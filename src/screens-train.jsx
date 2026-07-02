@@ -1905,6 +1905,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // handler — see handleSorenessAnswer/handleJointAnswer/handleVolumeAnswer).
   const mesoEditingRef = useRefT({ soreness: null, joint: null, volume: null });
   const [mesoRecapOpen, setMesoRecapOpen] = useStateT(false);
+  // Session feedback is two levels: the top sheet lists one button per
+  // muscle ("Chest feedback"); tapping it opens this detail sheet with the
+  // muscle's individual answers (Soreness, each exercise's Joint, Pump &
+  // Volume) to actually revise.
+  const [mesoRecapDetailMuscle, setMesoRecapDetailMuscle] = useStateT(null);
   const mesoAskedInitRef = useRefT(null);
   if (mesoAskedInitRef.current === null) mesoAskedInitRef.current = loadMesoAskedSets(session.id);
   const askedSorenessRef = useRefT(mesoAskedInitRef.current.soreness);
@@ -2149,6 +2154,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     setMesoSorenessSel(record.answer);
     mesoEditingRef.current.soreness = muscle;
     setMesoRecapOpen(false);
+    setMesoRecapDetailMuscle(null);
     setMesoSorenessOpen(true);
   };
   const openJointEdit = (exId) => {
@@ -2160,6 +2166,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     setMesoJointSel(record.answer);
     mesoEditingRef.current.joint = exId;
     setMesoRecapOpen(false);
+    setMesoRecapDetailMuscle(null);
     setMesoJointOpen(true);
   };
   const openVolumeEdit = (muscle) => {
@@ -2174,6 +2181,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     setMesoPumpAnswer(record.pump);
     setMesoVolumeAnswer(record.volume);
     mesoEditingRef.current.volume = muscle;
+    setMesoRecapDetailMuscle(null);
     setMesoRecapOpen(false);
     setMesoVolumeOpen(true);
   };
@@ -5383,20 +5391,36 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         </Btn>
       </Sheet>
 
-      {/* Session feedback recap — lets you revisit and change any soreness/
-          joint/volume answer given so far this session, grouped by muscle in
-          the order questions are actually asked (Soreness, then each
-          exercise's Joint check, then Pump & Volume). Opened from the small
-          square button in the footer nav (see "Footer nav" below). */}
+      {/* Session feedback recap — two levels. This top sheet lists one button
+          per muscle ("Chest feedback"); tapping it opens the detail sheet
+          below with that muscle's individual answers (Soreness, each
+          exercise's Joint check, Pump & Volume) to actually revise. Opened
+          from the small square button in the footer nav (see "Footer nav"
+          below). */}
       <Sheet open={mesoRecapOpen} onClose={() => setMesoRecapOpen(false)} title="Session feedback">
         <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: 1.5 }}>
-          Tap any answer to change it — feedback stays editable until you finish the session.
+          Tap a muscle group to review and change its feedback — everything stays editable until you finish the session.
         </div>
-        {mesoFeedbackGroups.map((group, gi) => (
-          <div key={group.muscle} style={{ marginBottom: 18 }}>
-            {gi > 0 && <div className="knurl" style={{ marginBottom: 14 }} />}
-            <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>{group.muscle.toUpperCase()}</div>
-            {group.rows.map(row => (
+        {mesoFeedbackGroups.map(group => (
+          <button key={group.muscle} onClick={() => { setMesoRecapOpen(false); setMesoRecapDetailMuscle(group.muscle); }} style={{
+            width: '100%', marginBottom: 8, padding: '12px 14px',
+            background: UI.bgInset, border: `1px solid ${UI.hairStrong}`,
+            borderRadius: 6, cursor: 'pointer', textAlign: 'left',
+            display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10,
+            WebkitTapHighlightColor: 'transparent',
+          }}>
+            <span style={{ fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, fontWeight: 600 }}>{group.muscle} feedback</span>
+            <i className="fa-solid fa-chevron-right" style={{ fontSize: 11, color: UI.inkFaint, flexShrink: 0 }} />
+          </button>
+        ))}
+      </Sheet>
+
+      {/* Detail sheet for one muscle group's feedback, opened from the list above. */}
+      {(() => {
+        const detailGroup = mesoFeedbackGroups.find(g => g.muscle === mesoRecapDetailMuscle);
+        return (
+          <Sheet open={!!mesoRecapDetailMuscle} onClose={() => setMesoRecapDetailMuscle(null)} title={mesoRecapDetailMuscle ? `${mesoRecapDetailMuscle} feedback` : 'Feedback'}>
+            {(detailGroup?.rows || []).map(row => (
               <button key={row.key} onClick={row.onEdit} style={{
                 width: '100%', marginBottom: 8, padding: '12px 14px',
                 background: UI.bgInset, border: `1px solid ${UI.hairStrong}`,
@@ -5411,9 +5435,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                 <i className="fa-solid fa-chevron-right" style={{ fontSize: 11, color: UI.inkFaint, flexShrink: 0 }} />
               </button>
             ))}
-          </div>
-        ))}
-      </Sheet>
+          </Sheet>
+        );
+      })()}
 
       {/* Meso changes — post-session set/weight adjustment summary */}
       {mesoGainSheetOpen && (
