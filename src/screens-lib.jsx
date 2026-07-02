@@ -5,6 +5,18 @@ const { useState: useStateL, useMemo: useMemoL, useRef: useRefL, useEffect: useE
 // Persists library filter state across navigation (survives remounts)
 const _lib = { tab: 'recent', q: '', filterTags: [], filterRestCats: [], filterUnilateral: null, filterPlan: null, filterEquipment: [], filtersOpen: false };
 
+// Accept only http(s) YouTube URLs. React does NOT block javascript: hrefs in
+// production, so we validate on save (strip otherwise) and guard again at render.
+// Returns the normalized URL string, or null if it is not a valid YouTube link.
+function sanitizeYoutubeUrl(raw) {
+  if (!raw) return null;
+  let u;
+  try { u = new URL(String(raw).trim()); } catch (_) { return null; }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
+  const ok = ['youtube.com', 'www.youtube.com', 'm.youtube.com', 'youtu.be'];
+  return ok.includes(u.hostname.toLowerCase()) ? u.href : null;
+}
+
 // ─── LIBRARY ──────────────────────────────────────────────────────────
 function LibraryScreen({ store, setStore, go, userId }) {
   const [confirmEl, confirm] = useConfirm();
@@ -43,7 +55,16 @@ function LibraryScreen({ store, setStore, go, userId }) {
 
   const deleteSelected = async () => {
     if (!await confirm(`Previous sessions will be preserved.`, { title: `Delete ${selected.size} exercise${selected.size > 1 ? 's' : ''}?`, ok: 'Delete', danger: true })) return;
-    setStore(s => ({ ...s, exercises: s.exercises.filter(e => !selected.has(e.id)) }));
+    const stripItems = items => (items || []).filter(item => !selected.has(item.exId));
+    setStore(s => ({
+      ...s,
+      exercises: s.exercises.filter(e => !selected.has(e.id)),
+      schedules: s.schedules.map(sch => ({
+        ...sch,
+        days: (sch.days || []).map(day => ({ ...day, items: stripItems(day.items) })),
+        versions: (sch.versions || []).map(v => ({ ...v, days: (v.days || []).map(day => ({ ...day, items: stripItems(day.items) })) })),
+      })),
+    }));
     exitSelect();
   };
 
@@ -69,7 +90,7 @@ function LibraryScreen({ store, setStore, go, userId }) {
       });
     });
     const e1rm = (entry) => entry
-      ? Math.max(0, ...(entry.sets || []).filter(s => s.kg && s.reps).map(s => LB.e1rm(s.kg, s.reps)), 0)
+      ? Math.max(0, ...(entry.sets || []).map(s => { const r = LB.effReps(s); return s.kg && r ? LB.e1rm(s.kg, r) : 0; }), 0)
       : 0;
     return store.exercises
       .filter(e => seenFirst.has(e.id))
@@ -652,7 +673,7 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
     const repsChanged = newProgressionReps !== (ex.progression_reps ?? null);
     setStore(s => {
       const exercises = s.exercises.map(e => e.id === exId
-        ? { ...e, name: editName.trim(), tags: editTags, category: editCategory || null, unilateral: editMovementType === 'unilateral', movement_type: editMovementType, no_weight_reps: editNoWeightReps, equipment: editEquipment || null, progression_reps: newProgressionReps, youtube_url: editYoutubeUrl.trim() || null }
+        ? { ...e, name: editName.trim(), tags: editTags, category: editCategory || null, unilateral: editMovementType === 'unilateral', movement_type: editMovementType, no_weight_reps: editNoWeightReps, equipment: editEquipment || null, progression_reps: newProgressionReps, youtube_url: sanitizeYoutubeUrl(editYoutubeUrl) }
         : e);
       const schedules = (repsChanged && newProgressionReps != null)
         ? s.schedules.map(sch => ({ ...sch, days: sch.days.map(day => ({ ...day, items: (day.items || []).map(it => it.exId === exId ? { ...it, reps: newProgressionReps } : it) })) }))
@@ -870,8 +891,8 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
       {!editMode && <div style={{ padding: '18px 22px 28px', display: 'flex', flexDirection: 'column', gap: 20 }}>
 
         {/* Form video link */}
-        {ex.youtube_url && (
-          <a href={ex.youtube_url} target="_blank" rel="noopener noreferrer"
+        {sanitizeYoutubeUrl(ex.youtube_url) && (
+          <a href={sanitizeYoutubeUrl(ex.youtube_url)} target="_blank" rel="noopener noreferrer"
             style={{
               display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
               padding: '11px 12px', borderRadius: 6, textDecoration: 'none',
@@ -1087,7 +1108,6 @@ function CardioTypeDetailSheet({ type, logs, open, onClose }) {
 
   const durPoints = filtered.map(l => ({ date: l.date, value: l.durationMinutes }));
   const distPoints = filtered.filter(l => l.distanceM != null).map(l => ({ date: l.date, value: du === 'mi' ? l.distanceM / MI_TO_M_H : l.distanceM / 1000 }));
-  const pacePoints = filtered.filter(l => l.distanceM != null && l.durationMinutes > 0).map(l => ({ date: l.date, value: (l.distanceM / 1000) * 60 / (du === 'mi' ? l.distanceM / MI_TO_M_H * (1000 / 1000) : 1) }));
   const speedPoints = filtered.filter(l => l.distanceM != null && l.durationMinutes > 0).map(l => ({ date: l.date, value: parseFloat(((du === 'mi' ? l.distanceM / MI_TO_M_H : l.distanceM / 1000) / (l.durationMinutes / 60)).toFixed(2)) }));
   const effortPoints = filtered.filter(l => l.effort != null).map(l => ({ date: l.date, value: l.effort }));
   const paceFlPoints = filtered.filter(l => l.paceFeeling != null).map(l => ({ date: l.date, value: l.paceFeeling }));
@@ -1118,7 +1138,7 @@ function CardioTypeDetailSheet({ type, logs, open, onClose }) {
 }
 
 // ─── WORKOUT EFFORT CHART ─────────────────────────────────────────────
-function WorkoutEffortSheet({ dayId, dayName, sessions, onClose }) {
+function WorkoutEffortSheet({ dayId, dayName, sessions, exercises, onClose }) {
   const FEEL_NUM = { easy: 1, good: 2, hard: 3, very_hard: 4, max: 5 };
   const FEEL_LBL = { 1: 'Easy', 2: 'Good', 3: 'Hard', 4: 'Very Hard', 5: 'Max' };
   const fmtDate = iso => { const d = new Date(iso + 'T12:00:00'); return `${d.getDate()} ${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()]}`; };
@@ -1133,7 +1153,7 @@ function WorkoutEffortSheet({ dayId, dayName, sessions, onClose }) {
     .filter(p => p.value);
 
   const volumePts = filtered
-    .map(s => ({ date: s.date.slice(0, 10), value: LB.totalVolume(s) }))
+    .map(s => ({ date: s.date.slice(0, 10), value: LB.totalVolume(s, exercises) }))
     .filter(p => p.value > 0);
 
   const W = 300, padL = 52, padR = 16, padTop = 36, padBottom = 26, plotH = 100;
@@ -1235,7 +1255,7 @@ function StatsTab({ store, sessions, go }) {
   const today = new Date(); today.setHours(12, 0, 0, 0);
   // Stable per-day key so the date-scoped memos below re-run when the calendar
   // day rolls over (long-lived PWA session), but stay memoized within a day.
-  const todayKey = today.toISOString().slice(0, 10);
+  const todayKey = LB.fmtISO(today);
 
   // Monday of current week
   const dow = today.getDay();
@@ -1250,7 +1270,7 @@ function StatsTab({ store, sessions, go }) {
   // Use getCycleNumForDate (version-aware) when versions exist; fall back to
   // simple arithmetic for unversioned plans. Both return 1-indexed; convert to
   // 0-indexed for internal use (display adds 1 back via selectedCycleNum + 1).
-  const todayISO = today.toISOString().slice(0, 10);
+  const todayISO = LB.fmtISO(today);
   const currentCycleNum = (() => {
     if (!isCycleMode) return 0;
     if (sch?.versions?.length) return LB.getCycleNumForDate(sch, todayISO) - 1;
@@ -1351,7 +1371,7 @@ function StatsTab({ store, sessions, go }) {
       const day = sch.days.find(d => d.weekday === wd);
       return day ? day.items.length > 0 : false;
     }
-    const dateStr = date.toISOString().slice(0, 10);
+    const dateStr = LB.fmtISO(date);
     const days = LB.getPlanDaysForDate(sch, dateStr);
     const idx = LB.getCyclePosForDate(sch, dateStr);
     if (idx !== null) return (days[idx]?.items || []).length > 0;
@@ -1383,7 +1403,7 @@ function StatsTab({ store, sessions, go }) {
     for (let i = 0; i <= 730; i++) {
       const d = new Date(today); d.setDate(today.getDate() - i); d.setHours(12, 0, 0, 0);
       if (planStart && d < planStart) break; // don't count before plan start
-      const key = d.toISOString().slice(0, 10);
+      const key = LB.fmtISO(d);
       if (sessionDateSet.has(key)) { cur++; }
       else if (i === 0) { /* today not done yet — don't break */ }
       else if (isTrainingDay(d) && !isInStatusPeriod(d)) { break; }
@@ -1395,7 +1415,7 @@ function StatsTab({ store, sessions, go }) {
       const dayCount = Math.round((today.getTime() - earliest.getTime()) / 86400000) + 1;
       for (let i = 0; i < dayCount; i++) {
         const d = new Date(earliest); d.setDate(earliest.getDate() + i); d.setHours(12, 0, 0, 0);
-        const key = d.toISOString().slice(0, 10);
+        const key = LB.fmtISO(d);
         if (sessionDateSet.has(key)) { ls++; longest = Math.max(longest, ls); }
         else if (isTrainingDay(d) && !isInStatusPeriod(d)) { ls = 0; }
         // rest day or sick/vacation day → ls unchanged
@@ -1448,7 +1468,7 @@ function StatsTab({ store, sessions, go }) {
     for (let d = new Date(planStart); d <= yesterday; d.setDate(d.getDate() + 1)) {
       d.setHours(12, 0, 0, 0);
       if (!isTrainingDay(d)) continue;
-      const key = d.toISOString().slice(0, 10);
+      const key = LB.fmtISO(d);
       if (sessionDateSet.has(key) || skipDates.has(key)) continue;
       missed++;
       if (isInStatusPeriod(key)) sickVac++;
@@ -2010,7 +2030,7 @@ function HistoryScreen({ store, setStore, go, userId, initialTab }) {
         );
       })()}
       {confirmEl}
-      {effortChart && <WorkoutEffortSheet dayId={effortChart.dayId} dayName={effortChart.dayName} sessions={sessions} onClose={() => setEffortChart(null)} />}
+      {effortChart && <WorkoutEffortSheet dayId={effortChart.dayId} dayName={effortChart.dayName} sessions={sessions} exercises={store.exercises} onClose={() => setEffortChart(null)} />}
     </Screen>
   );
 }
@@ -2168,7 +2188,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
   const prevSameDay = store.sessions
     .filter(x => x.ended && x.id !== s.id && x.ended < s.ended && x.dayId === s.dayId && !x.isDeload)
     .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''))[0];
-  const volDelta = prevSameDay != null ? vol - LB.totalVolume(prevSameDay) : null;
+  const volDelta = prevSameDay != null ? vol - LB.totalVolume(prevSameDay, store.exercises) : null;
   const compareCandidates = sameDaySessions(store.sessions, s);
 
   const exIsUnilateral = (exId) => !!store.exercises.find(x => x.id === exId)?.unilateral;
@@ -2791,7 +2811,7 @@ function SessionEditSheet({ session, duration, exercises, onClose, onSave }) {
   const [confirmEl, confirm] = useConfirm();
   const origDate = session.date ? session.date.slice(0, 10) : '';
   const origDuration = duration != null ? String(Math.round(duration / 5) * 5) : '0';
-  const origEntriesJson = useRefL(() => JSON.stringify(session.entries));
+  const origEntriesJson = useRefL(JSON.stringify(session.entries));
   const isDirty = draftDate !== origDate || draftDuration !== origDuration || JSON.stringify(draftEntries) !== origEntriesJson.current;
   const requestClose = async () => {
     if (isDirty && !await confirm('Your edits won\'t be saved.', { title: 'Discard changes?', ok: 'Discard', cancel: 'Keep editing', danger: true })) return;

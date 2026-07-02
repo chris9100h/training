@@ -1,10 +1,14 @@
-const CACHE = 'zane-v2.453';
+const CACHE = 'zane-v2.456';
 const CDN_HOSTS = ['unpkg.com', 'cdnjs.cloudflare.com', 'fonts.googleapis.com', 'fonts.gstatic.com'];
 // Works at any base path (e.g. /training/ on GitHub Pages, / on custom domain)
 const BASE = self.registration.scope.replace(/\/$/, '');
+// Boot shell — everything the app needs to actually start. Cached atomically
+// via addAll(): if any one of these 404s the install aborts (as it should — a
+// missing shell file means a broken deploy).
 const ASSETS = [
   BASE + '/',
   BASE + '/index.html',
+  BASE + '/manifest.json',
   BASE + '/src/store.js',
   BASE + '/src/supabase.js',
   BASE + '/src/whatsnew.js',
@@ -24,6 +28,13 @@ const ASSETS = [
   BASE + '/src/app.jsx',
   BASE + '/icons/icon-192.png',
   BASE + '/icons/icon-512.png',
+  BASE + '/icons/icon-180.png',
+];
+
+// Decorative background photos + their index. Purely cosmetic, and their file
+// names/extensions drift (e.g. .png vs .PNG on case-sensitive hosting), so a
+// single 404 here must NOT abort the whole SW install. Precached best-effort.
+const PHOTO_ASSETS = [
   BASE + '/Background/Appy.png',
   BASE + '/Background/phoenix.png',
   BASE + '/Background/marine.png',
@@ -39,20 +50,22 @@ const ASSETS = [
 
 // CDN libraries the app boots with. Precached best-effort so the app is fully
 // offline-capable right after the first load — but kept out of the atomic
-// addAll() above so a CDN hiccup can never abort the install. Babel is
-// deliberately omitted (~3 MB): it's only needed on a cache miss and gets
-// cached organically on first boot via the cache-first CDN path below.
+// addAll() above so a CDN hiccup can never abort the install. Babel is included
+// so that a fresh cache after an update can still transpile offline (on a
+// cache miss the organic CDN path would otherwise fail with no network).
 const CDN_ASSETS = [
   'https://unpkg.com/react@18.3.1/umd/react.production.min.js',
   'https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js',
+  'https://unpkg.com/@babel/standalone@7.29.0/babel.min.js',
 ];
 
 self.addEventListener('install', e => {
   e.waitUntil(
     caches.open(CACHE).then(c =>
       c.addAll(ASSETS).then(() =>
-        Promise.allSettled(CDN_ASSETS.map(u =>
-          c.add(new Request(u, { mode: 'cors' })).catch(() => {})
+        Promise.allSettled([].concat(
+          PHOTO_ASSETS.map(u => c.add(u).catch(() => {})),
+          CDN_ASSETS.map(u => c.add(new Request(u, { mode: 'cors' })).catch(() => {}))
         ))
       )
     )

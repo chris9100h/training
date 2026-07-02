@@ -513,6 +513,10 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
   const [vipBgKey, setVipBgKey] = useStateSet('');
   const [vipBgSaving, setVipBgSaving] = useStateSet(false);
   const [vipBgMsg, setVipBgMsg] = useStateSet(null);
+  const [broadcastSheet, setBroadcastSheet] = useStateSet(false);
+  const [broadcastBody, setBroadcastBody] = useStateSet('');
+  const [broadcastSending, setBroadcastSending] = useStateSet(false);
+  const [broadcastMsg, setBroadcastMsg] = useStateSet(null);
   const isAdmin = store.user?.email === 'office@btc-prime.biz';
   // Detected/reported in app.jsx (boot, foreground, controllerchange) — this
   // screen only reads it for display, so it stays fresh even if Settings is
@@ -727,6 +731,16 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     });
   };
 
+  // A sign-up counts as "new" only if it's both unseen on this device AND
+  // registered recently — otherwise a fresh admin device would flag every
+  // existing user as new.
+  const NEW_SIGNUP_DAYS = 14;
+  const isNewSignup = (u) => {
+    if (seenSignups.has(u.user_id)) return false;
+    if (!u.created_at) return false;
+    return (Date.now() - new Date(u.created_at).getTime()) < NEW_SIGNUP_DAYS * 24 * 60 * 60 * 1000;
+  };
+
   const toggleSignupApproval = async () => {
     const next = !signupApproval;
     setSignupApproval(next);
@@ -738,10 +752,16 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
   const saveBudget = async () => {
     const n = budgetDraft;
     setBudgetSheet(false);
+    const prevApproval = signupApproval;
+    const prevLeft = autoApproveLeft;
     setSignupApproval(n <= 0);            // n>0 → open for a batch; n<=0 → re-lock now
     setAutoApproveLeft(n > 0 ? n : null);
     const { error } = await LB.supabase.rpc('set_auto_approve_budget', { p_count: n });
-    if (error) await confirm(error.message || 'Could not update this setting.', { title: 'Update failed', ok: 'OK' });
+    if (error) {
+      setSignupApproval(prevApproval);
+      setAutoApproveLeft(prevLeft);
+      await confirm(error.message || 'Could not update this setting.', { title: 'Update failed', ok: 'OK' });
+    }
   };
 
   const approveUser = async (uid) => {
@@ -1100,6 +1120,19 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     } finally { setSupportAdminSending(false); }
   };
 
+  const sendBroadcast = async () => {
+    const body = broadcastBody.trim();
+    if (!body || broadcastSending) return;
+    setBroadcastSending(true);
+    setBroadcastMsg(null);
+    try {
+      const { data, error } = await LB.supabase.rpc('admin_broadcast_message', { p_body: body });
+      if (error) { setBroadcastMsg({ ok: false, text: error.message }); return; }
+      setBroadcastMsg({ ok: true, text: `Sent to ${data} user${data === 1 ? '' : 's'}.` });
+      setBroadcastBody('');
+    } finally { setBroadcastSending(false); }
+  };
+
   const saveVipBg = async () => {
     const email = vipBgEmail.trim().toLowerCase();
     if (!email || vipBgSaving) return;
@@ -1332,7 +1365,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 8, padding: '16px 20px', paddingBottom: 'calc(env(safe-area-inset-bottom, 8px) + 16px)', borderTop: `0.5px solid ${UI.hair}`, background: UI.bg }}>
         <Btn kind="ghost" onClick={async () => { if ('caches' in window) { const keys = await caches.keys(); await Promise.all(keys.map(k => caches.delete(k))); } window.location.reload(true); }}>Clear cache &amp; reload</Btn>
         {isAdmin ? (() => {
-          const unseenCount = allUsers.filter(u => !seenSignups.has(u.user_id)).length;
+          const unseenCount = allUsers.filter(isNewSignup).length;
           const adminUnread = supportInbox.reduce((sum, t) => sum + Number(t.unread_count || 0), 0);
           const hasBadge = unseenCount > 0 || adminUnread > 0;
           return (
@@ -1480,7 +1513,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                 <button key={u} onClick={() => setStore(s => ({ ...s, settings: { ...s.settings, glucoseUnit: u } }))}
                   style={{ padding: '5px 12px', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600,
                     background: (store.settings?.glucoseUnit ?? 'mmol') === u ? 'var(--accent)' : 'transparent',
-                    color: (store.settings?.glucoseUnit ?? 'mmol') === u ? '#fff' : UI.inkSoft,
+                    color: (store.settings?.glucoseUnit ?? 'mmol') === u ? '#0a0805' : UI.inkSoft,
                     border: 'none', cursor: 'pointer', transition: 'background 0.15s' }}>
                   {u === 'mmol' ? 'mmol/L' : 'mg/dL'}
                 </button>
@@ -1511,22 +1544,32 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             return d.toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' });
           };
           const updatePeriod = async (id, patch) => {
-            setStore(s => ({ ...s, statusPeriods: (s.statusPeriods || []).map(p => p.id === id ? { ...p, ...patch } : p) }));
-            await LB.supabase.from('zane_status_periods').update(
+            let prev = null;
+            setStore(s => { prev = s.statusPeriods || []; return { ...s, statusPeriods: (s.statusPeriods || []).map(p => p.id === id ? { ...p, ...patch } : p) }; });
+            const { error } = await LB.supabase.from('zane_status_periods').update(
               Object.fromEntries(Object.entries(patch).map(([k, v]) => [k === 'startedAt' ? 'started_at' : k === 'endedAt' ? 'ended_at' : k, v]))
             ).eq('id', id);
+            if (error) {
+              if (prev) setStore(s => ({ ...s, statusPeriods: prev }));
+              await confirm(error.message || 'Could not update this period.', { title: 'Update failed', ok: 'OK' });
+            }
           };
           const deletePeriod = async (id) => {
             setConfirmDeletePeriodId(null);
-            setStore(s => ({ ...s, statusPeriods: (s.statusPeriods || []).filter(p => p.id !== id) }));
-            await LB.supabase.from('zane_status_periods').delete().eq('id', id);
+            let prev = null;
+            setStore(s => { prev = s.statusPeriods || []; return { ...s, statusPeriods: (s.statusPeriods || []).filter(p => p.id !== id) }; });
+            const { error } = await LB.supabase.from('zane_status_periods').delete().eq('id', id);
+            if (error) {
+              if (prev) setStore(s => ({ ...s, statusPeriods: prev }));
+              await confirm(error.message || 'Could not delete this period.', { title: 'Delete failed', ok: 'OK' });
+            }
           };
           return (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
               {visible.map((p, i) => {
                 const isActive = !p.endedAt;
-                const icon = p.mode === 'sick' ? 'fa-bed-pulse' : 'fa-umbrella-beach';
-                const label = p.mode === 'sick' ? 'SICK' : 'VACATION';
+                const icon = p.mode === 'sick' ? 'fa-bed-pulse' : p.mode === 'deload' ? 'fa-arrow-trend-down' : 'fa-umbrella-beach';
+                const label = p.mode === 'sick' ? 'SICK' : p.mode === 'deload' ? 'DELOAD' : 'VACATION';
                 return (
                   <div key={p.id}>
                     {i > 0 && <div className="knurl" />}
@@ -1536,13 +1579,13 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                         <div className="micro" style={{ color: 'var(--accent)', marginBottom: 6 }}>{label}</div>
                         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                           <input type="date" value={p.startedAt.slice(0, 10)} max={p.endedAt ? p.endedAt.slice(0, 10) : todayStr}
-                            onChange={e => e.target.value && updatePeriod(p.id, { startedAt: e.target.value + 'T12:00:00.000Z' })}
+                            onChange={e => e.target.value && updatePeriod(p.id, { startedAt: LB.parseDate(e.target.value).toISOString() })}
                             style={{ background: 'transparent', border: 'none', color: UI.inkSoft, fontFamily: UI.fontNum, fontSize: 12, cursor: 'pointer', outline: 'none', padding: 0 }} />
                           <span style={{ color: UI.inkFaint, fontSize: 11, fontFamily: UI.fontUi }}>→</span>
                           {isActive
                             ? <span style={{ fontSize: 12, fontFamily: UI.fontUi, color: 'var(--accent)', fontStyle: 'italic' }}>ongoing</span>
                             : <input type="date" value={p.endedAt.slice(0, 10)} min={p.startedAt.slice(0, 10)} max={todayStr}
-                                onChange={e => e.target.value && updatePeriod(p.id, { endedAt: e.target.value + 'T12:00:00.000Z' })}
+                                onChange={e => e.target.value && updatePeriod(p.id, { endedAt: LB.parseDate(e.target.value).toISOString() })}
                                 style={{ background: 'transparent', border: 'none', color: UI.inkSoft, fontFamily: UI.fontNum, fontSize: 12, cursor: 'pointer', outline: 'none', padding: 0 }} />
                           }
                         </div>
@@ -1848,7 +1891,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                   <button key={u} onClick={() => setImportSourceUnit(u)} style={{
                     padding: '3px 10px', borderRadius: 4, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600,
                     background: importSourceUnit === u ? 'var(--accent)' : UI.bgInset,
-                    color: importSourceUnit === u ? '#fff' : UI.inkSoft,
+                    color: importSourceUnit === u ? '#0a0805' : UI.inkSoft,
                   }}>{u.toUpperCase()}</button>
                 ))}
               </div>
@@ -2077,7 +2120,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       {/* ══ Admin sheet ══ */}
       <SettingsSheet open={adminSheet} onClose={() => setAdminSheet(false)} title={'Admin'}>
         {(() => {
-          const unseenCount = allUsers.filter(u => !seenSignups.has(u.user_id)).length;
+          const unseenCount = allUsers.filter(isNewSignup).length;
           const adminUnread = supportInbox.reduce((sum, t) => sum + Number(t.unread_count || 0), 0);
           return (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -2098,6 +2141,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                 </div>
                 <NavRow label="All users" hint={unseenCount > 0 ? `${unseenCount} new` : (allUsers.length ? `${allUsers.length}` : undefined)} onTap={() => setAllUsersSheet(true)} />
                 <NavRow label="VIP backgrounds" hint={vipBgList.length > 0 ? `${vipBgList.length} assigned` : 'None'} onTap={() => { setVipBgMsg(null); setVipBgSheet(true); }} />
+                <NavRow label="Message all users" onTap={() => { setBroadcastMsg(null); setBroadcastSheet(true); }} />
               </Frame>
               <div style={{ borderTop: `0.5px solid ${UI.hair}`, paddingTop: 16 }}>
                 <Btn onClick={() => setSupportInboxSheet(true)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, width: '100%', fontSize: 15, padding: '14px 16px' }}>
@@ -2110,6 +2154,34 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             </div>
           );
         })()}
+      </SettingsSheet>
+
+      {/* ══ Message all users (admin) ══ */}
+      <SettingsSheet open={broadcastSheet} onClose={() => setBroadcastSheet(false)} title="Message All Users">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginBottom: 8 }}>
+          <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1.5 }}>
+            Sends a message into every user's support ticket (creating one first if they don't have one yet) — the same inbox they already use to reach support, so it shows up even on an older app version.
+          </div>
+          <textarea
+            value={broadcastBody}
+            onChange={e => setBroadcastBody(e.target.value)}
+            placeholder="Message to send to every user…"
+            rows={5}
+            style={{
+              width: '100%', boxSizing: 'border-box', resize: 'vertical',
+              background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4,
+              padding: '10px 12px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, outline: 'none',
+            }}
+          />
+          {broadcastMsg && (
+            <div style={{ fontSize: 12, color: broadcastMsg.ok ? 'var(--accent)' : UI.danger, fontFamily: UI.fontUi, padding: '8px 12px', background: broadcastMsg.ok ? 'rgba(var(--accent-rgb),0.08)' : 'rgba(var(--danger-rgb),0.08)', borderRadius: 6 }}>
+              {broadcastMsg.text}
+            </div>
+          )}
+          <Btn onClick={sendBroadcast} disabled={!broadcastBody.trim() || broadcastSending}>
+            {broadcastSending ? 'Sending…' : 'Send to all users'}
+          </Btn>
+        </div>
       </SettingsSheet>
 
       {/* ══ VIP backgrounds sheet (admin) ══ */}
@@ -2462,7 +2534,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                       return (
                         <div key={n.id} style={{ display: 'flex', flexDirection: 'column', alignItems: isAdminMsg ? 'flex-end' : 'flex-start' }}>
                           <div style={{
-                            maxWidth: '80%', padding: hasImg ? '6px' : '9px 13px', borderRadius: isAdminMsg ? '12px 12px 3px 12px' : '12px 12px 12px 3px',
+                            maxWidth: '80%', padding: hasImg ? '6px' : '9px 13px', borderRadius: isAdminMsg ? '8px 8px 4px 8px' : '8px 8px 8px 4px',
                             background: isAdminMsg ? 'rgba(var(--accent-rgb),0.15)' : UI.bgRaised,
                             border: `0.5px solid ${isAdminMsg ? 'rgba(var(--accent-rgb),0.25)' : UI.hair}`,
                             overflow: 'hidden',
@@ -2619,7 +2691,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
         {(() => {
           const q = allUsersSearch.trim().toLowerCase();
           const filtered = allUsers.filter(u => {
-            if (allUsersNewOnly && seenSignups.has(u.user_id)) return false;
+            if (allUsersNewOnly && !isNewSignup(u)) return false;
             if (allUsersOnboardedOnly && !(u.plan_count > 0)) return false;
             if (allUsersOutdatedOnly && swVersion && u.sw_version === swVersion) return false;
             if (!q) return true;
@@ -2834,7 +2906,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             if (webPushStep === 'code-sent') {
               const pct = pendingCountdown / 120;
               const urgent = pendingCountdown <= 30;
-              const barColor = urgent ? '#e07b3a' : 'var(--accent)';
+              const barColor = urgent ? UI.warn : 'var(--accent)';
               const mins = Math.floor(pendingCountdown / 60);
               const secs = pendingCountdown % 60;
               const timeStr = `${mins}:${secs.toString().padStart(2, '0')}`;
@@ -2842,7 +2914,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <div className="micro" style={{ color: UI.inkSoft }}>Enter the 6-digit code from the notification</div>
-                    <div className="num" style={{ fontSize: 11, color: urgent ? '#e07b3a' : UI.inkFaint, minWidth: 28, textAlign: 'right' }}>{timeStr}</div>
+                    <div className="num" style={{ fontSize: 11, color: urgent ? UI.warn : UI.inkFaint, minWidth: 28, textAlign: 'right' }}>{timeStr}</div>
                   </div>
                   <div style={{ height: 2, background: UI.hairStrong, borderRadius: 999, overflow: 'hidden' }}>
                     <div style={{ height: '100%', width: `${pct * 100}%`, background: barColor, borderRadius: 999, transition: 'width 1s linear, background 0.5s' }} />

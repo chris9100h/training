@@ -406,6 +406,11 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId })
     return () => { cancelled = true; };
   }, [dayForSeed?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Hoisted above the early returns below for the same reason as the seed hooks:
+  // hook order must stay constant across renders of this long-lived instance.
+  const isPad = useIsPadS();
+  const [confirmEl, confirm] = useConfirm();
+
   if (!sch) {
     return (
       <Screen>
@@ -447,8 +452,6 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId })
   const selBg     = viewingActiveVersion ? UI.goldFaint : UI.bgInset;
   const selText   = viewingActiveVersion ? UI.gold : UI.ink;
 
-  const isPad = useIsPadS();
-  const [confirmEl, confirm] = useConfirm();
   const activate = async () => {
     if (!await confirm(`"${sch.name}" will become your active plan and the cycle will reset.`, { title: 'Activate plan?', ok: 'Activate' })) return;
     setStore(s => ({
@@ -1153,6 +1156,15 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
       setStore(s => ({ ...s, mesoStates: (s.mesoStates || []).filter(m => m.scheduleId !== draft.id) }));
     }
 
+    // If the flex flag actually changed on the active plan, apply the date-anchor
+    // change now (turning flex on clears the anchor so date math stops driving
+    // position; turning it off re-anchors to today). Done here — not on toggle —
+    // so discarding the draft leaves the active plan's cycle position untouched.
+    if (isActive && LB.isFlexPlan(original) !== LB.isFlexPlan(draft)) {
+      const turnedOn = LB.isFlexPlan(draft);
+      setStore(s => ({ ...s, cycleStartDate: turnedOn ? null : LB.todayISO() }));
+    }
+
     const asClient = store.coaching?.asClient;
     if (store.activeScheduleId === draft.id && asClient?.status === 'active') {
       try {
@@ -1274,9 +1286,9 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
       }
       return next;
     });
-    if (isActive) {
-      setStore(s => ({ ...s, cycleStartDate: turningOn ? null : LB.todayISO() }));
-    }
+    // The date-anchor change is applied in doSave (gated on the flag actually
+    // changing), never here — toggling then discarding must not reset the
+    // active plan's cycle position.
   };
 
   return (
@@ -1553,8 +1565,8 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
                 background: UI.bgInset, border: `1px solid ${isFlex ? UI.goldSoft : UI.hairStrong}`,
                 borderRadius: 4, padding: '10px 12px', cursor: 'pointer', textAlign: 'left',
               }}>
-                <div style={{ width: 44, height: 26, borderRadius: 13, flexShrink: 0, position: 'relative', background: isFlex ? UI.gold : UI.hairStrong, transition: 'background 0.15s' }}>
-                  <div style={{ position: 'absolute', top: 3, left: isFlex ? 21 : 3, width: 20, height: 20, borderRadius: '50%', background: '#fff', transition: 'left 0.15s' }} />
+                <div style={{ width: 44, height: 26, borderRadius: 13, flexShrink: 0, position: 'relative', background: isFlex ? UI.gold : UI.hairStrong, border: `0.5px solid ${isFlex ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong}`, transition: 'background 0.15s' }}>
+                  <div style={{ position: 'absolute', top: 3, left: isFlex ? 21 : 3, width: 20, height: 20, borderRadius: '50%', background: isFlex ? '#0a0805' : '#fff', transition: 'left 0.15s' }} />
                 </div>
                 <div style={{ flex: 1 }}>
                   <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.ink, fontWeight: 600 }}>Advance only when I train</div>
@@ -1582,8 +1594,8 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
                   borderRadius: 4, padding: '10px 12px',
                 }}>
                   <button onClick={toggle} style={{ flexShrink: 0, background: 'none', border: 'none', padding: 0, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
-                    <div style={{ width: 44, height: 26, borderRadius: 13, position: 'relative', background: hasGoal ? UI.gold : UI.hairStrong, transition: 'background 0.15s' }}>
-                      <div style={{ position: 'absolute', top: 3, left: hasGoal ? 21 : 3, width: 20, height: 20, borderRadius: '50%', background: '#fff', transition: 'left 0.15s' }} />
+                    <div style={{ width: 44, height: 26, borderRadius: 13, position: 'relative', background: hasGoal ? UI.gold : UI.hairStrong, border: `0.5px solid ${hasGoal ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong}`, transition: 'background 0.15s' }}>
+                      <div style={{ position: 'absolute', top: 3, left: hasGoal ? 21 : 3, width: 20, height: 20, borderRadius: '50%', background: hasGoal ? '#0a0805' : '#fff', transition: 'left 0.15s' }} />
                     </div>
                   </button>
                   <div style={{ flex: 1 }}>
@@ -1638,8 +1650,8 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
                   borderRadius: 4, padding: '10px 12px',
                 }}>
                   <button onClick={toggleMeso} style={{ flexShrink: 0, background: 'none', border: 'none', padding: 0, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
-                    <div style={{ width: 44, height: 26, borderRadius: 13, position: 'relative', background: hasMeso ? UI.gold : UI.hairStrong, transition: 'background 0.15s' }}>
-                      <div style={{ position: 'absolute', top: 3, left: hasMeso ? 21 : 3, width: 20, height: 20, borderRadius: '50%', background: '#fff', transition: 'left 0.15s' }} />
+                    <div style={{ width: 44, height: 26, borderRadius: 13, position: 'relative', background: hasMeso ? UI.gold : UI.hairStrong, border: `0.5px solid ${hasMeso ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong}`, transition: 'background 0.15s' }}>
+                      <div style={{ position: 'absolute', top: 3, left: hasMeso ? 21 : 3, width: 20, height: 20, borderRadius: '50%', background: hasMeso ? '#0a0805' : '#fff', transition: 'left 0.15s' }} />
                     </div>
                   </button>
                   <div style={{ flex: 1 }}>
@@ -2222,9 +2234,15 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
   const updateItem = (idx, patch) => setDraft(d => {
     const item = d.items[idx];
     const gid = item?.supersetGroup;
+    // Same guard as toggleSuperset: never copy the set count onto a cardio
+    // partner (its `sets` is always 0) in a mixed group.
+    const srcIsCardio = LB.findExercise(store, item?.exId)?.movement_type === 'cardio';
     return { ...d, items: d.items.map((it, i) => {
       if (i === idx) return { ...it, ...patch };
-      if (gid && it.supersetGroup === gid && patch.sets !== undefined) return { ...it, sets: patch.sets };
+      if (gid && it.supersetGroup === gid && patch.sets !== undefined) {
+        const canMatchSets = !srcIsCardio && LB.findExercise(store, it.exId)?.movement_type !== 'cardio';
+        if (canMatchSets) return { ...it, sets: patch.sets };
+      }
       return it;
     })};
   });

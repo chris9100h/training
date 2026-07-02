@@ -380,7 +380,7 @@ function CoachingTabClientCard({ client, inProgress, statusMode, unreadCount, ch
         )}
         {statusMode && !inProgress && !showCheckinNew && (
           <div style={{ position: 'absolute', top: 0, right: 0, width: 12, height: 12, borderRadius: 6, background: UI.inkGhost, border: '2px solid var(--bg)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <i className={`fa-solid ${statusMode === 'sick' ? 'fa-bed-pulse' : 'fa-umbrella-beach'}`} style={{ fontSize: 5, color: UI.bg }} />
+            <i className={`fa-solid ${statusMode === 'sick' ? 'fa-bed-pulse' : statusMode === 'deload' ? 'fa-arrow-trend-down' : 'fa-umbrella-beach'}`} style={{ fontSize: 5, color: UI.bg }} />
           </div>
         )}
       </div>
@@ -391,7 +391,7 @@ function CoachingTabClientCard({ client, inProgress, statusMode, unreadCount, ch
         ) : inProgress ? (
           <div style={{ fontSize: 11, color: 'var(--accent)', fontFamily: UI.fontUi, fontWeight: 600, letterSpacing: '0.06em' }}>TRAINING NOW</div>
         ) : statusMode ? (
-          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, fontWeight: 600, letterSpacing: '0.06em' }}>{statusMode === 'sick' ? 'SICK' : 'VACATION'}</div>
+          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, fontWeight: 600, letterSpacing: '0.06em' }}>{statusMode === 'sick' ? 'SICK' : statusMode === 'deload' ? 'DELOAD' : 'VACATION'}</div>
         ) : showCheckinNew ? (
           <div style={{ fontSize: 11, color: 'var(--accent)', fontFamily: UI.fontUi, fontWeight: 600, letterSpacing: '0.06em' }}>CHECK-IN SUBMITTED</div>
         ) : checkinDue ? (
@@ -462,7 +462,7 @@ function MarkerRow({ label, value, onChange, readOnly }) {
   );
 }
 
-function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false, onEdit, onDelete, confirmingDelete = false, coachingMacrosHistory = null }) {
+function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false, onEdit, onDelete, confirmingDelete = false, coachingMacrosHistory = null, clientUnit }) {
   const [open, setOpen] = useStateC(defaultOpen);
   const [exportMode, setExportMode] = useStateC(null); // null | 'pick' | 'exporting'
   const cardRef = useRefC(null);
@@ -470,6 +470,9 @@ function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false
   const responses = ci.responses || {};
   const has = v => v != null && v !== '';
   const distUnit = (() => { try { return localStorage.getItem('logbook-cardio-dist-unit') || 'km'; } catch (_) { return 'km'; } })();
+  // The CLIENT's weight-unit label (numbers are never converted). Falls back to
+  // the viewer's unit for self-coaching / previews where no client unit is passed.
+  const wUnit = clientUnit || UI.unit();
 
   // Planned macro avg row — mirrors HealthWeekCard logic.
   // Resolve the macro entry that was active at the END of this check-in week
@@ -499,7 +502,7 @@ function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false
 
   // Format one field's stored value for display (mirrors the trend-card formatter).
   const fmtValue = (f, v) => {
-    if (f.unit === 'weight') return `${v} ${UI.unit()}`;
+    if (f.unit === 'weight') return `${v} ${wUnit}`;
     if (f._distanceField) return distUnit === 'mi' ? `${(v / 1609.344).toFixed(1)} mi` : `${(v / 1000).toFixed(1)} km`;
     if (f.key === 'hydration_ml') return `${(v / 1000).toFixed(1)} L / day`;
     if (f.key === 'steps') return Number(v).toLocaleString();
@@ -535,7 +538,7 @@ function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false
     if (isNaN(cur) || isNaN(prev)) return null;
     return Math.round((cur - prev) * 100) / 100;
   })();
-  const fmtDelta = d => (d >= 0 ? '+' : '') + d.toFixed(2).replace('.', ',') + ' ' + UI.unit();
+  const fmtDelta = d => (d >= 0 ? '+' : '') + d.toFixed(2).replace('.', ',') + ' ' + wUnit;
 
   const stepsDelta = (() => {
     const cur = parseFloat(responses.steps), prev = parseFloat(prevCi?.responses?.steps);
@@ -662,7 +665,7 @@ function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false
           <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>Week of {fmtWeek(ci.weekStart)}</div>
           {has(wToday) && (
             <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, marginTop: 2 }}>
-              {wToday} {UI.unit()}{has(wAvg) ? ` · avg ${wAvg} ${UI.unit()}` : ''}
+              {wToday} {wUnit}{has(wAvg) ? ` · avg ${wAvg} ${wUnit}` : ''}
             </div>
           )}
         </div>
@@ -1179,9 +1182,10 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
   const previewWeekStart = (() => {
     const t = new Date(); const d = t.getDay();
     const m = new Date(t); m.setDate(t.getDate() - (d === 0 ? 6 : d - 1));
-    return m.toISOString().slice(0, 10);
+    return LB.fmtISO(m);
   })();
   const [checkins, setCheckins] = useStateC(null);
+  const [loadErr, setLoadErr] = useStateC(false);
   const [schema, setSchema] = useStateC(null); // null = loading, then resolved or CHECKIN_DEFAULT_SCHEMA
   const [editTarget, setEditTarget] = useStateC(null); // null = overview | 'new' | a check-in object
   const [confirmDelete, setConfirmDelete] = useStateC(null); // id of check-in awaiting delete confirm
@@ -1191,8 +1195,11 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
   const [previewOpen, setPreviewOpen] = useStateC(false);
   const [coachingMacrosHistory, setCoachingMacrosHistory] = useStateC(null);
 
-  const load = () => LB.loadCheckins(coachingId).then(setCheckins).catch(() => {});
+  const load = () => LB.loadCheckins(coachingId)
+    .then(c => { setCheckins(c); setLoadErr(false); })
+    .catch(() => setLoadErr(true));
   useEffectC(() => {
+    setLoadErr(false);
     load();
     LB.loadCheckinSchema(coachingId).then(s => setSchema(s)).catch(() => {});
     LB.loadCoachingMacros(coachingId).then(data => setCoachingMacrosHistory(data)).catch(() => {});
@@ -1209,9 +1216,18 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
     }
     setDeleting(true);
     try { await LB.deleteCheckin(ci.id, userId); await load(); }
-    catch (e) {} finally { setDeleting(false); setConfirmDelete(null); }
+    catch (e) { alert(e.message || 'Could not delete check-in.'); }
+    finally { setDeleting(false); setConfirmDelete(null); }
   };
 
+  if (checkins === null && loadErr) {
+    return (
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, padding: 32 }}>
+        <div style={{ fontSize: 13, color: 'rgba(var(--danger-rgb),0.8)', fontFamily: UI.fontUi, textAlign: 'center' }}>Couldn't load check-ins.</div>
+        <button onClick={() => { setLoadErr(false); load(); }} style={{ background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '8px 16px', cursor: 'pointer', color: UI.ink, fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600 }}>Retry</button>
+      </div>
+    );
+  }
   if (checkins === null) {
     return <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.1em' }}>LOADING…</div></div>;
   }
@@ -1375,7 +1391,7 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
 // dismissed it yet today. Dismisses until midnight via localStorage.
 
 function CheckInRequestModal({ coaching }) {
-  const todayStr = new Date().toISOString().slice(0, 10);
+  const todayStr = LB.todayISO();
   const dismissKey = `logbook-checkin-dismiss-${coaching.id}`;
 
   const [dismissed, setDismissed] = useStateC(() => {

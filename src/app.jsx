@@ -296,6 +296,7 @@ function App() {
   const phaseRef                  = useRefA('init'); // current phase for stale-closure contexts
   const routeRef                  = useRefA({ name: 'home' }); // current route for stale-closure contexts
   const detectedSwVersion         = useRefA(null); // set as soon as caches.keys() resolves, applied once the store exists
+  const pendingSwVersion          = useRefA(null); // newest sw.js version seen but not yet applied; persisted only by applyUpdate
 
   useEffectA(() => { userIdRef.current = userId; }, [userId]);
   useEffectA(() => { phaseRef.current = phase; }, [phase]);
@@ -404,10 +405,24 @@ function App() {
           const localOnlyDaily   = (s.dailyLogs   || []).filter(l => !serverDailyIds.has(l.id) && !serverDailyDates.has(l.date));
           const localOnlyCardio  = (s.cardioLogs  || []).filter(l => !serverCardioIds.has(l.id));
           const localOnlyGlucose = (s.glucoseLogs || []).filter(l => !serverGlucoseIds.has(l.id));
+          // For ids on both sides keep the local row when it carries an unsynced
+          // edit (id in the persisted base AND local differs from base) so a
+          // background refresh doesn't clobber a health edit made offline.
+          const base = syncBase.current;
+          const mergeById = (freshRows, curRows, baseRows) => {
+            const curMap = new Map((curRows || []).map(r => [r.id, r]));
+            const baseMap = baseRows ? new Map(baseRows.map(r => [r.id, r])) : null;
+            return (freshRows || []).map(r => {
+              const c = curMap.get(r.id);
+              const b = baseMap?.get(r.id);
+              if (c && b && JSON.stringify(c) !== JSON.stringify(b)) return c;
+              return r;
+            });
+          };
           return { ...s,
-            dailyLogs:   [...localOnlyDaily,   ...fresh.dailyLogs],
-            cardioLogs:  [...localOnlyCardio,  ...fresh.cardioLogs],
-            glucoseLogs: [...localOnlyGlucose, ...(fresh.glucoseLogs || [])],
+            dailyLogs:   [...localOnlyDaily,   ...mergeById(fresh.dailyLogs, s.dailyLogs, base?.dailyLogs)],
+            cardioLogs:  [...localOnlyCardio,  ...mergeById(fresh.cardioLogs, s.cardioLogs, base?.cardioLogs)],
+            glucoseLogs: [...localOnlyGlucose, ...mergeById(fresh.glucoseLogs || [], s.glucoseLogs, base?.glucoseLogs)],
           };
         });
       }).catch(() => {});
@@ -495,6 +510,12 @@ function App() {
     // precise moment to re-check the version even for tabs that don't reload.
     const onControllerChange = () => {
       reportSwVersion();
+      // Persist the applied version only now that the new SW has actually taken
+      // control — not on the click — so an update that never activates (tab
+      // closed, SKIP_WAITING lost) keeps being re-offered after a cold start.
+      if (intentionalUpdate.current && pendingSwVersion.current) {
+        try { localStorage.setItem('logbook-sw-version', pendingSwVersion.current); } catch (_) {}
+      }
       if (intentionalUpdate.current) window.location.reload(true);
     };
     navigator.serviceWorker.addEventListener('controllerchange', onControllerChange);
@@ -502,10 +523,14 @@ function App() {
   }, []);
 
   const applyUpdate = useCallbackA(async () => {
-    if ('caches' in window) {
-      const keys = await caches.keys();
-      await Promise.all(keys.map(k => caches.delete(k)));
-    }
+    // The applied version is persisted in onControllerChange (once the new SW
+    // takes control), never on mere detection or click, so a not-yet-activated
+    // update keeps being re-offered across cold starts.
+    // Don't delete caches when we successfully hand off to a real worker
+    // below: the new SW's install already populated its CACHE, and its
+    // activate handler deletes every other (old) cache. Wiping all caches
+    // here too — including the freshly-installed one — would force a full
+    // network refetch and break offline right after an update.
 
     // Prefer the worker we already tracked; fall back to live reg state
     let worker = waitingWorker.current ?? swReg.current?.waiting;
@@ -531,6 +556,21 @@ function App() {
       intentionalUpdate.current = true;
       worker.postMessage({ type: 'SKIP_WAITING' });
     } else {
+      // No installed/waiting worker turned up in time — our own faster
+      // text-based update check (checkSwUpdate) can show the banner before
+      // the browser's native SW update/install has caught up, or install
+      // may still be running past the 6s wait above. A bare reload here
+      // would hit the OLD SW's stale-while-revalidate fetch handler and
+      // instantly re-serve the cached (old) app — the update button would
+      // look like it does nothing. Wipe the cache first, exactly like the
+      // "Reload App" quick action does, so the reload is guaranteed to
+      // actually fetch fresh code instead of silently staying on the old one.
+      if ('caches' in window) {
+        try {
+          const keys = await caches.keys();
+          await Promise.all(keys.map(k => caches.delete(k)));
+        } catch (_) {}
+      }
       window.location.reload(true);
     }
   }, []);
@@ -538,6 +578,10 @@ function App() {
   // Push pending local changes to Supabase. Serialized; on failure syncBase is
   // left untouched so the next change (or an 'online' event) retries the diff.
   const flushSync = useCallbackA((uid) => {
+    // Never write for a uid that is no longer the current user. A retry timer
+    // scheduled with the old uid could otherwise fire after an account switch
+    // and upsert one account's data stamped with another's user_id.
+    if (uid !== userIdRef.current) return;
     if (syncing.current) return;
     const target = pendingStore.current;
     if (!target || target === syncBase.current || !uid) return;
@@ -582,7 +626,10 @@ function App() {
           LB.saveBase(fresh, uid);
           let merged = fresh;
           if (cur) {
-            const inProgressId = cur.inProgress ?? fresh.inProgress;
+            // Use `in` (not `??`) so an explicit local null — "session just
+            // ended on this device" — wins over the stale server value instead
+            // of being treated as missing and resurrecting the old session.
+            const inProgressId = ('inProgress' in cur) ? cur.inProgress : fresh.inProgress;
             // Session merge lives in store.js (LB.mergeSessions) so the
             // windowing rules are unit-tested: the "missing on the server →
             // drop" logic works on the (complete) metadata list, while cached
@@ -597,7 +644,6 @@ function App() {
             const serverExIds = new Set(fresh.exercises.map(e => e.id));
             const baseExIds = base ? new Set((base.exercises || []).map(e => e.id)) : null;
             const localOnlyExercises = (cur.exercises || []).filter(x => !serverExIds.has(x.id) && !baseExIds?.has(x.id));
-            const curExMap = new Map((cur.exercises || []).map(e => [e.id, e]));
             const serverSchIds = new Set(fresh.schedules.map(s => s.id));
             const baseSchIds = base ? new Set((base.schedules || []).map(s => s.id)) : null;
             const localOnlySchedules = (cur.schedules || []).filter(x => !serverSchIds.has(x.id) && !baseSchIds?.has(x.id));
@@ -661,6 +707,22 @@ function App() {
               const cT = c.updatedAt ? new Date(c.updatedAt).getTime() : 0;
               return cT >= fT ? c : f;
             }).filter(Boolean);
+            // For ids present on BOTH sides, keep the server row unless the
+            // local row carries an unsynced offline edit — i.e. the id is in
+            // the persisted base AND local differs from base. Without this a
+            // row edited offline would be reverted to the server value and then
+            // re-synced back as the old value. Conservative: no base membership
+            // or local == base → server wins (mirrors the mesoStates merge).
+            const mergeById = (freshRows, curRows, baseRows, delIds) => {
+              const curMap = new Map((curRows || []).map(r => [r.id, r]));
+              const baseMap = baseRows ? new Map(baseRows.map(r => [r.id, r])) : null;
+              return (freshRows || []).filter(r => !delIds?.has(r.id)).map(r => {
+                const c = curMap.get(r.id);
+                const b = baseMap?.get(r.id);
+                if (c && b && JSON.stringify(c) !== JSON.stringify(b)) return c;
+                return r;
+              });
+            };
             // Scalar state: the local cache is authoritative — it always holds
             // the most recent state on this device, including unsynced offline
             // edits. For items with IDs we use an ID-based merge instead.
@@ -678,11 +740,11 @@ function App() {
               user: cur.user?.name ? { ...fresh.user, name: cur.user.name } : fresh.user,
               inProgress: activeExists ? inProgressId : null,
               sessions,
-              exercises: [...localOnlyExercises, ...fresh.exercises.filter(e => !delExIds?.has(e.id))],
-              schedules: [...localOnlySchedules, ...fresh.schedules.filter(s => !delSchIds?.has(s.id))],
+              exercises: [...localOnlyExercises, ...mergeById(fresh.exercises, cur.exercises, base?.exercises, delExIds)],
+              schedules: [...localOnlySchedules, ...mergeById(fresh.schedules, cur.schedules, base?.schedules, delSchIds)],
               skips: [...localOnlySkips, ...(fresh.skips || []).filter(s => !delSkipIds?.has(s.id))],
-              dailyLogs: [...localOnlyDailyLogs, ...(fresh.dailyLogs || []).filter(l => !delDailyIds?.has(l.id))],
-              cardioLogs: [...localOnlyCardioLogs, ...(fresh.cardioLogs || []).filter(l => !delCardioIds?.has(l.id))],
+              dailyLogs: [...localOnlyDailyLogs, ...mergeById(fresh.dailyLogs, cur.dailyLogs, base?.dailyLogs, delDailyIds)],
+              cardioLogs: [...localOnlyCardioLogs, ...mergeById(fresh.cardioLogs, cur.cardioLogs, base?.cardioLogs, delCardioIds)],
               workoutTemplates: [...localOnlyTemplates, ...(fresh.workoutTemplates || []).filter(t => !delTplIds?.has(t.id))],
               cardioPlans: [...localOnlyCardioPlans, ...(fresh.cardioPlans || []).filter(p => !delCardioPlanIds?.has(p.id))],
               mesoStates,
@@ -731,6 +793,11 @@ function App() {
         onboardingChecked.current = false;
         unitPicked.current = false; // re-arm unit watcher for the new account
         recoveryInProgress.current = false; // clear so loadData can complete after a password reset
+        // Cancel any pending retry from the previous account so it can't fire
+        // with the old uid after a quick account switch, and drop its stale
+        // pending state.
+        clearTimeout(retryTimer.current);
+        pendingStore.current = null;
         setUserId(session.user.id);
         if (isTokenFlow.current) { isTokenFlow.current = false; setPhase('invite'); }
         else loadData(session.user.id);
@@ -750,6 +817,7 @@ function App() {
         // real sign-out — never wipe the cache or drop to the login screen.
         if (!navigator.onLine) { setPhase(p => (p === 'ready' ? p : 'error')); return; }
         LB.clearLocal(userIdRef.current);
+        clearTimeout(retryTimer.current);
         setStore(null);
         setUserId(null);
         prevStore.current = null;
@@ -983,8 +1051,19 @@ function App() {
         // the banner — the user would never see it.
         let stored = null;
         try { stored = localStorage.getItem('logbook-sw-version'); } catch (_) {}
-        try { localStorage.setItem('logbook-sw-version', v); } catch (_) {}
-        if (stored && v !== stored) {
+        if (!stored) {
+          // First sighting: record the running version as the baseline so a
+          // later, newer sw.js is recognised as an update. Nothing to compare
+          // against yet, so no banner.
+          try { localStorage.setItem('logbook-sw-version', v); } catch (_) {}
+          return;
+        }
+        if (v !== stored) {
+          // An update is available. Do NOT advance the stored version here —
+          // only applyUpdate persists it. Otherwise after an iOS cold start
+          // (in-memory state wiped) stored would already equal v and the
+          // update would never be re-offered.
+          pendingSwVersion.current = v;
           setUpdateAvailable(true);
           swReg.current?.update().catch(() => {});
         }
@@ -1129,7 +1208,7 @@ function App() {
     case 'spectator':         screen = <window.Screens.SpectatorScreen {...props} targetUserId={route.targetUserId} userName={route.userName} sessionId={route.sessionId} />; break;
     case 'coaching':            screen = <window.Screens.CoachingTabScreen {...props} initialClientTab={route.initialClientTab} />; break;
     case 'coaching-dashboard':  screen = <window.Screens.CoachingDashboard {...props} />; break;
-    case 'coaching-client':     screen = <window.Screens.CoachClientScreen {...props} coachingId={route.coachingId} clientId={route.clientId} clientName={route.clientName} checkinAt={route.checkinAt} initialTab={route.initialTab} backRoute={route.backRoute || 'settings'} isSelf={route.isSelf} />; break;
+    case 'coaching-client':     screen = <window.Screens.CoachClientScreen key={route.coachingId} {...props} coachingId={route.coachingId} clientId={route.clientId} clientName={route.clientName} checkinAt={route.checkinAt} initialTab={route.initialTab} backRoute={route.backRoute || 'settings'} isSelf={route.isSelf} />; break;
     case 'coaching-edit-plan':  screen = <window.Screens.CoachPlanEditorScreen {...props} coachingId={route.coachingId} clientId={route.clientId} clientName={route.clientName} scheduleId={route.scheduleId} />; break;
     case 'coaching-new-plan':   screen = <window.Screens.CoachNewPlanScreen {...props} coachingId={route.coachingId} clientId={route.clientId} clientName={route.clientName} />; break;
     default:                  screen = <window.Screens.HomeScreen {...props} />; break;

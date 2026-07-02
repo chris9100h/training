@@ -64,7 +64,12 @@ function saveMesoStateToStorage(s) {
 // mesoState.deltas were already safe via getMesoState/saveMesoState.
 const MESO_ASKED_KEY = 'logbook-meso-asked-';
 function loadMesoAskedSets(sessionId) {
-  const empty = { soreness: new Set(), joint: new Set(), volume: new Set(), gains: {} };
+  // `answers` (per question type, keyed by muscle/exId) and `negOwner` (key ->
+  // question type) make answers editable for the rest of the session: they
+  // record enough to reopen a sheet prefilled and to re-diff its contribution
+  // to mesoState.deltas when the answer changes. See commitContrib below.
+  const empty = { soreness: new Set(), joint: new Set(), volume: new Set(), gains: {},
+    answers: { soreness: {}, joint: {}, volume: {} }, negOwner: {} };
   if (!sessionId) return empty;
   try {
     const r = localStorage.getItem(MESO_ASKED_KEY + sessionId);
@@ -75,6 +80,12 @@ function loadMesoAskedSets(sessionId) {
       joint: new Set(p.joint || []),
       volume: new Set(p.volume || []),
       gains: p.gains || {},
+      answers: {
+        soreness: p.answers?.soreness || {},
+        joint: p.answers?.joint || {},
+        volume: p.answers?.volume || {},
+      },
+      negOwner: p.negOwner || {},
     };
   } catch { return empty; }
 }
@@ -84,6 +95,8 @@ function saveMesoAskedSets(sessionId, asked) {
     localStorage.setItem(MESO_ASKED_KEY + sessionId, JSON.stringify({
       soreness: [...asked.soreness], joint: [...asked.joint], volume: [...asked.volume],
       gains: asked.gains || {},
+      answers: asked.answers || { soreness: {}, joint: {}, volume: {} },
+      negOwner: asked.negOwner || {},
     }));
   } catch {}
 }
@@ -108,7 +121,7 @@ function mesoCurrentWeek(mesoState, store) {
   // Weekday and date-based cycle plans: date arithmetic.
   // Cycle plans: one meso "week" = one full rotation (daysLen days).
   // Weekday plans: one meso "week" = 7 calendar days.
-  const start = new Date(mesoState.startDate); start.setHours(12, 0, 0, 0);
+  const start = LB.parseDate(mesoState.startDate);
   const today = new Date(); today.setHours(12, 0, 0, 0);
   if (today < start) return null; // pending
   const days = Math.round((today - start) / 86400000);
@@ -400,11 +413,11 @@ function CustomKeyboard({ visible, field, onType, onBackspace, onAdjust, onConfi
   const H = 40;
   const base = {
     background: 'var(--bg-raised)', border: `0.5px solid var(--hair)`, borderRadius: 6,
-    color: 'var(--ink)', fontFamily: '"JetBrains Mono", monospace', fontSize: 18, fontWeight: 500,
+    color: 'var(--ink)', fontFamily: UI.fontNum, fontSize: 18, fontWeight: 500,
     cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
     WebkitTapHighlightColor: 'transparent', userSelect: 'none', padding: 0,
   };
-  const act = { ...base, background: 'var(--bg-inset)', color: 'var(--ink-soft)', fontSize: 13, fontFamily: '"Inter", sans-serif' };
+  const act = { ...base, background: 'var(--bg-inset)', color: 'var(--ink-soft)', fontSize: 13, fontFamily: UI.fontUi };
 
   return (
     <div data-keyboard
@@ -530,62 +543,58 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   useEffectT(() => {
     if (!_sch?.mesocycle_weeks || !session.scheduleId) return;
     const schId = session.scheduleId;
-    // Recompute everything from the freshest store snapshot (`s`, inside the
-    // functional setStore updater) instead of the `_sch`/`store` closed over
-    // above — a plan edit that changes the day structure (new version +
-    // cycleOffset) and flips mesocycle_weeks on can commit via back-to-back
-    // setStore calls, and aligning against a stale closure risks dropping the
-    // cycleOffset and computing "today" instead of the true next D1.
-    let newMeso = null;
+    // Compute the new meso object PURELY (outside setStore) so it's guaranteed
+    // available for the localStorage / component-state writes below — a
+    // functional updater may run lazily, so we can't rely on it having assigned
+    // an outer variable by the time we read it. The effect runs once on mount,
+    // so the `store` closure is the freshest snapshot we need.
+    const freshSch = store.schedules.find(x => x.id === schId);
+    if (!freshSch?.mesocycle_weeks) return;
+    const existing = getMesoState(schId, store.mesoStates);
+    // Keep existing meso only if weeks match the current config.
+    // A mismatch (changed week count) always starts fresh.
+    if (existing && existing.weeks === freshSch.mesocycle_weeks) return;
+    // Align meso start to a clean boundary so week 1 is always a full rotation/week.
+    // Weekday: next Monday (or today). Flex: next D1 via cycleIndex. Cycle: next D1 via date.
+    const _isWeekday = LB.isWeekdayPlan(freshSch);
+    const _isFlex = LB.isFlexPlan(freshSch);
+    const _daysLen = freshSch.days.length || 1;
+    const _ci = store.cycleIndex || 0;
+    let alignedStartDate, alignedStartIdx;
+    if (_isWeekday) {
+      alignedStartDate = LB.nextMondayISO();
+      alignedStartIdx = _ci;
+    } else if (_isFlex) {
+      alignedStartIdx = _ci % _daysLen === 0 ? _ci : Math.ceil(_ci / _daysLen) * _daysLen;
+      alignedStartDate = LB.todayISO();
+    } else {
+      // Date-based cycle plan: use version-aware D1 so the meso aligns with how
+      // the date strip renders (getCyclePosForDate respects version boundaries).
+      alignedStartDate = LB.nextCycleD1ISOFromSchedule(freshSch, store.cycleStartDate);
+      alignedStartIdx = 0;
+    }
+    const newMeso = {
+      id: userId + '_' + schId,
+      scheduleId: schId,
+      weeks: freshSch.mesocycle_weeks,
+      startDate: alignedStartDate,
+      startCycleIndex: alignedStartIdx,
+      deltas: {},
+      jointFlags: {},
+      pumpLowCounts: {},
+      weightBoosts: {},
+      completions: existing?.completions ?? 0,
+      updatedAt: new Date().toISOString(),
+    };
     setStore(s => {
-      const freshSch = s.schedules.find(x => x.id === schId);
-      if (!freshSch?.mesocycle_weeks) return s;
-      const existing = getMesoState(schId, s.mesoStates);
-      // Keep existing meso only if weeks match the current config.
-      // A mismatch (changed week count) always starts fresh.
-      if (existing && existing.weeks === freshSch.mesocycle_weeks) return s;
-      // Align meso start to a clean boundary so week 1 is always a full rotation/week.
-      // Weekday: next Monday (or today). Flex: next D1 via cycleIndex. Cycle: next D1 via date.
-      const _isWeekday = LB.isWeekdayPlan(freshSch);
-      const _isFlex = LB.isFlexPlan(freshSch);
-      const _daysLen = freshSch.days.length || 1;
-      const _ci = s.cycleIndex || 0;
-      let alignedStartDate, alignedStartIdx;
-      if (_isWeekday) {
-        alignedStartDate = LB.nextMondayISO();
-        alignedStartIdx = _ci;
-      } else if (_isFlex) {
-        alignedStartIdx = _ci % _daysLen === 0 ? _ci : Math.ceil(_ci / _daysLen) * _daysLen;
-        alignedStartDate = LB.todayISO();
-      } else {
-        // Date-based cycle plan: use version-aware D1 so the meso aligns with how
-        // the date strip renders (getCyclePosForDate respects version boundaries).
-        alignedStartDate = LB.nextCycleD1ISOFromSchedule(freshSch, s.cycleStartDate);
-        alignedStartIdx = 0;
-      }
-      newMeso = {
-        id: userId + '_' + schId,
-        scheduleId: schId,
-        weeks: freshSch.mesocycle_weeks,
-        startDate: alignedStartDate,
-        startCycleIndex: alignedStartIdx,
-        deltas: {},
-        jointFlags: {},
-        pumpLowCounts: {},
-        weightBoosts: {},
-        completions: existing?.completions ?? 0,
-        updatedAt: new Date().toISOString(),
-      };
       const others = (s.mesoStates || []).filter(m => m.scheduleId !== schId);
       return { ...s, mesoStates: [...others, newMeso] };
     });
     // Immediately mirror the new meso state to the local cache / component
     // state too, so it's synced to DB without waiting for session end (covers
     // the case where user exits without finishing) and is available offline.
-    if (newMeso) {
-      saveMesoStateToStorage(newMeso);
-      setMesoStateLocal(newMeso);
-    }
+    saveMesoStateToStorage(newMeso);
+    setMesoStateLocal(newMeso);
   }, []);
 
   const exIdx = session.currentExIdx || 0;
@@ -613,7 +622,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     LB.fetchExerciseHistory(exId, session.dayId, 20, userId)
       .then(rows => {
         if (!on) return;
-        const filtered = (rows || []).filter(r => r.sessionId !== session.id);
+        // The server RPC doesn't know about is_deload and may return ~50%
+        // deload sessions — exclude them (same guard as fetchSeedEntries) so a
+        // deload load never becomes the "last time"/best/comparison baseline.
+        const deloadIds = new Set((store.sessions || []).filter(s => s.isDeload).map(s => s.id));
+        const filtered = (rows || []).filter(r => r.sessionId !== session.id && !deloadIds.has(r.sessionId));
         // best e1RM across all fetched sessions for this day type
         let best = 0;
         for (const r of filtered) {
@@ -1007,7 +1020,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       const completed = entry.sets[setIdx];
       const cReps = LB.effReps(completed);
       const cE1rm = (completed?.kg != null && cReps != null && cReps > 0) ? LB.e1rm(completed.kg, cReps) : 0;
-      const localBest = LB.bestE1rmForExercise(store, entry.exId, session.id, session.dayId);
+      const localBest = LB.bestE1rmForExercise(store, entry.exId, session.id);
       const priorBest = Math.max(localBest, remoteBestE1rmRef.current[entry.exId] || 0);
       const isNewBest = cE1rm > 0 && priorBest > 0 && cE1rm > priorBest && !newBestShownRef.current[entry.exId];
       if (isNewBest) {
@@ -1072,7 +1085,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       const wIdx = entry.sets.slice(0, targetIdx + 1).filter(s => !s.warmup).length - 1;
       const prevSet = wIdx >= 0 ? prevWS[wIdx] : undefined;
       const cE1rm = LB.e1rm(first.kg, first.reps);
-      const localBest = LB.bestE1rmForExercise(store, entry.exId, session.id, session.dayId);
+      const localBest = LB.bestE1rmForExercise(store, entry.exId, session.id);
       const priorBest = Math.max(localBest, remoteBestE1rmRef.current[entry.exId] || 0);
       const isNewBest = cE1rm > 0 && priorBest > 0 && cE1rm > priorBest && !newBestShownRef.current[entry.exId];
       if (isNewBest) {
@@ -1138,7 +1151,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       const wIdx = entry.sets.slice(0, targetIdx + 1).filter(s => !s.warmup).length - 1;
       const prevSet = wIdx >= 0 ? prevWS[wIdx] : undefined;
       const cE1rm = LB.e1rm(first.kg, first.reps);
-      const localBest = LB.bestE1rmForExercise(store, entry.exId, session.id, session.dayId);
+      const localBest = LB.bestE1rmForExercise(store, entry.exId, session.id);
       const priorBest = Math.max(localBest, remoteBestE1rmRef.current[entry.exId] || 0);
       const isNewBest = cE1rm > 0 && priorBest > 0 && cE1rm > priorBest && !newBestShownRef.current[entry.exId];
       if (isNewBest) {
@@ -1882,106 +1895,186 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const [mesoVolumeExIds, setMesoVolumeExIds] = useStateT([]); // exId+dayId pairs for delta
   const [mesoPumpAnswer, setMesoPumpAnswer] = useStateT(null);
   const [mesoVolumeAnswer, setMesoVolumeAnswer] = useStateT(null);
+  // Soreness/joint use a select-then-confirm step (like volume already did)
+  // so a single mistap only highlights an option instead of committing it.
+  const [mesoSorenessSel, setMesoSorenessSel] = useStateT(null);
+  const [mesoJointSel, setMesoJointSel] = useStateT(null);
+  // Editing an already-answered question reopens the same sheet prefilled;
+  // these track which subject (muscle/exId) is currently being re-answered
+  // vs. freshly asked for the first time (both paths call the same commit
+  // handler — see handleSorenessAnswer/handleJointAnswer/handleVolumeAnswer).
+  const mesoEditingRef = useRefT({ soreness: null, joint: null, volume: null });
+  const [mesoRecapOpen, setMesoRecapOpen] = useStateT(false);
+  // Session feedback is two levels: the top sheet lists one button per
+  // muscle ("Chest feedback"); tapping it opens this detail sheet with the
+  // muscle's individual answers (Soreness, each exercise's Joint, Pump &
+  // Volume) to actually revise.
+  const [mesoRecapDetailMuscle, setMesoRecapDetailMuscle] = useStateT(null);
   const mesoAskedInitRef = useRefT(null);
   if (mesoAskedInitRef.current === null) mesoAskedInitRef.current = loadMesoAskedSets(session.id);
   const askedSorenessRef = useRefT(mesoAskedInitRef.current.soreness);
   const askedJointRef = useRefT(mesoAskedInitRef.current.joint);
   const askedVolumeRef = useRefT(mesoAskedInitRef.current.volume);
+  // Answer records for recap + editing, keyed by muscle (soreness/volume) or
+  // exId (joint). Each record carries display metadata plus `contrib` (this
+  // question's current per-key contribution to mesoState.deltas), so editing
+  // an answer can diff old-vs-new instead of re-incrementing.
+  const mesoAnswersRef = useRefT(mesoAskedInitRef.current.answers);
   const persistMesoAsked = () => saveMesoAskedSets(session.id, {
     soreness: askedSorenessRef.current, joint: askedJointRef.current, volume: askedVolumeRef.current,
     gains: mesoSessionSetGainsRef.current,
+    answers: mesoAnswersRef.current,
+    negOwner: mesoNegativeDeltaKeysRef.current,
   });
   // Per-session quality tracking for weight progression
   const mesoJointFineRef = useRefT(new Set());    // exIds where joint was 'fine'
   const mesoPumpOkRef = useRefT(new Set());        // muscles where pump was moderate/amazing
   const mesoVolumeOkRef = useRefT(new Set());      // muscles where volume was just_right/not_enough
   const mesoSessionSetGainsRef = useRefT(mesoAskedInitRef.current.gains); // key → { exId, name, delta } for set changes this session
-  // exId_dayId keys already hit by a negative set-delta this session (from
-  // soreness, joint pain, or volume feedback) — shared across all three
-  // handlers so two independent negative signals never stack a -2 onto the
-  // same exercise in one session.
-  const mesoNegativeDeltaKeysRef = useRefT(new Set());
+  // Which question type currently "owns" the negative set-delta slot for a
+  // key (exId_dayId) this session — key -> 'soreness'|'joint'|'volume'. Two
+  // independent negative signals on the same key never stack past -1; the
+  // owner releases the slot if its own answer is edited away from negative,
+  // letting another question claim it. See commitContrib.
+  const mesoNegativeDeltaKeysRef = useRefT(mesoAskedInitRef.current.negOwner);
   const isMesoDeloadSession = store.statusMode === 'deload' || session.isDeload;
+
+  // Apply `newContrib` (key -> desired delta) as this question's current
+  // contribution to mesoState.deltas, replacing whatever it contributed last
+  // time (tracked in `record.contrib`) via a diff — so an edited answer never
+  // compounds with its own earlier answer. Negative amounts additionally
+  // respect mesoNegativeDeltaKeysRef ownership (suppressed to 0 if another
+  // question type already owns that key's negative slot this session).
+  // `namesByKey` supplies { name } for the "Next session" recap ledger.
+  const commitContrib = (record, questionType, newContrib, namesByKey) => {
+    const prevContrib = record.contrib || {};
+    const keys = new Set([...Object.keys(prevContrib), ...Object.keys(newContrib)]);
+    const deltaPatch = {};
+    const finalContrib = {};
+    keys.forEach(key => {
+      let want = newContrib[key] || 0;
+      const owners = mesoNegativeDeltaKeysRef.current;
+      if (want < 0) {
+        const owner = owners[key];
+        if (owner && owner !== questionType) want = 0; // another question owns this key's negative slot
+        else owners[key] = questionType;
+      }
+      if (want >= 0 && owners[key] === questionType) delete owners[key];
+      const diff = want - (prevContrib[key] || 0);
+      if (diff !== 0) deltaPatch[key] = diff;
+      finalContrib[key] = want;
+    });
+    if (Object.keys(deltaPatch).length) {
+      saveMesoState(m => {
+        const nd = { ...(m.deltas || {}) };
+        Object.entries(deltaPatch).forEach(([key, diff]) => { nd[key] = ((m.deltas || {})[key] || 0) + diff; });
+        return { ...m, deltas: nd };
+      });
+      Object.entries(deltaPatch).forEach(([key, diff]) => {
+        const prevGain = mesoSessionSetGainsRef.current[key];
+        const name = namesByKey?.[key] ?? prevGain?.name ?? record.exName ?? record.muscle;
+        mesoSessionSetGainsRef.current[key] = { name, delta: (prevGain?.delta ?? 0) + diff };
+      });
+    }
+    record.contrib = finalContrib;
+  };
   // ────────────────────────────────────────────────────────────────────────────
 
   // ── Meso feedback handlers ─────────────────────────────────────────────────
+  // Soreness, joint, and volume answers are all editable for the rest of the
+  // session (see the "Session feedback" recap sheet below): each handler is
+  // safe to call more than once for the same subject (muscle/exId) — the
+  // second call is an edit, not a fresh answer, and commitContrib() reconciles
+  // the difference instead of stacking a second contribution.
   const handleSorenessAnswer = (answer, muscle) => {
     setMesoSorenessOpen(false);
-    if ((answer !== 'still_sore' && answer !== 'very_sore') || !mesoState) return;
-    const mesoStart = mesoState.startDate;
-    const matchSessions = (store.sessions || [])
-      .filter(s => s.ended && s.date >= mesoStart && s.scheduleId === session.scheduleId && s.id !== session.id)
-      .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
-    for (const prev of matchSessions) {
-      const muscleEntries = (prev.entries || []).filter(e => {
-        const ex2 = store.exercises?.find(x => x.id === e.exId);
-        return primaryMuscleForExercise(ex2) === muscle;
-      });
-      if (!muscleEntries.length) continue;
-      // still_sore → only main lift; very_sore → all exercises of the group
-      const targets = answer === 'very_sore' ? muscleEntries : [muscleEntries[0]];
-      // Resolve, ONCE, which of these keys haven't already taken a negative
-      // delta this session from another signal (joint/volume) — computed up
-      // front so the display bookkeeping and the actual deltas mutation stay
-      // in lockstep (mutating the ref between the two would make the second
-      // check always pass).
-      const keysToApply = targets
-        .map(e => ({ e, key: e.exId + '_' + prev.dayId }))
-        .filter(({ key }) => !mesoNegativeDeltaKeysRef.current.has(key));
-      keysToApply.forEach(({ key }) => mesoNegativeDeltaKeysRef.current.add(key));
-      // Surface the change in the post-session "Next session" summary, same
-      // as joint/volume feedback — otherwise a soreness-only session silently
-      // changes next session's plan with no indication anywhere.
-      keysToApply.forEach(({ e, key }) => {
-        const prevGain = mesoSessionSetGainsRef.current[key];
-        mesoSessionSetGainsRef.current[key] = { exId: e.exId, name: e.name, delta: (prevGain?.delta ?? 0) - 1 };
-      });
-      if (keysToApply.length) {
-        saveMesoState(m => {
-          const newDeltas = { ...(m.deltas || {}) };
-          keysToApply.forEach(({ key }) => {
-            newDeltas[key] = ((m.deltas || {})[key] || 0) - 1;
-          });
-          return { ...m, deltas: newDeltas };
+    setMesoSorenessSel(null);
+    mesoEditingRef.current.soreness = null;
+    if (!mesoState || !muscle) return;
+    const record = mesoAnswersRef.current.soreness[muscle] || { muscle };
+    // Resolve the target previous session ONCE — an edit reuses the exact
+    // same candidate exercises rather than re-resolving (which could in
+    // theory match a different session if training history changed).
+    if (!record.resolved) {
+      record.resolved = true;
+      record.targets = [];
+      const mesoStart = mesoState.startDate;
+      const matchSessions = (store.sessions || [])
+        .filter(s => s.ended && s.date >= mesoStart && s.scheduleId === session.scheduleId && s.id !== session.id)
+        .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+      for (const prev of matchSessions) {
+        const muscleEntries = (prev.entries || []).filter(e => {
+          const ex2 = store.exercises?.find(x => x.id === e.exId);
+          return primaryMuscleForExercise(ex2) === muscle;
         });
-        persistMesoAsked();
+        if (!muscleEntries.length) continue;
+        record.targets = muscleEntries.map(e => ({ exId: e.exId, name: e.name, key: e.exId + '_' + prev.dayId }));
+        break;
       }
-      break;
     }
+    record.answer = answer;
+    const namesByKey = {};
+    const newContrib = {};
+    // still_sore → only the main (first) lift; very_sore → every exercise of
+    // the group; never/healed_* → no delta (and releases any prior one).
+    record.targets.forEach((t, i) => {
+      namesByKey[t.key] = t.name;
+      newContrib[t.key] = (answer === 'very_sore' || (answer === 'still_sore' && i === 0)) ? -1 : 0;
+    });
+    commitContrib(record, 'soreness', newContrib, namesByKey);
+    mesoAnswersRef.current.soreness[muscle] = record;
+    persistMesoAsked();
   };
 
   const handleJointAnswer = (answer) => {
     setMesoJointOpen(false);
+    setMesoJointSel(null);
+    mesoEditingRef.current.joint = null;
     const exId = mesoJointExId;
     const muscle = mesoJointMuscle;
     if (!mesoState || !exId) return;
 
-    if (answer === 'none') mesoJointFineRef.current.add(exId);
+    if (answer === 'none') mesoJointFineRef.current.add(exId); else mesoJointFineRef.current.delete(exId);
 
-    // Apply delta for joint pain — skip if soreness already penalized this
-    // exact exercise/day this session, so two independent negative signals
-    // don't stack to -2. jointFlags is a separate signal (a persistent
-    // "this exercise causes joint pain" marker) and is always recorded
-    // regardless of whether the delta was skipped.
-    if (answer === 'noticeable' || answer === 'sharp') {
-      const key = exId + '_' + session.dayId;
-      const alreadyPenalized = mesoNegativeDeltaKeysRef.current.has(key);
-      if (!alreadyPenalized) {
-        mesoNegativeDeltaKeysRef.current.add(key);
-        const prevGain = mesoSessionSetGainsRef.current[key];
-        mesoSessionSetGainsRef.current[key] = { exId, name: mesoJointExName, delta: (prevGain?.delta ?? 0) - 1 };
-      }
-      saveMesoState(m => ({
-        ...m,
-        ...(alreadyPenalized ? {} : { deltas: { ...(m.deltas || {}), [key]: ((m.deltas || {})[key] || 0) - 1 } }),
-        ...(answer === 'sharp' ? { jointFlags: { ...(m.jointFlags || {}), [exId]: true } } : {}),
-      }));
-      if (!alreadyPenalized) persistMesoAsked();
-    }
+    const record = mesoAnswersRef.current.joint[exId] || { exId };
+    record.answer = answer;
+    record.exName = mesoJointExName;
+    record.muscle = muscle;
+    // jointFlags is a persistent "causes joint pain" marker (survives across
+    // sessions) — flagBaseline captures whatever it already was BEFORE this
+    // session touched it, captured once, so editing back and forth within
+    // this session never erases a flag some earlier session legitimately set.
+    if (record.flagBaseline === undefined) record.flagBaseline = !!mesoState.jointFlags?.[exId];
 
-    // Check if this was the last exercise for this muscle group → open pump/volume
+    const key = exId + '_' + session.dayId;
+    commitContrib(record, 'joint', { [key]: (answer === 'noticeable' || answer === 'sharp') ? -1 : 0 }, { [key]: mesoJointExName });
+
+    const flagNow = record.flagBaseline || answer === 'sharp';
+    saveMesoState(m => {
+      const curFlag = !!(m.jointFlags || {})[exId];
+      if (curFlag === flagNow) return m;
+      return { ...m, jointFlags: { ...(m.jointFlags || {}), [exId]: flagNow } };
+    });
+    mesoAnswersRef.current.joint[exId] = record;
+    persistMesoAsked();
+
+    // Check if this was the last exercise for this muscle group → open pump/volume.
+    // Unchanged from a fresh ask: if the muscle's volume sheet already fired
+    // (askedVolumeRef), editing an earlier exercise's joint answer here just
+    // returns without re-triggering it.
     if (!muscle || askedVolumeRef.current.has(muscle)) return;
-    const currentIdx = mesoJointExIdxRef.current ?? exIdx;
+    const idx = session.entries.findIndex(e => e.exId === exId);
+    // exId no longer exists in this session (swapped out / removed via
+    // doSwap/removeExercise since the original answer) — an edit reached via
+    // the recap for a since-vanished exercise can't reason about "is this the
+    // last exercise of the muscle group" from a position that no longer
+    // exists, so skip the cascade entirely rather than falling back to
+    // whatever exIdx the user happens to be viewing right now (that produced
+    // a wrong, premature, and — since askedVolumeRef is one-shot —
+    // irreversible trigger of the volume sheet for the wrong exercise set).
+    if (idx < 0) return;
+    mesoJointExIdxRef.current = idx;
+    const currentIdx = idx;
     const isLastOfMuscle = !session.entries.slice(currentIdx + 1).some(e => {
       const ex2 = store.exercises?.find(x => x.id === e.exId);
       return primaryMuscleForExercise(ex2) === muscle;
@@ -2001,68 +2094,141 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     setMesoVolumeExIds(muscleExIds);
     setMesoPumpAnswer(null);
     setMesoVolumeAnswer(null);
+    mesoEditingRef.current.volume = null;
     setMesoVolumeOpen(true);
   };
 
   const handleVolumeAnswer = (pump, volume) => {
     setMesoVolumeOpen(false);
+    mesoEditingRef.current.volume = null;
     if (!mesoState || !mesoVolumeExIds.length) return;
-    // Track quality signals for weight progression
-    if (pump === 'moderate' || pump === 'amazing') mesoPumpOkRef.current.add(mesoVolumeMusc);
-    if (volume === 'just_right' || volume === 'not_enough') mesoVolumeOkRef.current.add(mesoVolumeMusc);
+    const muscle = mesoVolumeMusc;
+    if (pump === 'moderate' || pump === 'amazing') mesoPumpOkRef.current.add(muscle); else mesoPumpOkRef.current.delete(muscle);
+    if (volume === 'just_right' || volume === 'not_enough') mesoVolumeOkRef.current.add(muscle); else mesoVolumeOkRef.current.delete(muscle);
+
+    const record = mesoAnswersRef.current.volume[muscle] || { muscle, exIds: mesoVolumeExIds };
+    record.pump = pump;
+    record.volume = volume;
+    record.exIds = mesoVolumeExIds;
 
     // "Not enough" → +1 on main lift (first exercise of the muscle group) only
     // "Pushed my limits" → -1 on main lift only
     // "Too much" → -1 on every exercise of the muscle group
     const mainExId = mesoVolumeExIds[0];
-    // Which exId/dayId keys this answer wants to apply a NEGATIVE delta to —
-    // resolved once, up front, against mesoNegativeDeltaKeysRef so a prior
-    // soreness/joint penalty on the same key isn't stacked with a second
-    // negative signal (positive deltas like "not enough" are never guarded —
-    // they're an independent, opposite-direction signal, not a double
-    // penalty).
-    const negativeTargets = volume === 'pushed' && mainExId ? [mainExId]
-      : volume === 'too_much' ? mesoVolumeExIds
-      : [];
-    const negKeysToApply = negativeTargets
-      .map(exId => ({ exId, key: exId + '_' + session.dayId }))
-      .filter(({ key }) => !mesoNegativeDeltaKeysRef.current.has(key));
-    negKeysToApply.forEach(({ key }) => mesoNegativeDeltaKeysRef.current.add(key));
-
-    // Track set delta for summary screen
-    if (volume === 'not_enough' && mainExId) {
-      const key = mainExId + '_' + session.dayId;
-      const exName = session.entries.find(e => e.exId === mainExId)?.name || '';
-      const prevGain = mesoSessionSetGainsRef.current[key];
-      mesoSessionSetGainsRef.current[key] = { exId: mainExId, name: exName, delta: (prevGain?.delta ?? 0) + 1 };
-    } else {
-      negKeysToApply.forEach(({ exId, key }) => {
-        const exName = session.entries.find(e => e.exId === exId)?.name || '';
-        const prevGain = mesoSessionSetGainsRef.current[key];
-        mesoSessionSetGainsRef.current[key] = { exId, name: exName, delta: (prevGain?.delta ?? 0) - 1 };
-      });
-    }
-
-    // Pump: if low on "just right" volume, track for swap suggestion
-    const pumpLow = pump === 'low' && volume === 'just_right';
-
-    saveMesoState(m => {
-      const newDeltas = { ...(m.deltas || {}) };
-      const newPumpLow = { ...(m.pumpLowCounts || {}) };
-
-      if (volume === 'not_enough' && mainExId) {
-        const key = mainExId + '_' + session.dayId;
-        newDeltas[key] = ((m.deltas || {})[key] || 0) + 1;
-      } else {
-        negKeysToApply.forEach(({ key }) => {
-          newDeltas[key] = ((m.deltas || {})[key] || 0) - 1;
-        });
-      }
-
-      if (pumpLow && mainExId) newPumpLow[mainExId] = ((m.pumpLowCounts || {})[mainExId] || 0) + 1;
-      return { ...m, deltas: newDeltas, pumpLowCounts: newPumpLow };
+    const namesByKey = {};
+    const newContrib = {};
+    mesoVolumeExIds.forEach(exId => {
+      const key = exId + '_' + session.dayId;
+      namesByKey[key] = session.entries.find(e => e.exId === exId)?.name || '';
+      let want = 0;
+      if (volume === 'too_much') want = -1;
+      else if (exId === mainExId && volume === 'not_enough') want = 1;
+      else if (exId === mainExId && volume === 'pushed') want = -1;
+      newContrib[key] = want;
     });
+    commitContrib(record, 'volume', newContrib, namesByKey);
+
+    // Pump: if low on "just right" volume, track for swap suggestion — a
+    // counter (not a flag), so an edit applies just the ±1 its own current
+    // answer is responsible for, same idempotent-diff pattern as commitContrib.
+    const pumpLowApplied = pump === 'low' && volume === 'just_right';
+    const pumpLowDiff = (pumpLowApplied ? 1 : 0) - (record.pumpLowApplied ? 1 : 0);
+    record.pumpLowApplied = pumpLowApplied;
+    if (pumpLowDiff !== 0 && mainExId) {
+      saveMesoState(m => ({
+        ...m,
+        pumpLowCounts: { ...(m.pumpLowCounts || {}), [mainExId]: Math.max(0, ((m.pumpLowCounts || {})[mainExId] || 0) + pumpLowDiff) },
+      }));
+    }
+    mesoAnswersRef.current.volume[muscle] = record;
     persistMesoAsked();
+  };
+
+  // Reopen an already-answered sheet prefilled with the current answer so the
+  // user can revise it — a mistap is no longer permanent. Only reachable from
+  // the recap sheet (see mesoRecapGroups / the footer nav button below).
+  const openSorenessEdit = (muscle) => {
+    const record = mesoAnswersRef.current.soreness[muscle];
+    if (!record) return;
+    setMesoSorenessMusc(muscle);
+    setMesoSorenessSel(record.answer);
+    mesoEditingRef.current.soreness = muscle;
+    setMesoRecapOpen(false);
+    setMesoRecapDetailMuscle(null);
+    setMesoSorenessOpen(true);
+  };
+  const openJointEdit = (exId) => {
+    const record = mesoAnswersRef.current.joint[exId];
+    if (!record) return;
+    setMesoJointExId(exId);
+    setMesoJointExName(record.exName);
+    setMesoJointMuscle(record.muscle);
+    setMesoJointSel(record.answer);
+    mesoEditingRef.current.joint = exId;
+    setMesoRecapOpen(false);
+    setMesoRecapDetailMuscle(null);
+    setMesoJointOpen(true);
+  };
+  const openVolumeEdit = (muscle) => {
+    const record = mesoAnswersRef.current.volume[muscle];
+    if (!record) return;
+    // Drop any exId the exercise roster no longer has (swapped/removed since
+    // the original answer) so an edit can't reapply a delta to a slot that
+    // no longer means anything for this muscle group this session.
+    const liveExIds = (record.exIds || []).filter(exId => session.entries.some(e => e.exId === exId));
+    setMesoVolumeMusc(muscle);
+    setMesoVolumeExIds(liveExIds);
+    setMesoPumpAnswer(record.pump);
+    setMesoVolumeAnswer(record.volume);
+    mesoEditingRef.current.volume = muscle;
+    setMesoRecapDetailMuscle(null);
+    setMesoRecapOpen(false);
+    setMesoVolumeOpen(true);
+  };
+  const SORENESS_LABELS = { never: 'Never sore', healed_long: 'Healed a while ago', healed_just: 'Healed just in time', still_sore: 'Still sore', very_sore: 'Very sore' };
+  const JOINT_LABELS = { none: 'None', noticeable: 'Noticeable', sharp: 'Sharp pain' };
+  const PUMP_LABELS = { low: 'Low', moderate: 'Moderate', amazing: 'Amazing' };
+  const VOLUME_LABELS = { not_enough: 'Not enough', just_right: 'Just right', pushed: 'Pushed my limits', too_much: 'Too much' };
+  // Every answered question this session, grouped by muscle in workout order
+  // (the order questions are actually asked within a muscle group: Soreness
+  // first, then each exercise's Joint check, then Pump & Volume last) — for
+  // the recap sheet. Deriving joint rows straight from session.entries (not
+  // from mesoAnswersRef directly) automatically excludes an exercise that was
+  // swapped out or removed since — it's simply no longer in session.entries,
+  // so there's nothing left to reason a stale index against.
+  const mesoRecapGroups = () => {
+    const muscleOrder = [];
+    const seenMuscles = new Set();
+    session.entries.forEach(e => {
+      if (e.isCardio) return;
+      const pm = primaryMuscleForExercise(store.exercises?.find(x => x.id === e.exId));
+      if (pm && !seenMuscles.has(pm)) { seenMuscles.add(pm); muscleOrder.push(pm); }
+    });
+    const groups = [];
+    muscleOrder.forEach(muscle => {
+      const sRec = mesoAnswersRef.current.soreness[muscle];
+      const vRec = mesoAnswersRef.current.volume[muscle];
+      // Joint feedback (per exercise) vs. General feedback (muscle-group-wide:
+      // Soreness carryover + Pump & Volume) — split into two sections in the
+      // detail sheet so it's clear which answer applies to what.
+      const jointRows = [];
+      session.entries.forEach(e => {
+        if (e.isCardio) return;
+        if (primaryMuscleForExercise(store.exercises?.find(x => x.id === e.exId)) !== muscle) return;
+        const r = mesoAnswersRef.current.joint[e.exId];
+        if (!r || r.answer == null) return;
+        jointRows.push({ key: 'joint-' + e.exId, title: r.exName, sub: JOINT_LABELS[r.answer] || r.answer, onEdit: () => openJointEdit(e.exId) });
+      });
+      const generalRows = [];
+      if (sRec?.answer != null) {
+        generalRows.push({ key: 'soreness-' + muscle, title: 'Soreness', sub: SORENESS_LABELS[sRec.answer] || sRec.answer, onEdit: () => openSorenessEdit(muscle) });
+      }
+      if (vRec?.pump != null && vRec?.volume != null) {
+        generalRows.push({ key: 'volume-' + muscle, title: 'Pump & Volume', sub: `${PUMP_LABELS[vRec.pump] || vRec.pump} pump · ${VOLUME_LABELS[vRec.volume] || vRec.volume}`, onEdit: () => openVolumeEdit(muscle) });
+      }
+      if (jointRows.length || generalRows.length) groups.push({ muscle, jointRows, generalRows });
+    });
+    return groups;
   };
 
   // Compute per-exercise weight boosts earned this session and return gain items for
@@ -2096,8 +2262,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       const allHit = workingSets.every(s => {
         if (!s.done) return false;
         if (plannedReps == null) return true;
-        const reps = s.reps != null ? s.reps : Math.max(s.repsL ?? 0, s.repsR ?? 0);
-        return reps >= plannedReps;
+        const reps = LB.effReps(s);
+        return reps != null && reps >= plannedReps;
       });
       if (!allHit) continue;
 
@@ -2145,6 +2311,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     askedSorenessRef.current.add(pm);
     persistMesoAsked();
     setMesoSorenessMusc(pm);
+    setMesoSorenessSel(null);
+    mesoEditingRef.current.soreness = null;
     setMesoSorenessOpen(true);
   }, [exIdx, !!mesoState]);
 
@@ -2166,8 +2334,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     setMesoJointExId(exId);
     setMesoJointExName(entry.name);
     setMesoJointMuscle(pm);
+    setMesoJointSel(null);
+    mesoEditingRef.current.joint = null;
     setMesoJointOpen(true);
-  }, [entry?.sets?.map(s => s.done ? 1 : 0).join(','), !!mesoState]);
+  }, [exIdx, entry?.sets?.map(s => s.done ? 1 : 0).join(','), !!mesoState]);
 
   const tempoTimerRef = useRefT(null);
   const audioCtxRef = useRefT(null);
@@ -2405,7 +2575,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             // forward data that no longer matches what's being typed.
             sets: en.sets.map((st, si) =>
               si === setIdx ? { ...st, kg: num ?? null, done: false, ...(st.technique ? { technique: null, drops: null } : {}) }
-              : store.settings?.weightFillDown !== false && si > setIdx && !st.done ? { ...st, kg: num ?? null }
+              : store.settings?.weightFillDown !== false && si > setIdx && !st.done && !st.warmup ? { ...st, kg: num ?? null }
               : st
             ),
           }),
@@ -2496,7 +2666,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           ...en,
           sets: en.sets.map((st, si) =>
             si === setIdx ? { ...st, kg: next, done: false, ...(st.technique ? { technique: null, drops: null } : {}) }
-            : si > setIdx && !st.done ? { ...st, kg: next }
+            : store.settings?.weightFillDown !== false && si > setIdx && !st.done && !st.warmup ? { ...st, kg: next }
             : st
           ),
         }),
@@ -2859,7 +3029,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       const newSets = entry.sets.filter(s => !s.warmup).length;
       const mesoAdjustedPlan = entry.plannedSets ?? item.sets;
       if (newSets !== mesoAdjustedPlan) {
-        diffs.push({ type: 'sets', idx: originalIdx, exName: entry.name, oldSets: item.sets, newSets });
+        diffs.push({ type: 'sets', idx: originalIdx, exName: entry.name, oldSets: item.sets, newSets, mesoAdjustedPlanSets: mesoAdjustedPlan });
       }
     });
 
@@ -2981,7 +3151,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         const diff = planDiff.find(d => (d.type === 'swap' || d.type === 'sets') && d.idx === i);
         if (!diff) return item;
         if (diff.type === 'swap') return { ...item, exId: diff.newExId };
-        if (diff.type === 'sets') return { ...item, sets: diff.newSets };
+        // Persist only the user-driven delta on top of the base plan — newSets
+        // includes the meso set-delta, which applyMesoSetDelta re-adds next
+        // session; writing newSets directly would compound it (base+2 → base+3).
+        // Clamp to ≥1: mesoAdjustedPlanSets is the clamped count, so a deep cut
+        // during a ballooned meso could otherwise drive the stored base below 1.
+        if (diff.type === 'sets') return { ...item, sets: Math.max(1, item.sets + (diff.newSets - (diff.mesoAdjustedPlanSets ?? item.sets))) };
         return item;
       });
       // 2. Remove exercises skipped during training
@@ -3070,6 +3245,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const entrySets = entry?.sets || [];
   const completed = isCardio ? (entry?.cardioDone ? 1 : 0) : entrySets.filter(s => s.done).length;
   const allDone = !entry || (isCardio ? !!entry.cardioDone : (completed === entrySets.length));
+  // Computed once per render and reused by the footer's feedback button, the
+  // "Check set" shrink/compact logic, and the recap sheet itself.
+  const mesoFeedbackGroups = mesoState ? mesoRecapGroups() : [];
   const currentSetIdx = entrySets.findIndex(s => !s.done);
   const warmupCount = entrySets.filter(s => s.warmup).length;
   const isCurrentWarmup = warmupCount > 0 && currentSetIdx >= 0 && !!entry.sets[currentSetIdx]?.warmup;
@@ -3158,14 +3336,19 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   };
 
   const skipWarmup = () => {
-    updateSession(sess => ({
-      ...sess,
-      startedAt: new Date().toISOString(),
-      entries: sess.entries.map((e, i) => i === 0
-        ? { ...e, sets: e.sets.map(st => st.warmup ? { ...st, done: true } : st) }
-        : e
-      ),
-    }));
+    updateSession(sess => {
+      // The warmup-carrying entry isn't necessarily at index 0 — superset
+      // linking / reorder can move it. Find it by content, like warmupEntry.
+      const wIdx = sess.entries.findIndex(e => (e.sets || []).some(s => s.warmup));
+      return {
+        ...sess,
+        startedAt: new Date().toISOString(),
+        entries: sess.entries.map((e, i) => i === wIdx
+          ? { ...e, sets: e.sets.map(st => st.warmup ? { ...st, done: true } : st) }
+          : e
+        ),
+      };
+    });
     persistRestStart(null);
   };
 
@@ -4367,6 +4550,19 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         }}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M15 18l-6-6 6-6"/></svg>
         </button>
+        {/* Session feedback — only takes a footer slot once there's something
+            to revisit; Check set shrinks (and its label compacts) to make
+            room rather than the row growing past its usual button count. */}
+        {mesoFeedbackGroups.length > 0 && (
+          <button onClick={() => setMesoRecapOpen(true)} style={{
+            width: 44, minHeight: 44, borderRadius: 6,
+            background: UI.bgRaised, border: `1px solid ${UI.hairStrong}`,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+            cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+          }} aria-label="Session feedback">
+            <i className="fa-solid fa-list-check" style={{ fontSize: 15, color: UI.gold }} />
+          </button>
+        )}
         {allDone ? (
           <Btn onClick={() => navigate(1)} style={{ flex: 1, minHeight: 44, padding: '10px 16px' }}>
             {(session.entries.length === 0 || exIdx === session.entries.length - 1) ? 'Finish →' : 'Next exercise →'}
@@ -4380,7 +4576,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           {(() => {
             const pending = entrySets.find(s => !s.done && !s.skipped);
             const hasVal = pending && (pending.kg != null || pending.reps != null || pending.repsL != null || pending.repsR != null);
-            return <Btn onClick={checkSet} disabled={!hasVal} style={{ flex: 2, minHeight: 44, padding: '10px 16px' }}>Check set</Btn>;
+            const hasFeedback = mesoFeedbackGroups.length > 0;
+            return (
+              <Btn onClick={checkSet} disabled={!hasVal} style={{ flex: hasFeedback ? 1 : 2, minHeight: 44, padding: hasFeedback ? '10px 4px' : '10px 16px' }}>
+                {hasFeedback ? (<><i className="fa-solid fa-check" style={{ marginRight: 5 }} />Set</>) : 'Check set'}
+              </Btn>
+            );
           })()}
           <Btn onClick={skipExercise} style={{ flex: 1, minHeight: 44, padding: '6px 8px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 1 }}>
             <span>Skip</span>
@@ -5088,17 +5289,28 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           { key: 'healed_long', label: 'Healed a while ago', sub: 'Fully recovered well before this session' },
           { key: 'healed_just', label: 'Healed just in time', sub: 'Recovered right around this session' },
           { key: 'still_sore', label: 'Still sore', sub: 'Still feeling last session in this muscle' },
-        ].map(opt => (
-          <button key={opt.key} onClick={() => handleSorenessAnswer(opt.key, mesoSorenessMusc)} style={{
-            width: '100%', marginBottom: 8, padding: '12px 14px',
-            background: UI.bgInset, border: `1px solid ${UI.hairStrong}`,
-            borderRadius: 6, cursor: 'pointer', textAlign: 'left',
-            WebkitTapHighlightColor: 'transparent',
-          }}>
-            <div style={{ fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, fontWeight: 600 }}>{opt.label}</div>
-            <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 2 }}>{opt.sub}</div>
-          </button>
-        ))}
+        ].map(opt => {
+          const sel = mesoSorenessSel === opt.key;
+          return (
+            <button key={opt.key} onClick={() => setMesoSorenessSel(opt.key)} style={{
+              width: '100%', marginBottom: 8, padding: '12px 14px',
+              background: sel ? `rgba(var(--accent-rgb),0.12)` : UI.bgInset,
+              border: `1px solid ${sel ? 'var(--accent)' : UI.hairStrong}`,
+              borderRadius: 6, cursor: 'pointer', textAlign: 'left',
+              WebkitTapHighlightColor: 'transparent',
+            }}>
+              <div style={{ fontFamily: UI.fontUi, fontSize: 13, color: sel ? 'var(--accent)' : UI.ink, fontWeight: 600 }}>{opt.label}</div>
+              <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 2 }}>{opt.sub}</div>
+            </button>
+          );
+        })}
+        <Btn
+          disabled={!mesoSorenessSel}
+          onClick={() => handleSorenessAnswer(mesoSorenessSel, mesoSorenessMusc)}
+          style={{ width: '100%', marginTop: 12 }}
+        >
+          {mesoEditingRef.current.soreness ? 'Save changes' : 'Confirm'}
+        </Btn>
       </Sheet>
 
       {/* Joint discomfort */}
@@ -5110,17 +5322,28 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           { key: 'none', label: 'None', sub: 'All good — joints felt fine' },
           { key: 'noticeable', label: 'Noticeable', sub: 'Some discomfort but manageable' },
           { key: 'sharp', label: 'Sharp pain', sub: 'Clear pain — this exercise gets flagged' },
-        ].map(opt => (
-          <button key={opt.key} onClick={() => handleJointAnswer(opt.key)} style={{
-            width: '100%', marginBottom: 8, padding: '12px 14px',
-            background: UI.bgInset, border: `1px solid ${opt.key === 'sharp' ? 'rgba(var(--danger-rgb),0.4)' : UI.hairStrong}`,
-            borderRadius: 6, cursor: 'pointer', textAlign: 'left',
-            WebkitTapHighlightColor: 'transparent',
-          }}>
-            <div style={{ fontFamily: UI.fontUi, fontSize: 13, color: opt.key === 'sharp' ? UI.danger : UI.ink, fontWeight: 600 }}>{opt.label}</div>
-            <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 2 }}>{opt.sub}</div>
-          </button>
-        ))}
+        ].map(opt => {
+          const sel = mesoJointSel === opt.key;
+          return (
+            <button key={opt.key} onClick={() => setMesoJointSel(opt.key)} style={{
+              width: '100%', marginBottom: 8, padding: '12px 14px',
+              background: sel ? (opt.key === 'sharp' ? 'rgba(var(--danger-rgb),0.12)' : `rgba(var(--accent-rgb),0.12)`) : UI.bgInset,
+              border: `1px solid ${sel ? (opt.key === 'sharp' ? 'rgba(var(--danger-rgb),0.6)' : 'var(--accent)') : (opt.key === 'sharp' ? 'rgba(var(--danger-rgb),0.4)' : UI.hairStrong)}`,
+              borderRadius: 6, cursor: 'pointer', textAlign: 'left',
+              WebkitTapHighlightColor: 'transparent',
+            }}>
+              <div style={{ fontFamily: UI.fontUi, fontSize: 13, color: opt.key === 'sharp' ? UI.danger : (sel ? 'var(--accent)' : UI.ink), fontWeight: 600 }}>{opt.label}</div>
+              <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 2 }}>{opt.sub}</div>
+            </button>
+          );
+        })}
+        <Btn
+          disabled={!mesoJointSel}
+          onClick={() => handleJointAnswer(mesoJointSel)}
+          style={{ width: '100%', marginTop: 12 }}
+        >
+          {mesoEditingRef.current.joint ? 'Save changes' : 'Confirm'}
+        </Btn>
       </Sheet>
 
       {/* Pump + Volume */}
@@ -5168,9 +5391,70 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           onClick={() => handleVolumeAnswer(mesoPumpAnswer, mesoVolumeAnswer)}
           style={{ width: '100%' }}
         >
-          Save feedback
+          {mesoEditingRef.current.volume ? 'Save changes' : 'Save feedback'}
         </Btn>
       </Sheet>
+
+      {/* Session feedback recap — two levels. This top sheet lists one button
+          per muscle ("Chest feedback"); tapping it opens the detail sheet
+          below with that muscle's individual answers (Soreness, each
+          exercise's Joint check, Pump & Volume) to actually revise. Opened
+          from the small square button in the footer nav (see "Footer nav"
+          below). */}
+      <Sheet open={mesoRecapOpen} onClose={() => setMesoRecapOpen(false)} title="Session feedback">
+        <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: 1.5 }}>
+          Tap a muscle group to review and change its feedback — everything stays editable until you finish the session.
+        </div>
+        {mesoFeedbackGroups.map(group => (
+          <button key={group.muscle} onClick={() => { setMesoRecapOpen(false); setMesoRecapDetailMuscle(group.muscle); }} style={{
+            width: '100%', marginBottom: 8, padding: '12px 14px',
+            background: UI.bgInset, border: `1px solid ${UI.hairStrong}`,
+            borderRadius: 6, cursor: 'pointer', textAlign: 'left',
+            display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10,
+            WebkitTapHighlightColor: 'transparent',
+          }}>
+            <span style={{ fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, fontWeight: 600 }}>{group.muscle} feedback</span>
+            <i className="fa-solid fa-chevron-right" style={{ fontSize: 11, color: UI.inkFaint, flexShrink: 0 }} />
+          </button>
+        ))}
+      </Sheet>
+
+      {/* Detail sheet for one muscle group's feedback, opened from the list
+          above. Split into two sections so it's clear which answer applies to
+          what: Joint feedback is per exercise, General feedback (Soreness +
+          Pump & Volume) applies to the whole muscle group. */}
+      {(() => {
+        const detailGroup = mesoFeedbackGroups.find(g => g.muscle === mesoRecapDetailMuscle);
+        const feedbackRow = row => (
+          <button key={row.key} onClick={row.onEdit} style={{
+            width: '100%', marginBottom: 8, padding: '12px 14px',
+            background: UI.bgInset, border: `1px solid ${UI.hairStrong}`,
+            borderRadius: 6, cursor: 'pointer', textAlign: 'left',
+            display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10,
+            WebkitTapHighlightColor: 'transparent',
+          }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{row.title}</div>
+              <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 2 }}>{row.sub}</div>
+            </div>
+            <i className="fa-solid fa-chevron-right" style={{ fontSize: 11, color: UI.inkFaint, flexShrink: 0 }} />
+          </button>
+        );
+        return (
+          <Sheet open={!!mesoRecapDetailMuscle} onClose={() => setMesoRecapDetailMuscle(null)} title={mesoRecapDetailMuscle ? `${mesoRecapDetailMuscle} feedback` : 'Feedback'}>
+            {!!detailGroup?.jointRows.length && (<>
+              <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>JOINT FEEDBACK</div>
+              <div className="knurl" style={{ marginBottom: 10 }} />
+              {detailGroup.jointRows.map(feedbackRow)}
+            </>)}
+            {!!detailGroup?.generalRows.length && (<>
+              <div className="micro" style={{ color: UI.inkFaint, marginTop: detailGroup?.jointRows.length ? 16 : 0, marginBottom: 6 }}>GENERAL FEEDBACK</div>
+              <div className="knurl" style={{ marginBottom: 10 }} />
+              {detailGroup.generalRows.map(feedbackRow)}
+            </>)}
+          </Sheet>
+        );
+      })()}
 
       {/* Meso changes — post-session set/weight adjustment summary */}
       {mesoGainSheetOpen && (

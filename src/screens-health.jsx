@@ -19,7 +19,7 @@ function healthDayDiff(a, b) {
 
 function healthShiftISO(base, days) {
   const d = new Date(base + 'T12:00:00'); d.setDate(d.getDate() + days);
-  return d.toISOString().slice(0, 10);
+  return LB.fmtISO(d);
 }
 
 // [start, end] ISO bounds for a trailing N-day window ending today.
@@ -48,7 +48,7 @@ function healthFmtDate(iso, opts = { weekday: 'short', day: 'numeric', month: 's
 function adherenceColor(a) {
   if (a == null) return UI.inkFaint;
   if (a >= 90) return 'var(--ok)';
-  if (a >= 75) return '#d97706';
+  if (a >= 75) return UI.warn;
   return 'var(--danger)';
 }
 
@@ -63,6 +63,12 @@ function glucoseFromInput(raw, unit) {
   const n = parseFloat(String(raw).replace(',', '.'));
   if (!isFinite(n) || n <= 0) return null;
   return unit === 'mgdl' ? Math.round(n / GLUCOSE_FACTOR * 1000) / 1000 : n;
+}
+// Edit-form prefill: show the stored reading in the display unit but WITHOUT the
+// display rounding, so re-saving an untouched value doesn't clobber the raw mmol.
+function glucoseEditValue(mmol, unit) {
+  if (mmol == null) return '';
+  return String(unit === 'mgdl' ? Math.round(mmol * GLUCOSE_FACTOR) : mmol);
 }
 const glucoseUnitLabel = unit => unit === 'mgdl' ? 'mg/dL' : 'mmol/L';
 const GLUCOSE_CTX_LABELS = { fasted: 'Fasted', fed: 'Fed', other: 'Other' };
@@ -375,8 +381,10 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
 
   const deleteGlucose = async (id) => {
     setConfirmDeleteGlId(null);
+    const orig = (store.glucoseLogs || []).find(l => l.id === id);
     setStore(s => ({ ...s, glucoseLogs: (s.glucoseLogs || []).filter(l => l.id !== id) }));
-    await LB.supabase.from('zane_glucose_logs').delete().eq('id', id).eq('user_id', userId);
+    const { error } = await LB.supabase.from('zane_glucose_logs').delete().eq('id', id).eq('user_id', userId);
+    if (error && orig) setStore(s => ({ ...s, glucoseLogs: [orig, ...(s.glucoseLogs || [])] }));
   };
 
   useEffectH(() => {
@@ -629,7 +637,7 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
                   </div>
                   {g.note && <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>{g.note}</div>}
                 </div>
-                <button onClick={() => { setEditingGlucoseId(g.id); setAddingGlucose(true); setConfirmDeleteGlId(null); setGlForm({ value: String(glucoseDisplay(g.valueMmol, glUnit)), time: g.time, context: g.context, note: g.note || '' }); }} style={{ background: 'none', border: 'none', color: UI.inkGhost, fontSize: 11, cursor: 'pointer', padding: '0 4px', lineHeight: 1 }}>
+                <button onClick={() => { setEditingGlucoseId(g.id); setAddingGlucose(true); setConfirmDeleteGlId(null); setGlForm({ value: glucoseEditValue(g.valueMmol, glUnit), time: g.time, context: g.context, note: g.note || '' }); }} style={{ background: 'none', border: 'none', color: UI.inkGhost, fontSize: 11, cursor: 'pointer', padding: '0 4px', lineHeight: 1 }}>
                   <i className="fa-solid fa-pencil" />
                 </button>
                 <button onClick={() => setConfirmDeleteGlId(isConfirm ? null : g.id)} style={{ background: 'none', border: 'none', color: UI.inkGhost, fontSize: 14, cursor: 'pointer', padding: '0 2px', lineHeight: 1 }}>×</button>
@@ -637,7 +645,7 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
               {isConfirm && (
                 <div style={{ display: 'flex', gap: 0, borderTop: `0.5px solid ${UI.hairStrong}` }}>
                   <button onClick={() => setConfirmDeleteGlId(null)} style={{ flex: 1, padding: '7px', background: 'none', border: 'none', cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 11, color: UI.inkSoft }}>Cancel</button>
-                  <button onClick={() => deleteGlucose(g.id)} style={{ flex: 1, padding: '7px', background: 'none', border: 'none', borderLeft: `0.5px solid ${UI.hairStrong}`, cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700, color: '#e05a5a' }}>Delete</button>
+                  <button onClick={() => deleteGlucose(g.id)} style={{ flex: 1, padding: '7px', background: 'none', border: 'none', borderLeft: `0.5px solid ${UI.hairStrong}`, cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700, color: UI.danger }}>Delete</button>
                 </div>
               )}
             </div>
@@ -1149,7 +1157,7 @@ function GlucoseCard({ glucoseLogs, unit, tf, setTf, dragHandle }) {
           <GlucoseScatterChart readings={inWindow} from={start} to={end} unit={unit} />
           {/* Reference legend */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 4 }}>
-            <div style={{ height: 8, width: 28, background: 'rgba(var(--accent-rgb),0.15)', borderRadius: 2, flexShrink: 0 }} />
+            <div style={{ height: 8, width: 28, background: 'rgba(var(--accent-rgb),0.15)', borderRadius: 4, flexShrink: 0 }} />
             <span style={{ fontSize: 9, fontFamily: UI.fontUi, color: UI.inkFaint }}>
               Normal fasting {refLow.toFixed(dec)}–{refHigh.toFixed(dec)} {unitLabel}
             </span>
@@ -1357,14 +1365,19 @@ function HealthScreen({ store, setStore, go, userId }) {
     if (!toHeal.length) return;
     const healDates = new Set(toHeal.map(l => l.date));
     const restSnap = { ...restTarget, dayType: 'rest' };
-    setStore(s => ({
-      ...s,
-      dailyLogs: s.dailyLogs.map(l => {
-        if (!healDates.has(l.date)) return l;
-        const adherence = LB.macroAdherence({ protein: l.protein, carbs: l.carbs, fat: l.fat }, restTarget);
-        return adherence != null ? { ...l, adherence, targetsSnap: restSnap, updatedAt: new Date().toISOString() } : l;
-      }),
-    }));
+    // Only rewrite logs whose adherence actually resolves — a null result would
+    // leave the log unchanged but still spawn a fresh array, re-triggering this
+    // effect forever (dailyLogs is a dep). Skip setStore when nothing changed.
+    let changed = false;
+    const nextLogs = (store.dailyLogs || []).map(l => {
+      if (!healDates.has(l.date)) return l;
+      const adherence = LB.macroAdherence({ protein: l.protein, carbs: l.carbs, fat: l.fat }, restTarget);
+      if (adherence == null) return l;
+      changed = true;
+      return { ...l, adherence, targetsSnap: restSnap, updatedAt: new Date().toISOString() };
+    });
+    if (!changed) return;
+    setStore(s => ({ ...s, dailyLogs: nextLogs }));
   }, [store.sessions, store.dailyLogs, effectiveTargets]);
 
   // Windowed series builder for the charts. The x-range is tightened to the
@@ -1660,7 +1673,7 @@ function HealthScreen({ store, setStore, go, userId }) {
         </div>
       </div>
 
-      <DailyLogSheet open={logOpen} onClose={() => setLogOpen(false)} store={store} setStore={setStore} date={selectedDate} targets={targets} activeCoachingSchema={activeCoachingSchema} onSetStatus={handleSetStatus} userId={userId} glucoseLogs={store.glucoseLogs || []} glucoseUnit={store.settings?.glucoseUnit ?? 'mmol'} />
+      <DailyLogSheet open={logOpen} onClose={() => setLogOpen(false)} store={store} setStore={setStore} date={selectedDate} targets={effectiveTargets} activeCoachingSchema={activeCoachingSchema} onSetStatus={handleSetStatus} userId={userId} glucoseLogs={store.glucoseLogs || []} glucoseUnit={store.settings?.glucoseUnit ?? 'mmol'} />
       <MacroTargetSheet open={targetOpen} onClose={() => setTargetOpen(false)} store={store} setStore={setStore} coachingMacros={coachingMacros} />
       <ExportSheet open={exportOpen} onClose={() => setExportOpen(false)} store={store} />
     </Screen>
@@ -1739,7 +1752,7 @@ function HealthClientLogs({ clientStore }) {
     for (const l of logs) {
       const d = new Date(l.date + 'T12:00:00');
       const dow = d.getDay(); const mon = new Date(d); mon.setDate(d.getDate() - ((dow === 0 ? 7 : dow) - 1));
-      const ws = mon.toISOString().slice(0, 10);
+      const ws = LB.fmtISO(mon);
       (byWeek[ws] = byWeek[ws] || []).push(l);
     }
     const avg = (arr, k) => { const vs = arr.map(x => x[k]).filter(v => v != null); return vs.length ? Math.round(vs.reduce((s, v) => s + v, 0) / vs.length * 10) / 10 : null; };

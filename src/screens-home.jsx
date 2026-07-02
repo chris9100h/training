@@ -1064,7 +1064,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     if (!weekdayMode && !isFlex && sch && !store.cycleStartDate) {
       const today = new Date(); today.setHours(12, 0, 0, 0);
       const start = new Date(today.getTime() - (store.cycleIndex || 0) * 86400000);
-      setStore(s => s.cycleStartDate ? s : { ...s, cycleStartDate: start.toISOString().slice(0, 10) });
+      setStore(s => s.cycleStartDate ? s : { ...s, cycleStartDate: LB.fmtISO(start) });
     }
   }, []); // eslint-disable-line
 
@@ -1082,13 +1082,13 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
   // differs from dayIdx (plan position). Without offset they're always equal.
   const todayStripIdx = (() => {
     if (!sch?.versions?.length || weekdayMode || isFlex) return dayIdx;
-    const todayISO = new Date().toISOString().slice(0, 10);
+    const todayISO = LB.todayISO();
     const cn = LB.getCycleNumForDate(sch, todayISO);
     if (!cn || cn <= 0) return dayIdx;
     const cs = LB.getCycleStartForNum(sch, cn);
     if (!cs) return dayIdx;
     cs.setHours(12, 0, 0, 0);
-    const csStr = cs.toISOString().slice(0, 10);
+    const csStr = LB.fmtISO(cs);
     const activeV = sch.versions.find(v => v.validFrom <= csStr) || sch.versions[sch.versions.length - 1];
     const vOffset = activeV?.cycleOffset || 0;
     const daysFromCycleStart = Math.round((new Date(todayISO + 'T12:00:00') - cs) / 86400000);
@@ -1155,7 +1155,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       return Math.round((startMondayMs - currentMondayMs) / (7 * 86400000));
     }
     if (sch?.versions?.length && store.cycleStartDate) {
-      return -(LB.getCycleNumForDate(sch, new Date().toISOString().slice(0, 10)));
+      return -(LB.getCycleNumForDate(sch, LB.todayISO()));
     }
     return -(currentCycleNum + 1);
   })();
@@ -1181,8 +1181,8 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     if (weekdayMode) {
       return Array.from({ length: 7 }).map((_, i) => {
         const diff = i - todayWd + weekOffset * 7;
-        const date = new Date(); date.setDate(date.getDate() + diff);
-        const dateStr = date.toISOString().slice(0, 10);
+        const date = new Date(); date.setHours(12, 0, 0, 0); date.setDate(date.getDate() + diff);
+        const dateStr = LB.fmtISO(date);
         const vDays = LB.getPlanDaysForDate(sch, dateStr);
         const trainingDay = vDays.find(d => d.weekday === i) || null;
         return {
@@ -1200,7 +1200,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       monday.setDate(monday.getDate() - todayWd + weekOffset * 7);
       return Array.from({ length: 7 }).map((_, i) => {
         const date = new Date(monday); date.setDate(monday.getDate() + i);
-        const dateStr = date.toISOString().slice(0, 10);
+        const dateStr = LB.fmtISO(date);
         const daysFromStart = Math.round((date - start) / 86400000);
         const vDays = LB.getPlanDaysForDate(sch, dateStr);
         const cyclePosForDate = LB.getCyclePosForDate(sch, dateStr);
@@ -1219,7 +1219,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     }
     // Versioned classic cycle view: each weekOffset step = one version-aware cycle.
     if (sch.versions?.length && store.cycleStartDate) {
-      const todayISO = new Date().toISOString().slice(0, 10);
+      const todayISO = LB.todayISO();
       const currentCN = LB.getCycleNumForDate(sch, todayISO);
       const targetCN = currentCN + weekOffset;
       // targetCN <= 0 → pre-plan buffer: show oldest version's days shifted back
@@ -1240,7 +1240,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       const cycleStart = getCycleStartForNum(sch, targetCN);
       if (!cycleStart) return [];
       cycleStart.setHours(12, 0, 0, 0);
-      const csStr = cycleStart.toISOString().slice(0, 10);
+      const csStr = LB.fmtISO(cycleStart);
       const activeV = sch.versions.find(v => v.validFrom <= csStr) || sch.versions[sch.versions.length - 1];
       const vOffset = activeV?.cycleOffset || 0;
       const logicalStart = new Date(cycleStart.getTime() - vOffset * 86400000);
@@ -1300,7 +1300,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
   // day count must come from the version active on the date being viewed.
   const viewedDayCount = useMemo(() => {
     if (!sch?.versions?.length) return dayCount;
-    const dStr = sessionDate.toISOString().slice(0, 10);
+    const dStr = LB.fmtISO(sessionDate);
     return LB.getPlanDaysForDate(sch, dStr)?.length || dayCount;
   }, [sch, sessionDate, dayCount]);
   const isFutureSlot = sessionDate > (() => { const d = new Date(); d.setHours(12,0,0,0); return d; })();
@@ -1327,14 +1327,14 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       const monday = new Date(); monday.setHours(12, 0, 0, 0);
       monday.setDate(monday.getDate() - todayWd + weekOffset * 7);
       if (sch?.versions?.length) {
-        return `CYCLE ${LB.getCycleNumForDate(sch, monday.toISOString().slice(0, 10))}`;
+        return `CYCLE ${LB.getCycleNumForDate(sch, LB.fmtISO(monday))}`;
       }
       const start = LB.parseDate(store.cycleStartDate);
       const dfs = Math.round((monday - start) / 86400000);
       return `CYCLE ${Math.floor(dfs / dayCount) + 1}`;
     }
     if (sch?.versions?.length && store.cycleStartDate) {
-      const currentCN = LB.getCycleNumForDate(sch, new Date().toISOString().slice(0, 10));
+      const currentCN = LB.getCycleNumForDate(sch, LB.todayISO());
       return `CYCLE ${Math.max(0, currentCN + weekOffset)}`;
     }
     const cycleNum = currentCycleNum + weekOffset + 1;
@@ -1389,15 +1389,20 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     // most recent session logged for that day so "going back" shows the workout.
     if (isFlex) {
       if (selectedSlot >= dayIdx || !activeDay?.id) return null;
+      // Bound to the current rotation pass: match the session logged at this
+      // slot's absolute rotation position (cyclePos), not any months-old
+      // session for the same day from a previous pass.
+      const rotStart = (store.cycleIndex || 0) - dayIdx;
+      const targetPos = rotStart + selectedSlot;
       return [...store.sessions]
-        .filter(s => s.ended && s.dayId === activeDay.id)
+        .filter(s => s.ended && s.dayId === activeDay.id && s.cyclePos === targetPos)
         .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''))[0] ?? null;
     }
-    const dateKey = sessionDate.toISOString().slice(0, 10);
+    const dateKey = LB.fmtISO(sessionDate);
     return [...store.sessions]
       .filter(s => s.ended && s.date.slice(0, 10) === dateKey)
       .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''))[0] ?? null;
-  }, [isFlex, selectedSlot, dayIdx, activeDay?.id, store.sessions, sessionDate]);
+  }, [isFlex, selectedSlot, dayIdx, activeDay?.id, store.sessions, store.cycleIndex, sessionDate]);
 
   const { improvementCount, regressionCount } = useMemo(() => {
     if (!doneSession) return { improvementCount: 0, regressionCount: 0 };
@@ -1417,9 +1422,10 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
         .find(x => x.entries.some(en => en.exId === e.exId && en.sets.some(st => st.kg != null || st.reps != null)));
       const prevEntry = prev?.entries.find(en => en.exId === e.exId);
       if (!prevEntry) return;
-      // Compare working sets by position, warmups excluded on both sides
+      // Compare working sets by position, warmups AND skipped sets excluded on
+      // both sides so set N always lines up against set N.
       const currWorking = e.sets.filter(st => !st.warmup && !st.skipped);
-      const prevWorking = prevEntry.sets.filter(st => !st.warmup);
+      const prevWorking = prevEntry.sets.filter(st => !st.warmup && !st.skipped);
       const improved = currWorking.some((st, j) => cmp(st, prevWorking[j], true));
       if (improved) { improvements++; return; }
       const regressed = currWorking.some((st, j) => cmp(st, prevWorking[j], false));
@@ -1461,7 +1467,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     const cycleNums = Array.from({ length: 7 }).map((_, i) => {
       const date = new Date(monday); date.setDate(monday.getDate() + i);
       if (sch?.versions?.length) {
-        return LB.getCycleNumForDate(sch, date.toISOString().slice(0, 10));
+        return LB.getCycleNumForDate(sch, LB.fmtISO(date));
       }
       const dfs = Math.round((date - start) / 86400000);
       return Math.floor(dfs / dayCount) + 1;
@@ -1516,7 +1522,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
 
   const selectedDateSkip = useMemo(() => {
     if (isFlex || isViewingToday || isFutureSlot) return null;
-    return skipsMap.get(sessionDate.toISOString().slice(0, 10)) ?? null;
+    return skipsMap.get(LB.fmtISO(sessionDate)) ?? null;
   }, [isFlex, isViewingToday, isFutureSlot, skipsMap, sessionDate]);
 
   const selectedDayStatusMode = useMemo(() => {
@@ -1831,7 +1837,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
   }, [store?.statusMode, store?.inProgress, store?.deloadPromptDismissedAt, store?.sessions, sch]);
 
   const selectedDayCardioLogs = useMemo(() => {
-    const dateKey = sessionDate.toISOString().slice(0, 10);
+    const dateKey = LB.fmtISO(sessionDate);
     return (store.cardioLogs || []).filter(l => l.date === dateKey);
   }, [store.cardioLogs, sessionDate]);
 
@@ -1840,7 +1846,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     const activePlanId = store.activeCardioPlanId;
     const plans = (store.cardioPlans || []).filter(p => !p.archived && p.id === activePlanId);
     if (!plans.length) return null;
-    const dateISO = sessionDate.toISOString().slice(0, 10);
+    const dateISO = LB.fmtISO(sessionDate);
     const dow = sessionDate.getDay();
     const wkKeys = ['mon','tue','wed','thu','fri','sat','sun'];
     const wk = wkKeys[dow === 0 ? 6 : dow - 1];
@@ -1865,7 +1871,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     const sessionDates = new Set(store.sessions.filter(s => s.ended).map(s => s.date.slice(0, 10)));
     for (let daysAgo = 1; daysAgo <= 30; daysAgo++) {
       const d = new Date(todayD); d.setDate(todayD.getDate() - daysAgo);
-      const dateKey = d.toISOString().slice(0, 10);
+      const dateKey = LB.fmtISO(d);
       if (sessionDates.has(dateKey)) continue;
       const sk = skipsMap.get(dateKey);
       if (sk) continue; // already actioned — edit via calendar card
@@ -1905,7 +1911,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     const missed = [];
     for (let daysAgo = 1; daysAgo <= 14; daysAgo++) {
       const d = new Date(todayD); d.setDate(todayD.getDate() - daysAgo);
-      const dateKey = d.toISOString().slice(0, 10);
+      const dateKey = LB.fmtISO(d);
       if (sessionDates.has(dateKey)) continue;
       const skip = skipsMap.get(dateKey);
       if (skip && skip.skipReason !== '—') continue;
@@ -2015,6 +2021,10 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
 
   const startSession = async () => {
     if (!activeDay || isActiveRest) return;
+    // buildSessionEntries awaits a seed fetch — guard against a double tap
+    // creating two sessions inside that window (same as the backlog/bonus starts).
+    if (loggingRef.current) return;
+    loggingRef.current = true;
     const entries = await buildSessionEntries(activeDay.items, activeDay.id);
     const cyclePos = weekdayMode ? null :
       cycleWeekView
@@ -2023,7 +2033,8 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     const firstEx = LB.findExercise(store, activeDay.items[0]?.exId);
     // Flex sessions are always logged "now" — the selected slot is just a
     // rotation position, never a calendar date (catch-ups date to today too).
-    const sessionDateISO = (isFlex ? new Date() : sessionDate).toISOString();
+    const sessionDateISO = isFlex ? LB.todayISO() : LB.fmtISO(sessionDate);
+    loggingRef.current = false;
     // No warmup ramp for bodyweight (no meaningful load to ramp) or cardio
     // (not a weighted movement at all) — offering "3 sets · Treadmill" with
     // every preview weight blank made no sense.
@@ -2188,7 +2199,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     setQuickActionsOpen(false);
     const session = {
       id: LB.uid(), scheduleId: null, dayId: null, dayName: 'Freestyle',
-      date: new Date().toISOString(), startedAt: new Date().toISOString(),
+      date: LB.todayISO(), startedAt: new Date().toISOString(),
       ended: null, entries: [], currentExIdx: 0, cyclePos: null, isFreestyle: true, isBonus: true,
     };
     setStore(s => ({ ...s, sessions: [...s.sessions, session], inProgress: session.id }));
@@ -2217,7 +2228,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     });
     const session = {
       id: LB.uid(), scheduleId: null, dayId: null, dayName: 'Freestyle',
-      date: new Date().toISOString(), startedAt: new Date().toISOString(),
+      date: LB.todayISO(), startedAt: new Date().toISOString(),
       ended: null, entries, currentExIdx: 0, cyclePos: null, isFreestyle: true, isBonus: true,
     };
     setStore(s => ({ ...s, sessions: [...s.sessions, session], inProgress: session.id }));
@@ -2245,7 +2256,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     if (firstEx?.equipment === 'bodyweight' || firstEx?.movement_type === 'cardio') {
       const session = {
         id: LB.uid(), scheduleId: sch?.id, dayId: day.id, dayName: day.name,
-        date: new Date().toISOString(), startedAt: new Date().toISOString(),
+        date: LB.todayISO(), startedAt: new Date().toISOString(),
         ended: null, entries, currentExIdx: 0, cyclePos: null, ...extra,
       };
       setStore(s => ({ ...s, sessions: [...s.sessions, session], inProgress: session.id }));
@@ -2254,7 +2265,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     }
     setWarmupPromptData({
       entries, cyclePos: null, firstWorkingKg: entries[0]?.sets[0]?.kg ?? null, firstName: entries[0]?.name || '?',
-      scheduleId: sch?.id, dayId: day.id, dayName: day.name, dateISO: new Date().toISOString(), extra,
+      scheduleId: sch?.id, dayId: day.id, dayName: day.name, dateISO: LB.todayISO(), extra,
     });
   };
 
@@ -2270,7 +2281,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     const firstEx = LB.findExercise(store, dayData?.items?.[0]?.exId);
     loggingRef.current = false;
     if (firstEx?.equipment === 'bodyweight' || firstEx?.movement_type === 'cardio') {
-      const session = { id: LB.uid(), scheduleId: sch?.id, dayId, dayName, date: date.toISOString(), startedAt: new Date().toISOString(), ended: null, entries, currentExIdx: 0, cyclePos: null };
+      const session = { id: LB.uid(), scheduleId: sch?.id, dayId, dayName, date: LB.fmtISO(date), startedAt: new Date().toISOString(), ended: null, entries, currentExIdx: 0, cyclePos: null };
       setStore(s => ({
         ...s,
         sessions: [...s.sessions, session],
@@ -2282,7 +2293,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     }
     setWarmupPromptData({
       entries, cyclePos: null, firstWorkingKg: entries[0]?.sets[0]?.kg ?? null, firstName: entries[0]?.name || '?',
-      scheduleId: sch?.id, dayId, dayName, dateISO: date.toISOString(), autoSkipId,
+      scheduleId: sch?.id, dayId, dayName, dateISO: LB.fmtISO(date), autoSkipId,
     });
   };
 
@@ -2383,7 +2394,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
             {(() => {
               const isProblem = storageFull || syncStatus === 'error';
               const isSaving  = syncStatus === 'pending' && !storageFull;
-              const color = isProblem ? UI.danger : isSaving ? '#e8a838' : UI.ok;
+              const color = isProblem ? UI.danger : isSaving ? UI.warn : UI.ok;
               const pulse = isProblem ? 'pulseDot 1.4s ease-in-out infinite' : 'none';
               return (
                 <i
@@ -2555,8 +2566,12 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                 : d.date.toLocaleDateString(undefined, { day: 'numeric', month: 'numeric' }).replace(/\.$/, '');
             let isCompleted = false;
             if (!r && isFlex) {
-              // Earlier slots in the current rotation pass that have a session.
-              isCompleted = (d.slotIdx ?? i) < dayIdx && store.sessions.some(s => s.ended && s.dayId === d.id);
+              // Earlier slots in the current rotation pass that have a session,
+              // bounded to this pass by absolute rotation position (cyclePos) so a
+              // previous rotation's session can't mark a skipped slot done.
+              const slot = d.slotIdx ?? i;
+              const rotStart = (store.cycleIndex || 0) - dayIdx;
+              isCompleted = slot < dayIdx && (completedCyclePos?.has(rotStart + slot) ?? false);
             } else if (!r && !isFlex) {
               if (weekdayMode) {
                 const slotKey = `${d.date.getFullYear()}-${d.date.getMonth()}-${d.date.getDate()}`;
@@ -2571,7 +2586,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                 isCompleted = completedCyclePos?.has(dfs) ?? false;
               }
             }
-            const dateKey = d.date.toISOString().slice(0, 10);
+            const dateKey = LB.fmtISO(d.date);
             // Flex slots carry no real calendar date, so none of the date-derived
             // markers (missed / skipped / status / completed) apply.
             const isPast = !isFlex && !d.isToday && d.date < new Date();
@@ -2628,7 +2643,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
               const selDay = week.find(d => d.weekday === selectedWd);
               const selCycleNum = selDay
                 ? (sch?.versions?.length
-                    ? LB.getCycleNumForDate(sch, selDay.date.toISOString().slice(0, 10))
+                    ? LB.getCycleNumForDate(sch, LB.fmtISO(selDay.date))
                     : Math.floor(selDay.daysFromStart / dayCount) + 1)
                 : null;
               const isActive = seg.cycleNum === selCycleNum;
@@ -2776,7 +2791,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                           {selectedDateSkip.skipReason === '—' ? 'Not logged in time · delete to log' : selectedDateSkip.skipReason}
                         </div>
                       </div>
-                      <button onClick={() => setSkipReasonModal({ mode: 'edit', skipId: selectedDateSkip.id, currentReason: selectedDateSkip.skipReason, data: { dateKey: sessionDate.toISOString().slice(0, 10), dayId: activeDay?.id, dayName: activeDay?.name } })} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px 6px', color: UI.inkFaint, display: 'flex', alignItems: 'center' }}>
+                      <button onClick={() => setSkipReasonModal({ mode: 'edit', skipId: selectedDateSkip.id, currentReason: selectedDateSkip.skipReason, data: { dateKey: LB.fmtISO(sessionDate), dayId: activeDay?.id, dayName: activeDay?.name } })} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px 6px', color: UI.inkFaint, display: 'flex', alignItems: 'center' }}>
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
                       </button>
                       <button onClick={() => { setStore(s => ({ ...s, skips: (s.skips || []).filter(x => x.id !== selectedDateSkip.id) })); }} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px 2px', color: UI.danger, fontSize: 18, lineHeight: 1, fontFamily: UI.fontUi }}>×</button>
@@ -2804,7 +2819,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                       </span>
                     </button>
                     {isViewingToday && (
-                      <button onClick={isFlex ? flexSkip : () => setSkipReasonModal({ mode: 'skip', data: { dateKey: sessionDate.toISOString().slice(0, 10), dayId: activeDay?.id, dayName: activeDay?.name } })} style={{
+                      <button onClick={isFlex ? flexSkip : () => setSkipReasonModal({ mode: 'skip', data: { dateKey: LB.fmtISO(sessionDate), dayId: activeDay?.id, dayName: activeDay?.name } })} style={{
                         flexShrink: 0, width: 80, minHeight: 48, borderRadius: 6, cursor: 'pointer',
                         background: 'transparent',
                         border: `1px solid ${UI.hairStrong}`,
@@ -2861,7 +2876,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
         <window.Screens.TodayCardioWidget
           store={store}
           setStore={setStore}
-          todayISO={sessionDate.toISOString().slice(0, 10)}
+          todayISO={LB.fmtISO(sessionDate)}
           userId={userId}
           onPR={setCardioPR}
         />
