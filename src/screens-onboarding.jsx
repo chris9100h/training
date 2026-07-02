@@ -698,7 +698,7 @@ function tourToggleRow(label, sub, on) {
         <div style={{ fontSize: 12.5, fontFamily: UI.fontUi, color: UI.ink, fontWeight: 600 }}>{label}</div>
         <div style={{ fontSize: 10, fontFamily: UI.fontUi, color: UI.inkFaint, marginTop: 2 }}>{sub}</div>
       </div>
-      <div style={{ width: 40, height: 23, borderRadius: 13, background: on ? 'var(--accent)' : UI.bgInset, border: `0.5px solid ${on ? 'var(--accent)' : UI.hairStrong}`, position: 'relative', flexShrink: 0 }}>
+      <div style={{ width: 40, height: 23, borderRadius: 13, background: on ? 'var(--accent)' : UI.bgInset, border: `0.5px solid ${on ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong}`, position: 'relative', flexShrink: 0 }}>
         <div style={{ position: 'absolute', top: 2.5, [on ? 'right' : 'left']: 2.5, width: 16, height: 16, borderRadius: '50%', background: on ? '#0a0805' : UI.inkFaint }} />
       </div>
     </div>
@@ -1584,7 +1584,7 @@ function TourVisualCustomIntro() {
 }
 
 function TourVisualCustomAppearance() {
-  const colors = ['#c9a961', '#c47828', '#c96060', '#9b6dd4', '#4aab97'];
+  const colors = Object.values(window.ACCENT_PALETTE).map(c => c.hex).slice(0, 5);
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
       <div style={{ display: 'flex', gap: 6 }}>
@@ -1620,7 +1620,7 @@ function TourVisualCustomEquipment() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
       <div style={{ background: UI.bgCard, borderRadius: 6, border: `0.5px solid ${UI.hairStrong}`, padding: '9px 12px', display: 'flex', alignItems: 'center' }}>
         <span style={{ flex: 1, fontSize: 11, fontFamily: UI.fontUi, color: UI.inkSoft }}>Barbell — increment</span>
-        <span className="num" style={{ fontSize: 12, color: UI.ink }}>2.5 kg</span>
+        <span className="num" style={{ fontSize: 12, color: UI.ink }}>{`2.5 ${UI.unit()}`}</span>
       </div>
       <div style={{ display: 'flex', gap: 10, justifyContent: 'center', paddingTop: 2 }}>
         {[{ c: '#c0392b', on: true }, { c: '#2471a3', on: true }, { c: '#27ae60', on: false }].map((p, i) => (
@@ -2270,13 +2270,14 @@ function TourCrashCard({ onClose }) {
 function TourCompleteScreen({ title, onDone }) {
   const doneRef = useRefOB(onDone);
   doneRef.current = onDone;
+  const close = () => { try { doneRef.current && doneRef.current(); } catch (_) {} };
   useEffectOB(() => {
-    const close = () => { try { doneRef.current && doneRef.current(); } catch (_) {} };
     const t = setTimeout(close, 3000);
     return () => clearTimeout(t);
   }, []);
   return (
     <div
+      onPointerDown={close}
       style={{
         position: 'fixed', top: 'env(safe-area-inset-top, 0px)', left: 0, right: 0, bottom: 0, zIndex: 10000,
         background: 'linear-gradient(165deg, var(--accent-light) 0%, var(--accent) 48%, var(--accent-deep) 100%)',

@@ -93,7 +93,12 @@ function uid() { return Math.random().toString(36).slice(2, 9) + Date.now().toSt
 // returns the UTC date, which is yesterday between midnight and UTC-offset
 // o'clock (and tomorrow in negative-offset timezones from the evening on).
 function todayISO() {
-  const d = new Date();
+  return fmtISO(new Date());
+}
+// Local calendar date (YYYY-MM-DD) of an arbitrary Date. Shared helper so
+// screens stop reaching for `new Date(x).toISOString().slice(0,10)`, which
+// returns the UTC date and is off by one day for any non-UTC timezone.
+function fmtISO(d) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 // Returns the coming Monday as YYYY-MM-DD (returns today if today is Monday).
@@ -253,8 +258,8 @@ async function resetPassword(email, redirectTo) {
   if (error) throw error;
 }
 
-async function deleteAllData(userId) {
-  await Promise.all([
+async function deleteAllData(userId, { keepPush = false } = {}) {
+  const ops = [
     unwrap(_supabase.from('zane_sessions').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_exercises').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_schedules').delete().eq('user_id', userId)),
@@ -262,7 +267,21 @@ async function deleteAllData(userId) {
     unwrap(_supabase.from('zane_skips').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_cardio_logs').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_daily_logs').delete().eq('user_id', userId)),
-  ]);
+    unwrap(_supabase.from('zane_workout_templates').delete().eq('user_id', userId)),
+    unwrap(_supabase.from('zane_glucose_logs').delete().eq('user_id', userId)),
+    unwrap(_supabase.from('zane_meso_states').delete().eq('user_id', userId)),
+    unwrap(_supabase.from('zane_status_periods').delete().eq('user_id', userId)),
+    unwrap(_supabase.from('zane_cardio_plans').delete().eq('user_id', userId)),
+    unwrap(_supabase.from('zane_schedule_backups').delete().eq('user_id', userId)),
+  ];
+  // Push subscriptions are device-scoped and are never re-uploaded by
+  // importFromBackup, so a restore (which reuses this fn) must NOT drop them —
+  // that would silently unsubscribe the device from Web Push. Only the
+  // explicit "delete all data" flow wipes them.
+  if (!keepPush) {
+    ops.push(unwrap(_supabase.from('zane_push_subscriptions').delete().eq('user_id', userId)));
+  }
+  await Promise.all(ops);
 }
 
 // Validate a parsed backup object BEFORE importFromBackup deletes anything.
@@ -310,6 +329,30 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
     idRemap[e.id] = newId;
     return { id: newId, name: e.name, tags: e.tags ?? [], note: e.note ?? '', category: e.category ?? null, unilateral: e.unilateral ?? false, equipment: e.equipment ?? null, progression_reps: e.progression_reps ?? null, movement_type: e.movement_type ?? null, no_weight_reps: !!e.no_weight_reps, youtube_url: e.youtube_url ?? null, user_id: userId };
   });
+  // Exercises got fresh ids above — everything that references an exId must be
+  // remapped or it dangles after restore. remapEx: single id; remapExKeyed:
+  // { exId: v } maps; remapExDayKeyed: { exId_dayId: v } maps (uid() has no '_',
+  // so the first underscore splits exId from the dayId suffix, kept verbatim).
+  const remapEx = id => idRemap[id] ?? id;
+  const remapExKeyed = obj => {
+    const out = {};
+    for (const k in (obj || {})) out[remapEx(k)] = obj[k];
+    return out;
+  };
+  const remapExDayKeyed = obj => {
+    const out = {};
+    for (const k in (obj || {})) {
+      const us = k.indexOf('_');
+      out[us < 0 ? remapEx(k) : remapEx(k.slice(0, us)) + k.slice(us)] = obj[k];
+    }
+    return out;
+  };
+  const remapDays = days => (Array.isArray(days) ? days : []).map(d => ({
+    ...d,
+    items: Array.isArray(d.items)
+      ? d.items.map(it => (it.exId != null ? { ...it, exId: remapEx(it.exId) } : it))
+      : d.items,
+  }));
   const sessionRows = importSessions.map(s => sessionToRow(s, userId));
   const settingsRow = {
     user_id: userId,
@@ -368,13 +411,17 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
     + (backup.skips?.length ? 1 : 0)
     + (backup.cardioLogs?.length ? 1 : 0)
     + (backup.dailyLogs?.length ? 1 : 0)
-    + (backup.workoutTemplates?.length ? 1 : 0);
+    + (backup.workoutTemplates?.length ? 1 : 0)
+    + (backup.glucoseLogs?.length ? 1 : 0)
+    + (backup.cardioPlans?.length ? 1 : 0)
+    + (backup.statusPeriods?.length ? 1 : 0)
+    + (backup.mesoStates?.length ? 1 : 0);
   let stepsDone = 0;
   const prog = (phase) => onProgress?.(Math.min(99, Math.round(stepsDone / Math.max(1, totalSteps) * 100)), phase);
   const tag = (label, fn) => fn().catch(e => { throw new Error(`[${label}] ${e?.message || e}`); });
 
   prog('Clearing old data…');
-  try { await deleteAllData(userId); } catch(e) { throw new Error(`[delete] ${e?.message || e}`); }
+  try { await deleteAllData(userId, { keepPush: true }); } catch(e) { throw new Error(`[delete] ${e?.message || e}`); }
   stepsDone++;
 
   if (backup.user?.name) {
@@ -391,7 +438,12 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
 
   if (backup.schedules?.length) {
     prog('Uploading plans…');
-    await tag('schedules', () => unwrap(_supabase.from('zane_schedules').upsert(backup.schedules.map(({ mode, ...s }) => ({ ...s, user_id: userId })))));
+    await tag('schedules', () => unwrap(_supabase.from('zane_schedules').upsert(backup.schedules.map(({ mode, ...s }) => ({
+      ...s,
+      days: remapDays(s.days),
+      versions: Array.isArray(s.versions) ? s.versions.map(v => ({ ...v, days: remapDays(v.days) })) : s.versions,
+      user_id: userId,
+    })))));
     stepsDone++;
   }
 
@@ -468,7 +520,61 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
     prog('Uploading workout templates…');
     await unwrap(_supabase.from('zane_workout_templates').upsert(
       backup.workoutTemplates.map(t => ({
-        id: t.id, user_id: userId, name: t.name, exercises: t.exercises || [],
+        id: t.id, user_id: userId, name: t.name,
+        exercises: (t.exercises || []).map(e => (e.exId != null ? { ...e, exId: remapEx(e.exId) } : e)),
+      }))
+    ));
+    stepsDone++;
+  }
+  if (backup.glucoseLogs?.length) {
+    prog('Uploading glucose logs…');
+    await unwrap(_supabase.from('zane_glucose_logs').upsert(
+      backup.glucoseLogs.map(l => ({
+        id: l.id, user_id: userId, date: l.date, time: l.time,
+        value_mmol: l.valueMmol ?? null, context: l.context ?? 'other',
+        note: l.note ?? null,
+      }))
+    ));
+    stepsDone++;
+  }
+  if (backup.cardioPlans?.length) {
+    prog('Uploading cardio plans…');
+    await unwrap(_supabase.from('zane_cardio_plans').upsert(
+      backup.cardioPlans.map(p => ({
+        id: p.id, user_id: userId, name: p.name, activity_type: p.activityType,
+        archived: p.archived ?? false, mode: p.mode ?? null,
+        days: p.days ?? {}, manual_targets: p.manualTargets ?? null,
+        goal: p.goal ?? null, goal_due_date: p.goalDueDate ?? null,
+        start_fitness: p.startFitness ?? null, generated_weeks: p.generatedWeeks ?? null,
+        plan_start_date: p.planStartDate ?? null,
+      }))
+    ));
+    stepsDone++;
+  }
+  if (backup.statusPeriods?.length) {
+    prog('Uploading status periods…');
+    await unwrap(_supabase.from('zane_status_periods').upsert(
+      backup.statusPeriods.map(p => ({
+        id: p.id, user_id: userId, mode: p.mode,
+        started_at: p.startedAt ?? null, ended_at: p.endedAt ?? null,
+      }))
+    ));
+    stepsDone++;
+  }
+  if (backup.mesoStates?.length) {
+    prog('Uploading mesocycle states…');
+    // id is deterministic (userId + '_' + scheduleId) — regenerate for this user.
+    // schedule_id is preserved (schedules keep their ids), but the exId-keyed maps
+    // (deltas/weightBoosts: exId_dayId; jointFlags/pumpLowCounts: exId) must be
+    // remapped onto the fresh exercise ids or they dangle.
+    await unwrap(_supabase.from('zane_meso_states').upsert(
+      backup.mesoStates.map(m => ({
+        id: userId + '_' + m.scheduleId, user_id: userId, schedule_id: m.scheduleId,
+        weeks: m.weeks, start_date: m.startDate ?? null,
+        start_cycle_index: m.startCycleIndex ?? 0,
+        deltas: remapExDayKeyed(m.deltas), weight_boosts: remapExDayKeyed(m.weightBoosts),
+        joint_flags: remapExKeyed(m.jointFlags), pump_low_counts: remapExKeyed(m.pumpLowCounts),
+        completions: m.completions ?? 0, pending_meso2: m.pendingMeso2 ?? false,
       }))
     ));
     stepsDone++;
@@ -503,6 +609,14 @@ async function exportBackup(store, userId) {
 
   const [entriesRes, notesRes, threadsRes, macrosRes, checkinsRes] = await Promise.all(fetches);
 
+  // Import is delete-then-restore — a silent partial fetch would produce an
+  // incomplete backup that later wipes the missing data. Fail loudly instead.
+  if (entriesRes.error) throw entriesRes.error;
+  if (notesRes?.error) throw notesRes.error;
+  if (threadsRes?.error) throw threadsRes.error;
+  if (macrosRes?.error) throw macrosRes.error;
+  if (checkinsRes?.error) throw checkinsRes.error;
+
   const bySession = {};
   for (const e of (entriesRes.data || [])) {
     if (!bySession[e.session_id]) bySession[e.session_id] = [];
@@ -532,8 +646,8 @@ async function exportBackup(store, userId) {
 
 async function setupNewUser(userId, name, unit) {
   await Promise.all([
-    _supabase.from('zane_profiles').upsert({ id: userId, name }),
-    _supabase.from('zane_user_settings').upsert({ user_id: userId, ...(unit != null ? { unit } : {}), rest_default: 120 }),
+    unwrap(_supabase.from('zane_profiles').upsert({ id: userId, name })),
+    unwrap(_supabase.from('zane_user_settings').upsert({ user_id: userId, ...(unit != null ? { unit } : {}), rest_default: 120 })),
   ]);
 }
 
@@ -652,6 +766,31 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   // background refresh keeps the cache, the first load shows the retry screen.
   if (sessRes.error) throw sessRes.error;
   if (entriesRes.error) throw entriesRes.error;
+  // Settings feed the orphan-cleanup (in_progress_session_id) — a silent failure
+  // leaves sett={} and would delete the active in-progress session. Fail loudly.
+  if (settRes.error) throw settRes.error;
+  // Collection queries feed the store and the cache-first boot merge / sync diff.
+  // A failed request yields [] which would look like "user deleted everything"
+  // and drop cached data (or delete server rows on the next sync). Fail loudly so
+  // the caller keeps the cache and shows the retry screen instead.
+  if (exRes.error) throw exRes.error;
+  if (schRes.error) throw schRes.error;
+  if (skipsRes.error) throw skipsRes.error;
+  if (cardioLogsRes.error) throw cardioLogsRes.error;
+  if (cardioPlansRes.error) throw cardioPlansRes.error;
+  if (dailyLogsRes.error) throw dailyLogsRes.error;
+  if (statusPeriodsRes.error) throw statusPeriodsRes.error;
+  if (glucoseLogsRes.error) throw glucoseLogsRes.error;
+  if (templatesRes.error) throw templatesRes.error;
+  if (mesoStatesRes.error) throw mesoStatesRes.error;
+  // Coaching queries are null on coach loads (skipped) — guard with optional chaining.
+  if (coachInfoRes?.error) throw coachInfoRes.error;
+  if (coachClientsRes?.error) throw coachClientsRes.error;
+  if (unreadNotesRes?.error) throw unreadNotesRes.error;
+  // coachingRowRes/selfRowRes use maybeSingle() and only drive optional banner
+  // UI. There is no DB uniqueness constraint on (client_id, active), so a client
+  // with >1 active coach yields a PGRST116 "multiple rows" error — do NOT throw
+  // on these or such a user can't boot; degrade the banner instead.
 
   // First login after email confirmation — profile not yet created (skip for coach loads)
   if (!profileRes.data && !isCoachLoad) {
@@ -785,7 +924,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     })),
     glucoseLogs: (glucoseLogsRes?.data || []).map(l => ({
       id: l.id, date: l.date, time: l.time,
-      valueMmol: parseFloat(l.value_mmol),
+      valueMmol: l.value_mmol != null ? parseFloat(l.value_mmol) : null,
       context: l.context ?? 'other', note: l.note ?? null, createdAt: l.created_at,
     })),
     workoutTemplates: (templatesRes?.data || []).map(t => ({
@@ -1340,7 +1479,7 @@ async function syncStore(prev, next, userId) {
       onboarding_completed: next.settings?.onboardingCompleted ?? false,
       glucose_unit: next.settings?.glucoseUnit ?? 'mmol',
       default_checkin_schema: next.settings?.defaultCheckinSchema ?? null,
-      next_reminder_at: computeNextReminderAt(next),
+      next_reminder_at: next.nextReminderAt ?? null,
       in_progress_session_id: next.inProgress ?? null,
       status_mode: next.statusMode ?? null,
       status_mode_since: next.statusModeSince ?? null,
@@ -1635,14 +1774,19 @@ function latestBodyweight(store) {
 // Compute the seed-sets array when starting/logging a session for a planned item.
 // Honors smart-progression suggestions and falls back to last-session values.
 // bodyweightKg: prefill kg with this value when kg would otherwise be null (for bodyweight exercises).
-function buildSeedSets(it, last, suggestion, isUni, smartProgression, bodyweightKg = null) {
+function buildSeedSets(it, last, suggestion, isUni, smartProgression, bodyweightKg = null, deloadOverride = null) {
   const workingSets = (last?.entry?.sets || []).filter(s => !s.warmup);
   const repsPerSet = it.repsPerSet;
   // Deload overlay: halve the seeded LOAD (not bodyweight, not reps) so a
   // deload week pre-fills at ~50%. Reads the global mirrored from
   // store.statusMode in app.jsx (same pattern as window.__UNIT). Rounded to a
   // 2.5 increment; the user can still adjust per set.
-  const deload = typeof window !== 'undefined' && window.__DELOAD === true && bodyweightKg == null;
+  // deloadOverride lets a caller (e.g. a coach previewing a client's seeds)
+  // supply the *subject's* deload state instead of the viewer's global flag.
+  const deloadActive = deloadOverride != null
+    ? deloadOverride === true
+    : (typeof window !== 'undefined' && window.__DELOAD === true);
+  const deload = deloadActive && bodyweightKg == null;
   const dl = (kg) => (deload && kg != null) ? Math.round((kg * 0.5) / 2.5) * 2.5 : kg;
   return Array.from({ length: it.sets }).map((_, i) => {
     const prev = workingSets[i];
@@ -2655,9 +2799,13 @@ async function saveDefaultCheckinSchema(schema, coachId) {
   const { error: e1 } = await _supabase.from('zane_user_settings')
     .upsert({ user_id: coachId, default_checkin_schema: schema }, { onConflict: 'user_id' });
   if (e1) throw e1;
-  // Clear all per-client overrides so every client falls back to the new default
+  // Write the new default onto every coaching row too. Clients can't read the
+  // coach's zane_user_settings (RLS), so if we nulled the override here they'd
+  // fall back to CHECKIN_DEFAULT_SCHEMA and fill a different form than the coach
+  // reviews. Storing the schema on the coaching row (which the client can read)
+  // keeps both sides on the same form.
   const { error: e2 } = await _supabase.from('zane_coaching')
-    .update({ checkin_schema: null })
+    .update({ checkin_schema: schema })
     .eq('coach_id', coachId)
     .neq('client_id', coachId);
   if (e2) throw e2;
@@ -3132,7 +3280,7 @@ async function refreshHealthLogs(userId) {
     })),
     glucoseLogs: (glucoseRes?.data || []).map(l => ({
       id: l.id, date: l.date, time: l.time,
-      valueMmol: parseFloat(l.value_mmol),
+      valueMmol: l.value_mmol != null ? parseFloat(l.value_mmol) : null,
       context: l.context ?? 'other', note: l.note ?? null, createdAt: l.created_at,
     })),
   };
@@ -3146,7 +3294,7 @@ window.LB = {
   signIn, signUp, signOut, signInWithPasskey, registerPasskey, listPasskeys, deletePasskey, resetPassword, deleteAllData, exportBackup, importFromBackup, validateBackup,
   loadFromSupabase, syncStore, mergeSessions, historyWindowCutoffISO,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
-  uid, todayISO, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate,
+  uid, todayISO, fmtISO, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate,
   effReps, e1rm, isImprovement, isDecline, bestE1rmForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, latestBodyweight, inferCurrentExIdx, calcBlended,
   refreshExerciseBests, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries,
   computeNextTrainingDate, computeNextReminderAt,

@@ -108,7 +108,7 @@ function mesoCurrentWeek(mesoState, store) {
   // Weekday and date-based cycle plans: date arithmetic.
   // Cycle plans: one meso "week" = one full rotation (daysLen days).
   // Weekday plans: one meso "week" = 7 calendar days.
-  const start = new Date(mesoState.startDate); start.setHours(12, 0, 0, 0);
+  const start = LB.parseDate(mesoState.startDate);
   const today = new Date(); today.setHours(12, 0, 0, 0);
   if (today < start) return null; // pending
   const days = Math.round((today - start) / 86400000);
@@ -400,11 +400,11 @@ function CustomKeyboard({ visible, field, onType, onBackspace, onAdjust, onConfi
   const H = 40;
   const base = {
     background: 'var(--bg-raised)', border: `0.5px solid var(--hair)`, borderRadius: 6,
-    color: 'var(--ink)', fontFamily: '"JetBrains Mono", monospace', fontSize: 18, fontWeight: 500,
+    color: 'var(--ink)', fontFamily: UI.fontNum, fontSize: 18, fontWeight: 500,
     cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
     WebkitTapHighlightColor: 'transparent', userSelect: 'none', padding: 0,
   };
-  const act = { ...base, background: 'var(--bg-inset)', color: 'var(--ink-soft)', fontSize: 13, fontFamily: '"Inter", sans-serif' };
+  const act = { ...base, background: 'var(--bg-inset)', color: 'var(--ink-soft)', fontSize: 13, fontFamily: UI.fontUi };
 
   return (
     <div data-keyboard
@@ -530,62 +530,58 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   useEffectT(() => {
     if (!_sch?.mesocycle_weeks || !session.scheduleId) return;
     const schId = session.scheduleId;
-    // Recompute everything from the freshest store snapshot (`s`, inside the
-    // functional setStore updater) instead of the `_sch`/`store` closed over
-    // above — a plan edit that changes the day structure (new version +
-    // cycleOffset) and flips mesocycle_weeks on can commit via back-to-back
-    // setStore calls, and aligning against a stale closure risks dropping the
-    // cycleOffset and computing "today" instead of the true next D1.
-    let newMeso = null;
+    // Compute the new meso object PURELY (outside setStore) so it's guaranteed
+    // available for the localStorage / component-state writes below — a
+    // functional updater may run lazily, so we can't rely on it having assigned
+    // an outer variable by the time we read it. The effect runs once on mount,
+    // so the `store` closure is the freshest snapshot we need.
+    const freshSch = store.schedules.find(x => x.id === schId);
+    if (!freshSch?.mesocycle_weeks) return;
+    const existing = getMesoState(schId, store.mesoStates);
+    // Keep existing meso only if weeks match the current config.
+    // A mismatch (changed week count) always starts fresh.
+    if (existing && existing.weeks === freshSch.mesocycle_weeks) return;
+    // Align meso start to a clean boundary so week 1 is always a full rotation/week.
+    // Weekday: next Monday (or today). Flex: next D1 via cycleIndex. Cycle: next D1 via date.
+    const _isWeekday = LB.isWeekdayPlan(freshSch);
+    const _isFlex = LB.isFlexPlan(freshSch);
+    const _daysLen = freshSch.days.length || 1;
+    const _ci = store.cycleIndex || 0;
+    let alignedStartDate, alignedStartIdx;
+    if (_isWeekday) {
+      alignedStartDate = LB.nextMondayISO();
+      alignedStartIdx = _ci;
+    } else if (_isFlex) {
+      alignedStartIdx = _ci % _daysLen === 0 ? _ci : Math.ceil(_ci / _daysLen) * _daysLen;
+      alignedStartDate = LB.todayISO();
+    } else {
+      // Date-based cycle plan: use version-aware D1 so the meso aligns with how
+      // the date strip renders (getCyclePosForDate respects version boundaries).
+      alignedStartDate = LB.nextCycleD1ISOFromSchedule(freshSch, store.cycleStartDate);
+      alignedStartIdx = 0;
+    }
+    const newMeso = {
+      id: userId + '_' + schId,
+      scheduleId: schId,
+      weeks: freshSch.mesocycle_weeks,
+      startDate: alignedStartDate,
+      startCycleIndex: alignedStartIdx,
+      deltas: {},
+      jointFlags: {},
+      pumpLowCounts: {},
+      weightBoosts: {},
+      completions: existing?.completions ?? 0,
+      updatedAt: new Date().toISOString(),
+    };
     setStore(s => {
-      const freshSch = s.schedules.find(x => x.id === schId);
-      if (!freshSch?.mesocycle_weeks) return s;
-      const existing = getMesoState(schId, s.mesoStates);
-      // Keep existing meso only if weeks match the current config.
-      // A mismatch (changed week count) always starts fresh.
-      if (existing && existing.weeks === freshSch.mesocycle_weeks) return s;
-      // Align meso start to a clean boundary so week 1 is always a full rotation/week.
-      // Weekday: next Monday (or today). Flex: next D1 via cycleIndex. Cycle: next D1 via date.
-      const _isWeekday = LB.isWeekdayPlan(freshSch);
-      const _isFlex = LB.isFlexPlan(freshSch);
-      const _daysLen = freshSch.days.length || 1;
-      const _ci = s.cycleIndex || 0;
-      let alignedStartDate, alignedStartIdx;
-      if (_isWeekday) {
-        alignedStartDate = LB.nextMondayISO();
-        alignedStartIdx = _ci;
-      } else if (_isFlex) {
-        alignedStartIdx = _ci % _daysLen === 0 ? _ci : Math.ceil(_ci / _daysLen) * _daysLen;
-        alignedStartDate = LB.todayISO();
-      } else {
-        // Date-based cycle plan: use version-aware D1 so the meso aligns with how
-        // the date strip renders (getCyclePosForDate respects version boundaries).
-        alignedStartDate = LB.nextCycleD1ISOFromSchedule(freshSch, s.cycleStartDate);
-        alignedStartIdx = 0;
-      }
-      newMeso = {
-        id: userId + '_' + schId,
-        scheduleId: schId,
-        weeks: freshSch.mesocycle_weeks,
-        startDate: alignedStartDate,
-        startCycleIndex: alignedStartIdx,
-        deltas: {},
-        jointFlags: {},
-        pumpLowCounts: {},
-        weightBoosts: {},
-        completions: existing?.completions ?? 0,
-        updatedAt: new Date().toISOString(),
-      };
       const others = (s.mesoStates || []).filter(m => m.scheduleId !== schId);
       return { ...s, mesoStates: [...others, newMeso] };
     });
     // Immediately mirror the new meso state to the local cache / component
     // state too, so it's synced to DB without waiting for session end (covers
     // the case where user exits without finishing) and is available offline.
-    if (newMeso) {
-      saveMesoStateToStorage(newMeso);
-      setMesoStateLocal(newMeso);
-    }
+    saveMesoStateToStorage(newMeso);
+    setMesoStateLocal(newMeso);
   }, []);
 
   const exIdx = session.currentExIdx || 0;
@@ -613,7 +609,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     LB.fetchExerciseHistory(exId, session.dayId, 20, userId)
       .then(rows => {
         if (!on) return;
-        const filtered = (rows || []).filter(r => r.sessionId !== session.id);
+        // The server RPC doesn't know about is_deload and may return ~50%
+        // deload sessions — exclude them (same guard as fetchSeedEntries) so a
+        // deload load never becomes the "last time"/best/comparison baseline.
+        const deloadIds = new Set((store.sessions || []).filter(s => s.isDeload).map(s => s.id));
+        const filtered = (rows || []).filter(r => r.sessionId !== session.id && !deloadIds.has(r.sessionId));
         // best e1RM across all fetched sessions for this day type
         let best = 0;
         for (const r of filtered) {
@@ -1007,7 +1007,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       const completed = entry.sets[setIdx];
       const cReps = LB.effReps(completed);
       const cE1rm = (completed?.kg != null && cReps != null && cReps > 0) ? LB.e1rm(completed.kg, cReps) : 0;
-      const localBest = LB.bestE1rmForExercise(store, entry.exId, session.id, session.dayId);
+      const localBest = LB.bestE1rmForExercise(store, entry.exId, session.id);
       const priorBest = Math.max(localBest, remoteBestE1rmRef.current[entry.exId] || 0);
       const isNewBest = cE1rm > 0 && priorBest > 0 && cE1rm > priorBest && !newBestShownRef.current[entry.exId];
       if (isNewBest) {
@@ -1072,7 +1072,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       const wIdx = entry.sets.slice(0, targetIdx + 1).filter(s => !s.warmup).length - 1;
       const prevSet = wIdx >= 0 ? prevWS[wIdx] : undefined;
       const cE1rm = LB.e1rm(first.kg, first.reps);
-      const localBest = LB.bestE1rmForExercise(store, entry.exId, session.id, session.dayId);
+      const localBest = LB.bestE1rmForExercise(store, entry.exId, session.id);
       const priorBest = Math.max(localBest, remoteBestE1rmRef.current[entry.exId] || 0);
       const isNewBest = cE1rm > 0 && priorBest > 0 && cE1rm > priorBest && !newBestShownRef.current[entry.exId];
       if (isNewBest) {
@@ -1138,7 +1138,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       const wIdx = entry.sets.slice(0, targetIdx + 1).filter(s => !s.warmup).length - 1;
       const prevSet = wIdx >= 0 ? prevWS[wIdx] : undefined;
       const cE1rm = LB.e1rm(first.kg, first.reps);
-      const localBest = LB.bestE1rmForExercise(store, entry.exId, session.id, session.dayId);
+      const localBest = LB.bestE1rmForExercise(store, entry.exId, session.id);
       const priorBest = Math.max(localBest, remoteBestE1rmRef.current[entry.exId] || 0);
       const isNewBest = cE1rm > 0 && priorBest > 0 && cE1rm > priorBest && !newBestShownRef.current[entry.exId];
       if (isNewBest) {
@@ -2096,8 +2096,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       const allHit = workingSets.every(s => {
         if (!s.done) return false;
         if (plannedReps == null) return true;
-        const reps = s.reps != null ? s.reps : Math.max(s.repsL ?? 0, s.repsR ?? 0);
-        return reps >= plannedReps;
+        const reps = LB.effReps(s);
+        return reps != null && reps >= plannedReps;
       });
       if (!allHit) continue;
 
@@ -2167,7 +2167,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     setMesoJointExName(entry.name);
     setMesoJointMuscle(pm);
     setMesoJointOpen(true);
-  }, [entry?.sets?.map(s => s.done ? 1 : 0).join(','), !!mesoState]);
+  }, [exIdx, entry?.sets?.map(s => s.done ? 1 : 0).join(','), !!mesoState]);
 
   const tempoTimerRef = useRefT(null);
   const audioCtxRef = useRefT(null);
@@ -2405,7 +2405,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             // forward data that no longer matches what's being typed.
             sets: en.sets.map((st, si) =>
               si === setIdx ? { ...st, kg: num ?? null, done: false, ...(st.technique ? { technique: null, drops: null } : {}) }
-              : store.settings?.weightFillDown !== false && si > setIdx && !st.done ? { ...st, kg: num ?? null }
+              : store.settings?.weightFillDown !== false && si > setIdx && !st.done && !st.warmup ? { ...st, kg: num ?? null }
               : st
             ),
           }),
@@ -2496,7 +2496,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           ...en,
           sets: en.sets.map((st, si) =>
             si === setIdx ? { ...st, kg: next, done: false, ...(st.technique ? { technique: null, drops: null } : {}) }
-            : si > setIdx && !st.done ? { ...st, kg: next }
+            : store.settings?.weightFillDown !== false && si > setIdx && !st.done && !st.warmup ? { ...st, kg: next }
             : st
           ),
         }),
@@ -2859,7 +2859,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       const newSets = entry.sets.filter(s => !s.warmup).length;
       const mesoAdjustedPlan = entry.plannedSets ?? item.sets;
       if (newSets !== mesoAdjustedPlan) {
-        diffs.push({ type: 'sets', idx: originalIdx, exName: entry.name, oldSets: item.sets, newSets });
+        diffs.push({ type: 'sets', idx: originalIdx, exName: entry.name, oldSets: item.sets, newSets, mesoAdjustedPlanSets: mesoAdjustedPlan });
       }
     });
 
@@ -2981,7 +2981,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         const diff = planDiff.find(d => (d.type === 'swap' || d.type === 'sets') && d.idx === i);
         if (!diff) return item;
         if (diff.type === 'swap') return { ...item, exId: diff.newExId };
-        if (diff.type === 'sets') return { ...item, sets: diff.newSets };
+        // Persist only the user-driven delta on top of the base plan — newSets
+        // includes the meso set-delta, which applyMesoSetDelta re-adds next
+        // session; writing newSets directly would compound it (base+2 → base+3).
+        // Clamp to ≥1: mesoAdjustedPlanSets is the clamped count, so a deep cut
+        // during a ballooned meso could otherwise drive the stored base below 1.
+        if (diff.type === 'sets') return { ...item, sets: Math.max(1, item.sets + (diff.newSets - (diff.mesoAdjustedPlanSets ?? item.sets))) };
         return item;
       });
       // 2. Remove exercises skipped during training
@@ -3158,14 +3163,19 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   };
 
   const skipWarmup = () => {
-    updateSession(sess => ({
-      ...sess,
-      startedAt: new Date().toISOString(),
-      entries: sess.entries.map((e, i) => i === 0
-        ? { ...e, sets: e.sets.map(st => st.warmup ? { ...st, done: true } : st) }
-        : e
-      ),
-    }));
+    updateSession(sess => {
+      // The warmup-carrying entry isn't necessarily at index 0 — superset
+      // linking / reorder can move it. Find it by content, like warmupEntry.
+      const wIdx = sess.entries.findIndex(e => (e.sets || []).some(s => s.warmup));
+      return {
+        ...sess,
+        startedAt: new Date().toISOString(),
+        entries: sess.entries.map((e, i) => i === wIdx
+          ? { ...e, sets: e.sets.map(st => st.warmup ? { ...st, done: true } : st) }
+          : e
+        ),
+      };
+    });
     persistRestStart(null);
   };
 

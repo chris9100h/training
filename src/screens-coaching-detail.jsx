@@ -109,8 +109,10 @@ function checkinFieldYRange(field) {
 }
 
 // Value formatter for a field's chart axis and headline number.
-function checkinFieldFormat(field, distUnit) {
-  if (field.unit === 'weight') return v => `${Math.round(v * 100) / 100}${UI.unit()}`;
+// weightUnit = the CLIENT's unit label ('kg'/'lbs'); numbers are never converted,
+// only the label. Falls back to the viewer's UI.unit() (self-coaching).
+function checkinFieldFormat(field, distUnit, weightUnit) {
+  if (field.unit === 'weight') return v => `${Math.round(v * 100) / 100}${weightUnit || UI.unit()}`;
   if (field.key === 'steps') return v => `${Math.round(v / 1000)}k`;
   if (field.key === 'days_trained') return v => `${v}d`;
   if (field.key === 'cardio_minutes') return v => `${v} min`;
@@ -126,7 +128,7 @@ function checkinFieldFormat(field, distUnit) {
 
 // Build the per-field chart series for a set of check-ins, in schema order.
 // Skips text fields; choice fields are charted by option rank.
-function checkinChartMetrics(recent, schema, distUnit) {
+function checkinChartMetrics(recent, schema, distUnit, weightUnit) {
   const metrics = [];
   (schema || CHECKIN_DEFAULT_SCHEMA).forEach(section => (section.fields || []).forEach(field => {
     if (field.type === 'text') return;
@@ -136,12 +138,24 @@ function checkinChartMetrics(recent, schema, distUnit) {
       : field.type === 'pace'
         ? recent.map(c => paceToSec(c.responses?.[field.key]))
         : recent.map(c => { const v = c.responses?.[field.key]; return (v != null && v !== '') ? Number(v) : null; });
-    metrics.push({ label: field.label, values, format: checkinFieldFormat(field, distUnit), ...checkinFieldYRange(field) });
+    metrics.push({ label: field.label, values, format: checkinFieldFormat(field, distUnit, weightUnit), ...checkinFieldYRange(field) });
   }));
   return metrics;
 }
 
-async function exportCheckinCharts(recent, schema) {
+// Escape text before embedding it in hand-built SVG markup — coach-editable
+// labels/units/option names may contain & < > " ' which would otherwise break
+// the XML and silently drop the chart from the PNG.
+function escapeXml(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+async function exportCheckinCharts(recent, schema, weightUnit) {
   const cs = getComputedStyle(document.documentElement);
   const accent    = cs.getPropertyValue('--accent').trim();
   const accentRgb = cs.getPropertyValue('--accent-rgb').trim();
@@ -150,7 +164,7 @@ async function exportCheckinCharts(recent, schema) {
   const hairColor = cs.getPropertyValue('--hair').trim();
   const distUnit = (() => { try { return localStorage.getItem('logbook-cardio-dist-unit') || 'km'; } catch (_) { return 'km'; } })();
 
-  const metrics = checkinChartMetrics(recent, schema, distUnit);
+  const metrics = checkinChartMetrics(recent, schema, distUnit, weightUnit);
 
   const charts = metrics.map(m => {
     const entries = m.values
@@ -221,7 +235,7 @@ async function exportCheckinCharts(recent, schema) {
       : Array.from({ length: 4 }, (_, i) => dom.min + (dom.range / 3) * i);
     const grid = gridVals.map((v, i) =>
       (i > 0 ? `<line x1="${padL}" y1="${yOf(v).toFixed(1)}" x2="${W - padR}" y2="${yOf(v).toFixed(1)}" stroke="${hr}" stroke-width="0.5" stroke-dasharray="3 3"/>` : '') +
-      `<text x="${padL - 5}" y="${(yOf(v) + 3).toFixed(1)}" text-anchor="end" font-size="8" font-family="Arial,sans-serif" fill="${fi}">${format(Number(v.toFixed(dec)))}</text>`
+      `<text x="${padL - 5}" y="${(yOf(v) + 3).toFixed(1)}" text-anchor="end" font-size="8" font-family="Arial,sans-serif" fill="${fi}">${escapeXml(format(Number(v.toFixed(dec))))}</text>`
     ).join('') +
       `<line x1="${padL}" y1="${padTop}" x2="${padL}" y2="${padTop + plotH}" stroke="${hr}" stroke-width="0.5"/>` +
       `<line x1="${padL}" y1="${padTop + plotH}" x2="${W - padR}" y2="${padTop + plotH}" stroke="${hr}" stroke-width="0.5"/>`;
@@ -230,7 +244,7 @@ async function exportCheckinCharts(recent, schema) {
       const cx = xOf(i).toFixed(1), cy = yOf(e.value).toFixed(1);
       const anchor = i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle';
       return `<circle cx="${cx}" cy="${cy}" r="${i === n - 1 ? 3 : 2}" fill="${a}"/>` +
-        (showLbl(i) ? `<text x="${cx}" y="${(padTop + plotH + 16).toFixed(1)}" text-anchor="${anchor}" font-size="8" font-family="Arial,sans-serif" fill="${fi}">${fmtD(e.weekStart)}</text>` : '');
+        (showLbl(i) ? `<text x="${cx}" y="${(padTop + plotH + 16).toFixed(1)}" text-anchor="${anchor}" font-size="8" font-family="Arial,sans-serif" fill="${fi}">${escapeXml(fmtD(e.weekStart))}</text>` : '');
     }).join('');
 
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${chartH}">` +
@@ -267,7 +281,7 @@ async function exportCheckinCharts(recent, schema) {
   }, 'image/png'));
 }
 
-function CheckInTrendCards({ recent, schema }) {
+function CheckInTrendCards({ recent, schema, clientUnit }) {
   const resolvedSchema = schema || CHECKIN_DEFAULT_SCHEMA;
   const [chartModal, setChartModal] = useStateC(null);
   const [exporting, setExporting] = useStateC(false);
@@ -276,7 +290,7 @@ function CheckInTrendCards({ recent, schema }) {
   const handleExport = () => {
     if (exporting || n < 2) return;
     setExporting(true);
-    exportCheckinCharts(recent, resolvedSchema).catch(() => {}).finally(() => setExporting(false));
+    exportCheckinCharts(recent, resolvedSchema, clientUnit).catch(() => {}).finally(() => setExporting(false));
   };
 
   const openChart = (label, icon, values, format, invertColor, yMin, yMax) => {
@@ -348,7 +362,7 @@ function CheckInTrendCards({ recent, schema }) {
   const SUB_KEYS = new Set();
 
   // Field chart helpers are shared module-level (also used by the PNG export).
-  const getFormat = (field) => checkinFieldFormat(field, distUnit);
+  const getFormat = (field) => checkinFieldFormat(field, distUnit, clientUnit);
   const getYRange = checkinFieldYRange;
   const choiceRank = checkinChoiceRank;
 
@@ -458,7 +472,7 @@ function generatePreviewData(schema) {
   return Array.from({ length: W }, (_, wk) => {
     const t = wk / (W - 1);
     const d = new Date(mon); d.setDate(mon.getDate() - (W - 1 - wk) * 7);
-    const weekStart = d.toISOString().slice(0, 10);
+    const weekStart = LB.fmtISO(d);
     const responses = {};
 
     allFields.forEach(f => {
@@ -555,7 +569,7 @@ function CheckInFormPreview({ schema }) {
 // ─── CheckInSchemaBuilder ──────────────────────────────────────────────────────
 
 // These four fields are always shown/removed as a group — the coach always wants all or none.
-const MACRO_GROUP_KEYS = new Set(['calories_avg', 'protein_avg', 'carbs_avg', 'fat_avg']);
+var MACRO_GROUP_KEYS = new Set(['calories_avg', 'protein_avg', 'carbs_avg', 'fat_avg']);
 
 // Build a flat view for ReorderList where the 4 macro fields collapse into 1 group item.
 // Each item: { isMacroGroup: true, arrayIdx } | { isMacroGroup: false, arrayIdx }
@@ -1315,14 +1329,19 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
 
 // ─── ClientCheckInsTab (coach view) ───────────────────────────────────────────
 
-function ClientCheckInsTab({ coachingId, checkinEnabled = true, onToggle, toggling = false, store, setStore, userId }) {
+function ClientCheckInsTab({ coachingId, checkinEnabled = true, onToggle, toggling = false, store, setStore, userId, clientUnit }) {
   const [checkins, setCheckins] = useStateC(null);
+  const [loadErr, setLoadErr] = useStateC(false);
   const [schema, setSchema] = useStateC(null);
   const [builderOpen, setBuilderOpen] = useStateC(false);
   const [coachingMacrosHistory, setCoachingMacrosHistory] = useStateC(null);
 
+  const load = () => LB.loadCheckins(coachingId)
+    .then(c => { setCheckins(c); setLoadErr(false); })
+    .catch(() => setLoadErr(true));
   useEffectC(() => {
-    LB.loadCheckins(coachingId).then(setCheckins).catch(() => {});
+    setLoadErr(false);
+    load();
     LB.loadCheckinSchema(coachingId).then(s => setSchema(s)).catch(() => {});
     LB.loadCoachingMacros(coachingId).then(data => setCoachingMacrosHistory(data)).catch(() => {});
   }, [coachingId]);
@@ -1362,6 +1381,21 @@ function ClientCheckInsTab({ coachingId, checkinEnabled = true, onToggle, toggli
       onClose={() => setBuilderOpen(false)} />
   );
 
+  if (checkins === null && loadErr) {
+    return (
+      <>
+        {builder}
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          {toggleRow}
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, padding: 32 }}>
+            <div style={{ fontSize: 13, color: 'rgba(var(--danger-rgb),0.8)', fontFamily: UI.fontUi, textAlign: 'center' }}>Couldn't load check-ins.</div>
+            <button onClick={() => { setLoadErr(false); load(); }} style={{ background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '8px 16px', cursor: 'pointer', color: UI.ink, fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600 }}>Retry</button>
+          </div>
+        </div>
+      </>
+    );
+  }
+
   if (checkins === null) {
     return (
       <>
@@ -1400,11 +1434,11 @@ function ClientCheckInsTab({ coachingId, checkinEnabled = true, onToggle, toggli
         {toggleRow}
         <div style={{ flex: 1, overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
           <div style={{ padding: '16px 14px 40px', display: 'flex', flexDirection: 'column', gap: 20 }}>
-            <CheckInTrendCards recent={recent} schema={resolvedSchema} />
+            <CheckInTrendCards recent={recent} schema={resolvedSchema} clientUnit={clientUnit} />
             <div className="knurl" style={{ margin: '4px 0' }} />
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               <div className="micro" style={{ color: UI.inkFaint }}>ALL CHECK-INS</div>
-              {checkins.map((ci, i) => <CheckInCard key={ci.id} ci={ci} prevCi={checkins[i + 1]} schema={resolvedSchema} coachingMacrosHistory={coachingMacrosHistory} />)}
+              {checkins.map((ci, i) => <CheckInCard key={ci.id} ci={ci} prevCi={checkins[i + 1]} schema={resolvedSchema} coachingMacrosHistory={coachingMacrosHistory} clientUnit={clientUnit} />)}
             </div>
           </div>
         </div>

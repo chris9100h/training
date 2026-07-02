@@ -9,6 +9,11 @@ const UI = {
   bg:       'var(--bg)',
   bgRaised: 'var(--bg-raised)',
   bgInset:  'var(--bg-inset)',
+  // Aliases for the raised card surface — kept so existing UI.bgCard /
+  // UI.bgElevated call sites resolve to a real value instead of `undefined`
+  // (which rendered a transparent background).
+  bgCard:     'var(--bg-raised)',
+  bgElevated: 'var(--bg-raised)',
   ink:      'var(--ink)',
   inkSoft:  'var(--ink-soft)',
   inkFaint: 'var(--ink-faint)',
@@ -23,6 +28,7 @@ const UI = {
   goldFaint: 'var(--accent-faint)',
   danger:    'var(--danger)',
   ok:        'var(--ok)',
+  warn:      'var(--warn)',
   fontUi:      '"Inter", system-ui, sans-serif',
   fontNum:     '"JetBrains Mono", ui-monospace, monospace',
   fontDisplay: '"Big Shoulders Display", "Arial Narrow", sans-serif',
@@ -516,7 +522,7 @@ const btnPrimary = {
   border: '1px solid var(--accent-deep)',
   borderRadius: 6,
   padding: '14px 24px', minHeight: 48,
-  fontFamily: '"Inter", system-ui, sans-serif', fontSize: 13, fontWeight: 700,
+  fontFamily: UI.fontUi, fontSize: 13, fontWeight: 700,
   letterSpacing: '0.12em', textTransform: 'uppercase',
   cursor: 'pointer',
   boxShadow: '0 6px 20px rgba(var(--accent-rgb),0.30)',
@@ -529,7 +535,7 @@ const btnGhost = {
   border: `1px solid var(--hair-strong)`,
   borderRadius: 6,
   padding: '14px 22px', minHeight: 48,
-  fontFamily: '"Inter", system-ui, sans-serif', fontSize: 13, fontWeight: 600,
+  fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600,
   letterSpacing: '0.10em', textTransform: 'uppercase',
   cursor: 'pointer',
   WebkitTapHighlightColor: 'transparent',

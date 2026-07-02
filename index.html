@@ -59,6 +59,7 @@
     --danger: #c87469;
     --danger-rgb: 200,116,105;
     --ok: #8fb069;
+    --warn: #d97706;
   }
   html, body { min-height: 100vh; margin: 0; }
   html, body {
@@ -236,6 +237,15 @@ function makeClearCacheButton() {
   btn.onclick = async function() {
     btn.textContent = 'Clearing…';
     if ('caches' in window) { var keys = await caches.keys(); await Promise.all(keys.map(function(k){ return caches.delete(k); })); }
+    // Also nuke the IndexedDB precompile cache — a poisoned record there bricks
+    // boot just as badly as a bad Cache Storage entry, and clearing only caches
+    // would leave the app permanently broken with no recovery path.
+    if ('indexedDB' in window) {
+      await new Promise(function(resolve){
+        var req = indexedDB.deleteDatabase('zane-precompile');
+        req.onsuccess = req.onerror = req.onblocked = function(){ resolve(); };
+      });
+    }
     window.location.reload(true);
   };
   return btn;
@@ -302,6 +312,15 @@ setTimeout(async function() {
   log.textContent += 'window.React: ' + typeof window.React + '\n';
   log.textContent += 'window.Screen: ' + typeof window.Screen + '\n';
   d.appendChild(makeClearCacheButton());
+  // A slow first boot can trip the 6s timeout while the app is still coming up.
+  // Keep polling and auto-hide the overlay the moment React actually mounts, so
+  // a working (just sluggish) app isn't left buried under an opaque error screen.
+  var mountPoll = setInterval(function() {
+    if (document.getElementById('root').children.length) {
+      clearInterval(mountPoll);
+      d.style.display = 'none';
+    }
+  }, 500);
 }, 6000);
 </script>
 
@@ -326,7 +345,7 @@ window.applyAccentColor = function(key) {
   s.setProperty('--accent-deep', c.deep);
   s.setProperty('--accent-rgb', c.rgb);
 };
-window.applyAccentColor(localStorage.getItem('logbook-accent-color') || 'copper');
+window.applyAccentColor(localStorage.getItem('logbook-accent-color') || 'gold');
 </script>
 
 <script>

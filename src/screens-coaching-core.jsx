@@ -29,7 +29,10 @@ function CoachSyncErrorPill({ show }) {
 
 function fmtDate(iso) {
   if (!iso) return '—';
-  const d = new Date(iso);
+  // Date-only strings (YYYY-MM-DD, e.g. session.date) parse as UTC midnight via
+  // new Date() and render the previous day in negative-UTC zones — parse those
+  // at local noon via LB.parseDate. Full timestamps keep new Date().
+  const d = /^\d{4}-\d{2}-\d{2}$/.test(iso) ? LB.parseDate(iso) : new Date(iso);
   return d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: '2-digit' });
 }
 
@@ -260,6 +263,7 @@ function ChatThread({ thread, coachingId, userId, otherName, unreadNotes, onBack
   }, [notes]);
 
   const send = async () => {
+    if (sending) return;
     if (!body.trim() && !imageFile) return;
     setSending(true);
     const imgFile = imageFile;
@@ -359,8 +363,12 @@ function ThreadList({ coachingId, userId, otherName, unreadNotes, setStore, canD
       setThreads(loaded);
       if (setStore && (unreadNotes || []).length) {
         const validThreadIds = new Set(loaded.map(t => t.id));
+        // Only this coaching's notes — callers pass the global unread list, which
+        // also holds other relationships' notes and support_ tickets. Never mark
+        // those read here.
         // Stale = threadless (no UI to show them) OR referencing a deleted thread
         const orphanedIds = (unreadNotes || [])
+          .filter(n => n.coachingId === coachingId)
           .filter(n => !n.threadId || !validThreadIds.has(n.threadId))
           .map(n => n.id);
         if (orphanedIds.length) {
@@ -531,6 +539,8 @@ function CoachingSettingsSection({ store, setStore, userId, go }) {
       if (result?.startsWith('ERROR:not_found')) { setInviteError('No user found with that email.'); return; }
       if (result?.startsWith('ERROR:self')) { setInviteError('You cannot coach yourself.'); return; }
       if (result?.startsWith('ERROR:exists')) { setInviteError('Invite already sent or coaching already active.'); return; }
+      if (result?.startsWith('ERROR:already_coached')) { setInviteError('This person already has an active coach.'); return; }
+      if (result?.startsWith('ERROR:')) { setInviteError('Could not send invite.'); return; }
       setInviteEmail('');
       const fresh = await LB.loadFromSupabase(userId);
       setStore(s => ({ ...s, ...fresh }));

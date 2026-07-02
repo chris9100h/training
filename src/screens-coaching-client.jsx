@@ -43,9 +43,15 @@ function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, 
   };
 
   useEffectC(() => {
+    let on = true;
+    // Reset so a switch to another client never flashes the previous client's
+    // data, and ignore a resolved response that arrives after we've moved on.
+    setClientStore(null);
+    setLoadError(null);
     LB.loadClientStore(clientId)
-      .then(data => setClientStore(data))
-      .catch(e => setLoadError(e.message));
+      .then(data => { if (on) setClientStore(data); })
+      .catch(e => { if (on) setLoadError(e.message); });
+    return () => { on = false; };
   }, [clientId]);
 
   const reloadClient = async () => {
@@ -101,9 +107,9 @@ function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, 
           {/* Sick / vacation status banner */}
           {clientStore.statusMode && (
             <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px', background: 'var(--overlay-tint)', borderBottom: `0.5px solid ${UI.hairStrong}` }}>
-              <i className={`fa-solid ${clientStore.statusMode === 'sick' ? 'fa-bed-pulse' : 'fa-umbrella-beach'}`} style={{ fontSize: 12, color: UI.inkFaint, flexShrink: 0 }} />
+              <i className={`fa-solid ${clientStore.statusMode === 'sick' ? 'fa-bed-pulse' : clientStore.statusMode === 'deload' ? 'fa-arrow-trend-down' : 'fa-umbrella-beach'}`} style={{ fontSize: 12, color: UI.inkFaint, flexShrink: 0 }} />
               <span style={{ flex: 1, fontSize: 12, fontFamily: UI.fontUi, color: UI.inkSoft, letterSpacing: '0.08em', fontWeight: 600 }}>
-                {clientStore.statusMode === 'sick' ? 'SICK' : 'VACATION'}
+                {clientStore.statusMode === 'sick' ? 'SICK' : clientStore.statusMode === 'deload' ? 'DELOAD' : 'VACATION'}
                 {clientStore.statusModeSince && (() => {
                   const since = new Date(clientStore.statusModeSince);
                   const days = Math.floor((Date.now() - since.getTime()) / 86400000) + 1;
@@ -128,7 +134,7 @@ function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, 
           {tab === 'sessions'   && <ClientSessionsTab clientStore={clientStore} coachingId={coachingId} userId={userId} clientName={clientName} initialSelected={selectedSession} onClearSelected={() => setSelectedSession(null)} />}
           {tab === 'checkins'   && (isSelf
             ? <ClientCheckInTab coachingId={coachingId} clientId={clientId} userId={userId} store={store} isSelf />
-            : <ClientCheckInsTab coachingId={coachingId} checkinEnabled={checkinEnabled} onToggle={handleToggleCheckin} toggling={ciToggling} store={store} setStore={setStore} userId={userId} />)}
+            : <ClientCheckInsTab coachingId={coachingId} checkinEnabled={checkinEnabled} onToggle={handleToggleCheckin} toggling={ciToggling} store={store} setStore={setStore} userId={userId} clientUnit={clientStore.settings?.unit} />)}
           {tab === 'setup'      && <ClientSetupTab clientStore={clientStore} setClientStore={setClientStore} clientId={clientId} coachingId={coachingId} userId={userId} go={go} onReload={reloadClient} clientName={clientName} />}
           {tab === 'daily'      && <window.Screens.HealthClientLogs clientStore={clientStore} />}
           {tab === 'notes'      && <ClientNotesTab coachingId={coachingId} userId={userId} clientName={clientName} store={store} setStore={setStore} />}
@@ -143,6 +149,13 @@ function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, 
 function cyclePosFn(clientStore, date) {
   const activeSch = clientStore.schedules?.find(s => s.id === clientStore.activeScheduleId);
   if (!activeSch) return 0;
+  // Flex plans advance per logged action, never by calendar date — the position
+  // is the action-advanced cycleIndex, independent of `date` (date extrapolation
+  // is meaningless for flex and drifts when the client rests).
+  if (LB.isFlexPlan(activeSch)) {
+    const cycleLen = activeSch.days?.length || 1;
+    return (((clientStore.cycleIndex || 0) % cycleLen) + cycleLen) % cycleLen;
+  }
   const d = new Date(date); d.setHours(12, 0, 0, 0);
   const dateStr = d.toISOString().slice(0, 10);
   if (activeSch.versions?.length) {
@@ -372,6 +385,11 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
       monday.setDate(today.getDate() - todayWd);
       monday.setHours(0, 0, 0, 0);
       return ended.filter(s => new Date(s.ended) >= monday);
+    } else if (LB.isFlexPlan(activeSch)) {
+      // Flex advances per action, so a date window drifts when the client rests.
+      // Show the current rotation's worth: the most recent cycleLen sessions.
+      const cycleLen = activeSch.days?.length || 1;
+      return ended.slice(0, cycleLen);
     } else {
       // Start of the *current* cycle run = today minus today's position in the
       // cycle. A rolling cycleLen-day window would wrongly drag in the previous
@@ -502,7 +520,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
                   const last = LB.bestRecentEntry(clientStore, item.exId, todayDay.id);
                   const suggestion = LB.progressionSuggestion(clientStore, item.exId, todayDay.id, item.reps);
                   const bodyweightKg = ex?.equipment === 'bodyweight' ? LB.latestBodyweight(clientStore) : null;
-                  const seeds = LB.buildSeedSets(item, last, suggestion, ex?.unilateral, clientStore.settings?.smartProgression, bodyweightKg);
+                  const seeds = LB.buildSeedSets(item, last, suggestion, ex?.unilateral, clientStore.settings?.smartProgression, bodyweightKg, clientStore.statusMode === 'deload');
                   const hasWeight = seeds.some(s => s.kg != null);
                   return (
                     <div key={idx} style={{ padding: '12px 4px', borderBottom: `0.5px solid ${UI.hair}` }}>
@@ -600,8 +618,8 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
             <div className="micro" style={{ color: UI.inkFaint, margin: '20px 0 8px', paddingLeft: 2 }}>SICK & VACATION</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               {sorted.map((p, i) => {
-                const icon = p.mode === 'sick' ? 'fa-bed-pulse' : 'fa-umbrella-beach';
-                const modeLabel = p.mode === 'sick' ? 'Sick' : 'Vacation';
+                const icon = p.mode === 'sick' ? 'fa-bed-pulse' : p.mode === 'deload' ? 'fa-arrow-trend-down' : 'fa-umbrella-beach';
+                const modeLabel = p.mode === 'sick' ? 'Sick' : p.mode === 'deload' ? 'Deload' : 'Vacation';
                 const startDate = new Date(p.startedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
                 const endDate = p.endedAt ? new Date(p.endedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : null;
                 const days = p.endedAt
@@ -695,10 +713,15 @@ function RollingVolumeChart({ sessions, planStartDate, clientStore }) {
     return localDateKey(runStart);
   };
 
+  const isFlex = activeSch && LB.isFlexPlan(activeSch);
   const byGroup = {};
-  ended.forEach(s => {
-    const key = getGroupKey(s.date.slice(0, 10));
-    if (!byGroup[key]) byGroup[key] = { date: key, vol: 0, count: 0 };
+  ended.forEach((s, i) => {
+    // Flex plans advance per logged action, never by calendar date — group by
+    // cycleLen-session runs (chronological) so rest days don't drift the grouping.
+    // `date` holds the run's first session date for the label; key is zero-padded
+    // so the run index sorts lexically.
+    const key = isFlex ? String(Math.floor(i / cycleLen)).padStart(4, '0') : getGroupKey(s.date.slice(0, 10));
+    if (!byGroup[key]) byGroup[key] = { date: isFlex ? s.date.slice(0, 10) : key, vol: 0, count: 0 };
     byGroup[key].vol += LB.totalVolume(s, clientStore?.exercises);
     byGroup[key].count++;
   });
@@ -1151,7 +1174,7 @@ function InlineExHistory({ exId, dayId, exName, sessions, exercises, onBack, uni
 
 // ─── Tab: Sessions ────────────────────────────────────────────────────────────
 
-const CARDIO_ACTIVITY_MAP = {
+var CARDIO_ACTIVITY_MAP = {
   running:    { label: 'Running',    icon: 'fa-person-running' },
   walking:    { label: 'Walking',    icon: 'fa-person-walking' },
   cycling:    { label: 'Cycling',    icon: 'fa-person-biking' },

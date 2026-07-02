@@ -176,7 +176,7 @@ function cpNearestDateForKey(k, todayISO) {
   if (daysAhead < 0) daysAhead += 7;
   const d = new Date(todayISO + 'T12:00:00');
   d.setDate(d.getDate() + daysAhead);
-  return d.toISOString().slice(0, 10);
+  return LB.fmtISO(d);
 }
 
 function cpTodayLog(plan, cardioLogs, todayISO) {
@@ -518,7 +518,9 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
       };
       genWeeks  = cpGenerateWeeks(gObj, sfObj, goalDue, todayISO, days);
       startFit  = { distance_m: fitDistM, duration_minutes: fitDurMin, pace_s_per_km: fitPaceSec };
-      startDate = editPlan?.planStartDate || todayISO;
+      // genWeeks is anchored at todayISO, so the stored start date must match —
+      // otherwise cpSessionIndex(planStartDate,…) overshoots the fresh weeks array.
+      startDate = todayISO;
     }
 
     const cleanTargets = {};
@@ -530,6 +532,7 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
       } else {
         CP_WEEKDAY_KEYS.forEach(k => { if (days[k] && manualTargets[k]) cleanTargets[k] = manualTargets[k]; });
       }
+      if (!useTargets) Object.keys(cleanTargets).forEach(k => delete cleanTargets[k]);
     }
 
     const plan = {
@@ -875,7 +878,7 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
                   Target pace: {cpFmtPace((goalDurMin * 60) / (goalDistM / 1000), du)} · {cpFmtSpeed((goalDurMin * 60) / (goalDistM / 1000), du)}
                 </div>
               ) : (
-                <div style={{ fontSize: 11, color: '#f0a830', fontFamily: UI.fontUi, marginTop: 6 }}>
+                <div style={{ fontSize: 11, color: UI.warn, fontFamily: UI.fontUi, marginTop: 6 }}>
                   ⚠ Enter both a target distance and a target time to set a pace goal.
                 </div>
               )}
@@ -963,7 +966,7 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
                 Current pace: {cpFmtPace(fitPaceSec, du)} · {cpFmtSpeed(fitPaceSec, du)}
               </div>
             ) : goal.type === 'pace' ? (
-              <div style={{ fontSize: 11, color: '#f0a830', fontFamily: UI.fontUi, marginTop: 6 }}>
+              <div style={{ fontSize: 11, color: UI.warn, fontFamily: UI.fontUi, marginTop: 6 }}>
                 ⚠ Enter both distance and time so we can set your starting pace.
               </div>
             ) : null}
