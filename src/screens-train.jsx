@@ -394,7 +394,7 @@ function PlateCalcSheet({ open, onClose, initialWeight, availablePlates }) {
 }
 
 // ─── Custom Keyboard ──────────────────────────────────────────────────
-function CustomKeyboard({ visible, field, onType, onBackspace, onAdjust, onConfirm, onDismiss, onPlateCalc }) {
+function CustomKeyboard({ visible, field, onType, onBackspace, onAdjust, onConfirm, onDismiss, onPlateCalc, confirmDisabled }) {
   if (!visible) return null;
   const isKg = field === 'kg';
   const H = 40;
@@ -419,7 +419,15 @@ function CustomKeyboard({ visible, field, onType, onBackspace, onAdjust, onConfi
         <button style={act} onPointerDown={e => { e.preventDefault(); e.stopPropagation(); onAdjust(-1); }}>↓</button>
         <button style={act} onPointerDown={e => { e.preventDefault(); e.stopPropagation(); onPlateCalc(); }}><i className="fa-solid fa-dumbbell" style={{ fontSize: 11 }} /></button>
         <button style={act} onPointerDown={e => { e.preventDefault(); e.stopPropagation(); onAdjust(1); }}>↑</button>
-        <button onPointerDown={e => { e.preventDefault(); e.stopPropagation(); onConfirm(); }} style={{ ...base, gridColumn: 4, gridRow: '1 / span 4', background: 'linear-gradient(180deg, var(--accent-light), var(--accent))', color: '#0a0805', fontSize: 20, fontWeight: 700, borderColor: 'var(--accent-deep)' }}>✓</button>
+        <button
+          onPointerDown={e => { e.preventDefault(); e.stopPropagation(); if (!confirmDisabled) onConfirm(); }}
+          style={{
+            ...base, gridColumn: 4, gridRow: '1 / span 4', fontSize: 20, fontWeight: 700,
+            ...(confirmDisabled
+              ? { background: 'var(--bg-inset)', color: 'var(--ink-faint)', borderColor: 'var(--hair)', cursor: 'default' }
+              : { background: 'linear-gradient(180deg, var(--accent-light), var(--accent))', color: '#0a0805', borderColor: 'var(--accent-deep)' }),
+          }}
+        >✓</button>
 
         {/* Row 2: 1 2 3 */}
         {[1,2,3].map(n => <button key={n} style={base} onPointerDown={e => { e.preventDefault(); e.stopPropagation(); onType(String(n)); }}>{n}</button>)}
@@ -5049,6 +5057,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         onBackspace={kbBackspace}
         onAdjust={kbAdjust}
         onConfirm={kbConfirm}
+        confirmDisabled={
+          ((kbField?.setIdx === 'drop' || kbField?.setIdx === 'myo') && kbField?.field === 'reps') ||
+          (lpTarget?.exIdx === exIdx && lpTarget?.setIdx === kbField?.setIdx && (kbField?.field === 'reps' || kbField?.field === 'repsR'))
+        }
         onDismiss={() => { kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false; setKbField(null); setKbRaw(''); setKbFresh(false); armKbShield(); }}
         onPlateCalc={() => setPlateCalcOpen(true)}
       />
