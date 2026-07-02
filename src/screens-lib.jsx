@@ -2927,34 +2927,90 @@ function SessionEditSheet({ session, duration, exercises, onClose, onSave }) {
 }
 
 // ─── SESSION COMPARE ───────────────────────────────────────────────────
-// Set-string formatting shared with ComparisonScreen below (that one compares
-// against a coach-fetched last_session_entries snapshot; this one compares two
-// full store sessions directly, so the logic is duplicated rather than shared
-// — different data shapes). Split into { main, extra } — a drop/myo/partial
-// set's extra drops render on their own row underneath rather than crammed
-// into the 100px-wide compare column.
-function splitCompareSet(st) {
-  if (!st) return { main: '—', extra: null };
-  if (st.skipped && !st.done) return { main: 'skipped', extra: null };
-  const drops = st.drops && (Array.isArray(st.drops) ? st.drops.length > 0 : st.drops.partials) ? st.drops : null;
-  if (st.technique === 'drop' && Array.isArray(drops)) {
-    const main = `${drops[0]?.kg ?? '—'}${UI.unit()}×${drops[0]?.reps ?? '—'}`;
-    const rest = drops.slice(1).map(d => `${d.kg ?? '—'}${UI.unit()}×${d.reps ?? '—'}`).join(' → ');
-    return { main, extra: rest ? `↓ ${rest}` : null };
-  }
-  if ((st.technique === 'myorep' || st.technique === 'myorep_match') && Array.isArray(drops)) {
-    const total = drops.reduce((a, d) => a + (d.reps || 0), 0);
-    const main = `${drops[0]?.kg ?? '—'}${UI.unit()}×${drops[0]?.reps ?? '—'}`;
-    const rest = drops.slice(1).map(d => d.reps ?? '—').join(' ↺ ');
-    return { main, extra: rest ? `↺ ${rest} (${total})` : null };
-  }
+// Plain (non-technique) set formatting for the compact compare grid row.
+// Technique sets (drop/myorep/myorep_match/lengthened_partial) render via
+// TechniqueBlock below instead — this is only the fallback text used when
+// the *other* side of a comparison is plain while this side has a technique.
+function fmtCompareSet(st) {
+  if (!st) return '—';
+  if (st.skipped && !st.done) return 'skipped';
+  const repsStr = (st.repsL != null || st.repsR != null) ? `L${st.repsL ?? '?'}/R${st.repsR ?? '?'}` : (st.reps ?? '—');
+  return `${st.kg != null ? st.kg + UI.unit() : '—'} × ${repsStr}`;
+}
+
+const isTechniqueSet = (st) => !!st && !!st.technique;
+
+// Badge + connected chips for a drop/myo/myo-match/lengthened-partial set —
+// same visual language as SessionDetailScreen's per-set chip rendering
+// (colored rail, badge tag, bordered chips joined by →/↺, Total chip for
+// myo variants). `dim` shrinks and neutralizes it for secondary/compared-side
+// use; `highlight`/`decline` only apply to the primary (today) side.
+function TechniqueBlock({ st, highlight = false, decline = false, dim = false }) {
+  if (!st || !st.technique) return null;
+  const railColor = dim ? UI.hair : highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.4)' : 'rgba(var(--accent-rgb),0.35)';
+  const badgeColor = dim ? UI.inkFaint : highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.85)' : UI.inkFaint;
+  const badgeBg = dim ? 'transparent' : highlight ? UI.goldFaint : decline ? 'rgba(var(--danger-rgb),0.08)' : 'rgba(var(--accent-rgb),0.08)';
+  const badgeBorder = dim ? UI.hair : highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : 'rgba(var(--accent-rgb),0.25)';
+  const chipColor = dim ? UI.inkSoft : highlight ? UI.goldLight : decline ? 'rgba(var(--danger-rgb),0.85)' : UI.ink;
+  const chipBorder = dim ? UI.hair : highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : UI.hairStrong;
+  const chipBg = dim ? 'transparent' : highlight ? UI.goldFaint : decline ? 'rgba(var(--danger-rgb),0.08)' : 'transparent';
+  const unitColor = dim ? UI.inkFaint : highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint;
+  const fs = dim ? 10 : 12;
+  const pad = dim ? '2px 6px' : '3px 8px';
+
   if (st.technique === 'lengthened_partial') {
     const partials = st.drops?.partials || 0;
-    const main = `${st.kg != null ? st.kg + UI.unit() : '—'} × ${st.reps ?? '—'}`;
-    return { main, extra: partials > 0 ? `+${partials} partials` : null };
+    return (
+      <div style={{ width: '100%', borderLeft: `2px solid ${railColor}`, paddingLeft: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+          <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: badgeColor, background: badgeBg, border: `0.5px solid ${badgeBorder}`, borderRadius: 4, padding: '2px 6px' }}>PARTIALS</span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
+          <span style={{ background: chipBg, border: `1px solid ${chipBorder}`, borderRadius: 4, padding: pad, fontFamily: UI.fontNum, fontSize: fs, color: chipColor }}>
+            {st.kg ?? '—'}<span style={{ color: unitColor, fontSize: fs - 2 }}>{UI.unit()}</span><span style={{ color: unitColor, margin: '0 1px' }}>×</span>{st.reps ?? '—'}
+          </span>
+          {partials > 0 && <span style={{ color: UI.inkGhost, fontSize: 10, fontFamily: UI.fontUi }}>+</span>}
+          {partials > 0 && <span style={{ border: `1px solid ${dim ? UI.hair : 'rgba(var(--accent-rgb),0.35)'}`, borderRadius: 4, padding: pad, fontFamily: UI.fontNum, fontSize: fs, color: UI.inkSoft }}>{partials}<span style={{ fontFamily: UI.fontUi, fontSize: 9, color: UI.inkFaint, marginLeft: 3 }}>partials</span></span>}
+        </div>
+      </div>
+    );
   }
-  const repsStr = (st.repsL != null || st.repsR != null) ? `L${st.repsL ?? '?'}/R${st.repsR ?? '?'}` : (st.reps ?? '—');
-  return { main: `${st.kg != null ? st.kg + UI.unit() : '—'} × ${repsStr}`, extra: null };
+
+  const isMyo = st.technique === 'myorep' || st.technique === 'myorep_match';
+  const badgeLabel = st.technique === 'drop' ? 'DROP SET' : st.technique === 'myorep_match' ? 'MYO MATCH' : 'MYO-REPS';
+  const drops = (st.drops && Array.isArray(st.drops) && st.drops.length > 0) ? st.drops : (st.kg != null ? [{ kg: st.kg, reps: st.reps }] : []);
+
+  return (
+    <div style={{ width: '100%', borderLeft: `2px solid ${railColor}`, paddingLeft: 10 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+        <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: badgeColor, background: badgeBg, border: `0.5px solid ${badgeBorder}`, borderRadius: 4, padding: '2px 6px' }}>{badgeLabel}</span>
+      </div>
+      <div style={{ display: isMyo ? 'inline-flex' : 'flex', flexDirection: isMyo ? 'column' : 'row', gap: 4 }}>
+        <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
+          {drops.map((d, di) => (
+            <React.Fragment key={di}>
+              {di > 0 && <span style={{ color: UI.inkGhost, fontSize: 10, fontFamily: UI.fontUi }}>{isMyo ? '↺' : '→'}</span>}
+              <span style={{
+                background: di === 0 ? chipBg : 'transparent',
+                border: `1px solid ${di === 0 || !isMyo ? chipBorder : UI.hair}`,
+                borderRadius: 4, padding: pad, fontFamily: UI.fontNum, fontSize: fs,
+                color: di === 0 || !isMyo ? chipColor : UI.inkSoft,
+                opacity: di === 0 ? 1 : (isMyo ? 0.7 : 0.75),
+              }}>
+                {(di === 0 || !isMyo) && <>{d.kg ?? '—'}<span style={{ color: unitColor, fontSize: fs - 2 }}>{UI.unit()}</span><span style={{ color: unitColor, margin: '0 1px' }}>×</span></>}
+                {d.reps ?? '—'}
+              </span>
+            </React.Fragment>
+          ))}
+        </div>
+        {isMyo && (() => { const t = drops.reduce((a, d) => a + (d.reps || 0), 0); return t > 0 ? (
+          <div style={{ border: `1px solid ${dim ? UI.hair : 'var(--accent)'}`, borderRadius: 4, padding: pad, fontFamily: UI.fontUi, fontSize: fs - 1, color: dim ? UI.inkFaint : 'var(--accent)', letterSpacing: '0.03em' }}>
+            Total {t}
+          </div>
+        ) : null; })()}
+      </div>
+    </div>
+  );
 }
 
 function SessionCompareScreen({ store, setStore, go, sessionId, compareId, back }) {
@@ -3204,39 +3260,50 @@ function SessionCompareScreen({ store, setStore, go, sessionId, compareId, back 
                     const icon = !curr ? '−' : !prev ? '+' : currSkipped && prevDone ? '↓' : curr && !currSkipped && prev?.skipped && !prev?.done ? '↑' : improved ? '↑' : declined ? '↓' : '—';
                     const iconColor = (improved || (!prev && curr && !curr.skipped) || (curr && !curr.skipped && prev?.skipped)) ? 'var(--accent)'
                       : declined ? UI.danger : UI.inkFaint;
-                    const currParts = splitCompareSet(curr);
-                    const prevParts = splitCompareSet(prev);
-                    const hasExtra = !!(currParts.extra || prevParts.extra);
                     const isLastSet = si === maxLen - 1;
-                    return (
-                      <div key={si}>
-                        <div style={{
-                          display: 'grid', gridTemplateColumns: '20px 1fr 100px 18px',
-                          alignItems: 'center', gap: 10, padding: '6px 0',
-                          borderBottom: (!hasExtra && !isLastSet) ? `0.5px solid ${UI.hair}` : 'none',
-                        }}>
-                          <span className="num" style={{ fontSize: 11, color: UI.inkFaint }}>{si + 1}</span>
-                          <span className="num" style={{ fontSize: 14, color: curr && (!curr.skipped || curr.done) ? UI.ink : UI.inkFaint }}>
-                            {currParts.main}
-                          </span>
-                          <span className="num" style={{ fontSize: 13, color: UI.inkFaint, textAlign: 'right' }}>
-                            {prevParts.main}
-                          </span>
-                          <span style={{ fontSize: 14, color: iconColor, textAlign: 'right' }}>{icon}</span>
-                        </div>
-                        {hasExtra && (
-                          <div style={{
-                            display: 'grid', gridTemplateColumns: '20px 1fr 100px 18px', gap: 10,
-                            padding: '4px 0 6px',
-                            borderTop: `0.5px solid ${UI.hair}`,
-                            borderBottom: !isLastSet ? `0.5px solid ${UI.hair}` : 'none',
-                          }}>
-                            <span />
-                            <span className="num" style={{ fontSize: 11, color: UI.inkFaint }}>{currParts.extra || ''}</span>
-                            <span className="num" style={{ fontSize: 11, color: UI.inkFaint, textAlign: 'right' }}>{prevParts.extra || ''}</span>
-                            <span />
+                    const rowBorder = !isLastSet ? `0.5px solid ${UI.hair}` : 'none';
+
+                    // Drop/myo/myo-match/partials get the same badge+chip
+                    // treatment as SessionDetailScreen, full width — too
+                    // wide/variable to fit the 100px compare column.
+                    if (isTechniqueSet(curr) || isTechniqueSet(prev)) {
+                      return (
+                        <div key={si} style={{ padding: '8px 0', borderBottom: rowBorder }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                            <span className="num" style={{ fontSize: 11, color: UI.inkFaint }}>SET {si + 1}</span>
+                            <span style={{ fontSize: 14, color: iconColor }}>{icon}</span>
                           </div>
-                        )}
+                          {isTechniqueSet(curr) ? (
+                            <TechniqueBlock st={curr} highlight={improved} decline={declined} />
+                          ) : (
+                            <div className="num" style={{ fontSize: 14, color: curr && (!curr.skipped || curr.done) ? UI.ink : UI.inkFaint }}>{fmtCompareSet(curr)}</div>
+                          )}
+                          <div style={{ marginTop: 8, paddingTop: 8, borderTop: `0.5px solid ${UI.hair}` }}>
+                            <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>{fmtDate(cmp.date, { day: 'numeric', month: 'short' }).toUpperCase()}</div>
+                            {isTechniqueSet(prev) ? (
+                              <TechniqueBlock st={prev} dim />
+                            ) : (
+                              <div className="num" style={{ fontSize: 13, color: UI.inkFaint }}>{fmtCompareSet(prev)}</div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <div key={si} style={{
+                        display: 'grid', gridTemplateColumns: '20px 1fr 100px 18px',
+                        alignItems: 'center', gap: 10, padding: '6px 0',
+                        borderBottom: rowBorder,
+                      }}>
+                        <span className="num" style={{ fontSize: 11, color: UI.inkFaint }}>{si + 1}</span>
+                        <span className="num" style={{ fontSize: 14, color: curr && (!curr.skipped || curr.done) ? UI.ink : UI.inkFaint }}>
+                          {fmtCompareSet(curr)}
+                        </span>
+                        <span className="num" style={{ fontSize: 13, color: UI.inkFaint, textAlign: 'right' }}>
+                          {fmtCompareSet(prev)}
+                        </span>
+                        <span style={{ fontSize: 14, color: iconColor, textAlign: 'right' }}>{icon}</span>
                       </div>
                     );
                   })}
