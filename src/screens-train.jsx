@@ -692,14 +692,20 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // they're seeded onto at most one exercise for the whole session, unrelated
   // to superset rounds, so a cross-exercise focus jump should skip straight to
   // real working sets.
-  const firstOpenWorkingFocus = (e) => {
+  const firstOpenWorkingFocus = (e, skipWeightIfFilled) => {
     if (!e || e.isCardio) return null;
     const idx = (e.sets || []).findIndex(s => !s.warmup && !s.done && !s.skipped);
     if (idx < 0) return null;
     const ex = store.exercises?.find(x => x.id === e.exId);
     const noWeight = !!ex?.no_weight_reps;
     const uni = (ex?.movement_type ?? (ex?.unilateral ? 'unilateral' : 'bilateral')) === 'unilateral';
-    return { setIdx: idx, field: noWeight ? (uni ? 'repsL' : 'reps') : 'kg' };
+    const repsField = uni ? 'repsL' : 'reps';
+    // Same "don't re-enter an already-correct weight" skip as nextOwnFocus,
+    // applied across an exercise/superset-partner switch too.
+    if (!noWeight && skipWeightIfFilled && e.sets[idx]?.kg != null) {
+      return { setIdx: idx, field: repsField };
+    }
+    return { setIdx: idx, field: noWeight ? repsField : 'kg' };
   };
   // Next undone/unskipped set of THIS SAME exercise (any type, including a
   // following warmup) — used when navigation stays put, so the field type
@@ -739,6 +745,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // pending, jumping to it mid-round for no reason and blocking the
     // round/group from ever reading as complete.
     const resolved = (s) => !!s && (s.done || s.skipped);
+    const noTechnique = !entry.sets[setIdx]?.technique;
     if (group && !entry.sets[setIdx]?.warmup) {
       const workingIdx = entry.sets.slice(0, setIdx + 1).filter(s => !s.warmup).length - 1;
       const partnerWorkingSets = (e) => (e.sets || []).filter(s => !s.warmup);
@@ -746,7 +753,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       const nextPartner = partners.find(({ e }) => !resolved(partnerWorkingSets(e)[workingIdx]));
       if (nextPartner) {
         // Mid-round: jump to partner, no rest
-        if (advanceFocus) pendingFocusRef.current = firstOpenWorkingFocus(nextPartner.e);
+        if (advanceFocus) pendingFocusRef.current = firstOpenWorkingFocus(nextPartner.e, noTechnique);
         setTimeout(() => updateSession(sess => ({ ...sess, currentExIdx: nextPartner.i })), 300);
       } else {
         // Round complete: start rest
@@ -755,7 +762,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         if (allGroupDone) {
           const lastGroupIdx = Math.max(...session.entries.map((e, i) => e.supersetGroup === group ? i : -1));
           const nextAfterGroup = lastGroupIdx + 1 < session.entries.length ? session.entries[lastGroupIdx + 1] : null;
-          if (advanceFocus && nextAfterGroup) pendingFocusRef.current = firstOpenWorkingFocus(nextAfterGroup);
+          if (advanceFocus && nextAfterGroup) pendingFocusRef.current = firstOpenWorkingFocus(nextAfterGroup, noTechnique);
           setTimeout(() => {
             if (lastGroupIdx + 1 >= session.entries.length) setFinishOpen(true);
             else updateSession(sess => ({ ...sess, currentExIdx: lastGroupIdx + 1 }));
@@ -766,7 +773,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             i === exIdx ? !updatedSets.every(resolved) : partnerWorkingSets(e).some(s => !resolved(s))
           );
           if (firstIncomplete) {
-            if (advanceFocus) pendingFocusRef.current = firstOpenWorkingFocus(firstIncomplete.i === exIdx ? { ...entry, sets: updatedSets } : firstIncomplete.e);
+            if (advanceFocus) pendingFocusRef.current = firstOpenWorkingFocus(firstIncomplete.i === exIdx ? { ...entry, sets: updatedSets } : firstIncomplete.e, noTechnique);
             setTimeout(() => updateSession(sess => ({ ...sess, currentExIdx: firstIncomplete.i })), 600);
           }
         }
@@ -777,7 +784,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       }
       if (updatedSets.every(resolved)) {
         const nextEntry = session.entries[exIdx + 1];
-        if (advanceFocus && nextEntry) pendingFocusRef.current = firstOpenWorkingFocus(nextEntry);
+        if (advanceFocus && nextEntry) pendingFocusRef.current = firstOpenWorkingFocus(nextEntry, noTechnique);
         setTimeout(() => navigate(1), Math.max(600, overlayHoldMs));
       } else if (advanceFocus) {
         const focus = nextOwnFocus(updatedSets, setIdx);
