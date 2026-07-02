@@ -2930,35 +2930,44 @@ function SessionEditSheet({ session, duration, exercises, onClose, onSave }) {
 // Set-string formatting shared with ComparisonScreen below (that one compares
 // against a coach-fetched last_session_entries snapshot; this one compares two
 // full store sessions directly, so the logic is duplicated rather than shared
-// — different data shapes).
-function fmtCompareSet(st) {
-  if (!st) return '—';
-  if (st.skipped && !st.done) return 'skipped';
+// — different data shapes). Split into { main, extra } — a drop/myo/partial
+// set's extra drops render on their own row underneath rather than crammed
+// into the 100px-wide compare column.
+function splitCompareSet(st) {
+  if (!st) return { main: '—', extra: null };
+  if (st.skipped && !st.done) return { main: 'skipped', extra: null };
   const drops = st.drops && (Array.isArray(st.drops) ? st.drops.length > 0 : st.drops.partials) ? st.drops : null;
   if (st.technique === 'drop' && Array.isArray(drops)) {
-    return drops.map(d => `${d.kg ?? '—'}${UI.unit()}×${d.reps ?? '—'}`).join(' → ');
+    const main = `${drops[0]?.kg ?? '—'}${UI.unit()}×${drops[0]?.reps ?? '—'}`;
+    const rest = drops.slice(1).map(d => `${d.kg ?? '—'}${UI.unit()}×${d.reps ?? '—'}`).join(' → ');
+    return { main, extra: rest ? `↓ ${rest}` : null };
   }
   if ((st.technique === 'myorep' || st.technique === 'myorep_match') && Array.isArray(drops)) {
     const total = drops.reduce((a, d) => a + (d.reps || 0), 0);
-    const chain = drops.map((d, di) => di === 0 ? `${d.kg ?? '—'}${UI.unit()}×${d.reps ?? '—'}` : (d.reps ?? '—')).join(' ↺ ');
-    return `${chain} (${total})`;
+    const main = `${drops[0]?.kg ?? '—'}${UI.unit()}×${drops[0]?.reps ?? '—'}`;
+    const rest = drops.slice(1).map(d => d.reps ?? '—').join(' ↺ ');
+    return { main, extra: rest ? `↺ ${rest} (${total})` : null };
   }
   if (st.technique === 'lengthened_partial') {
     const partials = st.drops?.partials || 0;
     const main = `${st.kg != null ? st.kg + UI.unit() : '—'} × ${st.reps ?? '—'}`;
-    return partials > 0 ? `${main} +${partials} partials` : main;
+    return { main, extra: partials > 0 ? `+${partials} partials` : null };
   }
   const repsStr = (st.repsL != null || st.repsR != null) ? `L${st.repsL ?? '?'}/R${st.repsR ?? '?'}` : (st.reps ?? '—');
-  return `${st.kg != null ? st.kg + UI.unit() : '—'} × ${repsStr}`;
+  return { main: `${st.kg != null ? st.kg + UI.unit() : '—'} × ${repsStr}`, extra: null };
 }
 
 function SessionCompareScreen({ store, setStore, go, sessionId, compareId, back }) {
   const [pickerOpen, setPickerOpen] = useStateL(false);
   const [capturing, setCapturing] = useStateL(false);
   const captureRef = useRefL(null);
-  // Screenshot watermark: VIPs get their home-screen background image instead of the default ZANE mark.
-  const _shotLogo = store.settings?.vipBackground || 'icons/zane-logo-2.png';
-  const _shotIsCustom = _shotLogo !== 'icons/zane-logo-2.png';
+  // Screenshot background: same treatment as the HomeScreen watermark — VIPs
+  // get their custom image, everyone else the faint centered ZANE mark.
+  const _shotLogo = store.settings?.vipBackground || 'icons/zane-logo.png';
+  const _shotIsCustom = _shotLogo !== 'icons/zane-logo.png';
+  const _shotIsLight = (store.settings?.darkMode ?? 'dark') === 'light';
+  const _shotDefaultStyle = { width: '85%', maxWidth: 320, opacity: _shotIsLight ? 0.14 : 0.04, filter: _shotIsLight ? 'grayscale(1)' : 'grayscale(1) brightness(3)', objectFit: 'contain' };
+  const _shotCustomStyle = { width: '92%', maxWidth: 360, opacity: 0.16, objectFit: 'contain' };
   const s = store.sessions.find(x => x.id === sessionId);
   const candidates = s ? sameDaySessions(store.sessions, s) : [];
   const cmp = (compareId && store.sessions.find(x => x.id === compareId)) || candidates[0] || null;
@@ -2996,8 +3005,33 @@ function SessionCompareScreen({ store, setStore, go, sessionId, compareId, back 
   const entries = s.entries.filter(e => !isEntryCardio(e));
   const extraCmpEntries = cmp.entries.filter(e => !isEntryCardio(e) && !s.entries.some(se => se.exId === e.exId));
 
+  // Group consecutive same-supersetGroup entries — same grouping SessionDetailScreen uses.
+  const groups = [];
+  {
+    let idx = 0;
+    while (idx < entries.length) {
+      const e = entries[idx];
+      if (e.supersetGroup) {
+        const members = [{ entry: e, idx }];
+        let j = idx + 1;
+        while (j < entries.length && entries[j].supersetGroup === e.supersetGroup) {
+          members.push({ entry: entries[j], idx: j });
+          j++;
+        }
+        groups.push({ type: 'superset', members });
+        idx = j;
+      } else {
+        groups.push({ type: 'standalone', entry: e, idx });
+        idx++;
+      }
+    }
+  }
+
   // Same html2canvas flow as SessionDetailScreen's takeScreenshot — kept in
-  // lockstep with that one (imperative KnurlCanvas draw + avatar watermark).
+  // lockstep with that one (imperative KnurlCanvas draw). The watermark here
+  // is a full-page centered background (HomeScreen-style) rather than a
+  // foreground corner mark, so unlike SessionDetailScreen there's no need to
+  // measure/dodge it — knurl dividers always draw full width.
   const takeScreenshot = async () => {
     if (!captureRef.current) return;
     const html2canvas = await window.__ensureHtml2Canvas?.().catch(() => null);
@@ -3017,19 +3051,9 @@ function SessionCompareScreen({ store, setStore, go, sessionId, compareId, back 
       });
       await new Promise(r => requestAnimationFrame(r));
     }
-    const avatarRect = (avatarEl && avatarEl.getBoundingClientRect().height) ? avatarEl.getBoundingClientRect() : null;
-    const KNURL_GAP = 14;
     captureRef.current.querySelectorAll('canvas[data-knurl]').forEach(c => {
-      const pw = c.parentElement ? c.parentElement.offsetWidth : 320;
-      let w = pw;
-      if (avatarRect) {
-        const r = c.getBoundingClientRect();
-        if (r.bottom > avatarRect.top && r.top < avatarRect.bottom) {
-          w = Math.min(w, Math.round(pw - (r.right - avatarRect.left) - KNURL_GAP));
-        }
-      }
+      const w = c.parentElement ? c.parentElement.offsetWidth : 320;
       if (w <= 0) return;
-      if (w < pw) c.style.width = w + 'px';
       c.width = w; c.height = 3;
       const ctx = c.getContext('2d');
       const knurlRgb = getComputedStyle(document.documentElement).getPropertyValue('--knurl-rgb').trim() || '236,228,208';
@@ -3087,7 +3111,16 @@ function SessionCompareScreen({ store, setStore, go, sessionId, compareId, back 
       />
       <Hairline />
 
-      <div ref={captureRef} style={{ padding: capturing ? '20px 22px 24px' : '14px 22px 28px', display: 'flex', flexDirection: 'column', gap: 18, background: UI.bg }}>
+      <div ref={captureRef} style={{ padding: capturing ? '20px 22px 24px' : '14px 22px 28px', background: UI.bg, position: 'relative' }}>
+
+        {/* Screenshot background watermark — centered, faint, full document (HomeScreen-style) */}
+        {capturing && (
+          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', zIndex: 0, overflow: 'hidden' }}>
+            <img src={_shotLogo} data-shot-avatar="1" style={_shotIsCustom ? _shotCustomStyle : _shotDefaultStyle} />
+          </div>
+        )}
+
+        <div style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', gap: 18 }}>
 
         {/* Screenshot-only header */}
         {capturing && (
@@ -3123,7 +3156,7 @@ function SessionCompareScreen({ store, setStore, go, sessionId, compareId, back 
           </button>
         </div>
 
-        <div className="micro" style={{ textAlign: 'center', marginTop: -8, color: volDelta >= 0 ? UI.gold : UI.inkFaint }}>
+        <div className="micro" style={{ textAlign: 'center', marginTop: -8, color: volDelta >= 0 ? UI.gold : UI.danger }}>
           {volDelta >= 0 ? '↑' : '↓'} {Math.abs(Math.round(volDelta)).toLocaleString('en-US')} {UI.unit()} total volume
           {cmp.isDeload && <span style={{ color: UI.inkFaint }}> · compared session was a deload week</span>}
         </div>
@@ -3131,9 +3164,9 @@ function SessionCompareScreen({ store, setStore, go, sessionId, compareId, back 
         {capturing ? <KnurlCanvas /> : <div className="knurl" />}
 
         {/* Exercise entries */}
-        <div style={{ position: 'relative' }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            {entries.map((entry, ei) => {
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {(() => {
+            const renderEntry = (entry, ei) => {
               const cmpEntry = cmp.entries.find(e => e.exId === entry.exId);
               const sets = (entry.sets || []).filter(st => !st.warmup);
               const cmpSets = (cmpEntry?.sets || []).filter(st => !st.warmup);
@@ -3146,7 +3179,7 @@ function SessionCompareScreen({ store, setStore, go, sessionId, compareId, back 
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8, gap: 10 }}>
                     <span style={{ fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, letterSpacing: '0.05em', color: UI.ink }}>{entry.name}</span>
                     {cmpEntry ? (
-                      <span className="num" style={{ fontSize: 12, color: entryDelta >= 0 ? UI.gold : UI.inkFaint, flexShrink: 0 }}>
+                      <span className="num" style={{ fontSize: 12, color: entryDelta >= 0 ? UI.gold : UI.danger, flexShrink: 0 }}>
                         {entryDelta >= 0 ? '↑' : '↓'} {Math.abs(Math.round(entryDelta)).toLocaleString('en-US')} {UI.unit()}
                       </span>
                     ) : (
@@ -3171,39 +3204,69 @@ function SessionCompareScreen({ store, setStore, go, sessionId, compareId, back 
                     const icon = !curr ? '−' : !prev ? '+' : currSkipped && prevDone ? '↓' : curr && !currSkipped && prev?.skipped && !prev?.done ? '↑' : improved ? '↑' : declined ? '↓' : '—';
                     const iconColor = (improved || (!prev && curr && !curr.skipped) || (curr && !curr.skipped && prev?.skipped)) ? 'var(--accent)'
                       : declined ? UI.danger : UI.inkFaint;
+                    const currParts = splitCompareSet(curr);
+                    const prevParts = splitCompareSet(prev);
+                    const hasExtra = !!(currParts.extra || prevParts.extra);
+                    const isLastSet = si === maxLen - 1;
                     return (
-                      <div key={si} style={{
-                        display: 'grid', gridTemplateColumns: '20px 1fr 100px 18px',
-                        alignItems: 'center', gap: 10, padding: '6px 0',
-                        borderBottom: si < maxLen - 1 ? `0.5px solid ${UI.hair}` : 'none',
-                      }}>
-                        <span className="num" style={{ fontSize: 11, color: UI.inkFaint }}>{si + 1}</span>
-                        <span className="num" style={{ fontSize: 14, color: curr && (!curr.skipped || curr.done) ? UI.ink : UI.inkFaint }}>
-                          {fmtCompareSet(curr)}
-                        </span>
-                        <span className="num" style={{ fontSize: 13, color: UI.inkFaint, textAlign: 'right' }}>
-                          {fmtCompareSet(prev)}
-                        </span>
-                        <span style={{ fontSize: 14, color: iconColor, textAlign: 'right' }}>{icon}</span>
+                      <div key={si}>
+                        <div style={{
+                          display: 'grid', gridTemplateColumns: '20px 1fr 100px 18px',
+                          alignItems: 'center', gap: 10, padding: '6px 0',
+                          borderBottom: (!hasExtra && !isLastSet) ? `0.5px solid ${UI.hair}` : 'none',
+                        }}>
+                          <span className="num" style={{ fontSize: 11, color: UI.inkFaint }}>{si + 1}</span>
+                          <span className="num" style={{ fontSize: 14, color: curr && (!curr.skipped || curr.done) ? UI.ink : UI.inkFaint }}>
+                            {currParts.main}
+                          </span>
+                          <span className="num" style={{ fontSize: 13, color: UI.inkFaint, textAlign: 'right' }}>
+                            {prevParts.main}
+                          </span>
+                          <span style={{ fontSize: 14, color: iconColor, textAlign: 'right' }}>{icon}</span>
+                        </div>
+                        {hasExtra && (
+                          <div style={{
+                            display: 'grid', gridTemplateColumns: '20px 1fr 100px 18px', gap: 10,
+                            padding: '4px 0 6px',
+                            borderTop: `0.5px solid ${UI.hair}`,
+                            borderBottom: !isLastSet ? `0.5px solid ${UI.hair}` : 'none',
+                          }}>
+                            <span />
+                            <span className="num" style={{ fontSize: 11, color: UI.inkFaint }}>{currParts.extra || ''}</span>
+                            <span className="num" style={{ fontSize: 11, color: UI.inkFaint, textAlign: 'right' }}>{prevParts.extra || ''}</span>
+                            <span />
+                          </div>
+                        )}
                       </div>
                     );
                   })}
-                  {ei < entries.length - 1 && (capturing ? <KnurlCanvas style={{ marginTop: 14 }} /> : <Hairline style={{ marginTop: 14 }} />)}
                 </div>
               );
-            })}
-          </div>
-          {capturing && (
-            <img src={_shotLogo} data-shot-avatar="1" style={{ position: 'absolute', bottom: 2, right: 0, width: 90, opacity: 0.5, zIndex: 1, transform: _shotIsCustom ? 'none' : 'scaleX(-1)' }} />
-          )}
-          {capturing && <div style={{ height: '0.5px', background: UI.gold, marginTop: 10 }} />}
+            };
+
+            return groups.map((g, gi) => (
+              <div key={gi}>
+                {g.type === 'superset' ? (
+                  <div style={{ borderLeft: `2px solid ${UI.goldSoft}`, paddingLeft: 12 }}>
+                    <div className="micro" style={{ color: UI.gold, marginBottom: 10, letterSpacing: '0.12em' }}>{g.members.length >= 3 ? 'GIANT SET' : 'SUPERSET'}</div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                      {g.members.map(({ entry: e, idx: i }) => renderEntry(e, i))}
+                    </div>
+                  </div>
+                ) : renderEntry(g.entry, g.idx)}
+                {gi < groups.length - 1 && (capturing ? <KnurlCanvas style={{ marginTop: 14 }} /> : <Hairline style={{ marginTop: 14 }} />)}
+              </div>
+            ));
+          })()}
         </div>
+        {capturing && <div style={{ height: '0.5px', background: UI.gold, marginTop: -4 }} />}
 
         {extraCmpEntries.length > 0 && !capturing && (
           <div className="micro" style={{ color: UI.inkFaint, marginTop: -10 }}>
             + {extraCmpEntries.length} exercise(s) only in the compared session
           </div>
         )}
+        </div>
       </div>
 
       <Sheet open={pickerOpen} onClose={() => setPickerOpen(false)} title={s.dayName}>
