@@ -2488,7 +2488,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
         )}
 
         {/* Compare to another session of this same day */}
-        {!capturing && !justFinished && compareCandidates.length > 0 && (
+        {!capturing && compareCandidates.length > 0 && (
           <Btn kind="ghost" onClick={() => go({ name: 'compare', sessionId: s.id, back: { name: 'session', sessionId: s.id, back } })} style={{ width: '100%', marginTop: -8 }}>
             <i className="fa-solid fa-code-compare" style={{ marginRight: 8 }} /> Compare to another session
           </Btn>
