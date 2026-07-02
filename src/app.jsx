@@ -1087,6 +1087,9 @@ function App() {
   if (phase === 'error') return <ErrorScreen onRetry={() => window.location.reload()} />;
 
   const go    = (r) => setRoute(r);
+  // Global hook so shared components (TopBar/ScreenHead long-press-to-home)
+  // can jump home without threading `go` through every screen that renders them.
+  window.__goHome = () => go({ name: 'home' });
   const onRetrySync = () => { setStorageFull(false); flushSync(userId); };
 
   const props = { store, setStore, go, userId, syncStatus, storageFull, onRetrySync };

@@ -41,8 +41,40 @@ function Screen({ children, scroll = true, style = {} }) {
   );
 }
 
+// Long-press (500ms) on a screen title jumps home — a fast way out of deep
+// screens (Settings sub-views, Coaching, History, ...) without repeated
+// back-taps. window.__goHome is wired once in app.jsx's root component so
+// this shared component doesn't need `go` threaded through every screen.
+// Cancels if the finger moves (scroll) or lifts early.
+function useLongPressHome() {
+  const [pressing, setPressing] = React.useState(false);
+  const timerRef = React.useRef(null);
+  const startPos = React.useRef(null);
+  const clear = () => {
+    if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; }
+    setPressing(false);
+  };
+  const onPointerDown = (e) => {
+    if (!window.__goHome) return;
+    startPos.current = { x: e.clientX, y: e.clientY };
+    clear();
+    setPressing(true);
+    timerRef.current = setTimeout(() => {
+      timerRef.current = null;
+      setPressing(false);
+      window.__goHome?.();
+    }, 500);
+  };
+  const onPointerMove = (e) => {
+    if (!timerRef.current || !startPos.current) return;
+    if (Math.hypot(e.clientX - startPos.current.x, e.clientY - startPos.current.y) > 10) clear();
+  };
+  return { pressing, handlers: { onPointerDown, onPointerMove, onPointerUp: clear, onPointerCancel: clear, onPointerLeave: clear } };
+}
+
 // ─── TopBar ─────────────────────────────────────────────────────────
 function TopBar({ title, sub, onBack, right }) {
+  const { pressing, handlers } = useLongPressHome();
   return (
     <div style={{
       flexShrink: 0,
@@ -68,10 +100,12 @@ function TopBar({ title, sub, onBack, right }) {
           {sub && (
             <div className="micro" style={{ marginBottom: 2 }}>{typeof sub === 'string' ? sub.toUpperCase() : sub}</div>
           )}
-          <div style={{
+          <div {...handlers} style={{
             fontFamily: UI.fontDisplay, fontSize: 30, fontWeight: 700,
             color: UI.ink, lineHeight: 1, letterSpacing: '0.04em', textTransform: 'uppercase',
             whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+            opacity: pressing ? 0.5 : 1, transition: 'opacity 0.15s',
+            WebkitTapHighlightColor: 'transparent', userSelect: 'none', touchAction: 'manipulation',
           }}>{title}</div>
         </div>
         {right}
@@ -806,6 +840,7 @@ function Bezel({ children, style = {} }) {
 
 // Screen header for detail views
 function ScreenHead({ ref_, title, sub, right, onBack, style = {} }) {
+  const { pressing, handlers } = useLongPressHome();
   return (
     <div style={{
       flexShrink: 0, padding: 'calc(env(safe-area-inset-top, 0px) + 18px) 22px 14px',
@@ -827,7 +862,11 @@ function ScreenHead({ ref_, title, sub, right, onBack, style = {} }) {
             <svg width="9" height="14" viewBox="0 0 9 14" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M7 1 1 7l6 6"/></svg>
           </button>
         )}
-        <div style={{ flex: 1, fontFamily: UI.fontDisplay, fontSize: 32, fontWeight: 700, lineHeight: 1, color: UI.ink, letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+        <div {...handlers} style={{
+          flex: 1, fontFamily: UI.fontDisplay, fontSize: 32, fontWeight: 700, lineHeight: 1, color: UI.ink, letterSpacing: '0.04em', textTransform: 'uppercase',
+          opacity: pressing ? 0.5 : 1, transition: 'opacity 0.15s',
+          WebkitTapHighlightColor: 'transparent', userSelect: 'none', touchAction: 'manipulation',
+        }}>
           {title}
         </div>
         {right}

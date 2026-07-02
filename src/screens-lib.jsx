@@ -2711,7 +2711,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                                 {st.kg ?? '—'}<span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, fontSize: 10 }}>{UI.unit()}</span><span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, margin: '0 1px' }}>×</span>{st.reps ?? '—'}
                               </span>
                               {partials > 0 && <span style={{ color: UI.inkGhost, fontSize: 10, fontFamily: UI.fontUi }}>+</span>}
-                              {partials > 0 && <span style={{ border: `1px solid rgba(var(--accent-rgb),0.35)`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontNum, fontSize: 12, color: UI.inkSoft }}>{partials}<span style={{ fontFamily: UI.fontUi, fontSize: 9, color: UI.inkFaint, marginLeft: 3 }}>partials</span></span>}
+                              {partials > 0 && <span style={{ border: `1px solid rgba(var(--accent-rgb),0.35)`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontNum, fontSize: 12, color: UI.inkSoft }}>{partials}</span>}
                             </div>
                           </div>
                         );
@@ -2981,7 +2981,7 @@ function TechniqueBlock({ st, highlight = false, decline = false }) {
             {st.kg ?? '—'}<span style={{ color: unitColor, fontSize: 10 }}>{UI.unit()}</span><span style={{ color: unitColor, margin: '0 1px' }}>×</span>{st.reps ?? '—'}
           </span>
           {partials > 0 && <span style={{ color: UI.inkGhost, fontSize: 10, fontFamily: UI.fontUi }}>+</span>}
-          {partials > 0 && <span style={{ border: `1px solid rgba(var(--accent-rgb),0.35)`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontNum, fontSize: 12, color: UI.inkSoft }}>{partials}<span style={{ fontFamily: UI.fontUi, fontSize: 9, color: UI.inkFaint, marginLeft: 3 }}>partials</span></span>}
+          {partials > 0 && <span style={{ border: `1px solid rgba(var(--accent-rgb),0.35)`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontNum, fontSize: 12, color: UI.inkSoft }}>{partials}</span>}
         </div>
       </div>
     );
