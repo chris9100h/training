@@ -513,6 +513,10 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
   const [vipBgKey, setVipBgKey] = useStateSet('');
   const [vipBgSaving, setVipBgSaving] = useStateSet(false);
   const [vipBgMsg, setVipBgMsg] = useStateSet(null);
+  const [broadcastSheet, setBroadcastSheet] = useStateSet(false);
+  const [broadcastBody, setBroadcastBody] = useStateSet('');
+  const [broadcastSending, setBroadcastSending] = useStateSet(false);
+  const [broadcastMsg, setBroadcastMsg] = useStateSet(null);
   const isAdmin = store.user?.email === 'office@btc-prime.biz';
   // Detected/reported in app.jsx (boot, foreground, controllerchange) — this
   // screen only reads it for display, so it stays fresh even if Settings is
@@ -1114,6 +1118,19 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
         LB.fnFetch(`${LB.SUPABASE_URL}/functions/v1/zane_coaching-notify`, { coachingId: supportTicket.coachingId, preview });
       }
     } finally { setSupportAdminSending(false); }
+  };
+
+  const sendBroadcast = async () => {
+    const body = broadcastBody.trim();
+    if (!body || broadcastSending) return;
+    setBroadcastSending(true);
+    setBroadcastMsg(null);
+    try {
+      const { data, error } = await LB.supabase.rpc('admin_broadcast_message', { p_body: body });
+      if (error) { setBroadcastMsg({ ok: false, text: error.message }); return; }
+      setBroadcastMsg({ ok: true, text: `Sent to ${data} user${data === 1 ? '' : 's'}.` });
+      setBroadcastBody('');
+    } finally { setBroadcastSending(false); }
   };
 
   const saveVipBg = async () => {
@@ -2124,6 +2141,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                 </div>
                 <NavRow label="All users" hint={unseenCount > 0 ? `${unseenCount} new` : (allUsers.length ? `${allUsers.length}` : undefined)} onTap={() => setAllUsersSheet(true)} />
                 <NavRow label="VIP backgrounds" hint={vipBgList.length > 0 ? `${vipBgList.length} assigned` : 'None'} onTap={() => { setVipBgMsg(null); setVipBgSheet(true); }} />
+                <NavRow label="Message all users" onTap={() => { setBroadcastMsg(null); setBroadcastSheet(true); }} />
               </Frame>
               <div style={{ borderTop: `0.5px solid ${UI.hair}`, paddingTop: 16 }}>
                 <Btn onClick={() => setSupportInboxSheet(true)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, width: '100%', fontSize: 15, padding: '14px 16px' }}>
@@ -2136,6 +2154,34 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             </div>
           );
         })()}
+      </SettingsSheet>
+
+      {/* ══ Message all users (admin) ══ */}
+      <SettingsSheet open={broadcastSheet} onClose={() => setBroadcastSheet(false)} title="Message All Users">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginBottom: 8 }}>
+          <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1.5 }}>
+            Sends a message into every user's support ticket (creating one first if they don't have one yet) — the same inbox they already use to reach support, so it shows up even on an older app version.
+          </div>
+          <textarea
+            value={broadcastBody}
+            onChange={e => setBroadcastBody(e.target.value)}
+            placeholder="Message to send to every user…"
+            rows={5}
+            style={{
+              width: '100%', boxSizing: 'border-box', resize: 'vertical',
+              background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4,
+              padding: '10px 12px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, outline: 'none',
+            }}
+          />
+          {broadcastMsg && (
+            <div style={{ fontSize: 12, color: broadcastMsg.ok ? 'var(--accent)' : UI.danger, fontFamily: UI.fontUi, padding: '8px 12px', background: broadcastMsg.ok ? 'rgba(var(--accent-rgb),0.08)' : 'rgba(var(--danger-rgb),0.08)', borderRadius: 6 }}>
+              {broadcastMsg.text}
+            </div>
+          )}
+          <Btn onClick={sendBroadcast} disabled={!broadcastBody.trim() || broadcastSending}>
+            {broadcastSending ? 'Sending…' : 'Send to all users'}
+          </Btn>
+        </div>
       </SettingsSheet>
 
       {/* ══ VIP backgrounds sheet (admin) ══ */}

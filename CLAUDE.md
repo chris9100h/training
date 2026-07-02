@@ -216,6 +216,10 @@ Migrationen liegen in `supabase/migrations/` als nummerierte SQL-Dateien (`0001_
 
 **`enable_self_coaching()`** → `text` — legt (idempotent) eine Self-Coaching-Zeile (`coach_id = client_id = auth.uid()`, status active, id-Präfix `self_`) an und gibt deren id zurück. Aktiviert „be your own coach"
 
+**`admin_broadcast_message(p_body text)`** → `int` (nur Admin) — sendet eine Nachricht an **alle** User auf einmal, indem für jeden User (der noch keins hat) ein Support-Ticket (`support_<user_id>`) angelegt und eine `zane_coaching_notes`-Zeile vom Admin eingefügt wird. Nutzt bewusst die bestehende, bereits überall ausgelieferte Support-/Realtime-Infrastruktur (kein neuer Client-Code nötig, erreicht auch User auf altem App-Stand) statt eines neuen Banner-Systems. Gibt die Anzahl benachrichtigter User zurück. Migration 0127. Admin-UI: Settings → Admin → „Message all users".
+
+**Grant-Falle bei neuen SECURITY-DEFINER-Funktionen:** Postgres vergibt beim `CREATE FUNCTION` automatisch `EXECUTE` an die Pseudo-Rolle `PUBLIC` — davon erbt auch `anon`, **unabhängig** von einem gezielten `REVOKE ... FROM anon` (das war der Fehler in Migration 0125, korrigiert in 0128). Jede neue SECURITY-DEFINER-Funktion braucht explizit `REVOKE EXECUTE ON FUNCTION ... FROM PUBLIC` + `GRANT EXECUTE ON FUNCTION ... TO authenticated` (Ausnahme: rein intern aufgerufene Funktionen wie `find_user_by_email` bekommen kein Grant für `authenticated`).
+
 **Realtime:** `zane_coaching` und `zane_coaching_notes` sind in der `supabase_realtime`-Publikation — ermöglicht Live-Coaching-Einladungen und -Nachrichten. **Cross-Device Live-Sync laufender Sessions wurde entfernt** (der lokale Store ist die alleinige Quelle für eine laufende Session; ein Coach sieht die Live-Session eines Clients per Polling via `get_active_session_detail`, nicht über Realtime). `subscribeToChanges(userId, onCoachingNote, onCoachingInvite)` abonniert nur noch die Coaching-Tabellen.
 
 ## History-Windowing (Boot lädt nicht mehr die ganze Historie)
