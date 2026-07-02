@@ -3284,7 +3284,7 @@ function SessionCompareScreen({ store, setStore, go, sessionId, compareId, back 
                             {fmtCompareSet(curr)}
                           </span>
                         )}
-                        <span className="num" style={{ fontSize: 13, color: UI.inkFaint, textAlign: 'right' }}>
+                        <span className="num" style={{ fontSize: 13, color: UI.inkFaint, textAlign: 'right', background: UI.bgInset, borderRadius: 4, padding: '3px 8px' }}>
                           {fmtCompareSet(prev)}
                         </span>
                         <span style={{ fontSize: 14, color: iconColor, textAlign: 'right' }}>{icon}</span>
