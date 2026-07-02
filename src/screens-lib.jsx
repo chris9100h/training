@@ -3264,8 +3264,12 @@ function SessionCompareScreen({ store, setStore, go, sessionId, compareId, back 
                     const anyImprovementBefore = sets.slice(0, si).some((c, j) => isImprovement(c, cmpSets[j]));
                     const currSkipped = curr?.skipped && !curr?.done;
                     const declined = !anyImprovementBefore && (isDecline(curr, prev) || ((!curr || currSkipped) && prevDone));
-                    const icon = !curr ? '−' : !prev ? '+' : currSkipped && prevDone ? '↓' : curr && !currSkipped && prev?.skipped && !prev?.done ? '↑' : improved ? '↑' : declined ? '↓' : '—';
-                    const iconColor = (improved || (!prev && curr && !curr.skipped) || (curr && !curr.skipped && prev?.skipped)) ? 'var(--accent)'
+                    // A "+" only signals a real improvement (extra set added to an
+                    // exercise you already had a baseline for) when cmpEntry exists.
+                    // If the whole exercise is new (NOT LOGGED THEN), there's nothing
+                    // to have improved on, so every set stays neutral instead of "+".
+                    const icon = !curr ? '−' : !prev ? (cmpEntry ? '+' : '—') : currSkipped && prevDone ? '↓' : curr && !currSkipped && prev?.skipped && !prev?.done ? '↑' : improved ? '↑' : declined ? '↓' : '—';
+                    const iconColor = (improved || (!prev && cmpEntry && curr && !curr.skipped) || (curr && !curr.skipped && prev?.skipped)) ? 'var(--accent)'
                       : declined ? UI.danger : UI.inkFaint;
                     const isLastSet = si === maxLen - 1;
                     const currIsTechnique = isTechniqueSet(curr);
