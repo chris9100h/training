@@ -517,6 +517,10 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
   const [broadcastBody, setBroadcastBody] = useStateSet('');
   const [broadcastSending, setBroadcastSending] = useStateSet(false);
   const [broadcastMsg, setBroadcastMsg] = useStateSet(null);
+  const [adminEmailSubject, setAdminEmailSubject] = useStateSet('');
+  const [adminEmailBody, setAdminEmailBody] = useStateSet('');
+  const [adminEmailSending, setAdminEmailSending] = useStateSet(false);
+  const [adminEmailMsg, setAdminEmailMsg] = useStateSet(null);
   const isAdmin = store.user?.email === 'office@btc-prime.biz';
   // Detected/reported in app.jsx (boot, foreground, controllerchange) — this
   // screen only reads it for display, so it stays fresh even if Settings is
@@ -1141,6 +1145,21 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       setBroadcastMsg({ ok: true, text: `Sent to ${data} user${data === 1 ? '' : 's'}.` });
       setBroadcastBody('');
     } finally { setBroadcastSending(false); }
+  };
+
+  const sendAdminEmail = async () => {
+    const subject = adminEmailSubject.trim();
+    const body = adminEmailBody.trim();
+    if (!subject || !body || adminEmailSending || !adminUserDetail?.email) return;
+    setAdminEmailSending(true);
+    setAdminEmailMsg(null);
+    try {
+      const res = await LB.adminSendEmail(adminUserDetail.email, subject, body);
+      if (!res.ok) { setAdminEmailMsg({ ok: false, text: res.error }); return; }
+      setAdminEmailMsg({ ok: true, text: `Sent to ${adminUserDetail.email}.` });
+      setAdminEmailSubject('');
+      setAdminEmailBody('');
+    } finally { setAdminEmailSending(false); }
   };
 
   const saveVipBg = async () => {
@@ -2711,6 +2730,9 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             setAdminUserDetail({ userId: u.user_id, name: u.name, email: u.email, plans: null, exercises: null });
             setAdminUserDetailLoading(true);
             setAdminUserDetailSheet(true);
+            setAdminEmailSubject('');
+            setAdminEmailBody('');
+            setAdminEmailMsg(null);
             LB.supabase.rpc('get_user_detail_admin', { p_user_id: u.user_id })
               .then(({ data, error }) => {
                 if (error || !data) { setAdminUserDetailLoading(false); return; }
@@ -2797,6 +2819,36 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           ? <div style={{ fontSize: 13, color: UI.inkFaint, fontFamily: UI.fontUi, padding: '8px 0' }}>Loading…</div>
           : adminUserDetail && (
             <div style={{ display: 'flex', flexDirection: 'column', paddingBottom: 8 }}>
+              <div className="micro" style={{ color: UI.inkGhost, paddingBottom: 8 }}>SEND EMAIL</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 20 }}>
+                <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi }}>To {adminUserDetail.email}</div>
+                <input
+                  value={adminEmailSubject}
+                  onChange={e => setAdminEmailSubject(e.target.value)}
+                  placeholder="Subject"
+                  style={{ background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '10px 12px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, outline: 'none', width: '100%', boxSizing: 'border-box' }}
+                />
+                <textarea
+                  value={adminEmailBody}
+                  onChange={e => setAdminEmailBody(e.target.value)}
+                  placeholder="Message…"
+                  rows={5}
+                  style={{
+                    width: '100%', boxSizing: 'border-box', resize: 'vertical',
+                    background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4,
+                    padding: '10px 12px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, outline: 'none',
+                  }}
+                />
+                {adminEmailMsg && (
+                  <div style={{ fontSize: 12, color: adminEmailMsg.ok ? 'var(--accent)' : UI.danger, fontFamily: UI.fontUi, padding: '8px 12px', background: adminEmailMsg.ok ? 'rgba(var(--accent-rgb),0.08)' : 'rgba(var(--danger-rgb),0.08)', borderRadius: 6 }}>
+                    {adminEmailMsg.text}
+                  </div>
+                )}
+                <Btn onClick={sendAdminEmail} disabled={!adminEmailSubject.trim() || !adminEmailBody.trim() || adminEmailSending}>
+                  {adminEmailSending ? 'Sending…' : 'Send email'}
+                </Btn>
+              </div>
+              <Hairline style={{ marginBottom: 16 }} />
               <div className="micro" style={{ color: UI.inkGhost, paddingBottom: 8 }}>PLANS</div>
               {(adminUserDetail.plans || []).length === 0
                 ? <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, fontStyle: 'italic' }}>No plans.</div>

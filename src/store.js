@@ -6,6 +6,7 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const PUSHOVER_URL          = `${SUPABASE_URL}/functions/v1/pushover`;
 const WEB_PUSH_URL          = `${SUPABASE_URL}/functions/v1/web-push`;
 const COACHING_NOTIFY_URL   = `${SUPABASE_URL}/functions/v1/zane_coaching-notify`;
+const ADMIN_SEND_EMAIL_URL  = `${SUPABASE_URL}/functions/v1/admin-send-email`;
 
 const VAPID_PUBLIC_KEY = 'BD14GEr1JXGYdRwx6kiqpZMTvbialpruEJnHUmcbxjOshGZvULZ10xqayRTt3iVCyTBWRIR5nsXNVSsP0YdKQDI';
 
@@ -1587,6 +1588,16 @@ function cancelPushover(settings, userId) {
     fnFetch(WEB_PUSH_URL, { nonce: cancelNonce, cancel: true });
   }
   navigator.serviceWorker?.controller?.postMessage({ type: 'CANCEL_REST_TIMER' });
+}
+
+// Admin-only: send a one-off email to a user via the admin-send-email edge
+// function (Resend). Resolves { ok: true } or { ok: false, error }; never throws.
+async function adminSendEmail(to, subject, message) {
+  const res = await fnFetch(ADMIN_SEND_EMAIL_URL, { to, subject, message });
+  if (!res) return { ok: false, error: 'Network error' };
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) return { ok: false, error: data?.error || `Request failed (${res.status})` };
+  return { ok: true };
 }
 
 function findExercise(state, exId) {
@@ -3298,7 +3309,7 @@ window.LB = {
   effReps, e1rm, isImprovement, isDecline, bestE1rmForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, latestBodyweight, inferCurrentExIdx, calcBlended,
   refreshExerciseBests, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries,
   computeNextTrainingDate, computeNextReminderAt,
-  cancelPushover,
+  cancelPushover, adminSendEmail,
   subscribeToChanges,
   openStatusPeriod, closeStatusPeriod, updateStatusPeriodStart, clearStatusMode,
   startDeload, endDeload, deloadElapsed, deloadDaysRemaining, deloadPlanDays,
