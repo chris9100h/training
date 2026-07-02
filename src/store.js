@@ -133,16 +133,11 @@ function nextCycleD1ISOFromSchedule(schedule, cycleStartDate) {
         const daysUntilD1 = pos === 0 ? 0 : vDaysLen - pos;
         const d = new Date(today);
         d.setDate(d.getDate() + daysUntilD1);
-        const result = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-        // TEMP DIAGNOSTIC — remove once the meso-alignment bug is found.
-        try { console.log('[meso-debug] nextCycleD1ISOFromSchedule', { todayStr, pos, vi, vDaysLen, daysUntilD1, result, versions: (schedule.versions || []).map(v => ({ validFrom: v.validFrom, cycleOffset: v.cycleOffset, dayCount: (v.days || []).length })) }); } catch (_) {}
-        return result;
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
       }
     }
   }
-  const fallback = nextCycleD1ISO(cycleStartDate, (schedule?.days || []).length);
-  try { console.log('[meso-debug] nextCycleD1ISOFromSchedule FALLBACK PATH', { todayStr, cycleStartDate, daysLen: (schedule?.days || []).length, fallback, hasVersions: !!schedule?.versions?.length }); } catch (_) {}
-  return fallback;
+  return nextCycleD1ISO(cycleStartDate, (schedule?.days || []).length);
 }
 
 // ─── QUICK SWITCH ────────────────────────────────────────────────────────

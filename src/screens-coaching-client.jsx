@@ -193,34 +193,6 @@ function getTodayDay(clientStore) {
   return (activeSch.days || [])[idx] || null;
 }
 
-// Returns the plan days active on a given date — uses versions if present, falls back to schedule.days
-function getPlanDaysForDate(schedule, dateStr) {
-  const versions = schedule.versions;
-  if (!versions?.length) return schedule.days || [];
-  for (const v of versions) {
-    if (v.validFrom <= dateStr) return v.days || [];
-  }
-  return schedule.days || [];
-}
-
-// Returns cycle position for a date using the version's validFrom as cycle start reference.
-// Returns null when no versions exist (caller falls back to cyclePosFn).
-function getCyclePosForDate(schedule, dateStr) {
-  const versions = schedule.versions;
-  if (!versions?.length) return null;
-  for (const v of versions) {
-    if (v.validFrom <= dateStr) {
-      const daysLen = (v.days || []).length;
-      if (!daysLen) return 0;
-      const start = new Date(v.validFrom + 'T12:00:00');
-      const target = new Date(dateStr + 'T12:00:00');
-      const daysDiff = Math.round((target - start) / 86400000);
-      return ((daysDiff % daysLen) + daysLen) % daysLen;
-    }
-  }
-  return null;
-}
-
 function computeWeeklyAdherence(clientStore, weeksBack = 6) {
   const activeSch = clientStore.schedules?.find(s => s.id === clientStore.activeScheduleId);
   if (!activeSch) return [];
@@ -319,11 +291,11 @@ function computeWeeklyAdherence(clientStore, weeksBack = 6) {
 
       if (isWd) {
         const wd = LB.isoWd(date);
-        const daysForDate = getPlanDaysForDate(activeSch, dateStr);
+        const daysForDate = LB.getPlanDaysForDate(activeSch, dateStr);
         isTrainingDay = daysForDate.some(day => day.weekday === wd && day.items?.length > 0);
       } else {
-        const daysForDate = getPlanDaysForDate(activeSch, dateStr);
-        const versionedPos = getCyclePosForDate(activeSch, dateStr);
+        const daysForDate = LB.getPlanDaysForDate(activeSch, dateStr);
+        const versionedPos = LB.getCyclePosForDate(activeSch, dateStr);
         const pos = versionedPos !== null ? versionedPos : cyclePosFn(clientStore, date);
         isTrainingDay = !!(daysForDate[pos]?.items?.length > 0);
       }
