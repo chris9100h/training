@@ -731,6 +731,16 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     });
   };
 
+  const markAllSignupsSeen = (uids) => {
+    if (!uids.length) return;
+    setSeenSignups(prev => {
+      const next = new Set(prev);
+      uids.forEach(id => next.add(id));
+      try { localStorage.setItem('logbook-seen-signups', JSON.stringify([...next])); } catch (_) {}
+      return next;
+    });
+  };
+
   // A sign-up counts as "new" only if it's both unseen on this device AND
   // registered recently — otherwise a fresh admin device would flag every
   // existing user as new.
@@ -2730,7 +2740,17 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
               {allUsersOutdatedOnly && !swVersion && (
                 <div className="micro" style={{ color: UI.inkFaint }}>Your own version isn't known yet — this device hasn't reported one.</div>
               )}
-              <div className="micro" style={{ color: UI.inkGhost }}>{filtered.length} of {allUsers.length}{swVersion ? ` · you're on ${swVersion}` : ''}</div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                <div className="micro" style={{ color: UI.inkGhost }}>{filtered.length} of {allUsers.length}{swVersion ? ` · you're on ${swVersion}` : ''}</div>
+                {filtered.some(u => !seenSignups.has(u.user_id)) && (
+                  <button
+                    onClick={() => markAllSignupsSeen(filtered.filter(u => !seenSignups.has(u.user_id)).map(u => u.user_id))}
+                    style={{ ...accentBtn, padding: '3px 8px', fontSize: 9 }}
+                  >
+                    Mark all seen
+                  </button>
+                )}
+              </div>
               {filtered.length === 0 ? (
                 <div className="micro" style={{ color: UI.inkGhost, padding: '4px 0 12px' }}>No matching users.</div>
               ) : (
