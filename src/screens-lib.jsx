@@ -2954,6 +2954,11 @@ function fmtCompareSet(st) {
 
 function SessionCompareScreen({ store, setStore, go, sessionId, compareId, back }) {
   const [pickerOpen, setPickerOpen] = useStateL(false);
+  const [capturing, setCapturing] = useStateL(false);
+  const captureRef = useRefL(null);
+  // Screenshot watermark: VIPs get their home-screen background image instead of the default ZANE mark.
+  const _shotLogo = store.settings?.vipBackground || 'icons/zane-logo-2.png';
+  const _shotIsCustom = _shotLogo !== 'icons/zane-logo-2.png';
   const s = store.sessions.find(x => x.id === sessionId);
   const candidates = s ? sameDaySessions(store.sessions, s) : [];
   const cmp = (compareId && store.sessions.find(x => x.id === compareId)) || candidates[0] || null;
@@ -2988,95 +2993,215 @@ function SessionCompareScreen({ store, setStore, go, sessionId, compareId, back 
   // isCardio may be missing on entries loaded from DB (not a DB column) — fall
   // back to the exercise's movement_type, matching SessionDetailScreen.
   const isEntryCardio = (e) => !!e.isCardio || store.exercises.find(x => x.id === e.exId)?.movement_type === 'cardio';
+  const entries = s.entries.filter(e => !isEntryCardio(e));
+  const extraCmpEntries = cmp.entries.filter(e => !isEntryCardio(e) && !s.entries.some(se => se.exId === e.exId));
+
+  // Same html2canvas flow as SessionDetailScreen's takeScreenshot — kept in
+  // lockstep with that one (imperative KnurlCanvas draw + avatar watermark).
+  const takeScreenshot = async () => {
+    if (!captureRef.current) return;
+    const html2canvas = await window.__ensureHtml2Canvas?.().catch(() => null);
+    if (!html2canvas) return;
+    setCapturing(true);
+    const scrollParent = captureRef.current.parentElement;
+    const saved = { overflow: scrollParent.style.overflow, height: scrollParent.style.height, minHeight: scrollParent.style.minHeight };
+    scrollParent.style.overflow = 'visible';
+    scrollParent.style.height = 'auto';
+    scrollParent.style.minHeight = 'auto';
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const avatarEl = captureRef.current.querySelector('img[data-shot-avatar]');
+    if (avatarEl && !avatarEl.complete) {
+      await new Promise(res => {
+        avatarEl.addEventListener('load', res, { once: true });
+        avatarEl.addEventListener('error', res, { once: true });
+      });
+      await new Promise(r => requestAnimationFrame(r));
+    }
+    const avatarRect = (avatarEl && avatarEl.getBoundingClientRect().height) ? avatarEl.getBoundingClientRect() : null;
+    const KNURL_GAP = 14;
+    captureRef.current.querySelectorAll('canvas[data-knurl]').forEach(c => {
+      const pw = c.parentElement ? c.parentElement.offsetWidth : 320;
+      let w = pw;
+      if (avatarRect) {
+        const r = c.getBoundingClientRect();
+        if (r.bottom > avatarRect.top && r.top < avatarRect.bottom) {
+          w = Math.min(w, Math.round(pw - (r.right - avatarRect.left) - KNURL_GAP));
+        }
+      }
+      if (w <= 0) return;
+      if (w < pw) c.style.width = w + 'px';
+      c.width = w; c.height = 3;
+      const ctx = c.getContext('2d');
+      const knurlRgb = getComputedStyle(document.documentElement).getPropertyValue('--knurl-rgb').trim() || '236,228,208';
+      ctx.strokeStyle = `rgba(${knurlRgb},0.20)`;
+      ctx.lineWidth = 1.5;
+      for (let x = -2; x < w + 6; x += 5.2) {
+        ctx.beginPath(); ctx.moveTo(x, 3); ctx.lineTo(x + 1.73, 0); ctx.stroke();
+      }
+    });
+    try {
+      const el = captureRef.current;
+      const canvas = await html2canvas(el, {
+        backgroundColor: getComputedStyle(document.documentElement).getPropertyValue('--bg').trim() || '#1a1820',
+        scale: 2, useCORS: true, logging: false,
+        height: el.scrollHeight, windowHeight: el.scrollHeight,
+      });
+      canvas.toBlob(async (blob) => {
+        const filename = `${s.dayName}-compare-${s.date.slice(0, 10)}.png`;
+        const file = new File([blob], filename, { type: 'image/png' });
+        const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+        if (isMobile && navigator.share && navigator.canShare?.({ files: [file] })) {
+          try { await navigator.share({ files: [file] }); } catch (_) {}
+        } else {
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url; a.download = filename;
+          document.body.appendChild(a); a.click();
+          document.body.removeChild(a);
+          setTimeout(() => URL.revokeObjectURL(url), 1000);
+        }
+      }, 'image/png');
+    } finally {
+      scrollParent.style.overflow = saved.overflow;
+      scrollParent.style.height = saved.height;
+      scrollParent.style.minHeight = saved.minHeight;
+      setCapturing(false);
+    }
+  };
 
   return (
-    <Screen scroll={false}>
-      <TopBar title="Compare sessions" onBack={() => go(back || { name: 'session', sessionId })} />
+    <Screen>
+      <TopBar
+        title="Compare sessions"
+        onBack={() => go(back || { name: 'session', sessionId })}
+        right={
+          <button onClick={takeScreenshot} disabled={capturing} style={{
+            background: 'transparent', border: `1px solid ${UI.hairStrong}`,
+            borderRadius: 4, padding: '5px 10px', cursor: capturing ? 'default' : 'pointer',
+            color: capturing ? UI.inkGhost : UI.inkSoft, lineHeight: 1,
+            WebkitTapHighlightColor: 'transparent',
+          }}>
+            {capturing ? <span style={{ fontFamily: UI.fontUi, fontSize: 10 }}>…</span> : <i className="fa-solid fa-camera" style={{ fontSize: 11 }} />}
+          </button>
+        }
+      />
       <Hairline />
-      <div style={{ flexShrink: 0, padding: '14px 22px 0', display: 'flex', alignItems: 'center', gap: 12 }}>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div className="micro" style={{ color: UI.inkFaint, marginBottom: 3 }}>{s.dayName.toUpperCase()}</div>
-          <div className="display" style={{ fontSize: 18, lineHeight: 1.1 }}>{fmtDate(s.date)}</div>
-        </div>
-        <i className="fa-solid fa-code-compare" style={{ color: UI.inkFaint, fontSize: 13, flexShrink: 0 }} />
-        <button onClick={candidates.length > 1 ? () => setPickerOpen(true) : undefined} style={{
-          flex: 1, minWidth: 0, textAlign: 'right', background: 'none', border: 'none',
-          cursor: candidates.length > 1 ? 'pointer' : 'default', padding: 0, WebkitTapHighlightColor: 'transparent',
-        }}>
-          <div className="micro" style={{ color: UI.inkFaint, marginBottom: 3 }}>COMPARED TO</div>
-          <div className="display" style={{ fontSize: 18, lineHeight: 1.1, color: 'var(--accent)', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-            {fmtDate(cmp.date)}
-            {candidates.length > 1 && <i className="fa-solid fa-chevron-down" style={{ fontSize: 10 }} />}
-          </div>
-        </button>
-      </div>
-      <div className="micro" style={{ textAlign: 'center', margin: '10px 0 -4px', color: volDelta >= 0 ? UI.gold : UI.inkFaint }}>
-        {volDelta >= 0 ? '↑' : '↓'} {Math.abs(Math.round(volDelta)).toLocaleString('en-US')} {UI.unit()} total volume
-        {cmp.isDeload && <span style={{ color: UI.inkFaint }}> · compared session was a deload week</span>}
-      </div>
 
-      <div style={{ flex: 1, overflowY: 'auto', padding: '18px 22px 22px' }}>
-        {s.entries.filter(e => !isEntryCardio(e)).map((entry, ei) => {
-          const cmpEntry = cmp.entries.find(e => e.exId === entry.exId);
-          const sets = (entry.sets || []).filter(st => !st.warmup);
-          const cmpSets = (cmpEntry?.sets || []).filter(st => !st.warmup);
-          const maxLen = Math.max(sets.length, cmpSets.length);
-          const entryVolA = LB.entryVolume(entry, true);
-          const entryVolB = cmpEntry ? LB.entryVolume(cmpEntry, true) : 0;
-          const entryDelta = entryVolA - entryVolB;
-          return (
-            <div key={entry.exId + ei} style={{ marginBottom: 22 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8, gap: 10 }}>
-                <span style={{ fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, letterSpacing: '0.05em', color: UI.ink }}>{entry.name}</span>
-                {cmpEntry ? (
-                  <span className="num" style={{ fontSize: 12, color: entryDelta >= 0 ? UI.gold : UI.inkFaint, flexShrink: 0 }}>
-                    {entryDelta >= 0 ? '↑' : '↓'} {Math.abs(Math.round(entryDelta)).toLocaleString('en-US')} {UI.unit()}
-                  </span>
-                ) : (
-                  <span className="micro" style={{ color: UI.inkFaint, flexShrink: 0 }}>NOT LOGGED THEN</span>
-                )}
+      <div ref={captureRef} style={{ padding: capturing ? '20px 22px 24px' : '14px 22px 28px', display: 'flex', flexDirection: 'column', gap: 18, background: UI.bg }}>
+
+        {/* Screenshot-only header */}
+        {capturing && (
+          <div style={{ marginBottom: -4 }}>
+            <div style={{ height: '0.5px', background: UI.gold, marginBottom: 14 }} />
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
+              <div>
+                <div className="micro" style={{ color: UI.inkFaint, letterSpacing: '0.12em', marginBottom: 4 }}>SESSION COMPARE</div>
+                <div className="display" style={{ fontSize: 26 }}>{s.dayName}</div>
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '20px 1fr 100px 18px', gap: 10, marginBottom: 4 }}>
-                <span />
-                <span />
-                <span className="micro" style={{ color: UI.inkFaint, textAlign: 'right' }}>{fmtDate(cmp.date, { day: 'numeric', month: 'short' }).toUpperCase()}</span>
-                <span />
-              </div>
-              {Array.from({ length: maxLen }).map((_, si) => {
-                const curr = sets[si];
-                const prev = cmpSets[si];
-                if (!curr && !prev) return null;
-                const prevDone = prev && !prev.skipped;
-                const improved = isImprovement(curr, prev);
-                const anyImprovementBefore = sets.slice(0, si).some((c, j) => isImprovement(c, cmpSets[j]));
-                const currSkipped = curr?.skipped && !curr?.done;
-                const declined = !anyImprovementBefore && (isDecline(curr, prev) || ((!curr || currSkipped) && prevDone));
-                const icon = !curr ? '−' : !prev ? '+' : currSkipped && prevDone ? '↓' : curr && !currSkipped && prev?.skipped && !prev?.done ? '↑' : improved ? '↑' : declined ? '↓' : '—';
-                const iconColor = (improved || (!prev && curr && !curr.skipped) || (curr && !curr.skipped && prev?.skipped)) ? 'var(--accent)'
-                  : declined ? UI.danger : UI.inkFaint;
-                return (
-                  <div key={si} style={{
-                    display: 'grid', gridTemplateColumns: '20px 1fr 100px 18px',
-                    alignItems: 'center', gap: 10, padding: '6px 0',
-                    borderBottom: si < maxLen - 1 ? `0.5px solid ${UI.hair}` : 'none',
-                  }}>
-                    <span className="num" style={{ fontSize: 11, color: UI.inkFaint }}>{si + 1}</span>
-                    <span className="num" style={{ fontSize: 14, color: curr && (!curr.skipped || curr.done) ? UI.ink : UI.inkFaint }}>
-                      {fmtCompareSet(curr)}
-                    </span>
-                    <span className="num" style={{ fontSize: 13, color: UI.inkFaint, textAlign: 'right' }}>
-                      {fmtCompareSet(prev)}
-                    </span>
-                    <span style={{ fontSize: 14, color: iconColor, textAlign: 'right' }}>{icon}</span>
-                  </div>
-                );
-              })}
+              <div className="micro-gold" style={{ letterSpacing: '0.18em', marginTop: 2 }}>ZANE</div>
             </div>
-          );
-        })}
-        {cmp.entries.filter(e => !isEntryCardio(e) && !s.entries.some(se => se.exId === e.exId)).length > 0 && (
-          <div className="micro" style={{ color: UI.inkFaint, marginTop: 4 }}>
-            + {cmp.entries.filter(e => !isEntryCardio(e) && !s.entries.some(se => se.exId === e.exId)).length} exercise(s) only in the compared session
+            <div className="knurl" />
+          </div>
+        )}
+
+        {/* Today / compared-to header */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div className="micro" style={{ color: UI.inkFaint, marginBottom: 3 }}>TODAY</div>
+            <div className="display" style={{ fontSize: 18, lineHeight: 1.1 }}>{fmtDate(s.date)}</div>
+          </div>
+          <i className="fa-solid fa-code-compare" style={{ color: UI.inkFaint, fontSize: 13, flexShrink: 0 }} />
+          <button onClick={candidates.length > 1 && !capturing ? () => setPickerOpen(true) : undefined} style={{
+            flex: 1, minWidth: 0, textAlign: 'right', background: 'none', border: 'none',
+            cursor: candidates.length > 1 ? 'pointer' : 'default', padding: 0, WebkitTapHighlightColor: 'transparent',
+          }}>
+            <div className="micro" style={{ color: UI.inkFaint, marginBottom: 3 }}>COMPARED TO</div>
+            <div className="display" style={{ fontSize: 18, lineHeight: 1.1, color: 'var(--accent)', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              {fmtDate(cmp.date)}
+              {candidates.length > 1 && !capturing && <i className="fa-solid fa-chevron-down" style={{ fontSize: 10 }} />}
+            </div>
+          </button>
+        </div>
+
+        <div className="micro" style={{ textAlign: 'center', marginTop: -8, color: volDelta >= 0 ? UI.gold : UI.inkFaint }}>
+          {volDelta >= 0 ? '↑' : '↓'} {Math.abs(Math.round(volDelta)).toLocaleString('en-US')} {UI.unit()} total volume
+          {cmp.isDeload && <span style={{ color: UI.inkFaint }}> · compared session was a deload week</span>}
+        </div>
+
+        {capturing ? <KnurlCanvas /> : <div className="knurl" />}
+
+        {/* Exercise entries */}
+        <div style={{ position: 'relative' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            {entries.map((entry, ei) => {
+              const cmpEntry = cmp.entries.find(e => e.exId === entry.exId);
+              const sets = (entry.sets || []).filter(st => !st.warmup);
+              const cmpSets = (cmpEntry?.sets || []).filter(st => !st.warmup);
+              const maxLen = Math.max(sets.length, cmpSets.length);
+              const entryVolA = LB.entryVolume(entry, true);
+              const entryVolB = cmpEntry ? LB.entryVolume(cmpEntry, true) : 0;
+              const entryDelta = entryVolA - entryVolB;
+              return (
+                <div key={entry.exId + ei}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8, gap: 10 }}>
+                    <span style={{ fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, letterSpacing: '0.05em', color: UI.ink }}>{entry.name}</span>
+                    {cmpEntry ? (
+                      <span className="num" style={{ fontSize: 12, color: entryDelta >= 0 ? UI.gold : UI.inkFaint, flexShrink: 0 }}>
+                        {entryDelta >= 0 ? '↑' : '↓'} {Math.abs(Math.round(entryDelta)).toLocaleString('en-US')} {UI.unit()}
+                      </span>
+                    ) : (
+                      <span className="micro" style={{ color: UI.inkFaint, flexShrink: 0 }}>NOT LOGGED THEN</span>
+                    )}
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '20px 1fr 100px 18px', gap: 10, marginBottom: 4 }}>
+                    <span />
+                    <span />
+                    <span className="micro" style={{ color: UI.inkFaint, textAlign: 'right' }}>{fmtDate(cmp.date, { day: 'numeric', month: 'short' }).toUpperCase()}</span>
+                    <span />
+                  </div>
+                  {Array.from({ length: maxLen }).map((_, si) => {
+                    const curr = sets[si];
+                    const prev = cmpSets[si];
+                    if (!curr && !prev) return null;
+                    const prevDone = prev && !prev.skipped;
+                    const improved = isImprovement(curr, prev);
+                    const anyImprovementBefore = sets.slice(0, si).some((c, j) => isImprovement(c, cmpSets[j]));
+                    const currSkipped = curr?.skipped && !curr?.done;
+                    const declined = !anyImprovementBefore && (isDecline(curr, prev) || ((!curr || currSkipped) && prevDone));
+                    const icon = !curr ? '−' : !prev ? '+' : currSkipped && prevDone ? '↓' : curr && !currSkipped && prev?.skipped && !prev?.done ? '↑' : improved ? '↑' : declined ? '↓' : '—';
+                    const iconColor = (improved || (!prev && curr && !curr.skipped) || (curr && !curr.skipped && prev?.skipped)) ? 'var(--accent)'
+                      : declined ? UI.danger : UI.inkFaint;
+                    return (
+                      <div key={si} style={{
+                        display: 'grid', gridTemplateColumns: '20px 1fr 100px 18px',
+                        alignItems: 'center', gap: 10, padding: '6px 0',
+                        borderBottom: si < maxLen - 1 ? `0.5px solid ${UI.hair}` : 'none',
+                      }}>
+                        <span className="num" style={{ fontSize: 11, color: UI.inkFaint }}>{si + 1}</span>
+                        <span className="num" style={{ fontSize: 14, color: curr && (!curr.skipped || curr.done) ? UI.ink : UI.inkFaint }}>
+                          {fmtCompareSet(curr)}
+                        </span>
+                        <span className="num" style={{ fontSize: 13, color: UI.inkFaint, textAlign: 'right' }}>
+                          {fmtCompareSet(prev)}
+                        </span>
+                        <span style={{ fontSize: 14, color: iconColor, textAlign: 'right' }}>{icon}</span>
+                      </div>
+                    );
+                  })}
+                  {ei < entries.length - 1 && (capturing ? <KnurlCanvas style={{ marginTop: 14 }} /> : <Hairline style={{ marginTop: 14 }} />)}
+                </div>
+              );
+            })}
+          </div>
+          {capturing && (
+            <img src={_shotLogo} data-shot-avatar="1" style={{ position: 'absolute', bottom: 2, right: 0, width: 90, opacity: 0.5, zIndex: 1, transform: _shotIsCustom ? 'none' : 'scaleX(-1)' }} />
+          )}
+          {capturing && <div style={{ height: '0.5px', background: UI.gold, marginTop: 10 }} />}
+        </div>
+
+        {extraCmpEntries.length > 0 && !capturing && (
+          <div className="micro" style={{ color: UI.inkFaint, marginTop: -10 }}>
+            + {extraCmpEntries.length} exercise(s) only in the compared session
           </div>
         )}
       </div>
