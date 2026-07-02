@@ -3036,6 +3036,19 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                 'Message Coach',
                 'Send a note to your coach',
               )}
+              {actionBtn(
+                async () => {
+                  setQuickActionsOpen(false);
+                  if ('caches' in window) {
+                    const keys = await caches.keys();
+                    await Promise.all(keys.map(k => caches.delete(k)));
+                  }
+                  window.location.reload(true);
+                },
+                'fa-arrows-rotate',
+                'Reload App',
+                'Clear cache & refetch everything',
+              )}
             </div>
           );
         })()}
