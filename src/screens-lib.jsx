@@ -2488,7 +2488,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
         )}
 
         {/* Compare to another session of this same day */}
-        {!capturing && !justFinished && compareCandidates.length > 0 && (
+        {!capturing && compareCandidates.length > 0 && (
           <Btn kind="ghost" onClick={() => go({ name: 'compare', sessionId: s.id, back: { name: 'session', sessionId: s.id, back } })} style={{ width: '100%', marginTop: -8 }}>
             <i className="fa-solid fa-code-compare" style={{ marginRight: 8 }} /> Compare to another session
           </Btn>
@@ -3057,7 +3057,11 @@ function SessionCompareScreen({ store, setStore, go, sessionId, compareId, back 
   const _shotCustomStyle = { width: '92%', maxWidth: 360, opacity: 0.16, objectFit: 'contain' };
   const s = store.sessions.find(x => x.id === sessionId);
   const candidates = s ? sameDaySessions(store.sessions, s) : [];
-  const cmp = (compareId && store.sessions.find(x => x.id === compareId)) || candidates[0] || null;
+  // Default comparison should look backward in time — comparing an older
+  // session against a later one is never the intent when just opening the
+  // screen. Only fall back to a later candidate if no earlier one exists.
+  const earlierCandidates = s ? candidates.filter(c => (c.ended || '') < (s.ended || '')) : [];
+  const cmp = (compareId && store.sessions.find(x => x.id === compareId)) || earlierCandidates[0] || candidates[0] || null;
 
   useEffectL(() => { if (!s || !cmp) go({ name: 'hist' }); }, [!!s, !!cmp]);
 
@@ -3308,10 +3312,10 @@ function SessionCompareScreen({ store, setStore, go, sessionId, compareId, back 
                             {fmtCompareSet(curr)}
                           </span>
                         )}
-                        <span className="num" style={{ fontSize: 13, color: UI.inkFaint, textAlign: 'right' }}>
+                        <span className="num" style={{ fontSize: 13, color: UI.inkFaint, textAlign: 'right', alignSelf: 'center' }}>
                           {fmtCompareSet(prev)}
                         </span>
-                        <span style={{ fontSize: 14, color: iconColor, textAlign: 'right' }}>{icon}</span>
+                        <span style={{ fontSize: 14, color: iconColor, textAlign: 'right', alignSelf: 'center' }}>{icon}</span>
                       </div>
                     );
                   })}
