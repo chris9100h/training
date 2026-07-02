@@ -526,9 +526,10 @@ function App() {
     // The applied version is persisted in onControllerChange (once the new SW
     // takes control), never on mere detection or click, so a not-yet-activated
     // update keeps being re-offered across cold starts.
-    // Don't delete caches here: the new SW's install already populated its
-    // CACHE, and its activate handler deletes every other (old) cache. Wiping
-    // all caches — including the freshly-installed one — would force a full
+    // Don't delete caches when we successfully hand off to a real worker
+    // below: the new SW's install already populated its CACHE, and its
+    // activate handler deletes every other (old) cache. Wiping all caches
+    // here too — including the freshly-installed one — would force a full
     // network refetch and break offline right after an update.
 
     // Prefer the worker we already tracked; fall back to live reg state
@@ -555,6 +556,21 @@ function App() {
       intentionalUpdate.current = true;
       worker.postMessage({ type: 'SKIP_WAITING' });
     } else {
+      // No installed/waiting worker turned up in time — our own faster
+      // text-based update check (checkSwUpdate) can show the banner before
+      // the browser's native SW update/install has caught up, or install
+      // may still be running past the 6s wait above. A bare reload here
+      // would hit the OLD SW's stale-while-revalidate fetch handler and
+      // instantly re-serve the cached (old) app — the update button would
+      // look like it does nothing. Wipe the cache first, exactly like the
+      // "Reload App" quick action does, so the reload is guaranteed to
+      // actually fetch fresh code instead of silently staying on the old one.
+      if ('caches' in window) {
+        try {
+          const keys = await caches.keys();
+          await Promise.all(keys.map(k => caches.delete(k)));
+        } catch (_) {}
+      }
       window.location.reload(true);
     }
   }, []);
