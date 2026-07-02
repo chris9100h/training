@@ -707,7 +707,16 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const nextOwnFocus = (setsArr, afterIdx) => {
     const idx = setsArr.findIndex((s, i) => i > afterIdx && !s.done && !s.skipped);
     if (idx < 0) return null;
-    return { setIdx: idx, field: isNoWeightReps ? (isUnilateral ? 'repsL' : 'reps') : 'kg' };
+    const repsField = isUnilateral ? 'repsL' : 'reps';
+    // Skip the next set's weight field when it's pointless to re-enter: no
+    // intensity technique on the set just finished (a drop/myo/lengthened
+    // set already routes through its own dedicated flow, not this one) and
+    // the next set's weight is already filled in (pre-seeded from
+    // progression/last-time). Jump straight to reps instead of back to kg.
+    if (!isNoWeightReps && !setsArr[afterIdx]?.technique && setsArr[idx]?.kg != null) {
+      return { setIdx: idx, field: repsField };
+    }
+    return { setIdx: idx, field: isNoWeightReps ? repsField : 'kg' };
   };
 
   // Single source of truth for "where does the screen go, and where does the
