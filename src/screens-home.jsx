@@ -3036,19 +3036,24 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                 'Message Coach',
                 'Send a note to your coach',
               )}
-              {actionBtn(
-                async () => {
-                  setQuickActionsOpen(false);
-                  if ('caches' in window) {
-                    const keys = await caches.keys();
-                    await Promise.all(keys.map(k => caches.delete(k)));
-                  }
-                  window.location.reload(true);
-                },
-                'fa-arrows-rotate',
-                'Reload App',
-                'Clear cache & refetch everything',
-              )}
+              <button onClick={async () => {
+                setQuickActionsOpen(false);
+                if ('caches' in window) {
+                  const keys = await caches.keys();
+                  await Promise.all(keys.map(k => caches.delete(k)));
+                }
+                window.location.reload(true);
+              }} style={{
+                width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
+                padding: '12px 14px', background: UI.bgInset, border: `0.5px solid ${UI.hair}`,
+                borderRadius: 6, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <i className="fa-solid fa-arrows-rotate" style={{ fontSize: 16, color: 'var(--accent)' }} />
+                  <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--accent)', fontFamily: UI.fontUi }}>Reload App</span>
+                </div>
+                <span style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi }}>Clear cache & refetch everything</span>
+              </button>
             </div>
           );
         })()}
