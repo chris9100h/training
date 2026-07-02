@@ -2208,21 +2208,25 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     muscleOrder.forEach(muscle => {
       const sRec = mesoAnswersRef.current.soreness[muscle];
       const vRec = mesoAnswersRef.current.volume[muscle];
-      const rows = [];
-      if (sRec?.answer != null) {
-        rows.push({ key: 'soreness-' + muscle, title: 'Soreness', sub: SORENESS_LABELS[sRec.answer] || sRec.answer, onEdit: () => openSorenessEdit(muscle) });
-      }
+      // Joint feedback (per exercise) vs. General feedback (muscle-group-wide:
+      // Soreness carryover + Pump & Volume) — split into two sections in the
+      // detail sheet so it's clear which answer applies to what.
+      const jointRows = [];
       session.entries.forEach(e => {
         if (e.isCardio) return;
         if (primaryMuscleForExercise(store.exercises?.find(x => x.id === e.exId)) !== muscle) return;
         const r = mesoAnswersRef.current.joint[e.exId];
         if (!r || r.answer == null) return;
-        rows.push({ key: 'joint-' + e.exId, title: r.exName, sub: JOINT_LABELS[r.answer] || r.answer, onEdit: () => openJointEdit(e.exId) });
+        jointRows.push({ key: 'joint-' + e.exId, title: r.exName, sub: JOINT_LABELS[r.answer] || r.answer, onEdit: () => openJointEdit(e.exId) });
       });
-      if (vRec?.pump != null && vRec?.volume != null) {
-        rows.push({ key: 'volume-' + muscle, title: 'Pump & Volume', sub: `${PUMP_LABELS[vRec.pump] || vRec.pump} pump · ${VOLUME_LABELS[vRec.volume] || vRec.volume}`, onEdit: () => openVolumeEdit(muscle) });
+      const generalRows = [];
+      if (sRec?.answer != null) {
+        generalRows.push({ key: 'soreness-' + muscle, title: 'Soreness', sub: SORENESS_LABELS[sRec.answer] || sRec.answer, onEdit: () => openSorenessEdit(muscle) });
       }
-      if (rows.length) groups.push({ muscle, rows });
+      if (vRec?.pump != null && vRec?.volume != null) {
+        generalRows.push({ key: 'volume-' + muscle, title: 'Pump & Volume', sub: `${PUMP_LABELS[vRec.pump] || vRec.pump} pump · ${VOLUME_LABELS[vRec.volume] || vRec.volume}`, onEdit: () => openVolumeEdit(muscle) });
+      }
+      if (jointRows.length || generalRows.length) groups.push({ muscle, jointRows, generalRows });
     });
     return groups;
   };
@@ -5415,26 +5419,39 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         ))}
       </Sheet>
 
-      {/* Detail sheet for one muscle group's feedback, opened from the list above. */}
+      {/* Detail sheet for one muscle group's feedback, opened from the list
+          above. Split into two sections so it's clear which answer applies to
+          what: Joint feedback is per exercise, General feedback (Soreness +
+          Pump & Volume) applies to the whole muscle group. */}
       {(() => {
         const detailGroup = mesoFeedbackGroups.find(g => g.muscle === mesoRecapDetailMuscle);
+        const feedbackRow = row => (
+          <button key={row.key} onClick={row.onEdit} style={{
+            width: '100%', marginBottom: 8, padding: '12px 14px',
+            background: UI.bgInset, border: `1px solid ${UI.hairStrong}`,
+            borderRadius: 6, cursor: 'pointer', textAlign: 'left',
+            display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10,
+            WebkitTapHighlightColor: 'transparent',
+          }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{row.title}</div>
+              <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 2 }}>{row.sub}</div>
+            </div>
+            <i className="fa-solid fa-chevron-right" style={{ fontSize: 11, color: UI.inkFaint, flexShrink: 0 }} />
+          </button>
+        );
         return (
           <Sheet open={!!mesoRecapDetailMuscle} onClose={() => setMesoRecapDetailMuscle(null)} title={mesoRecapDetailMuscle ? `${mesoRecapDetailMuscle} feedback` : 'Feedback'}>
-            {(detailGroup?.rows || []).map(row => (
-              <button key={row.key} onClick={row.onEdit} style={{
-                width: '100%', marginBottom: 8, padding: '12px 14px',
-                background: UI.bgInset, border: `1px solid ${UI.hairStrong}`,
-                borderRadius: 6, cursor: 'pointer', textAlign: 'left',
-                display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10,
-                WebkitTapHighlightColor: 'transparent',
-              }}>
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{row.title}</div>
-                  <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 2 }}>{row.sub}</div>
-                </div>
-                <i className="fa-solid fa-chevron-right" style={{ fontSize: 11, color: UI.inkFaint, flexShrink: 0 }} />
-              </button>
-            ))}
+            {!!detailGroup?.jointRows.length && (<>
+              <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>JOINT FEEDBACK</div>
+              <div className="knurl" style={{ marginBottom: 10 }} />
+              {detailGroup.jointRows.map(feedbackRow)}
+            </>)}
+            {!!detailGroup?.generalRows.length && (<>
+              <div className="micro" style={{ color: UI.inkFaint, marginTop: detailGroup?.jointRows.length ? 16 : 0, marginBottom: 6 }}>GENERAL FEEDBACK</div>
+              <div className="knurl" style={{ marginBottom: 10 }} />
+              {detailGroup.generalRows.map(feedbackRow)}
+            </>)}
           </Sheet>
         );
       })()}
