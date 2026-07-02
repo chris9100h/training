@@ -2070,6 +2070,17 @@ function FeelSelector({ value, onChange }) {
 const isImprovement = LB.isImprovement;
 const isDecline = LB.isDecline;
 
+// Sessions eligible for comparison against `s`: same dayId, ended, excluding
+// itself — newest first. Deload sessions excluded for the same reason as
+// prevEntryMap below (artificially light, not a fair comparison baseline).
+// Shared by the Compare button (SessionDetailScreen) and the session picker
+// (SessionCompareScreen).
+function sameDaySessions(sessions, s) {
+  return sessions
+    .filter(x => x.ended && x.id !== s.id && x.dayId === s.dayId && !x.isDeload)
+    .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''));
+}
+
 // ─── SESSION DETAIL ──────────────────────────────────────────────────
 function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, back, userId }) {
   const [confirmEl, confirm] = useConfirm();
@@ -2158,6 +2169,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
     .filter(x => x.ended && x.id !== s.id && x.ended < s.ended && x.dayId === s.dayId && !x.isDeload)
     .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''))[0];
   const volDelta = prevSameDay != null ? vol - LB.totalVolume(prevSameDay) : null;
+  const compareCandidates = sameDaySessions(store.sessions, s);
 
   const exIsUnilateral = (exId) => !!store.exercises.find(x => x.id === exId)?.unilateral;
   const prReps = (st, exId) => exIsUnilateral(exId)
@@ -2453,6 +2465,13 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
           <div className="micro" style={{ textAlign: 'center', marginTop: -8, color: volDelta >= 0 ? UI.gold : UI.inkFaint }}>
             {volDelta >= 0 ? '↑' : '↓'} {Math.abs(Math.round(volDelta)).toLocaleString('en-US')} {UI.unit()} · vs last {s.dayName}
           </div>
+        )}
+
+        {/* Compare to another session of this same day */}
+        {!capturing && !justFinished && compareCandidates.length > 0 && (
+          <Btn kind="ghost" onClick={() => go({ name: 'compare', sessionId: s.id, back: { name: 'session', sessionId: s.id, back } })} style={{ width: '100%', marginTop: -8 }}>
+            <i className="fa-solid fa-code-compare" style={{ marginRight: 8 }} /> Compare to another session
+          </Btn>
         )}
 
         {/* Exercise entries */}
@@ -2907,6 +2926,183 @@ function SessionEditSheet({ session, duration, exercises, onClose, onSave }) {
   );
 }
 
+// ─── SESSION COMPARE ───────────────────────────────────────────────────
+// Set-string formatting shared with ComparisonScreen below (that one compares
+// against a coach-fetched last_session_entries snapshot; this one compares two
+// full store sessions directly, so the logic is duplicated rather than shared
+// — different data shapes).
+function fmtCompareSet(st) {
+  if (!st) return '—';
+  if (st.skipped && !st.done) return 'skipped';
+  const drops = st.drops && (Array.isArray(st.drops) ? st.drops.length > 0 : st.drops.partials) ? st.drops : null;
+  if (st.technique === 'drop' && Array.isArray(drops)) {
+    return drops.map(d => `${d.kg ?? '—'}${UI.unit()}×${d.reps ?? '—'}`).join(' → ');
+  }
+  if ((st.technique === 'myorep' || st.technique === 'myorep_match') && Array.isArray(drops)) {
+    const total = drops.reduce((a, d) => a + (d.reps || 0), 0);
+    const chain = drops.map((d, di) => di === 0 ? `${d.kg ?? '—'}${UI.unit()}×${d.reps ?? '—'}` : (d.reps ?? '—')).join(' ↺ ');
+    return `${chain} (${total})`;
+  }
+  if (st.technique === 'lengthened_partial') {
+    const partials = st.drops?.partials || 0;
+    const main = `${st.kg != null ? st.kg + UI.unit() : '—'} × ${st.reps ?? '—'}`;
+    return partials > 0 ? `${main} +${partials} partials` : main;
+  }
+  const repsStr = (st.repsL != null || st.repsR != null) ? `L${st.repsL ?? '?'}/R${st.repsR ?? '?'}` : (st.reps ?? '—');
+  return `${st.kg != null ? st.kg + UI.unit() : '—'} × ${repsStr}`;
+}
+
+function SessionCompareScreen({ store, setStore, go, sessionId, compareId, back }) {
+  const [pickerOpen, setPickerOpen] = useStateL(false);
+  const s = store.sessions.find(x => x.id === sessionId);
+  const candidates = s ? sameDaySessions(store.sessions, s) : [];
+  const cmp = (compareId && store.sessions.find(x => x.id === compareId)) || candidates[0] || null;
+
+  useEffectL(() => { if (!s || !cmp) go({ name: 'hist' }); }, [!!s, !!cmp]);
+
+  // Either side may be outside the 70-day boot window (aggregates only, no
+  // entries) — lazy-load on demand, same pattern as SessionDetailScreen.
+  const needsEntries = (sess) => !!(sess && sess.ended && !(sess.entries || []).length && (sess.aggExercises || 0) > 0);
+  useEffectL(() => {
+    const need = [s, cmp].filter(needsEntries).map(x => x.id);
+    if (!need.length) return;
+    let on = true;
+    LB.fetchSessionEntries(need)
+      .then(bySession => {
+        if (!on) return;
+        setStore(st => ({
+          ...st,
+          sessions: st.sessions.map(x => (bySession[x.id] && !(x.entries || []).length) ? { ...x, entries: bySession[x.id] } : x),
+        }));
+      })
+      .catch(() => {});
+    return () => { on = false; };
+  }, [s?.id, cmp?.id]);
+
+  if (!s || !cmp) return null;
+
+  const volA = LB.totalVolume(s, store.exercises);
+  const volB = LB.totalVolume(cmp, store.exercises);
+  const volDelta = volA - volB;
+  const fmtDate = (d, opts) => LB.parseDate(d).toLocaleDateString('en-US', opts || { weekday: 'short', day: 'numeric', month: 'short' });
+  // isCardio may be missing on entries loaded from DB (not a DB column) — fall
+  // back to the exercise's movement_type, matching SessionDetailScreen.
+  const isEntryCardio = (e) => !!e.isCardio || store.exercises.find(x => x.id === e.exId)?.movement_type === 'cardio';
+
+  return (
+    <Screen scroll={false}>
+      <TopBar title="Compare sessions" onBack={() => go(back || { name: 'session', sessionId })} />
+      <Hairline />
+      <div style={{ flexShrink: 0, padding: '14px 22px 0', display: 'flex', alignItems: 'center', gap: 12 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div className="micro" style={{ color: UI.inkFaint, marginBottom: 3 }}>{s.dayName.toUpperCase()}</div>
+          <div className="display" style={{ fontSize: 18, lineHeight: 1.1 }}>{fmtDate(s.date)}</div>
+        </div>
+        <i className="fa-solid fa-code-compare" style={{ color: UI.inkFaint, fontSize: 13, flexShrink: 0 }} />
+        <button onClick={candidates.length > 1 ? () => setPickerOpen(true) : undefined} style={{
+          flex: 1, minWidth: 0, textAlign: 'right', background: 'none', border: 'none',
+          cursor: candidates.length > 1 ? 'pointer' : 'default', padding: 0, WebkitTapHighlightColor: 'transparent',
+        }}>
+          <div className="micro" style={{ color: UI.inkFaint, marginBottom: 3 }}>COMPARED TO</div>
+          <div className="display" style={{ fontSize: 18, lineHeight: 1.1, color: 'var(--accent)', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            {fmtDate(cmp.date)}
+            {candidates.length > 1 && <i className="fa-solid fa-chevron-down" style={{ fontSize: 10 }} />}
+          </div>
+        </button>
+      </div>
+      <div className="micro" style={{ textAlign: 'center', margin: '10px 0 -4px', color: volDelta >= 0 ? UI.gold : UI.inkFaint }}>
+        {volDelta >= 0 ? '↑' : '↓'} {Math.abs(Math.round(volDelta)).toLocaleString('en-US')} {UI.unit()} total volume
+        {cmp.isDeload && <span style={{ color: UI.inkFaint }}> · compared session was a deload week</span>}
+      </div>
+
+      <div style={{ flex: 1, overflowY: 'auto', padding: '18px 22px 22px' }}>
+        {s.entries.filter(e => !isEntryCardio(e)).map((entry, ei) => {
+          const cmpEntry = cmp.entries.find(e => e.exId === entry.exId);
+          const sets = (entry.sets || []).filter(st => !st.warmup);
+          const cmpSets = (cmpEntry?.sets || []).filter(st => !st.warmup);
+          const maxLen = Math.max(sets.length, cmpSets.length);
+          const entryVolA = LB.entryVolume(entry, true);
+          const entryVolB = cmpEntry ? LB.entryVolume(cmpEntry, true) : 0;
+          const entryDelta = entryVolA - entryVolB;
+          return (
+            <div key={entry.exId + ei} style={{ marginBottom: 22 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8, gap: 10 }}>
+                <span style={{ fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, letterSpacing: '0.05em', color: UI.ink }}>{entry.name}</span>
+                {cmpEntry ? (
+                  <span className="num" style={{ fontSize: 12, color: entryDelta >= 0 ? UI.gold : UI.inkFaint, flexShrink: 0 }}>
+                    {entryDelta >= 0 ? '↑' : '↓'} {Math.abs(Math.round(entryDelta)).toLocaleString('en-US')} {UI.unit()}
+                  </span>
+                ) : (
+                  <span className="micro" style={{ color: UI.inkFaint, flexShrink: 0 }}>NOT LOGGED THEN</span>
+                )}
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '20px 1fr 100px 18px', gap: 10, marginBottom: 4 }}>
+                <span />
+                <span />
+                <span className="micro" style={{ color: UI.inkFaint, textAlign: 'right' }}>{fmtDate(cmp.date, { day: 'numeric', month: 'short' }).toUpperCase()}</span>
+                <span />
+              </div>
+              {Array.from({ length: maxLen }).map((_, si) => {
+                const curr = sets[si];
+                const prev = cmpSets[si];
+                if (!curr && !prev) return null;
+                const prevDone = prev && !prev.skipped;
+                const improved = isImprovement(curr, prev);
+                const anyImprovementBefore = sets.slice(0, si).some((c, j) => isImprovement(c, cmpSets[j]));
+                const currSkipped = curr?.skipped && !curr?.done;
+                const declined = !anyImprovementBefore && (isDecline(curr, prev) || ((!curr || currSkipped) && prevDone));
+                const icon = !curr ? '−' : !prev ? '+' : currSkipped && prevDone ? '↓' : curr && !currSkipped && prev?.skipped && !prev?.done ? '↑' : improved ? '↑' : declined ? '↓' : '—';
+                const iconColor = (improved || (!prev && curr && !curr.skipped) || (curr && !curr.skipped && prev?.skipped)) ? 'var(--accent)'
+                  : declined ? UI.danger : UI.inkFaint;
+                return (
+                  <div key={si} style={{
+                    display: 'grid', gridTemplateColumns: '20px 1fr 100px 18px',
+                    alignItems: 'center', gap: 10, padding: '6px 0',
+                    borderBottom: si < maxLen - 1 ? `0.5px solid ${UI.hair}` : 'none',
+                  }}>
+                    <span className="num" style={{ fontSize: 11, color: UI.inkFaint }}>{si + 1}</span>
+                    <span className="num" style={{ fontSize: 14, color: curr && (!curr.skipped || curr.done) ? UI.ink : UI.inkFaint }}>
+                      {fmtCompareSet(curr)}
+                    </span>
+                    <span className="num" style={{ fontSize: 13, color: UI.inkFaint, textAlign: 'right' }}>
+                      {fmtCompareSet(prev)}
+                    </span>
+                    <span style={{ fontSize: 14, color: iconColor, textAlign: 'right' }}>{icon}</span>
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })}
+        {cmp.entries.filter(e => !isEntryCardio(e) && !s.entries.some(se => se.exId === e.exId)).length > 0 && (
+          <div className="micro" style={{ color: UI.inkFaint, marginTop: 4 }}>
+            + {cmp.entries.filter(e => !isEntryCardio(e) && !s.entries.some(se => se.exId === e.exId)).length} exercise(s) only in the compared session
+          </div>
+        )}
+      </div>
+
+      <Sheet open={pickerOpen} onClose={() => setPickerOpen(false)} title={s.dayName}>
+        <div style={{ display: 'flex', flexDirection: 'column', maxHeight: '55vh', overflowY: 'auto' }}>
+          {candidates.map(c => {
+            const active = c.id === cmp.id;
+            return (
+              <button key={c.id} onClick={() => { setPickerOpen(false); go({ name: 'compare', sessionId, compareId: c.id, back }); }} style={{
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                padding: '13px 2px', background: 'none', border: 'none', cursor: 'pointer',
+                borderBottom: `0.5px solid ${UI.hair}`, textAlign: 'left', WebkitTapHighlightColor: 'transparent',
+              }}>
+                <span className="num" style={{ fontSize: 14, color: active ? 'var(--accent)' : UI.ink }}>
+                  {fmtDate(c.date, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}
+                </span>
+                {active && <i className="fa-solid fa-check" style={{ color: 'var(--accent)', fontSize: 12 }} />}
+              </button>
+            );
+          })}
+        </div>
+      </Sheet>
+    </Screen>
+  );
+}
 
 function ComparisonScreen({ session, onDismiss, go, userName }) {
   const entries     = session.entries || [];
@@ -3737,6 +3933,6 @@ function ExerciseHistoryScreen({ store, go, exId, dayId, exName, back, userId })
 }
 
 
-Object.assign(window.Screens, { LibraryScreen, ExerciseCreator, ExerciseDetailScreen, HistoryScreen, SessionDetailScreen, SpectatorScreen, ExerciseHistoryScreen });
+Object.assign(window.Screens, { LibraryScreen, ExerciseCreator, ExerciseDetailScreen, HistoryScreen, SessionDetailScreen, SessionCompareScreen, SpectatorScreen, ExerciseHistoryScreen });
 
 window.EQUIPMENT_TYPES = EQUIPMENT_TYPES;
