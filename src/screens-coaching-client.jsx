@@ -472,6 +472,14 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
                     }
                     return `${s.kg ?? '—'}${unit} × ${s.reps ?? s.repsL ?? '—'}`;
                   };
+                  // Same label text/style as the training screen's per-set
+                  // technique badge — the chip's number/arrow notation alone
+                  // doesn't say which technique produced it.
+                  const techniqueLabel = (s) => s.technique === 'drop' ? 'DROP SET'
+                    : s.technique === 'myorep_match' ? 'MYO MATCH'
+                    : s.technique === 'myorep' ? 'MYO REP'
+                    : s.technique === 'lengthened_partial' ? 'PARTIALS'
+                    : null;
                   return (todaySession.entries || []).map((e, i) => {
                     const lastResult = e.exId ? LB.lastSessionForExercise(storeWithoutToday, e.exId, todaySession.dayId) : null;
                     const lastSets = (lastResult?.entry?.sets || []).filter(s => !s.warmup && (s.kg != null || s.reps != null));
@@ -484,15 +492,25 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
                             const anyImpBefore = (e.sets || []).filter(x => !x.warmup).slice(0, j).some((x, k) => isImprovement(x, lastSets[k]));
                             const highlight = isImprovement(s, prev);
                             const decline   = !anyImpBefore && isDecline(s, prev);
+                            const label = techniqueLabel(s);
                             return (
-                              <span key={j} className="num" style={{
-                                fontSize: 12,
-                                color: highlight ? UI.goldLight : decline ? 'rgba(var(--danger-rgb),0.85)' : s.done ? UI.ink : UI.inkFaint,
-                                background: highlight ? UI.goldFaint : decline ? 'rgba(var(--danger-rgb),0.08)' : UI.bgInset,
-                                borderRadius: 4, padding: '2px 8px',
-                                border: `0.5px solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : UI.hair}`,
-                              }}>
-                                {fmtSetChip(s)}
+                              <span key={j} style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-start', gap: 2 }}>
+                                {label && (
+                                  <span style={{
+                                    fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: UI.gold,
+                                    background: 'rgba(var(--accent-rgb),0.12)', border: '0.5px solid rgba(var(--accent-rgb),0.35)',
+                                    borderRadius: 4, padding: '2px 6px',
+                                  }}>{label}</span>
+                                )}
+                                <span className="num" style={{
+                                  fontSize: 12,
+                                  color: highlight ? UI.goldLight : decline ? 'rgba(var(--danger-rgb),0.85)' : s.done ? UI.ink : UI.inkFaint,
+                                  background: highlight ? UI.goldFaint : decline ? 'rgba(var(--danger-rgb),0.08)' : UI.bgInset,
+                                  borderRadius: 4, padding: '2px 8px',
+                                  border: `0.5px solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : UI.hair}`,
+                                }}>
+                                  {fmtSetChip(s)}
+                                </span>
                               </span>
                             );
                           })}
@@ -1291,6 +1309,14 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
               }
               return `${s.kg ?? '—'}${unit} × ${s.reps ?? s.repsL ?? '—'}`;
             };
+            // Same label text/style as the training screen's per-set technique
+            // badge — the chip's number/arrow notation alone doesn't say which
+            // technique produced it.
+            const techniqueLabel = (s) => s.technique === 'drop' ? 'DROP SET'
+              : s.technique === 'myorep_match' ? 'MYO MATCH'
+              : s.technique === 'myorep' ? 'MYO REP'
+              : s.technique === 'lengthened_partial' ? 'PARTIALS'
+              : null;
             return (
               <div key={i}
                 onClick={() => e.exId && selected.dayId && setHistEx({ exId: e.exId, dayId: selected.dayId, exName: e.name })}
@@ -1305,15 +1331,25 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
                     const anyImpBefore = (e.sets || []).filter(x => !x.warmup).slice(0, j).some((x, k) => isImprovement(x, lastSets[k]));
                     const highlight = isImprovement(s, prev);
                     const decline   = !anyImpBefore && isDecline(s, prev);
+                    const label = techniqueLabel(s);
                     return (
-                      <span key={j} className="num" style={{
-                        fontSize: 12,
-                        color: highlight ? UI.goldLight : decline ? 'rgba(var(--danger-rgb),0.85)' : s.done ? UI.ink : UI.inkFaint,
-                        background: highlight ? UI.goldFaint : decline ? 'rgba(var(--danger-rgb),0.08)' : UI.bgInset,
-                        borderRadius: 4, padding: '2px 8px',
-                        border: `0.5px solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : UI.hair}`,
-                      }}>
-                        {fmtSetChip(s)}
+                      <span key={j} style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-start', gap: 2 }}>
+                        {label && (
+                          <span style={{
+                            fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: UI.gold,
+                            background: 'rgba(var(--accent-rgb),0.12)', border: '0.5px solid rgba(var(--accent-rgb),0.35)',
+                            borderRadius: 4, padding: '2px 6px',
+                          }}>{label}</span>
+                        )}
+                        <span className="num" style={{
+                          fontSize: 12,
+                          color: highlight ? UI.goldLight : decline ? 'rgba(var(--danger-rgb),0.85)' : s.done ? UI.ink : UI.inkFaint,
+                          background: highlight ? UI.goldFaint : decline ? 'rgba(var(--danger-rgb),0.08)' : UI.bgInset,
+                          borderRadius: 4, padding: '2px 8px',
+                          border: `0.5px solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : UI.hair}`,
+                        }}>
+                          {fmtSetChip(s)}
+                        </span>
                       </span>
                     );
                   })}
