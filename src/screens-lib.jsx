@@ -3057,7 +3057,11 @@ function SessionCompareScreen({ store, setStore, go, sessionId, compareId, back 
   const _shotCustomStyle = { width: '92%', maxWidth: 360, opacity: 0.16, objectFit: 'contain' };
   const s = store.sessions.find(x => x.id === sessionId);
   const candidates = s ? sameDaySessions(store.sessions, s) : [];
-  const cmp = (compareId && store.sessions.find(x => x.id === compareId)) || candidates[0] || null;
+  // Default comparison should look backward in time — comparing an older
+  // session against a later one is never the intent when just opening the
+  // screen. Only fall back to a later candidate if no earlier one exists.
+  const earlierCandidates = s ? candidates.filter(c => (c.ended || '') < (s.ended || '')) : [];
+  const cmp = (compareId && store.sessions.find(x => x.id === compareId)) || earlierCandidates[0] || candidates[0] || null;
 
   useEffectL(() => { if (!s || !cmp) go({ name: 'hist' }); }, [!!s, !!cmp]);
 
