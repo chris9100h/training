@@ -3065,6 +3065,7 @@ function SessionCompareScreen({ store, setStore, go, sessionId, compareId, back 
   const volA = LB.totalVolume(s, store.exercises);
   const volB = LB.totalVolume(cmp, store.exercises);
   const volDelta = volA - volB;
+  const volDeltaRounded = Math.round(volDelta);
   const fmtDate = (d, opts) => LB.parseDate(d).toLocaleDateString('en-US', opts || { weekday: 'short', day: 'numeric', month: 'short' });
   // isCardio may be missing on entries loaded from DB (not a DB column) — fall
   // back to the exercise's movement_type, matching SessionDetailScreen.
@@ -3223,8 +3224,8 @@ function SessionCompareScreen({ store, setStore, go, sessionId, compareId, back 
           </button>
         </div>
 
-        <div className="micro" style={{ textAlign: 'center', marginTop: -8, color: volDelta >= 0 ? UI.gold : UI.danger }}>
-          {volDelta >= 0 ? '↑' : '↓'} {Math.abs(Math.round(volDelta)).toLocaleString('en-US')} {UI.unit()} total volume
+        <div className="micro" style={{ textAlign: 'center', marginTop: -8, color: volDeltaRounded > 0 ? UI.gold : volDeltaRounded < 0 ? UI.danger : UI.inkFaint }}>
+          {volDeltaRounded > 0 ? '↑' : volDeltaRounded < 0 ? '↓' : '—'} {Math.abs(volDeltaRounded).toLocaleString('en-US')} {UI.unit()} total volume
           {cmp.isDeload && <span style={{ color: UI.inkFaint }}> · compared session was a deload week</span>}
         </div>
 
@@ -3241,13 +3242,14 @@ function SessionCompareScreen({ store, setStore, go, sessionId, compareId, back 
               const entryVolA = LB.entryVolume(entry, true);
               const entryVolB = cmpEntry ? LB.entryVolume(cmpEntry, true) : 0;
               const entryDelta = entryVolA - entryVolB;
+              const entryDeltaRounded = Math.round(entryDelta);
               return (
                 <div key={entry.exId + ei}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8, gap: 10 }}>
                     <span style={{ fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, letterSpacing: '0.05em', color: UI.ink }}>{entry.name}</span>
                     {cmpEntry ? (
-                      <span className="num" style={{ fontSize: 12, color: entryDelta >= 0 ? UI.gold : UI.danger, flexShrink: 0 }}>
-                        {entryDelta >= 0 ? '↑' : '↓'} {Math.abs(Math.round(entryDelta)).toLocaleString('en-US')} {UI.unit()}
+                      <span className="num" style={{ fontSize: 12, color: entryDeltaRounded > 0 ? UI.gold : entryDeltaRounded < 0 ? UI.danger : UI.inkFaint, flexShrink: 0 }}>
+                        {entryDeltaRounded > 0 ? '↑' : entryDeltaRounded < 0 ? '↓' : '—'} {Math.abs(entryDeltaRounded).toLocaleString('en-US')} {UI.unit()}
                       </span>
                     ) : (
                       <span className="micro" style={{ color: UI.inkFaint, flexShrink: 0 }}>NOT LOGGED THEN</span>
