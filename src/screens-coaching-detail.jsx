@@ -1622,6 +1622,7 @@ function ClientNutritionTab({ coachingId, userId }) {
 
 function CoachPlanEditorScreen({ store, setStore, go, userId, coachingId, clientId, clientName, scheduleId }) {
   const [clientStore, setClientStoreRaw] = useStateC(null);
+  const [loadError, setLoadError] = useStateC(null);
   const [syncErr, setSyncErr] = useStateC(false);
   const prevClientStore = useRefC(null);
   const latestClientStore = useRefC(null);  // updated synchronously for diff; prevClientStore only after confirmed sync
@@ -1629,13 +1630,18 @@ function CoachPlanEditorScreen({ store, setStore, go, userId, coachingId, client
   const isDirty = useRefC(false);
 
   useEffectC(() => {
+    let on = true;
+    setClientStoreRaw(null);
+    setLoadError(null);
     LB.loadClientStore(clientId).then(data => {
+      if (!on) return;
       setClientStoreRaw(data);
       prevClientStore.current = data;
       latestClientStore.current = data;
       const sch = data.schedules?.find(s => s.id === scheduleId);
       initialSchedule.current = sch ? JSON.parse(JSON.stringify(sch)) : null;
-    });
+    }).catch(e => { if (on) setLoadError(e.message); });
+    return () => { on = false; };
   }, [clientId]);
 
   const setClientStore = useRefC(null);
@@ -1679,11 +1685,15 @@ function CoachPlanEditorScreen({ store, setStore, go, userId, coachingId, client
     }
   };
 
-  if (!clientStore) {
+  if (loadError || !clientStore) {
     return (
       <Screen>
         <TopBar title={clientName} sub={<span className="micro" style={{ color: 'var(--accent)' }}>COACHING</span>} onBack={() => go({ name: 'coaching-client', coachingId, clientId, clientName, initialTab: 'plan' })} />
-        <div style={{ padding: 32, textAlign: 'center', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>Loading…</div>
+        {loadError ? (
+          <div style={{ padding: 32, textAlign: 'center', color: 'rgba(var(--danger-rgb),0.8)', fontFamily: UI.fontUi, fontSize: 13 }}>Failed to load client data: {loadError}</div>
+        ) : (
+          <div style={{ padding: 32, textAlign: 'center', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>Loading…</div>
+        )}
       </Screen>
     );
   }
@@ -1708,14 +1718,20 @@ function CoachPlanEditorScreen({ store, setStore, go, userId, coachingId, client
 
 function CoachNewPlanScreen({ store, setStore, go, userId, coachingId, clientId, clientName }) {
   const [clientStore, setClientStoreRaw] = useStateC(null);
+  const [loadError, setLoadError] = useStateC(null);
   const [syncErr, setSyncErr] = useStateC(false);
   const prevClientStore = useRefC(null);
 
   useEffectC(() => {
+    let on = true;
+    setClientStoreRaw(null);
+    setLoadError(null);
     LB.loadClientStore(clientId).then(data => {
+      if (!on) return;
       setClientStoreRaw(data);
       prevClientStore.current = data;
-    });
+    }).catch(e => { if (on) setLoadError(e.message); });
+    return () => { on = false; };
   }, [clientId]);
 
   const setClientStore = useRefC(null);
@@ -1741,11 +1757,15 @@ function CoachNewPlanScreen({ store, setStore, go, userId, coachingId, clientId,
     }
   };
 
-  if (!clientStore) {
+  if (loadError || !clientStore) {
     return (
       <Screen>
         <TopBar title={clientName} sub={<span className="micro" style={{ color: 'var(--accent)' }}>COACHING</span>} onBack={() => go({ name: 'coaching-client', coachingId, clientId, clientName, initialTab: 'plan' })} />
-        <div style={{ padding: 32, textAlign: 'center', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>Loading…</div>
+        {loadError ? (
+          <div style={{ padding: 32, textAlign: 'center', color: 'rgba(var(--danger-rgb),0.8)', fontFamily: UI.fontUi, fontSize: 13 }}>Failed to load client data: {loadError}</div>
+        ) : (
+          <div style={{ padding: 32, textAlign: 'center', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>Loading…</div>
+        )}
       </Screen>
     );
   }
