@@ -1392,7 +1392,19 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       </div>
       </div>
       <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 8, padding: '16px 20px', paddingBottom: 'calc(env(safe-area-inset-bottom, 8px) + 16px)', borderTop: `0.5px solid ${UI.hair}`, background: UI.bg }}>
-        <Btn kind="ghost" onClick={async () => { if ('caches' in window) { const keys = await caches.keys(); await Promise.all(keys.map(k => caches.delete(k))); } window.location.reload(true); }}>Clear cache &amp; reload</Btn>
+        <Btn kind="ghost" onClick={async () => {
+          if ('caches' in window) { const keys = await caches.keys(); await Promise.all(keys.map(k => caches.delete(k))); }
+          // Also nuke the IndexedDB precompile cache (see index.html's
+          // makeClearCacheButton) — a stale record there survives a plain
+          // CacheStorage clear and keeps serving old transpiled JS.
+          if ('indexedDB' in window) {
+            await new Promise(resolve => {
+              const req = indexedDB.deleteDatabase('zane-precompile');
+              req.onsuccess = req.onerror = req.onblocked = () => resolve();
+            });
+          }
+          window.location.reload(true);
+        }}>Clear cache &amp; reload</Btn>
         {isAdmin ? (() => {
           const unseenCount = allUsers.filter(isNewSignup).length;
           const adminUnread = supportInbox.reduce((sum, t) => sum + Number(t.unread_count || 0), 0);
