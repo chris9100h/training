@@ -1001,6 +1001,51 @@ function CardioFinishFlow({ open, durationMin, store, setStore, onClose, onPR })
 // one caller below until we can update the call site.
 const getCycleStartForNum = LB.getCycleStartForNum;
 
+// Walk backward from yesterday looking for planned training days with no
+// logged session — shared core for HomeScreen's recentBannerDay (single
+// most-recent candidate; any skip record at all excludes a day) and
+// allMissedDays (full list further back; a '—' "soft skip" placeholder still
+// counts as missed). isSkipped lets each caller apply its own inclusion rule.
+function findMissedTrainingDays(sch, { weekdayMode, cycleStartDate, weekPlanStartDate, sessions, skipsMap, maxDaysAgo, isSkipped }) {
+  if (!sch) return [];
+  const todayD = new Date(); todayD.setHours(12, 0, 0, 0);
+  const sessionDates = new Set(sessions.filter(s => s.ended).map(s => s.date.slice(0, 10)));
+  const results = [];
+  for (let daysAgo = 1; daysAgo <= maxDaysAgo; daysAgo++) {
+    const d = new Date(todayD); d.setDate(todayD.getDate() - daysAgo);
+    const dateKey = LB.fmtISO(d);
+    if (sessionDates.has(dateKey)) continue;
+    const sk = skipsMap.get(dateKey);
+    if (isSkipped(sk)) continue;
+    let trainingDay = null;
+    if (weekdayMode) {
+      if (weekPlanStartDate && dateKey < weekPlanStartDate) continue;
+      const wd = LB.isoWd(d);
+      trainingDay = sch.days.find(day => day.weekday === wd && day.items?.length > 0) || null;
+    } else if (cycleStartDate) {
+      const vDays = LB.getPlanDaysForDate(sch, dateKey);
+      if (!vDays.length) continue;
+      const cyclePosForDate = LB.getCyclePosForDate(sch, dateKey);
+      let idx;
+      if (cyclePosForDate !== null) {
+        const start = LB.parseDate(cycleStartDate);
+        if (Math.round((d.getTime() - start.getTime()) / 86400000) < 0) continue;
+        idx = cyclePosForDate;
+      } else {
+        const start = LB.parseDate(cycleStartDate);
+        const n = Math.round((d.getTime() - start.getTime()) / 86400000);
+        if (n < 0) continue;
+        idx = ((n % vDays.length) + vDays.length) % vDays.length;
+      }
+      const dayData = vDays[idx];
+      if (dayData?.items?.length > 0) trainingDay = dayData;
+    }
+    if (!trainingDay) continue;
+    results.push({ date: d, dateKey, dayName: trainingDay.name, dayId: trainingDay.id, daysAgo, skip: sk || null, dayData: trainingDay });
+  }
+  return results;
+}
+
 // ─── HOME ─────────────────────────────────────────────────────────────
 function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRetrySync }) {
   const [confirmEl, confirm] = useConfirm();
@@ -1835,83 +1880,19 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
   }, [store.cardioPlans, store.activeCardioPlanId, sessionDate]);
 
   const recentBannerDay = useMemo(() => {
-    if (!sch) return null;
-    const todayD = new Date(); todayD.setHours(12, 0, 0, 0);
-    const sessionDates = new Set(store.sessions.filter(s => s.ended).map(s => s.date.slice(0, 10)));
-    for (let daysAgo = 1; daysAgo <= 30; daysAgo++) {
-      const d = new Date(todayD); d.setDate(todayD.getDate() - daysAgo);
-      const dateKey = LB.fmtISO(d);
-      if (sessionDates.has(dateKey)) continue;
-      const sk = skipsMap.get(dateKey);
-      if (sk) continue; // already actioned — edit via calendar card
-      let trainingDay = null;
-      if (weekdayMode) {
-        if (store.weekPlanStartDate && dateKey < store.weekPlanStartDate) continue;
-        const wd = LB.isoWd(d);
-        trainingDay = sch.days.find(day => day.weekday === wd && day.items?.length > 0) || null;
-      } else if (store.cycleStartDate) {
-        const vDays = LB.getPlanDaysForDate(sch, dateKey);
-        if (!vDays.length) continue;
-        const cyclePosForDate = LB.getCyclePosForDate(sch, dateKey);
-        let idx;
-        if (cyclePosForDate !== null) {
-          const start = LB.parseDate(store.cycleStartDate);
-          if (Math.round((d.getTime() - start.getTime()) / 86400000) < 0) continue;
-          idx = cyclePosForDate;
-        } else {
-          const start = LB.parseDate(store.cycleStartDate);
-          const n = Math.round((d.getTime() - start.getTime()) / 86400000);
-          if (n < 0) continue;
-          idx = ((n % vDays.length) + vDays.length) % vDays.length;
-        }
-        const dayData = vDays[idx];
-        if (dayData?.items?.length > 0) trainingDay = dayData;
-      }
-      if (!trainingDay) continue;
-      return { date: d, dateKey, dayName: trainingDay.name, dayId: trainingDay.id, daysAgo, skip: sk || null, dayData: trainingDay };
-    }
-    return null;
+    const [first] = findMissedTrainingDays(sch, {
+      weekdayMode, cycleStartDate: store.cycleStartDate, weekPlanStartDate: store.weekPlanStartDate,
+      sessions: store.sessions, skipsMap, maxDaysAgo: 30,
+      isSkipped: sk => !!sk, // any skip record at all — already actioned, edit via calendar card
+    });
+    return first || null;
   }, [sch, weekdayMode, store.cycleStartDate, store.sessions, store.skips, skipsMap]);
 
-  const allMissedDays = useMemo(() => {
-    if (!sch) return [];
-    const todayD = new Date(); todayD.setHours(12, 0, 0, 0);
-    const sessionDates = new Set(store.sessions.filter(s => s.ended).map(s => s.date.slice(0, 10)));
-    const missed = [];
-    for (let daysAgo = 1; daysAgo <= 14; daysAgo++) {
-      const d = new Date(todayD); d.setDate(todayD.getDate() - daysAgo);
-      const dateKey = LB.fmtISO(d);
-      if (sessionDates.has(dateKey)) continue;
-      const skip = skipsMap.get(dateKey);
-      if (skip && skip.skipReason !== '—') continue;
-      let trainingDay = null;
-      if (weekdayMode) {
-        if (store.weekPlanStartDate && dateKey < store.weekPlanStartDate) continue;
-        const wd = LB.isoWd(d);
-        trainingDay = sch.days.find(day => day.weekday === wd && day.items?.length > 0) || null;
-      } else if (store.cycleStartDate) {
-        const vDays = LB.getPlanDaysForDate(sch, dateKey);
-        if (!vDays.length) continue;
-        const cyclePosForDate = LB.getCyclePosForDate(sch, dateKey);
-        let idx;
-        if (cyclePosForDate !== null) {
-          const start = LB.parseDate(store.cycleStartDate);
-          if (Math.round((d.getTime() - start.getTime()) / 86400000) < 0) continue;
-          idx = cyclePosForDate;
-        } else {
-          const start = LB.parseDate(store.cycleStartDate);
-          const n = Math.round((d.getTime() - start.getTime()) / 86400000);
-          if (n < 0) continue;
-          idx = ((n % vDays.length) + vDays.length) % vDays.length;
-        }
-        const dayData = vDays[idx];
-        if (dayData?.items?.length > 0) trainingDay = dayData;
-      }
-      if (!trainingDay) continue;
-      missed.push({ date: d, dateKey, dayName: trainingDay.name, dayId: trainingDay.id, daysAgo, dayData: trainingDay });
-    }
-    return missed;
-  }, [sch, weekdayMode, store.cycleStartDate, store.sessions, store.skips, skipsMap]);
+  const allMissedDays = useMemo(() => findMissedTrainingDays(sch, {
+    weekdayMode, cycleStartDate: store.cycleStartDate, weekPlanStartDate: store.weekPlanStartDate,
+    sessions: store.sessions, skipsMap, maxDaysAgo: 14,
+    isSkipped: sk => sk && sk.skipReason !== '—',
+  }), [sch, weekdayMode, store.cycleStartDate, store.sessions, store.skips, skipsMap]);
 
   useEffect(() => {
     const coaching = store.coaching;
