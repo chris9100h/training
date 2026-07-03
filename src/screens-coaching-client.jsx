@@ -454,42 +454,25 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
                 </div>
                 {(() => {
                   const storeWithoutToday = { ...clientStore, sessions: clientStore.sessions.filter(s => s.ended && s.ended < todaySession.ended) };
-                  // See ClientSessionsTab's fmtSetChip — same gap, same fix.
+                  // Shared with ClientSessionsTab via LB.techniqueRounds — both
+                  // used to reimplement this from scratch (comment used to say
+                  // "same gap, same fix", i.e. two independent copies to keep
+                  // in sync by hand).
                   const fmtSetChip = (s) => {
                     if (s.skipped && !s.done) return 'skipped';
-                    const drops = s.drops && Array.isArray(s.drops) && s.drops.length > 0 ? s.drops : null;
-                    if (s.technique === 'drop' && drops) {
-                      const chain = drops.map(d => `${d.kg ?? '—'}${unit}×${d.reps ?? '—'}`).join(' → ');
-                      const p = drops[drops.length - 1]?.partials || 0;
-                      return p > 0 ? `${chain} +${p}` : chain;
-                    }
-                    if ((s.technique === 'myorep' || s.technique === 'myorep_match') && drops) {
-                      const total = drops.reduce((a, d) => a + (d.reps || 0), 0);
-                      const chain = drops.map((d, di) => di === 0 ? `${d.kg ?? '—'}${unit}×${d.reps ?? '—'}` : (d.reps ?? '—')).join(' ↺ ');
-                      const p = drops[drops.length - 1]?.partials || 0;
-                      return p > 0 ? `${chain} (${total}) +${p}` : `${chain} (${total})`;
-                    }
-                    if (s.technique === 'amrap_variations' && drops) {
-                      const chain = drops.map(d => `${d.kg ?? '—'}${unit}×${d.reps ?? '—'}`).join(' → ');
-                      const p = drops[drops.length - 1]?.partials || 0;
-                      return p > 0 ? `${chain} +${p}` : chain;
-                    }
-                    if (s.technique === 'lengthened_partial') {
-                      const partials = s.drops?.partials || 0;
+                    const tr = LB.techniqueRounds(s);
+                    if (tr.kind === 'lengthened_partial') {
                       const main = `${s.kg ?? '—'}${unit} × ${s.reps ?? s.repsL ?? '—'}`;
-                      return partials > 0 ? `${main} +${partials}` : main;
+                      return tr.partials > 0 ? `${main} +${tr.partials}` : main;
+                    }
+                    if (tr.kind) {
+                      const chain = tr.rounds.map((d, di) => (tr.connector === '↺' && di > 0) ? (d.reps ?? '—') : `${d.kg ?? '—'}${unit}×${d.reps ?? '—'}`).join(` ${tr.connector} `);
+                      const suffix = tr.totalReps != null ? ` (${tr.totalReps})` : '';
+                      return tr.partials > 0 ? `${chain}${suffix} +${tr.partials}` : `${chain}${suffix}`;
                     }
                     return `${s.kg ?? '—'}${unit} × ${s.reps ?? s.repsL ?? '—'}`;
                   };
-                  // Same label text/style as the training screen's per-set
-                  // technique badge — the chip's number/arrow notation alone
-                  // doesn't say which technique produced it.
-                  const techniqueLabel = (s) => s.technique === 'drop' ? 'DROP SET'
-                    : s.technique === 'myorep_match' ? 'MYO MATCH'
-                    : s.technique === 'myorep' ? 'MYO REP'
-                    : s.technique === 'amrap_variations' ? 'AMRAP'
-                    : s.technique === 'lengthened_partial' ? 'PARTIALS'
-                    : null;
+                  const techniqueLabel = (s) => LB.techniqueRounds(s).badge;
                   return (todaySession.entries || []).map((e, i) => {
                     const lastResult = e.exId ? LB.lastSessionForExercise(storeWithoutToday, e.exId, todaySession.dayId) : null;
                     const lastSets = (lastResult?.entry?.sets || []).filter(s => !s.warmup && (s.kg != null || s.reps != null));
@@ -1322,41 +1305,22 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
             // awareness at all — a drop-set/myo-rep/lengthened-partial set just
             // showed its main kg×reps (drops[0] mirrors the top-level fields)
             // with the rest of the technique's data silently invisible.
+            // Shared with ClientOverviewTab via LB.techniqueRounds — see there.
             const fmtSetChip = (s) => {
               if (s.skipped && !s.done) return 'skipped';
-              const drops = s.drops && Array.isArray(s.drops) && s.drops.length > 0 ? s.drops : null;
-              if (s.technique === 'drop' && drops) {
-                const chain = drops.map(d => `${d.kg ?? '—'}${unit}×${d.reps ?? '—'}`).join(' → ');
-                const p = drops[drops.length - 1]?.partials || 0;
-                return p > 0 ? `${chain} +${p}` : chain;
-              }
-              if ((s.technique === 'myorep' || s.technique === 'myorep_match') && drops) {
-                const total = drops.reduce((a, d) => a + (d.reps || 0), 0);
-                const chain = drops.map((d, di) => di === 0 ? `${d.kg ?? '—'}${unit}×${d.reps ?? '—'}` : (d.reps ?? '—')).join(' ↺ ');
-                const p = drops[drops.length - 1]?.partials || 0;
-                return p > 0 ? `${chain} (${total}) +${p}` : `${chain} (${total})`;
-              }
-              if (s.technique === 'amrap_variations' && drops) {
-                const chain = drops.map(d => `${d.kg ?? '—'}${unit}×${d.reps ?? '—'}`).join(' → ');
-                const p = drops[drops.length - 1]?.partials || 0;
-                return p > 0 ? `${chain} +${p}` : chain;
-              }
-              if (s.technique === 'lengthened_partial') {
-                const partials = s.drops?.partials || 0;
+              const tr = LB.techniqueRounds(s);
+              if (tr.kind === 'lengthened_partial') {
                 const main = `${s.kg ?? '—'}${unit} × ${s.reps ?? s.repsL ?? '—'}`;
-                return partials > 0 ? `${main} +${partials}` : main;
+                return tr.partials > 0 ? `${main} +${tr.partials}` : main;
+              }
+              if (tr.kind) {
+                const chain = tr.rounds.map((d, di) => (tr.connector === '↺' && di > 0) ? (d.reps ?? '—') : `${d.kg ?? '—'}${unit}×${d.reps ?? '—'}`).join(` ${tr.connector} `);
+                const suffix = tr.totalReps != null ? ` (${tr.totalReps})` : '';
+                return tr.partials > 0 ? `${chain}${suffix} +${tr.partials}` : `${chain}${suffix}`;
               }
               return `${s.kg ?? '—'}${unit} × ${s.reps ?? s.repsL ?? '—'}`;
             };
-            // Same label text/style as the training screen's per-set technique
-            // badge — the chip's number/arrow notation alone doesn't say which
-            // technique produced it.
-            const techniqueLabel = (s) => s.technique === 'drop' ? 'DROP SET'
-              : s.technique === 'myorep_match' ? 'MYO MATCH'
-              : s.technique === 'myorep' ? 'MYO REP'
-              : s.technique === 'amrap_variations' ? 'AMRAP'
-              : s.technique === 'lengthened_partial' ? 'PARTIALS'
-              : null;
+            const techniqueLabel = (s) => LB.techniqueRounds(s).badge;
             // If any set in the row carries a technique badge, every set needs
             // equal reserved space above its chip — otherwise a plain set's
             // chip sits noticeably higher than a badged neighbor's.

@@ -2609,7 +2609,8 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
 
                       // Drop set: DS badge + chips connected by arrows
                       if (st.technique === 'drop' && !isCheckboxOnly) {
-                        const drops = (st.drops && st.drops.length > 0) ? st.drops : (st.kg != null ? [{ kg: st.kg, reps: st.reps }] : []);
+                        const tr = LB.techniqueRounds(st);
+                        const drops = tr.rounds;
                         const chipColor = highlight ? UI.goldLight : decline ? 'rgba(var(--danger-rgb),0.85)' : UI.ink;
                         const chipBorder = highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : UI.hairStrong;
                         const chipBg = highlight ? UI.goldFaint : decline ? 'rgba(var(--danger-rgb),0.08)' : 'transparent';
@@ -2649,12 +2650,12 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                                   </span>
                                 </React.Fragment>
                               ))}
-                              {(() => { const p = drops[drops.length - 1]?.partials || 0; return p > 0 && (
+                              {tr.partials > 0 && (
                                 <React.Fragment>
                                   <span style={{ color: UI.inkGhost, fontSize: 10, fontFamily: UI.fontUi }}>+</span>
-                                  <span style={{ border: `1px solid rgba(var(--accent-rgb),0.35)`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontNum, fontSize: 12, color: UI.inkSoft }}>{p}</span>
+                                  <span style={{ border: `1px solid rgba(var(--accent-rgb),0.35)`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontNum, fontSize: 12, color: UI.inkSoft }}>{tr.partials}</span>
                                 </React.Fragment>
-                              ); })()}
+                              )}
                             </div>
                           </div>
                         );
@@ -2662,7 +2663,8 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
 
                       // Myo-rep / myo-rep match: badge + activation chip + mini chips
                       if ((st.technique === 'myorep' || st.technique === 'myorep_match') && !isCheckboxOnly) {
-                        const drops = (st.drops && st.drops.length > 0) ? st.drops : (st.kg != null ? [{ kg: st.kg, reps: st.reps }] : []);
+                        const tr = LB.techniqueRounds(st);
+                        const drops = tr.rounds;
                         const chipColor = highlight ? UI.goldLight : decline ? 'rgba(var(--danger-rgb),0.85)' : UI.ink;
                         const chipBorder = highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : UI.hairStrong;
                         const chipBg = highlight ? UI.goldFaint : decline ? 'rgba(var(--danger-rgb),0.08)' : 'transparent';
@@ -2704,20 +2706,20 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                                   </React.Fragment>
                                 ))}
                               </div>
-                              {(() => { const t = drops.reduce((a, d) => a + (d.reps || 0), 0); const p = drops[drops.length - 1]?.partials || 0; return (t > 0 || p > 0) ? (
+                              {(tr.totalReps > 0 || tr.partials > 0) && (
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                                  {t > 0 && (
+                                  {tr.totalReps > 0 && (
                                     <div style={{ border: `1px solid var(--accent)`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontUi, fontSize: 11, color: 'var(--accent)', letterSpacing: '0.03em', textAlign: 'center' }}>
-                                      Total {t}
+                                      Total {tr.totalReps}
                                     </div>
                                   )}
-                                  {p > 0 && (
+                                  {tr.partials > 0 && (
                                     <div style={{ border: `1px solid rgba(var(--accent-rgb),0.35)`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontNum, fontSize: 11, color: UI.inkSoft }}>
-                                      +{p} partial{p === 1 ? '' : 's'}
+                                      +{tr.partials} partial{tr.partials === 1 ? '' : 's'}
                                     </div>
                                   )}
                                 </div>
-                              ) : null; })()}
+                              )}
                             </div>
                           </div>
                         );
@@ -2725,7 +2727,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
 
                       // Lengthened Partials: badge + main chip + partials count
                       if (st.technique === 'lengthened_partial' && !isCheckboxOnly) {
-                        const partials = st.drops?.partials || 0;
+                        const partials = LB.techniqueRounds(st).partials;
                         const chipColor = highlight ? UI.goldLight : decline ? 'rgba(var(--danger-rgb),0.85)' : UI.ink;
                         const chipBorder = highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : UI.hairStrong;
                         const chipBg = highlight ? UI.goldFaint : decline ? 'rgba(var(--danger-rgb),0.08)' : 'transparent';
@@ -2750,12 +2752,13 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                       // label above (unless it's just the exercise's own name —
                       // no variation was actually logged for that round).
                       if (st.technique === 'amrap_variations' && !isCheckboxOnly) {
-                        const drops = (st.drops && st.drops.length > 0) ? st.drops : (st.kg != null ? [{ kg: st.kg, reps: st.reps }] : []);
+                        const tr = LB.techniqueRounds(st, { exName });
+                        const drops = tr.rounds;
                         // Show every round's label once ANY round diverges from
                         // the exercise name — showing only the diverging rounds
                         // would leave the unvaried ones (usually round 1) looking
                         // unlabeled next to their labeled neighbors.
-                        const anyVaried = drops.some(d => d.label && d.label !== exName);
+                        const anyVaried = tr.anyVaried;
                         const chipColor = highlight ? UI.goldLight : decline ? 'rgba(var(--danger-rgb),0.85)' : UI.ink;
                         const chipBorder = highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : UI.hairStrong;
                         const chipBg = highlight ? UI.goldFaint : decline ? 'rgba(var(--danger-rgb),0.08)' : 'transparent';
@@ -2800,12 +2803,12 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                                   </div>
                                 </React.Fragment>
                               ))}
-                              {(() => { const p = drops[drops.length - 1]?.partials || 0; return p > 0 && (
+                              {tr.partials > 0 && (
                                 <React.Fragment>
                                   <span style={{ color: UI.inkGhost, fontSize: 10, fontFamily: UI.fontUi, alignSelf: 'center' }}>+</span>
-                                  <span style={{ border: `1px solid rgba(var(--accent-rgb),0.35)`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontNum, fontSize: 12, color: UI.inkSoft, alignSelf: 'center' }}>{p}</span>
+                                  <span style={{ border: `1px solid rgba(var(--accent-rgb),0.35)`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontNum, fontSize: 12, color: UI.inkSoft, alignSelf: 'center' }}>{tr.partials}</span>
                                 </React.Fragment>
-                              ); })()}
+                              )}
                             </div>
                           </div>
                         );
@@ -3027,27 +3030,15 @@ function SessionEditSheet({ session, duration, exercises, onClose, onSave }) {
 function fmtCompareSet(st) {
   if (!st) return '—';
   if (st.skipped && !st.done) return 'skipped';
-  const drops = st.drops && (Array.isArray(st.drops) ? st.drops.length > 0 : st.drops.partials) ? st.drops : null;
-  if (st.technique === 'drop' && Array.isArray(drops)) {
-    const chain = drops.map(d => `${d.kg ?? '—'}${UI.unit()}×${d.reps ?? '—'}`).join(' → ');
-    const p = drops[drops.length - 1]?.partials || 0;
-    return p > 0 ? `${chain} +${p} partials` : chain;
-  }
-  if ((st.technique === 'myorep' || st.technique === 'myorep_match') && Array.isArray(drops)) {
-    const total = drops.reduce((a, d) => a + (d.reps || 0), 0);
-    const chain = drops.map((d, di) => di === 0 ? `${d.kg ?? '—'}${UI.unit()}×${d.reps ?? '—'}` : (d.reps ?? '—')).join(' ↺ ');
-    const p = drops[drops.length - 1]?.partials || 0;
-    return p > 0 ? `${chain} (${total}) +${p} partials` : `${chain} (${total})`;
-  }
-  if (st.technique === 'amrap_variations' && Array.isArray(drops)) {
-    const chain = drops.map(d => `${d.kg ?? '—'}${UI.unit()}×${d.reps ?? '—'}`).join(' → ');
-    const p = drops[drops.length - 1]?.partials || 0;
-    return p > 0 ? `${chain} +${p} partials` : chain;
-  }
-  if (st.technique === 'lengthened_partial') {
-    const partials = st.drops?.partials || 0;
+  const tr = LB.techniqueRounds(st);
+  if (tr.kind === 'lengthened_partial') {
     const main = `${st.kg != null ? st.kg + UI.unit() : '—'} × ${st.reps ?? '—'}`;
-    return partials > 0 ? `${main} +${partials} partials` : main;
+    return tr.partials > 0 ? `${main} +${tr.partials} partials` : main;
+  }
+  if (tr.kind) {
+    const chain = tr.rounds.map((d, di) => (tr.connector === '↺' && di > 0) ? (d.reps ?? '—') : `${d.kg ?? '—'}${UI.unit()}×${d.reps ?? '—'}`).join(` ${tr.connector} `);
+    const suffix = tr.totalReps != null ? ` (${tr.totalReps})` : '';
+    return tr.partials > 0 ? `${chain}${suffix} +${tr.partials} partials` : `${chain}${suffix}`;
   }
   const repsStr = (st.repsL != null || st.repsR != null) ? `L${st.repsL ?? '?'}/R${st.repsR ?? '?'}` : (st.reps ?? '—');
   return `${st.kg != null ? st.kg + UI.unit() : '—'} × ${repsStr}`;
@@ -3071,38 +3062,38 @@ function TechniqueBlock({ st, highlight = false, decline = false }) {
   const chipBg = highlight ? UI.goldFaint : decline ? 'rgba(var(--danger-rgb),0.08)' : 'transparent';
   const unitColor = highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint;
 
-  if (st.technique === 'lengthened_partial') {
-    const partials = st.drops?.partials || 0;
+  const tr = LB.techniqueRounds(st);
+
+  if (tr.kind === 'lengthened_partial') {
     return (
       <div style={{ borderLeft: `2px solid ${railColor}`, paddingLeft: 10 }}>
         <div style={{ marginBottom: 6 }}>
-          <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: badgeColor, background: badgeBg, border: `0.5px solid ${badgeBorder}`, borderRadius: 4, padding: '2px 6px' }}>PARTIALS</span>
+          <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: badgeColor, background: badgeBg, border: `0.5px solid ${badgeBorder}`, borderRadius: 4, padding: '2px 6px' }}>{tr.badge}</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
           <span style={{ background: chipBg, border: `1px solid ${chipBorder}`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontNum, fontSize: 12, color: chipColor }}>
             {st.kg ?? '—'}<span style={{ color: unitColor, fontSize: 10 }}>{UI.unit()}</span><span style={{ color: unitColor, margin: '0 1px' }}>×</span>{st.reps ?? '—'}
           </span>
-          {partials > 0 && <span style={{ color: UI.inkGhost, fontSize: 10, fontFamily: UI.fontUi }}>+</span>}
-          {partials > 0 && <span style={{ border: `1px solid rgba(var(--accent-rgb),0.35)`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontNum, fontSize: 12, color: UI.inkSoft }}>{partials}</span>}
+          {tr.partials > 0 && <span style={{ color: UI.inkGhost, fontSize: 10, fontFamily: UI.fontUi }}>+</span>}
+          {tr.partials > 0 && <span style={{ border: `1px solid rgba(var(--accent-rgb),0.35)`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontNum, fontSize: 12, color: UI.inkSoft }}>{tr.partials}</span>}
         </div>
       </div>
     );
   }
 
-  const isMyo = st.technique === 'myorep' || st.technique === 'myorep_match';
-  const badgeLabel = st.technique === 'drop' ? 'DROP SET' : st.technique === 'myorep_match' ? 'MYO MATCH' : st.technique === 'amrap_variations' ? 'AMRAP' : 'MYO-REPS';
-  const drops = (st.drops && Array.isArray(st.drops) && st.drops.length > 0) ? st.drops : (st.kg != null ? [{ kg: st.kg, reps: st.reps }] : []);
+  const isMyo = tr.connector === '↺';
+  const drops = tr.rounds;
 
   return (
     <div style={{ borderLeft: `2px solid ${railColor}`, paddingLeft: 10 }}>
       <div style={{ marginBottom: 6 }}>
-        <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: badgeColor, background: badgeBg, border: `0.5px solid ${badgeBorder}`, borderRadius: 4, padding: '2px 6px' }}>{badgeLabel}</span>
+        <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: badgeColor, background: badgeBg, border: `0.5px solid ${badgeBorder}`, borderRadius: 4, padding: '2px 6px' }}>{tr.badge}</span>
       </div>
       <div style={{ display: isMyo ? 'inline-flex' : 'flex', flexDirection: isMyo ? 'column' : 'row', gap: 4 }}>
         <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
           {drops.map((d, di) => (
             <React.Fragment key={di}>
-              {di > 0 && <span style={{ color: UI.inkGhost, fontSize: 10, fontFamily: UI.fontUi }}>{isMyo ? '↺' : '→'}</span>}
+              {di > 0 && <span style={{ color: UI.inkGhost, fontSize: 10, fontFamily: UI.fontUi }}>{tr.connector}</span>}
               <span style={{
                 background: di === 0 ? chipBg : 'transparent',
                 border: `1px solid ${di === 0 || !isMyo ? chipBorder : UI.hair}`,
@@ -3116,17 +3107,17 @@ function TechniqueBlock({ st, highlight = false, decline = false }) {
             </React.Fragment>
           ))}
         </div>
-        {isMyo && (() => { const t = drops.reduce((a, d) => a + (d.reps || 0), 0); return t > 0 ? (
+        {tr.totalReps > 0 && (
           <div style={{ border: `1px solid var(--accent)`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontUi, fontSize: 11, color: 'var(--accent)', letterSpacing: '0.03em' }}>
-            Total {t}
+            Total {tr.totalReps}
           </div>
-        ) : null; })()}
-        {(() => { const p = drops[drops.length - 1]?.partials || 0; return p > 0 ? (
+        )}
+        {tr.partials > 0 && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
             <span style={{ color: UI.inkGhost, fontSize: 10, fontFamily: UI.fontUi }}>+</span>
-            <span style={{ border: `1px solid rgba(var(--accent-rgb),0.35)`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontNum, fontSize: 12, color: UI.inkSoft }}>{p}</span>
+            <span style={{ border: `1px solid rgba(var(--accent-rgb),0.35)`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontNum, fontSize: 12, color: UI.inkSoft }}>{tr.partials}</span>
           </div>
-        ) : null; })()}
+        )}
       </div>
     </div>
   );
@@ -3513,27 +3504,15 @@ function ComparisonScreen({ session, onDismiss, go, userName }) {
           const fmtSet = s => {
             if (!s) return '—';
             if (s.skipped && !s.done) return 'skipped';
-            const drops = s.drops && s.drops.length > 0 ? s.drops : null;
-            if (s.technique === 'drop' && drops) {
-              const chain = drops.map(d => `${d.kg ?? '—'}${unit}×${d.reps ?? '—'}`).join(' → ');
-              const p = drops[drops.length - 1]?.partials || 0;
-              return p > 0 ? `${chain} +${p} partials` : chain;
-            }
-            if ((s.technique === 'myorep' || s.technique === 'myorep_match') && drops) {
-              const total = drops.reduce((a, d) => a + (d.reps || 0), 0);
-              const chain = drops.map((d, di) => di === 0 ? `${d.kg ?? '—'}${unit}×${d.reps ?? '—'}` : (d.reps ?? '—')).join(' ↺ ');
-              const p = drops[drops.length - 1]?.partials || 0;
-              return p > 0 ? `${chain} (${total}) +${p} partials` : `${chain} (${total})`;
-            }
-            if (s.technique === 'amrap_variations' && drops) {
-              const chain = drops.map(d => `${d.kg ?? '—'}${unit}×${d.reps ?? '—'}`).join(' → ');
-              const p = drops[drops.length - 1]?.partials || 0;
-              return p > 0 ? `${chain} +${p} partials` : chain;
-            }
-            if (s.technique === 'lengthened_partial') {
-              const partials = s.drops?.partials || 0;
+            const tr = LB.techniqueRounds(s);
+            if (tr.kind === 'lengthened_partial') {
               const main = `${s.kg != null ? s.kg + unit : '—'} × ${s.reps ?? '—'}`;
-              return partials > 0 ? `${main} +${partials} partials` : main;
+              return tr.partials > 0 ? `${main} +${tr.partials} partials` : main;
+            }
+            if (tr.kind) {
+              const chain = tr.rounds.map((d, di) => (tr.connector === '↺' && di > 0) ? (d.reps ?? '—') : `${d.kg ?? '—'}${unit}×${d.reps ?? '—'}`).join(` ${tr.connector} `);
+              const suffix = tr.totalReps != null ? ` (${tr.totalReps})` : '';
+              return tr.partials > 0 ? `${chain}${suffix} +${tr.partials} partials` : `${chain}${suffix}`;
             }
             const repsStr = (s.repsL != null || s.repsR != null)
               ? `L${s.repsL ?? '?'}/R${s.repsR ?? '?'}`
@@ -3819,10 +3798,11 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
             {(entry.sets || []).map((s, i) => {
               const done = s.done || s.skipped;
               const unilateral = s.repsL != null || s.repsR != null;
-              const drops = s.drops && s.drops.length > 0 ? s.drops : null;
+              const tr = LB.techniqueRounds(s, { exName: entry.name });
+              const drops = tr.rounds;
 
               // Drop set
-              if (s.technique === 'drop' && drops) return (
+              if (tr.kind === 'drop') return (
                 <React.Fragment key={i}>
                 <div style={{ padding: '12px 0', opacity: done ? 1 : 0.35, transition: 'opacity 0.3s' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
@@ -3840,12 +3820,12 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
                         <span className="num" style={{ fontSize: 13, color: UI.ink }}>{d.kg ?? '—'}<span style={{ fontSize: 10, color: UI.inkFaint }}>{unit}</span> × {d.reps ?? '—'}</span>
                       </React.Fragment>
                     ))}
-                    {(() => { const p = drops[drops.length - 1]?.partials || 0; return p > 0 && (
+                    {tr.partials > 0 && (
                       <React.Fragment>
                         <span style={{ color: UI.inkGhost, fontSize: 10, fontFamily: UI.fontUi }}>+</span>
-                        <span className="num" style={{ fontSize: 13, color: UI.inkSoft }}>{p}<span style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint, marginLeft: 3 }}>partials</span></span>
+                        <span className="num" style={{ fontSize: 13, color: UI.inkSoft }}>{tr.partials}<span style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint, marginLeft: 3 }}>partials</span></span>
                       </React.Fragment>
-                    ); })()}
+                    )}
                   </div>
                 </div>
                 {i < entry.sets.length - 1 && <div className="knurl" />}
@@ -3853,9 +3833,9 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
               );
 
               // Myo-rep / myo-rep match
-              if ((s.technique === 'myorep' || s.technique === 'myorep_match') && drops) {
-                const isMatch = s.technique === 'myorep_match';
-                const total = drops.reduce((a, d) => a + (d.reps || 0), 0);
+              if (tr.kind === 'myorep' || tr.kind === 'myorep_match') {
+                const isMatch = tr.kind === 'myorep_match';
+                const total = tr.totalReps;
                 return (
                   <React.Fragment key={i}>
                   <div style={{ padding: '12px 0', opacity: done ? 1 : 0.35, transition: 'opacity 0.3s' }}>
@@ -3877,12 +3857,12 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
                           </span>
                         </React.Fragment>
                       ))}
-                      {(() => { const p = drops[drops.length - 1]?.partials || 0; return p > 0 && (
+                      {tr.partials > 0 && (
                         <React.Fragment>
                           <span style={{ color: UI.inkGhost, fontSize: 10, fontFamily: UI.fontUi }}>+</span>
-                          <span className="num" style={{ fontSize: 13, color: UI.inkSoft }}>{p}<span style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint, marginLeft: 3 }}>partials</span></span>
+                          <span className="num" style={{ fontSize: 13, color: UI.inkSoft }}>{tr.partials}<span style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint, marginLeft: 3 }}>partials</span></span>
                         </React.Fragment>
-                      ); })()}
+                      )}
                     </div>
                   </div>
                   {i < entry.sets.length - 1 && <div className="knurl" />}
@@ -3894,8 +3874,8 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
               // diverges from the exercise name, not just the diverging ones,
               // so the unvaried round (usually round 1) doesn't look unlabeled
               // next to its labeled neighbors.
-              if (s.technique === 'amrap_variations' && drops) {
-                const anyVaried = drops.some(d => d.label && d.label !== entry.name);
+              if (tr.kind === 'amrap_variations') {
+                const anyVaried = tr.anyVaried;
                 return (
                 <React.Fragment key={i}>
                 <div style={{ padding: '12px 0', opacity: done ? 1 : 0.35, transition: 'opacity 0.3s' }}>
@@ -3919,12 +3899,12 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
                         </div>
                       </React.Fragment>
                     ))}
-                    {(() => { const p = drops[drops.length - 1]?.partials || 0; return p > 0 && (
+                    {tr.partials > 0 && (
                       <React.Fragment>
                         <span style={{ color: UI.inkGhost, fontSize: 10, fontFamily: UI.fontUi, alignSelf: 'center' }}>+</span>
-                        <span className="num" style={{ fontSize: 13, color: UI.inkSoft, alignSelf: 'center' }}>{p}<span style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint, marginLeft: 3 }}>partials</span></span>
+                        <span className="num" style={{ fontSize: 13, color: UI.inkSoft, alignSelf: 'center' }}>{tr.partials}<span style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint, marginLeft: 3 }}>partials</span></span>
                       </React.Fragment>
-                    ); })()}
+                    )}
                   </div>
                 </div>
                 {i < entry.sets.length - 1 && <div className="knurl" />}
@@ -3933,8 +3913,8 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
               }
 
               // Lengthened partials
-              if (s.technique === 'lengthened_partial') {
-                const partials = s.drops?.partials || 0;
+              if (tr.kind === 'lengthened_partial') {
+                const partials = tr.partials;
                 return (
                   <React.Fragment key={i}>
                   <div style={{ padding: '12px 0', opacity: done ? 1 : 0.35, transition: 'opacity 0.3s' }}>
@@ -4351,16 +4331,33 @@ function ExerciseHistoryScreen({ store, go, exId, dayId, exName, back, userId })
                   {fmtDate(sess.ended)}
                 </span>
                 <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                  {sess.sets.map((st, si) => (
+                  {sess.sets.map((st, si) => {
+                    // Intensity-technique sets show every round, not just the
+                    // first — this compact list used to silently drop the
+                    // rest of a drop-set/myo-rep/AMRAP set's data.
+                    const tr = LB.techniqueRounds(st);
+                    return (
                     <span key={si} style={{
                       border: `1px solid ${UI.hair}`, borderRadius: 4, padding: '2px 7px',
                       fontFamily: UI.fontNum, fontSize: 11, color: UI.ink,
                     }}>
-                      {st.kg ?? '—'}<span style={{ color: UI.inkFaint, fontSize: 9 }}>{UI.unit()}</span>
-                      <span style={{ color: UI.inkFaint, margin: '0 1px' }}>×</span>
-                      {isUni ? `L${st.repsL ?? '?'}/R${st.repsR ?? '?'}` : (st.reps ?? '—')}
+                      {tr.kind === 'lengthened_partial' ? (
+                        <>{st.kg ?? '—'}<span style={{ color: UI.inkFaint, fontSize: 9 }}>{UI.unit()}</span><span style={{ color: UI.inkFaint, margin: '0 1px' }}>×</span>{st.reps ?? '—'}</>
+                      ) : tr.kind ? (
+                        tr.rounds.map((d, di) => (
+                          <React.Fragment key={di}>
+                            {di > 0 && <span style={{ color: UI.inkFaint }}> {tr.connector} </span>}
+                            {(tr.connector === '→' || di === 0) && <>{d.kg ?? '—'}<span style={{ color: UI.inkFaint, fontSize: 9 }}>{UI.unit()}</span><span style={{ color: UI.inkFaint, margin: '0 1px' }}>×</span></>}
+                            {d.reps ?? '—'}
+                          </React.Fragment>
+                        ))
+                      ) : (
+                        <>{st.kg ?? '—'}<span style={{ color: UI.inkFaint, fontSize: 9 }}>{UI.unit()}</span><span style={{ color: UI.inkFaint, margin: '0 1px' }}>×</span>{isUni ? `L${st.repsL ?? '?'}/R${st.repsR ?? '?'}` : (st.reps ?? '—')}</>
+                      )}
+                      {tr.partials > 0 && <span style={{ color: UI.inkFaint }}> +{tr.partials}</span>}
                     </span>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
               {i < visible.length - 1 && <div className="knurl" />}

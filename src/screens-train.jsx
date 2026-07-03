@@ -4282,8 +4282,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                                 background: 'rgba(var(--accent-rgb),0.12)',
                                 border: '0.5px solid rgba(var(--accent-rgb),0.35)',
                                 borderRadius: 4, padding: '2px 6px',
-                              }}>{s.technique === 'drop' ? 'DROP SET' : s.technique === 'myorep_match' ? 'MYO MATCH' : s.technique === 'myorep' ? 'MYO REP' : s.technique === 'amrap_variations' ? 'AMRAP' : 'PARTIALS'}</span>
-                              {s.technique === 'amrap_variations' && (s.drops || []).some(d => d.label && d.label !== entry.name) && (
+                              }}>{LB.techniqueRounds(s, { exName: entry.name }).badge}</span>
+                              {LB.techniqueRounds(s, { exName: entry.name }).anyVaried && (
                                 <span className="num" style={{ fontSize: 9, color: UI.inkGhost }}>{s.drops[0]?.label || entry.name}</span>
                               )}
                             </div>

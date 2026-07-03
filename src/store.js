@@ -3356,6 +3356,45 @@ function retractGrowthGrant(growthCounts, grantedKey) {
   return gc;
 }
 
+// Normalizes a set's intensity-technique data into one shape every renderer
+// (chip JSX, plain-text summaries) can consume. Used to be reimplemented ad
+// hoc in 7+ places — each new technique or field (e.g. the recent "partials
+// finisher") needed hand-editing every one of them, and two of them
+// (screens-coaching-client.jsx's two fmtSetChip copies) already carried a
+// comment admitting they were kept in sync by hand ("same gap, same fix").
+//   kind: 'drop'|'myorep'|'myorep_match'|'amrap_variations'|'lengthened_partial'|null
+//   badge: display label for the technique, null for a plain set
+//   connector: '→' (drop/AMRAP) | '↺' (myo) | null
+//   rounds: [{kg, reps, label?}] — populated for chain techniques (falls back
+//     to a single round built from st.kg/st.reps when drops is empty,
+//     matching every prior caller's own fallback); empty for
+//     lengthened_partial/plain sets, which use kg/reps directly
+//   totalReps: sum of round reps — only meaningful for myo variants, else null
+//   partials: the finisher count on the last round (chain techniques) or
+//     lengthened_partial's own count; 0 when none
+//   anyVaried: true if any AMRAP Variations round's label diverges from
+//     exName — callers use this to decide whether to show round labels at all
+function techniqueRounds(st, { exName } = {}) {
+  const empty = { kind: null, badge: null, connector: null, rounds: [], totalReps: null, partials: 0, anyVaried: false };
+  if (!st || !st.technique) return empty;
+  if (st.technique === 'lengthened_partial') {
+    return { ...empty, kind: 'lengthened_partial', badge: 'PARTIALS', partials: st.drops?.partials || 0 };
+  }
+  const BADGES = { drop: 'DROP SET', myorep: 'MYO-REPS', myorep_match: 'MYO MATCH', amrap_variations: 'AMRAP' };
+  if (!BADGES[st.technique]) return empty;
+  const drops = (st.drops && st.drops.length > 0) ? st.drops : (st.kg != null ? [{ kg: st.kg, reps: st.reps }] : []);
+  const isMyo = st.technique === 'myorep' || st.technique === 'myorep_match';
+  return {
+    kind: st.technique,
+    badge: BADGES[st.technique],
+    connector: isMyo ? '↺' : '→',
+    rounds: drops.map(d => ({ kg: d.kg, reps: d.reps, label: d.label })),
+    totalReps: isMyo ? drops.reduce((a, d) => a + (d.reps || 0), 0) : null,
+    partials: drops[drops.length - 1]?.partials || 0,
+    anyVaried: st.technique === 'amrap_variations' && drops.some(d => d.label && d.label !== exName),
+  };
+}
+
 // Wipes both cache layers a stale deploy can hide behind: the SW's
 // CacheStorage entries AND the IndexedDB precompile cache (zane-precompile,
 // see index.html's loader) — a stale record in the latter alone keeps
@@ -3396,7 +3435,7 @@ window.LB = {
   startDeload, endDeload, deloadElapsed, deloadDaysRemaining, deloadPlanDays,
   loadClientStore, loadCoachClientsStatus, reloadCoachingState, enableSelfCoaching, inviteClient, respondToCoachingInvite, endCoaching,
   addCoachingNote, markCoachingNotesRead, loadCoachingNotes, loadCoachingThreads, createCoachingThread, deleteCoachingThread, getOrCreateCoachingThread, uploadChatImage,
-  unreadCoachingNotes, isNoteFromClient,
+  unreadCoachingNotes, isNoteFromClient, techniqueRounds,
   loadCoachingMacros, addCoachingMacros,
   diffSchedule,
   checkinWeekStart, submitCheckin, loadCheckins, deleteCheckin, loadCoachCheckinStatus, requestCheckin, setCheckinEnabled, loadCheckinSchema, saveCheckinSchema, saveDefaultCheckinSchema,
