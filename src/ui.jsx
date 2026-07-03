@@ -1019,11 +1019,26 @@ UI.chartDomain = (dataMin, dataMax, opts) => {
 // from/to are indices into the data-reorder-item set (DOM order). Mark any
 // descendant that must NOT start a drag (e.g. a delete button) with
 // data-reorder-ignore="true". The callback is a no-op when from === to.
-function attachDragReorder(container, getCb, options) {
+// One pointer-driven engine shared by the vertical (attachDragReorder) and
+// horizontal (attachDragReorderH) reorder flavors, parameterized by axis.
+// Per-axis constants preserve each list type's existing feel: vertical lists
+// fall back to scrolling the whole page and tolerate more pre-drag jitter
+// (12px) before treating it as a page scroll; horizontal chip strips scroll
+// themselves and cancel sooner (8px) since sideways finger movement is much
+// more often an intentional scroll — these two thresholds already drifted
+// apart once (see the historical dy>dx bug fix this replaced), which is
+// exactly the kind of drift a shared engine prevents going forward.
+const DRAG_AXIS = {
+  v: { scrollEdge: 64, scrollSpeedMax: 18, touchCancelDist: 12, dropLineClass: 'reorder-drop-line' },
+  h: { scrollEdge: 48, scrollSpeedMax: 12, touchCancelDist: 8, dropLineClass: 'reorder-drop-line-h' },
+};
+
+function attachDragReorderAxis(axis, container, getCb, options) {
+  const cfg = DRAG_AXIS[axis];
   const opts = options || {};
   const LONG_PRESS_MS = opts.longPressMs != null ? opts.longPressMs : 220;
   const MOVE_TOLERANCE = opts.moveTolerance != null ? opts.moveTolerance : 8;
-  const SCROLL_EDGE = 64;
+  const SCROLL_EDGE = cfg.scrollEdge;
   let state = null;
   let rafId = null;
 
@@ -1037,38 +1052,58 @@ function attachDragReorder(container, getCb, options) {
     let n = container;
     while (n && n !== document.body && n !== document.documentElement) {
       const s = getComputedStyle(n);
-      if (/(auto|scroll)/.test(s.overflowY) && n.scrollHeight > n.clientHeight + 1) return n;
+      const scrolls = axis === 'v'
+        ? (/(auto|scroll)/.test(s.overflowY) && n.scrollHeight > n.clientHeight + 1)
+        : (/(auto|scroll)/.test(s.overflowX) && n.scrollWidth > n.clientWidth + 1);
+      if (scrolls) return n;
       n = n.parentElement;
     }
-    return null; // fall back to the window
+    return null; // fall back to the window (v) / the container itself (h)
   }
 
-  function placeDropLine(y) {
+  // v: a horizontal line spanning the full container width, positioned by y.
+  // h: a vertical line spanning the dragged item's height, positioned by x.
+  function placeDropLine(pos) {
     if (!state.dropLine) {
       state.dropLine = document.createElement('div');
-      state.dropLine.className = 'reorder-drop-line';
+      state.dropLine.className = cfg.dropLineClass;
       document.body.appendChild(state.dropLine);
     }
-    const r = container.getBoundingClientRect();
-    state.dropLine.style.left = r.left + 'px';
-    state.dropLine.style.width = r.width + 'px';
-    state.dropLine.style.top = (y - 1) + 'px';
+    if (axis === 'v') {
+      const r = container.getBoundingClientRect();
+      state.dropLine.style.left = r.left + 'px';
+      state.dropLine.style.width = r.width + 'px';
+      state.dropLine.style.top = (pos - 1) + 'px';
+    } else {
+      const r = state.src.getBoundingClientRect();
+      state.dropLine.style.top = r.top + 'px';
+      state.dropLine.style.height = r.height + 'px';
+      state.dropLine.style.left = (pos - 1) + 'px';
+    }
   }
 
-  function updateTarget(y) {
+  function updateTarget(pos) {
     const list = items();
     let insertIdx = list.length;
-    let lineY = null;
+    let line = null;
     for (let k = 0; k < list.length; k++) {
       const r = list[k].getBoundingClientRect();
-      if (y < r.top + r.height / 2) { insertIdx = k; lineY = r.top - 3; break; }
+      const start = axis === 'v' ? r.top : r.left;
+      const size = axis === 'v' ? r.height : r.width;
+      if (pos < start + size / 2) { insertIdx = k; line = start - 3; break; }
     }
-    if (lineY === null) {
+    if (line === null) {
       const last = list[list.length - 1];
-      lineY = last ? last.getBoundingClientRect().bottom + 3 : container.getBoundingClientRect().top;
+      if (last) {
+        const r = last.getBoundingClientRect();
+        line = (axis === 'v' ? r.bottom : r.right) + 3;
+      } else {
+        const r = container.getBoundingClientRect();
+        line = axis === 'v' ? r.top : r.left;
+      }
     }
     state.insertIdx = insertIdx;
-    placeDropLine(lineY);
+    placeDropLine(line);
   }
 
   function moveGhost(x, y) {
@@ -1078,27 +1113,32 @@ function attachDragReorder(container, getCb, options) {
       (y - state.offsetY - state.baseTop) + 'px) scale(1.02)';
   }
 
-  // Edge auto-scroll: nudge the nearest scroll container (or window) when the
-  // pointer hovers near its top/bottom edge, so long lists stay reachable.
+  // Edge auto-scroll: nudge the nearest scroll container (or window/self)
+  // when the pointer hovers near its leading/trailing edge, so long lists
+  // stay reachable.
   function tickScroll() {
     if (!state || !state.started) { rafId = null; return; }
-    const y = state.lastY || 0;
+    const pos = axis === 'v' ? (state.lastY || 0) : (state.lastX || 0);
     const sp = state.scrollParent;
-    const el = sp || document.scrollingElement || document.documentElement;
-    const top = sp ? sp.getBoundingClientRect().top : 0;
-    const bottom = sp ? sp.getBoundingClientRect().bottom : window.innerHeight;
-    const max = el.scrollHeight - el.clientHeight;
+    const el = sp || (axis === 'v' ? (document.scrollingElement || document.documentElement) : container);
+    const spRect = sp ? sp.getBoundingClientRect() : null;
+    const edgeStart = spRect ? (axis === 'v' ? spRect.top : spRect.left) : 0;
+    const edgeEnd = spRect
+      ? (axis === 'v' ? spRect.bottom : spRect.right)
+      : (axis === 'v' ? window.innerHeight : window.innerWidth);
+    const scrollProp = axis === 'v' ? 'scrollTop' : 'scrollLeft';
+    const max = el[axis === 'v' ? 'scrollHeight' : 'scrollWidth'] - el[axis === 'v' ? 'clientHeight' : 'clientWidth'];
     let moved = false;
-    if (y < top + SCROLL_EDGE && el.scrollTop > 0) {
-      const t = Math.min(1, (top + SCROLL_EDGE - y) / SCROLL_EDGE);
-      el.scrollTop = Math.max(0, el.scrollTop - Math.round(2 + t * 18));
+    if (pos < edgeStart + SCROLL_EDGE && el[scrollProp] > 0) {
+      const t = Math.min(1, (edgeStart + SCROLL_EDGE - pos) / SCROLL_EDGE);
+      el[scrollProp] = Math.max(0, el[scrollProp] - Math.round(2 + t * cfg.scrollSpeedMax));
       moved = true;
-    } else if (y > bottom - SCROLL_EDGE && el.scrollTop < max) {
-      const t = Math.min(1, (y - (bottom - SCROLL_EDGE)) / SCROLL_EDGE);
-      el.scrollTop = Math.min(max, el.scrollTop + Math.round(2 + t * 18));
+    } else if (pos > edgeEnd - SCROLL_EDGE && el[scrollProp] < max) {
+      const t = Math.min(1, (pos - (edgeEnd - SCROLL_EDGE)) / SCROLL_EDGE);
+      el[scrollProp] = Math.min(max, el[scrollProp] + Math.round(2 + t * cfg.scrollSpeedMax));
       moved = true;
     }
-    if (moved) updateTarget(y);
+    if (moved) updateTarget(pos);
     rafId = requestAnimationFrame(tickScroll);
   }
 
@@ -1121,7 +1161,7 @@ function attachDragReorder(container, getCb, options) {
     state.started = true;
     document.body.classList.add('reorder-dragging');
     moveGhost(x, y);
-    updateTarget(y);
+    updateTarget(axis === 'v' ? y : x);
     rafId = requestAnimationFrame(tickScroll);
   }
 
@@ -1173,7 +1213,7 @@ function attachDragReorder(container, getCb, options) {
     if (!state.started) {
       if (state.pointerType === 'mouse') {
         if (dist > MOVE_TOLERANCE) beginDrag(state.startX, state.startY);
-      } else if (dist > 12) {
+      } else if (dist > cfg.touchCancelDist) {
         // Moved before the long-press fired → treat as a scroll, bail out.
         clearTimeout(state.pressTimer);
         teardown();
@@ -1185,7 +1225,7 @@ function attachDragReorder(container, getCb, options) {
     state.lastX = ev.clientX;
     state.lastY = ev.clientY;
     moveGhost(ev.clientX, ev.clientY);
-    updateTarget(ev.clientY);
+    updateTarget(axis === 'v' ? ev.clientY : ev.clientX);
   }
 
   function onUp() {
@@ -1216,6 +1256,10 @@ function attachDragReorder(container, getCb, options) {
     document.removeEventListener('touchmove', touchBlocker, { passive: false });
     teardown();
   };
+}
+
+function attachDragReorder(container, getCb, options) {
+  return attachDragReorderAxis('v', container, getCb, options);
 }
 
 // Hook wrapper: returns a callback ref to attach to the list container. Re-binds
@@ -1254,204 +1298,11 @@ function DragHandle({ style } = {}) {
 }
 
 // ─── Horizontal drag-to-reorder (chip strips) ───────────────────────────────
-// Same architecture as attachDragReorder but works along the X axis.
-// Long-press on touch activates; vertical swipe bails immediately so the page
-// scroll is never blocked. Drop-line is a vertical accent bar.
+// Same engine as attachDragReorder, along the X axis. Long-press on touch
+// activates; a stray move before that fires bails immediately (any direction)
+// so the page/strip scroll is never blocked. Drop-line is a vertical bar.
 function attachDragReorderH(container, getCb, options) {
-  const opts = options || {};
-  const LONG_PRESS_MS = opts.longPressMs != null ? opts.longPressMs : 220;
-  const MOVE_TOLERANCE = opts.moveTolerance != null ? opts.moveTolerance : 8;
-  const SCROLL_EDGE = 48;
-  let state = null;
-  let rafId = null;
-
-  const items = () => Array.prototype.slice
-    .call(container.querySelectorAll('[data-reorder-item]'))
-    .filter(el => el.closest('[data-reorder-list]') === container);
-
-  function scrollParent() {
-    let n = container;
-    while (n && n !== document.body && n !== document.documentElement) {
-      const s = getComputedStyle(n);
-      if (/(auto|scroll)/.test(s.overflowX) && n.scrollWidth > n.clientWidth + 1) return n;
-      n = n.parentElement;
-    }
-    return null;
-  }
-
-  function placeDropLine(x) {
-    if (!state.dropLine) {
-      state.dropLine = document.createElement('div');
-      state.dropLine.className = 'reorder-drop-line-h';
-      document.body.appendChild(state.dropLine);
-    }
-    const r = state.src.getBoundingClientRect();
-    state.dropLine.style.top = r.top + 'px';
-    state.dropLine.style.height = r.height + 'px';
-    state.dropLine.style.left = (x - 1) + 'px';
-  }
-
-  function updateTarget(x) {
-    const list = items();
-    let insertIdx = list.length;
-    let lineX = null;
-    for (let k = 0; k < list.length; k++) {
-      const r = list[k].getBoundingClientRect();
-      if (x < r.left + r.width / 2) { insertIdx = k; lineX = r.left - 3; break; }
-    }
-    if (lineX === null) {
-      const last = list[list.length - 1];
-      lineX = last ? last.getBoundingClientRect().right + 3 : container.getBoundingClientRect().left;
-    }
-    state.insertIdx = insertIdx;
-    placeDropLine(lineX);
-  }
-
-  function moveGhost(x, y) {
-    if (!state || !state.ghost) return;
-    state.ghost.style.transform =
-      'translate(' + (x - state.offsetX - state.baseLeft) + 'px,' +
-      (y - state.offsetY - state.baseTop) + 'px) scale(1.02)';
-  }
-
-  function tickScroll() {
-    if (!state || !state.started) { rafId = null; return; }
-    const x = state.lastX || 0;
-    const sp = state.scrollParent;
-    const el = sp || container;
-    const left = sp ? sp.getBoundingClientRect().left : 0;
-    const right = sp ? sp.getBoundingClientRect().right : window.innerWidth;
-    const max = el.scrollWidth - el.clientWidth;
-    let moved = false;
-    if (x < left + SCROLL_EDGE && el.scrollLeft > 0) {
-      const t = Math.min(1, (left + SCROLL_EDGE - x) / SCROLL_EDGE);
-      el.scrollLeft = Math.max(0, el.scrollLeft - Math.round(2 + t * 12));
-      moved = true;
-    } else if (x > right - SCROLL_EDGE && el.scrollLeft < max) {
-      const t = Math.min(1, (x - (right - SCROLL_EDGE)) / SCROLL_EDGE);
-      el.scrollLeft = Math.min(max, el.scrollLeft + Math.round(2 + t * 12));
-      moved = true;
-    }
-    if (moved) updateTarget(x);
-    rafId = requestAnimationFrame(tickScroll);
-  }
-
-  function beginDrag(x, y) {
-    const src = state.src;
-    const rect = src.getBoundingClientRect();
-    const ghost = src.cloneNode(true);
-    ghost.classList.add('reorder-ghost');
-    ghost.style.width = rect.width + 'px';
-    ghost.style.height = rect.height + 'px';
-    ghost.style.left = rect.left + 'px';
-    ghost.style.top = rect.top + 'px';
-    document.body.appendChild(ghost);
-    src.classList.add('reorder-source');
-    state.ghost = ghost;
-    state.baseLeft = rect.left;
-    state.baseTop = rect.top;
-    state.offsetX = x - rect.left;
-    state.offsetY = y - rect.top;
-    state.started = true;
-    document.body.classList.add('reorder-dragging');
-    moveGhost(x, y);
-    updateTarget(x);
-    rafId = requestAnimationFrame(tickScroll);
-  }
-
-  function teardown() {
-    if (!state) return;
-    if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
-    document.removeEventListener('pointermove', onMove, { passive: false });
-    document.removeEventListener('pointerup', onUp);
-    document.removeEventListener('pointercancel', onUp);
-    clearTimeout(state.pressTimer);
-    if (state.dropLine) state.dropLine.remove();
-    if (state.src) state.src.classList.remove('reorder-source');
-    const ghost = state.ghost;
-    document.body.classList.remove('reorder-dragging');
-    state = null;
-    if (ghost) { ghost.style.opacity = '0'; setTimeout(() => ghost.remove(), 160); }
-  }
-
-  function onDown(ev) {
-    if (state) return;
-    if (ev.button != null && ev.button !== 0) return;
-    if (!ev.target || !ev.target.closest) return;
-    if (ev.target.closest('[data-reorder-ignore]')) return;
-    const src = ev.target.closest('[data-reorder-item]');
-    if (!src) return;
-    const fromIdx = items().indexOf(src);
-    if (fromIdx === -1) return;
-    state = {
-      src, fromIdx, insertIdx: fromIdx,
-      startX: ev.clientX, startY: ev.clientY,
-      lastX: ev.clientX, lastY: ev.clientY,
-      pointerType: ev.pointerType || 'mouse',
-      started: false, pressTimer: null, ghost: null, dropLine: null,
-      scrollParent: scrollParent(),
-    };
-    document.addEventListener('pointermove', onMove, { passive: false });
-    document.addEventListener('pointerup', onUp);
-    document.addEventListener('pointercancel', onUp);
-    if (state.pointerType !== 'mouse') {
-      state.pressTimer = setTimeout(() => {
-        if (state && !state.started) beginDrag(state.startX, state.startY);
-      }, LONG_PRESS_MS);
-    }
-  }
-
-  function onMove(ev) {
-    if (!state) return;
-    const dx = Math.abs(ev.clientX - state.startX);
-    const dy = Math.abs(ev.clientY - state.startY);
-    const dist = Math.hypot(dx, dy);
-    if (!state.started) {
-      if (state.pointerType === 'mouse') {
-        if (dist > MOVE_TOLERANCE) beginDrag(state.startX, state.startY);
-      } else if (dist > 8) {
-        // Any movement before long-press fires → user is scrolling, cancel.
-        // (Previously only cancelled on dy>dx, letting horizontal scroll keep
-        //  the timer alive — causing accidental reorders mid-scroll.)
-        clearTimeout(state.pressTimer);
-        teardown();
-        return;
-      }
-    }
-    if (!state || !state.started) return;
-    ev.preventDefault();
-    state.lastX = ev.clientX;
-    state.lastY = ev.clientY;
-    moveGhost(ev.clientX, ev.clientY);
-    updateTarget(ev.clientX);
-  }
-
-  function onUp() {
-    if (!state) return;
-    if (!state.started) { teardown(); return; }
-    const from = state.fromIdx;
-    let to = state.insertIdx;
-    if (to > from) to -= 1;
-    const swallow = e => { e.stopPropagation(); e.preventDefault(); };
-    document.addEventListener('click', swallow, { capture: true, once: true });
-    setTimeout(() => document.removeEventListener('click', swallow, { capture: true }), 120);
-    teardown();
-    if (to !== from && to >= 0) {
-      const cb = getCb();
-      if (cb) cb(from, to);
-    }
-  }
-
-  function touchBlocker(ev) { if (state && state.started) ev.preventDefault(); }
-
-  container.addEventListener('pointerdown', onDown);
-  document.addEventListener('touchmove', touchBlocker, { passive: false });
-
-  return function cleanup() {
-    container.removeEventListener('pointerdown', onDown);
-    document.removeEventListener('touchmove', touchBlocker, { passive: false });
-    teardown();
-  };
+  return attachDragReorderAxis('h', container, getCb, options);
 }
 
 UI.useDragReorderH = function(options) {
