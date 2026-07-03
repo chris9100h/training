@@ -409,20 +409,10 @@ function App() {
           // edit (id in the persisted base AND local differs from base) so a
           // background refresh doesn't clobber a health edit made offline.
           const base = syncBase.current;
-          const mergeById = (freshRows, curRows, baseRows) => {
-            const curMap = new Map((curRows || []).map(r => [r.id, r]));
-            const baseMap = baseRows ? new Map(baseRows.map(r => [r.id, r])) : null;
-            return (freshRows || []).map(r => {
-              const c = curMap.get(r.id);
-              const b = baseMap?.get(r.id);
-              if (c && b && JSON.stringify(c) !== JSON.stringify(b)) return c;
-              return r;
-            });
-          };
           return { ...s,
-            dailyLogs:   [...localOnlyDaily,   ...mergeById(fresh.dailyLogs, s.dailyLogs, base?.dailyLogs)],
-            cardioLogs:  [...localOnlyCardio,  ...mergeById(fresh.cardioLogs, s.cardioLogs, base?.cardioLogs)],
-            glucoseLogs: [...localOnlyGlucose, ...mergeById(fresh.glucoseLogs || [], s.glucoseLogs, base?.glucoseLogs)],
+            dailyLogs:   [...localOnlyDaily,   ...LB.mergeCollectionById(fresh.dailyLogs, s.dailyLogs, base?.dailyLogs)],
+            cardioLogs:  [...localOnlyCardio,  ...LB.mergeCollectionById(fresh.cardioLogs, s.cardioLogs, base?.cardioLogs)],
+            glucoseLogs: [...localOnlyGlucose, ...LB.mergeCollectionById(fresh.glucoseLogs || [], s.glucoseLogs, base?.glucoseLogs)],
           };
         });
       }).catch(() => {});
@@ -708,16 +698,7 @@ function App() {
             // row edited offline would be reverted to the server value and then
             // re-synced back as the old value. Conservative: no base membership
             // or local == base → server wins (mirrors the mesoStates merge).
-            const mergeById = (freshRows, curRows, baseRows, delIds) => {
-              const curMap = new Map((curRows || []).map(r => [r.id, r]));
-              const baseMap = baseRows ? new Map(baseRows.map(r => [r.id, r])) : null;
-              return (freshRows || []).filter(r => !delIds?.has(r.id)).map(r => {
-                const c = curMap.get(r.id);
-                const b = baseMap?.get(r.id);
-                if (c && b && JSON.stringify(c) !== JSON.stringify(b)) return c;
-                return r;
-              });
-            };
+            const mergeById = LB.mergeCollectionById;
             // Scalar state: the local cache is authoritative — it always holds
             // the most recent state on this device, including unsynced offline
             // edits. For items with IDs we use an ID-based merge instead.

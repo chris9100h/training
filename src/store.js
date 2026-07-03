@@ -3383,6 +3383,26 @@ function dayLabel(diffDays, { rollup = false, referenceDate } = {}) {
   return referenceDate ? referenceDate.toLocaleDateString('en-US', { month: 'short', year: '2-digit' }) : `${diffDays}d ago`;
 }
 
+// Cache-first reload merge for an ID-keyed collection: for ids on both
+// sides, keep the local row only if it carries an unsynced offline edit
+// (present in the persisted sync base AND different from it there) —
+// otherwise the server row wins. delIds, if given, drops rows the caller
+// already knows were deleted. app.jsx used to hand-roll this identically in
+// two places (softRefresh and loadData's reconciliation), the second with
+// the delIds filter the first didn't need. Local-only/server-only handling
+// (never-synced rows, resurrection guards) stays with each caller since it
+// varies per collection — this covers just the shared id-matched half.
+function mergeCollectionById(freshRows, curRows, baseRows, delIds) {
+  const curMap = new Map((curRows || []).map(r => [r.id, r]));
+  const baseMap = baseRows ? new Map(baseRows.map(r => [r.id, r])) : null;
+  return (freshRows || []).filter(r => !delIds?.has(r.id)).map(r => {
+    const c = curMap.get(r.id);
+    const b = baseMap?.get(r.id);
+    if (c && b && JSON.stringify(c) !== JSON.stringify(b)) return c;
+    return r;
+  });
+}
+
 // Bundles consecutive same-supersetGroup entries into { type: 'superset',
 // members: [{entry, idx}] } groups, everything else into { type:
 // 'standalone', entry, idx }. Used to be copy-pasted into 3 screens with a
@@ -3492,7 +3512,7 @@ window.LB = {
   startDeload, endDeload, deloadElapsed, deloadDaysRemaining, deloadPlanDays,
   loadClientStore, loadCoachClientsStatus, reloadCoachingState, enableSelfCoaching, inviteClient, respondToCoachingInvite, endCoaching,
   addCoachingNote, markCoachingNotesRead, loadCoachingNotes, loadCoachingThreads, createCoachingThread, deleteCoachingThread, getOrCreateCoachingThread, uploadChatImage,
-  unreadCoachingNotes, isNoteFromClient, techniqueRounds, groupBySuperset, supersetLabel, timeAgo, dayLabel, cyclePosFromStartDate,
+  unreadCoachingNotes, isNoteFromClient, techniqueRounds, groupBySuperset, supersetLabel, timeAgo, dayLabel, cyclePosFromStartDate, mergeCollectionById,
   loadCoachingMacros, addCoachingMacros,
   diffSchedule,
   checkinWeekStart, submitCheckin, loadCheckins, deleteCheckin, loadCoachCheckinStatus, requestCheckin, setCheckinEnabled, loadCheckinSchema, saveCheckinSchema, saveDefaultCheckinSchema,
