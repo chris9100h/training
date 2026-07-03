@@ -494,11 +494,20 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
                     // neighbor's (its chip is pushed down by the badge above).
                     const workingSets = (e.sets || []).filter(s => !s.warmup);
                     const anyLabelInRow = workingSets.some(s => techniqueLabel(s));
+                    const amrapLabelsFor = (s) => s.technique === 'amrap_variations' && (s.drops || []).some(d => d.label && d.label !== e.name)
+                      ? (s.drops || []).map(d => d.label || e.name).join(' → ')
+                      : null;
+                    // Both the badge line AND the AMRAP label-chain caption need
+                    // reserving on every set in the row once ANY sibling has one
+                    // — otherwise that sibling's chip still sits lower than the
+                    // others (only the badge row was reserved before).
+                    const anyAmrapLabelsInRow = workingSets.some(amrapLabelsFor);
                     const badgeBoxStyle = {
                       fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: UI.gold,
                       background: 'rgba(var(--accent-rgb),0.12)', border: '0.5px solid rgba(var(--accent-rgb),0.35)',
                       borderRadius: 4, padding: '2px 6px',
                     };
+                    const amrapLabelStyle = { fontSize: 8, color: UI.inkGhost, maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' };
                     return (
                       <div key={i} style={{ padding: '10px 0', borderBottom: `0.5px solid ${UI.hair}` }}>
                         <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600, marginBottom: 6 }}>{e.name}</div>
@@ -509,21 +518,15 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
                             const highlight = isImprovement(s, prev);
                             const decline   = !anyImpBefore && isDecline(s, prev);
                             const label = techniqueLabel(s);
-                            // AMRAP Variations: show every round's grip/variation
-                            // label once ANY round diverges from the exercise
-                            // name — this compact view has no per-round chips, so
-                            // the labels ride along as a small caption line.
-                            const amrapLabels = s.technique === 'amrap_variations' && (s.drops || []).some(d => d.label && d.label !== e.name)
-                              ? (s.drops || []).map(d => d.label || e.name).join(' → ')
-                              : null;
+                            const amrapLabels = amrapLabelsFor(s);
                             return (
                               <span key={j} style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-start', gap: 2 }}>
                                 {label
                                   ? <span style={badgeBoxStyle}>{label}</span>
                                   : anyLabelInRow ? <span style={{ ...badgeBoxStyle, visibility: 'hidden' }}>·</span> : null}
-                                {amrapLabels && (
-                                  <span className="num" style={{ fontSize: 8, color: UI.inkGhost, maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{amrapLabels}</span>
-                                )}
+                                {amrapLabels
+                                  ? <span className="num" style={amrapLabelStyle}>{amrapLabels}</span>
+                                  : anyAmrapLabelsInRow ? <span className="num" style={{ ...amrapLabelStyle, visibility: 'hidden' }}>·</span> : null}
                                 <span className="num" style={{
                                   fontSize: 12,
                                   color: highlight ? UI.goldLight : decline ? 'rgba(var(--danger-rgb),0.85)' : s.done ? UI.ink : UI.inkFaint,
@@ -1349,11 +1352,20 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
             // chip sits noticeably higher than a badged neighbor's.
             const workingSets = (e.sets || []).filter(s => !s.warmup);
             const anyLabelInRow = workingSets.some(s => techniqueLabel(s));
+            const amrapLabelsFor = (s) => s.technique === 'amrap_variations' && (s.drops || []).some(d => d.label && d.label !== e.name)
+              ? (s.drops || []).map(d => d.label || e.name).join(' → ')
+              : null;
+            // Both the badge line AND the AMRAP label-chain caption need
+            // reserving on every set in the row once ANY sibling has one —
+            // otherwise that sibling's chip still sits lower than the others
+            // (only the badge row was reserved before).
+            const anyAmrapLabelsInRow = workingSets.some(amrapLabelsFor);
             const badgeBoxStyle = {
               fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: UI.gold,
               background: 'rgba(var(--accent-rgb),0.12)', border: '0.5px solid rgba(var(--accent-rgb),0.35)',
               borderRadius: 4, padding: '2px 6px',
             };
+            const amrapLabelStyle = { fontSize: 8, color: UI.inkGhost, maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' };
             return (
               <div key={i}
                 onClick={() => e.exId && selected.dayId && setHistEx({ exId: e.exId, dayId: selected.dayId, exName: e.name })}
@@ -1369,17 +1381,15 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
                     const highlight = isImprovement(s, prev);
                     const decline   = !anyImpBefore && isDecline(s, prev);
                     const label = techniqueLabel(s);
-                    const amrapLabels = s.technique === 'amrap_variations' && (s.drops || []).some(d => d.label && d.label !== e.name)
-                      ? (s.drops || []).map(d => d.label || e.name).join(' → ')
-                      : null;
+                    const amrapLabels = amrapLabelsFor(s);
                     return (
                       <span key={j} style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-start', gap: 2 }}>
                         {label
                           ? <span style={badgeBoxStyle}>{label}</span>
                           : anyLabelInRow ? <span style={{ ...badgeBoxStyle, visibility: 'hidden' }}>·</span> : null}
-                        {amrapLabels && (
-                          <span className="num" style={{ fontSize: 8, color: UI.inkGhost, maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{amrapLabels}</span>
-                        )}
+                        {amrapLabels
+                          ? <span className="num" style={amrapLabelStyle}>{amrapLabels}</span>
+                          : anyAmrapLabelsInRow ? <span className="num" style={{ ...amrapLabelStyle, visibility: 'hidden' }}>·</span> : null}
                         <span className="num" style={{
                           fontSize: 12,
                           color: highlight ? UI.goldLight : decline ? 'rgba(var(--danger-rgb),0.85)' : s.done ? UI.ink : UI.inkFaint,
