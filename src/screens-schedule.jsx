@@ -289,9 +289,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId })
         } else if (versions) {
           pos = LB.getCyclePosForDate(sch, today);
         } else if (store.cycleStartDate) {
-          const st = LB.parseDate(store.cycleStartDate);
-          const t = new Date(); t.setHours(12, 0, 0, 0);
-          pos = ((Math.round((t - st) / 86400000) % sch.days.length) + sch.days.length) % sch.days.length;
+          pos = LB.cyclePosFromStartDate(store.cycleStartDate, sch.days.length, today);
         } else {
           pos = (store.cycleIndex || 0) % sch.days.length;
         }
@@ -1373,9 +1371,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
                 style={dateInputStyle} />
             </div>
             {store.cycleStartDate && draft.days.length > 0 && (() => {
-              const t = new Date(); t.setHours(12, 0, 0, 0);
-              const st = LB.parseDate(store.cycleStartDate);
-              const idx = ((Math.round((t - st) / 86400000) % draft.days.length) + draft.days.length) % draft.days.length;
+              const idx = LB.cyclePosFromStartDate(store.cycleStartDate, draft.days.length, LB.todayISO());
               return <div className="micro" style={{ marginTop: 8 }}>Today = Day {idx + 1} of {draft.days.length}</div>;
             })()}
           </Field>

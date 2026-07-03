@@ -2052,6 +2052,17 @@ function dedupeVersionsByDate(versions) {
     .sort((a, b) => b.validFrom.localeCompare(a.validFrom));
 }
 
+// Cycle position for a date-based (non-versioned, non-flex) plan, derived
+// from cycleStartDate — calendar days since start, wrapped to the plan's
+// length. Used to be duplicated within this same file (todaysDay/nextDay)
+// and reimplemented again in PlanViewerScreen.
+function cyclePosFromStartDate(startISO, daysLen, dateISO) {
+  const d = new Date((dateISO || todayISO()) + 'T12:00:00');
+  const start = parseDate(startISO);
+  const n = Math.round((d.getTime() - start.getTime()) / 86400000);
+  return ((n % daysLen) + daysLen) % daysLen;
+}
+
 function todaysDay(state) {
   const sch = state.schedules.find(s => s.id === state.activeScheduleId);
   if (!sch || !sch.days.length) return null;
@@ -2077,15 +2088,9 @@ function todaysDay(state) {
     return { schedule: sch, day: vDays[cyclePosToday] || sch.days[0], idx: cyclePosToday };
   }
   // Fall back: no versions → use cycleStartDate or cycleIndex
-  let idx;
-  if (state.cycleStartDate) {
-    const today = new Date(); today.setHours(12, 0, 0, 0);
-    const start = parseDate(state.cycleStartDate);
-    const n = Math.round((today.getTime() - start.getTime()) / 86400000);
-    idx = ((n % sch.days.length) + sch.days.length) % sch.days.length;
-  } else {
-    idx = (state.cycleIndex || 0) % sch.days.length;
-  }
+  const idx = state.cycleStartDate
+    ? cyclePosFromStartDate(state.cycleStartDate, sch.days.length, todayStr)
+    : (state.cycleIndex || 0) % sch.days.length;
   return { schedule: sch, day: sch.days[idx], idx };
 }
 
@@ -2107,15 +2112,9 @@ function nextDay(state) {
       return { schedule: sch, day: vDays[pos] || sch.days[0], idx: pos };
     }
   }
-  let curIdx;
-  if (state.cycleStartDate) {
-    const today = new Date(); today.setHours(12, 0, 0, 0);
-    const start = parseDate(state.cycleStartDate);
-    const n = Math.round((today.getTime() - start.getTime()) / 86400000);
-    curIdx = ((n % sch.days.length) + sch.days.length) % sch.days.length;
-  } else {
-    curIdx = (state.cycleIndex || 0) % sch.days.length;
-  }
+  const curIdx = state.cycleStartDate
+    ? cyclePosFromStartDate(state.cycleStartDate, sch.days.length, todayISO())
+    : (state.cycleIndex || 0) % sch.days.length;
   const idx = (curIdx + 1) % sch.days.length;
   return { schedule: sch, day: sch.days[idx], idx };
 }
@@ -3493,7 +3492,7 @@ window.LB = {
   startDeload, endDeload, deloadElapsed, deloadDaysRemaining, deloadPlanDays,
   loadClientStore, loadCoachClientsStatus, reloadCoachingState, enableSelfCoaching, inviteClient, respondToCoachingInvite, endCoaching,
   addCoachingNote, markCoachingNotesRead, loadCoachingNotes, loadCoachingThreads, createCoachingThread, deleteCoachingThread, getOrCreateCoachingThread, uploadChatImage,
-  unreadCoachingNotes, isNoteFromClient, techniqueRounds, groupBySuperset, supersetLabel, timeAgo, dayLabel,
+  unreadCoachingNotes, isNoteFromClient, techniqueRounds, groupBySuperset, supersetLabel, timeAgo, dayLabel, cyclePosFromStartDate,
   loadCoachingMacros, addCoachingMacros,
   diffSchedule,
   checkinWeekStart, submitCheckin, loadCheckins, deleteCheckin, loadCoachCheckinStatus, requestCheckin, setCheckinEnabled, loadCheckinSchema, saveCheckinSchema, saveDefaultCheckinSchema,
