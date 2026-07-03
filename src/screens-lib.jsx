@@ -345,9 +345,7 @@ function LibraryScreen({ store, setStore, go, userId }) {
         <Sheet open={true} onClose={() => setFiltersOpen(false)} title="Filter">
           <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
             <div>
-              <div style={{ borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8, marginBottom: 10 }}>
-                <span className="micro" style={{ color: UI.gold }}>MUSCLE GROUP</span>
-              </div>
+              <GoldSectionLabel style={{ color: UI.gold }}>MUSCLE GROUP</GoldSectionLabel>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                 {MUSCLES.map(m => (
                   <Pill key={m} gold={filterTags.includes(m)} onClick={() => toggleFilter(m)} style={{ cursor: 'pointer' }}>{m}</Pill>
@@ -355,9 +353,7 @@ function LibraryScreen({ store, setStore, go, userId }) {
               </div>
             </div>
             <div>
-              <div style={{ borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8, marginBottom: 10 }}>
-                <span className="micro" style={{ color: UI.gold }}>REST</span>
-              </div>
+              <GoldSectionLabel style={{ color: UI.gold }}>REST</GoldSectionLabel>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                 <Pill gold={filterRestCats.includes('none')} onClick={() => toggleRestCat('none')} style={{ cursor: 'pointer' }}>No rest assigned</Pill>
                 <Pill gold={filterRestCats.includes('big')} onClick={() => toggleRestCat('big')} style={{ cursor: 'pointer' }}>Big</Pill>
@@ -366,18 +362,14 @@ function LibraryScreen({ store, setStore, go, userId }) {
               </div>
             </div>
             <div>
-              <div style={{ borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8, marginBottom: 10 }}>
-                <span className="micro" style={{ color: UI.gold }}>MOVEMENT</span>
-              </div>
+              <GoldSectionLabel style={{ color: UI.gold }}>MOVEMENT</GoldSectionLabel>
               <div style={{ display: 'flex', gap: 6 }}>
                 <Pill gold={filterUnilateral === true} onClick={() => toggleUni(true)} style={{ cursor: 'pointer' }}>Unilateral</Pill>
                 <Pill gold={filterUnilateral === false} onClick={() => toggleUni(false)} style={{ cursor: 'pointer' }}>Bilateral</Pill>
               </div>
             </div>
             <div>
-              <div style={{ borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8, marginBottom: 10 }}>
-                <span className="micro" style={{ color: UI.gold }}>EQUIPMENT</span>
-              </div>
+              <GoldSectionLabel style={{ color: UI.gold }}>EQUIPMENT</GoldSectionLabel>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                 <Pill gold={filterEquipment.includes('none')} onClick={() => toggleEquipment('none')} style={{ cursor: 'pointer' }}>No equipment set</Pill>
                 {EQUIPMENT_TYPES.map(({ key, label }) => (
@@ -386,9 +378,7 @@ function LibraryScreen({ store, setStore, go, userId }) {
               </div>
             </div>
             <div>
-              <div style={{ borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8, marginBottom: 10 }}>
-                <span className="micro" style={{ color: UI.gold }}>PLAN</span>
-              </div>
+              <GoldSectionLabel style={{ color: UI.gold }}>PLAN</GoldSectionLabel>
               <div style={{ display: 'flex', gap: 6 }}>
                 <Pill gold={filterPlan === 'in'} onClick={() => togglePlan('in')} style={{ cursor: 'pointer' }}>In plan</Pill>
                 <Pill gold={filterPlan === 'out'} onClick={() => togglePlan('out')} style={{ cursor: 'pointer' }}>Not in plan</Pill>
@@ -499,6 +489,18 @@ function SvgKnurl({ style }) {
 // that overlap the avatar (bottom-right) are shortened there too, measured live.
 function KnurlCanvas({ style }) {
   return <canvas data-knurl="1" style={{ display: 'block', width: '100%', height: 3, ...style }} />;
+}
+
+// Gold-bordered micro-label heading off a section throughout the library/
+// stats screens. Border is always UI.gold (the fixed brand color, not the
+// user's --accent); text color follows the normal .micro convention
+// (ink-faint) unless a caller passes an explicit style.color override.
+function GoldSectionLabel({ children, style }) {
+  return (
+    <div className="micro" style={{ borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8, marginBottom: 10, ...style }}>
+      {children}
+    </div>
+  );
 }
 
 // Shared html2canvas capture flow for SessionDetailScreen and
@@ -1593,9 +1595,9 @@ function StatsTab({ store, sessions, go }) {
       {/* Weekly sets per muscle */}
       <div>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-          <div className="micro" style={{ borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8 }}>
+          <GoldSectionLabel style={{ marginBottom: 0 }}>
             {isCycleMode ? `CYCLE ${selectedCycleNum + 1} · SETS PER MUSCLE` : 'THIS WEEK · SETS PER MUSCLE'}
-          </div>
+          </GoldSectionLabel>
           {isCycleMode && (
             <div style={{ display: 'flex', gap: 2 }}>
               <button onClick={() => setCycleViewOffset(o => Math.max(-currentCycleNum, o - 1))} style={{ background: 'none', border: 'none', color: cycleViewOffset <= -currentCycleNum ? UI.inkFaint : UI.inkSoft, cursor: cycleViewOffset <= -currentCycleNum ? 'default' : 'pointer', fontSize: 16, padding: '0 6px', lineHeight: 1 }}>‹</button>
@@ -1618,7 +1620,7 @@ function StatsTab({ store, sessions, go }) {
 
       {/* Weekly volume trend */}
       <div>
-        <div className="micro" style={{ marginBottom: 14, borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8 }}>WEEKLY VOLUME · LAST 8 WEEKS</div>
+        <GoldSectionLabel style={{ marginBottom: 14 }}>WEEKLY VOLUME · LAST 8 WEEKS</GoldSectionLabel>
         <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4, height: 80 }}>
           {weeklyVolume.map(({ label, vol }, i) => (
             <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, height: '100%', justifyContent: 'flex-end' }}>
@@ -1641,7 +1643,7 @@ function StatsTab({ store, sessions, go }) {
 
       {/* All time */}
       <div>
-        <div className="micro" style={{ marginBottom: 14, borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8 }}>ALL TIME</div>
+        <GoldSectionLabel style={{ marginBottom: 14 }}>ALL TIME</GoldSectionLabel>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
           <StatCard label="Sessions" value={sessions.length} />
           <StatCard label="Avg Volume" value={Math.round(avgVol).toLocaleString('en-US')} sub={`${UI.unit()} / session`} />
@@ -1656,7 +1658,7 @@ function StatsTab({ store, sessions, go }) {
 
       {/* Consistency */}
       <div>
-        <div className="micro" style={{ marginBottom: 14, borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8 }}>CONSISTENCY</div>
+        <GoldSectionLabel style={{ marginBottom: 14 }}>CONSISTENCY</GoldSectionLabel>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
           {/* Streaks are day-based and assume fixed training days — meaningless for
               flexible plans, where the rotation never expects a specific day. */}
@@ -1686,7 +1688,7 @@ function StatsTab({ store, sessions, go }) {
       {/* Best session */}
       {bestSession && (
         <div>
-          <div className="micro" style={{ marginBottom: 14, borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8 }}>BEST SESSION</div>
+          <GoldSectionLabel style={{ marginBottom: 14 }}>BEST SESSION</GoldSectionLabel>
           <Frame onClick={() => go({ name: 'session', sessionId: bestSession.id, back: { name: 'hist', initialTab: 'stats' } })} style={{ padding: '14px 16px', cursor: 'pointer' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
@@ -1710,7 +1712,7 @@ function StatsTab({ store, sessions, go }) {
       {/* Top exercises */}
       {topExercises.length > 0 && (
         <div>
-          <div className="micro" style={{ marginBottom: 14, borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8 }}>TOP EXERCISES</div>
+          <GoldSectionLabel style={{ marginBottom: 14 }}>TOP EXERCISES</GoldSectionLabel>
           <div style={{ display: 'flex', flexDirection: 'column' }}>
             {topExercises.map(({ id, name, count }, i) => (
               <React.Fragment key={id}>
@@ -1890,9 +1892,9 @@ function HistoryScreen({ store, setStore, go, userId, initialTab }) {
             return items.map(item => {
               if (item.type === 'header') {
                 return (
-                  <div key={item.key} className="micro" style={{ marginTop: item.isFirst ? 6 : 24, marginBottom: 10, borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8 }}>
+                  <GoldSectionLabel key={item.key} style={{ marginTop: item.isFirst ? 6 : 24 }}>
                     {item.label}
-                  </div>
+                  </GoldSectionLabel>
                 );
               }
               const s = item.session;
@@ -1985,7 +1987,7 @@ function HistoryScreen({ store, setStore, go, userId, initialTab }) {
                 });
                 return items.map(item => {
                   if (item.type === 'header') {
-                    return <div key={item.key} className="micro" style={{ marginTop: item.isFirst ? 6 : 24, marginBottom: 10, borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8 }}>{item.label}</div>;
+                    return <GoldSectionLabel key={item.key} style={{ marginTop: item.isFirst ? 6 : 24 }}>{item.label}</GoldSectionLabel>;
                   }
                   const l = item.log;
                   return (
@@ -2060,9 +2062,7 @@ function HistoryScreen({ store, setStore, go, userId, initialTab }) {
           <Sheet open={true} onClose={() => setFiltersOpen(false)} title="Filter">
             <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
               <div>
-                <div style={{ borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8, marginBottom: 10 }}>
-                  <span className="micro" style={{ color: UI.gold }}>PLAN</span>
-                </div>
+                <GoldSectionLabel style={{ color: UI.gold }}>PLAN</GoldSectionLabel>
                 <div style={selWrap}>
                   <select value={planFilter || ''} style={selSt(!!planFilter)}
                     onChange={e => { const v = e.target.value || null; setPlanFilter(v); setPeriodFilter(null); setDayFilter(null); }}>
@@ -2075,9 +2075,7 @@ function HistoryScreen({ store, setStore, go, userId, initialTab }) {
 
               {periodOptions.length > 0 && (
                 <div>
-                  <div style={{ borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8, marginBottom: 10 }}>
-                    <span className="micro" style={{ color: UI.gold }}>CYCLE / WEEK</span>
-                  </div>
+                  <GoldSectionLabel style={{ color: UI.gold }}>CYCLE / WEEK</GoldSectionLabel>
                   <div style={selWrap}>
                     <select value={periodFilter || ''} style={selSt(!!periodFilter)}
                       onChange={e => { const v = e.target.value || null; setPeriodFilter(v); setDayFilter(null); }}>
@@ -2091,9 +2089,7 @@ function HistoryScreen({ store, setStore, go, userId, initialTab }) {
 
               {dayOptions.length > 1 && (
                 <div>
-                  <div style={{ borderLeft: `2px solid ${UI.gold}`, paddingLeft: 8, marginBottom: 10 }}>
-                    <span className="micro" style={{ color: UI.gold }}>DAY</span>
-                  </div>
+                  <GoldSectionLabel style={{ color: UI.gold }}>DAY</GoldSectionLabel>
                   <div style={selWrap}>
                     <select value={dayFilter || ''} style={selSt(!!dayFilter)}
                       onChange={e => setDayFilter(e.target.value || null)}>
