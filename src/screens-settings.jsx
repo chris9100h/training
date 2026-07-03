@@ -1542,10 +1542,6 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           const PREVIEW = 5;
           const visible = showAllPeriods ? allPeriods : allPeriods.slice(0, PREVIEW);
           const todayStr = LB.todayISO();
-          const fmtDate = (iso) => {
-            const d = new Date(iso);
-            return d.toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' });
-          };
           const updatePeriod = async (id, patch) => {
             let prev = null;
             setStore(s => { prev = s.statusPeriods || []; return { ...s, statusPeriods: (s.statusPeriods || []).map(p => p.id === id ? { ...p, ...patch } : p) }; });
