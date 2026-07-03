@@ -2758,7 +2758,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                                 background: highlight ? UI.goldFaint : decline ? 'rgba(var(--danger-rgb),0.08)' : 'rgba(var(--accent-rgb),0.08)',
                                 border: `0.5px solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : 'rgba(var(--accent-rgb),0.25)'}`,
                                 borderRadius: 4, padding: '2px 6px',
-                              }}>VARIATIONS</span>
+                              }}>AMRAP</span>
                               {pr && <i className="fa-solid fa-dumbbell" style={{ fontSize: 9, color: UI.gold }} />}
                             </div>
                             <div data-shot-chips="1" style={{ display: 'flex', alignItems: 'flex-end', flexWrap: 'wrap', gap: 4, overflow: 'hidden' }}>
@@ -3065,7 +3065,7 @@ function TechniqueBlock({ st, highlight = false, decline = false }) {
   }
 
   const isMyo = st.technique === 'myorep' || st.technique === 'myorep_match';
-  const badgeLabel = st.technique === 'drop' ? 'DROP SET' : st.technique === 'myorep_match' ? 'MYO MATCH' : st.technique === 'amrap_variations' ? 'VARIATIONS' : 'MYO-REPS';
+  const badgeLabel = st.technique === 'drop' ? 'DROP SET' : st.technique === 'myorep_match' ? 'MYO MATCH' : st.technique === 'amrap_variations' ? 'AMRAP' : 'MYO-REPS';
   const drops = (st.drops && Array.isArray(st.drops) && st.drops.length > 0) ? st.drops : (st.kg != null ? [{ kg: st.kg, reps: st.reps }] : []);
 
   return (
@@ -3813,7 +3813,7 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
                 <div style={{ padding: '12px 0', opacity: done ? 1 : 0.35, transition: 'opacity 0.3s' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                     <span className="num" style={{ fontSize: 11, color: done ? UI.gold : UI.inkFaint }}>{i + 1}</span>
-                    <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkFaint, background: 'rgba(var(--accent-rgb),0.08)', border: `0.5px solid rgba(var(--accent-rgb),0.25)`, borderRadius: 4, padding: '2px 6px' }}>VARIATIONS</span>
+                    <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkFaint, background: 'rgba(var(--accent-rgb),0.08)', border: `0.5px solid rgba(var(--accent-rgb),0.25)`, borderRadius: 4, padding: '2px 6px' }}>AMRAP</span>
                     <div style={{ marginLeft: 'auto' }}>
                       {done ? <svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke={UI.gold} strokeWidth="1.8"><path d="M2 6l2.5 2.5L10 3"/></svg>
                              : <div style={{ width: 13, height: 13, borderRadius: '50%', border: `1px solid ${UI.hair}` }} />}

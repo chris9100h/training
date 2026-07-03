@@ -481,7 +481,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
                   const techniqueLabel = (s) => s.technique === 'drop' ? 'DROP SET'
                     : s.technique === 'myorep_match' ? 'MYO MATCH'
                     : s.technique === 'myorep' ? 'MYO REP'
-                    : s.technique === 'amrap_variations' ? 'VARIATIONS'
+                    : s.technique === 'amrap_variations' ? 'AMRAP'
                     : s.technique === 'lengthened_partial' ? 'PARTIALS'
                     : null;
                   return (todaySession.entries || []).map((e, i) => {
@@ -490,7 +490,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
                     return (
                       <div key={i} style={{ padding: '10px 0', borderBottom: `0.5px solid ${UI.hair}` }}>
                         <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600, marginBottom: 6 }}>{e.name}</div>
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: lastSets.length ? 5 : 0 }}>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'flex-start', marginBottom: lastSets.length ? 5 : 0 }}>
                           {(e.sets || []).filter(s => !s.warmup).map((s, j) => {
                             const prev = lastSets[j];
                             const anyImpBefore = (e.sets || []).filter(x => !x.warmup).slice(0, j).some((x, k) => isImprovement(x, lastSets[k]));
@@ -1322,7 +1322,7 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
             const techniqueLabel = (s) => s.technique === 'drop' ? 'DROP SET'
               : s.technique === 'myorep_match' ? 'MYO MATCH'
               : s.technique === 'myorep' ? 'MYO REP'
-              : s.technique === 'amrap_variations' ? 'VARIATIONS'
+              : s.technique === 'amrap_variations' ? 'AMRAP'
               : s.technique === 'lengthened_partial' ? 'PARTIALS'
               : null;
             return (
@@ -1333,7 +1333,7 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
                 <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600, marginBottom: 6 }}>
                   {e.name}{e.exId && <span style={{ fontSize: 11, color: UI.inkFaint, marginLeft: 5 }}>›</span>}
                 </div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: lastSets.length ? 5 : 0 }}>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'flex-start', marginBottom: lastSets.length ? 5 : 0 }}>
                   {(e.sets || []).filter(s => !s.warmup).map((s, j) => {
                     const prev = lastSets[j];
                     const anyImpBefore = (e.sets || []).filter(x => !x.warmup).slice(0, j).some((x, k) => isImprovement(x, lastSets[k]));
