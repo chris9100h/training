@@ -602,12 +602,15 @@ function CardioPROverlay({ pr, onDone }) {
   );
 }
 
-function CardioQuickLogSheet({ open, onClose, store, setStore, userId, editLog, onPR, prefill }) {
+function CardioQuickLogSheet({ open, onClose, store, setStore, userId, editLog, onPR, prefill, logDate }) {
   const [distUnit, setDistUnitState] = useState(LB.cardioDistUnit);
   const setDistUnit = (u) => { LB.setCardioDistUnit(u); setDistUnitState(u); };
 
   const todayStr = LB.todayISO();
-  const empty = () => ({ date: todayStr, type: '', duration: '', distance: '', paceFeeling: null, effort: null, note: '' });
+  // Defaults to the day the caller has selected (e.g. the home strip's
+  // currently-browsed day), not always today — otherwise navigating back to
+  // log a missed day's cardio would silently save it under today's date.
+  const empty = () => ({ date: logDate || todayStr, type: '', duration: '', distance: '', paceFeeling: null, effort: null, note: '' });
   const [form, setForm] = useState(empty);
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
   const [confirmEl, confirm] = useConfirm();
@@ -2880,7 +2883,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
 
       <CardioFinishFlow open={cardioFinishOpen} durationMin={cardioFinishDuration} store={store} setStore={setStore} onClose={() => setCardioFinishOpen(false)} onPR={setCardioPR} />
 
-      <CardioQuickLogSheet open={cardioLogOpen} onClose={() => { setCardioLogOpen(false); setEditingCardioLog(null); }} store={store} setStore={setStore} userId={userId} editLog={editingCardioLog} onPR={setCardioPR} prefill={editingCardioLog ? null : cardioPlanPrefill} />
+      <CardioQuickLogSheet open={cardioLogOpen} onClose={() => { setCardioLogOpen(false); setEditingCardioLog(null); }} store={store} setStore={setStore} userId={userId} editLog={editingCardioLog} onPR={setCardioPR} prefill={editingCardioLog ? null : cardioPlanPrefill} logDate={LB.fmtISO(sessionDate)} />
       <CardioPROverlay pr={cardioPR} onDone={() => setCardioPR(null)} />
 
       {/* Coach message banner */}

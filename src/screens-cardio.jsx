@@ -1281,6 +1281,7 @@ function TodayCardioWidget({ store, setStore, todayISO, userId, onPR }) {
           userId={userId}
           editLog={null}
           prefill={logPrefill}
+          logDate={todayISO}
           onPR={onPR || (() => {})}
         />
       )}
