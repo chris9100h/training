@@ -835,11 +835,7 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
     </div>
   );
   const segBtn = (active) => ({ flex: 1, padding: '7px 4px', borderRadius: 6, border: `0.5px solid ${active ? 'var(--accent)' : UI.hairStrong}`, background: active ? 'rgba(var(--accent-rgb),0.12)' : UI.bgInset, color: active ? 'var(--accent)' : UI.inkSoft, fontFamily: UI.fontUi, fontSize: 12, cursor: 'pointer', fontWeight: active ? 700 : 400 });
-  const renderToggle = (on, onToggle) => (
-    <div onClick={onToggle} style={{ width: 44, height: 26, borderRadius: 13, cursor: 'pointer', flexShrink: 0, background: on ? 'var(--accent)' : UI.bgInset, border: `0.5px solid ${on ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong}`, position: 'relative', transition: 'background 0.18s', WebkitTapHighlightColor: 'transparent' }}>
-      <div style={{ position: 'absolute', top: 3, left: on ? 21 : 3, width: 18, height: 18, borderRadius: '50%', background: on ? '#0a0805' : UI.inkFaint, transition: 'left 0.18s' }} />
-    </div>
-  );
+  const renderToggle = (on, onToggle) => <Toggle on={on} onToggle={onToggle} />;
 
   const overlayStyle = { position: 'fixed', top: 0, right: 0, bottom: 0, left: 0, zIndex: 350, background: UI.bg, display: 'flex', flexDirection: 'column' };
   const headerStyle = { display: 'flex', alignItems: 'center', gap: 8, padding: 'calc(env(safe-area-inset-top, 0px) + 14px) 16px 14px', borderBottom: `0.5px solid ${UI.hair}`, flexShrink: 0 };
@@ -1378,11 +1374,8 @@ function ClientCheckInsTab({ coachingId, checkinEnabled = true, onToggle, toggli
           style={{ background: 'none', border: 'none', padding: 6, cursor: 'pointer', color: UI.inkFaint, fontSize: 15, lineHeight: 1 }}>
           <i className="fa-solid fa-sliders" />
         </button>
-        <div
-          onClick={onToggle}
-          style={{ width: 44, height: 26, borderRadius: 13, cursor: 'pointer', flexShrink: 0, background: checkinEnabled ? 'var(--accent)' : UI.bgInset, border: `0.5px solid ${checkinEnabled ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong}`, position: 'relative', transition: 'background 0.18s', WebkitTapHighlightColor: 'transparent', opacity: toggling ? 0.6 : 1 }}
-        >
-          <div style={{ position: 'absolute', top: 3, left: checkinEnabled ? 21 : 3, width: 18, height: 18, borderRadius: '50%', background: checkinEnabled ? '#0a0805' : UI.inkFaint, transition: 'left 0.18s' }} />
+        <div style={{ opacity: toggling ? 0.6 : 1 }}>
+          <Toggle on={checkinEnabled} onToggle={onToggle} />
         </div>
       </div>
     </div>
