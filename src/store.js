@@ -3356,6 +3356,36 @@ function retractGrowthGrant(growthCounts, grantedKey) {
   return gc;
 }
 
+// Bundles consecutive same-supersetGroup entries into { type: 'superset',
+// members: [{entry, idx}] } groups, everything else into { type:
+// 'standalone', entry, idx }. Used to be copy-pasted into 3 screens with a
+// comment admitting they were "kept in lockstep" by hand.
+function groupBySuperset(entries) {
+  const groups = [];
+  let idx = 0;
+  while (idx < entries.length) {
+    const e = entries[idx];
+    if (e.supersetGroup) {
+      const members = [{ entry: e, idx }];
+      let j = idx + 1;
+      while (j < entries.length && entries[j].supersetGroup === e.supersetGroup) {
+        members.push({ entry: entries[j], idx: j });
+        j++;
+      }
+      groups.push({ type: 'superset', members });
+      idx = j;
+    } else {
+      groups.push({ type: 'standalone', entry: e, idx });
+      idx++;
+    }
+  }
+  return groups;
+}
+
+function supersetLabel(memberCount) {
+  return memberCount >= 3 ? 'GIANT SET' : 'SUPERSET';
+}
+
 // Normalizes a set's intensity-technique data into one shape every renderer
 // (chip JSX, plain-text summaries) can consume. Used to be reimplemented ad
 // hoc in 7+ places — each new technique or field (e.g. the recent "partials
@@ -3435,7 +3465,7 @@ window.LB = {
   startDeload, endDeload, deloadElapsed, deloadDaysRemaining, deloadPlanDays,
   loadClientStore, loadCoachClientsStatus, reloadCoachingState, enableSelfCoaching, inviteClient, respondToCoachingInvite, endCoaching,
   addCoachingNote, markCoachingNotesRead, loadCoachingNotes, loadCoachingThreads, createCoachingThread, deleteCoachingThread, getOrCreateCoachingThread, uploadChatImage,
-  unreadCoachingNotes, isNoteFromClient, techniqueRounds,
+  unreadCoachingNotes, isNoteFromClient, techniqueRounds, groupBySuperset, supersetLabel,
   loadCoachingMacros, addCoachingMacros,
   diffSchedule,
   checkinWeekStart, submitCheckin, loadCheckins, deleteCheckin, loadCoachCheckinStatus, requestCheckin, setCheckinEnabled, loadCheckinSchema, saveCheckinSchema, saveDefaultCheckinSchema,

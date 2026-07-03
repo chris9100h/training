@@ -2512,25 +2512,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
           )}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginTop: 14 }}>
             {(() => {
-              // Group entries: consecutive entries with the same supersetGroup are bundled
-              const groups = [];
-              let idx = 0;
-              while (idx < s.entries.length) {
-                const e = s.entries[idx];
-                if (e.supersetGroup) {
-                  const members = [{ entry: e, idx }];
-                  let j = idx + 1;
-                  while (j < s.entries.length && s.entries[j].supersetGroup === e.supersetGroup) {
-                    members.push({ entry: s.entries[j], idx: j });
-                    j++;
-                  }
-                  groups.push({ type: 'superset', members });
-                  idx = j;
-                } else {
-                  groups.push({ type: 'standalone', entry: e, idx });
-                  idx++;
-                }
-              }
+              const groups = LB.groupBySuperset(s.entries);
 
               const showWarmup = store.settings?.showWarmupInSummary ?? true;
               const renderEntry = (e, i) => {
@@ -2845,7 +2827,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                 <div key={gi}>
                   {g.type === 'superset' ? (
                     <div style={{ borderLeft: `2px solid ${UI.goldSoft}`, paddingLeft: 12 }}>
-                      <div className="micro" style={{ color: UI.gold, marginBottom: 10, letterSpacing: '0.12em' }}>{g.members.length >= 3 ? 'GIANT SET' : 'SUPERSET'}</div>
+                      <div className="micro" style={{ color: UI.gold, marginBottom: 10, letterSpacing: '0.12em' }}>{LB.supersetLabel(g.members.length)}</div>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
                         {g.members.map(({ entry: e, idx: i }) => renderEntry(e, i))}
                       </div>
@@ -3176,27 +3158,7 @@ function SessionCompareScreen({ store, setStore, go, sessionId, compareId, back 
   const entries = s.entries.filter(e => !isEntryCardio(e));
   const extraCmpEntries = cmp.entries.filter(e => !isEntryCardio(e) && !s.entries.some(se => se.exId === e.exId));
 
-  // Group consecutive same-supersetGroup entries — same grouping SessionDetailScreen uses.
-  const groups = [];
-  {
-    let idx = 0;
-    while (idx < entries.length) {
-      const e = entries[idx];
-      if (e.supersetGroup) {
-        const members = [{ entry: e, idx }];
-        let j = idx + 1;
-        while (j < entries.length && entries[j].supersetGroup === e.supersetGroup) {
-          members.push({ entry: entries[j], idx: j });
-          j++;
-        }
-        groups.push({ type: 'superset', members });
-        idx = j;
-      } else {
-        groups.push({ type: 'standalone', entry: e, idx });
-        idx++;
-      }
-    }
-  }
+  const groups = LB.groupBySuperset(entries);
 
   // Same html2canvas flow as SessionDetailScreen's takeScreenshot — kept in
   // lockstep with that one (imperative KnurlCanvas draw). The watermark here
@@ -3406,7 +3368,7 @@ function SessionCompareScreen({ store, setStore, go, sessionId, compareId, back 
               <div key={gi}>
                 {g.type === 'superset' ? (
                   <div style={{ borderLeft: `2px solid ${UI.goldSoft}`, paddingLeft: 12 }}>
-                    <div className="micro" style={{ color: UI.gold, marginBottom: 10, letterSpacing: '0.12em' }}>{g.members.length >= 3 ? 'GIANT SET' : 'SUPERSET'}</div>
+                    <div className="micro" style={{ color: UI.gold, marginBottom: 10, letterSpacing: '0.12em' }}>{LB.supersetLabel(g.members.length)}</div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
                       {g.members.map(({ entry: e, idx: i }) => renderEntry(e, i))}
                     </div>
@@ -3460,27 +3422,7 @@ function ComparisonScreen({ session, onDismiss, go, userName }) {
     ? Math.round((new Date(session.ended) - new Date(session.started_at)) / 60000)
     : null;
 
-  // Group consecutive same-supersetGroup entries — same grouping SessionDetailScreen uses.
-  const groups = [];
-  {
-    let idx = 0;
-    while (idx < entries.length) {
-      const e = entries[idx];
-      if (e.supersetGroup) {
-        const members = [{ entry: e, idx }];
-        let j = idx + 1;
-        while (j < entries.length && entries[j].supersetGroup === e.supersetGroup) {
-          members.push({ entry: entries[j], idx: j });
-          j++;
-        }
-        groups.push({ type: 'superset', members });
-        idx = j;
-      } else {
-        groups.push({ type: 'standalone', entry: e, idx });
-        idx++;
-      }
-    }
-  }
+  const groups = LB.groupBySuperset(entries);
 
   return (
     <Screen scroll={false} style={{ position: 'relative' }}>
@@ -3567,7 +3509,7 @@ function ComparisonScreen({ session, onDismiss, go, userName }) {
           <div key={gi}>
             {g.type === 'superset' ? (
               <div style={{ borderLeft: `2px solid ${UI.goldSoft}`, paddingLeft: 12 }}>
-                <div className="micro" style={{ color: UI.gold, marginBottom: 10, letterSpacing: '0.12em' }}>{g.members.length >= 3 ? 'GIANT SET' : 'SUPERSET'}</div>
+                <div className="micro" style={{ color: UI.gold, marginBottom: 10, letterSpacing: '0.12em' }}>{LB.supersetLabel(g.members.length)}</div>
                 {g.members.map(({ entry: e, idx: i }) => renderEntry(e, i))}
               </div>
             ) : renderEntry(g.entry, g.idx)}
@@ -3772,7 +3714,7 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
             </div>
             {entry.supersetGroup && (
               <div className="micro" style={{ color: UI.gold, letterSpacing: '0.12em', marginBottom: 4 }}>
-                {entries.filter(e => e.supersetGroup === entry.supersetGroup).length >= 3 ? 'GIANT SET' : 'SUPERSET'}
+                {LB.supersetLabel(entries.filter(e => e.supersetGroup === entry.supersetGroup).length)}
               </div>
             )}
             <div className="display" style={{ fontSize: 28, color: UI.ink, fontWeight: 400 }}>{entry.name}</div>
