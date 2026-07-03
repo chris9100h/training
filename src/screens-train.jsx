@@ -245,7 +245,7 @@ function FinisherPartials({ count, onChange }) {
   );
   return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px 4px 8px' }}>
-      <span className="micro" style={{ color: UI.inkFaint }}>+ Partials on the last round</span>
+      <span className="micro" style={{ color: UI.inkFaint }}>Partials</span>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         <button onClick={() => onChange(Math.max(0, count - 1))} style={{ width: 28, height: 28, borderRadius: 4, border: `1px solid ${UI.hairStrong}`, background: 'transparent', color: UI.inkFaint, fontSize: 16, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', WebkitTapHighlightColor: 'transparent' }}>−</button>
         <span className="num" style={{ fontSize: 16, minWidth: 14, textAlign: 'center', color: count > 0 ? UI.gold : UI.inkFaint }}>{count}</span>
@@ -4379,7 +4379,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                           <button onClick={() => { setLpTarget(null); setLpCount(0); }} style={{ background: 'none', border: 'none', color: UI.inkFaint, fontSize: 10, fontFamily: UI.fontUi, cursor: 'pointer', padding: '2px 4px', letterSpacing: '0.08em' }}>CANCEL</button>
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px 4px 10px' }}>
-                          <span className="micro" style={{ color: UI.inkFaint }}>Partials in the stretch</span>
+                          <span className="micro" style={{ color: UI.inkFaint }}>Partials</span>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                             <button onClick={() => setLpCount(c => Math.max(0, c - 1))} style={{ width: 32, height: 32, borderRadius: 4, border: `1px solid ${UI.hairStrong}`, background: 'transparent', color: UI.inkFaint, fontSize: 18, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', WebkitTapHighlightColor: 'transparent' }}>−</button>
                             <span className="num" style={{ fontSize: 18, minWidth: 16, textAlign: 'center', color: lpCount > 0 ? UI.gold : UI.inkFaint }}>{lpCount}</span>
