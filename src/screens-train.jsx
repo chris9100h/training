@@ -4187,8 +4187,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                                 border: '0.5px solid rgba(var(--accent-rgb),0.35)',
                                 borderRadius: 4, padding: '2px 6px',
                               }}>{s.technique === 'drop' ? 'DROP SET' : s.technique === 'myorep_match' ? 'MYO MATCH' : s.technique === 'myorep' ? 'MYO REP' : s.technique === 'amrap_variations' ? 'AMRAP' : 'PARTIALS'}</span>
-                              {s.technique === 'amrap_variations' && s.drops?.[0]?.label && s.drops[0].label !== entry.name && (
-                                <span className="num" style={{ fontSize: 9, color: UI.inkGhost }}>{s.drops[0].label}</span>
+                              {s.technique === 'amrap_variations' && (s.drops || []).some(d => d.label && d.label !== entry.name) && (
+                                <span className="num" style={{ fontSize: 9, color: UI.inkGhost }}>{s.drops[0]?.label || entry.name}</span>
                               )}
                             </div>
                           : <div className="num" style={{ fontSize: 11, color: UI.inkFaint }}>
@@ -4500,12 +4500,14 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                       })()}
                     </div>
                   )}
-                  {s.technique === 'amrap_variations' && s.done && (s.drops || []).length > 1 && (
+                  {s.technique === 'amrap_variations' && s.done && (s.drops || []).length > 1 && (() => {
+                    const anyVaried = (s.drops || []).some(d => d.label && d.label !== entry.name);
+                    return (
                     <div style={{ marginLeft: 36, paddingLeft: 10, paddingBottom: 8, borderLeft: `2px solid rgba(var(--accent-rgb),0.2)` }}>
                       {(s.drops || []).slice(1).map((d, di) => (
                         <div key={di} style={{ padding: '4px 4px', opacity: 0.5 }}>
-                          {d.label && d.label !== entry.name && (
-                            <div className="num" style={{ fontSize: 9, color: UI.inkGhost, marginBottom: 2 }}>{d.label}</div>
+                          {anyVaried && (
+                            <div className="num" style={{ fontSize: 9, color: UI.inkGhost, marginBottom: 2 }}>{d.label || entry.name}</div>
                           )}
                           <div style={{ display: 'grid', gridTemplateColumns: '28px 1fr 72px 56px', gap: 8, alignItems: 'center' }}>
                             <div style={{
@@ -4525,7 +4527,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                         </div>
                       ))}
                     </div>
-                  )}
+                    );
+                  })()}
                   {/* Myo-Rep active inline rows */}
                   {myoSetIdx === i && !s.done && (() => {
                     const myoTotalReps = myoDrops.reduce((acc, d) => acc + (d.reps || 0), 0);

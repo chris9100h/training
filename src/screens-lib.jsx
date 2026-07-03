@@ -2742,6 +2742,11 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                       // no variation was actually logged for that round).
                       if (st.technique === 'amrap_variations' && !isCheckboxOnly) {
                         const drops = (st.drops && st.drops.length > 0) ? st.drops : (st.kg != null ? [{ kg: st.kg, reps: st.reps }] : []);
+                        // Show every round's label once ANY round diverges from
+                        // the exercise name — showing only the diverging rounds
+                        // would leave the unvaried ones (usually round 1) looking
+                        // unlabeled next to their labeled neighbors.
+                        const anyVaried = drops.some(d => d.label && d.label !== exName);
                         const chipColor = highlight ? UI.goldLight : decline ? 'rgba(var(--danger-rgb),0.85)' : UI.ink;
                         const chipBorder = highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : UI.hairStrong;
                         const chipBg = highlight ? UI.goldFaint : decline ? 'rgba(var(--danger-rgb),0.08)' : 'transparent';
@@ -2768,8 +2773,8 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                                     <span style={{ color: UI.inkGhost, fontSize: 10, fontFamily: UI.fontUi, alignSelf: 'center' }}>→</span>
                                   )}
                                   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
-                                    {d.label && d.label !== exName && (
-                                      <span className="num" style={{ fontSize: 8, color: UI.inkGhost, maxWidth: 72, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.label}</span>
+                                    {anyVaried && (
+                                      <span className="num" style={{ fontSize: 8, color: UI.inkGhost, maxWidth: 72, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.label || exName}</span>
                                     )}
                                     <span style={{
                                       background: chipBg,
@@ -3807,8 +3812,13 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
                 );
               }
 
-              // AMRAP Variations
-              if (s.technique === 'amrap_variations' && drops) return (
+              // AMRAP Variations — show every round's label once ANY round
+              // diverges from the exercise name, not just the diverging ones,
+              // so the unvaried round (usually round 1) doesn't look unlabeled
+              // next to its labeled neighbors.
+              if (s.technique === 'amrap_variations' && drops) {
+                const anyVaried = drops.some(d => d.label && d.label !== entry.name);
+                return (
                 <React.Fragment key={i}>
                 <div style={{ padding: '12px 0', opacity: done ? 1 : 0.35, transition: 'opacity 0.3s' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
@@ -3824,8 +3834,8 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
                       <React.Fragment key={di}>
                         {di > 0 && <span style={{ color: UI.inkGhost, fontSize: 10, fontFamily: UI.fontUi, alignSelf: 'center' }}>→</span>}
                         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
-                          {d.label && d.label !== entry.name && (
-                            <span className="num" style={{ fontSize: 8, color: UI.inkGhost, maxWidth: 90, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.label}</span>
+                          {anyVaried && (
+                            <span className="num" style={{ fontSize: 8, color: UI.inkGhost, maxWidth: 90, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.label || entry.name}</span>
                           )}
                           <span className="num" style={{ fontSize: 13, color: UI.ink }}>{d.kg ?? '—'}<span style={{ fontSize: 10, color: UI.inkFaint }}>{unit}</span> × {d.reps ?? '—'}</span>
                         </div>
@@ -3835,7 +3845,8 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
                 </div>
                 {i < entry.sets.length - 1 && <div className="knurl" />}
                 </React.Fragment>
-              );
+                );
+              }
 
               // Lengthened partials
               if (s.technique === 'lengthened_partial') {
