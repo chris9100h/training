@@ -1345,21 +1345,8 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
 // ─── ClientCheckInsTab (coach view) ───────────────────────────────────────────
 
 function ClientCheckInsTab({ coachingId, checkinEnabled = true, onToggle, toggling = false, store, setStore, userId, clientUnit }) {
-  const [checkins, setCheckins] = useStateC(null);
-  const [loadErr, setLoadErr] = useStateC(false);
-  const [schema, setSchema] = useStateC(null);
+  const { checkins, loadErr, setLoadErr, schema, setSchema, coachingMacrosHistory, load } = useCoachingCheckins(coachingId);
   const [builderOpen, setBuilderOpen] = useStateC(false);
-  const [coachingMacrosHistory, setCoachingMacrosHistory] = useStateC(null);
-
-  const load = () => LB.loadCheckins(coachingId)
-    .then(c => { setCheckins(c); setLoadErr(false); })
-    .catch(() => setLoadErr(true));
-  useEffectC(() => {
-    setLoadErr(false);
-    load();
-    LB.loadCheckinSchema(coachingId).then(s => setSchema(s)).catch(() => {});
-    LB.loadCoachingMacros(coachingId).then(data => setCoachingMacrosHistory(data)).catch(() => {});
-  }, [coachingId]);
 
   const resolvedSchema = schema || store?.settings?.defaultCheckinSchema || CHECKIN_DEFAULT_SCHEMA;
 

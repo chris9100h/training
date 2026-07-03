@@ -2,6 +2,29 @@
 
 const { useState: useStateC, useEffect: useEffectC, useRef: useRefC, useMemo: useMemoC } = React;
 
+// Check-in load state shared by ClientCheckInsTab (coach view, -detail.jsx)
+// and ClientCheckInTab (client/self view, -tabs.jsx) — both used to
+// hand-roll the identical checkins/loadErr/schema/coachingMacrosHistory
+// state + load effect.
+function useCoachingCheckins(coachingId) {
+  const [checkins, setCheckins] = useStateC(null);
+  const [loadErr, setLoadErr] = useStateC(false);
+  const [schema, setSchema] = useStateC(null);
+  const [coachingMacrosHistory, setCoachingMacrosHistory] = useStateC(null);
+
+  const load = () => LB.loadCheckins(coachingId)
+    .then(c => { setCheckins(c); setLoadErr(false); })
+    .catch(() => setLoadErr(true));
+  useEffectC(() => {
+    setLoadErr(false);
+    load();
+    LB.loadCheckinSchema(coachingId).then(s => setSchema(s)).catch(() => {});
+    LB.loadCoachingMacros(coachingId).then(data => setCoachingMacrosHistory(data)).catch(() => {});
+  }, [coachingId]);
+
+  return { checkins, loadErr, setLoadErr, schema, setSchema, coachingMacrosHistory, load };
+}
+
 // Fixed amber pill shown while a coach's edit to a client's plan failed to
 // sync. syncStore now throws on a real write failure, so this surfaces it
 // instead of the edit silently not persisting. The next edit retries the diff.

@@ -1170,26 +1170,13 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
     const m = new Date(t); m.setDate(t.getDate() - (d === 0 ? 6 : d - 1));
     return LB.fmtISO(m);
   })();
-  const [checkins, setCheckins] = useStateC(null);
-  const [loadErr, setLoadErr] = useStateC(false);
-  const [schema, setSchema] = useStateC(null); // null = loading, then resolved or CHECKIN_DEFAULT_SCHEMA
+  const { checkins, loadErr, setLoadErr, schema, setSchema, coachingMacrosHistory, load } = useCoachingCheckins(coachingId);
   const [editTarget, setEditTarget] = useStateC(null); // null = overview | 'new' | a check-in object
   const [confirmDelete, setConfirmDelete] = useStateC(null); // id of check-in awaiting delete confirm
   const [deleting, setDeleting] = useStateC(false);
   const [pastOpen, setPastOpen] = useStateC(false);
   const [builderOpen, setBuilderOpen] = useStateC(false);
   const [previewOpen, setPreviewOpen] = useStateC(false);
-  const [coachingMacrosHistory, setCoachingMacrosHistory] = useStateC(null);
-
-  const load = () => LB.loadCheckins(coachingId)
-    .then(c => { setCheckins(c); setLoadErr(false); })
-    .catch(() => setLoadErr(true));
-  useEffectC(() => {
-    setLoadErr(false);
-    load();
-    LB.loadCheckinSchema(coachingId).then(s => setSchema(s)).catch(() => {});
-    LB.loadCoachingMacros(coachingId).then(data => setCoachingMacrosHistory(data)).catch(() => {});
-  }, [coachingId]);
 
   const thisWeek = (checkins || []).find(c => c.weekStart === weekStart);
   const past = (checkins || []).filter(c => c.weekStart !== weekStart);
