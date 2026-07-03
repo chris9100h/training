@@ -16,6 +16,15 @@
    Entry shape: { id: string, title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.460',
+    title: 'Sweating the Small Stuff',
+    items: [
+      "🎯 Fixed: reordering fields inside a check-in category (Coaching → Customize Check-in) used to lift the row, look convincing, then quietly put it right back where it started. Every single time. It actually reorders now.",
+      "✏️ AMRAP Variations' round-name field used to be indistinguishable from plain text, so approximately nobody knew it was editable. It's a proper box now, with an accent underline when you tap in — go rename \"Cable Row A\" to whatever you actually did.",
+      "🌗 One settings sheet forgot to dim the screen behind it when it opened. A tiny thing, but it was bugging us more than it should have.",
+    ],
+  },
+  {
     id: 'v2.458',
     title: 'AMRAP Variations',
     items: [
