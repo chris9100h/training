@@ -459,15 +459,20 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
                     if (s.skipped && !s.done) return 'skipped';
                     const drops = s.drops && Array.isArray(s.drops) && s.drops.length > 0 ? s.drops : null;
                     if (s.technique === 'drop' && drops) {
-                      return drops.map(d => `${d.kg ?? '—'}${unit}×${d.reps ?? '—'}`).join(' → ');
+                      const chain = drops.map(d => `${d.kg ?? '—'}${unit}×${d.reps ?? '—'}`).join(' → ');
+                      const p = drops[drops.length - 1]?.partials || 0;
+                      return p > 0 ? `${chain} +${p}` : chain;
                     }
                     if ((s.technique === 'myorep' || s.technique === 'myorep_match') && drops) {
                       const total = drops.reduce((a, d) => a + (d.reps || 0), 0);
                       const chain = drops.map((d, di) => di === 0 ? `${d.kg ?? '—'}${unit}×${d.reps ?? '—'}` : (d.reps ?? '—')).join(' ↺ ');
-                      return `${chain} (${total})`;
+                      const p = drops[drops.length - 1]?.partials || 0;
+                      return p > 0 ? `${chain} (${total}) +${p}` : `${chain} (${total})`;
                     }
                     if (s.technique === 'amrap_variations' && drops) {
-                      return drops.map(d => `${d.kg ?? '—'}${unit}×${d.reps ?? '—'}`).join(' → ');
+                      const chain = drops.map(d => `${d.kg ?? '—'}${unit}×${d.reps ?? '—'}`).join(' → ');
+                      const p = drops[drops.length - 1]?.partials || 0;
+                      return p > 0 ? `${chain} +${p}` : chain;
                     }
                     if (s.technique === 'lengthened_partial') {
                       const partials = s.drops?.partials || 0;
@@ -1321,15 +1326,20 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
               if (s.skipped && !s.done) return 'skipped';
               const drops = s.drops && Array.isArray(s.drops) && s.drops.length > 0 ? s.drops : null;
               if (s.technique === 'drop' && drops) {
-                return drops.map(d => `${d.kg ?? '—'}${unit}×${d.reps ?? '—'}`).join(' → ');
+                const chain = drops.map(d => `${d.kg ?? '—'}${unit}×${d.reps ?? '—'}`).join(' → ');
+                const p = drops[drops.length - 1]?.partials || 0;
+                return p > 0 ? `${chain} +${p}` : chain;
               }
               if ((s.technique === 'myorep' || s.technique === 'myorep_match') && drops) {
                 const total = drops.reduce((a, d) => a + (d.reps || 0), 0);
                 const chain = drops.map((d, di) => di === 0 ? `${d.kg ?? '—'}${unit}×${d.reps ?? '—'}` : (d.reps ?? '—')).join(' ↺ ');
-                return `${chain} (${total})`;
+                const p = drops[drops.length - 1]?.partials || 0;
+                return p > 0 ? `${chain} (${total}) +${p}` : `${chain} (${total})`;
               }
               if (s.technique === 'amrap_variations' && drops) {
-                return drops.map(d => `${d.kg ?? '—'}${unit}×${d.reps ?? '—'}`).join(' → ');
+                const chain = drops.map(d => `${d.kg ?? '—'}${unit}×${d.reps ?? '—'}`).join(' → ');
+                const p = drops[drops.length - 1]?.partials || 0;
+                return p > 0 ? `${chain} +${p}` : chain;
               }
               if (s.technique === 'lengthened_partial') {
                 const partials = s.drops?.partials || 0;

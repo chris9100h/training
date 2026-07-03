@@ -2655,6 +2655,12 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                                   </span>
                                 </React.Fragment>
                               ))}
+                              {(() => { const p = drops[drops.length - 1]?.partials || 0; return p > 0 && (
+                                <React.Fragment>
+                                  <span style={{ color: UI.inkGhost, fontSize: 10, fontFamily: UI.fontUi }}>+</span>
+                                  <span style={{ border: `1px solid rgba(var(--accent-rgb),0.35)`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontNum, fontSize: 12, color: UI.inkSoft }}>{p}</span>
+                                </React.Fragment>
+                              ); })()}
                             </div>
                           </div>
                         );
@@ -2704,9 +2710,18 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                                   </React.Fragment>
                                 ))}
                               </div>
-                              {(() => { const t = drops.reduce((a, d) => a + (d.reps || 0), 0); return t > 0 ? (
-                                <div style={{ border: `1px solid var(--accent)`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontUi, fontSize: 11, color: 'var(--accent)', letterSpacing: '0.03em', textAlign: 'center' }}>
-                                  Total {t}
+                              {(() => { const t = drops.reduce((a, d) => a + (d.reps || 0), 0); const p = drops[drops.length - 1]?.partials || 0; return (t > 0 || p > 0) ? (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                                  {t > 0 && (
+                                    <div style={{ border: `1px solid var(--accent)`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontUi, fontSize: 11, color: 'var(--accent)', letterSpacing: '0.03em', textAlign: 'center' }}>
+                                      Total {t}
+                                    </div>
+                                  )}
+                                  {p > 0 && (
+                                    <div style={{ border: `1px solid rgba(var(--accent-rgb),0.35)`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontNum, fontSize: 11, color: UI.inkSoft }}>
+                                      +{p} partial{p === 1 ? '' : 's'}
+                                    </div>
+                                  )}
                                 </div>
                               ) : null; })()}
                             </div>
@@ -2791,6 +2806,12 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                                   </div>
                                 </React.Fragment>
                               ))}
+                              {(() => { const p = drops[drops.length - 1]?.partials || 0; return p > 0 && (
+                                <React.Fragment>
+                                  <span style={{ color: UI.inkGhost, fontSize: 10, fontFamily: UI.fontUi, alignSelf: 'center' }}>+</span>
+                                  <span style={{ border: `1px solid rgba(var(--accent-rgb),0.35)`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontNum, fontSize: 12, color: UI.inkSoft, alignSelf: 'center' }}>{p}</span>
+                                </React.Fragment>
+                              ); })()}
                             </div>
                           </div>
                         );
@@ -3014,15 +3035,20 @@ function fmtCompareSet(st) {
   if (st.skipped && !st.done) return 'skipped';
   const drops = st.drops && (Array.isArray(st.drops) ? st.drops.length > 0 : st.drops.partials) ? st.drops : null;
   if (st.technique === 'drop' && Array.isArray(drops)) {
-    return drops.map(d => `${d.kg ?? '—'}${UI.unit()}×${d.reps ?? '—'}`).join(' → ');
+    const chain = drops.map(d => `${d.kg ?? '—'}${UI.unit()}×${d.reps ?? '—'}`).join(' → ');
+    const p = drops[drops.length - 1]?.partials || 0;
+    return p > 0 ? `${chain} +${p} partials` : chain;
   }
   if ((st.technique === 'myorep' || st.technique === 'myorep_match') && Array.isArray(drops)) {
     const total = drops.reduce((a, d) => a + (d.reps || 0), 0);
     const chain = drops.map((d, di) => di === 0 ? `${d.kg ?? '—'}${UI.unit()}×${d.reps ?? '—'}` : (d.reps ?? '—')).join(' ↺ ');
-    return `${chain} (${total})`;
+    const p = drops[drops.length - 1]?.partials || 0;
+    return p > 0 ? `${chain} (${total}) +${p} partials` : `${chain} (${total})`;
   }
   if (st.technique === 'amrap_variations' && Array.isArray(drops)) {
-    return drops.map(d => `${d.kg ?? '—'}${UI.unit()}×${d.reps ?? '—'}`).join(' → ');
+    const chain = drops.map(d => `${d.kg ?? '—'}${UI.unit()}×${d.reps ?? '—'}`).join(' → ');
+    const p = drops[drops.length - 1]?.partials || 0;
+    return p > 0 ? `${chain} +${p} partials` : chain;
   }
   if (st.technique === 'lengthened_partial') {
     const partials = st.drops?.partials || 0;
@@ -3099,6 +3125,12 @@ function TechniqueBlock({ st, highlight = false, decline = false }) {
         {isMyo && (() => { const t = drops.reduce((a, d) => a + (d.reps || 0), 0); return t > 0 ? (
           <div style={{ border: `1px solid var(--accent)`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontUi, fontSize: 11, color: 'var(--accent)', letterSpacing: '0.03em' }}>
             Total {t}
+          </div>
+        ) : null; })()}
+        {(() => { const p = drops[drops.length - 1]?.partials || 0; return p > 0 ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <span style={{ color: UI.inkGhost, fontSize: 10, fontFamily: UI.fontUi }}>+</span>
+            <span style={{ border: `1px solid rgba(var(--accent-rgb),0.35)`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontNum, fontSize: 12, color: UI.inkSoft }}>{p}</span>
           </div>
         ) : null; })()}
       </div>
@@ -3489,15 +3521,20 @@ function ComparisonScreen({ session, onDismiss, go, userName }) {
             if (s.skipped && !s.done) return 'skipped';
             const drops = s.drops && s.drops.length > 0 ? s.drops : null;
             if (s.technique === 'drop' && drops) {
-              return drops.map(d => `${d.kg ?? '—'}${unit}×${d.reps ?? '—'}`).join(' → ');
+              const chain = drops.map(d => `${d.kg ?? '—'}${unit}×${d.reps ?? '—'}`).join(' → ');
+              const p = drops[drops.length - 1]?.partials || 0;
+              return p > 0 ? `${chain} +${p} partials` : chain;
             }
             if ((s.technique === 'myorep' || s.technique === 'myorep_match') && drops) {
               const total = drops.reduce((a, d) => a + (d.reps || 0), 0);
               const chain = drops.map((d, di) => di === 0 ? `${d.kg ?? '—'}${unit}×${d.reps ?? '—'}` : (d.reps ?? '—')).join(' ↺ ');
-              return `${chain} (${total})`;
+              const p = drops[drops.length - 1]?.partials || 0;
+              return p > 0 ? `${chain} (${total}) +${p} partials` : `${chain} (${total})`;
             }
             if (s.technique === 'amrap_variations' && drops) {
-              return drops.map(d => `${d.kg ?? '—'}${unit}×${d.reps ?? '—'}`).join(' → ');
+              const chain = drops.map(d => `${d.kg ?? '—'}${unit}×${d.reps ?? '—'}`).join(' → ');
+              const p = drops[drops.length - 1]?.partials || 0;
+              return p > 0 ? `${chain} +${p} partials` : chain;
             }
             if (s.technique === 'lengthened_partial') {
               const partials = s.drops?.partials || 0;
@@ -3809,6 +3846,12 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
                         <span className="num" style={{ fontSize: 13, color: UI.ink }}>{d.kg ?? '—'}<span style={{ fontSize: 10, color: UI.inkFaint }}>{unit}</span> × {d.reps ?? '—'}</span>
                       </React.Fragment>
                     ))}
+                    {(() => { const p = drops[drops.length - 1]?.partials || 0; return p > 0 && (
+                      <React.Fragment>
+                        <span style={{ color: UI.inkGhost, fontSize: 10, fontFamily: UI.fontUi }}>+</span>
+                        <span className="num" style={{ fontSize: 13, color: UI.inkSoft }}>{p}<span style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint, marginLeft: 3 }}>partials</span></span>
+                      </React.Fragment>
+                    ); })()}
                   </div>
                 </div>
                 {i < entry.sets.length - 1 && <div className="knurl" />}
@@ -3840,6 +3883,12 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
                           </span>
                         </React.Fragment>
                       ))}
+                      {(() => { const p = drops[drops.length - 1]?.partials || 0; return p > 0 && (
+                        <React.Fragment>
+                          <span style={{ color: UI.inkGhost, fontSize: 10, fontFamily: UI.fontUi }}>+</span>
+                          <span className="num" style={{ fontSize: 13, color: UI.inkSoft }}>{p}<span style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint, marginLeft: 3 }}>partials</span></span>
+                        </React.Fragment>
+                      ); })()}
                     </div>
                   </div>
                   {i < entry.sets.length - 1 && <div className="knurl" />}
@@ -3876,6 +3925,12 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
                         </div>
                       </React.Fragment>
                     ))}
+                    {(() => { const p = drops[drops.length - 1]?.partials || 0; return p > 0 && (
+                      <React.Fragment>
+                        <span style={{ color: UI.inkGhost, fontSize: 10, fontFamily: UI.fontUi, alignSelf: 'center' }}>+</span>
+                        <span className="num" style={{ fontSize: 13, color: UI.inkSoft, alignSelf: 'center' }}>{p}<span style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint, marginLeft: 3 }}>partials</span></span>
+                      </React.Fragment>
+                    ); })()}
                   </div>
                 </div>
                 {i < entry.sets.length - 1 && <div className="knurl" />}

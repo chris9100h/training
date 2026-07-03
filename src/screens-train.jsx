@@ -231,6 +231,30 @@ function KbCell({ text, placeholder, style, disabled, onActivate }) {
   );
 }
 
+// Optional "+ Partials" finisher on the last round of a Drop Set / Myo-Rep /
+// Myo-Rep Match / AMRAP Variations chain — collapsed by default (0 = no-op,
+// nothing written), tap to reveal the same stepper Lengthened Partials uses.
+function FinisherPartials({ count, onChange }) {
+  const [open, setOpen] = useStateT(count > 0);
+  if (!open) return (
+    <button onClick={() => setOpen(true)} style={{
+      background: 'none', border: 'none', color: UI.inkFaint,
+      fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.08em',
+      padding: '4px 4px 8px', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+    }}>+ PARTIALS</button>
+  );
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px 4px 8px' }}>
+      <span className="micro" style={{ color: UI.inkFaint }}>+ Partials on the last round</span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <button onClick={() => onChange(Math.max(0, count - 1))} style={{ width: 28, height: 28, borderRadius: 4, border: `1px solid ${UI.hairStrong}`, background: 'transparent', color: UI.inkFaint, fontSize: 16, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', WebkitTapHighlightColor: 'transparent' }}>−</button>
+        <span className="num" style={{ fontSize: 16, minWidth: 14, textAlign: 'center', color: count > 0 ? UI.gold : UI.inkFaint }}>{count}</span>
+        <button onClick={() => onChange(count + 1)} style={{ width: 28, height: 28, borderRadius: 4, border: `1px solid ${UI.hairStrong}`, background: 'transparent', color: UI.inkFaint, fontSize: 16, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', WebkitTapHighlightColor: 'transparent' }}>+</button>
+      </div>
+    </div>
+  );
+}
+
 // ─── Plate Calculator ────────────────────────────────────────────────
 const PLATES_KG  = [25, 20, 15, 10, 5, 2.5, 1.25, 0.75, 0.5, 0.25];
 const PLATES_LBS = [55, 45, 35, 25, 10, 5, 2.5, 1.25];
@@ -1052,7 +1076,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
   const finishDropSet = (drops) => {
     if (!drops.length || dropSetIdx == null) return;
-    const first = drops[0];
+    // Optional finisher: partials tacked onto the last drop's failure point.
+    const finalDrops = finisherPartials > 0
+      ? drops.map((d, i) => i === drops.length - 1 ? { ...d, partials: finisherPartials } : d)
+      : drops;
+    const first = finalDrops[0];
     updateSession(sess => ({
       ...sess,
       entries: sess.entries.map((en, ei) => ei !== exIdx ? en : {
@@ -1063,7 +1091,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           reps: first.reps,
           done: true,
           technique: 'drop',
-          drops,
+          drops: finalDrops,
         }),
       }),
     }));
@@ -1079,6 +1107,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     lastCompleteRef.current = Date.now();
     const targetIdx = dropSetIdx;
     setDropSetIdx(null);
+    setFinisherPartials(0);
     // Improvement / regression / new best overlays (same logic as completeSet)
     const isDeloadSession = store.statusMode === 'deload' || session.isDeload;
     let overlayHoldMs = 0;
@@ -1114,14 +1143,18 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   };
 
   const cancelMyo = () => {
-    setMyoSetIdx(null); setMyoDrops([]); setMyoTechnique(null); setMyoTarget(null);
+    setMyoSetIdx(null); setMyoDrops([]); setMyoTechnique(null); setMyoTarget(null); setFinisherPartials(0);
     kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false;
     setKbField(null); setKbRaw(''); setKbFresh(false);
   };
 
   const finishMyoSet = (drops, technique) => {
     if (!drops.length || myoSetIdx == null) return;
-    const first = drops[0];
+    // Optional finisher: partials tacked onto the last mini's failure point.
+    const finalDrops = finisherPartials > 0
+      ? drops.map((d, i) => i === drops.length - 1 ? { ...d, partials: finisherPartials } : d)
+      : drops;
+    const first = finalDrops[0];
     updateSession(sess => ({
       ...sess,
       entries: sess.entries.map((en, ei) => ei !== exIdx ? en : {
@@ -1132,7 +1165,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           reps: first.reps,
           done: true,
           technique,
-          drops,
+          drops: finalDrops,
         }),
       }),
     }));
@@ -1144,7 +1177,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     recentCompleteRef.current[myoSetIdx] = Date.now();
     lastCompleteRef.current = Date.now();
     const targetIdx = myoSetIdx;
-    setMyoSetIdx(null); setMyoTechnique(null); setMyoDrops([]); setMyoTarget(null);
+    setMyoSetIdx(null); setMyoTechnique(null); setMyoDrops([]); setMyoTarget(null); setFinisherPartials(0);
     // Improvement / regression / new best overlays
     const isDeloadSession = store.statusMode === 'deload' || session.isDeload;
     let overlayHoldMs = 0;
@@ -1188,7 +1221,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
   const finishAv = (drops) => {
     if (!drops.length || avSetIdx == null) return;
-    const first = drops[0];
+    // Optional finisher: partials tacked onto the last round's failure point.
+    const finalDrops = finisherPartials > 0
+      ? drops.map((d, i) => i === drops.length - 1 ? { ...d, partials: finisherPartials } : d)
+      : drops;
+    const first = finalDrops[0];
     updateSession(sess => ({
       ...sess,
       entries: sess.entries.map((en, ei) => ei !== exIdx ? en : {
@@ -1199,7 +1236,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           reps: first.reps,
           done: true,
           technique: 'amrap_variations',
-          drops,
+          drops: finalDrops,
         }),
       }),
     }));
@@ -1211,7 +1248,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     recentCompleteRef.current[avSetIdx] = Date.now();
     lastCompleteRef.current = Date.now();
     const targetIdx = avSetIdx;
-    setAvSetIdx(null); setAvDrops([]);
+    setAvSetIdx(null); setAvDrops([]); setFinisherPartials(0);
     // Improvement / regression / new best overlays (same logic as completeSet/finishDropSet)
     const isDeloadSession = store.statusMode === 'deload' || session.isDeload;
     let overlayHoldMs = 0;
@@ -1752,6 +1789,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const [avDrops, setAvDrops] = useStateT([]); // [{ kg, reps, label }, ...] — AMRAP Variations rounds
   const avDropsRef = useRefT([]);
   avDropsRef.current = avDrops;
+  // Shared across Drop Set / Myo-Rep / Myo-Rep Match / AMRAP Variations — only
+  // one of those is ever in flight at a time, so one counter suffices. Applied
+  // to the last round's drops entry on Finish; 0 = no-op, nothing written.
+  const [finisherPartials, setFinisherPartials] = useStateT(0);
   // Persist intensity state so a background/resume on iOS doesn't wipe mid-set
   // progress. This effect runs before the restore effect below on every fresh
   // mount (declaration order), so on mount state is still all-null — without
@@ -1768,13 +1809,14 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           myoSetIdx, myoDrops, myoTechnique, myoTarget,
           lpSetIdx: lpTarget?.setIdx ?? null, lpCount,
           avSetIdx, avDrops,
+          finisherPartials,
         }));
       } catch {}
     } else if (!skipFirstClearRef.current) {
       localStorage.removeItem('logbook-intensity-state');
     }
     skipFirstClearRef.current = false;
-  }, [dropSetIdx, dropDrops, myoSetIdx, myoDrops, myoTechnique, myoTarget, lpTarget, lpCount, avSetIdx, avDrops, sessionId, exIdx]);
+  }, [dropSetIdx, dropDrops, myoSetIdx, myoDrops, myoTechnique, myoTarget, lpTarget, lpCount, avSetIdx, avDrops, finisherPartials, sessionId, exIdx]);
   useEffectT(() => {
     try {
       const raw = localStorage.getItem('logbook-intensity-state');
@@ -1786,6 +1828,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         setDropSetIdx(st.dropSetIdx);
         const dd = st.dropDrops || [];
         setDropDrops(dd); dropDropsRef.current = dd;
+        setFinisherPartials(st.finisherPartials || 0);
       }
       if (st.myoSetIdx != null && !targetEntry?.sets[st.myoSetIdx]?.done) {
         setMyoSetIdx(st.myoSetIdx);
@@ -1793,6 +1836,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         setMyoDrops(md); myoDropsRef.current = md;
         setMyoTechnique(st.myoTechnique || null);
         setMyoTarget(st.myoTarget ?? null);
+        setFinisherPartials(st.finisherPartials || 0);
       }
       // The set only ever gets marked done via the dedicated FINISH button
       // (which commits technique+drops in the same update), so — like
@@ -1805,6 +1849,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         setAvSetIdx(st.avSetIdx);
         const ad = st.avDrops || [];
         setAvDrops(ad); avDropsRef.current = ad;
+        setFinisherPartials(st.finisherPartials || 0);
       }
     } catch {}
   }, [sessionId, exIdx]);
@@ -4363,7 +4408,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 4px 2px' }}>
                           <span className="micro-gold">DROP SET</span>
                           <button onClick={() => {
-                            setDropSetIdx(null); setDropDrops([]);
+                            setDropSetIdx(null); setDropDrops([]); setFinisherPartials(0);
                             kbFieldRef.current = null; kbRawRef.current = ''; setKbField(null); setKbRaw('');
                           }} style={{ background: 'none', border: 'none', color: UI.inkFaint, fontSize: 10, fontFamily: UI.fontUi, cursor: 'pointer', padding: '2px 4px', letterSpacing: '0.08em' }}>CANCEL</button>
                         </div>
@@ -4408,6 +4453,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                           </div>
                         );
                       })}
+                      <FinisherPartials count={finisherPartials} onChange={setFinisherPartials} />
                       {(() => {
                         const canFinishDrop = !!dropDrops[0]?.reps && (isNoWeightReps || isBodyweight || dropDrops[0]?.kg != null);
                         return (
@@ -4438,7 +4484,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                       })()}
                     </div>
                   )}
-                  {s.technique === 'drop' && s.done && (s.drops || []).length > 1 && (
+                  {s.technique === 'drop' && s.done && ((s.drops || []).length > 1 || (s.drops?.[s.drops.length - 1]?.partials || 0) > 0) && (
                     <div style={{ marginLeft: 36, paddingLeft: 10, paddingBottom: 8, borderLeft: `2px solid rgba(var(--accent-rgb),0.2)` }}>
                       {(s.drops || []).slice(1).map((d, di) => (
                         <div key={di} style={{ display: 'grid', gridTemplateColumns: '28px 1fr 72px 56px', gap: 8, alignItems: 'center', padding: '4px 4px', opacity: 0.5 }}>
@@ -4457,6 +4503,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                           </div>
                         </div>
                       ))}
+                      {(() => { const p = s.drops?.[s.drops.length - 1]?.partials || 0; return p > 0 && (
+                        <div style={{ display: 'inline-block', marginTop: 4, padding: '3px 8px', border: '1px solid var(--accent)', borderRadius: 4, fontFamily: UI.fontUi, fontSize: 11, color: 'var(--accent)', letterSpacing: '0.03em' }}>
+                          +{p} partial{p === 1 ? '' : 's'}
+                        </div>
+                      ); })()}
                     </div>
                   )}
                   {/* AMRAP Variations active inline rows */}
@@ -4466,7 +4517,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 4px 2px' }}>
                           <span className="micro-gold">AMRAP VARIATIONS</span>
                           <button onClick={() => {
-                            setAvSetIdx(null); setAvDrops([]);
+                            setAvSetIdx(null); setAvDrops([]); setFinisherPartials(0);
                             kbFieldRef.current = null; kbRawRef.current = ''; setKbField(null); setKbRaw('');
                           }} style={{ background: 'none', border: 'none', color: UI.inkFaint, fontSize: 10, fontFamily: UI.fontUi, cursor: 'pointer', padding: '2px 4px', letterSpacing: '0.08em' }}>CANCEL</button>
                         </div>
@@ -4524,6 +4575,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                           </div>
                         );
                       })}
+                      <FinisherPartials count={finisherPartials} onChange={setFinisherPartials} />
                       {(() => {
                         const canFinishAv = !!avDrops[0]?.reps && (isNoWeightReps || isBodyweight || avDrops[0]?.kg != null);
                         return (
@@ -4555,7 +4607,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                       })()}
                     </div>
                   )}
-                  {s.technique === 'amrap_variations' && s.done && (s.drops || []).length > 1 && (() => {
+                  {s.technique === 'amrap_variations' && s.done && ((s.drops || []).length > 1 || (s.drops?.[s.drops.length - 1]?.partials || 0) > 0) && (() => {
                     const anyVaried = (s.drops || []).some(d => d.label && d.label !== entry.name);
                     return (
                     <div style={{ marginLeft: 36, paddingLeft: 10, paddingBottom: 8, borderLeft: `2px solid rgba(var(--accent-rgb),0.2)` }}>
@@ -4581,6 +4633,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                           </div>
                         </div>
                       ))}
+                      {(() => { const p = s.drops?.[s.drops.length - 1]?.partials || 0; return p > 0 && (
+                        <div style={{ display: 'inline-block', marginTop: 4, padding: '3px 8px', border: '1px solid var(--accent)', borderRadius: 4, fontFamily: UI.fontUi, fontSize: 11, color: 'var(--accent)', letterSpacing: '0.03em' }}>
+                          +{p} partial{p === 1 ? '' : 's'}
+                        </div>
+                      ); })()}
                     </div>
                     );
                   })()}
@@ -4671,6 +4728,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                             </div>
                           );
                         })}
+                        <FinisherPartials count={finisherPartials} onChange={setFinisherPartials} />
                         <div data-myo-actions style={{ display: 'flex', gap: 8, padding: '4px 4px 10px', scrollMarginBottom: 260 }}>
                           {activationDone && (
                             <button onClick={() => {
@@ -4721,6 +4779,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                         </div>
                       ))}
                       {(() => { const t = (s.drops || []).reduce((a, d) => a + (d.reps || 0), 0); return t > 0 ? <div style={{ marginTop: 4, padding: '3px 8px', border: '1px solid var(--accent)', borderRadius: 4, fontFamily: UI.fontUi, fontSize: 11, color: 'var(--accent)', letterSpacing: '0.03em', textAlign: 'center' }}>Total {t}</div> : null; })()}
+                      {(() => { const p = s.drops?.[s.drops.length - 1]?.partials || 0; return p > 0 && (
+                        <div style={{ display: 'inline-block', marginTop: 4, marginLeft: 6, padding: '3px 8px', border: '1px solid var(--accent)', borderRadius: 4, fontFamily: UI.fontUi, fontSize: 11, color: 'var(--accent)', letterSpacing: '0.03em' }}>
+                          +{p} partial{p === 1 ? '' : 's'}
+                        </div>
+                      ); })()}
                     </div>
                   )}
                   {/* Committed lengthened-partial count — read-only, like the myo-rep total tag below */}
@@ -5065,10 +5128,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           // on the same still-unfinished set and picked Myo-Rep instead).
           // Without this, both sub-panels could end up targeting the same
           // row simultaneously.
-          const clearDrop = () => { setDropSetIdx(null); setDropDrops([]); };
-          const clearMyo = () => { setMyoSetIdx(null); setMyoDrops([]); setMyoTechnique(null); setMyoTarget(null); };
+          const clearDrop = () => { setDropSetIdx(null); setDropDrops([]); setFinisherPartials(0); };
+          const clearMyo = () => { setMyoSetIdx(null); setMyoDrops([]); setMyoTechnique(null); setMyoTarget(null); setFinisherPartials(0); };
           const clearLp = () => { setLpTarget(null); setLpCount(0); };
-          const clearAv = () => { setAvSetIdx(null); setAvDrops([]); };
+          const clearAv = () => { setAvSetIdx(null); setAvDrops([]); setFinisherPartials(0); };
           const startDrop = () => {
             const target = currentSetIdx >= 0
               ? currentSetIdx
