@@ -391,6 +391,17 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
     if (!open) return;
     const net = existing?.fiber != null ? true : !!store.settings?.netCarbs;
     setNetCarbs(net);
+    // Blank the calories field when the saved value matches what the saved
+    // macros alone would produce — so it keeps auto-updating live as macros
+    // are edited again. A genuine manual override (saved value differs from
+    // the macro-derived one) is preserved instead of being silently dropped.
+    const existingAutoCals = existing
+      ? (net
+          ? (existing.protein != null && existing.carbs != null && existing.fat != null && existing.fiber != null
+              ? caloriesFromMacros(existing.protein, existing.carbs, existing.fat, existing.fiber)
+              : null)
+          : caloriesFromMacros(existing.protein, existing.carbs, existing.fat))
+      : null;
     const nextForm = existing ? {
       weight: existing.weight != null ? String(existing.weight) : '',
       steps: existing.steps != null ? String(existing.steps) : '',
@@ -398,7 +409,7 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
       carbs: existing.carbs != null ? String(existing.carbs) : '',
       fat: existing.fat != null ? String(existing.fat) : '',
       fiber: existing.fiber != null ? String(existing.fiber) : '',
-      calories: existing.calories != null ? String(existing.calories) : '',
+      calories: (existing.calories != null && existing.calories !== existingAutoCals) ? String(existing.calories) : '',
       water: existing.waterMl != null ? String(existing.waterMl) : '',
       note: existing.note || '',
       offPlanNote: existing.offPlanNote || '',
