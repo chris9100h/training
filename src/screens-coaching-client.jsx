@@ -174,9 +174,7 @@ function cyclePosFn(clientStore, date) {
 }
 
 // Format a Date to "YYYY-MM-DD" using local time — avoids UTC off-by-one issues.
-function localDateKey(d) {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
+function localDateKey(d) { return LB.fmtISO(d); }
 
 function getTodayDay(clientStore) {
   const activeSch = clientStore.schedules?.find(s => s.id === clientStore.activeScheduleId);

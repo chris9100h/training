@@ -1012,14 +1012,6 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
   };
   const handleSignOut = async () => { await LB.signOut(); };
 
-  const uploadChatImage = async (file) => {
-    const ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
-    const path = `${userId}/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
-    const { error } = await LB.supabase.storage.from('chat-attachments').upload(path, file, { contentType: file.type });
-    if (error) throw error;
-    return LB.supabase.storage.from('chat-attachments').getPublicUrl(path).data.publicUrl;
-  };
-
   const handleImagePick = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -1051,7 +1043,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     try {
       let attachments = null;
       if (imgFile) {
-        const url = await uploadChatImage(imgFile);
+        const url = await LB.uploadChatImage(imgFile, userId);
         attachments = [{ url, name: imgFile.name, type: imgFile.type }];
       }
       const { data: note, error } = await LB.supabase.from('zane_coaching_notes').insert({
@@ -1084,7 +1076,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       if (ticketErr || !coachingId) return;
       let attachments = null;
       if (imgFile) {
-        const url = await uploadChatImage(imgFile);
+        const url = await LB.uploadChatImage(imgFile, userId);
         attachments = [{ url, name: imgFile.name, type: imgFile.type }];
       }
       const { data: note, error: noteErr } = await LB.supabase.from('zane_coaching_notes').insert({
@@ -1119,7 +1111,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     try {
       let attachments = null;
       if (imgFile) {
-        const url = await uploadChatImage(imgFile);
+        const url = await LB.uploadChatImage(imgFile, userId);
         attachments = [{ url, name: imgFile.name, type: imgFile.type }];
       }
       const { data: note, error } = await LB.supabase.from('zane_coaching_notes').insert({

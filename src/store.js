@@ -108,7 +108,7 @@ function nextMondayISO() {
   const daysUntil = (1 - today.getDay() + 7) % 7;
   const d = new Date(today);
   d.setDate(d.getDate() + daysUntil);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  return fmtISO(d);
 }
 // Returns the next D1 of a date-based cycle plan as YYYY-MM-DD.
 // Returns today if today is already D1; otherwise the start of the next full rotation.
@@ -121,7 +121,7 @@ function nextCycleD1ISO(cycleStartDate, daysLen) {
   const daysUntilD1 = pos === 0 ? 0 : daysLen - pos;
   const d = new Date(today);
   d.setDate(d.getDate() + daysUntilD1);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  return fmtISO(d);
 }
 // Version-aware wrapper: uses getCyclePosForDate when the plan has versions so
 // cycleOffset and version boundaries are respected (same logic as the date strip).
@@ -139,7 +139,7 @@ function nextCycleD1ISOFromSchedule(schedule, cycleStartDate) {
         const daysUntilD1 = pos === 0 ? 0 : vDaysLen - pos;
         const d = new Date(today);
         d.setDate(d.getDate() + daysUntilD1);
-        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        return fmtISO(d);
       }
     }
   }
@@ -2619,7 +2619,7 @@ function checkinWeekStart() {
   lastSunday.setDate(today.getDate() - daysSinceSunday);
   const monday = new Date(lastSunday);
   monday.setDate(lastSunday.getDate() - 6);
-  return `${monday.getFullYear()}-${String(monday.getMonth() + 1).padStart(2, '0')}-${String(monday.getDate()).padStart(2, '0')}`;
+  return fmtISO(monday);
 }
 
 // responses = plain object with snake_case keys matching the form schema fields.
