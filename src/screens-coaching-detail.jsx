@@ -1605,10 +1605,11 @@ function ClientNutritionTab({ coachingId, userId }) {
   );
 }
 
-// ─── CoachPlanEditorScreen ────────────────────────────────────────────────────
-// Wraps the existing ScheduleEditScreen with client store + syncing.
-
-function CoachPlanEditorScreen({ store, setStore, go, userId, coachingId, clientId, clientName, scheduleId }) {
+// Loads a client's store, keeping it in sync via LB.syncStore on every write.
+// Shared by CoachPlanEditorScreen and CoachNewPlanScreen. `scheduleId` (editor
+// only) additionally snapshots the initial schedule for diffing and tracks
+// isDirty/latestClientStore so the caller can send a "what changed" note.
+function useCoachClientSync(clientId, scheduleId) {
   const [clientStore, setClientStoreRaw] = useStateC(null);
   const [loadError, setLoadError] = useStateC(null);
   const [syncErr, setSyncErr] = useStateC(false);
@@ -1626,15 +1627,17 @@ function CoachPlanEditorScreen({ store, setStore, go, userId, coachingId, client
       setClientStoreRaw(data);
       prevClientStore.current = data;
       latestClientStore.current = data;
-      const sch = data.schedules?.find(s => s.id === scheduleId);
-      initialSchedule.current = sch ? JSON.parse(JSON.stringify(sch)) : null;
+      if (scheduleId) {
+        const sch = data.schedules?.find(s => s.id === scheduleId);
+        initialSchedule.current = sch ? JSON.parse(JSON.stringify(sch)) : null;
+      }
     }).catch(e => { if (on) setLoadError(e.message); });
     return () => { on = false; };
   }, [clientId]);
 
-  const setClientStore = useRefC(null);
-  if (!setClientStore.current) {
-    setClientStore.current = (updater) => {
+  const setClientStoreRef = useRefC(null);
+  if (!setClientStoreRef.current) {
+    setClientStoreRef.current = (updater) => {
       setClientStoreRaw(prev => {
         const next = typeof updater === 'function' ? updater(prev) : updater;
         isDirty.current = true;
@@ -1646,6 +1649,30 @@ function CoachPlanEditorScreen({ store, setStore, go, userId, coachingId, client
       });
     };
   }
+
+  return { clientStore, loadError, syncErr, setClientStore: setClientStoreRef.current, latestClientStore, initialSchedule, isDirty };
+}
+
+// Loading/error placeholder shown by both plan-editor wrapper screens while
+// the client's store is being fetched (or failed to load).
+function CoachClientLoadGate({ clientName, coachingId, clientId, go, loadError }) {
+  return (
+    <Screen>
+      <TopBar title={clientName} sub={<span className="micro" style={{ color: 'var(--accent)' }}>COACHING</span>} onBack={() => go({ name: 'coaching-client', coachingId, clientId, clientName, initialTab: 'plan' })} />
+      {loadError ? (
+        <div style={{ padding: 32, textAlign: 'center', color: 'rgba(var(--danger-rgb),0.8)', fontFamily: UI.fontUi, fontSize: 13 }}>Failed to load client data: {loadError}</div>
+      ) : (
+        <div style={{ padding: 32, textAlign: 'center', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>Loading…</div>
+      )}
+    </Screen>
+  );
+}
+
+// ─── CoachPlanEditorScreen ────────────────────────────────────────────────────
+// Wraps the existing ScheduleEditScreen with client store + syncing.
+
+function CoachPlanEditorScreen({ store, setStore, go, userId, coachingId, clientId, clientName, scheduleId }) {
+  const { clientStore, loadError, syncErr, setClientStore, latestClientStore, initialSchedule, isDirty } = useCoachClientSync(clientId, scheduleId);
 
   // Intercept go: notify client via Changes thread if plan was modified, then return to plan tab
   const coachGo = async (route) => {
@@ -1674,23 +1701,14 @@ function CoachPlanEditorScreen({ store, setStore, go, userId, coachingId, client
   };
 
   if (loadError || !clientStore) {
-    return (
-      <Screen>
-        <TopBar title={clientName} sub={<span className="micro" style={{ color: 'var(--accent)' }}>COACHING</span>} onBack={() => go({ name: 'coaching-client', coachingId, clientId, clientName, initialTab: 'plan' })} />
-        {loadError ? (
-          <div style={{ padding: 32, textAlign: 'center', color: 'rgba(var(--danger-rgb),0.8)', fontFamily: UI.fontUi, fontSize: 13 }}>Failed to load client data: {loadError}</div>
-        ) : (
-          <div style={{ padding: 32, textAlign: 'center', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>Loading…</div>
-        )}
-      </Screen>
-    );
+    return <CoachClientLoadGate clientName={clientName} coachingId={coachingId} clientId={clientId} go={go} loadError={loadError} />;
   }
 
   return (
     <>
       <window.Screens.ScheduleEditScreen
         store={clientStore}
-        setStore={setClientStore.current}
+        setStore={setClientStore}
         go={coachGo}
         userId={clientId}
         scheduleId={scheduleId}
@@ -1705,35 +1723,7 @@ function CoachPlanEditorScreen({ store, setStore, go, userId, coachingId, client
 // a brand-new plan for a client.
 
 function CoachNewPlanScreen({ store, setStore, go, userId, coachingId, clientId, clientName }) {
-  const [clientStore, setClientStoreRaw] = useStateC(null);
-  const [loadError, setLoadError] = useStateC(null);
-  const [syncErr, setSyncErr] = useStateC(false);
-  const prevClientStore = useRefC(null);
-
-  useEffectC(() => {
-    let on = true;
-    setClientStoreRaw(null);
-    setLoadError(null);
-    LB.loadClientStore(clientId).then(data => {
-      if (!on) return;
-      setClientStoreRaw(data);
-      prevClientStore.current = data;
-    }).catch(e => { if (on) setLoadError(e.message); });
-    return () => { on = false; };
-  }, [clientId]);
-
-  const setClientStore = useRefC(null);
-  if (!setClientStore.current) {
-    setClientStore.current = (updater) => {
-      setClientStoreRaw(prev => {
-        const next = typeof updater === 'function' ? updater(prev) : updater;
-        LB.syncStore(prevClientStore.current, next, clientId)
-          .then(() => { prevClientStore.current = next; setSyncErr(false); })
-          .catch(e => { console.error('Coach sync failed', e); setSyncErr(true); });
-        return next;
-      });
-    };
-  }
+  const { clientStore, loadError, syncErr, setClientStore } = useCoachClientSync(clientId);
 
   const coachGo = (route) => {
     if (route.name === 'plan') {
@@ -1746,23 +1736,14 @@ function CoachNewPlanScreen({ store, setStore, go, userId, coachingId, clientId,
   };
 
   if (loadError || !clientStore) {
-    return (
-      <Screen>
-        <TopBar title={clientName} sub={<span className="micro" style={{ color: 'var(--accent)' }}>COACHING</span>} onBack={() => go({ name: 'coaching-client', coachingId, clientId, clientName, initialTab: 'plan' })} />
-        {loadError ? (
-          <div style={{ padding: 32, textAlign: 'center', color: 'rgba(var(--danger-rgb),0.8)', fontFamily: UI.fontUi, fontSize: 13 }}>Failed to load client data: {loadError}</div>
-        ) : (
-          <div style={{ padding: 32, textAlign: 'center', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>Loading…</div>
-        )}
-      </Screen>
-    );
+    return <CoachClientLoadGate clientName={clientName} coachingId={coachingId} clientId={clientId} go={go} loadError={loadError} />;
   }
 
   return (
     <>
       <window.Screens.ScheduleNewScreen
         store={clientStore}
-        setStore={setClientStore.current}
+        setStore={setClientStore}
         go={coachGo}
       />
       <CoachSyncErrorPill show={syncErr} />
