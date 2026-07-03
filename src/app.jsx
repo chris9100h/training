@@ -364,14 +364,11 @@ function App() {
   // actually rotates (controllerchange) — a single boot-time check isn't
   // enough since most users leave the PWA open for days without reloading.
   const reportSwVersion = useCallbackA(() => {
-    if (!('caches' in window)) return;
-    caches.keys().then(keys => {
-      const name = keys.find(k => k.startsWith('zane-'));
-      if (!name) return;
-      const version = name.replace('zane-', '');
+    LB.detectCacheVersion().then(version => {
+      if (!version) return;
       detectedSwVersion.current = version;
       setStore(s => (s && s.settings?.swVersion !== version) ? { ...s, settings: { ...s.settings, swVersion: version } } : s);
-    }).catch(() => {});
+    });
   }, [setStore]);
 
   // On a genuinely cold boot (fresh install/incognito), the SW can finish

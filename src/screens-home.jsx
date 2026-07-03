@@ -106,11 +106,7 @@ function LoginScreen() {
   const formRef = useRef(null);
 
   useEffect(() => {
-    if (!('caches' in window)) return;
-    caches.keys().then(keys => {
-      const k = keys.find(k => k.startsWith('zane-'));
-      if (k) setSwVersion(k.replace('zane-', ''));
-    });
+    LB.detectCacheVersion().then(version => { if (version) setSwVersion(version); });
   }, []);
 
   // Safari autofill fires native DOM input events but not React synthetic ones.

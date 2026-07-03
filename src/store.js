@@ -3480,6 +3480,18 @@ function techniqueRounds(st, { exName } = {}) {
   };
 }
 
+// Reads the active Service Worker cache version ("zane-vX.XXX" → "vX.XXX"),
+// or null if unavailable. Used both to report a device's version to the
+// admin (app.jsx) and to display it locally (screens-home.jsx's login screen).
+async function detectCacheVersion() {
+  if (!('caches' in window)) return null;
+  try {
+    const keys = await caches.keys();
+    const name = keys.find(k => k.startsWith('zane-'));
+    return name ? name.replace('zane-', '') : null;
+  } catch (_) { return null; }
+}
+
 // Wipes both cache layers a stale deploy can hide behind: the SW's
 // CacheStorage entries AND the IndexedDB precompile cache (zane-precompile,
 // see index.html's loader) — a stale record in the latter alone keeps
@@ -3520,7 +3532,7 @@ window.LB = {
   startDeload, endDeload, deloadElapsed, deloadDaysRemaining, deloadPlanDays,
   loadClientStore, loadCoachClientsStatus, reloadCoachingState, enableSelfCoaching, inviteClient, respondToCoachingInvite, endCoaching,
   addCoachingNote, markCoachingNotesRead, loadCoachingNotes, loadCoachingThreads, createCoachingThread, deleteCoachingThread, getOrCreateCoachingThread, uploadChatImage,
-  unreadCoachingNotes, isNoteFromClient, techniqueRounds, groupBySuperset, supersetLabel, timeAgo, dayLabel, cyclePosFromStartDate, mergeCollectionById, caloriesFromMacros,
+  unreadCoachingNotes, isNoteFromClient, techniqueRounds, groupBySuperset, supersetLabel, timeAgo, dayLabel, cyclePosFromStartDate, mergeCollectionById, caloriesFromMacros, detectCacheVersion,
   loadCoachingMacros, addCoachingMacros,
   diffSchedule,
   checkinWeekStart, submitCheckin, loadCheckins, deleteCheckin, loadCoachCheckinStatus, requestCheckin, setCheckinEnabled, loadCheckinSchema, saveCheckinSchema, saveDefaultCheckinSchema,
