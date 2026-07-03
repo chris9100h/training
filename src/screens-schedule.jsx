@@ -14,6 +14,24 @@ function useIsPadS() {
 
 const STANDARD_DAY_TYPES = ['PUSH','PULL','LEGS','UPPER','LOWER','FULL','ARMS','BACK','REST'];
 
+// Shared chrome for this screen's compact "mini" bottom sheets (a small
+// gold-label header + custom content) — distinct from the app-wide `Sheet`
+// component (big uppercase display title, keyboard-aware, used for full
+// settings/detail panels). These stack on top of each other (versions →
+// backups → preview → date-pickers), so `dim` lets an inner sheet skip its
+// own backdrop when a parent sheet underneath is already dimming the page.
+function MiniSheet({ zIndex = 300, dim = true, onClose, style, children }) {
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', background: dim ? 'rgba(0,0,0,0.5)' : 'transparent' }}
+      onClick={onClose}>
+      <div style={{ background: UI.bg, borderRadius: '8px 8px 0 0', borderTop: `0.5px solid ${UI.hairStrong}`, padding: '22px 22px calc(22px + env(safe-area-inset-bottom, 0px))', ...style }}
+        onClick={e => e.stopPropagation()}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
 const daysArr = s => Array.isArray(s?.days) ? s.days : [];
 
 // One-line plan summary shown in the plan list and viewer header.
@@ -817,125 +835,109 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId })
       )}
 
       {reactivateSheet && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 300, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', background: 'rgba(0,0,0,0.5)' }}
-          onClick={() => setReactivateSheet(false)}>
-          <div style={{ background: UI.bg, borderRadius: '8px 8px 0 0', borderTop: `0.5px solid ${UI.hairStrong}`, padding: '22px 22px calc(22px + env(safe-area-inset-bottom, 0px))' }}
-            onClick={e => e.stopPropagation()}>
-            <div className="label" style={{ color: UI.inkFaint, marginBottom: 6 }}>REACTIVATE THIS VERSION</div>
-            <div className="micro" style={{ color: UI.inkFaint, marginBottom: 18, lineHeight: 1.5, letterSpacing: '0.06em', textTransform: 'none' }}>
-              A copy of this version's days becomes active from the date you pick. Your existing versions stay in the history.
-            </div>
-            <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-              <div style={{ flex: 1, overflow: 'hidden', borderRadius: 4, border: `1px solid ${reactivateDate ? UI.goldSoft : UI.hairStrong}` }}>
-                <input
-                  type="date"
-                  value={reactivateDate}
-                  onChange={e => setReactivateDate(e.target.value)}
-                  style={{ background: UI.bgInset, border: 'none', borderRadius: 4, padding: '10px 14px', color: reactivateDate ? UI.ink : UI.inkFaint, fontFamily: UI.fontNum, fontSize: 15, outline: 'none', width: '100%', boxSizing: 'border-box', display: 'block', colorScheme: 'dark' }}
-                />
-              </div>
-              <Btn disabled={!reactivateDate} onClick={() => doReactivate(reactivateDate)} style={{ flexShrink: 0 }}>
-                Apply
-              </Btn>
-            </div>
+        <MiniSheet onClose={() => setReactivateSheet(false)}>
+          <div className="label" style={{ color: UI.inkFaint, marginBottom: 6 }}>REACTIVATE THIS VERSION</div>
+          <div className="micro" style={{ color: UI.inkFaint, marginBottom: 18, lineHeight: 1.5, letterSpacing: '0.06em', textTransform: 'none' }}>
+            A copy of this version's days becomes active from the date you pick. Your existing versions stay in the history.
           </div>
-        </div>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+            <div style={{ flex: 1, overflow: 'hidden', borderRadius: 4, border: `1px solid ${reactivateDate ? UI.goldSoft : UI.hairStrong}` }}>
+              <input
+                type="date"
+                value={reactivateDate}
+                onChange={e => setReactivateDate(e.target.value)}
+                style={{ background: UI.bgInset, border: 'none', borderRadius: 4, padding: '10px 14px', color: reactivateDate ? UI.ink : UI.inkFaint, fontFamily: UI.fontNum, fontSize: 15, outline: 'none', width: '100%', boxSizing: 'border-box', display: 'block', colorScheme: 'dark' }}
+              />
+            </div>
+            <Btn disabled={!reactivateDate} onClick={() => doReactivate(reactivateDate)} style={{ flexShrink: 0 }}>
+              Apply
+            </Btn>
+          </div>
+        </MiniSheet>
       )}
 
       {restoreFromSheet && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 400, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}
-          onClick={() => { setRestoreFromSheet(false); setPendingBackup(null); }}>
-          <div style={{ background: UI.bg, borderRadius: '8px 8px 0 0', borderTop: `0.5px solid ${UI.hairStrong}`, padding: '22px 22px calc(22px + env(safe-area-inset-bottom, 0px))' }}
-            onClick={e => e.stopPropagation()}>
-            <div className="label" style={{ color: UI.inkFaint, marginBottom: 18 }}>WHEN SHOULD THIS TAKE EFFECT?</div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <div style={{ flex: 1, overflow: 'hidden', borderRadius: 4, border: `1px solid ${restoreFromDate ? UI.goldSoft : UI.hairStrong}` }}>
-                <input
-                  type="date"
-                  value={restoreFromDate}
-                  onChange={e => setRestoreFromDate(e.target.value)}
-                  style={{ background: UI.bgInset, border: 'none', borderRadius: 4, padding: '10px 14px', color: restoreFromDate ? UI.ink : UI.inkFaint, fontFamily: UI.fontNum, fontSize: 15, outline: 'none', width: '100%', boxSizing: 'border-box', display: 'block', colorScheme: 'dark' }}
-                />
-              </div>
-              {!isWeekday && (pendingBackup?.days || []).length > 1 && (
-                <div>
-                  <div className="label" style={{ color: UI.inkFaint, marginBottom: 8 }}>START WITH DAY</div>
-                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                    {(pendingBackup?.days || []).map((d, realIdx) => {
-                      const active = restoreFromDayIdx === realIdx;
-                      return (
-                        <button key={d.id} onClick={() => setRestoreFromDayIdx(realIdx)} style={{
-                          padding: '5px 11px 4px', borderRadius: 4, cursor: 'pointer',
-                          border: `1px solid ${active ? UI.goldSoft : UI.hairStrong}`,
-                          background: active ? UI.goldFaint : 'transparent',
-                          WebkitTapHighlightColor: 'transparent',
-                        }}>
-                          <div style={{ fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, color: active ? UI.gold : UI.inkSoft }}>{d.name}</div>
-                          <div style={{ fontFamily: UI.fontUi, fontSize: 8, color: active ? UI.gold : UI.inkFaint, letterSpacing: '0.08em' }}>Day {realIdx + 1}</div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-              <Btn
-                disabled={!restoreFromDate}
-                onClick={() => { if (!restoreFromDate) return; doRestoreBackup(restoreFromDate, restoreFromDayIdx); }}
-              >
-                Restore from date
-              </Btn>
+        <MiniSheet zIndex={400} dim={false} onClose={() => { setRestoreFromSheet(false); setPendingBackup(null); }}>
+          <div className="label" style={{ color: UI.inkFaint, marginBottom: 18 }}>WHEN SHOULD THIS TAKE EFFECT?</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ flex: 1, overflow: 'hidden', borderRadius: 4, border: `1px solid ${restoreFromDate ? UI.goldSoft : UI.hairStrong}` }}>
+              <input
+                type="date"
+                value={restoreFromDate}
+                onChange={e => setRestoreFromDate(e.target.value)}
+                style={{ background: UI.bgInset, border: 'none', borderRadius: 4, padding: '10px 14px', color: restoreFromDate ? UI.ink : UI.inkFaint, fontFamily: UI.fontNum, fontSize: 15, outline: 'none', width: '100%', boxSizing: 'border-box', display: 'block', colorScheme: 'dark' }}
+              />
             </div>
+            {!isWeekday && (pendingBackup?.days || []).length > 1 && (
+              <div>
+                <div className="label" style={{ color: UI.inkFaint, marginBottom: 8 }}>START WITH DAY</div>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  {(pendingBackup?.days || []).map((d, realIdx) => {
+                    const active = restoreFromDayIdx === realIdx;
+                    return (
+                      <button key={d.id} onClick={() => setRestoreFromDayIdx(realIdx)} style={{
+                        padding: '5px 11px 4px', borderRadius: 4, cursor: 'pointer',
+                        border: `1px solid ${active ? UI.goldSoft : UI.hairStrong}`,
+                        background: active ? UI.goldFaint : 'transparent',
+                        WebkitTapHighlightColor: 'transparent',
+                      }}>
+                        <div style={{ fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, color: active ? UI.gold : UI.inkSoft }}>{d.name}</div>
+                        <div style={{ fontFamily: UI.fontUi, fontSize: 8, color: active ? UI.gold : UI.inkFaint, letterSpacing: '0.08em' }}>Day {realIdx + 1}</div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+            <Btn
+              disabled={!restoreFromDate}
+              onClick={() => { if (!restoreFromDate) return; doRestoreBackup(restoreFromDate, restoreFromDayIdx); }}
+            >
+              Restore from date
+            </Btn>
           </div>
-        </div>
+        </MiniSheet>
       )}
 
       {backupSheet && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 300, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', background: 'rgba(0,0,0,0.5)' }}
-          onClick={() => setBackupSheet(false)}>
-          <div style={{ background: UI.bg, borderRadius: '8px 8px 0 0', borderTop: `0.5px solid ${UI.hairStrong}`, padding: '22px 22px calc(22px + env(safe-area-inset-bottom, 0px))', maxHeight: '70vh', display: 'flex', flexDirection: 'column' }}
-            onClick={e => e.stopPropagation()}>
-            <div className="label" style={{ color: UI.inkFaint, marginBottom: 4, flexShrink: 0 }}>PLAN BACKUPS</div>
-            <div className="micro" style={{ color: UI.inkFaint, marginBottom: 16, lineHeight: 1.5, letterSpacing: '0.06em', textTransform: 'none', flexShrink: 0 }}>
-              Automatic snapshots saved whenever you update your training days. Restoring replaces your current days.
-            </div>
-            <div style={{ overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {backups === null && (
-                <div style={{ color: UI.inkFaint, fontSize: 13, textAlign: 'center', padding: '16px 0' }}>Loading…</div>
-              )}
-              {backups !== null && backups.length === 0 && (
-                <div style={{ color: UI.inkFaint, fontSize: 13, textAlign: 'center', padding: '16px 0' }}>No backups yet. Backups are saved automatically when you update your plan.</div>
-              )}
-              {(backups || []).map(b => {
-                const date = new Date(b.created_at);
-                const dayCount = (b.days || []).filter(d => (d.items || []).length > 0).length;
-                return (
-                  <div key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', borderRadius: 6, border: `1px solid ${UI.hairStrong}`, background: UI.bgRaised }}>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi }}>
-                        {date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                      </div>
-                      <div className="micro" style={{ color: UI.inkFaint, marginTop: 2, letterSpacing: '0.06em' }}>
-                        {date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })} · {(b.days || []).length} days · {dayCount} training
-                      </div>
-                    </div>
-                    <Btn kind="ghost" onClick={() => { setPreviewBackup(b); setPreviewDayIdx(0); }} style={{ fontSize: 11, flexShrink: 0 }}>Preview</Btn>
-                  </div>
-                );
-              })}
-            </div>
+        <MiniSheet onClose={() => setBackupSheet(false)} style={{ maxHeight: '70vh', display: 'flex', flexDirection: 'column' }}>
+          <div className="label" style={{ color: UI.inkFaint, marginBottom: 4, flexShrink: 0 }}>PLAN BACKUPS</div>
+          <div className="micro" style={{ color: UI.inkFaint, marginBottom: 16, lineHeight: 1.5, letterSpacing: '0.06em', textTransform: 'none', flexShrink: 0 }}>
+            Automatic snapshots saved whenever you update your training days. Restoring replaces your current days.
           </div>
-        </div>
+          <div style={{ overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {backups === null && (
+              <div style={{ color: UI.inkFaint, fontSize: 13, textAlign: 'center', padding: '16px 0' }}>Loading…</div>
+            )}
+            {backups !== null && backups.length === 0 && (
+              <div style={{ color: UI.inkFaint, fontSize: 13, textAlign: 'center', padding: '16px 0' }}>No backups yet. Backups are saved automatically when you update your plan.</div>
+            )}
+            {(backups || []).map(b => {
+              const date = new Date(b.created_at);
+              const dayCount = (b.days || []).filter(d => (d.items || []).length > 0).length;
+              return (
+                <div key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', borderRadius: 6, border: `1px solid ${UI.hairStrong}`, background: UI.bgRaised }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi }}>
+                      {date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                    </div>
+                    <div className="micro" style={{ color: UI.inkFaint, marginTop: 2, letterSpacing: '0.06em' }}>
+                      {date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })} · {(b.days || []).length} days · {dayCount} training
+                    </div>
+                  </div>
+                  <Btn kind="ghost" onClick={() => { setPreviewBackup(b); setPreviewDayIdx(0); }} style={{ fontSize: 11, flexShrink: 0 }}>Preview</Btn>
+                </div>
+              );
+            })}
+          </div>
+        </MiniSheet>
       )}
 
       {previewBackup && (() => {
         const previewDays = previewBackup.days || [];
         const closePreview = () => { setPreviewBackup(null); setPreviewDayIdx(0); };
         return (
-          <div style={{ position: 'fixed', inset: 0, zIndex: 350, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}
-            onClick={closePreview}>
-            <div style={{ background: UI.bg, borderRadius: '8px 8px 0 0', borderTop: `0.5px solid ${UI.hairStrong}`, maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}
-              onClick={e => e.stopPropagation()}>
-
+          <MiniSheet zIndex={350} dim={false} onClose={closePreview} style={{ padding: 0, maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}>
               {/* Header */}
               <div style={{ padding: '18px 22px 0', flexShrink: 0 }}>
                 <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
@@ -1034,8 +1036,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId })
               <div style={{ padding: '12px 22px calc(16px + env(safe-area-inset-bottom, 0px))', borderTop: `0.5px solid ${UI.hairStrong}`, flexShrink: 0 }}>
                 <Btn onClick={() => { closePreview(); restoreBackup(previewBackup); }} style={{ width: '100%', textAlign: 'center', justifyContent: 'center' }}>Restore this backup</Btn>
               </div>
-            </div>
-          </div>
+          </MiniSheet>
         );
       })()}
     </Screen>
@@ -1499,52 +1500,48 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
       {confirmEl}
 
       {applyFromSheet && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 300, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}
-          onClick={() => setApplyFromSheet(false)}>
-          <div style={{ background: UI.bg, borderRadius: '8px 8px 0 0', borderTop: `0.5px solid ${UI.hairStrong}`, padding: '22px 22px calc(22px + env(safe-area-inset-bottom, 0px))' }}
-            onClick={e => e.stopPropagation()}>
-            <div className="label" style={{ color: UI.inkFaint, marginBottom: 18 }}>WHEN SHOULD THIS TAKE EFFECT?</div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-                <div style={{ flex: 1, overflow: 'hidden', borderRadius: 4, border: `1px solid ${applyFromDate ? UI.goldSoft : UI.hairStrong}` }}>
-                  <input
-                    type="date"
-                    value={applyFromDate}
-                    onChange={e => setApplyFromDate(e.target.value)}
-                    style={{ background: UI.bgInset, border: 'none', borderRadius: 4, padding: '10px 14px', color: applyFromDate ? UI.ink : UI.inkFaint, fontFamily: UI.fontNum, fontSize: 15, outline: 'none', width: '100%', boxSizing: 'border-box', display: 'block', colorScheme: 'dark' }}
-                  />
+        <MiniSheet onClose={() => setApplyFromSheet(false)}>
+          <div className="label" style={{ color: UI.inkFaint, marginBottom: 18 }}>WHEN SHOULD THIS TAKE EFFECT?</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+              <div style={{ flex: 1, overflow: 'hidden', borderRadius: 4, border: `1px solid ${applyFromDate ? UI.goldSoft : UI.hairStrong}` }}>
+                <input
+                  type="date"
+                  value={applyFromDate}
+                  onChange={e => setApplyFromDate(e.target.value)}
+                  style={{ background: UI.bgInset, border: 'none', borderRadius: 4, padding: '10px 14px', color: applyFromDate ? UI.ink : UI.inkFaint, fontFamily: UI.fontNum, fontSize: 15, outline: 'none', width: '100%', boxSizing: 'border-box', display: 'block', colorScheme: 'dark' }}
+                />
+              </div>
+            </div>
+            {!isWeekday && draft.days.length > 1 && (
+              <div>
+                <div className="label" style={{ color: UI.inkFaint, marginBottom: 8 }}>START WITH DAY</div>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  {draft.days.map((d, realIdx) => {
+                    const active = applyFromDayIdx === realIdx;
+                    return (
+                      <button key={d.id} onClick={() => setApplyFromDayIdx(realIdx)} style={{
+                        padding: '5px 11px 4px', borderRadius: 4, cursor: 'pointer',
+                        border: `1px solid ${active ? UI.goldSoft : UI.hairStrong}`,
+                        background: active ? UI.goldFaint : 'transparent',
+                        WebkitTapHighlightColor: 'transparent',
+                      }}>
+                        <div style={{ fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, color: active ? UI.gold : UI.inkSoft }}>{d.name}</div>
+                        <div style={{ fontFamily: UI.fontUi, fontSize: 8, color: active ? UI.gold : UI.inkFaint, letterSpacing: '0.08em' }}>Day {realIdx + 1}</div>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
-              {!isWeekday && draft.days.length > 1 && (
-                <div>
-                  <div className="label" style={{ color: UI.inkFaint, marginBottom: 8 }}>START WITH DAY</div>
-                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                    {draft.days.map((d, realIdx) => {
-                      const active = applyFromDayIdx === realIdx;
-                      return (
-                        <button key={d.id} onClick={() => setApplyFromDayIdx(realIdx)} style={{
-                          padding: '5px 11px 4px', borderRadius: 4, cursor: 'pointer',
-                          border: `1px solid ${active ? UI.goldSoft : UI.hairStrong}`,
-                          background: active ? UI.goldFaint : 'transparent',
-                          WebkitTapHighlightColor: 'transparent',
-                        }}>
-                          <div style={{ fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, color: active ? UI.gold : UI.inkSoft }}>{d.name}</div>
-                          <div style={{ fontFamily: UI.fontUi, fontSize: 8, color: active ? UI.gold : UI.inkFaint, letterSpacing: '0.08em' }}>Day {realIdx + 1}</div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-              <Btn
-                disabled={!applyFromDate}
-                onClick={() => { if (!applyFromDate) return; setApplyFromSheet(false); doSave(applyFromDate, applyFromDayIdx); }}
-              >
-                Apply from date
-              </Btn>
-            </div>
+            )}
+            <Btn
+              disabled={!applyFromDate}
+              onClick={() => { if (!applyFromDate) return; setApplyFromSheet(false); doSave(applyFromDate, applyFromDayIdx); }}
+            >
+              Apply from date
+            </Btn>
           </div>
-        </div>
+        </MiniSheet>
       )}
 
       <Sheet open={modifiersOpen} onClose={() => setModifiersOpen(false)} title="Options">
