@@ -2547,6 +2547,22 @@ async function addCoachingNote(coachingId, type, entityId, entityName, body, aut
   return id;
 }
 
+// Support-ticket notes must never surface in the coaching unread banner —
+// they have their own badge/inbox in Settings. Single source of truth so the
+// banner's count/preview and the group deciding whether to render it can
+// never disagree on which notes count (they did — see git history).
+function unreadCoachingNotes(store) {
+  return (store.coaching?.unreadNotes || []).filter(n => !n.coachingId?.startsWith('support_'));
+}
+
+// Direction: are these unread notes from a client (viewer is the coach) or
+// from a coach (viewer is the client)? asCoach's own support_ rows are
+// excluded the same way unreadCoachingNotes excludes support notes.
+function isNoteFromClient(store, notes) {
+  const clientIds = new Set((store.coaching?.asCoach || []).filter(c => !c.id?.startsWith('support_')).map(c => c.clientId));
+  return notes.some(n => clientIds.has(n.authorId));
+}
+
 // Upload an image to the chat-attachments bucket (own folder per RLS) and return
 // its public URL. Shared by support tickets and coaching notes.
 async function uploadChatImage(file, userId) {
@@ -2834,9 +2850,55 @@ async function deleteCheckin(checkinId, userId) {
   if (error) throw error;
 }
 
+// ─── Cardio distance/pace — single source for the whole app ─────────────────
+// Every screen that touches cardio distance used to reimplement this from
+// scratch (comma-decimal parsing, the km/mi factor, display precision), and
+// they'd already drifted: some skipped the comma-normalization (silently
+// truncating "5,5" km input to 5 km) and one rounded to a different decimal
+// count than the rest. One source of truth for all of it.
+const CARDIO_DIST_UNIT_KEY = 'logbook-cardio-dist-unit'; // 'km' | 'mi'
+const MI_TO_M = 1609.344;
+
+function cardioDistUnit() {
+  try { return localStorage.getItem(CARDIO_DIST_UNIT_KEY) || 'km'; } catch (_) { return 'km'; }
+}
+function setCardioDistUnit(u) {
+  try { localStorage.setItem(CARDIO_DIST_UNIT_KEY, u); } catch (_) {}
+}
+// Parses a user-typed distance (comma or dot decimal) in the given display
+// unit into meters.
+function distToM(val, unit) {
+  const n = parseFloat(String(val).replace(',', '.'));
+  if (isNaN(n)) return null;
+  return unit === 'mi' ? Math.round(n * MI_TO_M) : Math.round(n * 1000);
+}
+// Bare number string (no unit suffix) — for UIs that show the unit separately.
+function mToDisplay(meters, unit, decimals = 2) {
+  if (meters == null) return '';
+  return unit === 'mi' ? (meters / MI_TO_M).toFixed(decimals) : (meters / 1000).toFixed(decimals);
+}
+// Full "5.50 km" / "3.42 mi" string, unit suffix included.
+function fmtDistance(meters, unit, decimals = 2) {
+  if (meters == null) return '';
+  return `${mToDisplay(meters, unit, decimals)} ${unit === 'mi' ? 'mi' : 'km'}`;
+}
+function fmtPace(secPerKm, unit) {
+  if (secPerKm == null) return '';
+  const perUnit = unit === 'mi' ? secPerKm * MI_TO_M / 1000 : secPerKm;
+  const mins = Math.floor(perUnit / 60);
+  const secs = Math.round(perUnit % 60);
+  return `${mins}:${String(secs).padStart(2, '0')}/${unit}`;
+}
+function fmtSpeed(secPerKm, unit) {
+  if (secPerKm == null || secPerKm <= 0) return '';
+  const kmh = 3600 / secPerKm;
+  if (unit === 'mi') return `${(kmh / (MI_TO_M / 1000)).toFixed(1)} mph`;
+  return `${kmh.toFixed(1)} km/h`;
+}
+
 // Aggregate cardio logs for a given week (weekStart = 'YYYY-MM-DD' Monday).
 // Returns { cardioMinutes, cardioDistanceM, paceFeeling, effort, count } or null.
-function cardioWeekPrefill(cardioLogs, weekStart, unit) {
+function cardioWeekPrefill(cardioLogs, weekStart) {
   if (!cardioLogs?.length || !weekStart) return null;
   const ws = weekStart.slice(0, 10);
   const we = (() => { const d = new Date(ws + 'T12:00:00'); d.setDate(d.getDate() + 7); return d.toISOString().slice(0, 10); })();
@@ -2851,7 +2913,10 @@ function cardioWeekPrefill(cardioLogs, weekStart, unit) {
   let pace = null;
   if (withDist.length) {
     const pMin = withDist.reduce((s, l) => s + l.durationMinutes, 0);
-    const distUnit = unit === 'lbs' ? 1609.344 : 1000;
+    // The actual cardio distance-unit setting — NOT settings.unit (weight),
+    // which this used to be keyed off, silently treating "mixed"-unit users
+    // (kg weights + mi distances) as km and skewing their pace by ~1.6x.
+    const distUnit = cardioDistUnit() === 'mi' ? MI_TO_M : 1000;
     const dist = withDist.reduce((s, l) => s + l.distanceM, 0) / distUnit;
     const paceMinPer = pMin / dist;
     const m = Math.floor(paceMinPer);
@@ -3403,10 +3468,12 @@ window.LB = {
   startDeload, endDeload, deloadElapsed, deloadDaysRemaining, deloadPlanDays,
   loadClientStore, loadCoachClientsStatus, reloadCoachingState, enableSelfCoaching, inviteClient, respondToCoachingInvite, endCoaching,
   addCoachingNote, markCoachingNotesRead, loadCoachingNotes, loadCoachingThreads, createCoachingThread, deleteCoachingThread, getOrCreateCoachingThread, uploadChatImage,
+  unreadCoachingNotes, isNoteFromClient,
   loadCoachingMacros, addCoachingMacros,
   diffSchedule,
   checkinWeekStart, submitCheckin, loadCheckins, deleteCheckin, loadCoachCheckinStatus, requestCheckin, setCheckinEnabled, loadCheckinSchema, saveCheckinSchema, saveDefaultCheckinSchema,
   cardioWeekPrefill, detectCardioPRs,
+  cardioDistUnit, setCardioDistUnit, distToM, mToDisplay, fmtDistance, fmtPace, fmtSpeed, MI_TO_M,
   isLoggedTrainingDay, plannedTrainingDay, isTrainingDayForDate, dayTargetFromMacros, macroAdherence, effectiveMacroTargets, dailyLogAdherence, dailyLogsWeekPrefill, weekPerformanceSignal,
   refreshHealthLogs,
   pickGrowthRecipient, retractGrowthGrant, MESO_GROWTH_CEILING_DELTA,

@@ -1090,7 +1090,7 @@ function CardioLineChart({ points, label, formatVal, yMin, yMax }) {
 }
 
 function CardioTypeDetailSheet({ type, logs, open, onClose }) {
-  const du = (() => { try { return localStorage.getItem(CARDIO_DIST_KEY_H) || 'km'; } catch (_) { return 'km'; } })();
+  const du = LB.cardioDistUnit();
   if (!open || !type) return null;
   const filtered = logs
     .filter(l => (l.type || '').toLowerCase() === type.toLowerCase())
@@ -1107,8 +1107,8 @@ function CardioTypeDetailSheet({ type, logs, open, onClose }) {
   const totalM = filtered.reduce((s, l) => s + (l.distanceM || 0), 0);
 
   const durPoints = filtered.map(l => ({ date: l.date, value: l.durationMinutes }));
-  const distPoints = filtered.filter(l => l.distanceM != null).map(l => ({ date: l.date, value: du === 'mi' ? l.distanceM / MI_TO_M_H : l.distanceM / 1000 }));
-  const speedPoints = filtered.filter(l => l.distanceM != null && l.durationMinutes > 0).map(l => ({ date: l.date, value: parseFloat(((du === 'mi' ? l.distanceM / MI_TO_M_H : l.distanceM / 1000) / (l.durationMinutes / 60)).toFixed(2)) }));
+  const distPoints = filtered.filter(l => l.distanceM != null).map(l => ({ date: l.date, value: du === 'mi' ? l.distanceM / LB.MI_TO_M : l.distanceM / 1000 }));
+  const speedPoints = filtered.filter(l => l.distanceM != null && l.durationMinutes > 0).map(l => ({ date: l.date, value: parseFloat(((du === 'mi' ? l.distanceM / LB.MI_TO_M : l.distanceM / 1000) / (l.durationMinutes / 60)).toFixed(2)) }));
   const effortPoints = filtered.filter(l => l.effort != null).map(l => ({ date: l.date, value: l.effort }));
   const paceFlPoints = filtered.filter(l => l.paceFeeling != null).map(l => ({ date: l.date, value: l.paceFeeling }));
   const paceFlLabels = ['', 'Easy', 'Light', 'Steady', 'Solid', 'Hard', 'Max'];
@@ -1124,7 +1124,7 @@ function CardioTypeDetailSheet({ type, logs, open, onClose }) {
   const summaryParts = [
     `${filtered.length} sessions`,
     totalMin > 0 && `${Math.floor(totalMin / 60)}h ${totalMin % 60}min total`,
-    totalM > 0 && `${du === 'mi' ? (totalM / MI_TO_M_H).toFixed(1) : (totalM / 1000).toFixed(1)} ${du} total`,
+    totalM > 0 && `${du === 'mi' ? (totalM / LB.MI_TO_M).toFixed(1) : (totalM / 1000).toFixed(1)} ${du} total`,
   ].filter(Boolean);
 
   return (
@@ -1642,12 +1642,6 @@ function StatsTab({ store, sessions, go }) {
 }
 
 // ─── HISTORY ─────────────────────────────────────────────────────────
-const CARDIO_DIST_KEY_H = 'logbook-cardio-dist-unit';
-const MI_TO_M_H = 1609.344;
-function mToDisplayH(meters, unit) {
-  if (meters == null) return '';
-  return unit === 'mi' ? (meters / MI_TO_M_H).toFixed(2) : (meters / 1000).toFixed(2);
-}
 
 function HistoryScreen({ store, setStore, go, userId, initialTab }) {
   const [tab, setTab] = useStateL(initialTab || 'workouts');
@@ -1868,7 +1862,7 @@ function HistoryScreen({ store, setStore, go, userId, initialTab }) {
 
       {tab === 'cardio' && (() => {
         const logs = [...(store.cardioLogs || [])].sort((a, b) => b.date.localeCompare(a.date));
-        const du = (() => { try { return localStorage.getItem(CARDIO_DIST_KEY_H) || 'km'; } catch (_) { return 'km'; } })();
+        const du = LB.cardioDistUnit();
         const now = new Date(); now.setHours(12,0,0,0);
         const dow = now.getDay();
         const monday = new Date(now); monday.setDate(now.getDate() - (dow === 0 ? 6 : dow - 1));
@@ -1912,7 +1906,7 @@ function HistoryScreen({ store, setStore, go, userId, initialTab }) {
                               : <span style={{ fontFamily: UI.fontDisplay, fontSize: 16, color: UI.ink, lineHeight: 1 }}>—</span>
                             }
                             <span className="num" style={{ fontSize: 13, color: UI.gold }}>{l.durationMinutes}<span style={{ fontSize: 10, color: UI.inkFaint }}>min</span></span>
-                            {l.distanceM != null && <span className="num" style={{ fontSize: 12, color: UI.inkSoft }}>{mToDisplayH(l.distanceM, du)}<span style={{ fontSize: 9 }}>{du}</span></span>}
+                            {l.distanceM != null && <span className="num" style={{ fontSize: 12, color: UI.inkSoft }}>{LB.mToDisplay(l.distanceM, du)}<span style={{ fontSize: 9 }}>{du}</span></span>}
                           </div>
                           {(l.paceFeeling != null || l.effort != null || l.note) && (
                             <div style={{ display: 'flex', gap: 6, marginTop: 4, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -2559,11 +2553,11 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                     const match = logs.find(cl => cl.type?.toLowerCase() === exNameLower) || logs[0] || null;
                     if (match) cd = { type: match.type, durationMinutes: match.durationMinutes, distanceM: match.distanceM ?? null };
                   }
-                  const du = localStorage.getItem('logbook-cardio-dist-unit') || 'km';
+                  const du = LB.cardioDistUnit();
                   const parts = [];
                   if (cd?.type) parts.push(cd.type.charAt(0).toUpperCase() + cd.type.slice(1));
                   if (cd?.durationMinutes) parts.push(`${cd.durationMinutes} min`);
-                  if (cd?.distanceM != null) parts.push(du === 'mi' ? `${(cd.distanceM / 1609.344).toFixed(2)} mi` : `${(cd.distanceM / 1000).toFixed(1)} km`);
+                  if (cd?.distanceM != null) parts.push(LB.fmtDistance(cd.distanceM, du));
                   const done = e.cardioDone ?? !!cd;
                   return (
                     <div key={i}>

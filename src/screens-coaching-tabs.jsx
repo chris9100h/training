@@ -4,12 +4,10 @@
 
 function CoachingBannerGroup({ store, setStore, userId, go }) {
   const [notesOpen, setNotesOpen] = useStateC(false);
-  // Support-ticket notes must never appear in the coaching banner — they have
-  // their own badge/inbox in Settings. Filter defensively in case one leaks in.
-  const notes = (store.coaching?.unreadNotes || []).filter(n => !n.coachingId?.startsWith('support_'));
+  const notes = LB.unreadCoachingNotes(store);
 
   const clientIds = new Set((store.coaching?.asCoach || []).filter(c => !c.id?.startsWith('support_')).map(c => c.clientId));
-  const fromClient = notes.some(n => clientIds.has(n.authorId));
+  const fromClient = LB.isNoteFromClient(store, notes);
   const adminSupportUnread = store.adminSupportUnread || 0;
   const userSupportUnread  = store.supportUnread || 0;
   const hasSupportBanner   = adminSupportUnread > 0 || userSupportUnread > 0;
@@ -469,7 +467,7 @@ function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false
   const sections = schema || CHECKIN_DEFAULT_SCHEMA;
   const responses = ci.responses || {};
   const has = v => v != null && v !== '';
-  const distUnit = (() => { try { return localStorage.getItem('logbook-cardio-dist-unit') || 'km'; } catch (_) { return 'km'; } })();
+  const distUnit = LB.cardioDistUnit();
   // The CLIENT's weight-unit label (numbers are never converted). Falls back to
   // the viewer's unit for self-coaching / previews where no client unit is passed.
   const wUnit = clientUnit || UI.unit();
@@ -500,21 +498,10 @@ function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false
   const planFat  = planMacro('fatTraining',      'fatRest');
   const showPlanRow = hasMacroResponse && (planCal != null || planProt != null || planCarb != null || planFat != null);
 
-  // Format one field's stored value for display (mirrors the trend-card formatter).
-  const fmtValue = (f, v) => {
-    if (f.unit === 'weight') return `${v} ${wUnit}`;
-    if (f._distanceField) return distUnit === 'mi' ? `${(v / 1609.344).toFixed(1)} mi` : `${(v / 1000).toFixed(1)} km`;
-    if (f.key === 'hydration_ml') return `${(v / 1000).toFixed(1)} L / day`;
-    if (f.key === 'steps') return Number(v).toLocaleString();
-    if (f.type === 'percent') return `${v}%`;
-    if (f.type === 'choice' && f.options?.length) {
-      const opt = f.options.find(o => String(o.value) === String(v));
-      return opt ? opt.label : String(v);
-    }
-    if (f.type === 'pace') return String(v);
-    if (f.unit) return `${v} ${f.unit}`;
-    return String(v);
-  };
+  // Format one field's stored value for display — shared with the trend-card
+  // formatter (checkinFieldValue in screens-coaching-detail.jsx) so a field
+  // never shows a different number here than it does on the chart.
+  const fmtValue = (f, v) => checkinFieldValue(f, v, { distUnit, weightUnit: wUnit });
 
   // Color a stepper value by where it sits on its scale, respecting direction.
   const stepperColor = (f, v) => {
@@ -561,7 +548,7 @@ function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false
     if (isNaN(cur) || isNaN(prev)) return null;
     return cur - prev; // negative = faster = better (lower_better)
   })();
-  const fmtDistDelta = d => { const v = distUnit === 'mi' ? (d / 1609.344).toFixed(1) : (d / 1000).toFixed(1); return (d > 0 ? '+' : '') + v + ' ' + distUnit; };
+  const fmtDistDelta = d => (d > 0 ? '+' : '') + LB.mToDisplay(d, distUnit, 1) + ' ' + distUnit;
   const pillDeltaProps = f => {
     if (f.key === 'weight_avg_last_week') return { delta: weightDelta };
     if (f.key === 'steps') return { delta: stepsDelta, deltaStr: stepsDelta != null ? (stepsDelta > 0 ? '+' : '') + stepsDelta.toLocaleString() : undefined, deltaDir: 'higher_better' };
@@ -852,7 +839,7 @@ function toResponse(field, raw, distUnit) {
   if (field._distanceField) {
     const n = parseFloat(String(raw).replace(',', '.'));
     if (isNaN(n) || n <= 0) return null;
-    return distUnit === 'mi' ? Math.round(n * 1609.344) : Math.round(n * 1000);
+    return LB.distToM(raw, distUnit);
   }
   if (field.type === 'integer' || field.type === 'percent') { const n = parseInt(raw, 10); return isNaN(n) ? null : n; }
   if (field.type === 'decimal') { const n = parseFloat(String(raw).replace(',', '.')); return isNaN(n) ? null : n; }
@@ -865,7 +852,7 @@ function initFormState(sections, responses, distUnit) {
   (sections || []).forEach(sec => (sec.fields || []).forEach(field => {
     const v = responses?.[field.key];
     if (field._distanceField) {
-      form[field.key] = v != null ? (distUnit === 'mi' ? (v / 1609.344).toFixed(2) : (v / 1000).toFixed(2)) : '';
+      form[field.key] = v != null ? LB.mToDisplay(v, distUnit) : '';
     } else if (field.type === 'text') {
       form[field.key] = v != null ? String(v) : '';
     } else if (field.type === 'stepper' || field.type === 'choice') {
@@ -925,8 +912,8 @@ function FieldWidget({ field, value, onChange, distUnit, setDistUnit, inputStyle
                 const n = parseFloat(String(value || '').replace(',', '.'));
                 setDistUnit(u);
                 if (!isNaN(n) && n > 0) {
-                  const m = distUnit === 'mi' ? Math.round(n * 1609.344) : Math.round(n * 1000);
-                  onChange(u === 'mi' ? (m / 1609.344).toFixed(2) : (m / 1000).toFixed(2));
+                  const m = LB.distToM(value, distUnit);
+                  onChange(LB.mToDisplay(m, u));
                 }
               }} style={{ padding: '2px 7px', cursor: 'pointer', border: 'none',
                 background: distUnit === u ? 'var(--accent)' : 'transparent',
@@ -1068,17 +1055,16 @@ function CheckInForm({ coachingId, clientId, userId, weekStart, existing, prefil
   const sections = schema || CHECKIN_DEFAULT_SCHEMA;
   const allFields = sections.flatMap(s => s.fields || []);
 
-  const getDistUnit = () => { try { return localStorage.getItem('logbook-cardio-dist-unit') || 'km'; } catch (_) { return 'km'; } };
-  const [distUnit, setDistUnitRaw] = useStateC(getDistUnit);
-  const setDistUnit = u => { try { localStorage.setItem('logbook-cardio-dist-unit', u); } catch (_) {} setDistUnitRaw(u); };
+  const [distUnit, setDistUnitRaw] = useStateC(LB.cardioDistUnit);
+  const setDistUnit = u => { LB.setCardioDistUnit(u); setDistUnitRaw(u); };
 
   const [form, setForm] = useStateC(() => {
-    const du = getDistUnit();
+    const du = LB.cardioDistUnit();
     if (existing) return initFormState(sections, existing.responses || {}, du);
     const base = initFormState(sections, {}, du);
     if (prefill) {
       if (prefill.cardioMinutes != null) base.cardio_minutes = String(prefill.cardioMinutes);
-      if (prefill.cardioDistanceM != null) base.cardio_distance_m = du === 'mi' ? (prefill.cardioDistanceM / 1609.344).toFixed(2) : (prefill.cardioDistanceM / 1000).toFixed(2);
+      if (prefill.cardioDistanceM != null) base.cardio_distance_m = LB.mToDisplay(prefill.cardioDistanceM, du);
       if (prefill.pace != null) base.cardio_pace = prefill.pace;
       if (prefill.paceFeeling != null) base.cardio_pace_feeling = prefill.paceFeeling;
       if (prefill.effort != null) base.cardio_effort = prefill.effort;
@@ -1236,7 +1222,7 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
 
   // Preview: build a fake check-in from the current training week's accumulated data
   const previewDailyPrefill = LB.dailyLogsWeekPrefill(store?.dailyLogs, previewWeekStart, store?.sessions, resolvedSchema);
-  const previewCardioPrefill = LB.cardioWeekPrefill(store?.cardioLogs, previewWeekStart, store?.settings?.unit);
+  const previewCardioPrefill = LB.cardioWeekPrefill(store?.cardioLogs, previewWeekStart);
   const previewResponses = (() => {
     const r = {};
     if (previewDailyPrefill) Object.entries(previewDailyPrefill).forEach(([k, v]) => { if (v != null && k !== 'count') r[k] = v; });
@@ -1273,7 +1259,7 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
           userId={userId}
           weekStart={formWeek}
           existing={target}
-          prefill={!target ? LB.cardioWeekPrefill(store?.cardioLogs, formWeek, store?.settings?.unit) : undefined}
+          prefill={!target ? LB.cardioWeekPrefill(store?.cardioLogs, formWeek) : undefined}
           dailyPrefill={!target ? LB.dailyLogsWeekPrefill(store?.dailyLogs, formWeek, store?.sessions, resolvedSchema) : undefined}
           perfPrefill={!target ? LB.weekPerformanceSignal(store, formWeek) : undefined}
           onSaved={() => { setEditTarget(null); load(); }}

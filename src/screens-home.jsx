@@ -539,19 +539,7 @@ function RecentBannerDay({ banner, setStore, onOpenSkipSheet, onLog }) {
 
 // ─── CARDIO QUICK-LOG ─────────────────────────────────────────────────
 
-const CARDIO_DIST_KEY = 'logbook-cardio-dist-unit'; // 'km' | 'mi'
 const CARDIO_LIVE_KEY = 'logbook-cardio-live-start'; // epoch ms of a running live cardio, else absent
-const MI_TO_M = 1609.344;
-
-function distToM(val, unit) {
-  const n = parseFloat(String(val).replace(',', '.'));
-  if (isNaN(n)) return null;
-  return unit === 'mi' ? Math.round(n * MI_TO_M) : Math.round(n * 1000);
-}
-function mToDisplay(meters, unit) {
-  if (meters == null) return '';
-  return unit === 'mi' ? (meters / MI_TO_M).toFixed(2) : (meters / 1000).toFixed(2);
-}
 
 // Full-screen celebratory flash when a freshly logged cardio session beats a
 // personal best (★ NEW BEST) or the last same-type session (↑ IMPROVEMENT).
@@ -564,16 +552,18 @@ function CardioPROverlay({ pr, onDone }) {
   }, [pr]);
   if (!pr) return null;
 
-  const du = (() => { try { return localStorage.getItem(CARDIO_DIST_KEY) || 'km'; } catch (_) { return 'km'; } })();
+  const du = LB.cardioDistUnit();
   const isBest = pr.tier === 'best';
+  // detectCardioPRs' pace is decimal minutes/km (not seconds/km, which is
+  // LB.fmtPace's contract) — kept local rather than forced into that shape.
   const fmtPace = (minPerKm) => {
-    const perUnit = du === 'mi' ? minPerKm * MI_TO_M / 1000 : minPerKm;
+    const perUnit = du === 'mi' ? minPerKm * LB.MI_TO_M / 1000 : minPerKm;
     let mins = Math.floor(perUnit);
     let secs = Math.round((perUnit - mins) * 60);
     if (secs === 60) { mins += 1; secs = 0; }
     return `${mins}:${String(secs).padStart(2, '0')} /${du}`;
   };
-  const fmtDist = (m) => du === 'mi' ? `${(m / MI_TO_M).toFixed(2)} mi` : `${(m / 1000).toFixed(2)} km`;
+  const fmtDist = (m) => LB.fmtDistance(m, du);
   const META = {
     pace:     { label: 'Fastest Pace',     fmt: fmtPace },
     distance: { label: 'Longest Distance', fmt: fmtDist },
@@ -617,9 +607,8 @@ function CardioPROverlay({ pr, onDone }) {
 }
 
 function CardioQuickLogSheet({ open, onClose, store, setStore, userId, editLog, onPR, prefill }) {
-  const getDistUnit = () => { try { return localStorage.getItem(CARDIO_DIST_KEY) || 'km'; } catch (_) { return 'km'; } };
-  const [distUnit, setDistUnitState] = useState(getDistUnit);
-  const setDistUnit = (u) => { try { localStorage.setItem(CARDIO_DIST_KEY, u); } catch (_) {} setDistUnitState(u); };
+  const [distUnit, setDistUnitState] = useState(LB.cardioDistUnit);
+  const setDistUnit = (u) => { LB.setCardioDistUnit(u); setDistUnitState(u); };
 
   const todayStr = LB.todayISO();
   const empty = () => ({ date: todayStr, type: '', duration: '', distance: '', paceFeeling: null, effort: null, note: '' });
@@ -630,12 +619,12 @@ function CardioQuickLogSheet({ open, onClose, store, setStore, userId, editLog, 
 
   useEffect(() => {
     if (!open) return;
-    const du = getDistUnit();
+    const du = LB.cardioDistUnit();
     const next = editLog ? {
       date: editLog.date,
       type: editLog.type || '',
       duration: editLog.durationMinutes ? String(editLog.durationMinutes) : '',
-      distance: editLog.distanceM != null ? mToDisplay(editLog.distanceM, du) : '',
+      distance: editLog.distanceM != null ? LB.mToDisplay(editLog.distanceM, du) : '',
       paceFeeling: editLog.paceFeeling ?? null,
       effort: editLog.effort ?? null,
       note: editLog.note || '',
@@ -643,7 +632,7 @@ function CardioQuickLogSheet({ open, onClose, store, setStore, userId, editLog, 
       ...empty(),
       type: prefill?.type || '',
       duration: prefill?.durationMinutes ? String(prefill.durationMinutes) : '',
-      distance: prefill?.distanceM != null ? mToDisplay(prefill.distanceM, du) : '',
+      distance: prefill?.distanceM != null ? LB.mToDisplay(prefill.distanceM, du) : '',
     };
     setForm(next);
     initialSnap.current = next;
@@ -676,7 +665,7 @@ function CardioQuickLogSheet({ open, onClose, store, setStore, userId, editLog, 
         date: form.date,
         type: form.type.trim() || null,
         durationMinutes: Math.round(Number(form.duration)),
-        distanceM: form.distance ? distToM(form.distance, distUnit) : null,
+        distanceM: form.distance ? LB.distToM(form.distance, distUnit) : null,
         paceFeeling: form.paceFeeling,
         effort: form.effort,
         note: form.note.trim() || null,
@@ -688,7 +677,7 @@ function CardioQuickLogSheet({ open, onClose, store, setStore, userId, editLog, 
         date: form.date,
         type: form.type.trim() || null,
         durationMinutes: Math.round(Number(form.duration)),
-        distanceM: form.distance ? distToM(form.distance, distUnit) : null,
+        distanceM: form.distance ? LB.distToM(form.distance, distUnit) : null,
         paceFeeling: form.paceFeeling,
         effort: form.effort,
         note: form.note.trim() || null,
@@ -869,9 +858,8 @@ function CardioLiveSheet({ open, onFinish, onCancel }) {
 // Guided post-live flow: a "well done" moment, then one metric per step.
 // Saves the same shape as the manual log, so cardio PR detection still fires.
 function CardioFinishFlow({ open, durationMin, store, setStore, onClose, onPR }) {
-  const getDistUnit = () => { try { return localStorage.getItem(CARDIO_DIST_KEY) || 'km'; } catch (_) { return 'km'; } };
-  const [distUnit, setDistUnitState] = useState(getDistUnit);
-  const setDistUnit = (u) => { try { localStorage.setItem(CARDIO_DIST_KEY, u); } catch (_) {} setDistUnitState(u); };
+  const [distUnit, setDistUnitState] = useState(LB.cardioDistUnit);
+  const setDistUnit = (u) => { LB.setCardioDistUnit(u); setDistUnitState(u); };
   const [step, setStep] = useState(0);
   const [form, setForm] = useState({ type: '', distance: '', paceFeeling: null, effort: null, note: '' });
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
@@ -880,7 +868,7 @@ function CardioFinishFlow({ open, durationMin, store, setStore, onClose, onPR })
     if (!open) return;
     setStep(0);
     setForm({ type: '', distance: '', paceFeeling: null, effort: null, note: '' });
-    setDistUnitState(getDistUnit());
+    setDistUnitState(LB.cardioDistUnit());
   }, [open]);
 
   const typeChips = useMemo(() => {
@@ -903,7 +891,7 @@ function CardioFinishFlow({ open, durationMin, store, setStore, onClose, onPR })
       date: LB.todayISO(),
       type: form.type.trim() || null,
       durationMinutes: durationMin,
-      distanceM: form.distance ? distToM(form.distance, distUnit) : null,
+      distanceM: form.distance ? LB.distToM(form.distance, distUnit) : null,
       paceFeeling: form.paceFeeling,
       effort: form.effort,
       note: form.note.trim() || null,
@@ -2300,7 +2288,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
 
 
   const cardioBanner = selectedDayCardioLogs.length > 0 ? (() => {
-    const du = (() => { try { return localStorage.getItem(CARDIO_DIST_KEY) || 'km'; } catch(_) { return 'km'; } })();
+    const du = LB.cardioDistUnit();
     const totalMins = selectedDayCardioLogs.reduce((s, l) => s + (l.durationMinutes || 0), 0);
     const single = selectedDayCardioLogs.length === 1 ? selectedDayCardioLogs[0] : null;
     const typeLabel = (() => {
@@ -2319,7 +2307,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
               {totalMins}<span style={{ fontSize: 9, color: UI.inkFaint }}>{selectedDayCardioLogs.length > 1 ? 'min total' : 'min'}</span>
             </span>
             {single?.distanceM != null && (
-              <span className="num" style={{ fontSize: 11, color: UI.inkSoft, flexShrink: 0 }}>{mToDisplay(single.distanceM, du)}<span style={{ fontSize: 8 }}>{du}</span></span>
+              <span className="num" style={{ fontSize: 11, color: UI.inkSoft, flexShrink: 0 }}>{LB.mToDisplay(single.distanceM, du)}<span style={{ fontSize: 8 }}>{du}</span></span>
             )}
             {single?.effort != null && (
               <span className="num" style={{ fontSize: 11, color: UI.inkFaint, flexShrink: 0 }}>{single.effort}/10</span>
@@ -2887,7 +2875,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       {/* Cardio history popover */}
       {cardioPopoverOpen && (() => {
         const recentCardio = (store.cardioLogs || []).slice(0, 5);
-        const du = (() => { try { return localStorage.getItem(CARDIO_DIST_KEY) || 'km'; } catch (_) { return 'km'; } })();
+        const du = LB.cardioDistUnit();
         return (
           <Sheet open={true} onClose={() => setCardioPopoverOpen(false)}>
             <div style={{ fontFamily: UI.fontUi, fontSize: 15, fontWeight: 600, letterSpacing: '0.10em', textTransform: 'uppercase', color: UI.inkSoft, textAlign: 'center', marginBottom: recentCardio.length ? 16 : 10 }}>RECENT CARDIO</div>
@@ -2900,7 +2888,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                     <i className="fa-solid fa-person-running" style={{ fontSize: 11, color: UI.inkFaint, width: 12 }} />
                     <span style={{ flex: 1, fontSize: 12, color: UI.ink, fontFamily: UI.fontUi, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{l.type || '—'}</span>
                     <span className="num" style={{ fontSize: 12, color: UI.gold, flexShrink: 0 }}>{l.durationMinutes}<span style={{ color: UI.inkFaint, fontSize: 9 }}>min</span></span>
-                    {l.distanceM != null && <span className="num" style={{ fontSize: 11, color: UI.inkSoft, flexShrink: 0 }}>{mToDisplay(l.distanceM, du)}<span style={{ fontSize: 8 }}>{du}</span></span>}
+                    {l.distanceM != null && <span className="num" style={{ fontSize: 11, color: UI.inkSoft, flexShrink: 0 }}>{LB.mToDisplay(l.distanceM, du)}<span style={{ fontSize: 8 }}>{du}</span></span>}
                     <span style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi, flexShrink: 0 }}>{l.date.slice(5).replace('-', '/')}</span>
                     <button onClick={() => { setEditingCardioLog(l); setCardioPopoverOpen(false); setCardioLogOpen(true); }} style={{ flexShrink: 0, background: 'none', border: 'none', cursor: 'pointer', padding: '2px 4px', color: UI.inkFaint, display: 'flex', alignItems: 'center' }}>
                       <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>

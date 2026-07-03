@@ -178,12 +178,13 @@ function CoachingPendingBanner({ store, setStore, userId }) {
 // Small banner on home screen when there are unread coach notes.
 
 function CoachingUnreadBanner({ store, userId, onOpen }) {
-  const notes = store.coaching?.unreadNotes || [];
+  // Same filtered source CoachingBannerGroup uses to decide whether to render
+  // this at all — recomputing independently is exactly how this banner ended
+  // up showing an unfiltered count/preview that disagreed with its own parent.
+  const notes = LB.unreadCoachingNotes(store);
   if (!notes.length) return null;
 
-  // Determine direction: are these messages from a client (user is coach) or from a coach (user is client)?
-  const clientIds = new Set((store.coaching?.asCoach || []).map(c => c.clientId));
-  const fromClient = notes.some(n => clientIds.has(n.authorId));
+  const fromClient = LB.isNoteFromClient(store, notes);
   const label = fromClient ? 'NEW MESSAGE FROM CLIENT' : 'NEW MESSAGE FROM COACH';
   const labelPlural = fromClient ? 'NEW MESSAGES FROM CLIENTS' : 'NEW MESSAGES FROM COACH';
 

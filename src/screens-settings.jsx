@@ -1945,7 +1945,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             // Mixed = kg weight + mi distance; sync the cardio dist key so
             // all cardio screens immediately reflect the chosen distance unit.
             const distUnit = chosenUnit === 'lbs' ? 'mi' : chosenUnit === 'mixed' ? 'mi' : 'km';
-            try { localStorage.setItem('logbook-cardio-dist-unit', distUnit); } catch (_) {}
+            LB.setCardioDistUnit(distUnit);
             setStore(s => s ? { ...s, settings: { ...s.settings, unit: chosenUnit } } : s);
           }}
         />

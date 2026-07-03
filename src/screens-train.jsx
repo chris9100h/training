@@ -5,10 +5,6 @@
 
 const { useState: useStateT, useEffect: useEffectT, useRef: useRefT, useMemo: useMemoT } = React;
 
-const CARDIO_DIST_KEY_T = 'logbook-cardio-dist-unit';
-const MI_TO_M_T = 1609.344;
-function mToDisplayT(m, unit) { return m == null ? '' : unit === 'mi' ? (m / MI_TO_M_T).toFixed(2) : (m / 1000).toFixed(2); }
-function distToMT(val, unit) { const n = parseFloat(val); return isNaN(n) ? null : unit === 'mi' ? Math.round(n * MI_TO_M_T) : Math.round(n * 1000); }
 
 // ─── Mesocycle helpers ─────────────────────────────────────────────────────────
 const MESO_KEY = 'logbook-meso-state';
@@ -1401,7 +1397,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const logCardio = () => {
     const dur = parseInt(cardioForm.duration, 10);
     if (!dur || dur <= 0) return;
-    const distM = cardioForm.distance ? distToMT(cardioForm.distance, cardioForm.distUnit) : null;
+    const distM = cardioForm.distance ? LB.distToM(cardioForm.distance, cardioForm.distUnit) : null;
     const data = { type: cardioForm.type.trim() || null, durationMinutes: dur, distanceM: distM, paceFeeling: cardioForm.paceFeeling, effort: cardioForm.effort };
     updateSession(sess => ({
       ...sess,
@@ -2528,7 +2524,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     kbShieldTimerRef.current = setTimeout(() => setKbShield(false), 400);
   };
   const [plateCalcOpen, setPlateCalcOpen] = useStateT(false);
-  const [cardioForm, setCardioForm] = useStateT({ type: '', duration: '', distance: '', paceFeeling: null, effort: null, distUnit: localStorage.getItem(CARDIO_DIST_KEY_T) || 'km' });
+  const [cardioForm, setCardioForm] = useStateT({ type: '', duration: '', distance: '', paceFeeling: null, effort: null, distUnit: LB.cardioDistUnit() });
   const cardioTypeChips = useMemoT(() => {
     const seen = new Set(); const result = [];
     for (const l of (store.cardioLogs || [])) {
@@ -2556,9 +2552,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   }, [exIdx]);
   useEffectT(() => {
     if (!entry?.isCardio) return;
-    const du = localStorage.getItem(CARDIO_DIST_KEY_T) || 'km';
+    const du = LB.cardioDistUnit();
     const cd = entry.cardioData;
-    setCardioForm(cd ? { type: cd.type || '', duration: cd.durationMinutes ? String(cd.durationMinutes) : '', distance: cd.distanceM != null ? mToDisplayT(cd.distanceM, du) : '', paceFeeling: cd.paceFeeling ?? null, effort: cd.effort ?? null, distUnit: du } : { type: '', duration: '', distance: '', paceFeeling: null, effort: null, distUnit: du });
+    setCardioForm(cd ? { type: cd.type || '', duration: cd.durationMinutes ? String(cd.durationMinutes) : '', distance: cd.distanceM != null ? LB.mToDisplay(cd.distanceM, du) : '', paceFeeling: cd.paceFeeling ?? null, effort: cd.effort ?? null, distUnit: du } : { type: '', duration: '', distance: '', paceFeeling: null, effort: null, distUnit: du });
   }, [exIdx, sessionId]);
   // Intentionally NOT keyed on exIdx/entry — Paceguard (tempo) is meant to
   // keep running across exercise navigation once started, stopping only on
@@ -3986,7 +3982,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               {entry.cardioData && (
                 <div className="num" style={{ fontSize: 12, color: UI.inkSoft, marginBottom: 16 }}>
                   {entry.cardioData.durationMinutes}min
-                  {entry.cardioData.distanceM != null && ` · ${mToDisplayT(entry.cardioData.distanceM, cardioForm.distUnit)} ${cardioForm.distUnit}`}
+                  {entry.cardioData.distanceM != null && ` · ${LB.mToDisplay(entry.cardioData.distanceM, cardioForm.distUnit)} ${cardioForm.distUnit}`}
                   {entry.cardioData.effort != null && ` · effort ${entry.cardioData.effort}/10`}
                 </div>
               )}
@@ -4044,7 +4040,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                     <span className="label">Distance</span>
                     <div style={{ display: 'flex', gap: 4 }}>
                       {['km','mi'].map(u => (
-                        <button key={u} onClick={() => { localStorage.setItem(CARDIO_DIST_KEY_T, u); setCardioForm(f => ({ ...f, distUnit: u })); }} style={{ padding: '2px 8px', borderRadius: 4, border: `1px solid ${cardioForm.distUnit === u ? UI.gold : UI.hairStrong}`, background: cardioForm.distUnit === u ? UI.goldFaint : 'transparent', color: cardioForm.distUnit === u ? UI.gold : UI.inkFaint, fontFamily: UI.fontUi, fontSize: 9, letterSpacing: '0.1em', cursor: 'pointer' }}>{u}</button>
+                        <button key={u} onClick={() => { LB.setCardioDistUnit(u); setCardioForm(f => ({ ...f, distUnit: u })); }} style={{ padding: '2px 8px', borderRadius: 4, border: `1px solid ${cardioForm.distUnit === u ? UI.gold : UI.hairStrong}`, background: cardioForm.distUnit === u ? UI.goldFaint : 'transparent', color: cardioForm.distUnit === u ? UI.gold : UI.inkFaint, fontFamily: UI.fontUi, fontSize: 9, letterSpacing: '0.1em', cursor: 'pointer' }}>{u}</button>
                       ))}
                     </div>
                   </div>

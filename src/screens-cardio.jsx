@@ -14,43 +14,21 @@ const CARDIO_ACTIVITIES = [
 
 const CP_WEEKDAY_KEYS   = ['mon','tue','wed','thu','fri','sat','sun'];
 const CP_WEEKDAY_LABELS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
-const CP_DIST_KEY       = 'logbook-cardio-dist-unit';
 
 function cpActivity(type) {
   return CARDIO_ACTIVITIES.find(a => a.id === type) || { id: type, label: type, icon: 'fa-person-running' };
 }
 
-function cpDistUnit() {
-  try { return localStorage.getItem(CP_DIST_KEY) || 'km'; } catch (_) { return 'km'; }
-}
-
-function cpDistToM(val, du) {
-  const n = parseFloat(val);
-  if (!n || isNaN(n)) return null;
-  return du === 'mi' ? Math.round(n * 1609.344) : Math.round(n * 1000);
-}
-
-function cpFmtDist(m, du) {
-  if (m == null) return '';
-  return du === 'mi'
-    ? (m / 1609.344).toFixed(2) + ' mi'
-    : (m / 1000).toFixed(1) + ' km';
-}
-
-function cpFmtPace(secPerKm, du) {
-  if (secPerKm == null) return '';
-  const perUnit = du === 'mi' ? secPerKm * 1609.344 / 1000 : secPerKm;
-  const mins = Math.floor(perUnit / 60);
-  const secs = Math.round(perUnit % 60);
-  return `${mins}:${String(secs).padStart(2,'0')}/${du}`;
-}
-
-function cpFmtSpeed(secPerKm, du) {
-  if (secPerKm == null || secPerKm <= 0) return '';
-  const kmh = 3600 / secPerKm;
-  if (du === 'mi') return `${(kmh / 1.60934).toFixed(1)} mph`;
-  return `${kmh.toFixed(1)} km/h`;
-}
+// Thin wrappers over the shared LB cardio helpers (store.js) — kept as local
+// names since they're used throughout this file, but no longer their own
+// reimplementation. Used to skip comma-decimal normalization (cpDistToM) and
+// use a different km precision than the rest of the app (cpFmtDist); both
+// now come from the one shared source.
+function cpDistUnit() { return LB.cardioDistUnit(); }
+function cpDistToM(val, du) { return LB.distToM(val, du); }
+function cpFmtDist(m, du) { return LB.fmtDistance(m, du); }
+function cpFmtPace(secPerKm, du) { return LB.fmtPace(secPerKm, du); }
+function cpFmtSpeed(secPerKm, du) { return LB.fmtSpeed(secPerKm, du); }
 
 function cpTodayKey(todayISO) {
   const d = new Date(todayISO + 'T12:00:00');
@@ -370,13 +348,13 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
       const g = editPlan.goal;
       setGoal({
         type: g?.type || 'distance',
-        dist: g?.target_distance_m ? (du === 'mi' ? (g.target_distance_m / 1609.344).toFixed(2) : (g.target_distance_m / 1000).toFixed(1)) : '',
+        dist: g?.target_distance_m ? LB.mToDisplay(g.target_distance_m, du) : '',
         dur:  g?.target_duration_minutes ? String(g.target_duration_minutes) : '',
       });
       setGoalDue(editPlan.goalDueDate || '');
       const sf = editPlan.startFitness;
       setFitness({
-        dist: sf?.distance_m ? (du === 'mi' ? (sf.distance_m / 1609.344).toFixed(2) : (sf.distance_m / 1000).toFixed(1)) : '',
+        dist: sf?.distance_m ? LB.mToDisplay(sf.distance_m, du) : '',
         dur:  sf?.duration_minutes ? String(sf.duration_minutes) : '',
       });
       setPlanName(editPlan.name);
@@ -720,7 +698,7 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
       // day"); `upd` writes the target object the caller owns.
       const targetCard = (keyId, t, upd, label, span) => {
         const isDist = t.target_type !== 'duration';
-        const dispDist = t.distance_m ? (du === 'mi' ? (t.distance_m / 1609.344).toFixed(2) : (t.distance_m / 1000).toFixed(1)) : '';
+        const dispDist = t.distance_m ? LB.mToDisplay(t.distance_m, du) : '';
         return (
           <div key={keyId} style={{ padding: 12, background: UI.bgInset, borderRadius: 6, border: `0.5px solid ${UI.hair}`, ...(span ? { gridColumn: '1 / -1' } : {}) }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>

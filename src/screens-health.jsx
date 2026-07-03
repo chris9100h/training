@@ -1712,11 +1712,17 @@ function HealthClientLogs({ clientStore }) {
   const reorderCards = (from, to) => {
     if (from === to) return;
     setCardOrder(prev => {
-      const moved = [...prev];
+      // ReorderList reports from/to as indices into the VISIBLE cards it
+      // rendered, not the full order array — glucose/weekly are routinely
+      // absent for new coaching clients, so splicing prev directly (as this
+      // used to) reordered the wrong card whenever any card was hidden.
+      const visible = prev.filter(id => cardEls[id]);
+      const moved = [...visible];
       const [m] = moved.splice(from, 1);
       moved.splice(to, 0, m);
-      try { localStorage.setItem(COACH_ORDER_KEY, JSON.stringify(moved)); } catch (_) {}
-      return moved;
+      const next = [...moved, ...prev.filter(id => !visible.includes(id))];
+      try { localStorage.setItem(COACH_ORDER_KEY, JSON.stringify(next)); } catch (_) {}
+      return next;
     });
   };
 

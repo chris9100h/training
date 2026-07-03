@@ -108,22 +108,41 @@ function checkinFieldYRange(field) {
   return {};
 }
 
-// Value formatter for a field's chart axis and headline number.
-// weightUnit = the CLIENT's unit label ('kg'/'lbs'); numbers are never converted,
-// only the label. Falls back to the viewer's UI.unit() (self-coaching).
+// Formats one check-in field's stored value for display — shared by the
+// trend chart (via checkinFieldFormat below) and the check-in detail card,
+// so the same stored number never shows two different values in two views.
+// weightUnit/distUnit describe the CLIENT's units; numbers are never
+// converted, only the label. `chart` only changes the handful of fields
+// where an axis label genuinely needs different precision than a readable
+// card row (steps, stepper fraction, choice fallback, pace value shape) —
+// everything else renders identically either way.
+function checkinFieldValue(field, v, { distUnit, weightUnit, chart = false } = {}) {
+  if (field.unit === 'weight') return `${Math.round(v * 100) / 100}${weightUnit || UI.unit()}`;
+  if (field.key === 'steps') return chart ? `${Math.round(v / 1000)}k` : Number(v).toLocaleString();
+  if (field.key === 'days_trained') return `${v}d`;
+  if (field.key === 'cardio_minutes') return `${v} min`;
+  if (field.key === 'hydration_ml') return `${(v / 1000).toFixed(1)} L / day`;
+  if (field._distanceField) return LB.fmtDistance(v, distUnit, 1);
+  if (field.type === 'pace') {
+    if (!chart) return String(v);
+    const m = Math.floor(v / 60); const s = Math.round(v % 60);
+    return `${m}:${String(s).padStart(2, '0')}`;
+  }
+  if (field.type === 'percent') return `${Math.round(v)}%`;
+  if (field.type === 'stepper') return chart ? `${v}/${field.max || 10}` : String(v);
+  if (field.type === 'choice' && field.options?.length) {
+    if (chart) { const opt = field.options[Math.round(v) - 1]; return opt ? opt.label : `${v}/${field.options.length}`; }
+    const opt = field.options.find(o => String(o.value) === String(v));
+    return opt ? opt.label : String(v);
+  }
+  if (field.unit) return `${v} ${field.unit}`;
+  return chart ? String(Math.round(v * 10) / 10) : String(v);
+}
+
+// Chart-axis wrapper — curried so checkinChartMetrics can attach it as each
+// metric's `format` function.
 function checkinFieldFormat(field, distUnit, weightUnit) {
-  if (field.unit === 'weight') return v => `${Math.round(v * 100) / 100}${weightUnit || UI.unit()}`;
-  if (field.key === 'steps') return v => `${Math.round(v / 1000)}k`;
-  if (field.key === 'days_trained') return v => `${v}d`;
-  if (field.key === 'cardio_minutes') return v => `${v} min`;
-  if (field._distanceField) return v => distUnit === 'mi' ? `${(v / 1609.344).toFixed(1)} mi` : `${(v / 1000).toFixed(1)} km`;
-  if (field.type === 'pace') return v => { const m = Math.floor(v / 60); const s = Math.round(v % 60); return `${m}:${String(s).padStart(2, '0')}`; };
-  if (field.type === 'percent') return v => `${Math.round(v)}%`;
-  if (field.type === 'stepper') return v => `${v}/${field.max || 10}`;
-  if (field.type === 'choice' && field.options?.length)
-    return v => { const opt = field.options[Math.round(v) - 1]; return opt ? opt.label : `${v}/${field.options.length}`; };
-  if (field.unit) return v => `${v} ${field.unit}`;
-  return v => String(Math.round(v * 10) / 10);
+  return v => checkinFieldValue(field, v, { distUnit, weightUnit, chart: true });
 }
 
 // Build the per-field chart series for a set of check-ins, in schema order.
@@ -162,7 +181,7 @@ async function exportCheckinCharts(recent, schema, weightUnit) {
   const inkFaint  = cs.getPropertyValue('--ink-faint').trim();
   const bgColor   = cs.getPropertyValue('--bg').trim();
   const hairColor = cs.getPropertyValue('--hair').trim();
-  const distUnit = (() => { try { return localStorage.getItem('logbook-cardio-dist-unit') || 'km'; } catch (_) { return 'km'; } })();
+  const distUnit = LB.cardioDistUnit();
 
   const metrics = checkinChartMetrics(recent, schema, distUnit, weightUnit);
 
@@ -356,7 +375,7 @@ function CheckInTrendCards({ recent, schema, clientUnit }) {
     );
   };
 
-  const distUnit = (() => { try { return localStorage.getItem('logbook-cardio-dist-unit') || 'km'; } catch(_) { return 'km'; } })();
+  const distUnit = LB.cardioDistUnit();
 
   // Keys shown as sub-labels on another card — don't render as standalone
   const SUB_KEYS = new Set();
