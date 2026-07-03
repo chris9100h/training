@@ -501,6 +501,101 @@ function KnurlCanvas({ style }) {
   return <canvas data-knurl="1" style={{ display: 'block', width: '100%', height: 3, ...style }} />;
 }
 
+// Shared html2canvas capture flow for SessionDetailScreen and
+// SessionCompareScreen — expand the scroll parent, draw the imperative knurl
+// canvases, wait for the watermark avatar to decode, capture, then share/
+// download the PNG and restore layout. `dodgeAvatar` (SessionDetailScreen only)
+// shortens knurl dividers and shrinks chip rows that overlap the corner
+// avatar; SessionCompareScreen's watermark is a centered full-page background
+// so dividers there always draw full width.
+async function captureNodeAsPng(node, { filename, dodgeAvatar = false, setCapturing } = {}) {
+  if (!node) return;
+  // html2canvas is loaded on demand (not at boot) — fetch it on first use.
+  const html2canvas = await window.__ensureHtml2Canvas?.().catch(() => null);
+  if (!html2canvas) return;
+  setCapturing?.(true);
+  // Temporarily expand scroll parent so html2canvas captures full content
+  const scrollParent = node.parentElement;
+  const saved = { overflow: scrollParent.style.overflow, height: scrollParent.style.height, minHeight: scrollParent.style.minHeight };
+  scrollParent.style.overflow = 'visible';
+  scrollParent.style.height = 'auto';
+  scrollParent.style.minHeight = 'auto';
+  await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+  // Draw knurl dividers imperatively — canvas elements placed by KnurlCanvas
+  // are guaranteed to be in the DOM now (React re-render completed within 2 RAFs).
+  const avatarEl = node.querySelector('img[data-shot-avatar]');
+  // The avatar is a freshly-mounted <img>; on first capture it may not have
+  // decoded within the 2 RAFs above, so its box would measure 0 and no line
+  // would be trimmed. Wait for it to load before measuring.
+  if (avatarEl && !avatarEl.complete) {
+    await new Promise(res => {
+      avatarEl.addEventListener('load', res, { once: true });
+      avatarEl.addEventListener('error', res, { once: true });
+    });
+    await new Promise(r => requestAnimationFrame(r));
+  }
+  const avatarRect = (dodgeAvatar && avatarEl && avatarEl.getBoundingClientRect().height) ? avatarEl.getBoundingClientRect() : null;
+  const KNURL_GAP = 14;
+  // Limit chip containers that vertically overlap the avatar so they don't
+  // bleed into it. Same gap as knurl lines.
+  if (avatarRect) {
+    node.querySelectorAll('[data-shot-chips]').forEach(el => {
+      const r = el.getBoundingClientRect();
+      if (r.bottom > avatarRect.top && r.top < avatarRect.bottom) {
+        const maxW = Math.round(avatarRect.left - r.left - KNURL_GAP);
+        if (maxW > 0 && maxW < r.width) el.style.maxWidth = maxW + 'px';
+      }
+    });
+  }
+  node.querySelectorAll('canvas[data-knurl]').forEach(c => {
+    const pw = c.parentElement ? c.parentElement.offsetWidth : 320;
+    let w = pw;
+    if (avatarRect) {
+      const r = c.getBoundingClientRect();
+      // Vertical overlap with the avatar band → trim to just left of it.
+      if (r.bottom > avatarRect.top && r.top < avatarRect.bottom) {
+        w = Math.min(w, Math.round(pw - (r.right - avatarRect.left) - KNURL_GAP));
+      }
+    }
+    if (w <= 0) return;
+    if (w < pw) c.style.width = w + 'px';
+    c.width = w; c.height = 3;
+    const ctx = c.getContext('2d');
+    const knurlRgb = getComputedStyle(document.documentElement).getPropertyValue('--knurl-rgb').trim() || '236,228,208';
+    ctx.strokeStyle = `rgba(${knurlRgb},0.20)`;
+    ctx.lineWidth = 1.5;
+    for (let x = -2; x < w + 6; x += 5.2) {
+      ctx.beginPath(); ctx.moveTo(x, 3); ctx.lineTo(x + 1.73, 0); ctx.stroke();
+    }
+  });
+  try {
+    const canvas = await html2canvas(node, {
+      backgroundColor: getComputedStyle(document.documentElement).getPropertyValue('--bg').trim() || '#1a1820',
+      scale: 2, useCORS: true, logging: false,
+      height: node.scrollHeight, windowHeight: node.scrollHeight,
+    });
+    canvas.toBlob(async (blob) => {
+      const file = new File([blob], filename, { type: 'image/png' });
+      const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+      if (isMobile && navigator.share && navigator.canShare?.({ files: [file] })) {
+        try { await navigator.share({ files: [file] }); } catch (_) {}
+      } else {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = filename;
+        document.body.appendChild(a); a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+      }
+    }, 'image/png');
+  } finally {
+    scrollParent.style.overflow = saved.overflow;
+    scrollParent.style.height = saved.height;
+    scrollParent.style.minHeight = saved.minHeight;
+    setCapturing?.(false);
+  }
+}
+
 function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = '', initialTags = [] }) {
   const [confirmEl, confirm] = useConfirm();
   const [name, setName] = useStateL(initialName);
@@ -2227,98 +2322,11 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
     s.entries.flatMap(e => store.exercises.find(x => x.id === e.exId)?.tags || []).filter(Boolean)
   )];
 
-  const takeScreenshot = async () => {
-    if (!captureRef.current) return;
-    // html2canvas is loaded on demand (not at boot) — fetch it on first use.
-    const html2canvas = await window.__ensureHtml2Canvas?.().catch(() => null);
-    if (!html2canvas) return;
-    setCapturing(true);
-    // Temporarily expand scroll parent so html2canvas captures full content
-    const scrollParent = captureRef.current.parentElement;
-    const saved = { overflow: scrollParent.style.overflow, height: scrollParent.style.height, minHeight: scrollParent.style.minHeight };
-    scrollParent.style.overflow = 'visible';
-    scrollParent.style.height = 'auto';
-    scrollParent.style.minHeight = 'auto';
-    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
-    // Draw knurl dividers imperatively — canvas elements placed by KnurlCanvas
-    // are guaranteed to be in the DOM now (React re-render completed within 2 RAFs).
-    // Shorten any knurl divider that overlaps the avatar (bottom-right) so the
-    // line stops just before it. Measured live, so it's correct for any avatar /
-    // background aspect ratio — not just the last divider.
-    const avatarEl = captureRef.current.querySelector('img[data-shot-avatar]');
-    // The avatar is a freshly-mounted <img>; on first capture it may not have
-    // decoded within the 2 RAFs above, so its box would measure 0 and no line
-    // would be trimmed. Wait for it to load before measuring.
-    if (avatarEl && !avatarEl.complete) {
-      await new Promise(res => {
-        avatarEl.addEventListener('load', res, { once: true });
-        avatarEl.addEventListener('error', res, { once: true });
-      });
-      await new Promise(r => requestAnimationFrame(r));
-    }
-    const avatarRect = (avatarEl && avatarEl.getBoundingClientRect().height) ? avatarEl.getBoundingClientRect() : null;
-    const KNURL_GAP = 14;
-    // Limit chip containers that vertically overlap the avatar so they don't
-    // bleed into it. Same gap as knurl lines.
-    if (avatarRect) {
-      captureRef.current.querySelectorAll('[data-shot-chips]').forEach(el => {
-        const r = el.getBoundingClientRect();
-        if (r.bottom > avatarRect.top && r.top < avatarRect.bottom) {
-          const maxW = Math.round(avatarRect.left - r.left - KNURL_GAP);
-          if (maxW > 0 && maxW < r.width) el.style.maxWidth = maxW + 'px';
-        }
-      });
-    }
-    captureRef.current.querySelectorAll('canvas[data-knurl]').forEach(c => {
-      const pw = c.parentElement ? c.parentElement.offsetWidth : 320;
-      let w = pw;
-      if (avatarRect) {
-        const r = c.getBoundingClientRect();
-        // Vertical overlap with the avatar band → trim to just left of it.
-        if (r.bottom > avatarRect.top && r.top < avatarRect.bottom) {
-          w = Math.min(w, Math.round(pw - (r.right - avatarRect.left) - KNURL_GAP));
-        }
-      }
-      if (w <= 0) return;
-      if (w < pw) c.style.width = w + 'px';
-      c.width = w; c.height = 3;
-      const ctx = c.getContext('2d');
-      const knurlRgb = getComputedStyle(document.documentElement).getPropertyValue('--knurl-rgb').trim() || '236,228,208';
-      ctx.strokeStyle = `rgba(${knurlRgb},0.20)`;
-      ctx.lineWidth = 1.5;
-      for (let x = -2; x < w + 6; x += 5.2) {
-        ctx.beginPath(); ctx.moveTo(x, 3); ctx.lineTo(x + 1.73, 0); ctx.stroke();
-      }
-    });
-    try {
-      const el = captureRef.current;
-      const canvas = await html2canvas(el, {
-        backgroundColor: getComputedStyle(document.documentElement).getPropertyValue('--bg').trim() || '#1a1820',
-        scale: 2, useCORS: true, logging: false,
-        height: el.scrollHeight, windowHeight: el.scrollHeight,
-      });
-      canvas.toBlob(async (blob) => {
-        const filename = `${s.dayName}-${s.date.slice(0,10)}.png`;
-        const file = new File([blob], filename, { type: 'image/png' });
-        const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-        if (isMobile && navigator.share && navigator.canShare?.({ files: [file] })) {
-          try { await navigator.share({ files: [file] }); } catch(_) {}
-        } else {
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url; a.download = filename;
-          document.body.appendChild(a); a.click();
-          document.body.removeChild(a);
-          setTimeout(() => URL.revokeObjectURL(url), 1000);
-        }
-      }, 'image/png');
-    } finally {
-      scrollParent.style.overflow = saved.overflow;
-      scrollParent.style.height = saved.height;
-      scrollParent.style.minHeight = saved.minHeight;
-      setCapturing(false);
-    }
-  };
+  const takeScreenshot = () => captureNodeAsPng(captureRef.current, {
+    filename: `${s.dayName}-${s.date.slice(0, 10)}.png`,
+    dodgeAvatar: true,
+    setCapturing,
+  });
 
   return (
     <Screen>
@@ -3160,71 +3168,14 @@ function SessionCompareScreen({ store, setStore, go, sessionId, compareId, back 
 
   const groups = LB.groupBySuperset(entries);
 
-  // Same html2canvas flow as SessionDetailScreen's takeScreenshot — kept in
-  // lockstep with that one (imperative KnurlCanvas draw). The watermark here
-  // is a full-page centered background (HomeScreen-style) rather than a
-  // foreground corner mark, so unlike SessionDetailScreen there's no need to
-  // measure/dodge it — knurl dividers always draw full width.
-  const takeScreenshot = async () => {
-    if (!captureRef.current) return;
-    const html2canvas = await window.__ensureHtml2Canvas?.().catch(() => null);
-    if (!html2canvas) return;
-    setCapturing(true);
-    const scrollParent = captureRef.current.parentElement;
-    const saved = { overflow: scrollParent.style.overflow, height: scrollParent.style.height, minHeight: scrollParent.style.minHeight };
-    scrollParent.style.overflow = 'visible';
-    scrollParent.style.height = 'auto';
-    scrollParent.style.minHeight = 'auto';
-    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
-    const avatarEl = captureRef.current.querySelector('img[data-shot-avatar]');
-    if (avatarEl && !avatarEl.complete) {
-      await new Promise(res => {
-        avatarEl.addEventListener('load', res, { once: true });
-        avatarEl.addEventListener('error', res, { once: true });
-      });
-      await new Promise(r => requestAnimationFrame(r));
-    }
-    captureRef.current.querySelectorAll('canvas[data-knurl]').forEach(c => {
-      const w = c.parentElement ? c.parentElement.offsetWidth : 320;
-      if (w <= 0) return;
-      c.width = w; c.height = 3;
-      const ctx = c.getContext('2d');
-      const knurlRgb = getComputedStyle(document.documentElement).getPropertyValue('--knurl-rgb').trim() || '236,228,208';
-      ctx.strokeStyle = `rgba(${knurlRgb},0.20)`;
-      ctx.lineWidth = 1.5;
-      for (let x = -2; x < w + 6; x += 5.2) {
-        ctx.beginPath(); ctx.moveTo(x, 3); ctx.lineTo(x + 1.73, 0); ctx.stroke();
-      }
-    });
-    try {
-      const el = captureRef.current;
-      const canvas = await html2canvas(el, {
-        backgroundColor: getComputedStyle(document.documentElement).getPropertyValue('--bg').trim() || '#1a1820',
-        scale: 2, useCORS: true, logging: false,
-        height: el.scrollHeight, windowHeight: el.scrollHeight,
-      });
-      canvas.toBlob(async (blob) => {
-        const filename = `${s.dayName}-compare-${s.date.slice(0, 10)}.png`;
-        const file = new File([blob], filename, { type: 'image/png' });
-        const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-        if (isMobile && navigator.share && navigator.canShare?.({ files: [file] })) {
-          try { await navigator.share({ files: [file] }); } catch (_) {}
-        } else {
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url; a.download = filename;
-          document.body.appendChild(a); a.click();
-          document.body.removeChild(a);
-          setTimeout(() => URL.revokeObjectURL(url), 1000);
-        }
-      }, 'image/png');
-    } finally {
-      scrollParent.style.overflow = saved.overflow;
-      scrollParent.style.height = saved.height;
-      scrollParent.style.minHeight = saved.minHeight;
-      setCapturing(false);
-    }
-  };
+  // Same html2canvas flow as SessionDetailScreen's takeScreenshot. The
+  // watermark here is a full-page centered background (HomeScreen-style)
+  // rather than a foreground corner mark, so unlike SessionDetailScreen there's
+  // no need to dodge it — knurl dividers always draw full width.
+  const takeScreenshot = () => captureNodeAsPng(captureRef.current, {
+    filename: `${s.dayName}-compare-${s.date.slice(0, 10)}.png`,
+    setCapturing,
+  });
 
   return (
     <Screen>
