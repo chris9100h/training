@@ -20,7 +20,7 @@ window.WHATS_NEW = [
     title: 'AMRAP Variations',
     items: [
       "🔀 New intensity technique: AMRAP Variations. Turn your last working set into back-to-back AMRAP rounds — same weight, no rest between them, chase reps until you can't anymore. Switching grip or variation each round is entirely optional: the label starts pre-filled with your current exercise, so you only touch it if you actually change something up. Find it under INTENSITY on any set.",
-      '⚖️ Mesocycle auto-progression got fairer: "Not enough volume" feedback used to always pile extra sets onto your main lift only. Now it rotates across every exercise hitting that muscle group that day, so gains get shared instead of stacking on one lift.',
+      "⚖️ Mesocycle auto-progression got fairer: when an exercise earns an extra set, that growth used to always land on your main lift only. Now it's distributed across every exercise hitting that muscle group that day, so gains don't keep stacking on the same lift.",
       "🛠 Fixed: leaving mid-set on a Drop Set, Myo-Rep, Lengthened Partial, or AMRAP Variations (e.g. jumping back to Home) used to wipe your progress. It's exactly where you left it when you come back.",
     ],
   },
