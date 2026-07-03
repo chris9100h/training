@@ -552,6 +552,13 @@ function App() {
       // look like it does nothing. Wipe the cache first, exactly like the
       // "Reload App" quick action does, so the reload is guaranteed to
       // actually fetch fresh code instead of silently staying on the old one.
+      // Persist the version we're about to fetch fresh — otherwise
+      // checkSwUpdate sees the same "new" version again right after reload
+      // and re-shows the banner, forever (confirmed: this caused an
+      // infinite update-banner loop whenever this fallback path was taken).
+      if (pendingSwVersion.current) {
+        try { localStorage.setItem('logbook-sw-version', pendingSwVersion.current); } catch (_) {}
+      }
       await LB.clearPrecompileCaches();
       window.location.reload(true);
     }
