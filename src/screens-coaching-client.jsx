@@ -465,6 +465,9 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
                       const chain = drops.map((d, di) => di === 0 ? `${d.kg ?? '—'}${unit}×${d.reps ?? '—'}` : (d.reps ?? '—')).join(' ↺ ');
                       return `${chain} (${total})`;
                     }
+                    if (s.technique === 'amrap_variations' && drops) {
+                      return drops.map(d => `${d.kg ?? '—'}${unit}×${d.reps ?? '—'}`).join(' → ');
+                    }
                     if (s.technique === 'lengthened_partial') {
                       const partials = s.drops?.partials || 0;
                       const main = `${s.kg ?? '—'}${unit} × ${s.reps ?? s.repsL ?? '—'}`;
@@ -478,6 +481,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
                   const techniqueLabel = (s) => s.technique === 'drop' ? 'DROP SET'
                     : s.technique === 'myorep_match' ? 'MYO MATCH'
                     : s.technique === 'myorep' ? 'MYO REP'
+                    : s.technique === 'amrap_variations' ? 'VARIATIONS'
                     : s.technique === 'lengthened_partial' ? 'PARTIALS'
                     : null;
                   return (todaySession.entries || []).map((e, i) => {
@@ -1302,6 +1306,9 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
                 const chain = drops.map((d, di) => di === 0 ? `${d.kg ?? '—'}${unit}×${d.reps ?? '—'}` : (d.reps ?? '—')).join(' ↺ ');
                 return `${chain} (${total})`;
               }
+              if (s.technique === 'amrap_variations' && drops) {
+                return drops.map(d => `${d.kg ?? '—'}${unit}×${d.reps ?? '—'}`).join(' → ');
+              }
               if (s.technique === 'lengthened_partial') {
                 const partials = s.drops?.partials || 0;
                 const main = `${s.kg ?? '—'}${unit} × ${s.reps ?? s.repsL ?? '—'}`;
@@ -1315,6 +1322,7 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
             const techniqueLabel = (s) => s.technique === 'drop' ? 'DROP SET'
               : s.technique === 'myorep_match' ? 'MYO MATCH'
               : s.technique === 'myorep' ? 'MYO REP'
+              : s.technique === 'amrap_variations' ? 'VARIATIONS'
               : s.technique === 'lengthened_partial' ? 'PARTIALS'
               : null;
             return (

@@ -2737,6 +2737,60 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                         );
                       }
 
+                      // AMRAP Variations: badge + per-round chips, each with its
+                      // label above (unless it's just the exercise's own name —
+                      // no variation was actually logged for that round).
+                      if (st.technique === 'amrap_variations' && !isCheckboxOnly) {
+                        const drops = (st.drops && st.drops.length > 0) ? st.drops : (st.kg != null ? [{ kg: st.kg, reps: st.reps }] : []);
+                        const chipColor = highlight ? UI.goldLight : decline ? 'rgba(var(--danger-rgb),0.85)' : UI.ink;
+                        const chipBorder = highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : UI.hairStrong;
+                        const chipBg = highlight ? UI.goldFaint : decline ? 'rgba(var(--danger-rgb),0.08)' : 'transparent';
+                        return (
+                          <div key={j} style={{
+                            width: '100%', marginTop: j > 0 ? 6 : 0,
+                            borderLeft: `2px solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.4)' : 'rgba(var(--accent-rgb),0.35)'}`,
+                            paddingLeft: 10,
+                          }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                              <span style={{
+                                fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em',
+                                color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.85)' : UI.inkFaint,
+                                background: highlight ? UI.goldFaint : decline ? 'rgba(var(--danger-rgb),0.08)' : 'rgba(var(--accent-rgb),0.08)',
+                                border: `0.5px solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : 'rgba(var(--accent-rgb),0.25)'}`,
+                                borderRadius: 4, padding: '2px 6px',
+                              }}>VARIATIONS</span>
+                              {pr && <i className="fa-solid fa-dumbbell" style={{ fontSize: 9, color: UI.gold }} />}
+                            </div>
+                            <div data-shot-chips="1" style={{ display: 'flex', alignItems: 'flex-end', flexWrap: 'wrap', gap: 4, overflow: 'hidden' }}>
+                              {drops.map((d, di) => (
+                                <React.Fragment key={di}>
+                                  {di > 0 && (
+                                    <span style={{ color: UI.inkGhost, fontSize: 10, fontFamily: UI.fontUi, alignSelf: 'center' }}>→</span>
+                                  )}
+                                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+                                    {d.label && d.label !== exName && (
+                                      <span className="num" style={{ fontSize: 8, color: UI.inkGhost, maxWidth: 72, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.label}</span>
+                                    )}
+                                    <span style={{
+                                      background: chipBg,
+                                      border: `1px solid ${chipBorder}`,
+                                      borderRadius: 4, padding: '3px 8px',
+                                      fontFamily: UI.fontNum, fontSize: 12,
+                                      color: chipColor,
+                                      opacity: di === 0 ? 1 : 0.75,
+                                    }}>
+                                      {d.kg ?? '—'}<span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, fontSize: 10 }}>{UI.unit()}</span>
+                                      <span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, margin: '0 1px' }}>×</span>
+                                      {d.reps ?? '—'}
+                                    </span>
+                                  </div>
+                                </React.Fragment>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      }
+
                       return (
                         <span key={j} style={{
                           opacity: (st.done || hasData) ? (isWarm ? 0.65 : 1) : 0.45,
@@ -2962,6 +3016,9 @@ function fmtCompareSet(st) {
     const chain = drops.map((d, di) => di === 0 ? `${d.kg ?? '—'}${UI.unit()}×${d.reps ?? '—'}` : (d.reps ?? '—')).join(' ↺ ');
     return `${chain} (${total})`;
   }
+  if (st.technique === 'amrap_variations' && Array.isArray(drops)) {
+    return drops.map(d => `${d.kg ?? '—'}${UI.unit()}×${d.reps ?? '—'}`).join(' → ');
+  }
   if (st.technique === 'lengthened_partial') {
     const partials = st.drops?.partials || 0;
     const main = `${st.kg != null ? st.kg + UI.unit() : '—'} × ${st.reps ?? '—'}`;
@@ -3008,7 +3065,7 @@ function TechniqueBlock({ st, highlight = false, decline = false }) {
   }
 
   const isMyo = st.technique === 'myorep' || st.technique === 'myorep_match';
-  const badgeLabel = st.technique === 'drop' ? 'DROP SET' : st.technique === 'myorep_match' ? 'MYO MATCH' : 'MYO-REPS';
+  const badgeLabel = st.technique === 'drop' ? 'DROP SET' : st.technique === 'myorep_match' ? 'MYO MATCH' : st.technique === 'amrap_variations' ? 'VARIATIONS' : 'MYO-REPS';
   const drops = (st.drops && Array.isArray(st.drops) && st.drops.length > 0) ? st.drops : (st.kg != null ? [{ kg: st.kg, reps: st.reps }] : []);
 
   return (
@@ -3411,6 +3468,9 @@ function ComparisonScreen({ session, onDismiss, go, userName }) {
               const chain = drops.map((d, di) => di === 0 ? `${d.kg ?? '—'}${unit}×${d.reps ?? '—'}` : (d.reps ?? '—')).join(' ↺ ');
               return `${chain} (${total})`;
             }
+            if (s.technique === 'amrap_variations' && drops) {
+              return drops.map(d => `${d.kg ?? '—'}${unit}×${d.reps ?? '—'}`).join(' → ');
+            }
             if (s.technique === 'lengthened_partial') {
               const partials = s.drops?.partials || 0;
               const main = `${s.kg != null ? s.kg + unit : '—'} × ${s.reps ?? '—'}`;
@@ -3746,6 +3806,36 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
                   </React.Fragment>
                 );
               }
+
+              // AMRAP Variations
+              if (s.technique === 'amrap_variations' && drops) return (
+                <React.Fragment key={i}>
+                <div style={{ padding: '12px 0', opacity: done ? 1 : 0.35, transition: 'opacity 0.3s' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                    <span className="num" style={{ fontSize: 11, color: done ? UI.gold : UI.inkFaint }}>{i + 1}</span>
+                    <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkFaint, background: 'rgba(var(--accent-rgb),0.08)', border: `0.5px solid rgba(var(--accent-rgb),0.25)`, borderRadius: 4, padding: '2px 6px' }}>VARIATIONS</span>
+                    <div style={{ marginLeft: 'auto' }}>
+                      {done ? <svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke={UI.gold} strokeWidth="1.8"><path d="M2 6l2.5 2.5L10 3"/></svg>
+                             : <div style={{ width: 13, height: 13, borderRadius: '50%', border: `1px solid ${UI.hair}` }} />}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'flex-end', flexWrap: 'wrap', gap: 4 }}>
+                    {drops.map((d, di) => (
+                      <React.Fragment key={di}>
+                        {di > 0 && <span style={{ color: UI.inkGhost, fontSize: 10, fontFamily: UI.fontUi, alignSelf: 'center' }}>→</span>}
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+                          {d.label && d.label !== entry.name && (
+                            <span className="num" style={{ fontSize: 8, color: UI.inkGhost, maxWidth: 90, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.label}</span>
+                          )}
+                          <span className="num" style={{ fontSize: 13, color: UI.ink }}>{d.kg ?? '—'}<span style={{ fontSize: 10, color: UI.inkFaint }}>{unit}</span> × {d.reps ?? '—'}</span>
+                        </div>
+                      </React.Fragment>
+                    ))}
+                  </div>
+                </div>
+                {i < entry.sets.length - 1 && <div className="knurl" />}
+                </React.Fragment>
+              );
 
               // Lengthened partials
               if (s.technique === 'lengthened_partial') {

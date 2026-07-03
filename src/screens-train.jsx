@@ -821,11 +821,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // confirm, bulk check-all) is guarded to redirect or skip this set
     // instead of reaching here bare, but this is the backstop.
     if (lpTarget?.exIdx === exIdx && lpTarget?.setIdx === setIdx && !extraPatch) return;
-    // Drop-set/myo-rep only ever complete via finishDropSet/finishMyoSet
-    // (which build the whole patch themselves and never call completeSet) —
-    // a bare completeSet on their target set would mark it done with none of
-    // that data, so refuse outright rather than silently corrupting it.
-    if (dropSetIdx === setIdx || myoSetIdx === setIdx) return;
+    // Drop-set/myo-rep/AMRAP Variations only ever complete via their own
+    // finish*Set function (which builds the whole patch itself and never
+    // calls completeSet) — a bare completeSet on their target set would mark
+    // it done with none of that data, so refuse outright rather than
+    // silently corrupting it.
+    if (dropSetIdx === setIdx || myoSetIdx === setIdx || avSetIdx === setIdx) return;
     // Unlock AudioContext on this user gesture so the rest-timer beep works on iOS
     // even when the tempo feature is disabled (only other init path).
     try {
@@ -1184,6 +1185,64 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     completeSet(setIdx, false, true, { technique: 'lengthened_partial', drops: { partials: lpCount } });
   };
 
+  const finishAv = (drops) => {
+    if (!drops.length || avSetIdx == null) return;
+    const first = drops[0];
+    updateSession(sess => ({
+      ...sess,
+      entries: sess.entries.map((en, ei) => ei !== exIdx ? en : {
+        ...en,
+        sets: en.sets.map((st, si) => si !== avSetIdx ? st : {
+          ...st,
+          kg: first.kg,
+          reps: first.reps,
+          done: true,
+          technique: 'amrap_variations',
+          drops,
+        }),
+      }),
+    }));
+    setFlashSet(avSetIdx);
+    setTimeout(() => setFlashSet(null), 1400);
+    kbFieldRef.current = null; kbRawRef.current = ''; setKbField(null); setKbRaw('');
+    // Stamp the same ghost-click guards completeSet uses (see finishDropSet).
+    armKbShield();
+    recentCompleteRef.current[avSetIdx] = Date.now();
+    lastCompleteRef.current = Date.now();
+    const targetIdx = avSetIdx;
+    setAvSetIdx(null); setAvDrops([]);
+    // Improvement / regression / new best overlays (same logic as completeSet/finishDropSet)
+    const isDeloadSession = store.statusMode === 'deload' || session.isDeload;
+    let overlayHoldMs = 0;
+    if (!entry.sets[targetIdx]?.warmup && !isDeloadSession && first.kg != null && first.reps > 0) {
+      const prevWS = (last?.entry?.sets || []).filter(s => !s.warmup);
+      const wIdx = entry.sets.slice(0, targetIdx + 1).filter(s => !s.warmup).length - 1;
+      const prevSet = wIdx >= 0 ? prevWS[wIdx] : undefined;
+      const cE1rm = LB.e1rm(first.kg, first.reps);
+      const localBest = LB.bestE1rmForExercise(store, entry.exId, session.id);
+      const priorBest = Math.max(localBest, remoteBestE1rmRef.current[entry.exId] || 0);
+      const isNewBest = cE1rm > 0 && priorBest > 0 && cE1rm > priorBest && !newBestShownRef.current[entry.exId];
+      if (isNewBest) {
+        newBestShownRef.current[entry.exId] = true;
+        setNewBestSet(true); overlayHoldMs = 2500; setTimeout(() => setNewBestSet(false), 2500);
+      } else if (isImprovement(first, prevSet)) {
+        setImprovedSet(true); overlayHoldMs = 2500; setTimeout(() => setImprovedSet(false), 2500);
+      } else {
+        const anyImpBefore = entry.sets.slice(0, targetIdx).some((s, k) => {
+          if (s.warmup) return false;
+          const wk = entry.sets.slice(0, k + 1).filter(x => !x.warmup).length - 1;
+          return isImprovement(s, wk >= 0 ? prevWS[wk] : undefined);
+        });
+        if (!anyImpBefore && isDecline(first, prevSet) && store.settings?.showRegression !== false) {
+          setRegressionSet(true); overlayHoldMs = 2500; setTimeout(() => setRegressionSet(false), 2500);
+        }
+      }
+    }
+    // Same superset-aware navigation as completeSet/finishDropSet/finishMyoSet.
+    const updatedSets = entry.sets.map((st, k) => k === targetIdx ? { ...st, done: true } : st);
+    finishSetNavigation(targetIdx, updatedSets, overlayHoldMs, true);
+  };
+
   const addSet = () => {
     updateSession(sess => {
       const group = sess.entries[exIdx]?.supersetGroup;
@@ -1297,6 +1356,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     if (dropSetIdx === idx) { finishDropSet(dropDropsRef.current); return; }
     if (myoSetIdx === idx) { finishMyoSet(myoDropsRef.current, myoTechnique); return; }
     if (lpTarget?.exIdx === exIdx && lpTarget?.setIdx === idx) { finishLengthenedPartial(idx); return; }
+    if (avSetIdx === idx) { finishAv(avDropsRef.current); return; }
     completeSet(idx, false, true);
   };
 
@@ -1687,21 +1747,26 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const [myoTarget, setMyoTarget] = useStateT(null);
   const [lpTarget, setLpTarget] = useStateT(null); // { exIdx, setIdx } | null — set is NOT done yet, replaces its checkbox with a stepper + FINISH button
   const [lpCount, setLpCount] = useStateT(0); // in-progress partials count for lpTarget, committed to the set only on Finish
+  const [avSetIdx, setAvSetIdx] = useStateT(null);
+  const [avDrops, setAvDrops] = useStateT([]); // [{ kg, reps, label }, ...] — AMRAP Variations rounds
+  const avDropsRef = useRefT([]);
+  avDropsRef.current = avDrops;
   // Persist intensity state so a background/resume on iOS doesn't wipe mid-set progress
   useEffectT(() => {
-    if (dropSetIdx != null || myoSetIdx != null || lpTarget != null) {
+    if (dropSetIdx != null || myoSetIdx != null || lpTarget != null || avSetIdx != null) {
       try {
         localStorage.setItem('logbook-intensity-state', JSON.stringify({
           sessionId, exIdx,
           dropSetIdx, dropDrops,
           myoSetIdx, myoDrops, myoTechnique, myoTarget,
           lpSetIdx: lpTarget?.setIdx ?? null, lpCount,
+          avSetIdx, avDrops,
         }));
       } catch {}
     } else {
       localStorage.removeItem('logbook-intensity-state');
     }
-  }, [dropSetIdx, dropDrops, myoSetIdx, myoDrops, myoTechnique, myoTarget, lpTarget, lpCount, sessionId, exIdx]);
+  }, [dropSetIdx, dropDrops, myoSetIdx, myoDrops, myoTechnique, myoTarget, lpTarget, lpCount, avSetIdx, avDrops, sessionId, exIdx]);
   useEffectT(() => {
     try {
       const raw = localStorage.getItem('logbook-intensity-state');
@@ -1727,6 +1792,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       if (st.lpSetIdx != null && !targetEntry?.sets[st.lpSetIdx]?.done) {
         setLpTarget({ exIdx, setIdx: st.lpSetIdx });
         setLpCount(st.lpCount || 0);
+      }
+      if (st.avSetIdx != null && !targetEntry?.sets[st.avSetIdx]?.done) {
+        setAvSetIdx(st.avSetIdx);
+        const ad = st.avDrops || [];
+        setAvDrops(ad); avDropsRef.current = ad;
       }
     } catch {}
   }, [sessionId, exIdx]);
@@ -2536,6 +2606,23 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     }, 80);
   };
 
+  const activateAvKb = (dropIdx, field) => {
+    const d = avDropsRef.current[dropIdx];
+    const val = field === 'kg'
+      ? (d?.kg != null ? String(d.kg).replace('.', ',') : '')
+      : (d?.reps != null ? String(d.reps) : '');
+    kbFieldRef.current = { setIdx: 'av', dropIdx, field };
+    kbRawRef.current = val;
+    kbFreshRef.current = true;
+    setKbField({ setIdx: 'av', dropIdx, field });
+    setKbRaw(val);
+    setKbFresh(true);
+    setTimeout(() => {
+      const el = document.querySelector('[data-av-actions]');
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }, 80);
+  };
+
   const kbApply = (newRaw, field, setIdx) => {
     if (setIdx === 'drop') {
       const dropIdx = kbFieldRef.current?.dropIdx;
@@ -2558,6 +2645,18 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       } else {
         const num = newRaw === '' ? null : parseInt(newRaw, 10);
         if (newRaw === '' || !isNaN(num)) setMyoDrops(prev => prev.map((d, i) => i === dropIdx ? { ...d, reps: num ?? null } : d));
+      }
+      return;
+    }
+    if (setIdx === 'av') {
+      const dropIdx = kbFieldRef.current?.dropIdx;
+      if (typeof dropIdx !== 'number') return;
+      if (field === 'kg') {
+        const num = newRaw === '' ? null : parseFloat(newRaw.replace(',', '.'));
+        if (newRaw === '' || !isNaN(num)) setAvDrops(prev => prev.map((d, i) => i === dropIdx ? { ...d, kg: num ?? null } : d));
+      } else {
+        const num = newRaw === '' ? null : parseInt(newRaw, 10);
+        if (newRaw === '' || !isNaN(num)) setAvDrops(prev => prev.map((d, i) => i === dropIdx ? { ...d, reps: num ?? null } : d));
       }
       return;
     }
@@ -2653,6 +2752,25 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       }
       return;
     }
+    if (setIdx === 'av') {
+      const { dropIdx } = kbFieldRef.current;
+      if (field === 'kg') {
+        const cur = parseFloat(kbRawRef.current.replace(',', '.')) || 0;
+        const step = (exercise?.equipment && store.settings?.equipmentConfig?.[exercise.equipment]?.increment) || 1.25;
+        const next = Math.max(0, Math.round((cur + dir * step) * 100) / 100);
+        const newRaw = String(next).replace('.', ',');
+        kbRawRef.current = newRaw;
+        setKbRaw(newRaw);
+        setAvDrops(prev => prev.map((d, i) => i === dropIdx ? { ...d, kg: next } : d));
+      } else {
+        const cur = parseInt(kbRawRef.current, 10) || 0;
+        const next = Math.max(0, cur + dir);
+        kbRawRef.current = String(next);
+        setKbRaw(String(next));
+        setAvDrops(prev => prev.map((d, i) => i === dropIdx ? { ...d, reps: next } : d));
+      }
+      return;
+    }
     if (field === 'kg') {
       const cur = parseFloat(kbRawRef.current.replace(',', '.')) || 0;
       const step = (exercise?.equipment && store.settings?.equipmentConfig?.[exercise.equipment]?.increment) || 1.25;
@@ -2720,6 +2838,23 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       }
       return;
     }
+    if (setIdx === 'av') {
+      const { dropIdx } = kbFieldRef.current;
+      kbApply(kbRawRef.current, field, setIdx);
+      if (field === 'kg') {
+        activateAvKb(dropIdx, 'reps');
+      } else {
+        const drops = avDropsRef.current;
+        if (dropIdx + 1 < drops.length) {
+          setTimeout(() => activateAvKb(dropIdx + 1, 'kg'), 50);
+        } else {
+          kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false;
+          setKbField(null); setKbRaw(''); setKbFresh(false);
+          armKbShield();
+        }
+      }
+      return;
+    }
     _log(`kbConfirm: set${setIdx} field=${field} raw='${kbRawRef.current}'`);
     kbApply(kbRawRef.current, field, setIdx);
     if (field === 'kg') {
@@ -2730,7 +2865,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       activateKb(setIdx, 'repsR');
     } else {
       _log(`kbConfirm: ${field}→completeSet(${setIdx})`);
-      if (dropSetIdx === setIdx || myoSetIdx === setIdx) return;
+      if (dropSetIdx === setIdx || myoSetIdx === setIdx || avSetIdx === setIdx) return;
       if (lpTarget?.exIdx === exIdx && lpTarget?.setIdx === setIdx) return;
       completeSet(setIdx, false, true);
     }
@@ -3319,7 +3454,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // bulk-check has no way to supply (drop weights, myo minis, partials
     // count) — leave that one set for the user to finish individually rather
     // than silently marking it done with none of that data recorded.
-    const skipIdx = lpTarget?.exIdx === exIdx ? lpTarget.setIdx : (dropSetIdx ?? myoSetIdx ?? -1);
+    const skipIdx = lpTarget?.exIdx === exIdx ? lpTarget.setIdx : (dropSetIdx ?? myoSetIdx ?? avSetIdx ?? -1);
     updateSession(sess => ({
       ...sess,
       entries: sess.entries.map((e, i) => i === exIdx
@@ -4022,7 +4157,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                     const isDropActive = dropSetIdx === i && !s.done;
                     const isMyoActive = myoSetIdx === i && !s.done;
                     const isLpActive = lpTarget?.exIdx === exIdx && lpTarget?.setIdx === i && !s.done;
-                    const isIntensityActive = isDropActive || isMyoActive;
+                    const isAvActive = avSetIdx === i && !s.done;
+                    const isIntensityActive = isDropActive || isMyoActive || isAvActive;
                     return (
                     <div data-kb-row={i} style={{
                       display: 'grid',
@@ -4042,14 +4178,19 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                       }}>{isWarmupRow ? `W${warmupRowNum}` : workingRowNum}</div>
 
                       {isIntensityActive ? null : isNoWeightReps ? <div /> : (
-                        (s.technique === 'drop' || s.technique === 'myorep' || s.technique === 'myorep_match' || s.technique === 'lengthened_partial') && s.done
-                          ? <span style={{
-                              display: 'inline-block', fontFamily: UI.fontUi, fontSize: 8,
-                              fontWeight: 700, letterSpacing: '0.12em', color: UI.gold,
-                              background: 'rgba(var(--accent-rgb),0.12)',
-                              border: '0.5px solid rgba(var(--accent-rgb),0.35)',
-                              borderRadius: 4, padding: '2px 6px',
-                            }}>{s.technique === 'drop' ? 'DROP SET' : s.technique === 'myorep_match' ? 'MYO MATCH' : s.technique === 'myorep' ? 'MYO REP' : 'PARTIALS'}</span>
+                        (s.technique === 'drop' || s.technique === 'myorep' || s.technique === 'myorep_match' || s.technique === 'lengthened_partial' || s.technique === 'amrap_variations') && s.done
+                          ? <div style={{ display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'flex-start' }}>
+                              <span style={{
+                                display: 'inline-block', fontFamily: UI.fontUi, fontSize: 8,
+                                fontWeight: 700, letterSpacing: '0.12em', color: UI.gold,
+                                background: 'rgba(var(--accent-rgb),0.12)',
+                                border: '0.5px solid rgba(var(--accent-rgb),0.35)',
+                                borderRadius: 4, padding: '2px 6px',
+                              }}>{s.technique === 'drop' ? 'DROP SET' : s.technique === 'myorep_match' ? 'MYO MATCH' : s.technique === 'myorep' ? 'MYO REP' : s.technique === 'amrap_variations' ? 'VARIATIONS' : 'PARTIALS'}</span>
+                              {s.technique === 'amrap_variations' && s.drops?.[0]?.label && s.drops[0].label !== entry.name && (
+                                <span className="num" style={{ fontSize: 9, color: UI.inkGhost }}>{s.drops[0].label}</span>
+                              )}
+                            </div>
                           : <div className="num" style={{ fontSize: 11, color: UI.inkFaint }}>
                               {isWarmupRow
                                 ? <span style={{ color: UI.inkGhost }}>{s.warmupPct}%</span>
@@ -4109,7 +4250,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                             updateSet(i, { done: false });
                             return;
                           }
-                          if (dropSetIdx === i || myoSetIdx === i) return;
+                          if (dropSetIdx === i || myoSetIdx === i || avSetIdx === i) return;
                           if (!isNoWeightReps && !isBodyweight && s.kg == null) return;
                           _log(`row${i} → completeSet`);
                           completeSet(i, false, true);
@@ -4258,6 +4399,128 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                           </div>
                           <div style={{ ...setInputStyle(true, false), display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                             <span className="num" style={{ fontSize: 15, color: UI.inkSoft }}>{d.reps ?? '—'}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {/* AMRAP Variations active inline rows */}
+                  {avSetIdx === i && !s.done && (
+                    <div style={{ marginLeft: 36, paddingLeft: 10, borderLeft: `2px solid rgba(var(--accent-rgb),0.3)` }}>
+                      <div style={{ position: 'sticky', top: 0, background: 'var(--bg)', zIndex: 1, paddingBottom: 2 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 4px 2px' }}>
+                          <span className="micro-gold">AMRAP VARIATIONS</span>
+                          <button onClick={() => {
+                            setAvSetIdx(null); setAvDrops([]);
+                            kbFieldRef.current = null; kbRawRef.current = ''; setKbField(null); setKbRaw('');
+                          }} style={{ background: 'none', border: 'none', color: UI.inkFaint, fontSize: 10, fontFamily: UI.fontUi, cursor: 'pointer', padding: '2px 4px', letterSpacing: '0.08em' }}>CANCEL</button>
+                        </div>
+                      </div>
+                      {avDrops.map((d, di) => {
+                        const isKgA = kbField?.setIdx === 'av' && kbField?.dropIdx === di && kbField?.field === 'kg';
+                        const isRepsA = kbField?.setIdx === 'av' && kbField?.dropIdx === di && kbField?.field === 'reps';
+                        return (
+                          <div key={di} data-av-row={di} style={{ padding: '6px 4px', borderBottom: di < avDrops.length - 1 ? `0.5px solid ${UI.hair}` : 'none' }}>
+                            <input
+                              type="text"
+                              value={d.label ?? ''}
+                              onFocus={e => e.target.select()}
+                              onChange={e => { const val = e.target.value; setAvDrops(prev => prev.map((dd, idx) => idx === di ? { ...dd, label: val } : dd)); }}
+                              placeholder={entry.name}
+                              style={{
+                                width: '100%', boxSizing: 'border-box', background: 'transparent',
+                                border: 'none', borderBottom: `0.5px solid ${UI.hairStrong}`,
+                                color: UI.ink, fontFamily: UI.fontUi, fontSize: 12, padding: '2px 2px 5px',
+                                marginBottom: 6, outline: 'none', WebkitTapHighlightColor: 'transparent',
+                              }}
+                            />
+                            <div style={{ display: 'grid', gridTemplateColumns: '28px 1fr 72px 56px 28px', gap: 8, alignItems: 'center' }}>
+                              <div style={{
+                                width: 24, height: 24, borderRadius: 4, flexShrink: 0,
+                                background: 'rgba(var(--accent-rgb),0.08)',
+                                outline: `1px solid rgba(var(--accent-rgb),0.3)`,
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                color: UI.gold,
+                              }}><i className="fa-solid fa-shuffle" style={{ fontSize: 10 }} /></div>
+                              <div className="num" style={{ fontSize: 10, color: UI.inkGhost }}>round {di + 1}</div>
+                              <KbCell
+                                text={isKgA ? kbRaw : (d.kg != null ? String(d.kg).replace('.', ',') : '')}
+                                placeholder="—"
+                                onActivate={() => activateAvKb(di, 'kg')}
+                                style={{ ...setInputStyle(false, isKgA), ...(isKgA ? { boxShadow: 'inset 0 -2px 0 var(--accent)' } : {}) }}
+                              />
+                              <KbCell
+                                text={isRepsA ? kbRaw : (d.reps != null ? String(d.reps) : '')}
+                                placeholder="—"
+                                onActivate={() => activateAvKb(di, 'reps')}
+                                style={{ ...setInputStyle(false, isRepsA), ...(isRepsA ? { boxShadow: 'inset 0 -2px 0 var(--accent)' } : {}) }}
+                              />
+                              <button onClick={() => avDrops.length > 1 && setAvDrops(prev => prev.filter((_, idx) => idx !== di))}
+                                disabled={avDrops.length <= 1}
+                                style={{
+                                  width: 26, height: 26, borderRadius: 4, border: `1px solid ${UI.hair}`,
+                                  background: 'transparent', color: UI.inkFaint, fontSize: 14,
+                                  cursor: avDrops.length <= 1 ? 'default' : 'pointer',
+                                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                  opacity: avDrops.length <= 1 ? 0.2 : 1, flexShrink: 0,
+                                  WebkitTapHighlightColor: 'transparent',
+                                }}>×</button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                      {(() => {
+                        const canFinishAv = !!avDrops[0]?.reps && (isNoWeightReps || isBodyweight || avDrops[0]?.kg != null);
+                        return (
+                      <div data-av-actions style={{ display: 'flex', gap: 8, padding: '4px 4px 10px', scrollMarginBottom: 260 }}>
+                        <button onClick={() => {
+                          const newIdx = avDropsRef.current.length;
+                          const prevKg = avDropsRef.current[avDropsRef.current.length - 1]?.kg ?? null;
+                          setAvDrops(prev => [...prev, { kg: prevKg, reps: null, label: entry.name }]);
+                          setTimeout(() => activateAvKb(newIdx, 'kg'), 80);
+                        }} style={{
+                          flex: 1, padding: '8px 0', background: 'transparent',
+                          border: `1px solid ${UI.hairStrong}`, borderRadius: 6,
+                          color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700,
+                          letterSpacing: '0.1em', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+                        }}>+ ADD ROUND</button>
+                        <button onClick={() => finishAv(avDropsRef.current)}
+                          disabled={!canFinishAv}
+                          style={{
+                            flex: 2, padding: '8px 0',
+                            background: canFinishAv ? 'rgba(var(--accent-rgb),0.12)' : 'transparent',
+                            border: `1px solid ${canFinishAv ? 'rgba(var(--accent-rgb),0.5)' : UI.hair}`,
+                            borderRadius: 6, color: canFinishAv ? 'var(--accent)' : UI.inkGhost,
+                            fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.1em',
+                            cursor: canFinishAv ? 'pointer' : 'default',
+                            WebkitTapHighlightColor: 'transparent',
+                          }}>✓ FINISH</button>
+                      </div>
+                        );
+                      })()}
+                    </div>
+                  )}
+                  {s.technique === 'amrap_variations' && s.done && (s.drops || []).length > 1 && (
+                    <div style={{ marginLeft: 36, paddingLeft: 10, paddingBottom: 8, borderLeft: `2px solid rgba(var(--accent-rgb),0.2)` }}>
+                      {(s.drops || []).slice(1).map((d, di) => (
+                        <div key={di} style={{ padding: '4px 4px', opacity: 0.5 }}>
+                          {d.label && d.label !== entry.name && (
+                            <div className="num" style={{ fontSize: 9, color: UI.inkGhost, marginBottom: 2 }}>{d.label}</div>
+                          )}
+                          <div style={{ display: 'grid', gridTemplateColumns: '28px 1fr 72px 56px', gap: 8, alignItems: 'center' }}>
+                            <div style={{
+                              width: 24, height: 24, borderRadius: 4,
+                              outline: `1px solid rgba(var(--accent-rgb),0.2)`,
+                              display: 'flex', alignItems: 'center', justifyContent: 'center',
+                              color: UI.goldSoft,
+                            }}><i className="fa-solid fa-shuffle" style={{ fontSize: 9 }} /></div>
+                            <div />
+                            <div style={{ ...setInputStyle(true, false), display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                              <span className="num" style={{ fontSize: 15, color: UI.inkSoft }}>{d.kg != null ? String(d.kg).replace('.', ',') : '—'}</span>
+                            </div>
+                            <div style={{ ...setInputStyle(true, false), display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                              <span className="num" style={{ fontSize: 15, color: UI.inkSoft }}>{d.reps ?? '—'}</span>
+                            </div>
                           </div>
                         </div>
                       ))}
@@ -4747,12 +5010,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           const clearDrop = () => { setDropSetIdx(null); setDropDrops([]); };
           const clearMyo = () => { setMyoSetIdx(null); setMyoDrops([]); setMyoTechnique(null); setMyoTarget(null); };
           const clearLp = () => { setLpTarget(null); setLpCount(0); };
+          const clearAv = () => { setAvSetIdx(null); setAvDrops([]); };
           const startDrop = () => {
             const target = currentSetIdx >= 0
               ? currentSetIdx
               : entry.sets.reduce((last, s, i) => !s.warmup ? i : last, -1);
             if (target < 0) return;
-            clearMyo(); clearLp();
+            clearMyo(); clearLp(); clearAv();
             const s = entry.sets[target];
             const initDrops = [{ kg: s?.kg ?? null, reps: s?.reps ?? null }];
             setDropDrops(initDrops);
@@ -4761,12 +5025,26 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             setIntensityOpen(false);
             setTimeout(() => activateDropKb(0, 'kg'), 150);
           };
+          const startAv = () => {
+            const target = currentSetIdx >= 0
+              ? currentSetIdx
+              : entry.sets.reduce((last, s, i) => !s.warmup ? i : last, -1);
+            if (target < 0) return;
+            clearDrop(); clearMyo(); clearLp();
+            const s = entry.sets[target];
+            const initDrops = [{ kg: s?.kg ?? null, reps: s?.reps ?? null, label: entry.name }];
+            setAvDrops(initDrops);
+            avDropsRef.current = initDrops;
+            setAvSetIdx(target);
+            setIntensityOpen(false);
+            setTimeout(() => activateAvKb(0, 'kg'), 150);
+          };
           const startMyo = (technique) => {
             const target = currentSetIdx >= 0
               ? currentSetIdx
               : entry.sets.reduce((last, s, i) => !s.warmup ? i : last, -1);
             if (target < 0) return;
-            clearDrop(); clearLp();
+            clearDrop(); clearLp(); clearAv();
             const s = entry.sets[target];
             const anchor = entry.sets.find(st => st.technique === 'myorep' && st.done && st.drops?.[0]?.reps != null);
             // For match: activation kg locked to the preceding myo set's activation kg
@@ -4820,13 +5098,23 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkSoft, marginTop: 2 }}>Descend the weight, keep the reps coming</div>
                 </div>
               </button>
+              {/* AMRAP Variations — grip/variation swap is entirely optional
+                  (the label input pre-fills with the exercise's own name), the
+                  point is chasing reps back-to-back with no rest. */}
+              <button onClick={startAv} style={btnBase(true)}>
+                <i className="fa-solid fa-shuffle" style={{ fontSize: 18, color: 'var(--accent)', width: 20, textAlign: 'center', flexShrink: 0 }} />
+                <div>
+                  <div style={{ fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, letterSpacing: '0.12em', color: 'var(--accent)' }}>AMRAP VARIATIONS</div>
+                  <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkSoft, marginTop: 2 }}>AMRAP each round, swap the grip — no rest, no mercy</div>
+                </div>
+              </button>
               {/* Lengthened Partials */}
               <button onClick={() => {
                 const target = currentSetIdx >= 0
                   ? currentSetIdx
                   : entry.sets.reduce((last, s, i) => !s.warmup ? i : last, -1);
                 if (target < 0) return;
-                clearDrop(); clearMyo();
+                clearDrop(); clearMyo(); clearAv();
                 setLpTarget({ exIdx, setIdx: target });
                 setLpCount(0);
                 setIntensityOpen(false);
@@ -5259,7 +5547,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         onAdjust={kbAdjust}
         onConfirm={kbConfirm}
         confirmDisabled={
-          ((kbField?.setIdx === 'drop' || kbField?.setIdx === 'myo') && kbField?.field === 'reps') ||
+          ((kbField?.setIdx === 'drop' || kbField?.setIdx === 'myo' || kbField?.setIdx === 'av') && kbField?.field === 'reps') ||
           (lpTarget?.exIdx === exIdx && lpTarget?.setIdx === kbField?.setIdx && (kbField?.field === 'reps' || kbField?.field === 'repsR'))
         }
         onDismiss={() => { kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false; setKbField(null); setKbRaw(''); setKbFresh(false); armKbShield(); }}
