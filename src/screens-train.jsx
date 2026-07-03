@@ -1070,6 +1070,43 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     }
   };
 
+  // Improvement / regression / new-best overlay — shared by finishDropSet,
+  // finishMyoSet, and finishAv (three byte-identical copies before this).
+  // completeSet keeps its own version since it additionally handles
+  // PROGRESSION UNLOCKED precedence, which the technique finishers don't need.
+  // firstSet is the technique's first/committed round ({kg, reps, ...}),
+  // passed through as-is (not reconstructed) so isImprovement/isDecline see
+  // exactly what they always did. Returns overlayHoldMs for finishSetNavigation.
+  const flashOverlayForCompletedSet = (targetIdx, firstSet) => {
+    const isDeloadSession = store.statusMode === 'deload' || session.isDeload;
+    let overlayHoldMs = 0;
+    if (!entry.sets[targetIdx]?.warmup && !isDeloadSession && firstSet.kg != null && firstSet.reps > 0) {
+      const prevWS = (last?.entry?.sets || []).filter(s => !s.warmup);
+      const wIdx = entry.sets.slice(0, targetIdx + 1).filter(s => !s.warmup).length - 1;
+      const prevSet = wIdx >= 0 ? prevWS[wIdx] : undefined;
+      const cE1rm = LB.e1rm(firstSet.kg, firstSet.reps);
+      const localBest = LB.bestE1rmForExercise(store, entry.exId, session.id);
+      const priorBest = Math.max(localBest, remoteBestE1rmRef.current[entry.exId] || 0);
+      const isNewBest = cE1rm > 0 && priorBest > 0 && cE1rm > priorBest && !newBestShownRef.current[entry.exId];
+      if (isNewBest) {
+        newBestShownRef.current[entry.exId] = true;
+        setNewBestSet(true); overlayHoldMs = 2500; setTimeout(() => setNewBestSet(false), 2500);
+      } else if (isImprovement(firstSet, prevSet)) {
+        setImprovedSet(true); overlayHoldMs = 2500; setTimeout(() => setImprovedSet(false), 2500);
+      } else {
+        const anyImpBefore = entry.sets.slice(0, targetIdx).some((s, k) => {
+          if (s.warmup) return false;
+          const wk = entry.sets.slice(0, k + 1).filter(x => !x.warmup).length - 1;
+          return isImprovement(s, wk >= 0 ? prevWS[wk] : undefined);
+        });
+        if (!anyImpBefore && isDecline(firstSet, prevSet) && store.settings?.showRegression !== false) {
+          setRegressionSet(true); overlayHoldMs = 2500; setTimeout(() => setRegressionSet(false), 2500);
+        }
+      }
+    }
+    return overlayHoldMs;
+  };
+
   const finishDropSet = (drops) => {
     if (!drops.length || dropSetIdx == null) return;
     // Optional finisher: partials tacked onto the last drop's failure point.
@@ -1104,33 +1141,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     const targetIdx = dropSetIdx;
     setDropSetIdx(null);
     setFinisherPartials(0);
-    // Improvement / regression / new best overlays (same logic as completeSet)
-    const isDeloadSession = store.statusMode === 'deload' || session.isDeload;
-    let overlayHoldMs = 0;
-    if (!entry.sets[targetIdx]?.warmup && !isDeloadSession && first.kg != null && first.reps > 0) {
-      const prevWS = (last?.entry?.sets || []).filter(s => !s.warmup);
-      const wIdx = entry.sets.slice(0, targetIdx + 1).filter(s => !s.warmup).length - 1;
-      const prevSet = wIdx >= 0 ? prevWS[wIdx] : undefined;
-      const cE1rm = LB.e1rm(first.kg, first.reps);
-      const localBest = LB.bestE1rmForExercise(store, entry.exId, session.id);
-      const priorBest = Math.max(localBest, remoteBestE1rmRef.current[entry.exId] || 0);
-      const isNewBest = cE1rm > 0 && priorBest > 0 && cE1rm > priorBest && !newBestShownRef.current[entry.exId];
-      if (isNewBest) {
-        newBestShownRef.current[entry.exId] = true;
-        setNewBestSet(true); overlayHoldMs = 2500; setTimeout(() => setNewBestSet(false), 2500);
-      } else if (isImprovement(first, prevSet)) {
-        setImprovedSet(true); overlayHoldMs = 2500; setTimeout(() => setImprovedSet(false), 2500);
-      } else {
-        const anyImpBefore = entry.sets.slice(0, targetIdx).some((s, k) => {
-          if (s.warmup) return false;
-          const wk = entry.sets.slice(0, k + 1).filter(x => !x.warmup).length - 1;
-          return isImprovement(s, wk >= 0 ? prevWS[wk] : undefined);
-        });
-        if (!anyImpBefore && isDecline(first, prevSet) && store.settings?.showRegression !== false) {
-          setRegressionSet(true); overlayHoldMs = 2500; setTimeout(() => setRegressionSet(false), 2500);
-        }
-      }
-    }
+    const overlayHoldMs = flashOverlayForCompletedSet(targetIdx, first);
     // Rest timer + navigation — same superset-aware logic as completeSet, so
     // a drop-set finishing a round correctly jumps to the partner instead of
     // the plain navigate(1) this used to do regardless of grouping.
@@ -1174,33 +1185,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     lastCompleteRef.current = Date.now();
     const targetIdx = myoSetIdx;
     setMyoSetIdx(null); setMyoTechnique(null); setMyoDrops([]); setMyoTarget(null); setFinisherPartials(0);
-    // Improvement / regression / new best overlays
-    const isDeloadSession = store.statusMode === 'deload' || session.isDeload;
-    let overlayHoldMs = 0;
-    if (!entry.sets[targetIdx]?.warmup && !isDeloadSession && first.kg != null && first.reps > 0) {
-      const prevWS = (last?.entry?.sets || []).filter(s => !s.warmup);
-      const wIdx = entry.sets.slice(0, targetIdx + 1).filter(s => !s.warmup).length - 1;
-      const prevSet = wIdx >= 0 ? prevWS[wIdx] : undefined;
-      const cE1rm = LB.e1rm(first.kg, first.reps);
-      const localBest = LB.bestE1rmForExercise(store, entry.exId, session.id);
-      const priorBest = Math.max(localBest, remoteBestE1rmRef.current[entry.exId] || 0);
-      const isNewBest = cE1rm > 0 && priorBest > 0 && cE1rm > priorBest && !newBestShownRef.current[entry.exId];
-      if (isNewBest) {
-        newBestShownRef.current[entry.exId] = true;
-        setNewBestSet(true); overlayHoldMs = 2500; setTimeout(() => setNewBestSet(false), 2500);
-      } else if (isImprovement(first, prevSet)) {
-        setImprovedSet(true); overlayHoldMs = 2500; setTimeout(() => setImprovedSet(false), 2500);
-      } else {
-        const anyImpBefore = entry.sets.slice(0, targetIdx).some((s, k) => {
-          if (s.warmup) return false;
-          const wk = entry.sets.slice(0, k + 1).filter(x => !x.warmup).length - 1;
-          return isImprovement(s, wk >= 0 ? prevWS[wk] : undefined);
-        });
-        if (!anyImpBefore && isDecline(first, prevSet) && store.settings?.showRegression !== false) {
-          setRegressionSet(true); overlayHoldMs = 2500; setTimeout(() => setRegressionSet(false), 2500);
-        }
-      }
-    }
+    const overlayHoldMs = flashOverlayForCompletedSet(targetIdx, first);
     // Same superset-aware navigation as completeSet/finishDropSet — a myo-rep
     // finishing a round jumps to the partner instead of a plain navigate(1).
     const updatedSets = entry.sets.map((st, k) => k === targetIdx ? { ...st, done: true } : st);
@@ -1245,33 +1230,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     lastCompleteRef.current = Date.now();
     const targetIdx = avSetIdx;
     setAvSetIdx(null); setAvDrops([]); setFinisherPartials(0);
-    // Improvement / regression / new best overlays (same logic as completeSet/finishDropSet)
-    const isDeloadSession = store.statusMode === 'deload' || session.isDeload;
-    let overlayHoldMs = 0;
-    if (!entry.sets[targetIdx]?.warmup && !isDeloadSession && first.kg != null && first.reps > 0) {
-      const prevWS = (last?.entry?.sets || []).filter(s => !s.warmup);
-      const wIdx = entry.sets.slice(0, targetIdx + 1).filter(s => !s.warmup).length - 1;
-      const prevSet = wIdx >= 0 ? prevWS[wIdx] : undefined;
-      const cE1rm = LB.e1rm(first.kg, first.reps);
-      const localBest = LB.bestE1rmForExercise(store, entry.exId, session.id);
-      const priorBest = Math.max(localBest, remoteBestE1rmRef.current[entry.exId] || 0);
-      const isNewBest = cE1rm > 0 && priorBest > 0 && cE1rm > priorBest && !newBestShownRef.current[entry.exId];
-      if (isNewBest) {
-        newBestShownRef.current[entry.exId] = true;
-        setNewBestSet(true); overlayHoldMs = 2500; setTimeout(() => setNewBestSet(false), 2500);
-      } else if (isImprovement(first, prevSet)) {
-        setImprovedSet(true); overlayHoldMs = 2500; setTimeout(() => setImprovedSet(false), 2500);
-      } else {
-        const anyImpBefore = entry.sets.slice(0, targetIdx).some((s, k) => {
-          if (s.warmup) return false;
-          const wk = entry.sets.slice(0, k + 1).filter(x => !x.warmup).length - 1;
-          return isImprovement(s, wk >= 0 ? prevWS[wk] : undefined);
-        });
-        if (!anyImpBefore && isDecline(first, prevSet) && store.settings?.showRegression !== false) {
-          setRegressionSet(true); overlayHoldMs = 2500; setTimeout(() => setRegressionSet(false), 2500);
-        }
-      }
-    }
+    const overlayHoldMs = flashOverlayForCompletedSet(targetIdx, first);
     // Same superset-aware navigation as completeSet/finishDropSet/finishMyoSet.
     const updatedSets = entry.sets.map((st, k) => k === targetIdx ? { ...st, done: true } : st);
     finishSetNavigation(targetIdx, updatedSets, overlayHoldMs, true);
