@@ -764,14 +764,17 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
       const flds = n[si].fields;
       const view = buildFieldView(flds);
       const macroFields = flds.filter(f => MACRO_GROUP_KEYS.has(f.key));
-      const nonMacroFields = flds.filter(f => !MACRO_GROUP_KEYS.has(f.key));
-      // Apply the move on the view level, then reconstruct the fields array.
+      // Apply the move on the view level, then reconstruct the fields array
+      // by looking up each view item's ORIGINAL field via its arrayIdx — not
+      // by re-consuming non-macro fields in their old order, which silently
+      // discarded every reorder (the moved item's new position was applied
+      // to the view array, but the fields it mapped back to were still
+      // handed out in original order, so the rebuilt array never changed).
       const newView = [...view];
       const [moved] = newView.splice(fromV, 1);
       newView.splice(toV, 0, moved);
-      let nonMacroIdx = 0;
       n[si].fields = newView.map(item =>
-        item.isMacroGroup ? macroFields : [nonMacroFields[nonMacroIdx++]]
+        item.isMacroGroup ? macroFields : [flds[item.arrayIdx]]
       ).flat();
       return n;
     });
