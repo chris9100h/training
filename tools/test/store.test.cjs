@@ -500,6 +500,70 @@ async function testAsync(name, fn) {
     assert.strictEqual(LB.weekPerformanceSignal(state, '2026-06-08'), 'improved');
   });
 
+  // ── pickGrowthRecipient / retractGrowthGrant (meso volume growth rotation) ──
+  test('pickGrowthRecipient: single exercise always wins, matching pre-rotation main-lift-only behavior', () => {
+    const r = LB.pickGrowthRecipient(['a_d1'], {}, {}, null);
+    assert.strictEqual(r.recipientKey, 'a_d1');
+    assert.strictEqual(r.growthCounts.a_d1, 1);
+  });
+
+  test('pickGrowthRecipient: single exercise stops granting once at its own ceiling', () => {
+    const r = LB.pickGrowthRecipient(['a_d1'], { a_d1: 4 }, { a_d1: 7 }, null);
+    assert.strictEqual(r.recipientKey, null);
+    // growthCounts is left untouched when nobody is eligible
+    assert.strictEqual(r.growthCounts.a_d1, 7);
+  });
+
+  test('pickGrowthRecipient: fewest grants wins, ties toward the main (first) exercise', () => {
+    // Tied at 0 → main (a_d1) wins.
+    const r1 = LB.pickGrowthRecipient(['a_d1', 'b_d1'], {}, {}, null);
+    assert.strictEqual(r1.recipientKey, 'a_d1');
+    // b already has fewer grants → b wins even though a is main.
+    const r2 = LB.pickGrowthRecipient(['a_d1', 'b_d1'], {}, { a_d1: 2, b_d1: 1 }, null);
+    assert.strictEqual(r2.recipientKey, 'b_d1');
+    assert.strictEqual(r2.growthCounts.b_d1, 2);
+    assert.strictEqual(r2.growthCounts.a_d1, 2);
+  });
+
+  test('pickGrowthRecipient: only exercises below the ceiling are eligible, even if they have fewer grants', () => {
+    // b has fewer grants (0) but is already at its delta ceiling — a (delta 2) wins instead.
+    const r = LB.pickGrowthRecipient(['a_d1', 'b_d1'], { a_d1: 2, b_d1: 4 }, { a_d1: 3, b_d1: 0 }, null);
+    assert.strictEqual(r.recipientKey, 'a_d1');
+  });
+
+  test('pickGrowthRecipient: a never-before-seen exercise is seeded at the group max, not 0, so it cannot cut ahead', () => {
+    // a=3, b=1 already established; c is new (absent from growthCounts).
+    // groupMax=3 → c seeds to 3, so b (still at 1) correctly wins, not c.
+    const r = LB.pickGrowthRecipient(['a_d1', 'b_d1', 'c_d1'], {}, { a_d1: 3, b_d1: 1 }, null);
+    assert.strictEqual(r.recipientKey, 'b_d1');
+    assert.strictEqual(r.growthCounts.c_d1, 3);
+  });
+
+  test('pickGrowthRecipient: groupMax for seeding reflects the true established max, unaffected by undoing this record\'s own prior grant', () => {
+    // a is the sole holder of the group max (5) AND is this record's own
+    // previous grant recipient; c is new. Undoing a's prior grant must not
+    // transiently lower what c gets seeded at.
+    const r = LB.pickGrowthRecipient(['a_d1', 'c_d1'], { a_d1: 0, c_d1: 0 }, { a_d1: 5 }, 'a_d1');
+    assert.strictEqual(r.growthCounts.c_d1, 5);
+  });
+
+  test('pickGrowthRecipient: editing an already-answered "not enough" this session undoes the prior grant before re-deciding', () => {
+    const first = LB.pickGrowthRecipient(['a_d1', 'b_d1'], {}, {}, null);
+    assert.strictEqual(first.recipientKey, 'a_d1');
+    // Re-answering the same question this session (prevGrantedTo = a_d1):
+    // a's grant is undone first, so it ties with b at 0 again and wins back.
+    const again = LB.pickGrowthRecipient(['a_d1', 'b_d1'], {}, first.growthCounts, 'a_d1');
+    assert.strictEqual(again.recipientKey, 'a_d1');
+    assert.strictEqual(again.growthCounts.a_d1, 1);
+    assert.strictEqual(again.growthCounts.b_d1, 0);
+  });
+
+  test('retractGrowthGrant: undoes one grant, floors at 0, no-ops on a null key', () => {
+    assert.strictEqual(LB.retractGrowthGrant({ a_d1: 1 }, 'a_d1').a_d1, 0);
+    assert.strictEqual(LB.retractGrowthGrant({ a_d1: 0 }, 'a_d1').a_d1, 0);
+    assert.strictEqual(JSON.stringify(LB.retractGrowthGrant({ a_d1: 1 }, null)), JSON.stringify({ a_d1: 1 }));
+  });
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();

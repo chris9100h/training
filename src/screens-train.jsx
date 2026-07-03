@@ -144,7 +144,7 @@ function applyMesoSetDeltaFromState(it, dayId, mesoState) {
   const delta = (mesoState.deltas || {})[it.exId + '_' + dayId];
   if (!delta) return it;
   const base = it.sets || 1;
-  return { ...it, sets: Math.min(base + 4, Math.max(1, base + delta)) };
+  return { ...it, sets: Math.min(base + LB.MESO_GROWTH_CEILING_DELTA, Math.max(1, base + delta)) };
 }
 function applyMesoSetDelta(it, dayId, scheduleId, mesoStates) {
   if (!dayId || !scheduleId) return it;
@@ -583,6 +583,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       jointFlags: {},
       pumpLowCounts: {},
       weightBoosts: {},
+      growthCounts: {},
       completions: existing?.completions ?? 0,
       updatedAt: new Date().toISOString(),
     };
@@ -1891,6 +1892,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         deltas: {},
         jointFlags: {},
         pumpLowCounts: {},
+        growthCounts: {},
         pendingMeso2: false,
         // weightBoosts carries over to meso 2
         updatedAt: new Date().toISOString(),
@@ -2188,18 +2190,64 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     record.volume = volume;
     record.exIds = mesoVolumeExIds;
 
-    // "Not enough" → +1 on main lift (first exercise of the muscle group) only
-    // "Pushed my limits" → -1 on main lift only
-    // "Too much" → -1 on every exercise of the muscle group
+    // "Not enough" → rotates a +1 among the muscle group's exercises (see
+    // LB.pickGrowthRecipient); "Pushed my limits" → -1 on main lift only;
+    // "Too much" → -1 on every exercise of the muscle group.
     const mainExId = mesoVolumeExIds[0];
     const namesByKey = {};
-    const newContrib = {};
+    const keys = [];
     mesoVolumeExIds.forEach(exId => {
       const key = exId + '_' + session.dayId;
+      keys.push(key);
       namesByKey[key] = session.entries.find(e => e.exId === exId)?.name || '';
+    });
+
+    // Growth rotation for "not_enough": whichever exercise still below its
+    // own per-exercise ceiling (base+4, enforced separately by
+    // applyMesoSetDeltaFromState) has the fewest growth grants so far this
+    // meso wins (ties toward the main lift) — see LB.pickGrowthRecipient for
+    // the full rule, including how a mid-meso exercise swap-in is seeded so
+    // it can't cut ahead of an established lift. With only one exercise this
+    // still always picks it — same outcome as before this feature existed —
+    // except growth now correctly stops once that exercise hits its own
+    // ceiling instead of letting the underlying counter climb unboundedly
+    // past it forever (harmless before since only the clamped value was ever
+    // applied, but this also means a later shrink is no longer silently
+    // swallowed once the counter has drifted arbitrarily far past the cap).
+    // growthCounts is kept separate from deltas specifically so an unrelated
+    // shrink (soreness/joint) never distorts turn fairness; it is not frozen
+    // by "too_much" shrinking deltas back down — that exercise simply becomes
+    // eligible again once its delta drops back under the ceiling.
+    // LB.pickGrowthRecipient is called twice on purpose: once here (using
+    // `mesoState`) to decide `recipientKey` for the newContrib built below,
+    // and again inside the saveMesoState updater (using the fresh `m`
+    // parameter) for the actual write — so a rare double-invocation of this
+    // handler before React re-renders can never silently lose a prior grant
+    // by persisting a value computed from stale state. It's a pure,
+    // deterministic function, so calling it twice with the same inputs is
+    // cheap and safe.
+    //
+    // prevGrantedTo (which key, if any, this record's own last answer granted
+    // a set to) is derived from record.contrib rather than a separately
+    // tracked field — commitContrib already guarantees exactly one key ever
+    // holds a contrib of 1 for this question type, so there's nothing to keep
+    // in sync by hand.
+    const prevGrantedTo = Object.keys(record.contrib || {}).find(k => record.contrib[k] === 1) ?? null;
+    let recipientKey = null;
+    if (volume === 'not_enough') {
+      recipientKey = LB.pickGrowthRecipient(keys, mesoState.deltas, mesoState.growthCounts, prevGrantedTo).recipientKey;
+      saveMesoState(m => ({ ...m, growthCounts: LB.pickGrowthRecipient(keys, m.deltas, m.growthCounts, prevGrantedTo).growthCounts }));
+    } else if (prevGrantedTo) {
+      // Answer changed away from not_enough this session — undo the previous grant.
+      saveMesoState(m => ({ ...m, growthCounts: LB.retractGrowthGrant(m.growthCounts, prevGrantedTo) }));
+    }
+
+    const newContrib = {};
+    keys.forEach((key, i) => {
+      const exId = mesoVolumeExIds[i];
       let want = 0;
       if (volume === 'too_much') want = -1;
-      else if (exId === mainExId && volume === 'not_enough') want = 1;
+      else if (key === recipientKey) want = 1;
       else if (exId === mainExId && volume === 'pushed') want = -1;
       newContrib[key] = want;
     });

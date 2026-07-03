@@ -575,6 +575,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
         start_cycle_index: m.startCycleIndex ?? 0,
         deltas: remapExDayKeyed(m.deltas), weight_boosts: remapExDayKeyed(m.weightBoosts),
         joint_flags: remapExKeyed(m.jointFlags), pump_low_counts: remapExKeyed(m.pumpLowCounts),
+        growth_counts: remapExDayKeyed(m.growthCounts),
         completions: m.completions ?? 0, pending_meso2: m.pendingMeso2 ?? false,
       }))
     ));
@@ -749,7 +750,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     // Reusable workout templates (migration 0107)
     _supabase.from('zane_workout_templates').select('id, name, exercises, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
     // Mesocycle state per plan — replaces localStorage logbook-meso-state (migration 0120)
-    _supabase.from('zane_meso_states').select('id, schedule_id, weeks, start_date, start_cycle_index, deltas, joint_flags, pump_low_counts, weight_boosts, completions, pending_meso2, updated_at').eq('user_id', userId),
+    _supabase.from('zane_meso_states').select('id, schedule_id, weeks, start_date, start_cycle_index, deltas, joint_flags, pump_low_counts, weight_boosts, growth_counts, completions, pending_meso2, updated_at').eq('user_id', userId),
   ];
   const [profileRes, exRes, schRes, sessRes, settRes, skipsRes, entriesRes,
          bestsRes, sessionStatsRes,
@@ -938,6 +939,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
       startDate: m.start_date, startCycleIndex: m.start_cycle_index ?? 0,
       deltas: m.deltas ?? {}, jointFlags: m.joint_flags ?? {},
       pumpLowCounts: m.pump_low_counts ?? {}, weightBoosts: m.weight_boosts ?? {},
+      growthCounts: m.growth_counts ?? {},
       completions: m.completions ?? 0, pendingMeso2: m.pending_meso2 ?? false,
       updatedAt: m.updated_at ?? null,
     })),
@@ -1359,6 +1361,7 @@ async function syncStore(prev, next, userId) {
       start_date: m.startDate, start_cycle_index: m.startCycleIndex ?? 0,
       deltas: m.deltas ?? {}, joint_flags: m.jointFlags ?? {},
       pump_low_counts: m.pumpLowCounts ?? {}, weight_boosts: m.weightBoosts ?? {},
+      growth_counts: m.growthCounts ?? {},
       completions: m.completions ?? 0, pending_meso2: m.pendingMeso2 ?? false,
       updated_at: m.updatedAt ?? new Date().toISOString(),
     })) }));
@@ -3297,6 +3300,69 @@ async function refreshHealthLogs(userId) {
   };
 }
 
+// Must match applyMesoSetDeltaFromState's base+4 clamp (screens-train.jsx) —
+// an exercise at or past this many accumulated "not enough" sets can't
+// usefully receive another growth grant, since applying it would be entirely
+// swallowed by that clamp.
+const MESO_GROWTH_CEILING_DELTA = 4;
+
+// Picks which exId_dayId key (if any) wins a "not_enough" volume-feedback
+// growth turn for a muscle group's exercises this session, and returns the
+// growthCounts map updated to reflect that decision. Pure and side-effect
+// free — call it fresh (with the latest deltas/growthCounts) both to decide
+// the recipient and, separately, inside the actual saveMesoState write, so a
+// rare double-invocation of the caller can never silently lose a grant by
+// writing a value computed from stale state.
+//
+// - keys: exId_dayId keys of the muscle group's exercises this session, in
+//   day order (keys[0] = the muscle group's main/first lift).
+// - deltas / growthCounts: the meso state's full current maps (not just this
+//   group) — read-only, never mutated.
+// - prevGrantedTo: the key this same answer-record previously granted this
+//   session (or null for a fresh answer). Its earlier +1 is arithmetically
+//   un-done first (on both deltas, for eligibility, and growthCounts) so
+//   editing an already-answered question within the same session never
+//   double-counts — see commitContrib's identical idempotent-diff intent for
+//   `deltas` itself.
+// - Whichever exercise still below `ceiling` has the fewest growth grants so
+//   far wins (ties toward keys[0], i.e. the main lift); a key never seen in
+//   growthCounts before (a mid-meso exercise swap-in) is seeded at the
+//   group's current running max — computed BEFORE undoing prevGrantedTo, so
+//   undoing our own prior grant can't transiently understate the group's
+//   true established max — so it can't cut ahead of an established lift.
+// - Returns { recipientKey, growthCounts } — recipientKey is null if every
+//   exercise in the group is already at its own ceiling.
+function pickGrowthRecipient(keys, deltas, growthCounts, prevGrantedTo, ceiling = MESO_GROWTH_CEILING_DELTA) {
+  const deltaFor = (k) => {
+    const raw = (deltas || {})[k] || 0;
+    return k === prevGrantedTo ? raw - 1 : raw;
+  };
+  const gc = { ...(growthCounts || {}) };
+  const knownVals = keys.map(k => gc[k]).filter(v => v != null);
+  const groupMax = knownVals.length ? Math.max(...knownVals) : 0;
+  if (prevGrantedTo != null && gc[prevGrantedTo] != null) {
+    gc[prevGrantedTo] = Math.max(0, gc[prevGrantedTo] - 1);
+  }
+  keys.forEach(k => { if (gc[k] == null) gc[k] = groupMax; });
+  const eligible = keys.filter(k => deltaFor(k) < ceiling);
+  let recipientKey = null;
+  if (eligible.length) {
+    recipientKey = eligible.reduce((best, k) => (gc[k] < gc[best] ? k : best), eligible[0]);
+    gc[recipientKey] += 1;
+  }
+  return { recipientKey, growthCounts: gc };
+}
+
+// Un-does a single previously-granted growthCounts key by 1 (floor 0) — used
+// when an edited volume answer no longer grants anyone (e.g. changed away
+// from "not_enough" this session).
+function retractGrowthGrant(growthCounts, grantedKey) {
+  if (grantedKey == null) return growthCounts || {};
+  const gc = { ...(growthCounts || {}) };
+  if (gc[grantedKey] != null) gc[grantedKey] = Math.max(0, gc[grantedKey] - 1);
+  return gc;
+}
+
 window.LB = {
   supabase: _supabase,
   SUPABASE_URL, SUPABASE_ANON_KEY, PUSHOVER_URL, WEB_PUSH_URL, fnFetch,
@@ -3321,4 +3387,5 @@ window.LB = {
   cardioWeekPrefill, detectCardioPRs,
   isLoggedTrainingDay, plannedTrainingDay, isTrainingDayForDate, dayTargetFromMacros, macroAdherence, effectiveMacroTargets, dailyLogAdherence, dailyLogsWeekPrefill, weekPerformanceSignal,
   refreshHealthLogs,
+  pickGrowthRecipient, retractGrowthGrant, MESO_GROWTH_CEILING_DELTA,
 };

@@ -1618,6 +1618,7 @@ CREATE TABLE zane_meso_states (
   joint_flags        jsonb       NOT NULL DEFAULT '{}',
   pump_low_counts    jsonb       NOT NULL DEFAULT '{}',
   weight_boosts      jsonb       NOT NULL DEFAULT '{}',
+  growth_counts      jsonb       NOT NULL DEFAULT '{}',
   completions        int         NOT NULL DEFAULT 0,
   pending_meso2      boolean     NOT NULL DEFAULT false,
   created_at         timestamptz NOT NULL DEFAULT now(),
@@ -1633,7 +1634,7 @@ CREATE POLICY "Users manage own meso states"
 -- Batch upsert for meso states. Only overwrites when the incoming updated_at
 -- is newer (no stale clobber) so two devices training the same mesocycle plan
 -- don't silently discard each other's deltas/jointFlags/weightBoosts.
--- Migration 0122.
+-- Migration 0122. growth_counts added in migration 0130.
 CREATE OR REPLACE FUNCTION public.sync_meso_states_batch(p_states jsonb)
  RETURNS void
  LANGUAGE sql
@@ -1642,7 +1643,7 @@ CREATE OR REPLACE FUNCTION public.sync_meso_states_batch(p_states jsonb)
 AS $function$
   INSERT INTO zane_meso_states (
     id, user_id, schedule_id, weeks, start_date, start_cycle_index,
-    deltas, joint_flags, pump_low_counts, weight_boosts,
+    deltas, joint_flags, pump_low_counts, weight_boosts, growth_counts,
     completions, pending_meso2, updated_at
   )
   SELECT
@@ -1656,6 +1657,7 @@ AS $function$
     COALESCE(m->'joint_flags', '{}'::jsonb),
     COALESCE(m->'pump_low_counts', '{}'::jsonb),
     COALESCE(m->'weight_boosts', '{}'::jsonb),
+    COALESCE(m->'growth_counts', '{}'::jsonb),
     COALESCE((m->>'completions')::int, 0),
     COALESCE((m->>'pending_meso2')::boolean, false),
     COALESCE((m->>'updated_at')::timestamptz, now())
@@ -1668,6 +1670,7 @@ AS $function$
     joint_flags       = EXCLUDED.joint_flags,
     pump_low_counts   = EXCLUDED.pump_low_counts,
     weight_boosts     = EXCLUDED.weight_boosts,
+    growth_counts     = EXCLUDED.growth_counts,
     completions       = EXCLUDED.completions,
     pending_meso2     = EXCLUDED.pending_meso2,
     updated_at        = EXCLUDED.updated_at

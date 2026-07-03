@@ -1603,7 +1603,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
         weeks: freshSch.mesocycle_weeks,
         startDate: alignedStartDate,
         startCycleIndex: alignedStartIdx,
-        deltas: {}, jointFlags: {}, pumpLowCounts: {}, weightBoosts: {},
+        deltas: {}, jointFlags: {}, pumpLowCounts: {}, weightBoosts: {}, growthCounts: {},
         completions: existing?.completions ?? 0,
         updatedAt: new Date().toISOString(),
       };
@@ -1669,6 +1669,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
             deltas: {},
             jointFlags: {},
             pumpLowCounts: {},
+            growthCounts: {},
             pendingMeso2: false,
             updatedAt: new Date().toISOString(),
           };
