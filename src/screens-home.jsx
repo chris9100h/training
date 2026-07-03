@@ -3054,10 +3054,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
               )}
               <button onClick={async () => {
                 setQuickActionsOpen(false);
-                if ('caches' in window) {
-                  const keys = await caches.keys();
-                  await Promise.all(keys.map(k => caches.delete(k)));
-                }
+                await LB.clearPrecompileCaches();
                 window.location.reload(true);
               }} style={{
                 width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,

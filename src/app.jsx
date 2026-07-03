@@ -565,12 +565,7 @@ function App() {
       // look like it does nothing. Wipe the cache first, exactly like the
       // "Reload App" quick action does, so the reload is guaranteed to
       // actually fetch fresh code instead of silently staying on the old one.
-      if ('caches' in window) {
-        try {
-          const keys = await caches.keys();
-          await Promise.all(keys.map(k => caches.delete(k)));
-        } catch (_) {}
-      }
+      await LB.clearPrecompileCaches();
       window.location.reload(true);
     }
   }, []);

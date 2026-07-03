@@ -3363,8 +3363,30 @@ function retractGrowthGrant(growthCounts, grantedKey) {
   return gc;
 }
 
+// Wipes both cache layers a stale deploy can hide behind: the SW's
+// CacheStorage entries AND the IndexedDB precompile cache (zane-precompile,
+// see index.html's loader) — a stale record in the latter alone keeps
+// serving old transpiled JS even after CacheStorage is cleared, since it's
+// keyed by content hash and never touched by a plain cache wipe. Mirrors
+// index.html's own makeClearCacheButton, which can't call into LB (runs
+// before store.js loads) and so stays a separate vanilla-JS copy.
+async function clearPrecompileCaches() {
+  if ('caches' in window) {
+    try { const keys = await caches.keys(); await Promise.all(keys.map(k => caches.delete(k))); } catch {}
+  }
+  if ('indexedDB' in window) {
+    await new Promise(resolve => {
+      try {
+        const req = indexedDB.deleteDatabase('zane-precompile');
+        req.onsuccess = req.onerror = req.onblocked = () => resolve();
+      } catch { resolve(); }
+    });
+  }
+}
+
 window.LB = {
   supabase: _supabase,
+  clearPrecompileCaches,
   SUPABASE_URL, SUPABASE_ANON_KEY, PUSHOVER_URL, WEB_PUSH_URL, fnFetch,
   subscribeWebPush, unsubscribeWebPush, getWebPushSubscription,
   QS_EMAILS, hasQuickSwitchSession, quickSwitch, saveQsName, getQsName,
