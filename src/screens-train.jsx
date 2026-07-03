@@ -1742,6 +1742,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const [lpCount, setLpCount] = useStateT(0); // in-progress partials count for lpTarget, committed to the set only on Finish
   const [avSetIdx, setAvSetIdx] = useStateT(null);
   const [avDrops, setAvDrops] = useStateT([]); // [{ kg, reps, label }, ...] — AMRAP Variations rounds
+  const [avLabelFocusDi, setAvLabelFocusDi] = useStateT(null); // which round's variation-name box is focused (native text input, accent underline)
   const avDropsRef = useRefT([]);
   avDropsRef.current = avDrops;
   // Shared across Drop Set / Myo-Rep / Myo-Rep Match / AMRAP Variations — only
@@ -4478,13 +4479,16 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                             <input
                               type="text"
                               value={d.label ?? ''}
-                              onFocus={e => e.target.select()}
+                              onFocus={e => { e.target.select(); setAvLabelFocusDi(di); }}
+                              onBlur={() => setAvLabelFocusDi(cur => cur === di ? null : cur)}
                               onChange={e => { const val = e.target.value; setAvDrops(prev => prev.map((dd, idx) => idx === di ? { ...dd, label: val } : dd)); }}
                               placeholder={entry.name}
                               style={{
-                                width: '100%', boxSizing: 'border-box', background: 'transparent',
-                                border: 'none', borderBottom: `0.5px solid ${UI.hairStrong}`,
-                                color: UI.ink, fontFamily: UI.fontUi, fontSize: 12, padding: '2px 2px 5px',
+                                width: '100%', boxSizing: 'border-box', background: UI.bgInset,
+                                border: `1px solid ${UI.hair}`,
+                                borderBottom: `2px solid ${avLabelFocusDi === di ? 'var(--accent)' : UI.hair}`,
+                                borderRadius: 4,
+                                color: UI.ink, fontFamily: UI.fontUi, fontSize: 12, padding: '6px 8px',
                                 marginBottom: 6, outline: 'none', WebkitTapHighlightColor: 'transparent',
                               }}
                             />
