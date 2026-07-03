@@ -9,6 +9,56 @@ const fmtSec = s => s < 60 ? `${s}s` : `${Math.floor(s / 60)}:${String(s % 60).p
 // Short "time since" label for the admin sign-up feed.
 const fmtAgo = (iso) => LB.timeAgo(iso, { capDays: 7 });
 
+// Boxed input look shared by the settings sheets' plain text/password/email/
+// select inputs (password/email change, OTP, admin tools, ...). Spread and
+// override for a sheet's specific padding/fontSize/etc.
+const SETTINGS_INPUT_STYLE = {
+  background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4,
+  padding: '10px 14px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink,
+  outline: 'none', width: '100%', boxSizing: 'border-box',
+};
+// Same look, larger radius, for the multi-line support-ticket textareas.
+const SETTINGS_TEXTAREA_STYLE = {
+  width: '100%', background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`,
+  borderRadius: 6, padding: '10px 12px', color: UI.ink, fontFamily: UI.fontUi,
+  fontSize: 14, outline: 'none', resize: 'none', boxSizing: 'border-box', lineHeight: 1.5,
+};
+
+// Admin support-inbox ticket row — active and archived are the same shape,
+// the archived variant just mutes it (dimmed colors/opacity, smaller text,
+// no unread dot / "no messages yet" placeholder / timestamp).
+function AdminTicketRow({ t, archived = false, catLabel, onClick }) {
+  const statusColor = { open: UI.danger, in_progress: UI.gold, resolved: UI.inkFaint };
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        width: '100%',
+        background: archived ? UI.bgInset : UI.bgRaised,
+        border: `0.5px solid ${UI.hair}`,
+        borderLeft: `3px solid ${archived ? UI.inkGhost : (statusColor[t.support_status] || UI.hairStrong)}`,
+        borderRadius: 8, cursor: 'pointer', textAlign: 'left', padding: '12px 14px', marginBottom: 8,
+        WebkitTapHighlightColor: 'transparent', display: 'flex', flexDirection: 'column',
+        gap: archived ? 4 : 5, opacity: archived ? 0.7 : 1,
+      }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={{ fontSize: archived ? 13 : 14, fontWeight: 600, color: archived ? UI.inkSoft : UI.ink, fontFamily: UI.fontUi, flex: 1 }}>{t.client_name || t.client_email}</span>
+        {!archived && Number(t.unread_count) > 0 && <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--accent)', display: 'inline-block', flexShrink: 0, animation: 'pulseDot 1.5s ease-in-out infinite' }} />}
+        <span className="micro" style={{ color: archived ? UI.inkGhost : (statusColor[t.support_status] || UI.inkFaint) }}>{(t.support_status || (archived ? 'resolved' : 'open')).replace('_', ' ').toUpperCase()}</span>
+        {t.support_category && <span className="micro" style={{ color: archived ? UI.inkGhost : UI.inkFaint }}>{catLabel}</span>}
+      </div>
+      {t.last_message_body ? (
+        <div style={{ fontSize: archived ? 11 : 12, color: archived ? UI.inkGhost : UI.inkSoft, fontFamily: UI.fontUi, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.last_message_body}</div>
+      ) : (
+        !archived && <div style={{ fontSize: 12, color: UI.inkGhost, fontFamily: UI.fontUi, fontStyle: 'italic' }}>No messages yet</div>
+      )}
+      {!archived && t.last_message_at && (
+        <div className="micro" style={{ color: UI.inkGhost }}>{new Date(t.last_message_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} · {new Date(t.last_message_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</div>
+      )}
+    </button>
+  );
+}
+
 function UserArchivedSection({ tickets, renderTicket }) {
   const [open, setOpen] = useStateSet(false);
   return (
@@ -1668,7 +1718,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       {/* ══ Change Password Sheet ══ */}
       <SettingsSheet open={changePasswordSheet} onClose={() => { setChangePasswordSheet(false); setPwCurrent(''); setPwNew(''); setPwConfirm(''); setPwMsg(null); }} title="Change password">
         {(() => {
-          const iStyle = { background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '10px 14px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, outline: 'none', width: '100%', boxSizing: 'border-box' };
+          const iStyle = SETTINGS_INPUT_STYLE;
           return (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginBottom: 8 }}>
               <div>
@@ -1703,7 +1753,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       {/* ══ Change Email Sheet ══ */}
       <SettingsSheet open={changeEmailSheet} onClose={() => { setChangeEmailSheet(false); setEmailNew(''); setEmailMsg(null); }} title="Change email">
         {(() => {
-          const iStyle = { background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '10px 14px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, outline: 'none', width: '100%', boxSizing: 'border-box' };
+          const iStyle = SETTINGS_INPUT_STYLE;
           return (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginBottom: 8 }}>
               <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.6 }}>
@@ -2187,7 +2237,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       <SettingsSheet open={vipBgSheet} onClose={() => setVipBgSheet(false)} title="VIP Backgrounds">
         {(() => {
           const opts = vipBgOptions;
-          const iStyle = { background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '10px 12px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, outline: 'none', width: '100%', boxSizing: 'border-box' };
+          const iStyle = { ...SETTINGS_INPUT_STYLE, padding: '10px 12px' };
           return (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginBottom: 8 }}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -2291,7 +2341,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           const statusColor = { open: 'var(--accent)', in_progress: UI.gold, resolved: UI.inkFaint };
           const statusLabel = { open: 'Open', in_progress: 'In progress', resolved: 'Resolved' };
           const tickets = store.supportTickets || [];
-          const iStyle = { width: '100%', background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '10px 12px', color: UI.ink, fontFamily: UI.fontUi, fontSize: 14, outline: 'none', resize: 'none', boxSizing: 'border-box', lineHeight: 1.5 };
+          const iStyle = SETTINGS_TEXTAREA_STYLE;
 
           // ── NEW TICKET VIEW ──────────────────────────────────────────
           if (supportView === 'new') {
@@ -2482,8 +2532,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       >
         {(() => {
           const CATS = { feature_request: 'Feature', bug: 'Bug', question: 'Question' };
-          const statusColor = { open: UI.danger, in_progress: UI.gold, resolved: UI.inkFaint };
-          const iStyle = { width: '100%', background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '10px 12px', color: UI.ink, fontFamily: UI.fontUi, fontSize: 14, outline: 'none', resize: 'none', boxSizing: 'border-box', lineHeight: 1.5 };
+          const iStyle = SETTINGS_TEXTAREA_STYLE;
 
           // ── TICKET DETAIL VIEW ─────────────────────────────────────────
           if (supportTicket) {
@@ -2624,24 +2673,8 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                 </div>
               )}
               {filtered.map(t => (
-                <button key={t.coaching_id}
-                  onClick={() => setSupportTicket({ coachingId: t.coaching_id, clientName: t.client_name, clientEmail: t.client_email, category: t.support_category, status: t.support_status })}
-                  style={{ width: '100%', background: UI.bgRaised, border: `0.5px solid ${UI.hair}`, borderLeft: `3px solid ${statusColor[t.support_status] || UI.hairStrong}`, borderRadius: 8, cursor: 'pointer', textAlign: 'left', padding: '12px 14px', marginBottom: 8, WebkitTapHighlightColor: 'transparent', display: 'flex', flexDirection: 'column', gap: 5 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span style={{ fontSize: 14, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi, flex: 1 }}>{t.client_name || t.client_email}</span>
-                    {Number(t.unread_count) > 0 && <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--accent)', display: 'inline-block', flexShrink: 0, animation: 'pulseDot 1.5s ease-in-out infinite' }} />}
-                    <span className="micro" style={{ color: statusColor[t.support_status] || UI.inkFaint }}>{(t.support_status || 'open').replace('_', ' ').toUpperCase()}</span>
-                    {t.support_category && <span className="micro" style={{ color: UI.inkFaint }}>{CATS[t.support_category] || t.support_category}</span>}
-                  </div>
-                  {t.last_message_body ? (
-                    <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.last_message_body}</div>
-                  ) : (
-                    <div style={{ fontSize: 12, color: UI.inkGhost, fontFamily: UI.fontUi, fontStyle: 'italic' }}>No messages yet</div>
-                  )}
-                  {t.last_message_at && (
-                    <div className="micro" style={{ color: UI.inkGhost }}>{new Date(t.last_message_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} · {new Date(t.last_message_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</div>
-                  )}
-                </button>
+                <AdminTicketRow key={t.coaching_id} t={t} catLabel={CATS[t.support_category] || t.support_category}
+                  onClick={() => setSupportTicket({ coachingId: t.coaching_id, clientName: t.client_name, clientEmail: t.client_email, category: t.support_category, status: t.support_status })} />
               ))}
               {/* ── Archived section ── */}
               <div style={{ borderTop: `0.5px solid ${UI.hair}`, marginTop: 4, paddingTop: 12 }}>
@@ -2662,18 +2695,8 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                     : archivedInbox.length === 0
                     ? <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, fontStyle: 'italic', padding: '8px 0' }}>No archived tickets.</div>
                     : archivedInbox.map(t => (
-                      <button key={t.coaching_id}
-                        onClick={() => setSupportTicket({ coachingId: t.coaching_id, clientName: t.client_name, clientEmail: t.client_email, category: t.support_category, status: t.support_status })}
-                        style={{ width: '100%', background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderLeft: `3px solid ${UI.inkGhost}`, borderRadius: 8, cursor: 'pointer', textAlign: 'left', padding: '12px 14px', marginBottom: 8, WebkitTapHighlightColor: 'transparent', display: 'flex', flexDirection: 'column', gap: 4, opacity: 0.7 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <span style={{ fontSize: 13, fontWeight: 600, color: UI.inkSoft, fontFamily: UI.fontUi, flex: 1 }}>{t.client_name || t.client_email}</span>
-                          <span className="micro" style={{ color: UI.inkGhost }}>{(t.support_status || 'resolved').replace('_', ' ').toUpperCase()}</span>
-                          {t.support_category && <span className="micro" style={{ color: UI.inkGhost }}>{CATS[t.support_category] || t.support_category}</span>}
-                        </div>
-                        {t.last_message_body && (
-                          <div style={{ fontSize: 11, color: UI.inkGhost, fontFamily: UI.fontUi, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.last_message_body}</div>
-                        )}
-                      </button>
+                      <AdminTicketRow key={t.coaching_id} t={t} archived catLabel={CATS[t.support_category] || t.support_category}
+                        onClick={() => setSupportTicket({ coachingId: t.coaching_id, clientName: t.client_name, clientEmail: t.client_email, category: t.support_category, status: t.support_status })} />
                     ))
                 )}
               </div>
@@ -2944,7 +2967,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             <div className="micro" style={{ color: UI.inkGhost, paddingLeft: 2 }}>Active via Pushover — see Advanced</div>
           )}
           {(pushEnabled || webPushPending) && !store.settings?.usePushover && webPushSub && (() => {
-            const iStyle = { background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '10px 14px', fontFamily: UI.fontUi, fontSize: 20, color: UI.ink, outline: 'none', width: '100%', boxSizing: 'border-box', letterSpacing: '0.3em', textAlign: 'center' };
+            const iStyle = { ...SETTINGS_INPUT_STYLE, fontSize: 20, letterSpacing: '0.3em', textAlign: 'center' };
             if (webPushStep === 'code-sent') {
               const pct = pendingCountdown / 120;
               const urgent = pendingCountdown <= 30;
@@ -3005,7 +3028,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       <SettingsSheet open={advancedPushSheet} onClose={closeAdvanced} title="Advanced">
         {(() => {
           const isVerified = !!(store.settings?.usePushover && store.settings?.pushoverUserKey);
-          const inputStyle = { background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '10px 14px', fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, outline: 'none', width: '100%', boxSizing: 'border-box' };
+          const inputStyle = { ...SETTINGS_INPUT_STYLE, fontSize: 13 };
           return (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginBottom: 8 }}>
               <Row label="Use Pushover" first>
