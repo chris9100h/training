@@ -3443,6 +3443,28 @@ function ComparisonScreen({ session, onDismiss, go, userName }) {
     ? Math.round((new Date(session.ended) - new Date(session.started_at)) / 60000)
     : null;
 
+  // Group consecutive same-supersetGroup entries — same grouping SessionDetailScreen uses.
+  const groups = [];
+  {
+    let idx = 0;
+    while (idx < entries.length) {
+      const e = entries[idx];
+      if (e.supersetGroup) {
+        const members = [{ entry: e, idx }];
+        let j = idx + 1;
+        while (j < entries.length && entries[j].supersetGroup === e.supersetGroup) {
+          members.push({ entry: entries[j], idx: j });
+          j++;
+        }
+        groups.push({ type: 'superset', members });
+        idx = j;
+      } else {
+        groups.push({ type: 'standalone', entry: e, idx });
+        idx++;
+      }
+    }
+  }
+
   return (
     <Screen scroll={false} style={{ position: 'relative' }}>
       <TopBar title={userName} onBack={() => go({ name: 'settings' })} />
@@ -3456,7 +3478,8 @@ function ComparisonScreen({ session, onDismiss, go, userName }) {
       </div>
 
       <div style={{ flex: 1, overflowY: 'auto', padding: '16px 22px' }}>
-        {entries.map((entry, ei) => {
+        {(() => {
+        const renderEntry = (entry, ei) => {
           const lastEntry = lastEntries.find(e => e.exId === entry.exId);
           const sets      = (entry.sets || []).filter(s => !s.warmup);
           const lastSets  = (lastEntry?.sets || []).filter(s => !s.warmup);
@@ -3528,7 +3551,19 @@ function ComparisonScreen({ session, onDismiss, go, userName }) {
               })}
             </div>
           );
-        })}
+        };
+
+        return groups.map((g, gi) => (
+          <div key={gi}>
+            {g.type === 'superset' ? (
+              <div style={{ borderLeft: `2px solid ${UI.goldSoft}`, paddingLeft: 12 }}>
+                <div className="micro" style={{ color: UI.gold, marginBottom: 10, letterSpacing: '0.12em' }}>{g.members.length >= 3 ? 'GIANT SET' : 'SUPERSET'}</div>
+                {g.members.map(({ entry: e, idx: i }) => renderEntry(e, i))}
+              </div>
+            ) : renderEntry(g.entry, g.idx)}
+          </div>
+        ));
+        })()}
       </div>
 
       <div style={{ flexShrink: 0, padding: '14px 22px', paddingBottom: `calc(14px + env(safe-area-inset-bottom, 0px))`, borderTop: `0.5px solid ${UI.hair}` }}>
