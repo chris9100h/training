@@ -7,17 +7,7 @@ const { useState: useStateSet, useEffect: useEffectSet, useRef: useRefSet } = Re
 const fmtSec = s => s < 60 ? `${s}s` : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 
 // Short "time since" label for the admin sign-up feed.
-const fmtAgo = (iso) => {
-  if (!iso) return '';
-  const mins = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
-  if (mins < 1) return 'just now';
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  const days = Math.floor(hrs / 24);
-  if (days < 7) return `${days}d ago`;
-  return new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
-};
+const fmtAgo = (iso) => LB.timeAgo(iso, { capDays: 7 });
 
 function UserArchivedSection({ tickets, renderTicket }) {
   const [open, setOpen] = useStateSet(false);

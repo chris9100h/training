@@ -3012,7 +3012,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                 'fa-clock-rotate-left',
                 'Backlog Session',
                 allMissedDays.length === 1
-                  ? `Log ${allMissedDays[0].dayName} (${allMissedDays[0].daysAgo === 1 ? 'yesterday' : `${allMissedDays[0].daysAgo}d ago`})`
+                  ? `Log ${allMissedDays[0].dayName} (${LB.dayLabel(allMissedDays[0].daysAgo)})`
                   : `${allMissedDays.length} unlogged sessions`,
               )}
               {actionBtn(() => { setQuickActionsOpen(false); setCardioPopoverOpen(true); }, 'fa-person-running', 'Cardio', 'Start live or log manually')}
@@ -3204,7 +3204,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
             }}>
               <span style={{ fontSize: 14, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi }}>{m.dayName}</span>
               <span className="num" style={{ fontSize: 11, color: UI.inkFaint }}>
-                {m.daysAgo === 1 ? 'yesterday' : `${m.daysAgo}d ago`}
+                {LB.dayLabel(m.daysAgo)}
               </span>
             </button>
           ))}

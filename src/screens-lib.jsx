@@ -236,7 +236,7 @@ function LibraryScreen({ store, setStore, go, userId }) {
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div className="display" style={{ fontSize: 19, color: isToday ? UI.gold : UI.ink, lineHeight: 1.1, marginBottom: 3 }}>{ex.name}</div>
                 <div className="num" style={{ fontSize: 10, color: isToday ? UI.gold : UI.inkFaint, letterSpacing: '0.05em', marginBottom: 4 }}>
-                  {isToday ? 'today' : `${days}d ago`}
+                  {LB.dayLabel(days)}
                   {top && ` · ${top.kg}${UI.unit()} × ${LB.effReps(top) ?? '?'}`}
                 </div>
                 <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>

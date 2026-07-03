@@ -1901,11 +1901,7 @@ function DayCopyPicker({ store, schedule, currentDayId, onClose, onCopy, multiSe
     const d = LB.parseDate(iso);
     const now = new Date(); now.setHours(12,0,0,0);
     const diff = Math.round((now - d) / 86400000);
-    if (diff === 0) return 'today';
-    if (diff === 1) return 'yesterday';
-    if (diff < 7) return `${diff}d ago`;
-    if (diff < 30) return `${Math.round(diff/7)}w ago`;
-    return d.toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
+    return LB.dayLabel(diff, { rollup: true, referenceDate: d });
   };
 
   const goBack = () => { setSelectedPlan(null); setSelectedIds(new Set()); };

@@ -3356,6 +3356,34 @@ function retractGrowthGrant(growthCounts, grantedKey) {
   return gc;
 }
 
+// "5m ago"/"3h ago"/"2d ago" from an ISO timestamp. capDays, if given, rolls
+// over to a short locale date past that many days instead of counting
+// indefinitely (screens-settings.jsx's sign-up feed wants that; the
+// coaching thread previews don't).
+function timeAgo(iso, { capDays } = {}) {
+  if (!iso) return '';
+  const mins = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  if (capDays == null || days < capDays) return `${days}d ago`;
+  return new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+}
+
+// "today"/"yesterday"/"Nd ago" from a pre-computed day difference (today=0).
+// rollup additionally steps up to "Nw ago" past a week and a short
+// month/year past a month — the schedule backup picker wants that, the
+// Home/Library "last trained" labels just want the day count.
+function dayLabel(diffDays, { rollup = false, referenceDate } = {}) {
+  if (diffDays === 0) return 'today';
+  if (diffDays === 1) return 'yesterday';
+  if (!rollup || diffDays < 7) return `${diffDays}d ago`;
+  if (diffDays < 30) return `${Math.round(diffDays / 7)}w ago`;
+  return referenceDate ? referenceDate.toLocaleDateString('en-US', { month: 'short', year: '2-digit' }) : `${diffDays}d ago`;
+}
+
 // Bundles consecutive same-supersetGroup entries into { type: 'superset',
 // members: [{entry, idx}] } groups, everything else into { type:
 // 'standalone', entry, idx }. Used to be copy-pasted into 3 screens with a
@@ -3465,7 +3493,7 @@ window.LB = {
   startDeload, endDeload, deloadElapsed, deloadDaysRemaining, deloadPlanDays,
   loadClientStore, loadCoachClientsStatus, reloadCoachingState, enableSelfCoaching, inviteClient, respondToCoachingInvite, endCoaching,
   addCoachingNote, markCoachingNotesRead, loadCoachingNotes, loadCoachingThreads, createCoachingThread, deleteCoachingThread, getOrCreateCoachingThread, uploadChatImage,
-  unreadCoachingNotes, isNoteFromClient, techniqueRounds, groupBySuperset, supersetLabel,
+  unreadCoachingNotes, isNoteFromClient, techniqueRounds, groupBySuperset, supersetLabel, timeAgo, dayLabel,
   loadCoachingMacros, addCoachingMacros,
   diffSchedule,
   checkinWeekStart, submitCheckin, loadCheckins, deleteCheckin, loadCoachCheckinStatus, requestCheckin, setCheckinEnabled, loadCheckinSchema, saveCheckinSchema, saveDefaultCheckinSchema,
