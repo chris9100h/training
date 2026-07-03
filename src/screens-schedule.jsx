@@ -495,7 +495,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId })
     if (!newDate || !selectedVersion) return;
     const newVersions = LB.dedupeVersionsByDate(
       (sch.versions || []).map(v => v.validFrom === selectedVersion.validFrom ? { ...v, validFrom: newDate } : v)
-    ).sort((a, b) => b.validFrom.localeCompare(a.validFrom));
+    );
     setStore(s => ({
       ...s,
       schedules: s.schedules.map(x => x.id === sch.id ? { ...x, versions: newVersions } : x),
@@ -510,8 +510,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId })
     if (!selectedVersion || !date) return;
     const newVer = { validFrom: date, days: JSON.parse(JSON.stringify(selectedVersion.days || [])) };
     // One version per date — newVer is first, so it replaces any same-date entry.
-    const newVersions = LB.dedupeVersionsByDate([newVer, ...(sch.versions || [])])
-      .sort((a, b) => b.validFrom.localeCompare(a.validFrom));
+    const newVersions = LB.dedupeVersionsByDate([newVer, ...(sch.versions || [])]);
     const newIdx = newVersions.indexOf(newVer);
     setStore(s => ({
       ...s,
@@ -1129,8 +1128,6 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
       // One version per date — the new entry is first, so it wins for its date
       // (replaces any existing version with the same validFrom instead of duplicating).
       versions = LB.dedupeVersionsByDate(versions);
-      // Sort newest first
-      versions.sort((a, b) => b.validFrom.localeCompare(a.validFrom));
       savedDraft = { ...draft, versions };
       // Don't touch cycleStartDate / weekPlanStartDate: versions[] encodes
       // when each plan version takes effect; getPlanDaysForDate /

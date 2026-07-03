@@ -1208,7 +1208,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       // Notify user BEFORE deleting (coaching row must still exist)
       const { data: { session } } = await LB.supabase.auth.getSession();
       if (session?.access_token) {
-        await fetch(`https://ebbuvdzgstrhrcsbrlez.supabase.co/functions/v1/zane_coaching-notify`, {
+        await fetch(`${LB.SUPABASE_URL}/functions/v1/zane_coaching-notify`, {
           method: 'POST',
           headers: { 'Authorization': `Bearer ${session.access_token}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({ coachingId, preview: 'Your support ticket has been removed by support.' }),

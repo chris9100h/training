@@ -1058,26 +1058,10 @@ async function autoArchiveMissedDays(userId, state) {
     const d = new Date(todayD); d.setDate(todayD.getDate() - daysAgo);
     const dateKey = d.toISOString().slice(0, 10);
     if (sessionDates.has(dateKey) || skipDates.has(dateKey)) continue;
-    let trainingDay = null;
-    if (isWd) {
-      if (state.weekPlanStartDate && dateKey < state.weekPlanStartDate) continue;
-      const wd = isoWd(d);
-      trainingDay = activeSch.days.find(day => day.weekday === wd && (day.items || []).length > 0) || null;
-    } else {
-      const days = getPlanDaysForDate(activeSch, dateKey);
-      const pos = getCyclePosForDate(activeSch, dateKey);
-      let dayData;
-      if (pos !== null) {
-        dayData = days[pos];
-      } else {
-        if (!state.cycleStartDate) continue;
-        const start = parseDate(state.cycleStartDate);
-        const n = Math.round((d.getTime() - start.getTime()) / 86400000);
-        if (n < 0) continue;
-        dayData = activeSch.days[((n % activeSch.days.length) + activeSch.days.length) % activeSch.days.length];
-      }
-      if ((dayData?.items || []).length > 0) trainingDay = dayData;
-    }
+    // Version-aware — a hand-rolled copy of this used to ignore a schedule's
+    // versioned days (validFrom), so a future plan change threw off which
+    // day layout auto-archiving compared against.
+    const trainingDay = plannedTrainingDay(state, dateKey);
     if (!trainingDay) continue;
     missed.push({ date: dateKey, dayId: trainingDay.id, dayName: trainingDay.name });
   }
@@ -1502,43 +1486,6 @@ async function syncStore(prev, next, userId) {
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────
 
-// Date of the next upcoming training day (today if not yet trained, otherwise tomorrow+).
-// Returns an ISO date string or null.
-function computeNextTrainingDate(state) {
-  const sch = state.schedules.find(s => s.id === state.activeScheduleId);
-  if (!sch || !sch.days.length) return null;
-
-  const today = new Date(); today.setHours(12, 0, 0, 0);
-  const todayStr = today.toISOString().slice(0, 10);
-  const trainedToday = state.sessions.some(s => s.date?.slice(0, 10) === todayStr && s.ended);
-  const wdPlan = isWeekdayPlan(sch);
-
-  for (let ahead = trainedToday ? 1 : 0; ahead <= 14; ahead++) {
-    const d = new Date(today); d.setDate(today.getDate() + ahead);
-    const dateStr = d.toISOString().slice(0, 10);
-    let training = false;
-    if (wdPlan) {
-      const wd = isoWd(d);
-      const day = sch.days.find(x => x.weekday === wd);
-      training = !!(day && (day.items || []).length > 0);
-    } else {
-      const days = getPlanDaysForDate(sch, dateStr);
-      const idx = getCyclePosForDate(sch, dateStr);
-      if (idx !== null) {
-        training = (days[idx]?.items || []).length > 0;
-      } else {
-        if (!state.cycleStartDate) return null;
-        const start = parseDate(state.cycleStartDate);
-        const n = Math.round((d.getTime() - start.getTime()) / 86400000);
-        if (n < 0) continue;
-        training = (sch.days[((n % sch.days.length) + sch.days.length) % sch.days.length]?.items || []).length > 0;
-      }
-    }
-    if (training) return dateStr;
-  }
-  return null;
-}
-
 // UTC ISO timestamp for the next training-day reminder, or null if reminder is disabled.
 // Skips today if today's reminder time has already passed (prevents re-firing after the
 // edge function clears next_reminder_at and the app writes the old value back via syncStore).
@@ -1553,31 +1500,16 @@ function computeNextReminderAt(state) {
   const todayStr = today.toISOString().slice(0, 10);
   const trainedToday = state.sessions.some(s => s.date?.slice(0, 10) === todayStr && s.ended);
   const todayTimePassed = new Date(todayStr + 'T' + time + ':00') <= now;
-  const wdPlan = isWeekdayPlan(sch);
 
   for (let ahead = (trainedToday || todayTimePassed) ? 1 : 0; ahead <= 14; ahead++) {
     const d = new Date(today); d.setDate(today.getDate() + ahead);
     const dateStr = d.toISOString().slice(0, 10);
-    let training = false;
-    if (wdPlan) {
-      const wd = isoWd(d);
-      const day = sch.days.find(x => x.weekday === wd);
-      training = !!(day && (day.items || []).length > 0);
-    } else {
-      const days = getPlanDaysForDate(sch, dateStr);
-      const idx = getCyclePosForDate(sch, dateStr);
-      if (idx !== null) {
-        training = (days[idx]?.items || []).length > 0;
-      } else {
-        // Flex plans have no cycleStartDate — position is action-advanced only, calendar-based reminders not supported.
-        if (!state.cycleStartDate) return null;
-        const start = parseDate(state.cycleStartDate);
-        const n = Math.round((d.getTime() - start.getTime()) / 86400000);
-        if (n < 0) continue;
-        training = (sch.days[((n % sch.days.length) + sch.days.length) % sch.days.length]?.items || []).length > 0;
-      }
-    }
-    if (training) return new Date(dateStr + 'T' + time + ':00').toISOString();
+    // Version-aware — see plannedTrainingDay; a hand-rolled copy of this used
+    // to resolve weekday plans against sch.days directly, ignoring a plan
+    // change scheduled with a future validFrom date. Returns null for every
+    // date on a cycle plan with no cycleStartDate / a flex plan on a date
+    // other than today, so the loop just runs its course and falls through.
+    if (plannedTrainingDay(state, dateStr)) return new Date(dateStr + 'T' + time + ':00').toISOString();
   }
   return null;
 }
@@ -1836,15 +1768,7 @@ function buildSeedSets(it, last, suggestion, isUni, smartProgression, bodyweight
 }
 
 function lastSessionForExercise(state, exId, dayId = null) {
-  const sessions = state.sessions
-    .filter(s => s.ended && !s.isDeload && (dayId == null || s.dayId === dayId))
-    .slice()
-    .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''));
-  for (const s of sessions) {
-    const entry = s.entries.find(e => e.exId === exId && (e.sets || []).some(x => x.kg != null || x.reps != null));
-    if (entry) return { session: s, entry };
-  }
-  return null;
+  return recentSessionsForExercise(state, exId, dayId, 1)[0] ?? null;
 }
 
 // Up to `limit` most-recent ended sessions that logged this exercise, newest first.
@@ -2114,14 +2038,18 @@ function getActiveVersionIdx(schedule, dateStr) {
 
 // One version per date: keep only the first entry for each validFrom. Callers
 // put the authoritative/newest entry first, so a same-date save replaces the
-// previous version for that date instead of stacking a duplicate.
+// previous version for that date instead of stacking a duplicate. Always
+// returns newest-first — getActiveVersionIdx's first-match-wins loop assumes
+// that order, and not every caller remembered to re-sort after deduping.
 function dedupeVersionsByDate(versions) {
   const seen = new Set();
-  return (versions || []).filter(v => {
-    if (seen.has(v.validFrom)) return false;
-    seen.add(v.validFrom);
-    return true;
-  });
+  return (versions || [])
+    .filter(v => {
+      if (seen.has(v.validFrom)) return false;
+      seen.add(v.validFrom);
+      return true;
+    })
+    .sort((a, b) => b.validFrom.localeCompare(a.validFrom));
 }
 
 function todaysDay(state) {
@@ -3461,7 +3389,7 @@ window.LB = {
   uid, todayISO, fmtISO, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate,
   effReps, e1rm, isImprovement, isDecline, bestE1rmForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, latestBodyweight, inferCurrentExIdx, calcBlended,
   refreshExerciseBests, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries,
-  computeNextTrainingDate, computeNextReminderAt,
+  computeNextReminderAt,
   cancelPushover, adminSendEmail,
   subscribeToChanges,
   openStatusPeriod, closeStatusPeriod, updateStatusPeriodStart, clearStatusMode,

@@ -1692,7 +1692,7 @@ function HistoryScreen({ store, setStore, go, userId, initialTab }) {
         if (isWd) {
           const startWd = LB.isoWd(startD);
           const startMon = new Date(startD); startMon.setDate(startD.getDate() - startWd); startMon.setHours(0,0,0,0);
-          const weekNum = Math.floor((sDate - startMon) / (7 * 86400000)) + 1;
+          const weekNum = Math.floor(Math.round((sDate - startMon) / 86400000) / 7) + 1;
           if (weekNum > 0) map.set(s.id, `Week ${weekNum}`);
         } else {
           const cycleLen = sch.days.length || 1;
