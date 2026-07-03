@@ -1751,7 +1751,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const [avDrops, setAvDrops] = useStateT([]); // [{ kg, reps, label }, ...] — AMRAP Variations rounds
   const avDropsRef = useRefT([]);
   avDropsRef.current = avDrops;
-  // Persist intensity state so a background/resume on iOS doesn't wipe mid-set progress
+  // Persist intensity state so a background/resume on iOS doesn't wipe mid-set
+  // progress. This effect runs before the restore effect below on every fresh
+  // mount (declaration order), so on mount state is still all-null — without
+  // skipFirstClearRef, that first run would always wipe localStorage via the
+  // else branch a split second before the restore effect gets to read it,
+  // permanently defeating restoration across any navigate-away-and-back.
+  const skipFirstClearRef = useRefT(true);
   useEffectT(() => {
     if (dropSetIdx != null || myoSetIdx != null || lpTarget != null || avSetIdx != null) {
       try {
@@ -1763,9 +1769,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           avSetIdx, avDrops,
         }));
       } catch {}
-    } else {
+    } else if (!skipFirstClearRef.current) {
       localStorage.removeItem('logbook-intensity-state');
     }
+    skipFirstClearRef.current = false;
   }, [dropSetIdx, dropDrops, myoSetIdx, myoDrops, myoTechnique, myoTarget, lpTarget, lpCount, avSetIdx, avDrops, sessionId, exIdx]);
   useEffectT(() => {
     try {
