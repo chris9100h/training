@@ -31,17 +31,84 @@ function healthWindow(days) {
 const healthNum = v => (v === '' || v == null || isNaN(parseFloat(v))) ? null : parseFloat(String(v).replace(',', '.'));
 const healthInt = v => (v === '' || v == null || isNaN(parseInt(v, 10))) ? null : parseInt(v, 10);
 
-// Calories from macros: P×4 + C×4 + F×9. With fiber given (net-carb mode),
-// carbs contribute max(0, C − fiber)×4 — clamped so it matches the displayed
-// net-carb value when fiber exceeds carbs. Returns null when no macro is set.
-function caloriesFromMacros(p, c, f, fiber) {
-  if (p == null && c == null && f == null) return null;
-  return (p || 0) * 4 + Math.max(0, (c || 0) - (fiber || 0)) * 4 + (f || 0) * 9;
-}
+const caloriesFromMacros = LB.caloriesFromMacros;
 
 function healthFmtDate(iso, opts = { weekday: 'short', day: 'numeric', month: 'short' }) {
   if (!iso) return '';
   return new Date(iso + 'T12:00:00').toLocaleDateString('en-GB', opts);
+}
+
+// Windowed series builder for the charts — pure, so HealthScreen (dailyLogs)
+// and HealthClientLogs (a coach's client logs) can share it instead of
+// reimplementing the same ~90 lines against differently-named data.
+function healthSeriesFor(logs, days, pick) {
+  const { start, end } = healthWindow(days);
+  const data = logs.filter(l => l.date >= start && l.date <= end).map(l => ({ date: l.date, ...pick(l) }));
+  const dates = data.map(d => d.date);
+  let from = dates.length ? dates.reduce((a, b) => a < b ? a : b) : start;
+  let to = dates.length ? dates.reduce((a, b) => a > b ? a : b) : end;
+  if (from === to) { from = healthShiftISO(from, -1); to = healthShiftISO(to, 1); }
+  return { from, to, data };
+}
+
+function healthCardioSeries(cardioLogs, days) {
+  const { start, end } = healthWindow(days);
+  const byDay = {};
+  (cardioLogs || []).forEach(l => { if (l.date >= start && l.date <= end) byDay[l.date] = (byDay[l.date] || 0) + (l.durationMinutes || 0); });
+  const data = Object.keys(byDay).map(date => ({ date, value: byDay[date] }));
+  const dates = data.map(d => d.date);
+  let from = dates.length ? dates.reduce((a, b) => a < b ? a : b) : start;
+  let to = dates.length ? dates.reduce((a, b) => a > b ? a : b) : end;
+  if (from === to) { from = healthShiftISO(from, -1); to = healthShiftISO(to, 1); }
+  return { from, to, data };
+}
+
+// Period overview (Mon-anchored week or rolling 1M/3M window) — pure, shared
+// by HealthScreen and HealthClientLogs. planningState is whatever
+// LB.plannedTrainingDay needs (store, or clientStore || {}).
+function computeHealthWeekStats({ logs, sessions, cardioLogs, planningState, tf, today, selectedDate }) {
+  const dayOf = s => s.date ? (typeof s.date === 'string' ? s.date.slice(0, 10) : new Date(s.date).toISOString().slice(0, 10)) : null;
+  let from, to, periodDays;
+  if (tf === '1W') {
+    const anchor = selectedDate;
+    const jsDow = new Date(anchor + 'T12:00:00').getDay();
+    const monday = healthShiftISO(anchor, -((jsDow === 0 ? 7 : jsDow) - 1));
+    from = monday; to = healthShiftISO(monday, 6); periodDays = 7;
+  } else {
+    const days = (HEALTH_TFS.find(t => t.id === tf) || HEALTH_TFS[1]).days;
+    to = today; from = healthShiftISO(today, -(days - 1)); periodDays = days;
+  }
+  const allDays = Array.from({ length: periodDays }, (_, i) => healthShiftISO(from, i));
+  const inPeriod = logs.filter(l => l.date >= from && l.date <= to);
+  const avgK = k => { const vs = inPeriod.map(l => l[k]).filter(v => v != null); return vs.length ? vs.reduce((s, v) => s + v, 0) / vs.length : null; };
+  const sumK = k => { const vs = inPeriod.map(l => l[k]).filter(v => v != null); return vs.length ? vs.reduce((s, v) => s + v, 0) : null; };
+  const sessionDatesInPeriod = new Set((sessions || []).filter(s => s.ended).map(s => dayOf(s)).filter(d => d && d >= from && d <= to));
+  const trainingsDone = sessionDatesInPeriod.size;
+  const trainingsPlanned = allDays.filter(d => d <= today && LB.plannedTrainingDay(planningState, d)).length;
+  // Training days for macro target avg: future planned days count as training (not yet missed),
+  // past planned days only count if a session was actually done (missed = rest day, no earned macros).
+  const trainingDaysInPeriod = allDays.filter(d => {
+    if (!LB.plannedTrainingDay(planningState, d)) return false;
+    if (d < today) return sessionDatesInPeriod.has(d);
+    return true;
+  }).length;
+  const periodCardio = (cardioLogs || []).filter(l => l.date >= from && l.date <= to);
+  // Historical target avg from persisted targetsSnap (correct even after target changes).
+  // Only used for 1M/3M; 1W falls back to plan-weighted current targets in the card.
+  const withSnap = tf !== '1W' ? inPeriod.filter(l => l.targetsSnap) : [];
+  const avgSnap = k => withSnap.length ? Math.round(withSnap.reduce((s, l) => s + (l.targetsSnap[k] || 0), 0) / withSnap.length) : null;
+  return {
+    from, to, periodDays, daysLogged: inPeriod.length,
+    trainingsDone, trainingsPlanned, trainingDaysInPeriod,
+    cardioMinutes: periodCardio.reduce((s, l) => s + (l.durationMinutes || 0), 0),
+    cardioSessions: periodCardio.length,
+    weight: avgK('weight'), steps: avgK('steps'),
+    stepsSum: tf === '1W' ? sumK('steps') : null,
+    calories: avgK('calories'), protein: avgK('protein'), carbs: avgK('carbs'),
+    fat: avgK('fat'), water: avgK('waterMl'), adherence: avgK('adherence'),
+    snapTgtCal: avgSnap('calories'), snapTgtProt: avgSnap('protein'),
+    snapTgtCarb: avgSnap('carbs'), snapTgtFat: avgSnap('fat'),
+  };
 }
 
 // Adherence → traffic-light colour (green ≥90, amber 75–89, red <75).
@@ -1395,34 +1462,15 @@ function HealthScreen({ store, setStore, go, userId }) {
   // actual logged days inside the window (not the full timeframe) so a sparse
   // window doesn't leave most of the chart empty — 80 of 90 days fills the chart.
   const tfDays = id => (HEALTH_TFS.find(t => t.id === id) || HEALTH_TFS[1]).days;
-  const seriesFor = (days, pick) => {
-    const { start, end } = healthWindow(days);
-    const data = dailyLogs.filter(l => l.date >= start && l.date <= end).map(l => ({ date: l.date, ...pick(l) }));
-    const dates = data.map(d => d.date);
-    let from = dates.length ? dates.reduce((a, b) => a < b ? a : b) : start;
-    let to = dates.length ? dates.reduce((a, b) => a > b ? a : b) : end;
-    if (from === to) { from = healthShiftISO(from, -1); to = healthShiftISO(to, 1); }
-    return { from, to, data };
-  };
 
   const windowDays = tfDays(tf);
-  const weightSeries = useMemoH(() => seriesFor(windowDays, l => ({ value: l.weight })), [dailyLogs, tf]);
-  const stepsSeries = useMemoH(() => seriesFor(windowDays, l => ({ value: l.steps })), [dailyLogs, tf]);
-  const macroSeries = useMemoH(() => seriesFor(windowDays, l => ({ protein: l.protein, carbs: l.carbs, fat: l.fat, fiber: l.fiber, calories: l.calories, targetCal: l.targetsSnap?.calories ?? null })), [dailyLogs, tf]);
-  const adhSeries = useMemoH(() => seriesFor(windowDays, l => ({ value: l.adherence })), [dailyLogs, tf]);
+  const weightSeries = useMemoH(() => healthSeriesFor(dailyLogs, windowDays, l => ({ value: l.weight })), [dailyLogs, tf]);
+  const stepsSeries = useMemoH(() => healthSeriesFor(dailyLogs, windowDays, l => ({ value: l.steps })), [dailyLogs, tf]);
+  const macroSeries = useMemoH(() => healthSeriesFor(dailyLogs, windowDays, l => ({ protein: l.protein, carbs: l.carbs, fat: l.fat, fiber: l.fiber, calories: l.calories, targetCal: l.targetsSnap?.calories ?? null })), [dailyLogs, tf]);
+  const adhSeries = useMemoH(() => healthSeriesFor(dailyLogs, windowDays, l => ({ value: l.adherence })), [dailyLogs, tf]);
 
   // Cardio chart series — minutes summed per day from store.cardioLogs.
-  const cardioSeries = useMemoH(() => {
-    const { start, end } = healthWindow(windowDays);
-    const byDay = {};
-    (store.cardioLogs || []).forEach(l => { if (l.date >= start && l.date <= end) byDay[l.date] = (byDay[l.date] || 0) + (l.durationMinutes || 0); });
-    const data = Object.keys(byDay).map(date => ({ date, value: byDay[date] }));
-    const dates = data.map(d => d.date);
-    let from = dates.length ? dates.reduce((a, b) => a < b ? a : b) : start;
-    let to = dates.length ? dates.reduce((a, b) => a > b ? a : b) : end;
-    if (from === to) { from = healthShiftISO(from, -1); to = healthShiftISO(to, 1); }
-    return { from, to, data };
-  }, [store.cardioLogs, tf]);
+  const cardioSeries = useMemoH(() => healthCardioSeries(store.cardioLogs, windowDays), [store.cardioLogs, tf]);
 
   // Historical avg macro target for the chart window (from persisted targetsSnap).
   // For 1M/3M this replaces the current training/rest split in the Macro card target row.
@@ -1467,50 +1515,10 @@ function HealthScreen({ store, setStore, go, userId }) {
   };
 
   // Period overview — adapts to tf: 1W = current Mon–Sun, 1M/3M = rolling window.
-  const weekStats = useMemoH(() => {
-    const dayOf = s => s.date ? (typeof s.date === 'string' ? s.date.slice(0, 10) : new Date(s.date).toISOString().slice(0, 10)) : null;
-    let from, to, periodDays;
-    if (tf === '1W') {
-      const anchor = selectedDate;
-      const jsDow = new Date(anchor + 'T12:00:00').getDay();
-      const monday = healthShiftISO(anchor, -((jsDow === 0 ? 7 : jsDow) - 1));
-      from = monday; to = healthShiftISO(monday, 6); periodDays = 7;
-    } else {
-      const days = tfDays(tf);
-      to = today; from = healthShiftISO(today, -(days - 1)); periodDays = days;
-    }
-    const allDays = Array.from({ length: periodDays }, (_, i) => healthShiftISO(from, i));
-    const inPeriod = dailyLogs.filter(l => l.date >= from && l.date <= to);
-    const avgK = k => { const vs = inPeriod.map(l => l[k]).filter(v => v != null); return vs.length ? vs.reduce((s, v) => s + v, 0) / vs.length : null; };
-    const sumK = k => { const vs = inPeriod.map(l => l[k]).filter(v => v != null); return vs.length ? vs.reduce((s, v) => s + v, 0) : null; };
-    const sessionDatesInPeriod = new Set((store.sessions || []).filter(s => s.ended).map(s => dayOf(s)).filter(d => d && d >= from && d <= to));
-    const trainingsDone = sessionDatesInPeriod.size;
-    const trainingsPlanned = allDays.filter(d => d <= today && LB.plannedTrainingDay(store, d)).length;
-    // Training days for macro target avg: future planned days count as training (not yet missed),
-    // past planned days only count if a session was actually done (missed = rest day, no earned macros).
-    const trainingDaysInPeriod = allDays.filter(d => {
-      if (!LB.plannedTrainingDay(store, d)) return false;
-      if (d < today) return sessionDatesInPeriod.has(d);
-      return true;
-    }).length;
-    const periodCardio = (store.cardioLogs || []).filter(l => l.date >= from && l.date <= to);
-    // Historical target avg from persisted targetsSnap (correct even after target changes).
-    // Only used for 1M/3M; 1W falls back to plan-weighted current targets in the card.
-    const withSnap = tf !== '1W' ? inPeriod.filter(l => l.targetsSnap) : [];
-    const avgSnap = k => withSnap.length ? Math.round(withSnap.reduce((s, l) => s + (l.targetsSnap[k] || 0), 0) / withSnap.length) : null;
-    return {
-      from, to, periodDays, daysLogged: inPeriod.length,
-      trainingsDone, trainingsPlanned, trainingDaysInPeriod,
-      cardioMinutes: periodCardio.reduce((s, l) => s + (l.durationMinutes || 0), 0),
-      cardioSessions: periodCardio.length,
-      weight: avgK('weight'), steps: avgK('steps'),
-      stepsSum: tf === '1W' ? sumK('steps') : null,
-      calories: avgK('calories'), protein: avgK('protein'), carbs: avgK('carbs'),
-      fat: avgK('fat'), water: avgK('waterMl'), adherence: avgK('adherence'),
-      snapTgtCal: avgSnap('calories'), snapTgtProt: avgSnap('protein'),
-      snapTgtCarb: avgSnap('carbs'), snapTgtFat: avgSnap('fat'),
-    };
-  }, [dailyLogs, store.sessions, store.cardioLogs, store.schedules, store.activeScheduleId, store.cycleStartDate, store.weekPlanStartDate, today, selectedDate, tf]);
+  const weekStats = useMemoH(() => computeHealthWeekStats({
+    logs: dailyLogs, sessions: store.sessions, cardioLogs: store.cardioLogs,
+    planningState: store, tf, today, selectedDate,
+  }), [dailyLogs, store.sessions, store.cardioLogs, store.schedules, store.activeScheduleId, store.cycleStartDate, store.weekPlanStartDate, today, selectedDate, tf]);
 
   const targetDayRow = (label, suffix) => {
     const t = effectiveTargets || {};
@@ -1731,31 +1739,11 @@ function HealthClientLogs({ clientStore }) {
   const tfDays = id => (HEALTH_TFS.find(t => t.id === id) || HEALTH_TFS[1]).days;
   const windowDays = tfDays(tf);
 
-  const seriesFor = (days, pick) => {
-    const { start, end } = healthWindow(days);
-    const data = logs.filter(l => l.date >= start && l.date <= end).map(l => ({ date: l.date, ...pick(l) }));
-    const dates = data.map(d => d.date);
-    let from = dates.length ? dates.reduce((a, b) => a < b ? a : b) : start;
-    let to = dates.length ? dates.reduce((a, b) => a > b ? a : b) : end;
-    if (from === to) { from = healthShiftISO(from, -1); to = healthShiftISO(to, 1); }
-    return { from, to, data };
-  };
-
-  const weightSeries = useMemoH(() => seriesFor(windowDays, l => ({ value: l.weight })), [logs, tf]);
-  const stepsSeries  = useMemoH(() => seriesFor(windowDays, l => ({ value: l.steps })), [logs, tf]);
-  const macroSeries  = useMemoH(() => seriesFor(windowDays, l => ({ protein: l.protein, carbs: l.carbs, fat: l.fat, fiber: l.fiber, calories: l.calories, targetCal: l.targetsSnap?.calories ?? null })), [logs, tf]);
-  const adhSeries    = useMemoH(() => seriesFor(windowDays, l => ({ value: l.adherence })), [logs, tf]);
-  const cardioSeries = useMemoH(() => {
-    const { start, end } = healthWindow(windowDays);
-    const byDay = {};
-    cardioLogs.forEach(l => { if (l.date >= start && l.date <= end) byDay[l.date] = (byDay[l.date] || 0) + (l.durationMinutes || 0); });
-    const data = Object.keys(byDay).map(date => ({ date, value: byDay[date] }));
-    const dates = data.map(d => d.date);
-    let from = dates.length ? dates.reduce((a, b) => a < b ? a : b) : start;
-    let to = dates.length ? dates.reduce((a, b) => a > b ? a : b) : end;
-    if (from === to) { from = healthShiftISO(from, -1); to = healthShiftISO(to, 1); }
-    return { from, to, data };
-  }, [cardioLogs, tf]);
+  const weightSeries = useMemoH(() => healthSeriesFor(logs, windowDays, l => ({ value: l.weight })), [logs, tf]);
+  const stepsSeries  = useMemoH(() => healthSeriesFor(logs, windowDays, l => ({ value: l.steps })), [logs, tf]);
+  const macroSeries  = useMemoH(() => healthSeriesFor(logs, windowDays, l => ({ protein: l.protein, carbs: l.carbs, fat: l.fat, fiber: l.fiber, calories: l.calories, targetCal: l.targetsSnap?.calories ?? null })), [logs, tf]);
+  const adhSeries    = useMemoH(() => healthSeriesFor(logs, windowDays, l => ({ value: l.adherence })), [logs, tf]);
+  const cardioSeries = useMemoH(() => healthCardioSeries(cardioLogs, windowDays), [cardioLogs, tf]);
 
   const numAvg = series => { const vs = series.data.map(d => d.value).filter(v => v != null); return vs.length ? vs.reduce((s, v) => s + v, 0) / vs.length : null; };
   const weightAvg = useMemoH(() => { const a = numAvg(weightSeries); return a != null ? Math.round(a * 10) / 10 : null; }, [weightSeries]);
@@ -1787,46 +1775,10 @@ function HealthClientLogs({ clientStore }) {
 
   const today = LB.todayISO();
 
-  const weekStats = useMemoH(() => {
-    const dayOf = s => s.date ? (typeof s.date === 'string' ? s.date.slice(0, 10) : new Date(s.date).toISOString().slice(0, 10)) : null;
-    let from, to, periodDays;
-    if (tf === '1W') {
-      const anchor = selectedDate;
-      const jsDow = new Date(anchor + 'T12:00:00').getDay();
-      const monday = healthShiftISO(anchor, -((jsDow === 0 ? 7 : jsDow) - 1));
-      from = monday; to = healthShiftISO(monday, 6); periodDays = 7;
-    } else {
-      const days = tfDays(tf);
-      to = today; from = healthShiftISO(today, -(days - 1)); periodDays = days;
-    }
-    const allDays = Array.from({ length: periodDays }, (_, i) => healthShiftISO(from, i));
-    const inPeriod = logs.filter(l => l.date >= from && l.date <= to);
-    const avgK = k => { const vs = inPeriod.map(l => l[k]).filter(v => v != null); return vs.length ? vs.reduce((s, v) => s + v, 0) / vs.length : null; };
-    const sumK = k => { const vs = inPeriod.map(l => l[k]).filter(v => v != null); return vs.length ? vs.reduce((s, v) => s + v, 0) : null; };
-    const sessionDatesInPeriod = new Set((clientStore?.sessions || []).filter(s => s.ended).map(s => dayOf(s)).filter(d => d && d >= from && d <= to));
-    const trainingsDone = sessionDatesInPeriod.size;
-    const trainingsPlanned = allDays.filter(d => d <= today && LB.plannedTrainingDay(clientStore || {}, d)).length;
-    const trainingDaysInPeriod = allDays.filter(d => {
-      if (!LB.plannedTrainingDay(clientStore || {}, d)) return false;
-      if (d < today) return sessionDatesInPeriod.has(d);
-      return true;
-    }).length;
-    const periodCardio = (clientStore?.cardioLogs || []).filter(l => l.date >= from && l.date <= to);
-    const withSnap = tf !== '1W' ? inPeriod.filter(l => l.targetsSnap) : [];
-    const avgSnap = k => withSnap.length ? Math.round(withSnap.reduce((s, l) => s + (l.targetsSnap[k] || 0), 0) / withSnap.length) : null;
-    return {
-      from, to, periodDays, daysLogged: inPeriod.length,
-      trainingsDone, trainingsPlanned, trainingDaysInPeriod,
-      cardioMinutes: periodCardio.reduce((s, l) => s + (l.durationMinutes || 0), 0),
-      cardioSessions: periodCardio.length,
-      weight: avgK('weight'), steps: avgK('steps'),
-      stepsSum: tf === '1W' ? sumK('steps') : null,
-      calories: avgK('calories'), protein: avgK('protein'), carbs: avgK('carbs'),
-      fat: avgK('fat'), water: avgK('waterMl'), adherence: avgK('adherence'),
-      snapTgtCal: avgSnap('calories'), snapTgtProt: avgSnap('protein'),
-      snapTgtCarb: avgSnap('carbs'), snapTgtFat: avgSnap('fat'),
-    };
-  }, [logs, clientStore?.sessions, clientStore?.cardioLogs, clientStore?.schedules, clientStore?.activeScheduleId, clientStore?.cycleStartDate, clientStore?.weekPlanStartDate, today, selectedDate, tf]);
+  const weekStats = useMemoH(() => computeHealthWeekStats({
+    logs, sessions: clientStore?.sessions, cardioLogs: clientStore?.cardioLogs,
+    planningState: clientStore || {}, tf, today, selectedDate,
+  }), [logs, clientStore?.sessions, clientStore?.cardioLogs, clientStore?.schedules, clientStore?.activeScheduleId, clientStore?.cycleStartDate, clientStore?.weekPlanStartDate, today, selectedDate, tf]);
 
   if (!logs.length && !cardioLogs.length && !glucoseLogs.length) {
     return (

@@ -3403,6 +3403,14 @@ function mergeCollectionById(freshRows, curRows, baseRows, delIds) {
   });
 }
 
+// Calories from macros: P×4 + C×4 + F×9. With fiber given (net-carb mode),
+// carbs contribute max(0, C − fiber)×4 — clamped so it matches the displayed
+// net-carb value when fiber exceeds carbs. Returns null when no macro is set.
+function caloriesFromMacros(p, c, f, fiber) {
+  if (p == null && c == null && f == null) return null;
+  return (p || 0) * 4 + Math.max(0, (c || 0) - (fiber || 0)) * 4 + (f || 0) * 9;
+}
+
 // Bundles consecutive same-supersetGroup entries into { type: 'superset',
 // members: [{entry, idx}] } groups, everything else into { type:
 // 'standalone', entry, idx }. Used to be copy-pasted into 3 screens with a
@@ -3512,7 +3520,7 @@ window.LB = {
   startDeload, endDeload, deloadElapsed, deloadDaysRemaining, deloadPlanDays,
   loadClientStore, loadCoachClientsStatus, reloadCoachingState, enableSelfCoaching, inviteClient, respondToCoachingInvite, endCoaching,
   addCoachingNote, markCoachingNotesRead, loadCoachingNotes, loadCoachingThreads, createCoachingThread, deleteCoachingThread, getOrCreateCoachingThread, uploadChatImage,
-  unreadCoachingNotes, isNoteFromClient, techniqueRounds, groupBySuperset, supersetLabel, timeAgo, dayLabel, cyclePosFromStartDate, mergeCollectionById,
+  unreadCoachingNotes, isNoteFromClient, techniqueRounds, groupBySuperset, supersetLabel, timeAgo, dayLabel, cyclePosFromStartDate, mergeCollectionById, caloriesFromMacros,
   loadCoachingMacros, addCoachingMacros,
   diffSchedule,
   checkinWeekStart, submitCheckin, loadCheckins, deleteCheckin, loadCoachCheckinStatus, requestCheckin, setCheckinEnabled, loadCheckinSchema, saveCheckinSchema, saveDefaultCheckinSchema,

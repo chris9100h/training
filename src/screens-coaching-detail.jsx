@@ -1467,9 +1467,10 @@ function ClientNutritionTab({ coachingId, userId }) {
   const emptyForm = { proteinTraining: '', carbsTraining: '', fatTraining: '', proteinRest: '', carbsRest: '', fatRest: '' };
   const [form, setForm] = useStateC(emptyForm);
 
-  // Calories auto-computed: protein*4 + carbs*4 + fat*9
+  // Calories auto-computed via the shared formula (no fiber — this form has
+  // no net-carb concept); 0 is treated as "nothing entered yet", not a real value.
   const calcCals = (pro, car, fat) => {
-    const total = (parseInt(pro) || 0) * 4 + (parseInt(car) || 0) * 4 + (parseInt(fat) || 0) * 9;
+    const total = LB.caloriesFromMacros(parseInt(pro) || 0, parseInt(car) || 0, parseInt(fat) || 0);
     return total > 0 ? total : null;
   };
   const calsTraining = calcCals(form.proteinTraining, form.carbsTraining, form.fatTraining);
