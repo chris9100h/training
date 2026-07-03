@@ -2823,6 +2823,18 @@ function fmtSpeed(secPerKm, unit) {
   return `${kmh.toFixed(1)} km/h`;
 }
 
+// Recently-used cardio activity type strings (for the "e.g. Running,
+// Cycling…" suggestion chips), most-recently-used first, deduped, capped.
+function recentCardioTypes(cardioLogs, limit = 6) {
+  const seen = new Set();
+  const result = [];
+  for (const l of (cardioLogs || [])) {
+    if (l.type && !seen.has(l.type)) { seen.add(l.type); result.push(l.type); }
+    if (result.length >= limit) break;
+  }
+  return result;
+}
+
 // Aggregate cardio logs for a given week (weekStart = 'YYYY-MM-DD' Monday).
 // Returns { cardioMinutes, cardioDistanceM, paceFeeling, effort, count } or null.
 function cardioWeekPrefill(cardioLogs, weekStart) {
@@ -3537,7 +3549,7 @@ window.LB = {
   diffSchedule,
   checkinWeekStart, submitCheckin, loadCheckins, deleteCheckin, loadCoachCheckinStatus, requestCheckin, setCheckinEnabled, loadCheckinSchema, saveCheckinSchema, saveDefaultCheckinSchema,
   cardioWeekPrefill, detectCardioPRs,
-  cardioDistUnit, setCardioDistUnit, distToM, mToDisplay, fmtDistance, fmtPace, fmtSpeed, MI_TO_M,
+  cardioDistUnit, setCardioDistUnit, distToM, mToDisplay, fmtDistance, fmtPace, fmtSpeed, MI_TO_M, recentCardioTypes,
   isLoggedTrainingDay, plannedTrainingDay, isTrainingDayForDate, dayTargetFromMacros, macroAdherence, effectiveMacroTargets, dailyLogAdherence, dailyLogsWeekPrefill, weekPerformanceSignal,
   refreshHealthLogs,
   pickGrowthRecipient, retractGrowthGrant, MESO_GROWTH_CEILING_DELTA,

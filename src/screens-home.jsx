@@ -640,16 +640,7 @@ function CardioQuickLogSheet({ open, onClose, store, setStore, userId, editLog, 
     onClose();
   };
 
-  // Unique types from history, most-recently-used first
-  const typeChips = useMemo(() => {
-    const seen = new Set();
-    const result = [];
-    for (const l of (store.cardioLogs || [])) {
-      if (l.type && !seen.has(l.type)) { seen.add(l.type); result.push(l.type); }
-      if (result.length >= 6) break;
-    }
-    return result;
-  }, [store.cardioLogs]);
+  const typeChips = useMemo(() => LB.recentCardioTypes(store.cardioLogs), [store.cardioLogs]);
 
   const canSave = form.date && form.duration && Number(form.duration) > 0;
 
@@ -867,14 +858,7 @@ function CardioFinishFlow({ open, durationMin, store, setStore, onClose, onPR })
     setDistUnitState(LB.cardioDistUnit());
   }, [open]);
 
-  const typeChips = useMemo(() => {
-    const seen = new Set(); const result = [];
-    for (const l of (store.cardioLogs || [])) {
-      if (l.type && !seen.has(l.type)) { seen.add(l.type); result.push(l.type); }
-      if (result.length >= 6) break;
-    }
-    return result;
-  }, [store.cardioLogs]);
+  const typeChips = useMemo(() => LB.recentCardioTypes(store.cardioLogs), [store.cardioLogs]);
 
   const METRICS = 5;
   const next = () => setStep(s => s + 1);

@@ -2484,14 +2484,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   };
   const [plateCalcOpen, setPlateCalcOpen] = useStateT(false);
   const [cardioForm, setCardioForm] = useStateT({ type: '', duration: '', distance: '', paceFeeling: null, effort: null, distUnit: LB.cardioDistUnit() });
-  const cardioTypeChips = useMemoT(() => {
-    const seen = new Set(); const result = [];
-    for (const l of (store.cardioLogs || [])) {
-      if (l.type && !seen.has(l.type)) { seen.add(l.type); result.push(l.type); }
-      if (result.length >= 6) break;
-    }
-    return result;
-  }, [store.cardioLogs]);
+  const cardioTypeChips = useMemoT(() => LB.recentCardioTypes(store.cardioLogs), [store.cardioLogs]);
   const pendingFocusRef = useRefT(null);
   // Records when a set was last completed via the checkbox; used to ignore
   // iOS ghost-clicks that fire 200-400ms after completion and would otherwise
