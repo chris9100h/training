@@ -830,9 +830,11 @@ function useConfirm() {
       <div style={{ fontFamily: UI.fontDisplay, fontSize: 26, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: UI.ink, marginBottom: 10, textAlign: 'center' }}>{state.title}</div>
       <div style={{ fontSize: 14, color: UI.inkSoft, marginBottom: 22, lineHeight: 1.5, textAlign: 'center' }}>{state.message}</div>
       <div style={{ display: 'flex', gap: 8 }}>
-        <Btn kind="ghost" onClick={() => close(false)} style={{ flex: 1 }}>{state.cancel}</Btn>
+        {/* cancel: null → single-button alert mode (nothing to actually
+            confirm/deny, just an explanation to acknowledge). */}
+        {state.cancel && <Btn kind="ghost" onClick={() => close(false)} style={{ flex: 1 }}>{state.cancel}</Btn>}
         <Btn onClick={() => close(true)} style={{
-          flex: 2,
+          flex: state.cancel ? 2 : 1,
           ...(state.danger ? { background: UI.danger, borderColor: 'rgba(var(--danger-rgb),0.6)', boxShadow: '0 6px 20px rgba(var(--danger-rgb),0.25)' } : {}),
         }}>{state.ok}</Btn>
       </div>

@@ -1124,14 +1124,21 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     return overlayHoldMs;
   };
 
-  const finishDropSet = (rawDrops) => {
+  const finishDropSet = async (rawDrops) => {
     // Silently drop any incomplete row (missing reps, or missing kg unless
     // no-weight-reps/bodyweight) instead of saving it — e.g. an ADD DROP
     // row added by accident and never filled in. Centralized here (not
     // just at the Sheet's own FINISH button) since checkSet() below can
     // also reach this directly.
     const drops = rawDrops.filter(d => !!d.reps && (isNoWeightReps || isBodyweight || d.kg != null));
-    if (!drops.length || dropSetIdx == null) return;
+    if (dropSetIdx == null) return;
+    // A "drop set" with no actual drop beyond the top set isn't a drop set
+    // — the FINISH button stays tappable (not disabled) specifically so
+    // this explains why instead of just doing nothing.
+    if (drops.length < 2) {
+      await confirm("You did a Drop Set... without a drop? Bold strategy. Add one, or just log this as a normal set.", { title: 'No Drop, No Drop Set', ok: 'Got it', cancel: null });
+      return;
+    }
     // Optional finisher: partials tacked onto the last drop's failure point.
     const finalDrops = finisherPartials > 0
       ? drops.map((d, i) => i === drops.length - 1 ? { ...d, partials: finisherPartials } : d)
@@ -1178,12 +1185,19 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     setKbField(null); setKbRaw(''); setKbFresh(false);
   };
 
-  const finishMyoSet = (rawDrops, technique) => {
+  const finishMyoSet = async (rawDrops, technique) => {
     // Silently drop any incomplete mini-set instead of saving it (see
     // finishDropSet) — still needs the activation plus at least one
-    // completed mini-set to count as an actual myo-reps set.
+    // completed mini-set to count as an actual myo-reps set. FINISH stays
+    // tappable (not disabled) specifically so this can explain why instead
+    // of just doing nothing.
     const drops = rawDrops.filter(d => d.reps != null && (isNoWeightReps || isBodyweight || d.kg != null));
-    if (drops.length < 2 || myoSetIdx == null) return;
+    if (myoSetIdx == null) return;
+    if (drops.length < 2) {
+      const label = technique === 'myorep_match' ? 'Myo Rep Match' : 'Myo-Reps';
+      await confirm(`${label} without any myo sets? That's just a regular set. Add one, or just log it normally.`, { title: 'No Myo, No Myo-Reps', ok: 'Got it', cancel: null });
+      return;
+    }
     // Optional finisher: partials tacked onto the last mini's failure point.
     const finalDrops = finisherPartials > 0
       ? drops.map((d, i) => i === drops.length - 1 ? { ...d, partials: finisherPartials } : d)
@@ -1227,11 +1241,17 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     completeSet(setIdx, false, true, { technique: 'lengthened_partial', drops: { partials: lpCount } });
   };
 
-  const finishAv = (rawDrops) => {
+  const finishAv = async (rawDrops) => {
     // Silently drop any incomplete round instead of saving it (see
     // finishDropSet).
     const drops = rawDrops.filter(d => !!d.reps && (isNoWeightReps || isBodyweight || d.kg != null));
-    if (!drops.length || avSetIdx == null) return;
+    if (avSetIdx == null) return;
+    // AMRAP Variations with only the first round isn't a variation — FINISH
+    // stays tappable (not disabled) specifically so this can explain why.
+    if (drops.length < 2) {
+      await confirm("AMRAP Variations with just one round? That's just an AMRAP. Add a variation, or log it as one.", { title: 'No Variation, No Variations', ok: 'Got it', cancel: null });
+      return;
+    }
     // Optional finisher: partials tacked onto the last round's failure point.
     const finalDrops = finisherPartials > 0
       ? drops.map((d, i) => i === drops.length - 1 ? { ...d, partials: finisherPartials } : d)
@@ -5073,11 +5093,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               <FinisherPartials count={finisherPartials} onChange={setFinisherPartials} />
             </div>
             {(() => {
-              // finishDropSet silently drops any incomplete row itself
-              // (accidentally added via ADD DROP, never filled in) rather
-              // than blocking FINISH on it — this only disables FINISH
-              // when that would leave nothing at all to save.
-              const canFinishDrop = dropDrops.some(d => !!d.reps && (isNoWeightReps || isBodyweight || d.kg != null));
+              // finishDropSet itself both silently drops any incomplete row
+              // (accidentally added via ADD DROP, never filled in) and
+              // requires at least one actual drop beyond the top set — not
+              // disabling FINISH here on purpose, so tapping it while
+              // "not ready" explains why via a warning instead of just
+              // doing nothing.
+              const canFinishDrop = dropDrops.filter(d => !!d.reps && (isNoWeightReps || isBodyweight || d.kg != null)).length >= 2;
               return (
                 <div style={{ flexShrink: 0, display: 'flex', gap: 8, padding: '4px 4px 10px' }}>
                   <button onClick={() => {
@@ -5091,14 +5113,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                     letterSpacing: '0.1em', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
                   }}>↓ ADD DROP</button>
                   <button onClick={() => finishDropSet(dropDropsRef.current)}
-                    disabled={!canFinishDrop}
                     style={{
                       flex: 2, padding: '8px 0',
                       background: canFinishDrop ? 'rgba(var(--accent-rgb),0.12)' : 'transparent',
                       border: `1px solid ${canFinishDrop ? 'rgba(var(--accent-rgb),0.5)' : UI.hair}`,
                       borderRadius: 6, color: canFinishDrop ? 'var(--accent)' : UI.inkGhost,
                       fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.1em',
-                      cursor: canFinishDrop ? 'pointer' : 'default',
+                      cursor: 'pointer',
                       WebkitTapHighlightColor: 'transparent',
                     }}>✓ FINISH</button>
                 </div>
@@ -5173,11 +5194,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               <FinisherPartials count={finisherPartials} onChange={setFinisherPartials} />
             </div>
             {(() => {
-              // finishAv silently drops any incomplete round itself
-              // (accidentally added via ADD ROUND, never filled in) rather
-              // than blocking FINISH on it — this only disables FINISH
-              // when that would leave nothing at all to save.
-              const canFinishAv = avDrops.some(d => !!d.reps && (isNoWeightReps || isBodyweight || d.kg != null));
+              // finishAv itself both silently drops any incomplete round
+              // (accidentally added via ADD ROUND, never filled in) and
+              // requires at least one actual variation round beyond the
+              // first — not disabling FINISH here on purpose, so tapping
+              // it while "not ready" explains why via a warning instead of
+              // just doing nothing.
+              const canFinishAv = avDrops.filter(d => !!d.reps && (isNoWeightReps || isBodyweight || d.kg != null)).length >= 2;
               return (
                 <div style={{ flexShrink: 0, display: 'flex', gap: 8, padding: '4px 4px 10px' }}>
                   <button onClick={() => {
@@ -5192,14 +5215,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                     letterSpacing: '0.1em', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
                   }}>+ ADD ROUND</button>
                   <button onClick={() => finishAv(avDropsRef.current)}
-                    disabled={!canFinishAv}
                     style={{
                       flex: 2, padding: '8px 0',
                       background: canFinishAv ? 'rgba(var(--accent-rgb),0.12)' : 'transparent',
                       border: `1px solid ${canFinishAv ? 'rgba(var(--accent-rgb),0.5)' : UI.hair}`,
                       borderRadius: 6, color: canFinishAv ? 'var(--accent)' : UI.inkGhost,
                       fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.1em',
-                      cursor: canFinishAv ? 'pointer' : 'default',
+                      cursor: 'pointer',
                       WebkitTapHighlightColor: 'transparent',
                     }}>✓ FINISH</button>
                 </div>
@@ -5338,14 +5360,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   }}>↺ ADD MYO</button>
                 )}
                 <button onClick={() => finishMyoSet(myoDropsRef.current, myoTechnique)}
-                  disabled={!canFinish}
                   style={{
                     flex: 2, padding: '8px 0',
                     background: canFinish ? 'rgba(var(--accent-rgb),0.12)' : 'transparent',
                     border: `1px solid ${canFinish ? 'rgba(var(--accent-rgb),0.5)' : UI.hair}`,
                     borderRadius: 6, color: canFinish ? 'var(--accent)' : UI.inkGhost,
                     fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.1em',
-                    cursor: canFinish ? 'pointer' : 'default',
+                    cursor: 'pointer',
                     WebkitTapHighlightColor: 'transparent',
                   }}>✓ FINISH</button>
               </div>
