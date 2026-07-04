@@ -1660,8 +1660,31 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
                       <Stepper value={draft.mesocycle_weeks} step={1} min={4} max={8}
                         suffix=" weeks"
                         onChange={v => setDraft(d => ({ ...d, mesocycle_weeks: Math.min(8, Math.max(4, Math.round(v))) }))} />
-                      <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 8, textAlign: 'center', lineHeight: 1.5 }}>
-                        {'Week 1 = 3 RIR · Week ' + draft.mesocycle_weeks + ' = 0 RIR · then deload'}
+                      {(() => {
+                        const sr = draft.mesocycle_start_rir ?? 3;
+                        const er = draft.mesocycle_end_rir ?? 0;
+                        return (
+                          <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
+                            <div style={{ flex: 1, textAlign: 'center' }}>
+                              <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>START RIR</div>
+                              <Stepper value={sr} step={1} min={0} suffix=" RIR"
+                                onChange={v => setDraft(d => ({ ...d, mesocycle_start_rir: Math.min(3, Math.max(0, Math.round(v))) }))} />
+                            </div>
+                            <div style={{ flex: 1, textAlign: 'center' }}>
+                              <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>END RIR</div>
+                              <Stepper value={er} step={1} min={-3} suffix=" RIR"
+                                onChange={v => setDraft(d => ({ ...d, mesocycle_end_rir: Math.min(0, Math.max(-3, Math.round(v))) }))} />
+                            </div>
+                          </div>
+                        );
+                      })()}
+                      <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 10, textAlign: 'center', lineHeight: 1.5 }}>
+                        {(() => {
+                          const sr = draft.mesocycle_start_rir ?? 3;
+                          const er = draft.mesocycle_end_rir ?? 0;
+                          const partHint = er < 0 ? ` · +${-er} partial${er === -1 ? '' : 's'}/set at peak 🔥` : '';
+                          return `Week 1 = ${sr} RIR · Week ${draft.mesocycle_weeks} = ${er} RIR${partHint} · then deload`;
+                        })()}
                       </div>
                       {mesoCompletions > 0 && (
                         <button onClick={() => setStore(s => ({
@@ -1693,7 +1716,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
       <Sheet open={mesoInfoOpen} onClose={() => setMesoInfoOpen(false)} title="Mesocycle">
         <div style={{ fontSize: 13, color: UI.inkSoft, lineHeight: 1.6, display: 'flex', flexDirection: 'column', gap: 14 }}>
           <p style={{ margin: 0 }}>A <strong style={{ color: UI.ink }}>mesocycle</strong> is a structured training block (4–8 weeks) where effort progressively increases each week, measured by <strong style={{ color: UI.ink }}>Reps in Reserve (RIR)</strong> — how many reps you could still do before failure.</p>
-          <p style={{ margin: 0 }}>Week 1 starts easy (3 RIR) and ramps up to all-out effort (0 RIR) by the final week. Then you deload.</p>
+          <p style={{ margin: 0 }}>By default week 1 starts easy (3 RIR) and ramps up to all-out effort (0 RIR) by the final week, then you deload. You can adjust both endpoints — and even set the peak <em>past</em> failure (negative RIR), which auto-adds that many lengthened partials to every set. That last one's for very advanced lifters. 🔥</p>
           <div style={{ background: UI.bgInset, borderRadius: 6, padding: '12px 14px', border: `1px solid ${UI.hairStrong}` }}>
             <div className="label" style={{ marginBottom: 10 }}>What Zane asks during training</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>

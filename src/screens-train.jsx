@@ -135,10 +135,9 @@ function mesoCurrentWeek(mesoState, store) {
   const cycleLen = (sch && !LB.isWeekdayPlan(sch) && sch.days?.length > 0) ? sch.days.length : 7;
   return Math.min(Math.max(1, Math.floor(days / cycleLen) + 1), mesoState.weeks);
 }
-function mesoRirForWeek(week, weeks) {
-  if (!weeks || weeks <= 1) return 0;
-  return Math.max(0, Math.round(3 - (week - 1) * 3 / (weeks - 1)));
-}
+// mesoRirForWeek lives in store.js (LB.mesoRirForWeek) so it's unit-testable —
+// linear RIR taper from startRir (week 1) to endRir (final week), endRir may be
+// negative (beyond failure → auto lengthened partials, see mesoPartials).
 // Apply an already-resolved meso state's set-delta to a plan item before
 // building seed sets. Returns a shallow copy with adjusted .sets, clamped to
 // [1, baseline+4] so repeated "not enough volume" answers across a mesocycle
@@ -876,6 +875,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // it done with none of that data, so refuse outright rather than
     // silently corrupting it.
     if (dropSetIdx === setIdx || myoSetIdx === setIdx || avSetIdx === setIdx) return;
+    // Beyond-failure meso block: auto-attach the prescribed lengthened partials
+    // to a plain working set (intensity chains carry theirs via the finisher
+    // seed instead — see startDrop/startMyo/startAv). Only when the caller
+    // didn't already supply its own patch and this isn't a warm-up.
+    if (!extraPatch && mesoPartials > 0 && !entry.sets[setIdx]?.warmup) {
+      extraPatch = { technique: 'lengthened_partial', drops: { partials: mesoPartials } };
+    }
     // Unlock AudioContext on this user gesture so the rest-timer beep works on iOS
     // even when the tempo feature is disabled (only other init path).
     try {
@@ -1966,7 +1972,16 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     try { localStorage.removeItem(MESO_ASKED_KEY + session.id); } catch {}
   };
   const mesoWeek = mesoState ? mesoCurrentWeek(mesoState, store) : null;
-  const mesoRirVal = (mesoWeek != null && mesoState?.weeks != null) ? mesoRirForWeek(mesoWeek, mesoState.weeks) : null;
+  const mesoSch = mesoState ? store.schedules?.find(s => s.id === mesoState.scheduleId) : null;
+  const mesoStartRir = mesoSch?.mesocycle_start_rir ?? 3;
+  const mesoEndRir = mesoSch?.mesocycle_end_rir ?? 0;
+  const mesoRirVal = (mesoWeek != null && mesoState?.weeks != null) ? LB.mesoRirForWeek(mesoWeek, mesoState.weeks, mesoStartRir, mesoEndRir) : null;
+  // Beyond-failure block: a negative RIR target prescribes |RIR| lengthened
+  // partials on every working set this session (RIR -3 → 3 partials). Auto-
+  // attached at set completion / seeded into the intensity-chain finisher.
+  // (isMesoDeloadSession is declared further down, so inline the deload check
+  // here to avoid a temporal-dead-zone reference.)
+  const mesoPartials = (mesoRirVal != null && !(store.statusMode === 'deload' || session.isDeload)) ? Math.max(0, -mesoRirVal) : 0;
   const [mesoGainSheetOpen, setMesoGainSheetOpen] = useStateT(false);
   const [mesoGainItems, setMesoGainItems] = useStateT([]);
   const mesoGainNavRef = useRefT(null);
@@ -4164,16 +4179,33 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           </Frame>
         ) : heroSet && (
           <BracketFrame gold padding={0}>
-            {mesoState && mesoRirVal != null && !isCurrentWarmup && (
-              <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', overflow: 'hidden' }}>
-                <span className="display-it" style={{
-                  fontSize: 72, fontWeight: 900, letterSpacing: '0.18em', whiteSpace: 'nowrap', userSelect: 'none',
-                  color: mesoRirVal === 0 ? 'rgba(220,53,69,1)' : UI.gold,
-                  opacity: mesoRirVal === 0 ? 0.13 : 0.09,
-                  transform: 'rotate(-22deg)',
-                }}>{mesoRirVal} RIR</span>
-              </div>
-            )}
+            {mesoState && mesoRirVal != null && !isCurrentWarmup && (() => {
+              // Escalate the RIR watermark as the block gets crazier: gold above
+              // failure, red at 0 RIR, then a hotter, faster ember-flicker the
+              // further past failure (negative RIR) it goes — at -3 it's fully
+              // ablaze. neg = how many partials are prescribed (0..3).
+              const neg = mesoRirVal < 0 ? -mesoRirVal : 0;
+              const fire = neg > 0;
+              return (
+                <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', overflow: 'hidden' }}>
+                  <span className={`display-it${fire ? ' meso-ember' : ''}`} style={{
+                    fontSize: 72, fontWeight: 900, letterSpacing: '0.18em', whiteSpace: 'nowrap', userSelect: 'none',
+                    color: fire ? '#ff5a1f' : (mesoRirVal === 0 ? 'rgba(220,53,69,1)' : UI.gold),
+                    transform: 'rotate(-22deg)',
+                    ...(fire
+                      ? { '--ember-op': Math.min(0.3, 0.14 + neg * 0.05), '--ember-blur': `${6 + neg * 9}px`, animationDuration: `${(1.3 - neg * 0.25).toFixed(2)}s` }
+                      : { opacity: mesoRirVal === 0 ? 0.13 : 0.09 }),
+                  }}>{mesoRirVal} RIR</span>
+                  {fire && (
+                    <span className="meso-ember" style={{
+                      fontFamily: UI.fontUi, fontSize: 13, fontWeight: 800, letterSpacing: '0.22em', color: '#ff5a1f',
+                      transform: 'rotate(-22deg)', marginTop: 6, userSelect: 'none',
+                      '--ember-op': Math.min(0.5, 0.3 + neg * 0.06), '--ember-blur': `${5 + neg * 5}px`, animationDuration: `${(1.3 - neg * 0.25).toFixed(2)}s`,
+                    }}>+{neg} PARTIAL{neg === 1 ? '' : 'S'}</span>
+                  )}
+                </div>
+              );
+            })()}
             <div style={{ padding: '12px 6px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', padding: '0 18px', marginBottom: 8 }}>
                 <span className="micro-gold">
@@ -4917,6 +4949,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               : entry.sets.reduce((last, s, i) => !s.warmup ? i : last, -1);
             if (target < 0) return;
             clearMyo(); clearLp(); clearAv();
+            setFinisherPartials(mesoPartials); // beyond-failure meso: pre-seed prescribed partials
             const s = entry.sets[target];
             const initDrops = [{ kg: s?.kg ?? null, reps: s?.reps ?? null }];
             setDropDrops(initDrops);
@@ -4931,6 +4964,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               : entry.sets.reduce((last, s, i) => !s.warmup ? i : last, -1);
             if (target < 0) return;
             clearDrop(); clearMyo(); clearLp();
+            setFinisherPartials(mesoPartials); // beyond-failure meso: pre-seed prescribed partials
             const s = entry.sets[target];
             const initDrops = [{ kg: s?.kg ?? null, reps: s?.reps ?? null, label: entry.name }];
             setAvDrops(initDrops);
@@ -4945,6 +4979,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               : entry.sets.reduce((last, s, i) => !s.warmup ? i : last, -1);
             if (target < 0) return;
             clearDrop(); clearLp(); clearAv();
+            setFinisherPartials(mesoPartials); // beyond-failure meso: pre-seed prescribed partials
             const s = entry.sets[target];
             const anchor = entry.sets.find(st => st.technique === 'myorep' && st.done && st.drops?.[0]?.reps != null);
             // For match: activation kg locked to the preceding myo set's activation kg

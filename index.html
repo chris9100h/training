@@ -177,6 +177,27 @@
   }
   .intensity-glow { animation: intensityGlow 2.5s ease-in-out infinite; }
 
+  /* Beyond-failure meso: the RIR watermark literally catches fire as the
+     target dips below 0. Intensity is driven by inline custom props set per
+     set: --ember-op (base opacity) and --ember-blur (glow radius) scale with
+     how far past failure (−1 → −3), and the caller shortens animationDuration
+     so it flickers faster the crazier it gets. */
+  @keyframes meso-ember {
+    0%, 100% {
+      opacity: var(--ember-op, 0.2);
+      text-shadow: 0 0 var(--ember-blur, 10px) rgba(255,90,31,0.9),
+                   0 0 calc(var(--ember-blur, 10px) * 2.2) rgba(255,40,0,0.55);
+    }
+    45%  { opacity: calc(var(--ember-op, 0.2) * 1.25);
+           text-shadow: 0 0 calc(var(--ember-blur, 10px) * 1.4) rgba(255,150,50,0.95),
+                        0 0 calc(var(--ember-blur, 10px) * 2.8) rgba(255,60,0,0.6); }
+    70%  { opacity: calc(var(--ember-op, 0.2) * 0.7);
+           text-shadow: 0 0 calc(var(--ember-blur, 10px) * 0.7) rgba(255,120,40,0.8),
+                        0 0 var(--ember-blur, 10px) rgba(255,50,0,0.4); }
+  }
+  .meso-ember { animation: meso-ember 1.1s ease-in-out infinite; will-change: opacity, text-shadow; }
+  @media (prefers-reduced-motion: reduce) { .meso-ember { animation: none; opacity: var(--ember-op, 0.2); } }
+
   /* Drag-to-reorder (plan days · day exercises). Imperatively driven by
      UI.useDragReorder — the ghost is a clone of the picked-up row that
      tracks the finger, the drop-line marks where it will land. */

@@ -619,6 +619,30 @@ async function testAsync(name, fn) {
     assert.strictEqual(LB.mesoPausedDays([{ mode: 'sick', startedAt: '2026-01-05T12:00:00Z', endedAt: null }], new Set(), '2026-01-20', '2026-01-01'), 0);
   });
 
+  // ── mesoRirForWeek (configurable, taper can go beyond failure) ──
+  test('mesoRirForWeek: default 3 → 0 taper reproduces the classic curve', () => {
+    // 6-week meso: 3,2,2,1,1,0 (rounded linear).
+    const rirs = [1, 2, 3, 4, 5, 6].map(w => LB.mesoRirForWeek(w, 6));
+    assert.strictEqual(rirs[0], 3);
+    assert.strictEqual(rirs[5], 0);
+    assert.ok(rirs.every((v, i) => i === 0 || v <= rirs[i - 1]), 'monotonically non-increasing');
+  });
+  test('mesoRirForWeek: a negative end RIR is preserved (no floor at 0)', () => {
+    // 4-week meso, start 3, end -3: 3, 1, -1, -3.
+    assert.strictEqual(LB.mesoRirForWeek(1, 4, 3, -3), 3);
+    assert.strictEqual(LB.mesoRirForWeek(4, 4, 3, -3), -3);
+    assert.strictEqual(LB.mesoRirForWeek(3, 4, 3, -3), -1);
+  });
+  test('mesoRirForWeek: lower start (2) and negative end (-2) taper correctly', () => {
+    assert.strictEqual(LB.mesoRirForWeek(1, 5, 2, -2), 2);
+    assert.strictEqual(LB.mesoRirForWeek(5, 5, 2, -2), -2);
+    assert.strictEqual(LB.mesoRirForWeek(3, 5, 2, -2), 0);
+  });
+  test('mesoRirForWeek: a 1-week (or 0) meso just returns the end RIR', () => {
+    assert.strictEqual(LB.mesoRirForWeek(1, 1, 3, -3), -3);
+    assert.strictEqual(LB.mesoRirForWeek(1, 0, 3, 0), 0);
+  });
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();
