@@ -5211,8 +5211,28 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                         minWidth: myoProgress > 0 ? 8 : 0,
                         borderRadius: 999,
                         background: myoProgress >= 1 ? 'var(--accent)' : 'rgba(var(--accent-rgb),0.75)',
-                        boxShadow: myoProgress > 0 ? `0 0 ${Math.round(4 + myoProgress * 10)}px ${Math.round(2 + myoProgress * 6)}px rgba(var(--accent-rgb),${(0.3 + myoProgress * 0.5).toFixed(2)})` : 'none',
-                        transition: 'width 0.3s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.3s ease',
+                        transition: 'width 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                      }} />
+                      {/* Glow as a separate, fixed-blur layer whose opacity fades in with
+                          progress — only what the compositor can move for free (opacity,
+                          like the width bar's transform-free width) changes per render.
+                          The old version recomputed the box-shadow's blur/spread radius
+                          from myoProgress on every render, so its very first paint (this
+                          technique's own progress can already be non-zero on mount, e.g.
+                          activation reps carried over) had a genuinely different blur
+                          value than every later re-render — the one concrete difference
+                          between this content and Drop Set/AMRAP Variations/plain
+                          Myo-Reps, none of which have any animated/blurred element. A
+                          constant blur here removes that per-render recompute. */}
+                      <div style={{
+                        position: 'absolute', left: 0, top: 0, height: '100%',
+                        width: `${Math.min(1, myoProgress) * 100}%`,
+                        minWidth: myoProgress > 0 ? 8 : 0,
+                        borderRadius: 999,
+                        boxShadow: '0 0 14px 8px rgba(var(--accent-rgb),0.6)',
+                        opacity: myoProgress > 0 ? Math.min(1, 0.3 + myoProgress * 0.5) : 0,
+                        transition: 'width 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease',
+                        pointerEvents: 'none',
                       }} />
                     </div>
                   </div>
