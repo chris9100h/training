@@ -1022,8 +1022,14 @@ function App() {
   // from the network (bypassing the SW cache via ?_v=) and compares the CACHE
   // version string. iOS Safari ignores reg.update() when the app is in the
   // foreground, so this is the only reliable detection path.
+  // Deliberately runs regardless of route (including 'train') — the banner
+  // itself is separately held back while store.inProgress is true, so this
+  // only sets a background flag, never interrupts a workout. A user whose
+  // app usage is almost entirely spent on the training screen (trains daily,
+  // rarely visits any other screen) would otherwise get checked so rarely
+  // that they can end up dozens of versions behind — confirmed as a real
+  // support case.
   const checkSwUpdate = useCallbackA(() => {
-    if (routeRef.current?.name === 'train') return;
     // Resolve sw.js relative to the SW scope (or page URL before registration
     // settles) — works on both github.io/training/ and the zane-wo.com root.
     const swUrl = new URL('sw.js', swReg.current?.scope || window.location.href);
@@ -1064,8 +1070,9 @@ function App() {
   // bump (see admin_force_update). Same "first sighting = baseline, no
   // banner" pattern as checkSwUpdate above — a brand-new device must never
   // see a false "update available" for a nonce it's never seen before.
+  // Deliberately runs regardless of route (including 'train') — see
+  // checkSwUpdate's comment for why the route guard was removed there too.
   const checkForceUpdate = useCallbackA(() => {
-    if (routeRef.current?.name === 'train') return;
     LB.supabase.rpc('get_force_update_nonce').then(({ data, error }) => {
       if (error || !data) return;
       let stored = null;
