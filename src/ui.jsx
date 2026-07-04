@@ -662,10 +662,20 @@ function Sheet({ open, onClose, title, titleColor, children, keyboardHeight = 0 
   if (!open) return null;
   const effectiveKbHeight = Math.max(kbHeight, keyboardHeight);
   return (
+    // The backdrop only shrinks (bottom: keyboardHeight) for the caller-
+    // declared custom keyboard, not the auto-detected native one: a custom
+    // keyboard is a real DOM sibling (e.g. this app's on-screen numeric
+    // keypad) with its own z-index, and a full-height backdrop on top of it
+    // would swallow every tap meant for its keys as a backdrop-dismiss
+    // instead. A native on-screen keyboard isn't part of this page's DOM at
+    // all (a separate OS/browser compositing layer), so there's nothing
+    // underneath for the backdrop to block — it keeps its full extent
+    // (bottom: 0) and reserves the gap via paddingBottom exactly as before.
     <div onClick={onClose} style={{
-      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 100,
+      position: 'fixed', top: 0, left: 0, right: 0, bottom: keyboardHeight,
+      background: 'rgba(0,0,0,0.7)', zIndex: 100,
       display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
-      paddingBottom: effectiveKbHeight,
+      paddingBottom: effectiveKbHeight - keyboardHeight,
       animation: 'sheet-fade 0.18s ease',
     }}>
       <div onClick={e => e.stopPropagation()} style={{
