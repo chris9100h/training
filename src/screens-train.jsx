@@ -2005,6 +2005,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const mesoStartRir = mesoSch?.mesocycle_start_rir ?? 3;
   const mesoEndRir = mesoSch?.mesocycle_end_rir ?? 0;
   const mesoRirVal = (mesoWeek != null && mesoState?.weeks != null) ? LB.mesoRirForWeek(mesoWeek, mesoState.weeks, mesoStartRir, mesoEndRir) : null;
+  // Final meso week: set-count deltas (and the growth/decline rotation feeding
+  // them) are frozen. A set change written now can never reach a later session
+  // in this block AND is wiped by the Meso-2 baseline reset anyway, so
+  // collecting it is pure waste. Weight boosts still accrue (they carry into
+  // Meso 2), so the joint + pump/volume questions stay — they gate the boost —
+  // while the soreness question (pure set-delta, no weight gate) is skipped.
+  const mesoLastWeek = mesoState != null && mesoWeek != null && mesoState.weeks != null && mesoWeek >= mesoState.weeks;
   // Beyond-failure block: a negative RIR target prescribes |RIR| lengthened
   // partials on every working set this session (RIR -3 → 3 partials). Auto-
   // attached at set completion / seeded into the intensity-chain finisher.
@@ -2182,6 +2189,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // question type already owns that key's negative slot this session).
   // `namesByKey` supplies { name } for the "Next session" recap ledger.
   const commitContrib = (record, questionType, newContrib, namesByKey) => {
+    // Frozen in the final week — no set delta is written and none is recorded
+    // for the recap (weight boosts, handled separately in computeMesoGains,
+    // still accrue). All three feedback questions funnel through here, so this
+    // one guard freezes the whole set-delta system for the last week.
+    if (mesoLastWeek) return;
     const prevContrib = record.contrib || {};
     const keys = new Set([...Object.keys(prevContrib), ...Object.keys(newContrib)]);
     const deltaPatch = {};
@@ -2427,9 +2439,15 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // tracked field — commitContrib already guarantees exactly one key ever
     // holds a contrib of 1 for this question type, so there's nothing to keep
     // in sync by hand.
+    // Skip the whole growth/decline rotation in the final week — commitContrib
+    // is frozen there, so bumping growthCounts would only drift the counter
+    // (harmless since it resets at Meso 2, but pointless) with no delta to show
+    // for it.
     const prevGrantedTo = Object.keys(record.contrib || {}).find(k => record.contrib[k] === 1) ?? null;
     let recipientKey = null;
-    if (volume === 'not_enough') {
+    if (mesoLastWeek) {
+      // frozen: no rotation, no grant
+    } else if (volume === 'not_enough') {
       recipientKey = LB.pickGrowthRecipient(keys, mesoState.deltas, mesoState.growthCounts, prevGrantedTo).recipientKey;
       saveMesoState(m => ({ ...m, growthCounts: LB.pickGrowthRecipient(keys, m.deltas, m.growthCounts, prevGrantedTo).growthCounts }));
     } else if (prevGrantedTo) {
@@ -2637,6 +2655,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     if (!mesoState || !entry || isCardio || isMesoDeloadSession) return;
     if (mesoWeek == null) return; // pending period — meso not yet started
     if (mesoWeek === 1) return; // week 1: no previous meso session to be sore from
+    if (mesoLastWeek) return; // final week: set deltas frozen, and soreness only drives deltas
     const ex = entry ? store.exercises?.find(e => e.id === entry.exId) : null;
     const pm = primaryMuscleForExercise(ex);
     if (!pm || askedSorenessRef.current.has(pm)) return;
