@@ -275,6 +275,7 @@ function App() {
   const [userId, setUserId]       = useStateA(null);
   const [route, setRoute]         = useStateA({ name: 'home' });
   const [updateAvailable, setUpdateAvailable] = useStateA(false);
+  const [forceShowUpdateBanner, setForceShowUpdateBanner] = useStateA(false); // Settings "Test update banner" bypasses the in-progress/onboarding hold-backs below
   const [autoCloseNotify, setAutoCloseNotify] = useStateA(null);
   const [whatsNew, setWhatsNew] = useStateA(null); // array of unseen changelog entries, or null
   const [syncStatus, setSyncStatus] = useStateA('synced'); // 'synced' | 'pending' | 'error'
@@ -1213,7 +1214,7 @@ function App() {
     case 'session':          screen = <window.Screens.SessionDetailScreen {...props} sessionId={route.sessionId} justFinished={route.justFinished} back={route.back} />; break;
     case 'compare':          screen = <window.Screens.SessionCompareScreen {...props} sessionId={route.sessionId} compareId={route.compareId} back={route.back} />; break;
     case 'exerciseHistory':  screen = <window.Screens.ExerciseHistoryScreen {...props} exId={route.exId} dayId={route.dayId} exName={route.exName} back={route.back} />; break;
-    case 'settings':          screen = <window.Screens.SettingsScreen {...props} openSupportInbox={route.openSupportInbox} openSupportSheet={route.openSupportSheet} onTestUpdateBanner={() => setUpdateAvailable(true)} />; break;
+    case 'settings':          screen = <window.Screens.SettingsScreen {...props} openSupportInbox={route.openSupportInbox} openSupportSheet={route.openSupportSheet} onTestUpdateBanner={() => setForceShowUpdateBanner(true)} />; break;
     case 'spectator':         screen = <window.Screens.SpectatorScreen {...props} targetUserId={route.targetUserId} userName={route.userName} sessionId={route.sessionId} />; break;
     case 'coaching':            screen = <window.Screens.CoachingTabScreen {...props} initialClientTab={route.initialClientTab} />; break;
     case 'coaching-dashboard':  screen = <window.Screens.CoachingDashboard {...props} />; break;
@@ -1265,8 +1266,9 @@ function App() {
   return (
     <>
       {layout}
-      {/* Hold the update banner back while a session is live — never interrupt a workout */}
-      {updateAvailable && !store?.inProgress && !onboardingState && <UpdateBanner onUpdate={applyUpdate} />}
+      {/* Hold the update banner back while a session is live — never interrupt a workout.
+          forceShowUpdateBanner (Settings "Test update banner") deliberately bypasses this. */}
+      {(forceShowUpdateBanner || (updateAvailable && !store?.inProgress && !onboardingState)) && <UpdateBanner onUpdate={applyUpdate} />}
       {autoCloseNotify && <AutoCloseBanner notify={autoCloseNotify} onDismiss={() => setAutoCloseNotify(null)} />}
       {whatsNew && <WhatsNewModal entries={whatsNew} onDismiss={dismissWhatsNew} />}
       {store && <window.Screens.CoachingPendingBanner store={store} setStore={setStore} userId={userId} />}

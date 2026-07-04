@@ -2220,9 +2220,14 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                 <NavRow label="All users" hint={unseenCount > 0 ? `${unseenCount} new` : (allUsers.length ? `${allUsers.length}` : undefined)} onTap={() => setAllUsersSheet(true)} />
                 <NavRow label="VIP backgrounds" hint={vipBgList.length > 0 ? `${vipBgList.length} assigned` : 'None'} onTap={() => { setVipBgMsg(null); setVipBgSheet(true); }} />
                 <NavRow label="Message all users" onTap={() => { setBroadcastMsg(null); setBroadcastSheet(true); }} />
-                <NavRow label="Force refresh all users" onTap={handleForceUpdateAll} />
-                <NavRow label="Test update banner" onTap={onTestUpdateBanner} />
               </Frame>
+              <div>
+                <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>UPDATE</div>
+                <Frame style={{ padding: '0 14px' }}>
+                  <NavRow label="Force refresh all users" onTap={handleForceUpdateAll} first />
+                  <NavRow label="Test update banner" onTap={onTestUpdateBanner} />
+                </Frame>
+              </div>
               <div style={{ borderTop: `0.5px solid ${UI.hair}`, paddingTop: 16 }}>
                 <Btn onClick={() => setSupportInboxSheet(true)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, width: '100%', fontSize: 15, padding: '14px 16px' }}>
                   Support inbox
