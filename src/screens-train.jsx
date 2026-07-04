@@ -5060,7 +5060,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               <FinisherPartials count={finisherPartials} onChange={setFinisherPartials} />
             </div>
             {(() => {
-              const canFinishDrop = !!dropDrops[0]?.reps && (isNoWeightReps || isBodyweight || dropDrops[0]?.kg != null);
+              // Every drop needs its own reps, not just the top set — a
+              // row added via ADD DROP and never filled in used to slip
+              // through (only drops[0] was checked) and get saved empty.
+              const canFinishDrop = dropDrops.every(d => !!d.reps && (isNoWeightReps || isBodyweight || d.kg != null));
               return (
                 <div style={{ flexShrink: 0, display: 'flex', gap: 8, padding: '4px 4px 10px' }}>
                   <button onClick={() => {
@@ -5156,7 +5159,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               <FinisherPartials count={finisherPartials} onChange={setFinisherPartials} />
             </div>
             {(() => {
-              const canFinishAv = !!avDrops[0]?.reps && (isNoWeightReps || isBodyweight || avDrops[0]?.kg != null);
+              // Every round needs its own reps, not just the first — a
+              // round added via ADD ROUND and never filled in used to slip
+              // through (only avDrops[0] was checked) and get saved empty.
+              const canFinishAv = avDrops.every(d => !!d.reps && (isNoWeightReps || isBodyweight || d.kg != null));
               return (
                 <div style={{ flexShrink: 0, display: 'flex', gap: 8, padding: '4px 4px 10px' }}>
                   <button onClick={() => {
@@ -5190,7 +5196,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         {myoSetIdx != null && (() => {
           const myoTotalReps = myoDrops.reduce((acc, d) => acc + (d.reps || 0), 0);
           const myoProgress = myoTarget ? Math.min(1, myoTotalReps / myoTarget) : 0;
-          const canFinish = myoDrops.length >= 2 && myoDrops[0]?.reps != null && (isNoWeightReps || isBodyweight || myoDrops[0]?.kg != null);
+          // Every myo mini-set needs its own reps, not just the activation
+          // row — a row added via ADD MYO and never filled in used to slip
+          // through (only myoDrops[0] was checked) and get saved empty.
+          const canFinish = myoDrops.length >= 2 && myoDrops.every(d => d.reps != null && (isNoWeightReps || isBodyweight || d.kg != null));
           const activationDone = myoDrops[0]?.reps != null;
           return (
             <div style={{ display: 'flex', flexDirection: 'column', maxHeight: 'inherit', minHeight: 0 }}>
