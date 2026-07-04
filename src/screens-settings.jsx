@@ -1197,6 +1197,13 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
   const handleForceUpdateAll = async () => {
     if (!await confirm('Every connected user will see the update banner and be prompted to refresh.', { title: 'Force refresh all users?', ok: 'Send' })) return;
     const { error } = await LB.supabase.rpc('admin_force_update');
+    if (!error) {
+      // The broadcast has no per-user exclusion — without this, the device
+      // that sent it would see its own banner too. Mark the freshly-set nonce
+      // as already seen on THIS device before checkForceUpdate ever polls it.
+      const { data: nonce } = await LB.supabase.rpc('get_force_update_nonce');
+      if (nonce) { try { localStorage.setItem('logbook-force-nonce-seen', nonce); } catch (_) {} }
+    }
     await confirm(error ? (error.message || 'Could not trigger the broadcast.') : 'All connected clients will see the update banner shortly.', { title: error ? 'Error' : 'Sent', ok: 'OK' });
   };
 
