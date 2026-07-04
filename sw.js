@@ -1,4 +1,4 @@
-const CACHE = 'zane-v2.465';
+const CACHE = 'zane-v2.466';
 const CDN_HOSTS = ['unpkg.com', 'cdnjs.cloudflare.com', 'fonts.googleapis.com', 'fonts.gstatic.com'];
 // Works at any base path (e.g. /training/ on GitHub Pages, / on custom domain)
 const BASE = self.registration.scope.replace(/\/$/, '');
@@ -161,13 +161,22 @@ self.addEventListener('fetch', e => {
   if (sameOrigin) {
     // _v=timestamp requests are version-check probes — always hit network, never cache
     if (url.searchParams.has('_v')) {
-      e.respondWith(fetch(e.request.url).catch(() => offlineResponse()));
+      e.respondWith(fetch(e.request.url, { cache: 'no-store' }).catch(() => offlineResponse()));
       return;
     }
-    // App shell: stale-while-revalidate — serve cache instantly, refresh in background
+    // App shell: stale-while-revalidate — serve cache instantly, refresh in background.
+    // { cache: 'no-store' } on the network fetch matters a lot more than it looks:
+    // after a deliberate cache wipe (LB.clearCachesAndReload / "Clear cache &
+    // reload"), every request here is a CacheStorage miss and falls through to
+    // this fetch — but a plain fetch() is still answered by the BROWSER's own
+    // HTTP cache (a layer entirely below CacheStorage, untouched by wiping it),
+    // so static <script src> tags and the precompile loader's own fetch(src)
+    // calls (index.html) could still silently resolve to stale bytes even
+    // though every app-level cache had just been cleared. no-store forces an
+    // actual network round-trip regardless of what the browser has cached.
     e.respondWith(
       caches.match(e.request).then(cached => {
-        const network = fetch(e.request).then(res => {
+        const network = fetch(e.request, { cache: 'no-store' }).then(res => {
           if (res.ok) {
             const clone = res.clone();
             caches.open(CACHE).then(c => c.put(e.request, clone));
@@ -188,7 +197,7 @@ self.addEventListener('fetch', e => {
   e.respondWith(
     caches.match(e.request).then(cached => {
       if (cached) return cached;
-      return fetch(e.request.url, { mode: 'cors' }).then(res => {
+      return fetch(e.request.url, { mode: 'cors', cache: 'no-store' }).then(res => {
         if (res.ok) {
           const clone = res.clone();
           caches.open(CACHE).then(c => c.put(e.request, clone));
