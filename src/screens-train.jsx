@@ -1237,7 +1237,15 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // count chosen via the stepper — both land in the same session update, so
   // there's no window (crash, background, navigation) where the set is done
   // but the chosen partials count wasn't recorded yet.
-  const finishLengthenedPartial = (setIdx) => {
+  const finishLengthenedPartial = async (setIdx) => {
+    // Lengthened Partials with zero partials isn't lengthened partials — it's
+    // just the set. FINISH stays tappable even at 0 (see finishDropSet) so
+    // this can explain why instead of silently tagging the set with a
+    // technique nothing was actually done for.
+    if (lpCount === 0) {
+      await confirm("Lengthened Partials with zero partials? That's just a regular set. Add some, or cancel and check it off normally.", { title: 'No Partials, No Lengthened Partials', ok: 'Got it', cancel: null });
+      return;
+    }
     completeSet(setIdx, false, true, { technique: 'lengthened_partial', drops: { partials: lpCount } });
   };
 
@@ -4427,13 +4435,19 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                           </div>
                         </div>
                         <div style={{ padding: '0 4px 10px' }}>
+                          {/* missingData is a hard block (the underlying set
+                              itself has no kg/reps yet — nothing to finish
+                              regardless of partials); lpCount === 0 only
+                              dims it — still tappable, so finishLengthenedPartial
+                              can explain why instead of silently completing
+                              a "lengthened partial" that had none. */}
                           <button onClick={() => finishLengthenedPartial(i)}
                             disabled={missingData}
                             style={{
                               width: '100%', padding: '8px 0',
-                              background: missingData ? 'transparent' : 'rgba(var(--accent-rgb),0.12)',
-                              border: `1px solid ${missingData ? UI.hair : 'rgba(var(--accent-rgb),0.5)'}`,
-                              borderRadius: 6, color: missingData ? UI.inkGhost : 'var(--accent)',
+                              background: !missingData && lpCount > 0 ? 'rgba(var(--accent-rgb),0.12)' : 'transparent',
+                              border: `1px solid ${!missingData && lpCount > 0 ? 'rgba(var(--accent-rgb),0.5)' : UI.hair}`,
+                              borderRadius: 6, color: !missingData && lpCount > 0 ? 'var(--accent)' : UI.inkGhost,
                               fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.1em',
                               cursor: missingData ? 'default' : 'pointer',
                               WebkitTapHighlightColor: 'transparent',
