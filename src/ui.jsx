@@ -639,6 +639,18 @@ function Toggle({ on, onToggle }) {
 function Sheet({ open, onClose, title, titleColor, children, keyboardHeight = 0 }) {
   const [kbHeight, setKbHeight] = React.useState(0);
   const [vvHeight, setVvHeight] = React.useState(window.innerHeight);
+  const panelRef = React.useRef(null);
+  // Safari/WebKit can mis-measure a position:sticky child's width on the very
+  // first paint of a freshly-mounted overflow:auto container whose height is
+  // itself computed inline (this panel, via maxHeight above) — reproduced as
+  // sticky content briefly rendering edge-to-edge (ignoring the panel's own
+  // padding) on a sheet's first open, self-correcting on the next reflow.
+  // Reading a layout property forces that reflow synchronously, before the
+  // browser ever paints the wrong layout.
+  React.useLayoutEffect(() => {
+    if (!open) return;
+    void panelRef.current?.offsetHeight;
+  }, [open]);
   React.useEffect(() => {
     if (!open) return;
     const vv = window.visualViewport;
@@ -678,7 +690,7 @@ function Sheet({ open, onClose, title, titleColor, children, keyboardHeight = 0 
       paddingBottom: effectiveKbHeight - keyboardHeight,
       animation: 'sheet-fade 0.18s ease',
     }}>
-      <div onClick={e => e.stopPropagation()} style={{
+      <div ref={panelRef} onClick={e => e.stopPropagation()} style={{
         width: '100%', maxWidth: 540, boxSizing: 'border-box',
         background: UI.bgRaised,
         borderRadius: '6px 6px 0 0',

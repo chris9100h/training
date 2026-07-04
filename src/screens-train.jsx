@@ -3,7 +3,7 @@
    swap-exercise sheet, rest timer, abandon flow).
 */
 
-const { useState: useStateT, useEffect: useEffectT, useRef: useRefT, useMemo: useMemoT } = React;
+const { useState: useStateT, useEffect: useEffectT, useRef: useRefT, useMemo: useMemoT, useLayoutEffect: useLayoutEffectT } = React;
 
 
 // ─── Mesocycle helpers ─────────────────────────────────────────────────────────
@@ -2521,6 +2521,19 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const tempoTimerRef = useRefT(null);
   const audioCtxRef = useRefT(null);
   const [kbField, setKbField] = useStateT(null); // { setIdx, field }
+  // IntensityChainSheet needs the keyboard's actual rendered height (not a
+  // guessed constant — CustomKeyboard's real height varies with
+  // env(safe-area-inset-bottom), so a hardcoded number was off by exactly
+  // that amount and left the sheet overlapping the keyboard's top row).
+  // useLayoutEffect (not useEffect) measures synchronously before paint, so
+  // the sheet renders at the right height on the very first frame — no
+  // visible jump once the keyboard mounts.
+  const [customKbHeight, setCustomKbHeight] = useStateT(0);
+  useLayoutEffectT(() => {
+    if (!kbField) return;
+    const el = document.querySelector('[data-keyboard]');
+    if (el) setCustomKbHeight(el.getBoundingClientRect().height);
+  }, [kbField]);
   const [kbRaw, setKbRaw] = useStateT('');
   const [kbFresh, setKbFresh] = useStateT(false);
   const kbFieldRef = useRefT(null);
@@ -4983,7 +4996,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       <Sheet
         open={dropSetIdx != null || myoSetIdx != null || avSetIdx != null}
         onClose={requestCloseChainSheet}
-        keyboardHeight={kbField ? 225 : 0}
+        keyboardHeight={kbField ? customKbHeight : 0}
       >
         {dropSetIdx != null && (
           <div>
