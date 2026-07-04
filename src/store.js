@@ -3367,6 +3367,34 @@ function retractGrowthGrant(growthCounts, grantedKey) {
   return gc;
 }
 
+// The mirror image of pickGrowthRecipient for the single-exercise DECLINE
+// signals ("pushed my limits" / "still sore"). Growth rotates fairly, so
+// decline must move too — hard-wiring −1 onto the main lift (keys[0]) alone
+// let the group diverge: the main lift sank to its 1-set floor while grown
+// secondaries sat at the +4 ceiling, and once floored the signal did nothing.
+// Instead the −1 goes to whichever exercise of the group is currently the
+// MOST grown, so the group self-balances and can never dead-lock as long as
+// anything is above the floor.
+// - keys: exId_dayId keys of the muscle group's exercises this session, in
+//   day order (keys[0] = the main/first lift).
+// - deltas: the meso state's full current set-adjustment map (read-only).
+// - prevContrib: this answer-record's ENTIRE previous contribution (record.
+//   contrib) — undone first so an edit re-decides from the true pre-answer
+//   deltas (handles a "too much" → "pushed" edit that had set several −1s,
+//   not just one), keeping repeated confirmations of the same answer stable.
+// - Highest effective delta wins; ties resolve toward keys[0] (main lift), so
+//   an all-even group early in the meso still trims the main lift exactly like
+//   before, and only once a secondary out-grows it does the −1 follow. No
+//   floor check needed: the most-grown exercise is by definition furthest from
+//   the floor, and an all-at-floor group correctly has its −1 swallowed by
+//   applyMesoSetDeltaFromState's clamp (you genuinely can't cut below 1 set).
+// - Returns the chosen key, or null if keys is empty.
+function pickDeclineRecipient(keys, deltas, prevContrib) {
+  if (!keys || !keys.length) return null;
+  const eff = (k) => ((deltas || {})[k] || 0) - ((prevContrib || {})[k] || 0);
+  return keys.reduce((best, k) => (eff(k) > eff(best) ? k : best), keys[0]);
+}
+
 // A mesocycle weight boost (exId_dayId → kg increment applied to the next
 // session's seed) must be RE-EARNED every session — min reps hit + joint fine
 // + pump ok + volume ok, all re-confirmed. Given the exId_dayId keys of the
@@ -3627,5 +3655,5 @@ window.LB = {
   cardioDistUnit, setCardioDistUnit, distToM, mToDisplay, fmtDistance, fmtPace, fmtSpeed, MI_TO_M, recentCardioTypes,
   isLoggedTrainingDay, plannedTrainingDay, isTrainingDayForDate, dayTargetFromMacros, macroAdherence, effectiveMacroTargets, dailyLogAdherence, dailyLogsWeekPrefill, weekPerformanceSignal,
   refreshHealthLogs,
-  pickGrowthRecipient, retractGrowthGrant, reearnMesoWeightBoosts, mesoPausedDays, mesoRirForWeek, MESO_GROWTH_CEILING_DELTA,
+  pickGrowthRecipient, retractGrowthGrant, pickDeclineRecipient, reearnMesoWeightBoosts, mesoPausedDays, mesoRirForWeek, MESO_GROWTH_CEILING_DELTA,
 };

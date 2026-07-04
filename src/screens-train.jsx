@@ -2263,9 +2263,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     //     first, makes a second grant the same session (e.g. also "not enough")
     //     spread to a different exercise instead of piling +2 onto the main lift.
     //   • healed just in time → optimal recovery window → hold (no delta).
-    //   • still sore → clear over-reach → shave the main (first) lift by a set
-    //     (commitContrib's negative-slot ownership already stops this from
-    //     double-stacking with a "pushed"/"too much" -1 on the same key).
+    //   • still sore → clear over-reach → shave a set off the currently
+    //     MOST-grown exercise of the group (LB.pickDeclineRecipient, the same
+    //     rotation-aware target the volume "pushed" signal uses, so decline
+    //     never drains only the main lift into the floor). commitContrib's
+    //     negative-slot ownership still stops it from double-stacking with a
+    //     "pushed"/"too much" -1 on the same key.
     const adds = answer === 'never' || answer === 'healed_long';
     const prevGrantedTo = Object.keys(record.contrib || {}).find(k => record.contrib[k] === 1) ?? null;
     let recipientKey = null;
@@ -2277,11 +2280,17 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       saveMesoState(m => ({ ...m, growthCounts: LB.retractGrowthGrant(m.growthCounts, prevGrantedTo) }));
     }
 
+    // "Still sore" trims the most-grown target (record.contrib = this record's
+    // prior contribution, undone first so an edit re-decides cleanly).
+    const declineKey = answer === 'still_sore'
+      ? LB.pickDeclineRecipient(keys, mesoState.deltas, record.contrib)
+      : null;
+
     const newContrib = {};
-    record.targets.forEach((t, i) => {
+    record.targets.forEach((t) => {
       let want = 0;
       if (t.key === recipientKey) want = 1;
-      else if (answer === 'still_sore' && i === 0) want = -1;
+      else if (t.key === declineKey) want = -1;
       newContrib[t.key] = want;
     });
     commitContrib(record, 'soreness', newContrib, namesByKey);
@@ -2375,8 +2384,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     record.exIds = mesoVolumeExIds;
 
     // "Not enough" → rotates a +1 among the muscle group's exercises (see
-    // LB.pickGrowthRecipient); "Pushed my limits" → -1 on main lift only;
-    // "Too much" → -1 on every exercise of the muscle group.
+    // LB.pickGrowthRecipient); "Pushed my limits" → -1 on the currently
+    // MOST-grown exercise (LB.pickDeclineRecipient — mirror of the growth
+    // rotation, so decline follows growth instead of always draining the main
+    // lift into the floor); "Too much" → -1 on every exercise of the group.
     const mainExId = mesoVolumeExIds[0];
     const namesByKey = {};
     const keys = [];
@@ -2426,13 +2437,20 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       saveMesoState(m => ({ ...m, growthCounts: LB.retractGrowthGrant(m.growthCounts, prevGrantedTo) }));
     }
 
+    // "Pushed" trims the most-grown exercise of the group. record.contrib is
+    // this record's PRIOR contribution (commitContrib rewrites it below), so
+    // pickDeclineRecipient undoes it first and an edit re-decides from the
+    // true pre-answer deltas.
+    const declineKey = volume === 'pushed'
+      ? LB.pickDeclineRecipient(keys, mesoState.deltas, record.contrib)
+      : null;
+
     const newContrib = {};
-    keys.forEach((key, i) => {
-      const exId = mesoVolumeExIds[i];
+    keys.forEach((key) => {
       let want = 0;
       if (volume === 'too_much') want = -1;
       else if (key === recipientKey) want = 1;
-      else if (exId === mainExId && volume === 'pushed') want = -1;
+      else if (key === declineKey) want = -1;
       newContrib[key] = want;
     });
     commitContrib(record, 'volume', newContrib, namesByKey);

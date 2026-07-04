@@ -577,6 +577,42 @@ async function testAsync(name, fn) {
     assert.strictEqual(volume.growthCounts.b_d1, 1);
   });
 
+  // ── pickDeclineRecipient (decline trims the most-grown exercise) ──
+  test('pickDeclineRecipient: an all-even group trims the main (first) lift, matching the old main-lift-only behavior', () => {
+    assert.strictEqual(LB.pickDeclineRecipient(['a_d1', 'b_d1', 'c_d1'], {}, null), 'a_d1');
+    // ties still resolve toward the main lift even when everyone sits at +2
+    assert.strictEqual(LB.pickDeclineRecipient(['a_d1', 'b_d1'], { a_d1: 2, b_d1: 2 }, null), 'a_d1');
+  });
+
+  test('pickDeclineRecipient: the most-grown secondary is trimmed instead of a lower main lift (the divergence fix)', () => {
+    // main lift already low (delta 0), a secondary sitting high (delta 4) →
+    // the -1 must land on the secondary, not drain the main lift further.
+    assert.strictEqual(LB.pickDeclineRecipient(['a_d1', 'b_d1', 'c_d1'], { a_d1: 0, b_d1: 4, c_d1: 1 }, null), 'b_d1');
+  });
+
+  test('pickDeclineRecipient: undoes this record prior contribution before re-deciding, so a re-confirm is stable', () => {
+    // deltas already reflect this record having trimmed b (b was 4, now 3);
+    // re-confirming the same answer must undo that -1 (b back to 4) and pick b
+    // again, not drift the -1 onto a different exercise each time.
+    const deltas = { a_d1: 0, b_d1: 3, c_d1: 1 };
+    const prevContrib = { b_d1: -1 };
+    assert.strictEqual(LB.pickDeclineRecipient(['a_d1', 'b_d1', 'c_d1'], deltas, prevContrib), 'b_d1');
+  });
+
+  test('pickDeclineRecipient: undoes a whole "too much" prior contribution (multiple -1s) when re-deciding for "pushed"', () => {
+    // record previously answered "too much" (every key -1); editing to "pushed"
+    // must re-decide from the true pre-answer deltas (all restored by +1), so
+    // the genuinely most-grown exercise wins rather than a post-shrink artifact.
+    const deltas = { a_d1: 1, b_d1: 3, c_d1: 0 }; // already includes the too-much -1s
+    const prevContrib = { a_d1: -1, b_d1: -1, c_d1: -1 };
+    // pre-answer deltas: a=2, b=4, c=1 → b is highest
+    assert.strictEqual(LB.pickDeclineRecipient(['a_d1', 'b_d1', 'c_d1'], deltas, prevContrib), 'b_d1');
+  });
+
+  test('pickDeclineRecipient: empty group is a no-op (null)', () => {
+    assert.strictEqual(LB.pickDeclineRecipient([], { a_d1: 3 }, null), null);
+  });
+
   // ── reearnMesoWeightBoosts (weight boost must be re-earned every session) ──
   test('reearnMesoWeightBoosts: a boost not re-earned this session is dropped, not kept', () => {
     // bench earned a boost last session but is trained again this session with
