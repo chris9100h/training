@@ -4295,6 +4295,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               } : {};
               const coreColor = fire ? ['#ff6a2a', '#ff801a', '#ffa510'][neg - 1] : (mesoRirVal === 0 ? 'rgba(220,53,69,1)' : UI.gold);
               return (
+                <>
                 <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', overflow: 'hidden' }}>
                   {/* RIR + partials gloss rotate together as ONE unit around the
                       card's centre (not each span on its own) so the long
@@ -4322,9 +4323,18 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                     )}
                   </div>
                 </div>
+                {/* Scrim: a bg-toned radial veil painted OVER the ember but
+                    UNDER the content (which is z-indexed above it) so the
+                    foreground numbers/labels stay legible against the fire in
+                    ANY accent colour and theme, while the card edges stay
+                    ablaze. Fire mode only — the faint non-fire watermark
+                    (opacity 0.09/0.13) needs no veil, just the z-order lift. */}
+                {fire && <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none',
+                  background: 'radial-gradient(ellipse 78% 72% at 50% 56%, rgba(var(--bg-rgb),0.62) 0%, rgba(var(--bg-rgb),0.42) 42%, rgba(var(--bg-rgb),0) 78%)' }} />}
+                </>
               );
             })()}
-            <div style={{ padding: '12px 6px' }}>
+            <div style={{ padding: '12px 6px', position: 'relative', zIndex: 1 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', padding: '0 18px', marginBottom: 8 }}>
                 <span className="micro-gold">
                   {(!warmupSetsRemaining && isCurrentWarmup)
