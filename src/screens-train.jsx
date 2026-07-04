@@ -2249,12 +2249,40 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     }
     record.answer = answer;
     const namesByKey = {};
+    const keys = [];
+    record.targets.forEach(t => { namesByKey[t.key] = t.name; keys.push(t.key); });
+
+    // Soreness carryover is a recovery signal, so it moves volume BOTH ways —
+    // symmetric with the pump/volume question, not a one-directional "reduce"
+    // check (too little soreness is just as much an off-MRV signal as too much):
+    //   • never / healed a while ago → recovered easily = probably training
+    //     below MRV → grant +1 set, rotated across the muscle group with the
+    //     SAME LB.pickGrowthRecipient / growthCounts machinery the volume
+    //     "not enough" grant uses. Sharing the pool keeps soreness- and
+    //     volume-driven grants fair to each other and, since soreness is asked
+    //     first, makes a second grant the same session (e.g. also "not enough")
+    //     spread to a different exercise instead of piling +2 onto the main lift.
+    //   • healed just in time → optimal recovery window → hold (no delta).
+    //   • still sore → clear over-reach → shave the main (first) lift by a set
+    //     (commitContrib's negative-slot ownership already stops this from
+    //     double-stacking with a "pushed"/"too much" -1 on the same key).
+    const adds = answer === 'never' || answer === 'healed_long';
+    const prevGrantedTo = Object.keys(record.contrib || {}).find(k => record.contrib[k] === 1) ?? null;
+    let recipientKey = null;
+    if (adds && keys.length) {
+      recipientKey = LB.pickGrowthRecipient(keys, mesoState.deltas, mesoState.growthCounts, prevGrantedTo).recipientKey;
+      saveMesoState(m => ({ ...m, growthCounts: LB.pickGrowthRecipient(keys, m.deltas, m.growthCounts, prevGrantedTo).growthCounts }));
+    } else if (prevGrantedTo) {
+      // Edited away from an adding answer this session → undo the prior grant.
+      saveMesoState(m => ({ ...m, growthCounts: LB.retractGrowthGrant(m.growthCounts, prevGrantedTo) }));
+    }
+
     const newContrib = {};
-    // still_sore → only the main (first) lift; very_sore → every exercise of
-    // the group; never/healed_* → no delta (and releases any prior one).
     record.targets.forEach((t, i) => {
-      namesByKey[t.key] = t.name;
-      newContrib[t.key] = (answer === 'very_sore' || (answer === 'still_sore' && i === 0)) ? -1 : 0;
+      let want = 0;
+      if (t.key === recipientKey) want = 1;
+      else if (answer === 'still_sore' && i === 0) want = -1;
+      newContrib[t.key] = want;
     });
     commitContrib(record, 'soreness', newContrib, namesByKey);
     mesoAnswersRef.current.soreness[muscle] = record;

@@ -564,6 +564,19 @@ async function testAsync(name, fn) {
     assert.strictEqual(JSON.stringify(LB.retractGrowthGrant({ a_d1: 1 }, null)), JSON.stringify({ a_d1: 1 }));
   });
 
+  test('pickGrowthRecipient: two independent grants one session (soreness then volume) via the shared pool spread to two exercises', () => {
+    // The low-soreness grant and the "not enough" volume grant share the same
+    // growthCounts pool. Soreness is asked first: it grants to the main lift and
+    // bumps the pool. The volume grant, fed that updated pool, must then rotate
+    // to the OTHER exercise instead of piling a second +1 onto the main lift.
+    const soreness = LB.pickGrowthRecipient(['a_d1', 'b_d1'], {}, {}, null);
+    assert.strictEqual(soreness.recipientKey, 'a_d1');
+    const volume = LB.pickGrowthRecipient(['a_d1', 'b_d1'], {}, soreness.growthCounts, null);
+    assert.strictEqual(volume.recipientKey, 'b_d1');
+    assert.strictEqual(volume.growthCounts.a_d1, 1);
+    assert.strictEqual(volume.growthCounts.b_d1, 1);
+  });
+
   // ── reearnMesoWeightBoosts (weight boost must be re-earned every session) ──
   test('reearnMesoWeightBoosts: a boost not re-earned this session is dropped, not kept', () => {
     // bench earned a boost last session but is trained again this session with
