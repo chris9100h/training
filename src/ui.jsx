@@ -643,33 +643,39 @@ function Toggle({ on, onToggle }) {
 // after that, of any Sheet, is fine. Several targeted root-cause attempts
 // (removing position:sticky, willChange layer-promotion hints, isolating
 // myo-match's glow to a constant blur) didn't hold up on device, so instead
-// of continuing to guess at the trigger, this masks it directly: the first
-// Sheet's panel renders fully laid out and painted (opacity:0, so the paint
-// still happens — unlike visibility:hidden, which some engines skip
-// rasterizing) for two animation frames, then reveals. Whatever goes wrong
-// on that first paint has already happened, off-screen, by the time the
-// user ever sees it — matching the observed "always correct from the
-// second open on" pattern instead of trying to prevent the first bad paint
-// outright. Scoped globally (not per Sheet instance) because Sheet fully
-// unmounts when closed (`if (!open) return null` below), so a per-instance
-// flag would re-arm on every single open — this only pays the ~32ms delay
-// once per session, on whichever Sheet the user happens to open first.
+// of continuing to guess at the trigger, this masks it: the first Sheet's
+// panel plays its entrance animation in full (same sheet-up keyframes,
+// same duration, every property real) inside a wrapper held at opacity:0
+// — opacity, not visibility:hidden, so the browser still has to actually
+// paint/composite every frame of that animation, it just isn't shown —
+// then reveals the wrapper once the animation reports done. Whatever goes
+// wrong during that first animation's first-ever run has already happened,
+// unseen, by the time the user sees anything. (A first attempt at this
+// idea froze a static, non-animating opacity:0 frame for two rAFs instead
+// of actually running the animation — since the bug may be tied to the
+// animation's own first run, not just the first paint of static content,
+// that version didn't hold up either.) Scoped globally (not per Sheet
+// instance) because Sheet fully unmounts when closed (`if (!open) return
+// null` below), so a per-instance flag would re-arm on every single open —
+// this only pays the one-time ~220ms invisible run once per session, on
+// whichever Sheet the user happens to open first.
 let sheetEverWarmed = false;
 function Sheet({ open, onClose, title, titleColor, children, keyboardHeight = 0 }) {
   const [kbHeight, setKbHeight] = React.useState(0);
   const [vvHeight, setVvHeight] = React.useState(window.innerHeight);
   const panelRef = React.useRef(null);
   const [warmed, setWarmed] = React.useState(sheetEverWarmed);
-  React.useLayoutEffect(() => {
+  React.useEffect(() => {
     if (!open || sheetEverWarmed) { setWarmed(sheetEverWarmed); return; }
-    let raf2 = null;
-    const raf1 = requestAnimationFrame(() => {
-      raf2 = requestAnimationFrame(() => {
-        sheetEverWarmed = true;
-        setWarmed(true);
-      });
-    });
-    return () => { cancelAnimationFrame(raf1); if (raf2) cancelAnimationFrame(raf2); };
+    const panel = panelRef.current;
+    const reveal = () => { sheetEverWarmed = true; setWarmed(true); };
+    if (!panel) { reveal(); return; }
+    panel.addEventListener('animationend', reveal, { once: true });
+    // Fallback in case animationend never fires (prefers-reduced-motion
+    // disabling the animation entirely, some odd interruption, etc.) — the
+    // animation is 220ms, give it generous headroom.
+    const fallback = setTimeout(reveal, 500);
+    return () => { panel.removeEventListener('animationend', reveal); clearTimeout(fallback); };
   }, [open]);
   React.useEffect(() => {
     if (!open) return;
@@ -711,30 +717,35 @@ function Sheet({ open, onClose, title, titleColor, children, keyboardHeight = 0 
       animation: 'sheet-fade 0.18s ease',
       willChange: 'opacity',
     }}>
-      <div ref={panelRef} onClick={e => e.stopPropagation()} style={{
-        width: '100%', maxWidth: 540, boxSizing: 'border-box',
-        background: UI.bgRaised,
-        borderRadius: '6px 6px 0 0',
-        border: `1px solid ${UI.hairStrong}`, borderBottom: 'none',
-        boxShadow: '0 -16px 48px rgba(0,0,0,0.6)',
-        padding: `16px 22px ${effectiveKbHeight > 0 ? 18 : 'calc(env(safe-area-inset-bottom, 8px) + 22px)'}`,
-        // Not warmed yet: fully laid out and painted, just invisible and
-        // non-interactive (see sheetEverWarmed above) — no entrance
-        // animation until the reveal frame, so sheet-up plays in full once
-        // warmed flips true instead of losing its first ~32ms mid-flight.
-        animation: warmed ? 'sheet-up 0.22s ease' : 'none',
-        opacity: warmed ? 1 : 0,
-        pointerEvents: warmed ? 'auto' : 'none',
-        maxHeight: effectiveKbHeight > 0 ? `${vvHeight - 32}px` : '88dvh', overflow: 'auto', overscrollBehavior: 'contain',
-        willChange: 'transform, opacity',
+      {/* Separate wrapper for the reveal opacity: the panel's own animation
+          (sheet-up) already animates opacity 0→1 itself — controlling
+          visibility on the same element would fight that animated value.
+          A wrapping ancestor's opacity is independent of its child's
+          animated properties, so the panel's animation always runs for
+          real (see sheetEverWarmed above) regardless of warmed. */}
+      <div style={{
+        width: '100%', maxWidth: 540,
+        opacity: warmed ? 1 : 0, pointerEvents: warmed ? 'auto' : 'none',
       }}>
-        <div style={{ width: 36, height: 3, background: UI.hairStrong, borderRadius: 4, margin: '0 auto 16px' }} />
-        {title && (
-          <div style={{ fontFamily: UI.fontDisplay, fontSize: 28, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: titleColor || UI.ink, marginBottom: 16 }}>
-            {title}
-          </div>
-        )}
-        {children}
+        <div ref={panelRef} onClick={e => e.stopPropagation()} style={{
+          width: '100%', boxSizing: 'border-box',
+          background: UI.bgRaised,
+          borderRadius: '6px 6px 0 0',
+          border: `1px solid ${UI.hairStrong}`, borderBottom: 'none',
+          boxShadow: '0 -16px 48px rgba(0,0,0,0.6)',
+          padding: `16px 22px ${effectiveKbHeight > 0 ? 18 : 'calc(env(safe-area-inset-bottom, 8px) + 22px)'}`,
+          animation: 'sheet-up 0.22s ease',
+          maxHeight: effectiveKbHeight > 0 ? `${vvHeight - 32}px` : '88dvh', overflow: 'auto', overscrollBehavior: 'contain',
+          willChange: 'transform, opacity',
+        }}>
+          <div style={{ width: 36, height: 3, background: UI.hairStrong, borderRadius: 4, margin: '0 auto 16px' }} />
+          {title && (
+            <div style={{ fontFamily: UI.fontDisplay, fontSize: 28, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: titleColor || UI.ink, marginBottom: 16 }}>
+              {title}
+            </div>
+          )}
+          {children}
+        </div>
       </div>
     </div>
   );
