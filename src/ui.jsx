@@ -691,7 +691,11 @@ function Sheet({ open, onClose, title, titleColor, children, keyboardHeight = 0,
       paddingBottom: (effectiveKbHeight - keyboardHeight) + (floating ? 10 : 0),
       animation: 'sheet-fade 0.18s ease',
     }}>
-      <div style={{ position: 'relative', width: '100%', maxWidth: 540 }}>
+      {/* accent: inset a few px off the screen edges so the glow has room
+          to actually render there instead of bleeding straight off-screen
+          — a plain width:100% sheet runs edge-to-edge, leaving nowhere for
+          an outward glow on the sides to be visible. */}
+      <div style={{ position: 'relative', width: accent ? 'calc(100% - 32px)' : '100%', maxWidth: 540 }}>
         {/* Same breathing glow as the Intensity button (.intensity-glow /
             @keyframes intensityGlow in index.html) — a sibling of the
             panel, not a child of it: the panel has overflow:'auto' for its
