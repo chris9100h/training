@@ -1124,7 +1124,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     return overlayHoldMs;
   };
 
-  const finishDropSet = (drops) => {
+  const finishDropSet = (rawDrops) => {
+    // Silently drop any incomplete row (missing reps, or missing kg unless
+    // no-weight-reps/bodyweight) instead of saving it — e.g. an ADD DROP
+    // row added by accident and never filled in. Centralized here (not
+    // just at the Sheet's own FINISH button) since checkSet() below can
+    // also reach this directly.
+    const drops = rawDrops.filter(d => !!d.reps && (isNoWeightReps || isBodyweight || d.kg != null));
     if (!drops.length || dropSetIdx == null) return;
     // Optional finisher: partials tacked onto the last drop's failure point.
     const finalDrops = finisherPartials > 0
@@ -1172,8 +1178,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     setKbField(null); setKbRaw(''); setKbFresh(false);
   };
 
-  const finishMyoSet = (drops, technique) => {
-    if (!drops.length || myoSetIdx == null) return;
+  const finishMyoSet = (rawDrops, technique) => {
+    // Silently drop any incomplete mini-set instead of saving it (see
+    // finishDropSet) — still needs the activation plus at least one
+    // completed mini-set to count as an actual myo-reps set.
+    const drops = rawDrops.filter(d => d.reps != null && (isNoWeightReps || isBodyweight || d.kg != null));
+    if (drops.length < 2 || myoSetIdx == null) return;
     // Optional finisher: partials tacked onto the last mini's failure point.
     const finalDrops = finisherPartials > 0
       ? drops.map((d, i) => i === drops.length - 1 ? { ...d, partials: finisherPartials } : d)
@@ -1217,7 +1227,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     completeSet(setIdx, false, true, { technique: 'lengthened_partial', drops: { partials: lpCount } });
   };
 
-  const finishAv = (drops) => {
+  const finishAv = (rawDrops) => {
+    // Silently drop any incomplete round instead of saving it (see
+    // finishDropSet).
+    const drops = rawDrops.filter(d => !!d.reps && (isNoWeightReps || isBodyweight || d.kg != null));
     if (!drops.length || avSetIdx == null) return;
     // Optional finisher: partials tacked onto the last round's failure point.
     const finalDrops = finisherPartials > 0
@@ -5060,10 +5073,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               <FinisherPartials count={finisherPartials} onChange={setFinisherPartials} />
             </div>
             {(() => {
-              // Every drop needs its own reps, not just the top set — a
-              // row added via ADD DROP and never filled in used to slip
-              // through (only drops[0] was checked) and get saved empty.
-              const canFinishDrop = dropDrops.every(d => !!d.reps && (isNoWeightReps || isBodyweight || d.kg != null));
+              // finishDropSet silently drops any incomplete row itself
+              // (accidentally added via ADD DROP, never filled in) rather
+              // than blocking FINISH on it — this only disables FINISH
+              // when that would leave nothing at all to save.
+              const canFinishDrop = dropDrops.some(d => !!d.reps && (isNoWeightReps || isBodyweight || d.kg != null));
               return (
                 <div style={{ flexShrink: 0, display: 'flex', gap: 8, padding: '4px 4px 10px' }}>
                   <button onClick={() => {
@@ -5159,10 +5173,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               <FinisherPartials count={finisherPartials} onChange={setFinisherPartials} />
             </div>
             {(() => {
-              // Every round needs its own reps, not just the first — a
-              // round added via ADD ROUND and never filled in used to slip
-              // through (only avDrops[0] was checked) and get saved empty.
-              const canFinishAv = avDrops.every(d => !!d.reps && (isNoWeightReps || isBodyweight || d.kg != null));
+              // finishAv silently drops any incomplete round itself
+              // (accidentally added via ADD ROUND, never filled in) rather
+              // than blocking FINISH on it — this only disables FINISH
+              // when that would leave nothing at all to save.
+              const canFinishAv = avDrops.some(d => !!d.reps && (isNoWeightReps || isBodyweight || d.kg != null));
               return (
                 <div style={{ flexShrink: 0, display: 'flex', gap: 8, padding: '4px 4px 10px' }}>
                   <button onClick={() => {
@@ -5196,10 +5211,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         {myoSetIdx != null && (() => {
           const myoTotalReps = myoDrops.reduce((acc, d) => acc + (d.reps || 0), 0);
           const myoProgress = myoTarget ? Math.min(1, myoTotalReps / myoTarget) : 0;
-          // Every myo mini-set needs its own reps, not just the activation
-          // row — a row added via ADD MYO and never filled in used to slip
-          // through (only myoDrops[0] was checked) and get saved empty.
-          const canFinish = myoDrops.length >= 2 && myoDrops.every(d => d.reps != null && (isNoWeightReps || isBodyweight || d.kg != null));
+          // finishMyoSet silently drops any incomplete mini-set itself
+          // (accidentally added via ADD MYO, never filled in) rather than
+          // blocking FINISH on it — still needs the activation plus at
+          // least one completed mini-set to count as an actual myo-reps
+          // set, not just a plain activation, so FINISH is disabled below
+          // that.
+          const canFinish = myoDrops.filter(d => d.reps != null && (isNoWeightReps || isBodyweight || d.kg != null)).length >= 2;
           const activationDone = myoDrops[0]?.reps != null;
           return (
             <div style={{ display: 'flex', flexDirection: 'column', maxHeight: 'inherit', minHeight: 0 }}>
