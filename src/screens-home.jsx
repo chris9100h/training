@@ -1726,6 +1726,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
             pumpLowCounts: {},
             growthCounts: {},
             pendingMeso2: false,
+            startedAt: new Date().toISOString(), // fresh block-start anchor (flex week count)
             updatedAt: new Date().toISOString(),
           };
           // Overwrite the per-plan localStorage cache too — getMesoState returns

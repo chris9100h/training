@@ -42,7 +42,13 @@ function getMesoState(scheduleId, mesoStates) {
   if (!fromStorage) return fromStore;
   const storeT = fromStore.updatedAt ? new Date(fromStore.updatedAt).getTime() : 0;
   const storageT = fromStorage.updatedAt ? new Date(fromStorage.updatedAt).getTime() : 0;
-  return storageT > storeT ? fromStorage : fromStore;
+  const chosen = storageT > storeT ? fromStorage : fromStore;
+  const other = chosen === fromStore ? fromStorage : fromStore;
+  // startedAt is client-only (not round-tripped through the DB), so a DB-loaded
+  // store copy can lack it while the localStorage cache still has it — carry it
+  // over so the flex meso-week anchor survives a reload on the same device.
+  if (chosen.startedAt == null && other?.startedAt != null) return { ...chosen, startedAt: other.startedAt };
+  return chosen;
 }
 // Write meso state to per-plan localStorage key (in-session fast cache).
 // The store (DB) is updated via setStore at session end.
@@ -108,8 +114,16 @@ function mesoCurrentWeek(mesoState, store) {
     const startIdx = mesoState.startCycleIndex ?? 0;
     const currentIdx = store.cycleIndex || 0;
     if (currentIdx < startIdx) return null; // pending — waiting for next rotation start
+    // Count trained sessions since the block began. Prefer the precise
+    // startedAt timestamp over the date-only startDate: without it, sessions
+    // from a PREVIOUS block logged earlier the SAME day the new block starts
+    // (e.g. finishing Meso 1 then starting Meso 2 the same day) leak into the
+    // new block's count and fast-forward its week. Falls back to the date
+    // comparison for older mesos that predate startedAt.
+    const startedTs = mesoState.startedAt ? new Date(mesoState.startedAt).getTime() : null;
     const trainedCount = (store?.sessions || []).filter(s =>
-      s.ended && !s.isDeload && s.scheduleId === mesoState.scheduleId && (s.date || '') >= mesoState.startDate
+      s.ended && !s.isDeload && s.scheduleId === mesoState.scheduleId &&
+      (startedTs != null ? new Date(s.ended).getTime() > startedTs : (s.date || '') >= mesoState.startDate)
     ).length;
     const rotations = Math.floor(trainedCount / sch.days.length);
     return Math.min(Math.max(1, rotations + 1), mesoState.weeks);
@@ -632,6 +646,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       weightBoosts: {},
       growthCounts: {},
       completions: existing?.completions ?? 0,
+      // Precise block-start anchor for the flex week count (see
+      // mesoCurrentWeek) — client-side, mirrored to the localStorage cache;
+      // absent mesos fall back to the date comparison.
+      startedAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
     setStore(s => {
@@ -2020,6 +2038,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       growthCounts: {},
       pendingMeso2: false,
       // weightBoosts carries over to meso 2
+      startedAt: new Date().toISOString(), // fresh block-start anchor (flex week count)
       updatedAt: new Date().toISOString(),
     };
     // Keep the per-plan localStorage cache in sync with the store (getMesoState
