@@ -251,60 +251,20 @@ function FinisherPartials({ count, onChange }) {
   );
 }
 
-// Drop Set / Myo-Rep(-Match) / AMRAP Variations chains, while a field is being
-// edited: the header (title + Myo Match's live progress bar) stays sticky-top
-// as always, and the row being typed into scrolls into view via native
-// scrollIntoView (its own CHAIN_ROW_SCROLL_MARGIN_TOP keeps it clear of the
-// sticky header). A small top-up scroll follows only if the actions row (add
-// mini-set / finish) doesn't yet clear the on-screen keypad — capped so it
-// can never push the actively-edited row itself out of view (behind the
-// header): seeing what you're typing outranks seeing the (already reachable)
-// action buttons.
-//
-// Two earlier versions of this were both wrong in opposite ways:
-// - A phantom scroll-margin-bottom on the actions row alone could overshoot
-//   past the sticky header's own "stuck" budget once a chain had grown past
-//   what fit on screen, popping the header (or its own rows) out of view.
-// - A real spacer element (to genuinely grow that budget) fixed that, but
-//   always rendered its full height while editing regardless of whether any
-//   extra room was actually needed — a large, pointless blank gap on short
-//   chains that already fit on screen.
-// - A sticky-bottom actions bar (to avoid scroll math for it entirely) could
-//   resolve to nearly the same "stuck" position as the sticky header inside a
-//   short container, and the later element then painted over the header
-//   instead of appearing below it — confirmed with a live repro.
-//
-// This version only ever scrolls the minimum actually needed, computed live
-// against real geometry — never more, never a permanent reservation.
-const CHAIN_KEYPAD_CLEARANCE = 235;
+// Drop Set / Myo-Rep(-Match) / AMRAP Variations chains now edit inside their
+// own sheet (IntensityChainSheet, see the Sheet rendered near the Intensity
+// picker below) rather than inline in the exercise list, so the keypad
+// clearance and "don't push the header out of view" problems that used to
+// require careful scroll math here are handled by the Sheet itself (it
+// shrinks/scrolls to sit above the keypad — see keyboardHeight). All that's
+// left is bringing the row actually being typed into into view within the
+// sheet's own small, self-contained scrollbox — a plain scrollIntoView, with
+// a scroll-margin-top matching the sticky header so the row never ends up
+// hidden behind it.
 const CHAIN_ROW_SCROLL_MARGIN_TOP = 100;
-function chainScrollParent(el) {
-  let n = el.parentElement;
-  while (n && n !== document.body && n !== document.documentElement) {
-    const s = getComputedStyle(n);
-    if (/(auto|scroll)/.test(s.overflowY) && n.scrollHeight > n.clientHeight + 1) return n;
-    n = n.parentElement;
-  }
-  return null;
-}
-function scrollChainRowIntoView(rowAttr, idx, actionsAttr, headerAttr) {
+function scrollChainRowIntoView(rowAttr, idx) {
   const row = document.querySelector(`[${rowAttr}="${idx}"]`);
-  if (!row) return;
-  row.scrollIntoView({ behavior: 'auto', block: 'nearest' });
-  const header = document.querySelector(`[${headerAttr}]`);
-  const actions = document.querySelector(`[${actionsAttr}]`);
-  const scrollParent = chainScrollParent(row);
-  if (!header || !actions || !scrollParent) return;
-  const parentRect = scrollParent.getBoundingClientRect();
-  const headerRect = header.getBoundingClientRect();
-  const actionsRect = actions.getBoundingClientRect();
-  const rowRect = row.getBoundingClientRect();
-  const overflow = (actionsRect.bottom + CHAIN_KEYPAD_CLEARANCE) - parentRect.bottom;
-  if (overflow > 0) {
-    const maxSafeScroll = Math.max(0, rowRect.top - headerRect.bottom);
-    const delta = Math.min(overflow, maxSafeScroll);
-    if (delta > 0) scrollParent.scrollBy({ top: delta, behavior: 'auto' });
-  }
+  if (row) row.scrollIntoView({ behavior: 'auto', block: 'nearest' });
 }
 
 // ─── Plate Calculator ────────────────────────────────────────────────
@@ -1290,6 +1250,43 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // Same superset-aware navigation as completeSet/finishDropSet/finishMyoSet.
     const updatedSets = entry.sets.map((st, k) => k === targetIdx ? { ...st, done: true } : st);
     finishSetNavigation(targetIdx, updatedSets, overlayHoldMs, true);
+  };
+
+  // Drop Set / Myo-Rep(-Match) / AMRAP Variations share one editing sheet
+  // (IntensityChainSheet, rendered near the Intensity picker below) — at most
+  // one is ever open at a time. "Dirty" means losing it on discard would
+  // actually lose real work: more than the starting round, or a partials
+  // count already set. A single un-added activation kg/reps tweak doesn't
+  // count — canceling never touches the underlying set's own kg/reps/done
+  // (those are only written by finishDropSet/finishMyoSet/finishAv), so that
+  // alone is always a lossless cancel.
+  const activeChainDirty = () => {
+    if (dropSetIdx != null) return dropDrops.length > 1 || finisherPartials > 0;
+    if (myoSetIdx != null) return myoDrops.length > 1 || finisherPartials > 0;
+    if (avSetIdx != null) return avDrops.length > 1 || finisherPartials > 0;
+    return false;
+  };
+  const confirmDiscardChain = async () => {
+    if (!activeChainDirty()) return true;
+    return await confirm('Your progress on this set won\'t be saved.', { title: 'Discard changes?', ok: 'Discard', cancel: 'Keep editing', danger: true });
+  };
+  const closeChainSheet = () => {
+    if (dropSetIdx != null) { setDropSetIdx(null); setDropDrops([]); setFinisherPartials(0); }
+    else if (myoSetIdx != null) { cancelMyo(); return; }
+    else if (avSetIdx != null) { setAvSetIdx(null); setAvDrops([]); setFinisherPartials(0); }
+    kbFieldRef.current = null; kbRawRef.current = ''; setKbField(null); setKbRaw('');
+  };
+  const requestCloseChainSheet = async () => {
+    if (!await confirmDiscardChain()) return;
+    closeChainSheet();
+  };
+  // Guards the training header's home button — otherwise it navigates away
+  // unconditionally, silently discarding an in-progress chain sheet along
+  // with the rest of the (unmounted) training screen.
+  const requestGoHome = async () => {
+    if (!await confirmDiscardChain()) return;
+    closeChainSheet();
+    go({ name: 'home' });
   };
 
   const addSet = () => {
@@ -2688,7 +2685,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     setKbField({ setIdx: 'drop', dropIdx, field });
     setKbRaw(val);
     setKbFresh(true);
-    setTimeout(() => scrollChainRowIntoView('data-drop-row', dropIdx, 'data-drop-actions', 'data-drop-header'), 80);
+    setTimeout(() => scrollChainRowIntoView('data-drop-row', dropIdx), 80);
   };
 
   const activateMyo = (dropIdx, field) => {
@@ -2702,7 +2699,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     setKbField({ setIdx: 'myo', dropIdx, field });
     setKbRaw(val);
     setKbFresh(true);
-    setTimeout(() => scrollChainRowIntoView('data-myo-row', dropIdx, 'data-myo-actions', 'data-myo-header'), 80);
+    setTimeout(() => scrollChainRowIntoView('data-myo-row', dropIdx), 80);
   };
 
   const activateAvKb = (dropIdx, field) => {
@@ -2716,7 +2713,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     setKbField({ setIdx: 'av', dropIdx, field });
     setKbRaw(val);
     setKbFresh(true);
-    setTimeout(() => scrollChainRowIntoView('data-av-row', dropIdx, 'data-av-actions', 'data-av-header'), 80);
+    setTimeout(() => scrollChainRowIntoView('data-av-row', dropIdx), 80);
   };
 
   const kbApply = (newRaw, field, setIdx) => {
@@ -3809,7 +3806,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             </button>
           </>)}
         </div>
-        <button onClick={() => go({ name: 'home' })} style={{
+        <button onClick={requestGoHome} style={{
           width: 32, height: 32, borderRadius: 4,
           border: `1px solid ${UI.hairStrong}`, background: 'transparent',
           color: UI.inkSoft, cursor: 'pointer',
@@ -4398,88 +4395,6 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                       </div>
                     );
                   })()}
-                  {dropSetIdx === i && !s.done && (
-                    <div style={{ marginLeft: 36, paddingLeft: 10, borderLeft: `2px solid rgba(var(--accent-rgb),0.3)` }}>
-                      <div data-drop-header style={{ position: 'sticky', top: 0, background: 'var(--bg)', zIndex: 1, paddingBottom: 2 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 4px 2px' }}>
-                          <span className="micro-gold">DROP SET</span>
-                          <button onClick={() => {
-                            setDropSetIdx(null); setDropDrops([]); setFinisherPartials(0);
-                            kbFieldRef.current = null; kbRawRef.current = ''; setKbField(null); setKbRaw('');
-                          }} style={{ background: 'none', border: 'none', color: UI.inkFaint, fontSize: 10, fontFamily: UI.fontUi, cursor: 'pointer', padding: '2px 4px', letterSpacing: '0.08em' }}>CANCEL</button>
-                        </div>
-                      </div>
-                      {dropDrops.map((d, di) => {
-                        const isKgA = kbField?.setIdx === 'drop' && kbField?.dropIdx === di && kbField?.field === 'kg';
-                        const isRepsA = kbField?.setIdx === 'drop' && kbField?.dropIdx === di && kbField?.field === 'reps';
-                        return (
-                          <div key={di} data-drop-row={di} style={{ display: 'grid', gridTemplateColumns: '28px 1fr 72px 56px 28px', gap: 8, alignItems: 'center', padding: '5px 4px', scrollMarginTop: CHAIN_ROW_SCROLL_MARGIN_TOP }}>
-                            <div style={{
-                              width: 24, height: 24, borderRadius: 4, flexShrink: 0,
-                              background: 'rgba(var(--accent-rgb),0.08)',
-                              outline: `1px solid rgba(var(--accent-rgb),0.3)`,
-                              display: 'flex', alignItems: 'center', justifyContent: 'center',
-                              fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, color: UI.gold,
-                            }}>↓</div>
-                            <div className="num" style={{ fontSize: 10, color: UI.inkGhost }}>
-                              {di === 0 ? 'top' : `drop ${di + 1}`}
-                            </div>
-                            <KbCell
-                              text={isKgA ? kbRaw : (d.kg != null ? String(d.kg).replace('.', ',') : '')}
-                              placeholder="—"
-                              onActivate={() => activateDropKb(di, 'kg')}
-                              style={{ ...setInputStyle(false, isKgA), ...(isKgA ? { boxShadow: 'inset 0 -2px 0 var(--accent)' } : {}) }}
-                            />
-                            <KbCell
-                              text={isRepsA ? kbRaw : (d.reps != null ? String(d.reps) : '')}
-                              placeholder="—"
-                              onActivate={() => activateDropKb(di, 'reps')}
-                              style={{ ...setInputStyle(false, isRepsA), ...(isRepsA ? { boxShadow: 'inset 0 -2px 0 var(--accent)' } : {}) }}
-                            />
-                            <button onClick={() => dropDrops.length > 1 && setDropDrops(prev => prev.filter((_, idx) => idx !== di))}
-                              disabled={dropDrops.length <= 1}
-                              style={{
-                                width: 26, height: 26, borderRadius: 4, border: `1px solid ${UI.hair}`,
-                                background: 'transparent', color: UI.inkFaint, fontSize: 14,
-                                cursor: dropDrops.length <= 1 ? 'default' : 'pointer',
-                                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                opacity: dropDrops.length <= 1 ? 0.2 : 1, flexShrink: 0,
-                                WebkitTapHighlightColor: 'transparent',
-                              }}>×</button>
-                          </div>
-                        );
-                      })}
-                      <FinisherPartials count={finisherPartials} onChange={setFinisherPartials} />
-                      {(() => {
-                        const canFinishDrop = !!dropDrops[0]?.reps && (isNoWeightReps || isBodyweight || dropDrops[0]?.kg != null);
-                        return (
-                      <div data-drop-actions style={{ display: 'flex', gap: 8, padding: '4px 4px 10px' }}>
-                        <button onClick={() => {
-                          const newIdx = dropDropsRef.current.length;
-                          setDropDrops(prev => [...prev, { kg: null, reps: null }]);
-                          setTimeout(() => activateDropKb(newIdx, 'kg'), 80);
-                        }} style={{
-                          flex: 1, padding: '8px 0', background: 'transparent',
-                          border: `1px solid ${UI.hairStrong}`, borderRadius: 6,
-                          color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700,
-                          letterSpacing: '0.1em', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
-                        }}>↓ ADD DROP</button>
-                        <button onClick={() => finishDropSet(dropDropsRef.current)}
-                          disabled={!canFinishDrop}
-                          style={{
-                            flex: 2, padding: '8px 0',
-                            background: canFinishDrop ? 'rgba(var(--accent-rgb),0.12)' : 'transparent',
-                            border: `1px solid ${canFinishDrop ? 'rgba(var(--accent-rgb),0.5)' : UI.hair}`,
-                            borderRadius: 6, color: canFinishDrop ? 'var(--accent)' : UI.inkGhost,
-                            fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.1em',
-                            cursor: canFinishDrop ? 'pointer' : 'default',
-                            WebkitTapHighlightColor: 'transparent',
-                          }}>✓ FINISH</button>
-                      </div>
-                        );
-                      })()}
-                    </div>
-                  )}
                   {s.technique === 'drop' && s.done && ((s.drops || []).length > 1 || (s.drops?.[s.drops.length - 1]?.partials || 0) > 0) && (
                     <div style={{ marginLeft: 36, paddingLeft: 10, paddingBottom: 8, borderLeft: `2px solid rgba(var(--accent-rgb),0.2)` }}>
                       {(s.drops || []).slice(1).map((d, di) => (
@@ -4504,106 +4419,6 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                           +{p} partial{p === 1 ? '' : 's'}
                         </div>
                       ); })()}
-                    </div>
-                  )}
-                  {/* AMRAP Variations active inline rows */}
-                  {avSetIdx === i && !s.done && (
-                    <div style={{ marginLeft: 36, paddingLeft: 10, borderLeft: `2px solid rgba(var(--accent-rgb),0.3)` }}>
-                      <div data-av-header style={{ position: 'sticky', top: 0, background: 'var(--bg)', zIndex: 1, paddingBottom: 2 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 4px 2px' }}>
-                          <span className="micro-gold">AMRAP VARIATIONS</span>
-                          <button onClick={() => {
-                            setAvSetIdx(null); setAvDrops([]); setFinisherPartials(0);
-                            kbFieldRef.current = null; kbRawRef.current = ''; setKbField(null); setKbRaw('');
-                          }} style={{ background: 'none', border: 'none', color: UI.inkFaint, fontSize: 10, fontFamily: UI.fontUi, cursor: 'pointer', padding: '2px 4px', letterSpacing: '0.08em' }}>CANCEL</button>
-                        </div>
-                      </div>
-                      {avDrops.map((d, di) => {
-                        const isKgA = kbField?.setIdx === 'av' && kbField?.dropIdx === di && kbField?.field === 'kg';
-                        const isRepsA = kbField?.setIdx === 'av' && kbField?.dropIdx === di && kbField?.field === 'reps';
-                        return (
-                          <div key={di} data-av-row={di} style={{ padding: '6px 4px', borderBottom: di < avDrops.length - 1 ? `0.5px solid ${UI.hair}` : 'none', scrollMarginTop: CHAIN_ROW_SCROLL_MARGIN_TOP }}>
-                            <input
-                              type="text"
-                              value={d.label ?? ''}
-                              onFocus={e => { e.target.select(); setAvLabelFocusDi(di); }}
-                              onBlur={() => setAvLabelFocusDi(cur => cur === di ? null : cur)}
-                              onChange={e => { const val = e.target.value; setAvDrops(prev => prev.map((dd, idx) => idx === di ? { ...dd, label: val } : dd)); }}
-                              placeholder={entry.name}
-                              style={{
-                                width: '100%', boxSizing: 'border-box', background: UI.bgInset,
-                                border: `1px solid ${UI.hair}`,
-                                borderBottom: `2px solid ${avLabelFocusDi === di ? 'var(--accent)' : UI.hair}`,
-                                borderRadius: 4,
-                                color: UI.ink, fontFamily: UI.fontUi, fontSize: 12, padding: '6px 8px',
-                                marginBottom: 6, outline: 'none', WebkitTapHighlightColor: 'transparent',
-                              }}
-                            />
-                            <div style={{ display: 'grid', gridTemplateColumns: '28px 1fr 72px 56px 28px', gap: 8, alignItems: 'center' }}>
-                              <div style={{
-                                width: 24, height: 24, borderRadius: 4, flexShrink: 0,
-                                background: 'rgba(var(--accent-rgb),0.08)',
-                                outline: `1px solid rgba(var(--accent-rgb),0.3)`,
-                                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                color: UI.gold,
-                              }}><i className="fa-solid fa-shuffle" style={{ fontSize: 10 }} /></div>
-                              <div className="num" style={{ fontSize: 10, color: UI.inkGhost }}>round {di + 1}</div>
-                              <KbCell
-                                text={isKgA ? kbRaw : (d.kg != null ? String(d.kg).replace('.', ',') : '')}
-                                placeholder="—"
-                                onActivate={() => activateAvKb(di, 'kg')}
-                                style={{ ...setInputStyle(false, isKgA), ...(isKgA ? { boxShadow: 'inset 0 -2px 0 var(--accent)' } : {}) }}
-                              />
-                              <KbCell
-                                text={isRepsA ? kbRaw : (d.reps != null ? String(d.reps) : '')}
-                                placeholder="—"
-                                onActivate={() => activateAvKb(di, 'reps')}
-                                style={{ ...setInputStyle(false, isRepsA), ...(isRepsA ? { boxShadow: 'inset 0 -2px 0 var(--accent)' } : {}) }}
-                              />
-                              <button onClick={() => avDrops.length > 1 && setAvDrops(prev => prev.filter((_, idx) => idx !== di))}
-                                disabled={avDrops.length <= 1}
-                                style={{
-                                  width: 26, height: 26, borderRadius: 4, border: `1px solid ${UI.hair}`,
-                                  background: 'transparent', color: UI.inkFaint, fontSize: 14,
-                                  cursor: avDrops.length <= 1 ? 'default' : 'pointer',
-                                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                  opacity: avDrops.length <= 1 ? 0.2 : 1, flexShrink: 0,
-                                  WebkitTapHighlightColor: 'transparent',
-                                }}>×</button>
-                            </div>
-                          </div>
-                        );
-                      })}
-                      <FinisherPartials count={finisherPartials} onChange={setFinisherPartials} />
-                      {(() => {
-                        const canFinishAv = !!avDrops[0]?.reps && (isNoWeightReps || isBodyweight || avDrops[0]?.kg != null);
-                        return (
-                      <div data-av-actions style={{ display: 'flex', gap: 8, padding: '4px 4px 10px' }}>
-                        <button onClick={() => {
-                          const newIdx = avDropsRef.current.length;
-                          const prevKg = avDropsRef.current[avDropsRef.current.length - 1]?.kg ?? null;
-                          setAvDrops(prev => [...prev, { kg: prevKg, reps: null, label: entry.name }]);
-                          setTimeout(() => activateAvKb(newIdx, 'kg'), 80);
-                        }} style={{
-                          flex: 1, padding: '8px 0', background: 'transparent',
-                          border: `1px solid ${UI.hairStrong}`, borderRadius: 6,
-                          color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700,
-                          letterSpacing: '0.1em', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
-                        }}>+ ADD ROUND</button>
-                        <button onClick={() => finishAv(avDropsRef.current)}
-                          disabled={!canFinishAv}
-                          style={{
-                            flex: 2, padding: '8px 0',
-                            background: canFinishAv ? 'rgba(var(--accent-rgb),0.12)' : 'transparent',
-                            border: `1px solid ${canFinishAv ? 'rgba(var(--accent-rgb),0.5)' : UI.hair}`,
-                            borderRadius: 6, color: canFinishAv ? 'var(--accent)' : UI.inkGhost,
-                            fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.1em',
-                            cursor: canFinishAv ? 'pointer' : 'default',
-                            WebkitTapHighlightColor: 'transparent',
-                          }}>✓ FINISH</button>
-                      </div>
-                        );
-                      })()}
                     </div>
                   )}
                   {s.technique === 'amrap_variations' && s.done && ((s.drops || []).length > 1 || (s.drops?.[s.drops.length - 1]?.partials || 0) > 0) && (() => {
@@ -4638,123 +4453,6 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                         </div>
                       ); })()}
                     </div>
-                    );
-                  })()}
-                  {/* Myo-Rep active inline rows */}
-                  {myoSetIdx === i && !s.done && (() => {
-                    const myoTotalReps = myoDrops.reduce((acc, d) => acc + (d.reps || 0), 0);
-                    const myoProgress = myoTarget ? Math.min(1, myoTotalReps / myoTarget) : 0;
-                    const canFinish = myoDrops.length >= 2 && myoDrops[0]?.reps != null && (isNoWeightReps || isBodyweight || myoDrops[0]?.kg != null);
-                    const activationDone = myoDrops[0]?.reps != null;
-                    return (
-                      <div style={{ marginLeft: 36, paddingLeft: 10, borderLeft: `2px solid rgba(var(--accent-rgb),0.3)` }}>
-                          <div data-myo-header style={{ position: 'sticky', top: 0, background: 'var(--bg)', zIndex: 1, paddingBottom: 2 }}>
-                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 4px 2px' }}>
-                            <span className="micro-gold">{myoTechnique === 'myorep_match' ? 'MYO REP MATCH' : 'MYO-REPS'}</span>
-                            <button onClick={cancelMyo} style={{ background: 'none', border: 'none', color: UI.inkFaint, fontSize: 10, fontFamily: UI.fontUi, cursor: 'pointer', padding: '2px 4px', letterSpacing: '0.08em' }}>CANCEL</button>
-                          </div>
-                          {/* Match progress counter */}
-                          {myoTechnique === 'myorep_match' && myoTarget != null && (
-                            <div style={{ padding: '6px 4px 4px' }}>
-                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 5 }}>
-                                <span className="micro" style={{ color: UI.inkSoft, letterSpacing: '0.1em' }}>MATCH</span>
-                                <div>
-                                  <span className="num" style={{ fontSize: 20, fontWeight: 700, color: myoProgress >= 1 ? UI.gold : UI.ink, transition: 'color 0.3s ease' }}>{myoTotalReps}</span>
-                                  <span className="num" style={{ fontSize: 12, color: UI.inkGhost }}> / {myoTarget}</span>
-                                </div>
-                              </div>
-                              <div style={{ position: 'relative', height: 6, borderRadius: 999, background: 'rgba(var(--accent-rgb),0.12)', margin: '0 0 4px' }}>
-                                <div style={{
-                                  position: 'absolute', left: 0, top: 0, height: '100%',
-                                  width: `${Math.min(1, myoProgress) * 100}%`,
-                                  minWidth: myoProgress > 0 ? 8 : 0,
-                                  borderRadius: 999,
-                                  background: myoProgress >= 1 ? 'var(--accent)' : 'rgba(var(--accent-rgb),0.75)',
-                                  boxShadow: myoProgress > 0 ? `0 0 ${Math.round(4 + myoProgress * 10)}px ${Math.round(2 + myoProgress * 6)}px rgba(var(--accent-rgb),${(0.3 + myoProgress * 0.5).toFixed(2)})` : 'none',
-                                  transition: 'width 0.3s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.3s ease',
-                                }} />
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                        {myoDrops.map((d, di) => {
-                          const isActiv = di === 0;
-                          const isKgA = kbField?.setIdx === 'myo' && kbField?.dropIdx === di && kbField?.field === 'kg';
-                          const isRepsA = kbField?.setIdx === 'myo' && kbField?.dropIdx === di && kbField?.field === 'reps';
-                          return (
-                            <div key={di} data-myo-row={di} style={{ display: 'grid', gridTemplateColumns: '28px 1fr 72px 56px 28px', gap: 8, alignItems: 'center', padding: '5px 4px', scrollMarginTop: CHAIN_ROW_SCROLL_MARGIN_TOP }}>
-                              <div style={{
-                                width: 24, height: 24, borderRadius: 4, flexShrink: 0,
-                                background: 'rgba(var(--accent-rgb),0.08)',
-                                outline: `1px solid rgba(var(--accent-rgb),0.3)`,
-                                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                fontFamily: UI.fontUi, fontSize: isActiv ? 9 : 10, fontWeight: 700, color: UI.gold,
-                              }}>{isActiv ? 'ACT' : '↺'}</div>
-                              <div className="num" style={{ fontSize: 10, color: UI.inkGhost }}>{isActiv ? 'activation' : `myo ${di}`}</div>
-                              {/* kg — editable for activation (myo only), read-only for match activation + all minis */}
-                              {isActiv && myoTechnique === 'myorep' ? (
-                                <KbCell
-                                  text={isKgA ? kbRaw : (d.kg != null ? String(d.kg).replace('.', ',') : '')}
-                                  placeholder="—"
-                                  onActivate={() => activateMyo(di, 'kg')}
-                                  style={{ ...setInputStyle(false, isKgA), ...(isKgA ? { boxShadow: 'inset 0 -2px 0 var(--accent)' } : {}) }}
-                                />
-                              ) : (
-                                <div style={{ ...setInputStyle(true, false), display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                  <span className="num" style={{ fontSize: 15, color: UI.inkGhost }}>{d.kg != null ? String(d.kg).replace('.', ',') : '—'}</span>
-                                </div>
-                              )}
-                              <KbCell
-                                text={isRepsA ? kbRaw : (d.reps != null ? String(d.reps) : '')}
-                                placeholder="—"
-                                onActivate={() => activateMyo(di, 'reps')}
-                                style={{ ...setInputStyle(false, isRepsA), ...(isRepsA ? { boxShadow: 'inset 0 -2px 0 var(--accent)' } : {}) }}
-                              />
-                              {isActiv ? (
-                                <div />
-                              ) : (
-                                <button onClick={() => myoDrops.length > 2 && setMyoDrops(prev => prev.filter((_, idx) => idx !== di))}
-                                  disabled={myoDrops.length <= 2}
-                                  style={{
-                                    width: 26, height: 26, borderRadius: 4, border: `1px solid ${UI.hair}`,
-                                    background: 'transparent', color: UI.inkFaint, fontSize: 14,
-                                    cursor: myoDrops.length <= 2 ? 'default' : 'pointer',
-                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                    opacity: myoDrops.length <= 2 ? 0.2 : 1, flexShrink: 0,
-                                    WebkitTapHighlightColor: 'transparent',
-                                  }}>×</button>
-                              )}
-                            </div>
-                          );
-                        })}
-                        <FinisherPartials count={finisherPartials} onChange={setFinisherPartials} />
-                        <div data-myo-actions style={{ display: 'flex', gap: 8, padding: '4px 4px 10px' }}>
-                          {activationDone && (
-                            <button onClick={() => {
-                              const newIdx = myoDropsRef.current.length;
-                              const activKg = myoDropsRef.current[0]?.kg ?? null;
-                              setMyoDrops(prev => [...prev, { kg: activKg, reps: null }]);
-                              setTimeout(() => activateMyo(newIdx, 'reps'), 80);
-                            }} style={{
-                              flex: 1, padding: '8px 0', background: 'transparent',
-                              border: `1px solid ${UI.hairStrong}`, borderRadius: 6,
-                              color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700,
-                              letterSpacing: '0.1em', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
-                            }}>↺ ADD MYO</button>
-                          )}
-                          <button onClick={() => finishMyoSet(myoDropsRef.current, myoTechnique)}
-                            disabled={!canFinish}
-                            style={{
-                              flex: 2, padding: '8px 0',
-                              background: canFinish ? 'rgba(var(--accent-rgb),0.12)' : 'transparent',
-                              border: `1px solid ${canFinish ? 'rgba(var(--accent-rgb),0.5)' : UI.hair}`,
-                              borderRadius: 6, color: canFinish ? 'var(--accent)' : UI.inkGhost,
-                              fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.1em',
-                              cursor: canFinish ? 'pointer' : 'default',
-                              WebkitTapHighlightColor: 'transparent',
-                            }}>✓ FINISH</button>
-                        </div>
-                      </div>
                     );
                   })()}
                   {/* Completed myo rows */}
@@ -5265,6 +4963,317 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                     </div>
                   </div>
                 </button>
+              </div>
+            </div>
+          );
+        })()}
+      </Sheet>
+
+      {/* Drop Set / Myo-Rep(-Match) / AMRAP Variations editing sheet — exactly
+          one chain is ever in flight (drop/myo/av start* clear the other
+          two). Edited in its own sheet instead of inline in the set row so
+          the header, the active weight/rep row, and the action buttons are
+          always on screen together regardless of scroll position or chain
+          length — inline rendering inside the (potentially very long)
+          exercise list made that impossible to guarantee reliably.
+          keyboardHeight tells Sheet this app's custom numeric keypad is open
+          — it focuses no real <input>, so Sheet's own visualViewport-based
+          auto-detection never fires for it — so Sheet shrinks/scrolls itself
+          to sit above it, exactly like it already does for native inputs. */}
+      <Sheet
+        open={dropSetIdx != null || myoSetIdx != null || avSetIdx != null}
+        onClose={requestCloseChainSheet}
+        keyboardHeight={kbField ? 225 : 0}
+      >
+        {dropSetIdx != null && (
+          <div>
+            <div style={{ position: 'sticky', top: 0, background: UI.bgRaised, zIndex: 1, paddingBottom: 2 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 4px 2px' }}>
+                <span className="micro-gold">DROP SET</span>
+                <button onClick={requestCloseChainSheet} style={{ background: 'none', border: 'none', color: UI.inkFaint, fontSize: 10, fontFamily: UI.fontUi, cursor: 'pointer', padding: '2px 4px', letterSpacing: '0.08em' }}>CANCEL</button>
+              </div>
+            </div>
+            {dropDrops.map((d, di) => {
+              const isKgA = kbField?.setIdx === 'drop' && kbField?.dropIdx === di && kbField?.field === 'kg';
+              const isRepsA = kbField?.setIdx === 'drop' && kbField?.dropIdx === di && kbField?.field === 'reps';
+              return (
+                <div key={di} data-drop-row={di} style={{ display: 'grid', gridTemplateColumns: '28px 1fr 72px 56px 28px', gap: 8, alignItems: 'center', padding: '5px 4px', scrollMarginTop: CHAIN_ROW_SCROLL_MARGIN_TOP }}>
+                  <div style={{
+                    width: 24, height: 24, borderRadius: 4, flexShrink: 0,
+                    background: 'rgba(var(--accent-rgb),0.08)',
+                    outline: `1px solid rgba(var(--accent-rgb),0.3)`,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, color: UI.gold,
+                  }}>↓</div>
+                  <div className="num" style={{ fontSize: 10, color: UI.inkGhost }}>
+                    {di === 0 ? 'top' : `drop ${di + 1}`}
+                  </div>
+                  <KbCell
+                    text={isKgA ? kbRaw : (d.kg != null ? String(d.kg).replace('.', ',') : '')}
+                    placeholder="—"
+                    onActivate={() => activateDropKb(di, 'kg')}
+                    style={{ ...setInputStyle(false, isKgA), ...(isKgA ? { boxShadow: 'inset 0 -2px 0 var(--accent)' } : {}) }}
+                  />
+                  <KbCell
+                    text={isRepsA ? kbRaw : (d.reps != null ? String(d.reps) : '')}
+                    placeholder="—"
+                    onActivate={() => activateDropKb(di, 'reps')}
+                    style={{ ...setInputStyle(false, isRepsA), ...(isRepsA ? { boxShadow: 'inset 0 -2px 0 var(--accent)' } : {}) }}
+                  />
+                  <button onClick={() => dropDrops.length > 1 && setDropDrops(prev => prev.filter((_, idx) => idx !== di))}
+                    disabled={dropDrops.length <= 1}
+                    style={{
+                      width: 26, height: 26, borderRadius: 4, border: `1px solid ${UI.hair}`,
+                      background: 'transparent', color: UI.inkFaint, fontSize: 14,
+                      cursor: dropDrops.length <= 1 ? 'default' : 'pointer',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      opacity: dropDrops.length <= 1 ? 0.2 : 1, flexShrink: 0,
+                      WebkitTapHighlightColor: 'transparent',
+                    }}>×</button>
+                </div>
+              );
+            })}
+            <FinisherPartials count={finisherPartials} onChange={setFinisherPartials} />
+            {(() => {
+              const canFinishDrop = !!dropDrops[0]?.reps && (isNoWeightReps || isBodyweight || dropDrops[0]?.kg != null);
+              return (
+                <div style={{ display: 'flex', gap: 8, padding: '4px 4px 10px' }}>
+                  <button onClick={() => {
+                    const newIdx = dropDropsRef.current.length;
+                    setDropDrops(prev => [...prev, { kg: null, reps: null }]);
+                    setTimeout(() => activateDropKb(newIdx, 'kg'), 80);
+                  }} style={{
+                    flex: 1, padding: '8px 0', background: 'transparent',
+                    border: `1px solid ${UI.hairStrong}`, borderRadius: 6,
+                    color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700,
+                    letterSpacing: '0.1em', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+                  }}>↓ ADD DROP</button>
+                  <button onClick={() => finishDropSet(dropDropsRef.current)}
+                    disabled={!canFinishDrop}
+                    style={{
+                      flex: 2, padding: '8px 0',
+                      background: canFinishDrop ? 'rgba(var(--accent-rgb),0.12)' : 'transparent',
+                      border: `1px solid ${canFinishDrop ? 'rgba(var(--accent-rgb),0.5)' : UI.hair}`,
+                      borderRadius: 6, color: canFinishDrop ? 'var(--accent)' : UI.inkGhost,
+                      fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.1em',
+                      cursor: canFinishDrop ? 'pointer' : 'default',
+                      WebkitTapHighlightColor: 'transparent',
+                    }}>✓ FINISH</button>
+                </div>
+              );
+            })()}
+          </div>
+        )}
+
+        {avSetIdx != null && (
+          <div>
+            <div style={{ position: 'sticky', top: 0, background: UI.bgRaised, zIndex: 1, paddingBottom: 2 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 4px 2px' }}>
+                <span className="micro-gold">AMRAP VARIATIONS</span>
+                <button onClick={requestCloseChainSheet} style={{ background: 'none', border: 'none', color: UI.inkFaint, fontSize: 10, fontFamily: UI.fontUi, cursor: 'pointer', padding: '2px 4px', letterSpacing: '0.08em' }}>CANCEL</button>
+              </div>
+            </div>
+            {avDrops.map((d, di) => {
+              const isKgA = kbField?.setIdx === 'av' && kbField?.dropIdx === di && kbField?.field === 'kg';
+              const isRepsA = kbField?.setIdx === 'av' && kbField?.dropIdx === di && kbField?.field === 'reps';
+              return (
+                <div key={di} data-av-row={di} style={{ padding: '6px 4px', borderBottom: di < avDrops.length - 1 ? `0.5px solid ${UI.hair}` : 'none', scrollMarginTop: CHAIN_ROW_SCROLL_MARGIN_TOP }}>
+                  <input
+                    type="text"
+                    value={d.label ?? ''}
+                    onFocus={e => { e.target.select(); setAvLabelFocusDi(di); }}
+                    onBlur={() => setAvLabelFocusDi(cur => cur === di ? null : cur)}
+                    onChange={e => { const val = e.target.value; setAvDrops(prev => prev.map((dd, idx) => idx === di ? { ...dd, label: val } : dd)); }}
+                    placeholder={entry.name}
+                    style={{
+                      width: '100%', boxSizing: 'border-box', background: UI.bgInset,
+                      border: `1px solid ${UI.hair}`,
+                      borderBottom: `2px solid ${avLabelFocusDi === di ? 'var(--accent)' : UI.hair}`,
+                      borderRadius: 4,
+                      color: UI.ink, fontFamily: UI.fontUi, fontSize: 12, padding: '6px 8px',
+                      marginBottom: 6, outline: 'none', WebkitTapHighlightColor: 'transparent',
+                    }}
+                  />
+                  <div style={{ display: 'grid', gridTemplateColumns: '28px 1fr 72px 56px 28px', gap: 8, alignItems: 'center' }}>
+                    <div style={{
+                      width: 24, height: 24, borderRadius: 4, flexShrink: 0,
+                      background: 'rgba(var(--accent-rgb),0.08)',
+                      outline: `1px solid rgba(var(--accent-rgb),0.3)`,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      color: UI.gold,
+                    }}><i className="fa-solid fa-shuffle" style={{ fontSize: 10 }} /></div>
+                    <div className="num" style={{ fontSize: 10, color: UI.inkGhost }}>round {di + 1}</div>
+                    <KbCell
+                      text={isKgA ? kbRaw : (d.kg != null ? String(d.kg).replace('.', ',') : '')}
+                      placeholder="—"
+                      onActivate={() => activateAvKb(di, 'kg')}
+                      style={{ ...setInputStyle(false, isKgA), ...(isKgA ? { boxShadow: 'inset 0 -2px 0 var(--accent)' } : {}) }}
+                    />
+                    <KbCell
+                      text={isRepsA ? kbRaw : (d.reps != null ? String(d.reps) : '')}
+                      placeholder="—"
+                      onActivate={() => activateAvKb(di, 'reps')}
+                      style={{ ...setInputStyle(false, isRepsA), ...(isRepsA ? { boxShadow: 'inset 0 -2px 0 var(--accent)' } : {}) }}
+                    />
+                    <button onClick={() => avDrops.length > 1 && setAvDrops(prev => prev.filter((_, idx) => idx !== di))}
+                      disabled={avDrops.length <= 1}
+                      style={{
+                        width: 26, height: 26, borderRadius: 4, border: `1px solid ${UI.hair}`,
+                        background: 'transparent', color: UI.inkFaint, fontSize: 14,
+                        cursor: avDrops.length <= 1 ? 'default' : 'pointer',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        opacity: avDrops.length <= 1 ? 0.2 : 1, flexShrink: 0,
+                        WebkitTapHighlightColor: 'transparent',
+                      }}>×</button>
+                  </div>
+                </div>
+              );
+            })}
+            <FinisherPartials count={finisherPartials} onChange={setFinisherPartials} />
+            {(() => {
+              const canFinishAv = !!avDrops[0]?.reps && (isNoWeightReps || isBodyweight || avDrops[0]?.kg != null);
+              return (
+                <div style={{ display: 'flex', gap: 8, padding: '4px 4px 10px' }}>
+                  <button onClick={() => {
+                    const newIdx = avDropsRef.current.length;
+                    const prevKg = avDropsRef.current[avDropsRef.current.length - 1]?.kg ?? null;
+                    setAvDrops(prev => [...prev, { kg: prevKg, reps: null, label: entry.name }]);
+                    setTimeout(() => activateAvKb(newIdx, 'kg'), 80);
+                  }} style={{
+                    flex: 1, padding: '8px 0', background: 'transparent',
+                    border: `1px solid ${UI.hairStrong}`, borderRadius: 6,
+                    color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700,
+                    letterSpacing: '0.1em', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+                  }}>+ ADD ROUND</button>
+                  <button onClick={() => finishAv(avDropsRef.current)}
+                    disabled={!canFinishAv}
+                    style={{
+                      flex: 2, padding: '8px 0',
+                      background: canFinishAv ? 'rgba(var(--accent-rgb),0.12)' : 'transparent',
+                      border: `1px solid ${canFinishAv ? 'rgba(var(--accent-rgb),0.5)' : UI.hair}`,
+                      borderRadius: 6, color: canFinishAv ? 'var(--accent)' : UI.inkGhost,
+                      fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.1em',
+                      cursor: canFinishAv ? 'pointer' : 'default',
+                      WebkitTapHighlightColor: 'transparent',
+                    }}>✓ FINISH</button>
+                </div>
+              );
+            })()}
+          </div>
+        )}
+
+        {myoSetIdx != null && (() => {
+          const myoTotalReps = myoDrops.reduce((acc, d) => acc + (d.reps || 0), 0);
+          const myoProgress = myoTarget ? Math.min(1, myoTotalReps / myoTarget) : 0;
+          const canFinish = myoDrops.length >= 2 && myoDrops[0]?.reps != null && (isNoWeightReps || isBodyweight || myoDrops[0]?.kg != null);
+          const activationDone = myoDrops[0]?.reps != null;
+          return (
+            <div>
+              <div style={{ position: 'sticky', top: 0, background: UI.bgRaised, zIndex: 1, paddingBottom: 2 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 4px 2px' }}>
+                  <span className="micro-gold">{myoTechnique === 'myorep_match' ? 'MYO REP MATCH' : 'MYO-REPS'}</span>
+                  <button onClick={requestCloseChainSheet} style={{ background: 'none', border: 'none', color: UI.inkFaint, fontSize: 10, fontFamily: UI.fontUi, cursor: 'pointer', padding: '2px 4px', letterSpacing: '0.08em' }}>CANCEL</button>
+                </div>
+                {/* Match progress counter */}
+                {myoTechnique === 'myorep_match' && myoTarget != null && (
+                  <div style={{ padding: '6px 4px 4px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 5 }}>
+                      <span className="micro" style={{ color: UI.inkSoft, letterSpacing: '0.1em' }}>MATCH</span>
+                      <div>
+                        <span className="num" style={{ fontSize: 20, fontWeight: 700, color: myoProgress >= 1 ? UI.gold : UI.ink, transition: 'color 0.3s ease' }}>{myoTotalReps}</span>
+                        <span className="num" style={{ fontSize: 12, color: UI.inkGhost }}> / {myoTarget}</span>
+                      </div>
+                    </div>
+                    <div style={{ position: 'relative', height: 6, borderRadius: 999, background: 'rgba(var(--accent-rgb),0.12)', margin: '0 0 4px' }}>
+                      <div style={{
+                        position: 'absolute', left: 0, top: 0, height: '100%',
+                        width: `${Math.min(1, myoProgress) * 100}%`,
+                        minWidth: myoProgress > 0 ? 8 : 0,
+                        borderRadius: 999,
+                        background: myoProgress >= 1 ? 'var(--accent)' : 'rgba(var(--accent-rgb),0.75)',
+                        boxShadow: myoProgress > 0 ? `0 0 ${Math.round(4 + myoProgress * 10)}px ${Math.round(2 + myoProgress * 6)}px rgba(var(--accent-rgb),${(0.3 + myoProgress * 0.5).toFixed(2)})` : 'none',
+                        transition: 'width 0.3s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.3s ease',
+                      }} />
+                    </div>
+                  </div>
+                )}
+              </div>
+              {myoDrops.map((d, di) => {
+                const isActiv = di === 0;
+                const isKgA = kbField?.setIdx === 'myo' && kbField?.dropIdx === di && kbField?.field === 'kg';
+                const isRepsA = kbField?.setIdx === 'myo' && kbField?.dropIdx === di && kbField?.field === 'reps';
+                return (
+                  <div key={di} data-myo-row={di} style={{ display: 'grid', gridTemplateColumns: '28px 1fr 72px 56px 28px', gap: 8, alignItems: 'center', padding: '5px 4px', scrollMarginTop: CHAIN_ROW_SCROLL_MARGIN_TOP }}>
+                    <div style={{
+                      width: 24, height: 24, borderRadius: 4, flexShrink: 0,
+                      background: 'rgba(var(--accent-rgb),0.08)',
+                      outline: `1px solid rgba(var(--accent-rgb),0.3)`,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontFamily: UI.fontUi, fontSize: isActiv ? 9 : 10, fontWeight: 700, color: UI.gold,
+                    }}>{isActiv ? 'ACT' : '↺'}</div>
+                    <div className="num" style={{ fontSize: 10, color: UI.inkGhost }}>{isActiv ? 'activation' : `myo ${di}`}</div>
+                    {/* kg — editable for activation (myo only), read-only for match activation + all minis */}
+                    {isActiv && myoTechnique === 'myorep' ? (
+                      <KbCell
+                        text={isKgA ? kbRaw : (d.kg != null ? String(d.kg).replace('.', ',') : '')}
+                        placeholder="—"
+                        onActivate={() => activateMyo(di, 'kg')}
+                        style={{ ...setInputStyle(false, isKgA), ...(isKgA ? { boxShadow: 'inset 0 -2px 0 var(--accent)' } : {}) }}
+                      />
+                    ) : (
+                      <div style={{ ...setInputStyle(true, false), display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <span className="num" style={{ fontSize: 15, color: UI.inkGhost }}>{d.kg != null ? String(d.kg).replace('.', ',') : '—'}</span>
+                      </div>
+                    )}
+                    <KbCell
+                      text={isRepsA ? kbRaw : (d.reps != null ? String(d.reps) : '')}
+                      placeholder="—"
+                      onActivate={() => activateMyo(di, 'reps')}
+                      style={{ ...setInputStyle(false, isRepsA), ...(isRepsA ? { boxShadow: 'inset 0 -2px 0 var(--accent)' } : {}) }}
+                    />
+                    {isActiv ? (
+                      <div />
+                    ) : (
+                      <button onClick={() => myoDrops.length > 2 && setMyoDrops(prev => prev.filter((_, idx) => idx !== di))}
+                        disabled={myoDrops.length <= 2}
+                        style={{
+                          width: 26, height: 26, borderRadius: 4, border: `1px solid ${UI.hair}`,
+                          background: 'transparent', color: UI.inkFaint, fontSize: 14,
+                          cursor: myoDrops.length <= 2 ? 'default' : 'pointer',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          opacity: myoDrops.length <= 2 ? 0.2 : 1, flexShrink: 0,
+                          WebkitTapHighlightColor: 'transparent',
+                        }}>×</button>
+                    )}
+                  </div>
+                );
+              })}
+              <FinisherPartials count={finisherPartials} onChange={setFinisherPartials} />
+              <div style={{ display: 'flex', gap: 8, padding: '4px 4px 10px' }}>
+                {activationDone && (
+                  <button onClick={() => {
+                    const newIdx = myoDropsRef.current.length;
+                    const activKg = myoDropsRef.current[0]?.kg ?? null;
+                    setMyoDrops(prev => [...prev, { kg: activKg, reps: null }]);
+                    setTimeout(() => activateMyo(newIdx, 'reps'), 80);
+                  }} style={{
+                    flex: 1, padding: '8px 0', background: 'transparent',
+                    border: `1px solid ${UI.hairStrong}`, borderRadius: 6,
+                    color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700,
+                    letterSpacing: '0.1em', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+                  }}>↺ ADD MYO</button>
+                )}
+                <button onClick={() => finishMyoSet(myoDropsRef.current, myoTechnique)}
+                  disabled={!canFinish}
+                  style={{
+                    flex: 2, padding: '8px 0',
+                    background: canFinish ? 'rgba(var(--accent-rgb),0.12)' : 'transparent',
+                    border: `1px solid ${canFinish ? 'rgba(var(--accent-rgb),0.5)' : UI.hair}`,
+                    borderRadius: 6, color: canFinish ? 'var(--accent)' : UI.inkGhost,
+                    fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.1em',
+                    cursor: canFinish ? 'pointer' : 'default',
+                    WebkitTapHighlightColor: 'transparent',
+                  }}>✓ FINISH</button>
               </div>
             </div>
           );

@@ -631,7 +631,12 @@ function Toggle({ on, onToggle }) {
 }
 
 // ─── Sheet ──────────────────────────────────────────────────────────
-function Sheet({ open, onClose, title, titleColor, children }) {
+// keyboardHeight: lets a caller report a non-native on-screen keyboard (e.g.
+// this app's custom numeric keypad, which focuses no real <input> so the
+// visualViewport-based auto-detection below never fires for it) is open, at
+// a known height — combined with the auto-detected kbHeight via Math.max so
+// existing callers (default 0) are unaffected.
+function Sheet({ open, onClose, title, titleColor, children, keyboardHeight = 0 }) {
   const [kbHeight, setKbHeight] = React.useState(0);
   const [vvHeight, setVvHeight] = React.useState(window.innerHeight);
   React.useEffect(() => {
@@ -655,11 +660,12 @@ function Sheet({ open, onClose, title, titleColor, children }) {
   }, [open]);
 
   if (!open) return null;
+  const effectiveKbHeight = Math.max(kbHeight, keyboardHeight);
   return (
     <div onClick={onClose} style={{
       position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 100,
       display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
-      paddingBottom: kbHeight,
+      paddingBottom: effectiveKbHeight,
       animation: 'sheet-fade 0.18s ease',
     }}>
       <div onClick={e => e.stopPropagation()} style={{
@@ -668,9 +674,9 @@ function Sheet({ open, onClose, title, titleColor, children }) {
         borderRadius: '6px 6px 0 0',
         border: `1px solid ${UI.hairStrong}`, borderBottom: 'none',
         boxShadow: '0 -16px 48px rgba(0,0,0,0.6)',
-        padding: `16px 22px ${kbHeight > 0 ? 18 : 'calc(env(safe-area-inset-bottom, 8px) + 22px)'}`,
+        padding: `16px 22px ${effectiveKbHeight > 0 ? 18 : 'calc(env(safe-area-inset-bottom, 8px) + 22px)'}`,
         animation: 'sheet-up 0.22s ease',
-        maxHeight: kbHeight > 0 ? `${vvHeight - 32}px` : '88dvh', overflow: 'auto', overscrollBehavior: 'contain',
+        maxHeight: effectiveKbHeight > 0 ? `${vvHeight - 32}px` : '88dvh', overflow: 'auto', overscrollBehavior: 'contain',
       }}>
         <div style={{ width: 36, height: 3, background: UI.hairStrong, borderRadius: 4, margin: '0 auto 16px' }} />
         {title && (
