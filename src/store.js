@@ -3367,6 +3367,24 @@ function retractGrowthGrant(growthCounts, grantedKey) {
   return gc;
 }
 
+// A mesocycle weight boost (exId_dayId → kg increment applied to the next
+// session's seed) must be RE-EARNED every session — min reps hit + joint fine
+// + pump ok + volume ok, all re-confirmed. Given the exId_dayId keys of the
+// exercises trained THIS session and the boosts actually earned this session,
+// return the new full boosts map: every key belonging to this session is
+// replaced wholesale (earned → set, un-earned → dropped), while keys for
+// OTHER training days are left untouched (they carry their own last-earned
+// boost until their own next session). Previously computeMesoGains merged the
+// earned map over the old one without ever clearing, so a boost earned once
+// kept getting re-applied every session regardless of feedback — the whole
+// per-session joint/pump/volume gating was effectively decorative for weight.
+// Pure and side-effect free so it can be unit-tested and called safely.
+function reearnMesoWeightBoosts(prevBoosts, sessionKeys, earnedBoosts) {
+  const next = { ...(prevBoosts || {}) };
+  for (const k of (sessionKeys || [])) delete next[k];
+  return { ...next, ...(earnedBoosts || {}) };
+}
+
 // "5m ago"/"3h ago"/"2d ago" from an ISO timestamp. capDays, if given, rolls
 // over to a short locale date past that many days instead of counting
 // indefinitely (screens-settings.jsx's sign-up feed wants that; the
@@ -3568,5 +3586,5 @@ window.LB = {
   cardioDistUnit, setCardioDistUnit, distToM, mToDisplay, fmtDistance, fmtPace, fmtSpeed, MI_TO_M, recentCardioTypes,
   isLoggedTrainingDay, plannedTrainingDay, isTrainingDayForDate, dayTargetFromMacros, macroAdherence, effectiveMacroTargets, dailyLogAdherence, dailyLogsWeekPrefill, weekPerformanceSignal,
   refreshHealthLogs,
-  pickGrowthRecipient, retractGrowthGrant, MESO_GROWTH_CEILING_DELTA,
+  pickGrowthRecipient, retractGrowthGrant, reearnMesoWeightBoosts, MESO_GROWTH_CEILING_DELTA,
 };

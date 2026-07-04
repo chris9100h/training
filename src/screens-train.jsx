@@ -2496,11 +2496,21 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       gainMap[key].weightDelta = increment;
     }
 
-    // Merge weight boosts into meso state and flush to store (DB sync).
+    // Weight boosts must be re-earned every session (min reps + joint fine +
+    // pump ok + volume ok, all re-confirmed this session). Replace this
+    // session's exercise keys wholesale — earned ones set, un-earned ones
+    // dropped — leaving other training days' boosts untouched. A deload
+    // session collects no feedback, so it must NOT wipe boosts earned before
+    // it: skip the recompute entirely and leave the map as-is.
     // mesoState here is the React state — already contains all feedback deltas from this session.
-    const withBoosts = Object.keys(weightBoostMap).length
-      ? { ...mesoState, weightBoosts: { ...(mesoState.weightBoosts || {}), ...weightBoostMap } }
-      : mesoState;
+    const newWeightBoosts = isMesoDeloadSession
+      ? (mesoState.weightBoosts || {})
+      : LB.reearnMesoWeightBoosts(
+          mesoState.weightBoosts,
+          session.entries.filter(e => !e.isCardio).map(e => e.exId + '_' + session.dayId),
+          weightBoostMap,
+        );
+    const withBoosts = { ...mesoState, weightBoosts: newWeightBoosts };
     // If the last meso week just finished: bump completions + set pendingMeso2 so the
     // home screen can offer Meso 2 after a deload (or immediately).
     const finalMeso = isComplete

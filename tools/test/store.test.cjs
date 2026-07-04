@@ -564,6 +564,33 @@ async function testAsync(name, fn) {
     assert.strictEqual(JSON.stringify(LB.retractGrowthGrant({ a_d1: 1 }, null)), JSON.stringify({ a_d1: 1 }));
   });
 
+  // ── reearnMesoWeightBoosts (weight boost must be re-earned every session) ──
+  test('reearnMesoWeightBoosts: a boost not re-earned this session is dropped, not kept', () => {
+    // bench earned a boost last session but is trained again this session with
+    // no boost earned → its stale boost must be cleared, not carried forward.
+    const out = LB.reearnMesoWeightBoosts({ bench_d1: 2.5 }, ['bench_d1'], {});
+    assert.ok(!('bench_d1' in out), 'stale boost must be removed');
+  });
+  test('reearnMesoWeightBoosts: a boost re-earned this session is set to the new value', () => {
+    const out = LB.reearnMesoWeightBoosts({ bench_d1: 2.5 }, ['bench_d1'], { bench_d1: 2.5 });
+    assert.strictEqual(out.bench_d1, 2.5);
+  });
+  test('reearnMesoWeightBoosts: other training days\' boosts are left untouched', () => {
+    // squat (a different day, not in this session's keys) keeps its boost even
+    // though bench (this session) earned nothing.
+    const out = LB.reearnMesoWeightBoosts({ bench_d1: 2.5, squat_d2: 5 }, ['bench_d1'], {});
+    assert.ok(!('bench_d1' in out), 'this session\'s un-earned boost dropped');
+    assert.strictEqual(out.squat_d2, 5, 'other day\'s boost preserved');
+  });
+  test('reearnMesoWeightBoosts: earning on a fresh key adds it', () => {
+    const out = LB.reearnMesoWeightBoosts({}, ['bench_d1'], { bench_d1: 2.5 });
+    assert.strictEqual(out.bench_d1, 2.5);
+  });
+  test('reearnMesoWeightBoosts: null/empty inputs are safe', () => {
+    assert.strictEqual(JSON.stringify(LB.reearnMesoWeightBoosts(null, [], null)), '{}');
+    assert.strictEqual(JSON.stringify(LB.reearnMesoWeightBoosts(undefined, undefined, undefined)), '{}');
+  });
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();
