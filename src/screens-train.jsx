@@ -5012,8 +5012,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       >
         {dropSetIdx != null && (
           <div style={{ display: 'flex', flexDirection: 'column', maxHeight: 'inherit', minHeight: 0 }}>
-            <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 4px 2px' }}>
-              <span className="micro-gold">DROP SET</span>
+            <div style={{ flexShrink: 0, display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', padding: '0 4px 8px' }}>
+              <span style={chainTitleStyle}>DROP SET</span>
               <button onClick={requestCloseChainSheet} style={{ background: 'none', border: 'none', color: UI.inkFaint, fontSize: 10, fontFamily: UI.fontUi, cursor: 'pointer', padding: '2px 4px', letterSpacing: '0.08em' }}>CANCEL</button>
             </div>
             <div style={{ overflowY: 'auto', minHeight: 0 }}>
@@ -5092,8 +5092,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
         {avSetIdx != null && (
           <div style={{ display: 'flex', flexDirection: 'column', maxHeight: 'inherit', minHeight: 0 }}>
-            <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 4px 2px' }}>
-              <span className="micro-gold">AMRAP VARIATIONS</span>
+            <div style={{ flexShrink: 0, display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', padding: '0 4px 8px' }}>
+              <span style={chainTitleStyle}>AMRAP VARIATIONS</span>
               <button onClick={requestCloseChainSheet} style={{ background: 'none', border: 'none', color: UI.inkFaint, fontSize: 10, fontFamily: UI.fontUi, cursor: 'pointer', padding: '2px 4px', letterSpacing: '0.08em' }}>CANCEL</button>
             </div>
             <div style={{ overflowY: 'auto', minHeight: 0 }}>
@@ -5195,8 +5195,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           return (
             <div style={{ display: 'flex', flexDirection: 'column', maxHeight: 'inherit', minHeight: 0 }}>
               <div style={{ flexShrink: 0 }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 4px 2px' }}>
-                  <span className="micro-gold">{myoTechnique === 'myorep_match' ? 'MYO REP MATCH' : 'MYO-REPS'}</span>
+                <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', padding: '0 4px 8px' }}>
+                  <span style={chainTitleStyle}>{myoTechnique === 'myorep_match' ? 'MYO REP MATCH' : 'MYO-REPS'}</span>
                   <button onClick={requestCloseChainSheet} style={{ background: 'none', border: 'none', color: UI.inkFaint, fontSize: 10, fontFamily: UI.fontUi, cursor: 'pointer', padding: '2px 4px', letterSpacing: '0.08em' }}>CANCEL</button>
                 </div>
                 {/* Match progress counter */}
@@ -5965,6 +5965,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     </Screen>
   );
 }
+
+// Shared title style for the Drop Set/Myo-Reps/AMRAP Variations chain
+// sheet's header — matches the app's standard sheet-title treatment (same
+// font/weight as Sheet's own `title` prop) instead of the tiny micro-gold
+// label the header used before, so it reads as a real heading next to the
+// deliberately quiet CANCEL button beside it.
+const chainTitleStyle = { fontFamily: UI.fontDisplay, fontSize: 22, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--accent)' };
 
 function setInputStyle(done, current) {
   return {
