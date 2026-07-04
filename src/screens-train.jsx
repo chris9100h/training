@@ -4258,15 +4258,19 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                       with the plain-language gloss below, so it can't be
                       misread as "negative reps in reserve". */}
                   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', transform: 'rotate(-22deg)' }}>
+                    {/* Fire mode adds the gloss line below, so the number is
+                        smaller there — rotating a full 72px headline + gloss
+                        overflows this short hero card and clips the gloss. The
+                        plain single-line watermark keeps its bigger size. */}
                     <span className={`display-it${fire ? ' meso-ember' : ''}`} style={{
-                      fontSize: 72, fontWeight: 900, letterSpacing: '0.18em', whiteSpace: 'nowrap', userSelect: 'none', lineHeight: 1,
+                      fontSize: fire ? 52 : 72, fontWeight: 900, letterSpacing: fire ? '0.12em' : '0.18em', whiteSpace: 'nowrap', userSelect: 'none', lineHeight: 1,
                       color: coreColor,
                       ...(fire ? emberVars : { opacity: mesoRirVal === 0 ? 0.13 : 0.09 }),
                     }}>{mesoRirVal} RIR</span>
                     {fire && (
                       <span className="meso-ember" style={{
-                        fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', color: coreColor,
-                        marginTop: 10, userSelect: 'none', whiteSpace: 'nowrap',
+                        fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', color: coreColor,
+                        marginTop: 5, userSelect: 'none', whiteSpace: 'nowrap',
                         ...emberVars, '--ember-blur': `${5 + neg * 5}px`,
                       }}>(0 RIR + {neg} PARTIAL{neg === 1 ? '' : 'S'})</span>
                     )}
