@@ -636,47 +636,9 @@ function Toggle({ on, onToggle }) {
 // visualViewport-based auto-detection below never fires for it) is open, at
 // a known height — combined with the auto-detected kbHeight via Math.max so
 // existing callers (default 0) are unaffected.
-//
-// sheetEverWarmed (module-level, not per-instance): on real devices, the
-// very first Sheet opened in a session can render its panel briefly
-// edge-to-edge (ignoring its own padding) on its first paint — every open
-// after that, of any Sheet, is fine. Several targeted root-cause attempts
-// (removing position:sticky, willChange layer-promotion hints, isolating
-// myo-match's glow to a constant blur) didn't hold up on device, so instead
-// of continuing to guess at the trigger, this masks it: the first Sheet's
-// panel plays its entrance animation in full (same sheet-up keyframes,
-// same duration, every property real) inside a wrapper held at opacity:0
-// — opacity, not visibility:hidden, so the browser still has to actually
-// paint/composite every frame of that animation, it just isn't shown —
-// then reveals the wrapper once the animation reports done. Whatever goes
-// wrong during that first animation's first-ever run has already happened,
-// unseen, by the time the user sees anything. (A first attempt at this
-// idea froze a static, non-animating opacity:0 frame for two rAFs instead
-// of actually running the animation — since the bug may be tied to the
-// animation's own first run, not just the first paint of static content,
-// that version didn't hold up either.) Scoped globally (not per Sheet
-// instance) because Sheet fully unmounts when closed (`if (!open) return
-// null` below), so a per-instance flag would re-arm on every single open —
-// this only pays the one-time ~220ms invisible run once per session, on
-// whichever Sheet the user happens to open first.
-let sheetEverWarmed = false;
 function Sheet({ open, onClose, title, titleColor, children, keyboardHeight = 0 }) {
   const [kbHeight, setKbHeight] = React.useState(0);
   const [vvHeight, setVvHeight] = React.useState(window.innerHeight);
-  const panelRef = React.useRef(null);
-  const [warmed, setWarmed] = React.useState(sheetEverWarmed);
-  React.useEffect(() => {
-    if (!open || sheetEverWarmed) { setWarmed(sheetEverWarmed); return; }
-    const panel = panelRef.current;
-    const reveal = () => { sheetEverWarmed = true; setWarmed(true); };
-    if (!panel) { reveal(); return; }
-    panel.addEventListener('animationend', reveal, { once: true });
-    // Fallback in case animationend never fires (prefers-reduced-motion
-    // disabling the animation entirely, some odd interruption, etc.) — the
-    // animation is 220ms, give it generous headroom.
-    const fallback = setTimeout(reveal, 500);
-    return () => { panel.removeEventListener('animationend', reveal); clearTimeout(fallback); };
-  }, [open]);
   React.useEffect(() => {
     if (!open) return;
     const vv = window.visualViewport;
@@ -715,37 +677,35 @@ function Sheet({ open, onClose, title, titleColor, children, keyboardHeight = 0 
       display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
       paddingBottom: effectiveKbHeight - keyboardHeight,
       animation: 'sheet-fade 0.18s ease',
-      willChange: 'opacity',
     }}>
-      {/* Separate wrapper for the reveal opacity: the panel's own animation
-          (sheet-up) already animates opacity 0→1 itself — controlling
-          visibility on the same element would fight that animated value.
-          A wrapping ancestor's opacity is independent of its child's
-          animated properties, so the panel's animation always runs for
-          real (see sheetEverWarmed above) regardless of warmed. */}
-      <div style={{
-        width: '100%', maxWidth: 540,
-        opacity: warmed ? 1 : 0, pointerEvents: warmed ? 'auto' : 'none',
+      <div onClick={e => e.stopPropagation()} style={{
+        width: '100%', maxWidth: 540, boxSizing: 'border-box',
+        background: UI.bgRaised,
+        borderRadius: '6px 6px 0 0',
+        border: `1px solid ${UI.hairStrong}`, borderBottom: 'none',
+        boxShadow: '0 -16px 48px rgba(0,0,0,0.6)',
+        // The 3rd value here used to be the bare number 18 instead of '18px'
+        // — React silently drops the *entire* padding declaration (not just
+        // that one component) when a shorthand's value contains a unitless
+        // non-zero number, no warning either. That only ever showed up with
+        // the keyboardHeight prop in play (effectiveKbHeight > 0), i.e. only
+        // on the drop/myo/AMRAP chain sheets whenever this app's on-screen
+        // keypad was open — exactly the "content goes edge to edge" bug
+        // reported repeatedly, confirmed via an isolated minimal React
+        // repro. Every other Sheet in the app never sets keyboardHeight, so
+        // effectiveKbHeight stays 0 and always took the (valid) calc()
+        // branch — which is why "all other sheets work fine" was true.
+        padding: `16px 22px ${effectiveKbHeight > 0 ? '18px' : 'calc(env(safe-area-inset-bottom, 8px) + 22px)'}`,
+        animation: 'sheet-up 0.22s ease',
+        maxHeight: effectiveKbHeight > 0 ? `${vvHeight - 32}px` : '88dvh', overflow: 'auto', overscrollBehavior: 'contain',
       }}>
-        <div ref={panelRef} onClick={e => e.stopPropagation()} style={{
-          width: '100%', boxSizing: 'border-box',
-          background: UI.bgRaised,
-          borderRadius: '6px 6px 0 0',
-          border: `1px solid ${UI.hairStrong}`, borderBottom: 'none',
-          boxShadow: '0 -16px 48px rgba(0,0,0,0.6)',
-          padding: `16px 22px ${effectiveKbHeight > 0 ? 18 : 'calc(env(safe-area-inset-bottom, 8px) + 22px)'}`,
-          animation: 'sheet-up 0.22s ease',
-          maxHeight: effectiveKbHeight > 0 ? `${vvHeight - 32}px` : '88dvh', overflow: 'auto', overscrollBehavior: 'contain',
-          willChange: 'transform, opacity',
-        }}>
-          <div style={{ width: 36, height: 3, background: UI.hairStrong, borderRadius: 4, margin: '0 auto 16px' }} />
-          {title && (
-            <div style={{ fontFamily: UI.fontDisplay, fontSize: 28, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: titleColor || UI.ink, marginBottom: 16 }}>
-              {title}
-            </div>
-          )}
-          {children}
-        </div>
+        <div style={{ width: 36, height: 3, background: UI.hairStrong, borderRadius: 4, margin: '0 auto 16px' }} />
+        {title && (
+          <div style={{ fontFamily: UI.fontDisplay, fontSize: 28, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: titleColor || UI.ink, marginBottom: 16 }}>
+            {title}
+          </div>
+        )}
+        {children}
       </div>
     </div>
   );
