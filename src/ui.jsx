@@ -684,6 +684,30 @@ function Sheet({ open, onClose, title, titleColor, children }) {
   );
 }
 
+// ─── ImageLightbox ──────────────────────────────────────────────────
+// Full-screen viewer for a tapped chat/attachment image. Tap anywhere (or
+// the close button) to dismiss. src is nullable — render unconditionally
+// and pass the tapped image's URL, or null to keep it closed.
+function ImageLightbox({ src, onClose }) {
+  if (!src) return null;
+  return (
+    <div onClick={onClose} style={{
+      position: 'fixed', inset: 0, zIndex: 500, background: 'rgba(0,0,0,0.92)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      cursor: 'zoom-out', animation: 'sheet-fade 0.18s ease',
+    }}>
+      <img src={src} alt="" style={{ maxWidth: '92%', maxHeight: '88vh', objectFit: 'contain', borderRadius: 4 }} />
+      <button onClick={onClose} style={{
+        position: 'absolute', top: 'calc(env(safe-area-inset-top, 0px) + 14px)', right: 16,
+        width: 36, height: 36, borderRadius: '50%', border: 'none',
+        background: 'rgba(255,255,255,0.12)', color: '#fff', fontSize: 20, lineHeight: 1,
+        cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+        WebkitTapHighlightColor: 'transparent',
+      }}>×</button>
+    </div>
+  );
+}
+
 // ─── Empty ──────────────────────────────────────────────────────────
 function Empty({ title, sub, action, icon }) {
   return (
@@ -1328,7 +1352,7 @@ function ReorderList({ onReorder, longPressMs, moveTolerance, style, className, 
 }
 
 Object.assign(window, {
-  UI, Screen, TopBar, SubTabBar, TabBar, Btn, Card, Label, Stepper, Pill, Sheet, Empty,
+  UI, Screen, TopBar, SubTabBar, TabBar, Btn, Card, Label, Stepper, Pill, Sheet, Empty, ImageLightbox,
   ChevronRight, ICON_HISTORY, ICON_BARBELL, ICON_CALENDAR,
   btnPrimary, btnGhost, useConfirm, DragHandle, ReorderList,
   MUSCLES, WEEKDAYS, WEEKDAYS_FULL,

@@ -512,6 +512,7 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
   const [supportInboxLoading, setSupportInboxLoading] = useStateSet(false);
   const [supportTicket, setSupportTicket] = useStateSet(null);
   const [supportTicketNotes, setSupportTicketNotes] = useStateSet([]);
+  const [lightboxSrc, setLightboxSrc] = useStateSet(null); // chat/support attachment tapped for fullscreen view
   const [supportTicketLoading, setSupportTicketLoading] = useStateSet(false);
   const [supportAdminDraft, setSupportAdminDraft] = useStateSet('');
   const [supportAdminSending, setSupportAdminSending] = useStateSet(false);
@@ -2431,7 +2432,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                         <div key={n.id} style={{ display: 'flex', flexDirection: 'column', alignItems: isMe ? 'flex-end' : 'flex-start' }}>
                           <div style={{ maxWidth: '80%', padding: hasImg ? '6px' : '9px 13px', borderRadius: isMe ? '8px 8px 4px 8px' : '8px 8px 8px 4px', background: isMe ? 'rgba(var(--accent-rgb),0.15)' : UI.bgRaised, border: `0.5px solid ${isMe ? 'rgba(var(--accent-rgb),0.25)' : UI.hair}`, overflow: 'hidden' }}>
                             {hasImg && n.attachments.map((a, i) => (
-                              <img key={i} src={a.url} alt="" style={{ display: 'block', maxWidth: '100%', maxHeight: 300, objectFit: 'contain', borderRadius: 4, marginBottom: n.body ? 4 : 0 }} />
+                              <img key={i} src={a.url} alt="" onClick={() => setLightboxSrc(a.url)} style={{ display: 'block', maxWidth: '100%', maxHeight: 300, objectFit: 'contain', borderRadius: 4, marginBottom: n.body ? 4 : 0, cursor: 'pointer' }} />
                             ))}
                             {n.body ? <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, lineHeight: 1.55, padding: hasImg ? '0 6px 4px' : 0 }}>{n.body}</div> : null}
                           </div>
@@ -2588,7 +2589,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                             overflow: 'hidden',
                           }}>
                             {hasImg && n.attachments.map((a, i) => (
-                              <img key={i} src={a.url} alt="" style={{ display: 'block', maxWidth: '100%', maxHeight: 300, objectFit: 'contain', borderRadius: 4, marginBottom: n.body ? 4 : 0 }} />
+                              <img key={i} src={a.url} alt="" onClick={() => setLightboxSrc(a.url)} style={{ display: 'block', maxWidth: '100%', maxHeight: 300, objectFit: 'contain', borderRadius: 4, marginBottom: n.body ? 4 : 0, cursor: 'pointer' }} />
                             ))}
                             {n.body ? <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, lineHeight: 1.55, padding: hasImg ? '0 6px 4px' : 0 }}>{n.body}</div> : null}
                           </div>
@@ -3118,6 +3119,8 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           <Btn kind="ghost" onClick={() => { setTestPickerOpen(false); testRestTimer(30); }}>In 30 seconds</Btn>
         </div>
       </SettingsSheet>
+
+      <ImageLightbox src={lightboxSrc} onClose={() => setLightboxSrc(null)} />
 
     </Screen>
   );

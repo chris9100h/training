@@ -238,6 +238,7 @@ function ChatThread({ thread, coachingId, userId, otherName, unreadNotes, onBack
   const [sending, setSending] = useStateC(false);
   const [imageFile, setImageFile] = useStateC(null);
   const [imagePreview, setImagePreview] = useStateC(null);
+  const [lightboxSrc, setLightboxSrc] = useStateC(null);
   const bottomRef = useRefC(null);
 
   const pickImage = (e) => {
@@ -315,9 +316,8 @@ function ChatThread({ thread, coachingId, userId, otherName, unreadNotes, onBack
             <div key={n.id} style={{ display: 'flex', flexDirection: 'column', alignItems: isMe ? 'flex-end' : 'flex-start' }}>
               <div style={{ maxWidth: '80%', background: isMe ? 'var(--accent)' : UI.bgElevated, borderRadius: isMe ? '8px 8px 4px 8px' : '8px 8px 8px 4px', padding: '9px 12px', border: isMe ? 'none' : `0.5px solid ${UI.hairStrong}` }}>
                 {(n.attachments || []).map((a, ai) => (
-                  <a key={ai} href={a.url} target="_blank" rel="noopener noreferrer" style={{ display: 'block', marginBottom: n.body ? 8 : 0 }}>
-                    <img src={a.url} alt={a.name || 'image'} style={{ maxWidth: '100%', maxHeight: 300, borderRadius: 4, display: 'block' }} />
-                  </a>
+                  <img key={ai} src={a.url} alt={a.name || 'image'} onClick={() => setLightboxSrc(a.url)}
+                    style={{ maxWidth: '100%', maxHeight: 300, borderRadius: 4, display: 'block', marginBottom: n.body ? 8 : 0, cursor: 'pointer' }} />
                 ))}
                 {n.body && <div style={{ fontSize: 13, color: isMe ? '#0a0805' : UI.ink, fontFamily: UI.fontUi, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{n.body}</div>}
               </div>
@@ -356,6 +356,7 @@ function ChatThread({ thread, coachingId, userId, otherName, unreadNotes, onBack
         </div>
         <div style={{ height: 'env(safe-area-inset-bottom, 0px)' }} />
       </div>
+      <ImageLightbox src={lightboxSrc} onClose={() => setLightboxSrc(null)} />
     </>
   );
 }
