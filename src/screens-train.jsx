@@ -253,31 +253,31 @@ function FinisherPartials({ count, onChange }) {
 
 // Drop Set / Myo-Rep(-Match) / AMRAP Variations chains, while a field is being
 // edited: the header (title + Myo Match's live progress bar) stays sticky-top
-// as always, a REAL spacer (not just a scroll-margin) appears after the
-// actions row so the chain's own scrollable height genuinely grows by the
-// keypad's clearance, and the row being typed into scrolls into view with a
-// top/bottom margin matching the header and actions.
+// as always, and the row being typed into scrolls into view via native
+// scrollIntoView (its own CHAIN_ROW_SCROLL_MARGIN_TOP keeps it clear of the
+// sticky header). A small top-up scroll follows only if the actions row (add
+// mini-set / finish) doesn't yet clear the on-screen keypad — capped so it
+// can never push the actively-edited row itself out of view (behind the
+// header): seeing what you're typing outranks seeing the (already reachable)
+// action buttons.
 //
-// A second sticky-bottom bar for the actions row was tried and reverted: with
-// two independently-stuck edges (header top, actions bottom) inside a short
-// container, Chromium can resolve both "stuck" positions to nearly the same
-// spot, and the later element (actions) then paints over the header instead
-// of appearing below it — confirmed with a live repro. A manual scroll-budget
-// clamp was tried before that and was unreliable in the other direction: it
-// protected the header but regularly left the actions row not fully clear of
-// the keypad once a chain had grown past what fit on screen.
+// Two earlier versions of this were both wrong in opposite ways:
+// - A phantom scroll-margin-bottom on the actions row alone could overshoot
+//   past the sticky header's own "stuck" budget once a chain had grown past
+//   what fit on screen, popping the header (or its own rows) out of view.
+// - A real spacer element (to genuinely grow that budget) fixed that, but
+//   always rendered its full height while editing regardless of whether any
+//   extra room was actually needed — a large, pointless blank gap on short
+//   chains that already fit on screen.
+// - A sticky-bottom actions bar (to avoid scroll math for it entirely) could
+//   resolve to nearly the same "stuck" position as the sticky header inside a
+//   short container, and the later element then painted over the header
+//   instead of appearing below it — confirmed with a live repro.
 //
-// This version: native scrollIntoView (with the real spacer providing genuine
-// room, so it can never need to evict the header to satisfy the margin) plus
-// a small top-up scroll for the rare case where scrollIntoView leaves the
-// actions row short of the keypad's clearance — Chromium sometimes skips the
-// margin check entirely when the target is already within the raw viewport.
-// The top-up is capped so it can never push the actively-edited row itself
-// out of view (behind the header) — seeing what you're typing outranks
-// seeing the (already reachable) action buttons.
-const CHAIN_KEYPAD_CLEARANCE = 260;
+// This version only ever scrolls the minimum actually needed, computed live
+// against real geometry — never more, never a permanent reservation.
+const CHAIN_KEYPAD_CLEARANCE = 235;
 const CHAIN_ROW_SCROLL_MARGIN_TOP = 100;
-const CHAIN_ROW_SCROLL_MARGIN_BOTTOM = 340;
 function chainScrollParent(el) {
   let n = el.parentElement;
   while (n && n !== document.body && n !== document.documentElement) {
@@ -4413,7 +4413,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                         const isKgA = kbField?.setIdx === 'drop' && kbField?.dropIdx === di && kbField?.field === 'kg';
                         const isRepsA = kbField?.setIdx === 'drop' && kbField?.dropIdx === di && kbField?.field === 'reps';
                         return (
-                          <div key={di} data-drop-row={di} style={{ display: 'grid', gridTemplateColumns: '28px 1fr 72px 56px 28px', gap: 8, alignItems: 'center', padding: '5px 4px', scrollMarginTop: CHAIN_ROW_SCROLL_MARGIN_TOP, scrollMarginBottom: CHAIN_ROW_SCROLL_MARGIN_BOTTOM }}>
+                          <div key={di} data-drop-row={di} style={{ display: 'grid', gridTemplateColumns: '28px 1fr 72px 56px 28px', gap: 8, alignItems: 'center', padding: '5px 4px', scrollMarginTop: CHAIN_ROW_SCROLL_MARGIN_TOP }}>
                             <div style={{
                               width: 24, height: 24, borderRadius: 4, flexShrink: 0,
                               background: 'rgba(var(--accent-rgb),0.08)',
@@ -4478,11 +4478,6 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                       </div>
                         );
                       })()}
-                      {/* Real spacer (not just scroll-margin) so the chain's
-                          own scrollable height genuinely grows while the
-                          keypad is up — gives the sticky header real room to
-                          stay stuck instead of relying on a phantom margin. */}
-                      {kbField?.setIdx === 'drop' && <div style={{ height: CHAIN_KEYPAD_CLEARANCE }} />}
                     </div>
                   )}
                   {s.technique === 'drop' && s.done && ((s.drops || []).length > 1 || (s.drops?.[s.drops.length - 1]?.partials || 0) > 0) && (
@@ -4527,7 +4522,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                         const isKgA = kbField?.setIdx === 'av' && kbField?.dropIdx === di && kbField?.field === 'kg';
                         const isRepsA = kbField?.setIdx === 'av' && kbField?.dropIdx === di && kbField?.field === 'reps';
                         return (
-                          <div key={di} data-av-row={di} style={{ padding: '6px 4px', borderBottom: di < avDrops.length - 1 ? `0.5px solid ${UI.hair}` : 'none', scrollMarginTop: CHAIN_ROW_SCROLL_MARGIN_TOP, scrollMarginBottom: CHAIN_ROW_SCROLL_MARGIN_BOTTOM }}>
+                          <div key={di} data-av-row={di} style={{ padding: '6px 4px', borderBottom: di < avDrops.length - 1 ? `0.5px solid ${UI.hair}` : 'none', scrollMarginTop: CHAIN_ROW_SCROLL_MARGIN_TOP }}>
                             <input
                               type="text"
                               value={d.label ?? ''}
@@ -4609,7 +4604,6 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                       </div>
                         );
                       })()}
-                      {kbField?.setIdx === 'av' && <div style={{ height: CHAIN_KEYPAD_CLEARANCE }} />}
                     </div>
                   )}
                   {s.technique === 'amrap_variations' && s.done && ((s.drops || []).length > 1 || (s.drops?.[s.drops.length - 1]?.partials || 0) > 0) && (() => {
@@ -4688,7 +4682,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                           const isKgA = kbField?.setIdx === 'myo' && kbField?.dropIdx === di && kbField?.field === 'kg';
                           const isRepsA = kbField?.setIdx === 'myo' && kbField?.dropIdx === di && kbField?.field === 'reps';
                           return (
-                            <div key={di} data-myo-row={di} style={{ display: 'grid', gridTemplateColumns: '28px 1fr 72px 56px 28px', gap: 8, alignItems: 'center', padding: '5px 4px', scrollMarginTop: CHAIN_ROW_SCROLL_MARGIN_TOP, scrollMarginBottom: CHAIN_ROW_SCROLL_MARGIN_BOTTOM }}>
+                            <div key={di} data-myo-row={di} style={{ display: 'grid', gridTemplateColumns: '28px 1fr 72px 56px 28px', gap: 8, alignItems: 'center', padding: '5px 4px', scrollMarginTop: CHAIN_ROW_SCROLL_MARGIN_TOP }}>
                               <div style={{
                                 width: 24, height: 24, borderRadius: 4, flexShrink: 0,
                                 background: 'rgba(var(--accent-rgb),0.08)',
@@ -4760,7 +4754,6 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                               WebkitTapHighlightColor: 'transparent',
                             }}>✓ FINISH</button>
                         </div>
-                        {kbField?.setIdx === 'myo' && <div style={{ height: CHAIN_KEYPAD_CLEARANCE }} />}
                       </div>
                     );
                   })()}
