@@ -16,6 +16,15 @@
    Entry shape: { id: string, title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.479',
+    title: 'Mesocycles: Hell Mode',
+    items: [
+      "🎚️ Your mesocycle's RIR taper is now yours to set — choose where week 1 starts (0–3 RIR) and where the final week peaks. Find it in the plan editor's Mesocycle section.",
+      "🔥 Or take it clean past failure: set a negative peak RIR and every working set auto-gets that many lengthened partials (−3 RIR = three partials past failure — and yes, they stack on top of your drop sets and myo-reps too). The RIR watermark literally catches fire the deeper you go. For the certifiably advanced only.",
+      "🩹 Meso reliability, quietly fixed: earned weight jumps no longer keep climbing after a rough session, and a sick day or vacation now pauses your mesocycle instead of fast-forwarding it — you pick up exactly where you left off.",
+    ],
+  },
+  {
     id: 'v2.474',
     title: 'Nothing Left Behind',
     items: [
