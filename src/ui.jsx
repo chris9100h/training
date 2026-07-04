@@ -674,7 +674,6 @@ function Sheet({ open, onClose, title, titleColor, children, keyboardHeight = 0,
   const edgeColor = accent ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong;
   const shadowLayers = [floating ? '0 4px 24px rgba(0,0,0,0.45)' : '0 -16px 48px rgba(0,0,0,0.6)'];
   if (floating) shadowLayers.push(`0 1px 0 ${edgeColor}`);
-  if (accent) shadowLayers.push('0 0 40px rgba(var(--accent-rgb),0.22)');
   return (
     // The backdrop only shrinks (bottom: keyboardHeight) for the caller-
     // declared custom keyboard, not the auto-detected native one: a custom
@@ -693,6 +692,7 @@ function Sheet({ open, onClose, title, titleColor, children, keyboardHeight = 0,
       animation: 'sheet-fade 0.18s ease',
     }}>
       <div onClick={e => e.stopPropagation()} style={{
+        position: 'relative',
         width: '100%', maxWidth: 540, boxSizing: 'border-box',
         background: UI.bgRaised,
         borderRadius: floating ? 6 : '6px 6px 0 0',
@@ -705,7 +705,6 @@ function Sheet({ open, onClose, title, titleColor, children, keyboardHeight = 0,
         // same 1px hairline there can vanish against the dark backdrop. A
         // second, crisp shadow line in the same tone doubles up the border
         // right where it needs it, without touching the other three sides.
-        // accent additionally adds an ambient glow (see shadowLayers above).
         boxShadow: shadowLayers.join(', '),
         // The 3rd value here used to be the bare number 18 instead of '18px'
         // — React silently drops the *entire* padding declaration (not just
@@ -722,6 +721,14 @@ function Sheet({ open, onClose, title, titleColor, children, keyboardHeight = 0,
         animation: 'sheet-up 0.22s ease',
         maxHeight: floating ? `${vvHeight - 32}px` : '88dvh', overflow: 'auto', overscrollBehavior: 'contain',
       }}>
+        {/* Same breathing glow as the Intensity button (.intensity-glow /
+            @keyframes intensityGlow in index.html), on its own overlay
+            rather than the panel's own box-shadow — the keyframe's
+            box-shadow values would otherwise fully replace (not blend
+            with) the panel's static elevation/edge shadow above while
+            animating. borderRadius:'inherit' tracks the panel's own
+            (floating-dependent) radius automatically. */}
+        {accent && <div className="intensity-glow" style={{ position: 'absolute', inset: 0, borderRadius: 'inherit', pointerEvents: 'none' }} />}
         <div style={{ width: 36, height: 3, background: accent ? 'var(--accent)' : UI.hairStrong, borderRadius: 4, margin: '0 auto 16px' }} />
         {title && (
           <div style={{ fontFamily: UI.fontDisplay, fontSize: 28, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: titleColor || UI.ink, marginBottom: 16 }}>
