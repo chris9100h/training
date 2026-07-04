@@ -108,22 +108,41 @@ function checkinFieldYRange(field) {
   return {};
 }
 
-// Value formatter for a field's chart axis and headline number.
-// weightUnit = the CLIENT's unit label ('kg'/'lbs'); numbers are never converted,
-// only the label. Falls back to the viewer's UI.unit() (self-coaching).
+// Formats one check-in field's stored value for display — shared by the
+// trend chart (via checkinFieldFormat below) and the check-in detail card,
+// so the same stored number never shows two different values in two views.
+// weightUnit/distUnit describe the CLIENT's units; numbers are never
+// converted, only the label. `chart` only changes the handful of fields
+// where an axis label genuinely needs different precision than a readable
+// card row (steps, stepper fraction, choice fallback, pace value shape) —
+// everything else renders identically either way.
+function checkinFieldValue(field, v, { distUnit, weightUnit, chart = false } = {}) {
+  if (field.unit === 'weight') return `${Math.round(v * 100) / 100}${weightUnit || UI.unit()}`;
+  if (field.key === 'steps') return chart ? `${Math.round(v / 1000)}k` : Number(v).toLocaleString();
+  if (field.key === 'days_trained') return `${v}d`;
+  if (field.key === 'cardio_minutes') return `${v} min`;
+  if (field.key === 'hydration_ml') return `${(v / 1000).toFixed(1)} L / day`;
+  if (field._distanceField) return LB.fmtDistance(v, distUnit, 1);
+  if (field.type === 'pace') {
+    if (!chart) return String(v);
+    const m = Math.floor(v / 60); const s = Math.round(v % 60);
+    return `${m}:${String(s).padStart(2, '0')}`;
+  }
+  if (field.type === 'percent') return `${Math.round(v)}%`;
+  if (field.type === 'stepper') return chart ? `${v}/${field.max || 10}` : String(v);
+  if (field.type === 'choice' && field.options?.length) {
+    if (chart) { const opt = field.options[Math.round(v) - 1]; return opt ? opt.label : `${v}/${field.options.length}`; }
+    const opt = field.options.find(o => String(o.value) === String(v));
+    return opt ? opt.label : String(v);
+  }
+  if (field.unit) return `${v} ${field.unit}`;
+  return chart ? String(Math.round(v * 10) / 10) : String(v);
+}
+
+// Chart-axis wrapper — curried so checkinChartMetrics can attach it as each
+// metric's `format` function.
 function checkinFieldFormat(field, distUnit, weightUnit) {
-  if (field.unit === 'weight') return v => `${Math.round(v * 100) / 100}${weightUnit || UI.unit()}`;
-  if (field.key === 'steps') return v => `${Math.round(v / 1000)}k`;
-  if (field.key === 'days_trained') return v => `${v}d`;
-  if (field.key === 'cardio_minutes') return v => `${v} min`;
-  if (field._distanceField) return v => distUnit === 'mi' ? `${(v / 1609.344).toFixed(1)} mi` : `${(v / 1000).toFixed(1)} km`;
-  if (field.type === 'pace') return v => { const m = Math.floor(v / 60); const s = Math.round(v % 60); return `${m}:${String(s).padStart(2, '0')}`; };
-  if (field.type === 'percent') return v => `${Math.round(v)}%`;
-  if (field.type === 'stepper') return v => `${v}/${field.max || 10}`;
-  if (field.type === 'choice' && field.options?.length)
-    return v => { const opt = field.options[Math.round(v) - 1]; return opt ? opt.label : `${v}/${field.options.length}`; };
-  if (field.unit) return v => `${v} ${field.unit}`;
-  return v => String(Math.round(v * 10) / 10);
+  return v => checkinFieldValue(field, v, { distUnit, weightUnit, chart: true });
 }
 
 // Build the per-field chart series for a set of check-ins, in schema order.
@@ -162,7 +181,7 @@ async function exportCheckinCharts(recent, schema, weightUnit) {
   const inkFaint  = cs.getPropertyValue('--ink-faint').trim();
   const bgColor   = cs.getPropertyValue('--bg').trim();
   const hairColor = cs.getPropertyValue('--hair').trim();
-  const distUnit = (() => { try { return localStorage.getItem('logbook-cardio-dist-unit') || 'km'; } catch (_) { return 'km'; } })();
+  const distUnit = LB.cardioDistUnit();
 
   const metrics = checkinChartMetrics(recent, schema, distUnit, weightUnit);
 
@@ -356,7 +375,7 @@ function CheckInTrendCards({ recent, schema, clientUnit }) {
     );
   };
 
-  const distUnit = (() => { try { return localStorage.getItem('logbook-cardio-dist-unit') || 'km'; } catch(_) { return 'km'; } })();
+  const distUnit = LB.cardioDistUnit();
 
   // Keys shown as sub-labels on another card — don't render as standalone
   const SUB_KEYS = new Set();
@@ -745,14 +764,17 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
       const flds = n[si].fields;
       const view = buildFieldView(flds);
       const macroFields = flds.filter(f => MACRO_GROUP_KEYS.has(f.key));
-      const nonMacroFields = flds.filter(f => !MACRO_GROUP_KEYS.has(f.key));
-      // Apply the move on the view level, then reconstruct the fields array.
+      // Apply the move on the view level, then reconstruct the fields array
+      // by looking up each view item's ORIGINAL field via its arrayIdx — not
+      // by re-consuming non-macro fields in their old order, which silently
+      // discarded every reorder (the moved item's new position was applied
+      // to the view array, but the fields it mapped back to were still
+      // handed out in original order, so the rebuilt array never changed).
       const newView = [...view];
       const [moved] = newView.splice(fromV, 1);
       newView.splice(toV, 0, moved);
-      let nonMacroIdx = 0;
       n[si].fields = newView.map(item =>
-        item.isMacroGroup ? macroFields : [nonMacroFields[nonMacroIdx++]]
+        item.isMacroGroup ? macroFields : [flds[item.arrayIdx]]
       ).flat();
       return n;
     });
@@ -816,11 +838,7 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
     </div>
   );
   const segBtn = (active) => ({ flex: 1, padding: '7px 4px', borderRadius: 6, border: `0.5px solid ${active ? 'var(--accent)' : UI.hairStrong}`, background: active ? 'rgba(var(--accent-rgb),0.12)' : UI.bgInset, color: active ? 'var(--accent)' : UI.inkSoft, fontFamily: UI.fontUi, fontSize: 12, cursor: 'pointer', fontWeight: active ? 700 : 400 });
-  const renderToggle = (on, onToggle) => (
-    <div onClick={onToggle} style={{ width: 44, height: 26, borderRadius: 13, cursor: 'pointer', flexShrink: 0, background: on ? 'var(--accent)' : UI.bgInset, border: `0.5px solid ${on ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong}`, position: 'relative', transition: 'background 0.18s', WebkitTapHighlightColor: 'transparent' }}>
-      <div style={{ position: 'absolute', top: 3, left: on ? 21 : 3, width: 18, height: 18, borderRadius: '50%', background: on ? '#0a0805' : UI.inkFaint, transition: 'left 0.18s' }} />
-    </div>
-  );
+  const renderToggle = (on, onToggle) => <Toggle on={on} onToggle={onToggle} />;
 
   const overlayStyle = { position: 'fixed', top: 0, right: 0, bottom: 0, left: 0, zIndex: 350, background: UI.bg, display: 'flex', flexDirection: 'column' };
   const headerStyle = { display: 'flex', alignItems: 'center', gap: 8, padding: 'calc(env(safe-area-inset-top, 0px) + 14px) 16px 14px', borderBottom: `0.5px solid ${UI.hair}`, flexShrink: 0 };
@@ -1330,21 +1348,8 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
 // ─── ClientCheckInsTab (coach view) ───────────────────────────────────────────
 
 function ClientCheckInsTab({ coachingId, checkinEnabled = true, onToggle, toggling = false, store, setStore, userId, clientUnit }) {
-  const [checkins, setCheckins] = useStateC(null);
-  const [loadErr, setLoadErr] = useStateC(false);
-  const [schema, setSchema] = useStateC(null);
+  const { checkins, loadErr, setLoadErr, schema, setSchema, coachingMacrosHistory, load } = useCoachingCheckins(coachingId);
   const [builderOpen, setBuilderOpen] = useStateC(false);
-  const [coachingMacrosHistory, setCoachingMacrosHistory] = useStateC(null);
-
-  const load = () => LB.loadCheckins(coachingId)
-    .then(c => { setCheckins(c); setLoadErr(false); })
-    .catch(() => setLoadErr(true));
-  useEffectC(() => {
-    setLoadErr(false);
-    load();
-    LB.loadCheckinSchema(coachingId).then(s => setSchema(s)).catch(() => {});
-    LB.loadCoachingMacros(coachingId).then(data => setCoachingMacrosHistory(data)).catch(() => {});
-  }, [coachingId]);
 
   const resolvedSchema = schema || store?.settings?.defaultCheckinSchema || CHECKIN_DEFAULT_SCHEMA;
 
@@ -1359,11 +1364,8 @@ function ClientCheckInsTab({ coachingId, checkinEnabled = true, onToggle, toggli
           style={{ background: 'none', border: 'none', padding: 6, cursor: 'pointer', color: UI.inkFaint, fontSize: 15, lineHeight: 1 }}>
           <i className="fa-solid fa-sliders" />
         </button>
-        <div
-          onClick={onToggle}
-          style={{ width: 44, height: 26, borderRadius: 13, cursor: 'pointer', flexShrink: 0, background: checkinEnabled ? 'var(--accent)' : UI.bgInset, border: `0.5px solid ${checkinEnabled ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong}`, position: 'relative', transition: 'background 0.18s', WebkitTapHighlightColor: 'transparent', opacity: toggling ? 0.6 : 1 }}
-        >
-          <div style={{ position: 'absolute', top: 3, left: checkinEnabled ? 21 : 3, width: 18, height: 18, borderRadius: '50%', background: checkinEnabled ? '#0a0805' : UI.inkFaint, transition: 'left 0.18s' }} />
+        <div style={{ opacity: toggling ? 0.6 : 1 }}>
+          <Toggle on={checkinEnabled} onToggle={onToggle} />
         </div>
       </div>
     </div>
@@ -1468,9 +1470,10 @@ function ClientNutritionTab({ coachingId, userId }) {
   const emptyForm = { proteinTraining: '', carbsTraining: '', fatTraining: '', proteinRest: '', carbsRest: '', fatRest: '' };
   const [form, setForm] = useStateC(emptyForm);
 
-  // Calories auto-computed: protein*4 + carbs*4 + fat*9
+  // Calories auto-computed via the shared formula (no fiber — this form has
+  // no net-carb concept); 0 is treated as "nothing entered yet", not a real value.
   const calcCals = (pro, car, fat) => {
-    const total = (parseInt(pro) || 0) * 4 + (parseInt(car) || 0) * 4 + (parseInt(fat) || 0) * 9;
+    const total = LB.caloriesFromMacros(parseInt(pro) || 0, parseInt(car) || 0, parseInt(fat) || 0);
     return total > 0 ? total : null;
   };
   const calsTraining = calcCals(form.proteinTraining, form.carbsTraining, form.fatTraining);
@@ -1605,11 +1608,13 @@ function ClientNutritionTab({ coachingId, userId }) {
   );
 }
 
-// ─── CoachPlanEditorScreen ────────────────────────────────────────────────────
-// Wraps the existing ScheduleEditScreen with client store + syncing.
-
-function CoachPlanEditorScreen({ store, setStore, go, userId, coachingId, clientId, clientName, scheduleId }) {
+// Loads a client's store, keeping it in sync via LB.syncStore on every write.
+// Shared by CoachPlanEditorScreen and CoachNewPlanScreen. `scheduleId` (editor
+// only) additionally snapshots the initial schedule for diffing and tracks
+// isDirty/latestClientStore so the caller can send a "what changed" note.
+function useCoachClientSync(clientId, scheduleId) {
   const [clientStore, setClientStoreRaw] = useStateC(null);
+  const [loadError, setLoadError] = useStateC(null);
   const [syncErr, setSyncErr] = useStateC(false);
   const prevClientStore = useRefC(null);
   const latestClientStore = useRefC(null);  // updated synchronously for diff; prevClientStore only after confirmed sync
@@ -1617,18 +1622,25 @@ function CoachPlanEditorScreen({ store, setStore, go, userId, coachingId, client
   const isDirty = useRefC(false);
 
   useEffectC(() => {
+    let on = true;
+    setClientStoreRaw(null);
+    setLoadError(null);
     LB.loadClientStore(clientId).then(data => {
+      if (!on) return;
       setClientStoreRaw(data);
       prevClientStore.current = data;
       latestClientStore.current = data;
-      const sch = data.schedules?.find(s => s.id === scheduleId);
-      initialSchedule.current = sch ? JSON.parse(JSON.stringify(sch)) : null;
-    });
+      if (scheduleId) {
+        const sch = data.schedules?.find(s => s.id === scheduleId);
+        initialSchedule.current = sch ? JSON.parse(JSON.stringify(sch)) : null;
+      }
+    }).catch(e => { if (on) setLoadError(e.message); });
+    return () => { on = false; };
   }, [clientId]);
 
-  const setClientStore = useRefC(null);
-  if (!setClientStore.current) {
-    setClientStore.current = (updater) => {
+  const setClientStoreRef = useRefC(null);
+  if (!setClientStoreRef.current) {
+    setClientStoreRef.current = (updater) => {
       setClientStoreRaw(prev => {
         const next = typeof updater === 'function' ? updater(prev) : updater;
         isDirty.current = true;
@@ -1640,6 +1652,30 @@ function CoachPlanEditorScreen({ store, setStore, go, userId, coachingId, client
       });
     };
   }
+
+  return { clientStore, loadError, syncErr, setClientStore: setClientStoreRef.current, latestClientStore, initialSchedule, isDirty };
+}
+
+// Loading/error placeholder shown by both plan-editor wrapper screens while
+// the client's store is being fetched (or failed to load).
+function CoachClientLoadGate({ clientName, coachingId, clientId, go, loadError }) {
+  return (
+    <Screen>
+      <TopBar title={clientName} sub={<span className="micro" style={{ color: 'var(--accent)' }}>COACHING</span>} onBack={() => go({ name: 'coaching-client', coachingId, clientId, clientName, initialTab: 'plan' })} />
+      {loadError ? (
+        <div style={{ padding: 32, textAlign: 'center', color: 'rgba(var(--danger-rgb),0.8)', fontFamily: UI.fontUi, fontSize: 13 }}>Failed to load client data: {loadError}</div>
+      ) : (
+        <div style={{ padding: 32, textAlign: 'center', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>Loading…</div>
+      )}
+    </Screen>
+  );
+}
+
+// ─── CoachPlanEditorScreen ────────────────────────────────────────────────────
+// Wraps the existing ScheduleEditScreen with client store + syncing.
+
+function CoachPlanEditorScreen({ store, setStore, go, userId, coachingId, clientId, clientName, scheduleId }) {
+  const { clientStore, loadError, syncErr, setClientStore, latestClientStore, initialSchedule, isDirty } = useCoachClientSync(clientId, scheduleId);
 
   // Intercept go: notify client via Changes thread if plan was modified, then return to plan tab
   const coachGo = async (route) => {
@@ -1667,20 +1703,15 @@ function CoachPlanEditorScreen({ store, setStore, go, userId, coachingId, client
     }
   };
 
-  if (!clientStore) {
-    return (
-      <Screen>
-        <TopBar title={clientName} sub={<span className="micro" style={{ color: 'var(--accent)' }}>COACHING</span>} onBack={() => go({ name: 'coaching-client', coachingId, clientId, clientName, initialTab: 'plan' })} />
-        <div style={{ padding: 32, textAlign: 'center', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>Loading…</div>
-      </Screen>
-    );
+  if (loadError || !clientStore) {
+    return <CoachClientLoadGate clientName={clientName} coachingId={coachingId} clientId={clientId} go={go} loadError={loadError} />;
   }
 
   return (
     <>
       <window.Screens.ScheduleEditScreen
         store={clientStore}
-        setStore={setClientStore.current}
+        setStore={setClientStore}
         go={coachGo}
         userId={clientId}
         scheduleId={scheduleId}
@@ -1695,29 +1726,7 @@ function CoachPlanEditorScreen({ store, setStore, go, userId, coachingId, client
 // a brand-new plan for a client.
 
 function CoachNewPlanScreen({ store, setStore, go, userId, coachingId, clientId, clientName }) {
-  const [clientStore, setClientStoreRaw] = useStateC(null);
-  const [syncErr, setSyncErr] = useStateC(false);
-  const prevClientStore = useRefC(null);
-
-  useEffectC(() => {
-    LB.loadClientStore(clientId).then(data => {
-      setClientStoreRaw(data);
-      prevClientStore.current = data;
-    });
-  }, [clientId]);
-
-  const setClientStore = useRefC(null);
-  if (!setClientStore.current) {
-    setClientStore.current = (updater) => {
-      setClientStoreRaw(prev => {
-        const next = typeof updater === 'function' ? updater(prev) : updater;
-        LB.syncStore(prevClientStore.current, next, clientId)
-          .then(() => { prevClientStore.current = next; setSyncErr(false); })
-          .catch(e => { console.error('Coach sync failed', e); setSyncErr(true); });
-        return next;
-      });
-    };
-  }
+  const { clientStore, loadError, syncErr, setClientStore } = useCoachClientSync(clientId);
 
   const coachGo = (route) => {
     if (route.name === 'plan') {
@@ -1729,20 +1738,15 @@ function CoachNewPlanScreen({ store, setStore, go, userId, coachingId, clientId,
     }
   };
 
-  if (!clientStore) {
-    return (
-      <Screen>
-        <TopBar title={clientName} sub={<span className="micro" style={{ color: 'var(--accent)' }}>COACHING</span>} onBack={() => go({ name: 'coaching-client', coachingId, clientId, clientName, initialTab: 'plan' })} />
-        <div style={{ padding: 32, textAlign: 'center', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>Loading…</div>
-      </Screen>
-    );
+  if (loadError || !clientStore) {
+    return <CoachClientLoadGate clientName={clientName} coachingId={coachingId} clientId={clientId} go={go} loadError={loadError} />;
   }
 
   return (
     <>
       <window.Screens.ScheduleNewScreen
         store={clientStore}
-        setStore={setClientStore.current}
+        setStore={setClientStore}
         go={coachGo}
       />
       <CoachSyncErrorPill show={syncErr} />

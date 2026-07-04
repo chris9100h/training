@@ -16,6 +16,35 @@
    Entry shape: { id: string, title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.474',
+    title: 'Nothing Left Behind',
+    items: [
+      "🎯 Drop Set, Myo-Reps, Myo-Rep Match, and AMRAP Variations now open in their own clean panel instead of squeezing into the set list — the weight/rep row and your Finish/Add buttons stay put no matter how far you've scrolled or how many drops you've stacked up. It also now sits cleanly above the number pad instead of overlapping it.",
+      "🛡️ Tap away or hit Cancel mid-chain with unsaved reps (or hit Home) — the app asks first now instead of silently tossing your progress.",
+      "🔄 Fixed several bugs where tapping \"Update\" could still leave you stuck on the old version — updates now land cleanly every time.",
+      "🖼️ Coaching chat / support tickets: tap any photo to view it full-screen, and paste an image straight from your clipboard instead of only picking a file.",
+      "👇 Home now shows a small chevron hinting that Quick Actions live behind a pull-down — it was invisible until you actually started pulling, so a lot of people never found the feature. Tap it directly to open Quick Actions, or just pull down as before.",
+    ],
+  },
+  {
+    id: 'v2.460',
+    title: 'Sweating the Small Stuff',
+    items: [
+      "🎯 Fixed: reordering fields inside a check-in category (Coaching → Customize Check-in) used to lift the row, look convincing, then quietly put it right back where it started. Every single time. It actually reorders now.",
+      "✏️ AMRAP Variations' round-name field used to be indistinguishable from plain text, so approximately nobody knew it was editable. It's a proper box now, with an accent underline when you tap in — go rename \"Cable Row A\" to whatever you actually did.",
+      "🌗 One settings sheet forgot to dim the screen behind it when it opened. A tiny thing, but it was bugging us more than it should have.",
+    ],
+  },
+  {
+    id: 'v2.458',
+    title: 'AMRAP Variations',
+    items: [
+      "🔀 New intensity technique: AMRAP Variations. Turn any working set into back-to-back AMRAP rounds — same weight, no rest between them, chase reps until you can't anymore. Switching grip or variation each round is entirely optional: the label starts pre-filled with your current exercise, so you only touch it if you actually change something up. Find it under INTENSITY on any set.",
+      "⚖️ Mesocycle auto-progression got fairer: when an exercise earns an extra set, that growth used to always land on your main lift only. Now it's distributed across every exercise hitting that muscle group that day, so gains don't keep stacking on the same lift.",
+      "🛠 Fixed: leaving mid-set on a Drop Set, Myo-Rep, Lengthened Partial, or AMRAP Variations (e.g. jumping back to Home) used to wipe your progress. It's exactly where you left it when you come back.",
+    ],
+  },
+  {
     id: 'v2.457',
     title: 'Compare Sessions, Sharper',
     items: [

@@ -275,6 +275,7 @@ function App() {
   const [userId, setUserId]       = useStateA(null);
   const [route, setRoute]         = useStateA({ name: 'home' });
   const [updateAvailable, setUpdateAvailable] = useStateA(false);
+  const [forceShowUpdateBanner, setForceShowUpdateBanner] = useStateA(false); // Settings "Test update banner" bypasses the in-progress/onboarding hold-backs below
   const [autoCloseNotify, setAutoCloseNotify] = useStateA(null);
   const [whatsNew, setWhatsNew] = useStateA(null); // array of unseen changelog entries, or null
   const [syncStatus, setSyncStatus] = useStateA('synced'); // 'synced' | 'pending' | 'error'
@@ -297,6 +298,7 @@ function App() {
   const routeRef                  = useRefA({ name: 'home' }); // current route for stale-closure contexts
   const detectedSwVersion         = useRefA(null); // set as soon as caches.keys() resolves, applied once the store exists
   const pendingSwVersion          = useRefA(null); // newest sw.js version seen but not yet applied; persisted only by applyUpdate
+  const pendingForceNonce         = useRefA(null); // admin_force_update() broadcast nonce seen but not yet applied
 
   useEffectA(() => { userIdRef.current = userId; }, [userId]);
   useEffectA(() => { phaseRef.current = phase; }, [phase]);
@@ -364,14 +366,11 @@ function App() {
   // actually rotates (controllerchange) — a single boot-time check isn't
   // enough since most users leave the PWA open for days without reloading.
   const reportSwVersion = useCallbackA(() => {
-    if (!('caches' in window)) return;
-    caches.keys().then(keys => {
-      const name = keys.find(k => k.startsWith('zane-'));
-      if (!name) return;
-      const version = name.replace('zane-', '');
+    LB.detectCacheVersion().then(version => {
+      if (!version) return;
       detectedSwVersion.current = version;
       setStore(s => (s && s.settings?.swVersion !== version) ? { ...s, settings: { ...s.settings, swVersion: version } } : s);
-    }).catch(() => {});
+    });
   }, [setStore]);
 
   // On a genuinely cold boot (fresh install/incognito), the SW can finish
@@ -409,20 +408,10 @@ function App() {
           // edit (id in the persisted base AND local differs from base) so a
           // background refresh doesn't clobber a health edit made offline.
           const base = syncBase.current;
-          const mergeById = (freshRows, curRows, baseRows) => {
-            const curMap = new Map((curRows || []).map(r => [r.id, r]));
-            const baseMap = baseRows ? new Map(baseRows.map(r => [r.id, r])) : null;
-            return (freshRows || []).map(r => {
-              const c = curMap.get(r.id);
-              const b = baseMap?.get(r.id);
-              if (c && b && JSON.stringify(c) !== JSON.stringify(b)) return c;
-              return r;
-            });
-          };
           return { ...s,
-            dailyLogs:   [...localOnlyDaily,   ...mergeById(fresh.dailyLogs, s.dailyLogs, base?.dailyLogs)],
-            cardioLogs:  [...localOnlyCardio,  ...mergeById(fresh.cardioLogs, s.cardioLogs, base?.cardioLogs)],
-            glucoseLogs: [...localOnlyGlucose, ...mergeById(fresh.glucoseLogs || [], s.glucoseLogs, base?.glucoseLogs)],
+            dailyLogs:   [...localOnlyDaily,   ...LB.mergeCollectionById(fresh.dailyLogs, s.dailyLogs, base?.dailyLogs)],
+            cardioLogs:  [...localOnlyCardio,  ...LB.mergeCollectionById(fresh.cardioLogs, s.cardioLogs, base?.cardioLogs)],
+            glucoseLogs: [...localOnlyGlucose, ...LB.mergeCollectionById(fresh.glucoseLogs || [], s.glucoseLogs, base?.glucoseLogs)],
           };
         });
       }).catch(() => {});
@@ -523,6 +512,14 @@ function App() {
   }, []);
 
   const applyUpdate = useCallbackA(async () => {
+    // A force-update broadcast (admin_force_update) isn't tied to an actual
+    // SW change, so there's no "wait for activation" step to persist it
+    // after — clicking Update always leads to a fresh reload one way or
+    // another (real SW takeover or the clearCachesAndReload fallback below),
+    // so mark it seen right away.
+    if (pendingForceNonce.current) {
+      try { localStorage.setItem('logbook-force-nonce-seen', pendingForceNonce.current); } catch (_) {}
+    }
     // The applied version is persisted in onControllerChange (once the new SW
     // takes control), never on mere detection or click, so a not-yet-activated
     // update keeps being re-offered across cold starts.
@@ -565,13 +562,14 @@ function App() {
       // look like it does nothing. Wipe the cache first, exactly like the
       // "Reload App" quick action does, so the reload is guaranteed to
       // actually fetch fresh code instead of silently staying on the old one.
-      if ('caches' in window) {
-        try {
-          const keys = await caches.keys();
-          await Promise.all(keys.map(k => caches.delete(k)));
-        } catch (_) {}
+      // Persist the version we're about to fetch fresh — otherwise
+      // checkSwUpdate sees the same "new" version again right after reload
+      // and re-shows the banner, forever (confirmed: this caused an
+      // infinite update-banner loop whenever this fallback path was taken).
+      if (pendingSwVersion.current) {
+        try { localStorage.setItem('logbook-sw-version', pendingSwVersion.current); } catch (_) {}
       }
-      window.location.reload(true);
+      await LB.clearCachesAndReload();
     }
   }, []);
 
@@ -713,16 +711,7 @@ function App() {
             // row edited offline would be reverted to the server value and then
             // re-synced back as the old value. Conservative: no base membership
             // or local == base → server wins (mirrors the mesoStates merge).
-            const mergeById = (freshRows, curRows, baseRows, delIds) => {
-              const curMap = new Map((curRows || []).map(r => [r.id, r]));
-              const baseMap = baseRows ? new Map(baseRows.map(r => [r.id, r])) : null;
-              return (freshRows || []).filter(r => !delIds?.has(r.id)).map(r => {
-                const c = curMap.get(r.id);
-                const b = baseMap?.get(r.id);
-                if (c && b && JSON.stringify(c) !== JSON.stringify(b)) return c;
-                return r;
-              });
-            };
+            const mergeById = LB.mergeCollectionById;
             // Scalar state: the local cache is authoritative — it always holds
             // the most recent state on this device, including unsynced offline
             // edits. For items with IDs we use an ID-based merge instead.
@@ -1033,6 +1022,13 @@ function App() {
   // from the network (bypassing the SW cache via ?_v=) and compares the CACHE
   // version string. iOS Safari ignores reg.update() when the app is in the
   // foreground, so this is the only reliable detection path.
+  // Skipped entirely while on the training screen — never risk nudging
+  // someone mid-workout, even indirectly (a background swReg.update() can
+  // still be surprising). This means a user who lives almost entirely on
+  // 'train' can go a long time without a successful check; that tradeoff is
+  // deliberate. The admin-triggered force-update path (checkForceUpdate
+  // below) intentionally does NOT have this guard, so a manual broadcast can
+  // still reach everyone promptly.
   const checkSwUpdate = useCallbackA(() => {
     if (routeRef.current?.name === 'train') return;
     // Resolve sw.js relative to the SW scope (or page URL before registration
@@ -1071,10 +1067,34 @@ function App() {
       .catch(() => {});
   }, []);
 
-  useEffectA(() => { checkSwUpdate(); }, [route]);
+  // Lets the admin push the update banner to everyone without an sw.js cache
+  // bump (see admin_force_update). Same "first sighting = baseline, no
+  // banner" pattern as checkSwUpdate above — a brand-new device must never
+  // see a false "update available" for a nonce it's never seen before.
+  // Deliberately runs regardless of route (including 'train') — this is the
+  // one deliberate, admin-triggered broadcast, so it's allowed to reach a
+  // training user promptly. checkSwUpdate above keeps the route guard so
+  // routine version bumps never even risk nudging someone mid-workout.
+  const checkForceUpdate = useCallbackA(() => {
+    LB.supabase.rpc('get_force_update_nonce').then(({ data, error }) => {
+      if (error || !data) return;
+      let stored = null;
+      try { stored = localStorage.getItem('logbook-force-nonce-seen'); } catch (_) {}
+      if (!stored) {
+        try { localStorage.setItem('logbook-force-nonce-seen', data); } catch (_) {}
+        return;
+      }
+      if (data !== stored) {
+        pendingForceNonce.current = data;
+        setUpdateAvailable(true);
+      }
+    }).catch(() => {});
+  }, []);
+
+  useEffectA(() => { checkSwUpdate(); checkForceUpdate(); }, [route]);
 
   useEffectA(() => {
-    const onVisible = () => { if (document.visibilityState === 'visible') checkSwUpdate(); };
+    const onVisible = () => { if (document.visibilityState === 'visible') { checkSwUpdate(); checkForceUpdate(); } };
     document.addEventListener('visibilitychange', onVisible);
     return () => document.removeEventListener('visibilitychange', onVisible);
   }, []);
@@ -1204,7 +1224,7 @@ function App() {
     case 'session':          screen = <window.Screens.SessionDetailScreen {...props} sessionId={route.sessionId} justFinished={route.justFinished} back={route.back} />; break;
     case 'compare':          screen = <window.Screens.SessionCompareScreen {...props} sessionId={route.sessionId} compareId={route.compareId} back={route.back} />; break;
     case 'exerciseHistory':  screen = <window.Screens.ExerciseHistoryScreen {...props} exId={route.exId} dayId={route.dayId} exName={route.exName} back={route.back} />; break;
-    case 'settings':          screen = <window.Screens.SettingsScreen {...props} openSupportInbox={route.openSupportInbox} openSupportSheet={route.openSupportSheet} />; break;
+    case 'settings':          screen = <window.Screens.SettingsScreen {...props} openSupportInbox={route.openSupportInbox} openSupportSheet={route.openSupportSheet} onTestUpdateBanner={() => setForceShowUpdateBanner(true)} />; break;
     case 'spectator':         screen = <window.Screens.SpectatorScreen {...props} targetUserId={route.targetUserId} userName={route.userName} sessionId={route.sessionId} />; break;
     case 'coaching':            screen = <window.Screens.CoachingTabScreen {...props} initialClientTab={route.initialClientTab} />; break;
     case 'coaching-dashboard':  screen = <window.Screens.CoachingDashboard {...props} />; break;
@@ -1221,11 +1241,8 @@ function App() {
   // correct distance unit on boot (not just when the picker is used).
   const _u = store?.settings?.unit;
   window.__UNIT = (_u === 'lbs') ? 'lbs' : 'kg';
-  try {
-    if (_u === 'mixed') localStorage.setItem('logbook-cardio-dist-unit', 'mi');
-    else if (_u === 'kg') localStorage.setItem('logbook-cardio-dist-unit', 'km');
-    else if (_u === 'lbs') localStorage.setItem('logbook-cardio-dist-unit', 'mi');
-  } catch (_) {}
+  if (_u === 'mixed' || _u === 'lbs') LB.setCardioDistUnit('mi');
+  else if (_u === 'kg') LB.setCardioDistUnit('km');
 
   // Deload overlay flag — buildSeedSets reads this to pre-fill loads at ~50%.
   window.__DELOAD = store?.statusMode === 'deload';
@@ -1259,8 +1276,9 @@ function App() {
   return (
     <>
       {layout}
-      {/* Hold the update banner back while a session is live — never interrupt a workout */}
-      {updateAvailable && !store?.inProgress && !onboardingState && <UpdateBanner onUpdate={applyUpdate} />}
+      {/* Hold the update banner back while a session is live — never interrupt a workout.
+          forceShowUpdateBanner (Settings "Test update banner") deliberately bypasses this. */}
+      {(forceShowUpdateBanner || (updateAvailable && !store?.inProgress && !onboardingState)) && <UpdateBanner onUpdate={applyUpdate} />}
       {autoCloseNotify && <AutoCloseBanner notify={autoCloseNotify} onDismiss={() => setAutoCloseNotify(null)} />}
       {whatsNew && <WhatsNewModal entries={whatsNew} onDismiss={dismissWhatsNew} />}
       {store && <window.Screens.CoachingPendingBanner store={store} setStore={setStore} userId={userId} />}

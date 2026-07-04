@@ -174,9 +174,7 @@ function cyclePosFn(clientStore, date) {
 }
 
 // Format a Date to "YYYY-MM-DD" using local time — avoids UTC off-by-one issues.
-function localDateKey(d) {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
+function localDateKey(d) { return LB.fmtISO(d); }
 
 function getTodayDay(clientStore) {
   const activeSch = clientStore.schedules?.find(s => s.id === clientStore.activeScheduleId);
@@ -454,54 +452,67 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
                 </div>
                 {(() => {
                   const storeWithoutToday = { ...clientStore, sessions: clientStore.sessions.filter(s => s.ended && s.ended < todaySession.ended) };
-                  // See ClientSessionsTab's fmtSetChip — same gap, same fix.
+                  // Shared with ClientSessionsTab via LB.techniqueRounds — both
+                  // used to reimplement this from scratch (comment used to say
+                  // "same gap, same fix", i.e. two independent copies to keep
+                  // in sync by hand).
                   const fmtSetChip = (s) => {
-                    const drops = s.drops && Array.isArray(s.drops) && s.drops.length > 0 ? s.drops : null;
-                    if (s.technique === 'drop' && drops) {
-                      return drops.map(d => `${d.kg ?? '—'}${unit}×${d.reps ?? '—'}`).join(' → ');
-                    }
-                    if ((s.technique === 'myorep' || s.technique === 'myorep_match') && drops) {
-                      const total = drops.reduce((a, d) => a + (d.reps || 0), 0);
-                      const chain = drops.map((d, di) => di === 0 ? `${d.kg ?? '—'}${unit}×${d.reps ?? '—'}` : (d.reps ?? '—')).join(' ↺ ');
-                      return `${chain} (${total})`;
-                    }
-                    if (s.technique === 'lengthened_partial') {
-                      const partials = s.drops?.partials || 0;
+                    if (s.skipped && !s.done) return 'skipped';
+                    const tr = LB.techniqueRounds(s);
+                    if (tr.kind === 'lengthened_partial') {
                       const main = `${s.kg ?? '—'}${unit} × ${s.reps ?? s.repsL ?? '—'}`;
-                      return partials > 0 ? `${main} +${partials}` : main;
+                      return tr.partials > 0 ? `${main} +${tr.partials}` : main;
+                    }
+                    if (tr.kind) {
+                      const chain = tr.rounds.map((d, di) => (tr.connector === '↺' && di > 0) ? (d.reps ?? '—') : `${d.kg ?? '—'}${unit}×${d.reps ?? '—'}`).join(` ${tr.connector} `);
+                      const suffix = tr.totalReps != null ? ` (${tr.totalReps})` : '';
+                      return tr.partials > 0 ? `${chain}${suffix} +${tr.partials}` : `${chain}${suffix}`;
                     }
                     return `${s.kg ?? '—'}${unit} × ${s.reps ?? s.repsL ?? '—'}`;
                   };
-                  // Same label text/style as the training screen's per-set
-                  // technique badge — the chip's number/arrow notation alone
-                  // doesn't say which technique produced it.
-                  const techniqueLabel = (s) => s.technique === 'drop' ? 'DROP SET'
-                    : s.technique === 'myorep_match' ? 'MYO MATCH'
-                    : s.technique === 'myorep' ? 'MYO REP'
-                    : s.technique === 'lengthened_partial' ? 'PARTIALS'
-                    : null;
+                  const techniqueLabel = (s) => LB.techniqueRounds(s).badge;
                   return (todaySession.entries || []).map((e, i) => {
                     const lastResult = e.exId ? LB.lastSessionForExercise(storeWithoutToday, e.exId, todaySession.dayId) : null;
                     const lastSets = (lastResult?.entry?.sets || []).filter(s => !s.warmup && (s.kg != null || s.reps != null));
+                    // If any set in the row carries a technique badge, every set
+                    // needs equal reserved space above its chip — otherwise a
+                    // plain set's chip sits noticeably higher than a badged
+                    // neighbor's (its chip is pushed down by the badge above).
+                    const workingSets = (e.sets || []).filter(s => !s.warmup);
+                    const anyLabelInRow = workingSets.some(s => techniqueLabel(s));
+                    const amrapLabelsFor = (s) => s.technique === 'amrap_variations' && (s.drops || []).some(d => d.label && d.label !== e.name)
+                      ? (s.drops || []).map(d => d.label || e.name).join(' → ')
+                      : null;
+                    // Both the badge line AND the AMRAP label-chain caption need
+                    // reserving on every set in the row once ANY sibling has one
+                    // — otherwise that sibling's chip still sits lower than the
+                    // others (only the badge row was reserved before).
+                    const anyAmrapLabelsInRow = workingSets.some(amrapLabelsFor);
+                    const badgeBoxStyle = {
+                      fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: UI.gold,
+                      background: 'rgba(var(--accent-rgb),0.12)', border: '0.5px solid rgba(var(--accent-rgb),0.35)',
+                      borderRadius: 4, padding: '2px 6px',
+                    };
+                    const amrapLabelStyle = { fontSize: 8, color: UI.inkGhost, maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' };
                     return (
                       <div key={i} style={{ padding: '10px 0', borderBottom: `0.5px solid ${UI.hair}` }}>
                         <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600, marginBottom: 6 }}>{e.name}</div>
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: lastSets.length ? 5 : 0 }}>
-                          {(e.sets || []).filter(s => !s.warmup).map((s, j) => {
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'flex-start', marginBottom: lastSets.length ? 5 : 0 }}>
+                          {workingSets.map((s, j) => {
                             const prev = lastSets[j];
-                            const anyImpBefore = (e.sets || []).filter(x => !x.warmup).slice(0, j).some((x, k) => isImprovement(x, lastSets[k]));
+                            const anyImpBefore = workingSets.slice(0, j).some((x, k) => isImprovement(x, lastSets[k]));
                             const highlight = isImprovement(s, prev);
                             const decline   = !anyImpBefore && isDecline(s, prev);
                             const label = techniqueLabel(s);
+                            const amrapLabels = amrapLabelsFor(s);
                             return (
                               <span key={j} style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-start', gap: 2 }}>
-                                {label && (
-                                  <span style={{
-                                    fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: UI.gold,
-                                    background: 'rgba(var(--accent-rgb),0.12)', border: '0.5px solid rgba(var(--accent-rgb),0.35)',
-                                    borderRadius: 4, padding: '2px 6px',
-                                  }}>{label}</span>
-                                )}
+                                {label
+                                  ? <span style={badgeBoxStyle}>{label}</span>
+                                  : anyLabelInRow ? <span style={{ ...badgeBoxStyle, visibility: 'hidden' }}>·</span> : null}
+                                {amrapLabels
+                                  ? <span className="num" style={amrapLabelStyle}>{amrapLabels}</span>
+                                  : anyAmrapLabelsInRow ? <span className="num" style={{ ...amrapLabelStyle, visibility: 'hidden' }}>·</span> : null}
                                 <span className="num" style={{
                                   fontSize: 12,
                                   color: highlight ? UI.goldLight : decline ? 'rgba(var(--danger-rgb),0.85)' : s.done ? UI.ink : UI.inkFaint,
@@ -1292,31 +1303,41 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
             // awareness at all — a drop-set/myo-rep/lengthened-partial set just
             // showed its main kg×reps (drops[0] mirrors the top-level fields)
             // with the rest of the technique's data silently invisible.
+            // Shared with ClientOverviewTab via LB.techniqueRounds — see there.
             const fmtSetChip = (s) => {
-              const drops = s.drops && Array.isArray(s.drops) && s.drops.length > 0 ? s.drops : null;
-              if (s.technique === 'drop' && drops) {
-                return drops.map(d => `${d.kg ?? '—'}${unit}×${d.reps ?? '—'}`).join(' → ');
-              }
-              if ((s.technique === 'myorep' || s.technique === 'myorep_match') && drops) {
-                const total = drops.reduce((a, d) => a + (d.reps || 0), 0);
-                const chain = drops.map((d, di) => di === 0 ? `${d.kg ?? '—'}${unit}×${d.reps ?? '—'}` : (d.reps ?? '—')).join(' ↺ ');
-                return `${chain} (${total})`;
-              }
-              if (s.technique === 'lengthened_partial') {
-                const partials = s.drops?.partials || 0;
+              if (s.skipped && !s.done) return 'skipped';
+              const tr = LB.techniqueRounds(s);
+              if (tr.kind === 'lengthened_partial') {
                 const main = `${s.kg ?? '—'}${unit} × ${s.reps ?? s.repsL ?? '—'}`;
-                return partials > 0 ? `${main} +${partials}` : main;
+                return tr.partials > 0 ? `${main} +${tr.partials}` : main;
+              }
+              if (tr.kind) {
+                const chain = tr.rounds.map((d, di) => (tr.connector === '↺' && di > 0) ? (d.reps ?? '—') : `${d.kg ?? '—'}${unit}×${d.reps ?? '—'}`).join(` ${tr.connector} `);
+                const suffix = tr.totalReps != null ? ` (${tr.totalReps})` : '';
+                return tr.partials > 0 ? `${chain}${suffix} +${tr.partials}` : `${chain}${suffix}`;
               }
               return `${s.kg ?? '—'}${unit} × ${s.reps ?? s.repsL ?? '—'}`;
             };
-            // Same label text/style as the training screen's per-set technique
-            // badge — the chip's number/arrow notation alone doesn't say which
-            // technique produced it.
-            const techniqueLabel = (s) => s.technique === 'drop' ? 'DROP SET'
-              : s.technique === 'myorep_match' ? 'MYO MATCH'
-              : s.technique === 'myorep' ? 'MYO REP'
-              : s.technique === 'lengthened_partial' ? 'PARTIALS'
+            const techniqueLabel = (s) => LB.techniqueRounds(s).badge;
+            // If any set in the row carries a technique badge, every set needs
+            // equal reserved space above its chip — otherwise a plain set's
+            // chip sits noticeably higher than a badged neighbor's.
+            const workingSets = (e.sets || []).filter(s => !s.warmup);
+            const anyLabelInRow = workingSets.some(s => techniqueLabel(s));
+            const amrapLabelsFor = (s) => s.technique === 'amrap_variations' && (s.drops || []).some(d => d.label && d.label !== e.name)
+              ? (s.drops || []).map(d => d.label || e.name).join(' → ')
               : null;
+            // Both the badge line AND the AMRAP label-chain caption need
+            // reserving on every set in the row once ANY sibling has one —
+            // otherwise that sibling's chip still sits lower than the others
+            // (only the badge row was reserved before).
+            const anyAmrapLabelsInRow = workingSets.some(amrapLabelsFor);
+            const badgeBoxStyle = {
+              fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: UI.gold,
+              background: 'rgba(var(--accent-rgb),0.12)', border: '0.5px solid rgba(var(--accent-rgb),0.35)',
+              borderRadius: 4, padding: '2px 6px',
+            };
+            const amrapLabelStyle = { fontSize: 8, color: UI.inkGhost, maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' };
             return (
               <div key={i}
                 onClick={() => e.exId && selected.dayId && setHistEx({ exId: e.exId, dayId: selected.dayId, exName: e.name })}
@@ -1325,22 +1346,22 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
                 <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600, marginBottom: 6 }}>
                   {e.name}{e.exId && <span style={{ fontSize: 11, color: UI.inkFaint, marginLeft: 5 }}>›</span>}
                 </div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: lastSets.length ? 5 : 0 }}>
-                  {(e.sets || []).filter(s => !s.warmup).map((s, j) => {
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'flex-start', marginBottom: lastSets.length ? 5 : 0 }}>
+                  {workingSets.map((s, j) => {
                     const prev = lastSets[j];
-                    const anyImpBefore = (e.sets || []).filter(x => !x.warmup).slice(0, j).some((x, k) => isImprovement(x, lastSets[k]));
+                    const anyImpBefore = workingSets.slice(0, j).some((x, k) => isImprovement(x, lastSets[k]));
                     const highlight = isImprovement(s, prev);
                     const decline   = !anyImpBefore && isDecline(s, prev);
                     const label = techniqueLabel(s);
+                    const amrapLabels = amrapLabelsFor(s);
                     return (
                       <span key={j} style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-start', gap: 2 }}>
-                        {label && (
-                          <span style={{
-                            fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: UI.gold,
-                            background: 'rgba(var(--accent-rgb),0.12)', border: '0.5px solid rgba(var(--accent-rgb),0.35)',
-                            borderRadius: 4, padding: '2px 6px',
-                          }}>{label}</span>
-                        )}
+                        {label
+                          ? <span style={badgeBoxStyle}>{label}</span>
+                          : anyLabelInRow ? <span style={{ ...badgeBoxStyle, visibility: 'hidden' }}>·</span> : null}
+                        {amrapLabels
+                          ? <span className="num" style={amrapLabelStyle}>{amrapLabels}</span>
+                          : anyAmrapLabelsInRow ? <span className="num" style={{ ...amrapLabelStyle, visibility: 'hidden' }}>·</span> : null}
                         <span className="num" style={{
                           fontSize: 12,
                           color: highlight ? UI.goldLight : decline ? 'rgba(var(--danger-rgb),0.85)' : s.done ? UI.ink : UI.inkFaint,

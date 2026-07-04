@@ -108,7 +108,7 @@ function nextMondayISO() {
   const daysUntil = (1 - today.getDay() + 7) % 7;
   const d = new Date(today);
   d.setDate(d.getDate() + daysUntil);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  return fmtISO(d);
 }
 // Returns the next D1 of a date-based cycle plan as YYYY-MM-DD.
 // Returns today if today is already D1; otherwise the start of the next full rotation.
@@ -121,7 +121,7 @@ function nextCycleD1ISO(cycleStartDate, daysLen) {
   const daysUntilD1 = pos === 0 ? 0 : daysLen - pos;
   const d = new Date(today);
   d.setDate(d.getDate() + daysUntilD1);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  return fmtISO(d);
 }
 // Version-aware wrapper: uses getCyclePosForDate when the plan has versions so
 // cycleOffset and version boundaries are respected (same logic as the date strip).
@@ -139,7 +139,7 @@ function nextCycleD1ISOFromSchedule(schedule, cycleStartDate) {
         const daysUntilD1 = pos === 0 ? 0 : vDaysLen - pos;
         const d = new Date(today);
         d.setDate(d.getDate() + daysUntilD1);
-        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        return fmtISO(d);
       }
     }
   }
@@ -575,6 +575,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
         start_cycle_index: m.startCycleIndex ?? 0,
         deltas: remapExDayKeyed(m.deltas), weight_boosts: remapExDayKeyed(m.weightBoosts),
         joint_flags: remapExKeyed(m.jointFlags), pump_low_counts: remapExKeyed(m.pumpLowCounts),
+        growth_counts: remapExDayKeyed(m.growthCounts),
         completions: m.completions ?? 0, pending_meso2: m.pendingMeso2 ?? false,
       }))
     ));
@@ -749,7 +750,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     // Reusable workout templates (migration 0107)
     _supabase.from('zane_workout_templates').select('id, name, exercises, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
     // Mesocycle state per plan — replaces localStorage logbook-meso-state (migration 0120)
-    _supabase.from('zane_meso_states').select('id, schedule_id, weeks, start_date, start_cycle_index, deltas, joint_flags, pump_low_counts, weight_boosts, completions, pending_meso2, updated_at').eq('user_id', userId),
+    _supabase.from('zane_meso_states').select('id, schedule_id, weeks, start_date, start_cycle_index, deltas, joint_flags, pump_low_counts, weight_boosts, growth_counts, completions, pending_meso2, updated_at').eq('user_id', userId),
   ];
   const [profileRes, exRes, schRes, sessRes, settRes, skipsRes, entriesRes,
          bestsRes, sessionStatsRes,
@@ -938,6 +939,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
       startDate: m.start_date, startCycleIndex: m.start_cycle_index ?? 0,
       deltas: m.deltas ?? {}, jointFlags: m.joint_flags ?? {},
       pumpLowCounts: m.pump_low_counts ?? {}, weightBoosts: m.weight_boosts ?? {},
+      growthCounts: m.growth_counts ?? {},
       completions: m.completions ?? 0, pendingMeso2: m.pending_meso2 ?? false,
       updatedAt: m.updated_at ?? null,
     })),
@@ -1056,26 +1058,10 @@ async function autoArchiveMissedDays(userId, state) {
     const d = new Date(todayD); d.setDate(todayD.getDate() - daysAgo);
     const dateKey = d.toISOString().slice(0, 10);
     if (sessionDates.has(dateKey) || skipDates.has(dateKey)) continue;
-    let trainingDay = null;
-    if (isWd) {
-      if (state.weekPlanStartDate && dateKey < state.weekPlanStartDate) continue;
-      const wd = isoWd(d);
-      trainingDay = activeSch.days.find(day => day.weekday === wd && (day.items || []).length > 0) || null;
-    } else {
-      const days = getPlanDaysForDate(activeSch, dateKey);
-      const pos = getCyclePosForDate(activeSch, dateKey);
-      let dayData;
-      if (pos !== null) {
-        dayData = days[pos];
-      } else {
-        if (!state.cycleStartDate) continue;
-        const start = parseDate(state.cycleStartDate);
-        const n = Math.round((d.getTime() - start.getTime()) / 86400000);
-        if (n < 0) continue;
-        dayData = activeSch.days[((n % activeSch.days.length) + activeSch.days.length) % activeSch.days.length];
-      }
-      if ((dayData?.items || []).length > 0) trainingDay = dayData;
-    }
+    // Version-aware — a hand-rolled copy of this used to ignore a schedule's
+    // versioned days (validFrom), so a future plan change threw off which
+    // day layout auto-archiving compared against.
+    const trainingDay = plannedTrainingDay(state, dateKey);
     if (!trainingDay) continue;
     missed.push({ date: dateKey, dayId: trainingDay.id, dayName: trainingDay.name });
   }
@@ -1359,6 +1345,7 @@ async function syncStore(prev, next, userId) {
       start_date: m.startDate, start_cycle_index: m.startCycleIndex ?? 0,
       deltas: m.deltas ?? {}, joint_flags: m.jointFlags ?? {},
       pump_low_counts: m.pumpLowCounts ?? {}, weight_boosts: m.weightBoosts ?? {},
+      growth_counts: m.growthCounts ?? {},
       completions: m.completions ?? 0, pending_meso2: m.pendingMeso2 ?? false,
       updated_at: m.updatedAt ?? new Date().toISOString(),
     })) }));
@@ -1499,43 +1486,6 @@ async function syncStore(prev, next, userId) {
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────
 
-// Date of the next upcoming training day (today if not yet trained, otherwise tomorrow+).
-// Returns an ISO date string or null.
-function computeNextTrainingDate(state) {
-  const sch = state.schedules.find(s => s.id === state.activeScheduleId);
-  if (!sch || !sch.days.length) return null;
-
-  const today = new Date(); today.setHours(12, 0, 0, 0);
-  const todayStr = today.toISOString().slice(0, 10);
-  const trainedToday = state.sessions.some(s => s.date?.slice(0, 10) === todayStr && s.ended);
-  const wdPlan = isWeekdayPlan(sch);
-
-  for (let ahead = trainedToday ? 1 : 0; ahead <= 14; ahead++) {
-    const d = new Date(today); d.setDate(today.getDate() + ahead);
-    const dateStr = d.toISOString().slice(0, 10);
-    let training = false;
-    if (wdPlan) {
-      const wd = isoWd(d);
-      const day = sch.days.find(x => x.weekday === wd);
-      training = !!(day && (day.items || []).length > 0);
-    } else {
-      const days = getPlanDaysForDate(sch, dateStr);
-      const idx = getCyclePosForDate(sch, dateStr);
-      if (idx !== null) {
-        training = (days[idx]?.items || []).length > 0;
-      } else {
-        if (!state.cycleStartDate) return null;
-        const start = parseDate(state.cycleStartDate);
-        const n = Math.round((d.getTime() - start.getTime()) / 86400000);
-        if (n < 0) continue;
-        training = (sch.days[((n % sch.days.length) + sch.days.length) % sch.days.length]?.items || []).length > 0;
-      }
-    }
-    if (training) return dateStr;
-  }
-  return null;
-}
-
 // UTC ISO timestamp for the next training-day reminder, or null if reminder is disabled.
 // Skips today if today's reminder time has already passed (prevents re-firing after the
 // edge function clears next_reminder_at and the app writes the old value back via syncStore).
@@ -1550,31 +1500,16 @@ function computeNextReminderAt(state) {
   const todayStr = today.toISOString().slice(0, 10);
   const trainedToday = state.sessions.some(s => s.date?.slice(0, 10) === todayStr && s.ended);
   const todayTimePassed = new Date(todayStr + 'T' + time + ':00') <= now;
-  const wdPlan = isWeekdayPlan(sch);
 
   for (let ahead = (trainedToday || todayTimePassed) ? 1 : 0; ahead <= 14; ahead++) {
     const d = new Date(today); d.setDate(today.getDate() + ahead);
     const dateStr = d.toISOString().slice(0, 10);
-    let training = false;
-    if (wdPlan) {
-      const wd = isoWd(d);
-      const day = sch.days.find(x => x.weekday === wd);
-      training = !!(day && (day.items || []).length > 0);
-    } else {
-      const days = getPlanDaysForDate(sch, dateStr);
-      const idx = getCyclePosForDate(sch, dateStr);
-      if (idx !== null) {
-        training = (days[idx]?.items || []).length > 0;
-      } else {
-        // Flex plans have no cycleStartDate — position is action-advanced only, calendar-based reminders not supported.
-        if (!state.cycleStartDate) return null;
-        const start = parseDate(state.cycleStartDate);
-        const n = Math.round((d.getTime() - start.getTime()) / 86400000);
-        if (n < 0) continue;
-        training = (sch.days[((n % sch.days.length) + sch.days.length) % sch.days.length]?.items || []).length > 0;
-      }
-    }
-    if (training) return new Date(dateStr + 'T' + time + ':00').toISOString();
+    // Version-aware — see plannedTrainingDay; a hand-rolled copy of this used
+    // to resolve weekday plans against sch.days directly, ignoring a plan
+    // change scheduled with a future validFrom date. Returns null for every
+    // date on a cycle plan with no cycleStartDate / a flex plan on a date
+    // other than today, so the loop just runs its course and falls through.
+    if (plannedTrainingDay(state, dateStr)) return new Date(dateStr + 'T' + time + ':00').toISOString();
   }
   return null;
 }
@@ -1833,15 +1768,7 @@ function buildSeedSets(it, last, suggestion, isUni, smartProgression, bodyweight
 }
 
 function lastSessionForExercise(state, exId, dayId = null) {
-  const sessions = state.sessions
-    .filter(s => s.ended && !s.isDeload && (dayId == null || s.dayId === dayId))
-    .slice()
-    .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''));
-  for (const s of sessions) {
-    const entry = s.entries.find(e => e.exId === exId && (e.sets || []).some(x => x.kg != null || x.reps != null));
-    if (entry) return { session: s, entry };
-  }
-  return null;
+  return recentSessionsForExercise(state, exId, dayId, 1)[0] ?? null;
 }
 
 // Up to `limit` most-recent ended sessions that logged this exercise, newest first.
@@ -2111,14 +2038,29 @@ function getActiveVersionIdx(schedule, dateStr) {
 
 // One version per date: keep only the first entry for each validFrom. Callers
 // put the authoritative/newest entry first, so a same-date save replaces the
-// previous version for that date instead of stacking a duplicate.
+// previous version for that date instead of stacking a duplicate. Always
+// returns newest-first — getActiveVersionIdx's first-match-wins loop assumes
+// that order, and not every caller remembered to re-sort after deduping.
 function dedupeVersionsByDate(versions) {
   const seen = new Set();
-  return (versions || []).filter(v => {
-    if (seen.has(v.validFrom)) return false;
-    seen.add(v.validFrom);
-    return true;
-  });
+  return (versions || [])
+    .filter(v => {
+      if (seen.has(v.validFrom)) return false;
+      seen.add(v.validFrom);
+      return true;
+    })
+    .sort((a, b) => b.validFrom.localeCompare(a.validFrom));
+}
+
+// Cycle position for a date-based (non-versioned, non-flex) plan, derived
+// from cycleStartDate — calendar days since start, wrapped to the plan's
+// length. Used to be duplicated within this same file (todaysDay/nextDay)
+// and reimplemented again in PlanViewerScreen.
+function cyclePosFromStartDate(startISO, daysLen, dateISO) {
+  const d = new Date((dateISO || todayISO()) + 'T12:00:00');
+  const start = parseDate(startISO);
+  const n = Math.round((d.getTime() - start.getTime()) / 86400000);
+  return ((n % daysLen) + daysLen) % daysLen;
 }
 
 function todaysDay(state) {
@@ -2146,15 +2088,9 @@ function todaysDay(state) {
     return { schedule: sch, day: vDays[cyclePosToday] || sch.days[0], idx: cyclePosToday };
   }
   // Fall back: no versions → use cycleStartDate or cycleIndex
-  let idx;
-  if (state.cycleStartDate) {
-    const today = new Date(); today.setHours(12, 0, 0, 0);
-    const start = parseDate(state.cycleStartDate);
-    const n = Math.round((today.getTime() - start.getTime()) / 86400000);
-    idx = ((n % sch.days.length) + sch.days.length) % sch.days.length;
-  } else {
-    idx = (state.cycleIndex || 0) % sch.days.length;
-  }
+  const idx = state.cycleStartDate
+    ? cyclePosFromStartDate(state.cycleStartDate, sch.days.length, todayStr)
+    : (state.cycleIndex || 0) % sch.days.length;
   return { schedule: sch, day: sch.days[idx], idx };
 }
 
@@ -2176,15 +2112,9 @@ function nextDay(state) {
       return { schedule: sch, day: vDays[pos] || sch.days[0], idx: pos };
     }
   }
-  let curIdx;
-  if (state.cycleStartDate) {
-    const today = new Date(); today.setHours(12, 0, 0, 0);
-    const start = parseDate(state.cycleStartDate);
-    const n = Math.round((today.getTime() - start.getTime()) / 86400000);
-    curIdx = ((n % sch.days.length) + sch.days.length) % sch.days.length;
-  } else {
-    curIdx = (state.cycleIndex || 0) % sch.days.length;
-  }
+  const curIdx = state.cycleStartDate
+    ? cyclePosFromStartDate(state.cycleStartDate, sch.days.length, todayISO())
+    : (state.cycleIndex || 0) % sch.days.length;
   const idx = (curIdx + 1) % sch.days.length;
   return { schedule: sch, day: sch.days[idx], idx };
 }
@@ -2544,6 +2474,22 @@ async function addCoachingNote(coachingId, type, entityId, entityName, body, aut
   return id;
 }
 
+// Support-ticket notes must never surface in the coaching unread banner —
+// they have their own badge/inbox in Settings. Single source of truth so the
+// banner's count/preview and the group deciding whether to render it can
+// never disagree on which notes count (they did — see git history).
+function unreadCoachingNotes(store) {
+  return (store.coaching?.unreadNotes || []).filter(n => !n.coachingId?.startsWith('support_'));
+}
+
+// Direction: are these unread notes from a client (viewer is the coach) or
+// from a coach (viewer is the client)? asCoach's own support_ rows are
+// excluded the same way unreadCoachingNotes excludes support notes.
+function isNoteFromClient(store, notes) {
+  const clientIds = new Set((store.coaching?.asCoach || []).filter(c => !c.id?.startsWith('support_')).map(c => c.clientId));
+  return notes.some(n => clientIds.has(n.authorId));
+}
+
 // Upload an image to the chat-attachments bucket (own folder per RLS) and return
 // its public URL. Shared by support tickets and coaching notes.
 async function uploadChatImage(file, userId) {
@@ -2672,7 +2618,7 @@ function checkinWeekStart() {
   lastSunday.setDate(today.getDate() - daysSinceSunday);
   const monday = new Date(lastSunday);
   monday.setDate(lastSunday.getDate() - 6);
-  return `${monday.getFullYear()}-${String(monday.getMonth() + 1).padStart(2, '0')}-${String(monday.getDate()).padStart(2, '0')}`;
+  return fmtISO(monday);
 }
 
 // responses = plain object with snake_case keys matching the form schema fields.
@@ -2831,9 +2777,67 @@ async function deleteCheckin(checkinId, userId) {
   if (error) throw error;
 }
 
+// ─── Cardio distance/pace — single source for the whole app ─────────────────
+// Every screen that touches cardio distance used to reimplement this from
+// scratch (comma-decimal parsing, the km/mi factor, display precision), and
+// they'd already drifted: some skipped the comma-normalization (silently
+// truncating "5,5" km input to 5 km) and one rounded to a different decimal
+// count than the rest. One source of truth for all of it.
+const CARDIO_DIST_UNIT_KEY = 'logbook-cardio-dist-unit'; // 'km' | 'mi'
+const MI_TO_M = 1609.344;
+
+function cardioDistUnit() {
+  try { return localStorage.getItem(CARDIO_DIST_UNIT_KEY) || 'km'; } catch (_) { return 'km'; }
+}
+function setCardioDistUnit(u) {
+  try { localStorage.setItem(CARDIO_DIST_UNIT_KEY, u); } catch (_) {}
+}
+// Parses a user-typed distance (comma or dot decimal) in the given display
+// unit into meters.
+function distToM(val, unit) {
+  const n = parseFloat(String(val).replace(',', '.'));
+  if (isNaN(n)) return null;
+  return unit === 'mi' ? Math.round(n * MI_TO_M) : Math.round(n * 1000);
+}
+// Bare number string (no unit suffix) — for UIs that show the unit separately.
+function mToDisplay(meters, unit, decimals = 2) {
+  if (meters == null) return '';
+  return unit === 'mi' ? (meters / MI_TO_M).toFixed(decimals) : (meters / 1000).toFixed(decimals);
+}
+// Full "5.50 km" / "3.42 mi" string, unit suffix included.
+function fmtDistance(meters, unit, decimals = 2) {
+  if (meters == null) return '';
+  return `${mToDisplay(meters, unit, decimals)} ${unit === 'mi' ? 'mi' : 'km'}`;
+}
+function fmtPace(secPerKm, unit) {
+  if (secPerKm == null) return '';
+  const perUnit = unit === 'mi' ? secPerKm * MI_TO_M / 1000 : secPerKm;
+  const mins = Math.floor(perUnit / 60);
+  const secs = Math.round(perUnit % 60);
+  return `${mins}:${String(secs).padStart(2, '0')}/${unit}`;
+}
+function fmtSpeed(secPerKm, unit) {
+  if (secPerKm == null || secPerKm <= 0) return '';
+  const kmh = 3600 / secPerKm;
+  if (unit === 'mi') return `${(kmh / (MI_TO_M / 1000)).toFixed(1)} mph`;
+  return `${kmh.toFixed(1)} km/h`;
+}
+
+// Recently-used cardio activity type strings (for the "e.g. Running,
+// Cycling…" suggestion chips), most-recently-used first, deduped, capped.
+function recentCardioTypes(cardioLogs, limit = 6) {
+  const seen = new Set();
+  const result = [];
+  for (const l of (cardioLogs || [])) {
+    if (l.type && !seen.has(l.type)) { seen.add(l.type); result.push(l.type); }
+    if (result.length >= limit) break;
+  }
+  return result;
+}
+
 // Aggregate cardio logs for a given week (weekStart = 'YYYY-MM-DD' Monday).
 // Returns { cardioMinutes, cardioDistanceM, paceFeeling, effort, count } or null.
-function cardioWeekPrefill(cardioLogs, weekStart, unit) {
+function cardioWeekPrefill(cardioLogs, weekStart) {
   if (!cardioLogs?.length || !weekStart) return null;
   const ws = weekStart.slice(0, 10);
   const we = (() => { const d = new Date(ws + 'T12:00:00'); d.setDate(d.getDate() + 7); return d.toISOString().slice(0, 10); })();
@@ -2848,7 +2852,10 @@ function cardioWeekPrefill(cardioLogs, weekStart, unit) {
   let pace = null;
   if (withDist.length) {
     const pMin = withDist.reduce((s, l) => s + l.durationMinutes, 0);
-    const distUnit = unit === 'lbs' ? 1609.344 : 1000;
+    // The actual cardio distance-unit setting — NOT settings.unit (weight),
+    // which this used to be keyed off, silently treating "mixed"-unit users
+    // (kg weights + mi distances) as km and skewing their pace by ~1.6x.
+    const distUnit = cardioDistUnit() === 'mi' ? MI_TO_M : 1000;
     const dist = withDist.reduce((s, l) => s + l.distanceM, 0) / distUnit;
     const paceMinPer = pMin / dist;
     const m = Math.floor(paceMinPer);
@@ -3297,8 +3304,246 @@ async function refreshHealthLogs(userId) {
   };
 }
 
+// Must match applyMesoSetDeltaFromState's base+4 clamp (screens-train.jsx) —
+// an exercise at or past this many accumulated "not enough" sets can't
+// usefully receive another growth grant, since applying it would be entirely
+// swallowed by that clamp.
+const MESO_GROWTH_CEILING_DELTA = 4;
+
+// Picks which exId_dayId key (if any) wins a "not_enough" volume-feedback
+// growth turn for a muscle group's exercises this session, and returns the
+// growthCounts map updated to reflect that decision. Pure and side-effect
+// free — call it fresh (with the latest deltas/growthCounts) both to decide
+// the recipient and, separately, inside the actual saveMesoState write, so a
+// rare double-invocation of the caller can never silently lose a grant by
+// writing a value computed from stale state.
+//
+// - keys: exId_dayId keys of the muscle group's exercises this session, in
+//   day order (keys[0] = the muscle group's main/first lift).
+// - deltas / growthCounts: the meso state's full current maps (not just this
+//   group) — read-only, never mutated.
+// - prevGrantedTo: the key this same answer-record previously granted this
+//   session (or null for a fresh answer). Its earlier +1 is arithmetically
+//   un-done first (on both deltas, for eligibility, and growthCounts) so
+//   editing an already-answered question within the same session never
+//   double-counts — see commitContrib's identical idempotent-diff intent for
+//   `deltas` itself.
+// - Whichever exercise still below `ceiling` has the fewest growth grants so
+//   far wins (ties toward keys[0], i.e. the main lift); a key never seen in
+//   growthCounts before (a mid-meso exercise swap-in) is seeded at the
+//   group's current running max — computed BEFORE undoing prevGrantedTo, so
+//   undoing our own prior grant can't transiently understate the group's
+//   true established max — so it can't cut ahead of an established lift.
+// - Returns { recipientKey, growthCounts } — recipientKey is null if every
+//   exercise in the group is already at its own ceiling.
+function pickGrowthRecipient(keys, deltas, growthCounts, prevGrantedTo, ceiling = MESO_GROWTH_CEILING_DELTA) {
+  const deltaFor = (k) => {
+    const raw = (deltas || {})[k] || 0;
+    return k === prevGrantedTo ? raw - 1 : raw;
+  };
+  const gc = { ...(growthCounts || {}) };
+  const knownVals = keys.map(k => gc[k]).filter(v => v != null);
+  const groupMax = knownVals.length ? Math.max(...knownVals) : 0;
+  if (prevGrantedTo != null && gc[prevGrantedTo] != null) {
+    gc[prevGrantedTo] = Math.max(0, gc[prevGrantedTo] - 1);
+  }
+  keys.forEach(k => { if (gc[k] == null) gc[k] = groupMax; });
+  const eligible = keys.filter(k => deltaFor(k) < ceiling);
+  let recipientKey = null;
+  if (eligible.length) {
+    recipientKey = eligible.reduce((best, k) => (gc[k] < gc[best] ? k : best), eligible[0]);
+    gc[recipientKey] += 1;
+  }
+  return { recipientKey, growthCounts: gc };
+}
+
+// Un-does a single previously-granted growthCounts key by 1 (floor 0) — used
+// when an edited volume answer no longer grants anyone (e.g. changed away
+// from "not_enough" this session).
+function retractGrowthGrant(growthCounts, grantedKey) {
+  if (grantedKey == null) return growthCounts || {};
+  const gc = { ...(growthCounts || {}) };
+  if (gc[grantedKey] != null) gc[grantedKey] = Math.max(0, gc[grantedKey] - 1);
+  return gc;
+}
+
+// "5m ago"/"3h ago"/"2d ago" from an ISO timestamp. capDays, if given, rolls
+// over to a short locale date past that many days instead of counting
+// indefinitely (screens-settings.jsx's sign-up feed wants that; the
+// coaching thread previews don't).
+function timeAgo(iso, { capDays } = {}) {
+  if (!iso) return '';
+  const mins = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  if (capDays == null || days < capDays) return `${days}d ago`;
+  return new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+}
+
+// "today"/"yesterday"/"Nd ago" from a pre-computed day difference (today=0).
+// rollup additionally steps up to "Nw ago" past a week and a short
+// month/year past a month — the schedule backup picker wants that, the
+// Home/Library "last trained" labels just want the day count.
+function dayLabel(diffDays, { rollup = false, referenceDate } = {}) {
+  if (diffDays === 0) return 'today';
+  if (diffDays === 1) return 'yesterday';
+  if (!rollup || diffDays < 7) return `${diffDays}d ago`;
+  if (diffDays < 30) return `${Math.round(diffDays / 7)}w ago`;
+  return referenceDate ? referenceDate.toLocaleDateString('en-US', { month: 'short', year: '2-digit' }) : `${diffDays}d ago`;
+}
+
+// Cache-first reload merge for an ID-keyed collection: for ids on both
+// sides, keep the local row only if it carries an unsynced offline edit
+// (present in the persisted sync base AND different from it there) —
+// otherwise the server row wins. delIds, if given, drops rows the caller
+// already knows were deleted. app.jsx used to hand-roll this identically in
+// two places (softRefresh and loadData's reconciliation), the second with
+// the delIds filter the first didn't need. Local-only/server-only handling
+// (never-synced rows, resurrection guards) stays with each caller since it
+// varies per collection — this covers just the shared id-matched half.
+function mergeCollectionById(freshRows, curRows, baseRows, delIds) {
+  const curMap = new Map((curRows || []).map(r => [r.id, r]));
+  const baseMap = baseRows ? new Map(baseRows.map(r => [r.id, r])) : null;
+  return (freshRows || []).filter(r => !delIds?.has(r.id)).map(r => {
+    const c = curMap.get(r.id);
+    const b = baseMap?.get(r.id);
+    if (c && b && JSON.stringify(c) !== JSON.stringify(b)) return c;
+    return r;
+  });
+}
+
+// Calories from macros: P×4 + C×4 + F×9. With fiber given (net-carb mode),
+// carbs contribute max(0, C − fiber)×4 — clamped so it matches the displayed
+// net-carb value when fiber exceeds carbs. Returns null when no macro is set.
+function caloriesFromMacros(p, c, f, fiber) {
+  if (p == null && c == null && f == null) return null;
+  return (p || 0) * 4 + Math.max(0, (c || 0) - (fiber || 0)) * 4 + (f || 0) * 9;
+}
+
+// Bundles consecutive same-supersetGroup entries into { type: 'superset',
+// members: [{entry, idx}] } groups, everything else into { type:
+// 'standalone', entry, idx }. Used to be copy-pasted into 3 screens with a
+// comment admitting they were "kept in lockstep" by hand.
+function groupBySuperset(entries) {
+  const groups = [];
+  let idx = 0;
+  while (idx < entries.length) {
+    const e = entries[idx];
+    if (e.supersetGroup) {
+      const members = [{ entry: e, idx }];
+      let j = idx + 1;
+      while (j < entries.length && entries[j].supersetGroup === e.supersetGroup) {
+        members.push({ entry: entries[j], idx: j });
+        j++;
+      }
+      groups.push({ type: 'superset', members });
+      idx = j;
+    } else {
+      groups.push({ type: 'standalone', entry: e, idx });
+      idx++;
+    }
+  }
+  return groups;
+}
+
+function supersetLabel(memberCount) {
+  return memberCount >= 3 ? 'GIANT SET' : 'SUPERSET';
+}
+
+// Normalizes a set's intensity-technique data into one shape every renderer
+// (chip JSX, plain-text summaries) can consume. Used to be reimplemented ad
+// hoc in 7+ places — each new technique or field (e.g. the recent "partials
+// finisher") needed hand-editing every one of them, and two of them
+// (screens-coaching-client.jsx's two fmtSetChip copies) already carried a
+// comment admitting they were kept in sync by hand ("same gap, same fix").
+//   kind: 'drop'|'myorep'|'myorep_match'|'amrap_variations'|'lengthened_partial'|null
+//   badge: display label for the technique, null for a plain set
+//   connector: '→' (drop/AMRAP) | '↺' (myo) | null
+//   rounds: [{kg, reps, label?}] — populated for chain techniques (falls back
+//     to a single round built from st.kg/st.reps when drops is empty,
+//     matching every prior caller's own fallback); empty for
+//     lengthened_partial/plain sets, which use kg/reps directly
+//   totalReps: sum of round reps — only meaningful for myo variants, else null
+//   partials: the finisher count on the last round (chain techniques) or
+//     lengthened_partial's own count; 0 when none
+//   anyVaried: true if any AMRAP Variations round's label diverges from
+//     exName — callers use this to decide whether to show round labels at all
+function techniqueRounds(st, { exName } = {}) {
+  const empty = { kind: null, badge: null, connector: null, rounds: [], totalReps: null, partials: 0, anyVaried: false };
+  if (!st || !st.technique) return empty;
+  if (st.technique === 'lengthened_partial') {
+    return { ...empty, kind: 'lengthened_partial', badge: 'PARTIALS', partials: st.drops?.partials || 0 };
+  }
+  const BADGES = { drop: 'DROP SET', myorep: 'MYO-REPS', myorep_match: 'MYO MATCH', amrap_variations: 'AMRAP' };
+  if (!BADGES[st.technique]) return empty;
+  const drops = (st.drops && st.drops.length > 0) ? st.drops : (st.kg != null ? [{ kg: st.kg, reps: st.reps }] : []);
+  const isMyo = st.technique === 'myorep' || st.technique === 'myorep_match';
+  return {
+    kind: st.technique,
+    badge: BADGES[st.technique],
+    connector: isMyo ? '↺' : '→',
+    rounds: drops.map(d => ({ kg: d.kg, reps: d.reps, label: d.label })),
+    totalReps: isMyo ? drops.reduce((a, d) => a + (d.reps || 0), 0) : null,
+    partials: drops[drops.length - 1]?.partials || 0,
+    anyVaried: st.technique === 'amrap_variations' && drops.some(d => d.label && d.label !== exName),
+  };
+}
+
+// Reads the active Service Worker cache version ("zane-vX.XXX" → "vX.XXX"),
+// or null if unavailable. Used both to report a device's version to the
+// admin (app.jsx) and to display it locally (screens-home.jsx's login screen).
+async function detectCacheVersion() {
+  if (!('caches' in window)) return null;
+  try {
+    const keys = await caches.keys();
+    const name = keys.find(k => k.startsWith('zane-'));
+    return name ? name.replace('zane-', '') : null;
+  } catch (_) { return null; }
+}
+
+// Wipes both cache layers a stale deploy can hide behind: the SW's
+// CacheStorage entries AND the IndexedDB precompile cache (zane-precompile,
+// see index.html's loader) — a stale record in the latter alone keeps
+// serving old transpiled JS even after CacheStorage is cleared, since it's
+// keyed by content hash and never touched by a plain cache wipe. Mirrors
+// index.html's own makeClearCacheButton, which can't call into LB (runs
+// before store.js loads) and so stays a separate vanilla-JS copy.
+async function clearPrecompileCaches() {
+  if ('caches' in window) {
+    try { const keys = await caches.keys(); await Promise.all(keys.map(k => caches.delete(k))); } catch {}
+  }
+  if ('indexedDB' in window) {
+    await new Promise(resolve => {
+      try {
+        const req = indexedDB.deleteDatabase('zane-precompile');
+        req.onsuccess = req.onerror = req.onblocked = () => resolve();
+      } catch { resolve(); }
+    });
+  }
+}
+
+// Clears both cache layers above, then reloads via a cache-busted URL.
+// window.location.reload(true)'s "force" argument is a removed, no-op
+// legacy API in modern browsers — a plain reload after clearing caches is
+// still served by whichever service worker is CURRENTLY active (an update
+// may be waiting but not yet activated), and that worker's own network
+// fallback fetch can still be answered by the browser's HTTP cache, a
+// layer entirely below CacheStorage that clearing it never touches. A
+// unique ?_v= query string guarantees no HTTP cache entry exists for this
+// exact URL, and sw.js's fetch handler already treats any ?_v= request as
+// always-network (see the version-check probe in checkSwUpdate) — so this
+// reliably gets the same fresh result an actual SW update does.
+async function clearCachesAndReload() {
+  await clearPrecompileCaches();
+  window.location.href = window.location.pathname + '?_v=' + Date.now() + window.location.hash;
+}
+
 window.LB = {
   supabase: _supabase,
+  clearPrecompileCaches, clearCachesAndReload,
   SUPABASE_URL, SUPABASE_ANON_KEY, PUSHOVER_URL, WEB_PUSH_URL, fnFetch,
   subscribeWebPush, unsubscribeWebPush, getWebPushSubscription,
   QS_EMAILS, hasQuickSwitchSession, quickSwitch, saveQsName, getQsName,
@@ -3308,17 +3553,20 @@ window.LB = {
   uid, todayISO, fmtISO, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate,
   effReps, e1rm, isImprovement, isDecline, bestE1rmForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, latestBodyweight, inferCurrentExIdx, calcBlended,
   refreshExerciseBests, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries,
-  computeNextTrainingDate, computeNextReminderAt,
+  computeNextReminderAt,
   cancelPushover, adminSendEmail,
   subscribeToChanges,
   openStatusPeriod, closeStatusPeriod, updateStatusPeriodStart, clearStatusMode,
   startDeload, endDeload, deloadElapsed, deloadDaysRemaining, deloadPlanDays,
   loadClientStore, loadCoachClientsStatus, reloadCoachingState, enableSelfCoaching, inviteClient, respondToCoachingInvite, endCoaching,
   addCoachingNote, markCoachingNotesRead, loadCoachingNotes, loadCoachingThreads, createCoachingThread, deleteCoachingThread, getOrCreateCoachingThread, uploadChatImage,
+  unreadCoachingNotes, isNoteFromClient, techniqueRounds, groupBySuperset, supersetLabel, timeAgo, dayLabel, cyclePosFromStartDate, mergeCollectionById, caloriesFromMacros, detectCacheVersion,
   loadCoachingMacros, addCoachingMacros,
   diffSchedule,
   checkinWeekStart, submitCheckin, loadCheckins, deleteCheckin, loadCoachCheckinStatus, requestCheckin, setCheckinEnabled, loadCheckinSchema, saveCheckinSchema, saveDefaultCheckinSchema,
   cardioWeekPrefill, detectCardioPRs,
+  cardioDistUnit, setCardioDistUnit, distToM, mToDisplay, fmtDistance, fmtPace, fmtSpeed, MI_TO_M, recentCardioTypes,
   isLoggedTrainingDay, plannedTrainingDay, isTrainingDayForDate, dayTargetFromMacros, macroAdherence, effectiveMacroTargets, dailyLogAdherence, dailyLogsWeekPrefill, weekPerformanceSignal,
   refreshHealthLogs,
+  pickGrowthRecipient, retractGrowthGrant, MESO_GROWTH_CEILING_DELTA,
 };

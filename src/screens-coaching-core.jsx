@@ -2,6 +2,29 @@
 
 const { useState: useStateC, useEffect: useEffectC, useRef: useRefC, useMemo: useMemoC } = React;
 
+// Check-in load state shared by ClientCheckInsTab (coach view, -detail.jsx)
+// and ClientCheckInTab (client/self view, -tabs.jsx) — both used to
+// hand-roll the identical checkins/loadErr/schema/coachingMacrosHistory
+// state + load effect.
+function useCoachingCheckins(coachingId) {
+  const [checkins, setCheckins] = useStateC(null);
+  const [loadErr, setLoadErr] = useStateC(false);
+  const [schema, setSchema] = useStateC(null);
+  const [coachingMacrosHistory, setCoachingMacrosHistory] = useStateC(null);
+
+  const load = () => LB.loadCheckins(coachingId)
+    .then(c => { setCheckins(c); setLoadErr(false); })
+    .catch(() => setLoadErr(true));
+  useEffectC(() => {
+    setLoadErr(false);
+    load();
+    LB.loadCheckinSchema(coachingId).then(s => setSchema(s)).catch(() => {});
+    LB.loadCoachingMacros(coachingId).then(data => setCoachingMacrosHistory(data)).catch(() => {});
+  }, [coachingId]);
+
+  return { checkins, loadErr, setLoadErr, schema, setSchema, coachingMacrosHistory, load };
+}
+
 // Fixed amber pill shown while a coach's edit to a client's plan failed to
 // sync. syncStore now throws on a real write failure, so this surfaces it
 // instead of the edit silently not persisting. The next edit retries the diff.
@@ -36,16 +59,7 @@ function fmtDate(iso) {
   return d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: '2-digit' });
 }
 
-function fmtRelative(iso) {
-  if (!iso) return '';
-  const diff = Date.now() - new Date(iso).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return 'just now';
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  return `${Math.floor(hrs / 24)}d ago`;
-}
+function fmtRelative(iso) { return LB.timeAgo(iso); }
 
 
 
@@ -178,12 +192,13 @@ function CoachingPendingBanner({ store, setStore, userId }) {
 // Small banner on home screen when there are unread coach notes.
 
 function CoachingUnreadBanner({ store, userId, onOpen }) {
-  const notes = store.coaching?.unreadNotes || [];
+  // Same filtered source CoachingBannerGroup uses to decide whether to render
+  // this at all — recomputing independently is exactly how this banner ended
+  // up showing an unfiltered count/preview that disagreed with its own parent.
+  const notes = LB.unreadCoachingNotes(store);
   if (!notes.length) return null;
 
-  // Determine direction: are these messages from a client (user is coach) or from a coach (user is client)?
-  const clientIds = new Set((store.coaching?.asCoach || []).map(c => c.clientId));
-  const fromClient = notes.some(n => clientIds.has(n.authorId));
+  const fromClient = LB.isNoteFromClient(store, notes);
   const label = fromClient ? 'NEW MESSAGE FROM CLIENT' : 'NEW MESSAGE FROM COACH';
   const labelPlural = fromClient ? 'NEW MESSAGES FROM CLIENTS' : 'NEW MESSAGES FROM COACH';
 
@@ -223,16 +238,28 @@ function ChatThread({ thread, coachingId, userId, otherName, unreadNotes, onBack
   const [sending, setSending] = useStateC(false);
   const [imageFile, setImageFile] = useStateC(null);
   const [imagePreview, setImagePreview] = useStateC(null);
+  const [lightboxSrc, setLightboxSrc] = useStateC(null);
   const bottomRef = useRefC(null);
 
-  const pickImage = (e) => {
-    const file = e.target.files?.[0];
-    e.target.value = '';
+  const attachImageFile = (file) => {
     if (!file) return;
     setImageFile(file);
     const reader = new FileReader();
     reader.onload = ev => setImagePreview(ev.target.result);
     reader.readAsDataURL(file);
+  };
+  const pickImage = (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    attachImageFile(file);
+  };
+  // Paste an image straight from the clipboard (screenshot, copied photo…)
+  // into the message box, same as picking a file.
+  const onPasteMessage = (e) => {
+    const item = Array.from(e.clipboardData?.items || []).find(it => it.type.startsWith('image/'));
+    if (!item) return;
+    e.preventDefault();
+    attachImageFile(item.getAsFile());
   };
 
   const reload = () => {
@@ -300,9 +327,8 @@ function ChatThread({ thread, coachingId, userId, otherName, unreadNotes, onBack
             <div key={n.id} style={{ display: 'flex', flexDirection: 'column', alignItems: isMe ? 'flex-end' : 'flex-start' }}>
               <div style={{ maxWidth: '80%', background: isMe ? 'var(--accent)' : UI.bgElevated, borderRadius: isMe ? '8px 8px 4px 8px' : '8px 8px 8px 4px', padding: '9px 12px', border: isMe ? 'none' : `0.5px solid ${UI.hairStrong}` }}>
                 {(n.attachments || []).map((a, ai) => (
-                  <a key={ai} href={a.url} target="_blank" rel="noopener noreferrer" style={{ display: 'block', marginBottom: n.body ? 8 : 0 }}>
-                    <img src={a.url} alt={a.name || 'image'} style={{ maxWidth: '100%', maxHeight: 300, borderRadius: 4, display: 'block' }} />
-                  </a>
+                  <img key={ai} src={a.url} alt={a.name || 'image'} onClick={() => setLightboxSrc(a.url)}
+                    style={{ maxWidth: '100%', maxHeight: 300, borderRadius: 4, display: 'block', marginBottom: n.body ? 8 : 0, cursor: 'pointer' }} />
                 ))}
                 {n.body && <div style={{ fontSize: 13, color: isMe ? '#0a0805' : UI.ink, fontFamily: UI.fontUi, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{n.body}</div>}
               </div>
@@ -332,6 +358,7 @@ function ChatThread({ thread, coachingId, userId, otherName, unreadNotes, onBack
             value={body}
             onChange={e => setBody(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && !e.shiftKey && send()}
+            onPaste={onPasteMessage}
             placeholder="Message…"
             style={{ flex: 1, background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 6, padding: '10px 16px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, outline: 'none' }}
           />
@@ -341,6 +368,7 @@ function ChatThread({ thread, coachingId, userId, otherName, unreadNotes, onBack
         </div>
         <div style={{ height: 'env(safe-area-inset-bottom, 0px)' }} />
       </div>
+      <ImageLightbox src={lightboxSrc} onClose={() => setLightboxSrc(null)} />
     </>
   );
 }

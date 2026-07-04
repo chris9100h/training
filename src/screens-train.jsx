@@ -3,12 +3,8 @@
    swap-exercise sheet, rest timer, abandon flow).
 */
 
-const { useState: useStateT, useEffect: useEffectT, useRef: useRefT, useMemo: useMemoT } = React;
+const { useState: useStateT, useEffect: useEffectT, useRef: useRefT, useMemo: useMemoT, useLayoutEffect: useLayoutEffectT } = React;
 
-const CARDIO_DIST_KEY_T = 'logbook-cardio-dist-unit';
-const MI_TO_M_T = 1609.344;
-function mToDisplayT(m, unit) { return m == null ? '' : unit === 'mi' ? (m / MI_TO_M_T).toFixed(2) : (m / 1000).toFixed(2); }
-function distToMT(val, unit) { const n = parseFloat(val); return isNaN(n) ? null : unit === 'mi' ? Math.round(n * MI_TO_M_T) : Math.round(n * 1000); }
 
 // ─── Mesocycle helpers ─────────────────────────────────────────────────────────
 const MESO_KEY = 'logbook-meso-state';
@@ -144,7 +140,7 @@ function applyMesoSetDeltaFromState(it, dayId, mesoState) {
   const delta = (mesoState.deltas || {})[it.exId + '_' + dayId];
   if (!delta) return it;
   const base = it.sets || 1;
-  return { ...it, sets: Math.min(base + 4, Math.max(1, base + delta)) };
+  return { ...it, sets: Math.min(base + LB.MESO_GROWTH_CEILING_DELTA, Math.max(1, base + delta)) };
 }
 function applyMesoSetDelta(it, dayId, scheduleId, mesoStates) {
   if (!dayId || !scheduleId) return it;
@@ -229,6 +225,43 @@ function KbCell({ text, placeholder, style, disabled, onActivate }) {
       {empty ? <span style={{ color: UI.inkGhost }}>{placeholder}</span> : text}
     </div>
   );
+}
+
+// Optional "+ Partials" finisher on the last round of a Drop Set / Myo-Rep /
+// Myo-Rep Match / AMRAP Variations chain — collapsed by default (0 = no-op,
+// nothing written), tap to reveal the same stepper Lengthened Partials uses.
+function FinisherPartials({ count, onChange }) {
+  const [open, setOpen] = useStateT(count > 0);
+  if (!open) return (
+    <button onClick={() => setOpen(true)} style={{
+      background: 'none', border: 'none', color: UI.inkFaint,
+      fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.08em',
+      padding: '4px 4px 8px', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+    }}>+ PARTIALS</button>
+  );
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px 4px 8px' }}>
+      <span className="micro" style={{ color: UI.inkFaint }}>Partials</span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <button onClick={() => onChange(Math.max(0, count - 1))} style={{ width: 28, height: 28, borderRadius: 4, border: `1px solid ${UI.hairStrong}`, background: 'transparent', color: UI.inkFaint, fontSize: 16, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', WebkitTapHighlightColor: 'transparent' }}>−</button>
+        <span className="num" style={{ fontSize: 16, minWidth: 14, textAlign: 'center', color: count > 0 ? UI.gold : UI.inkFaint }}>{count}</span>
+        <button onClick={() => onChange(count + 1)} style={{ width: 28, height: 28, borderRadius: 4, border: `1px solid ${UI.hairStrong}`, background: 'transparent', color: UI.inkFaint, fontSize: 16, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', WebkitTapHighlightColor: 'transparent' }}>+</button>
+      </div>
+    </div>
+  );
+}
+
+// Drop Set / Myo-Rep(-Match) / AMRAP Variations chains edit inside their own
+// sheet (IntensityChainSheet, see the Sheet rendered near the Intensity
+// picker below) rather than inline in the exercise list. The sheet's header
+// is a plain flex item (not position:sticky — see IntensityChainSheet) sitting
+// outside the rows' own scrollbox, so bringing the row actually being typed
+// into into view is just a plain scrollIntoView within that small, bounded
+// scrollbox — no margin needed, since there's no overlapping sticky header
+// in this scroll context to hide behind.
+function scrollChainRowIntoView(rowAttr, idx) {
+  const row = document.querySelector(`[${rowAttr}="${idx}"]`);
+  if (row) row.scrollIntoView({ behavior: 'auto', block: 'nearest' });
 }
 
 // ─── Plate Calculator ────────────────────────────────────────────────
@@ -424,9 +457,13 @@ function CustomKeyboard({ visible, field, onType, onBackspace, onAdjust, onConfi
       onPointerDown={e => { e.preventDefault(); e.stopPropagation(); }}
       onTouchStart={e => { e.preventDefault(); e.stopPropagation(); }}
       style={{ position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 95,
-      background: 'var(--bg)', borderTop: `0.5px solid var(--hair)`,
+      background: 'var(--bg)',
       padding: `5px 8px calc(env(safe-area-inset-bottom, 0px) + 5px)`,
     }}>
+      {/* knurled top edge — same grip-texture seam the rest of the kit uses,
+          in place of a flat hairline, so the keypad reads as a distinct
+          physical piece instead of just fading into the screen above it. */}
+      <div className="knurl" style={{ position: 'absolute', top: 0, left: 0, right: 0 }} />
       <div style={{ maxWidth: 480, margin: '0 auto', display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gridTemplateRows: `repeat(5, ${H}px)`, gap: 4 }}>
         {/* Row 1: ↓ 🏋 ↑ | ✓ (spans rows 1-4) */}
         <button style={act} onPointerDown={e => { e.preventDefault(); e.stopPropagation(); onAdjust(-1); }}>↓</button>
@@ -583,6 +620,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       jointFlags: {},
       pumpLowCounts: {},
       weightBoosts: {},
+      growthCounts: {},
       completions: existing?.completions ?? 0,
       updatedAt: new Date().toISOString(),
     };
@@ -821,11 +859,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // confirm, bulk check-all) is guarded to redirect or skip this set
     // instead of reaching here bare, but this is the backstop.
     if (lpTarget?.exIdx === exIdx && lpTarget?.setIdx === setIdx && !extraPatch) return;
-    // Drop-set/myo-rep only ever complete via finishDropSet/finishMyoSet
-    // (which build the whole patch themselves and never call completeSet) —
-    // a bare completeSet on their target set would mark it done with none of
-    // that data, so refuse outright rather than silently corrupting it.
-    if (dropSetIdx === setIdx || myoSetIdx === setIdx) return;
+    // Drop-set/myo-rep/AMRAP Variations only ever complete via their own
+    // finish*Set function (which builds the whole patch itself and never
+    // calls completeSet) — a bare completeSet on their target set would mark
+    // it done with none of that data, so refuse outright rather than
+    // silently corrupting it.
+    if (dropSetIdx === setIdx || myoSetIdx === setIdx || avSetIdx === setIdx) return;
     // Unlock AudioContext on this user gesture so the rest-timer beep works on iOS
     // even when the tempo feature is disabled (only other init path).
     try {
@@ -1048,9 +1087,50 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     }
   };
 
+  // Improvement / regression / new-best overlay — shared by finishDropSet,
+  // finishMyoSet, and finishAv (three byte-identical copies before this).
+  // completeSet keeps its own version since it additionally handles
+  // PROGRESSION UNLOCKED precedence, which the technique finishers don't need.
+  // firstSet is the technique's first/committed round ({kg, reps, ...}),
+  // passed through as-is (not reconstructed) so isImprovement/isDecline see
+  // exactly what they always did. Returns overlayHoldMs for finishSetNavigation.
+  const flashOverlayForCompletedSet = (targetIdx, firstSet) => {
+    const isDeloadSession = store.statusMode === 'deload' || session.isDeload;
+    let overlayHoldMs = 0;
+    if (!entry.sets[targetIdx]?.warmup && !isDeloadSession && firstSet.kg != null && firstSet.reps > 0) {
+      const prevWS = (last?.entry?.sets || []).filter(s => !s.warmup);
+      const wIdx = entry.sets.slice(0, targetIdx + 1).filter(s => !s.warmup).length - 1;
+      const prevSet = wIdx >= 0 ? prevWS[wIdx] : undefined;
+      const cE1rm = LB.e1rm(firstSet.kg, firstSet.reps);
+      const localBest = LB.bestE1rmForExercise(store, entry.exId, session.id);
+      const priorBest = Math.max(localBest, remoteBestE1rmRef.current[entry.exId] || 0);
+      const isNewBest = cE1rm > 0 && priorBest > 0 && cE1rm > priorBest && !newBestShownRef.current[entry.exId];
+      if (isNewBest) {
+        newBestShownRef.current[entry.exId] = true;
+        setNewBestSet(true); overlayHoldMs = 2500; setTimeout(() => setNewBestSet(false), 2500);
+      } else if (isImprovement(firstSet, prevSet)) {
+        setImprovedSet(true); overlayHoldMs = 2500; setTimeout(() => setImprovedSet(false), 2500);
+      } else {
+        const anyImpBefore = entry.sets.slice(0, targetIdx).some((s, k) => {
+          if (s.warmup) return false;
+          const wk = entry.sets.slice(0, k + 1).filter(x => !x.warmup).length - 1;
+          return isImprovement(s, wk >= 0 ? prevWS[wk] : undefined);
+        });
+        if (!anyImpBefore && isDecline(firstSet, prevSet) && store.settings?.showRegression !== false) {
+          setRegressionSet(true); overlayHoldMs = 2500; setTimeout(() => setRegressionSet(false), 2500);
+        }
+      }
+    }
+    return overlayHoldMs;
+  };
+
   const finishDropSet = (drops) => {
     if (!drops.length || dropSetIdx == null) return;
-    const first = drops[0];
+    // Optional finisher: partials tacked onto the last drop's failure point.
+    const finalDrops = finisherPartials > 0
+      ? drops.map((d, i) => i === drops.length - 1 ? { ...d, partials: finisherPartials } : d)
+      : drops;
+    const first = finalDrops[0];
     updateSession(sess => ({
       ...sess,
       entries: sess.entries.map((en, ei) => ei !== exIdx ? en : {
@@ -1061,7 +1141,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           reps: first.reps,
           done: true,
           technique: 'drop',
-          drops,
+          drops: finalDrops,
         }),
       }),
     }));
@@ -1077,33 +1157,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     lastCompleteRef.current = Date.now();
     const targetIdx = dropSetIdx;
     setDropSetIdx(null);
-    // Improvement / regression / new best overlays (same logic as completeSet)
-    const isDeloadSession = store.statusMode === 'deload' || session.isDeload;
-    let overlayHoldMs = 0;
-    if (!entry.sets[targetIdx]?.warmup && !isDeloadSession && first.kg != null && first.reps > 0) {
-      const prevWS = (last?.entry?.sets || []).filter(s => !s.warmup);
-      const wIdx = entry.sets.slice(0, targetIdx + 1).filter(s => !s.warmup).length - 1;
-      const prevSet = wIdx >= 0 ? prevWS[wIdx] : undefined;
-      const cE1rm = LB.e1rm(first.kg, first.reps);
-      const localBest = LB.bestE1rmForExercise(store, entry.exId, session.id);
-      const priorBest = Math.max(localBest, remoteBestE1rmRef.current[entry.exId] || 0);
-      const isNewBest = cE1rm > 0 && priorBest > 0 && cE1rm > priorBest && !newBestShownRef.current[entry.exId];
-      if (isNewBest) {
-        newBestShownRef.current[entry.exId] = true;
-        setNewBestSet(true); overlayHoldMs = 2500; setTimeout(() => setNewBestSet(false), 2500);
-      } else if (isImprovement(first, prevSet)) {
-        setImprovedSet(true); overlayHoldMs = 2500; setTimeout(() => setImprovedSet(false), 2500);
-      } else {
-        const anyImpBefore = entry.sets.slice(0, targetIdx).some((s, k) => {
-          if (s.warmup) return false;
-          const wk = entry.sets.slice(0, k + 1).filter(x => !x.warmup).length - 1;
-          return isImprovement(s, wk >= 0 ? prevWS[wk] : undefined);
-        });
-        if (!anyImpBefore && isDecline(first, prevSet) && store.settings?.showRegression !== false) {
-          setRegressionSet(true); overlayHoldMs = 2500; setTimeout(() => setRegressionSet(false), 2500);
-        }
-      }
-    }
+    setFinisherPartials(0);
+    const overlayHoldMs = flashOverlayForCompletedSet(targetIdx, first);
     // Rest timer + navigation — same superset-aware logic as completeSet, so
     // a drop-set finishing a round correctly jumps to the partner instead of
     // the plain navigate(1) this used to do regardless of grouping.
@@ -1112,14 +1167,18 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   };
 
   const cancelMyo = () => {
-    setMyoSetIdx(null); setMyoDrops([]); setMyoTechnique(null); setMyoTarget(null);
+    setMyoSetIdx(null); setMyoDrops([]); setMyoTechnique(null); setMyoTarget(null); setFinisherPartials(0);
     kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false;
     setKbField(null); setKbRaw(''); setKbFresh(false);
   };
 
   const finishMyoSet = (drops, technique) => {
     if (!drops.length || myoSetIdx == null) return;
-    const first = drops[0];
+    // Optional finisher: partials tacked onto the last mini's failure point.
+    const finalDrops = finisherPartials > 0
+      ? drops.map((d, i) => i === drops.length - 1 ? { ...d, partials: finisherPartials } : d)
+      : drops;
+    const first = finalDrops[0];
     updateSession(sess => ({
       ...sess,
       entries: sess.entries.map((en, ei) => ei !== exIdx ? en : {
@@ -1130,7 +1189,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           reps: first.reps,
           done: true,
           technique,
-          drops,
+          drops: finalDrops,
         }),
       }),
     }));
@@ -1142,34 +1201,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     recentCompleteRef.current[myoSetIdx] = Date.now();
     lastCompleteRef.current = Date.now();
     const targetIdx = myoSetIdx;
-    setMyoSetIdx(null); setMyoTechnique(null); setMyoDrops([]); setMyoTarget(null);
-    // Improvement / regression / new best overlays
-    const isDeloadSession = store.statusMode === 'deload' || session.isDeload;
-    let overlayHoldMs = 0;
-    if (!entry.sets[targetIdx]?.warmup && !isDeloadSession && first.kg != null && first.reps > 0) {
-      const prevWS = (last?.entry?.sets || []).filter(s => !s.warmup);
-      const wIdx = entry.sets.slice(0, targetIdx + 1).filter(s => !s.warmup).length - 1;
-      const prevSet = wIdx >= 0 ? prevWS[wIdx] : undefined;
-      const cE1rm = LB.e1rm(first.kg, first.reps);
-      const localBest = LB.bestE1rmForExercise(store, entry.exId, session.id);
-      const priorBest = Math.max(localBest, remoteBestE1rmRef.current[entry.exId] || 0);
-      const isNewBest = cE1rm > 0 && priorBest > 0 && cE1rm > priorBest && !newBestShownRef.current[entry.exId];
-      if (isNewBest) {
-        newBestShownRef.current[entry.exId] = true;
-        setNewBestSet(true); overlayHoldMs = 2500; setTimeout(() => setNewBestSet(false), 2500);
-      } else if (isImprovement(first, prevSet)) {
-        setImprovedSet(true); overlayHoldMs = 2500; setTimeout(() => setImprovedSet(false), 2500);
-      } else {
-        const anyImpBefore = entry.sets.slice(0, targetIdx).some((s, k) => {
-          if (s.warmup) return false;
-          const wk = entry.sets.slice(0, k + 1).filter(x => !x.warmup).length - 1;
-          return isImprovement(s, wk >= 0 ? prevWS[wk] : undefined);
-        });
-        if (!anyImpBefore && isDecline(first, prevSet) && store.settings?.showRegression !== false) {
-          setRegressionSet(true); overlayHoldMs = 2500; setTimeout(() => setRegressionSet(false), 2500);
-        }
-      }
-    }
+    setMyoSetIdx(null); setMyoTechnique(null); setMyoDrops([]); setMyoTarget(null); setFinisherPartials(0);
+    const overlayHoldMs = flashOverlayForCompletedSet(targetIdx, first);
     // Same superset-aware navigation as completeSet/finishDropSet — a myo-rep
     // finishing a round jumps to the partner instead of a plain navigate(1).
     const updatedSets = entry.sets.map((st, k) => k === targetIdx ? { ...st, done: true } : st);
@@ -1182,6 +1215,79 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // but the chosen partials count wasn't recorded yet.
   const finishLengthenedPartial = (setIdx) => {
     completeSet(setIdx, false, true, { technique: 'lengthened_partial', drops: { partials: lpCount } });
+  };
+
+  const finishAv = (drops) => {
+    if (!drops.length || avSetIdx == null) return;
+    // Optional finisher: partials tacked onto the last round's failure point.
+    const finalDrops = finisherPartials > 0
+      ? drops.map((d, i) => i === drops.length - 1 ? { ...d, partials: finisherPartials } : d)
+      : drops;
+    const first = finalDrops[0];
+    updateSession(sess => ({
+      ...sess,
+      entries: sess.entries.map((en, ei) => ei !== exIdx ? en : {
+        ...en,
+        sets: en.sets.map((st, si) => si !== avSetIdx ? st : {
+          ...st,
+          kg: first.kg,
+          reps: first.reps,
+          done: true,
+          technique: 'amrap_variations',
+          drops: finalDrops,
+        }),
+      }),
+    }));
+    setFlashSet(avSetIdx);
+    setTimeout(() => setFlashSet(null), 1400);
+    kbFieldRef.current = null; kbRawRef.current = ''; setKbField(null); setKbRaw('');
+    // Stamp the same ghost-click guards completeSet uses (see finishDropSet).
+    armKbShield();
+    recentCompleteRef.current[avSetIdx] = Date.now();
+    lastCompleteRef.current = Date.now();
+    const targetIdx = avSetIdx;
+    setAvSetIdx(null); setAvDrops([]); setFinisherPartials(0);
+    const overlayHoldMs = flashOverlayForCompletedSet(targetIdx, first);
+    // Same superset-aware navigation as completeSet/finishDropSet/finishMyoSet.
+    const updatedSets = entry.sets.map((st, k) => k === targetIdx ? { ...st, done: true } : st);
+    finishSetNavigation(targetIdx, updatedSets, overlayHoldMs, true);
+  };
+
+  // Drop Set / Myo-Rep(-Match) / AMRAP Variations share one editing sheet
+  // (IntensityChainSheet, rendered near the Intensity picker below) — at most
+  // one is ever open at a time. "Dirty" means losing it on discard would
+  // actually lose real work: more than the starting round, or a partials
+  // count already set. A single un-added activation kg/reps tweak doesn't
+  // count — canceling never touches the underlying set's own kg/reps/done
+  // (those are only written by finishDropSet/finishMyoSet/finishAv), so that
+  // alone is always a lossless cancel.
+  const activeChainDirty = () => {
+    if (dropSetIdx != null) return dropDrops.length > 1 || finisherPartials > 0;
+    if (myoSetIdx != null) return myoDrops.length > 1 || finisherPartials > 0;
+    if (avSetIdx != null) return avDrops.length > 1 || finisherPartials > 0;
+    return false;
+  };
+  const confirmDiscardChain = async () => {
+    if (!activeChainDirty()) return true;
+    return await confirm('Your progress on this set won\'t be saved.', { title: 'Discard changes?', ok: 'Discard', cancel: 'Keep editing', danger: true });
+  };
+  const closeChainSheet = () => {
+    if (dropSetIdx != null) { setDropSetIdx(null); setDropDrops([]); setFinisherPartials(0); }
+    else if (myoSetIdx != null) { cancelMyo(); return; }
+    else if (avSetIdx != null) { setAvSetIdx(null); setAvDrops([]); setFinisherPartials(0); }
+    kbFieldRef.current = null; kbRawRef.current = ''; setKbField(null); setKbRaw('');
+  };
+  const requestCloseChainSheet = async () => {
+    if (!await confirmDiscardChain()) return;
+    closeChainSheet();
+  };
+  // Guards the training header's home button — otherwise it navigates away
+  // unconditionally, silently discarding an in-progress chain sheet along
+  // with the rest of the (unmounted) training screen.
+  const requestGoHome = async () => {
+    if (!await confirmDiscardChain()) return;
+    closeChainSheet();
+    go({ name: 'home' });
   };
 
   const addSet = () => {
@@ -1297,13 +1403,14 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     if (dropSetIdx === idx) { finishDropSet(dropDropsRef.current); return; }
     if (myoSetIdx === idx) { finishMyoSet(myoDropsRef.current, myoTechnique); return; }
     if (lpTarget?.exIdx === exIdx && lpTarget?.setIdx === idx) { finishLengthenedPartial(idx); return; }
+    if (avSetIdx === idx) { finishAv(avDropsRef.current); return; }
     completeSet(idx, false, true);
   };
 
   const logCardio = () => {
     const dur = parseInt(cardioForm.duration, 10);
     if (!dur || dur <= 0) return;
-    const distM = cardioForm.distance ? distToMT(cardioForm.distance, cardioForm.distUnit) : null;
+    const distM = cardioForm.distance ? LB.distToM(cardioForm.distance, cardioForm.distUnit) : null;
     const data = { type: cardioForm.type.trim() || null, durationMinutes: dur, distanceM: distM, paceFeeling: cardioForm.paceFeeling, effort: cardioForm.effort };
     updateSession(sess => ({
       ...sess,
@@ -1687,21 +1794,39 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const [myoTarget, setMyoTarget] = useStateT(null);
   const [lpTarget, setLpTarget] = useStateT(null); // { exIdx, setIdx } | null — set is NOT done yet, replaces its checkbox with a stepper + FINISH button
   const [lpCount, setLpCount] = useStateT(0); // in-progress partials count for lpTarget, committed to the set only on Finish
-  // Persist intensity state so a background/resume on iOS doesn't wipe mid-set progress
+  const [avSetIdx, setAvSetIdx] = useStateT(null);
+  const [avDrops, setAvDrops] = useStateT([]); // [{ kg, reps, label }, ...] — AMRAP Variations rounds
+  const [avLabelFocusDi, setAvLabelFocusDi] = useStateT(null); // which round's variation-name box is focused (native text input, accent underline)
+  const avDropsRef = useRefT([]);
+  avDropsRef.current = avDrops;
+  // Shared across Drop Set / Myo-Rep / Myo-Rep Match / AMRAP Variations — only
+  // one of those is ever in flight at a time, so one counter suffices. Applied
+  // to the last round's drops entry on Finish; 0 = no-op, nothing written.
+  const [finisherPartials, setFinisherPartials] = useStateT(0);
+  // Persist intensity state so a background/resume on iOS doesn't wipe mid-set
+  // progress. This effect runs before the restore effect below on every fresh
+  // mount (declaration order), so on mount state is still all-null — without
+  // skipFirstClearRef, that first run would always wipe localStorage via the
+  // else branch a split second before the restore effect gets to read it,
+  // permanently defeating restoration across any navigate-away-and-back.
+  const skipFirstClearRef = useRefT(true);
   useEffectT(() => {
-    if (dropSetIdx != null || myoSetIdx != null || lpTarget != null) {
+    if (dropSetIdx != null || myoSetIdx != null || lpTarget != null || avSetIdx != null) {
       try {
         localStorage.setItem('logbook-intensity-state', JSON.stringify({
           sessionId, exIdx,
           dropSetIdx, dropDrops,
           myoSetIdx, myoDrops, myoTechnique, myoTarget,
           lpSetIdx: lpTarget?.setIdx ?? null, lpCount,
+          avSetIdx, avDrops,
+          finisherPartials,
         }));
       } catch {}
-    } else {
+    } else if (!skipFirstClearRef.current) {
       localStorage.removeItem('logbook-intensity-state');
     }
-  }, [dropSetIdx, dropDrops, myoSetIdx, myoDrops, myoTechnique, myoTarget, lpTarget, lpCount, sessionId, exIdx]);
+    skipFirstClearRef.current = false;
+  }, [dropSetIdx, dropDrops, myoSetIdx, myoDrops, myoTechnique, myoTarget, lpTarget, lpCount, avSetIdx, avDrops, finisherPartials, sessionId, exIdx]);
   useEffectT(() => {
     try {
       const raw = localStorage.getItem('logbook-intensity-state');
@@ -1713,6 +1838,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         setDropSetIdx(st.dropSetIdx);
         const dd = st.dropDrops || [];
         setDropDrops(dd); dropDropsRef.current = dd;
+        setFinisherPartials(st.finisherPartials || 0);
       }
       if (st.myoSetIdx != null && !targetEntry?.sets[st.myoSetIdx]?.done) {
         setMyoSetIdx(st.myoSetIdx);
@@ -1720,6 +1846,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         setMyoDrops(md); myoDropsRef.current = md;
         setMyoTechnique(st.myoTechnique || null);
         setMyoTarget(st.myoTarget ?? null);
+        setFinisherPartials(st.finisherPartials || 0);
       }
       // The set only ever gets marked done via the dedicated FINISH button
       // (which commits technique+drops in the same update), so — like
@@ -1727,6 +1854,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       if (st.lpSetIdx != null && !targetEntry?.sets[st.lpSetIdx]?.done) {
         setLpTarget({ exIdx, setIdx: st.lpSetIdx });
         setLpCount(st.lpCount || 0);
+      }
+      if (st.avSetIdx != null && !targetEntry?.sets[st.avSetIdx]?.done) {
+        setAvSetIdx(st.avSetIdx);
+        const ad = st.avDrops || [];
+        setAvDrops(ad); avDropsRef.current = ad;
+        setFinisherPartials(st.finisherPartials || 0);
       }
     } catch {}
   }, [sessionId, exIdx]);
@@ -1814,6 +1947,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         deltas: {},
         jointFlags: {},
         pumpLowCounts: {},
+        growthCounts: {},
         pendingMeso2: false,
         // weightBoosts carries over to meso 2
         updatedAt: new Date().toISOString(),
@@ -2111,18 +2245,64 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     record.volume = volume;
     record.exIds = mesoVolumeExIds;
 
-    // "Not enough" → +1 on main lift (first exercise of the muscle group) only
-    // "Pushed my limits" → -1 on main lift only
-    // "Too much" → -1 on every exercise of the muscle group
+    // "Not enough" → rotates a +1 among the muscle group's exercises (see
+    // LB.pickGrowthRecipient); "Pushed my limits" → -1 on main lift only;
+    // "Too much" → -1 on every exercise of the muscle group.
     const mainExId = mesoVolumeExIds[0];
     const namesByKey = {};
-    const newContrib = {};
+    const keys = [];
     mesoVolumeExIds.forEach(exId => {
       const key = exId + '_' + session.dayId;
+      keys.push(key);
       namesByKey[key] = session.entries.find(e => e.exId === exId)?.name || '';
+    });
+
+    // Growth rotation for "not_enough": whichever exercise still below its
+    // own per-exercise ceiling (base+4, enforced separately by
+    // applyMesoSetDeltaFromState) has the fewest growth grants so far this
+    // meso wins (ties toward the main lift) — see LB.pickGrowthRecipient for
+    // the full rule, including how a mid-meso exercise swap-in is seeded so
+    // it can't cut ahead of an established lift. With only one exercise this
+    // still always picks it — same outcome as before this feature existed —
+    // except growth now correctly stops once that exercise hits its own
+    // ceiling instead of letting the underlying counter climb unboundedly
+    // past it forever (harmless before since only the clamped value was ever
+    // applied, but this also means a later shrink is no longer silently
+    // swallowed once the counter has drifted arbitrarily far past the cap).
+    // growthCounts is kept separate from deltas specifically so an unrelated
+    // shrink (soreness/joint) never distorts turn fairness; it is not frozen
+    // by "too_much" shrinking deltas back down — that exercise simply becomes
+    // eligible again once its delta drops back under the ceiling.
+    // LB.pickGrowthRecipient is called twice on purpose: once here (using
+    // `mesoState`) to decide `recipientKey` for the newContrib built below,
+    // and again inside the saveMesoState updater (using the fresh `m`
+    // parameter) for the actual write — so a rare double-invocation of this
+    // handler before React re-renders can never silently lose a prior grant
+    // by persisting a value computed from stale state. It's a pure,
+    // deterministic function, so calling it twice with the same inputs is
+    // cheap and safe.
+    //
+    // prevGrantedTo (which key, if any, this record's own last answer granted
+    // a set to) is derived from record.contrib rather than a separately
+    // tracked field — commitContrib already guarantees exactly one key ever
+    // holds a contrib of 1 for this question type, so there's nothing to keep
+    // in sync by hand.
+    const prevGrantedTo = Object.keys(record.contrib || {}).find(k => record.contrib[k] === 1) ?? null;
+    let recipientKey = null;
+    if (volume === 'not_enough') {
+      recipientKey = LB.pickGrowthRecipient(keys, mesoState.deltas, mesoState.growthCounts, prevGrantedTo).recipientKey;
+      saveMesoState(m => ({ ...m, growthCounts: LB.pickGrowthRecipient(keys, m.deltas, m.growthCounts, prevGrantedTo).growthCounts }));
+    } else if (prevGrantedTo) {
+      // Answer changed away from not_enough this session — undo the previous grant.
+      saveMesoState(m => ({ ...m, growthCounts: LB.retractGrowthGrant(m.growthCounts, prevGrantedTo) }));
+    }
+
+    const newContrib = {};
+    keys.forEach((key, i) => {
+      const exId = mesoVolumeExIds[i];
       let want = 0;
       if (volume === 'too_much') want = -1;
-      else if (exId === mainExId && volume === 'not_enough') want = 1;
+      else if (key === recipientKey) want = 1;
       else if (exId === mainExId && volume === 'pushed') want = -1;
       newContrib[key] = want;
     });
@@ -2342,6 +2522,19 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const tempoTimerRef = useRefT(null);
   const audioCtxRef = useRefT(null);
   const [kbField, setKbField] = useStateT(null); // { setIdx, field }
+  // IntensityChainSheet needs the keyboard's actual rendered height (not a
+  // guessed constant — CustomKeyboard's real height varies with
+  // env(safe-area-inset-bottom), so a hardcoded number was off by exactly
+  // that amount and left the sheet overlapping the keyboard's top row).
+  // useLayoutEffect (not useEffect) measures synchronously before paint, so
+  // the sheet renders at the right height on the very first frame — no
+  // visible jump once the keyboard mounts.
+  const [customKbHeight, setCustomKbHeight] = useStateT(0);
+  useLayoutEffectT(() => {
+    if (!kbField) return;
+    const el = document.querySelector('[data-keyboard]');
+    if (el) setCustomKbHeight(el.getBoundingClientRect().height);
+  }, [kbField]);
   const [kbRaw, setKbRaw] = useStateT('');
   const [kbFresh, setKbFresh] = useStateT(false);
   const kbFieldRef = useRefT(null);
@@ -2358,15 +2551,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     kbShieldTimerRef.current = setTimeout(() => setKbShield(false), 400);
   };
   const [plateCalcOpen, setPlateCalcOpen] = useStateT(false);
-  const [cardioForm, setCardioForm] = useStateT({ type: '', duration: '', distance: '', paceFeeling: null, effort: null, distUnit: localStorage.getItem(CARDIO_DIST_KEY_T) || 'km' });
-  const cardioTypeChips = useMemoT(() => {
-    const seen = new Set(); const result = [];
-    for (const l of (store.cardioLogs || [])) {
-      if (l.type && !seen.has(l.type)) { seen.add(l.type); result.push(l.type); }
-      if (result.length >= 6) break;
-    }
-    return result;
-  }, [store.cardioLogs]);
+  const [cardioForm, setCardioForm] = useStateT({ type: '', duration: '', distance: '', paceFeeling: null, effort: null, distUnit: LB.cardioDistUnit() });
+  const cardioTypeChips = useMemoT(() => LB.recentCardioTypes(store.cardioLogs), [store.cardioLogs]);
   const pendingFocusRef = useRefT(null);
   // Records when a set was last completed via the checkbox; used to ignore
   // iOS ghost-clicks that fire 200-400ms after completion and would otherwise
@@ -2386,9 +2572,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   }, [exIdx]);
   useEffectT(() => {
     if (!entry?.isCardio) return;
-    const du = localStorage.getItem(CARDIO_DIST_KEY_T) || 'km';
+    const du = LB.cardioDistUnit();
     const cd = entry.cardioData;
-    setCardioForm(cd ? { type: cd.type || '', duration: cd.durationMinutes ? String(cd.durationMinutes) : '', distance: cd.distanceM != null ? mToDisplayT(cd.distanceM, du) : '', paceFeeling: cd.paceFeeling ?? null, effort: cd.effort ?? null, distUnit: du } : { type: '', duration: '', distance: '', paceFeeling: null, effort: null, distUnit: du });
+    setCardioForm(cd ? { type: cd.type || '', duration: cd.durationMinutes ? String(cd.durationMinutes) : '', distance: cd.distanceM != null ? LB.mToDisplay(cd.distanceM, du) : '', paceFeeling: cd.paceFeeling ?? null, effort: cd.effort ?? null, distUnit: du } : { type: '', duration: '', distance: '', paceFeeling: null, effort: null, distUnit: du });
   }, [exIdx, sessionId]);
   // Intentionally NOT keyed on exIdx/entry — Paceguard (tempo) is meant to
   // keep running across exercise navigation once started, stopping only on
@@ -2513,10 +2699,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     setKbField({ setIdx: 'drop', dropIdx, field });
     setKbRaw(val);
     setKbFresh(true);
-    setTimeout(() => {
-      const el = document.querySelector('[data-drop-actions]');
-      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    }, 80);
+    setTimeout(() => scrollChainRowIntoView('data-drop-row', dropIdx), 80);
   };
 
   const activateMyo = (dropIdx, field) => {
@@ -2530,10 +2713,21 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     setKbField({ setIdx: 'myo', dropIdx, field });
     setKbRaw(val);
     setKbFresh(true);
-    setTimeout(() => {
-      const el = document.querySelector('[data-myo-actions]');
-      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    }, 80);
+    setTimeout(() => scrollChainRowIntoView('data-myo-row', dropIdx), 80);
+  };
+
+  const activateAvKb = (dropIdx, field) => {
+    const d = avDropsRef.current[dropIdx];
+    const val = field === 'kg'
+      ? (d?.kg != null ? String(d.kg).replace('.', ',') : '')
+      : (d?.reps != null ? String(d.reps) : '');
+    kbFieldRef.current = { setIdx: 'av', dropIdx, field };
+    kbRawRef.current = val;
+    kbFreshRef.current = true;
+    setKbField({ setIdx: 'av', dropIdx, field });
+    setKbRaw(val);
+    setKbFresh(true);
+    setTimeout(() => scrollChainRowIntoView('data-av-row', dropIdx), 80);
   };
 
   const kbApply = (newRaw, field, setIdx) => {
@@ -2558,6 +2752,18 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       } else {
         const num = newRaw === '' ? null : parseInt(newRaw, 10);
         if (newRaw === '' || !isNaN(num)) setMyoDrops(prev => prev.map((d, i) => i === dropIdx ? { ...d, reps: num ?? null } : d));
+      }
+      return;
+    }
+    if (setIdx === 'av') {
+      const dropIdx = kbFieldRef.current?.dropIdx;
+      if (typeof dropIdx !== 'number') return;
+      if (field === 'kg') {
+        const num = newRaw === '' ? null : parseFloat(newRaw.replace(',', '.'));
+        if (newRaw === '' || !isNaN(num)) setAvDrops(prev => prev.map((d, i) => i === dropIdx ? { ...d, kg: num ?? null } : d));
+      } else {
+        const num = newRaw === '' ? null : parseInt(newRaw, 10);
+        if (newRaw === '' || !isNaN(num)) setAvDrops(prev => prev.map((d, i) => i === dropIdx ? { ...d, reps: num ?? null } : d));
       }
       return;
     }
@@ -2653,6 +2859,25 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       }
       return;
     }
+    if (setIdx === 'av') {
+      const { dropIdx } = kbFieldRef.current;
+      if (field === 'kg') {
+        const cur = parseFloat(kbRawRef.current.replace(',', '.')) || 0;
+        const step = (exercise?.equipment && store.settings?.equipmentConfig?.[exercise.equipment]?.increment) || 1.25;
+        const next = Math.max(0, Math.round((cur + dir * step) * 100) / 100);
+        const newRaw = String(next).replace('.', ',');
+        kbRawRef.current = newRaw;
+        setKbRaw(newRaw);
+        setAvDrops(prev => prev.map((d, i) => i === dropIdx ? { ...d, kg: next } : d));
+      } else {
+        const cur = parseInt(kbRawRef.current, 10) || 0;
+        const next = Math.max(0, cur + dir);
+        kbRawRef.current = String(next);
+        setKbRaw(String(next));
+        setAvDrops(prev => prev.map((d, i) => i === dropIdx ? { ...d, reps: next } : d));
+      }
+      return;
+    }
     if (field === 'kg') {
       const cur = parseFloat(kbRawRef.current.replace(',', '.')) || 0;
       const step = (exercise?.equipment && store.settings?.equipmentConfig?.[exercise.equipment]?.increment) || 1.25;
@@ -2720,6 +2945,23 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       }
       return;
     }
+    if (setIdx === 'av') {
+      const { dropIdx } = kbFieldRef.current;
+      kbApply(kbRawRef.current, field, setIdx);
+      if (field === 'kg') {
+        activateAvKb(dropIdx, 'reps');
+      } else {
+        const drops = avDropsRef.current;
+        if (dropIdx + 1 < drops.length) {
+          setTimeout(() => activateAvKb(dropIdx + 1, 'kg'), 50);
+        } else {
+          kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false;
+          setKbField(null); setKbRaw(''); setKbFresh(false);
+          armKbShield();
+        }
+      }
+      return;
+    }
     _log(`kbConfirm: set${setIdx} field=${field} raw='${kbRawRef.current}'`);
     kbApply(kbRawRef.current, field, setIdx);
     if (field === 'kg') {
@@ -2730,7 +2972,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       activateKb(setIdx, 'repsR');
     } else {
       _log(`kbConfirm: ${field}→completeSet(${setIdx})`);
-      if (dropSetIdx === setIdx || myoSetIdx === setIdx) return;
+      if (dropSetIdx === setIdx || myoSetIdx === setIdx || avSetIdx === setIdx) return;
       if (lpTarget?.exIdx === exIdx && lpTarget?.setIdx === setIdx) return;
       completeSet(setIdx, false, true);
     }
@@ -3319,7 +3561,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // bulk-check has no way to supply (drop weights, myo minis, partials
     // count) — leave that one set for the user to finish individually rather
     // than silently marking it done with none of that data recorded.
-    const skipIdx = lpTarget?.exIdx === exIdx ? lpTarget.setIdx : (dropSetIdx ?? myoSetIdx ?? -1);
+    const skipIdx = lpTarget?.exIdx === exIdx ? lpTarget.setIdx : (dropSetIdx ?? myoSetIdx ?? avSetIdx ?? -1);
     updateSession(sess => ({
       ...sess,
       entries: sess.entries.map((e, i) => i === exIdx
@@ -3578,7 +3820,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             </button>
           </>)}
         </div>
-        <button onClick={() => go({ name: 'home' })} style={{
+        <button onClick={requestGoHome} style={{
           width: 32, height: 32, borderRadius: 4,
           border: `1px solid ${UI.hairStrong}`, background: 'transparent',
           color: UI.inkSoft, cursor: 'pointer',
@@ -3751,7 +3993,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               {entry.cardioData && (
                 <div className="num" style={{ fontSize: 12, color: UI.inkSoft, marginBottom: 16 }}>
                   {entry.cardioData.durationMinutes}min
-                  {entry.cardioData.distanceM != null && ` · ${mToDisplayT(entry.cardioData.distanceM, cardioForm.distUnit)} ${cardioForm.distUnit}`}
+                  {entry.cardioData.distanceM != null && ` · ${LB.mToDisplay(entry.cardioData.distanceM, cardioForm.distUnit)} ${cardioForm.distUnit}`}
                   {entry.cardioData.effort != null && ` · effort ${entry.cardioData.effort}/10`}
                 </div>
               )}
@@ -3809,7 +4051,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                     <span className="label">Distance</span>
                     <div style={{ display: 'flex', gap: 4 }}>
                       {['km','mi'].map(u => (
-                        <button key={u} onClick={() => { localStorage.setItem(CARDIO_DIST_KEY_T, u); setCardioForm(f => ({ ...f, distUnit: u })); }} style={{ padding: '2px 8px', borderRadius: 4, border: `1px solid ${cardioForm.distUnit === u ? UI.gold : UI.hairStrong}`, background: cardioForm.distUnit === u ? UI.goldFaint : 'transparent', color: cardioForm.distUnit === u ? UI.gold : UI.inkFaint, fontFamily: UI.fontUi, fontSize: 9, letterSpacing: '0.1em', cursor: 'pointer' }}>{u}</button>
+                        <button key={u} onClick={() => { LB.setCardioDistUnit(u); setCardioForm(f => ({ ...f, distUnit: u })); }} style={{ padding: '2px 8px', borderRadius: 4, border: `1px solid ${cardioForm.distUnit === u ? UI.gold : UI.hairStrong}`, background: cardioForm.distUnit === u ? UI.goldFaint : 'transparent', color: cardioForm.distUnit === u ? UI.gold : UI.inkFaint, fontFamily: UI.fontUi, fontSize: 9, letterSpacing: '0.1em', cursor: 'pointer' }}>{u}</button>
                       ))}
                     </div>
                   </div>
@@ -4022,7 +4264,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                     const isDropActive = dropSetIdx === i && !s.done;
                     const isMyoActive = myoSetIdx === i && !s.done;
                     const isLpActive = lpTarget?.exIdx === exIdx && lpTarget?.setIdx === i && !s.done;
-                    const isIntensityActive = isDropActive || isMyoActive;
+                    const isAvActive = avSetIdx === i && !s.done;
+                    const isIntensityActive = isDropActive || isMyoActive || isAvActive;
                     return (
                     <div data-kb-row={i} style={{
                       display: 'grid',
@@ -4042,14 +4285,19 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                       }}>{isWarmupRow ? `W${warmupRowNum}` : workingRowNum}</div>
 
                       {isIntensityActive ? null : isNoWeightReps ? <div /> : (
-                        (s.technique === 'drop' || s.technique === 'myorep' || s.technique === 'myorep_match' || s.technique === 'lengthened_partial') && s.done
-                          ? <span style={{
-                              display: 'inline-block', fontFamily: UI.fontUi, fontSize: 8,
-                              fontWeight: 700, letterSpacing: '0.12em', color: UI.gold,
-                              background: 'rgba(var(--accent-rgb),0.12)',
-                              border: '0.5px solid rgba(var(--accent-rgb),0.35)',
-                              borderRadius: 4, padding: '2px 6px',
-                            }}>{s.technique === 'drop' ? 'DROP SET' : s.technique === 'myorep_match' ? 'MYO MATCH' : s.technique === 'myorep' ? 'MYO REP' : 'PARTIALS'}</span>
+                        (s.technique === 'drop' || s.technique === 'myorep' || s.technique === 'myorep_match' || s.technique === 'lengthened_partial' || s.technique === 'amrap_variations') && s.done
+                          ? <div style={{ display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'flex-start' }}>
+                              <span style={{
+                                display: 'inline-block', fontFamily: UI.fontUi, fontSize: 8,
+                                fontWeight: 700, letterSpacing: '0.12em', color: UI.gold,
+                                background: 'rgba(var(--accent-rgb),0.12)',
+                                border: '0.5px solid rgba(var(--accent-rgb),0.35)',
+                                borderRadius: 4, padding: '2px 6px',
+                              }}>{LB.techniqueRounds(s, { exName: entry.name }).badge}</span>
+                              {LB.techniqueRounds(s, { exName: entry.name }).anyVaried && (
+                                <span className="num" style={{ fontSize: 9, color: UI.inkGhost }}>{s.drops[0]?.label || entry.name}</span>
+                              )}
+                            </div>
                           : <div className="num" style={{ fontSize: 11, color: UI.inkFaint }}>
                               {isWarmupRow
                                 ? <span style={{ color: UI.inkGhost }}>{s.warmupPct}%</span>
@@ -4109,7 +4357,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                             updateSet(i, { done: false });
                             return;
                           }
-                          if (dropSetIdx === i || myoSetIdx === i) return;
+                          if (dropSetIdx === i || myoSetIdx === i || avSetIdx === i) return;
                           if (!isNoWeightReps && !isBodyweight && s.kg == null) return;
                           _log(`row${i} → completeSet`);
                           completeSet(i, false, true);
@@ -4138,7 +4386,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                           <button onClick={() => { setLpTarget(null); setLpCount(0); }} style={{ background: 'none', border: 'none', color: UI.inkFaint, fontSize: 10, fontFamily: UI.fontUi, cursor: 'pointer', padding: '2px 4px', letterSpacing: '0.08em' }}>CANCEL</button>
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px 4px 10px' }}>
-                          <span className="micro" style={{ color: UI.inkFaint }}>Partials in the stretch</span>
+                          <span className="micro" style={{ color: UI.inkFaint }}>Partials</span>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                             <button onClick={() => setLpCount(c => Math.max(0, c - 1))} style={{ width: 32, height: 32, borderRadius: 4, border: `1px solid ${UI.hairStrong}`, background: 'transparent', color: UI.inkFaint, fontSize: 18, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', WebkitTapHighlightColor: 'transparent' }}>−</button>
                             <span className="num" style={{ fontSize: 18, minWidth: 16, textAlign: 'center', color: lpCount > 0 ? UI.gold : UI.inkFaint }}>{lpCount}</span>
@@ -4161,88 +4409,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                       </div>
                     );
                   })()}
-                  {dropSetIdx === i && !s.done && (
-                    <div style={{ marginLeft: 36, paddingLeft: 10, borderLeft: `2px solid rgba(var(--accent-rgb),0.3)` }}>
-                      <div style={{ position: 'sticky', top: 0, background: 'var(--bg)', zIndex: 1, paddingBottom: 2 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 4px 2px' }}>
-                          <span className="micro-gold">DROP SET</span>
-                          <button onClick={() => {
-                            setDropSetIdx(null); setDropDrops([]);
-                            kbFieldRef.current = null; kbRawRef.current = ''; setKbField(null); setKbRaw('');
-                          }} style={{ background: 'none', border: 'none', color: UI.inkFaint, fontSize: 10, fontFamily: UI.fontUi, cursor: 'pointer', padding: '2px 4px', letterSpacing: '0.08em' }}>CANCEL</button>
-                        </div>
-                      </div>
-                      {dropDrops.map((d, di) => {
-                        const isKgA = kbField?.setIdx === 'drop' && kbField?.dropIdx === di && kbField?.field === 'kg';
-                        const isRepsA = kbField?.setIdx === 'drop' && kbField?.dropIdx === di && kbField?.field === 'reps';
-                        return (
-                          <div key={di} data-drop-row={di} style={{ display: 'grid', gridTemplateColumns: '28px 1fr 72px 56px 28px', gap: 8, alignItems: 'center', padding: '5px 4px' }}>
-                            <div style={{
-                              width: 24, height: 24, borderRadius: 4, flexShrink: 0,
-                              background: 'rgba(var(--accent-rgb),0.08)',
-                              outline: `1px solid rgba(var(--accent-rgb),0.3)`,
-                              display: 'flex', alignItems: 'center', justifyContent: 'center',
-                              fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, color: UI.gold,
-                            }}>↓</div>
-                            <div className="num" style={{ fontSize: 10, color: UI.inkGhost }}>
-                              {di === 0 ? 'top' : `drop ${di + 1}`}
-                            </div>
-                            <KbCell
-                              text={isKgA ? kbRaw : (d.kg != null ? String(d.kg).replace('.', ',') : '')}
-                              placeholder="—"
-                              onActivate={() => activateDropKb(di, 'kg')}
-                              style={{ ...setInputStyle(false, isKgA), ...(isKgA ? { boxShadow: 'inset 0 -2px 0 var(--accent)' } : {}) }}
-                            />
-                            <KbCell
-                              text={isRepsA ? kbRaw : (d.reps != null ? String(d.reps) : '')}
-                              placeholder="—"
-                              onActivate={() => activateDropKb(di, 'reps')}
-                              style={{ ...setInputStyle(false, isRepsA), ...(isRepsA ? { boxShadow: 'inset 0 -2px 0 var(--accent)' } : {}) }}
-                            />
-                            <button onClick={() => dropDrops.length > 1 && setDropDrops(prev => prev.filter((_, idx) => idx !== di))}
-                              disabled={dropDrops.length <= 1}
-                              style={{
-                                width: 26, height: 26, borderRadius: 4, border: `1px solid ${UI.hair}`,
-                                background: 'transparent', color: UI.inkFaint, fontSize: 14,
-                                cursor: dropDrops.length <= 1 ? 'default' : 'pointer',
-                                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                opacity: dropDrops.length <= 1 ? 0.2 : 1, flexShrink: 0,
-                                WebkitTapHighlightColor: 'transparent',
-                              }}>×</button>
-                          </div>
-                        );
-                      })}
-                      {(() => {
-                        const canFinishDrop = !!dropDrops[0]?.reps && (isNoWeightReps || isBodyweight || dropDrops[0]?.kg != null);
-                        return (
-                      <div data-drop-actions style={{ display: 'flex', gap: 8, padding: '4px 4px 10px', scrollMarginBottom: 260 }}>
-                        <button onClick={() => {
-                          const newIdx = dropDropsRef.current.length;
-                          setDropDrops(prev => [...prev, { kg: null, reps: null }]);
-                          setTimeout(() => activateDropKb(newIdx, 'kg'), 80);
-                        }} style={{
-                          flex: 1, padding: '8px 0', background: 'transparent',
-                          border: `1px solid ${UI.hairStrong}`, borderRadius: 6,
-                          color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700,
-                          letterSpacing: '0.1em', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
-                        }}>↓ ADD DROP</button>
-                        <button onClick={() => finishDropSet(dropDropsRef.current)}
-                          disabled={!canFinishDrop}
-                          style={{
-                            flex: 2, padding: '8px 0',
-                            background: canFinishDrop ? 'rgba(var(--accent-rgb),0.12)' : 'transparent',
-                            border: `1px solid ${canFinishDrop ? 'rgba(var(--accent-rgb),0.5)' : UI.hair}`,
-                            borderRadius: 6, color: canFinishDrop ? 'var(--accent)' : UI.inkGhost,
-                            fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.1em',
-                            cursor: canFinishDrop ? 'pointer' : 'default',
-                            WebkitTapHighlightColor: 'transparent',
-                          }}>✓ FINISH</button>
-                      </div>
-                        );
-                      })()}
-                    </div>
-                  )}
-                  {s.technique === 'drop' && s.done && (s.drops || []).length > 1 && (
+                  {s.technique === 'drop' && s.done && ((s.drops || []).length > 1 || (s.drops?.[s.drops.length - 1]?.partials || 0) > 0) && (
                     <div style={{ marginLeft: 36, paddingLeft: 10, paddingBottom: 8, borderLeft: `2px solid rgba(var(--accent-rgb),0.2)` }}>
                       {(s.drops || []).slice(1).map((d, di) => (
                         <div key={di} style={{ display: 'grid', gridTemplateColumns: '28px 1fr 72px 56px', gap: 8, alignItems: 'center', padding: '4px 4px', opacity: 0.5 }}>
@@ -4261,122 +4428,45 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                           </div>
                         </div>
                       ))}
+                      {(() => { const p = s.drops?.[s.drops.length - 1]?.partials || 0; return p > 0 && (
+                        <div style={{ display: 'inline-block', marginTop: 4, padding: '3px 8px', border: '1px solid var(--accent)', borderRadius: 4, fontFamily: UI.fontUi, fontSize: 11, color: 'var(--accent)', letterSpacing: '0.03em' }}>
+                          +{p} partial{p === 1 ? '' : 's'}
+                        </div>
+                      ); })()}
                     </div>
                   )}
-                  {/* Myo-Rep active inline rows */}
-                  {myoSetIdx === i && !s.done && (() => {
-                    const myoTotalReps = myoDrops.reduce((acc, d) => acc + (d.reps || 0), 0);
-                    const myoProgress = myoTarget ? Math.min(1, myoTotalReps / myoTarget) : 0;
-                    const canFinish = myoDrops.length >= 2 && myoDrops[0]?.reps != null && (isNoWeightReps || isBodyweight || myoDrops[0]?.kg != null);
-                    const activationDone = myoDrops[0]?.reps != null;
+                  {s.technique === 'amrap_variations' && s.done && ((s.drops || []).length > 1 || (s.drops?.[s.drops.length - 1]?.partials || 0) > 0) && (() => {
+                    const anyVaried = (s.drops || []).some(d => d.label && d.label !== entry.name);
                     return (
-                      <div style={{ marginLeft: 36, paddingLeft: 10, borderLeft: `2px solid rgba(var(--accent-rgb),0.3)` }}>
-                          <div style={{ position: 'sticky', top: 0, background: 'var(--bg)', zIndex: 1, paddingBottom: 2 }}>
-                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 4px 2px' }}>
-                            <span className="micro-gold">{myoTechnique === 'myorep_match' ? 'MYO REP MATCH' : 'MYO-REPS'}</span>
-                            <button onClick={cancelMyo} style={{ background: 'none', border: 'none', color: UI.inkFaint, fontSize: 10, fontFamily: UI.fontUi, cursor: 'pointer', padding: '2px 4px', letterSpacing: '0.08em' }}>CANCEL</button>
+                    <div style={{ marginLeft: 36, paddingLeft: 10, paddingBottom: 8, borderLeft: `2px solid rgba(var(--accent-rgb),0.2)` }}>
+                      {(s.drops || []).slice(1).map((d, di) => (
+                        <div key={di} style={{ padding: '4px 4px', opacity: 0.5 }}>
+                          {anyVaried && (
+                            <div className="num" style={{ fontSize: 9, color: UI.inkGhost, marginBottom: 2 }}>{d.label || entry.name}</div>
+                          )}
+                          <div style={{ display: 'grid', gridTemplateColumns: '28px 1fr 72px 56px', gap: 8, alignItems: 'center' }}>
+                            <div style={{
+                              width: 24, height: 24, borderRadius: 4,
+                              outline: `1px solid rgba(var(--accent-rgb),0.2)`,
+                              display: 'flex', alignItems: 'center', justifyContent: 'center',
+                              color: UI.goldSoft,
+                            }}><i className="fa-solid fa-shuffle" style={{ fontSize: 9 }} /></div>
+                            <div />
+                            <div style={{ ...setInputStyle(true, false), display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                              <span className="num" style={{ fontSize: 15, color: UI.inkSoft }}>{d.kg != null ? String(d.kg).replace('.', ',') : '—'}</span>
+                            </div>
+                            <div style={{ ...setInputStyle(true, false), display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                              <span className="num" style={{ fontSize: 15, color: UI.inkSoft }}>{d.reps ?? '—'}</span>
+                            </div>
                           </div>
-                          {/* Match progress counter */}
-                          {myoTechnique === 'myorep_match' && myoTarget != null && (
-                            <div style={{ padding: '6px 4px 4px' }}>
-                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 5 }}>
-                                <span className="micro" style={{ color: UI.inkSoft, letterSpacing: '0.1em' }}>MATCH</span>
-                                <div>
-                                  <span className="num" style={{ fontSize: 20, fontWeight: 700, color: myoProgress >= 1 ? UI.gold : UI.ink, transition: 'color 0.3s ease' }}>{myoTotalReps}</span>
-                                  <span className="num" style={{ fontSize: 12, color: UI.inkGhost }}> / {myoTarget}</span>
-                                </div>
-                              </div>
-                              <div style={{ position: 'relative', height: 6, borderRadius: 999, background: 'rgba(var(--accent-rgb),0.12)', margin: '0 0 4px' }}>
-                                <div style={{
-                                  position: 'absolute', left: 0, top: 0, height: '100%',
-                                  width: `${Math.min(1, myoProgress) * 100}%`,
-                                  minWidth: myoProgress > 0 ? 8 : 0,
-                                  borderRadius: 999,
-                                  background: myoProgress >= 1 ? 'var(--accent)' : 'rgba(var(--accent-rgb),0.75)',
-                                  boxShadow: myoProgress > 0 ? `0 0 ${Math.round(4 + myoProgress * 10)}px ${Math.round(2 + myoProgress * 6)}px rgba(var(--accent-rgb),${(0.3 + myoProgress * 0.5).toFixed(2)})` : 'none',
-                                  transition: 'width 0.3s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.3s ease',
-                                }} />
-                              </div>
-                            </div>
-                          )}
                         </div>
-                        {myoDrops.map((d, di) => {
-                          const isActiv = di === 0;
-                          const isKgA = kbField?.setIdx === 'myo' && kbField?.dropIdx === di && kbField?.field === 'kg';
-                          const isRepsA = kbField?.setIdx === 'myo' && kbField?.dropIdx === di && kbField?.field === 'reps';
-                          return (
-                            <div key={di} data-myo-row={di} style={{ display: 'grid', gridTemplateColumns: '28px 1fr 72px 56px 28px', gap: 8, alignItems: 'center', padding: '5px 4px' }}>
-                              <div style={{
-                                width: 24, height: 24, borderRadius: 4, flexShrink: 0,
-                                background: 'rgba(var(--accent-rgb),0.08)',
-                                outline: `1px solid rgba(var(--accent-rgb),0.3)`,
-                                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                fontFamily: UI.fontUi, fontSize: isActiv ? 9 : 10, fontWeight: 700, color: UI.gold,
-                              }}>{isActiv ? 'ACT' : '↺'}</div>
-                              <div className="num" style={{ fontSize: 10, color: UI.inkGhost }}>{isActiv ? 'activation' : `myo ${di}`}</div>
-                              {/* kg — editable for activation (myo only), read-only for match activation + all minis */}
-                              {isActiv && myoTechnique === 'myorep' ? (
-                                <KbCell
-                                  text={isKgA ? kbRaw : (d.kg != null ? String(d.kg).replace('.', ',') : '')}
-                                  placeholder="—"
-                                  onActivate={() => activateMyo(di, 'kg')}
-                                  style={{ ...setInputStyle(false, isKgA), ...(isKgA ? { boxShadow: 'inset 0 -2px 0 var(--accent)' } : {}) }}
-                                />
-                              ) : (
-                                <div style={{ ...setInputStyle(true, false), display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                  <span className="num" style={{ fontSize: 15, color: UI.inkGhost }}>{d.kg != null ? String(d.kg).replace('.', ',') : '—'}</span>
-                                </div>
-                              )}
-                              <KbCell
-                                text={isRepsA ? kbRaw : (d.reps != null ? String(d.reps) : '')}
-                                placeholder="—"
-                                onActivate={() => activateMyo(di, 'reps')}
-                                style={{ ...setInputStyle(false, isRepsA), ...(isRepsA ? { boxShadow: 'inset 0 -2px 0 var(--accent)' } : {}) }}
-                              />
-                              {isActiv ? (
-                                <div />
-                              ) : (
-                                <button onClick={() => myoDrops.length > 2 && setMyoDrops(prev => prev.filter((_, idx) => idx !== di))}
-                                  disabled={myoDrops.length <= 2}
-                                  style={{
-                                    width: 26, height: 26, borderRadius: 4, border: `1px solid ${UI.hair}`,
-                                    background: 'transparent', color: UI.inkFaint, fontSize: 14,
-                                    cursor: myoDrops.length <= 2 ? 'default' : 'pointer',
-                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                    opacity: myoDrops.length <= 2 ? 0.2 : 1, flexShrink: 0,
-                                    WebkitTapHighlightColor: 'transparent',
-                                  }}>×</button>
-                              )}
-                            </div>
-                          );
-                        })}
-                        <div data-myo-actions style={{ display: 'flex', gap: 8, padding: '4px 4px 10px', scrollMarginBottom: 260 }}>
-                          {activationDone && (
-                            <button onClick={() => {
-                              const newIdx = myoDropsRef.current.length;
-                              const activKg = myoDropsRef.current[0]?.kg ?? null;
-                              setMyoDrops(prev => [...prev, { kg: activKg, reps: null }]);
-                              setTimeout(() => activateMyo(newIdx, 'reps'), 80);
-                            }} style={{
-                              flex: 1, padding: '8px 0', background: 'transparent',
-                              border: `1px solid ${UI.hairStrong}`, borderRadius: 6,
-                              color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700,
-                              letterSpacing: '0.1em', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
-                            }}>↺ ADD MYO</button>
-                          )}
-                          <button onClick={() => finishMyoSet(myoDropsRef.current, myoTechnique)}
-                            disabled={!canFinish}
-                            style={{
-                              flex: 2, padding: '8px 0',
-                              background: canFinish ? 'rgba(var(--accent-rgb),0.12)' : 'transparent',
-                              border: `1px solid ${canFinish ? 'rgba(var(--accent-rgb),0.5)' : UI.hair}`,
-                              borderRadius: 6, color: canFinish ? 'var(--accent)' : UI.inkGhost,
-                              fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.1em',
-                              cursor: canFinish ? 'pointer' : 'default',
-                              WebkitTapHighlightColor: 'transparent',
-                            }}>✓ FINISH</button>
+                      ))}
+                      {(() => { const p = s.drops?.[s.drops.length - 1]?.partials || 0; return p > 0 && (
+                        <div style={{ display: 'inline-block', marginTop: 4, padding: '3px 8px', border: '1px solid var(--accent)', borderRadius: 4, fontFamily: UI.fontUi, fontSize: 11, color: 'var(--accent)', letterSpacing: '0.03em' }}>
+                          +{p} partial{p === 1 ? '' : 's'}
                         </div>
-                      </div>
+                      ); })()}
+                    </div>
                     );
                   })()}
                   {/* Completed myo rows */}
@@ -4400,6 +4490,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                         </div>
                       ))}
                       {(() => { const t = (s.drops || []).reduce((a, d) => a + (d.reps || 0), 0); return t > 0 ? <div style={{ marginTop: 4, padding: '3px 8px', border: '1px solid var(--accent)', borderRadius: 4, fontFamily: UI.fontUi, fontSize: 11, color: 'var(--accent)', letterSpacing: '0.03em', textAlign: 'center' }}>Total {t}</div> : null; })()}
+                      {(() => { const p = s.drops?.[s.drops.length - 1]?.partials || 0; return p > 0 && (
+                        <div style={{ display: 'inline-block', marginTop: 4, marginLeft: 6, padding: '3px 8px', border: '1px solid var(--accent)', borderRadius: 4, fontFamily: UI.fontUi, fontSize: 11, color: 'var(--accent)', letterSpacing: '0.03em' }}>
+                          +{p} partial{p === 1 ? '' : 's'}
+                        </div>
+                      ); })()}
                     </div>
                   )}
                   {/* Committed lengthened-partial count — read-only, like the myo-rep total tag below */}
@@ -4744,15 +4839,16 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           // on the same still-unfinished set and picked Myo-Rep instead).
           // Without this, both sub-panels could end up targeting the same
           // row simultaneously.
-          const clearDrop = () => { setDropSetIdx(null); setDropDrops([]); };
-          const clearMyo = () => { setMyoSetIdx(null); setMyoDrops([]); setMyoTechnique(null); setMyoTarget(null); };
+          const clearDrop = () => { setDropSetIdx(null); setDropDrops([]); setFinisherPartials(0); };
+          const clearMyo = () => { setMyoSetIdx(null); setMyoDrops([]); setMyoTechnique(null); setMyoTarget(null); setFinisherPartials(0); };
           const clearLp = () => { setLpTarget(null); setLpCount(0); };
+          const clearAv = () => { setAvSetIdx(null); setAvDrops([]); setFinisherPartials(0); };
           const startDrop = () => {
             const target = currentSetIdx >= 0
               ? currentSetIdx
               : entry.sets.reduce((last, s, i) => !s.warmup ? i : last, -1);
             if (target < 0) return;
-            clearMyo(); clearLp();
+            clearMyo(); clearLp(); clearAv();
             const s = entry.sets[target];
             const initDrops = [{ kg: s?.kg ?? null, reps: s?.reps ?? null }];
             setDropDrops(initDrops);
@@ -4761,12 +4857,26 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             setIntensityOpen(false);
             setTimeout(() => activateDropKb(0, 'kg'), 150);
           };
+          const startAv = () => {
+            const target = currentSetIdx >= 0
+              ? currentSetIdx
+              : entry.sets.reduce((last, s, i) => !s.warmup ? i : last, -1);
+            if (target < 0) return;
+            clearDrop(); clearMyo(); clearLp();
+            const s = entry.sets[target];
+            const initDrops = [{ kg: s?.kg ?? null, reps: s?.reps ?? null, label: entry.name }];
+            setAvDrops(initDrops);
+            avDropsRef.current = initDrops;
+            setAvSetIdx(target);
+            setIntensityOpen(false);
+            setTimeout(() => activateAvKb(0, 'kg'), 150);
+          };
           const startMyo = (technique) => {
             const target = currentSetIdx >= 0
               ? currentSetIdx
               : entry.sets.reduce((last, s, i) => !s.warmup ? i : last, -1);
             if (target < 0) return;
-            clearDrop(); clearLp();
+            clearDrop(); clearLp(); clearAv();
             const s = entry.sets[target];
             const anchor = entry.sets.find(st => st.technique === 'myorep' && st.done && st.drops?.[0]?.reps != null);
             // For match: activation kg locked to the preceding myo set's activation kg
@@ -4820,13 +4930,23 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkSoft, marginTop: 2 }}>Descend the weight, keep the reps coming</div>
                 </div>
               </button>
+              {/* AMRAP Variations — grip/variation swap is entirely optional
+                  (the label input pre-fills with the exercise's own name), the
+                  point is chasing reps back-to-back with no rest. */}
+              <button onClick={startAv} style={btnBase(true)}>
+                <i className="fa-solid fa-shuffle" style={{ fontSize: 18, color: 'var(--accent)', width: 20, textAlign: 'center', flexShrink: 0 }} />
+                <div>
+                  <div style={{ fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, letterSpacing: '0.12em', color: 'var(--accent)' }}>AMRAP VARIATIONS</div>
+                  <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkSoft, marginTop: 2 }}>AMRAP each round, swap the grip — no rest, no mercy</div>
+                </div>
+              </button>
               {/* Lengthened Partials */}
               <button onClick={() => {
                 const target = currentSetIdx >= 0
                   ? currentSetIdx
                   : entry.sets.reduce((last, s, i) => !s.warmup ? i : last, -1);
                 if (target < 0) return;
-                clearDrop(); clearMyo();
+                clearDrop(); clearMyo(); clearAv();
                 setLpTarget({ exIdx, setIdx: target });
                 setLpCount(0);
                 setIntensityOpen(false);
@@ -4857,6 +4977,350 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                     </div>
                   </div>
                 </button>
+              </div>
+            </div>
+          );
+        })()}
+      </Sheet>
+
+      {/* Drop Set / Myo-Rep(-Match) / AMRAP Variations editing sheet — exactly
+          one chain is ever in flight (drop/myo/av start* clear the other
+          two). Edited in its own sheet instead of inline in the set row so
+          the header, the active weight/rep row, and the action buttons are
+          always on screen together regardless of scroll position or chain
+          length — inline rendering inside the (potentially very long)
+          exercise list made that impossible to guarantee reliably.
+          keyboardHeight tells Sheet this app's custom numeric keypad is open
+          — it focuses no real <input>, so Sheet's own visualViewport-based
+          auto-detection never fires for it — so Sheet shrinks/scrolls itself
+          to sit above it, exactly like it already does for native inputs.
+          Each chain's own content below is a flex column (maxHeight:'inherit'
+          takes the Sheet panel's own computed max-height) — header and
+          actions as flexShrink:0, rows as the flex:1-equivalent scrollable
+          middle (overflowY:'auto', minHeight:0). Deliberately NOT
+          position:sticky: a sticky header inside this panel's overflow:auto
+          box reproduced a Safari/WebKit bug where it briefly rendered
+          edge-to-edge (ignoring the panel's own padding) on a sheet's very
+          first open. The flex layout sidesteps that bug class entirely —
+          the header is a genuinely separate, non-scrolling box, not
+          scroll-positioned relative to anything. */}
+      <Sheet
+        open={dropSetIdx != null || myoSetIdx != null || avSetIdx != null}
+        onClose={requestCloseChainSheet}
+        keyboardHeight={kbField ? customKbHeight : 0}
+        accent
+      >
+        {dropSetIdx != null && (
+          <div style={{ display: 'flex', flexDirection: 'column', maxHeight: 'inherit', minHeight: 0 }}>
+            <div style={{ flexShrink: 0, display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', padding: '0 4px 8px' }}>
+              <span style={chainTitleStyle}>DROP SET</span>
+              <button onClick={requestCloseChainSheet} style={{ background: 'none', border: 'none', color: UI.inkFaint, fontSize: 10, fontFamily: UI.fontUi, cursor: 'pointer', padding: '2px 4px', letterSpacing: '0.08em' }}>CANCEL</button>
+            </div>
+            <div style={{ overflowY: 'auto', minHeight: 0 }}>
+              {dropDrops.map((d, di) => {
+                const isKgA = kbField?.setIdx === 'drop' && kbField?.dropIdx === di && kbField?.field === 'kg';
+                const isRepsA = kbField?.setIdx === 'drop' && kbField?.dropIdx === di && kbField?.field === 'reps';
+                return (
+                  <div key={di} data-drop-row={di} style={{ display: 'grid', gridTemplateColumns: '28px 1fr 72px 56px 28px', gap: 8, alignItems: 'center', padding: '5px 4px' }}>
+                    <div style={{
+                      width: 24, height: 24, borderRadius: 4, flexShrink: 0,
+                      background: 'rgba(var(--accent-rgb),0.08)',
+                      outline: `1px solid rgba(var(--accent-rgb),0.3)`,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, color: UI.gold,
+                    }}>↓</div>
+                    <div className="num" style={{ fontSize: 10, color: UI.inkGhost }}>
+                      {di === 0 ? 'top' : `drop ${di + 1}`}
+                    </div>
+                    <KbCell
+                      text={isKgA ? kbRaw : (d.kg != null ? String(d.kg).replace('.', ',') : '')}
+                      placeholder="—"
+                      onActivate={() => activateDropKb(di, 'kg')}
+                      style={{ ...setInputStyle(false, isKgA), ...(isKgA ? { boxShadow: 'inset 0 -2px 0 var(--accent)' } : {}) }}
+                    />
+                    <KbCell
+                      text={isRepsA ? kbRaw : (d.reps != null ? String(d.reps) : '')}
+                      placeholder="—"
+                      onActivate={() => activateDropKb(di, 'reps')}
+                      style={{ ...setInputStyle(false, isRepsA), ...(isRepsA ? { boxShadow: 'inset 0 -2px 0 var(--accent)' } : {}) }}
+                    />
+                    <button onClick={() => dropDrops.length > 1 && setDropDrops(prev => prev.filter((_, idx) => idx !== di))}
+                      disabled={dropDrops.length <= 1}
+                      style={{
+                        width: 26, height: 26, borderRadius: 4, border: `1px solid ${UI.hair}`,
+                        background: 'transparent', color: UI.inkFaint, fontSize: 14,
+                        cursor: dropDrops.length <= 1 ? 'default' : 'pointer',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        opacity: dropDrops.length <= 1 ? 0.2 : 1, flexShrink: 0,
+                        WebkitTapHighlightColor: 'transparent',
+                      }}>×</button>
+                  </div>
+                );
+              })}
+              <FinisherPartials count={finisherPartials} onChange={setFinisherPartials} />
+            </div>
+            {(() => {
+              const canFinishDrop = !!dropDrops[0]?.reps && (isNoWeightReps || isBodyweight || dropDrops[0]?.kg != null);
+              return (
+                <div style={{ flexShrink: 0, display: 'flex', gap: 8, padding: '4px 4px 10px' }}>
+                  <button onClick={() => {
+                    const newIdx = dropDropsRef.current.length;
+                    setDropDrops(prev => [...prev, { kg: null, reps: null }]);
+                    setTimeout(() => activateDropKb(newIdx, 'kg'), 80);
+                  }} style={{
+                    flex: 1, padding: '8px 0', background: 'transparent',
+                    border: `1px solid ${UI.hairStrong}`, borderRadius: 6,
+                    color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700,
+                    letterSpacing: '0.1em', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+                  }}>↓ ADD DROP</button>
+                  <button onClick={() => finishDropSet(dropDropsRef.current)}
+                    disabled={!canFinishDrop}
+                    style={{
+                      flex: 2, padding: '8px 0',
+                      background: canFinishDrop ? 'rgba(var(--accent-rgb),0.12)' : 'transparent',
+                      border: `1px solid ${canFinishDrop ? 'rgba(var(--accent-rgb),0.5)' : UI.hair}`,
+                      borderRadius: 6, color: canFinishDrop ? 'var(--accent)' : UI.inkGhost,
+                      fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.1em',
+                      cursor: canFinishDrop ? 'pointer' : 'default',
+                      WebkitTapHighlightColor: 'transparent',
+                    }}>✓ FINISH</button>
+                </div>
+              );
+            })()}
+          </div>
+        )}
+
+        {avSetIdx != null && (
+          <div style={{ display: 'flex', flexDirection: 'column', maxHeight: 'inherit', minHeight: 0 }}>
+            <div style={{ flexShrink: 0, display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', padding: '0 4px 8px' }}>
+              <span style={chainTitleStyle}>AMRAP VARIATIONS</span>
+              <button onClick={requestCloseChainSheet} style={{ background: 'none', border: 'none', color: UI.inkFaint, fontSize: 10, fontFamily: UI.fontUi, cursor: 'pointer', padding: '2px 4px', letterSpacing: '0.08em' }}>CANCEL</button>
+            </div>
+            <div style={{ overflowY: 'auto', minHeight: 0 }}>
+              {avDrops.map((d, di) => {
+                const isKgA = kbField?.setIdx === 'av' && kbField?.dropIdx === di && kbField?.field === 'kg';
+                const isRepsA = kbField?.setIdx === 'av' && kbField?.dropIdx === di && kbField?.field === 'reps';
+                return (
+                  <div key={di} data-av-row={di} style={{ padding: '6px 4px', borderBottom: di < avDrops.length - 1 ? `0.5px solid ${UI.hair}` : 'none' }}>
+                    <input
+                      type="text"
+                      value={d.label ?? ''}
+                      onFocus={e => { e.target.select(); setAvLabelFocusDi(di); }}
+                      onBlur={() => setAvLabelFocusDi(cur => cur === di ? null : cur)}
+                      onChange={e => { const val = e.target.value; setAvDrops(prev => prev.map((dd, idx) => idx === di ? { ...dd, label: val } : dd)); }}
+                      placeholder={entry.name}
+                      style={{
+                        width: '100%', boxSizing: 'border-box', background: UI.bgInset,
+                        border: `1px solid ${UI.hair}`,
+                        borderBottom: `2px solid ${avLabelFocusDi === di ? 'var(--accent)' : UI.hair}`,
+                        borderRadius: 4,
+                        color: UI.ink, fontFamily: UI.fontUi, fontSize: 12, padding: '6px 8px',
+                        marginBottom: 6, outline: 'none', WebkitTapHighlightColor: 'transparent',
+                      }}
+                    />
+                    <div style={{ display: 'grid', gridTemplateColumns: '28px 1fr 72px 56px 28px', gap: 8, alignItems: 'center' }}>
+                      <div style={{
+                        width: 24, height: 24, borderRadius: 4, flexShrink: 0,
+                        background: 'rgba(var(--accent-rgb),0.08)',
+                        outline: `1px solid rgba(var(--accent-rgb),0.3)`,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        color: UI.gold,
+                      }}><i className="fa-solid fa-shuffle" style={{ fontSize: 10 }} /></div>
+                      <div className="num" style={{ fontSize: 10, color: UI.inkGhost }}>round {di + 1}</div>
+                      <KbCell
+                        text={isKgA ? kbRaw : (d.kg != null ? String(d.kg).replace('.', ',') : '')}
+                        placeholder="—"
+                        onActivate={() => activateAvKb(di, 'kg')}
+                        style={{ ...setInputStyle(false, isKgA), ...(isKgA ? { boxShadow: 'inset 0 -2px 0 var(--accent)' } : {}) }}
+                      />
+                      <KbCell
+                        text={isRepsA ? kbRaw : (d.reps != null ? String(d.reps) : '')}
+                        placeholder="—"
+                        onActivate={() => activateAvKb(di, 'reps')}
+                        style={{ ...setInputStyle(false, isRepsA), ...(isRepsA ? { boxShadow: 'inset 0 -2px 0 var(--accent)' } : {}) }}
+                      />
+                      <button onClick={() => avDrops.length > 1 && setAvDrops(prev => prev.filter((_, idx) => idx !== di))}
+                        disabled={avDrops.length <= 1}
+                        style={{
+                          width: 26, height: 26, borderRadius: 4, border: `1px solid ${UI.hair}`,
+                          background: 'transparent', color: UI.inkFaint, fontSize: 14,
+                          cursor: avDrops.length <= 1 ? 'default' : 'pointer',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          opacity: avDrops.length <= 1 ? 0.2 : 1, flexShrink: 0,
+                          WebkitTapHighlightColor: 'transparent',
+                        }}>×</button>
+                    </div>
+                  </div>
+                );
+              })}
+              <FinisherPartials count={finisherPartials} onChange={setFinisherPartials} />
+            </div>
+            {(() => {
+              const canFinishAv = !!avDrops[0]?.reps && (isNoWeightReps || isBodyweight || avDrops[0]?.kg != null);
+              return (
+                <div style={{ flexShrink: 0, display: 'flex', gap: 8, padding: '4px 4px 10px' }}>
+                  <button onClick={() => {
+                    const newIdx = avDropsRef.current.length;
+                    const prevKg = avDropsRef.current[avDropsRef.current.length - 1]?.kg ?? null;
+                    setAvDrops(prev => [...prev, { kg: prevKg, reps: null, label: entry.name }]);
+                    setTimeout(() => activateAvKb(newIdx, 'kg'), 80);
+                  }} style={{
+                    flex: 1, padding: '8px 0', background: 'transparent',
+                    border: `1px solid ${UI.hairStrong}`, borderRadius: 6,
+                    color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700,
+                    letterSpacing: '0.1em', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+                  }}>+ ADD ROUND</button>
+                  <button onClick={() => finishAv(avDropsRef.current)}
+                    disabled={!canFinishAv}
+                    style={{
+                      flex: 2, padding: '8px 0',
+                      background: canFinishAv ? 'rgba(var(--accent-rgb),0.12)' : 'transparent',
+                      border: `1px solid ${canFinishAv ? 'rgba(var(--accent-rgb),0.5)' : UI.hair}`,
+                      borderRadius: 6, color: canFinishAv ? 'var(--accent)' : UI.inkGhost,
+                      fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.1em',
+                      cursor: canFinishAv ? 'pointer' : 'default',
+                      WebkitTapHighlightColor: 'transparent',
+                    }}>✓ FINISH</button>
+                </div>
+              );
+            })()}
+          </div>
+        )}
+
+        {myoSetIdx != null && (() => {
+          const myoTotalReps = myoDrops.reduce((acc, d) => acc + (d.reps || 0), 0);
+          const myoProgress = myoTarget ? Math.min(1, myoTotalReps / myoTarget) : 0;
+          const canFinish = myoDrops.length >= 2 && myoDrops[0]?.reps != null && (isNoWeightReps || isBodyweight || myoDrops[0]?.kg != null);
+          const activationDone = myoDrops[0]?.reps != null;
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', maxHeight: 'inherit', minHeight: 0 }}>
+              <div style={{ flexShrink: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', padding: '0 4px 8px' }}>
+                  <span style={chainTitleStyle}>{myoTechnique === 'myorep_match' ? 'MYO REP MATCH' : 'MYO-REPS'}</span>
+                  <button onClick={requestCloseChainSheet} style={{ background: 'none', border: 'none', color: UI.inkFaint, fontSize: 10, fontFamily: UI.fontUi, cursor: 'pointer', padding: '2px 4px', letterSpacing: '0.08em' }}>CANCEL</button>
+                </div>
+                {/* Match progress counter */}
+                {myoTechnique === 'myorep_match' && myoTarget != null && (
+                  <div style={{ padding: '6px 4px 4px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 5 }}>
+                      <span className="micro" style={{ color: UI.inkSoft, letterSpacing: '0.1em' }}>MATCH</span>
+                      <div>
+                        <span className="num" style={{ fontSize: 20, fontWeight: 700, color: myoProgress >= 1 ? UI.gold : UI.ink, transition: 'color 0.3s ease' }}>{myoTotalReps}</span>
+                        <span className="num" style={{ fontSize: 12, color: UI.inkGhost }}> / {myoTarget}</span>
+                      </div>
+                    </div>
+                    <div style={{ position: 'relative', height: 6, borderRadius: 999, background: 'rgba(var(--accent-rgb),0.12)', margin: '0 0 4px' }}>
+                      <div style={{
+                        position: 'absolute', left: 0, top: 0, height: '100%',
+                        width: `${Math.min(1, myoProgress) * 100}%`,
+                        minWidth: myoProgress > 0 ? 8 : 0,
+                        borderRadius: 999,
+                        background: myoProgress >= 1 ? 'var(--accent)' : 'rgba(var(--accent-rgb),0.75)',
+                        transition: 'width 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                      }} />
+                      {/* Glow as a separate, fixed-blur layer whose opacity fades in with
+                          progress — only what the compositor can move for free (opacity,
+                          like the width bar's transform-free width) changes per render.
+                          The old version recomputed the box-shadow's blur/spread radius
+                          from myoProgress on every render, so its very first paint (this
+                          technique's own progress can already be non-zero on mount, e.g.
+                          activation reps carried over) had a genuinely different blur
+                          value than every later re-render — the one concrete difference
+                          between this content and Drop Set/AMRAP Variations/plain
+                          Myo-Reps, none of which have any animated/blurred element. A
+                          constant blur here removes that per-render recompute. */}
+                      <div style={{
+                        position: 'absolute', left: 0, top: 0, height: '100%',
+                        width: `${Math.min(1, myoProgress) * 100}%`,
+                        minWidth: myoProgress > 0 ? 8 : 0,
+                        borderRadius: 999,
+                        boxShadow: '0 0 14px 8px rgba(var(--accent-rgb),0.6)',
+                        opacity: myoProgress > 0 ? Math.min(1, 0.3 + myoProgress * 0.5) : 0,
+                        transition: 'width 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease',
+                        pointerEvents: 'none',
+                      }} />
+                    </div>
+                  </div>
+                )}
+              </div>
+              <div style={{ overflowY: 'auto', minHeight: 0 }}>
+                {myoDrops.map((d, di) => {
+                  const isActiv = di === 0;
+                  const isKgA = kbField?.setIdx === 'myo' && kbField?.dropIdx === di && kbField?.field === 'kg';
+                  const isRepsA = kbField?.setIdx === 'myo' && kbField?.dropIdx === di && kbField?.field === 'reps';
+                  return (
+                    <div key={di} data-myo-row={di} style={{ display: 'grid', gridTemplateColumns: '28px 1fr 72px 56px 28px', gap: 8, alignItems: 'center', padding: '5px 4px' }}>
+                      <div style={{
+                        width: 24, height: 24, borderRadius: 4, flexShrink: 0,
+                        background: 'rgba(var(--accent-rgb),0.08)',
+                        outline: `1px solid rgba(var(--accent-rgb),0.3)`,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        fontFamily: UI.fontUi, fontSize: isActiv ? 9 : 10, fontWeight: 700, color: UI.gold,
+                      }}>{isActiv ? 'ACT' : '↺'}</div>
+                      <div className="num" style={{ fontSize: 10, color: UI.inkGhost }}>{isActiv ? 'activation' : `myo ${di}`}</div>
+                      {/* kg — editable for activation (myo only), read-only for match activation + all minis */}
+                      {isActiv && myoTechnique === 'myorep' ? (
+                        <KbCell
+                          text={isKgA ? kbRaw : (d.kg != null ? String(d.kg).replace('.', ',') : '')}
+                          placeholder="—"
+                          onActivate={() => activateMyo(di, 'kg')}
+                          style={{ ...setInputStyle(false, isKgA), ...(isKgA ? { boxShadow: 'inset 0 -2px 0 var(--accent)' } : {}) }}
+                        />
+                      ) : (
+                        <div style={{ ...setInputStyle(true, false), display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          <span className="num" style={{ fontSize: 15, color: UI.inkGhost }}>{d.kg != null ? String(d.kg).replace('.', ',') : '—'}</span>
+                        </div>
+                      )}
+                      <KbCell
+                        text={isRepsA ? kbRaw : (d.reps != null ? String(d.reps) : '')}
+                        placeholder="—"
+                        onActivate={() => activateMyo(di, 'reps')}
+                        style={{ ...setInputStyle(false, isRepsA), ...(isRepsA ? { boxShadow: 'inset 0 -2px 0 var(--accent)' } : {}) }}
+                      />
+                      {isActiv ? (
+                        <div />
+                      ) : (
+                        <button onClick={() => myoDrops.length > 2 && setMyoDrops(prev => prev.filter((_, idx) => idx !== di))}
+                          disabled={myoDrops.length <= 2}
+                          style={{
+                            width: 26, height: 26, borderRadius: 4, border: `1px solid ${UI.hair}`,
+                            background: 'transparent', color: UI.inkFaint, fontSize: 14,
+                            cursor: myoDrops.length <= 2 ? 'default' : 'pointer',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            opacity: myoDrops.length <= 2 ? 0.2 : 1, flexShrink: 0,
+                            WebkitTapHighlightColor: 'transparent',
+                          }}>×</button>
+                      )}
+                    </div>
+                  );
+                })}
+                <FinisherPartials count={finisherPartials} onChange={setFinisherPartials} />
+              </div>
+              <div style={{ flexShrink: 0, display: 'flex', gap: 8, padding: '4px 4px 10px' }}>
+                {activationDone && (
+                  <button onClick={() => {
+                    const newIdx = myoDropsRef.current.length;
+                    const activKg = myoDropsRef.current[0]?.kg ?? null;
+                    setMyoDrops(prev => [...prev, { kg: activKg, reps: null }]);
+                    setTimeout(() => activateMyo(newIdx, 'reps'), 80);
+                  }} style={{
+                    flex: 1, padding: '8px 0', background: 'transparent',
+                    border: `1px solid ${UI.hairStrong}`, borderRadius: 6,
+                    color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700,
+                    letterSpacing: '0.1em', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+                  }}>↺ ADD MYO</button>
+                )}
+                <button onClick={() => finishMyoSet(myoDropsRef.current, myoTechnique)}
+                  disabled={!canFinish}
+                  style={{
+                    flex: 2, padding: '8px 0',
+                    background: canFinish ? 'rgba(var(--accent-rgb),0.12)' : 'transparent',
+                    border: `1px solid ${canFinish ? 'rgba(var(--accent-rgb),0.5)' : UI.hair}`,
+                    borderRadius: 6, color: canFinish ? 'var(--accent)' : UI.inkGhost,
+                    fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.1em',
+                    cursor: canFinish ? 'pointer' : 'default',
+                    WebkitTapHighlightColor: 'transparent',
+                  }}>✓ FINISH</button>
               </div>
             </div>
           );
@@ -5259,7 +5723,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         onAdjust={kbAdjust}
         onConfirm={kbConfirm}
         confirmDisabled={
-          ((kbField?.setIdx === 'drop' || kbField?.setIdx === 'myo') && kbField?.field === 'reps') ||
+          ((kbField?.setIdx === 'drop' || kbField?.setIdx === 'myo' || kbField?.setIdx === 'av') && kbField?.field === 'reps') ||
           (lpTarget?.exIdx === exIdx && lpTarget?.setIdx === kbField?.setIdx && (kbField?.field === 'reps' || kbField?.field === 'repsR'))
         }
         onDismiss={() => { kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false; setKbField(null); setKbRaw(''); setKbFresh(false); armKbShield(); }}
@@ -5501,6 +5965,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     </Screen>
   );
 }
+
+// Shared title style for the Drop Set/Myo-Reps/AMRAP Variations chain
+// sheet's header — matches the app's standard sheet-title treatment (same
+// font/weight as Sheet's own `title` prop) instead of the tiny micro-gold
+// label the header used before, so it reads as a real heading next to the
+// deliberately quiet CANCEL button beside it.
+const chainTitleStyle = { fontFamily: UI.fontDisplay, fontSize: 22, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--accent)' };
 
 function setInputStyle(done, current) {
   return {

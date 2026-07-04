@@ -1,4 +1,4 @@
-const CACHE = 'zane-v2.457';
+const CACHE = 'zane-v2.478';
 const CDN_HOSTS = ['unpkg.com', 'cdnjs.cloudflare.com', 'fonts.googleapis.com', 'fonts.gstatic.com'];
 // Works at any base path (e.g. /training/ on GitHub Pages, / on custom domain)
 const BASE = self.registration.scope.replace(/\/$/, '');
@@ -59,13 +59,31 @@ const CDN_ASSETS = [
   'https://unpkg.com/@babel/standalone@7.29.0/babel.min.js',
 ];
 
+// cache.addAll()/cache.add() don't force a network round-trip — being handed
+// a plain URL (not a Request with explicit cache options), they can be
+// satisfied by the browser's own HTTP cache, a layer entirely below
+// CacheStorage. If the static host serves these files with any freshness
+// window, a brand-new SW version's install step could silently precache the
+// very stale bytes the update exists to replace — every check in this file
+// (checkSwUpdate's ?_v= probe, the runtime fetch handler below) works hard to
+// avoid exactly that, so precaching needs the same guarantee. Fetch each
+// asset with cache:'no-store' explicitly instead.
+function precacheAll(cache, urls) {
+  return Promise.all(urls.map(url =>
+    fetch(url, { cache: 'no-store' }).then(res => {
+      if (!res.ok) throw new Error(`Precache failed: ${url} (${res.status})`);
+      return cache.put(url, res);
+    })
+  ));
+}
+
 self.addEventListener('install', e => {
   e.waitUntil(
     caches.open(CACHE).then(c =>
-      c.addAll(ASSETS).then(() =>
+      precacheAll(c, ASSETS).then(() =>
         Promise.allSettled([].concat(
-          PHOTO_ASSETS.map(u => c.add(u).catch(() => {})),
-          CDN_ASSETS.map(u => c.add(new Request(u, { mode: 'cors' })).catch(() => {}))
+          PHOTO_ASSETS.map(u => fetch(u, { cache: 'no-store' }).then(res => { if (res.ok) return c.put(u, res); }).catch(() => {})),
+          CDN_ASSETS.map(u => fetch(new Request(u, { mode: 'cors', cache: 'no-store' })).then(res => { if (res.ok) return c.put(u, res); }).catch(() => {}))
         ))
       )
     )
@@ -161,13 +179,22 @@ self.addEventListener('fetch', e => {
   if (sameOrigin) {
     // _v=timestamp requests are version-check probes — always hit network, never cache
     if (url.searchParams.has('_v')) {
-      e.respondWith(fetch(e.request.url).catch(() => offlineResponse()));
+      e.respondWith(fetch(e.request.url, { cache: 'no-store' }).catch(() => offlineResponse()));
       return;
     }
-    // App shell: stale-while-revalidate — serve cache instantly, refresh in background
+    // App shell: stale-while-revalidate — serve cache instantly, refresh in background.
+    // { cache: 'no-store' } on the network fetch matters a lot more than it looks:
+    // after a deliberate cache wipe (LB.clearCachesAndReload / "Clear cache &
+    // reload"), every request here is a CacheStorage miss and falls through to
+    // this fetch — but a plain fetch() is still answered by the BROWSER's own
+    // HTTP cache (a layer entirely below CacheStorage, untouched by wiping it),
+    // so static <script src> tags and the precompile loader's own fetch(src)
+    // calls (index.html) could still silently resolve to stale bytes even
+    // though every app-level cache had just been cleared. no-store forces an
+    // actual network round-trip regardless of what the browser has cached.
     e.respondWith(
       caches.match(e.request).then(cached => {
-        const network = fetch(e.request).then(res => {
+        const network = fetch(e.request, { cache: 'no-store' }).then(res => {
           if (res.ok) {
             const clone = res.clone();
             caches.open(CACHE).then(c => c.put(e.request, clone));
@@ -188,7 +215,7 @@ self.addEventListener('fetch', e => {
   e.respondWith(
     caches.match(e.request).then(cached => {
       if (cached) return cached;
-      return fetch(e.request.url, { mode: 'cors' }).then(res => {
+      return fetch(e.request.url, { mode: 'cors', cache: 'no-store' }).then(res => {
         if (res.ok) {
           const clone = res.clone();
           caches.open(CACHE).then(c => c.put(e.request, clone));

@@ -621,8 +621,26 @@ function Pill({ children, gold = false, style = {}, ...rest }) {
   );
 }
 
+// ─── Toggle ─────────────────────────────────────────────────────────
+function Toggle({ on, onToggle }) {
+  return (
+    <div onClick={onToggle} style={{ width: 44, height: 26, borderRadius: 13, cursor: 'pointer', flexShrink: 0, background: on ? 'var(--accent)' : UI.bgInset, border: `0.5px solid ${on ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong}`, position: 'relative', transition: 'background 0.18s', WebkitTapHighlightColor: 'transparent' }}>
+      <div style={{ position: 'absolute', top: 3, left: on ? 21 : 3, width: 18, height: 18, borderRadius: '50%', background: on ? '#0a0805' : UI.inkFaint, transition: 'left 0.18s' }} />
+    </div>
+  );
+}
+
 // ─── Sheet ──────────────────────────────────────────────────────────
-function Sheet({ open, onClose, title, titleColor, children }) {
+// keyboardHeight: lets a caller report a non-native on-screen keyboard (e.g.
+// this app's custom numeric keypad, which focuses no real <input> so the
+// visualViewport-based auto-detection below never fires for it) is open, at
+// a known height — combined with the auto-detected kbHeight via Math.max so
+// existing callers (default 0) are unaffected.
+// accent: swaps the neutral hairline border/drag-handle for an accent-toned
+// edge plus an ambient glow — reserved for sheets that represent something
+// deliberately intense (currently just the Drop Set/Myo-Reps/AMRAP
+// Variations chain sheet), not a general-purpose "make it gold" switch.
+function Sheet({ open, onClose, title, titleColor, children, keyboardHeight = 0, accent = false }) {
   const [kbHeight, setKbHeight] = React.useState(0);
   const [vvHeight, setVvHeight] = React.useState(window.innerHeight);
   React.useEffect(() => {
@@ -646,24 +664,72 @@ function Sheet({ open, onClose, title, titleColor, children }) {
   }, [open]);
 
   if (!open) return null;
+  const effectiveKbHeight = Math.max(kbHeight, keyboardHeight);
+  // Above a real keyboard (native or this app's custom one), the panel no
+  // longer sits flush against the physical bottom edge — it floats above
+  // it, so it reads as its own card: full rounding + bottom border instead
+  // of the bottom-sheet's "attached to the screen edge" look, plus a small
+  // gap off the keyboard instead of sitting flush on top of it.
+  const floating = effectiveKbHeight > 0;
+  const edgeColor = accent ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong;
+  const shadowLayers = [floating ? '0 4px 24px rgba(0,0,0,0.45)' : '0 -16px 48px rgba(0,0,0,0.6)'];
+  if (floating) shadowLayers.push(`0 1px 0 ${edgeColor}`);
   return (
+    // The backdrop only shrinks (bottom: keyboardHeight) for the caller-
+    // declared custom keyboard, not the auto-detected native one: a custom
+    // keyboard is a real DOM sibling (e.g. this app's on-screen numeric
+    // keypad) with its own z-index, and a full-height backdrop on top of it
+    // would swallow every tap meant for its keys as a backdrop-dismiss
+    // instead. A native on-screen keyboard isn't part of this page's DOM at
+    // all (a separate OS/browser compositing layer), so there's nothing
+    // underneath for the backdrop to block — it keeps its full extent
+    // (bottom: 0) and reserves the gap via paddingBottom exactly as before.
     <div onClick={onClose} style={{
-      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 100,
+      position: 'fixed', top: 0, left: 0, right: 0, bottom: keyboardHeight,
+      background: 'rgba(0,0,0,0.7)', zIndex: 100,
       display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
-      paddingBottom: kbHeight,
+      paddingBottom: (effectiveKbHeight - keyboardHeight) + (floating ? 10 : 0),
       animation: 'sheet-fade 0.18s ease',
     }}>
       <div onClick={e => e.stopPropagation()} style={{
+        position: 'relative',
         width: '100%', maxWidth: 540, boxSizing: 'border-box',
         background: UI.bgRaised,
-        borderRadius: '6px 6px 0 0',
-        border: `1px solid ${UI.hairStrong}`, borderBottom: 'none',
-        boxShadow: '0 -16px 48px rgba(0,0,0,0.6)',
-        padding: `16px 22px ${kbHeight > 0 ? 18 : 'calc(env(safe-area-inset-bottom, 8px) + 22px)'}`,
+        borderRadius: floating ? 6 : '6px 6px 0 0',
+        border: `1px solid ${edgeColor}`,
+        ...(!floating && { borderBottom: 'none' }),
+        // Floating above the keyboard, every edge needs to read as a real
+        // boundary on its own — the bottom-sheet variant gets that for free
+        // from the drag handle and the darker screen behind it, but a
+        // floating card has nothing else anchoring its bottom edge, so the
+        // same 1px hairline there can vanish against the dark backdrop. A
+        // second, crisp shadow line in the same tone doubles up the border
+        // right where it needs it, without touching the other three sides.
+        boxShadow: shadowLayers.join(', '),
+        // The 3rd value here used to be the bare number 18 instead of '18px'
+        // — React silently drops the *entire* padding declaration (not just
+        // that one component) when a shorthand's value contains a unitless
+        // non-zero number, no warning either. That only ever showed up with
+        // the keyboardHeight prop in play (effectiveKbHeight > 0), i.e. only
+        // on the drop/myo/AMRAP chain sheets whenever this app's on-screen
+        // keypad was open — exactly the "content goes edge to edge" bug
+        // reported repeatedly, confirmed via an isolated minimal React
+        // repro. Every other Sheet in the app never sets keyboardHeight, so
+        // effectiveKbHeight stays 0 and always took the (valid) calc()
+        // branch — which is why "all other sheets work fine" was true.
+        padding: `16px 22px ${floating ? '18px' : 'calc(env(safe-area-inset-bottom, 8px) + 22px)'}`,
         animation: 'sheet-up 0.22s ease',
-        maxHeight: kbHeight > 0 ? `${vvHeight - 32}px` : '88dvh', overflow: 'auto', overscrollBehavior: 'contain',
+        maxHeight: floating ? `${vvHeight - 32}px` : '88dvh', overflow: 'auto', overscrollBehavior: 'contain',
       }}>
-        <div style={{ width: 36, height: 3, background: UI.hairStrong, borderRadius: 4, margin: '0 auto 16px' }} />
+        {/* Same breathing glow as the Intensity button (.intensity-glow /
+            @keyframes intensityGlow in index.html), on its own overlay
+            rather than the panel's own box-shadow — the keyframe's
+            box-shadow values would otherwise fully replace (not blend
+            with) the panel's static elevation/edge shadow above while
+            animating. borderRadius:'inherit' tracks the panel's own
+            (floating-dependent) radius automatically. */}
+        {accent && <div className="intensity-glow" style={{ position: 'absolute', inset: 0, borderRadius: 'inherit', pointerEvents: 'none' }} />}
+        <div style={{ width: 36, height: 3, background: accent ? 'var(--accent)' : UI.hairStrong, borderRadius: 4, margin: '0 auto 16px' }} />
         {title && (
           <div style={{ fontFamily: UI.fontDisplay, fontSize: 28, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: titleColor || UI.ink, marginBottom: 16 }}>
             {title}
@@ -671,6 +737,30 @@ function Sheet({ open, onClose, title, titleColor, children }) {
         )}
         {children}
       </div>
+    </div>
+  );
+}
+
+// ─── ImageLightbox ──────────────────────────────────────────────────
+// Full-screen viewer for a tapped chat/attachment image. Tap anywhere (or
+// the close button) to dismiss. src is nullable — render unconditionally
+// and pass the tapped image's URL, or null to keep it closed.
+function ImageLightbox({ src, onClose }) {
+  if (!src) return null;
+  return (
+    <div onClick={onClose} style={{
+      position: 'fixed', inset: 0, zIndex: 500, background: 'rgba(0,0,0,0.92)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      cursor: 'zoom-out', animation: 'sheet-fade 0.18s ease',
+    }}>
+      <img src={src} alt="" style={{ maxWidth: '92%', maxHeight: '88vh', objectFit: 'contain', borderRadius: 4 }} />
+      <button onClick={onClose} style={{
+        position: 'absolute', top: 'calc(env(safe-area-inset-top, 0px) + 14px)', right: 16,
+        width: 36, height: 36, borderRadius: '50%', border: 'none',
+        background: 'rgba(255,255,255,0.12)', color: '#fff', fontSize: 20, lineHeight: 1,
+        cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+        WebkitTapHighlightColor: 'transparent',
+      }}>×</button>
     </div>
   );
 }
@@ -1010,11 +1100,26 @@ UI.chartDomain = (dataMin, dataMax, opts) => {
 // from/to are indices into the data-reorder-item set (DOM order). Mark any
 // descendant that must NOT start a drag (e.g. a delete button) with
 // data-reorder-ignore="true". The callback is a no-op when from === to.
-function attachDragReorder(container, getCb, options) {
+// One pointer-driven engine shared by the vertical (attachDragReorder) and
+// horizontal (attachDragReorderH) reorder flavors, parameterized by axis.
+// Per-axis constants preserve each list type's existing feel: vertical lists
+// fall back to scrolling the whole page and tolerate more pre-drag jitter
+// (12px) before treating it as a page scroll; horizontal chip strips scroll
+// themselves and cancel sooner (8px) since sideways finger movement is much
+// more often an intentional scroll — these two thresholds already drifted
+// apart once (see the historical dy>dx bug fix this replaced), which is
+// exactly the kind of drift a shared engine prevents going forward.
+const DRAG_AXIS = {
+  v: { scrollEdge: 64, scrollSpeedMax: 18, touchCancelDist: 12, dropLineClass: 'reorder-drop-line' },
+  h: { scrollEdge: 48, scrollSpeedMax: 12, touchCancelDist: 8, dropLineClass: 'reorder-drop-line-h' },
+};
+
+function attachDragReorderAxis(axis, container, getCb, options) {
+  const cfg = DRAG_AXIS[axis];
   const opts = options || {};
   const LONG_PRESS_MS = opts.longPressMs != null ? opts.longPressMs : 220;
   const MOVE_TOLERANCE = opts.moveTolerance != null ? opts.moveTolerance : 8;
-  const SCROLL_EDGE = 64;
+  const SCROLL_EDGE = cfg.scrollEdge;
   let state = null;
   let rafId = null;
 
@@ -1028,38 +1133,58 @@ function attachDragReorder(container, getCb, options) {
     let n = container;
     while (n && n !== document.body && n !== document.documentElement) {
       const s = getComputedStyle(n);
-      if (/(auto|scroll)/.test(s.overflowY) && n.scrollHeight > n.clientHeight + 1) return n;
+      const scrolls = axis === 'v'
+        ? (/(auto|scroll)/.test(s.overflowY) && n.scrollHeight > n.clientHeight + 1)
+        : (/(auto|scroll)/.test(s.overflowX) && n.scrollWidth > n.clientWidth + 1);
+      if (scrolls) return n;
       n = n.parentElement;
     }
-    return null; // fall back to the window
+    return null; // fall back to the window (v) / the container itself (h)
   }
 
-  function placeDropLine(y) {
+  // v: a horizontal line spanning the full container width, positioned by y.
+  // h: a vertical line spanning the dragged item's height, positioned by x.
+  function placeDropLine(pos) {
     if (!state.dropLine) {
       state.dropLine = document.createElement('div');
-      state.dropLine.className = 'reorder-drop-line';
+      state.dropLine.className = cfg.dropLineClass;
       document.body.appendChild(state.dropLine);
     }
-    const r = container.getBoundingClientRect();
-    state.dropLine.style.left = r.left + 'px';
-    state.dropLine.style.width = r.width + 'px';
-    state.dropLine.style.top = (y - 1) + 'px';
+    if (axis === 'v') {
+      const r = container.getBoundingClientRect();
+      state.dropLine.style.left = r.left + 'px';
+      state.dropLine.style.width = r.width + 'px';
+      state.dropLine.style.top = (pos - 1) + 'px';
+    } else {
+      const r = state.src.getBoundingClientRect();
+      state.dropLine.style.top = r.top + 'px';
+      state.dropLine.style.height = r.height + 'px';
+      state.dropLine.style.left = (pos - 1) + 'px';
+    }
   }
 
-  function updateTarget(y) {
+  function updateTarget(pos) {
     const list = items();
     let insertIdx = list.length;
-    let lineY = null;
+    let line = null;
     for (let k = 0; k < list.length; k++) {
       const r = list[k].getBoundingClientRect();
-      if (y < r.top + r.height / 2) { insertIdx = k; lineY = r.top - 3; break; }
+      const start = axis === 'v' ? r.top : r.left;
+      const size = axis === 'v' ? r.height : r.width;
+      if (pos < start + size / 2) { insertIdx = k; line = start - 3; break; }
     }
-    if (lineY === null) {
+    if (line === null) {
       const last = list[list.length - 1];
-      lineY = last ? last.getBoundingClientRect().bottom + 3 : container.getBoundingClientRect().top;
+      if (last) {
+        const r = last.getBoundingClientRect();
+        line = (axis === 'v' ? r.bottom : r.right) + 3;
+      } else {
+        const r = container.getBoundingClientRect();
+        line = axis === 'v' ? r.top : r.left;
+      }
     }
     state.insertIdx = insertIdx;
-    placeDropLine(lineY);
+    placeDropLine(line);
   }
 
   function moveGhost(x, y) {
@@ -1069,27 +1194,32 @@ function attachDragReorder(container, getCb, options) {
       (y - state.offsetY - state.baseTop) + 'px) scale(1.02)';
   }
 
-  // Edge auto-scroll: nudge the nearest scroll container (or window) when the
-  // pointer hovers near its top/bottom edge, so long lists stay reachable.
+  // Edge auto-scroll: nudge the nearest scroll container (or window/self)
+  // when the pointer hovers near its leading/trailing edge, so long lists
+  // stay reachable.
   function tickScroll() {
     if (!state || !state.started) { rafId = null; return; }
-    const y = state.lastY || 0;
+    const pos = axis === 'v' ? (state.lastY || 0) : (state.lastX || 0);
     const sp = state.scrollParent;
-    const el = sp || document.scrollingElement || document.documentElement;
-    const top = sp ? sp.getBoundingClientRect().top : 0;
-    const bottom = sp ? sp.getBoundingClientRect().bottom : window.innerHeight;
-    const max = el.scrollHeight - el.clientHeight;
+    const el = sp || (axis === 'v' ? (document.scrollingElement || document.documentElement) : container);
+    const spRect = sp ? sp.getBoundingClientRect() : null;
+    const edgeStart = spRect ? (axis === 'v' ? spRect.top : spRect.left) : 0;
+    const edgeEnd = spRect
+      ? (axis === 'v' ? spRect.bottom : spRect.right)
+      : (axis === 'v' ? window.innerHeight : window.innerWidth);
+    const scrollProp = axis === 'v' ? 'scrollTop' : 'scrollLeft';
+    const max = el[axis === 'v' ? 'scrollHeight' : 'scrollWidth'] - el[axis === 'v' ? 'clientHeight' : 'clientWidth'];
     let moved = false;
-    if (y < top + SCROLL_EDGE && el.scrollTop > 0) {
-      const t = Math.min(1, (top + SCROLL_EDGE - y) / SCROLL_EDGE);
-      el.scrollTop = Math.max(0, el.scrollTop - Math.round(2 + t * 18));
+    if (pos < edgeStart + SCROLL_EDGE && el[scrollProp] > 0) {
+      const t = Math.min(1, (edgeStart + SCROLL_EDGE - pos) / SCROLL_EDGE);
+      el[scrollProp] = Math.max(0, el[scrollProp] - Math.round(2 + t * cfg.scrollSpeedMax));
       moved = true;
-    } else if (y > bottom - SCROLL_EDGE && el.scrollTop < max) {
-      const t = Math.min(1, (y - (bottom - SCROLL_EDGE)) / SCROLL_EDGE);
-      el.scrollTop = Math.min(max, el.scrollTop + Math.round(2 + t * 18));
+    } else if (pos > edgeEnd - SCROLL_EDGE && el[scrollProp] < max) {
+      const t = Math.min(1, (pos - (edgeEnd - SCROLL_EDGE)) / SCROLL_EDGE);
+      el[scrollProp] = Math.min(max, el[scrollProp] + Math.round(2 + t * cfg.scrollSpeedMax));
       moved = true;
     }
-    if (moved) updateTarget(y);
+    if (moved) updateTarget(pos);
     rafId = requestAnimationFrame(tickScroll);
   }
 
@@ -1112,7 +1242,7 @@ function attachDragReorder(container, getCb, options) {
     state.started = true;
     document.body.classList.add('reorder-dragging');
     moveGhost(x, y);
-    updateTarget(y);
+    updateTarget(axis === 'v' ? y : x);
     rafId = requestAnimationFrame(tickScroll);
   }
 
@@ -1164,7 +1294,7 @@ function attachDragReorder(container, getCb, options) {
     if (!state.started) {
       if (state.pointerType === 'mouse') {
         if (dist > MOVE_TOLERANCE) beginDrag(state.startX, state.startY);
-      } else if (dist > 12) {
+      } else if (dist > cfg.touchCancelDist) {
         // Moved before the long-press fired → treat as a scroll, bail out.
         clearTimeout(state.pressTimer);
         teardown();
@@ -1176,7 +1306,7 @@ function attachDragReorder(container, getCb, options) {
     state.lastX = ev.clientX;
     state.lastY = ev.clientY;
     moveGhost(ev.clientX, ev.clientY);
-    updateTarget(ev.clientY);
+    updateTarget(axis === 'v' ? ev.clientY : ev.clientX);
   }
 
   function onUp() {
@@ -1207,6 +1337,10 @@ function attachDragReorder(container, getCb, options) {
     document.removeEventListener('touchmove', touchBlocker, { passive: false });
     teardown();
   };
+}
+
+function attachDragReorder(container, getCb, options) {
+  return attachDragReorderAxis('v', container, getCb, options);
 }
 
 // Hook wrapper: returns a callback ref to attach to the list container. Re-binds
@@ -1245,204 +1379,11 @@ function DragHandle({ style } = {}) {
 }
 
 // ─── Horizontal drag-to-reorder (chip strips) ───────────────────────────────
-// Same architecture as attachDragReorder but works along the X axis.
-// Long-press on touch activates; vertical swipe bails immediately so the page
-// scroll is never blocked. Drop-line is a vertical accent bar.
+// Same engine as attachDragReorder, along the X axis. Long-press on touch
+// activates; a stray move before that fires bails immediately (any direction)
+// so the page/strip scroll is never blocked. Drop-line is a vertical bar.
 function attachDragReorderH(container, getCb, options) {
-  const opts = options || {};
-  const LONG_PRESS_MS = opts.longPressMs != null ? opts.longPressMs : 220;
-  const MOVE_TOLERANCE = opts.moveTolerance != null ? opts.moveTolerance : 8;
-  const SCROLL_EDGE = 48;
-  let state = null;
-  let rafId = null;
-
-  const items = () => Array.prototype.slice
-    .call(container.querySelectorAll('[data-reorder-item]'))
-    .filter(el => el.closest('[data-reorder-list]') === container);
-
-  function scrollParent() {
-    let n = container;
-    while (n && n !== document.body && n !== document.documentElement) {
-      const s = getComputedStyle(n);
-      if (/(auto|scroll)/.test(s.overflowX) && n.scrollWidth > n.clientWidth + 1) return n;
-      n = n.parentElement;
-    }
-    return null;
-  }
-
-  function placeDropLine(x) {
-    if (!state.dropLine) {
-      state.dropLine = document.createElement('div');
-      state.dropLine.className = 'reorder-drop-line-h';
-      document.body.appendChild(state.dropLine);
-    }
-    const r = state.src.getBoundingClientRect();
-    state.dropLine.style.top = r.top + 'px';
-    state.dropLine.style.height = r.height + 'px';
-    state.dropLine.style.left = (x - 1) + 'px';
-  }
-
-  function updateTarget(x) {
-    const list = items();
-    let insertIdx = list.length;
-    let lineX = null;
-    for (let k = 0; k < list.length; k++) {
-      const r = list[k].getBoundingClientRect();
-      if (x < r.left + r.width / 2) { insertIdx = k; lineX = r.left - 3; break; }
-    }
-    if (lineX === null) {
-      const last = list[list.length - 1];
-      lineX = last ? last.getBoundingClientRect().right + 3 : container.getBoundingClientRect().left;
-    }
-    state.insertIdx = insertIdx;
-    placeDropLine(lineX);
-  }
-
-  function moveGhost(x, y) {
-    if (!state || !state.ghost) return;
-    state.ghost.style.transform =
-      'translate(' + (x - state.offsetX - state.baseLeft) + 'px,' +
-      (y - state.offsetY - state.baseTop) + 'px) scale(1.02)';
-  }
-
-  function tickScroll() {
-    if (!state || !state.started) { rafId = null; return; }
-    const x = state.lastX || 0;
-    const sp = state.scrollParent;
-    const el = sp || container;
-    const left = sp ? sp.getBoundingClientRect().left : 0;
-    const right = sp ? sp.getBoundingClientRect().right : window.innerWidth;
-    const max = el.scrollWidth - el.clientWidth;
-    let moved = false;
-    if (x < left + SCROLL_EDGE && el.scrollLeft > 0) {
-      const t = Math.min(1, (left + SCROLL_EDGE - x) / SCROLL_EDGE);
-      el.scrollLeft = Math.max(0, el.scrollLeft - Math.round(2 + t * 12));
-      moved = true;
-    } else if (x > right - SCROLL_EDGE && el.scrollLeft < max) {
-      const t = Math.min(1, (x - (right - SCROLL_EDGE)) / SCROLL_EDGE);
-      el.scrollLeft = Math.min(max, el.scrollLeft + Math.round(2 + t * 12));
-      moved = true;
-    }
-    if (moved) updateTarget(x);
-    rafId = requestAnimationFrame(tickScroll);
-  }
-
-  function beginDrag(x, y) {
-    const src = state.src;
-    const rect = src.getBoundingClientRect();
-    const ghost = src.cloneNode(true);
-    ghost.classList.add('reorder-ghost');
-    ghost.style.width = rect.width + 'px';
-    ghost.style.height = rect.height + 'px';
-    ghost.style.left = rect.left + 'px';
-    ghost.style.top = rect.top + 'px';
-    document.body.appendChild(ghost);
-    src.classList.add('reorder-source');
-    state.ghost = ghost;
-    state.baseLeft = rect.left;
-    state.baseTop = rect.top;
-    state.offsetX = x - rect.left;
-    state.offsetY = y - rect.top;
-    state.started = true;
-    document.body.classList.add('reorder-dragging');
-    moveGhost(x, y);
-    updateTarget(x);
-    rafId = requestAnimationFrame(tickScroll);
-  }
-
-  function teardown() {
-    if (!state) return;
-    if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
-    document.removeEventListener('pointermove', onMove, { passive: false });
-    document.removeEventListener('pointerup', onUp);
-    document.removeEventListener('pointercancel', onUp);
-    clearTimeout(state.pressTimer);
-    if (state.dropLine) state.dropLine.remove();
-    if (state.src) state.src.classList.remove('reorder-source');
-    const ghost = state.ghost;
-    document.body.classList.remove('reorder-dragging');
-    state = null;
-    if (ghost) { ghost.style.opacity = '0'; setTimeout(() => ghost.remove(), 160); }
-  }
-
-  function onDown(ev) {
-    if (state) return;
-    if (ev.button != null && ev.button !== 0) return;
-    if (!ev.target || !ev.target.closest) return;
-    if (ev.target.closest('[data-reorder-ignore]')) return;
-    const src = ev.target.closest('[data-reorder-item]');
-    if (!src) return;
-    const fromIdx = items().indexOf(src);
-    if (fromIdx === -1) return;
-    state = {
-      src, fromIdx, insertIdx: fromIdx,
-      startX: ev.clientX, startY: ev.clientY,
-      lastX: ev.clientX, lastY: ev.clientY,
-      pointerType: ev.pointerType || 'mouse',
-      started: false, pressTimer: null, ghost: null, dropLine: null,
-      scrollParent: scrollParent(),
-    };
-    document.addEventListener('pointermove', onMove, { passive: false });
-    document.addEventListener('pointerup', onUp);
-    document.addEventListener('pointercancel', onUp);
-    if (state.pointerType !== 'mouse') {
-      state.pressTimer = setTimeout(() => {
-        if (state && !state.started) beginDrag(state.startX, state.startY);
-      }, LONG_PRESS_MS);
-    }
-  }
-
-  function onMove(ev) {
-    if (!state) return;
-    const dx = Math.abs(ev.clientX - state.startX);
-    const dy = Math.abs(ev.clientY - state.startY);
-    const dist = Math.hypot(dx, dy);
-    if (!state.started) {
-      if (state.pointerType === 'mouse') {
-        if (dist > MOVE_TOLERANCE) beginDrag(state.startX, state.startY);
-      } else if (dist > 8) {
-        // Any movement before long-press fires → user is scrolling, cancel.
-        // (Previously only cancelled on dy>dx, letting horizontal scroll keep
-        //  the timer alive — causing accidental reorders mid-scroll.)
-        clearTimeout(state.pressTimer);
-        teardown();
-        return;
-      }
-    }
-    if (!state || !state.started) return;
-    ev.preventDefault();
-    state.lastX = ev.clientX;
-    state.lastY = ev.clientY;
-    moveGhost(ev.clientX, ev.clientY);
-    updateTarget(ev.clientX);
-  }
-
-  function onUp() {
-    if (!state) return;
-    if (!state.started) { teardown(); return; }
-    const from = state.fromIdx;
-    let to = state.insertIdx;
-    if (to > from) to -= 1;
-    const swallow = e => { e.stopPropagation(); e.preventDefault(); };
-    document.addEventListener('click', swallow, { capture: true, once: true });
-    setTimeout(() => document.removeEventListener('click', swallow, { capture: true }), 120);
-    teardown();
-    if (to !== from && to >= 0) {
-      const cb = getCb();
-      if (cb) cb(from, to);
-    }
-  }
-
-  function touchBlocker(ev) { if (state && state.started) ev.preventDefault(); }
-
-  container.addEventListener('pointerdown', onDown);
-  document.addEventListener('touchmove', touchBlocker, { passive: false });
-
-  return function cleanup() {
-    container.removeEventListener('pointerdown', onDown);
-    document.removeEventListener('touchmove', touchBlocker, { passive: false });
-    teardown();
-  };
+  return attachDragReorderAxis('h', container, getCb, options);
 }
 
 UI.useDragReorderH = function(options) {
@@ -1468,7 +1409,7 @@ function ReorderList({ onReorder, longPressMs, moveTolerance, style, className, 
 }
 
 Object.assign(window, {
-  UI, Screen, TopBar, SubTabBar, TabBar, Btn, Card, Label, Stepper, Pill, Sheet, Empty,
+  UI, Screen, TopBar, SubTabBar, TabBar, Btn, Card, Label, Stepper, Pill, Sheet, Empty, ImageLightbox,
   ChevronRight, ICON_HISTORY, ICON_BARBELL, ICON_CALENDAR,
   btnPrimary, btnGhost, useConfirm, DragHandle, ReorderList,
   MUSCLES, WEEKDAYS, WEEKDAYS_FULL,

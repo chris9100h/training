@@ -106,11 +106,7 @@ function LoginScreen() {
   const formRef = useRef(null);
 
   useEffect(() => {
-    if (!('caches' in window)) return;
-    caches.keys().then(keys => {
-      const k = keys.find(k => k.startsWith('zane-'));
-      if (k) setSwVersion(k.replace('zane-', ''));
-    });
+    LB.detectCacheVersion().then(version => { if (version) setSwVersion(version); });
   }, []);
 
   // Safari autofill fires native DOM input events but not React synthetic ones.
@@ -539,19 +535,7 @@ function RecentBannerDay({ banner, setStore, onOpenSkipSheet, onLog }) {
 
 // ─── CARDIO QUICK-LOG ─────────────────────────────────────────────────
 
-const CARDIO_DIST_KEY = 'logbook-cardio-dist-unit'; // 'km' | 'mi'
 const CARDIO_LIVE_KEY = 'logbook-cardio-live-start'; // epoch ms of a running live cardio, else absent
-const MI_TO_M = 1609.344;
-
-function distToM(val, unit) {
-  const n = parseFloat(String(val).replace(',', '.'));
-  if (isNaN(n)) return null;
-  return unit === 'mi' ? Math.round(n * MI_TO_M) : Math.round(n * 1000);
-}
-function mToDisplay(meters, unit) {
-  if (meters == null) return '';
-  return unit === 'mi' ? (meters / MI_TO_M).toFixed(2) : (meters / 1000).toFixed(2);
-}
 
 // Full-screen celebratory flash when a freshly logged cardio session beats a
 // personal best (★ NEW BEST) or the last same-type session (↑ IMPROVEMENT).
@@ -564,16 +548,18 @@ function CardioPROverlay({ pr, onDone }) {
   }, [pr]);
   if (!pr) return null;
 
-  const du = (() => { try { return localStorage.getItem(CARDIO_DIST_KEY) || 'km'; } catch (_) { return 'km'; } })();
+  const du = LB.cardioDistUnit();
   const isBest = pr.tier === 'best';
+  // detectCardioPRs' pace is decimal minutes/km (not seconds/km, which is
+  // LB.fmtPace's contract) — kept local rather than forced into that shape.
   const fmtPace = (minPerKm) => {
-    const perUnit = du === 'mi' ? minPerKm * MI_TO_M / 1000 : minPerKm;
+    const perUnit = du === 'mi' ? minPerKm * LB.MI_TO_M / 1000 : minPerKm;
     let mins = Math.floor(perUnit);
     let secs = Math.round((perUnit - mins) * 60);
     if (secs === 60) { mins += 1; secs = 0; }
     return `${mins}:${String(secs).padStart(2, '0')} /${du}`;
   };
-  const fmtDist = (m) => du === 'mi' ? `${(m / MI_TO_M).toFixed(2)} mi` : `${(m / 1000).toFixed(2)} km`;
+  const fmtDist = (m) => LB.fmtDistance(m, du);
   const META = {
     pace:     { label: 'Fastest Pace',     fmt: fmtPace },
     distance: { label: 'Longest Distance', fmt: fmtDist },
@@ -616,13 +602,15 @@ function CardioPROverlay({ pr, onDone }) {
   );
 }
 
-function CardioQuickLogSheet({ open, onClose, store, setStore, userId, editLog, onPR, prefill }) {
-  const getDistUnit = () => { try { return localStorage.getItem(CARDIO_DIST_KEY) || 'km'; } catch (_) { return 'km'; } };
-  const [distUnit, setDistUnitState] = useState(getDistUnit);
-  const setDistUnit = (u) => { try { localStorage.setItem(CARDIO_DIST_KEY, u); } catch (_) {} setDistUnitState(u); };
+function CardioQuickLogSheet({ open, onClose, store, setStore, userId, editLog, onPR, prefill, logDate }) {
+  const [distUnit, setDistUnitState] = useState(LB.cardioDistUnit);
+  const setDistUnit = (u) => { LB.setCardioDistUnit(u); setDistUnitState(u); };
 
   const todayStr = LB.todayISO();
-  const empty = () => ({ date: todayStr, type: '', duration: '', distance: '', paceFeeling: null, effort: null, note: '' });
+  // Defaults to the day the caller has selected (e.g. the home strip's
+  // currently-browsed day), not always today — otherwise navigating back to
+  // log a missed day's cardio would silently save it under today's date.
+  const empty = () => ({ date: logDate || todayStr, type: '', duration: '', distance: '', paceFeeling: null, effort: null, note: '' });
   const [form, setForm] = useState(empty);
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
   const [confirmEl, confirm] = useConfirm();
@@ -630,12 +618,12 @@ function CardioQuickLogSheet({ open, onClose, store, setStore, userId, editLog, 
 
   useEffect(() => {
     if (!open) return;
-    const du = getDistUnit();
+    const du = LB.cardioDistUnit();
     const next = editLog ? {
       date: editLog.date,
       type: editLog.type || '',
       duration: editLog.durationMinutes ? String(editLog.durationMinutes) : '',
-      distance: editLog.distanceM != null ? mToDisplay(editLog.distanceM, du) : '',
+      distance: editLog.distanceM != null ? LB.mToDisplay(editLog.distanceM, du) : '',
       paceFeeling: editLog.paceFeeling ?? null,
       effort: editLog.effort ?? null,
       note: editLog.note || '',
@@ -643,7 +631,7 @@ function CardioQuickLogSheet({ open, onClose, store, setStore, userId, editLog, 
       ...empty(),
       type: prefill?.type || '',
       duration: prefill?.durationMinutes ? String(prefill.durationMinutes) : '',
-      distance: prefill?.distanceM != null ? mToDisplay(prefill.distanceM, du) : '',
+      distance: prefill?.distanceM != null ? LB.mToDisplay(prefill.distanceM, du) : '',
     };
     setForm(next);
     initialSnap.current = next;
@@ -655,16 +643,7 @@ function CardioQuickLogSheet({ open, onClose, store, setStore, userId, editLog, 
     onClose();
   };
 
-  // Unique types from history, most-recently-used first
-  const typeChips = useMemo(() => {
-    const seen = new Set();
-    const result = [];
-    for (const l of (store.cardioLogs || [])) {
-      if (l.type && !seen.has(l.type)) { seen.add(l.type); result.push(l.type); }
-      if (result.length >= 6) break;
-    }
-    return result;
-  }, [store.cardioLogs]);
+  const typeChips = useMemo(() => LB.recentCardioTypes(store.cardioLogs), [store.cardioLogs]);
 
   const canSave = form.date && form.duration && Number(form.duration) > 0;
 
@@ -676,7 +655,7 @@ function CardioQuickLogSheet({ open, onClose, store, setStore, userId, editLog, 
         date: form.date,
         type: form.type.trim() || null,
         durationMinutes: Math.round(Number(form.duration)),
-        distanceM: form.distance ? distToM(form.distance, distUnit) : null,
+        distanceM: form.distance ? LB.distToM(form.distance, distUnit) : null,
         paceFeeling: form.paceFeeling,
         effort: form.effort,
         note: form.note.trim() || null,
@@ -688,7 +667,7 @@ function CardioQuickLogSheet({ open, onClose, store, setStore, userId, editLog, 
         date: form.date,
         type: form.type.trim() || null,
         durationMinutes: Math.round(Number(form.duration)),
-        distanceM: form.distance ? distToM(form.distance, distUnit) : null,
+        distanceM: form.distance ? LB.distToM(form.distance, distUnit) : null,
         paceFeeling: form.paceFeeling,
         effort: form.effort,
         note: form.note.trim() || null,
@@ -869,9 +848,8 @@ function CardioLiveSheet({ open, onFinish, onCancel }) {
 // Guided post-live flow: a "well done" moment, then one metric per step.
 // Saves the same shape as the manual log, so cardio PR detection still fires.
 function CardioFinishFlow({ open, durationMin, store, setStore, onClose, onPR }) {
-  const getDistUnit = () => { try { return localStorage.getItem(CARDIO_DIST_KEY) || 'km'; } catch (_) { return 'km'; } };
-  const [distUnit, setDistUnitState] = useState(getDistUnit);
-  const setDistUnit = (u) => { try { localStorage.setItem(CARDIO_DIST_KEY, u); } catch (_) {} setDistUnitState(u); };
+  const [distUnit, setDistUnitState] = useState(LB.cardioDistUnit);
+  const setDistUnit = (u) => { LB.setCardioDistUnit(u); setDistUnitState(u); };
   const [step, setStep] = useState(0);
   const [form, setForm] = useState({ type: '', distance: '', paceFeeling: null, effort: null, note: '' });
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
@@ -880,17 +858,10 @@ function CardioFinishFlow({ open, durationMin, store, setStore, onClose, onPR })
     if (!open) return;
     setStep(0);
     setForm({ type: '', distance: '', paceFeeling: null, effort: null, note: '' });
-    setDistUnitState(getDistUnit());
+    setDistUnitState(LB.cardioDistUnit());
   }, [open]);
 
-  const typeChips = useMemo(() => {
-    const seen = new Set(); const result = [];
-    for (const l of (store.cardioLogs || [])) {
-      if (l.type && !seen.has(l.type)) { seen.add(l.type); result.push(l.type); }
-      if (result.length >= 6) break;
-    }
-    return result;
-  }, [store.cardioLogs]);
+  const typeChips = useMemo(() => LB.recentCardioTypes(store.cardioLogs), [store.cardioLogs]);
 
   const METRICS = 5;
   const next = () => setStep(s => s + 1);
@@ -903,7 +874,7 @@ function CardioFinishFlow({ open, durationMin, store, setStore, onClose, onPR })
       date: LB.todayISO(),
       type: form.type.trim() || null,
       durationMinutes: durationMin,
-      distanceM: form.distance ? distToM(form.distance, distUnit) : null,
+      distanceM: form.distance ? LB.distToM(form.distance, distUnit) : null,
       paceFeeling: form.paceFeeling,
       effort: form.effort,
       note: form.note.trim() || null,
@@ -1032,6 +1003,91 @@ function CardioFinishFlow({ open, durationMin, store, setStore, onClose, onPR })
 // Moved to store.js as LB.getCycleStartForNum — kept as thin wrapper for the
 // one caller below until we can update the call site.
 const getCycleStartForNum = LB.getCycleStartForNum;
+
+// Walk backward from yesterday looking for planned training days with no
+// logged session — shared core for HomeScreen's recentBannerDay (single
+// most-recent candidate; any skip record at all excludes a day) and
+// allMissedDays (full list further back; a '—' "soft skip" placeholder still
+// counts as missed). isSkipped lets each caller apply its own inclusion rule.
+function findMissedTrainingDays(sch, { weekdayMode, cycleStartDate, weekPlanStartDate, sessions, skipsMap, maxDaysAgo, isSkipped }) {
+  if (!sch) return [];
+  const todayD = new Date(); todayD.setHours(12, 0, 0, 0);
+  const sessionDates = new Set(sessions.filter(s => s.ended).map(s => s.date.slice(0, 10)));
+  const results = [];
+  for (let daysAgo = 1; daysAgo <= maxDaysAgo; daysAgo++) {
+    const d = new Date(todayD); d.setDate(todayD.getDate() - daysAgo);
+    const dateKey = LB.fmtISO(d);
+    if (sessionDates.has(dateKey)) continue;
+    const sk = skipsMap.get(dateKey);
+    if (isSkipped(sk)) continue;
+    let trainingDay = null;
+    if (weekdayMode) {
+      if (weekPlanStartDate && dateKey < weekPlanStartDate) continue;
+      const wd = LB.isoWd(d);
+      trainingDay = sch.days.find(day => day.weekday === wd && day.items?.length > 0) || null;
+    } else if (cycleStartDate) {
+      const vDays = LB.getPlanDaysForDate(sch, dateKey);
+      if (!vDays.length) continue;
+      const cyclePosForDate = LB.getCyclePosForDate(sch, dateKey);
+      let idx;
+      if (cyclePosForDate !== null) {
+        const start = LB.parseDate(cycleStartDate);
+        if (Math.round((d.getTime() - start.getTime()) / 86400000) < 0) continue;
+        idx = cyclePosForDate;
+      } else {
+        const start = LB.parseDate(cycleStartDate);
+        const n = Math.round((d.getTime() - start.getTime()) / 86400000);
+        if (n < 0) continue;
+        idx = ((n % vDays.length) + vDays.length) % vDays.length;
+      }
+      const dayData = vDays[idx];
+      if (dayData?.items?.length > 0) trainingDay = dayData;
+    }
+    if (!trainingDay) continue;
+    results.push({ date: d, dateKey, dayName: trainingDay.name, dayId: trainingDay.id, daysAgo, skip: sk || null, dayData: trainingDay });
+  }
+  return results;
+}
+
+// Pull-to-open-Quick-Actions affordance, shown right below the home header.
+// A bold, accent-colored chevron stays visible at rest (pullDelta === 0) so
+// the gesture is discoverable without ever pulling — a returning user
+// reported never finding Quick Actions at all since this used to collapse
+// to zero height/opacity when idle. It's also directly tappable (not just
+// a hint), growing into the full "QUICK ACTIONS"/"RELEASE" label once the
+// user actually starts pulling.
+function PullHintChevron({ pullDelta, onOpen }) {
+  return (
+    <div style={{
+      flexShrink: 0,
+      height: Math.max(16, Math.min(pullDelta * 0.4, 28)),
+      overflow: 'hidden',
+      display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
+      transition: pullDelta === 0 ? 'height 0.25s ease' : 'none',
+    }}>
+      <button onClick={onOpen} style={{
+        display: 'flex', alignItems: 'center', gap: 6, padding: '4px 14px',
+        background: 'none', border: 'none', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+        color: pullDelta >= 65 ? UI.gold : 'var(--accent)',
+        transition: pullDelta === 0 ? 'color 0.15s ease' : 'color 0.1s ease',
+      }}>
+        <svg width="17" height="10" viewBox="0 0 12 7" fill="none" style={{ opacity: Math.max(0.9, Math.min(1, pullDelta / 50)) }}>
+          <path d="M1 1l5 4.5L11 1" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+        {pullDelta > 0 && (
+          <>
+            <span style={{ fontFamily: UI.fontUi, fontSize: 9, letterSpacing: '0.18em', fontWeight: 600, opacity: Math.min(1, pullDelta / 50) }}>
+              {pullDelta >= 65 ? 'RELEASE' : 'QUICK ACTIONS'}
+            </span>
+            <svg width="17" height="10" viewBox="0 0 12 7" fill="none" style={{ opacity: Math.min(1, pullDelta / 50) }}>
+              <path d="M1 1l5 4.5L11 1" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          </>
+        )}
+      </button>
+    </div>
+  );
+}
 
 // ─── HOME ─────────────────────────────────────────────────────────────
 function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRetrySync }) {
@@ -1603,7 +1659,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
         weeks: freshSch.mesocycle_weeks,
         startDate: alignedStartDate,
         startCycleIndex: alignedStartIdx,
-        deltas: {}, jointFlags: {}, pumpLowCounts: {}, weightBoosts: {},
+        deltas: {}, jointFlags: {}, pumpLowCounts: {}, weightBoosts: {}, growthCounts: {},
         completions: existing?.completions ?? 0,
         updatedAt: new Date().toISOString(),
       };
@@ -1669,6 +1725,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
             deltas: {},
             jointFlags: {},
             pumpLowCounts: {},
+            growthCounts: {},
             pendingMeso2: false,
             updatedAt: new Date().toISOString(),
           };
@@ -1866,83 +1923,19 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
   }, [store.cardioPlans, store.activeCardioPlanId, sessionDate]);
 
   const recentBannerDay = useMemo(() => {
-    if (!sch) return null;
-    const todayD = new Date(); todayD.setHours(12, 0, 0, 0);
-    const sessionDates = new Set(store.sessions.filter(s => s.ended).map(s => s.date.slice(0, 10)));
-    for (let daysAgo = 1; daysAgo <= 30; daysAgo++) {
-      const d = new Date(todayD); d.setDate(todayD.getDate() - daysAgo);
-      const dateKey = LB.fmtISO(d);
-      if (sessionDates.has(dateKey)) continue;
-      const sk = skipsMap.get(dateKey);
-      if (sk) continue; // already actioned — edit via calendar card
-      let trainingDay = null;
-      if (weekdayMode) {
-        if (store.weekPlanStartDate && dateKey < store.weekPlanStartDate) continue;
-        const wd = LB.isoWd(d);
-        trainingDay = sch.days.find(day => day.weekday === wd && day.items?.length > 0) || null;
-      } else if (store.cycleStartDate) {
-        const vDays = LB.getPlanDaysForDate(sch, dateKey);
-        if (!vDays.length) continue;
-        const cyclePosForDate = LB.getCyclePosForDate(sch, dateKey);
-        let idx;
-        if (cyclePosForDate !== null) {
-          const start = LB.parseDate(store.cycleStartDate);
-          if (Math.round((d.getTime() - start.getTime()) / 86400000) < 0) continue;
-          idx = cyclePosForDate;
-        } else {
-          const start = LB.parseDate(store.cycleStartDate);
-          const n = Math.round((d.getTime() - start.getTime()) / 86400000);
-          if (n < 0) continue;
-          idx = ((n % vDays.length) + vDays.length) % vDays.length;
-        }
-        const dayData = vDays[idx];
-        if (dayData?.items?.length > 0) trainingDay = dayData;
-      }
-      if (!trainingDay) continue;
-      return { date: d, dateKey, dayName: trainingDay.name, dayId: trainingDay.id, daysAgo, skip: sk || null, dayData: trainingDay };
-    }
-    return null;
+    const [first] = findMissedTrainingDays(sch, {
+      weekdayMode, cycleStartDate: store.cycleStartDate, weekPlanStartDate: store.weekPlanStartDate,
+      sessions: store.sessions, skipsMap, maxDaysAgo: 30,
+      isSkipped: sk => !!sk, // any skip record at all — already actioned, edit via calendar card
+    });
+    return first || null;
   }, [sch, weekdayMode, store.cycleStartDate, store.sessions, store.skips, skipsMap]);
 
-  const allMissedDays = useMemo(() => {
-    if (!sch) return [];
-    const todayD = new Date(); todayD.setHours(12, 0, 0, 0);
-    const sessionDates = new Set(store.sessions.filter(s => s.ended).map(s => s.date.slice(0, 10)));
-    const missed = [];
-    for (let daysAgo = 1; daysAgo <= 14; daysAgo++) {
-      const d = new Date(todayD); d.setDate(todayD.getDate() - daysAgo);
-      const dateKey = LB.fmtISO(d);
-      if (sessionDates.has(dateKey)) continue;
-      const skip = skipsMap.get(dateKey);
-      if (skip && skip.skipReason !== '—') continue;
-      let trainingDay = null;
-      if (weekdayMode) {
-        if (store.weekPlanStartDate && dateKey < store.weekPlanStartDate) continue;
-        const wd = LB.isoWd(d);
-        trainingDay = sch.days.find(day => day.weekday === wd && day.items?.length > 0) || null;
-      } else if (store.cycleStartDate) {
-        const vDays = LB.getPlanDaysForDate(sch, dateKey);
-        if (!vDays.length) continue;
-        const cyclePosForDate = LB.getCyclePosForDate(sch, dateKey);
-        let idx;
-        if (cyclePosForDate !== null) {
-          const start = LB.parseDate(store.cycleStartDate);
-          if (Math.round((d.getTime() - start.getTime()) / 86400000) < 0) continue;
-          idx = cyclePosForDate;
-        } else {
-          const start = LB.parseDate(store.cycleStartDate);
-          const n = Math.round((d.getTime() - start.getTime()) / 86400000);
-          if (n < 0) continue;
-          idx = ((n % vDays.length) + vDays.length) % vDays.length;
-        }
-        const dayData = vDays[idx];
-        if (dayData?.items?.length > 0) trainingDay = dayData;
-      }
-      if (!trainingDay) continue;
-      missed.push({ date: d, dateKey, dayName: trainingDay.name, dayId: trainingDay.id, daysAgo, dayData: trainingDay });
-    }
-    return missed;
-  }, [sch, weekdayMode, store.cycleStartDate, store.sessions, store.skips, skipsMap]);
+  const allMissedDays = useMemo(() => findMissedTrainingDays(sch, {
+    weekdayMode, cycleStartDate: store.cycleStartDate, weekPlanStartDate: store.weekPlanStartDate,
+    sessions: store.sessions, skipsMap, maxDaysAgo: 14,
+    isSkipped: sk => sk && sk.skipReason !== '—',
+  }), [sch, weekdayMode, store.cycleStartDate, store.sessions, store.skips, skipsMap]);
 
   useEffect(() => {
     const coaching = store.coaching;
@@ -2299,7 +2292,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
 
 
   const cardioBanner = selectedDayCardioLogs.length > 0 ? (() => {
-    const du = (() => { try { return localStorage.getItem(CARDIO_DIST_KEY) || 'km'; } catch(_) { return 'km'; } })();
+    const du = LB.cardioDistUnit();
     const totalMins = selectedDayCardioLogs.reduce((s, l) => s + (l.durationMinutes || 0), 0);
     const single = selectedDayCardioLogs.length === 1 ? selectedDayCardioLogs[0] : null;
     const typeLabel = (() => {
@@ -2318,7 +2311,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
               {totalMins}<span style={{ fontSize: 9, color: UI.inkFaint }}>{selectedDayCardioLogs.length > 1 ? 'min total' : 'min'}</span>
             </span>
             {single?.distanceM != null && (
-              <span className="num" style={{ fontSize: 11, color: UI.inkSoft, flexShrink: 0 }}>{mToDisplay(single.distanceM, du)}<span style={{ fontSize: 8 }}>{du}</span></span>
+              <span className="num" style={{ fontSize: 11, color: UI.inkSoft, flexShrink: 0 }}>{LB.mToDisplay(single.distanceM, du)}<span style={{ fontSize: 8 }}>{du}</span></span>
             )}
             {single?.effort != null && (
               <span className="num" style={{ fontSize: 11, color: UI.inkFaint, flexShrink: 0 }}>{single.effort}/10</span>
@@ -2350,27 +2343,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l-.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
             </button>}
           />
-          <div style={{
-            flexShrink: 0,
-            height: Math.min(pullDelta * 0.4, 28),
-            overflow: 'hidden',
-            display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
-            transition: pullDelta === 0 ? 'height 0.25s ease' : 'none',
-            pointerEvents: 'none',
-          }}>
-            <div style={{
-              display: 'flex', alignItems: 'center', gap: 6, paddingBottom: 4,
-              opacity: Math.min(1, pullDelta / 50),
-              color: pullDelta >= 65 ? UI.gold : UI.inkFaint,
-              transition: pullDelta === 0 ? 'opacity 0.25s ease, color 0.15s ease' : 'color 0.1s ease',
-            }}>
-              <svg width="12" height="7" viewBox="0 0 12 7" fill="none"><path d="M1 1l5 4.5L11 1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
-              <span style={{ fontFamily: UI.fontUi, fontSize: 9, letterSpacing: '0.18em', fontWeight: 600 }}>
-                {pullDelta >= 65 ? 'RELEASE' : 'QUICK ACTIONS'}
-              </span>
-              <svg width="12" height="7" viewBox="0 0 12 7" fill="none"><path d="M1 1l5 4.5L11 1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
-            </div>
-          </div>
+          <PullHintChevron pullDelta={pullDelta} onOpen={() => setQuickActionsOpen(true)} />
           <div style={{ padding: 22 }}>
             {hasPlans
               ? <Empty title="No active plan" sub="You have plans ready — just pick one to activate." action={<Btn onClick={() => go({ name: 'plan' })}>View plans</Btn>} icon={ICON_CALENDAR} />
@@ -2435,27 +2408,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       </div>
 
       {/* Pull-down indicator — right below plan header */}
-      <div style={{
-        flexShrink: 0,
-        height: Math.min(pullDelta * 0.4, 28),
-        overflow: 'hidden',
-        display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
-        transition: pullDelta === 0 ? 'height 0.25s ease' : 'none',
-        pointerEvents: 'none',
-      }}>
-        <div style={{
-          display: 'flex', alignItems: 'center', gap: 6, paddingBottom: 4,
-          opacity: Math.min(1, pullDelta / 50),
-          color: pullDelta >= 65 ? UI.gold : UI.inkFaint,
-          transition: pullDelta === 0 ? 'opacity 0.25s ease, color 0.15s ease' : 'color 0.1s ease',
-        }}>
-          <svg width="12" height="7" viewBox="0 0 12 7" fill="none"><path d="M1 1l5 4.5L11 1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
-          <span style={{ fontFamily: UI.fontUi, fontSize: 9, letterSpacing: '0.18em', fontWeight: 600 }}>
-            {pullDelta >= 65 ? 'RELEASE' : 'QUICK ACTIONS'}
-          </span>
-          <svg width="12" height="7" viewBox="0 0 12 7" fill="none"><path d="M1 1l5 4.5L11 1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
-        </div>
-      </div>
+      <PullHintChevron pullDelta={pullDelta} onOpen={() => setQuickActionsOpen(true)} />
 
       {/* In-progress banner */}
       {store.inProgress && (() => {
@@ -2886,7 +2839,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       {/* Cardio history popover */}
       {cardioPopoverOpen && (() => {
         const recentCardio = (store.cardioLogs || []).slice(0, 5);
-        const du = (() => { try { return localStorage.getItem(CARDIO_DIST_KEY) || 'km'; } catch (_) { return 'km'; } })();
+        const du = LB.cardioDistUnit();
         return (
           <Sheet open={true} onClose={() => setCardioPopoverOpen(false)}>
             <div style={{ fontFamily: UI.fontUi, fontSize: 15, fontWeight: 600, letterSpacing: '0.10em', textTransform: 'uppercase', color: UI.inkSoft, textAlign: 'center', marginBottom: recentCardio.length ? 16 : 10 }}>RECENT CARDIO</div>
@@ -2899,7 +2852,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                     <i className="fa-solid fa-person-running" style={{ fontSize: 11, color: UI.inkFaint, width: 12 }} />
                     <span style={{ flex: 1, fontSize: 12, color: UI.ink, fontFamily: UI.fontUi, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{l.type || '—'}</span>
                     <span className="num" style={{ fontSize: 12, color: UI.gold, flexShrink: 0 }}>{l.durationMinutes}<span style={{ color: UI.inkFaint, fontSize: 9 }}>min</span></span>
-                    {l.distanceM != null && <span className="num" style={{ fontSize: 11, color: UI.inkSoft, flexShrink: 0 }}>{mToDisplay(l.distanceM, du)}<span style={{ fontSize: 8 }}>{du}</span></span>}
+                    {l.distanceM != null && <span className="num" style={{ fontSize: 11, color: UI.inkSoft, flexShrink: 0 }}>{LB.mToDisplay(l.distanceM, du)}<span style={{ fontSize: 8 }}>{du}</span></span>}
                     <span style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi, flexShrink: 0 }}>{l.date.slice(5).replace('-', '/')}</span>
                     <button onClick={() => { setEditingCardioLog(l); setCardioPopoverOpen(false); setCardioLogOpen(true); }} style={{ flexShrink: 0, background: 'none', border: 'none', cursor: 'pointer', padding: '2px 4px', color: UI.inkFaint, display: 'flex', alignItems: 'center' }}>
                       <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
@@ -2930,7 +2883,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
 
       <CardioFinishFlow open={cardioFinishOpen} durationMin={cardioFinishDuration} store={store} setStore={setStore} onClose={() => setCardioFinishOpen(false)} onPR={setCardioPR} />
 
-      <CardioQuickLogSheet open={cardioLogOpen} onClose={() => { setCardioLogOpen(false); setEditingCardioLog(null); }} store={store} setStore={setStore} userId={userId} editLog={editingCardioLog} onPR={setCardioPR} prefill={editingCardioLog ? null : cardioPlanPrefill} />
+      <CardioQuickLogSheet open={cardioLogOpen} onClose={() => { setCardioLogOpen(false); setEditingCardioLog(null); }} store={store} setStore={setStore} userId={userId} editLog={editingCardioLog} onPR={setCardioPR} prefill={editingCardioLog ? null : cardioPlanPrefill} logDate={LB.fmtISO(sessionDate)} />
       <CardioPROverlay pr={cardioPR} onDone={() => setCardioPR(null)} />
 
       {/* Coach message banner */}
@@ -3023,7 +2976,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                 'fa-clock-rotate-left',
                 'Backlog Session',
                 allMissedDays.length === 1
-                  ? `Log ${allMissedDays[0].dayName} (${allMissedDays[0].daysAgo === 1 ? 'yesterday' : `${allMissedDays[0].daysAgo}d ago`})`
+                  ? `Log ${allMissedDays[0].dayName} (${LB.dayLabel(allMissedDays[0].daysAgo)})`
                   : `${allMissedDays.length} unlogged sessions`,
               )}
               {actionBtn(() => { setQuickActionsOpen(false); setCardioPopoverOpen(true); }, 'fa-person-running', 'Cardio', 'Start live or log manually')}
@@ -3053,11 +3006,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
               )}
               <button onClick={async () => {
                 setQuickActionsOpen(false);
-                if ('caches' in window) {
-                  const keys = await caches.keys();
-                  await Promise.all(keys.map(k => caches.delete(k)));
-                }
-                window.location.reload(true);
+                await LB.clearCachesAndReload();
               }} style={{
                 width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
                 padding: '12px 14px', background: UI.bgInset, border: `0.5px solid ${UI.hair}`,
@@ -3218,7 +3167,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
             }}>
               <span style={{ fontSize: 14, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi }}>{m.dayName}</span>
               <span className="num" style={{ fontSize: 11, color: UI.inkFaint }}>
-                {m.daysAgo === 1 ? 'yesterday' : `${m.daysAgo}d ago`}
+                {LB.dayLabel(m.daysAgo)}
               </span>
             </button>
           ))}

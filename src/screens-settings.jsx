@@ -7,17 +7,57 @@ const { useState: useStateSet, useEffect: useEffectSet, useRef: useRefSet } = Re
 const fmtSec = s => s < 60 ? `${s}s` : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 
 // Short "time since" label for the admin sign-up feed.
-const fmtAgo = (iso) => {
-  if (!iso) return '';
-  const mins = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
-  if (mins < 1) return 'just now';
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  const days = Math.floor(hrs / 24);
-  if (days < 7) return `${days}d ago`;
-  return new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+const fmtAgo = (iso) => LB.timeAgo(iso, { capDays: 7 });
+
+// Boxed input look shared by the settings sheets' plain text/password/email/
+// select inputs (password/email change, OTP, admin tools, ...). Spread and
+// override for a sheet's specific padding/fontSize/etc.
+const SETTINGS_INPUT_STYLE = {
+  background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4,
+  padding: '10px 14px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink,
+  outline: 'none', width: '100%', boxSizing: 'border-box',
 };
+// Same look, larger radius, for the multi-line support-ticket textareas.
+const SETTINGS_TEXTAREA_STYLE = {
+  width: '100%', background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`,
+  borderRadius: 6, padding: '10px 12px', color: UI.ink, fontFamily: UI.fontUi,
+  fontSize: 14, outline: 'none', resize: 'none', boxSizing: 'border-box', lineHeight: 1.5,
+};
+
+// Admin support-inbox ticket row — active and archived are the same shape,
+// the archived variant just mutes it (dimmed colors/opacity, smaller text,
+// no unread dot / "no messages yet" placeholder / timestamp).
+function AdminTicketRow({ t, archived = false, catLabel, onClick }) {
+  const statusColor = { open: UI.danger, in_progress: UI.gold, resolved: UI.inkFaint };
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        width: '100%',
+        background: archived ? UI.bgInset : UI.bgRaised,
+        border: `0.5px solid ${UI.hair}`,
+        borderLeft: `3px solid ${archived ? UI.inkGhost : (statusColor[t.support_status] || UI.hairStrong)}`,
+        borderRadius: 8, cursor: 'pointer', textAlign: 'left', padding: '12px 14px', marginBottom: 8,
+        WebkitTapHighlightColor: 'transparent', display: 'flex', flexDirection: 'column',
+        gap: archived ? 4 : 5, opacity: archived ? 0.7 : 1,
+      }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={{ fontSize: archived ? 13 : 14, fontWeight: 600, color: archived ? UI.inkSoft : UI.ink, fontFamily: UI.fontUi, flex: 1 }}>{t.client_name || t.client_email}</span>
+        {!archived && Number(t.unread_count) > 0 && <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--accent)', display: 'inline-block', flexShrink: 0, animation: 'pulseDot 1.5s ease-in-out infinite' }} />}
+        <span className="micro" style={{ color: archived ? UI.inkGhost : (statusColor[t.support_status] || UI.inkFaint) }}>{(t.support_status || (archived ? 'resolved' : 'open')).replace('_', ' ').toUpperCase()}</span>
+        {t.support_category && <span className="micro" style={{ color: archived ? UI.inkGhost : UI.inkFaint }}>{catLabel}</span>}
+      </div>
+      {t.last_message_body ? (
+        <div style={{ fontSize: archived ? 11 : 12, color: archived ? UI.inkGhost : UI.inkSoft, fontFamily: UI.fontUi, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.last_message_body}</div>
+      ) : (
+        !archived && <div style={{ fontSize: 12, color: UI.inkGhost, fontFamily: UI.fontUi, fontStyle: 'italic' }}>No messages yet</div>
+      )}
+      {!archived && t.last_message_at && (
+        <div className="micro" style={{ color: UI.inkGhost }}>{new Date(t.last_message_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} · {new Date(t.last_message_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</div>
+      )}
+    </button>
+  );
+}
 
 function UserArchivedSection({ tickets, renderTicket }) {
   const [open, setOpen] = useStateSet(false);
@@ -28,14 +68,6 @@ function UserArchivedSection({ tickets, renderTicket }) {
         Archived ({tickets.length})
       </button>
       {open && <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 4 }}>{tickets.map(renderTicket)}</div>}
-    </div>
-  );
-}
-
-function Toggle({ on, onToggle }) {
-  return (
-    <div onClick={onToggle} style={{ width: 44, height: 26, borderRadius: 13, cursor: 'pointer', flexShrink: 0, background: on ? 'var(--accent)' : UI.bgInset, border: `0.5px solid ${on ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong}`, position: 'relative', transition: 'background 0.18s', WebkitTapHighlightColor: 'transparent' }}>
-      <div style={{ position: 'absolute', top: 3, left: on ? 21 : 3, width: 18, height: 18, borderRadius: '50%', background: on ? '#0a0805' : UI.inkFaint, transition: 'left 0.18s' }} />
     </div>
   );
 }
@@ -376,7 +408,7 @@ function PasskeySheet({ open, onClose }) {
 }
 
 // ─── SETTINGS ────────────────────────────────────────────────────────
-function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSupportSheet }) {
+function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSupportSheet, onTestUpdateBanner }) {
   const [confirmEl, confirm] = useConfirm();
   const [nickname, setNickname] = useStateSet(store.user?.name || '');
 
@@ -480,6 +512,7 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
   const [supportInboxLoading, setSupportInboxLoading] = useStateSet(false);
   const [supportTicket, setSupportTicket] = useStateSet(null);
   const [supportTicketNotes, setSupportTicketNotes] = useStateSet([]);
+  const [lightboxSrc, setLightboxSrc] = useStateSet(null); // chat/support attachment tapped for fullscreen view
   const [supportTicketLoading, setSupportTicketLoading] = useStateSet(false);
   const [supportAdminDraft, setSupportAdminDraft] = useStateSet('');
   const [supportAdminSending, setSupportAdminSending] = useStateSet(false);
@@ -514,6 +547,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
   const [vipBgSaving, setVipBgSaving] = useStateSet(false);
   const [vipBgMsg, setVipBgMsg] = useStateSet(null);
   const [broadcastSheet, setBroadcastSheet] = useStateSet(false);
+  const [updateToolsSheet, setUpdateToolsSheet] = useStateSet(false);
   const [broadcastBody, setBroadcastBody] = useStateSet('');
   const [broadcastSending, setBroadcastSending] = useStateSet(false);
   const [broadcastMsg, setBroadcastMsg] = useStateSet(null);
@@ -1012,32 +1046,44 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
   };
   const handleSignOut = async () => { await LB.signOut(); };
 
-  const uploadChatImage = async (file) => {
-    const ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
-    const path = `${userId}/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
-    const { error } = await LB.supabase.storage.from('chat-attachments').upload(path, file, { contentType: file.type });
-    if (error) throw error;
-    return LB.supabase.storage.from('chat-attachments').getPublicUrl(path).data.publicUrl;
-  };
-
-  const handleImagePick = (e) => {
-    const file = e.target.files?.[0];
+  const attachSupportImageFile = (file) => {
     if (!file) return;
     setSupportImageFile(file);
     const reader = new FileReader();
     reader.onload = ev => setSupportImagePreview(ev.target.result);
     reader.readAsDataURL(file);
+  };
+  const handleImagePick = (e) => {
+    const file = e.target.files?.[0];
     e.target.value = '';
+    attachSupportImageFile(file);
+  };
+  // Paste an image straight from the clipboard (screenshot, copied photo…)
+  // into the message box, same as picking a file.
+  const onPasteSupportMessage = (e) => {
+    const item = Array.from(e.clipboardData?.items || []).find(it => it.type.startsWith('image/'));
+    if (!item) return;
+    e.preventDefault();
+    attachSupportImageFile(item.getAsFile());
   };
 
-  const handleAdminImagePick = (e) => {
-    const file = e.target.files?.[0];
+  const attachAdminImageFile = (file) => {
     if (!file) return;
     setAdminImageFile(file);
     const reader = new FileReader();
     reader.onload = ev => setAdminImagePreview(ev.target.result);
     reader.readAsDataURL(file);
+  };
+  const handleAdminImagePick = (e) => {
+    const file = e.target.files?.[0];
     e.target.value = '';
+    attachAdminImageFile(file);
+  };
+  const onPasteAdminMessage = (e) => {
+    const item = Array.from(e.clipboardData?.items || []).find(it => it.type.startsWith('image/'));
+    if (!item) return;
+    e.preventDefault();
+    attachAdminImageFile(item.getAsFile());
   };
 
   const handleSupportSend = async () => {
@@ -1051,7 +1097,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     try {
       let attachments = null;
       if (imgFile) {
-        const url = await uploadChatImage(imgFile);
+        const url = await LB.uploadChatImage(imgFile, userId);
         attachments = [{ url, name: imgFile.name, type: imgFile.type }];
       }
       const { data: note, error } = await LB.supabase.from('zane_coaching_notes').insert({
@@ -1084,7 +1130,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       if (ticketErr || !coachingId) return;
       let attachments = null;
       if (imgFile) {
-        const url = await uploadChatImage(imgFile);
+        const url = await LB.uploadChatImage(imgFile, userId);
         attachments = [{ url, name: imgFile.name, type: imgFile.type }];
       }
       const { data: note, error: noteErr } = await LB.supabase.from('zane_coaching_notes').insert({
@@ -1119,7 +1165,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     try {
       let attachments = null;
       if (imgFile) {
-        const url = await uploadChatImage(imgFile);
+        const url = await LB.uploadChatImage(imgFile, userId);
         attachments = [{ url, name: imgFile.name, type: imgFile.type }];
       }
       const { data: note, error } = await LB.supabase.from('zane_coaching_notes').insert({
@@ -1145,6 +1191,21 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       setBroadcastMsg({ ok: true, text: `Sent to ${data} user${data === 1 ? '' : 's'}.` });
       setBroadcastBody('');
     } finally { setBroadcastSending(false); }
+  };
+
+  // Pushes the "New version available" banner to every connected client
+  // without needing an sw.js cache-version bump — see admin_force_update.
+  const handleForceUpdateAll = async () => {
+    if (!await confirm('Every connected user will see the update banner and be prompted to refresh.', { title: 'Force refresh all users?', ok: 'Send' })) return;
+    const { error } = await LB.supabase.rpc('admin_force_update');
+    if (!error) {
+      // The broadcast has no per-user exclusion — without this, the device
+      // that sent it would see its own banner too. Mark the freshly-set nonce
+      // as already seen on THIS device before checkForceUpdate ever polls it.
+      const { data: nonce } = await LB.supabase.rpc('get_force_update_nonce');
+      if (nonce) { try { localStorage.setItem('logbook-force-nonce-seen', nonce); } catch (_) {} }
+    }
+    await confirm(error ? (error.message || 'Could not trigger the broadcast.') : 'All connected clients will see the update banner shortly.', { title: error ? 'Error' : 'Sent', ok: 'OK' });
   };
 
   const sendAdminEmail = async () => {
@@ -1208,7 +1269,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       // Notify user BEFORE deleting (coaching row must still exist)
       const { data: { session } } = await LB.supabase.auth.getSession();
       if (session?.access_token) {
-        await fetch(`https://ebbuvdzgstrhrcsbrlez.supabase.co/functions/v1/zane_coaching-notify`, {
+        await fetch(`${LB.SUPABASE_URL}/functions/v1/zane_coaching-notify`, {
           method: 'POST',
           headers: { 'Authorization': `Bearer ${session.access_token}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({ coachingId, preview: 'Your support ticket has been removed by support.' }),
@@ -1392,7 +1453,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       </div>
       </div>
       <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 8, padding: '16px 20px', paddingBottom: 'calc(env(safe-area-inset-bottom, 8px) + 16px)', borderTop: `0.5px solid ${UI.hair}`, background: UI.bg }}>
-        <Btn kind="ghost" onClick={async () => { if ('caches' in window) { const keys = await caches.keys(); await Promise.all(keys.map(k => caches.delete(k))); } window.location.reload(true); }}>Clear cache &amp; reload</Btn>
+        <Btn kind="ghost" onClick={() => LB.clearCachesAndReload()}>Clear cache &amp; reload</Btn>
         {isAdmin ? (() => {
           const unseenCount = allUsers.filter(isNewSignup).length;
           const adminUnread = supportInbox.reduce((sum, t) => sum + Number(t.unread_count || 0), 0);
@@ -1568,10 +1629,6 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           const PREVIEW = 5;
           const visible = showAllPeriods ? allPeriods : allPeriods.slice(0, PREVIEW);
           const todayStr = LB.todayISO();
-          const fmtDate = (iso) => {
-            const d = new Date(iso);
-            return d.toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' });
-          };
           const updatePeriod = async (id, patch) => {
             let prev = null;
             setStore(s => { prev = s.statusPeriods || []; return { ...s, statusPeriods: (s.statusPeriods || []).map(p => p.id === id ? { ...p, ...patch } : p) }; });
@@ -1698,7 +1755,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       {/* ══ Change Password Sheet ══ */}
       <SettingsSheet open={changePasswordSheet} onClose={() => { setChangePasswordSheet(false); setPwCurrent(''); setPwNew(''); setPwConfirm(''); setPwMsg(null); }} title="Change password">
         {(() => {
-          const iStyle = { background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '10px 14px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, outline: 'none', width: '100%', boxSizing: 'border-box' };
+          const iStyle = SETTINGS_INPUT_STYLE;
           return (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginBottom: 8 }}>
               <div>
@@ -1733,7 +1790,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       {/* ══ Change Email Sheet ══ */}
       <SettingsSheet open={changeEmailSheet} onClose={() => { setChangeEmailSheet(false); setEmailNew(''); setEmailMsg(null); }} title="Change email">
         {(() => {
-          const iStyle = { background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '10px 14px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, outline: 'none', width: '100%', boxSizing: 'border-box' };
+          const iStyle = SETTINGS_INPUT_STYLE;
           return (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginBottom: 8 }}>
               <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.6 }}>
@@ -1945,7 +2002,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             // Mixed = kg weight + mi distance; sync the cardio dist key so
             // all cardio screens immediately reflect the chosen distance unit.
             const distUnit = chosenUnit === 'lbs' ? 'mi' : chosenUnit === 'mixed' ? 'mi' : 'km';
-            try { localStorage.setItem('logbook-cardio-dist-unit', distUnit); } catch (_) {}
+            LB.setCardioDistUnit(distUnit);
             setStore(s => s ? { ...s, settings: { ...s.settings, unit: chosenUnit } } : s);
           }}
         />
@@ -2171,6 +2228,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                 <NavRow label="All users" hint={unseenCount > 0 ? `${unseenCount} new` : (allUsers.length ? `${allUsers.length}` : undefined)} onTap={() => setAllUsersSheet(true)} />
                 <NavRow label="VIP backgrounds" hint={vipBgList.length > 0 ? `${vipBgList.length} assigned` : 'None'} onTap={() => { setVipBgMsg(null); setVipBgSheet(true); }} />
                 <NavRow label="Message all users" onTap={() => { setBroadcastMsg(null); setBroadcastSheet(true); }} />
+                <NavRow label="Update tools" onTap={() => setUpdateToolsSheet(true)} />
               </Frame>
               <div style={{ borderTop: `0.5px solid ${UI.hair}`, paddingTop: 16 }}>
                 <Btn onClick={() => setSupportInboxSheet(true)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, width: '100%', fontSize: 15, padding: '14px 16px' }}>
@@ -2213,11 +2271,24 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
         </div>
       </SettingsSheet>
 
+      {/* ══ Update tools (admin) ══ */}
+      <SettingsSheet open={updateToolsSheet} onClose={() => setUpdateToolsSheet(false)} title="Update Tools">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginBottom: 8 }}>
+          <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1.5 }}>
+            Force refresh broadcasts the update banner to every connected user without needing an sw.js cache bump. Test update banner only shows it on this device, to preview the banner itself.
+          </div>
+          <Frame style={{ padding: '0 14px' }}>
+            <NavRow label="Force refresh all users" onTap={handleForceUpdateAll} first />
+            <NavRow label="Test update banner" onTap={onTestUpdateBanner} />
+          </Frame>
+        </div>
+      </SettingsSheet>
+
       {/* ══ VIP backgrounds sheet (admin) ══ */}
       <SettingsSheet open={vipBgSheet} onClose={() => setVipBgSheet(false)} title="VIP Backgrounds">
         {(() => {
           const opts = vipBgOptions;
-          const iStyle = { background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '10px 12px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, outline: 'none', width: '100%', boxSizing: 'border-box' };
+          const iStyle = { ...SETTINGS_INPUT_STYLE, padding: '10px 12px' };
           return (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginBottom: 8 }}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -2321,7 +2392,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           const statusColor = { open: 'var(--accent)', in_progress: UI.gold, resolved: UI.inkFaint };
           const statusLabel = { open: 'Open', in_progress: 'In progress', resolved: 'Resolved' };
           const tickets = store.supportTickets || [];
-          const iStyle = { width: '100%', background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '10px 12px', color: UI.ink, fontFamily: UI.fontUi, fontSize: 14, outline: 'none', resize: 'none', boxSizing: 'border-box', lineHeight: 1.5 };
+          const iStyle = SETTINGS_TEXTAREA_STYLE;
 
           // ── NEW TICKET VIEW ──────────────────────────────────────────
           if (supportView === 'new') {
@@ -2361,6 +2432,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                   )}
                   <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
                     <textarea value={supportDraft} onChange={e => setSupportDraft(e.target.value)}
+                      onPaste={onPasteSupportMessage}
                       placeholder="Describe your request…" rows={4} style={{ ...iStyle, flex: 1 }} />
                     <label style={{ cursor: 'pointer', flexShrink: 0, width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 6, background: supportImageFile ? 'rgba(var(--accent-rgb),0.15)' : UI.bgInset, border: `0.5px solid ${supportImageFile ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong}`, color: supportImageFile ? 'var(--accent)' : UI.inkFaint }}>
                       <input type="file" accept="image/*" style={{ display: 'none' }} onChange={handleImagePick} />
@@ -2411,7 +2483,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                         <div key={n.id} style={{ display: 'flex', flexDirection: 'column', alignItems: isMe ? 'flex-end' : 'flex-start' }}>
                           <div style={{ maxWidth: '80%', padding: hasImg ? '6px' : '9px 13px', borderRadius: isMe ? '8px 8px 4px 8px' : '8px 8px 8px 4px', background: isMe ? 'rgba(var(--accent-rgb),0.15)' : UI.bgRaised, border: `0.5px solid ${isMe ? 'rgba(var(--accent-rgb),0.25)' : UI.hair}`, overflow: 'hidden' }}>
                             {hasImg && n.attachments.map((a, i) => (
-                              <img key={i} src={a.url} alt="" style={{ display: 'block', maxWidth: '100%', maxHeight: 300, objectFit: 'contain', borderRadius: 4, marginBottom: n.body ? 4 : 0 }} />
+                              <img key={i} src={a.url} alt="" onClick={() => setLightboxSrc(a.url)} style={{ display: 'block', maxWidth: '100%', maxHeight: 300, objectFit: 'contain', borderRadius: 4, marginBottom: n.body ? 4 : 0, cursor: 'pointer' }} />
                             ))}
                             {n.body ? <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, lineHeight: 1.55, padding: hasImg ? '0 6px 4px' : 0 }}>{n.body}</div> : null}
                           </div>
@@ -2437,6 +2509,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                     <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
                       <textarea value={supportDraft} onChange={e => setSupportDraft(e.target.value)}
                         placeholder="Write a message…" rows={3} style={{ ...iStyle, flex: 1 }}
+                        onPaste={onPasteSupportMessage}
                         onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleSupportSend(); }} />
                       <label style={{ cursor: 'pointer', flexShrink: 0, width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 6, background: supportImageFile ? 'rgba(var(--accent-rgb),0.15)' : UI.bgInset, border: `0.5px solid ${supportImageFile ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong}`, color: supportImageFile ? 'var(--accent)' : UI.inkFaint }}>
                         <input type="file" accept="image/*" style={{ display: 'none' }} onChange={handleImagePick} />
@@ -2512,8 +2585,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       >
         {(() => {
           const CATS = { feature_request: 'Feature', bug: 'Bug', question: 'Question' };
-          const statusColor = { open: UI.danger, in_progress: UI.gold, resolved: UI.inkFaint };
-          const iStyle = { width: '100%', background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '10px 12px', color: UI.ink, fontFamily: UI.fontUi, fontSize: 14, outline: 'none', resize: 'none', boxSizing: 'border-box', lineHeight: 1.5 };
+          const iStyle = SETTINGS_TEXTAREA_STYLE;
 
           // ── TICKET DETAIL VIEW ─────────────────────────────────────────
           if (supportTicket) {
@@ -2569,7 +2641,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                             overflow: 'hidden',
                           }}>
                             {hasImg && n.attachments.map((a, i) => (
-                              <img key={i} src={a.url} alt="" style={{ display: 'block', maxWidth: '100%', maxHeight: 300, objectFit: 'contain', borderRadius: 4, marginBottom: n.body ? 4 : 0 }} />
+                              <img key={i} src={a.url} alt="" onClick={() => setLightboxSrc(a.url)} style={{ display: 'block', maxWidth: '100%', maxHeight: 300, objectFit: 'contain', borderRadius: 4, marginBottom: n.body ? 4 : 0, cursor: 'pointer' }} />
                             ))}
                             {n.body ? <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, lineHeight: 1.55, padding: hasImg ? '0 6px 4px' : 0 }}>{n.body}</div> : null}
                           </div>
@@ -2594,6 +2666,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                   <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
                     <textarea value={supportAdminDraft} onChange={e => setSupportAdminDraft(e.target.value)}
                       placeholder="Reply…" rows={3} style={{ ...iStyle, flex: 1 }}
+                      onPaste={onPasteAdminMessage}
                       onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleAdminReply(); }}
                     />
                     <label style={{ cursor: 'pointer', flexShrink: 0, width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 6, background: adminImageFile ? 'rgba(var(--accent-rgb),0.15)' : UI.bgInset, border: `0.5px solid ${adminImageFile ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong}`, color: adminImageFile ? 'var(--accent)' : UI.inkFaint }}>
@@ -2654,24 +2727,8 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                 </div>
               )}
               {filtered.map(t => (
-                <button key={t.coaching_id}
-                  onClick={() => setSupportTicket({ coachingId: t.coaching_id, clientName: t.client_name, clientEmail: t.client_email, category: t.support_category, status: t.support_status })}
-                  style={{ width: '100%', background: UI.bgRaised, border: `0.5px solid ${UI.hair}`, borderLeft: `3px solid ${statusColor[t.support_status] || UI.hairStrong}`, borderRadius: 8, cursor: 'pointer', textAlign: 'left', padding: '12px 14px', marginBottom: 8, WebkitTapHighlightColor: 'transparent', display: 'flex', flexDirection: 'column', gap: 5 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span style={{ fontSize: 14, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi, flex: 1 }}>{t.client_name || t.client_email}</span>
-                    {Number(t.unread_count) > 0 && <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--accent)', display: 'inline-block', flexShrink: 0, animation: 'pulseDot 1.5s ease-in-out infinite' }} />}
-                    <span className="micro" style={{ color: statusColor[t.support_status] || UI.inkFaint }}>{(t.support_status || 'open').replace('_', ' ').toUpperCase()}</span>
-                    {t.support_category && <span className="micro" style={{ color: UI.inkFaint }}>{CATS[t.support_category] || t.support_category}</span>}
-                  </div>
-                  {t.last_message_body ? (
-                    <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.last_message_body}</div>
-                  ) : (
-                    <div style={{ fontSize: 12, color: UI.inkGhost, fontFamily: UI.fontUi, fontStyle: 'italic' }}>No messages yet</div>
-                  )}
-                  {t.last_message_at && (
-                    <div className="micro" style={{ color: UI.inkGhost }}>{new Date(t.last_message_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} · {new Date(t.last_message_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</div>
-                  )}
-                </button>
+                <AdminTicketRow key={t.coaching_id} t={t} catLabel={CATS[t.support_category] || t.support_category}
+                  onClick={() => setSupportTicket({ coachingId: t.coaching_id, clientName: t.client_name, clientEmail: t.client_email, category: t.support_category, status: t.support_status })} />
               ))}
               {/* ── Archived section ── */}
               <div style={{ borderTop: `0.5px solid ${UI.hair}`, marginTop: 4, paddingTop: 12 }}>
@@ -2692,18 +2749,8 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                     : archivedInbox.length === 0
                     ? <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, fontStyle: 'italic', padding: '8px 0' }}>No archived tickets.</div>
                     : archivedInbox.map(t => (
-                      <button key={t.coaching_id}
-                        onClick={() => setSupportTicket({ coachingId: t.coaching_id, clientName: t.client_name, clientEmail: t.client_email, category: t.support_category, status: t.support_status })}
-                        style={{ width: '100%', background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderLeft: `3px solid ${UI.inkGhost}`, borderRadius: 8, cursor: 'pointer', textAlign: 'left', padding: '12px 14px', marginBottom: 8, WebkitTapHighlightColor: 'transparent', display: 'flex', flexDirection: 'column', gap: 4, opacity: 0.7 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <span style={{ fontSize: 13, fontWeight: 600, color: UI.inkSoft, fontFamily: UI.fontUi, flex: 1 }}>{t.client_name || t.client_email}</span>
-                          <span className="micro" style={{ color: UI.inkGhost }}>{(t.support_status || 'resolved').replace('_', ' ').toUpperCase()}</span>
-                          {t.support_category && <span className="micro" style={{ color: UI.inkGhost }}>{CATS[t.support_category] || t.support_category}</span>}
-                        </div>
-                        {t.last_message_body && (
-                          <div style={{ fontSize: 11, color: UI.inkGhost, fontFamily: UI.fontUi, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.last_message_body}</div>
-                        )}
-                      </button>
+                      <AdminTicketRow key={t.coaching_id} t={t} archived catLabel={CATS[t.support_category] || t.support_category}
+                        onClick={() => setSupportTicket({ coachingId: t.coaching_id, clientName: t.client_name, clientEmail: t.client_email, category: t.support_category, status: t.support_status })} />
                     ))
                 )}
               </div>
@@ -2974,7 +3021,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             <div className="micro" style={{ color: UI.inkGhost, paddingLeft: 2 }}>Active via Pushover — see Advanced</div>
           )}
           {(pushEnabled || webPushPending) && !store.settings?.usePushover && webPushSub && (() => {
-            const iStyle = { background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '10px 14px', fontFamily: UI.fontUi, fontSize: 20, color: UI.ink, outline: 'none', width: '100%', boxSizing: 'border-box', letterSpacing: '0.3em', textAlign: 'center' };
+            const iStyle = { ...SETTINGS_INPUT_STYLE, fontSize: 20, letterSpacing: '0.3em', textAlign: 'center' };
             if (webPushStep === 'code-sent') {
               const pct = pendingCountdown / 120;
               const urgent = pendingCountdown <= 30;
@@ -3035,7 +3082,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       <SettingsSheet open={advancedPushSheet} onClose={closeAdvanced} title="Advanced">
         {(() => {
           const isVerified = !!(store.settings?.usePushover && store.settings?.pushoverUserKey);
-          const inputStyle = { background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '10px 14px', fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, outline: 'none', width: '100%', boxSizing: 'border-box' };
+          const inputStyle = { ...SETTINGS_INPUT_STYLE, fontSize: 13 };
           return (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginBottom: 8 }}>
               <Row label="Use Pushover" first>
@@ -3125,6 +3172,8 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           <Btn kind="ghost" onClick={() => { setTestPickerOpen(false); testRestTimer(30); }}>In 30 seconds</Btn>
         </div>
       </SettingsSheet>
+
+      <ImageLightbox src={lightboxSrc} onClose={() => setLightboxSrc(null)} />
 
     </Screen>
   );
