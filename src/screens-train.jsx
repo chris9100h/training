@@ -457,9 +457,13 @@ function CustomKeyboard({ visible, field, onType, onBackspace, onAdjust, onConfi
       onPointerDown={e => { e.preventDefault(); e.stopPropagation(); }}
       onTouchStart={e => { e.preventDefault(); e.stopPropagation(); }}
       style={{ position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 95,
-      background: 'var(--bg)', borderTop: `0.5px solid var(--hair)`,
+      background: 'var(--bg)',
       padding: `5px 8px calc(env(safe-area-inset-bottom, 0px) + 5px)`,
     }}>
+      {/* knurled top edge — same grip-texture seam the rest of the kit uses,
+          in place of a flat hairline, so the keypad reads as a distinct
+          physical piece instead of just fading into the screen above it. */}
+      <div className="knurl" style={{ position: 'absolute', top: 0, left: 0, right: 0 }} />
       <div style={{ maxWidth: 480, margin: '0 auto', display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gridTemplateRows: `repeat(5, ${H}px)`, gap: 4 }}>
         {/* Row 1: ↓ 🏋 ↑ | ✓ (spans rows 1-4) */}
         <button style={act} onPointerDown={e => { e.preventDefault(); e.stopPropagation(); onAdjust(-1); }}>↓</button>
