@@ -5008,6 +5008,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         open={dropSetIdx != null || myoSetIdx != null || avSetIdx != null}
         onClose={requestCloseChainSheet}
         keyboardHeight={kbField ? customKbHeight : 0}
+        accent
       >
         {dropSetIdx != null && (
           <div style={{ display: 'flex', flexDirection: 'column', maxHeight: 'inherit', minHeight: 0 }}>

@@ -636,7 +636,11 @@ function Toggle({ on, onToggle }) {
 // visualViewport-based auto-detection below never fires for it) is open, at
 // a known height — combined with the auto-detected kbHeight via Math.max so
 // existing callers (default 0) are unaffected.
-function Sheet({ open, onClose, title, titleColor, children, keyboardHeight = 0 }) {
+// accent: swaps the neutral hairline border/drag-handle for an accent-toned
+// edge plus an ambient glow — reserved for sheets that represent something
+// deliberately intense (currently just the Drop Set/Myo-Reps/AMRAP
+// Variations chain sheet), not a general-purpose "make it gold" switch.
+function Sheet({ open, onClose, title, titleColor, children, keyboardHeight = 0, accent = false }) {
   const [kbHeight, setKbHeight] = React.useState(0);
   const [vvHeight, setVvHeight] = React.useState(window.innerHeight);
   React.useEffect(() => {
@@ -667,6 +671,10 @@ function Sheet({ open, onClose, title, titleColor, children, keyboardHeight = 0 
   // of the bottom-sheet's "attached to the screen edge" look, plus a small
   // gap off the keyboard instead of sitting flush on top of it.
   const floating = effectiveKbHeight > 0;
+  const edgeColor = accent ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong;
+  const shadowLayers = [floating ? '0 4px 24px rgba(0,0,0,0.45)' : '0 -16px 48px rgba(0,0,0,0.6)'];
+  if (floating) shadowLayers.push(`0 1px 0 ${edgeColor}`);
+  if (accent) shadowLayers.push('0 0 32px rgba(var(--accent-rgb),0.16)');
   return (
     // The backdrop only shrinks (bottom: keyboardHeight) for the caller-
     // declared custom keyboard, not the auto-detected native one: a custom
@@ -688,7 +696,7 @@ function Sheet({ open, onClose, title, titleColor, children, keyboardHeight = 0 
         width: '100%', maxWidth: 540, boxSizing: 'border-box',
         background: UI.bgRaised,
         borderRadius: floating ? 6 : '6px 6px 0 0',
-        border: `1px solid ${UI.hairStrong}`,
+        border: `1px solid ${edgeColor}`,
         ...(!floating && { borderBottom: 'none' }),
         // Floating above the keyboard, every edge needs to read as a real
         // boundary on its own — the bottom-sheet variant gets that for free
@@ -697,9 +705,8 @@ function Sheet({ open, onClose, title, titleColor, children, keyboardHeight = 0 
         // same 1px hairline there can vanish against the dark backdrop. A
         // second, crisp shadow line in the same tone doubles up the border
         // right where it needs it, without touching the other three sides.
-        boxShadow: floating
-          ? `0 4px 24px rgba(0,0,0,0.45), 0 1px 0 ${UI.hairStrong}`
-          : '0 -16px 48px rgba(0,0,0,0.6)',
+        // accent additionally adds an ambient glow (see shadowLayers above).
+        boxShadow: shadowLayers.join(', '),
         // The 3rd value here used to be the bare number 18 instead of '18px'
         // — React silently drops the *entire* padding declaration (not just
         // that one component) when a shorthand's value contains a unitless
@@ -715,7 +722,7 @@ function Sheet({ open, onClose, title, titleColor, children, keyboardHeight = 0 
         animation: 'sheet-up 0.22s ease',
         maxHeight: floating ? `${vvHeight - 32}px` : '88dvh', overflow: 'auto', overscrollBehavior: 'contain',
       }}>
-        <div style={{ width: 36, height: 3, background: UI.hairStrong, borderRadius: 4, margin: '0 auto 16px' }} />
+        <div style={{ width: 36, height: 3, background: accent ? 'var(--accent)' : UI.hairStrong, borderRadius: 4, margin: '0 auto 16px' }} />
         {title && (
           <div style={{ fontFamily: UI.fontDisplay, fontSize: 28, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: titleColor || UI.ink, marginBottom: 16 }}>
             {title}
