@@ -689,7 +689,22 @@ function Sheet({ open, onClose, title, titleColor, children, keyboardHeight = 0 
       display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
       paddingBottom: effectiveKbHeight - keyboardHeight,
       animation: 'sheet-fade 0.18s ease',
+      willChange: 'opacity',
     }}>
+      {/* willChange hints the browser to promote this panel to its own GPU
+          compositing layer immediately on insertion, before sheet-up's first
+          animated frame paints — confirmed (two same-second screenshots,
+          first open vs. reopen) that this sheet's content briefly renders
+          edge-to-edge (ignoring its own padding) only on a session's very
+          first open of ANY chain sheet, self-correcting on every reopen
+          after. Matches a known WebKit pattern: an element that both needs a
+          new compositing layer (position:fixed backdrop, backdrop-filter)
+          AND starts animating (transform + opacity) on the same frame can
+          paint incorrectly before the layer is fully established; a
+          previously-closed sheet's layer stays warm, so only the first-ever
+          open is affected. Unverified against real WebKit (only Chromium is
+          available here, which never reproduced this) — best-effort fix for
+          a known bug class, not a confirmed root-cause fix. */}
       <div ref={panelRef} onClick={e => e.stopPropagation()} style={{
         width: '100%', maxWidth: 540, boxSizing: 'border-box',
         background: UI.bgRaised,
@@ -699,6 +714,7 @@ function Sheet({ open, onClose, title, titleColor, children, keyboardHeight = 0 
         padding: `16px 22px ${effectiveKbHeight > 0 ? 18 : 'calc(env(safe-area-inset-bottom, 8px) + 22px)'}`,
         animation: 'sheet-up 0.22s ease',
         maxHeight: effectiveKbHeight > 0 ? `${vvHeight - 32}px` : '88dvh', overflow: 'auto', overscrollBehavior: 'contain',
+        willChange: 'transform, opacity',
       }}>
         <div style={{ width: 36, height: 3, background: UI.hairStrong, borderRadius: 4, margin: '0 auto 16px' }} />
         {title && (
