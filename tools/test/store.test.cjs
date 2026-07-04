@@ -591,6 +591,34 @@ async function testAsync(name, fn) {
     assert.strictEqual(JSON.stringify(LB.reearnMesoWeightBoosts(undefined, undefined, undefined)), '{}');
   });
 
+  // ── mesoPausedDays (recovery time must not fast-forward the meso week) ──
+  test('mesoPausedDays: deload days in the window are all excluded', () => {
+    // 5-day deload Jan 10–14 inside a meso running Jan 1 → Jan 20.
+    const periods = [{ mode: 'deload', startedAt: '2026-01-10T12:00:00Z', endedAt: '2026-01-14T12:00:00Z' }];
+    assert.strictEqual(LB.mesoPausedDays(periods, new Set(), '2026-01-01', '2026-01-20'), 5);
+  });
+  test('mesoPausedDays: sick days are excluded just like deload', () => {
+    const periods = [{ mode: 'sick', startedAt: '2026-01-05T12:00:00Z', endedAt: '2026-01-07T12:00:00Z' }];
+    assert.strictEqual(LB.mesoPausedDays(periods, new Set(), '2026-01-01', '2026-01-20'), 3);
+  });
+  test('mesoPausedDays: an OPEN (still active) period runs to today', () => {
+    const periods = [{ mode: 'sick', startedAt: '2026-01-18T12:00:00Z', endedAt: null }];
+    // Jan 18, 19, 20 = 3 days.
+    assert.strictEqual(LB.mesoPausedDays(periods, new Set(), '2026-01-01', '2026-01-20'), 3);
+  });
+  test('mesoPausedDays: vacation excludes only idle days; trained vacation days count', () => {
+    // 4-day vacation Jan 10–13; user trained on Jan 11 and Jan 13.
+    const periods = [{ mode: 'vacation', startedAt: '2026-01-10T12:00:00Z', endedAt: '2026-01-13T12:00:00Z' }];
+    const trained = new Set(['2026-01-11', '2026-01-13']);
+    // Jan 10 + Jan 12 idle = 2 excluded; Jan 11 + Jan 13 trained = counted.
+    assert.strictEqual(LB.mesoPausedDays(periods, trained, '2026-01-01', '2026-01-20'), 2);
+  });
+  test('mesoPausedDays: no periods, empty, or reversed window → 0', () => {
+    assert.strictEqual(LB.mesoPausedDays([], new Set(), '2026-01-01', '2026-01-20'), 0);
+    assert.strictEqual(LB.mesoPausedDays(null, new Set(), '2026-01-01', '2026-01-20'), 0);
+    assert.strictEqual(LB.mesoPausedDays([{ mode: 'sick', startedAt: '2026-01-05T12:00:00Z', endedAt: null }], new Set(), '2026-01-20', '2026-01-01'), 0);
+  });
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();

@@ -1773,6 +1773,10 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     if (deloadNudgeShown.current) return;
     if (store?.statusMode || store?.inProgress) return;
     if (!sch) return;
+    // A mesocycle is never interrupted by a deload — the deload comes AFTER the
+    // meso finishes (handleMesoComplete). While a meso is active on this plan,
+    // suppress the generic 8-week auto-deload nudge so it can't fire mid-meso.
+    if (sch.mesocycle_weeks) return;
 
     const todayStr = LB.todayISO();
     const justFinished = (store?.sessions || []).some(

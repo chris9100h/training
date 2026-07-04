@@ -120,7 +120,18 @@ function mesoCurrentWeek(mesoState, store) {
   const start = LB.parseDate(mesoState.startDate);
   const today = new Date(); today.setHours(12, 0, 0, 0);
   if (today < start) return null; // pending
-  const days = Math.round((today - start) / 86400000);
+  const rawDays = Math.round((today - start) / 86400000);
+  // Subtract pure-recovery time (deload/sick, plus idle vacation days) so a
+  // break can't fast-forward the meso week / RIR target the way raw calendar
+  // arithmetic would — mirrors the flex path's "only training advances the
+  // meso" principle. Trained vacation days still count (they're not paused).
+  const trainedDates = new Set(
+    (store?.sessions || [])
+      .filter(s => s.ended && !s.isDeload && s.scheduleId === mesoState.scheduleId && s.date)
+      .map(s => s.date.slice(0, 10))
+  );
+  const paused = LB.mesoPausedDays(store?.statusPeriods, trainedDates, mesoState.startDate, LB.fmtISO(today));
+  const days = Math.max(0, rawDays - paused);
   const cycleLen = (sch && !LB.isWeekdayPlan(sch) && sch.days?.length > 0) ? sch.days.length : 7;
   return Math.min(Math.max(1, Math.floor(days / cycleLen) + 1), mesoState.weeks);
 }

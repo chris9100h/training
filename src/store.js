@@ -3385,6 +3385,38 @@ function reearnMesoWeightBoosts(prevBoosts, sessionKeys, earnedBoosts) {
   return { ...next, ...(earnedBoosts || {}) };
 }
 
+// Counts calendar days within [mesoStartISO, todayISO] that must NOT advance a
+// date-based/weekday mesocycle's week counter (see mesoCurrentWeek). The meso
+// week represents accumulated training fatigue, so pure recovery time can't
+// fast-forward it:
+//   • deload + sick days are always excluded (no meso training happens);
+//   • vacation allows training, so a vacation day is excluded ONLY if nothing
+//     was trained that day — trained vacation days count normally.
+// trainedDates is a Set of 'YYYY-MM-DD' on which an ended, non-deload session
+// for this plan was logged. Pure/testable. The flex path handles this natively
+// (it counts trained non-deload sessions), so this only feeds the date/weekday
+// paths, which are otherwise raw calendar arithmetic.
+function mesoPausedDays(statusPeriods, trainedDates, mesoStartISO, todayISO) {
+  if (!statusPeriods?.length || !mesoStartISO || !todayISO) return 0;
+  const start = new Date(mesoStartISO.slice(0, 10) + 'T12:00:00');
+  const end = new Date(todayISO.slice(0, 10) + 'T12:00:00');
+  if (isNaN(start.getTime()) || isNaN(end.getTime()) || end < start) return 0;
+  const trained = trainedDates || new Set();
+  const periods = statusPeriods
+    .filter(p => p && p.startedAt)
+    .map(p => ({ mode: p.mode, from: p.startedAt.slice(0, 10), to: p.endedAt ? p.endedAt.slice(0, 10) : todayISO.slice(0, 10) }));
+  let paused = 0;
+  for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+    const iso = fmtISO(d);
+    const frozen = periods.some(p =>
+      iso >= p.from && iso <= p.to &&
+      (p.mode === 'deload' || p.mode === 'sick' || (p.mode === 'vacation' && !trained.has(iso)))
+    );
+    if (frozen) paused++;
+  }
+  return paused;
+}
+
 // "5m ago"/"3h ago"/"2d ago" from an ISO timestamp. capDays, if given, rolls
 // over to a short locale date past that many days instead of counting
 // indefinitely (screens-settings.jsx's sign-up feed wants that; the
@@ -3586,5 +3618,5 @@ window.LB = {
   cardioDistUnit, setCardioDistUnit, distToM, mToDisplay, fmtDistance, fmtPace, fmtSpeed, MI_TO_M, recentCardioTypes,
   isLoggedTrainingDay, plannedTrainingDay, isTrainingDayForDate, dayTargetFromMacros, macroAdherence, effectiveMacroTargets, dailyLogAdherence, dailyLogsWeekPrefill, weekPerformanceSignal,
   refreshHealthLogs,
-  pickGrowthRecipient, retractGrowthGrant, reearnMesoWeightBoosts, MESO_GROWTH_CEILING_DELTA,
+  pickGrowthRecipient, retractGrowthGrant, reearnMesoWeightBoosts, mesoPausedDays, MESO_GROWTH_CEILING_DELTA,
 };
