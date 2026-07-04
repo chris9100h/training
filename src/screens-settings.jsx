@@ -547,6 +547,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
   const [vipBgSaving, setVipBgSaving] = useStateSet(false);
   const [vipBgMsg, setVipBgMsg] = useStateSet(null);
   const [broadcastSheet, setBroadcastSheet] = useStateSet(false);
+  const [updateToolsSheet, setUpdateToolsSheet] = useStateSet(false);
   const [broadcastBody, setBroadcastBody] = useStateSet('');
   const [broadcastSending, setBroadcastSending] = useStateSet(false);
   const [broadcastMsg, setBroadcastMsg] = useStateSet(null);
@@ -2227,14 +2228,8 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                 <NavRow label="All users" hint={unseenCount > 0 ? `${unseenCount} new` : (allUsers.length ? `${allUsers.length}` : undefined)} onTap={() => setAllUsersSheet(true)} />
                 <NavRow label="VIP backgrounds" hint={vipBgList.length > 0 ? `${vipBgList.length} assigned` : 'None'} onTap={() => { setVipBgMsg(null); setVipBgSheet(true); }} />
                 <NavRow label="Message all users" onTap={() => { setBroadcastMsg(null); setBroadcastSheet(true); }} />
+                <NavRow label="Update tools" onTap={() => setUpdateToolsSheet(true)} />
               </Frame>
-              <div>
-                <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>UPDATE</div>
-                <Frame style={{ padding: '0 14px' }}>
-                  <NavRow label="Force refresh all users" onTap={handleForceUpdateAll} first />
-                  <NavRow label="Test update banner" onTap={onTestUpdateBanner} />
-                </Frame>
-              </div>
               <div style={{ borderTop: `0.5px solid ${UI.hair}`, paddingTop: 16 }}>
                 <Btn onClick={() => setSupportInboxSheet(true)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, width: '100%', fontSize: 15, padding: '14px 16px' }}>
                   Support inbox
@@ -2273,6 +2268,19 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           <Btn onClick={sendBroadcast} disabled={!broadcastBody.trim() || broadcastSending}>
             {broadcastSending ? 'Sending…' : 'Send to all users'}
           </Btn>
+        </div>
+      </SettingsSheet>
+
+      {/* ══ Update tools (admin) ══ */}
+      <SettingsSheet open={updateToolsSheet} onClose={() => setUpdateToolsSheet(false)} title="Update Tools">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginBottom: 8 }}>
+          <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1.5 }}>
+            Force refresh broadcasts the update banner to every connected user without needing an sw.js cache bump. Test update banner only shows it on this device, to preview the banner itself.
+          </div>
+          <Frame style={{ padding: '0 14px' }}>
+            <NavRow label="Force refresh all users" onTap={handleForceUpdateAll} first />
+            <NavRow label="Test update banner" onTap={onTestUpdateBanner} />
+          </Frame>
         </div>
       </SettingsSheet>
 
