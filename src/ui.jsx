@@ -690,7 +690,16 @@ function Sheet({ open, onClose, title, titleColor, children, keyboardHeight = 0 
         borderRadius: floating ? 6 : '6px 6px 0 0',
         border: `1px solid ${UI.hairStrong}`,
         ...(!floating && { borderBottom: 'none' }),
-        boxShadow: floating ? '0 4px 24px rgba(0,0,0,0.45)' : '0 -16px 48px rgba(0,0,0,0.6)',
+        // Floating above the keyboard, every edge needs to read as a real
+        // boundary on its own — the bottom-sheet variant gets that for free
+        // from the drag handle and the darker screen behind it, but a
+        // floating card has nothing else anchoring its bottom edge, so the
+        // same 1px hairline there can vanish against the dark backdrop. A
+        // second, crisp shadow line in the same tone doubles up the border
+        // right where it needs it, without touching the other three sides.
+        boxShadow: floating
+          ? `0 4px 24px rgba(0,0,0,0.45), 0 1px 0 ${UI.hairStrong}`
+          : '0 -16px 48px rgba(0,0,0,0.6)',
         // The 3rd value here used to be the bare number 18 instead of '18px'
         // — React silently drops the *entire* padding declaration (not just
         // that one component) when a shorthand's value contains a unitless
