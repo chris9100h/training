@@ -636,20 +636,40 @@ function Toggle({ on, onToggle }) {
 // visualViewport-based auto-detection below never fires for it) is open, at
 // a known height — combined with the auto-detected kbHeight via Math.max so
 // existing callers (default 0) are unaffected.
+//
+// sheetEverWarmed (module-level, not per-instance): on real devices, the
+// very first Sheet opened in a session can render its panel briefly
+// edge-to-edge (ignoring its own padding) on its first paint — every open
+// after that, of any Sheet, is fine. Several targeted root-cause attempts
+// (removing position:sticky, willChange layer-promotion hints, isolating
+// myo-match's glow to a constant blur) didn't hold up on device, so instead
+// of continuing to guess at the trigger, this masks it directly: the first
+// Sheet's panel renders fully laid out and painted (opacity:0, so the paint
+// still happens — unlike visibility:hidden, which some engines skip
+// rasterizing) for two animation frames, then reveals. Whatever goes wrong
+// on that first paint has already happened, off-screen, by the time the
+// user ever sees it — matching the observed "always correct from the
+// second open on" pattern instead of trying to prevent the first bad paint
+// outright. Scoped globally (not per Sheet instance) because Sheet fully
+// unmounts when closed (`if (!open) return null` below), so a per-instance
+// flag would re-arm on every single open — this only pays the ~32ms delay
+// once per session, on whichever Sheet the user happens to open first.
+let sheetEverWarmed = false;
 function Sheet({ open, onClose, title, titleColor, children, keyboardHeight = 0 }) {
   const [kbHeight, setKbHeight] = React.useState(0);
   const [vvHeight, setVvHeight] = React.useState(window.innerHeight);
   const panelRef = React.useRef(null);
-  // Safari/WebKit can mis-measure a position:sticky child's width on the very
-  // first paint of a freshly-mounted overflow:auto container whose height is
-  // itself computed inline (this panel, via maxHeight above) — reproduced as
-  // sticky content briefly rendering edge-to-edge (ignoring the panel's own
-  // padding) on a sheet's first open, self-correcting on the next reflow.
-  // Reading a layout property forces that reflow synchronously, before the
-  // browser ever paints the wrong layout.
+  const [warmed, setWarmed] = React.useState(sheetEverWarmed);
   React.useLayoutEffect(() => {
-    if (!open) return;
-    void panelRef.current?.offsetHeight;
+    if (!open || sheetEverWarmed) { setWarmed(sheetEverWarmed); return; }
+    let raf2 = null;
+    const raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(() => {
+        sheetEverWarmed = true;
+        setWarmed(true);
+      });
+    });
+    return () => { cancelAnimationFrame(raf1); if (raf2) cancelAnimationFrame(raf2); };
   }, [open]);
   React.useEffect(() => {
     if (!open) return;
@@ -691,20 +711,6 @@ function Sheet({ open, onClose, title, titleColor, children, keyboardHeight = 0 
       animation: 'sheet-fade 0.18s ease',
       willChange: 'opacity',
     }}>
-      {/* willChange hints the browser to promote this panel to its own GPU
-          compositing layer immediately on insertion, before sheet-up's first
-          animated frame paints — confirmed (two same-second screenshots,
-          first open vs. reopen) that this sheet's content briefly renders
-          edge-to-edge (ignoring its own padding) only on a session's very
-          first open of ANY chain sheet, self-correcting on every reopen
-          after. Matches a known WebKit pattern: an element that both needs a
-          new compositing layer (position:fixed backdrop, backdrop-filter)
-          AND starts animating (transform + opacity) on the same frame can
-          paint incorrectly before the layer is fully established; a
-          previously-closed sheet's layer stays warm, so only the first-ever
-          open is affected. Unverified against real WebKit (only Chromium is
-          available here, which never reproduced this) — best-effort fix for
-          a known bug class, not a confirmed root-cause fix. */}
       <div ref={panelRef} onClick={e => e.stopPropagation()} style={{
         width: '100%', maxWidth: 540, boxSizing: 'border-box',
         background: UI.bgRaised,
@@ -712,7 +718,13 @@ function Sheet({ open, onClose, title, titleColor, children, keyboardHeight = 0 
         border: `1px solid ${UI.hairStrong}`, borderBottom: 'none',
         boxShadow: '0 -16px 48px rgba(0,0,0,0.6)',
         padding: `16px 22px ${effectiveKbHeight > 0 ? 18 : 'calc(env(safe-area-inset-bottom, 8px) + 22px)'}`,
-        animation: 'sheet-up 0.22s ease',
+        // Not warmed yet: fully laid out and painted, just invisible and
+        // non-interactive (see sheetEverWarmed above) — no entrance
+        // animation until the reveal frame, so sheet-up plays in full once
+        // warmed flips true instead of losing its first ~32ms mid-flight.
+        animation: warmed ? 'sheet-up 0.22s ease' : 'none',
+        opacity: warmed ? 1 : 0,
+        pointerEvents: warmed ? 'auto' : 'none',
         maxHeight: effectiveKbHeight > 0 ? `${vvHeight - 32}px` : '88dvh', overflow: 'auto', overscrollBehavior: 'contain',
         willChange: 'transform, opacity',
       }}>
