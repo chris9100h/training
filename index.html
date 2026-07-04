@@ -246,7 +246,15 @@ function makeClearCacheButton() {
         req.onsuccess = req.onerror = req.onblocked = function(){ resolve(); };
       });
     }
-    window.location.reload(true);
+    // reload(true)'s "force" argument is a removed, no-op legacy API in
+    // modern browsers — a plain reload here can still be served stale by
+    // the browser's own HTTP cache (a layer clearing CacheStorage/IndexedDB
+    // never touches), via whichever service worker is still active. A
+    // unique ?_v= query string guarantees no HTTP cache entry exists for
+    // this exact URL, and sw.js's fetch handler already treats any ?_v=
+    // request as always-network. Mirrors LB.clearCachesAndReload in
+    // store.js (this file can't call into LB — it runs before store.js loads).
+    window.location.href = window.location.pathname + '?_v=' + Date.now() + window.location.hash;
   };
   return btn;
 }

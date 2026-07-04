@@ -3006,8 +3006,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
               )}
               <button onClick={async () => {
                 setQuickActionsOpen(false);
-                await LB.clearPrecompileCaches();
-                window.location.reload(true);
+                await LB.clearCachesAndReload();
               }} style={{
                 width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
                 padding: '12px 14px', background: UI.bgInset, border: `0.5px solid ${UI.hair}`,

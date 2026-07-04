@@ -3525,9 +3525,25 @@ async function clearPrecompileCaches() {
   }
 }
 
+// Clears both cache layers above, then reloads via a cache-busted URL.
+// window.location.reload(true)'s "force" argument is a removed, no-op
+// legacy API in modern browsers — a plain reload after clearing caches is
+// still served by whichever service worker is CURRENTLY active (an update
+// may be waiting but not yet activated), and that worker's own network
+// fallback fetch can still be answered by the browser's HTTP cache, a
+// layer entirely below CacheStorage that clearing it never touches. A
+// unique ?_v= query string guarantees no HTTP cache entry exists for this
+// exact URL, and sw.js's fetch handler already treats any ?_v= request as
+// always-network (see the version-check probe in checkSwUpdate) — so this
+// reliably gets the same fresh result an actual SW update does.
+async function clearCachesAndReload() {
+  await clearPrecompileCaches();
+  window.location.href = window.location.pathname + '?_v=' + Date.now() + window.location.hash;
+}
+
 window.LB = {
   supabase: _supabase,
-  clearPrecompileCaches,
+  clearPrecompileCaches, clearCachesAndReload,
   SUPABASE_URL, SUPABASE_ANON_KEY, PUSHOVER_URL, WEB_PUSH_URL, fnFetch,
   subscribeWebPush, unsubscribeWebPush, getWebPushSubscription,
   QS_EMAILS, hasQuickSwitchSession, quickSwitch, saveQsName, getQsName,

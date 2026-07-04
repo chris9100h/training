@@ -559,8 +559,7 @@ function App() {
       if (pendingSwVersion.current) {
         try { localStorage.setItem('logbook-sw-version', pendingSwVersion.current); } catch (_) {}
       }
-      await LB.clearPrecompileCaches();
-      window.location.reload(true);
+      await LB.clearCachesAndReload();
     }
   }, []);
 
