@@ -16,6 +16,17 @@
    Entry shape: { id: string, title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.474',
+    title: 'Nothing Left Behind',
+    items: [
+      "🎯 Drop Set, Myo-Reps, Myo-Rep Match, and AMRAP Variations now open in their own clean panel instead of squeezing into the set list — the weight/rep row and your Finish/Add buttons stay put no matter how far you've scrolled or how many drops you've stacked up. It also now sits cleanly above the number pad instead of overlapping it.",
+      "🛡️ Tap away or hit Cancel mid-chain with unsaved reps (or hit Home) — the app asks first now instead of silently tossing your progress.",
+      "🔄 Fixed several bugs where tapping \"Update\" could still leave you stuck on the old version — updates now land cleanly every time.",
+      "🖼️ Coaching chat / support tickets: tap any photo to view it full-screen, and paste an image straight from your clipboard instead of only picking a file.",
+      "👇 Home now shows a small chevron hinting that Quick Actions live behind a pull-down — it was invisible until you actually started pulling, so a lot of people never found the feature. Tap it directly to open Quick Actions, or just pull down as before.",
+    ],
+  },
+  {
     id: 'v2.460',
     title: 'Sweating the Small Stuff',
     items: [
