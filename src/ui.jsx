@@ -674,7 +674,7 @@ function Sheet({ open, onClose, title, titleColor, children, keyboardHeight = 0,
   const edgeColor = accent ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong;
   const shadowLayers = [floating ? '0 4px 24px rgba(0,0,0,0.45)' : '0 -16px 48px rgba(0,0,0,0.6)'];
   if (floating) shadowLayers.push(`0 1px 0 ${edgeColor}`);
-  if (accent) shadowLayers.push('0 0 32px rgba(var(--accent-rgb),0.16)');
+  if (accent) shadowLayers.push('0 0 40px rgba(var(--accent-rgb),0.22)');
   return (
     // The backdrop only shrinks (bottom: keyboardHeight) for the caller-
     // declared custom keyboard, not the auto-detected native one: a custom
