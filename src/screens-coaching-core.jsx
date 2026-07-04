@@ -241,14 +241,25 @@ function ChatThread({ thread, coachingId, userId, otherName, unreadNotes, onBack
   const [lightboxSrc, setLightboxSrc] = useStateC(null);
   const bottomRef = useRefC(null);
 
-  const pickImage = (e) => {
-    const file = e.target.files?.[0];
-    e.target.value = '';
+  const attachImageFile = (file) => {
     if (!file) return;
     setImageFile(file);
     const reader = new FileReader();
     reader.onload = ev => setImagePreview(ev.target.result);
     reader.readAsDataURL(file);
+  };
+  const pickImage = (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    attachImageFile(file);
+  };
+  // Paste an image straight from the clipboard (screenshot, copied photo…)
+  // into the message box, same as picking a file.
+  const onPasteMessage = (e) => {
+    const item = Array.from(e.clipboardData?.items || []).find(it => it.type.startsWith('image/'));
+    if (!item) return;
+    e.preventDefault();
+    attachImageFile(item.getAsFile());
   };
 
   const reload = () => {
@@ -347,6 +358,7 @@ function ChatThread({ thread, coachingId, userId, otherName, unreadNotes, onBack
             value={body}
             onChange={e => setBody(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && !e.shiftKey && send()}
+            onPaste={onPasteMessage}
             placeholder="Message…"
             style={{ flex: 1, background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 6, padding: '10px 16px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, outline: 'none' }}
           />

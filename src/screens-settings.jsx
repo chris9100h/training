@@ -1045,24 +1045,44 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
   };
   const handleSignOut = async () => { await LB.signOut(); };
 
-  const handleImagePick = (e) => {
-    const file = e.target.files?.[0];
+  const attachSupportImageFile = (file) => {
     if (!file) return;
     setSupportImageFile(file);
     const reader = new FileReader();
     reader.onload = ev => setSupportImagePreview(ev.target.result);
     reader.readAsDataURL(file);
+  };
+  const handleImagePick = (e) => {
+    const file = e.target.files?.[0];
     e.target.value = '';
+    attachSupportImageFile(file);
+  };
+  // Paste an image straight from the clipboard (screenshot, copied photo…)
+  // into the message box, same as picking a file.
+  const onPasteSupportMessage = (e) => {
+    const item = Array.from(e.clipboardData?.items || []).find(it => it.type.startsWith('image/'));
+    if (!item) return;
+    e.preventDefault();
+    attachSupportImageFile(item.getAsFile());
   };
 
-  const handleAdminImagePick = (e) => {
-    const file = e.target.files?.[0];
+  const attachAdminImageFile = (file) => {
     if (!file) return;
     setAdminImageFile(file);
     const reader = new FileReader();
     reader.onload = ev => setAdminImagePreview(ev.target.result);
     reader.readAsDataURL(file);
+  };
+  const handleAdminImagePick = (e) => {
+    const file = e.target.files?.[0];
     e.target.value = '';
+    attachAdminImageFile(file);
+  };
+  const onPasteAdminMessage = (e) => {
+    const item = Array.from(e.clipboardData?.items || []).find(it => it.type.startsWith('image/'));
+    if (!item) return;
+    e.preventDefault();
+    attachAdminImageFile(item.getAsFile());
   };
 
   const handleSupportSend = async () => {
@@ -2382,6 +2402,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                   )}
                   <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
                     <textarea value={supportDraft} onChange={e => setSupportDraft(e.target.value)}
+                      onPaste={onPasteSupportMessage}
                       placeholder="Describe your request…" rows={4} style={{ ...iStyle, flex: 1 }} />
                     <label style={{ cursor: 'pointer', flexShrink: 0, width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 6, background: supportImageFile ? 'rgba(var(--accent-rgb),0.15)' : UI.bgInset, border: `0.5px solid ${supportImageFile ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong}`, color: supportImageFile ? 'var(--accent)' : UI.inkFaint }}>
                       <input type="file" accept="image/*" style={{ display: 'none' }} onChange={handleImagePick} />
@@ -2458,6 +2479,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                     <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
                       <textarea value={supportDraft} onChange={e => setSupportDraft(e.target.value)}
                         placeholder="Write a message…" rows={3} style={{ ...iStyle, flex: 1 }}
+                        onPaste={onPasteSupportMessage}
                         onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleSupportSend(); }} />
                       <label style={{ cursor: 'pointer', flexShrink: 0, width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 6, background: supportImageFile ? 'rgba(var(--accent-rgb),0.15)' : UI.bgInset, border: `0.5px solid ${supportImageFile ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong}`, color: supportImageFile ? 'var(--accent)' : UI.inkFaint }}>
                         <input type="file" accept="image/*" style={{ display: 'none' }} onChange={handleImagePick} />
@@ -2614,6 +2636,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                   <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
                     <textarea value={supportAdminDraft} onChange={e => setSupportAdminDraft(e.target.value)}
                       placeholder="Reply…" rows={3} style={{ ...iStyle, flex: 1 }}
+                      onPaste={onPasteAdminMessage}
                       onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleAdminReply(); }}
                     />
                     <label style={{ cursor: 'pointer', flexShrink: 0, width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 6, background: adminImageFile ? 'rgba(var(--accent-rgb),0.15)' : UI.bgInset, border: `0.5px solid ${adminImageFile ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong}`, color: adminImageFile ? 'var(--accent)' : UI.inkFaint }}>
