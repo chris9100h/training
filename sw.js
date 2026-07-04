@@ -59,13 +59,31 @@ const CDN_ASSETS = [
   'https://unpkg.com/@babel/standalone@7.29.0/babel.min.js',
 ];
 
+// cache.addAll()/cache.add() don't force a network round-trip — being handed
+// a plain URL (not a Request with explicit cache options), they can be
+// satisfied by the browser's own HTTP cache, a layer entirely below
+// CacheStorage. If the static host serves these files with any freshness
+// window, a brand-new SW version's install step could silently precache the
+// very stale bytes the update exists to replace — every check in this file
+// (checkSwUpdate's ?_v= probe, the runtime fetch handler below) works hard to
+// avoid exactly that, so precaching needs the same guarantee. Fetch each
+// asset with cache:'no-store' explicitly instead.
+function precacheAll(cache, urls) {
+  return Promise.all(urls.map(url =>
+    fetch(url, { cache: 'no-store' }).then(res => {
+      if (!res.ok) throw new Error(`Precache failed: ${url} (${res.status})`);
+      return cache.put(url, res);
+    })
+  ));
+}
+
 self.addEventListener('install', e => {
   e.waitUntil(
     caches.open(CACHE).then(c =>
-      c.addAll(ASSETS).then(() =>
+      precacheAll(c, ASSETS).then(() =>
         Promise.allSettled([].concat(
-          PHOTO_ASSETS.map(u => c.add(u).catch(() => {})),
-          CDN_ASSETS.map(u => c.add(new Request(u, { mode: 'cors' })).catch(() => {}))
+          PHOTO_ASSETS.map(u => fetch(u, { cache: 'no-store' }).then(res => { if (res.ok) return c.put(u, res); }).catch(() => {})),
+          CDN_ASSETS.map(u => fetch(new Request(u, { mode: 'cors', cache: 'no-store' })).then(res => { if (res.ok) return c.put(u, res); }).catch(() => {}))
         ))
       )
     )
