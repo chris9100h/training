@@ -251,6 +251,46 @@ function FinisherPartials({ count, onChange }) {
   );
 }
 
+// Reveals a Drop Set / Myo-Rep / AMRAP Variations chain's action row (add
+// mini-set / finish) above the on-screen numeric keypad, which reserves
+// KEYPAD_CLEARANCE px below it. A plain `actionsEl.scrollIntoView({block:
+// 'nearest'})` with a matching scroll-margin-bottom can overshoot: when the
+// chain's own sticky header (title + Myo Match's live progress bar) is short
+// relative to that clearance, the browser scrolls straight past the point
+// where the header would still be pinned, popping it (or the rows just below
+// it) out of view. Computed manually instead so the scroll never exceeds the
+// header's own "stuck" budget — the panel's total height minus the header's
+// height — guaranteeing the header stays visible even if that means the
+// actions row doesn't fully clear the keypad in an extreme case (more rows
+// than fit on screen).
+const KEYPAD_CLEARANCE = 260;
+function scrollChainActionsIntoView(panelAttr, headerAttr, actionsAttr) {
+  const panel = document.querySelector(`[${panelAttr}]`);
+  const header = document.querySelector(`[${headerAttr}]`);
+  const actions = document.querySelector(`[${actionsAttr}]`);
+  if (!panel || !header || !actions) return;
+  let scrollParent = panel.parentElement;
+  while (scrollParent && scrollParent !== document.body && scrollParent !== document.documentElement) {
+    const s = getComputedStyle(scrollParent);
+    if (/(auto|scroll)/.test(s.overflowY) && scrollParent.scrollHeight > scrollParent.clientHeight + 1) break;
+    scrollParent = scrollParent.parentElement;
+  }
+  if (!scrollParent || scrollParent === document.body || scrollParent === document.documentElement) return;
+  const parentRect = scrollParent.getBoundingClientRect();
+  const headerRect = header.getBoundingClientRect();
+  const panelRect = panel.getBoundingClientRect();
+  const actionsRect = actions.getBoundingClientRect();
+  const overflowBelow = (actionsRect.bottom + KEYPAD_CLEARANCE) - parentRect.bottom;
+  const overflowAbove = parentRect.top - actionsRect.top;
+  if (overflowBelow > 0) {
+    const maxSafeScroll = (panelRect.bottom - scrollParent.scrollTop) - headerRect.height - parentRect.top;
+    const delta = Math.min(overflowBelow, Math.max(0, maxSafeScroll));
+    if (delta > 0) scrollParent.scrollBy({ top: delta, behavior: 'smooth' });
+  } else if (overflowAbove > 0) {
+    scrollParent.scrollBy({ top: -overflowAbove, behavior: 'smooth' });
+  }
+}
+
 // ─── Plate Calculator ────────────────────────────────────────────────
 const PLATES_KG  = [25, 20, 15, 10, 5, 2.5, 1.25, 0.75, 0.5, 0.25];
 const PLATES_LBS = [55, 45, 35, 25, 10, 5, 2.5, 1.25];
@@ -2632,10 +2672,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     setKbField({ setIdx: 'drop', dropIdx, field });
     setKbRaw(val);
     setKbFresh(true);
-    setTimeout(() => {
-      const el = document.querySelector('[data-drop-actions]');
-      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    }, 80);
+    setTimeout(() => scrollChainActionsIntoView('data-drop-panel', 'data-drop-header', 'data-drop-actions'), 80);
   };
 
   const activateMyo = (dropIdx, field) => {
@@ -2649,10 +2686,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     setKbField({ setIdx: 'myo', dropIdx, field });
     setKbRaw(val);
     setKbFresh(true);
-    setTimeout(() => {
-      const el = document.querySelector('[data-myo-actions]');
-      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    }, 80);
+    setTimeout(() => scrollChainActionsIntoView('data-myo-panel', 'data-myo-header', 'data-myo-actions'), 80);
   };
 
   const activateAvKb = (dropIdx, field) => {
@@ -2666,10 +2700,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     setKbField({ setIdx: 'av', dropIdx, field });
     setKbRaw(val);
     setKbFresh(true);
-    setTimeout(() => {
-      const el = document.querySelector('[data-av-actions]');
-      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    }, 80);
+    setTimeout(() => scrollChainActionsIntoView('data-av-panel', 'data-av-header', 'data-av-actions'), 80);
   };
 
   const kbApply = (newRaw, field, setIdx) => {
@@ -4352,8 +4383,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                     );
                   })()}
                   {dropSetIdx === i && !s.done && (
-                    <div style={{ marginLeft: 36, paddingLeft: 10, borderLeft: `2px solid rgba(var(--accent-rgb),0.3)` }}>
-                      <div style={{ position: 'sticky', top: 0, background: 'var(--bg)', zIndex: 1, paddingBottom: 2 }}>
+                    <div data-drop-panel style={{ marginLeft: 36, paddingLeft: 10, borderLeft: `2px solid rgba(var(--accent-rgb),0.3)` }}>
+                      <div data-drop-header style={{ position: 'sticky', top: 0, background: 'var(--bg)', zIndex: 1, paddingBottom: 2 }}>
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 4px 2px' }}>
                           <span className="micro-gold">DROP SET</span>
                           <button onClick={() => {
@@ -4461,8 +4492,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   )}
                   {/* AMRAP Variations active inline rows */}
                   {avSetIdx === i && !s.done && (
-                    <div style={{ marginLeft: 36, paddingLeft: 10, borderLeft: `2px solid rgba(var(--accent-rgb),0.3)` }}>
-                      <div style={{ position: 'sticky', top: 0, background: 'var(--bg)', zIndex: 1, paddingBottom: 2 }}>
+                    <div data-av-panel style={{ marginLeft: 36, paddingLeft: 10, borderLeft: `2px solid rgba(var(--accent-rgb),0.3)` }}>
+                      <div data-av-header style={{ position: 'sticky', top: 0, background: 'var(--bg)', zIndex: 1, paddingBottom: 2 }}>
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 4px 2px' }}>
                           <span className="micro-gold">AMRAP VARIATIONS</span>
                           <button onClick={() => {
@@ -4600,8 +4631,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                     const canFinish = myoDrops.length >= 2 && myoDrops[0]?.reps != null && (isNoWeightReps || isBodyweight || myoDrops[0]?.kg != null);
                     const activationDone = myoDrops[0]?.reps != null;
                     return (
-                      <div style={{ marginLeft: 36, paddingLeft: 10, borderLeft: `2px solid rgba(var(--accent-rgb),0.3)` }}>
-                          <div style={{ position: 'sticky', top: 0, background: 'var(--bg)', zIndex: 1, paddingBottom: 2 }}>
+                      <div data-myo-panel style={{ marginLeft: 36, paddingLeft: 10, borderLeft: `2px solid rgba(var(--accent-rgb),0.3)` }}>
+                          <div data-myo-header style={{ position: 'sticky', top: 0, background: 'var(--bg)', zIndex: 1, paddingBottom: 2 }}>
                           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 4px 2px' }}>
                             <span className="micro-gold">{myoTechnique === 'myorep_match' ? 'MYO REP MATCH' : 'MYO-REPS'}</span>
                             <button onClick={cancelMyo} style={{ background: 'none', border: 'none', color: UI.inkFaint, fontSize: 10, fontFamily: UI.fontUi, cursor: 'pointer', padding: '2px 4px', letterSpacing: '0.08em' }}>CANCEL</button>
