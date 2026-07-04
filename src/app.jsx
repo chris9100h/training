@@ -297,6 +297,7 @@ function App() {
   const routeRef                  = useRefA({ name: 'home' }); // current route for stale-closure contexts
   const detectedSwVersion         = useRefA(null); // set as soon as caches.keys() resolves, applied once the store exists
   const pendingSwVersion          = useRefA(null); // newest sw.js version seen but not yet applied; persisted only by applyUpdate
+  const pendingForceNonce         = useRefA(null); // admin_force_update() broadcast nonce seen but not yet applied
 
   useEffectA(() => { userIdRef.current = userId; }, [userId]);
   useEffectA(() => { phaseRef.current = phase; }, [phase]);
@@ -510,6 +511,14 @@ function App() {
   }, []);
 
   const applyUpdate = useCallbackA(async () => {
+    // A force-update broadcast (admin_force_update) isn't tied to an actual
+    // SW change, so there's no "wait for activation" step to persist it
+    // after — clicking Update always leads to a fresh reload one way or
+    // another (real SW takeover or the clearCachesAndReload fallback below),
+    // so mark it seen right away.
+    if (pendingForceNonce.current) {
+      try { localStorage.setItem('logbook-force-nonce-seen', pendingForceNonce.current); } catch (_) {}
+    }
     // The applied version is persisted in onControllerChange (once the new SW
     // takes control), never on mere detection or click, so a not-yet-activated
     // update keeps being re-offered across cold starts.
@@ -1050,10 +1059,31 @@ function App() {
       .catch(() => {});
   }, []);
 
-  useEffectA(() => { checkSwUpdate(); }, [route]);
+  // Lets the admin push the update banner to everyone without an sw.js cache
+  // bump (see admin_force_update). Same "first sighting = baseline, no
+  // banner" pattern as checkSwUpdate above — a brand-new device must never
+  // see a false "update available" for a nonce it's never seen before.
+  const checkForceUpdate = useCallbackA(() => {
+    if (routeRef.current?.name === 'train') return;
+    LB.supabase.rpc('get_force_update_nonce').then(({ data, error }) => {
+      if (error || !data) return;
+      let stored = null;
+      try { stored = localStorage.getItem('logbook-force-nonce-seen'); } catch (_) {}
+      if (!stored) {
+        try { localStorage.setItem('logbook-force-nonce-seen', data); } catch (_) {}
+        return;
+      }
+      if (data !== stored) {
+        pendingForceNonce.current = data;
+        setUpdateAvailable(true);
+      }
+    }).catch(() => {});
+  }, []);
+
+  useEffectA(() => { checkSwUpdate(); checkForceUpdate(); }, [route]);
 
   useEffectA(() => {
-    const onVisible = () => { if (document.visibilityState === 'visible') checkSwUpdate(); };
+    const onVisible = () => { if (document.visibilityState === 'visible') { checkSwUpdate(); checkForceUpdate(); } };
     document.addEventListener('visibilitychange', onVisible);
     return () => document.removeEventListener('visibilitychange', onVisible);
   }, []);
@@ -1183,7 +1213,7 @@ function App() {
     case 'session':          screen = <window.Screens.SessionDetailScreen {...props} sessionId={route.sessionId} justFinished={route.justFinished} back={route.back} />; break;
     case 'compare':          screen = <window.Screens.SessionCompareScreen {...props} sessionId={route.sessionId} compareId={route.compareId} back={route.back} />; break;
     case 'exerciseHistory':  screen = <window.Screens.ExerciseHistoryScreen {...props} exId={route.exId} dayId={route.dayId} exName={route.exName} back={route.back} />; break;
-    case 'settings':          screen = <window.Screens.SettingsScreen {...props} openSupportInbox={route.openSupportInbox} openSupportSheet={route.openSupportSheet} />; break;
+    case 'settings':          screen = <window.Screens.SettingsScreen {...props} openSupportInbox={route.openSupportInbox} openSupportSheet={route.openSupportSheet} onTestUpdateBanner={() => setUpdateAvailable(true)} />; break;
     case 'spectator':         screen = <window.Screens.SpectatorScreen {...props} targetUserId={route.targetUserId} userName={route.userName} sessionId={route.sessionId} />; break;
     case 'coaching':            screen = <window.Screens.CoachingTabScreen {...props} initialClientTab={route.initialClientTab} />; break;
     case 'coaching-dashboard':  screen = <window.Screens.CoachingDashboard {...props} />; break;

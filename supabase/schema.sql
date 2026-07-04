@@ -14,10 +14,13 @@ CREATE TABLE public.zane_profiles (
 );
 
 -- Global app config (single row). Drives the zane_profiles.approved default.
+-- force_update_nonce (Migration 0131): set by admin_force_update() to push
+-- the "New version available" banner to every client without an sw.js bump.
 CREATE TABLE public.zane_app_config (
   id int PRIMARY KEY DEFAULT 1,
   signup_requires_approval boolean NOT NULL DEFAULT true,
   auto_approve_remaining int,
+  force_update_nonce text,
   CONSTRAINT zane_app_config_singleton CHECK (id = 1)
 );
 
@@ -1494,6 +1497,41 @@ $function$;
 
 REVOKE EXECUTE ON FUNCTION public.admin_broadcast_message(text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.admin_broadcast_message(text) TO authenticated;
+
+-- get_force_update_nonce / admin_force_update (Migration 0131): lets the
+-- admin push the update banner to every client without an sw.js cache bump.
+CREATE OR REPLACE FUNCTION public.get_force_update_nonce()
+RETURNS text
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path TO 'public', 'pg_temp'
+AS $function$
+  SELECT force_update_nonce FROM zane_app_config WHERE id = 1;
+$function$;
+
+REVOKE EXECUTE ON FUNCTION public.get_force_update_nonce() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.get_force_update_nonce() TO authenticated;
+
+CREATE OR REPLACE FUNCTION public.admin_force_update()
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+  v_admin_id uuid;
+BEGIN
+  SELECT id INTO v_admin_id FROM auth.users WHERE email = 'office@btc-prime.biz' LIMIT 1;
+  IF auth.uid() IS NULL OR auth.uid() <> v_admin_id THEN RAISE EXCEPTION 'Unauthorized'; END IF;
+
+  INSERT INTO zane_app_config (id, force_update_nonce)
+  VALUES (1, gen_random_uuid()::text)
+  ON CONFLICT (id) DO UPDATE SET force_update_nonce = EXCLUDED.force_update_nonce;
+END;
+$function$;
+
+REVOKE EXECUTE ON FUNCTION public.admin_force_update() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.admin_force_update() TO authenticated;
 
 -- get_support_chats (Migration 0129): excludes a support ticket until the
 -- user has sent at least one message of their own — otherwise

@@ -408,7 +408,7 @@ function PasskeySheet({ open, onClose }) {
 }
 
 // ─── SETTINGS ────────────────────────────────────────────────────────
-function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSupportSheet }) {
+function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSupportSheet, onTestUpdateBanner }) {
   const [confirmEl, confirm] = useConfirm();
   const [nickname, setNickname] = useStateSet(store.user?.name || '');
 
@@ -1190,6 +1190,14 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       setBroadcastMsg({ ok: true, text: `Sent to ${data} user${data === 1 ? '' : 's'}.` });
       setBroadcastBody('');
     } finally { setBroadcastSending(false); }
+  };
+
+  // Pushes the "New version available" banner to every connected client
+  // without needing an sw.js cache-version bump — see admin_force_update.
+  const handleForceUpdateAll = async () => {
+    if (!await confirm('Every connected user will see the update banner and be prompted to refresh.', { title: 'Force refresh all users?', ok: 'Send' })) return;
+    const { error } = await LB.supabase.rpc('admin_force_update');
+    await confirm(error ? (error.message || 'Could not trigger the broadcast.') : 'All connected clients will see the update banner shortly.', { title: error ? 'Error' : 'Sent', ok: 'OK' });
   };
 
   const sendAdminEmail = async () => {
@@ -2212,6 +2220,8 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                 <NavRow label="All users" hint={unseenCount > 0 ? `${unseenCount} new` : (allUsers.length ? `${allUsers.length}` : undefined)} onTap={() => setAllUsersSheet(true)} />
                 <NavRow label="VIP backgrounds" hint={vipBgList.length > 0 ? `${vipBgList.length} assigned` : 'None'} onTap={() => { setVipBgMsg(null); setVipBgSheet(true); }} />
                 <NavRow label="Message all users" onTap={() => { setBroadcastMsg(null); setBroadcastSheet(true); }} />
+                <NavRow label="Force refresh all users" onTap={handleForceUpdateAll} />
+                <NavRow label="Test update banner" onTap={onTestUpdateBanner} />
               </Frame>
               <div style={{ borderTop: `0.5px solid ${UI.hair}`, paddingTop: 16 }}>
                 <Btn onClick={() => setSupportInboxSheet(true)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, width: '100%', fontSize: 15, padding: '14px 16px' }}>
