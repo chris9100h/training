@@ -1648,7 +1648,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         ...(newCardioLogs.length ? { cardioLogs: [...(s.cardioLogs || []), ...newCardioLogs] } : {}),
       };
     });
-    if (mesoState) {
+    // Skip the whole meso completion/gains flow for a deload session — a deload
+    // is recovery, not a meso week. The meso week counter is frozen at the peak
+    // (>= weeks) throughout the deload, so without this guard every deload
+    // session finish would re-fire "Mesocycle complete!" and re-increment
+    // completions. The meso state was already flushed by the session that
+    // actually completed the block.
+    if (mesoState && !isMesoDeloadSession) {
       const isComplete = mesoWeek != null && mesoState?.weeks != null && mesoWeek >= mesoState.weeks;
       const gains = computeMesoGains(isComplete); // also flushes final meso state to store
       if (gains.length > 0) {
@@ -4192,7 +4198,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           </Frame>
         ) : heroSet && (
           <BracketFrame gold padding={0}>
-            {mesoState && mesoRirVal != null && !isCurrentWarmup && (() => {
+            {mesoState && mesoRirVal != null && !isCurrentWarmup && !isMesoDeloadSession && (() => {
               // Escalate the RIR watermark as the block gets crazier: gold above
               // failure, red at 0 RIR, then a hotter, faster ember-flicker the
               // further past failure (negative RIR) it goes — at -3 it's fully

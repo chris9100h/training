@@ -2470,6 +2470,15 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
           )}
           <div style={{ flex: 1, textAlign: 'center' }}>
             {sch.mesocycle_weeks ? (() => {
+              // A deload following the meso is a recovery week — show DELOAD, not
+              // the (now-frozen, possibly beyond-failure) meso RIR target.
+              if (isViewingToday && store.statusMode === 'deload') {
+                return (
+                  <span style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase', color: UI.gold, background: 'rgba(var(--accent-rgb),0.1)', border: `0.5px solid rgba(var(--accent-rgb),0.4)`, borderRadius: 4, padding: '2px 8px' }}>
+                    MESO · DELOAD
+                  </span>
+                );
+              }
               const m = (typeof getMesoState === 'function') ? getMesoState(sch.id, store.mesoStates) : null;
               const weeks = sch.mesocycle_weeks;
               const week = (m && typeof mesoCurrentWeek === 'function') ? mesoCurrentWeek(m, store) : null;
