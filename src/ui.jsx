@@ -661,6 +661,12 @@ function Sheet({ open, onClose, title, titleColor, children, keyboardHeight = 0 
 
   if (!open) return null;
   const effectiveKbHeight = Math.max(kbHeight, keyboardHeight);
+  // Above a real keyboard (native or this app's custom one), the panel no
+  // longer sits flush against the physical bottom edge — it floats above
+  // it, so it reads as its own card: full rounding + bottom border instead
+  // of the bottom-sheet's "attached to the screen edge" look, plus a small
+  // gap off the keyboard instead of sitting flush on top of it.
+  const floating = effectiveKbHeight > 0;
   return (
     // The backdrop only shrinks (bottom: keyboardHeight) for the caller-
     // declared custom keyboard, not the auto-detected native one: a custom
@@ -675,15 +681,16 @@ function Sheet({ open, onClose, title, titleColor, children, keyboardHeight = 0 
       position: 'fixed', top: 0, left: 0, right: 0, bottom: keyboardHeight,
       background: 'rgba(0,0,0,0.7)', zIndex: 100,
       display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
-      paddingBottom: effectiveKbHeight - keyboardHeight,
+      paddingBottom: (effectiveKbHeight - keyboardHeight) + (floating ? 10 : 0),
       animation: 'sheet-fade 0.18s ease',
     }}>
       <div onClick={e => e.stopPropagation()} style={{
         width: '100%', maxWidth: 540, boxSizing: 'border-box',
         background: UI.bgRaised,
-        borderRadius: '6px 6px 0 0',
-        border: `1px solid ${UI.hairStrong}`, borderBottom: 'none',
-        boxShadow: '0 -16px 48px rgba(0,0,0,0.6)',
+        borderRadius: floating ? 6 : '6px 6px 0 0',
+        border: `1px solid ${UI.hairStrong}`,
+        ...(!floating && { borderBottom: 'none' }),
+        boxShadow: floating ? '0 4px 24px rgba(0,0,0,0.45)' : '0 -16px 48px rgba(0,0,0,0.6)',
         // The 3rd value here used to be the bare number 18 instead of '18px'
         // — React silently drops the *entire* padding declaration (not just
         // that one component) when a shorthand's value contains a unitless
@@ -695,9 +702,9 @@ function Sheet({ open, onClose, title, titleColor, children, keyboardHeight = 0 
         // repro. Every other Sheet in the app never sets keyboardHeight, so
         // effectiveKbHeight stays 0 and always took the (valid) calc()
         // branch — which is why "all other sheets work fine" was true.
-        padding: `16px 22px ${effectiveKbHeight > 0 ? '18px' : 'calc(env(safe-area-inset-bottom, 8px) + 22px)'}`,
+        padding: `16px 22px ${floating ? '18px' : 'calc(env(safe-area-inset-bottom, 8px) + 22px)'}`,
         animation: 'sheet-up 0.22s ease',
-        maxHeight: effectiveKbHeight > 0 ? `${vvHeight - 32}px` : '88dvh', overflow: 'auto', overscrollBehavior: 'contain',
+        maxHeight: floating ? `${vvHeight - 32}px` : '88dvh', overflow: 'auto', overscrollBehavior: 'contain',
       }}>
         <div style={{ width: 36, height: 3, background: UI.hairStrong, borderRadius: 4, margin: '0 auto 16px' }} />
         {title && (
