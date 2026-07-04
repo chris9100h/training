@@ -4188,6 +4188,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               const fire = neg > 0;
               return (
                 <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', overflow: 'hidden' }}>
+                  {/* Beyond failure shows the raw negative RIR as the compact
+                      headline (−3 RIR) with a plain-language gloss below —
+                      "(0 RIR + 3 partials)" — so it can't be misread as
+                      "negative reps in reserve". */}
                   <span className={`display-it${fire ? ' meso-ember' : ''}`} style={{
                     fontSize: 72, fontWeight: 900, letterSpacing: '0.18em', whiteSpace: 'nowrap', userSelect: 'none',
                     color: fire ? '#ff5a1f' : (mesoRirVal === 0 ? 'rgba(220,53,69,1)' : UI.gold),
@@ -4198,10 +4202,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   }}>{mesoRirVal} RIR</span>
                   {fire && (
                     <span className="meso-ember" style={{
-                      fontFamily: UI.fontUi, fontSize: 13, fontWeight: 800, letterSpacing: '0.22em', color: '#ff5a1f',
-                      transform: 'rotate(-22deg)', marginTop: 6, userSelect: 'none',
+                      fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, letterSpacing: '0.14em', color: '#ff5a1f',
+                      transform: 'rotate(-22deg)', marginTop: 8, userSelect: 'none', whiteSpace: 'nowrap',
                       '--ember-op': Math.min(0.5, 0.3 + neg * 0.06), '--ember-blur': `${5 + neg * 5}px`, animationDuration: `${(1.3 - neg * 0.25).toFixed(2)}s`,
-                    }}>+{neg} PARTIAL{neg === 1 ? '' : 'S'}</span>
+                    }}>(0 RIR + {neg} PARTIAL{neg === 1 ? '' : 'S'})</span>
                   )}
                 </div>
               );

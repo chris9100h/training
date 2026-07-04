@@ -1682,8 +1682,8 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
                         {(() => {
                           const sr = draft.mesocycle_start_rir ?? 3;
                           const er = draft.mesocycle_end_rir ?? 0;
-                          const partHint = er < 0 ? ` · +${-er} partial${er === -1 ? '' : 's'}/set at peak 🔥` : '';
-                          return `Week 1 = ${sr} RIR · Week ${draft.mesocycle_weeks} = ${er} RIR${partHint} · then deload`;
+                          const peak = er < 0 ? `${er} RIR (0 RIR + ${-er} partial${er === -1 ? '' : 's'}/set) 🔥` : `${er} RIR`;
+                          return `Week 1 = ${sr} RIR · Week ${draft.mesocycle_weeks} = ${peak} · then deload`;
                         })()}
                       </div>
                       {mesoCompletions > 0 && (
