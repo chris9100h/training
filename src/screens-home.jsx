@@ -2484,7 +2484,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                   </span>
                 );
               }
-              const rir = (typeof mesoRirForWeek === 'function') ? mesoRirForWeek(week, weeks) : null;
+              const rir = (typeof mesoRirForWeek === 'function') ? mesoRirForWeek(week, weeks, sch.mesocycle_start_rir ?? 3, sch.mesocycle_end_rir ?? 0) : null;
               if (rir == null) return null;
               const unit = weekdayMode ? 'W' : 'C';
               return (

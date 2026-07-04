@@ -875,13 +875,6 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // it done with none of that data, so refuse outright rather than
     // silently corrupting it.
     if (dropSetIdx === setIdx || myoSetIdx === setIdx || avSetIdx === setIdx) return;
-    // Beyond-failure meso block: auto-attach the prescribed lengthened partials
-    // to a plain working set (intensity chains carry theirs via the finisher
-    // seed instead — see startDrop/startMyo/startAv). Only when the caller
-    // didn't already supply its own patch and this isn't a warm-up.
-    if (!extraPatch && mesoPartials > 0 && !entry.sets[setIdx]?.warmup) {
-      extraPatch = { technique: 'lengthened_partial', drops: { partials: mesoPartials } };
-    }
     // Unlock AudioContext on this user gesture so the rest-timer beep works on iOS
     // even when the tempo feature is disabled (only other init path).
     try {
@@ -1861,6 +1854,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // one of those is ever in flight at a time, so one counter suffices. Applied
   // to the last round's drops entry on Finish; 0 = no-op, nothing written.
   const [finisherPartials, setFinisherPartials] = useStateT(0);
+  // Which (exIdx_setIdx) working sets the beyond-failure meso auto-armed the
+  // Lengthened Partials stepper on, so it arms each set exactly once — a user
+  // who cancels the auto-prescribed partials on a set isn't re-nagged by a
+  // re-firing effect.
+  const mesoLpArmedRef = useRefT(new Set());
   // Persist intensity state so a background/resume on iOS doesn't wipe mid-set
   // progress. This effect runs before the restore effect below on every fresh
   // mount (declaration order), so on mount state is still all-null — without
@@ -3593,6 +3591,21 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const allWorkingDone = workingSetsArr.length > 0 && workingSetsArr.every(s => s.done || s.skipped);
   const anyMissingData = !isNoWeightReps && workingSetsArr.some(st => !st.done && !st.skipped && ((!isBodyweight && st.kg == null) || (isUnilateral ? (st.repsL == null || st.repsR == null) : st.reps == null)));
 
+  // Beyond-failure meso: auto-arm the Lengthened Partials stepper (pre-filled to
+  // the prescribed count) on the current plain working set, so the partials are
+  // visible up front instead of silently attached on check-off. Armed once per
+  // set (mesoLpArmedRef) so cancelling on a set doesn't re-nag. Chains carry
+  // their own partials via the finisher seed, so skip while one is in flight.
+  useEffectT(() => {
+    if (mesoPartials <= 0 || currentSetIdx < 0 || isCurrentWarmup) return;
+    if (dropSetIdx != null || myoSetIdx != null || avSetIdx != null || lpTarget != null) return;
+    const key = exIdx + '_' + currentSetIdx;
+    if (mesoLpArmedRef.current.has(key)) return;
+    mesoLpArmedRef.current.add(key);
+    setLpTarget({ exIdx, setIdx: currentSetIdx });
+    setLpCount(mesoPartials);
+  }, [currentSetIdx, exIdx, mesoPartials, dropSetIdx, myoSetIdx, avSetIdx]);
+
   // Superset linking (Intensity sheet) is only offered before any working set
   // in the CURRENT group has started — retroactively linking a partially-run
   // superset would insert the new exercise's round 0 after rounds the
@@ -4186,27 +4199,42 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               // ablaze. neg = how many partials are prescribed (0..3).
               const neg = mesoRirVal < 0 ? -mesoRirVal : 0;
               const fire = neg > 0;
+              // Escalating ember: hotter (orange→amber), bigger glow, higher
+              // opacity and a slower flicker the further past failure it goes,
+              // so −1 and −3 look clearly different (−3 is fully ablaze). Two-
+              // layer warm palette via CSS custom props (see @keyframes
+              // meso-ember). animationDuration overridden per intensity.
+              const emberVars = fire ? {
+                '--ember-op': (0.16 + neg * 0.07).toFixed(2),
+                '--ember-blur': `${8 + neg * 15}px`,
+                '--ember-glow1': `rgba(255,${120 + neg * 22},${25 + neg * 8},0.92)`,
+                '--ember-glow2': `rgba(255,${Math.max(0, 60 - neg * 14)},0,${(0.4 + neg * 0.08).toFixed(2)})`,
+                animationDuration: `${(2.9 - neg * 0.28).toFixed(2)}s`,
+              } : {};
+              const coreColor = fire ? ['#ff6a2a', '#ff801a', '#ffa510'][neg - 1] : (mesoRirVal === 0 ? 'rgba(220,53,69,1)' : UI.gold);
               return (
-                <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', overflow: 'hidden' }}>
-                  {/* Beyond failure shows the raw negative RIR as the compact
-                      headline (−3 RIR) with a plain-language gloss below —
-                      "(0 RIR + 3 partials)" — so it can't be misread as
-                      "negative reps in reserve". */}
-                  <span className={`display-it${fire ? ' meso-ember' : ''}`} style={{
-                    fontSize: 72, fontWeight: 900, letterSpacing: '0.18em', whiteSpace: 'nowrap', userSelect: 'none',
-                    color: fire ? '#ff5a1f' : (mesoRirVal === 0 ? 'rgba(220,53,69,1)' : UI.gold),
-                    transform: 'rotate(-22deg)',
-                    ...(fire
-                      ? { '--ember-op': Math.min(0.3, 0.14 + neg * 0.05), '--ember-blur': `${6 + neg * 9}px`, animationDuration: `${(1.3 - neg * 0.25).toFixed(2)}s` }
-                      : { opacity: mesoRirVal === 0 ? 0.13 : 0.09 }),
-                  }}>{mesoRirVal} RIR</span>
-                  {fire && (
-                    <span className="meso-ember" style={{
-                      fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, letterSpacing: '0.14em', color: '#ff5a1f',
-                      transform: 'rotate(-22deg)', marginTop: 8, userSelect: 'none', whiteSpace: 'nowrap',
-                      '--ember-op': Math.min(0.5, 0.3 + neg * 0.06), '--ember-blur': `${5 + neg * 5}px`, animationDuration: `${(1.3 - neg * 0.25).toFixed(2)}s`,
-                    }}>(0 RIR + {neg} PARTIAL{neg === 1 ? '' : 'S'})</span>
-                  )}
+                <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', overflow: 'hidden' }}>
+                  {/* RIR + partials gloss rotate together as ONE unit around the
+                      card's centre (not each span on its own) so the long
+                      "(0 RIR + N partials)" line stays centred under the number
+                      instead of clipping off the bottom-left edge. Beyond
+                      failure shows the raw negative RIR as the compact headline
+                      with the plain-language gloss below, so it can't be
+                      misread as "negative reps in reserve". */}
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', transform: 'rotate(-22deg)' }}>
+                    <span className={`display-it${fire ? ' meso-ember' : ''}`} style={{
+                      fontSize: 72, fontWeight: 900, letterSpacing: '0.18em', whiteSpace: 'nowrap', userSelect: 'none', lineHeight: 1,
+                      color: coreColor,
+                      ...(fire ? emberVars : { opacity: mesoRirVal === 0 ? 0.13 : 0.09 }),
+                    }}>{mesoRirVal} RIR</span>
+                    {fire && (
+                      <span className="meso-ember" style={{
+                        fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', color: coreColor,
+                        marginTop: 10, userSelect: 'none', whiteSpace: 'nowrap',
+                        ...emberVars, '--ember-blur': `${5 + neg * 5}px`,
+                      }}>(0 RIR + {neg} PARTIAL{neg === 1 ? '' : 'S'})</span>
+                    )}
+                  </div>
                 </div>
               );
             })()}
