@@ -1992,40 +1992,42 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const mesoJustCompletedRef = useRefT(false); // set when last meso week finished
 
   const startMeso2ForSchedule = (scheduleId) => {
-    setStore(s => {
-      const existing = (s.mesoStates || []).find(m => m.scheduleId === scheduleId);
-      if (!existing) return s;
-      const sch2 = s.schedules?.find(sc => sc.id === scheduleId);
-      const isWd = sch2 ? LB.isWeekdayPlan(sch2) : false;
-      const isFlex2 = sch2 ? LB.isFlexPlan(sch2) : false;
-      const daysLen2 = sch2?.days?.length || 1;
-      const ci = s.cycleIndex || 0;
-      let startDate2, startCycleIndex2;
-      if (isWd) {
-        startDate2 = LB.nextMondayISO();
-        startCycleIndex2 = existing.startCycleIndex ?? 0;
-      } else if (isFlex2) {
-        startCycleIndex2 = ci % daysLen2 === 0 ? ci : Math.ceil(ci / daysLen2) * daysLen2;
-        startDate2 = LB.todayISO();
-      } else {
-        startDate2 = LB.nextCycleD1ISOFromSchedule(sch2, s.cycleStartDate);
-        startCycleIndex2 = 0;
-      }
-      const newMeso = {
-        ...existing,
-        startDate: startDate2,
-        startCycleIndex: startCycleIndex2,
-        deltas: {},
-        jointFlags: {},
-        pumpLowCounts: {},
-        growthCounts: {},
-        pendingMeso2: false,
-        // weightBoosts carries over to meso 2
-        updatedAt: new Date().toISOString(),
-      };
-      const others = (s.mesoStates || []).filter(m => m.scheduleId !== scheduleId);
-      return { ...s, mesoStates: [...others, newMeso] };
-    });
+    const existing = (store.mesoStates || []).find(m => m.scheduleId === scheduleId);
+    if (!existing) return;
+    const sch2 = store.schedules?.find(sc => sc.id === scheduleId);
+    const isWd = sch2 ? LB.isWeekdayPlan(sch2) : false;
+    const isFlex2 = sch2 ? LB.isFlexPlan(sch2) : false;
+    const daysLen2 = sch2?.days?.length || 1;
+    const ci = store.cycleIndex || 0;
+    let startDate2, startCycleIndex2;
+    if (isWd) {
+      startDate2 = LB.nextMondayISO();
+      startCycleIndex2 = existing.startCycleIndex ?? 0;
+    } else if (isFlex2) {
+      startCycleIndex2 = ci % daysLen2 === 0 ? ci : Math.ceil(ci / daysLen2) * daysLen2;
+      startDate2 = LB.todayISO();
+    } else {
+      startDate2 = LB.nextCycleD1ISOFromSchedule(sch2, store.cycleStartDate);
+      startCycleIndex2 = 0;
+    }
+    const newMeso = {
+      ...existing,
+      startDate: startDate2,
+      startCycleIndex: startCycleIndex2,
+      deltas: {},
+      jointFlags: {},
+      pumpLowCounts: {},
+      growthCounts: {},
+      pendingMeso2: false,
+      // weightBoosts carries over to meso 2
+      updatedAt: new Date().toISOString(),
+    };
+    // Keep the per-plan localStorage cache in sync with the store (getMesoState
+    // picks the newer of the two by updatedAt) so the stale Meso-1 cache can't
+    // keep winning on the home strip after Meso 2 starts.
+    saveMesoStateToStorage(newMeso);
+    setMesoStateLocal(newMeso);
+    setStore(s => ({ ...s, mesoStates: [...(s.mesoStates || []).filter(m => m.scheduleId !== scheduleId), newMeso] }));
   };
 
   const continueAsCycle = (scheduleId) => {

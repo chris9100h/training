@@ -1699,14 +1699,13 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
         { title: 'Start Meso 2?', ok: 'Start Meso 2', cancel: 'Skip', preventBackdropClose: true },
       );
       if (wantMeso2) {
-        setStore(s => {
-          const existing = (s.mesoStates || []).find(m => m.scheduleId === scheduleId);
-          if (!existing) return s;
-          const sc2 = s.schedules?.find(sc => sc.id === scheduleId);
+        const existing = (store.mesoStates || []).find(m => m.scheduleId === scheduleId);
+        if (existing) {
+          const sc2 = store.schedules?.find(sc => sc.id === scheduleId);
           const isWd = sc2 ? LB.isWeekdayPlan(sc2) : false;
           const isFlex2 = sc2 ? LB.isFlexPlan(sc2) : false;
           const daysLen2 = sc2?.days?.length || 1;
-          const ci = s.cycleIndex || 0;
+          const ci = store.cycleIndex || 0;
           let startDate2, startCycleIndex2;
           if (isWd) {
             startDate2 = LB.nextMondayISO();
@@ -1715,7 +1714,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
             startCycleIndex2 = ci % daysLen2 === 0 ? ci : Math.ceil(ci / daysLen2) * daysLen2;
             startDate2 = LB.todayISO();
           } else {
-            startDate2 = LB.nextCycleD1ISOFromSchedule(sc2, s.cycleStartDate);
+            startDate2 = LB.nextCycleD1ISOFromSchedule(sc2, store.cycleStartDate);
             startCycleIndex2 = 0;
           }
           const newMeso = {
@@ -1729,9 +1728,13 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
             pendingMeso2: false,
             updatedAt: new Date().toISOString(),
           };
-          const others = (s.mesoStates || []).filter(m => m.scheduleId !== scheduleId);
-          return { ...s, mesoStates: [...others, newMeso] };
-        });
+          // Overwrite the per-plan localStorage cache too — getMesoState returns
+          // whichever of {store, cache} is newer by updatedAt, so leaving the
+          // stale Meso-1 cache in place would keep winning and the home strip /
+          // training screen would still show the old (completed) block.
+          if (typeof saveMesoStateToStorage === 'function') saveMesoStateToStorage(newMeso);
+          setStore(s => ({ ...s, mesoStates: [...(s.mesoStates || []).filter(m => m.scheduleId !== scheduleId), newMeso] }));
+        }
         return;
       }
       const keepActive = await confirm(
@@ -2481,6 +2484,10 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
               }
               const m = (typeof getMesoState === 'function') ? getMesoState(sch.id, store.mesoStates) : null;
               const weeks = sch.mesocycle_weeks;
+              // completions = how many blocks finished, so the block currently
+              // running is number completions+1. Shown from Meso 2 on.
+              const mesoNum = (m?.completions ?? 0) + 1;
+              const mesoLabel = `MESO${mesoNum > 1 ? ' ' + mesoNum : ''}`;
               const week = (m && typeof mesoCurrentWeek === 'function') ? mesoCurrentWeek(m, store) : null;
               if (week == null) {
                 // Pending — meso hasn't started yet; show start date if known
@@ -2489,7 +2496,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                   : 'D1';
                 return (
                   <span style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase', color: UI.inkFaint, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '2px 8px' }}>
-                    MESO · starts {startLabel}
+                    {mesoLabel} · starts {startLabel}
                   </span>
                 );
               }
@@ -2498,7 +2505,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
               const unit = weekdayMode ? 'W' : 'C';
               return (
                 <span style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase', color: UI.inkSoft, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '2px 8px' }}>
-                  MESO {unit}{week}/{weeks} · {rir} RIR
+                  {mesoLabel} {unit}{week}/{weeks} · {rir} RIR
                 </span>
               );
             })() : (
