@@ -1694,9 +1694,10 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     pendingMeso2Checked.current = true;
     (async () => {
       const scheduleId = sch.id;
+      const nextNum = (mesoSt.completions ?? 0) + 1; // the block being offered
       const wantMeso2 = await confirm(
-        'Your deload is done — nice recovery! Ready to kick off Meso 2? Your earned weight boosts carry over and set counts reset to baseline.',
-        { title: 'Start Meso 2?', ok: 'Start Meso 2', cancel: 'Skip', preventBackdropClose: true },
+        `Your deload is done — nice recovery! Ready to kick off Meso ${nextNum}? Your earned weight boosts carry over and set counts reset to baseline.`,
+        { title: `Start Meso ${nextNum}?`, ok: `Start Meso ${nextNum}`, cancel: 'Skip', preventBackdropClose: true },
       );
       if (wantMeso2) {
         const existing = (store.mesoStates || []).find(m => m.scheduleId === scheduleId);

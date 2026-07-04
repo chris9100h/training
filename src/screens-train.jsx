@@ -1674,6 +1674,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // actually completed the block.
     if (mesoState && !isMesoDeloadSession) {
       const isComplete = mesoWeek != null && mesoState?.weeks != null && mesoWeek >= mesoState.weeks;
+      // Number of the NEXT block to offer, captured here where mesoState is
+      // reliably the just-completed block (completions not yet incremented):
+      // completions is the count of blocks BEFORE this one, so the block that
+      // just finished is completions+1 and the next is completions+2. Read from
+      // a ref by handleMesoComplete, which is reached from two paths (direct and
+      // via the gain sheet's onClose) whose mesoState freshness differs.
+      if (isComplete) mesoNextNumRef.current = (mesoState.completions ?? 0) + 2;
       const gains = computeMesoGains(isComplete); // also flushes final meso state to store
       if (gains.length > 0) {
         mesoGainNavRef.current = session.id;
@@ -2008,6 +2015,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const [mesoGainItems, setMesoGainItems] = useStateT([]);
   const mesoGainNavRef = useRefT(null);
   const mesoJustCompletedRef = useRefT(false); // set when last meso week finished
+  const mesoNextNumRef = useRefT(2); // number of the next block to offer ("Start Meso N")
 
   const startMeso2ForSchedule = (scheduleId) => {
     const existing = (store.mesoStates || []).find(m => m.scheduleId === scheduleId);
@@ -2086,9 +2094,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       go({ name: 'session', sessionId: session.id, justFinished: true });
       return;
     }
+    const nextNum = mesoNextNumRef.current;
     const wantMeso2 = await confirm(
-      'Start Meso 2 with the same plan? Your earned weight boosts carry over — set counts reset to baseline so week 1 feels fresh again.',
-      { title: 'Start Meso 2?', ok: 'Start Meso 2', cancel: 'Skip', preventBackdropClose: true },
+      `Start Meso ${nextNum} with the same plan? Your earned weight boosts carry over — set counts reset to baseline so week 1 feels fresh again.`,
+      { title: `Start Meso ${nextNum}?`, ok: `Start Meso ${nextNum}`, cancel: 'Skip', preventBackdropClose: true },
     );
     if (wantMeso2) {
       startMeso2ForSchedule(scheduleId);
