@@ -16,6 +16,16 @@
    Entry shape: { id: string, title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.482',
+    title: 'Reps, Your Rules',
+    items: [
+      "🎯 New Range mode for reps — set a target like 8–12 instead of one fixed number, right next to Uniform and Per Set in the plan editor. It's now the default for freshly added exercises, since most lifts are trained across a window, not one exact count.",
+      "➕ Adding exercises to a plan is faster now — pick one or several, and you're taken straight into sets/reps for each one, one after another. No more hunting down freshly-added rows to configure afterward.",
+      "🎚️ Smart Progression just got personal — every exercise (Range included) can now override the global setting: dial in your own \"add weight after +N reps\" threshold, or switch it off entirely for exercises where auto weight bumps just get in the way (looking at you, lateral raises). A small icon in the plan list shows at a glance which exercises have a custom setting.",
+      "📝 Exercise notes (\"cable pos 4, slow eccentric…\") are now fillable right when you create or edit an exercise — no more hunting for a separate note screen — and they still show up every time you train that exercise, in any plan.",
+    ],
+  },
+  {
     id: 'v2.479',
     title: 'Mesocycles: Hell Mode',
     items: [

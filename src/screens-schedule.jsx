@@ -378,14 +378,11 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId })
       ...s,
       schedules: s.schedules.map(x => {
         if (x.id !== sch.id) return x;
-        // Always add as a new version entry — no deduplication so the backup
-        // is always a distinct version even when the date matches an existing one.
-        // For same-date ties the backup wins (comparator puts newVer first).
-        const newVersions = [newVer, ...(x.versions || [])].sort((a, b) => {
-          const cmp = b.validFrom.localeCompare(a.validFrom);
-          if (cmp !== 0) return cmp;
-          return a === newVer ? -1 : 1;
-        });
+        // One version per date, same policy as a normal plan save (doSave /
+        // LB.dedupeVersionsByDate): a same-date restore replaces the existing
+        // version for that date instead of stacking a duplicate that
+        // getActiveVersionIdx could never actually surface anyway.
+        const newVersions = LB.dedupeVersionsByDate([newVer, ...(x.versions || [])]);
         return { ...x, days: newVersions[0].days, versions: newVersions };
       }),
     }));
@@ -592,7 +589,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId })
         // disagree with what actually gets seeded on a fresh device/reinstall.
         const seedRef = seedRefs[it.exId];
         const last = seedRef ?? LB.bestRecentEntry(store, it.exId, day.id);
-        const suggestion = LB.progressionSuggestion(store, it.exId, day.id, it.reps, it.repsPerSet || null, seedRef);
+        const suggestion = LB.progressionSuggestion(store, it.exId, day.id, it.reps, it.repsPerSet || null, seedRef, it.repsMax || null, it.progressionOffset ?? null);
         const bodyweightKg = ex?.equipment === 'bodyweight' ? LB.latestBodyweight(store) : null;
         const itAdj = (typeof applyMesoSetDeltaFromState === 'function') ? applyMesoSetDeltaFromState(it, day.id, resolvedMeso) : it;
         const weightBoost = mesoBoosts?.[it.exId + '_' + day.id] ?? null;
@@ -601,7 +598,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId })
           const refSet = (last?.entry?.sets || []).filter(s => !s.warmup && !s.skipped).find(s => s.kg != null);
           if (refSet) suggestionFinal = { kg: Math.round((refSet.kg + weightBoost) * 4) / 4, reps: refSet.reps ?? null };
         }
-        const seedSets = LB.buildSeedSets(itAdj, last, suggestionFinal, isUni, !!store.settings?.smartProgression, bodyweightKg);
+        const seedSets = LB.buildSeedSets(itAdj, last, suggestionFinal, isUni, store, bodyweightKg);
         const nextIt = day.items[k + 1];
         const linkedToNext = it.supersetGroup && it.supersetGroup === nextIt?.supersetGroup;
         const isGiant = it.supersetGroup && day.items.filter(x => x.supersetGroup === it.supersetGroup).length >= 3;
@@ -642,7 +639,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId })
         return [frame];
       })}
       <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.5, marginTop: 2, textAlign: 'center' }}>
-        {store.settings?.smartProgression
+        {day.items.some(i => LB.progressionEnabled(store, i.repsMax, i.progressionOffset))
           ? <>Prefilled for your next session · <i className="fa-solid fa-arrow-up" style={{ fontSize: 8 }} /> = smart progression bump</>
           : 'Prefilled from your last session'}
       </div>
@@ -998,6 +995,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId })
                               const ex = LB.findExercise(store, it.exId);
                               const label = it.repsPerSet && it.repsPerSet.length > 1
                                 ? it.repsPerSet.join('/')
+                                : it.repsMax != null ? `${it.sets}×${it.reps}-${it.repsMax}`
                                 : ex?.no_weight_reps ? `${it.sets}×` : `${it.sets}×${it.reps}`;
                               const nextIt = items[k + 1];
                               const prevIt = items[k - 1];
@@ -1014,13 +1012,21 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId })
                                 }}>
                                   <div style={{ flex: 1, minWidth: 0 }}>
                                     <div style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi }}>{ex?.name || '—'}</div>
-                                    {it.note && <div className="micro" style={{ color: UI.inkFaint, marginTop: 2, fontStyle: 'italic' }}>{it.note}</div>}
                                   </div>
                                   <span className="num" style={{
                                     fontSize: 12, color: UI.gold, background: UI.goldFaint,
                                     border: `1px solid ${UI.goldSoft}`, borderRadius: 4,
                                     padding: '3px 8px', whiteSpace: 'nowrap', flexShrink: 0,
-                                  }}>{label}</span>
+                                    display: 'flex', alignItems: 'center', gap: 5,
+                                  }}>
+                                    <span>{label}</span>
+                                    {it.progressionOffset === 0 && (
+                                      <i className="fa-solid fa-ban" title="Smart Progression off" style={{ fontSize: 9, opacity: 0.7, color: UI.inkFaint }} />
+                                    )}
+                                    {it.progressionOffset != null && it.progressionOffset > 0 && (
+                                      <i className="fa-solid fa-bolt" title={`Smart Progression: +${it.progressionOffset}`} style={{ fontSize: 9, opacity: 0.85 }} />
+                                    )}
+                                  </span>
                                 </div>
                               );
                             })}
@@ -1897,7 +1903,7 @@ function DayCopyPicker({ store, schedule, currentDayId, onClose, onCopy, multiSe
   const importTemplate = (t) => {
     const items = normalizeSupersets((t.exercises || [])
       .filter(it => LB.findExercise(store, it.exId))
-      .map(it => ({ exId: it.exId, sets: it.sets || 3, reps: it.reps ?? 8, ...(it.repsPerSet ? { repsPerSet: it.repsPerSet } : {}), ...(it.supersetGroup ? { supersetGroup: it.supersetGroup } : {}) })));
+      .map(it => ({ exId: it.exId, sets: it.sets || 3, reps: it.reps ?? 8, ...(it.repsPerSet ? { repsPerSet: it.repsPerSet } : {}), ...(it.repsMax != null ? { repsMax: it.repsMax } : {}), ...(it.progressionOffset != null ? { progressionOffset: it.progressionOffset } : {}), ...(it.supersetGroup ? { supersetGroup: it.supersetGroup } : {}) })));
     const day = { id: LB.uid(), name: t.name, items };
     if (multiSelect) onCopy([{ day, migrateId: undefined }]);
     else onCopy(day, undefined);
@@ -2090,22 +2096,37 @@ function DayCopyPicker({ store, schedule, currentDayId, onClose, onCopy, multiSe
 }
 
 // ─── Day editor (exercises within a day) ─────────────────────────────
-function ExerciseItemEditor({ item, exName, isCheckboxOnly, onClose, onSave }) {
+function ExerciseItemEditor({ item, exName, isCheckboxOnly, queuePos, queueTotal, store, setStore, onClose, onSave }) {
+  // The exercise note is global (same record, shared across every plan that
+  // uses this exercise) — not part of this day/plan item — so it's read from
+  // and written straight back to store.exercises, independent of onSave's
+  // item patch (same field the training screen's "Exercise note" edits).
+  const exercise = LB.findExercise(store, item.exId);
+  const [exNote, setExNote] = useStateS(exercise?.note || '');
   const hasVariable = item.repsPerSet && item.repsPerSet.length > 1;
-  const [mode, setMode] = useStateS(hasVariable ? 'variable' : 'uniform');
+  const hasRange = !hasVariable && item.repsMax != null;
+  const [mode, setMode] = useStateS(hasVariable ? 'variable' : hasRange ? 'range' : 'uniform');
   const [sets, setSetsRaw] = useStateS(item.sets);
+  // Doubles as the range floor when mode === 'range'.
   const [uniformReps, setUniformReps] = useStateS(item.reps ?? 8);
+  const [rangeMax, setRangeMax] = useStateS(item.repsMax ?? (item.reps ?? 8) + 4);
   const [repsPerSet, setRepsPerSet] = useStateS(
     hasVariable ? item.repsPerSet : Array.from({ length: item.sets }, () => item.reps ?? 8)
   );
-  const [note, setNote] = useStateS(item.note || '');
+  // Independent of `mode` — a per-exercise Smart Progression override, kept
+  // across Uniform/Per Set switches. null = inherit the global setting,
+  // 0 = explicitly off, N = explicitly on with a +N reps ceiling.
+  const [progOverride, setProgOverride] = useStateS(item.progressionOffset ?? null);
 
   const switchMode = (m) => {
-    if (m === 'variable' && mode === 'uniform') {
+    if (m === 'variable' && mode !== 'variable') {
       setRepsPerSet(Array.from({ length: sets }, () => uniformReps));
     }
-    if (m === 'uniform' && mode === 'variable') {
+    if (mode === 'variable' && m !== 'variable') {
       setUniformReps(repsPerSet[0] ?? 8);
+    }
+    if (m === 'range' && mode === 'variable') {
+      setRangeMax(Math.max(...repsPerSet));
     }
     setMode(m);
   };
@@ -2122,15 +2143,27 @@ function ExerciseItemEditor({ item, exName, isCheckboxOnly, onClose, onSave }) {
     }
   };
 
+  const handleMinChange = (v) => {
+    const n = Math.max(1, Math.round(v));
+    setUniformReps(n);
+    if (rangeMax < n) setRangeMax(n);
+  };
+
   const handleSave = () => {
+    const trimmedExNote = exNote.trim();
+    if (item.exId && trimmedExNote !== (exercise?.note || '')) {
+      setStore(s => ({ ...s, exercises: s.exercises.map(e => e.id === item.exId ? { ...e, note: trimmedExNote } : e) }));
+    }
     if (isCheckboxOnly) {
-      onSave({ sets, reps: 0, repsPerSet: undefined, note });
+      onSave({ sets, reps: 0, repsPerSet: undefined, repsMax: undefined, progressionOffset: progOverride });
       return;
     }
     if (mode === 'variable') {
-      onSave({ sets, reps: repsPerSet[0] ?? uniformReps, repsPerSet, note });
+      onSave({ sets, reps: repsPerSet[0] ?? uniformReps, repsPerSet, repsMax: undefined, progressionOffset: progOverride });
+    } else if (mode === 'range') {
+      onSave({ sets, reps: uniformReps, repsPerSet: undefined, repsMax: rangeMax, progressionOffset: progOverride });
     } else {
-      onSave({ sets, reps: uniformReps, repsPerSet: undefined, note });
+      onSave({ sets, reps: uniformReps, repsPerSet: undefined, repsMax: undefined, progressionOffset: progOverride });
     }
   };
 
@@ -2146,9 +2179,13 @@ function ExerciseItemEditor({ item, exName, isCheckboxOnly, onClose, onSave }) {
 
   return (
     <Sheet open={true} onClose={onClose} title={exName}>
+      {queueTotal > 1 && (
+        <div className="micro" style={{ color: UI.inkFaint, marginBottom: 12 }}>Exercise {queuePos} / {queueTotal}</div>
+      )}
       {/* Mode toggle — hidden for checkbox-only exercises */}
       {!isCheckboxOnly && <div style={{ display: 'flex', gap: 8, marginBottom: 24 }}>
         <button style={toggleStyle(mode === 'uniform')} onClick={() => switchMode('uniform')}>Uniform</button>
+        <button style={toggleStyle(mode === 'range')} onClick={() => switchMode('range')}>Range</button>
         <button style={toggleStyle(mode === 'variable')} onClick={() => switchMode('variable')}>Per Set</button>
       </div>}
 
@@ -2170,6 +2207,21 @@ function ExerciseItemEditor({ item, exName, isCheckboxOnly, onClose, onSave }) {
               <Stepper value={uniformReps} onChange={v => setUniformReps(Math.max(1, Math.round(v)))} step={1} min={1} />
             </div>
           </div>
+        ) : mode === 'range' ? (
+          <>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <span className="label" style={{ width: 36, textAlign: 'right', flexShrink: 0 }}>Min</span>
+              <div style={{ flex: 1 }}>
+                <Stepper value={uniformReps} onChange={handleMinChange} step={1} min={1} />
+              </div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <span className="label" style={{ width: 36, textAlign: 'right', flexShrink: 0 }}>Max</span>
+              <div style={{ flex: 1 }}>
+                <Stepper value={rangeMax} onChange={v => setRangeMax(Math.max(uniformReps, Math.round(v)))} step={1} min={uniformReps} />
+              </div>
+            </div>
+          </>
         ) : (
           repsPerSet.map((r, i) => (
             <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -2188,10 +2240,68 @@ function ExerciseItemEditor({ item, exName, isCheckboxOnly, onClose, onSave }) {
         )}</>}
       </div>
 
-      <Field label="Note (optional)">
-        <TextInput value={note} onChange={setNote} placeholder="e.g. cable pos 4, slow eccentric…" />
+      {!isCheckboxOnly && (() => {
+        if (mode === 'range') {
+          // Range's own Max is always the ceiling when on — no separate
+          // offset number to configure, just whether progression applies
+          // to this exercise at all. progOverride 0 = off, anything else
+          // (including a leftover Uniform/Per-Set custom value) = on.
+          const isOn = progOverride !== 0;
+          return (
+            <div style={{ marginBottom: 24 }}>
+              <div className="label" style={{ marginBottom: 10 }}>Smart Progression</div>
+              <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+                <button style={toggleStyle(isOn)} onClick={() => setProgOverride(null)}>On</button>
+                <button style={toggleStyle(!isOn)} onClick={() => setProgOverride(0)}>Off</button>
+              </div>
+              <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.4 }}>
+                {isOn
+                  ? `Hit ${rangeMax} reps on every set and we'll suggest a weight bump next session — works even with Smart Progression off in Settings.`
+                  : 'Smart Progression is off for this exercise.'}
+              </div>
+            </div>
+          );
+        }
+        // When the global setting is off, "inherit" always resolves to off
+        // too — showing "Default" as a choice would be misleading, so the
+        // toggle reframes as a plain On/Off for this exercise instead. Either
+        // way the left button always maps to null (inherit) and the right
+        // button to an explicit offset; only the labels (and whether 0 is
+        // reachable via the stepper) change.
+        const globalOn = !!store?.settings?.smartProgression;
+        return (
+          <div style={{ marginBottom: 24 }}>
+            <div className="label" style={{ marginBottom: 10 }}>Smart Progression</div>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+              <button style={toggleStyle(progOverride === null)} onClick={() => setProgOverride(null)}>{globalOn ? 'Default' : 'Off'}</button>
+              <button style={toggleStyle(progOverride !== null)} onClick={() => setProgOverride(p => p ?? Math.max(globalOn ? 0 : 1, store?.settings?.progressionRangeTop ?? 4))}>{globalOn ? 'Custom' : 'On'}</button>
+            </div>
+            {progOverride !== null && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
+                <span className="label" style={{ width: 36, textAlign: 'right', flexShrink: 0 }}>Reps</span>
+                <div style={{ flex: 1 }}>
+                  <Stepper value={progOverride} onChange={v => setProgOverride(Math.max(globalOn ? 0 : 1, Math.round(v)))} step={1} min={globalOn ? 0 : 1} />
+                </div>
+              </div>
+            )}
+            <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.4 }}>
+              {progOverride === null
+                ? (globalOn ? 'Uses the global Smart Progression setting.' : 'Smart Progression is off for this exercise.')
+                : progOverride === 0
+                  ? 'Smart Progression is off for this exercise.'
+                  : `Hit +${progOverride} reps over target on every set and we'll suggest a weight bump — overrides the global Smart Progression setting.`}
+            </div>
+          </div>
+        );
+      })()}
+
+      <Field label="Exercise note (optional)">
+        <TextInput value={exNote} onChange={setExNote} placeholder="e.g. cable pos 4, slow eccentric…" />
       </Field>
-      <Btn onClick={handleSave} style={{ width: '100%', marginTop: 20 }}>Apply</Btn>
+      <div className="micro" style={{ color: UI.inkFaint, marginTop: 6, marginBottom: 20, lineHeight: 1.4 }}>
+        Shown every time you train this exercise, in any plan — not specific to this one.
+      </div>
+      <Btn onClick={handleSave} style={{ width: '100%' }}>Apply</Btn>
     </Sheet>
   );
 }
@@ -2217,6 +2327,7 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
   const [addingEx, setAddingEx] = useStateS(false);
   const [copyingFrom, setCopyingFrom] = useStateS(false);
   const [editingItem, setEditingItem] = useStateS(null);
+  const [editQueue, setEditQueue] = useStateS(null); // { indices: number[], pos: number } while stepping through newly added exercises
   const [pickingType, setPickingType] = useStateS(false);
   const [confirmEl, confirm] = useConfirm();
   const initialDay = React.useRef(JSON.stringify(day));
@@ -2256,16 +2367,40 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
     })};
   });
   const removeItem = (idx) => setDraft(d => ({ ...d, items: normalizeSupersets(d.items.filter((_, i) => i !== idx)) }));
+  // Advances the add-exercise queue to the next item, or ends it once exhausted.
+  const advanceEditQueue = () => {
+    if (!editQueue) { setEditingItem(null); return; }
+    const nextPos = editQueue.pos + 1;
+    if (nextPos < editQueue.indices.length) {
+      setEditQueue(q => ({ ...q, pos: nextPos }));
+      setEditingItem(editQueue.indices[nextPos]);
+    } else {
+      setEditQueue(null);
+      setEditingItem(null);
+    }
+  };
+  const saveEditor = (patch) => { updateItem(editingItem, patch); advanceEditQueue(); };
+  const closeEditor = () => advanceEditQueue();
   const addExercise = (exIds) => {
     const ids = Array.isArray(exIds) ? exIds : [exIds];
+    const startIdx = draft.items.length;
     const newItems = ids.map(exId => {
       const ex = LB.findExercise(store, exId);
       const isCardioEx = ex?.movement_type === 'cardio';
+      const isCheckboxEx = !!ex?.no_weight_reps;
       const defaultReps = ex?.progression_reps ?? 8;
-      return { exId, sets: isCardioEx ? 0 : 3, reps: isCardioEx ? 0 : defaultReps };
+      return {
+        exId, sets: isCardioEx ? 0 : 3, reps: isCardioEx ? 0 : defaultReps,
+        // Range is the default reps mode for a freshly added exercise.
+        ...(!isCardioEx && !isCheckboxEx ? { repsMax: defaultReps + 4 } : {}),
+      };
     });
     setDraft(d => ({ ...d, items: [...d.items, ...newItems] }));
     setAddingEx(false);
+    // Step through each newly added exercise's sets/reps editor in sequence.
+    const indices = ids.map((_, i) => startIdx + i);
+    setEditQueue({ indices, pos: 0 });
+    setEditingItem(indices[0]);
   };
   const copyItemsFromDay = (sourceDay, migrateId) => {
     // Deep-copy each item and remap superset group ids — a shallow spread
@@ -2392,7 +2527,6 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
                   <DragHandle />
                   <div style={{ flex: 1 }}>
                     <div className="display" style={{ fontSize: 15, color: UI.ink, lineHeight: 1.1 }}>{ex?.name || '—'}</div>
-                    {it.note ? <div className="micro" style={{ color: UI.inkFaint, marginTop: 2, fontStyle: 'italic' }}>{it.note}</div> : null}
                   </div>
                   <div className="num" style={{
                     fontSize: 12, color: UI.gold, background: UI.goldFaint,
@@ -2400,7 +2534,13 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
                     padding: '3px 8px', whiteSpace: 'nowrap',
                     display: 'flex', alignItems: 'center', gap: 5,
                   }}>
-                    <span>{it.repsPerSet && it.repsPerSet.length > 1 ? it.repsPerSet.join('/') : ex?.no_weight_reps ? `${it.sets}×` : `${it.sets}×${it.reps}`}</span>
+                    <span>{it.repsPerSet && it.repsPerSet.length > 1 ? it.repsPerSet.join('/') : it.repsMax != null ? `${it.sets}×${it.reps}-${it.repsMax}` : ex?.no_weight_reps ? `${it.sets}×` : `${it.sets}×${it.reps}`}</span>
+                    {it.progressionOffset === 0 && (
+                      <i className="fa-solid fa-ban" title="Smart Progression off" style={{ fontSize: 9, opacity: 0.7, color: UI.inkFaint }} />
+                    )}
+                    {it.progressionOffset != null && it.progressionOffset > 0 && (
+                      <i className="fa-solid fa-bolt" title={`Smart Progression: +${it.progressionOffset}`} style={{ fontSize: 9, opacity: 0.85 }} />
+                    )}
                     <i className="fa fa-pencil" style={{ fontSize: 9, opacity: 0.7 }} />
                   </div>
                   <button data-reorder-ignore="true" onClick={e => { e.stopPropagation(); removeItem(i); }} style={{ ...dayEditIconBtn, color: UI.inkFaint, fontSize: 16 }}>×</button>
@@ -2434,11 +2574,16 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
 
       {editingItem !== null && (
         <ExerciseItemEditor
+          key={editingItem}
           item={draft.items[editingItem]}
           exName={LB.findExercise(store, draft.items[editingItem]?.exId)?.name || '—'}
           isCheckboxOnly={!!LB.findExercise(store, draft.items[editingItem]?.exId)?.no_weight_reps}
-          onClose={() => setEditingItem(null)}
-          onSave={(patch) => { updateItem(editingItem, patch); setEditingItem(null); }}
+          queuePos={editQueue ? editQueue.pos + 1 : undefined}
+          queueTotal={editQueue ? editQueue.indices.length : undefined}
+          store={store}
+          setStore={setStore}
+          onClose={closeEditor}
+          onSave={saveEditor}
         />
       )}
       {addingEx && (

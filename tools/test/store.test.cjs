@@ -692,6 +692,105 @@ async function testAsync(name, fn) {
     assert.strictEqual(LB.mesoRirForWeek(1, 0, 3, 0), 0);
   });
 
+  const smartProgStore = { settings: { smartProgression: true, progressionRangeTop: 4 } };
+  const noSmartProgStore = { settings: { smartProgression: false, progressionRangeTop: 4 } };
+
+  test('progressionEnabled: Range repsMax is always on, regardless of the global setting', () => {
+    assert.strictEqual(LB.progressionEnabled(noSmartProgStore, 12, null), true);
+    assert.strictEqual(LB.progressionEnabled(smartProgStore, 12, null), true);
+  });
+  test('progressionEnabled: an explicit progressionOffset of 0 is off regardless of the global setting', () => {
+    assert.strictEqual(LB.progressionEnabled(smartProgStore, null, 0), false);
+  });
+  test('progressionEnabled: an explicit positive progressionOffset is on regardless of the global setting', () => {
+    assert.strictEqual(LB.progressionEnabled(noSmartProgStore, null, 6), true);
+  });
+  test('progressionEnabled: unset progressionOffset inherits the global setting', () => {
+    assert.strictEqual(LB.progressionEnabled(smartProgStore, null, null), true);
+    assert.strictEqual(LB.progressionEnabled(noSmartProgStore, null, null), false);
+  });
+  test('progressionEnabled: an explicit progressionOffset of 0 wins even for a Range item', () => {
+    // Lets a Range exercise (e.g. lateral raises with a "12-15" display target)
+    // still opt out of auto weight-bump progression entirely.
+    assert.strictEqual(LB.progressionEnabled(smartProgStore, 12, 0), false);
+  });
+  test('progressionCeilingFor: Range repsMax wins as an absolute ceiling', () => {
+    assert.strictEqual(LB.progressionCeilingFor(smartProgStore, 8, 12, 6), 12);
+  });
+  test('progressionCeilingFor: explicit offset adds onto the base, ignoring the global range top', () => {
+    assert.strictEqual(LB.progressionCeilingFor(smartProgStore, 8, null, 2), 10);
+  });
+  test('progressionCeilingFor: falls back to base + global progressionRangeTop', () => {
+    assert.strictEqual(LB.progressionCeilingFor(smartProgStore, 8, null, null), 12);
+  });
+
+  test('buildSeedSets caps the +1 progression nudge at a Range item\'s repsMax', () => {
+    const it = { sets: 1, reps: 8, repsMax: 12 };
+    const atCap = { entry: { sets: [{ warmup: false, kg: 100, reps: 12, done: true }] } };
+    const seeded = LB.buildSeedSets(it, atCap, null, false, noSmartProgStore, null);
+    assert.strictEqual(seeded[0].reps, 12); // must not climb to 13 past the range ceiling, even with the global setting off
+  });
+  test('buildSeedSets still bumps +1 while below a Range item\'s repsMax', () => {
+    const it = { sets: 1, reps: 8, repsMax: 12 };
+    const belowCap = { entry: { sets: [{ warmup: false, kg: 100, reps: 9, done: true }] } };
+    const seeded = LB.buildSeedSets(it, belowCap, null, false, noSmartProgStore, null);
+    assert.strictEqual(seeded[0].reps, 10);
+  });
+  test('buildSeedSets leaves the classic (non-Range) +1 nudge uncapped past the global ceiling', () => {
+    // Only a Range item's own repsMax caps the nudge — the global default /
+    // a custom progressionOffset ceiling is just an internal trigger
+    // threshold, not a user-drawn boundary, so it keeps climbing (matches
+    // classic Smart Progression's long-standing behavior).
+    const it = { sets: 1, reps: 8 };
+    const pastCap = { entry: { sets: [{ warmup: false, kg: 100, reps: 12, done: true }] } };
+    const seeded = LB.buildSeedSets(it, pastCap, null, false, smartProgStore, null);
+    assert.strictEqual(seeded[0].reps, 13);
+  });
+  test('buildSeedSets still bumps +1 below the global ceiling when Smart Progression is on', () => {
+    const it = { sets: 1, reps: 8 };
+    const last = { entry: { sets: [{ warmup: false, kg: 100, reps: 10, done: true }] } };
+    const seeded = LB.buildSeedSets(it, last, null, false, smartProgStore, null);
+    assert.strictEqual(seeded[0].reps, 11);
+  });
+  test('buildSeedSets does not bump reps at all when the global setting is off and there is no override', () => {
+    const it = { sets: 1, reps: 8 };
+    const last = { entry: { sets: [{ warmup: false, kg: 100, reps: 10, done: true }] } };
+    const seeded = LB.buildSeedSets(it, last, null, false, noSmartProgStore, null);
+    assert.strictEqual(seeded[0].reps, 10); // unchanged, no progression nudge
+  });
+  test('buildSeedSets honors a per-exercise progressionOffset override even with the global setting off, uncapped', () => {
+    const it = { sets: 1, reps: 8, progressionOffset: 2 };
+    const last = { entry: { sets: [{ warmup: false, kg: 100, reps: 10, done: true }] } };
+    const seeded = LB.buildSeedSets(it, last, null, false, noSmartProgStore, null);
+    assert.strictEqual(seeded[0].reps, 11); // offset ceiling (10) is a trigger threshold, not a cap — keeps climbing
+  });
+  test('buildSeedSets respects an explicit progressionOffset of 0 (off) even with the global setting on', () => {
+    const it = { sets: 1, reps: 8, progressionOffset: 0 };
+    const last = { entry: { sets: [{ warmup: false, kg: 100, reps: 10, done: true }] } };
+    const seeded = LB.buildSeedSets(it, last, null, false, smartProgStore, null);
+    assert.strictEqual(seeded[0].reps, 10); // unchanged, no progression nudge despite the global setting being on
+  });
+
+  test('dedupeVersionsByDate: a same-date entry placed first replaces the later one for that date', () => {
+    const versions = [
+      { validFrom: '2026-07-05', days: ['new'] },
+      { validFrom: '2026-07-05', days: ['old'] },
+      { validFrom: '2026-06-01', days: ['older'] },
+    ];
+    const result = LB.dedupeVersionsByDate(versions);
+    assert.strictEqual(result.length, 2);
+    assert.deepStrictEqual(result[0], { validFrom: '2026-07-05', days: ['new'] });
+    assert.deepStrictEqual(result[1], { validFrom: '2026-06-01', days: ['older'] });
+  });
+  test('dedupeVersionsByDate: distinct dates all survive, sorted newest first', () => {
+    const versions = [
+      { validFrom: '2026-06-01', days: [] },
+      { validFrom: '2026-07-05', days: [] },
+    ];
+    const result = LB.dedupeVersionsByDate(versions);
+    assert.deepStrictEqual(result.map(v => v.validFrom), ['2026-07-05', '2026-06-01']);
+  });
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();

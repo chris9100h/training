@@ -717,7 +717,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const isNoWeightReps = !isCardio && !!exercise?.no_weight_reps;
   const isBodyweight = !isCardio && exercise?.equipment === 'bodyweight';
   const progressionTargetForSet = (workingSetIdx) => {
-    if (!store.settings?.smartProgression) return null;
+    if (!LB.progressionEnabled(store, entry?.plannedRepsMax, entry?.plannedProgressionOffset)) return null;
     // Progression itself is suppressed during deload (see completeSet's
     // isDeloadSession guard) — showing the "≥X reps · next weight" hint
     // anyway would promise an unlock that can never actually fire.
@@ -726,8 +726,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     const perSetVal = perSet && perSet.length > 1
       ? (perSet[workingSetIdx] ?? perSet[perSet.length - 1])
       : null;
-    const base = (perSetVal ?? exercise?.progression_reps ?? entry?.plannedReps) ?? 0;
-    const target = base + (store.settings?.progressionRangeTop ?? 4);
+    const base = (perSetVal ?? entry?.plannedReps) ?? 0;
+    const target = LB.progressionCeilingFor(store, base, perSetVal ? null : entry?.plannedRepsMax, entry?.plannedProgressionOffset);
     return target > 0 ? target : null;
   };
 
@@ -917,12 +917,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       const prevWorkingSets = (last?.entry?.sets || []).filter(s => !s.warmup);
       const prevSet = wIdx >= 0 ? prevWorkingSets[wIdx] : undefined;
       // Mirror buildSeedSets exactly
-      const suggestion = LB.progressionSuggestion(store, entry.exId, session.dayId, entry.plannedReps, entry.plannedRepsPerSet, last);
+      const suggestion = LB.progressionSuggestion(store, entry.exId, session.dayId, entry.plannedReps, entry.plannedRepsPerSet, last, entry.plannedRepsMax, entry.plannedProgressionOffset ?? null);
       const lastReps = prevSet ? LB.effReps(prevSet) : null;
       const refReps = suggestion
         ? (suggestion.reps ?? null)
         : lastReps != null
-          ? (store.settings?.smartProgression ? lastReps + 1 : lastReps)
+          ? (LB.progressionEnabled(store, entry?.plannedRepsMax, entry?.plannedProgressionOffset) ? lastReps + 1 : lastReps)
           : null;
 
       // Compute logged values (respect pending KB input)
@@ -1036,12 +1036,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
     const progressionResult = (() => {
       if (isDeloadSession) return null;
-      if (!store.settings?.smartProgression) return null;
+      if (!LB.progressionEnabled(store, entry?.plannedRepsMax, entry?.plannedProgressionOffset)) return null;
       if (!updatedSets.filter(s => !s.warmup).every(s => s.done || s.skipped)) return null;
       const catCfg = exercise?.equipment ? (store.settings?.equipmentConfig?.[exercise.equipment] ?? {}) : {};
-      const increment = catCfg.increment ?? null;
-      if (!increment) return null;
-      const range = store.settings?.progressionRangeTop ?? 4;
+      // Mirror progressionSuggestion's fallback (store.js) — that's what actually
+      // seeds next session's weight, so the toast must fire under the same
+      // condition, not silently stay quiet just because no increment was configured.
+      const increment = catCfg.increment ?? 2.5;
       // Index by true working-set position (warm-ups stripped, nothing else)
       // so progressionTargetForSet(i) lines up correctly — filtering skipped/
       // no-kg sets out before indexing (as this used to) shifts every later
@@ -3213,7 +3214,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           const bwKg = newEx?.equipment === 'bodyweight' ? LB.latestBodyweight(s) ?? null : null;
           const last = LB.bestRecentEntry(s, newExId, session.dayId);
           const suggestion = LB.progressionSuggestion(s, newExId, session.dayId, null, null, last);
-          const seedSets = LB.buildSeedSets({ sets: 3, repsPerSet: null }, last, suggestion, isUni, !!s.settings?.smartProgression, bwKg);
+          const seedSets = LB.buildSeedSets({ sets: 3, repsPerSet: null }, last, suggestion, isUni, s, bwKg);
           newEntry = { exId: newExId, name: newEx?.name || newExId, plannedSets: 3, plannedReps: null, plannedRepsPerSet: null, sets: seedSets, note: '', supersetGroup: null, addedDuringSession: true };
         }
         return {
@@ -3275,7 +3276,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         const suggestion = LB.progressionSuggestion(s, newExId, session.dayId, null, null, last);
         const mother = targetIdx !== null ? sess.entries[targetIdx] : null;
         const setCount = mother ? (mother.plannedSets ?? mother.sets?.length ?? 3) : 3;
-        const seedSets = LB.buildSeedSets({ sets: setCount, repsPerSet: null }, last, suggestion, isUni, !!s.settings?.smartProgression, bwKg);
+        const seedSets = LB.buildSeedSets({ sets: setCount, repsPerSet: null }, last, suggestion, isUni, s, bwKg);
         newEntry = { exId: newExId, name: newEx?.name || newExId, plannedSets: setCount, plannedReps: null, plannedRepsPerSet: null, sets: seedSets, note: '', supersetGroup: group, addedDuringSession: true };
       }
       const withNew = [
@@ -4142,8 +4143,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               </a>
             )}
           </div>
-          {(exercise?.category || exercise?.equipment || (exercise?.tags || []).length > 0) && (
+          {(exercise?.category || exercise?.equipment || (exercise?.tags || []).length > 0 || entry.plannedRepsMax != null || (entry.plannedRepsPerSet && entry.plannedRepsPerSet.length > 1) || (!isCardio && !isNoWeightReps && entry.plannedReps)) && (
             <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
+              {entry.plannedRepsMax != null && <Pill gold>Range {entry.plannedReps}–{entry.plannedRepsMax}</Pill>}
+              {entry.plannedRepsMax == null && entry.plannedRepsPerSet && entry.plannedRepsPerSet.length > 1 && <Pill gold>Per Set {entry.plannedRepsPerSet.join('/')}</Pill>}
+              {entry.plannedRepsMax == null && !(entry.plannedRepsPerSet && entry.plannedRepsPerSet.length > 1) && !isCardio && !isNoWeightReps && entry.plannedReps && <Pill gold>{entry.plannedReps} reps</Pill>}
               {exercise?.category && <Pill gold>{exercise.category}</Pill>}
               {exercise?.equipment && <Pill>{(window.EQUIPMENT_TYPES||[]).find(t=>t.key===exercise.equipment)?.label ?? exercise.equipment}</Pill>}
               {(exercise?.tags || []).map(t => <Pill key={t}>{t}</Pill>)}
@@ -4370,7 +4374,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   {progressionTarget && (
                     <div className="micro" style={{ color: UI.gold, opacity: 0.65, marginTop: 3 }}>≥{progressionTarget} reps · next weight</div>
                   )}
-                  {!progressionTarget && entry.plannedRepsPerSet && entry.plannedRepsPerSet.length > 1 && (() => {
+                  {/* Range's own configured span is shown as a permanent badge next to the
+                      exercise name instead (doesn't vary per set, so no need to repeat it here). */}
+                  {entry.plannedRepsMax == null && entry.plannedRepsPerSet && entry.plannedRepsPerSet.length > 1 && (() => {
                     const workingIdx = bgSetIdx - warmupCount;
                     const target = entry.plannedRepsPerSet[workingIdx] ?? entry.plannedRepsPerSet[entry.plannedRepsPerSet.length - 1];
                     return <div className="micro" style={{ color: UI.inkFaint, marginTop: 3 }}>Target: {target} reps</div>;
@@ -4469,7 +4475,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   <span className="micro" style={{ color: UI.inkFaint, textAlign: 'center' }}>R</span>
                 </>
               ) : (
-                <span className="micro" style={{ color: UI.inkFaint, textAlign: 'center' }}>{store.settings?.smartProgression ? 'Reps (min)' : 'Reps'}</span>
+                <span className="micro" style={{ color: UI.inkFaint, textAlign: 'center' }}>{LB.progressionEnabled(store, entry?.plannedRepsMax, entry?.plannedProgressionOffset) ? 'Reps (min)' : 'Reps'}</span>
               )}
               <div />
             </div>
