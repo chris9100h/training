@@ -692,6 +692,25 @@ async function testAsync(name, fn) {
     assert.strictEqual(LB.mesoRirForWeek(1, 0, 3, 0), 0);
   });
 
+  test('buildSeedSets caps the +1 progression nudge at a Range item\'s repsMax', () => {
+    const it = { sets: 1, reps: 8, repsMax: 12 };
+    const atCap = { entry: { sets: [{ warmup: false, kg: 100, reps: 12, done: true }] } };
+    const seeded = LB.buildSeedSets(it, atCap, null, false, true, null);
+    assert.strictEqual(seeded[0].reps, 12); // must not climb to 13 past the range ceiling
+  });
+  test('buildSeedSets still bumps +1 while below a Range item\'s repsMax', () => {
+    const it = { sets: 1, reps: 8, repsMax: 12 };
+    const belowCap = { entry: { sets: [{ warmup: false, kg: 100, reps: 9, done: true }] } };
+    const seeded = LB.buildSeedSets(it, belowCap, null, false, true, null);
+    assert.strictEqual(seeded[0].reps, 10);
+  });
+  test('buildSeedSets leaves the classic (non-Range) +1 nudge unbounded', () => {
+    const it = { sets: 1, reps: 8 };
+    const last = { entry: { sets: [{ warmup: false, kg: 100, reps: 10, done: true }] } };
+    const seeded = LB.buildSeedSets(it, last, null, false, true, null);
+    assert.strictEqual(seeded[0].reps, 11);
+  });
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();

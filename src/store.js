@@ -1754,9 +1754,15 @@ function buildSeedSets(it, last, suggestion, isUni, smartProgression, bodyweight
         : { kg: dl(baseKg), reps: seedReps, done: false };
     }
     if (smartProgression && prev) {
+      // Range mode's own ceiling caps the +1 nudge — without this, a set that
+      // already hit the top (e.g. one lagging set keeps the suggestion from
+      // firing) would keep climbing past repsMax session after session,
+      // defeating the whole point of a bounded range.
+      const cap = it.repsMax;
+      const bump = (v) => v == null ? null : (cap != null ? Math.min(v + 1, cap) : v + 1);
       return isUni
-        ? { kg: dl(seedKg), repsL: prev.repsL != null ? prev.repsL + 1 : null, repsR: prev.repsR != null ? prev.repsR + 1 : null, done: false }
-        : { kg: dl(seedKg), reps: prev.reps != null ? prev.reps + 1 : null, done: false };
+        ? { kg: dl(seedKg), repsL: bump(prev.repsL), repsR: bump(prev.repsR), done: false }
+        : { kg: dl(seedKg), reps: bump(prev.reps), done: false };
     }
     if (!prev && targetReps != null) {
       return isUni
