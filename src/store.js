@@ -2079,6 +2079,33 @@ function cyclePosFromStartDate(startISO, daysLen, dateISO) {
   return ((n % daysLen) + daysLen) % daysLen;
 }
 
+// Re-anchor a date-based cycle plan so `todayStr` lands on rotation position
+// `targetPos`. Unversioned → returns { cycleStartDate }; versioned → adjusts the
+// ACTIVE version's cycleOffset (its position is (daysSince(validFrom) +
+// cycleOffset) % len — see getCyclePosForDate). Returns a store patch to spread
+// into setStore, or null if the plan isn't a date-based cycle plan. Powers the
+// return-from-break realign nudge for BOTH versioned and unversioned plans.
+function realignCycleForToday(state, sch, todayStr, targetPos) {
+  if (!sch || isFlexPlan(sch) || isWeekdayPlan(sch)) return null;
+  if (sch.versions && sch.versions.length) {
+    const vi = getActiveVersionIdx(sch, todayStr);
+    if (vi < 0) return null;
+    const v = sch.versions[vi];
+    const len = (v.days || []).length;
+    if (!len) return null;
+    const daysDiff = Math.round((new Date(todayStr + 'T12:00:00') - new Date(v.validFrom + 'T12:00:00')) / 86400000);
+    const cycleOffset = (((targetPos - daysDiff) % len) + len) % len;
+    const versions = sch.versions.map((ver, i) => (i === vi ? { ...ver, cycleOffset } : ver));
+    return { schedules: (state.schedules || []).map(s => (s.id === sch.id ? { ...s, versions } : s)) };
+  }
+  const len = (sch.days || []).length;
+  if (!len) return null;
+  const t = ((targetPos % len) + len) % len;
+  const d = new Date(todayStr + 'T12:00:00');
+  d.setDate(d.getDate() - t);
+  return { cycleStartDate: fmtISO(d) };
+}
+
 function todaysDay(state) {
   const sch = state.schedules.find(s => s.id === state.activeScheduleId);
   if (!sch || !sch.days.length) return null;
@@ -3702,7 +3729,7 @@ window.LB = {
   signIn, signUp, signOut, signInWithPasskey, registerPasskey, listPasskeys, deletePasskey, resetPassword, deleteAllData, exportBackup, importFromBackup, validateBackup,
   loadFromSupabase, syncStore, mergeSessions, withCarriedWindowEntries, historyWindowCutoffISO,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
-  uid, todayISO, fmtISO, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate,
+  uid, todayISO, fmtISO, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, realignCycleForToday,
   effReps, e1rm, isImprovement, isDecline, bestE1rmForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, latestBodyweight, inferCurrentExIdx, calcBlended,
   refreshExerciseBests, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries,
   computeNextReminderAt,

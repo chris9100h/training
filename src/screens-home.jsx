@@ -1906,10 +1906,11 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
   // Return-from-break realign: a cycle plan advances by CALENDAR DATE and does
   // NOT pause during vacation/sick (unlike the meso week counter, which excludes
   // paused days). So coming back, the rotation has drifted from where you left
-  // off. Offer a one-tap realign to resume at your next day. Only for
-  // unversioned cycle plans — flex advances on action (never drifts), weekday
-  // plans are pinned to real weekdays, and versioned plans use a different
-  // anchor. Fires on the first app-open after returning, before you train again.
+  // off. Offer a one-tap realign to resume at your next day — works for both
+  // unversioned (re-anchors cycleStartDate) and versioned (adjusts the active
+  // version's cycleOffset) plans via LB.realignCycleForToday. Flex advances on
+  // action (never drifts) and weekday plans are pinned to real weekdays, so both
+  // are excluded. Fires on the first app-open after returning, before training.
   const realignNudgeShown = useRef(false);
   const resyncTodayAfterRealign = useRef(false);
   // After a realign changes cycleStartDate, todayStripIdx recomputes — pull the
@@ -1919,13 +1920,14 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     if (!resyncTodayAfterRealign.current) return;
     resyncTodayAfterRealign.current = false;
     if (!weekdayMode && !cycleWeekView) setSelectedSlot(todayStripIdx);
-  }, [store?.cycleStartDate]); // eslint-disable-line
+  }, [store?.cycleStartDate, sch]); // eslint-disable-line
   useEffect(() => {
     if (realignNudgeShown.current) return;
     if (store?.statusMode || store?.inProgress) return;
     if (!sch || !sch.days?.length) return;
-    if (LB.isFlexPlan(sch) || LB.isWeekdayPlan(sch) || sch.versions?.length) return;
-    if (!store?.cycleStartDate) return;
+    // Cycle plans drift by calendar date across a break; flex advances on action
+    // and weekday plans are pinned to real weekdays, so neither needs realigning.
+    if (LB.isFlexPlan(sch) || LB.isWeekdayPlan(sch)) return;
 
     const periods = (store?.statusPeriods || []).filter(p => (p.mode === 'vacation' || p.mode === 'sick') && p.endedAt);
     if (!periods.length) return;
@@ -1945,36 +1947,40 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     if (handled === last.endedAt) return;
 
     // Where they left off: last completed session on this plan up to the break,
-    // then the NEXT day in the rotation.
+    // then the NEXT day in the rotation (relative to the version active today).
     const lastSession = (store.sessions || [])
       .filter(s => s.ended && s.scheduleId === sch.id && s.dayId && new Date(s.ended).getTime() <= endedD.getTime())
       .sort((a, b) => new Date(b.ended) - new Date(a.ended))[0];
     if (!lastSession) return;
-    const lastIdx = sch.days.findIndex(d => d.id === lastSession.dayId);
+    const activeDays = LB.getPlanDaysForDate(sch, todayStr);
+    const len = activeDays.length;
+    if (!len) return;
+    const lastIdx = activeDays.findIndex(d => d.id === lastSession.dayId);
     if (lastIdx < 0) return;
-    const len = sch.days.length;
     const resumeIdx = (lastIdx + 1) % len;
 
-    // Already aligned (rotation happened to land right)? Nothing to do.
-    const start = new Date(store.cycleStartDate + 'T12:00:00');
-    const curIdx = ((Math.round((todayD - start) / 86400000) % len) + len) % len;
+    // Already aligned (rotation happened to land right)? Nothing to do. todaysDay
+    // handles versioned + unversioned position the same way the home strip does.
+    const curIdx = LB.todaysDay(store)?.idx ?? null;
     const markHandled = () => { try { localStorage.setItem(HANDLED_KEY, last.endedAt); } catch (_) {} };
     if (curIdx === resumeIdx) { markHandled(); return; }
 
     realignNudgeShown.current = true;
     (async () => {
-      const nextName = sch.days[resumeIdx]?.name || 'your next day';
+      const nextName = activeDays[resumeIdx]?.name || 'your next day';
       const yes = await confirm(
         `Your plan counts by the calendar, so it kept advancing while you were away and has drifted from where you stopped. Want to pick up right where you left off? ${nextName} would be next.`,
         { title: 'Welcome back! 👋', ok: 'Resume plan', cancel: 'Leave it', preventBackdropClose: true },
       );
       markHandled();
       if (yes) {
-        // Anchor so today maps to resumeIdx: cyclePosFromStartDate = (today − start) % len.
-        const newStart = new Date(todayStr + 'T12:00:00');
-        newStart.setDate(newStart.getDate() - resumeIdx);
-        resyncTodayAfterRealign.current = true;
-        setStore(s => ({ ...s, cycleStartDate: LB.fmtISO(newStart) }));
+        // Re-anchor so today lands on resumeIdx — cycleStartDate for unversioned
+        // plans, the active version's cycleOffset for versioned ones.
+        const patch = LB.realignCycleForToday(store, sch, todayStr, resumeIdx);
+        if (patch) {
+          resyncTodayAfterRealign.current = true;
+          setStore(s => ({ ...s, ...patch }));
+        }
       }
     })();
   }, [store?.statusMode, store?.inProgress, store?.statusPeriods, store?.sessions, store?.cycleStartDate, sch]);

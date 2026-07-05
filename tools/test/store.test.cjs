@@ -819,6 +819,38 @@ async function testAsync(name, fn) {
     assert.deepStrictEqual(LB.withCarriedWindowEntries(fresh, null), fresh);
   });
 
+  // ── realignCycleForToday (return-from-break nudge) ──────────────────────────
+  test('realignCycleForToday: unversioned → cycleStartDate so today maps to targetPos', () => {
+    const sch = { id: 'p1', days: [{}, {}, {}, {}, {}, {}, {}, {}] }; // 8-day cycle
+    const patch = LB.realignCycleForToday({ schedules: [sch] }, sch, '2026-07-05', 4);
+    // today − targetPos = Jul 5 − 4 = Jul 1
+    assert.strictEqual(patch.cycleStartDate, '2026-07-01');
+    // and it actually resolves today to position 4
+    assert.strictEqual(LB.cyclePosFromStartDate(patch.cycleStartDate, 8, '2026-07-05'), 4);
+  });
+
+  test('realignCycleForToday: unversioned targetPos 0 anchors today itself', () => {
+    const sch = { id: 'p1', days: [{}, {}, {}, {}, {}, {}, {}, {}] };
+    const patch = LB.realignCycleForToday({ schedules: [sch] }, sch, '2026-07-05', 0);
+    assert.strictEqual(patch.cycleStartDate, '2026-07-05');
+  });
+
+  test('realignCycleForToday: versioned → active version cycleOffset so today maps to targetPos', () => {
+    const days = [{}, {}, {}, {}, {}, {}, {}, {}]; // len 8
+    const sch = { id: 'p1', days, versions: [{ validFrom: '2026-06-10', days, cycleOffset: 0 }] };
+    const patch = LB.realignCycleForToday({ schedules: [sch] }, sch, '2026-07-05', 4);
+    const v = patch.schedules[0].versions[0];
+    // getCyclePosForDate must now return the target for today
+    assert.strictEqual(LB.getCyclePosForDate({ versions: [v] }, '2026-07-05'), 4);
+    // cycleStartDate is NOT touched for a versioned plan
+    assert.strictEqual(patch.cycleStartDate, undefined);
+  });
+
+  test('realignCycleForToday: returns null for flex / weekday plans', () => {
+    assert.strictEqual(LB.realignCycleForToday({ schedules: [] }, { id: 'f', is_flex: true, days: [{}] }, '2026-07-05', 0), null);
+    assert.strictEqual(LB.realignCycleForToday({ schedules: [] }, { id: 'w', days: [{ weekday: 0 }] }, '2026-07-05', 0), null);
+  });
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();
