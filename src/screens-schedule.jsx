@@ -1017,7 +1017,16 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId })
                                     fontSize: 12, color: UI.gold, background: UI.goldFaint,
                                     border: `1px solid ${UI.goldSoft}`, borderRadius: 4,
                                     padding: '3px 8px', whiteSpace: 'nowrap', flexShrink: 0,
-                                  }}>{label}</span>
+                                    display: 'flex', alignItems: 'center', gap: 5,
+                                  }}>
+                                    <span>{label}</span>
+                                    {it.progressionOffset === 0 && (
+                                      <i className="fa-solid fa-ban" title="Smart Progression off" style={{ fontSize: 9, opacity: 0.7, color: UI.inkFaint }} />
+                                    )}
+                                    {it.progressionOffset != null && it.progressionOffset > 0 && (
+                                      <i className="fa-solid fa-bolt" title={`Smart Progression: +${it.progressionOffset}`} style={{ fontSize: 9, opacity: 0.85 }} />
+                                    )}
+                                  </span>
                                 </div>
                               );
                             })}
@@ -2526,6 +2535,12 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
                     display: 'flex', alignItems: 'center', gap: 5,
                   }}>
                     <span>{it.repsPerSet && it.repsPerSet.length > 1 ? it.repsPerSet.join('/') : it.repsMax != null ? `${it.sets}×${it.reps}-${it.repsMax}` : ex?.no_weight_reps ? `${it.sets}×` : `${it.sets}×${it.reps}`}</span>
+                    {it.progressionOffset === 0 && (
+                      <i className="fa-solid fa-ban" title="Smart Progression off" style={{ fontSize: 9, opacity: 0.7, color: UI.inkFaint }} />
+                    )}
+                    {it.progressionOffset != null && it.progressionOffset > 0 && (
+                      <i className="fa-solid fa-bolt" title={`Smart Progression: +${it.progressionOffset}`} style={{ fontSize: 9, opacity: 0.85 }} />
+                    )}
                     <i className="fa fa-pencil" style={{ fontSize: 9, opacity: 0.7 }} />
                   </div>
                   <button data-reorder-ignore="true" onClick={e => { e.stopPropagation(); removeItem(i); }} style={{ ...dayEditIconBtn, color: UI.inkFaint, fontSize: 16 }}>×</button>
