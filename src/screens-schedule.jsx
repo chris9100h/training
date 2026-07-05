@@ -2352,8 +2352,13 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
     const newItems = ids.map(exId => {
       const ex = LB.findExercise(store, exId);
       const isCardioEx = ex?.movement_type === 'cardio';
+      const isCheckboxEx = !!ex?.no_weight_reps;
       const defaultReps = ex?.progression_reps ?? 8;
-      return { exId, sets: isCardioEx ? 0 : 3, reps: isCardioEx ? 0 : defaultReps };
+      return {
+        exId, sets: isCardioEx ? 0 : 3, reps: isCardioEx ? 0 : defaultReps,
+        // Range is the default reps mode for a freshly added exercise.
+        ...(!isCardioEx && !isCheckboxEx ? { repsMax: defaultReps + 4 } : {}),
+      };
     });
     setDraft(d => ({ ...d, items: [...d.items, ...newItems] }));
     setAddingEx(false);
