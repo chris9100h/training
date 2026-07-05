@@ -4143,9 +4143,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               </a>
             )}
           </div>
-          {(exercise?.category || exercise?.equipment || (exercise?.tags || []).length > 0 || entry.plannedRepsMax != null) && (
+          {(exercise?.category || exercise?.equipment || (exercise?.tags || []).length > 0 || entry.plannedRepsMax != null || (entry.plannedRepsPerSet && entry.plannedRepsPerSet.length > 1)) && (
             <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
               {entry.plannedRepsMax != null && <Pill gold>Range {entry.plannedReps}–{entry.plannedRepsMax}</Pill>}
+              {entry.plannedRepsMax == null && entry.plannedRepsPerSet && entry.plannedRepsPerSet.length > 1 && <Pill gold>Per Set {entry.plannedRepsPerSet.join('/')}</Pill>}
               {exercise?.category && <Pill gold>{exercise.category}</Pill>}
               {exercise?.equipment && <Pill>{(window.EQUIPMENT_TYPES||[]).find(t=>t.key===exercise.equipment)?.label ?? exercise.equipment}</Pill>}
               {(exercise?.tags || []).map(t => <Pill key={t}>{t}</Pill>)}
@@ -4372,10 +4373,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   {progressionTarget && (
                     <div className="micro" style={{ color: UI.gold, opacity: 0.65, marginTop: 3 }}>≥{progressionTarget} reps · next weight</div>
                   )}
-                  {!progressionTarget && entry.plannedRepsMax != null && (
-                    <div className="micro" style={{ color: UI.inkFaint, marginTop: 3 }}>Target: {entry.plannedReps}–{entry.plannedRepsMax} reps</div>
-                  )}
-                  {!progressionTarget && entry.plannedRepsMax == null && entry.plannedRepsPerSet && entry.plannedRepsPerSet.length > 1 && (() => {
+                  {/* Range's own configured span is shown as a permanent badge next to the
+                      exercise name instead (doesn't vary per set, so no need to repeat it here). */}
+                  {entry.plannedRepsMax == null && entry.plannedRepsPerSet && entry.plannedRepsPerSet.length > 1 && (() => {
                     const workingIdx = bgSetIdx - warmupCount;
                     const target = entry.plannedRepsPerSet[workingIdx] ?? entry.plannedRepsPerSet[entry.plannedRepsPerSet.length - 1];
                     return <div className="micro" style={{ color: UI.inkFaint, marginTop: 3 }}>Target: {target} reps</div>;
