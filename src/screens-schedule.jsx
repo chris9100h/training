@@ -1565,14 +1565,14 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
                   });
                   setPendingImportDay(null);
                 }} style={{
-                  // Mirror the "Training days" grid: accent = already has a day
-                  // (here locked/dimmed), grey = free — tap a free one to place.
+                  // Exactly like the "Training days" grid: accent = already has a
+                  // day (locked here), grey = free — tap a free one to place.
                   flex: 1, minWidth: 0, height: 44, borderRadius: 6,
                   border: `1px solid ${taken ? UI.goldSoft : UI.hairStrong}`,
                   background: taken ? UI.goldFaint : 'transparent',
                   color: taken ? UI.gold : UI.inkFaint,
                   fontFamily: UI.fontNum, fontSize: 12, fontWeight: taken ? 600 : 400,
-                  cursor: taken ? 'not-allowed' : 'pointer', opacity: taken ? 0.5 : 1,
+                  cursor: taken ? 'not-allowed' : 'pointer',
                 }}>{wd}</button>
               );
             })}
