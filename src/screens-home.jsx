@@ -1587,7 +1587,15 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     return statusPeriodModeFor(sessionDate);
   }, [isViewingToday, isFutureSlot, store.statusMode, statusPeriodModeFor, sessionDate]);
 
-  const handleClearStatus = () => LB.clearStatusMode(userId, store, setStore);
+  const handleClearStatus = () => {
+    // "Back to normal" is the primary way a break ends — offer to realign a
+    // drifted cycle plan right here (offerRealignAfterBreak is defined below and
+    // resolved at click time). handleSetStatus(null) carries the same hook for
+    // the status-picker path.
+    const wasBreak = store.statusMode === 'vacation' || store.statusMode === 'sick';
+    LB.clearStatusMode(userId, store, setStore);
+    if (wasBreak) offerRealignAfterBreak();
+  };
 
   // After training while Sick mode is on, offer to end it — catches the common
   // "forgot to toggle it off" case. Covers both strength and cardio sessions,
