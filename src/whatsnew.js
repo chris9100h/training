@@ -16,6 +16,15 @@
    Entry shape: { id: string, title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.485',
+    title: 'Welcome Back',
+    items: [
+      "🏖️ Back from a vacation or sick break? The moment you flip your status back to normal, your cycle plan asks the one question that matters: which day do you want to pick up on? Tap it and today snaps right there. Clean restart from Day 1 after being sick? Go for it. Rather continue where you left off? Also fine — your call.",
+      "🔢 And no getting demoted for taking time off. Your plan quietly rolls on by the calendar while you're away, but picking back up keeps your progress — you resume right where your cycle count was, never yanked back to Cycle 1.",
+      "🗓️ Two date fixes round it out: starting a session on a future day no longer stamps it with the wrong date, and editing a session's date now lands exactly on the day you picked (blame timezones for that one).",
+    ],
+  },
+  {
     id: 'v2.484',
     title: 'Whole Days, Any Plan',
     items: [
