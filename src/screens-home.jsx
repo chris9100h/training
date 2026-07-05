@@ -1177,6 +1177,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
   const [backlogPickerOpen, setBacklogPickerOpen] = useState(false);
   const [workoutSubOpen, setWorkoutSubOpen] = useState(false);
   const [bonusDayPickerOpen, setBonusDayPickerOpen] = useState(false);
+  const [realignSheet, setRealignSheet] = useState(null); // { scr, days } — "resume plan on which day?" after ending a break
   const [freestyleSubOpen, setFreestyleSubOpen] = useState(false);
   const [checkinPickerOpen, setCheckinPickerOpen] = useState(false);
   const [pullDelta, setPullDelta] = useState(0);
@@ -1588,13 +1589,13 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
   }, [isViewingToday, isFutureSlot, store.statusMode, statusPeriodModeFor, sessionDate]);
 
   const handleClearStatus = () => {
-    // "Back to normal" is the primary way a break ends — offer to realign a
-    // drifted cycle plan right here (offerRealignAfterBreak is defined below and
-    // resolved at click time). handleSetStatus(null) carries the same hook for
-    // the status-picker path.
+    // "Back to normal" is the primary way a break ends — offer to realign the
+    // cycle plan right here (maybeOfferRealign is defined below and resolved at
+    // click time). handleSetStatus(null) carries the same hook for the
+    // status-picker path.
     const wasBreak = store.statusMode === 'vacation' || store.statusMode === 'sick';
     LB.clearStatusMode(userId, store, setStore);
-    if (wasBreak) offerRealignAfterBreak();
+    if (wasBreak) maybeOfferRealign();
   };
 
   // After training while Sick mode is on, offer to end it — catches the common
@@ -1914,11 +1915,13 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
   // Return-from-break realign: a cycle plan advances by CALENDAR DATE and does
   // NOT pause during vacation/sick (unlike the meso week counter, which excludes
   // paused days), so coming back the rotation has drifted from where you left
-  // off. When you END a vacation/sick period we offer a one-tap realign right
-  // there (offerRealignAfterBreak, called from handleSetStatus) — the natural
-  // moment, no passive polling. Works for both unversioned (re-anchors
-  // cycleStartDate) and versioned (adjusts the active version's cycleOffset)
-  // plans via LB.realignCycleForToday. Flex advances on action (never drifts)
+  // off. When you END a vacation/sick period we ALWAYS open a small day-picker
+  // ("resume on which day?") right there — the natural moment, no passive
+  // polling. No drift check: even when nothing drifted, plenty of people like to
+  // restart a rotation from day 1 after time off, so we just let them choose.
+  // Tapping a day re-anchors today onto it via LB.realignCycleForToday (works
+  // for both unversioned — re-anchors cycleStartDate — and versioned — adjusts
+  // the active version's cycleOffset). Flex advances on action (never drifts)
   // and weekday plans are pinned to real weekdays, so both are skipped.
   const resyncTodayAfterRealign = useRef(false);
   // After a realign changes the anchor, todayStripIdx recomputes — pull the
@@ -1930,37 +1933,27 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     if (!weekdayMode && !cycleWeekView) setSelectedSlot(todayStripIdx);
   }, [store?.cycleStartDate, sch]); // eslint-disable-line
 
-  const offerRealignAfterBreak = async () => {
+  const maybeOfferRealign = () => {
     const scr = store.schedules?.find(x => x.id === store.activeScheduleId);
     if (!scr || !scr.days?.length) return;
+    // Only cycle plans drift by the calendar; flex advances on action and
+    // weekday plans are pinned to real weekdays, so neither needs a realign.
     if (LB.isFlexPlan(scr) || LB.isWeekdayPlan(scr)) return;
-    const todayStr = LB.todayISO();
-    // Last completed session on this plan → the NEXT day is where you resume.
-    const lastSession = (store.sessions || [])
-      .filter(s => s.ended && s.scheduleId === scr.id && s.dayId)
-      .sort((a, b) => new Date(b.ended) - new Date(a.ended))[0];
-    if (!lastSession) return;
-    // No gap if the last session was today — you're not actually returning from a
-    // break, so "next day" would wrongly push today forward.
-    if (lastSession.date && lastSession.date.slice(0, 10) === todayStr) return;
-    const activeDays = LB.getPlanDaysForDate(scr, todayStr);
-    const len = activeDays.length;
-    if (!len) return;
-    const lastIdx = activeDays.findIndex(d => d.id === lastSession.dayId);
-    if (lastIdx < 0) return;
-    const resumeIdx = (lastIdx + 1) % len;
-    // Nothing drifted? No prompt. todaysDay handles versioned + unversioned the
-    // same way the home strip does.
-    if ((LB.todaysDay(store)?.idx ?? null) === resumeIdx) return;
-    const nextName = activeDays[resumeIdx]?.name || 'your next day';
-    const yes = await confirm(
-      `Your plan counts by the calendar, so it kept advancing while you were away and has drifted from where you stopped. Pick up right where you left off? ${nextName} would be next.`,
-      { title: 'Welcome back! 👋', ok: 'Resume plan', cancel: 'Leave it', preventBackdropClose: true },
-    );
-    if (!yes) return;
-    // Re-anchor so today lands on resumeIdx — cycleStartDate for unversioned
-    // plans, the active version's cycleOffset for versioned ones.
-    const patch = LB.realignCycleForToday(store, scr, todayStr, resumeIdx);
+    const days = LB.getPlanDaysForDate(scr, LB.todayISO());
+    if (!days.length) return;
+    // Always open the picker — the user decides which day to resume on (incl.
+    // starting over at day 1), even if the rotation didn't actually drift.
+    setRealignSheet({ scr, days });
+  };
+
+  // Tapping a day in the realign picker re-anchors today onto that day —
+  // cycleStartDate for unversioned plans, the active version's cycleOffset for
+  // versioned ones (both handled by LB.realignCycleForToday).
+  const applyRealign = (targetIdx) => {
+    const scr = realignSheet?.scr;
+    setRealignSheet(null);
+    if (!scr) return;
+    const patch = LB.realignCycleForToday(store, scr, LB.todayISO(), targetIdx);
     if (patch) { resyncTodayAfterRealign.current = true; setStore(s => ({ ...s, ...patch })); }
   };
 
@@ -2261,8 +2254,8 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
         await LB.addCoachingNote(coachingId, 'general', null, null, body, userId, threadId);
       } catch (_) {}
     }
-    // Just ended a break? Offer to realign a drifted cycle plan right away.
-    if (mode === null && (current === 'vacation' || current === 'sick')) offerRealignAfterBreak();
+    // Just ended a break? Offer to realign the cycle plan right away.
+    if (mode === null && (current === 'vacation' || current === 'sick')) maybeOfferRealign();
   };
 
   const startFreestyleSession = () => {
@@ -3245,6 +3238,31 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
               <span className="micro" style={{ color: UI.inkFaint }}>{d.items.length} exercise{d.items.length !== 1 ? 's' : ''}</span>
             </button>
           ))}
+        </div>
+      </Sheet>
+
+      {/* Return-from-break realign: pick which day to resume the rotation on */}
+      <Sheet open={!!realignSheet} onClose={() => setRealignSheet(null)} title="Welcome back! 👋" titleColor="var(--accent)">
+        <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5, marginBottom: 14 }}>
+          Your plan rotates by the calendar, so it kept moving while you were away. Which day do you want to pick up on today?
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {(realignSheet?.days || []).map((d, i) => {
+            const isCurrent = (LB.todaysDay(store)?.idx ?? null) === i;
+            return (
+              <button key={d.id} onClick={() => applyRealign(i)} style={{
+                width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                padding: '12px 14px', background: UI.bgInset,
+                border: `0.5px solid ${isCurrent ? 'rgba(var(--accent-rgb),0.5)' : UI.hair}`,
+                borderRadius: 6, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+              }}>
+                <span style={{ fontSize: 14, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi }}>{d.name}</span>
+                {isCurrent
+                  ? <span className="micro-gold">Today now</span>
+                  : <span className="micro" style={{ color: UI.inkFaint }}>{d.items?.length || 0} exercise{(d.items?.length || 0) !== 1 ? 's' : ''}</span>}
+              </button>
+            );
+          })}
         </div>
       </Sheet>
 
