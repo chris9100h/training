@@ -42,7 +42,13 @@ function getMesoState(scheduleId, mesoStates) {
   if (!fromStorage) return fromStore;
   const storeT = fromStore.updatedAt ? new Date(fromStore.updatedAt).getTime() : 0;
   const storageT = fromStorage.updatedAt ? new Date(fromStorage.updatedAt).getTime() : 0;
-  return storageT > storeT ? fromStorage : fromStore;
+  const chosen = storageT > storeT ? fromStorage : fromStore;
+  const other = chosen === fromStore ? fromStorage : fromStore;
+  // startedAt is client-only (not round-tripped through the DB), so a DB-loaded
+  // store copy can lack it while the localStorage cache still has it — carry it
+  // over so the flex meso-week anchor survives a reload on the same device.
+  if (chosen.startedAt == null && other?.startedAt != null) return { ...chosen, startedAt: other.startedAt };
+  return chosen;
 }
 // Write meso state to per-plan localStorage key (in-session fast cache).
 // The store (DB) is updated via setStore at session end.
@@ -108,8 +114,16 @@ function mesoCurrentWeek(mesoState, store) {
     const startIdx = mesoState.startCycleIndex ?? 0;
     const currentIdx = store.cycleIndex || 0;
     if (currentIdx < startIdx) return null; // pending — waiting for next rotation start
+    // Count trained sessions since the block began. Prefer the precise
+    // startedAt timestamp over the date-only startDate: without it, sessions
+    // from a PREVIOUS block logged earlier the SAME day the new block starts
+    // (e.g. finishing Meso 1 then starting Meso 2 the same day) leak into the
+    // new block's count and fast-forward its week. Falls back to the date
+    // comparison for older mesos that predate startedAt.
+    const startedTs = mesoState.startedAt ? new Date(mesoState.startedAt).getTime() : null;
     const trainedCount = (store?.sessions || []).filter(s =>
-      s.ended && !s.isDeload && s.scheduleId === mesoState.scheduleId && (s.date || '') >= mesoState.startDate
+      s.ended && !s.isDeload && s.scheduleId === mesoState.scheduleId &&
+      (startedTs != null ? new Date(s.ended).getTime() > startedTs : (s.date || '') >= mesoState.startDate)
     ).length;
     const rotations = Math.floor(trainedCount / sch.days.length);
     return Math.min(Math.max(1, rotations + 1), mesoState.weeks);
@@ -120,14 +134,24 @@ function mesoCurrentWeek(mesoState, store) {
   const start = LB.parseDate(mesoState.startDate);
   const today = new Date(); today.setHours(12, 0, 0, 0);
   if (today < start) return null; // pending
-  const days = Math.round((today - start) / 86400000);
+  const rawDays = Math.round((today - start) / 86400000);
+  // Subtract pure-recovery time (deload/sick, plus idle vacation days) so a
+  // break can't fast-forward the meso week / RIR target the way raw calendar
+  // arithmetic would — mirrors the flex path's "only training advances the
+  // meso" principle. Trained vacation days still count (they're not paused).
+  const trainedDates = new Set(
+    (store?.sessions || [])
+      .filter(s => s.ended && !s.isDeload && s.scheduleId === mesoState.scheduleId && s.date)
+      .map(s => s.date.slice(0, 10))
+  );
+  const paused = LB.mesoPausedDays(store?.statusPeriods, trainedDates, mesoState.startDate, LB.fmtISO(today));
+  const days = Math.max(0, rawDays - paused);
   const cycleLen = (sch && !LB.isWeekdayPlan(sch) && sch.days?.length > 0) ? sch.days.length : 7;
   return Math.min(Math.max(1, Math.floor(days / cycleLen) + 1), mesoState.weeks);
 }
-function mesoRirForWeek(week, weeks) {
-  if (!weeks || weeks <= 1) return 0;
-  return Math.max(0, Math.round(3 - (week - 1) * 3 / (weeks - 1)));
-}
+// mesoRirForWeek lives in store.js (LB.mesoRirForWeek) so it's unit-testable —
+// linear RIR taper from startRir (week 1) to endRir (final week), endRir may be
+// negative (beyond failure → auto lengthened partials, see mesoPartials).
 // Apply an already-resolved meso state's set-delta to a plan item before
 // building seed sets. Returns a shallow copy with adjusted .sets, clamped to
 // [1, baseline+4] so repeated "not enough volume" answers across a mesocycle
@@ -622,6 +646,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       weightBoosts: {},
       growthCounts: {},
       completions: existing?.completions ?? 0,
+      // Precise block-start anchor for the flex week count (see
+      // mesoCurrentWeek) — client-side, mirrored to the localStorage cache;
+      // absent mesos fall back to the date comparison.
+      startedAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
     setStore(s => {
@@ -1124,8 +1152,21 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     return overlayHoldMs;
   };
 
-  const finishDropSet = (drops) => {
-    if (!drops.length || dropSetIdx == null) return;
+  const finishDropSet = async (rawDrops) => {
+    // Silently drop any incomplete row (missing reps, or missing kg unless
+    // no-weight-reps/bodyweight) instead of saving it — e.g. an ADD DROP
+    // row added by accident and never filled in. Centralized here (not
+    // just at the Sheet's own FINISH button) since checkSet() below can
+    // also reach this directly.
+    const drops = rawDrops.filter(d => !!d.reps && (isNoWeightReps || isBodyweight || d.kg != null));
+    if (dropSetIdx == null) return;
+    // A "drop set" with no actual drop beyond the top set isn't a drop set
+    // — the FINISH button stays tappable (not disabled) specifically so
+    // this explains why instead of just doing nothing.
+    if (drops.length < 2) {
+      await confirm("You did a Drop Set... without a drop? Bold strategy. Add one, or just log this as a normal set.", { title: 'No Drop, No Drop Set', ok: 'Got it', cancel: null });
+      return;
+    }
     // Optional finisher: partials tacked onto the last drop's failure point.
     const finalDrops = finisherPartials > 0
       ? drops.map((d, i) => i === drops.length - 1 ? { ...d, partials: finisherPartials } : d)
@@ -1172,8 +1213,19 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     setKbField(null); setKbRaw(''); setKbFresh(false);
   };
 
-  const finishMyoSet = (drops, technique) => {
-    if (!drops.length || myoSetIdx == null) return;
+  const finishMyoSet = async (rawDrops, technique) => {
+    // Silently drop any incomplete mini-set instead of saving it (see
+    // finishDropSet) — still needs the activation plus at least one
+    // completed mini-set to count as an actual myo-reps set. FINISH stays
+    // tappable (not disabled) specifically so this can explain why instead
+    // of just doing nothing.
+    const drops = rawDrops.filter(d => d.reps != null && (isNoWeightReps || isBodyweight || d.kg != null));
+    if (myoSetIdx == null) return;
+    if (drops.length < 2) {
+      const label = technique === 'myorep_match' ? 'Myo Rep Match' : 'Myo-Reps';
+      await confirm(`${label} without any myo sets? That's just a regular set. Add one, or just log it normally.`, { title: 'No Myo, No Myo-Reps', ok: 'Got it', cancel: null });
+      return;
+    }
     // Optional finisher: partials tacked onto the last mini's failure point.
     const finalDrops = finisherPartials > 0
       ? drops.map((d, i) => i === drops.length - 1 ? { ...d, partials: finisherPartials } : d)
@@ -1213,12 +1265,29 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // count chosen via the stepper — both land in the same session update, so
   // there's no window (crash, background, navigation) where the set is done
   // but the chosen partials count wasn't recorded yet.
-  const finishLengthenedPartial = (setIdx) => {
+  const finishLengthenedPartial = async (setIdx) => {
+    // Lengthened Partials with zero partials isn't lengthened partials — it's
+    // just the set. FINISH stays tappable even at 0 (see finishDropSet) so
+    // this can explain why instead of silently tagging the set with a
+    // technique nothing was actually done for.
+    if (lpCount === 0) {
+      await confirm("Lengthened Partials with zero partials? That's just a regular set. Add some, or cancel and check it off normally.", { title: 'No Partials, No Lengthened Partials', ok: 'Got it', cancel: null });
+      return;
+    }
     completeSet(setIdx, false, true, { technique: 'lengthened_partial', drops: { partials: lpCount } });
   };
 
-  const finishAv = (drops) => {
-    if (!drops.length || avSetIdx == null) return;
+  const finishAv = async (rawDrops) => {
+    // Silently drop any incomplete round instead of saving it (see
+    // finishDropSet).
+    const drops = rawDrops.filter(d => !!d.reps && (isNoWeightReps || isBodyweight || d.kg != null));
+    if (avSetIdx == null) return;
+    // AMRAP Variations with only the first round isn't a variation — FINISH
+    // stays tappable (not disabled) specifically so this can explain why.
+    if (drops.length < 2) {
+      await confirm("AMRAP Variations with just one round? That's just an AMRAP. Add a variation, or log it as one.", { title: 'No Variation, No Variations', ok: 'Got it', cancel: null });
+      return;
+    }
     // Optional finisher: partials tacked onto the last round's failure point.
     const finalDrops = finisherPartials > 0
       ? drops.map((d, i) => i === drops.length - 1 ? { ...d, partials: finisherPartials } : d)
@@ -1597,8 +1666,21 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         ...(newCardioLogs.length ? { cardioLogs: [...(s.cardioLogs || []), ...newCardioLogs] } : {}),
       };
     });
-    if (mesoState) {
+    // Skip the whole meso completion/gains flow for a deload session — a deload
+    // is recovery, not a meso week. The meso week counter is frozen at the peak
+    // (>= weeks) throughout the deload, so without this guard every deload
+    // session finish would re-fire "Mesocycle complete!" and re-increment
+    // completions. The meso state was already flushed by the session that
+    // actually completed the block.
+    if (mesoState && !isMesoDeloadSession) {
       const isComplete = mesoWeek != null && mesoState?.weeks != null && mesoWeek >= mesoState.weeks;
+      // Number of the NEXT block to offer, captured here where mesoState is
+      // reliably the just-completed block (completions not yet incremented):
+      // completions is the count of blocks BEFORE this one, so the block that
+      // just finished is completions+1 and the next is completions+2. Read from
+      // a ref by handleMesoComplete, which is reached from two paths (direct and
+      // via the gain sheet's onClose) whose mesoState freshness differs.
+      if (isComplete) mesoNextNumRef.current = (mesoState.completions ?? 0) + 2;
       const gains = computeMesoGains(isComplete); // also flushes final meso state to store
       if (gains.length > 0) {
         mesoGainNavRef.current = session.id;
@@ -1803,6 +1885,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // one of those is ever in flight at a time, so one counter suffices. Applied
   // to the last round's drops entry on Finish; 0 = no-op, nothing written.
   const [finisherPartials, setFinisherPartials] = useStateT(0);
+  // Which (exIdx_setIdx) working sets the beyond-failure meso auto-armed the
+  // Lengthened Partials stepper on, so it arms each set exactly once — a user
+  // who cancels the auto-prescribed partials on a set isn't re-nagged by a
+  // re-firing effect.
+  const mesoLpArmedRef = useRefT(new Set());
   // Persist intensity state so a background/resume on iOS doesn't wipe mid-set
   // progress. This effect runs before the restore effect below on every fresh
   // mount (declaration order), so on mount state is still all-null — without
@@ -1914,47 +2001,67 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     try { localStorage.removeItem(MESO_ASKED_KEY + session.id); } catch {}
   };
   const mesoWeek = mesoState ? mesoCurrentWeek(mesoState, store) : null;
-  const mesoRirVal = (mesoWeek != null && mesoState?.weeks != null) ? mesoRirForWeek(mesoWeek, mesoState.weeks) : null;
+  const mesoSch = mesoState ? store.schedules?.find(s => s.id === mesoState.scheduleId) : null;
+  const mesoStartRir = mesoSch?.mesocycle_start_rir ?? 3;
+  const mesoEndRir = mesoSch?.mesocycle_end_rir ?? 0;
+  const mesoRirVal = (mesoWeek != null && mesoState?.weeks != null) ? LB.mesoRirForWeek(mesoWeek, mesoState.weeks, mesoStartRir, mesoEndRir) : null;
+  // Final meso week: set-count deltas (and the growth/decline rotation feeding
+  // them) are frozen. A set change written now can never reach a later session
+  // in this block AND is wiped by the Meso-2 baseline reset anyway, so
+  // collecting it is pure waste. Weight boosts still accrue (they carry into
+  // Meso 2), so the joint + pump/volume questions stay — they gate the boost —
+  // while the soreness question (pure set-delta, no weight gate) is skipped.
+  const mesoLastWeek = mesoState != null && mesoWeek != null && mesoState.weeks != null && mesoWeek >= mesoState.weeks;
+  // Beyond-failure block: a negative RIR target prescribes |RIR| lengthened
+  // partials on every working set this session (RIR -3 → 3 partials). Auto-
+  // attached at set completion / seeded into the intensity-chain finisher.
+  // (isMesoDeloadSession is declared further down, so inline the deload check
+  // here to avoid a temporal-dead-zone reference.)
+  const mesoPartials = (mesoRirVal != null && !(store.statusMode === 'deload' || session.isDeload)) ? Math.max(0, -mesoRirVal) : 0;
   const [mesoGainSheetOpen, setMesoGainSheetOpen] = useStateT(false);
   const [mesoGainItems, setMesoGainItems] = useStateT([]);
   const mesoGainNavRef = useRefT(null);
   const mesoJustCompletedRef = useRefT(false); // set when last meso week finished
+  const mesoNextNumRef = useRefT(2); // number of the next block to offer ("Start Meso N")
 
   const startMeso2ForSchedule = (scheduleId) => {
-    setStore(s => {
-      const existing = (s.mesoStates || []).find(m => m.scheduleId === scheduleId);
-      if (!existing) return s;
-      const sch2 = s.schedules?.find(sc => sc.id === scheduleId);
-      const isWd = sch2 ? LB.isWeekdayPlan(sch2) : false;
-      const isFlex2 = sch2 ? LB.isFlexPlan(sch2) : false;
-      const daysLen2 = sch2?.days?.length || 1;
-      const ci = s.cycleIndex || 0;
-      let startDate2, startCycleIndex2;
-      if (isWd) {
-        startDate2 = LB.nextMondayISO();
-        startCycleIndex2 = existing.startCycleIndex ?? 0;
-      } else if (isFlex2) {
-        startCycleIndex2 = ci % daysLen2 === 0 ? ci : Math.ceil(ci / daysLen2) * daysLen2;
-        startDate2 = LB.todayISO();
-      } else {
-        startDate2 = LB.nextCycleD1ISOFromSchedule(sch2, s.cycleStartDate);
-        startCycleIndex2 = 0;
-      }
-      const newMeso = {
-        ...existing,
-        startDate: startDate2,
-        startCycleIndex: startCycleIndex2,
-        deltas: {},
-        jointFlags: {},
-        pumpLowCounts: {},
-        growthCounts: {},
-        pendingMeso2: false,
-        // weightBoosts carries over to meso 2
-        updatedAt: new Date().toISOString(),
-      };
-      const others = (s.mesoStates || []).filter(m => m.scheduleId !== scheduleId);
-      return { ...s, mesoStates: [...others, newMeso] };
-    });
+    const existing = (store.mesoStates || []).find(m => m.scheduleId === scheduleId);
+    if (!existing) return;
+    const sch2 = store.schedules?.find(sc => sc.id === scheduleId);
+    const isWd = sch2 ? LB.isWeekdayPlan(sch2) : false;
+    const isFlex2 = sch2 ? LB.isFlexPlan(sch2) : false;
+    const daysLen2 = sch2?.days?.length || 1;
+    const ci = store.cycleIndex || 0;
+    let startDate2, startCycleIndex2;
+    if (isWd) {
+      startDate2 = LB.nextMondayISO();
+      startCycleIndex2 = existing.startCycleIndex ?? 0;
+    } else if (isFlex2) {
+      startCycleIndex2 = ci % daysLen2 === 0 ? ci : Math.ceil(ci / daysLen2) * daysLen2;
+      startDate2 = LB.todayISO();
+    } else {
+      startDate2 = LB.nextCycleD1ISOFromSchedule(sch2, store.cycleStartDate);
+      startCycleIndex2 = 0;
+    }
+    const newMeso = {
+      ...existing,
+      startDate: startDate2,
+      startCycleIndex: startCycleIndex2,
+      deltas: {},
+      jointFlags: {},
+      pumpLowCounts: {},
+      growthCounts: {},
+      pendingMeso2: false,
+      // weightBoosts carries over to meso 2
+      startedAt: new Date().toISOString(), // fresh block-start anchor (flex week count)
+      updatedAt: new Date().toISOString(),
+    };
+    // Keep the per-plan localStorage cache in sync with the store (getMesoState
+    // picks the newer of the two by updatedAt) so the stale Meso-1 cache can't
+    // keep winning on the home strip after Meso 2 starts.
+    saveMesoStateToStorage(newMeso);
+    setMesoStateLocal(newMeso);
+    setStore(s => ({ ...s, mesoStates: [...(s.mesoStates || []).filter(m => m.scheduleId !== scheduleId), newMeso] }));
   };
 
   const continueAsCycle = (scheduleId) => {
@@ -1994,9 +2101,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       go({ name: 'session', sessionId: session.id, justFinished: true });
       return;
     }
+    const nextNum = mesoNextNumRef.current;
     const wantMeso2 = await confirm(
-      'Start Meso 2 with the same plan? Your earned weight boosts carry over — set counts reset to baseline so week 1 feels fresh again.',
-      { title: 'Start Meso 2?', ok: 'Start Meso 2', cancel: 'Skip', preventBackdropClose: true },
+      `Start Meso ${nextNum} with the same plan? Your earned weight boosts carry over — set counts reset to baseline so week 1 feels fresh again.`,
+      { title: `Start Meso ${nextNum}?`, ok: `Start Meso ${nextNum}`, cancel: 'Skip', preventBackdropClose: true },
     );
     if (wantMeso2) {
       startMeso2ForSchedule(scheduleId);
@@ -2081,6 +2189,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // question type already owns that key's negative slot this session).
   // `namesByKey` supplies { name } for the "Next session" recap ledger.
   const commitContrib = (record, questionType, newContrib, namesByKey) => {
+    // Frozen in the final week — no set delta is written and none is recorded
+    // for the recap (weight boosts, handled separately in computeMesoGains,
+    // still accrue). All three feedback questions funnel through here, so this
+    // one guard freezes the whole set-delta system for the last week.
+    if (mesoLastWeek) return;
     const prevContrib = record.contrib || {};
     const keys = new Set([...Object.keys(prevContrib), ...Object.keys(newContrib)]);
     const deltaPatch = {};
@@ -2148,12 +2261,49 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     }
     record.answer = answer;
     const namesByKey = {};
+    const keys = [];
+    record.targets.forEach(t => { namesByKey[t.key] = t.name; keys.push(t.key); });
+
+    // Soreness carryover is a recovery signal, so it moves volume BOTH ways —
+    // symmetric with the pump/volume question, not a one-directional "reduce"
+    // check (too little soreness is just as much an off-MRV signal as too much):
+    //   • never / healed a while ago → recovered easily = probably training
+    //     below MRV → grant +1 set, rotated across the muscle group with the
+    //     SAME LB.pickGrowthRecipient / growthCounts machinery the volume
+    //     "not enough" grant uses. Sharing the pool keeps soreness- and
+    //     volume-driven grants fair to each other and, since soreness is asked
+    //     first, makes a second grant the same session (e.g. also "not enough")
+    //     spread to a different exercise instead of piling +2 onto the main lift.
+    //   • healed just in time → optimal recovery window → hold (no delta).
+    //   • still sore → clear over-reach → shave a set off the currently
+    //     MOST-grown exercise of the group (LB.pickDeclineRecipient, the same
+    //     rotation-aware target the volume "pushed" signal uses, so decline
+    //     never drains only the main lift into the floor). commitContrib's
+    //     negative-slot ownership still stops it from double-stacking with a
+    //     "pushed"/"too much" -1 on the same key.
+    const adds = answer === 'never' || answer === 'healed_long';
+    const prevGrantedTo = Object.keys(record.contrib || {}).find(k => record.contrib[k] === 1) ?? null;
+    let recipientKey = null;
+    if (adds && keys.length) {
+      recipientKey = LB.pickGrowthRecipient(keys, mesoState.deltas, mesoState.growthCounts, prevGrantedTo).recipientKey;
+      saveMesoState(m => ({ ...m, growthCounts: LB.pickGrowthRecipient(keys, m.deltas, m.growthCounts, prevGrantedTo).growthCounts }));
+    } else if (prevGrantedTo) {
+      // Edited away from an adding answer this session → undo the prior grant.
+      saveMesoState(m => ({ ...m, growthCounts: LB.retractGrowthGrant(m.growthCounts, prevGrantedTo) }));
+    }
+
+    // "Still sore" trims the most-grown target (record.contrib = this record's
+    // prior contribution, undone first so an edit re-decides cleanly).
+    const declineKey = answer === 'still_sore'
+      ? LB.pickDeclineRecipient(keys, mesoState.deltas, record.contrib)
+      : null;
+
     const newContrib = {};
-    // still_sore → only the main (first) lift; very_sore → every exercise of
-    // the group; never/healed_* → no delta (and releases any prior one).
-    record.targets.forEach((t, i) => {
-      namesByKey[t.key] = t.name;
-      newContrib[t.key] = (answer === 'very_sore' || (answer === 'still_sore' && i === 0)) ? -1 : 0;
+    record.targets.forEach((t) => {
+      let want = 0;
+      if (t.key === recipientKey) want = 1;
+      else if (t.key === declineKey) want = -1;
+      newContrib[t.key] = want;
     });
     commitContrib(record, 'soreness', newContrib, namesByKey);
     mesoAnswersRef.current.soreness[muscle] = record;
@@ -2246,8 +2396,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     record.exIds = mesoVolumeExIds;
 
     // "Not enough" → rotates a +1 among the muscle group's exercises (see
-    // LB.pickGrowthRecipient); "Pushed my limits" → -1 on main lift only;
-    // "Too much" → -1 on every exercise of the muscle group.
+    // LB.pickGrowthRecipient); "Pushed my limits" → -1 on the currently
+    // MOST-grown exercise (LB.pickDeclineRecipient — mirror of the growth
+    // rotation, so decline follows growth instead of always draining the main
+    // lift into the floor); "Too much" → -1 on every exercise of the group.
     const mainExId = mesoVolumeExIds[0];
     const namesByKey = {};
     const keys = [];
@@ -2287,9 +2439,15 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // tracked field — commitContrib already guarantees exactly one key ever
     // holds a contrib of 1 for this question type, so there's nothing to keep
     // in sync by hand.
+    // Skip the whole growth/decline rotation in the final week — commitContrib
+    // is frozen there, so bumping growthCounts would only drift the counter
+    // (harmless since it resets at Meso 2, but pointless) with no delta to show
+    // for it.
     const prevGrantedTo = Object.keys(record.contrib || {}).find(k => record.contrib[k] === 1) ?? null;
     let recipientKey = null;
-    if (volume === 'not_enough') {
+    if (mesoLastWeek) {
+      // frozen: no rotation, no grant
+    } else if (volume === 'not_enough') {
       recipientKey = LB.pickGrowthRecipient(keys, mesoState.deltas, mesoState.growthCounts, prevGrantedTo).recipientKey;
       saveMesoState(m => ({ ...m, growthCounts: LB.pickGrowthRecipient(keys, m.deltas, m.growthCounts, prevGrantedTo).growthCounts }));
     } else if (prevGrantedTo) {
@@ -2297,13 +2455,20 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       saveMesoState(m => ({ ...m, growthCounts: LB.retractGrowthGrant(m.growthCounts, prevGrantedTo) }));
     }
 
+    // "Pushed" trims the most-grown exercise of the group. record.contrib is
+    // this record's PRIOR contribution (commitContrib rewrites it below), so
+    // pickDeclineRecipient undoes it first and an edit re-decides from the
+    // true pre-answer deltas.
+    const declineKey = volume === 'pushed'
+      ? LB.pickDeclineRecipient(keys, mesoState.deltas, record.contrib)
+      : null;
+
     const newContrib = {};
-    keys.forEach((key, i) => {
-      const exId = mesoVolumeExIds[i];
+    keys.forEach((key) => {
       let want = 0;
       if (volume === 'too_much') want = -1;
       else if (key === recipientKey) want = 1;
-      else if (exId === mainExId && volume === 'pushed') want = -1;
+      else if (key === declineKey) want = -1;
       newContrib[key] = want;
     });
     commitContrib(record, 'volume', newContrib, namesByKey);
@@ -2455,11 +2620,21 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       gainMap[key].weightDelta = increment;
     }
 
-    // Merge weight boosts into meso state and flush to store (DB sync).
+    // Weight boosts must be re-earned every session (min reps + joint fine +
+    // pump ok + volume ok, all re-confirmed this session). Replace this
+    // session's exercise keys wholesale — earned ones set, un-earned ones
+    // dropped — leaving other training days' boosts untouched. A deload
+    // session collects no feedback, so it must NOT wipe boosts earned before
+    // it: skip the recompute entirely and leave the map as-is.
     // mesoState here is the React state — already contains all feedback deltas from this session.
-    const withBoosts = Object.keys(weightBoostMap).length
-      ? { ...mesoState, weightBoosts: { ...(mesoState.weightBoosts || {}), ...weightBoostMap } }
-      : mesoState;
+    const newWeightBoosts = isMesoDeloadSession
+      ? (mesoState.weightBoosts || {})
+      : LB.reearnMesoWeightBoosts(
+          mesoState.weightBoosts,
+          session.entries.filter(e => !e.isCardio).map(e => e.exId + '_' + session.dayId),
+          weightBoostMap,
+        );
+    const withBoosts = { ...mesoState, weightBoosts: newWeightBoosts };
     // If the last meso week just finished: bump completions + set pendingMeso2 so the
     // home screen can offer Meso 2 after a deload (or immediately).
     const finalMeso = isComplete
@@ -2480,6 +2655,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     if (!mesoState || !entry || isCardio || isMesoDeloadSession) return;
     if (mesoWeek == null) return; // pending period — meso not yet started
     if (mesoWeek === 1) return; // week 1: no previous meso session to be sore from
+    if (mesoLastWeek) return; // final week: set deltas frozen, and soreness only drives deltas
     const ex = entry ? store.exercises?.find(e => e.id === entry.exId) : null;
     const pm = primaryMuscleForExercise(ex);
     if (!pm || askedSorenessRef.current.has(pm)) return;
@@ -3516,6 +3692,21 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const allWorkingDone = workingSetsArr.length > 0 && workingSetsArr.every(s => s.done || s.skipped);
   const anyMissingData = !isNoWeightReps && workingSetsArr.some(st => !st.done && !st.skipped && ((!isBodyweight && st.kg == null) || (isUnilateral ? (st.repsL == null || st.repsR == null) : st.reps == null)));
 
+  // Beyond-failure meso: auto-arm the Lengthened Partials stepper (pre-filled to
+  // the prescribed count) on the current plain working set, so the partials are
+  // visible up front instead of silently attached on check-off. Armed once per
+  // set (mesoLpArmedRef) so cancelling on a set doesn't re-nag. Chains carry
+  // their own partials via the finisher seed, so skip while one is in flight.
+  useEffectT(() => {
+    if (mesoPartials <= 0 || currentSetIdx < 0 || isCurrentWarmup) return;
+    if (dropSetIdx != null || myoSetIdx != null || avSetIdx != null || lpTarget != null) return;
+    const key = exIdx + '_' + currentSetIdx;
+    if (mesoLpArmedRef.current.has(key)) return;
+    mesoLpArmedRef.current.add(key);
+    setLpTarget({ exIdx, setIdx: currentSetIdx });
+    setLpCount(mesoPartials);
+  }, [currentSetIdx, exIdx, mesoPartials, dropSetIdx, myoSetIdx, avSetIdx]);
+
   // Superset linking (Intensity sheet) is only offered before any working set
   // in the CURRENT group has started — retroactively linking a partially-run
   // superset would insert the new exercise's round 0 after rounds the
@@ -4102,17 +4293,67 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           </Frame>
         ) : heroSet && (
           <BracketFrame gold padding={0}>
-            {mesoState && mesoRirVal != null && !isCurrentWarmup && (
-              <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', overflow: 'hidden' }}>
-                <span className="display-it" style={{
-                  fontSize: 72, fontWeight: 900, letterSpacing: '0.18em', whiteSpace: 'nowrap', userSelect: 'none',
-                  color: mesoRirVal === 0 ? 'rgba(220,53,69,1)' : UI.gold,
-                  opacity: mesoRirVal === 0 ? 0.13 : 0.09,
-                  transform: 'rotate(-22deg)',
-                }}>{mesoRirVal} RIR</span>
-              </div>
-            )}
-            <div style={{ padding: '12px 6px' }}>
+            {mesoState && mesoRirVal != null && !isCurrentWarmup && !isMesoDeloadSession && (() => {
+              // Escalate the RIR watermark as the block gets crazier: gold above
+              // failure, red at 0 RIR, then a hotter, faster ember-flicker the
+              // further past failure (negative RIR) it goes — at -3 it's fully
+              // ablaze. neg = how many partials are prescribed (0..3).
+              const neg = mesoRirVal < 0 ? -mesoRirVal : 0;
+              const fire = neg > 0;
+              // Escalating ember: hotter (orange→amber), bigger glow, higher
+              // opacity and a slower flicker the further past failure it goes,
+              // so −1 and −3 look clearly different (−3 is fully ablaze). Two-
+              // layer warm palette via CSS custom props (see @keyframes
+              // meso-ember). animationDuration overridden per intensity.
+              const emberVars = fire ? {
+                '--ember-op': (0.16 + neg * 0.07).toFixed(2),
+                '--ember-blur': `${8 + neg * 15}px`,
+                '--ember-glow1': `rgba(255,${120 + neg * 22},${25 + neg * 8},0.92)`,
+                '--ember-glow2': `rgba(255,${Math.max(0, 60 - neg * 14)},0,${(0.4 + neg * 0.08).toFixed(2)})`,
+                animationDuration: `${(2.9 - neg * 0.28).toFixed(2)}s`,
+              } : {};
+              const coreColor = fire ? ['#ff6a2a', '#ff801a', '#ffa510'][neg - 1] : (mesoRirVal === 0 ? 'rgba(220,53,69,1)' : UI.gold);
+              return (
+                <>
+                <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', overflow: 'hidden' }}>
+                  {/* RIR + partials gloss rotate together as ONE unit around the
+                      card's centre (not each span on its own) so the long
+                      "(0 RIR + N partials)" line stays centred under the number
+                      instead of clipping off the bottom-left edge. Beyond
+                      failure shows the raw negative RIR as the compact headline
+                      with the plain-language gloss below, so it can't be
+                      misread as "negative reps in reserve". */}
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', transform: 'rotate(-22deg)' }}>
+                    {/* Fire mode adds the gloss line below, so the number is
+                        smaller there — rotating a full 72px headline + gloss
+                        overflows this short hero card and clips the gloss. The
+                        plain single-line watermark keeps its bigger size. */}
+                    <span className={`display-it${fire ? ' meso-ember' : ''}`} style={{
+                      fontSize: fire ? 52 : 72, fontWeight: 900, letterSpacing: fire ? '0.12em' : '0.18em', whiteSpace: 'nowrap', userSelect: 'none', lineHeight: 1,
+                      color: coreColor,
+                      ...(fire ? emberVars : { opacity: mesoRirVal === 0 ? 0.13 : 0.09 }),
+                    }}>{mesoRirVal} RIR</span>
+                    {fire && (
+                      <span className="meso-ember" style={{
+                        fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', color: coreColor,
+                        marginTop: 5, userSelect: 'none', whiteSpace: 'nowrap',
+                        ...emberVars, '--ember-blur': `${5 + neg * 5}px`,
+                      }}>(0 RIR + {neg} PARTIAL{neg === 1 ? '' : 'S'})</span>
+                    )}
+                  </div>
+                </div>
+                {/* Scrim: a bg-toned radial veil painted OVER the ember but
+                    UNDER the content (which is z-indexed above it) so the
+                    foreground numbers/labels stay legible against the fire in
+                    ANY accent colour and theme, while the card edges stay
+                    ablaze. Fire mode only — the faint non-fire watermark
+                    (opacity 0.09/0.13) needs no veil, just the z-order lift. */}
+                {fire && <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none',
+                  background: 'radial-gradient(ellipse 78% 72% at 50% 56%, rgba(var(--bg-rgb),0.62) 0%, rgba(var(--bg-rgb),0.42) 42%, rgba(var(--bg-rgb),0) 78%)' }} />}
+                </>
+              );
+            })()}
+            <div style={{ padding: '12px 6px', position: 'relative', zIndex: 1 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', padding: '0 18px', marginBottom: 8 }}>
                 <span className="micro-gold">
                   {(!warmupSetsRemaining && isCurrentWarmup)
@@ -4394,13 +4635,19 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                           </div>
                         </div>
                         <div style={{ padding: '0 4px 10px' }}>
+                          {/* missingData is a hard block (the underlying set
+                              itself has no kg/reps yet — nothing to finish
+                              regardless of partials); lpCount === 0 only
+                              dims it — still tappable, so finishLengthenedPartial
+                              can explain why instead of silently completing
+                              a "lengthened partial" that had none. */}
                           <button onClick={() => finishLengthenedPartial(i)}
                             disabled={missingData}
                             style={{
                               width: '100%', padding: '8px 0',
-                              background: missingData ? 'transparent' : 'rgba(var(--accent-rgb),0.12)',
-                              border: `1px solid ${missingData ? UI.hair : 'rgba(var(--accent-rgb),0.5)'}`,
-                              borderRadius: 6, color: missingData ? UI.inkGhost : 'var(--accent)',
+                              background: !missingData && lpCount > 0 ? 'rgba(var(--accent-rgb),0.12)' : 'transparent',
+                              border: `1px solid ${!missingData && lpCount > 0 ? 'rgba(var(--accent-rgb),0.5)' : UI.hair}`,
+                              borderRadius: 6, color: !missingData && lpCount > 0 ? 'var(--accent)' : UI.inkGhost,
                               fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.1em',
                               cursor: missingData ? 'default' : 'pointer',
                               WebkitTapHighlightColor: 'transparent',
@@ -4849,6 +5096,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               : entry.sets.reduce((last, s, i) => !s.warmup ? i : last, -1);
             if (target < 0) return;
             clearMyo(); clearLp(); clearAv();
+            setFinisherPartials(mesoPartials); // beyond-failure meso: pre-seed prescribed partials
             const s = entry.sets[target];
             const initDrops = [{ kg: s?.kg ?? null, reps: s?.reps ?? null }];
             setDropDrops(initDrops);
@@ -4863,6 +5111,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               : entry.sets.reduce((last, s, i) => !s.warmup ? i : last, -1);
             if (target < 0) return;
             clearDrop(); clearMyo(); clearLp();
+            setFinisherPartials(mesoPartials); // beyond-failure meso: pre-seed prescribed partials
             const s = entry.sets[target];
             const initDrops = [{ kg: s?.kg ?? null, reps: s?.reps ?? null, label: entry.name }];
             setAvDrops(initDrops);
@@ -4877,6 +5126,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               : entry.sets.reduce((last, s, i) => !s.warmup ? i : last, -1);
             if (target < 0) return;
             clearDrop(); clearLp(); clearAv();
+            setFinisherPartials(mesoPartials); // beyond-failure meso: pre-seed prescribed partials
             const s = entry.sets[target];
             const anchor = entry.sets.find(st => st.technique === 'myorep' && st.done && st.drops?.[0]?.reps != null);
             // For match: activation kg locked to the preceding myo set's activation kg
@@ -5060,7 +5310,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               <FinisherPartials count={finisherPartials} onChange={setFinisherPartials} />
             </div>
             {(() => {
-              const canFinishDrop = !!dropDrops[0]?.reps && (isNoWeightReps || isBodyweight || dropDrops[0]?.kg != null);
+              // finishDropSet itself both silently drops any incomplete row
+              // (accidentally added via ADD DROP, never filled in) and
+              // requires at least one actual drop beyond the top set — not
+              // disabling FINISH here on purpose, so tapping it while
+              // "not ready" explains why via a warning instead of just
+              // doing nothing.
+              const canFinishDrop = dropDrops.filter(d => !!d.reps && (isNoWeightReps || isBodyweight || d.kg != null)).length >= 2;
               return (
                 <div style={{ flexShrink: 0, display: 'flex', gap: 8, padding: '4px 4px 10px' }}>
                   <button onClick={() => {
@@ -5074,14 +5330,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                     letterSpacing: '0.1em', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
                   }}>↓ ADD DROP</button>
                   <button onClick={() => finishDropSet(dropDropsRef.current)}
-                    disabled={!canFinishDrop}
                     style={{
                       flex: 2, padding: '8px 0',
                       background: canFinishDrop ? 'rgba(var(--accent-rgb),0.12)' : 'transparent',
                       border: `1px solid ${canFinishDrop ? 'rgba(var(--accent-rgb),0.5)' : UI.hair}`,
                       borderRadius: 6, color: canFinishDrop ? 'var(--accent)' : UI.inkGhost,
                       fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.1em',
-                      cursor: canFinishDrop ? 'pointer' : 'default',
+                      cursor: 'pointer',
                       WebkitTapHighlightColor: 'transparent',
                     }}>✓ FINISH</button>
                 </div>
@@ -5156,7 +5411,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               <FinisherPartials count={finisherPartials} onChange={setFinisherPartials} />
             </div>
             {(() => {
-              const canFinishAv = !!avDrops[0]?.reps && (isNoWeightReps || isBodyweight || avDrops[0]?.kg != null);
+              // finishAv itself both silently drops any incomplete round
+              // (accidentally added via ADD ROUND, never filled in) and
+              // requires at least one actual variation round beyond the
+              // first — not disabling FINISH here on purpose, so tapping
+              // it while "not ready" explains why via a warning instead of
+              // just doing nothing.
+              const canFinishAv = avDrops.filter(d => !!d.reps && (isNoWeightReps || isBodyweight || d.kg != null)).length >= 2;
               return (
                 <div style={{ flexShrink: 0, display: 'flex', gap: 8, padding: '4px 4px 10px' }}>
                   <button onClick={() => {
@@ -5171,14 +5432,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                     letterSpacing: '0.1em', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
                   }}>+ ADD ROUND</button>
                   <button onClick={() => finishAv(avDropsRef.current)}
-                    disabled={!canFinishAv}
                     style={{
                       flex: 2, padding: '8px 0',
                       background: canFinishAv ? 'rgba(var(--accent-rgb),0.12)' : 'transparent',
                       border: `1px solid ${canFinishAv ? 'rgba(var(--accent-rgb),0.5)' : UI.hair}`,
                       borderRadius: 6, color: canFinishAv ? 'var(--accent)' : UI.inkGhost,
                       fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.1em',
-                      cursor: canFinishAv ? 'pointer' : 'default',
+                      cursor: 'pointer',
                       WebkitTapHighlightColor: 'transparent',
                     }}>✓ FINISH</button>
                 </div>
@@ -5190,7 +5450,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         {myoSetIdx != null && (() => {
           const myoTotalReps = myoDrops.reduce((acc, d) => acc + (d.reps || 0), 0);
           const myoProgress = myoTarget ? Math.min(1, myoTotalReps / myoTarget) : 0;
-          const canFinish = myoDrops.length >= 2 && myoDrops[0]?.reps != null && (isNoWeightReps || isBodyweight || myoDrops[0]?.kg != null);
+          // finishMyoSet silently drops any incomplete mini-set itself
+          // (accidentally added via ADD MYO, never filled in) rather than
+          // blocking FINISH on it — still needs the activation plus at
+          // least one completed mini-set to count as an actual myo-reps
+          // set, not just a plain activation, so FINISH is disabled below
+          // that.
+          const canFinish = myoDrops.filter(d => d.reps != null && (isNoWeightReps || isBodyweight || d.kg != null)).length >= 2;
           const activationDone = myoDrops[0]?.reps != null;
           return (
             <div style={{ display: 'flex', flexDirection: 'column', maxHeight: 'inherit', minHeight: 0 }}>
@@ -5311,14 +5577,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   }}>↺ ADD MYO</button>
                 )}
                 <button onClick={() => finishMyoSet(myoDropsRef.current, myoTechnique)}
-                  disabled={!canFinish}
                   style={{
                     flex: 2, padding: '8px 0',
                     background: canFinish ? 'rgba(var(--accent-rgb),0.12)' : 'transparent',
                     border: `1px solid ${canFinish ? 'rgba(var(--accent-rgb),0.5)' : UI.hair}`,
                     borderRadius: 6, color: canFinish ? 'var(--accent)' : UI.inkGhost,
                     fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.1em',
-                    cursor: canFinish ? 'pointer' : 'default',
+                    cursor: 'pointer',
                     WebkitTapHighlightColor: 'transparent',
                   }}>✓ FINISH</button>
               </div>

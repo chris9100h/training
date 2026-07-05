@@ -564,6 +564,134 @@ async function testAsync(name, fn) {
     assert.strictEqual(JSON.stringify(LB.retractGrowthGrant({ a_d1: 1 }, null)), JSON.stringify({ a_d1: 1 }));
   });
 
+  test('pickGrowthRecipient: two independent grants one session (soreness then volume) via the shared pool spread to two exercises', () => {
+    // The low-soreness grant and the "not enough" volume grant share the same
+    // growthCounts pool. Soreness is asked first: it grants to the main lift and
+    // bumps the pool. The volume grant, fed that updated pool, must then rotate
+    // to the OTHER exercise instead of piling a second +1 onto the main lift.
+    const soreness = LB.pickGrowthRecipient(['a_d1', 'b_d1'], {}, {}, null);
+    assert.strictEqual(soreness.recipientKey, 'a_d1');
+    const volume = LB.pickGrowthRecipient(['a_d1', 'b_d1'], {}, soreness.growthCounts, null);
+    assert.strictEqual(volume.recipientKey, 'b_d1');
+    assert.strictEqual(volume.growthCounts.a_d1, 1);
+    assert.strictEqual(volume.growthCounts.b_d1, 1);
+  });
+
+  // ── pickDeclineRecipient (decline trims the most-grown exercise) ──
+  test('pickDeclineRecipient: an all-even group trims the main (first) lift, matching the old main-lift-only behavior', () => {
+    assert.strictEqual(LB.pickDeclineRecipient(['a_d1', 'b_d1', 'c_d1'], {}, null), 'a_d1');
+    // ties still resolve toward the main lift even when everyone sits at +2
+    assert.strictEqual(LB.pickDeclineRecipient(['a_d1', 'b_d1'], { a_d1: 2, b_d1: 2 }, null), 'a_d1');
+  });
+
+  test('pickDeclineRecipient: the most-grown secondary is trimmed instead of a lower main lift (the divergence fix)', () => {
+    // main lift already low (delta 0), a secondary sitting high (delta 4) →
+    // the -1 must land on the secondary, not drain the main lift further.
+    assert.strictEqual(LB.pickDeclineRecipient(['a_d1', 'b_d1', 'c_d1'], { a_d1: 0, b_d1: 4, c_d1: 1 }, null), 'b_d1');
+  });
+
+  test('pickDeclineRecipient: undoes this record prior contribution before re-deciding, so a re-confirm is stable', () => {
+    // deltas already reflect this record having trimmed b (b was 4, now 3);
+    // re-confirming the same answer must undo that -1 (b back to 4) and pick b
+    // again, not drift the -1 onto a different exercise each time.
+    const deltas = { a_d1: 0, b_d1: 3, c_d1: 1 };
+    const prevContrib = { b_d1: -1 };
+    assert.strictEqual(LB.pickDeclineRecipient(['a_d1', 'b_d1', 'c_d1'], deltas, prevContrib), 'b_d1');
+  });
+
+  test('pickDeclineRecipient: undoes a whole "too much" prior contribution (multiple -1s) when re-deciding for "pushed"', () => {
+    // record previously answered "too much" (every key -1); editing to "pushed"
+    // must re-decide from the true pre-answer deltas (all restored by +1), so
+    // the genuinely most-grown exercise wins rather than a post-shrink artifact.
+    const deltas = { a_d1: 1, b_d1: 3, c_d1: 0 }; // already includes the too-much -1s
+    const prevContrib = { a_d1: -1, b_d1: -1, c_d1: -1 };
+    // pre-answer deltas: a=2, b=4, c=1 → b is highest
+    assert.strictEqual(LB.pickDeclineRecipient(['a_d1', 'b_d1', 'c_d1'], deltas, prevContrib), 'b_d1');
+  });
+
+  test('pickDeclineRecipient: empty group is a no-op (null)', () => {
+    assert.strictEqual(LB.pickDeclineRecipient([], { a_d1: 3 }, null), null);
+  });
+
+  // ── reearnMesoWeightBoosts (weight boost must be re-earned every session) ──
+  test('reearnMesoWeightBoosts: a boost not re-earned this session is dropped, not kept', () => {
+    // bench earned a boost last session but is trained again this session with
+    // no boost earned → its stale boost must be cleared, not carried forward.
+    const out = LB.reearnMesoWeightBoosts({ bench_d1: 2.5 }, ['bench_d1'], {});
+    assert.ok(!('bench_d1' in out), 'stale boost must be removed');
+  });
+  test('reearnMesoWeightBoosts: a boost re-earned this session is set to the new value', () => {
+    const out = LB.reearnMesoWeightBoosts({ bench_d1: 2.5 }, ['bench_d1'], { bench_d1: 2.5 });
+    assert.strictEqual(out.bench_d1, 2.5);
+  });
+  test('reearnMesoWeightBoosts: other training days\' boosts are left untouched', () => {
+    // squat (a different day, not in this session's keys) keeps its boost even
+    // though bench (this session) earned nothing.
+    const out = LB.reearnMesoWeightBoosts({ bench_d1: 2.5, squat_d2: 5 }, ['bench_d1'], {});
+    assert.ok(!('bench_d1' in out), 'this session\'s un-earned boost dropped');
+    assert.strictEqual(out.squat_d2, 5, 'other day\'s boost preserved');
+  });
+  test('reearnMesoWeightBoosts: earning on a fresh key adds it', () => {
+    const out = LB.reearnMesoWeightBoosts({}, ['bench_d1'], { bench_d1: 2.5 });
+    assert.strictEqual(out.bench_d1, 2.5);
+  });
+  test('reearnMesoWeightBoosts: null/empty inputs are safe', () => {
+    assert.strictEqual(JSON.stringify(LB.reearnMesoWeightBoosts(null, [], null)), '{}');
+    assert.strictEqual(JSON.stringify(LB.reearnMesoWeightBoosts(undefined, undefined, undefined)), '{}');
+  });
+
+  // ── mesoPausedDays (recovery time must not fast-forward the meso week) ──
+  test('mesoPausedDays: deload days in the window are all excluded', () => {
+    // 5-day deload Jan 10–14 inside a meso running Jan 1 → Jan 20.
+    const periods = [{ mode: 'deload', startedAt: '2026-01-10T12:00:00Z', endedAt: '2026-01-14T12:00:00Z' }];
+    assert.strictEqual(LB.mesoPausedDays(periods, new Set(), '2026-01-01', '2026-01-20'), 5);
+  });
+  test('mesoPausedDays: sick days are excluded just like deload', () => {
+    const periods = [{ mode: 'sick', startedAt: '2026-01-05T12:00:00Z', endedAt: '2026-01-07T12:00:00Z' }];
+    assert.strictEqual(LB.mesoPausedDays(periods, new Set(), '2026-01-01', '2026-01-20'), 3);
+  });
+  test('mesoPausedDays: an OPEN (still active) period runs to today', () => {
+    const periods = [{ mode: 'sick', startedAt: '2026-01-18T12:00:00Z', endedAt: null }];
+    // Jan 18, 19, 20 = 3 days.
+    assert.strictEqual(LB.mesoPausedDays(periods, new Set(), '2026-01-01', '2026-01-20'), 3);
+  });
+  test('mesoPausedDays: vacation excludes only idle days; trained vacation days count', () => {
+    // 4-day vacation Jan 10–13; user trained on Jan 11 and Jan 13.
+    const periods = [{ mode: 'vacation', startedAt: '2026-01-10T12:00:00Z', endedAt: '2026-01-13T12:00:00Z' }];
+    const trained = new Set(['2026-01-11', '2026-01-13']);
+    // Jan 10 + Jan 12 idle = 2 excluded; Jan 11 + Jan 13 trained = counted.
+    assert.strictEqual(LB.mesoPausedDays(periods, trained, '2026-01-01', '2026-01-20'), 2);
+  });
+  test('mesoPausedDays: no periods, empty, or reversed window → 0', () => {
+    assert.strictEqual(LB.mesoPausedDays([], new Set(), '2026-01-01', '2026-01-20'), 0);
+    assert.strictEqual(LB.mesoPausedDays(null, new Set(), '2026-01-01', '2026-01-20'), 0);
+    assert.strictEqual(LB.mesoPausedDays([{ mode: 'sick', startedAt: '2026-01-05T12:00:00Z', endedAt: null }], new Set(), '2026-01-20', '2026-01-01'), 0);
+  });
+
+  // ── mesoRirForWeek (configurable, taper can go beyond failure) ──
+  test('mesoRirForWeek: default 3 → 0 taper reproduces the classic curve', () => {
+    // 6-week meso: 3,2,2,1,1,0 (rounded linear).
+    const rirs = [1, 2, 3, 4, 5, 6].map(w => LB.mesoRirForWeek(w, 6));
+    assert.strictEqual(rirs[0], 3);
+    assert.strictEqual(rirs[5], 0);
+    assert.ok(rirs.every((v, i) => i === 0 || v <= rirs[i - 1]), 'monotonically non-increasing');
+  });
+  test('mesoRirForWeek: a negative end RIR is preserved (no floor at 0)', () => {
+    // 4-week meso, start 3, end -3: 3, 1, -1, -3.
+    assert.strictEqual(LB.mesoRirForWeek(1, 4, 3, -3), 3);
+    assert.strictEqual(LB.mesoRirForWeek(4, 4, 3, -3), -3);
+    assert.strictEqual(LB.mesoRirForWeek(3, 4, 3, -3), -1);
+  });
+  test('mesoRirForWeek: lower start (2) and negative end (-2) taper correctly', () => {
+    assert.strictEqual(LB.mesoRirForWeek(1, 5, 2, -2), 2);
+    assert.strictEqual(LB.mesoRirForWeek(5, 5, 2, -2), -2);
+    assert.strictEqual(LB.mesoRirForWeek(3, 5, 2, -2), 0);
+  });
+  test('mesoRirForWeek: a 1-week (or 0) meso just returns the end RIR', () => {
+    assert.strictEqual(LB.mesoRirForWeek(1, 1, 3, -3), -3);
+    assert.strictEqual(LB.mesoRirForWeek(1, 0, 3, 0), 0);
+  });
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();

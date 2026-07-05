@@ -701,7 +701,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   const queries = [
     _supabase.from('zane_profiles').select('id, name, approved').eq('id', userId).maybeSingle(),
     _supabase.from('zane_exercises').select('id, name, tags, note, category, unilateral, equipment, progression_reps, movement_type, no_weight_reps, youtube_url').eq('user_id', userId),
-    _supabase.from('zane_schedules').select('id, name, days, archived, versions, is_flex, sessions_per_week, mesocycle_weeks').eq('user_id', userId),
+    _supabase.from('zane_schedules').select('id, name, days, archived, versions, is_flex, sessions_per_week, mesocycle_weeks, mesocycle_start_rir, mesocycle_end_rir').eq('user_id', userId),
     // Session METADATA stays complete (cheap; streaks/calendar need the full
     // date list) — the legacy entries JSONB is no longer selected.
     _supabase.from('zane_sessions').select('id, schedule_id, day_id, day_name, date, started_at, ended, duration_minutes, feel, is_bonus, is_freestyle, is_deload')
@@ -3367,6 +3367,93 @@ function retractGrowthGrant(growthCounts, grantedKey) {
   return gc;
 }
 
+// The mirror image of pickGrowthRecipient for the single-exercise DECLINE
+// signals ("pushed my limits" / "still sore"). Growth rotates fairly, so
+// decline must move too — hard-wiring −1 onto the main lift (keys[0]) alone
+// let the group diverge: the main lift sank to its 1-set floor while grown
+// secondaries sat at the +4 ceiling, and once floored the signal did nothing.
+// Instead the −1 goes to whichever exercise of the group is currently the
+// MOST grown, so the group self-balances and can never dead-lock as long as
+// anything is above the floor.
+// - keys: exId_dayId keys of the muscle group's exercises this session, in
+//   day order (keys[0] = the main/first lift).
+// - deltas: the meso state's full current set-adjustment map (read-only).
+// - prevContrib: this answer-record's ENTIRE previous contribution (record.
+//   contrib) — undone first so an edit re-decides from the true pre-answer
+//   deltas (handles a "too much" → "pushed" edit that had set several −1s,
+//   not just one), keeping repeated confirmations of the same answer stable.
+// - Highest effective delta wins; ties resolve toward keys[0] (main lift), so
+//   an all-even group early in the meso still trims the main lift exactly like
+//   before, and only once a secondary out-grows it does the −1 follow. No
+//   floor check needed: the most-grown exercise is by definition furthest from
+//   the floor, and an all-at-floor group correctly has its −1 swallowed by
+//   applyMesoSetDeltaFromState's clamp (you genuinely can't cut below 1 set).
+// - Returns the chosen key, or null if keys is empty.
+function pickDeclineRecipient(keys, deltas, prevContrib) {
+  if (!keys || !keys.length) return null;
+  const eff = (k) => ((deltas || {})[k] || 0) - ((prevContrib || {})[k] || 0);
+  return keys.reduce((best, k) => (eff(k) > eff(best) ? k : best), keys[0]);
+}
+
+// A mesocycle weight boost (exId_dayId → kg increment applied to the next
+// session's seed) must be RE-EARNED every session — min reps hit + joint fine
+// + pump ok + volume ok, all re-confirmed. Given the exId_dayId keys of the
+// exercises trained THIS session and the boosts actually earned this session,
+// return the new full boosts map: every key belonging to this session is
+// replaced wholesale (earned → set, un-earned → dropped), while keys for
+// OTHER training days are left untouched (they carry their own last-earned
+// boost until their own next session). Previously computeMesoGains merged the
+// earned map over the old one without ever clearing, so a boost earned once
+// kept getting re-applied every session regardless of feedback — the whole
+// per-session joint/pump/volume gating was effectively decorative for weight.
+// Pure and side-effect free so it can be unit-tested and called safely.
+function reearnMesoWeightBoosts(prevBoosts, sessionKeys, earnedBoosts) {
+  const next = { ...(prevBoosts || {}) };
+  for (const k of (sessionKeys || [])) delete next[k];
+  return { ...next, ...(earnedBoosts || {}) };
+}
+
+// Counts calendar days within [mesoStartISO, todayISO] that must NOT advance a
+// date-based/weekday mesocycle's week counter (see mesoCurrentWeek). The meso
+// week represents accumulated training fatigue, so pure recovery time can't
+// fast-forward it:
+//   • deload + sick days are always excluded (no meso training happens);
+//   • vacation allows training, so a vacation day is excluded ONLY if nothing
+//     was trained that day — trained vacation days count normally.
+// trainedDates is a Set of 'YYYY-MM-DD' on which an ended, non-deload session
+// for this plan was logged. Pure/testable. The flex path handles this natively
+// (it counts trained non-deload sessions), so this only feeds the date/weekday
+// paths, which are otherwise raw calendar arithmetic.
+function mesoPausedDays(statusPeriods, trainedDates, mesoStartISO, todayISO) {
+  if (!statusPeriods?.length || !mesoStartISO || !todayISO) return 0;
+  const start = new Date(mesoStartISO.slice(0, 10) + 'T12:00:00');
+  const end = new Date(todayISO.slice(0, 10) + 'T12:00:00');
+  if (isNaN(start.getTime()) || isNaN(end.getTime()) || end < start) return 0;
+  const trained = trainedDates || new Set();
+  const periods = statusPeriods
+    .filter(p => p && p.startedAt)
+    .map(p => ({ mode: p.mode, from: p.startedAt.slice(0, 10), to: p.endedAt ? p.endedAt.slice(0, 10) : todayISO.slice(0, 10) }));
+  let paused = 0;
+  for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+    const iso = fmtISO(d);
+    const frozen = periods.some(p =>
+      iso >= p.from && iso <= p.to &&
+      (p.mode === 'deload' || p.mode === 'sick' || (p.mode === 'vacation' && !trained.has(iso)))
+    );
+    if (frozen) paused++;
+  }
+  return paused;
+}
+
+// RIR target for a given meso week: linear taper from startRir (week 1) down to
+// endRir (final week). endRir may be NEGATIVE (beyond failure → auto lengthened
+// partials) — no floor at 0, so the negative tail survives. Defaults 3 → 0
+// reproduce the original fixed taper exactly. Pure/testable.
+function mesoRirForWeek(week, weeks, startRir = 3, endRir = 0) {
+  if (!weeks || weeks <= 1) return endRir;
+  return Math.round(startRir - (week - 1) * (startRir - endRir) / (weeks - 1));
+}
+
 // "5m ago"/"3h ago"/"2d ago" from an ISO timestamp. capDays, if given, rolls
 // over to a short locale date past that many days instead of counting
 // indefinitely (screens-settings.jsx's sign-up feed wants that; the
@@ -3568,5 +3655,5 @@ window.LB = {
   cardioDistUnit, setCardioDistUnit, distToM, mToDisplay, fmtDistance, fmtPace, fmtSpeed, MI_TO_M, recentCardioTypes,
   isLoggedTrainingDay, plannedTrainingDay, isTrainingDayForDate, dayTargetFromMacros, macroAdherence, effectiveMacroTargets, dailyLogAdherence, dailyLogsWeekPrefill, weekPerformanceSignal,
   refreshHealthLogs,
-  pickGrowthRecipient, retractGrowthGrant, MESO_GROWTH_CEILING_DELTA,
+  pickGrowthRecipient, retractGrowthGrant, pickDeclineRecipient, reearnMesoWeightBoosts, mesoPausedDays, mesoRirForWeek, MESO_GROWTH_CEILING_DELTA,
 };

@@ -691,51 +691,59 @@ function Sheet({ open, onClose, title, titleColor, children, keyboardHeight = 0,
       paddingBottom: (effectiveKbHeight - keyboardHeight) + (floating ? 10 : 0),
       animation: 'sheet-fade 0.18s ease',
     }}>
-      <div onClick={e => e.stopPropagation()} style={{
-        position: 'relative',
-        width: '100%', maxWidth: 540, boxSizing: 'border-box',
-        background: UI.bgRaised,
-        borderRadius: floating ? 6 : '6px 6px 0 0',
-        border: `1px solid ${edgeColor}`,
-        ...(!floating && { borderBottom: 'none' }),
-        // Floating above the keyboard, every edge needs to read as a real
-        // boundary on its own — the bottom-sheet variant gets that for free
-        // from the drag handle and the darker screen behind it, but a
-        // floating card has nothing else anchoring its bottom edge, so the
-        // same 1px hairline there can vanish against the dark backdrop. A
-        // second, crisp shadow line in the same tone doubles up the border
-        // right where it needs it, without touching the other three sides.
-        boxShadow: shadowLayers.join(', '),
-        // The 3rd value here used to be the bare number 18 instead of '18px'
-        // — React silently drops the *entire* padding declaration (not just
-        // that one component) when a shorthand's value contains a unitless
-        // non-zero number, no warning either. That only ever showed up with
-        // the keyboardHeight prop in play (effectiveKbHeight > 0), i.e. only
-        // on the drop/myo/AMRAP chain sheets whenever this app's on-screen
-        // keypad was open — exactly the "content goes edge to edge" bug
-        // reported repeatedly, confirmed via an isolated minimal React
-        // repro. Every other Sheet in the app never sets keyboardHeight, so
-        // effectiveKbHeight stays 0 and always took the (valid) calc()
-        // branch — which is why "all other sheets work fine" was true.
-        padding: `16px 22px ${floating ? '18px' : 'calc(env(safe-area-inset-bottom, 8px) + 22px)'}`,
-        animation: 'sheet-up 0.22s ease',
-        maxHeight: floating ? `${vvHeight - 32}px` : '88dvh', overflow: 'auto', overscrollBehavior: 'contain',
-      }}>
+      {/* accent: inset a few px off the screen edges so the glow has room
+          to actually render there instead of bleeding straight off-screen
+          — a plain width:100% sheet runs edge-to-edge, leaving nowhere for
+          an outward glow on the sides to be visible. */}
+      <div style={{ position: 'relative', width: accent ? 'calc(100% - 32px)' : '100%', maxWidth: 540 }}>
         {/* Same breathing glow as the Intensity button (.intensity-glow /
-            @keyframes intensityGlow in index.html), on its own overlay
-            rather than the panel's own box-shadow — the keyframe's
-            box-shadow values would otherwise fully replace (not blend
-            with) the panel's static elevation/edge shadow above while
-            animating. borderRadius:'inherit' tracks the panel's own
-            (floating-dependent) radius automatically. */}
-        {accent && <div className="intensity-glow" style={{ position: 'absolute', inset: 0, borderRadius: 'inherit', pointerEvents: 'none' }} />}
-        <div style={{ width: 36, height: 3, background: accent ? 'var(--accent)' : UI.hairStrong, borderRadius: 4, margin: '0 auto 16px' }} />
-        {title && (
-          <div style={{ fontFamily: UI.fontDisplay, fontSize: 28, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: titleColor || UI.ink, marginBottom: 16 }}>
-            {title}
-          </div>
-        )}
-        {children}
+            @keyframes intensityGlow in index.html) — a sibling of the
+            panel, not a child of it: the panel has overflow:'auto' for its
+            scrollable content, which clips any child's box-shadow the
+            instant it bleeds past the panel's own edge, so an ambient glow
+            rendered from inside it is invisible no matter its z-index. This
+            wrapper has no overflow clipping of its own, so the glow's
+            shadow escapes freely. Its own box-shadow (not the panel's,
+            which needs a separate static one for elevation) also avoids
+            fighting over the same property while animating. */}
+        {accent && <div className="intensity-glow" style={{ position: 'absolute', inset: 0, borderRadius: floating ? 6 : '6px 6px 0 0', pointerEvents: 'none' }} />}
+        <div onClick={e => e.stopPropagation()} style={{
+          width: '100%', boxSizing: 'border-box',
+          background: UI.bgRaised,
+          borderRadius: floating ? 6 : '6px 6px 0 0',
+          border: `1px solid ${edgeColor}`,
+          ...(!floating && { borderBottom: 'none' }),
+          // Floating above the keyboard, every edge needs to read as a real
+          // boundary on its own — the bottom-sheet variant gets that for free
+          // from the drag handle and the darker screen behind it, but a
+          // floating card has nothing else anchoring its bottom edge, so the
+          // same 1px hairline there can vanish against the dark backdrop. A
+          // second, crisp shadow line in the same tone doubles up the border
+          // right where it needs it, without touching the other three sides.
+          boxShadow: shadowLayers.join(', '),
+          // The 3rd value here used to be the bare number 18 instead of '18px'
+          // — React silently drops the *entire* padding declaration (not just
+          // that one component) when a shorthand's value contains a unitless
+          // non-zero number, no warning either. That only ever showed up with
+          // the keyboardHeight prop in play (effectiveKbHeight > 0), i.e. only
+          // on the drop/myo/AMRAP chain sheets whenever this app's on-screen
+          // keypad was open — exactly the "content goes edge to edge" bug
+          // reported repeatedly, confirmed via an isolated minimal React
+          // repro. Every other Sheet in the app never sets keyboardHeight, so
+          // effectiveKbHeight stays 0 and always took the (valid) calc()
+          // branch — which is why "all other sheets work fine" was true.
+          padding: `16px 22px ${floating ? '18px' : 'calc(env(safe-area-inset-bottom, 8px) + 22px)'}`,
+          animation: 'sheet-up 0.22s ease',
+          maxHeight: floating ? `${vvHeight - 32}px` : '88dvh', overflow: 'auto', overscrollBehavior: 'contain',
+        }}>
+          <div style={{ width: 36, height: 3, background: accent ? 'var(--accent)' : UI.hairStrong, borderRadius: 4, margin: '0 auto 16px' }} />
+          {title && (
+            <div style={{ fontFamily: UI.fontDisplay, fontSize: 28, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: titleColor || UI.ink, marginBottom: 16 }}>
+              {title}
+            </div>
+          )}
+          {children}
+        </div>
       </div>
     </div>
   );
@@ -822,9 +830,11 @@ function useConfirm() {
       <div style={{ fontFamily: UI.fontDisplay, fontSize: 26, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: UI.ink, marginBottom: 10, textAlign: 'center' }}>{state.title}</div>
       <div style={{ fontSize: 14, color: UI.inkSoft, marginBottom: 22, lineHeight: 1.5, textAlign: 'center' }}>{state.message}</div>
       <div style={{ display: 'flex', gap: 8 }}>
-        <Btn kind="ghost" onClick={() => close(false)} style={{ flex: 1 }}>{state.cancel}</Btn>
+        {/* cancel: null → single-button alert mode (nothing to actually
+            confirm/deny, just an explanation to acknowledge). */}
+        {state.cancel && <Btn kind="ghost" onClick={() => close(false)} style={{ flex: 1 }}>{state.cancel}</Btn>}
         <Btn onClick={() => close(true)} style={{
-          flex: 2,
+          flex: state.cancel ? 2 : 1,
           ...(state.danger ? { background: UI.danger, borderColor: 'rgba(var(--danger-rgb),0.6)', boxShadow: '0 6px 20px rgba(var(--danger-rgb),0.25)' } : {}),
         }}>{state.ok}</Btn>
       </div>

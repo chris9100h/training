@@ -60,7 +60,9 @@ CREATE TABLE public.zane_schedules (
   versions jsonb NOT NULL DEFAULT '[]'::jsonb,
   is_flex boolean NOT NULL DEFAULT false,
   sessions_per_week integer,
-  mesocycle_weeks integer
+  mesocycle_weeks integer,
+  mesocycle_start_rir integer,
+  mesocycle_end_rir integer
 );
 
 CREATE TABLE public.zane_sessions (

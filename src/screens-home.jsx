@@ -1694,19 +1694,19 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     pendingMeso2Checked.current = true;
     (async () => {
       const scheduleId = sch.id;
+      const nextNum = (mesoSt.completions ?? 0) + 1; // the block being offered
       const wantMeso2 = await confirm(
-        'Your deload is done — nice recovery! Ready to kick off Meso 2? Your earned weight boosts carry over and set counts reset to baseline.',
-        { title: 'Start Meso 2?', ok: 'Start Meso 2', cancel: 'Skip', preventBackdropClose: true },
+        `Your deload is done — nice recovery! Ready to kick off Meso ${nextNum}? Your earned weight boosts carry over and set counts reset to baseline.`,
+        { title: `Start Meso ${nextNum}?`, ok: `Start Meso ${nextNum}`, cancel: 'Skip', preventBackdropClose: true },
       );
       if (wantMeso2) {
-        setStore(s => {
-          const existing = (s.mesoStates || []).find(m => m.scheduleId === scheduleId);
-          if (!existing) return s;
-          const sc2 = s.schedules?.find(sc => sc.id === scheduleId);
+        const existing = (store.mesoStates || []).find(m => m.scheduleId === scheduleId);
+        if (existing) {
+          const sc2 = store.schedules?.find(sc => sc.id === scheduleId);
           const isWd = sc2 ? LB.isWeekdayPlan(sc2) : false;
           const isFlex2 = sc2 ? LB.isFlexPlan(sc2) : false;
           const daysLen2 = sc2?.days?.length || 1;
-          const ci = s.cycleIndex || 0;
+          const ci = store.cycleIndex || 0;
           let startDate2, startCycleIndex2;
           if (isWd) {
             startDate2 = LB.nextMondayISO();
@@ -1715,7 +1715,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
             startCycleIndex2 = ci % daysLen2 === 0 ? ci : Math.ceil(ci / daysLen2) * daysLen2;
             startDate2 = LB.todayISO();
           } else {
-            startDate2 = LB.nextCycleD1ISOFromSchedule(sc2, s.cycleStartDate);
+            startDate2 = LB.nextCycleD1ISOFromSchedule(sc2, store.cycleStartDate);
             startCycleIndex2 = 0;
           }
           const newMeso = {
@@ -1727,11 +1727,16 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
             pumpLowCounts: {},
             growthCounts: {},
             pendingMeso2: false,
+            startedAt: new Date().toISOString(), // fresh block-start anchor (flex week count)
             updatedAt: new Date().toISOString(),
           };
-          const others = (s.mesoStates || []).filter(m => m.scheduleId !== scheduleId);
-          return { ...s, mesoStates: [...others, newMeso] };
-        });
+          // Overwrite the per-plan localStorage cache too — getMesoState returns
+          // whichever of {store, cache} is newer by updatedAt, so leaving the
+          // stale Meso-1 cache in place would keep winning and the home strip /
+          // training screen would still show the old (completed) block.
+          if (typeof saveMesoStateToStorage === 'function') saveMesoStateToStorage(newMeso);
+          setStore(s => ({ ...s, mesoStates: [...(s.mesoStates || []).filter(m => m.scheduleId !== scheduleId), newMeso] }));
+        }
         return;
       }
       const keepActive = await confirm(
@@ -1773,6 +1778,10 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     if (deloadNudgeShown.current) return;
     if (store?.statusMode || store?.inProgress) return;
     if (!sch) return;
+    // A mesocycle is never interrupted by a deload — the deload comes AFTER the
+    // meso finishes (handleMesoComplete). While a meso is active on this plan,
+    // suppress the generic 8-week auto-deload nudge so it can't fire mid-meso.
+    if (sch.mesocycle_weeks) return;
 
     const todayStr = LB.todayISO();
     const justFinished = (store?.sessions || []).some(
@@ -2466,8 +2475,21 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
           )}
           <div style={{ flex: 1, textAlign: 'center' }}>
             {sch.mesocycle_weeks ? (() => {
+              // A deload following the meso is a recovery week — show DELOAD, not
+              // the (now-frozen, possibly beyond-failure) meso RIR target.
+              if (isViewingToday && store.statusMode === 'deload') {
+                return (
+                  <span style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase', color: UI.gold, background: 'rgba(var(--accent-rgb),0.1)', border: `0.5px solid rgba(var(--accent-rgb),0.4)`, borderRadius: 4, padding: '2px 8px' }}>
+                    MESO · DELOAD
+                  </span>
+                );
+              }
               const m = (typeof getMesoState === 'function') ? getMesoState(sch.id, store.mesoStates) : null;
               const weeks = sch.mesocycle_weeks;
+              // completions = how many blocks finished, so the block currently
+              // running is number completions+1. Shown from Meso 2 on.
+              const mesoNum = (m?.completions ?? 0) + 1;
+              const mesoLabel = `MESO${mesoNum > 1 ? ' ' + mesoNum : ''}`;
               const week = (m && typeof mesoCurrentWeek === 'function') ? mesoCurrentWeek(m, store) : null;
               if (week == null) {
                 // Pending — meso hasn't started yet; show start date if known
@@ -2476,16 +2498,16 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                   : 'D1';
                 return (
                   <span style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase', color: UI.inkFaint, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '2px 8px' }}>
-                    MESO · starts {startLabel}
+                    {mesoLabel} · starts {startLabel}
                   </span>
                 );
               }
-              const rir = (typeof mesoRirForWeek === 'function') ? mesoRirForWeek(week, weeks) : null;
+              const rir = (typeof mesoRirForWeek === 'function') ? mesoRirForWeek(week, weeks, sch.mesocycle_start_rir ?? 3, sch.mesocycle_end_rir ?? 0) : null;
               if (rir == null) return null;
               const unit = weekdayMode ? 'W' : 'C';
               return (
                 <span style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase', color: UI.inkSoft, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '2px 8px' }}>
-                  MESO {unit}{week}/{weeks} · {rir} RIR
+                  {mesoLabel} {unit}{week}/{weeks} · {rir} RIR
                 </span>
               );
             })() : (
