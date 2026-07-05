@@ -922,7 +922,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       const refReps = suggestion
         ? (suggestion.reps ?? null)
         : lastReps != null
-          ? (store.settings?.smartProgression ? lastReps + 1 : lastReps)
+          ? (LB.progressionEnabled(store, entry?.plannedRepsMax, entry?.plannedProgressionOffset) ? lastReps + 1 : lastReps)
           : null;
 
       // Compute logged values (respect pending KB input)
@@ -1041,7 +1041,6 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       const catCfg = exercise?.equipment ? (store.settings?.equipmentConfig?.[exercise.equipment] ?? {}) : {};
       const increment = catCfg.increment ?? null;
       if (!increment) return null;
-      const range = store.settings?.progressionRangeTop ?? 4;
       // Index by true working-set position (warm-ups stripped, nothing else)
       // so progressionTargetForSet(i) lines up correctly — filtering skipped/
       // no-kg sets out before indexing (as this used to) shifts every later
@@ -4472,7 +4471,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   <span className="micro" style={{ color: UI.inkFaint, textAlign: 'center' }}>R</span>
                 </>
               ) : (
-                <span className="micro" style={{ color: UI.inkFaint, textAlign: 'center' }}>{store.settings?.smartProgression ? 'Reps (min)' : 'Reps'}</span>
+                <span className="micro" style={{ color: UI.inkFaint, textAlign: 'center' }}>{LB.progressionEnabled(store, entry?.plannedRepsMax, entry?.plannedProgressionOffset) ? 'Reps (min)' : 'Reps'}</span>
               )}
               <div />
             </div>
