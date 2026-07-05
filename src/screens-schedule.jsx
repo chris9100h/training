@@ -2229,30 +2229,39 @@ function ExerciseItemEditor({ item, exName, isCheckboxOnly, queuePos, queueTotal
         )}</>}
       </div>
 
-      {!isCheckboxOnly && mode !== 'range' && (
-        <div style={{ marginBottom: 24 }}>
-          <div className="label" style={{ marginBottom: 10 }}>Smart Progression</div>
-          <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-            <button style={toggleStyle(progOverride === null)} onClick={() => setProgOverride(null)}>Default</button>
-            <button style={toggleStyle(progOverride !== null)} onClick={() => setProgOverride(p => p ?? (store?.settings?.progressionRangeTop ?? 4))}>Custom</button>
-          </div>
-          {progOverride !== null && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
-              <span className="label" style={{ width: 36, textAlign: 'right', flexShrink: 0 }}>Reps</span>
-              <div style={{ flex: 1 }}>
-                <Stepper value={progOverride} onChange={v => setProgOverride(Math.max(0, Math.round(v)))} step={1} min={0} />
-              </div>
+      {!isCheckboxOnly && mode !== 'range' && (() => {
+        // When the global setting is off, "inherit" always resolves to off
+        // too — showing "Default" as a choice would be misleading, so the
+        // toggle reframes as a plain On/Off for this exercise instead. Either
+        // way the left button always maps to null (inherit) and the right
+        // button to an explicit offset; only the labels (and whether 0 is
+        // reachable via the stepper) change.
+        const globalOn = !!store?.settings?.smartProgression;
+        return (
+          <div style={{ marginBottom: 24 }}>
+            <div className="label" style={{ marginBottom: 10 }}>Smart Progression</div>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+              <button style={toggleStyle(progOverride === null)} onClick={() => setProgOverride(null)}>{globalOn ? 'Default' : 'Off'}</button>
+              <button style={toggleStyle(progOverride !== null)} onClick={() => setProgOverride(p => p ?? Math.max(globalOn ? 0 : 1, store?.settings?.progressionRangeTop ?? 4))}>{globalOn ? 'Custom' : 'On'}</button>
             </div>
-          )}
-          <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.4 }}>
-            {progOverride === null
-              ? 'Uses the global Smart Progression setting.'
-              : progOverride === 0
-                ? 'Smart Progression is off for this exercise.'
-                : `Hit +${progOverride} reps over target on every set and we'll suggest a weight bump — overrides the global Smart Progression setting.`}
+            {progOverride !== null && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
+                <span className="label" style={{ width: 36, textAlign: 'right', flexShrink: 0 }}>Reps</span>
+                <div style={{ flex: 1 }}>
+                  <Stepper value={progOverride} onChange={v => setProgOverride(Math.max(globalOn ? 0 : 1, Math.round(v)))} step={1} min={globalOn ? 0 : 1} />
+                </div>
+              </div>
+            )}
+            <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.4 }}>
+              {progOverride === null
+                ? (globalOn ? 'Uses the global Smart Progression setting.' : 'Smart Progression is off for this exercise.')
+                : progOverride === 0
+                  ? 'Smart Progression is off for this exercise.'
+                  : `Hit +${progOverride} reps over target on every set and we'll suggest a weight bump — overrides the global Smart Progression setting.`}
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       <Field label="Note (optional)">
         <TextInput value={note} onChange={setNote} placeholder="e.g. cable pos 4, slow eccentric…" />
