@@ -1485,7 +1485,13 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
           schedule={draft}
           onClose={() => setEditingDay(null)}
           onSave={(updated) => {
-            setDraft(d => ({ ...d, days: d.days.map(x => x.id === updated.id ? updated : x) }));
+            // Match by editingDay (the id the day currently has in the plan),
+            // NOT updated.id: copyItemsFromDay swaps the day's id to the source
+            // day's id when importing "from plan" across plans (to carry that
+            // day's session history over). updated.id then no longer matches any
+            // existing day, so matching on it silently dropped the whole import
+            // — the exercises appeared in the editor but never saved.
+            setDraft(d => ({ ...d, days: d.days.map(x => x.id === editingDay ? updated : x) }));
             setEditingDay(null);
           }}
         />
