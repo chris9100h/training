@@ -99,6 +99,7 @@
   - `logbook-whatsnew-seen` — zuletzt gesehene `WHATS_NEW.id` (siehe „What's New / Changelog")
   - `logbook-health-card-order` — vom Nutzer gewählte Reihenfolge der Health-Tab-Karten (per Gerät, kein DB-Sync)
   - `logbook-seen-signups` — vom Admin per „Got it" abgehakte Registrierungen im Account-Tab-Feed (Array von user_ids, per Gerät)
+  - `logbook-realign-handled` — `endedAt` der zuletzt behandelten Vacation/Sick-Rückkehr, für die der „Zurück aus dem Urlaub → Plan neu ausrichten?"-Nudge (Cycle-Pläne) schon gezeigt/abgehakt wurde (per Gerät)
 
 ## What's New / Changelog
 

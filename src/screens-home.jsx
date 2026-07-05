@@ -1903,6 +1903,82 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     })();
   }, [store?.statusMode, store?.inProgress, store?.deloadPromptDismissedAt, store?.sessions, sch]);
 
+  // Return-from-break realign: a cycle plan advances by CALENDAR DATE and does
+  // NOT pause during vacation/sick (unlike the meso week counter, which excludes
+  // paused days). So coming back, the rotation has drifted from where you left
+  // off. Offer a one-tap realign to resume at your next day. Only for
+  // unversioned cycle plans — flex advances on action (never drifts), weekday
+  // plans are pinned to real weekdays, and versioned plans use a different
+  // anchor. Fires on the first app-open after returning, before you train again.
+  const realignNudgeShown = useRef(false);
+  const resyncTodayAfterRealign = useRef(false);
+  // After a realign changes cycleStartDate, todayStripIdx recomputes — pull the
+  // selected slot back onto the corrected today so the card doesn't get stuck
+  // showing "DAY X" instead of "TODAY".
+  useEffect(() => {
+    if (!resyncTodayAfterRealign.current) return;
+    resyncTodayAfterRealign.current = false;
+    if (!weekdayMode && !cycleWeekView) setSelectedSlot(todayStripIdx);
+  }, [store?.cycleStartDate]); // eslint-disable-line
+  useEffect(() => {
+    if (realignNudgeShown.current) return;
+    if (store?.statusMode || store?.inProgress) return;
+    if (!sch || !sch.days?.length) return;
+    if (LB.isFlexPlan(sch) || LB.isWeekdayPlan(sch) || sch.versions?.length) return;
+    if (!store?.cycleStartDate) return;
+
+    const periods = (store?.statusPeriods || []).filter(p => (p.mode === 'vacation' || p.mode === 'sick') && p.endedAt);
+    if (!periods.length) return;
+    const last = periods.reduce((a, b) => (new Date(a.endedAt) > new Date(b.endedAt) ? a : b));
+    const endedD = new Date(last.endedAt);
+    const todayStr = LB.todayISO();
+    const todayD = new Date(todayStr + 'T12:00:00');
+    const daysSinceReturn = Math.round((todayD - endedD) / 86400000);
+    if (daysSinceReturn < 0 || daysSinceReturn > 4) return; // only a fresh return
+
+    // Once trained on this plan since returning, they've resumed — don't nudge.
+    if ((store.sessions || []).some(s => s.ended && s.scheduleId === sch.id && new Date(s.ended).getTime() > endedD.getTime())) return;
+
+    const HANDLED_KEY = 'logbook-realign-handled';
+    let handled = null;
+    try { handled = localStorage.getItem(HANDLED_KEY); } catch (_) {}
+    if (handled === last.endedAt) return;
+
+    // Where they left off: last completed session on this plan up to the break,
+    // then the NEXT day in the rotation.
+    const lastSession = (store.sessions || [])
+      .filter(s => s.ended && s.scheduleId === sch.id && s.dayId && new Date(s.ended).getTime() <= endedD.getTime())
+      .sort((a, b) => new Date(b.ended) - new Date(a.ended))[0];
+    if (!lastSession) return;
+    const lastIdx = sch.days.findIndex(d => d.id === lastSession.dayId);
+    if (lastIdx < 0) return;
+    const len = sch.days.length;
+    const resumeIdx = (lastIdx + 1) % len;
+
+    // Already aligned (rotation happened to land right)? Nothing to do.
+    const start = new Date(store.cycleStartDate + 'T12:00:00');
+    const curIdx = ((Math.round((todayD - start) / 86400000) % len) + len) % len;
+    const markHandled = () => { try { localStorage.setItem(HANDLED_KEY, last.endedAt); } catch (_) {} };
+    if (curIdx === resumeIdx) { markHandled(); return; }
+
+    realignNudgeShown.current = true;
+    (async () => {
+      const nextName = sch.days[resumeIdx]?.name || 'your next day';
+      const yes = await confirm(
+        `Your plan counts by the calendar, so it kept advancing while you were away and has drifted from where you stopped. Want to pick up right where you left off? ${nextName} would be next.`,
+        { title: 'Welcome back! 👋', ok: 'Resume plan', cancel: 'Leave it', preventBackdropClose: true },
+      );
+      markHandled();
+      if (yes) {
+        // Anchor so today maps to resumeIdx: cyclePosFromStartDate = (today − start) % len.
+        const newStart = new Date(todayStr + 'T12:00:00');
+        newStart.setDate(newStart.getDate() - resumeIdx);
+        resyncTodayAfterRealign.current = true;
+        setStore(s => ({ ...s, cycleStartDate: LB.fmtISO(newStart) }));
+      }
+    })();
+  }, [store?.statusMode, store?.inProgress, store?.statusPeriods, store?.sessions, store?.cycleStartDate, sch]);
+
   const selectedDayCardioLogs = useMemo(() => {
     const dateKey = LB.fmtISO(sessionDate);
     return (store.cardioLogs || []).filter(l => l.date === dateKey);
@@ -2036,9 +2112,13 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
         ? (week.find(d => d.weekday === selectedWd)?.daysFromStart ?? null)
         : (currentCycleNum + weekOffset) * dayCount + selectedSlot;
     const firstEx = LB.findExercise(store, activeDay.items[0]?.exId);
-    // Flex sessions are always logged "now" — the selected slot is just a
-    // rotation position, never a calendar date (catch-ups date to today too).
-    const sessionDateISO = isFlex ? LB.todayISO() : LB.fmtISO(sessionDate);
+    // A live-started workout is trained NOW, so it must never be stamped with a
+    // future date. Flex is always "now" (the slot is just a rotation position);
+    // for a cycle/weekday plan a FUTURE slot (training ahead of schedule) also
+    // dates to today. Only a past slot (backfilling a missed day) keeps its own
+    // date. Without this, starting a forward slot stamped the session with the
+    // slot's future date — see Mike's "trained Jul 9" ticket.
+    const sessionDateISO = (isFlex || isFutureSlot) ? LB.todayISO() : LB.fmtISO(sessionDate);
     loggingRef.current = false;
     // No warmup ramp for bodyweight (no meaningful load to ramp) or cardio
     // (not a weighted movement at all) — offering "3 sets · Treadmill" with
