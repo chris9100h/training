@@ -1074,6 +1074,9 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
   const [editingDay, setEditingDay] = useStateS(null);
   const [mesoInfoOpen, setMesoInfoOpen] = useStateS(false);
   const [modifiersOpen, setModifiersOpen] = useStateS(false);
+  // Weekday-mode whole-day import: pick a source day, then a weekday to place it on.
+  const [importDayOpen, setImportDayOpen] = useStateS(false);
+  const [pendingImportDay, setPendingImportDay] = useStateS(null); // { name, items, migrateId } awaiting a weekday
 
   const reorderDays = (from, to) => {
     if (from === to) return;
@@ -1091,6 +1094,9 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
   const isActive = draft.id === store.activeScheduleId;
   const isWeekday = LB.isWeekdayPlan(draft);
   const isFlex = LB.isFlexPlan(draft);
+  // Weekday whole-day import is offered only when there's a source day to pull
+  // from and a free weekday slot to place it on (max 7 days).
+  const canImportWholeDay = store.schedules.some(s => (s.days || []).some(d => (d.items || []).length > 0)) && draft.days.length < 7;
 
   const toggleWeekdayEdit = (idx) => {
     setDraft(d => {
@@ -1434,6 +1440,17 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
                 </div>
               ))}
             </div>
+            {canImportWholeDay && (
+              <button onClick={() => setImportDayOpen(true)} style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                width: '100%', marginTop: 10, padding: '12px 14px', borderRadius: 4,
+                background: UI.goldFaint, border: `1px solid ${UI.goldSoft}`,
+                cursor: 'pointer', color: UI.gold, fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600,
+              }}>
+                <span>↩ Import day with history</span>
+                <span className="micro" style={{ color: UI.gold, opacity: 0.7 }}>exercises + progression →</span>
+              </button>
+            )}
           </div>
         ) : (
           <div>
@@ -1508,6 +1525,60 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
             setPickingType(false);
           }}
         />
+      )}
+      {/* Weekday whole-day import: pick a source day, then a weekday to place it on. */}
+      {importDayOpen && (
+        <DayCopyPicker
+          store={store}
+          schedule={null}
+          currentDayId={null}
+          multiSelect={false}
+          onClose={() => setImportDayOpen(false)}
+          onCopy={(sourceDay, migrateId) => {
+            // Deep-copy items + remap superset group ids so the new day never
+            // shares objects / group ids with the source day.
+            const gidMap = {};
+            const items = (sourceDay.items || []).map(it => {
+              const next = { ...it };
+              if (it.supersetGroup) { gidMap[it.supersetGroup] = gidMap[it.supersetGroup] || LB.uid(); next.supersetGroup = gidMap[it.supersetGroup]; }
+              return next;
+            });
+            setPendingImportDay({ name: sourceDay.name, items, migrateId });
+            setImportDayOpen(false);
+          }}
+        />
+      )}
+      {pendingImportDay && (
+        <MiniSheet onClose={() => setPendingImportDay(null)}>
+          <div className="label" style={{ color: UI.inkFaint, marginBottom: 14 }}>PLACE "{pendingImportDay.name}" ON</div>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {WEEKDAYS.map((wd, i) => {
+              const taken = draft.days.some(d => d.weekday === i);
+              return (
+                <button key={i} disabled={taken} onClick={() => {
+                  setDraft(d => {
+                    // Keep the source day's id (carries its session history) unless
+                    // that id already exists in this plan — then use a fresh one.
+                    const collides = d.days.some(x => x.id === pendingImportDay.migrateId);
+                    const id = (pendingImportDay.migrateId && !collides) ? pendingImportDay.migrateId : LB.uid();
+                    return { ...d, days: [...d.days, { id, name: pendingImportDay.name, weekday: i, items: pendingImportDay.items }] };
+                  });
+                  setPendingImportDay(null);
+                }} style={{
+                  width: 44, height: 44, borderRadius: 6,
+                  border: `1px solid ${taken ? UI.hairStrong : UI.goldSoft}`,
+                  background: taken ? 'transparent' : UI.goldFaint,
+                  color: taken ? UI.inkFaint : UI.gold,
+                  fontFamily: UI.fontNum, fontSize: 12, fontWeight: 600,
+                  cursor: taken ? 'not-allowed' : 'pointer', opacity: taken ? 0.4 : 1,
+                }}>{wd}</button>
+              );
+            })}
+          </div>
+          <div className="micro" style={{ color: UI.inkFaint, marginTop: 12, lineHeight: 1.6 }}>
+            Greyed-out weekdays already have a day.
+          </div>
+        </MiniSheet>
       )}
       {confirmEl}
 
