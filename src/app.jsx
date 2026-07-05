@@ -408,10 +408,22 @@ function App() {
           // edit (id in the persisted base AND local differs from base) so a
           // background refresh doesn't clobber a health edit made offline.
           const base = syncBase.current;
+          // Locally-deleted-but-unsynced rows (in base, gone from local): filter
+          // them out of fresh so the background refresh doesn't resurrect a log
+          // the user just deleted before the delete reached the server (audit
+          // B3 — the boot merge already does this; softRefresh was missing it).
+          const delDel = (baseRows, curRows) => {
+            if (!baseRows) return null;
+            const curIds = new Set((curRows || []).map(r => r.id));
+            return new Set(baseRows.map(r => r.id).filter(id => !curIds.has(id)));
+          };
+          const delDaily   = delDel(base?.dailyLogs,   s.dailyLogs);
+          const delCardio  = delDel(base?.cardioLogs,  s.cardioLogs);
+          const delGlucose = delDel(base?.glucoseLogs, s.glucoseLogs);
           return { ...s,
-            dailyLogs:   [...localOnlyDaily,   ...LB.mergeCollectionById(fresh.dailyLogs, s.dailyLogs, base?.dailyLogs)],
-            cardioLogs:  [...localOnlyCardio,  ...LB.mergeCollectionById(fresh.cardioLogs, s.cardioLogs, base?.cardioLogs)],
-            glucoseLogs: [...localOnlyGlucose, ...LB.mergeCollectionById(fresh.glucoseLogs || [], s.glucoseLogs, base?.glucoseLogs)],
+            dailyLogs:   [...localOnlyDaily,   ...LB.mergeCollectionById(fresh.dailyLogs, s.dailyLogs, base?.dailyLogs, delDaily)],
+            cardioLogs:  [...localOnlyCardio,  ...LB.mergeCollectionById(fresh.cardioLogs, s.cardioLogs, base?.cardioLogs, delCardio)],
+            glucoseLogs: [...localOnlyGlucose, ...LB.mergeCollectionById(fresh.glucoseLogs || [], s.glucoseLogs, base?.glucoseLogs, delGlucose)],
           };
         });
       }).catch(() => {});
@@ -619,9 +631,21 @@ function App() {
       LB.loadFromSupabase(uid)
         .then(fresh => {
           const cur = prevStore.current;
-          // fresh is the pristine server state — use it as the sync diff base
-          syncBase.current = fresh;
-          LB.saveBase(fresh, uid);
+          // fresh is the pristine server state — use it as the sync diff base.
+          // BUT sessions outside the history window come back with entries:[]
+          // (their sets aren't loaded), while the cache-first merge below
+          // restores their cached entries into the store. If the diff base kept
+          // entries:[] for them, every boot would diff the restored entries as
+          // "new" and re-upload all their sets stamped now() — clobbering newer
+          // cross-device edits and growing write load with account age (audit
+          // B1). Carry the last-synced entries (from the persisted base) into
+          // the diff base so _syncEntryRelational's per-set diff sees them
+          // unchanged and skips them; a genuine offline edit still differs and
+          // is pushed. First boot / no base → entries:[] fallback (one re-sync,
+          // then self-heals once the post-boot flush saves the merged base).
+          const diffBase = { ...fresh, sessions: LB.withCarriedWindowEntries(fresh.sessions, base?.sessions) };
+          syncBase.current = diffBase;
+          LB.saveBase(diffBase, uid);
           let merged = fresh;
           if (cur) {
             // Use `in` (not `??`) so an explicit local null — "session just

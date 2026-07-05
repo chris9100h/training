@@ -791,6 +791,34 @@ async function testAsync(name, fn) {
     assert.deepStrictEqual(result.map(v => v.validFrom), ['2026-07-05', '2026-06-01']);
   });
 
+  // ── withCarriedWindowEntries (audit B1: no re-upload of windowed sessions) ──
+  test('withCarriedWindowEntries: carries last-synced entries into a windowed (entries:[]) session', () => {
+    const fresh = [{ id: 's1', entries: [] }]; // server windowed it (sets not loaded)
+    const base = [{ id: 's1', entries: [{ exId: 'e', sets: [{ kg: 100, reps: 5 }] }] }];
+    const out = LB.withCarriedWindowEntries(fresh, base);
+    assert.deepStrictEqual(out[0].entries, base[0].entries);
+  });
+
+  test('withCarriedWindowEntries: leaves a session the server DID load (entries present) untouched', () => {
+    const serverEntries = [{ exId: 'e', sets: [{ kg: 110, reps: 5 }] }];
+    const fresh = [{ id: 's1', entries: serverEntries }];
+    const base = [{ id: 's1', entries: [{ exId: 'e', sets: [{ kg: 100, reps: 5 }] }] }];
+    const out = LB.withCarriedWindowEntries(fresh, base);
+    assert.strictEqual(out[0].entries, serverEntries); // server copy wins, not stale base
+  });
+
+  test('withCarriedWindowEntries: a windowed session unknown to the base keeps entries:[] (re-syncs once)', () => {
+    const fresh = [{ id: 's2', entries: [] }];
+    const base = [{ id: 's1', entries: [{ exId: 'e', sets: [{ kg: 100, reps: 5 }] }] }];
+    const out = LB.withCarriedWindowEntries(fresh, base);
+    assert.deepStrictEqual(out[0].entries, []);
+  });
+
+  test('withCarriedWindowEntries: no base (first boot) leaves everything as-is', () => {
+    const fresh = [{ id: 's1', entries: [] }];
+    assert.deepStrictEqual(LB.withCarriedWindowEntries(fresh, null), fresh);
+  });
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();

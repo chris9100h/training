@@ -2637,8 +2637,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         );
     const withBoosts = { ...mesoState, weightBoosts: newWeightBoosts };
     // If the last meso week just finished: bump completions + set pendingMeso2 so the
-    // home screen can offer Meso 2 after a deload (or immediately).
-    const finalMeso = isComplete
+    // home screen can offer Meso 2 after a deload (or immediately). isComplete is
+    // true for EVERY session of the final week, and this runs per session-end, so
+    // guard on pendingMeso2 to increment completions exactly once per block — else
+    // a second peak-week session (or a force-quit re-run) double-counts and the
+    // offer misreads "Meso 3" instead of "Meso 2" (audit C2). pendingMeso2 clears
+    // only when the user answers the offer, i.e. when the next block begins.
+    const finalMeso = (isComplete && !withBoosts.pendingMeso2)
       ? { ...withBoosts, completions: (withBoosts.completions ?? 0) + 1, pendingMeso2: true }
       : withBoosts;
     if (finalMeso) {

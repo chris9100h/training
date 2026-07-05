@@ -2173,6 +2173,24 @@ function mergeEntrySets(serverEntries, cachedEntries) {
   });
 }
 
+// Boot sync diff base: sessions outside the history window come back from the
+// server with entries:[] (their sets aren't loaded), while the cache-first merge
+// restores their cached entries into the store. Carry the last-synced entries
+// (from the persisted base) into the diff base for those windowed sessions so
+// the per-set diff sees them unchanged and doesn't re-upload every set with a
+// fresh updated_at each boot — which clobbers newer cross-device edits and grows
+// write load with account age (audit B1). A genuine offline edit still differs
+// from the carried base entries and is pushed as normal. Sessions the base
+// doesn't know (first boot / new) keep entries:[] and re-sync once, then heal.
+function withCarriedWindowEntries(freshSessions, baseSessions) {
+  const baseEntries = new Map((baseSessions || []).filter(s => (s.entries || []).length).map(s => [s.id, s.entries]));
+  return (freshSessions || []).map(s =>
+    (s.entries || []).length === 0 && baseEntries.has(s.id)
+      ? { ...s, entries: baseEntries.get(s.id) }
+      : s
+  );
+}
+
 function mergeSessions(freshSessions, curSessions, inProgressId, baseSessions = null, now = new Date()) {
   const baseIds = baseSessions ? new Set(baseSessions.map(s => s.id)) : null;
   // Sessions deleted locally: once confirmed synced (in base) but no longer in
@@ -3680,7 +3698,7 @@ window.LB = {
   subscribeWebPush, unsubscribeWebPush, getWebPushSubscription,
   QS_EMAILS, hasQuickSwitchSession, quickSwitch, saveQsName, getQsName,
   signIn, signUp, signOut, signInWithPasskey, registerPasskey, listPasskeys, deletePasskey, resetPassword, deleteAllData, exportBackup, importFromBackup, validateBackup,
-  loadFromSupabase, syncStore, mergeSessions, historyWindowCutoffISO,
+  loadFromSupabase, syncStore, mergeSessions, withCarriedWindowEntries, historyWindowCutoffISO,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
   uid, todayISO, fmtISO, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate,
   effReps, e1rm, isImprovement, isDecline, bestE1rmForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, latestBodyweight, inferCurrentExIdx, calcBlended,
