@@ -1408,12 +1408,12 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
         {isWeekday ? (
           <div>
             <span className="label">Training days</span>
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', margin: '10px 0 14px' }}>
+            <div style={{ display: 'flex', gap: 6, margin: '10px 0 14px' }}>
               {WEEKDAYS.map((wd, i) => {
                 const active = draft.days.some(d => d.weekday === i);
                 return (
                   <button key={i} onClick={() => toggleWeekdayEdit(i)} style={{
-                    width: 44, height: 44, borderRadius: 6,
+                    flex: 1, minWidth: 0, height: 44, borderRadius: 6,
                     border: `1px solid ${active ? UI.goldSoft : UI.hairStrong}`,
                     background: active ? UI.goldFaint : 'transparent',
                     color: active ? UI.gold : UI.inkFaint,
@@ -1551,7 +1551,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
       {pendingImportDay && (
         <MiniSheet onClose={() => setPendingImportDay(null)}>
           <div className="label" style={{ color: UI.inkFaint, marginBottom: 14 }}>PLACE "{pendingImportDay.name}" ON</div>
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: 6 }}>
             {WEEKDAYS.map((wd, i) => {
               const taken = draft.days.some(d => d.weekday === i);
               return (
@@ -1565,18 +1565,20 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
                   });
                   setPendingImportDay(null);
                 }} style={{
-                  width: 44, height: 44, borderRadius: 6,
-                  border: `1px solid ${taken ? UI.hairStrong : UI.goldSoft}`,
-                  background: taken ? 'transparent' : UI.goldFaint,
-                  color: taken ? UI.inkFaint : UI.gold,
-                  fontFamily: UI.fontNum, fontSize: 12, fontWeight: 600,
-                  cursor: taken ? 'not-allowed' : 'pointer', opacity: taken ? 0.4 : 1,
+                  // Mirror the "Training days" grid: accent = already has a day
+                  // (here locked/dimmed), grey = free — tap a free one to place.
+                  flex: 1, minWidth: 0, height: 44, borderRadius: 6,
+                  border: `1px solid ${taken ? UI.goldSoft : UI.hairStrong}`,
+                  background: taken ? UI.goldFaint : 'transparent',
+                  color: taken ? UI.gold : UI.inkFaint,
+                  fontFamily: UI.fontNum, fontSize: 12, fontWeight: taken ? 600 : 400,
+                  cursor: taken ? 'not-allowed' : 'pointer', opacity: taken ? 0.5 : 1,
                 }}>{wd}</button>
               );
             })}
           </div>
           <div className="micro" style={{ color: UI.inkFaint, marginTop: 12, lineHeight: 1.6 }}>
-            Greyed-out weekdays already have a day.
+            Highlighted weekdays already have a day — tap a free one.
           </div>
         </MiniSheet>
       )}
