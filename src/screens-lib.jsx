@@ -606,7 +606,6 @@ function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = ''
   const [movementType, setMovementType] = useStateL('bilateral');
   const [noWeightReps, setNoWeightReps] = useStateL(false);
   const [equipment, setEquipment] = useStateL('barbell_dual');
-  const [progressionReps, setProgressionReps] = useStateL(null);
   const [showSizeInfo, setShowSizeInfo] = useStateL(false);
   const [showBodyweightHint, setShowBodyweightHint] = useStateL(false);
   const toggleTag = (m) => setSelectedTags(t => t.includes(m) ? t.filter(x => x !== m) : [...t, m]);
@@ -619,7 +618,7 @@ function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = ''
   };
   const save = () => {
     if (!name.trim()) return;
-    const ex = { id: LB.uid(), name: name.trim(), tags: selectedTags, category: category || null, unilateral: movementType === 'unilateral', movement_type: movementType, no_weight_reps: noWeightReps, equipment: equipment || null, note: '', progression_reps: progressionReps ?? null };
+    const ex = { id: LB.uid(), name: name.trim(), tags: selectedTags, category: category || null, unilateral: movementType === 'unilateral', movement_type: movementType, no_weight_reps: noWeightReps, equipment: equipment || null, note: '', progression_reps: null };
     setStore(s => ({ ...s, exercises: [...s.exercises, ex] }));
     onCreated?.(ex.id);
     onClose();
@@ -627,7 +626,7 @@ function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = ''
   // Guard against an accidental backdrop tap wiping a half-filled form.
   const isDirty = () =>
     name.trim() !== initialName.trim() || selectedTags.length > 0 || category != null ||
-    movementType !== 'bilateral' || noWeightReps || progressionReps != null || equipment !== 'barbell_dual';
+    movementType !== 'bilateral' || noWeightReps || equipment !== 'barbell_dual';
   const requestClose = async () => {
     if (isDirty() && !await confirm('Your new exercise will be discarded.', { title: 'Leave without saving?', ok: 'Discard', cancel: 'Keep editing', danger: true })) return;
     onClose();
@@ -689,18 +688,6 @@ function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = ''
             </div>
           )}
         </div>
-        <div>
-          <span className="label">Rep target</span>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
-            <Chip on={progressionReps != null} onClick={() => setProgressionReps(v => v == null ? 12 : null)}>
-              {progressionReps != null ? 'On' : 'Off'}
-            </Chip>
-            {progressionReps != null
-              ? <Stepper value={progressionReps} onChange={v => setProgressionReps(Math.max(1, Math.round(v)))} step={1} min={1} />
-              : <span style={{ color: UI.inkFaint, fontSize: 13 }}>Uses planned reps per day</span>
-            }
-          </div>
-        </div>
         <Btn onClick={save} style={{ opacity: name.trim() ? 1 : 0.4 }} disabled={!name.trim()}>Create</Btn>
       </div>
     </Sheet>
@@ -739,7 +726,6 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
   const [editMovementType, setEditMovementType] = useStateL(autoEdit ? (ex.movement_type ?? (ex.unilateral ? 'unilateral' : 'bilateral')) : 'bilateral');
   const [editNoWeightReps, setEditNoWeightReps] = useStateL(autoEdit ? !!ex.no_weight_reps : false);
   const [editEquipment, setEditEquipment] = useStateL(autoEdit ? (ex.equipment || null) : null);
-  const [editProgressionReps, setEditProgressionReps] = useStateL(autoEdit ? (ex.progression_reps ?? null) : null);
   const [editYoutubeUrl, setEditYoutubeUrl] = useStateL(autoEdit ? (ex.youtube_url || '') : '');
   const [editNote, setEditNote] = useStateL(false);
   const [noteVal, setNoteVal] = useStateL(ex.note || '');
@@ -762,20 +748,15 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
     }
   };
 
-  const startEdit = () => { setEditName(ex.name); setEditTags([...(ex.tags || [])]); setEditCategory(ex.category || null); setEditMovementType(ex.movement_type ?? (ex.unilateral ? 'unilateral' : 'bilateral')); setEditNoWeightReps(!!ex.no_weight_reps); setEditEquipment(ex.equipment || null); setEditProgressionReps(ex.progression_reps ?? null); setEditYoutubeUrl(ex.youtube_url || ''); setEditMode(true); };
+  const startEdit = () => { setEditName(ex.name); setEditTags([...(ex.tags || [])]); setEditCategory(ex.category || null); setEditMovementType(ex.movement_type ?? (ex.unilateral ? 'unilateral' : 'bilateral')); setEditNoWeightReps(!!ex.no_weight_reps); setEditEquipment(ex.equipment || null); setEditYoutubeUrl(ex.youtube_url || ''); setEditMode(true); };
   const cancelEdit = () => { if (autoEdit) advanceQueue(); else setEditMode(false); };
   const saveEdit = () => {
     if (!editName.trim()) return;
-    const newProgressionReps = editProgressionReps ?? null;
-    const repsChanged = newProgressionReps !== (ex.progression_reps ?? null);
     setStore(s => {
       const exercises = s.exercises.map(e => e.id === exId
-        ? { ...e, name: editName.trim(), tags: editTags, category: editCategory || null, unilateral: editMovementType === 'unilateral', movement_type: editMovementType, no_weight_reps: editNoWeightReps, equipment: editEquipment || null, progression_reps: newProgressionReps, youtube_url: sanitizeYoutubeUrl(editYoutubeUrl) }
+        ? { ...e, name: editName.trim(), tags: editTags, category: editCategory || null, unilateral: editMovementType === 'unilateral', movement_type: editMovementType, no_weight_reps: editNoWeightReps, equipment: editEquipment || null, youtube_url: sanitizeYoutubeUrl(editYoutubeUrl) }
         : e);
-      const schedules = (repsChanged && newProgressionReps != null)
-        ? s.schedules.map(sch => ({ ...sch, days: sch.days.map(day => ({ ...day, items: (day.items || []).map(it => it.exId === exId ? { ...it, reps: newProgressionReps } : it) })) }))
-        : s.schedules;
-      return { ...s, exercises, schedules };
+      return { ...s, exercises };
     });
     setEditMode(false);
     if (autoEdit) advanceQueue();
@@ -947,18 +928,6 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
                   <Chip on={!editNoWeightReps} onClick={() => setEditNoWeightReps(false)}>Weight & Reps</Chip>
                 </div>
               )}
-            </div>
-            <div>
-              <span className="label">Rep target</span>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
-                <Chip on={editProgressionReps != null} onClick={() => setEditProgressionReps(v => v == null ? 12 : null)}>
-                  {editProgressionReps != null ? 'On' : 'Off'}
-                </Chip>
-                {editProgressionReps != null
-                  ? <Stepper value={editProgressionReps} onChange={v => setEditProgressionReps(Math.max(1, Math.round(v)))} step={1} min={1} />
-                  : <span style={{ color: UI.inkFaint, fontSize: 13 }}>Uses planned reps per day</span>
-                }
-              </div>
             </div>
             <Field label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><i className="fa-brands fa-youtube" style={{ color: '#FF0000', fontSize: 12 }} />Form video</span>}>
               <TextInput value={editYoutubeUrl} onChange={setEditYoutubeUrl} placeholder="YouTube link (optional)" />

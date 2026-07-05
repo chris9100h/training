@@ -726,7 +726,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     const perSetVal = perSet && perSet.length > 1
       ? (perSet[workingSetIdx] ?? perSet[perSet.length - 1])
       : null;
-    const base = (perSetVal ?? exercise?.progression_reps ?? entry?.plannedReps) ?? 0;
+    const base = (perSetVal ?? entry?.plannedReps) ?? 0;
     const target = LB.progressionCeilingFor(store, base, perSetVal ? null : entry?.plannedRepsMax, entry?.plannedProgressionOffset);
     return target > 0 ? target : null;
   };

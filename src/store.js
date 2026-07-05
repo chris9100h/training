@@ -2354,7 +2354,7 @@ function progressionSuggestion(store, exId, dayId, plannedReps, plannedRepsPerSe
     const perSet = plannedRepsPerSet && plannedRepsPerSet.length > 1
       ? (plannedRepsPerSet[i] ?? plannedRepsPerSet[plannedRepsPerSet.length - 1])
       : null;
-    const baseReps = perSet ?? ex?.progression_reps ?? plannedReps;
+    const baseReps = perSet ?? plannedReps;
     // A Range-mode exercise's own repsMax is the ceiling to hit, replacing
     // the global range add-on for that exercise (but only when repsPerSet
     // isn't itself in play — Range and Per Set are mutually exclusive).
@@ -2369,7 +2369,7 @@ function progressionSuggestion(store, exId, dayId, plannedReps, plannedRepsPerSe
   const cappedKg = maxKg ? Math.min(newKg, maxKg) : newKg;
   if (cappedKg <= refKg) return null;
 
-  const baseRepsFirst = plannedRepsPerSet?.[0] ?? ex?.progression_reps ?? plannedReps;
+  const baseRepsFirst = plannedRepsPerSet?.[0] ?? plannedReps;
   return { kg: cappedKg, reps: baseRepsFirst ?? null };
 }
 
