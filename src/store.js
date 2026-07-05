@@ -572,7 +572,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
       backup.mesoStates.map(m => ({
         id: userId + '_' + m.scheduleId, user_id: userId, schedule_id: m.scheduleId,
         weeks: m.weeks, start_date: m.startDate ?? null,
-        start_cycle_index: m.startCycleIndex ?? 0,
+        start_cycle_index: m.startCycleIndex ?? 0, started_at: m.startedAt ?? null,
         deltas: remapExDayKeyed(m.deltas), weight_boosts: remapExDayKeyed(m.weightBoosts),
         joint_flags: remapExKeyed(m.jointFlags), pump_low_counts: remapExKeyed(m.pumpLowCounts),
         growth_counts: remapExDayKeyed(m.growthCounts),
@@ -752,7 +752,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     // Reusable workout templates (migration 0107)
     _supabase.from('zane_workout_templates').select('id, name, exercises, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
     // Mesocycle state per plan — replaces localStorage logbook-meso-state (migration 0120)
-    _supabase.from('zane_meso_states').select('id, schedule_id, weeks, start_date, start_cycle_index, deltas, joint_flags, pump_low_counts, weight_boosts, growth_counts, completions, pending_meso2, updated_at').eq('user_id', userId),
+    _supabase.from('zane_meso_states').select('id, schedule_id, weeks, start_date, start_cycle_index, started_at, deltas, joint_flags, pump_low_counts, weight_boosts, growth_counts, completions, pending_meso2, updated_at').eq('user_id', userId),
   ];
   const [profileRes, exRes, schRes, sessRes, settRes, skipsRes, entriesRes,
          bestsRes, sessionStatsRes,
@@ -939,6 +939,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     mesoStates: (mesoStatesRes?.data || []).map(m => ({
       id: m.id, scheduleId: m.schedule_id, weeks: m.weeks,
       startDate: m.start_date, startCycleIndex: m.start_cycle_index ?? 0,
+      startedAt: m.started_at ?? null,
       deltas: m.deltas ?? {}, jointFlags: m.joint_flags ?? {},
       pumpLowCounts: m.pump_low_counts ?? {}, weightBoosts: m.weight_boosts ?? {},
       growthCounts: m.growth_counts ?? {},
@@ -1347,6 +1348,7 @@ async function syncStore(prev, next, userId) {
     if (upsert.length) ops.push(_supabase.rpc('sync_meso_states_batch', { p_states: upsert.map(m => ({
       id: m.id, schedule_id: m.scheduleId, weeks: m.weeks,
       start_date: m.startDate, start_cycle_index: m.startCycleIndex ?? 0,
+      started_at: m.startedAt ?? null,
       deltas: m.deltas ?? {}, joint_flags: m.jointFlags ?? {},
       pump_low_counts: m.pumpLowCounts ?? {}, weight_boosts: m.weightBoosts ?? {},
       growth_counts: m.growthCounts ?? {},

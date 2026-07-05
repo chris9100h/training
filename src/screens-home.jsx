@@ -1659,6 +1659,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
         weeks: freshSch.mesocycle_weeks,
         startDate: alignedStartDate,
         startCycleIndex: alignedStartIdx,
+        startedAt: new Date().toISOString(), // block-start anchor (flex week count); persisted since Migration 0138
         deltas: {}, jointFlags: {}, pumpLowCounts: {}, weightBoosts: {}, growthCounts: {},
         completions: existing?.completions ?? 0,
         updatedAt: new Date().toISOString(),
