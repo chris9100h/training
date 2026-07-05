@@ -16,6 +16,16 @@
    Entry shape: { id: string, title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.484',
+    title: 'Whole Days, Any Plan',
+    items: [
+      "📅 Weekday plans can now import a whole day — not just its exercises. Pull your leg day (history and all) from another plan or a template, tap which weekday it lands on, done. Cycle plans could already do this; weekdays finally caught up.",
+      "🔁 Importing a day across plans now actually sticks. Before, it'd pull the exercises in and then quietly drop them the second you hit Save. Fixed — what you import is what you keep.",
+      "🎯 Your rep target now rides along in training. Single, range, or per-set — it shows right under the exercise name the whole time, so you always know what you're chasing, even once Smart Progression starts bumping the weight.",
+      "🛟 A few things under the hood so nothing slips through the cracks: support messages can't silently fail to send anymore, and your logged sets are a bit safer when you train across multiple devices.",
+    ],
+  },
+  {
     id: 'v2.482',
     title: 'Reps, Your Rules',
     items: [
