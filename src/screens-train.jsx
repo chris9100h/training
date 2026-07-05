@@ -727,7 +727,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       ? (perSet[workingSetIdx] ?? perSet[perSet.length - 1])
       : null;
     const base = (perSetVal ?? exercise?.progression_reps ?? entry?.plannedReps) ?? 0;
-    const target = base + (store.settings?.progressionRangeTop ?? 4);
+    // Range-mode exercises supply their own ceiling instead of the global add-on.
+    const target = (!perSetVal && entry?.plannedRepsMax != null) ? entry.plannedRepsMax : base + (store.settings?.progressionRangeTop ?? 4);
     return target > 0 ? target : null;
   };
 
@@ -917,7 +918,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       const prevWorkingSets = (last?.entry?.sets || []).filter(s => !s.warmup);
       const prevSet = wIdx >= 0 ? prevWorkingSets[wIdx] : undefined;
       // Mirror buildSeedSets exactly
-      const suggestion = LB.progressionSuggestion(store, entry.exId, session.dayId, entry.plannedReps, entry.plannedRepsPerSet, last);
+      const suggestion = LB.progressionSuggestion(store, entry.exId, session.dayId, entry.plannedReps, entry.plannedRepsPerSet, last, entry.plannedRepsMax);
       const lastReps = prevSet ? LB.effReps(prevSet) : null;
       const refReps = suggestion
         ? (suggestion.reps ?? null)
@@ -4370,7 +4371,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   {progressionTarget && (
                     <div className="micro" style={{ color: UI.gold, opacity: 0.65, marginTop: 3 }}>≥{progressionTarget} reps · next weight</div>
                   )}
-                  {!progressionTarget && entry.plannedRepsPerSet && entry.plannedRepsPerSet.length > 1 && (() => {
+                  {!progressionTarget && entry.plannedRepsMax != null && (
+                    <div className="micro" style={{ color: UI.inkFaint, marginTop: 3 }}>Target: {entry.plannedReps}–{entry.plannedRepsMax} reps</div>
+                  )}
+                  {!progressionTarget && entry.plannedRepsMax == null && entry.plannedRepsPerSet && entry.plannedRepsPerSet.length > 1 && (() => {
                     const workingIdx = bgSetIdx - warmupCount;
                     const target = entry.plannedRepsPerSet[workingIdx] ?? entry.plannedRepsPerSet[entry.plannedRepsPerSet.length - 1];
                     return <div className="micro" style={{ color: UI.inkFaint, marginTop: 3 }}>Target: {target} reps</div>;

@@ -2988,7 +2988,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                             </span>
                           </div>
                           <span className="num" style={{ fontSize: 13, color: UI.inkSoft, flexShrink: 0 }}>
-                            {it.sets} × {it.reps || '—'}
+                            {it.sets} × {it.repsMax != null ? `${it.reps}-${it.repsMax}` : (it.reps || '—')}
                           </span>
                         </div>
                       </div>

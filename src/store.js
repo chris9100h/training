@@ -677,6 +677,7 @@ function mapEntryRows(entryRows) {
     plannedSets: e.planned_sets,
     plannedReps: e.planned_reps,
     plannedRepsPerSet: e.planned_reps_per_set || null,
+    plannedRepsMax: e.planned_reps_max ?? null,
     note: e.note || '',
     supersetGroup: e.superset_group || null,
     sets: (e.sets || [])
@@ -1127,6 +1128,7 @@ async function _syncEntryRelational(sessions, userId, prevSessions, onStep) {
         planned_sets: e.plannedSets || null,
         planned_reps: e.plannedReps || null,
         planned_reps_per_set: e.plannedRepsPerSet || null,
+        planned_reps_max: e.plannedRepsMax || null,
         note: e.note || '',
         superset_group: e.supersetGroup || null,
       });
@@ -2296,7 +2298,7 @@ function subscribeToChanges(userId, onCoachingNote, onCoachingInvite) {
 // Returns { kg, reps } suggestion when all last sets hit top of rep range, null otherwise.
 // refOverride: a pre-fetched { entry: { sets } } reference (fetchSeedEntries) —
 // used when the exercise's recent history lives outside the boot window.
-function progressionSuggestion(store, exId, dayId, plannedReps, plannedRepsPerSet, refOverride) {
+function progressionSuggestion(store, exId, dayId, plannedReps, plannedRepsPerSet, refOverride, plannedRepsMax) {
   if (!store.settings?.smartProgression) return null;
   const ex = findExercise(store, exId);
   const catCfg = ex?.equipment ? (store.settings?.equipmentConfig?.[ex.equipment] ?? {}) : {};
@@ -2322,7 +2324,11 @@ function progressionSuggestion(store, exId, dayId, plannedReps, plannedRepsPerSe
       ? (plannedRepsPerSet[i] ?? plannedRepsPerSet[plannedRepsPerSet.length - 1])
       : null;
     const baseReps = perSet ?? ex?.progression_reps ?? plannedReps;
-    return (effReps(s) ?? 0) >= (baseReps ?? 0) + range;
+    // A Range-mode exercise's own repsMax is the ceiling to hit, replacing
+    // the global range add-on for that exercise (but only when repsPerSet
+    // isn't itself in play — Range and Per Set are mutually exclusive).
+    const ceiling = (!perSet && plannedRepsMax != null) ? plannedRepsMax : (baseReps ?? 0) + range;
+    return (effReps(s) ?? 0) >= ceiling;
   });
   if (!allHitTop) return null;
 

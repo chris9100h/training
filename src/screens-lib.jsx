@@ -2238,6 +2238,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
       sets: e.plannedSets || (e.sets || []).filter(st => !st.warmup).length || 3,
       reps: e.plannedReps ?? null,
       repsPerSet: e.plannedRepsPerSet ?? null,
+      repsMax: e.plannedRepsMax ?? null,
       supersetGroup: e.supersetGroup ?? null,
     }));
     const tpl = { id: LB.uid(), name, exercises, createdAt: new Date().toISOString() };

@@ -547,7 +547,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
                 {(todayDay?.items || []).filter(i => i.exId).map((item, idx) => {
                   const ex = (clientStore.exercises || []).find(e => e.id === item.exId);
                   const last = LB.bestRecentEntry(clientStore, item.exId, todayDay.id);
-                  const suggestion = LB.progressionSuggestion(clientStore, item.exId, todayDay.id, item.reps);
+                  const suggestion = LB.progressionSuggestion(clientStore, item.exId, todayDay.id, item.reps, item.repsPerSet || null, undefined, item.repsMax || null);
                   const bodyweightKg = ex?.equipment === 'bodyweight' ? LB.latestBodyweight(clientStore) : null;
                   const seeds = LB.buildSeedSets(item, last, suggestion, ex?.unilateral, clientStore.settings?.smartProgression, bodyweightKg, clientStore.statusMode === 'deload');
                   const hasWeight = seeds.some(s => s.kg != null);
@@ -556,7 +556,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
                       <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 6 }}>
                         <div style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>{ex?.name || item.exId}</div>
                         {item.sets && item.reps && (
-                          <span className="micro" style={{ color: UI.inkFaint }}>{item.sets} × {item.reps}</span>
+                          <span className="micro" style={{ color: UI.inkFaint }}>{item.sets} × {item.repsMax != null ? `${item.reps}-${item.repsMax}` : item.reps}</span>
                         )}
                       </div>
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>

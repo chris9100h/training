@@ -592,7 +592,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId })
         // disagree with what actually gets seeded on a fresh device/reinstall.
         const seedRef = seedRefs[it.exId];
         const last = seedRef ?? LB.bestRecentEntry(store, it.exId, day.id);
-        const suggestion = LB.progressionSuggestion(store, it.exId, day.id, it.reps, it.repsPerSet || null, seedRef);
+        const suggestion = LB.progressionSuggestion(store, it.exId, day.id, it.reps, it.repsPerSet || null, seedRef, it.repsMax || null);
         const bodyweightKg = ex?.equipment === 'bodyweight' ? LB.latestBodyweight(store) : null;
         const itAdj = (typeof applyMesoSetDeltaFromState === 'function') ? applyMesoSetDeltaFromState(it, day.id, resolvedMeso) : it;
         const weightBoost = mesoBoosts?.[it.exId + '_' + day.id] ?? null;
@@ -998,6 +998,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId })
                               const ex = LB.findExercise(store, it.exId);
                               const label = it.repsPerSet && it.repsPerSet.length > 1
                                 ? it.repsPerSet.join('/')
+                                : it.repsMax != null ? `${it.reps}-${it.repsMax}`
                                 : ex?.no_weight_reps ? `${it.sets}×` : `${it.sets}×${it.reps}`;
                               const nextIt = items[k + 1];
                               const prevIt = items[k - 1];
@@ -1897,7 +1898,7 @@ function DayCopyPicker({ store, schedule, currentDayId, onClose, onCopy, multiSe
   const importTemplate = (t) => {
     const items = normalizeSupersets((t.exercises || [])
       .filter(it => LB.findExercise(store, it.exId))
-      .map(it => ({ exId: it.exId, sets: it.sets || 3, reps: it.reps ?? 8, ...(it.repsPerSet ? { repsPerSet: it.repsPerSet } : {}), ...(it.supersetGroup ? { supersetGroup: it.supersetGroup } : {}) })));
+      .map(it => ({ exId: it.exId, sets: it.sets || 3, reps: it.reps ?? 8, ...(it.repsPerSet ? { repsPerSet: it.repsPerSet } : {}), ...(it.repsMax != null ? { repsMax: it.repsMax } : {}), ...(it.supersetGroup ? { supersetGroup: it.supersetGroup } : {}) })));
     const day = { id: LB.uid(), name: t.name, items };
     if (multiSelect) onCopy([{ day, migrateId: undefined }]);
     else onCopy(day, undefined);
@@ -2090,22 +2091,28 @@ function DayCopyPicker({ store, schedule, currentDayId, onClose, onCopy, multiSe
 }
 
 // ─── Day editor (exercises within a day) ─────────────────────────────
-function ExerciseItemEditor({ item, exName, isCheckboxOnly, onClose, onSave }) {
+function ExerciseItemEditor({ item, exName, isCheckboxOnly, queuePos, queueTotal, onClose, onSave }) {
   const hasVariable = item.repsPerSet && item.repsPerSet.length > 1;
-  const [mode, setMode] = useStateS(hasVariable ? 'variable' : 'uniform');
+  const hasRange = !hasVariable && item.repsMax != null;
+  const [mode, setMode] = useStateS(hasVariable ? 'variable' : hasRange ? 'range' : 'uniform');
   const [sets, setSetsRaw] = useStateS(item.sets);
+  // Doubles as the range floor when mode === 'range'.
   const [uniformReps, setUniformReps] = useStateS(item.reps ?? 8);
+  const [rangeMax, setRangeMax] = useStateS(item.repsMax ?? (item.reps ?? 8) + 4);
   const [repsPerSet, setRepsPerSet] = useStateS(
     hasVariable ? item.repsPerSet : Array.from({ length: item.sets }, () => item.reps ?? 8)
   );
   const [note, setNote] = useStateS(item.note || '');
 
   const switchMode = (m) => {
-    if (m === 'variable' && mode === 'uniform') {
+    if (m === 'variable' && mode !== 'variable') {
       setRepsPerSet(Array.from({ length: sets }, () => uniformReps));
     }
-    if (m === 'uniform' && mode === 'variable') {
+    if (mode === 'variable' && m !== 'variable') {
       setUniformReps(repsPerSet[0] ?? 8);
+    }
+    if (m === 'range' && mode === 'variable') {
+      setRangeMax(Math.max(...repsPerSet));
     }
     setMode(m);
   };
@@ -2122,15 +2129,23 @@ function ExerciseItemEditor({ item, exName, isCheckboxOnly, onClose, onSave }) {
     }
   };
 
+  const handleMinChange = (v) => {
+    const n = Math.max(1, Math.round(v));
+    setUniformReps(n);
+    if (rangeMax < n) setRangeMax(n);
+  };
+
   const handleSave = () => {
     if (isCheckboxOnly) {
-      onSave({ sets, reps: 0, repsPerSet: undefined, note });
+      onSave({ sets, reps: 0, repsPerSet: undefined, repsMax: undefined, note });
       return;
     }
     if (mode === 'variable') {
-      onSave({ sets, reps: repsPerSet[0] ?? uniformReps, repsPerSet, note });
+      onSave({ sets, reps: repsPerSet[0] ?? uniformReps, repsPerSet, repsMax: undefined, note });
+    } else if (mode === 'range') {
+      onSave({ sets, reps: uniformReps, repsPerSet: undefined, repsMax: rangeMax, note });
     } else {
-      onSave({ sets, reps: uniformReps, repsPerSet: undefined, note });
+      onSave({ sets, reps: uniformReps, repsPerSet: undefined, repsMax: undefined, note });
     }
   };
 
@@ -2146,9 +2161,13 @@ function ExerciseItemEditor({ item, exName, isCheckboxOnly, onClose, onSave }) {
 
   return (
     <Sheet open={true} onClose={onClose} title={exName}>
+      {queueTotal > 1 && (
+        <div className="micro" style={{ color: UI.inkFaint, marginBottom: 12 }}>Exercise {queuePos} / {queueTotal}</div>
+      )}
       {/* Mode toggle — hidden for checkbox-only exercises */}
       {!isCheckboxOnly && <div style={{ display: 'flex', gap: 8, marginBottom: 24 }}>
         <button style={toggleStyle(mode === 'uniform')} onClick={() => switchMode('uniform')}>Uniform</button>
+        <button style={toggleStyle(mode === 'range')} onClick={() => switchMode('range')}>Range</button>
         <button style={toggleStyle(mode === 'variable')} onClick={() => switchMode('variable')}>Per Set</button>
       </div>}
 
@@ -2170,6 +2189,21 @@ function ExerciseItemEditor({ item, exName, isCheckboxOnly, onClose, onSave }) {
               <Stepper value={uniformReps} onChange={v => setUniformReps(Math.max(1, Math.round(v)))} step={1} min={1} />
             </div>
           </div>
+        ) : mode === 'range' ? (
+          <>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <span className="label" style={{ width: 36, textAlign: 'right', flexShrink: 0 }}>Min</span>
+              <div style={{ flex: 1 }}>
+                <Stepper value={uniformReps} onChange={handleMinChange} step={1} min={1} />
+              </div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <span className="label" style={{ width: 36, textAlign: 'right', flexShrink: 0 }}>Max</span>
+              <div style={{ flex: 1 }}>
+                <Stepper value={rangeMax} onChange={v => setRangeMax(Math.max(uniformReps, Math.round(v)))} step={1} min={uniformReps} />
+              </div>
+            </div>
+          </>
         ) : (
           repsPerSet.map((r, i) => (
             <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -2217,6 +2251,7 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
   const [addingEx, setAddingEx] = useStateS(false);
   const [copyingFrom, setCopyingFrom] = useStateS(false);
   const [editingItem, setEditingItem] = useStateS(null);
+  const [editQueue, setEditQueue] = useStateS(null); // { indices: number[], pos: number } while stepping through newly added exercises
   const [pickingType, setPickingType] = useStateS(false);
   const [confirmEl, confirm] = useConfirm();
   const initialDay = React.useRef(JSON.stringify(day));
@@ -2256,8 +2291,23 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
     })};
   });
   const removeItem = (idx) => setDraft(d => ({ ...d, items: normalizeSupersets(d.items.filter((_, i) => i !== idx)) }));
+  // Advances the add-exercise queue to the next item, or ends it once exhausted.
+  const advanceEditQueue = () => {
+    if (!editQueue) { setEditingItem(null); return; }
+    const nextPos = editQueue.pos + 1;
+    if (nextPos < editQueue.indices.length) {
+      setEditQueue(q => ({ ...q, pos: nextPos }));
+      setEditingItem(editQueue.indices[nextPos]);
+    } else {
+      setEditQueue(null);
+      setEditingItem(null);
+    }
+  };
+  const saveEditor = (patch) => { updateItem(editingItem, patch); advanceEditQueue(); };
+  const closeEditor = () => advanceEditQueue();
   const addExercise = (exIds) => {
     const ids = Array.isArray(exIds) ? exIds : [exIds];
+    const startIdx = draft.items.length;
     const newItems = ids.map(exId => {
       const ex = LB.findExercise(store, exId);
       const isCardioEx = ex?.movement_type === 'cardio';
@@ -2266,6 +2316,10 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
     });
     setDraft(d => ({ ...d, items: [...d.items, ...newItems] }));
     setAddingEx(false);
+    // Step through each newly added exercise's sets/reps editor in sequence.
+    const indices = ids.map((_, i) => startIdx + i);
+    setEditQueue({ indices, pos: 0 });
+    setEditingItem(indices[0]);
   };
   const copyItemsFromDay = (sourceDay, migrateId) => {
     // Deep-copy each item and remap superset group ids — a shallow spread
@@ -2400,7 +2454,7 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
                     padding: '3px 8px', whiteSpace: 'nowrap',
                     display: 'flex', alignItems: 'center', gap: 5,
                   }}>
-                    <span>{it.repsPerSet && it.repsPerSet.length > 1 ? it.repsPerSet.join('/') : ex?.no_weight_reps ? `${it.sets}×` : `${it.sets}×${it.reps}`}</span>
+                    <span>{it.repsPerSet && it.repsPerSet.length > 1 ? it.repsPerSet.join('/') : it.repsMax != null ? `${it.reps}-${it.repsMax}` : ex?.no_weight_reps ? `${it.sets}×` : `${it.sets}×${it.reps}`}</span>
                     <i className="fa fa-pencil" style={{ fontSize: 9, opacity: 0.7 }} />
                   </div>
                   <button data-reorder-ignore="true" onClick={e => { e.stopPropagation(); removeItem(i); }} style={{ ...dayEditIconBtn, color: UI.inkFaint, fontSize: 16 }}>×</button>
@@ -2434,11 +2488,14 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
 
       {editingItem !== null && (
         <ExerciseItemEditor
+          key={editingItem}
           item={draft.items[editingItem]}
           exName={LB.findExercise(store, draft.items[editingItem]?.exId)?.name || '—'}
           isCheckboxOnly={!!LB.findExercise(store, draft.items[editingItem]?.exId)?.no_weight_reps}
-          onClose={() => setEditingItem(null)}
-          onSave={(patch) => { updateItem(editingItem, patch); setEditingItem(null); }}
+          queuePos={editQueue ? editQueue.pos + 1 : undefined}
+          queueTotal={editQueue ? editQueue.indices.length : undefined}
+          onClose={closeEditor}
+          onSave={saveEditor}
         />
       )}
       {addingEx && (
