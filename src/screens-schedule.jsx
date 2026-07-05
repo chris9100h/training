@@ -1012,7 +1012,6 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId })
                                 }}>
                                   <div style={{ flex: 1, minWidth: 0 }}>
                                     <div style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi }}>{ex?.name || '—'}</div>
-                                    {it.note && <div className="micro" style={{ color: UI.inkFaint, marginTop: 2, fontStyle: 'italic' }}>{it.note}</div>}
                                   </div>
                                   <span className="num" style={{
                                     fontSize: 12, color: UI.gold, background: UI.goldFaint,
@@ -2103,7 +2102,6 @@ function ExerciseItemEditor({ item, exName, isCheckboxOnly, queuePos, queueTotal
   // across Uniform/Per Set switches. null = inherit the global setting,
   // 0 = explicitly off, N = explicitly on with a +N reps ceiling.
   const [progOverride, setProgOverride] = useStateS(item.progressionOffset ?? null);
-  const [note, setNote] = useStateS(item.note || '');
 
   const switchMode = (m) => {
     if (m === 'variable' && mode !== 'variable') {
@@ -2138,15 +2136,15 @@ function ExerciseItemEditor({ item, exName, isCheckboxOnly, queuePos, queueTotal
 
   const handleSave = () => {
     if (isCheckboxOnly) {
-      onSave({ sets, reps: 0, repsPerSet: undefined, repsMax: undefined, progressionOffset: progOverride, note });
+      onSave({ sets, reps: 0, repsPerSet: undefined, repsMax: undefined, progressionOffset: progOverride });
       return;
     }
     if (mode === 'variable') {
-      onSave({ sets, reps: repsPerSet[0] ?? uniformReps, repsPerSet, repsMax: undefined, progressionOffset: progOverride, note });
+      onSave({ sets, reps: repsPerSet[0] ?? uniformReps, repsPerSet, repsMax: undefined, progressionOffset: progOverride });
     } else if (mode === 'range') {
-      onSave({ sets, reps: uniformReps, repsPerSet: undefined, repsMax: rangeMax, progressionOffset: progOverride, note });
+      onSave({ sets, reps: uniformReps, repsPerSet: undefined, repsMax: rangeMax, progressionOffset: progOverride });
     } else {
-      onSave({ sets, reps: uniformReps, repsPerSet: undefined, repsMax: undefined, progressionOffset: progOverride, note });
+      onSave({ sets, reps: uniformReps, repsPerSet: undefined, repsMax: undefined, progressionOffset: progOverride });
     }
   };
 
@@ -2278,9 +2276,6 @@ function ExerciseItemEditor({ item, exName, isCheckboxOnly, queuePos, queueTotal
         );
       })()}
 
-      <Field label="Note (optional)">
-        <TextInput value={note} onChange={setNote} placeholder="e.g. cable pos 4, slow eccentric…" />
-      </Field>
       <Btn onClick={handleSave} style={{ width: '100%', marginTop: 20 }}>Apply</Btn>
     </Sheet>
   );
@@ -2507,7 +2502,6 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
                   <DragHandle />
                   <div style={{ flex: 1 }}>
                     <div className="display" style={{ fontSize: 15, color: UI.ink, lineHeight: 1.1 }}>{ex?.name || '—'}</div>
-                    {it.note ? <div className="micro" style={{ color: UI.inkFaint, marginTop: 2, fontStyle: 'italic' }}>{it.note}</div> : null}
                   </div>
                   <div className="num" style={{
                     fontSize: 12, color: UI.gold, background: UI.goldFaint,
