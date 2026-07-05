@@ -2863,10 +2863,14 @@ function SessionEditSheet({ session, duration, exercises, onClose, onSave }) {
   const save = () => {
     const patch = { entries: draftEntries };
     if (draftDate && draftDate !== session.date?.slice(0, 10)) {
-      const original = new Date(session.date);
-      const [y, m, d] = draftDate.split('-').map(Number);
-      original.setFullYear(y, m - 1, d);
-      patch.date = original.toISOString();
+      // Store the picked day as UTC noon so its date part (slice 0,10) equals
+      // the chosen day in every timezone. The old new Date()/setFullYear/
+      // toISOString dance kept the original's LOCAL time-of-day and, for a
+      // UTC-midnight date viewed west of UTC, rolled the day forward by one on
+      // re-serialization (Mike's "set today → history shows Jul 6" ticket).
+      // `date` is read everywhere as a day via slice/parseDate, never as a
+      // wall-clock time — started_at/ended carry the actual times.
+      patch.date = draftDate + 'T12:00:00.000Z';
     }
     const mins = parseInt(draftDuration, 10);
     if (!isNaN(mins) && mins > 0) {
