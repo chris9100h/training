@@ -606,6 +606,7 @@ function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = ''
   const [movementType, setMovementType] = useStateL('bilateral');
   const [noWeightReps, setNoWeightReps] = useStateL(false);
   const [equipment, setEquipment] = useStateL('barbell_dual');
+  const [note, setNote] = useStateL('');
   const [showSizeInfo, setShowSizeInfo] = useStateL(false);
   const [showBodyweightHint, setShowBodyweightHint] = useStateL(false);
   const toggleTag = (m) => setSelectedTags(t => t.includes(m) ? t.filter(x => x !== m) : [...t, m]);
@@ -618,7 +619,7 @@ function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = ''
   };
   const save = () => {
     if (!name.trim()) return;
-    const ex = { id: LB.uid(), name: name.trim(), tags: selectedTags, category: category || null, unilateral: movementType === 'unilateral', movement_type: movementType, no_weight_reps: noWeightReps, equipment: equipment || null, note: '', progression_reps: null };
+    const ex = { id: LB.uid(), name: name.trim(), tags: selectedTags, category: category || null, unilateral: movementType === 'unilateral', movement_type: movementType, no_weight_reps: noWeightReps, equipment: equipment || null, note: note.trim(), progression_reps: null };
     setStore(s => ({ ...s, exercises: [...s.exercises, ex] }));
     onCreated?.(ex.id);
     onClose();
@@ -626,7 +627,7 @@ function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = ''
   // Guard against an accidental backdrop tap wiping a half-filled form.
   const isDirty = () =>
     name.trim() !== initialName.trim() || selectedTags.length > 0 || category != null ||
-    movementType !== 'bilateral' || noWeightReps || equipment !== 'barbell_dual';
+    movementType !== 'bilateral' || noWeightReps || equipment !== 'barbell_dual' || note.trim() !== '';
   const requestClose = async () => {
     if (isDirty() && !await confirm('Your new exercise will be discarded.', { title: 'Leave without saving?', ok: 'Discard', cancel: 'Keep editing', danger: true })) return;
     onClose();
@@ -688,6 +689,18 @@ function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = ''
             </div>
           )}
         </div>
+        <Field label="Note (optional)">
+          <textarea value={note} onChange={e => setNote(e.target.value)}
+            placeholder="e.g. Cable pos 4, neutral grip, slow eccentric"
+            rows={3}
+            style={{
+              width: '100%', boxSizing: 'border-box', background: 'transparent',
+              border: 'none', borderBottom: `0.5px solid ${UI.hairStrong}`,
+              padding: '6px 0', color: UI.ink, fontFamily: UI.fontUi, fontSize: 14,
+              resize: 'none', outline: 'none',
+            }}
+          />
+        </Field>
         <Btn onClick={save} style={{ opacity: name.trim() ? 1 : 0.4 }} disabled={!name.trim()}>Create</Btn>
       </div>
     </Sheet>
@@ -727,8 +740,7 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
   const [editNoWeightReps, setEditNoWeightReps] = useStateL(autoEdit ? !!ex.no_weight_reps : false);
   const [editEquipment, setEditEquipment] = useStateL(autoEdit ? (ex.equipment || null) : null);
   const [editYoutubeUrl, setEditYoutubeUrl] = useStateL(autoEdit ? (ex.youtube_url || '') : '');
-  const [editNote, setEditNote] = useStateL(false);
-  const [noteVal, setNoteVal] = useStateL(ex.note || '');
+  const [noteVal, setNoteVal] = useStateL(autoEdit ? (ex.note || '') : '');
   const [showSizeInfoEdit, setShowSizeInfoEdit] = useStateL(false);
   const [showBodyweightHint, setShowBodyweightHint] = useStateL(false);
   const handleEditEquipmentChange = (key) => {
@@ -748,13 +760,13 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
     }
   };
 
-  const startEdit = () => { setEditName(ex.name); setEditTags([...(ex.tags || [])]); setEditCategory(ex.category || null); setEditMovementType(ex.movement_type ?? (ex.unilateral ? 'unilateral' : 'bilateral')); setEditNoWeightReps(!!ex.no_weight_reps); setEditEquipment(ex.equipment || null); setEditYoutubeUrl(ex.youtube_url || ''); setEditMode(true); };
+  const startEdit = () => { setEditName(ex.name); setEditTags([...(ex.tags || [])]); setEditCategory(ex.category || null); setEditMovementType(ex.movement_type ?? (ex.unilateral ? 'unilateral' : 'bilateral')); setEditNoWeightReps(!!ex.no_weight_reps); setEditEquipment(ex.equipment || null); setEditYoutubeUrl(ex.youtube_url || ''); setNoteVal(ex.note || ''); setEditMode(true); };
   const cancelEdit = () => { if (autoEdit) advanceQueue(); else setEditMode(false); };
   const saveEdit = () => {
     if (!editName.trim()) return;
     setStore(s => {
       const exercises = s.exercises.map(e => e.id === exId
-        ? { ...e, name: editName.trim(), tags: editTags, category: editCategory || null, unilateral: editMovementType === 'unilateral', movement_type: editMovementType, no_weight_reps: editNoWeightReps, equipment: editEquipment || null, youtube_url: sanitizeYoutubeUrl(editYoutubeUrl) }
+        ? { ...e, name: editName.trim(), tags: editTags, category: editCategory || null, unilateral: editMovementType === 'unilateral', movement_type: editMovementType, no_weight_reps: editNoWeightReps, equipment: editEquipment || null, note: noteVal.trim(), youtube_url: sanitizeYoutubeUrl(editYoutubeUrl) }
         : e);
       return { ...s, exercises };
     });
@@ -762,11 +774,6 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
     if (autoEdit) advanceQueue();
   };
   const toggleEditTag = (m) => setEditTags(t => t.includes(m) ? t.filter(x => x !== m) : [...t, m]);
-
-  const saveNote = () => {
-    setStore(s => ({ ...s, exercises: s.exercises.map(e => e.id === exId ? { ...e, note: noteVal.trim() } : e) }));
-    setEditNote(false);
-  };
 
   const deleteExercise = async () => {
     if (!await confirm('Previous sessions will be preserved.', { title: `Delete "${ex.name}"?`, ok: 'Delete', danger: true })) return;
@@ -932,6 +939,18 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
             <Field label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><i className="fa-brands fa-youtube" style={{ color: '#FF0000', fontSize: 12 }} />Form video</span>}>
               <TextInput value={editYoutubeUrl} onChange={setEditYoutubeUrl} placeholder="YouTube link (optional)" />
             </Field>
+            <Field label="Note (optional)">
+              <textarea value={noteVal} onChange={e => setNoteVal(e.target.value)}
+                placeholder="e.g. Cable pos 4, neutral grip, slow eccentric"
+                rows={3}
+                style={{
+                  width: '100%', boxSizing: 'border-box', background: 'transparent',
+                  border: 'none', borderBottom: `0.5px solid ${UI.hairStrong}`,
+                  padding: '6px 0', color: UI.ink, fontFamily: UI.fontUi, fontSize: 14,
+                  resize: 'none', outline: 'none',
+                }}
+              />
+            </Field>
             <div style={{ display: 'flex', gap: 10 }}>
               <Btn kind="ghost" onClick={cancelEdit} style={{ flex: 1 }}>
                 {autoEdit ? 'Skip' : 'Cancel'}
@@ -980,36 +999,13 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
 
         {points.length > 1 && <ProgressChart points={points} />}
 
-        {/* Note */}
+        {/* Note — read-only here; edited via the Edit button's form below */}
         <div>
           <Bezel>NOTE</Bezel>
           <div style={{ marginTop: 12 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-              <span />
-              <button onClick={() => { setNoteVal(ex.note || ''); setEditNote(v => !v); }}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', color: UI.gold, fontSize: 10, fontFamily: UI.fontUi, padding: 0, letterSpacing: '0.12em', textTransform: 'uppercase' }}>
-                {editNote ? 'Cancel' : 'Edit'}
-              </button>
+            <div className="display-it" style={{ fontSize: 16, color: ex.note ? UI.inkSoft : UI.inkFaint, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
+              {ex.note || 'No note yet.'}
             </div>
-            {editNote ? (
-              <div>
-                <textarea value={noteVal} onChange={e => setNoteVal(e.target.value)}
-                  placeholder="e.g. Cable pos 4, neutral grip, slow eccentric"
-                  rows={3}
-                  style={{
-                    width: '100%', boxSizing: 'border-box', background: 'transparent',
-                    border: 'none', borderBottom: `0.5px solid ${UI.hairStrong}`,
-                    padding: '6px 0', color: UI.ink, fontFamily: UI.fontUi, fontSize: 14,
-                    resize: 'none', outline: 'none',
-                  }}
-                />
-                <Btn onClick={saveNote} style={{ marginTop: 12, width: '100%' }}>Save</Btn>
-              </div>
-            ) : (
-              <div className="display-it" style={{ fontSize: 16, color: ex.note ? UI.inkSoft : UI.inkFaint, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
-                {ex.note || 'No note yet.'}
-              </div>
-            )}
           </div>
         </div>
 
