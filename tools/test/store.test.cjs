@@ -731,11 +731,15 @@ async function testAsync(name, fn) {
     const seeded = LB.buildSeedSets(it, belowCap, null, false, noSmartProgStore, null);
     assert.strictEqual(seeded[0].reps, 10);
   });
-  test('buildSeedSets caps the classic (non-Range) +1 nudge at base + global progressionRangeTop', () => {
+  test('buildSeedSets leaves the classic (non-Range) +1 nudge uncapped past the global ceiling', () => {
+    // Only a Range item's own repsMax caps the nudge — the global default /
+    // a custom progressionOffset ceiling is just an internal trigger
+    // threshold, not a user-drawn boundary, so it keeps climbing (matches
+    // classic Smart Progression's long-standing behavior).
     const it = { sets: 1, reps: 8 };
-    const atCap = { entry: { sets: [{ warmup: false, kg: 100, reps: 12, done: true }] } };
-    const seeded = LB.buildSeedSets(it, atCap, null, false, smartProgStore, null);
-    assert.strictEqual(seeded[0].reps, 12); // must not climb to 13 — same runaway fix, now for the global default too
+    const pastCap = { entry: { sets: [{ warmup: false, kg: 100, reps: 12, done: true }] } };
+    const seeded = LB.buildSeedSets(it, pastCap, null, false, smartProgStore, null);
+    assert.strictEqual(seeded[0].reps, 13);
   });
   test('buildSeedSets still bumps +1 below the global ceiling when Smart Progression is on', () => {
     const it = { sets: 1, reps: 8 };
@@ -749,11 +753,11 @@ async function testAsync(name, fn) {
     const seeded = LB.buildSeedSets(it, last, null, false, noSmartProgStore, null);
     assert.strictEqual(seeded[0].reps, 10); // unchanged, no progression nudge
   });
-  test('buildSeedSets honors a per-exercise progressionOffset override even with the global setting off', () => {
+  test('buildSeedSets honors a per-exercise progressionOffset override even with the global setting off, uncapped', () => {
     const it = { sets: 1, reps: 8, progressionOffset: 2 };
     const last = { entry: { sets: [{ warmup: false, kg: 100, reps: 10, done: true }] } };
     const seeded = LB.buildSeedSets(it, last, null, false, noSmartProgStore, null);
-    assert.strictEqual(seeded[0].reps, 10); // base(8)+offset(2)=10 ceiling, already there, capped not bumped to 11
+    assert.strictEqual(seeded[0].reps, 11); // offset ceiling (10) is a trigger threshold, not a cap — keeps climbing
   });
   test('buildSeedSets respects an explicit progressionOffset of 0 (off) even with the global setting on', () => {
     const it = { sets: 1, reps: 8, progressionOffset: 0 };

@@ -1756,13 +1756,16 @@ function buildSeedSets(it, last, suggestion, isUni, store, bodyweightKg = null, 
         : { kg: dl(baseKg), reps: seedReps, done: false };
     }
     if (progressionEnabled(store, it.repsMax, it.progressionOffset) && prev) {
-      // The resolved ceiling caps the +1 nudge — without this, a set that
-      // already hit the top (e.g. one lagging set keeps the suggestion from
-      // firing) would keep climbing past the ceiling session after session,
-      // defeating the whole point of a bounded progression target.
-      const base = targetReps ?? it.reps ?? 0;
-      const cap = progressionCeilingFor(store, base, it.repsMax, it.progressionOffset);
-      const bump = (v) => v == null ? null : Math.min(v + 1, cap);
+      // Only a Range item's own repsMax caps the +1 nudge — the user
+      // explicitly drew that boundary, so the seeded value should respect
+      // it (one lagging set otherwise keeps the suggestion from firing
+      // while a synced set climbs past the range forever). The global
+      // default / a custom progressionOffset ceiling is just an internal
+      // trigger threshold, not a user-drawn boundary, so it stays
+      // uncapped — matches classic Smart Progression's long-standing
+      // behavior of nudging reps up every session regardless.
+      const cap = it.repsMax;
+      const bump = (v) => v == null ? null : (cap != null ? Math.min(v + 1, cap) : v + 1);
       return isUni
         ? { kg: dl(seedKg), repsL: bump(prev.repsL), repsR: bump(prev.repsR), done: false }
         : { kg: dl(seedKg), reps: bump(prev.reps), done: false };
