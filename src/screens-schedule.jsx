@@ -2207,9 +2207,6 @@ function ExerciseItemEditor({ item, exName, isCheckboxOnly, queuePos, queueTotal
                 <Stepper value={rangeMax} onChange={v => setRangeMax(Math.max(uniformReps, Math.round(v)))} step={1} min={uniformReps} />
               </div>
             </div>
-            <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.4 }}>
-              Hit {rangeMax} reps on every set and we'll suggest a weight bump next session — works even with Smart Progression off in Settings.
-            </div>
           </>
         ) : (
           repsPerSet.map((r, i) => (
@@ -2229,7 +2226,28 @@ function ExerciseItemEditor({ item, exName, isCheckboxOnly, queuePos, queueTotal
         )}</>}
       </div>
 
-      {!isCheckboxOnly && mode !== 'range' && (() => {
+      {!isCheckboxOnly && (() => {
+        if (mode === 'range') {
+          // Range's own Max is always the ceiling when on — no separate
+          // offset number to configure, just whether progression applies
+          // to this exercise at all. progOverride 0 = off, anything else
+          // (including a leftover Uniform/Per-Set custom value) = on.
+          const isOn = progOverride !== 0;
+          return (
+            <div style={{ marginBottom: 24 }}>
+              <div className="label" style={{ marginBottom: 10 }}>Smart Progression</div>
+              <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+                <button style={toggleStyle(isOn)} onClick={() => setProgOverride(null)}>On</button>
+                <button style={toggleStyle(!isOn)} onClick={() => setProgOverride(0)}>Off</button>
+              </div>
+              <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.4 }}>
+                {isOn
+                  ? `Hit ${rangeMax} reps on every set and we'll suggest a weight bump next session — works even with Smart Progression off in Settings.`
+                  : 'Smart Progression is off for this exercise.'}
+              </div>
+            </div>
+          );
+        }
         // When the global setting is off, "inherit" always resolves to off
         // too — showing "Default" as a choice would be misleading, so the
         // toggle reframes as a plain On/Off for this exercise instead. Either

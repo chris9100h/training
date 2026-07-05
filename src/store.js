@@ -2308,14 +2308,16 @@ function subscribeToChanges(userId, onCoachingNote, onCoachingInvite) {
 }
 
 // Whether Smart Progression is active for a given exercise entry/item.
-// Precedence: an explicit Range ceiling (plannedRepsMax) is always on >
-// an explicit per-exercise progressionOffset override (0 = off, N = on) >
-// the global smartProgression setting. progressionOffset === 0 is a
-// meaningful, distinct value from null/undefined — never coerce it away
-// with `||`, only `!= null`/`===` checks.
+// Precedence: an explicit per-exercise progressionOffset of 0 always wins
+// (even for a Range item — you can still turn progression off for e.g.
+// lateral raises while keeping the range as a plain display target) >
+// a Range ceiling (plannedRepsMax) is on by default > a positive
+// progressionOffset override is on > the global smartProgression setting.
+// progressionOffset === 0 is a meaningful, distinct value from
+// null/undefined — never coerce it away with `||`, only `!= null`/`===` checks.
 function progressionEnabled(store, plannedRepsMax, progressionOffset) {
-  if (plannedRepsMax != null) return true;
   if (progressionOffset === 0) return false;
+  if (plannedRepsMax != null) return true;
   if (progressionOffset != null) return true;
   return !!store.settings?.smartProgression;
 }

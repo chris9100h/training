@@ -709,6 +709,11 @@ async function testAsync(name, fn) {
     assert.strictEqual(LB.progressionEnabled(smartProgStore, null, null), true);
     assert.strictEqual(LB.progressionEnabled(noSmartProgStore, null, null), false);
   });
+  test('progressionEnabled: an explicit progressionOffset of 0 wins even for a Range item', () => {
+    // Lets a Range exercise (e.g. lateral raises with a "12-15" display target)
+    // still opt out of auto weight-bump progression entirely.
+    assert.strictEqual(LB.progressionEnabled(smartProgStore, 12, 0), false);
+  });
   test('progressionCeilingFor: Range repsMax wins as an absolute ceiling', () => {
     assert.strictEqual(LB.progressionCeilingFor(smartProgStore, 8, 12, 6), 12);
   });
