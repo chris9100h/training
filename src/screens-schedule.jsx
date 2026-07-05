@@ -998,7 +998,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId })
                               const ex = LB.findExercise(store, it.exId);
                               const label = it.repsPerSet && it.repsPerSet.length > 1
                                 ? it.repsPerSet.join('/')
-                                : it.repsMax != null ? `${it.reps}-${it.repsMax}`
+                                : it.repsMax != null ? `${it.sets}×${it.reps}-${it.repsMax}`
                                 : ex?.no_weight_reps ? `${it.sets}×` : `${it.sets}×${it.reps}`;
                               const nextIt = items[k + 1];
                               const prevIt = items[k - 1];
@@ -2500,7 +2500,7 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
                     padding: '3px 8px', whiteSpace: 'nowrap',
                     display: 'flex', alignItems: 'center', gap: 5,
                   }}>
-                    <span>{it.repsPerSet && it.repsPerSet.length > 1 ? it.repsPerSet.join('/') : it.repsMax != null ? `${it.reps}-${it.repsMax}` : ex?.no_weight_reps ? `${it.sets}×` : `${it.sets}×${it.reps}`}</span>
+                    <span>{it.repsPerSet && it.repsPerSet.length > 1 ? it.repsPerSet.join('/') : it.repsMax != null ? `${it.sets}×${it.reps}-${it.repsMax}` : ex?.no_weight_reps ? `${it.sets}×` : `${it.sets}×${it.reps}`}</span>
                     <i className="fa fa-pencil" style={{ fontSize: 9, opacity: 0.7 }} />
                   </div>
                   <button data-reorder-ignore="true" onClick={e => { e.stopPropagation(); removeItem(i); }} style={{ ...dayEditIconBtn, color: UI.inkFaint, fontSize: 16 }}>×</button>
