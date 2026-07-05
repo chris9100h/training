@@ -2652,7 +2652,13 @@ async function requestCheckin(coachingId, userId) {
 
 function checkinWeekStart() {
   const today = new Date();
-  const daysSinceSunday = today.getDay(); // 0=Sun, 1=Mon, …, 6=Sat
+  // Check-ins cover Mon–Sun. Sunday is the LAST day of its week, not a fresh
+  // start — treating it as day 0 (like plain getDay() does) flipped this to
+  // the not-yet-finished current week a full day early, before that Sunday's
+  // own daily log (macros/steps) even exists. isoWd(today)+1 keeps Sunday
+  // counted as day 7 of its own week, so the "due" week only advances once
+  // Monday actually arrives.
+  const daysSinceSunday = isoWd(today) + 1;
   const lastSunday = new Date(today);
   lastSunday.setDate(today.getDate() - daysSinceSunday);
   const monday = new Date(lastSunday);
