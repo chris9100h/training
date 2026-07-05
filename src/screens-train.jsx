@@ -4143,8 +4143,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               </a>
             )}
           </div>
-          {(exercise?.category || exercise?.equipment || (exercise?.tags || []).length > 0) && (
+          {(exercise?.category || exercise?.equipment || (exercise?.tags || []).length > 0 || entry.plannedRepsMax != null) && (
             <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
+              {entry.plannedRepsMax != null && <Pill gold>Range {entry.plannedReps}–{entry.plannedRepsMax}</Pill>}
               {exercise?.category && <Pill gold>{exercise.category}</Pill>}
               {exercise?.equipment && <Pill>{(window.EQUIPMENT_TYPES||[]).find(t=>t.key===exercise.equipment)?.label ?? exercise.equipment}</Pill>}
               {(exercise?.tags || []).map(t => <Pill key={t}>{t}</Pill>)}
