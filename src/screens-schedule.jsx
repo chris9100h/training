@@ -378,14 +378,11 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId })
       ...s,
       schedules: s.schedules.map(x => {
         if (x.id !== sch.id) return x;
-        // Always add as a new version entry — no deduplication so the backup
-        // is always a distinct version even when the date matches an existing one.
-        // For same-date ties the backup wins (comparator puts newVer first).
-        const newVersions = [newVer, ...(x.versions || [])].sort((a, b) => {
-          const cmp = b.validFrom.localeCompare(a.validFrom);
-          if (cmp !== 0) return cmp;
-          return a === newVer ? -1 : 1;
-        });
+        // One version per date, same policy as a normal plan save (doSave /
+        // LB.dedupeVersionsByDate): a same-date restore replaces the existing
+        // version for that date instead of stacking a duplicate that
+        // getActiveVersionIdx could never actually surface anyway.
+        const newVersions = LB.dedupeVersionsByDate([newVer, ...(x.versions || [])]);
         return { ...x, days: newVersions[0].days, versions: newVersions };
       }),
     }));

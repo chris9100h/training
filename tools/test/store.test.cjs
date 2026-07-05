@@ -771,6 +771,26 @@ async function testAsync(name, fn) {
     assert.strictEqual(seeded[0].reps, 10); // unchanged, no progression nudge despite the global setting being on
   });
 
+  test('dedupeVersionsByDate: a same-date entry placed first replaces the later one for that date', () => {
+    const versions = [
+      { validFrom: '2026-07-05', days: ['new'] },
+      { validFrom: '2026-07-05', days: ['old'] },
+      { validFrom: '2026-06-01', days: ['older'] },
+    ];
+    const result = LB.dedupeVersionsByDate(versions);
+    assert.strictEqual(result.length, 2);
+    assert.deepStrictEqual(result[0], { validFrom: '2026-07-05', days: ['new'] });
+    assert.deepStrictEqual(result[1], { validFrom: '2026-06-01', days: ['older'] });
+  });
+  test('dedupeVersionsByDate: distinct dates all survive, sorted newest first', () => {
+    const versions = [
+      { validFrom: '2026-06-01', days: [] },
+      { validFrom: '2026-07-05', days: [] },
+    ];
+    const result = LB.dedupeVersionsByDate(versions);
+    assert.deepStrictEqual(result.map(v => v.validFrom), ['2026-07-05', '2026-06-01']);
+  });
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();
