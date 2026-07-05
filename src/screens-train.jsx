@@ -1039,8 +1039,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       if (!LB.progressionEnabled(store, entry?.plannedRepsMax, entry?.plannedProgressionOffset)) return null;
       if (!updatedSets.filter(s => !s.warmup).every(s => s.done || s.skipped)) return null;
       const catCfg = exercise?.equipment ? (store.settings?.equipmentConfig?.[exercise.equipment] ?? {}) : {};
-      const increment = catCfg.increment ?? null;
-      if (!increment) return null;
+      // Mirror progressionSuggestion's fallback (store.js) — that's what actually
+      // seeds next session's weight, so the toast must fire under the same
+      // condition, not silently stay quiet just because no increment was configured.
+      const increment = catCfg.increment ?? 2.5;
       // Index by true working-set position (warm-ups stripped, nothing else)
       // so progressionTargetForSet(i) lines up correctly — filtering skipped/
       // no-kg sets out before indexing (as this used to) shifts every later
