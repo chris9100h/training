@@ -2011,7 +2011,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
         const refSet = (last?.entry?.sets || []).filter(s => !s.warmup && !s.skipped).find(s => s.kg != null);
         if (refSet) suggestionFinal = { kg: Math.round((refSet.kg + weightBoost) * 4) / 4, reps: refSet.reps ?? null };
       }
-      const seedSets = LB.buildSeedSets(itAdj, last, suggestionFinal, isUnilateral, !!store.settings?.smartProgression, bodyweightKg);
+      const seedSets = LB.buildSeedSets(itAdj, last, suggestionFinal, isUnilateral, !!store.settings?.smartProgression || it.repsMax != null, bodyweightKg);
       return {
         exId: it.exId, name: ex?.name || '?',
         plannedSets: itAdj.sets, plannedReps: it.reps, plannedRepsPerSet: it.repsPerSet || null,
@@ -2226,7 +2226,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       const isUni = ex?.unilateral || false;
       const suggestion = LB.progressionSuggestion(store, it.exId, null, it.reps, it.repsPerSet, seedRefs[it.exId], it.repsMax || null);
       const bodyweightKg = ex?.equipment === 'bodyweight' ? LB.latestBodyweight(store) : null;
-      const seedSets = LB.buildSeedSets(it, last, suggestion, isUni, !!store.settings?.smartProgression, bodyweightKg);
+      const seedSets = LB.buildSeedSets(it, last, suggestion, isUni, !!store.settings?.smartProgression || it.repsMax != null, bodyweightKg);
       return { exId: it.exId, name: ex?.name || '?', plannedSets: it.sets, plannedReps: it.reps, plannedRepsPerSet: it.repsPerSet || null, plannedRepsMax: it.repsMax || null, sets: seedSets, note: '', supersetGroup: it.supersetGroup || null };
     });
     const session = {

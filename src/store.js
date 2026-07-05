@@ -2299,7 +2299,10 @@ function subscribeToChanges(userId, onCoachingNote, onCoachingInvite) {
 // refOverride: a pre-fetched { entry: { sets } } reference (fetchSeedEntries) —
 // used when the exercise's recent history lives outside the boot window.
 function progressionSuggestion(store, exId, dayId, plannedReps, plannedRepsPerSet, refOverride, plannedRepsMax) {
-  if (!store.settings?.smartProgression) return null;
+  // A Range-mode exercise always opts into progression suggestions —
+  // hitting the top of its own range is the whole point of Range mode,
+  // independent of the global Smart Progression toggle.
+  if (!store.settings?.smartProgression && plannedRepsMax == null) return null;
   const ex = findExercise(store, exId);
   const catCfg = ex?.equipment ? (store.settings?.equipmentConfig?.[ex.equipment] ?? {}) : {};
   const increment = catCfg.increment ?? 2.5;

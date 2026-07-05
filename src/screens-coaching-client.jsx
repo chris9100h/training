@@ -549,7 +549,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
                   const last = LB.bestRecentEntry(clientStore, item.exId, todayDay.id);
                   const suggestion = LB.progressionSuggestion(clientStore, item.exId, todayDay.id, item.reps, item.repsPerSet || null, undefined, item.repsMax || null);
                   const bodyweightKg = ex?.equipment === 'bodyweight' ? LB.latestBodyweight(clientStore) : null;
-                  const seeds = LB.buildSeedSets(item, last, suggestion, ex?.unilateral, clientStore.settings?.smartProgression, bodyweightKg, clientStore.statusMode === 'deload');
+                  const seeds = LB.buildSeedSets(item, last, suggestion, ex?.unilateral, clientStore.settings?.smartProgression || item.repsMax != null, bodyweightKg, clientStore.statusMode === 'deload');
                   const hasWeight = seeds.some(s => s.kg != null);
                   return (
                     <div key={idx} style={{ padding: '12px 4px', borderBottom: `0.5px solid ${UI.hair}` }}>

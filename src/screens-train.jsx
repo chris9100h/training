@@ -717,7 +717,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const isNoWeightReps = !isCardio && !!exercise?.no_weight_reps;
   const isBodyweight = !isCardio && exercise?.equipment === 'bodyweight';
   const progressionTargetForSet = (workingSetIdx) => {
-    if (!store.settings?.smartProgression) return null;
+    // A Range-mode exercise (entry.plannedRepsMax) always opts into the
+    // progression hint, independent of the global toggle.
+    if (!store.settings?.smartProgression && entry?.plannedRepsMax == null) return null;
     // Progression itself is suppressed during deload (see completeSet's
     // isDeloadSession guard) — showing the "≥X reps · next weight" hint
     // anyway would promise an unlock that can never actually fire.
@@ -1037,7 +1039,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
     const progressionResult = (() => {
       if (isDeloadSession) return null;
-      if (!store.settings?.smartProgression) return null;
+      // Range-mode exercises always opt into the unlock toast, independent
+      // of the global toggle — same rationale as progressionTargetForSet.
+      if (!store.settings?.smartProgression && entry?.plannedRepsMax == null) return null;
       if (!updatedSets.filter(s => !s.warmup).every(s => s.done || s.skipped)) return null;
       const catCfg = exercise?.equipment ? (store.settings?.equipmentConfig?.[exercise.equipment] ?? {}) : {};
       const increment = catCfg.increment ?? null;

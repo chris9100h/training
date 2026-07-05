@@ -601,7 +601,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId })
           const refSet = (last?.entry?.sets || []).filter(s => !s.warmup && !s.skipped).find(s => s.kg != null);
           if (refSet) suggestionFinal = { kg: Math.round((refSet.kg + weightBoost) * 4) / 4, reps: refSet.reps ?? null };
         }
-        const seedSets = LB.buildSeedSets(itAdj, last, suggestionFinal, isUni, !!store.settings?.smartProgression, bodyweightKg);
+        const seedSets = LB.buildSeedSets(itAdj, last, suggestionFinal, isUni, !!store.settings?.smartProgression || it.repsMax != null, bodyweightKg);
         const nextIt = day.items[k + 1];
         const linkedToNext = it.supersetGroup && it.supersetGroup === nextIt?.supersetGroup;
         const isGiant = it.supersetGroup && day.items.filter(x => x.supersetGroup === it.supersetGroup).length >= 3;
@@ -642,7 +642,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId })
         return [frame];
       })}
       <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.5, marginTop: 2, textAlign: 'center' }}>
-        {store.settings?.smartProgression
+        {(store.settings?.smartProgression || day.items.some(i => i.repsMax != null))
           ? <>Prefilled for your next session · <i className="fa-solid fa-arrow-up" style={{ fontSize: 8 }} /> = smart progression bump</>
           : 'Prefilled from your last session'}
       </div>
@@ -2202,6 +2202,9 @@ function ExerciseItemEditor({ item, exName, isCheckboxOnly, queuePos, queueTotal
               <div style={{ flex: 1 }}>
                 <Stepper value={rangeMax} onChange={v => setRangeMax(Math.max(uniformReps, Math.round(v)))} step={1} min={uniformReps} />
               </div>
+            </div>
+            <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.4 }}>
+              Hit {rangeMax} reps on every set and we'll suggest a weight bump next session — works even with Smart Progression off in Settings.
             </div>
           </>
         ) : (
