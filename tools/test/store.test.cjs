@@ -820,35 +820,76 @@ async function testAsync(name, fn) {
   });
 
   // ── realignCycleForToday (return-from-break nudge) ──────────────────────────
-  test('realignCycleForToday: unversioned → cycleStartDate so today maps to targetPos', () => {
-    const sch = { id: 'p1', days: [{}, {}, {}, {}, {}, {}, {}, {}] }; // 8-day cycle
-    const patch = LB.realignCycleForToday({ schedules: [sch] }, sch, '2026-07-05', 4);
-    // today − targetPos = Jul 5 − 4 = Jul 1
-    assert.strictEqual(patch.cycleStartDate, '2026-07-01');
-    // and it actually resolves today to position 4
-    assert.strictEqual(LB.cyclePosFromStartDate(patch.cycleStartDate, 8, '2026-07-05'), 4);
+  // Realign is built on the version-change "start at day K from this date" flow:
+  // it adds a new version effective today with a cycleOffset that lands today on
+  // the picked day, converting an unversioned plan to versioned. The cycle NUMBER
+  // continues across the boundary (never resets to 1) and past dates keep their
+  // old rotation.
+  test('realignCycleForToday: unversioned → today lands on the picked day', () => {
+    const days = Array.from({ length: 8 }, () => ({})); // 8-day cycle
+    const sch = { id: 'p1', days };
+    const patch = LB.realignCycleForToday({ schedules: [sch], cycleStartDate: '2026-06-01' }, sch, '2026-07-05', 4);
+    const patched = patch.schedules[0];
+    // unversioned plan is now versioned …
+    assert.ok(patched.versions && patched.versions.length >= 2);
+    // … and today resolves to the picked position
+    assert.strictEqual(LB.getCyclePosForDate(patched, '2026-07-05'), 4);
   });
 
-  test('realignCycleForToday: unversioned targetPos 0 anchors today itself', () => {
-    const sch = { id: 'p1', days: [{}, {}, {}, {}, {}, {}, {}, {}] };
-    const patch = LB.realignCycleForToday({ schedules: [sch] }, sch, '2026-07-05', 0);
-    assert.strictEqual(patch.cycleStartDate, '2026-07-05');
+  test('realignCycleForToday: targetPos 0 → today is day 1 (no cycleOffset on the new version)', () => {
+    const days = Array.from({ length: 8 }, () => ({}));
+    const sch = { id: 'p1', days };
+    const patch = LB.realignCycleForToday({ schedules: [sch], cycleStartDate: '2026-06-01' }, sch, '2026-07-05', 0);
+    const patched = patch.schedules[0];
+    assert.strictEqual(LB.getCyclePosForDate(patched, '2026-07-05'), 0);
+    // newest version starts today, day 1 → no offset stored
+    assert.strictEqual(patched.versions[0].validFrom, '2026-07-05');
+    assert.strictEqual(patched.versions[0].cycleOffset, undefined);
   });
 
-  test('realignCycleForToday: versioned → active version cycleOffset so today maps to targetPos', () => {
-    const days = [{}, {}, {}, {}, {}, {}, {}, {}]; // len 8
+  test('realignCycleForToday: already-versioned → prepends a new version, today maps to target', () => {
+    const days = Array.from({ length: 8 }, () => ({}));
     const sch = { id: 'p1', days, versions: [{ validFrom: '2026-06-10', days, cycleOffset: 0 }] };
     const patch = LB.realignCycleForToday({ schedules: [sch] }, sch, '2026-07-05', 4);
-    const v = patch.schedules[0].versions[0];
-    // getCyclePosForDate must now return the target for today
-    assert.strictEqual(LB.getCyclePosForDate({ versions: [v] }, '2026-07-05'), 4);
-    // cycleStartDate is NOT touched for a versioned plan
-    assert.strictEqual(patch.cycleStartDate, undefined);
+    const patched = patch.schedules[0];
+    assert.strictEqual(patched.versions.length, 2);
+    assert.strictEqual(patched.versions[0].validFrom, '2026-07-05');
+    assert.strictEqual(LB.getCyclePosForDate(patched, '2026-07-05'), 4);
   });
 
   test('realignCycleForToday: returns null for flex / weekday plans', () => {
     assert.strictEqual(LB.realignCycleForToday({ schedules: [] }, { id: 'f', is_flex: true, days: [{}] }, '2026-07-05', 0), null);
     assert.strictEqual(LB.realignCycleForToday({ schedules: [] }, { id: 'w', days: [{ weekday: 0 }] }, '2026-07-05', 0), null);
+  });
+
+  test('realignCycleForToday: unversioned preserves the cycle NUMBER (never resets to 1)', () => {
+    const days = Array.from({ length: 8 }, () => ({}));
+    const sch = { id: 'p1', days };
+    const today = '2026-07-05';
+    // cycleStartDate several cycles back → user is deep into the plan, not cycle 1
+    const state = { schedules: [sch], cycleStartDate: '2026-06-01' };
+    const dsBefore = Math.round((new Date(today + 'T12:00:00') - new Date('2026-06-01T12:00:00')) / 86400000);
+    const numBefore = Math.floor(dsBefore / 8) + 1;
+    assert.ok(numBefore > 1); // sanity: a non-trivial cycle number
+    const patched = LB.realignCycleForToday(state, sch, today, 0).schedules[0];
+    // day position snapped to the picked target …
+    assert.strictEqual(LB.getCyclePosForDate(patched, today), 0);
+    // … and the CYCLE NUMBER continues (never drops, never resets to 1)
+    const numAfter = LB.getCycleNumForDate(patched, today);
+    assert.ok(numAfter >= numBefore);
+    assert.ok(numAfter > 1);
+  });
+
+  test('realignCycleForToday: preserves history — a past date keeps its old rotation', () => {
+    const days = Array.from({ length: 8 }, () => ({}));
+    const sch = { id: 'p1', days };
+    const today = '2026-07-05';
+    const state = { schedules: [sch], cycleStartDate: '2026-06-01' };
+    // a date well before today, under the original unversioned anchor
+    const pastPos = LB.cyclePosFromStartDate('2026-06-01', 8, '2026-06-20');
+    const patched = LB.realignCycleForToday(state, sch, today, 0).schedules[0];
+    // the old version still governs the past → same rotation position
+    assert.strictEqual(LB.getCyclePosForDate(patched, '2026-06-20'), pastPos);
   });
 
   console.log(`\n${pass} passed, ${fail} failed`);

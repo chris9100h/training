@@ -2080,30 +2080,51 @@ function cyclePosFromStartDate(startISO, daysLen, dateISO) {
 }
 
 // Re-anchor a date-based cycle plan so `todayStr` lands on rotation position
-// `targetPos`. Unversioned → returns { cycleStartDate }; versioned → adjusts the
-// ACTIVE version's cycleOffset (its position is (daysSince(validFrom) +
-// cycleOffset) % len — see getCyclePosForDate). Returns a store patch to spread
-// into setStore, or null if the plan isn't a date-based cycle plan. Powers the
-// return-from-break realign nudge for BOTH versioned and unversioned plans.
+// `targetPos` — built on the SAME calculation as versioning a plan with a
+// "start at day K from this date" choice (doSave / doRestoreBackup in
+// screens-schedule.jsx): it adds a new plan version effective today whose
+// cycleOffset puts today on day `targetPos`. An unversioned plan is converted
+// to versioned (its current layout anchored from cycleStartDate) exactly like
+// the first versioned edit does.
+//
+// Why a version boundary instead of just moving cycleStartDate / the active
+// version's cycleOffset:
+//   • The cycle NUMBER is preserved — it does NOT reset to 1. getCycleNumForDate
+//     sums completed cycles across versions, so today continues the count (a
+//     fresh cycle at day K), never collapses to Cycle 1. A naive
+//     `cycleStartDate = today − targetPos` would drop floor(daysSince/len)+1 to
+//     1, which is demotivating.
+//   • History stays intact — past dates are still governed by the OLD version,
+//     so their day-of-cycle (home strip when scrolling back, per-cycle
+//     setsPerMuscle, session labels) doesn't retroactively shift the way
+//     rewriting the single anchor would.
+//
+// Returns a store patch to spread into setStore, or null if the plan isn't a
+// date-based cycle plan. Powers the return-from-break realign.
 function realignCycleForToday(state, sch, todayStr, targetPos) {
   if (!sch || isFlexPlan(sch) || isWeekdayPlan(sch)) return null;
-  if (sch.versions && sch.versions.length) {
-    const vi = getActiveVersionIdx(sch, todayStr);
-    if (vi < 0) return null;
-    const v = sch.versions[vi];
-    const len = (v.days || []).length;
-    if (!len) return null;
-    const daysDiff = Math.round((new Date(todayStr + 'T12:00:00') - new Date(v.validFrom + 'T12:00:00')) / 86400000);
-    const cycleOffset = (((targetPos - daysDiff) % len) + len) % len;
-    const versions = sch.versions.map((ver, i) => (i === vi ? { ...ver, cycleOffset } : ver));
-    return { schedules: (state.schedules || []).map(s => (s.id === sch.id ? { ...s, versions } : s)) };
-  }
-  const len = (sch.days || []).length;
+  const activeDays = getPlanDaysForDate(sch, todayStr);
+  const len = (activeDays || []).length;
   if (!len) return null;
   const t = ((targetPos % len) + len) % len;
-  const d = new Date(todayStr + 'T12:00:00');
-  d.setDate(d.getDate() - t);
-  return { cycleStartDate: fmtISO(d) };
+  const newVer = { validFrom: todayStr, days: activeDays };
+  if (t > 0) newVer.cycleOffset = t;
+  let versions;
+  const existing = sch.versions || [];
+  if (existing.length === 0) {
+    // First versioned change — anchor the current (unversioned) layout at its
+    // start date so cycles before today keep their numbering/positions.
+    const anchorDate = state.cycleStartDate || todayStr;
+    versions = [newVer, { validFrom: anchorDate, days: sch.days }];
+  } else {
+    versions = [newVer, ...existing];
+  }
+  // One version per date (a same-day re-realign replaces, never stacks).
+  versions = dedupeVersionsByDate(versions);
+  return {
+    schedules: (state.schedules || []).map(s =>
+      s.id === sch.id ? { ...s, days: versions[0].days, versions } : s),
+  };
 }
 
 function todaysDay(state) {

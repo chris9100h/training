@@ -1919,14 +1919,16 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
   // ("resume on which day?") right there — the natural moment, no passive
   // polling. No drift check: even when nothing drifted, plenty of people like to
   // restart a rotation from day 1 after time off, so we just let them choose.
-  // Tapping a day re-anchors today onto it via LB.realignCycleForToday (works
-  // for both unversioned — re-anchors cycleStartDate — and versioned — adjusts
-  // the active version's cycleOffset). Flex advances on action (never drifts)
-  // and weekday plans are pinned to real weekdays, so both are skipped.
+  // Tapping a day re-bases today onto it via LB.realignCycleForToday, which adds
+  // a new plan version effective today (same "start at day K from this date"
+  // calculation as versioning a plan) — so the cycle NUMBER continues instead of
+  // resetting to 1, and past dates keep their old rotation. Flex advances on
+  // action (never drifts) and weekday plans are pinned to real weekdays, so both
+  // are skipped.
   const resyncTodayAfterRealign = useRef(false);
-  // After a realign changes the anchor, todayStripIdx recomputes — pull the
-  // selected slot back onto the corrected today so the card doesn't get stuck
-  // showing "DAY X" instead of "TODAY".
+  // A realign replaces the active schedule object (new versions[]), so `sch`
+  // changes reference and todayStripIdx recomputes — pull the selected slot back
+  // onto the corrected today so the card doesn't get stuck on "DAY X".
   useEffect(() => {
     if (!resyncTodayAfterRealign.current) return;
     resyncTodayAfterRealign.current = false;
