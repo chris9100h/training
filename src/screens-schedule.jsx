@@ -2087,7 +2087,13 @@ function DayCopyPicker({ store, schedule, currentDayId, onClose, onCopy, multiSe
 }
 
 // ─── Day editor (exercises within a day) ─────────────────────────────
-function ExerciseItemEditor({ item, exName, isCheckboxOnly, queuePos, queueTotal, store, onClose, onSave }) {
+function ExerciseItemEditor({ item, exName, isCheckboxOnly, queuePos, queueTotal, store, setStore, onClose, onSave }) {
+  // The exercise note is global (same record, shared across every plan that
+  // uses this exercise) — not part of this day/plan item — so it's read from
+  // and written straight back to store.exercises, independent of onSave's
+  // item patch (same field the training screen's "Exercise note" edits).
+  const exercise = LB.findExercise(store, item.exId);
+  const [exNote, setExNote] = useStateS(exercise?.note || '');
   const hasVariable = item.repsPerSet && item.repsPerSet.length > 1;
   const hasRange = !hasVariable && item.repsMax != null;
   const [mode, setMode] = useStateS(hasVariable ? 'variable' : hasRange ? 'range' : 'uniform');
@@ -2135,6 +2141,10 @@ function ExerciseItemEditor({ item, exName, isCheckboxOnly, queuePos, queueTotal
   };
 
   const handleSave = () => {
+    const trimmedExNote = exNote.trim();
+    if (item.exId && trimmedExNote !== (exercise?.note || '')) {
+      setStore(s => ({ ...s, exercises: s.exercises.map(e => e.id === item.exId ? { ...e, note: trimmedExNote } : e) }));
+    }
     if (isCheckboxOnly) {
       onSave({ sets, reps: 0, repsPerSet: undefined, repsMax: undefined, progressionOffset: progOverride });
       return;
@@ -2276,7 +2286,13 @@ function ExerciseItemEditor({ item, exName, isCheckboxOnly, queuePos, queueTotal
         );
       })()}
 
-      <Btn onClick={handleSave} style={{ width: '100%', marginTop: 20 }}>Apply</Btn>
+      <Field label="Exercise note (optional)">
+        <TextInput value={exNote} onChange={setExNote} placeholder="e.g. cable pos 4, slow eccentric…" />
+      </Field>
+      <div className="micro" style={{ color: UI.inkFaint, marginTop: 6, marginBottom: 20, lineHeight: 1.4 }}>
+        Shown every time you train this exercise, in any plan — not specific to this one.
+      </div>
+      <Btn onClick={handleSave} style={{ width: '100%' }}>Apply</Btn>
     </Sheet>
   );
 }
@@ -2550,6 +2566,7 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
           queuePos={editQueue ? editQueue.pos + 1 : undefined}
           queueTotal={editQueue ? editQueue.indices.length : undefined}
           store={store}
+          setStore={setStore}
           onClose={closeEditor}
           onSave={saveEditor}
         />
