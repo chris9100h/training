@@ -94,7 +94,8 @@ CREATE TABLE public.zane_session_entries (
   note text NOT NULL DEFAULT ''::text,
   superset_group text,
   planned_reps_per_set integer[],
-  planned_reps_max integer
+  planned_reps_max integer,
+  planned_progression_offset integer
 );
 
 CREATE TABLE public.zane_sets (
@@ -1130,6 +1131,7 @@ AS $function$
       'plannedReps', e.planned_reps,
       'plannedRepsPerSet', e.planned_reps_per_set,
       'plannedRepsMax', e.planned_reps_max,
+      'plannedProgressionOffset', e.planned_progression_offset,
       'note', e.note,
       'supersetGroup', e.superset_group,
       'category', ex.category,

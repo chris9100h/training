@@ -717,9 +717,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const isNoWeightReps = !isCardio && !!exercise?.no_weight_reps;
   const isBodyweight = !isCardio && exercise?.equipment === 'bodyweight';
   const progressionTargetForSet = (workingSetIdx) => {
-    // A Range-mode exercise (entry.plannedRepsMax) always opts into the
-    // progression hint, independent of the global toggle.
-    if (!store.settings?.smartProgression && entry?.plannedRepsMax == null) return null;
+    if (!LB.progressionEnabled(store, entry?.plannedRepsMax, entry?.plannedProgressionOffset)) return null;
     // Progression itself is suppressed during deload (see completeSet's
     // isDeloadSession guard) — showing the "≥X reps · next weight" hint
     // anyway would promise an unlock that can never actually fire.
@@ -729,8 +727,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       ? (perSet[workingSetIdx] ?? perSet[perSet.length - 1])
       : null;
     const base = (perSetVal ?? exercise?.progression_reps ?? entry?.plannedReps) ?? 0;
-    // Range-mode exercises supply their own ceiling instead of the global add-on.
-    const target = (!perSetVal && entry?.plannedRepsMax != null) ? entry.plannedRepsMax : base + (store.settings?.progressionRangeTop ?? 4);
+    const target = LB.progressionCeilingFor(store, base, perSetVal ? null : entry?.plannedRepsMax, entry?.plannedProgressionOffset);
     return target > 0 ? target : null;
   };
 
@@ -920,7 +917,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       const prevWorkingSets = (last?.entry?.sets || []).filter(s => !s.warmup);
       const prevSet = wIdx >= 0 ? prevWorkingSets[wIdx] : undefined;
       // Mirror buildSeedSets exactly
-      const suggestion = LB.progressionSuggestion(store, entry.exId, session.dayId, entry.plannedReps, entry.plannedRepsPerSet, last, entry.plannedRepsMax);
+      const suggestion = LB.progressionSuggestion(store, entry.exId, session.dayId, entry.plannedReps, entry.plannedRepsPerSet, last, entry.plannedRepsMax, entry.plannedProgressionOffset ?? null);
       const lastReps = prevSet ? LB.effReps(prevSet) : null;
       const refReps = suggestion
         ? (suggestion.reps ?? null)
@@ -1039,9 +1036,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
     const progressionResult = (() => {
       if (isDeloadSession) return null;
-      // Range-mode exercises always opt into the unlock toast, independent
-      // of the global toggle — same rationale as progressionTargetForSet.
-      if (!store.settings?.smartProgression && entry?.plannedRepsMax == null) return null;
+      if (!LB.progressionEnabled(store, entry?.plannedRepsMax, entry?.plannedProgressionOffset)) return null;
       if (!updatedSets.filter(s => !s.warmup).every(s => s.done || s.skipped)) return null;
       const catCfg = exercise?.equipment ? (store.settings?.equipmentConfig?.[exercise.equipment] ?? {}) : {};
       const increment = catCfg.increment ?? null;
@@ -3218,7 +3213,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           const bwKg = newEx?.equipment === 'bodyweight' ? LB.latestBodyweight(s) ?? null : null;
           const last = LB.bestRecentEntry(s, newExId, session.dayId);
           const suggestion = LB.progressionSuggestion(s, newExId, session.dayId, null, null, last);
-          const seedSets = LB.buildSeedSets({ sets: 3, repsPerSet: null }, last, suggestion, isUni, !!s.settings?.smartProgression, bwKg);
+          const seedSets = LB.buildSeedSets({ sets: 3, repsPerSet: null }, last, suggestion, isUni, s, bwKg);
           newEntry = { exId: newExId, name: newEx?.name || newExId, plannedSets: 3, plannedReps: null, plannedRepsPerSet: null, sets: seedSets, note: '', supersetGroup: null, addedDuringSession: true };
         }
         return {
@@ -3280,7 +3275,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         const suggestion = LB.progressionSuggestion(s, newExId, session.dayId, null, null, last);
         const mother = targetIdx !== null ? sess.entries[targetIdx] : null;
         const setCount = mother ? (mother.plannedSets ?? mother.sets?.length ?? 3) : 3;
-        const seedSets = LB.buildSeedSets({ sets: setCount, repsPerSet: null }, last, suggestion, isUni, !!s.settings?.smartProgression, bwKg);
+        const seedSets = LB.buildSeedSets({ sets: setCount, repsPerSet: null }, last, suggestion, isUni, s, bwKg);
         newEntry = { exId: newExId, name: newEx?.name || newExId, plannedSets: setCount, plannedReps: null, plannedRepsPerSet: null, sets: seedSets, note: '', supersetGroup: group, addedDuringSession: true };
       }
       const withNew = [

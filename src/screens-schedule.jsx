@@ -592,7 +592,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId })
         // disagree with what actually gets seeded on a fresh device/reinstall.
         const seedRef = seedRefs[it.exId];
         const last = seedRef ?? LB.bestRecentEntry(store, it.exId, day.id);
-        const suggestion = LB.progressionSuggestion(store, it.exId, day.id, it.reps, it.repsPerSet || null, seedRef, it.repsMax || null);
+        const suggestion = LB.progressionSuggestion(store, it.exId, day.id, it.reps, it.repsPerSet || null, seedRef, it.repsMax || null, it.progressionOffset ?? null);
         const bodyweightKg = ex?.equipment === 'bodyweight' ? LB.latestBodyweight(store) : null;
         const itAdj = (typeof applyMesoSetDeltaFromState === 'function') ? applyMesoSetDeltaFromState(it, day.id, resolvedMeso) : it;
         const weightBoost = mesoBoosts?.[it.exId + '_' + day.id] ?? null;
@@ -601,7 +601,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId })
           const refSet = (last?.entry?.sets || []).filter(s => !s.warmup && !s.skipped).find(s => s.kg != null);
           if (refSet) suggestionFinal = { kg: Math.round((refSet.kg + weightBoost) * 4) / 4, reps: refSet.reps ?? null };
         }
-        const seedSets = LB.buildSeedSets(itAdj, last, suggestionFinal, isUni, !!store.settings?.smartProgression || it.repsMax != null, bodyweightKg);
+        const seedSets = LB.buildSeedSets(itAdj, last, suggestionFinal, isUni, store, bodyweightKg);
         const nextIt = day.items[k + 1];
         const linkedToNext = it.supersetGroup && it.supersetGroup === nextIt?.supersetGroup;
         const isGiant = it.supersetGroup && day.items.filter(x => x.supersetGroup === it.supersetGroup).length >= 3;
@@ -642,7 +642,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId })
         return [frame];
       })}
       <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.5, marginTop: 2, textAlign: 'center' }}>
-        {(store.settings?.smartProgression || day.items.some(i => i.repsMax != null))
+        {day.items.some(i => LB.progressionEnabled(store, i.repsMax, i.progressionOffset))
           ? <>Prefilled for your next session · <i className="fa-solid fa-arrow-up" style={{ fontSize: 8 }} /> = smart progression bump</>
           : 'Prefilled from your last session'}
       </div>
@@ -1898,7 +1898,7 @@ function DayCopyPicker({ store, schedule, currentDayId, onClose, onCopy, multiSe
   const importTemplate = (t) => {
     const items = normalizeSupersets((t.exercises || [])
       .filter(it => LB.findExercise(store, it.exId))
-      .map(it => ({ exId: it.exId, sets: it.sets || 3, reps: it.reps ?? 8, ...(it.repsPerSet ? { repsPerSet: it.repsPerSet } : {}), ...(it.repsMax != null ? { repsMax: it.repsMax } : {}), ...(it.supersetGroup ? { supersetGroup: it.supersetGroup } : {}) })));
+      .map(it => ({ exId: it.exId, sets: it.sets || 3, reps: it.reps ?? 8, ...(it.repsPerSet ? { repsPerSet: it.repsPerSet } : {}), ...(it.repsMax != null ? { repsMax: it.repsMax } : {}), ...(it.progressionOffset != null ? { progressionOffset: it.progressionOffset } : {}), ...(it.supersetGroup ? { supersetGroup: it.supersetGroup } : {}) })));
     const day = { id: LB.uid(), name: t.name, items };
     if (multiSelect) onCopy([{ day, migrateId: undefined }]);
     else onCopy(day, undefined);
@@ -2091,7 +2091,7 @@ function DayCopyPicker({ store, schedule, currentDayId, onClose, onCopy, multiSe
 }
 
 // ─── Day editor (exercises within a day) ─────────────────────────────
-function ExerciseItemEditor({ item, exName, isCheckboxOnly, queuePos, queueTotal, onClose, onSave }) {
+function ExerciseItemEditor({ item, exName, isCheckboxOnly, queuePos, queueTotal, store, onClose, onSave }) {
   const hasVariable = item.repsPerSet && item.repsPerSet.length > 1;
   const hasRange = !hasVariable && item.repsMax != null;
   const [mode, setMode] = useStateS(hasVariable ? 'variable' : hasRange ? 'range' : 'uniform');
@@ -2102,6 +2102,10 @@ function ExerciseItemEditor({ item, exName, isCheckboxOnly, queuePos, queueTotal
   const [repsPerSet, setRepsPerSet] = useStateS(
     hasVariable ? item.repsPerSet : Array.from({ length: item.sets }, () => item.reps ?? 8)
   );
+  // Independent of `mode` — a per-exercise Smart Progression override, kept
+  // across Uniform/Per Set switches. null = inherit the global setting,
+  // 0 = explicitly off, N = explicitly on with a +N reps ceiling.
+  const [progOverride, setProgOverride] = useStateS(item.progressionOffset ?? null);
   const [note, setNote] = useStateS(item.note || '');
 
   const switchMode = (m) => {
@@ -2137,15 +2141,15 @@ function ExerciseItemEditor({ item, exName, isCheckboxOnly, queuePos, queueTotal
 
   const handleSave = () => {
     if (isCheckboxOnly) {
-      onSave({ sets, reps: 0, repsPerSet: undefined, repsMax: undefined, note });
+      onSave({ sets, reps: 0, repsPerSet: undefined, repsMax: undefined, progressionOffset: progOverride, note });
       return;
     }
     if (mode === 'variable') {
-      onSave({ sets, reps: repsPerSet[0] ?? uniformReps, repsPerSet, repsMax: undefined, note });
+      onSave({ sets, reps: repsPerSet[0] ?? uniformReps, repsPerSet, repsMax: undefined, progressionOffset: progOverride, note });
     } else if (mode === 'range') {
-      onSave({ sets, reps: uniformReps, repsPerSet: undefined, repsMax: rangeMax, note });
+      onSave({ sets, reps: uniformReps, repsPerSet: undefined, repsMax: rangeMax, progressionOffset: progOverride, note });
     } else {
-      onSave({ sets, reps: uniformReps, repsPerSet: undefined, repsMax: undefined, note });
+      onSave({ sets, reps: uniformReps, repsPerSet: undefined, repsMax: undefined, progressionOffset: progOverride, note });
     }
   };
 
@@ -2224,6 +2228,31 @@ function ExerciseItemEditor({ item, exName, isCheckboxOnly, queuePos, queueTotal
           ))
         )}</>}
       </div>
+
+      {!isCheckboxOnly && mode !== 'range' && (
+        <div style={{ marginBottom: 24 }}>
+          <div className="label" style={{ marginBottom: 10 }}>Smart Progression</div>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+            <button style={toggleStyle(progOverride === null)} onClick={() => setProgOverride(null)}>Default</button>
+            <button style={toggleStyle(progOverride !== null)} onClick={() => setProgOverride(p => p ?? (store?.settings?.progressionRangeTop ?? 4))}>Custom</button>
+          </div>
+          {progOverride !== null && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
+              <span className="label" style={{ width: 36, textAlign: 'right', flexShrink: 0 }}>Reps</span>
+              <div style={{ flex: 1 }}>
+                <Stepper value={progOverride} onChange={v => setProgOverride(Math.max(0, Math.round(v)))} step={1} min={0} />
+              </div>
+            </div>
+          )}
+          <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.4 }}>
+            {progOverride === null
+              ? 'Uses the global Smart Progression setting.'
+              : progOverride === 0
+                ? 'Smart Progression is off for this exercise.'
+                : `Hit +${progOverride} reps over target on every set and we'll suggest a weight bump — overrides the global Smart Progression setting.`}
+          </div>
+        </div>
+      )}
 
       <Field label="Note (optional)">
         <TextInput value={note} onChange={setNote} placeholder="e.g. cable pos 4, slow eccentric…" />
@@ -2497,6 +2526,7 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
           isCheckboxOnly={!!LB.findExercise(store, draft.items[editingItem]?.exId)?.no_weight_reps}
           queuePos={editQueue ? editQueue.pos + 1 : undefined}
           queueTotal={editQueue ? editQueue.indices.length : undefined}
+          store={store}
           onClose={closeEditor}
           onSave={saveEditor}
         />

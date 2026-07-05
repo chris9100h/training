@@ -678,6 +678,7 @@ function mapEntryRows(entryRows) {
     plannedReps: e.planned_reps,
     plannedRepsPerSet: e.planned_reps_per_set || null,
     plannedRepsMax: e.planned_reps_max ?? null,
+    plannedProgressionOffset: e.planned_progression_offset ?? null,
     note: e.note || '',
     supersetGroup: e.superset_group || null,
     sets: (e.sets || [])
@@ -1129,6 +1130,7 @@ async function _syncEntryRelational(sessions, userId, prevSessions, onStep) {
         planned_reps: e.plannedReps || null,
         planned_reps_per_set: e.plannedRepsPerSet || null,
         planned_reps_max: e.plannedRepsMax || null,
+        planned_progression_offset: e.plannedProgressionOffset ?? null,
         note: e.note || '',
         superset_group: e.supersetGroup || null,
       });
@@ -1722,7 +1724,7 @@ function latestBodyweight(store) {
 // Compute the seed-sets array when starting/logging a session for a planned item.
 // Honors smart-progression suggestions and falls back to last-session values.
 // bodyweightKg: prefill kg with this value when kg would otherwise be null (for bodyweight exercises).
-function buildSeedSets(it, last, suggestion, isUni, smartProgression, bodyweightKg = null, deloadOverride = null) {
+function buildSeedSets(it, last, suggestion, isUni, store, bodyweightKg = null, deloadOverride = null) {
   const workingSets = (last?.entry?.sets || []).filter(s => !s.warmup);
   const repsPerSet = it.repsPerSet;
   // Deload overlay: halve the seeded LOAD (not bodyweight, not reps) so a
@@ -1753,13 +1755,14 @@ function buildSeedSets(it, last, suggestion, isUni, smartProgression, bodyweight
         ? { kg: dl(baseKg), repsL: seedReps, repsR: seedReps, done: false }
         : { kg: dl(baseKg), reps: seedReps, done: false };
     }
-    if (smartProgression && prev) {
-      // Range mode's own ceiling caps the +1 nudge — without this, a set that
+    if (progressionEnabled(store, it.repsMax, it.progressionOffset) && prev) {
+      // The resolved ceiling caps the +1 nudge — without this, a set that
       // already hit the top (e.g. one lagging set keeps the suggestion from
-      // firing) would keep climbing past repsMax session after session,
-      // defeating the whole point of a bounded range.
-      const cap = it.repsMax;
-      const bump = (v) => v == null ? null : (cap != null ? Math.min(v + 1, cap) : v + 1);
+      // firing) would keep climbing past the ceiling session after session,
+      // defeating the whole point of a bounded progression target.
+      const base = targetReps ?? it.reps ?? 0;
+      const cap = progressionCeilingFor(store, base, it.repsMax, it.progressionOffset);
+      const bump = (v) => v == null ? null : Math.min(v + 1, cap);
       return isUni
         ? { kg: dl(seedKg), repsL: bump(prev.repsL), repsR: bump(prev.repsR), done: false }
         : { kg: dl(seedKg), reps: bump(prev.reps), done: false };
@@ -2301,14 +2304,31 @@ function subscribeToChanges(userId, onCoachingNote, onCoachingInvite) {
   return () => { _supabase.removeChannel(_realtimeChannel); _realtimeChannel = null; };
 }
 
+// Whether Smart Progression is active for a given exercise entry/item.
+// Precedence: an explicit Range ceiling (plannedRepsMax) is always on >
+// an explicit per-exercise progressionOffset override (0 = off, N = on) >
+// the global smartProgression setting. progressionOffset === 0 is a
+// meaningful, distinct value from null/undefined — never coerce it away
+// with `||`, only `!= null`/`===` checks.
+function progressionEnabled(store, plannedRepsMax, progressionOffset) {
+  if (plannedRepsMax != null) return true;
+  if (progressionOffset === 0) return false;
+  if (progressionOffset != null) return true;
+  return !!store.settings?.smartProgression;
+}
+// The reps ceiling to hit for a given base rep count. Only meaningful when
+// progressionEnabled(...) is true for the same inputs.
+function progressionCeilingFor(store, base, plannedRepsMax, progressionOffset) {
+  if (plannedRepsMax != null) return plannedRepsMax;
+  if (progressionOffset != null) return (base ?? 0) + progressionOffset;
+  return (base ?? 0) + (store.settings?.progressionRangeTop ?? 4);
+}
+
 // Returns { kg, reps } suggestion when all last sets hit top of rep range, null otherwise.
 // refOverride: a pre-fetched { entry: { sets } } reference (fetchSeedEntries) —
 // used when the exercise's recent history lives outside the boot window.
-function progressionSuggestion(store, exId, dayId, plannedReps, plannedRepsPerSet, refOverride, plannedRepsMax) {
-  // A Range-mode exercise always opts into progression suggestions —
-  // hitting the top of its own range is the whole point of Range mode,
-  // independent of the global Smart Progression toggle.
-  if (!store.settings?.smartProgression && plannedRepsMax == null) return null;
+function progressionSuggestion(store, exId, dayId, plannedReps, plannedRepsPerSet, refOverride, plannedRepsMax, progressionOffset) {
+  if (!progressionEnabled(store, plannedRepsMax, progressionOffset)) return null;
   const ex = findExercise(store, exId);
   const catCfg = ex?.equipment ? (store.settings?.equipmentConfig?.[ex.equipment] ?? {}) : {};
   const increment = catCfg.increment ?? 2.5;
@@ -2319,7 +2339,6 @@ function progressionSuggestion(store, exId, dayId, plannedReps, plannedRepsPerSe
   const ref = refOverride ?? bestRecentEntry(store, exId, dayId);
   if (!ref) return null;
 
-  const range = store.settings?.progressionRangeTop ?? 4;
   // Index by true working-set position (warm-ups stripped, nothing else) so
   // plannedRepsPerSet[i] lines up correctly — filtering skipped sets out
   // before indexing (as this used to) shifts every later set's target one
@@ -2336,7 +2355,7 @@ function progressionSuggestion(store, exId, dayId, plannedReps, plannedRepsPerSe
     // A Range-mode exercise's own repsMax is the ceiling to hit, replacing
     // the global range add-on for that exercise (but only when repsPerSet
     // isn't itself in play — Range and Per Set are mutually exclusive).
-    const ceiling = (!perSet && plannedRepsMax != null) ? plannedRepsMax : (baseReps ?? 0) + range;
+    const ceiling = progressionCeilingFor(store, baseReps, perSet ? null : plannedRepsMax, progressionOffset);
     return (effReps(s) ?? 0) >= ceiling;
   });
   if (!allHitTop) return null;
@@ -3652,7 +3671,7 @@ window.LB = {
   signIn, signUp, signOut, signInWithPasskey, registerPasskey, listPasskeys, deletePasskey, resetPassword, deleteAllData, exportBackup, importFromBackup, validateBackup,
   loadFromSupabase, syncStore, mergeSessions, historyWindowCutoffISO,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
-  uid, todayISO, fmtISO, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate,
+  uid, todayISO, fmtISO, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate,
   effReps, e1rm, isImprovement, isDecline, bestE1rmForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, latestBodyweight, inferCurrentExIdx, calcBlended,
   refreshExerciseBests, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries,
   computeNextReminderAt,

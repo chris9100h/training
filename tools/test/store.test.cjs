@@ -692,23 +692,74 @@ async function testAsync(name, fn) {
     assert.strictEqual(LB.mesoRirForWeek(1, 0, 3, 0), 0);
   });
 
+  const smartProgStore = { settings: { smartProgression: true, progressionRangeTop: 4 } };
+  const noSmartProgStore = { settings: { smartProgression: false, progressionRangeTop: 4 } };
+
+  test('progressionEnabled: Range repsMax is always on, regardless of the global setting', () => {
+    assert.strictEqual(LB.progressionEnabled(noSmartProgStore, 12, null), true);
+    assert.strictEqual(LB.progressionEnabled(smartProgStore, 12, null), true);
+  });
+  test('progressionEnabled: an explicit progressionOffset of 0 is off regardless of the global setting', () => {
+    assert.strictEqual(LB.progressionEnabled(smartProgStore, null, 0), false);
+  });
+  test('progressionEnabled: an explicit positive progressionOffset is on regardless of the global setting', () => {
+    assert.strictEqual(LB.progressionEnabled(noSmartProgStore, null, 6), true);
+  });
+  test('progressionEnabled: unset progressionOffset inherits the global setting', () => {
+    assert.strictEqual(LB.progressionEnabled(smartProgStore, null, null), true);
+    assert.strictEqual(LB.progressionEnabled(noSmartProgStore, null, null), false);
+  });
+  test('progressionCeilingFor: Range repsMax wins as an absolute ceiling', () => {
+    assert.strictEqual(LB.progressionCeilingFor(smartProgStore, 8, 12, 6), 12);
+  });
+  test('progressionCeilingFor: explicit offset adds onto the base, ignoring the global range top', () => {
+    assert.strictEqual(LB.progressionCeilingFor(smartProgStore, 8, null, 2), 10);
+  });
+  test('progressionCeilingFor: falls back to base + global progressionRangeTop', () => {
+    assert.strictEqual(LB.progressionCeilingFor(smartProgStore, 8, null, null), 12);
+  });
+
   test('buildSeedSets caps the +1 progression nudge at a Range item\'s repsMax', () => {
     const it = { sets: 1, reps: 8, repsMax: 12 };
     const atCap = { entry: { sets: [{ warmup: false, kg: 100, reps: 12, done: true }] } };
-    const seeded = LB.buildSeedSets(it, atCap, null, false, true, null);
-    assert.strictEqual(seeded[0].reps, 12); // must not climb to 13 past the range ceiling
+    const seeded = LB.buildSeedSets(it, atCap, null, false, noSmartProgStore, null);
+    assert.strictEqual(seeded[0].reps, 12); // must not climb to 13 past the range ceiling, even with the global setting off
   });
   test('buildSeedSets still bumps +1 while below a Range item\'s repsMax', () => {
     const it = { sets: 1, reps: 8, repsMax: 12 };
     const belowCap = { entry: { sets: [{ warmup: false, kg: 100, reps: 9, done: true }] } };
-    const seeded = LB.buildSeedSets(it, belowCap, null, false, true, null);
+    const seeded = LB.buildSeedSets(it, belowCap, null, false, noSmartProgStore, null);
     assert.strictEqual(seeded[0].reps, 10);
   });
-  test('buildSeedSets leaves the classic (non-Range) +1 nudge unbounded', () => {
+  test('buildSeedSets caps the classic (non-Range) +1 nudge at base + global progressionRangeTop', () => {
+    const it = { sets: 1, reps: 8 };
+    const atCap = { entry: { sets: [{ warmup: false, kg: 100, reps: 12, done: true }] } };
+    const seeded = LB.buildSeedSets(it, atCap, null, false, smartProgStore, null);
+    assert.strictEqual(seeded[0].reps, 12); // must not climb to 13 — same runaway fix, now for the global default too
+  });
+  test('buildSeedSets still bumps +1 below the global ceiling when Smart Progression is on', () => {
     const it = { sets: 1, reps: 8 };
     const last = { entry: { sets: [{ warmup: false, kg: 100, reps: 10, done: true }] } };
-    const seeded = LB.buildSeedSets(it, last, null, false, true, null);
+    const seeded = LB.buildSeedSets(it, last, null, false, smartProgStore, null);
     assert.strictEqual(seeded[0].reps, 11);
+  });
+  test('buildSeedSets does not bump reps at all when the global setting is off and there is no override', () => {
+    const it = { sets: 1, reps: 8 };
+    const last = { entry: { sets: [{ warmup: false, kg: 100, reps: 10, done: true }] } };
+    const seeded = LB.buildSeedSets(it, last, null, false, noSmartProgStore, null);
+    assert.strictEqual(seeded[0].reps, 10); // unchanged, no progression nudge
+  });
+  test('buildSeedSets honors a per-exercise progressionOffset override even with the global setting off', () => {
+    const it = { sets: 1, reps: 8, progressionOffset: 2 };
+    const last = { entry: { sets: [{ warmup: false, kg: 100, reps: 10, done: true }] } };
+    const seeded = LB.buildSeedSets(it, last, null, false, noSmartProgStore, null);
+    assert.strictEqual(seeded[0].reps, 10); // base(8)+offset(2)=10 ceiling, already there, capped not bumped to 11
+  });
+  test('buildSeedSets respects an explicit progressionOffset of 0 (off) even with the global setting on', () => {
+    const it = { sets: 1, reps: 8, progressionOffset: 0 };
+    const last = { entry: { sets: [{ warmup: false, kg: 100, reps: 10, done: true }] } };
+    const seeded = LB.buildSeedSets(it, last, null, false, smartProgStore, null);
+    assert.strictEqual(seeded[0].reps, 10); // unchanged, no progression nudge despite the global setting being on
   });
 
   console.log(`\n${pass} passed, ${fail} failed`);

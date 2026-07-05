@@ -547,9 +547,9 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
                 {(todayDay?.items || []).filter(i => i.exId).map((item, idx) => {
                   const ex = (clientStore.exercises || []).find(e => e.id === item.exId);
                   const last = LB.bestRecentEntry(clientStore, item.exId, todayDay.id);
-                  const suggestion = LB.progressionSuggestion(clientStore, item.exId, todayDay.id, item.reps, item.repsPerSet || null, undefined, item.repsMax || null);
+                  const suggestion = LB.progressionSuggestion(clientStore, item.exId, todayDay.id, item.reps, item.repsPerSet || null, undefined, item.repsMax || null, item.progressionOffset ?? null);
                   const bodyweightKg = ex?.equipment === 'bodyweight' ? LB.latestBodyweight(clientStore) : null;
-                  const seeds = LB.buildSeedSets(item, last, suggestion, ex?.unilateral, clientStore.settings?.smartProgression || item.repsMax != null, bodyweightKg, clientStore.statusMode === 'deload');
+                  const seeds = LB.buildSeedSets(item, last, suggestion, ex?.unilateral, clientStore, bodyweightKg, clientStore.statusMode === 'deload');
                   const hasWeight = seeds.some(s => s.kg != null);
                   return (
                     <div key={idx} style={{ padding: '12px 4px', borderBottom: `0.5px solid ${UI.hair}` }}>
