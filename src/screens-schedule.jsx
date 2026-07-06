@@ -3167,8 +3167,8 @@ function PlanWizard({ store, setStore, go }) {
       </div>
       {dayFlash && (
         <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}>
-          <div style={{ width: 92, height: 92, borderRadius: '50%', background: 'rgba(var(--accent-rgb),0.18)', border: '1px solid var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 12px 40px rgba(0,0,0,0.5)', animation: 'fadeUp 0.2s ease' }}>
-            <i className="fa-solid fa-check" style={{ fontSize: 42, color: 'var(--accent)' }} />
+          <div style={{ width: 92, height: 92, borderRadius: '50%', background: 'var(--accent)', border: '1px solid var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 12px 40px rgba(0,0,0,0.6)', animation: 'fadeUp 0.2s ease' }}>
+            <i className="fa-solid fa-check" style={{ fontSize: 42, color: '#0a0805' }} />
           </div>
         </div>
       )}
