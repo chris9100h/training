@@ -714,7 +714,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const last = localLast ?? (entry ? remoteLast[entry.exId] : null) ?? null;
   const isCardio = !!entry?.isCardio;
   const isUnilateral = !isCardio && (exercise?.movement_type ?? (exercise?.unilateral ? 'unilateral' : 'bilateral')) === 'unilateral';
-  const isNoWeightReps = !isCardio && !!exercise?.no_weight_reps;
+  const logMode = !isCardio ? LB.exerciseLogMode(exercise) : 'weight';
+  const isCheckbox = logMode === 'checkbox';   // tick only, no numbers
+  const isRepsOnly = logMode === 'reps';       // reps cell, no weight
+  const isNoWeightReps = isCheckbox || isRepsOnly; // "no weight column" — keeps all existing kg/header/hero gates
   const isBodyweight = !isCardio && exercise?.equipment === 'bodyweight';
   const progressionTargetForSet = (workingSetIdx) => {
     if (!LB.progressionEnabled(store, entry?.plannedRepsMax, entry?.plannedProgressionOffset)) return null;
@@ -1373,7 +1376,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           if (i !== exIdx && !(group && e.supersetGroup === group)) return e;
           const ex = LB.findExercise(store, e.exId);
           const uni = (ex?.movement_type ?? (ex?.unilateral ? 'unilateral' : 'bilateral')) === 'unilateral';
-          const bwKg = ex?.equipment === 'bodyweight' ? LB.latestBodyweight(store) : null;
+          const bwKg = LB.shouldPullBodyweight(ex) ? LB.latestBodyweight(store) : null;
           const last = e.sets[e.sets.length - 1];
           const newSet = uni
             ? { kg: last?.kg ?? bwKg ?? null, repsL: last?.repsL ?? null, repsR: last?.repsR ?? null, done: false }
@@ -2637,8 +2640,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         );
     const withBoosts = { ...mesoState, weightBoosts: newWeightBoosts };
     // If the last meso week just finished: bump completions + set pendingMeso2 so the
-    // home screen can offer Meso 2 after a deload (or immediately).
-    const finalMeso = isComplete
+    // home screen can offer Meso 2 after a deload (or immediately). isComplete is
+    // true for EVERY session of the final week, and this runs per session-end, so
+    // guard on pendingMeso2 to increment completions exactly once per block — else
+    // a second peak-week session (or a force-quit re-run) double-counts and the
+    // offer misreads "Meso 3" instead of "Meso 2" (audit C2). pendingMeso2 clears
+    // only when the user answers the offer, i.e. when the next block begins.
+    const finalMeso = (isComplete && !withBoosts.pendingMeso2)
       ? { ...withBoosts, completions: (withBoosts.completions ?? 0) + 1, pendingMeso2: true }
       : withBoosts;
     if (finalMeso) {
@@ -3211,7 +3219,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           newEntry = { exId: newExId, name: newEx?.name || newExId, isCardio: true, plannedSets: 0, plannedReps: null, plannedRepsPerSet: null, sets: [], cardioDone: false, cardioData: null, note: '', supersetGroup: null, addedDuringSession: true };
         } else {
           const isUni = newEx?.movement_type === 'unilateral';
-          const bwKg = newEx?.equipment === 'bodyweight' ? LB.latestBodyweight(s) ?? null : null;
+          const bwKg = LB.shouldPullBodyweight(newEx) ? LB.latestBodyweight(s) ?? null : null;
           const last = LB.bestRecentEntry(s, newExId, session.dayId);
           const suggestion = LB.progressionSuggestion(s, newExId, session.dayId, null, null, last);
           const seedSets = LB.buildSeedSets({ sets: 3, repsPerSet: null }, last, suggestion, isUni, s, bwKg);
@@ -3228,7 +3236,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       });
       if (jump && !isNewCardio) {
         addAndJumpRef.current = false;
-        setTimeout(() => activateKb(0, firstFieldForExercise(LB.findExercise(store, newExId))), 200);
+        const ff = firstFieldForExercise(LB.findExercise(store, newExId));
+        if (ff) setTimeout(() => activateKb(0, ff), 200);
       }
     } else if (addSupersetCandidates.length === 0) {
       // Nothing eligible to pair with — skip the superset prompt entirely
@@ -3242,11 +3251,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     }
   };
 
-  // First field to jump the keyboard to for a freshly-added exercise — 'kg'
-  // unless the exercise has no weight field at all (no_weight_reps), in
-  // which case it's whichever reps cell is actually rendered first.
+  // First field to jump the keyboard to for a freshly-added exercise — 'kg' for
+  // weight mode, the first rendered reps cell for reps mode, and null for
+  // checkbox mode (nothing to type, so no keyboard).
   const firstFieldForExercise = (ex) => {
-    if (!ex?.no_weight_reps) return 'kg';
+    const m = LB.exerciseLogMode(ex);
+    if (m === 'weight') return 'kg';
+    if (m === 'checkbox') return null;
     return ex?.movement_type === 'unilateral' ? 'repsL' : 'reps';
   };
 
@@ -3271,7 +3282,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         newEntry = { exId: newExId, name: newEx?.name || newExId, isCardio: true, plannedSets: 0, plannedReps: null, plannedRepsPerSet: null, sets: [], cardioDone: false, cardioData: null, note: '', supersetGroup: group, addedDuringSession: true };
       } else {
         const isUni = newEx?.movement_type === 'unilateral';
-        const bwKg = newEx?.equipment === 'bodyweight' ? LB.latestBodyweight(s) ?? null : null;
+        const bwKg = LB.shouldPullBodyweight(newEx) ? LB.latestBodyweight(s) ?? null : null;
         const last = LB.bestRecentEntry(s, newExId, session.dayId);
         const suggestion = LB.progressionSuggestion(s, newExId, session.dayId, null, null, last);
         const mother = targetIdx !== null ? sess.entries[targetIdx] : null;
@@ -3301,7 +3312,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     });
     if (jump) {
       const newEx = store.exercises?.find(e => e.id === newExId);
-      if (newEx?.movement_type !== 'cardio') setTimeout(() => activateKb(0, firstFieldForExercise(newEx)), 200);
+      const ff = newEx?.movement_type !== 'cardio' ? firstFieldForExercise(newEx) : null;
+      if (ff) setTimeout(() => activateKb(0, ff), 200);
     }
   };
 
@@ -3641,6 +3653,30 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     return { totalSetsDone, expectedSec };
   }, [avgStats, session.entries, session.startedAt]);
 
+  // Beyond-failure meso: auto-arm the Lengthened Partials stepper (pre-filled to
+  // the prescribed count) on the current plain working set, so the partials are
+  // visible up front instead of silently attached on check-off. Armed once per
+  // set (mesoLpArmedRef) so cancelling on a set doesn't re-nag. Chains carry
+  // their own partials via the finisher seed, so skip while one is in flight.
+  // MUST sit above the `if (!entry)` early return (empty freestyle/bonus
+  // session): a hook after that return changes the hook count when the first
+  // exercise is added (entry null → set), which is React error #310. Derives
+  // the current set locally since currentSetIdx/isCurrentWarmup come later.
+  useEffectT(() => {
+    if (!entry || isCardio) return;
+    const sets = entry.sets || [];
+    const curIdx = sets.findIndex(s => !s.done);
+    const wCount = sets.filter(s => s.warmup).length;
+    const curWarmup = wCount > 0 && curIdx >= 0 && !!sets[curIdx]?.warmup;
+    if (mesoPartials <= 0 || curIdx < 0 || curWarmup) return;
+    if (dropSetIdx != null || myoSetIdx != null || avSetIdx != null || lpTarget != null) return;
+    const key = exIdx + '_' + curIdx;
+    if (mesoLpArmedRef.current.has(key)) return;
+    mesoLpArmedRef.current.add(key);
+    setLpTarget({ exIdx, setIdx: curIdx });
+    setLpCount(mesoPartials);
+  }, [entry, isCardio, exIdx, mesoPartials, dropSetIdx, myoSetIdx, avSetIdx, lpTarget]);
+
   if (!entry) {
     if (!session.isBonus) {
       return <Screen><Empty title="This session is empty" action={<Btn onClick={() => go({ name: 'home' })}>Back</Btn>} /></Screen>;
@@ -3693,20 +3729,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const allWorkingDone = workingSetsArr.length > 0 && workingSetsArr.every(s => s.done || s.skipped);
   const anyMissingData = !isNoWeightReps && workingSetsArr.some(st => !st.done && !st.skipped && ((!isBodyweight && st.kg == null) || (isUnilateral ? (st.repsL == null || st.repsR == null) : st.reps == null)));
 
-  // Beyond-failure meso: auto-arm the Lengthened Partials stepper (pre-filled to
-  // the prescribed count) on the current plain working set, so the partials are
-  // visible up front instead of silently attached on check-off. Armed once per
-  // set (mesoLpArmedRef) so cancelling on a set doesn't re-nag. Chains carry
-  // their own partials via the finisher seed, so skip while one is in flight.
-  useEffectT(() => {
-    if (mesoPartials <= 0 || currentSetIdx < 0 || isCurrentWarmup) return;
-    if (dropSetIdx != null || myoSetIdx != null || avSetIdx != null || lpTarget != null) return;
-    const key = exIdx + '_' + currentSetIdx;
-    if (mesoLpArmedRef.current.has(key)) return;
-    mesoLpArmedRef.current.add(key);
-    setLpTarget({ exIdx, setIdx: currentSetIdx });
-    setLpCount(mesoPartials);
-  }, [currentSetIdx, exIdx, mesoPartials, dropSetIdx, myoSetIdx, avSetIdx]);
+  // (The Lengthened-Partials auto-arm effect lives above the `if (!entry)`
+  // early return to keep the hook order stable; see the note there.)
 
   // Superset linking (Intensity sheet) is only offered before any working set
   // in the CURRENT group has started — retroactively linking a partially-run
@@ -4516,7 +4540,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                     return (
                     <div data-kb-row={i} style={{
                       display: 'grid',
-                      gridTemplateColumns: isIntensityActive ? '28px 1fr' : (isNoWeightReps ? '28px 1fr 28px' : (isUnilateral ? '28px 1fr 72px 44px 44px 28px' : '28px 1fr 72px 56px 28px')),
+                      gridTemplateColumns: isIntensityActive ? '28px 1fr' : (isCheckbox ? '28px 1fr 28px' : isRepsOnly ? (isUnilateral ? '28px 1fr 44px 44px 28px' : '28px 1fr 56px 28px') : (isUnilateral ? '28px 1fr 72px 44px 44px 28px' : '28px 1fr 72px 56px 28px')),
                       gap: 8, alignItems: 'center',
                       padding: '10px 4px',
                       opacity: s.done || s.skipped ? (isWarmupRow ? 0.3 : 0.4) : 1,
@@ -4531,7 +4555,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                         color: isCurrent ? UI.gold : s.done ? UI.goldDeep : UI.inkFaint,
                       }}>{isWarmupRow ? `W${warmupRowNum}` : workingRowNum}</div>
 
-                      {isIntensityActive ? null : isNoWeightReps ? <div /> : (
+                      {isIntensityActive ? null : isCheckbox ? <div /> : (
                         (s.technique === 'drop' || s.technique === 'myorep' || s.technique === 'myorep_match' || s.technique === 'lengthened_partial' || s.technique === 'amrap_variations') && s.done
                           ? <div style={{ display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'flex-start' }}>
                               <span style={{
@@ -4548,7 +4572,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                           : <div className="num" style={{ fontSize: 11, color: UI.inkFaint }}>
                               {isWarmupRow
                                 ? <span style={{ color: UI.inkGhost }}>{s.warmupPct}%</span>
-                                : prevSet?.kg != null && (prevSet.reps != null || prevSet.repsL != null || prevSet.repsR != null) ? `${prevSet.kg}${UI.unit()} × ${(prevSet.repsL != null || prevSet.repsR != null) ? `L${prevSet.repsL ?? '?'}/R${prevSet.repsR ?? '?'}` : prevSet.reps}` : '—'
+                                : isRepsOnly
+                                  ? (prevSet && (prevSet.reps != null || prevSet.repsL != null || prevSet.repsR != null) ? `${(prevSet.repsL != null || prevSet.repsR != null) ? `L${prevSet.repsL ?? '?'}/R${prevSet.repsR ?? '?'}` : prevSet.reps} reps` : '—')
+                                  : prevSet?.kg != null && (prevSet.reps != null || prevSet.repsL != null || prevSet.repsR != null) ? `${prevSet.kg}${UI.unit()} × ${(prevSet.repsL != null || prevSet.repsR != null) ? `L${prevSet.repsL ?? '?'}/R${prevSet.repsR ?? '?'}` : prevSet.reps}` : '—'
                               }
                             </div>
                       )}
@@ -4573,7 +4599,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                         }))}
                       />}
 
-                      {!isIntensityActive && !isNoWeightReps && (isUnilateral ? (
+                      {!isIntensityActive && !isCheckbox && (isUnilateral ? (
                         <>
                           <KbCell text={kbField?.setIdx === i && kbField?.field === 'repsL' ? kbRaw : (s.repsL ?? '')} placeholder="L" disabled={s.done || s.skipped} onActivate={() => activateKb(i, 'repsL')} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), ...(kbField?.setIdx === i && kbField?.field === 'repsL' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }} />
                           <KbCell text={kbField?.setIdx === i && kbField?.field === 'repsR' ? kbRaw : (s.repsR ?? '')} placeholder="R" disabled={s.done || s.skipped} onActivate={() => activateKb(i, 'repsR')} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), ...(kbField?.setIdx === i && kbField?.field === 'repsR' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }} />

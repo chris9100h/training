@@ -590,7 +590,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId })
         const seedRef = seedRefs[it.exId];
         const last = seedRef ?? LB.bestRecentEntry(store, it.exId, day.id);
         const suggestion = LB.progressionSuggestion(store, it.exId, day.id, it.reps, it.repsPerSet || null, seedRef, it.repsMax || null, it.progressionOffset ?? null);
-        const bodyweightKg = ex?.equipment === 'bodyweight' ? LB.latestBodyweight(store) : null;
+        const bodyweightKg = LB.shouldPullBodyweight(ex) ? LB.latestBodyweight(store) : null;
         const itAdj = (typeof applyMesoSetDeltaFromState === 'function') ? applyMesoSetDeltaFromState(it, day.id, resolvedMeso) : it;
         const weightBoost = mesoBoosts?.[it.exId + '_' + day.id] ?? null;
         let suggestionFinal = suggestion;
@@ -1074,6 +1074,9 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
   const [editingDay, setEditingDay] = useStateS(null);
   const [mesoInfoOpen, setMesoInfoOpen] = useStateS(false);
   const [modifiersOpen, setModifiersOpen] = useStateS(false);
+  // Weekday-mode whole-day import: pick a source day, then a weekday to place it on.
+  const [importDayOpen, setImportDayOpen] = useStateS(false);
+  const [pendingImportDay, setPendingImportDay] = useStateS(null); // { name, items, migrateId } awaiting a weekday
 
   const reorderDays = (from, to) => {
     if (from === to) return;
@@ -1091,6 +1094,9 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
   const isActive = draft.id === store.activeScheduleId;
   const isWeekday = LB.isWeekdayPlan(draft);
   const isFlex = LB.isFlexPlan(draft);
+  // Weekday whole-day import is offered only when there's a source day to pull
+  // from and a free weekday slot to place it on (max 7 days).
+  const canImportWholeDay = store.schedules.some(s => (s.days || []).some(d => (d.items || []).length > 0)) && draft.days.length < 7;
 
   const toggleWeekdayEdit = (idx) => {
     setDraft(d => {
@@ -1402,12 +1408,12 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
         {isWeekday ? (
           <div>
             <span className="label">Training days</span>
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', margin: '10px 0 14px' }}>
+            <div style={{ display: 'flex', gap: 6, margin: '10px 0 14px' }}>
               {WEEKDAYS.map((wd, i) => {
                 const active = draft.days.some(d => d.weekday === i);
                 return (
                   <button key={i} onClick={() => toggleWeekdayEdit(i)} style={{
-                    width: 44, height: 44, borderRadius: 6,
+                    flex: 1, minWidth: 0, height: 44, borderRadius: 6,
                     border: `1px solid ${active ? UI.goldSoft : UI.hairStrong}`,
                     background: active ? UI.goldFaint : 'transparent',
                     color: active ? UI.gold : UI.inkFaint,
@@ -1434,6 +1440,17 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
                 </div>
               ))}
             </div>
+            {canImportWholeDay && (
+              <button onClick={() => setImportDayOpen(true)} style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                width: '100%', marginTop: 10, padding: '12px 14px', borderRadius: 4,
+                background: UI.goldFaint, border: `1px solid ${UI.goldSoft}`,
+                cursor: 'pointer', color: UI.gold, fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600,
+              }}>
+                <span>↩ Import day with history</span>
+                <span className="micro" style={{ color: UI.gold, opacity: 0.7 }}>exercises + progression →</span>
+              </button>
+            )}
           </div>
         ) : (
           <div>
@@ -1485,7 +1502,13 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
           schedule={draft}
           onClose={() => setEditingDay(null)}
           onSave={(updated) => {
-            setDraft(d => ({ ...d, days: d.days.map(x => x.id === updated.id ? updated : x) }));
+            // Match by editingDay (the id the day currently has in the plan),
+            // NOT updated.id: copyItemsFromDay swaps the day's id to the source
+            // day's id when importing "from plan" across plans (to carry that
+            // day's session history over). updated.id then no longer matches any
+            // existing day, so matching on it silently dropped the whole import
+            // — the exercises appeared in the editor but never saved.
+            setDraft(d => ({ ...d, days: d.days.map(x => x.id === editingDay ? updated : x) }));
             setEditingDay(null);
           }}
         />
@@ -1502,6 +1525,62 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
             setPickingType(false);
           }}
         />
+      )}
+      {/* Weekday whole-day import: pick a source day, then a weekday to place it on. */}
+      {importDayOpen && (
+        <DayCopyPicker
+          store={store}
+          schedule={null}
+          currentDayId={null}
+          multiSelect={false}
+          onClose={() => setImportDayOpen(false)}
+          onCopy={(sourceDay, migrateId) => {
+            // Deep-copy items + remap superset group ids so the new day never
+            // shares objects / group ids with the source day.
+            const gidMap = {};
+            const items = (sourceDay.items || []).map(it => {
+              const next = { ...it };
+              if (it.supersetGroup) { gidMap[it.supersetGroup] = gidMap[it.supersetGroup] || LB.uid(); next.supersetGroup = gidMap[it.supersetGroup]; }
+              return next;
+            });
+            setPendingImportDay({ name: sourceDay.name, items, migrateId });
+            setImportDayOpen(false);
+          }}
+        />
+      )}
+      {pendingImportDay && (
+        <MiniSheet onClose={() => setPendingImportDay(null)}>
+          <div className="label" style={{ color: UI.inkFaint, marginBottom: 14 }}>PLACE "{pendingImportDay.name}" ON</div>
+          <div style={{ display: 'flex', gap: 6 }}>
+            {WEEKDAYS.map((wd, i) => {
+              const taken = draft.days.some(d => d.weekday === i);
+              return (
+                <button key={i} disabled={taken} onClick={() => {
+                  setDraft(d => {
+                    // Keep the source day's id (carries its session history) unless
+                    // that id already exists in this plan — then use a fresh one.
+                    const collides = d.days.some(x => x.id === pendingImportDay.migrateId);
+                    const id = (pendingImportDay.migrateId && !collides) ? pendingImportDay.migrateId : LB.uid();
+                    return { ...d, days: [...d.days, { id, name: pendingImportDay.name, weekday: i, items: pendingImportDay.items }] };
+                  });
+                  setPendingImportDay(null);
+                }} style={{
+                  // Exactly like the "Training days" grid: accent = already has a
+                  // day (locked here), grey = free — tap a free one to place.
+                  flex: 1, minWidth: 0, height: 44, borderRadius: 6,
+                  border: `1px solid ${taken ? UI.goldSoft : UI.hairStrong}`,
+                  background: taken ? UI.goldFaint : 'transparent',
+                  color: taken ? UI.gold : UI.inkFaint,
+                  fontFamily: UI.fontNum, fontSize: 12, fontWeight: taken ? 600 : 400,
+                  cursor: taken ? 'not-allowed' : 'pointer',
+                }}>{wd}</button>
+              );
+            })}
+          </div>
+          <div className="micro" style={{ color: UI.inkFaint, marginTop: 12, lineHeight: 1.6 }}>
+            Highlighted weekdays already have a day — tap a free one.
+          </div>
+        </MiniSheet>
       )}
       {confirmEl}
 
@@ -2631,6 +2710,51 @@ function ExercisePicker({ store, setStore, onClose, onPick, singleSelect = false
       .sort((a,b) => a.name.localeCompare(b.name));
   }, [store.exercises, q, filterTags]);
 
+  // System exercise catalog (exercise-db.js), surfaced on demand: only while
+  // searching or filtering, so the default quick-add view stays the user's own
+  // library. Catalog entries already in the library (by name) are hidden to
+  // avoid offering a duplicate.
+  const userNamesU = useMemoS(() => new Set(store.exercises.map(e => (e.name || '').toUpperCase())), [store.exercises]);
+  const dbActive = !!q || filterTags.length > 0;
+  const systemList = useMemoS(() => {
+    if (!dbActive) return [];
+    const ql = q.toUpperCase();
+    return (window.SYSTEM_EXERCISES || [])
+      .filter(s => !userNamesU.has((s.name || '').toUpperCase()))
+      .filter(s => {
+        const matchSearch = !q || s.name.toUpperCase().includes(ql) || s.tags?.some(t => t.toUpperCase().includes(ql));
+        const matchTags = filterTags.length === 0 || filterTags.some(ft => s.tags?.includes(ft));
+        return matchSearch && matchTags;
+      })
+      .sort((a,b) => a.name.localeCompare(b.name));
+  }, [dbActive, q, filterTags, userNamesU]);
+
+  // Resolve a picked id list to real user-exercise ids: a catalog (sys_) id is
+  // duplicated into store.exercises (or mapped to an existing same-named copy)
+  // so plans/sessions only ever hold user-owned ids. The new rows are added in
+  // one setStore before onPick, and doAdd/doSwap read the exercise from fresh
+  // state (functional setStore), so the just-created copy resolves correctly.
+  const finalizePick = (ids) => {
+    const sysById = new Map((window.SYSTEM_EXERCISES || []).map(s => [s.id, s]));
+    const newRows = [];
+    const resolved = ids.map(id => {
+      const sys = sysById.get(id);
+      if (!sys) return id;
+      const existing = store.exercises.find(e => (e.name || '').toUpperCase() === sys.name.toUpperCase());
+      if (existing) return existing.id;
+      const row = LB.systemExerciseToRow(sys);
+      newRows.push(row);
+      return row.id;
+    });
+    if (newRows.length) setStore(s => ({ ...s, exercises: [...s.exercises, ...newRows] }));
+    onPick(resolved);
+  };
+
+  const exactNameExists = !!q && (
+    store.exercises.some(e => e.name.toUpperCase() === q.toUpperCase()) ||
+    (window.SYSTEM_EXERCISES || []).some(s => s.name.toUpperCase() === q.toUpperCase())
+  );
+
   return (
     <Sheet open={true} onClose={onClose} title="Select exercises">
       <Field label="">
@@ -2647,7 +2771,7 @@ function ExercisePicker({ store, setStore, onClose, onPick, singleSelect = false
           const isSel = selected.includes(e.id);
           return (
             <React.Fragment key={e.id}>
-            <button onClick={() => singleSelect ? onPick([e.id]) : toggleSelect(e.id)} style={{
+            <button onClick={() => singleSelect ? finalizePick([e.id]) : toggleSelect(e.id)} style={{
               background: isSel ? UI.goldFaint : 'transparent', border: 'none', textAlign: 'left',
               padding: '11px 8px', cursor: 'pointer', borderRadius: 4,
               display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8,
@@ -2659,22 +2783,51 @@ function ExercisePicker({ store, setStore, onClose, onPick, singleSelect = false
                 {(e.tags || []).map(t => <Pill key={t} gold={isSel}>{t}</Pill>)}
               </div>
             </button>
-            {ei < list.length - 1 && <div className="knurl" />}
+            {(ei < list.length - 1 || systemList.length > 0) && <div className="knurl" />}
             </React.Fragment>
           );
         })}
-        {list.length === 0 && <div className="micro" style={{ padding: '20px 0', textAlign: 'center', color: UI.inkFaint }}>No exercises found</div>}
+        {systemList.length > 0 && (
+          <div className="micro" style={{ padding: '8px 8px 4px', color: UI.inkFaint, letterSpacing: '0.12em' }}>DATABASE</div>
+        )}
+        {systemList.map((s, si) => {
+          const isSel = selected.includes(s.id);
+          return (
+            <React.Fragment key={s.id}>
+            <button onClick={() => singleSelect ? finalizePick([s.id]) : toggleSelect(s.id)} style={{
+              background: isSel ? UI.goldFaint : 'transparent', border: 'none', textAlign: 'left',
+              padding: '11px 8px', cursor: 'pointer', borderRadius: 4,
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8,
+              width: '100%', boxSizing: 'border-box',
+            }}>
+              <span className="display" style={{ fontSize: 17, color: isSel ? UI.gold : UI.ink }}>{s.name}</span>
+              <div style={{ display: 'flex', gap: 4, flexShrink: 0, alignItems: 'center' }}>
+                {isSel && <i className="fa fa-check-circle" style={{ color: UI.gold, fontSize: 15 }} />}
+                <Pill style={{ color: UI.inkFaint, borderColor: UI.hair, fontSize: 8 }}>DB</Pill>
+                {(s.tags || []).map(t => <Pill key={t} gold={isSel}>{t}</Pill>)}
+              </div>
+            </button>
+            {si < systemList.length - 1 && <div className="knurl" />}
+            </React.Fragment>
+          );
+        })}
+        {list.length === 0 && systemList.length === 0 && <div className="micro" style={{ padding: '20px 0', textAlign: 'center', color: UI.inkFaint }}>No exercises found</div>}
+        {!dbActive && (window.SYSTEM_EXERCISES || []).length > 0 && (
+          <div className="micro" style={{ padding: '12px 8px 2px', textAlign: 'center', color: UI.inkGhost, letterSpacing: '0.04em', textTransform: 'none', fontStyle: 'italic' }}>
+            Search or pick a muscle to also add from the exercise database.
+          </div>
+        )}
       </div>
       {selected.length > 0 && (
-        <Btn onClick={() => onPick(selected)} style={{ marginTop: 12, width: '100%' }}>
+        <Btn onClick={() => finalizePick(selected)} style={{ marginTop: 12, width: '100%' }}>
           Add {selected.length} exercise{selected.length !== 1 ? 's' : ''} →
         </Btn>
       )}
-      {/* Check against every exercise, not just the tag-filtered `list` — an
-          existing exercise hidden by an active muscle-tag pill must still
-          suppress "+ Create", or picking it creates a duplicate that splits
-          its history/progression across two library entries. */}
-      {q && !store.exercises.find(e => e.name.toUpperCase() === q.toUpperCase()) && (
+      {/* Check against every exercise, not just the tag-filtered `list`: an
+          existing user OR catalog exercise with this exact name must suppress
+          "+ Create", or picking it creates a duplicate that splits its
+          history/progression across two library entries. */}
+      {q && !exactNameExists && (
         <button onClick={() => setCreatingNew(q)} style={{
           background: UI.goldFaint, border: `1px dashed ${UI.goldSoft}`,
           padding: '12px 14px', borderRadius: 4, cursor: 'pointer',

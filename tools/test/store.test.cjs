@@ -791,6 +791,178 @@ async function testAsync(name, fn) {
     assert.deepStrictEqual(result.map(v => v.validFrom), ['2026-07-05', '2026-06-01']);
   });
 
+  // ── withCarriedWindowEntries (audit B1: no re-upload of windowed sessions) ──
+  test('withCarriedWindowEntries: carries last-synced entries into a windowed (entries:[]) session', () => {
+    const fresh = [{ id: 's1', entries: [] }]; // server windowed it (sets not loaded)
+    const base = [{ id: 's1', entries: [{ exId: 'e', sets: [{ kg: 100, reps: 5 }] }] }];
+    const out = LB.withCarriedWindowEntries(fresh, base);
+    assert.deepStrictEqual(out[0].entries, base[0].entries);
+  });
+
+  test('withCarriedWindowEntries: leaves a session the server DID load (entries present) untouched', () => {
+    const serverEntries = [{ exId: 'e', sets: [{ kg: 110, reps: 5 }] }];
+    const fresh = [{ id: 's1', entries: serverEntries }];
+    const base = [{ id: 's1', entries: [{ exId: 'e', sets: [{ kg: 100, reps: 5 }] }] }];
+    const out = LB.withCarriedWindowEntries(fresh, base);
+    assert.strictEqual(out[0].entries, serverEntries); // server copy wins, not stale base
+  });
+
+  test('withCarriedWindowEntries: a windowed session unknown to the base keeps entries:[] (re-syncs once)', () => {
+    const fresh = [{ id: 's2', entries: [] }];
+    const base = [{ id: 's1', entries: [{ exId: 'e', sets: [{ kg: 100, reps: 5 }] }] }];
+    const out = LB.withCarriedWindowEntries(fresh, base);
+    assert.deepStrictEqual(out[0].entries, []);
+  });
+
+  test('withCarriedWindowEntries: no base (first boot) leaves everything as-is', () => {
+    const fresh = [{ id: 's1', entries: [] }];
+    assert.deepStrictEqual(LB.withCarriedWindowEntries(fresh, null), fresh);
+  });
+
+  // ── realignCycleForToday (return-from-break nudge) ──────────────────────────
+  // Realign is built on the version-change "start at day K from this date" flow:
+  // it adds a new version effective today with a cycleOffset that lands today on
+  // the picked day, converting an unversioned plan to versioned. The cycle NUMBER
+  // continues across the boundary (never resets to 1) and past dates keep their
+  // old rotation.
+  test('realignCycleForToday: unversioned → today lands on the picked day', () => {
+    const days = Array.from({ length: 8 }, () => ({})); // 8-day cycle
+    const sch = { id: 'p1', days };
+    const patch = LB.realignCycleForToday({ schedules: [sch], cycleStartDate: '2026-06-01' }, sch, '2026-07-05', 4);
+    const patched = patch.schedules[0];
+    // unversioned plan is now versioned …
+    assert.ok(patched.versions && patched.versions.length >= 2);
+    // … and today resolves to the picked position
+    assert.strictEqual(LB.getCyclePosForDate(patched, '2026-07-05'), 4);
+  });
+
+  test('realignCycleForToday: targetPos 0 → today is day 1 (no cycleOffset on the new version)', () => {
+    const days = Array.from({ length: 8 }, () => ({}));
+    const sch = { id: 'p1', days };
+    const patch = LB.realignCycleForToday({ schedules: [sch], cycleStartDate: '2026-06-01' }, sch, '2026-07-05', 0);
+    const patched = patch.schedules[0];
+    assert.strictEqual(LB.getCyclePosForDate(patched, '2026-07-05'), 0);
+    // newest version starts today, day 1 → no offset stored
+    assert.strictEqual(patched.versions[0].validFrom, '2026-07-05');
+    assert.strictEqual(patched.versions[0].cycleOffset, undefined);
+  });
+
+  test('realignCycleForToday: already-versioned → prepends a new version, today maps to target', () => {
+    const days = Array.from({ length: 8 }, () => ({}));
+    const sch = { id: 'p1', days, versions: [{ validFrom: '2026-06-10', days, cycleOffset: 0 }] };
+    const patch = LB.realignCycleForToday({ schedules: [sch] }, sch, '2026-07-05', 4);
+    const patched = patch.schedules[0];
+    assert.strictEqual(patched.versions.length, 2);
+    assert.strictEqual(patched.versions[0].validFrom, '2026-07-05');
+    assert.strictEqual(LB.getCyclePosForDate(patched, '2026-07-05'), 4);
+  });
+
+  test('realignCycleForToday: returns null for flex / weekday plans', () => {
+    assert.strictEqual(LB.realignCycleForToday({ schedules: [] }, { id: 'f', is_flex: true, days: [{}] }, '2026-07-05', 0), null);
+    assert.strictEqual(LB.realignCycleForToday({ schedules: [] }, { id: 'w', days: [{ weekday: 0 }] }, '2026-07-05', 0), null);
+  });
+
+  test('realignCycleForToday: unversioned preserves the cycle NUMBER (never resets to 1)', () => {
+    const days = Array.from({ length: 8 }, () => ({}));
+    const sch = { id: 'p1', days };
+    const today = '2026-07-05';
+    // cycleStartDate several cycles back → user is deep into the plan, not cycle 1
+    const state = { schedules: [sch], cycleStartDate: '2026-06-01' };
+    const dsBefore = Math.round((new Date(today + 'T12:00:00') - new Date('2026-06-01T12:00:00')) / 86400000);
+    const numBefore = Math.floor(dsBefore / 8) + 1;
+    assert.ok(numBefore > 1); // sanity: a non-trivial cycle number
+    const patched = LB.realignCycleForToday(state, sch, today, 0).schedules[0];
+    // day position snapped to the picked target …
+    assert.strictEqual(LB.getCyclePosForDate(patched, today), 0);
+    // … and the CYCLE NUMBER continues (never drops, never resets to 1)
+    const numAfter = LB.getCycleNumForDate(patched, today);
+    assert.ok(numAfter >= numBefore);
+    assert.ok(numAfter > 1);
+  });
+
+  test('realignCycleForToday: preserves history — a past date keeps its old rotation', () => {
+    const days = Array.from({ length: 8 }, () => ({}));
+    const sch = { id: 'p1', days };
+    const today = '2026-07-05';
+    const state = { schedules: [sch], cycleStartDate: '2026-06-01' };
+    // a date well before today, under the original unversioned anchor
+    const pastPos = LB.cyclePosFromStartDate('2026-06-01', 8, '2026-06-20');
+    const patched = LB.realignCycleForToday(state, sch, today, 0).schedules[0];
+    // the old version still governs the past → same rotation position
+    assert.strictEqual(LB.getCyclePosForDate(patched, '2026-06-20'), pastPos);
+  });
+
+  // ── exerciseLogMode / shouldPullBodyweight (logging modes) ──────────────────
+  test('exerciseLogMode: log_mode wins when set', () => {
+    assert.strictEqual(LB.exerciseLogMode({ log_mode: 'checkbox' }), 'checkbox');
+    assert.strictEqual(LB.exerciseLogMode({ log_mode: 'reps' }), 'reps');
+    assert.strictEqual(LB.exerciseLogMode({ log_mode: 'weight' }), 'weight');
+  });
+  test('exerciseLogMode: legacy fallback from no_weight_reps', () => {
+    assert.strictEqual(LB.exerciseLogMode({ no_weight_reps: true }), 'reps');
+    assert.strictEqual(LB.exerciseLogMode({ no_weight_reps: false }), 'weight');
+    assert.strictEqual(LB.exerciseLogMode({}), 'weight');
+    assert.strictEqual(LB.exerciseLogMode(null), 'weight');
+  });
+  test('exerciseLogMode: log_mode takes precedence over legacy flag', () => {
+    // a bodyweight weight-mode exercise still carries no_weight_reps=false, and
+    // a reps exercise carries no_weight_reps=true — but log_mode is authoritative
+    assert.strictEqual(LB.exerciseLogMode({ log_mode: 'weight', no_weight_reps: true }), 'weight');
+  });
+  test('shouldPullBodyweight: only bodyweight + explicit opt-in', () => {
+    assert.strictEqual(LB.shouldPullBodyweight({ equipment: 'bodyweight', pull_bodyweight: true }), true);
+    assert.strictEqual(LB.shouldPullBodyweight({ equipment: 'bodyweight', pull_bodyweight: false }), false);
+    assert.strictEqual(LB.shouldPullBodyweight({ equipment: 'bodyweight' }), false);
+    assert.strictEqual(LB.shouldPullBodyweight({ equipment: 'barbell_dual', pull_bodyweight: true }), false);
+    assert.strictEqual(LB.shouldPullBodyweight(null), false);
+  });
+
+  // ── systemExerciseToRow (Exercise DB → editable copy) ───────────────────────
+  test('systemExerciseToRow: normalizes catalog shape to a store row', () => {
+    const row = LB.systemExerciseToRow({ id: 'sys_x', name: 'Single-Arm Cable Row', tags: ['Back', 'Biceps'], equipment: 'cable', movement: 'unilateral', logMode: 'weight' });
+    assert.strictEqual(row.name, 'Single-Arm Cable Row');
+    assert.deepStrictEqual([...row.tags], ['Back', 'Biceps']);
+    assert.strictEqual(row.equipment, 'cable');
+    assert.strictEqual(row.movement_type, 'unilateral');
+    assert.strictEqual(row.unilateral, true);
+    assert.strictEqual(row.log_mode, 'weight');
+    assert.strictEqual(row.no_weight_reps, false);
+    assert.strictEqual(row.pull_bodyweight, false);
+    assert.ok(row.id && row.id !== 'sys_x'); // fresh id, not the catalog id
+    assert.strictEqual(row.progression_reps, null);
+  });
+  test('systemExerciseToRow: category (rest-timer size) carries through / defaults null', () => {
+    const withCat = LB.systemExerciseToRow({ id: 'sys_sq', name: 'Back Squat', tags: ['Quads'], equipment: 'barbell_dual', category: 'big' });
+    assert.strictEqual(withCat.category, 'big'); // rest size copied so the duplicate gets a real rest time
+    const noCat = LB.systemExerciseToRow({ id: 'sys_n', name: 'X', tags: ['Chest'], equipment: 'machine' });
+    assert.strictEqual(noCat.category, null); // absent → null (falls back to default rest)
+  });
+  test('every SYSTEM_EXERCISES entry has a valid rest-timer category', () => {
+    const dbSandbox = { window: {} };
+    vm.createContext(dbSandbox);
+    vm.runInContext(fs.readFileSync(path.join(__dirname, '../../src/exercise-db.js'), 'utf8'), dbSandbox, { filename: 'exercise-db.js' });
+    const valid = new Set(['big', 'medium', 'small']);
+    const bad = (dbSandbox.window.SYSTEM_EXERCISES || []).filter(e => !valid.has(e.category));
+    assert.strictEqual(bad.length, 0, `entries without a valid category: ${bad.map(e => e.name).join(', ')}`);
+  });
+  test('systemExerciseToRow: reps mode → no_weight_reps true; defaults when omitted', () => {
+    const reps = LB.systemExerciseToRow({ id: 'sys_p', name: 'Push-Up', tags: ['Chest'], equipment: 'bodyweight', logMode: 'reps' });
+    assert.strictEqual(reps.log_mode, 'reps');
+    assert.strictEqual(reps.no_weight_reps, true);
+    assert.strictEqual(reps.unilateral, false); // no movement → bilateral
+    assert.strictEqual(reps.movement_type, 'bilateral');
+    const bare = LB.systemExerciseToRow({ id: 'sys_b', name: 'Bench', tags: ['Chest'], equipment: 'barbell_dual' });
+    assert.strictEqual(bare.log_mode, 'weight'); // logMode omitted → weight
+    assert.strictEqual(bare.no_weight_reps, false);
+    assert.strictEqual(bare.movement_type, 'bilateral');
+  });
+  test('systemExerciseToRow: tags are copied, not shared by reference', () => {
+    const src = { id: 'sys_t', name: 'X', tags: ['Quads'], equipment: 'machine' };
+    const row = LB.systemExerciseToRow(src);
+    row.tags.push('Glutes');
+    assert.deepStrictEqual(src.tags, ['Quads']); // original untouched
+  });
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();

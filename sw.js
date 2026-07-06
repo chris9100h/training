@@ -1,4 +1,4 @@
-const CACHE = 'zane-v2.482';
+const CACHE = 'zane-v2.486';
 const CDN_HOSTS = ['unpkg.com', 'cdnjs.cloudflare.com', 'fonts.googleapis.com', 'fonts.gstatic.com'];
 // Works at any base path (e.g. /training/ on GitHub Pages, / on custom domain)
 const BASE = self.registration.scope.replace(/\/$/, '');
@@ -12,6 +12,7 @@ const ASSETS = [
   BASE + '/src/store.js',
   BASE + '/src/supabase.js',
   BASE + '/src/whatsnew.js',
+  BASE + '/src/exercise-db.js',
   BASE + '/src/ui.jsx',
   BASE + '/src/screens-home.jsx',
   BASE + '/src/screens-schedule.jsx',

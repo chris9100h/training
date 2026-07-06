@@ -328,7 +328,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
   const exerciseRows = (backup.exercises || []).map(e => {
     const newId = uid();
     idRemap[e.id] = newId;
-    return { id: newId, name: e.name, tags: e.tags ?? [], note: e.note ?? '', category: e.category ?? null, unilateral: e.unilateral ?? false, equipment: e.equipment ?? null, progression_reps: e.progression_reps ?? null, movement_type: e.movement_type ?? null, no_weight_reps: !!e.no_weight_reps, youtube_url: e.youtube_url ?? null, user_id: userId };
+    return { id: newId, name: e.name, tags: e.tags ?? [], note: e.note ?? '', category: e.category ?? null, unilateral: e.unilateral ?? false, equipment: e.equipment ?? null, progression_reps: e.progression_reps ?? null, movement_type: e.movement_type ?? null, no_weight_reps: !!e.no_weight_reps, log_mode: e.log_mode ?? null, pull_bodyweight: !!e.pull_bodyweight, youtube_url: e.youtube_url ?? null, user_id: userId };
   });
   // Exercises got fresh ids above — everything that references an exId must be
   // remapped or it dangles after restore. remapEx: single id; remapExKeyed:
@@ -572,7 +572,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
       backup.mesoStates.map(m => ({
         id: userId + '_' + m.scheduleId, user_id: userId, schedule_id: m.scheduleId,
         weeks: m.weeks, start_date: m.startDate ?? null,
-        start_cycle_index: m.startCycleIndex ?? 0,
+        start_cycle_index: m.startCycleIndex ?? 0, started_at: m.startedAt ?? null,
         deltas: remapExDayKeyed(m.deltas), weight_boosts: remapExDayKeyed(m.weightBoosts),
         joint_flags: remapExKeyed(m.jointFlags), pump_low_counts: remapExKeyed(m.pumpLowCounts),
         growth_counts: remapExDayKeyed(m.growthCounts),
@@ -702,7 +702,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   const histCutoff = historyWindowCutoffISO();
   const queries = [
     _supabase.from('zane_profiles').select('id, name, approved').eq('id', userId).maybeSingle(),
-    _supabase.from('zane_exercises').select('id, name, tags, note, category, unilateral, equipment, progression_reps, movement_type, no_weight_reps, youtube_url').eq('user_id', userId),
+    _supabase.from('zane_exercises').select('id, name, tags, note, category, unilateral, equipment, progression_reps, movement_type, no_weight_reps, log_mode, pull_bodyweight, youtube_url').eq('user_id', userId),
     _supabase.from('zane_schedules').select('id, name, days, archived, versions, is_flex, sessions_per_week, mesocycle_weeks, mesocycle_start_rir, mesocycle_end_rir').eq('user_id', userId),
     // Session METADATA stays complete (cheap; streaks/calendar need the full
     // date list) — the legacy entries JSONB is no longer selected.
@@ -752,7 +752,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     // Reusable workout templates (migration 0107)
     _supabase.from('zane_workout_templates').select('id, name, exercises, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
     // Mesocycle state per plan — replaces localStorage logbook-meso-state (migration 0120)
-    _supabase.from('zane_meso_states').select('id, schedule_id, weeks, start_date, start_cycle_index, deltas, joint_flags, pump_low_counts, weight_boosts, growth_counts, completions, pending_meso2, updated_at').eq('user_id', userId),
+    _supabase.from('zane_meso_states').select('id, schedule_id, weeks, start_date, start_cycle_index, started_at, deltas, joint_flags, pump_low_counts, weight_boosts, growth_counts, completions, pending_meso2, updated_at').eq('user_id', userId),
   ];
   const [profileRes, exRes, schRes, sessRes, settRes, skipsRes, entriesRes,
          bestsRes, sessionStatsRes,
@@ -939,6 +939,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     mesoStates: (mesoStatesRes?.data || []).map(m => ({
       id: m.id, scheduleId: m.schedule_id, weeks: m.weeks,
       startDate: m.start_date, startCycleIndex: m.start_cycle_index ?? 0,
+      startedAt: m.started_at ?? null,
       deltas: m.deltas ?? {}, jointFlags: m.joint_flags ?? {},
       pumpLowCounts: m.pump_low_counts ?? {}, weightBoosts: m.weight_boosts ?? {},
       growthCounts: m.growth_counts ?? {},
@@ -1218,7 +1219,7 @@ async function syncStore(prev, next, userId) {
       return !p || JSON.stringify(p) !== JSON.stringify(e);
     });
     const removed = prev.exercises.filter(e => !next.exercises.find(x => x.id === e.id));
-    if (upsert.length)  ops.push(_supabase.from('zane_exercises').upsert(upsert.map(e => ({ id: e.id, name: e.name, tags: e.tags ?? [], note: e.note ?? '', category: e.category ?? null, unilateral: e.unilateral ?? false, equipment: e.equipment ?? null, progression_reps: e.progression_reps ?? null, movement_type: e.movement_type ?? null, no_weight_reps: !!e.no_weight_reps, youtube_url: e.youtube_url ?? null, user_id: userId }))));
+    if (upsert.length)  ops.push(_supabase.from('zane_exercises').upsert(upsert.map(e => ({ id: e.id, name: e.name, tags: e.tags ?? [], note: e.note ?? '', category: e.category ?? null, unilateral: e.unilateral ?? false, equipment: e.equipment ?? null, progression_reps: e.progression_reps ?? null, movement_type: e.movement_type ?? null, no_weight_reps: !!e.no_weight_reps, log_mode: e.log_mode ?? null, pull_bodyweight: !!e.pull_bodyweight, youtube_url: e.youtube_url ?? null, user_id: userId }))));
     if (removed.length) ops.push(_supabase.from('zane_exercises').delete().in('id', removed.map(e => e.id)));
   }
 
@@ -1347,6 +1348,7 @@ async function syncStore(prev, next, userId) {
     if (upsert.length) ops.push(_supabase.rpc('sync_meso_states_batch', { p_states: upsert.map(m => ({
       id: m.id, schedule_id: m.scheduleId, weeks: m.weeks,
       start_date: m.startDate, start_cycle_index: m.startCycleIndex ?? 0,
+      started_at: m.startedAt ?? null,
       deltas: m.deltas ?? {}, joint_flags: m.jointFlags ?? {},
       pump_low_counts: m.pumpLowCounts ?? {}, weight_boosts: m.weightBoosts ?? {},
       growth_counts: m.growthCounts ?? {},
@@ -1721,6 +1723,41 @@ function latestBodyweight(store) {
   return logs.slice().sort((a, b) => b.date.localeCompare(a.date))[0].weight;
 }
 
+// How an exercise is logged: 'checkbox' (tick only), 'reps' (reps, no weight)
+// or 'weight' (weight + reps). Resolves the new log_mode column, falling back to
+// the legacy no_weight_reps boolean (true → 'reps') for rows written before
+// Migration 0139 / by older clients.
+function exerciseLogMode(ex) {
+  if (ex?.log_mode) return ex.log_mode;
+  return ex?.no_weight_reps ? 'reps' : 'weight';
+}
+
+// Should a set's weight be pre-filled from the user's logged bodyweight? Only for
+// bodyweight-equipment exercises that explicitly opted in (pull_bodyweight). The
+// caller still has to have a logged weight (latestBodyweight != null) for it to
+// actually fill anything.
+function shouldPullBodyweight(ex) {
+  return ex?.equipment === 'bodyweight' && ex?.pull_bodyweight === true;
+}
+
+// Normalize a read-only system-catalog entry (window.SYSTEM_EXERCISES: compact
+// shape { movement, logMode }) into an editable store-shape user exercise with a
+// fresh id. The interactive "Check & Add" flow instead seeds ExerciseCreator's
+// review sheet (so the user can tweak before committing, and the form's save()
+// builds the row); this is the programmatic normalizer for any direct-duplication
+// path (e.g. the planned plan-editor picker). The result matches syncStore's
+// exercises upsert (Migration 0139 columns included).
+function systemExerciseToRow(sysEx) {
+  const mv = sysEx.movement || 'bilateral';
+  const lm = sysEx.logMode || 'weight';
+  return {
+    id: uid(), name: sysEx.name, tags: sysEx.tags ? [...sysEx.tags] : [], note: '',
+    category: sysEx.category ?? null, unilateral: mv === 'unilateral', movement_type: mv,
+    log_mode: lm, no_weight_reps: lm !== 'weight', pull_bodyweight: false,
+    equipment: sysEx.equipment ?? null, progression_reps: null, youtube_url: null,
+  };
+}
+
 // Compute the seed-sets array when starting/logging a session for a planned item.
 // Honors smart-progression suggestions and falls back to last-session values.
 // bodyweightKg: prefill kg with this value when kg would otherwise be null (for bodyweight exercises).
@@ -2077,6 +2114,54 @@ function cyclePosFromStartDate(startISO, daysLen, dateISO) {
   return ((n % daysLen) + daysLen) % daysLen;
 }
 
+// Re-anchor a date-based cycle plan so `todayStr` lands on rotation position
+// `targetPos` — built on the SAME calculation as versioning a plan with a
+// "start at day K from this date" choice (doSave / doRestoreBackup in
+// screens-schedule.jsx): it adds a new plan version effective today whose
+// cycleOffset puts today on day `targetPos`. An unversioned plan is converted
+// to versioned (its current layout anchored from cycleStartDate) exactly like
+// the first versioned edit does.
+//
+// Why a version boundary instead of just moving cycleStartDate / the active
+// version's cycleOffset:
+//   • The cycle NUMBER is preserved — it does NOT reset to 1. getCycleNumForDate
+//     sums completed cycles across versions, so today continues the count (a
+//     fresh cycle at day K), never collapses to Cycle 1. A naive
+//     `cycleStartDate = today − targetPos` would drop floor(daysSince/len)+1 to
+//     1, which is demotivating.
+//   • History stays intact — past dates are still governed by the OLD version,
+//     so their day-of-cycle (home strip when scrolling back, per-cycle
+//     setsPerMuscle, session labels) doesn't retroactively shift the way
+//     rewriting the single anchor would.
+//
+// Returns a store patch to spread into setStore, or null if the plan isn't a
+// date-based cycle plan. Powers the return-from-break realign.
+function realignCycleForToday(state, sch, todayStr, targetPos) {
+  if (!sch || isFlexPlan(sch) || isWeekdayPlan(sch)) return null;
+  const activeDays = getPlanDaysForDate(sch, todayStr);
+  const len = (activeDays || []).length;
+  if (!len) return null;
+  const t = ((targetPos % len) + len) % len;
+  const newVer = { validFrom: todayStr, days: activeDays };
+  if (t > 0) newVer.cycleOffset = t;
+  let versions;
+  const existing = sch.versions || [];
+  if (existing.length === 0) {
+    // First versioned change — anchor the current (unversioned) layout at its
+    // start date so cycles before today keep their numbering/positions.
+    const anchorDate = state.cycleStartDate || todayStr;
+    versions = [newVer, { validFrom: anchorDate, days: sch.days }];
+  } else {
+    versions = [newVer, ...existing];
+  }
+  // One version per date (a same-day re-realign replaces, never stacks).
+  versions = dedupeVersionsByDate(versions);
+  return {
+    schedules: (state.schedules || []).map(s =>
+      s.id === sch.id ? { ...s, days: versions[0].days, versions } : s),
+  };
+}
+
 function todaysDay(state) {
   const sch = state.schedules.find(s => s.id === state.activeScheduleId);
   if (!sch || !sch.days.length) return null;
@@ -2171,6 +2256,24 @@ function mergeEntrySets(serverEntries, cachedEntries) {
       }),
     };
   });
+}
+
+// Boot sync diff base: sessions outside the history window come back from the
+// server with entries:[] (their sets aren't loaded), while the cache-first merge
+// restores their cached entries into the store. Carry the last-synced entries
+// (from the persisted base) into the diff base for those windowed sessions so
+// the per-set diff sees them unchanged and doesn't re-upload every set with a
+// fresh updated_at each boot — which clobbers newer cross-device edits and grows
+// write load with account age (audit B1). A genuine offline edit still differs
+// from the carried base entries and is pushed as normal. Sessions the base
+// doesn't know (first boot / new) keep entries:[] and re-sync once, then heal.
+function withCarriedWindowEntries(freshSessions, baseSessions) {
+  const baseEntries = new Map((baseSessions || []).filter(s => (s.entries || []).length).map(s => [s.id, s.entries]));
+  return (freshSessions || []).map(s =>
+    (s.entries || []).length === 0 && baseEntries.has(s.id)
+      ? { ...s, entries: baseEntries.get(s.id) }
+      : s
+  );
 }
 
 function mergeSessions(freshSessions, curSessions, inProgressId, baseSessions = null, now = new Date()) {
@@ -3680,10 +3783,10 @@ window.LB = {
   subscribeWebPush, unsubscribeWebPush, getWebPushSubscription,
   QS_EMAILS, hasQuickSwitchSession, quickSwitch, saveQsName, getQsName,
   signIn, signUp, signOut, signInWithPasskey, registerPasskey, listPasskeys, deletePasskey, resetPassword, deleteAllData, exportBackup, importFromBackup, validateBackup,
-  loadFromSupabase, syncStore, mergeSessions, historyWindowCutoffISO,
+  loadFromSupabase, syncStore, mergeSessions, withCarriedWindowEntries, historyWindowCutoffISO,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
-  uid, todayISO, fmtISO, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate,
-  effReps, e1rm, isImprovement, isDecline, bestE1rmForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, latestBodyweight, inferCurrentExIdx, calcBlended,
+  uid, todayISO, fmtISO, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, realignCycleForToday,
+  effReps, e1rm, isImprovement, isDecline, bestE1rmForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, latestBodyweight, exerciseLogMode, shouldPullBodyweight, systemExerciseToRow, inferCurrentExIdx, calcBlended,
   refreshExerciseBests, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries,
   computeNextReminderAt,
   cancelPushover, adminSendEmail,

@@ -25,6 +25,8 @@ function LibraryScreen({ store, setStore, go, userId }) {
   const [creating, setCreating] = useStateL(false);
   const [selecting, setSelecting] = useStateL(false);
   const [selected, setSelected] = useStateL(new Set());
+  const [addedSysIds, setAddedSysIds] = useStateL(new Set()); // sys_ ids added to the library this session (for row feedback)
+  const [dbSeed, setDbSeed] = useStateL(null); // catalog entry being reviewed via "Check & Add" (opens the review sheet)
   const [filterTags, setFilterTags] = useStateL(_lib.filterTags);
   const [filterRestCats, setFilterRestCats] = useStateL(_lib.filterRestCats);
   const [filterUnilateral, setFilterUnilateral] = useStateL(_lib.filterUnilateral);
@@ -37,10 +39,26 @@ function LibraryScreen({ store, setStore, go, userId }) {
   const toggleEquipment = (v) => setFilterEquipment(t => { const n = t.includes(v) ? t.filter(x => x !== v) : [...t, v]; _lib.filterEquipment = n; return n; });
   const [filtersOpen, setFiltersOpen] = useStateL(_lib.filtersOpen);
   useEffectL(() => { _lib.filtersOpen = filtersOpen; }, [filtersOpen]);
+  const anyFilter = filterTags.length > 0 || filterRestCats.length > 0 || filterEquipment.length > 0 || filterUnilateral !== null || filterPlan !== null;
+  const clearFilters = () => {
+    setFilterTags([]); _lib.filterTags = [];
+    setFilterRestCats([]); _lib.filterRestCats = [];
+    setFilterUnilateral(null); _lib.filterUnilateral = null;
+    setFilterPlan(null); _lib.filterPlan = null;
+    setFilterEquipment([]); _lib.filterEquipment = [];
+  };
 
   const planExIds = useMemoL(() => new Set(
     store.schedules.flatMap(s => s.days.flatMap(d => (d.items || []).map(it => it.exId)))
   ), [store.schedules]);
+  // Catalog entries carry sys_ ids that are never in a plan, so plan-membership
+  // for the Database tab is resolved by NAME (same mapping as the "In library"
+  // check): a catalog row counts as in-plan when a same-named user exercise is.
+  const planExNamesLower = useMemoL(() => {
+    const names = new Set();
+    for (const e of store.exercises) if (planExIds.has(e.id)) names.add((e.name || '').toUpperCase());
+    return names;
+  }, [store.exercises, planExIds]);
 
   useEffectL(() => { _lib.tab = tab; }, [tab]);
   useEffectL(() => { _lib.q = q; }, [q]);
@@ -127,6 +145,33 @@ function LibraryScreen({ store, setStore, go, userId }) {
       .sort((a,b) => a.name.localeCompare(b.name));
   }, [store.exercises, q, filterTags, filterRestCats, filterUnilateral, filterPlan, filterEquipment, planExIds]);
 
+  // Read-only system catalog (Exercise DB tab), normalized to the row/filter shape
+  // the library already renders. Duplicate-on-add copies an entry into the user's
+  // own exercises (LB.systemExerciseToRow), so it never mixes into the user lists.
+  const systemDisplay = useMemoL(() => (window.SYSTEM_EXERCISES || []).map(s => ({
+    id: s.id, name: s.name, tags: s.tags || [], category: s.category ?? null,
+    unilateral: (s.movement || 'bilateral') === 'unilateral', movement_type: s.movement || 'bilateral',
+    equipment: s.equipment ?? null, _sys: s,
+  })), []);
+  const userNamesLower = useMemoL(() => new Set(store.exercises.map(e => (e.name || '').toUpperCase())), [store.exercises]);
+  const dbFiltered = useMemoL(() => {
+    const ql = q.toUpperCase();
+    return systemDisplay.filter(e => {
+      const matchSearch = !q || e.name.toUpperCase().includes(ql) || e.tags?.some(t => t.toUpperCase().includes(ql));
+      const matchTags = filterTags.length === 0 || filterTags.some(ft => e.tags?.includes(ft));
+      const matchUnilateral = filterUnilateral === null || !!e.unilateral === filterUnilateral;
+      const matchEquipment = filterEquipment.length === 0 ||
+        (filterEquipment.includes('none') && !e.equipment) ||
+        (e.equipment && filterEquipment.includes(e.equipment));
+      const matchRestCat = filterRestCats.length === 0 ||
+        (filterRestCats.includes('none') && !e.category) ||
+        (e.category && filterRestCats.includes(e.category));
+      const inPlan = planExNamesLower.has(e.name.toUpperCase());
+      const matchPlan = filterPlan === null || (filterPlan === 'in' ? inPlan : !inPlan);
+      return matchSearch && matchTags && matchUnilateral && matchEquipment && matchRestCat && matchPlan;
+    }).sort((a, b) => a.name.localeCompare(b.name));
+  }, [systemDisplay, q, filterTags, filterUnilateral, filterEquipment, filterRestCats, filterPlan, planExNamesLower]);
+
   const allFilteredSelected = filtered.length > 0 && filtered.every(e => selected.has(e.id));
   const selectAll = () => setSelected(new Set(filtered.map(e => e.id)));
   const deselectAll = () => setSelected(new Set());
@@ -174,13 +219,13 @@ function LibraryScreen({ store, setStore, go, userId }) {
 
       {/* Tab strip */}
       <div style={{ display: 'flex', padding: '0 22px', borderBottom: `0.5px solid ${UI.hair}`, flexShrink: 0, marginTop: 8 }}>
-        {[['recent','Recent'],['all','All']].map(([id,label]) => (
+        {[['recent','Recent'],['all','My exercises'],['db','Database']].map(([id,label]) => (
           <button key={id} onClick={() => setTab(id)} style={{
             flex: 1, background: 'transparent', border: 'none',
-            padding: '11px 0', cursor: 'pointer',
+            padding: '11px 0', cursor: 'pointer', whiteSpace: 'nowrap',
             color: tab === id ? UI.gold : UI.inkFaint,
             fontFamily: UI.fontUi, fontSize: 10, fontWeight: tab === id ? 600 : 400,
-            letterSpacing: '0.14em', textTransform: 'uppercase',
+            letterSpacing: '0.1em', textTransform: 'uppercase',
             borderBottom: `0.5px solid ${tab === id ? UI.gold : 'transparent'}`,
             marginBottom: -0.5,
             transition: 'color 0.2s',
@@ -189,7 +234,12 @@ function LibraryScreen({ store, setStore, go, userId }) {
       </div>
 
       <div style={{ padding: '18px 22px', paddingBottom: selecting ? 80 : 22, display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {tab === 'all' && (() => {
+        {tab === 'db' && (
+          <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5, marginBottom: 4 }}>
+            Browse the catalog and tap Check &amp; Add — review or tweak the exercise first, then it becomes your own editable copy, ready for your plans.
+          </div>
+        )}
+        {(tab === 'all' || tab === 'db') && (() => {
           const activeCount = filterTags.length + filterRestCats.length + filterEquipment.length + (filterUnilateral !== null ? 1 : 0) + (filterPlan !== null ? 1 : 0);
           return (
             <>
@@ -243,7 +293,7 @@ function LibraryScreen({ store, setStore, go, userId }) {
                   {ex.tags?.map(t => <Pill key={t}>{t}</Pill>)}
                   {ex.category && <Pill style={{ color: UI.inkSoft, borderColor: UI.hair }}>{ex.category.charAt(0).toUpperCase() + ex.category.slice(1)}</Pill>}
                   {ex.unilateral && <Pill style={{ color: UI.inkSoft, borderColor: UI.hair }}>Unilateral</Pill>}
-                  {ex.equipment ? <Pill style={{ color: UI.inkFaint, borderColor: UI.hair, fontSize: 8 }}>{EQUIPMENT_TYPES.find(t => t.key === ex.equipment)?.label ?? ex.equipment}</Pill> : <Pill style={{ color: 'rgba(var(--danger-rgb),0.5)', borderColor: 'rgba(var(--danger-rgb),0.2)', fontSize: 8 }}>No equipment</Pill>}
+                  {ex.equipment ? <Pill style={{ color: UI.inkFaint, borderColor: UI.hair, fontSize: 8 }}>{EQUIPMENT_TYPES.find(t => t.key === ex.equipment)?.label ?? ex.equipment}</Pill> : <Pill style={{ color: 'rgba(var(--danger-rgb),0.5)', borderColor: 'rgba(var(--danger-rgb),0.2)', fontSize: 8 }}>Unspecified</Pill>}
                   {planExIds.has(ex.id) && <span style={{ color: UI.inkFaint, fontSize: 9, letterSpacing: '0.05em' }}>◆</span>}
                 </div>
               </div>
@@ -278,7 +328,7 @@ function LibraryScreen({ store, setStore, go, userId }) {
                   {e.tags?.map(t => <Pill key={t}>{t}</Pill>)}
                   {e.category && <Pill style={{ color: UI.inkSoft, borderColor: UI.hair }}>{e.category.charAt(0).toUpperCase() + e.category.slice(1)}</Pill>}
                   {e.unilateral && <Pill style={{ color: UI.inkSoft, borderColor: UI.hair }}>Unilateral</Pill>}
-                  {e.equipment ? <Pill style={{ color: UI.inkFaint, borderColor: UI.hair, fontSize: 8 }}>{EQUIPMENT_TYPES.find(t => t.key === e.equipment)?.label ?? e.equipment}</Pill> : <Pill style={{ color: 'rgba(var(--danger-rgb),0.5)', borderColor: 'rgba(var(--danger-rgb),0.2)', fontSize: 8 }}>No equipment</Pill>}
+                  {e.equipment ? <Pill style={{ color: UI.inkFaint, borderColor: UI.hair, fontSize: 8 }}>{EQUIPMENT_TYPES.find(t => t.key === e.equipment)?.label ?? e.equipment}</Pill> : <Pill style={{ color: 'rgba(var(--danger-rgb),0.5)', borderColor: 'rgba(var(--danger-rgb),0.2)', fontSize: 8 }}>Unspecified</Pill>}
                   {planExIds.has(e.id) && <span style={{ color: UI.inkFaint, fontSize: 9, letterSpacing: '0.05em' }}>◆</span>}
                 </div>
               </div>
@@ -301,6 +351,46 @@ function LibraryScreen({ store, setStore, go, userId }) {
         })}
         {tab === 'all' && filtered.length === 0 && (
           <Empty title="No exercises" action={<Btn onClick={() => setCreating(true)}>Add exercise</Btn>} icon={ICON_BARBELL} />
+        )}
+
+        {tab === 'db' && dbFiltered.map((e, fi) => {
+          const inLib = addedSysIds.has(e.id) || userNamesLower.has(e.name.toUpperCase());
+          const justAdded = addedSysIds.has(e.id);
+          return (
+            <React.Fragment key={e.id}>
+            <div onClick={() => { if (!inLib) setDbSeed(e._sys); }} style={{
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12,
+              padding: '13px 0', cursor: inLib ? 'default' : 'pointer',
+            }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div className="display" style={{ fontSize: 19, color: UI.ink, lineHeight: 1.1 }}>{e.name}</div>
+                <div style={{ display: 'flex', gap: 4, marginTop: 4, flexWrap: 'wrap', alignItems: 'center' }}>
+                  {e.tags?.map(t => <Pill key={t}>{t}</Pill>)}
+                  {e.category && <Pill style={{ color: UI.inkSoft, borderColor: UI.hair }}>{e.category.charAt(0).toUpperCase() + e.category.slice(1)}</Pill>}
+                  {e.unilateral && <Pill style={{ color: UI.inkSoft, borderColor: UI.hair }}>Unilateral</Pill>}
+                  {e.equipment ? <Pill style={{ color: UI.inkFaint, borderColor: UI.hair, fontSize: 8 }}>{EQUIPMENT_TYPES.find(t => t.key === e.equipment)?.label ?? e.equipment}</Pill> : <Pill style={{ color: 'rgba(var(--danger-rgb),0.5)', borderColor: 'rgba(var(--danger-rgb),0.2)', fontSize: 8 }}>Unspecified</Pill>}
+                  {planExNamesLower.has(e.name.toUpperCase()) && <span style={{ color: UI.inkFaint, fontSize: 9, letterSpacing: '0.05em' }}>◆</span>}
+                </div>
+              </div>
+              {inLib ? (
+                <span style={{ flexShrink: 0, fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase', color: justAdded ? UI.gold : UI.inkFaint, display: 'flex', alignItems: 'center', gap: 5 }}>
+                  <i className="fa-solid fa-check" /> {justAdded ? 'Added' : 'In library'}
+                </span>
+              ) : (
+                <button onClick={ev => { ev.stopPropagation(); setDbSeed(e._sys); }} style={{
+                  flexShrink: 0, background: UI.goldFaint, border: `1px solid ${UI.goldSoft}`, borderRadius: 4,
+                  padding: '7px 13px', cursor: 'pointer', color: UI.gold, fontFamily: UI.fontUi, fontSize: 11,
+                  fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: 5,
+                  WebkitTapHighlightColor: 'transparent', whiteSpace: 'nowrap',
+                }}><i className="fa-solid fa-plus" /> Check &amp; Add</button>
+              )}
+            </div>
+            {fi < dbFiltered.length - 1 && <div className="knurl" />}
+            </React.Fragment>
+          );
+        })}
+        {tab === 'db' && dbFiltered.length === 0 && (
+          <Empty title="No matches" sub="Try a different search or filter." icon={ICON_BARBELL} />
         )}
       </div>
 
@@ -340,6 +430,7 @@ function LibraryScreen({ store, setStore, go, userId }) {
       )}
 
       {creating && <ExerciseCreator onClose={() => setCreating(false)} store={store} setStore={setStore} initialTags={filterTags} />}
+      {dbSeed && <ExerciseCreator seed={dbSeed} onClose={() => setDbSeed(null)} store={store} setStore={setStore} onCreated={() => setAddedSysIds(prev => new Set(prev).add(dbSeed.id))} />}
 
       {filtersOpen && (
         <Sheet open={true} onClose={() => setFiltersOpen(false)} title="Filter">
@@ -371,7 +462,7 @@ function LibraryScreen({ store, setStore, go, userId }) {
             <div>
               <GoldSectionLabel style={{ color: UI.gold }}>EQUIPMENT</GoldSectionLabel>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                <Pill gold={filterEquipment.includes('none')} onClick={() => toggleEquipment('none')} style={{ cursor: 'pointer' }}>No equipment set</Pill>
+                <Pill gold={filterEquipment.includes('none')} onClick={() => toggleEquipment('none')} style={{ cursor: 'pointer' }}>Unspecified</Pill>
                 {EQUIPMENT_TYPES.map(({ key, label }) => (
                   <Pill key={key} gold={filterEquipment.includes(key)} onClick={() => toggleEquipment(key)} style={{ cursor: 'pointer' }}>{label}</Pill>
                 ))}
@@ -384,9 +475,15 @@ function LibraryScreen({ store, setStore, go, userId }) {
                 <Pill gold={filterPlan === 'out'} onClick={() => togglePlan('out')} style={{ cursor: 'pointer' }}>Not in plan</Pill>
               </div>
             </div>
-            <Btn onClick={() => setFiltersOpen(false)} disabled={filtered.length === 0} style={{ opacity: filtered.length === 0 ? 0.4 : 1 }}>
-              {filtered.length === 0 ? 'No results' : `Show ${filtered.length} exercise${filtered.length === 1 ? '' : 's'}`}
-            </Btn>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {/* Two destinations: apply the filter and view either the user's own
+                  library or the catalog. Current tab is the primary button. */}
+              <div style={{ display: 'flex', gap: 10 }}>
+                <Btn kind={tab === 'all' ? undefined : 'ghost'} onClick={() => { setTab('all'); setFiltersOpen(false); }} disabled={filtered.length === 0} style={{ flex: 1, opacity: filtered.length === 0 ? 0.4 : 1 }}>Mine ({filtered.length})</Btn>
+                <Btn kind={tab === 'db' ? undefined : 'ghost'} onClick={() => { setTab('db'); setFiltersOpen(false); }} disabled={dbFiltered.length === 0} style={{ flex: 1, opacity: dbFiltered.length === 0 ? 0.4 : 1 }}>Database ({dbFiltered.length})</Btn>
+              </div>
+              {anyFilter && <Btn kind="ghost" onClick={clearFilters}>Clear all filters</Btn>}
+            </div>
           </div>
         </Sheet>
       )}
@@ -598,17 +695,279 @@ async function captureNodeAsPng(node, { filename, dodgeAvatar = false, setCaptur
   }
 }
 
-function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = '', initialTags = [] }) {
+// Shared "how is this logged" picker. Appears whenever load isn't inherent —
+// no_equipment / bodyweight equipment, or a mobility movement (the union, since
+// a mobility exercise may keep any equipment). Three modes resolve to
+// LB.exerciseLogMode; for bodyweight + Weight & Reps an opt-in toggle pulls the
+// user's logged bodyweight (LB.shouldPullBodyweight), gated on having logged one.
+const LOG_MODES = [['checkbox', 'Checkbox only'], ['reps', 'Reps only'], ['weight', 'Weight & Reps']];
+function loggingPickerVisible(equipment, movementType) {
+  return equipment === 'no_equipment' || equipment === 'bodyweight' || movementType === 'mobility';
+}
+const logNoteStyle = { marginTop: 8, textTransform: 'none', letterSpacing: '0.02em', fontWeight: 400, lineHeight: 1.5 };
+function LoggingModeSection({ equipment, movementType, logMode, onLogMode, pullBodyweight, onPullBodyweight, hasLoggedWeight }) {
+  if (!loggingPickerVisible(equipment, movementType)) return null;
+  const info = logMode === 'reps' ? 'Tracks reps only — no weight, adds 0 to volume.'
+             : logMode === 'checkbox' ? 'Just tick each set off — no reps or weight, 0 volume.'
+             : null;
+  const showPull = equipment === 'bodyweight' && logMode === 'weight';
+  return (
+    <div>
+      <span className="label">Logging</span>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+        {LOG_MODES.map(([val, label]) => (
+          <Chip key={val} on={logMode === val} onClick={() => onLogMode(val)}>{label}</Chip>
+        ))}
+      </div>
+      {info && <div className="micro" style={{ color: UI.inkFaint, ...logNoteStyle }}>{info}</div>}
+      {showPull && (
+        <div style={{ marginTop: 12 }}>
+          {hasLoggedWeight ? (
+            <>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                <Chip on={pullBodyweight} onClick={() => onPullBodyweight(true)}>Use my bodyweight</Chip>
+                <Chip on={!pullBodyweight} onClick={() => onPullBodyweight(false)}>Enter manually</Chip>
+              </div>
+              {pullBodyweight && <div className="micro" style={{ color: UI.inkFaint, ...logNoteStyle }}>Pulls your latest weight from the Health tab — tap Log there to record it.</div>}
+            </>
+          ) : (
+            <div className="micro" style={{ color: 'rgba(var(--danger-rgb),0.7)', ...logNoteStyle }}>
+              Log your bodyweight first in the app's Health tab (enable it under Settings) to auto-fill it.
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Exercise-creation wizard ────────────────────────────────────────────────
+// A step-by-step pop-up flow (UnitPromptModal-style overlay) that guides through
+// a NEW exercise's fields one pick at a time, then hands off to the existing
+// ExerciseCreator sheet (pre-filled) for a final review/edit before saving. It
+// writes into the SAME state ExerciseCreator owns, so the hand-off is just
+// "stop showing the wizard" (wizardStep → null). Sits above Sheets (z 9998), so
+// its own discard prompt is inline rather than the portaled useConfirm sheet.
+const WIZARD_ORDER = ['name', 'muscle', 'size', 'equipment', 'movement', 'logging'];
+const WIZARD_TITLES = { name: 'Name your exercise', muscle: 'Muscle group', size: 'Exercise size', equipment: 'Equipment', movement: 'Movement type', logging: 'How do you log it?' };
+function wizardStepApplicable(step, equipment, movementType) {
+  return step === 'logging' ? loggingPickerVisible(equipment, movementType) : true;
+}
+function adjacentWizardStep(current, dir, equipment, movementType) {
+  let i = WIZARD_ORDER.indexOf(current) + dir;
+  while (i >= 0 && i < WIZARD_ORDER.length) {
+    if (wizardStepApplicable(WIZARD_ORDER[i], equipment, movementType)) return WIZARD_ORDER[i];
+    i += dir;
+  }
+  return null;
+}
+
+const WIZARD_INTRO = {
+  name: 'Give it a clear name — this is what shows up in your plans and history.',
+  muscle: 'Which muscle(s) does it train? Used to count your weekly sets per muscle. Pick one or more.',
+  size: 'The times below are your own rest timers — heavier lifts get more rest. Set them under Settings › Training › Session › Rest timers, or just tweak rest mid-workout.',
+  equipment: 'What do you load or do it with? This also decides how weight is entered while training.',
+  movement: 'How is it performed? Decides whether you log one number or one per side.',
+  logging: 'What do you want to record for each set while training?',
+};
+const WIZARD_EQUIP_META = {
+  no_equipment:   { icon: 'fa-ban',            sub: 'Bands, ab-wheel, sled — or nothing at all' },
+  bodyweight:     { icon: 'fa-person',         sub: 'Just your bodyweight (push-ups, pull-ups)' },
+  cable:          { icon: 'fa-grip-vertical',  sub: 'Cable pulley / stack' },
+  dumbbell:       { icon: 'fa-dumbbell',       sub: 'Dumbbells or kettlebells' },
+  barbell_dual:   { icon: 'fa-weight-hanging', sub: 'Barbell, plates on both sides' },
+  machine:        { icon: 'fa-sliders',        sub: 'Pin- or plate-loaded machine' },
+  barbell_single: { icon: 'fa-weight-hanging', sub: 'Landmine / single-loaded bar' },
+};
+
+function ExerciseWizard({ step, setStep, onClose, isDirty, store,
+  name, setName, selectedTags, setSelectedTags, category, setCategory,
+  equipment, onEquipment, movementType, setMovementType, logMode, pickLogMode,
+  pullBodyweight, setPullBodyweight }) {
+  const [confirming, setConfirming] = useStateL(false);
+  // Keep the card inside the VISIBLE viewport so the Name step's text input isn't
+  // hidden behind the on-screen keyboard: visualViewport shrinks when the keyboard
+  // opens, so centering within it floats the card just above the keyboard.
+  const [vp, setVp] = useStateL(null);
+  useEffectL(() => {
+    const v = typeof window !== 'undefined' ? window.visualViewport : null;
+    if (!v) return;
+    const on = () => setVp({ top: v.offsetTop, height: v.height });
+    on();
+    v.addEventListener('resize', on); v.addEventListener('scroll', on);
+    return () => { v.removeEventListener('resize', on); v.removeEventListener('scroll', on); };
+  }, []);
+  const applicable = WIZARD_ORDER.filter(s => wizardStepApplicable(s, equipment, movementType));
+  const idx = applicable.indexOf(step);
+  const hasPrev = adjacentWizardStep(step, -1, equipment, movementType) != null;
+  const goNext = (o = {}) => setStep(adjacentWizardStep(step, 1, o.equipment ?? equipment, o.movementType ?? movementType));
+  const goBack = () => {
+    const prev = adjacentWizardStep(step, -1, equipment, movementType);
+    if (prev) setStep(prev);
+    else if (isDirty()) setConfirming(true);
+    else onClose();
+  };
+  // Backdrop tap → leave the wizard, warning first if anything was entered.
+  const requestExit = () => { if (isDirty()) setConfirming(true); else onClose(); };
+  const restLabel = (cat) => {
+    const s = store?.settings || {};
+    const sec = cat === 'big' ? (s.restBig ?? 180) : cat === 'medium' ? (s.restMedium ?? 120) : (s.restSmall ?? 90);
+    return sec % 60 === 0 ? `${sec / 60} min` : sec > 60 ? `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}` : `${sec}s`;
+  };
+  // Rich option row: icon chip · label + explainer · (rest badge and/or check).
+  const optRow = ({ key, icon, label, sub, active, badge, onClick }) => (
+    <button key={key} onClick={onClick} style={{
+      width: '100%', display: 'flex', alignItems: 'center', gap: 12, textAlign: 'left',
+      padding: '12px 14px', borderRadius: 6, cursor: 'pointer',
+      background: active ? 'rgba(var(--accent-rgb),0.10)' : UI.bgInset,
+      border: `1px solid ${active ? 'var(--accent)' : UI.hairStrong}`,
+      WebkitTapHighlightColor: 'transparent', transition: 'border-color 0.12s, background 0.12s',
+    }}>
+      <span style={{
+        width: 40, height: 40, borderRadius: 6, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+        background: active ? 'rgba(var(--accent-rgb),0.16)' : UI.bgRaised,
+        border: `0.5px solid ${active ? 'rgba(var(--accent-rgb),0.4)' : UI.hair}`,
+      }}><i className={`fa-solid ${icon}`} style={{ fontSize: 16, color: active ? 'var(--accent)' : UI.inkFaint }} /></span>
+      <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
+        <span style={{ fontSize: 14, fontWeight: 600, color: active ? 'var(--accent)' : UI.ink, fontFamily: UI.fontUi }}>{label}</span>
+        {sub && <span className="micro" style={{ color: UI.inkFaint, textTransform: 'none', letterSpacing: '0.02em', fontWeight: 400, lineHeight: 1.35 }}>{sub}</span>}
+      </span>
+      {badge && <span className="num" style={{ flexShrink: 0, fontSize: 11, padding: '3px 7px', borderRadius: 4, color: active ? 'var(--accent)' : UI.inkSoft, background: active ? 'rgba(var(--accent-rgb),0.12)' : UI.bgRaised, border: `0.5px solid ${active ? 'rgba(var(--accent-rgb),0.35)' : UI.hair}` }}>{badge}</span>}
+      {!badge && active && <i className="fa-solid fa-circle-check" style={{ flexShrink: 0, fontSize: 17, color: 'var(--accent)' }} />}
+    </button>
+  );
+
+  let body;
+  if (step === 'name') {
+    body = <TextInput value={name} onChange={v => setName(v.toUpperCase())} placeholder="e.g. BENCH PRESS" autoFocus />;
+  } else if (step === 'muscle') {
+    body = <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+      {MUSCLES.map(m => {
+        const on = selectedTags.includes(m);
+        return <button key={m} onClick={() => setSelectedTags(on ? selectedTags.filter(x => x !== m) : [...selectedTags, m])}
+          style={{ ...pickChipStyle(on), width: '100%', textAlign: 'center', padding: '11px 6px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{m}</button>;
+      })}
+    </div>;
+  } else if (step === 'size') {
+    body = <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {[['big', 'Big', 'Heavy compounds — squat, deadlift, overhead press'], ['medium', 'Medium', 'Moderate lifts — bench, row, pull-up, lunge'], ['small', 'Small', 'Isolation — curls, lateral raises, extensions']]
+        .map(([val, label, sub]) => optRow({ key: val, icon: 'fa-stopwatch', label, sub, active: category === val, badge: restLabel(val) + ' rest', onClick: () => { setCategory(val); goNext(); } }))}
+    </div>;
+  } else if (step === 'equipment') {
+    body = <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {EQUIPMENT_TYPES.map(({ key, label }) => optRow({ key, icon: WIZARD_EQUIP_META[key].icon, label, sub: WIZARD_EQUIP_META[key].sub, active: equipment === key, onClick: () => { onEquipment(key); goNext({ equipment: key }); } }))}
+    </div>;
+  } else if (step === 'movement') {
+    body = <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {[['bilateral', 'Bilateral', 'fa-arrows-left-right', 'Both sides work together — one number per set'], ['unilateral', 'Unilateral', 'fa-arrow-right-long', 'One arm/leg at a time — logs left & right'], ['mobility', 'Mobility', 'fa-arrows-rotate', 'Stretch or warm-up — usually no load']]
+        .map(([val, label, icon, sub]) => optRow({ key: val, icon, label, sub, active: movementType === val, onClick: () => { setMovementType(val); goNext({ movementType: val }); } }))}
+    </div>;
+  } else if (step === 'logging') {
+    // For a bodyweight exercise, picking Weight & Reps reveals the pull-from-Health
+    // choice inline (and needs an explicit Next); other picks auto-advance.
+    const showPull = equipment === 'bodyweight' && logMode === 'weight';
+    const hasLoggedWeight = LB.latestBodyweight(store) != null;
+    body = <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {[['checkbox', 'Checkbox only', 'fa-circle-check', 'Just tick each set off — no numbers, 0 volume'], ['reps', 'Reps only', 'fa-rotate', 'Count reps, no weight — adds 0 to volume'], ['weight', 'Weight & Reps', 'fa-dumbbell', 'Track both — the usual for weighted lifts']]
+        .map(([val, label, icon, sub]) => optRow({ key: val, icon, label, sub, active: logMode === val, onClick: () => { pickLogMode(val); if (!(val === 'weight' && equipment === 'bodyweight')) goNext(); } }))}
+      {showPull && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 6 }}>
+          <span className="micro" style={{ color: UI.inkFaint }}>Starting weight</span>
+          {hasLoggedWeight
+            ? [['pull', true, 'fa-person', 'Use my bodyweight', 'Pulls your latest weight from the Health tab — tap Log there to record it'], ['manual', false, 'fa-pen', 'Enter manually', 'Type the weight yourself each session']]
+                .map(([k, v, icon, label, sub]) => optRow({ key: k, icon, label, sub, active: pullBodyweight === v, onClick: () => setPullBodyweight(v) }))
+            : <div className="micro" style={{ color: 'rgba(var(--danger-rgb),0.7)', textTransform: 'none', letterSpacing: '0.02em', fontWeight: 400, lineHeight: 1.5 }}>Log your bodyweight first in the app's Health tab (enable it under Settings) to auto-fill it.</div>}
+        </div>
+      )}
+    </div>;
+  }
+
+  const needsNext = step === 'name' || step === 'muscle' || (step === 'logging' && equipment === 'bodyweight' && logMode === 'weight');
+  const canNext = step !== 'name' || name.trim();
+  const overlayBase = { zIndex: 9998, background: 'rgba(0,0,0,0.74)', backdropFilter: 'blur(14px)', WebkitBackdropFilter: 'blur(14px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 };
+  const overlayStyle = vp ? { ...overlayBase, position: 'fixed', left: 0, right: 0, top: vp.top, height: vp.height } : { ...overlayBase, position: 'fixed', inset: 0 };
+  return (
+    <div style={overlayStyle} onClick={e => { if (e.target === e.currentTarget) requestExit(); }}>
+      <div style={{ width: '100%', maxWidth: 360, maxHeight: '86vh', overflowY: 'auto', background: UI.bgRaised, border: `1px solid ${UI.hairStrong}`, borderRadius: 8, padding: '20px 20px 22px', display: 'flex', flexDirection: 'column', gap: 18, boxShadow: '0 32px 80px rgba(0,0,0,0.6)', animation: 'fadeUp 0.3s ease' }}>
+        {confirming ? (
+          <>
+            <div style={{ fontFamily: UI.fontDisplay, fontSize: 22, color: UI.ink, fontWeight: 700, textTransform: 'uppercase' }}>Discard exercise?</div>
+            <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>Your new exercise won't be saved.</div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Btn kind="ghost" onClick={() => setConfirming(false)} style={{ flex: 1 }}>Keep editing</Btn>
+              <Btn onClick={onClose} style={{ flex: 1, background: UI.danger, borderColor: 'rgba(var(--danger-rgb),0.6)' }}>Discard</Btn>
+            </div>
+          </>
+        ) : (
+          <>
+            {/* Segmented progress */}
+            <div style={{ display: 'flex', gap: 4 }}>
+              {applicable.map((s, i) => (
+                <div key={s} style={{ flex: 1, height: 4, borderRadius: 999, background: i <= idx ? 'var(--accent)' : UI.hairStrong, opacity: i <= idx ? 1 : 0.5, transition: 'background 0.2s, opacity 0.2s' }} />
+              ))}
+            </div>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10 }}>
+                <div style={{ fontFamily: UI.fontDisplay, fontSize: 23, color: 'var(--accent)', fontWeight: 400, textTransform: 'uppercase', letterSpacing: '0.02em', lineHeight: 1.1 }}>{WIZARD_TITLES[step]}</div>
+                <span className="micro" style={{ color: UI.inkGhost, flexShrink: 0 }}>{idx + 1}/{applicable.length}</span>
+              </div>
+              <div style={{ fontSize: 12.5, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5, marginTop: 7 }}>{WIZARD_INTRO[step]}</div>
+            </div>
+            {body}
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+              <button onClick={goBack} style={{ background: 'transparent', border: 'none', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13, cursor: 'pointer', padding: '8px 4px', WebkitTapHighlightColor: 'transparent' }}>{hasPrev ? '← Back' : 'Cancel'}</button>
+              <div style={{ flex: 1 }} />
+              {step === 'size' && <button onClick={() => { setCategory(null); goNext(); }} style={{ background: 'transparent', border: 'none', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13, cursor: 'pointer', padding: '8px 10px', WebkitTapHighlightColor: 'transparent' }}>Skip</button>}
+              {needsNext && <Btn onClick={() => goNext()} disabled={!canNext} style={{ opacity: canNext ? 1 : 0.4 }}>Next</Btn>}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = '', initialTags = [], seed = null }) {
   const [confirmEl, confirm] = useConfirm();
-  const [name, setName] = useStateL(initialName);
-  const [selectedTags, setSelectedTags] = useStateL(initialTags);
-  const [category, setCategory] = useStateL(null);
-  const [movementType, setMovementType] = useStateL('bilateral');
-  const [noWeightReps, setNoWeightReps] = useStateL(false);
-  const [equipment, setEquipment] = useStateL('barbell_dual');
+  // `seed` = a system-catalog entry ({ name, tags, equipment, movement, logMode })
+  // being duplicated via "Check & Add": every field is pre-filled and the wizard
+  // is skipped, dropping straight into the review sheet so the user can tweak
+  // anything before committing. A plain "New exercise" has no seed.
+  // A fresh new exercise starts blank — EXCEPT the muscle group, which pre-fills
+  // from an active Library filter (initialTags) so "filter by Back → create" keeps
+  // Back selected (now shown in the muscle step, not silently skipped). Equipment/
+  // movement come from no filter, so they start unset. A catalog `seed` pre-fills
+  // everything (it IS a specific exercise being reviewed).
+  const [name, setName] = useStateL(seed ? (seed.name || '') : initialName);
+  const [selectedTags, setSelectedTags] = useStateL(seed ? (seed.tags ? [...seed.tags] : []) : initialTags);
+  const [category, setCategory] = useStateL(seed?.category ?? null);
+  const [movementType, setMovementType] = useStateL(seed ? (seed.movement || 'bilateral') : null);
+  const [logMode, setLogMode] = useStateL(seed ? (seed.logMode || 'weight') : 'weight');
+  const [pullBodyweight, setPullBodyweight] = useStateL(false);
+  const [logModeTouched, setLogModeTouched] = useStateL(!!seed); // seed pre-sets the mode → don't auto-override
+  const pickLogMode = (m) => { setLogModeTouched(true); setLogMode(m); };
+  const [equipment, setEquipment] = useStateL(seed ? (seed.equipment || 'no_equipment') : null);
   const [note, setNote] = useStateL('');
   const [showSizeInfo, setShowSizeInfo] = useStateL(false);
   const [showBodyweightHint, setShowBodyweightHint] = useStateL(false);
+  // Fresh exercise → the wizard runs the full flow from the name step. A catalog
+  // seed skips it (null = review sheet). The wizard forces a pick at each step, so
+  // equipment/movement are never left unset by the time the review sheet renders.
+  const [wizardStep, setWizardStep] = useStateL(seed ? null : 'name');
+  // Wizard equipment pick: activate the Health tab silently — the info sheet is
+  // z-100 and would hide behind the z-9998 wizard; the pull toggle in the review
+  // form covers the rest.
+  const wizardSetEquipment = (key) => {
+    setEquipment(key || 'no_equipment');
+    if (key === 'bodyweight' && !store?.settings?.showHealthTab) setStore(s => ({ ...s, settings: { ...s.settings, showHealthTab: true } }));
+  };
+  // When the Logging picker first becomes relevant (no_equipment / bodyweight
+  // equipment, or a mobility movement) and the user hasn't chosen a mode yet,
+  // pre-select a sensible default — without clobbering a manual pick.
+  useEffectL(() => {
+    if (logModeTouched || !loggingPickerVisible(equipment, movementType)) return;
+    setLogMode(movementType === 'mobility' ? 'checkbox' : equipment === 'bodyweight' ? 'weight' : 'reps');
+  }, [equipment, movementType, logModeTouched]);
   const toggleTag = (m) => setSelectedTags(t => t.includes(m) ? t.filter(x => x !== m) : [...t, m]);
   const handleEquipmentChange = (key) => {
     setEquipment(key || 'no_equipment');
@@ -619,25 +978,38 @@ function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = ''
   };
   const save = () => {
     if (!name.trim()) return;
-    const ex = { id: LB.uid(), name: name.trim(), tags: selectedTags, category: category || null, unilateral: movementType === 'unilateral', movement_type: movementType, no_weight_reps: noWeightReps, equipment: equipment || null, note: note.trim(), progression_reps: null };
+    const effLogMode = loggingPickerVisible(equipment, movementType) ? logMode : 'weight';
+    const ex = { id: LB.uid(), name: name.trim(), tags: selectedTags, category: category || null, unilateral: movementType === 'unilateral', movement_type: movementType, no_weight_reps: effLogMode !== 'weight', log_mode: effLogMode, pull_bodyweight: (equipment === 'bodyweight' && effLogMode === 'weight' ? pullBodyweight : false), equipment: equipment || null, note: note.trim(), progression_reps: null };
     setStore(s => ({ ...s, exercises: [...s.exercises, ex] }));
     onCreated?.(ex.id);
     onClose();
   };
-  // Guard against an accidental backdrop tap wiping a half-filled form.
+  // Guard against an accidental backdrop tap wiping a half-filled form. Everything
+  // starts unset now (equipment/movement null), so "dirty" = the user picked anything.
   const isDirty = () =>
     name.trim() !== initialName.trim() || selectedTags.length > 0 || category != null ||
-    movementType !== 'bilateral' || noWeightReps || equipment !== 'barbell_dual' || note.trim() !== '';
+    movementType != null || logModeTouched || equipment != null || note.trim() !== '';
   const requestClose = async () => {
     if (isDirty() && !await confirm('Your new exercise will be discarded.', { title: 'Leave without saving?', ok: 'Discard', cancel: 'Keep editing', danger: true })) return;
     onClose();
   };
   return (
     <>
-    <Sheet open={true} onClose={requestClose} title="New exercise">
+    {wizardStep !== null ? (
+      <ExerciseWizard
+        step={wizardStep} setStep={setWizardStep} onClose={onClose} isDirty={isDirty} store={store}
+        name={name} setName={setName} selectedTags={selectedTags} setSelectedTags={setSelectedTags}
+        category={category} setCategory={setCategory}
+        equipment={equipment} onEquipment={wizardSetEquipment}
+        movementType={movementType} setMovementType={setMovementType}
+        logMode={logMode} pickLogMode={pickLogMode}
+        pullBodyweight={pullBodyweight} setPullBodyweight={setPullBodyweight}
+      />
+    ) : (
+    <Sheet open={true} onClose={requestClose} title={seed ? 'Review & add' : 'New exercise'}>
       <div onPointerDown={blurKbOnControlTap} style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
         <Field label="Name">
-          <TextInput value={name} onChange={v => setName(v.toUpperCase())} placeholder="e.g. BENCH PRESS" autoFocus />
+          <TextInput value={name} onChange={v => setName(v.toUpperCase())} placeholder="e.g. BENCH PRESS" />
         </Field>
         <div>
           <span className="label">Muscle group</span>
@@ -677,18 +1049,16 @@ function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = ''
           <span className="label">Movement type</span>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
             {[['bilateral', 'Bilateral'], ['unilateral', 'Unilateral'], ['mobility', 'Mobility']].map(([val, label]) => (
-              <Chip key={val} on={movementType === val}
-                onClick={() => { setMovementType(val); setNoWeightReps(val === 'mobility'); if (val === 'mobility') setEquipment('no_equipment'); }}
-              >{label}</Chip>
+              <Chip key={val} on={movementType === val} onClick={() => setMovementType(val)}>{label}</Chip>
             ))}
           </div>
-          {movementType === 'mobility' && (
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
-              <Chip on={noWeightReps} onClick={() => setNoWeightReps(true)}>Checkbox only</Chip>
-              <Chip on={!noWeightReps} onClick={() => setNoWeightReps(false)}>Weight & Reps</Chip>
-            </div>
-          )}
         </div>
+        <LoggingModeSection
+          equipment={equipment} movementType={movementType}
+          logMode={logMode} onLogMode={pickLogMode}
+          pullBodyweight={pullBodyweight} onPullBodyweight={setPullBodyweight}
+          hasLoggedWeight={LB.latestBodyweight(store) != null}
+        />
         <Field label="Note (optional)">
           <textarea value={note} onChange={e => setNote(e.target.value)}
             placeholder="e.g. Cable pos 4, neutral grip, slow eccentric"
@@ -701,9 +1071,10 @@ function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = ''
             }}
           />
         </Field>
-        <Btn onClick={save} style={{ opacity: name.trim() ? 1 : 0.4 }} disabled={!name.trim()}>Create</Btn>
+        <Btn onClick={save} style={{ opacity: name.trim() ? 1 : 0.4 }} disabled={!name.trim()}>{seed ? 'Add to library' : 'Create'}</Btn>
       </div>
     </Sheet>
+    )}
     {showBodyweightHint && (
       <Sheet open={true} onClose={() => setShowBodyweightHint(false)} title="Health tab activated">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -737,7 +1108,8 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
   const [editTags, setEditTags] = useStateL(autoEdit ? [...(ex.tags || [])] : []);
   const [editCategory, setEditCategory] = useStateL(autoEdit ? (ex.category || null) : null);
   const [editMovementType, setEditMovementType] = useStateL(autoEdit ? (ex.movement_type ?? (ex.unilateral ? 'unilateral' : 'bilateral')) : 'bilateral');
-  const [editNoWeightReps, setEditNoWeightReps] = useStateL(autoEdit ? !!ex.no_weight_reps : false);
+  const [editLogMode, setEditLogMode] = useStateL(autoEdit ? LB.exerciseLogMode(ex) : 'weight');
+  const [editPullBodyweight, setEditPullBodyweight] = useStateL(autoEdit ? !!ex.pull_bodyweight : false);
   const [editEquipment, setEditEquipment] = useStateL(autoEdit ? (ex.equipment || null) : null);
   const [editYoutubeUrl, setEditYoutubeUrl] = useStateL(autoEdit ? (ex.youtube_url || '') : '');
   const [noteVal, setNoteVal] = useStateL(autoEdit ? (ex.note || '') : '');
@@ -760,13 +1132,14 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
     }
   };
 
-  const startEdit = () => { setEditName(ex.name); setEditTags([...(ex.tags || [])]); setEditCategory(ex.category || null); setEditMovementType(ex.movement_type ?? (ex.unilateral ? 'unilateral' : 'bilateral')); setEditNoWeightReps(!!ex.no_weight_reps); setEditEquipment(ex.equipment || null); setEditYoutubeUrl(ex.youtube_url || ''); setNoteVal(ex.note || ''); setEditMode(true); };
+  const startEdit = () => { setEditName(ex.name); setEditTags([...(ex.tags || [])]); setEditCategory(ex.category || null); setEditMovementType(ex.movement_type ?? (ex.unilateral ? 'unilateral' : 'bilateral')); setEditLogMode(LB.exerciseLogMode(ex)); setEditPullBodyweight(!!ex.pull_bodyweight); setEditEquipment(ex.equipment || null); setEditYoutubeUrl(ex.youtube_url || ''); setNoteVal(ex.note || ''); setEditMode(true); };
   const cancelEdit = () => { if (autoEdit) advanceQueue(); else setEditMode(false); };
   const saveEdit = () => {
     if (!editName.trim()) return;
     setStore(s => {
+      const effLogMode = loggingPickerVisible(editEquipment, editMovementType) ? editLogMode : 'weight';
       const exercises = s.exercises.map(e => e.id === exId
-        ? { ...e, name: editName.trim(), tags: editTags, category: editCategory || null, unilateral: editMovementType === 'unilateral', movement_type: editMovementType, no_weight_reps: editNoWeightReps, equipment: editEquipment || null, note: noteVal.trim(), youtube_url: sanitizeYoutubeUrl(editYoutubeUrl) }
+        ? { ...e, name: editName.trim(), tags: editTags, category: editCategory || null, unilateral: editMovementType === 'unilateral', movement_type: editMovementType, no_weight_reps: effLogMode !== 'weight', log_mode: effLogMode, pull_bodyweight: (editEquipment === 'bodyweight' && effLogMode === 'weight' ? editPullBodyweight : false), equipment: editEquipment || null, note: noteVal.trim(), youtube_url: sanitizeYoutubeUrl(editYoutubeUrl) }
         : e);
       return { ...s, exercises };
     });
@@ -924,18 +1297,16 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
               <span className="label">Movement type</span>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
                 {[['bilateral', 'Bilateral'], ['unilateral', 'Unilateral'], ['mobility', 'Mobility']].map(([val, label]) => (
-                  <Chip key={val} on={editMovementType === val}
-                    onClick={() => { setEditMovementType(val); setEditNoWeightReps(val === 'mobility'); if (val === 'mobility') setEditEquipment('no_equipment'); }}
-                  >{label}</Chip>
+                  <Chip key={val} on={editMovementType === val} onClick={() => setEditMovementType(val)}>{label}</Chip>
                 ))}
               </div>
-              {editMovementType === 'mobility' && (
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
-                  <Chip on={editNoWeightReps} onClick={() => setEditNoWeightReps(true)}>Checkbox only</Chip>
-                  <Chip on={!editNoWeightReps} onClick={() => setEditNoWeightReps(false)}>Weight & Reps</Chip>
-                </div>
-              )}
             </div>
+            <LoggingModeSection
+              equipment={editEquipment} movementType={editMovementType}
+              logMode={editLogMode} onLogMode={setEditLogMode}
+              pullBodyweight={editPullBodyweight} onPullBodyweight={setEditPullBodyweight}
+              hasLoggedWeight={LB.latestBodyweight(store) != null}
+            />
             <Field label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><i className="fa-brands fa-youtube" style={{ color: '#FF0000', fontSize: 12 }} />Form video</span>}>
               <TextInput value={editYoutubeUrl} onChange={setEditYoutubeUrl} placeholder="YouTube link (optional)" />
             </Field>
@@ -2863,10 +3234,14 @@ function SessionEditSheet({ session, duration, exercises, onClose, onSave }) {
   const save = () => {
     const patch = { entries: draftEntries };
     if (draftDate && draftDate !== session.date?.slice(0, 10)) {
-      const original = new Date(session.date);
-      const [y, m, d] = draftDate.split('-').map(Number);
-      original.setFullYear(y, m - 1, d);
-      patch.date = original.toISOString();
+      // Store the picked day as UTC noon so its date part (slice 0,10) equals
+      // the chosen day in every timezone. The old new Date()/setFullYear/
+      // toISOString dance kept the original's LOCAL time-of-day and, for a
+      // UTC-midnight date viewed west of UTC, rolled the day forward by one on
+      // re-serialization (Mike's "set today → history shows Jul 6" ticket).
+      // `date` is read everywhere as a day via slice/parseDate, never as a
+      // wall-clock time — started_at/ended carry the actual times.
+      patch.date = draftDate + 'T12:00:00.000Z';
     }
     const mins = parseInt(draftDuration, 10);
     if (!isNaN(mins) && mins > 0) {

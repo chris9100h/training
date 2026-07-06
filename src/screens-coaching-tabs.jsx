@@ -1275,7 +1275,13 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
               Submit this week's check-in
             </button>
           )}
-          {!thisWeek && checkinEnabled && !canSubmitToday && previewResponses && (
+          {/* Sunday only (!canSubmitToday). The preview shows previewWeekStart —
+              the CURRENT in-progress week — which is independent of weekStart's
+              submission status, so it must NOT be gated on !thisWeek: since
+              checkinWeekStart now correctly points weekStart at last week on
+              Sunday (already submitted → thisWeek truthy), gating on !thisWeek
+              would wrongly hide the preview whenever last week was checked in. */}
+          {checkinEnabled && !canSubmitToday && previewResponses && (
             <button onClick={() => setPreviewOpen(v => !v)}
               style={{ flex: 1, background: previewOpen ? `rgba(var(--accent-rgb),0.1)` : `rgba(var(--accent-rgb),0.05)`, border: `0.5px solid rgba(var(--accent-rgb),0.25)`, borderRadius: 6, padding: '12px 14px', cursor: 'pointer', color: previewOpen ? 'var(--accent)' : UI.inkSoft, fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600 }}>
               {previewOpen ? 'Close preview' : 'Preview this week'}

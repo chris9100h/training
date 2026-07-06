@@ -1091,9 +1091,13 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     setSupportSending(true);
     const body = supportDraft.trim();
     const imgFile = supportImageFile;
+    const imgPreview = supportImagePreview;
     setSupportDraft('');
     setSupportImageFile(null);
     setSupportImagePreview(null);
+    // Restore the typed message + image on failure so a swallowed write (network
+    // / RLS) can't silently drop the user's message while looking sent (audit B2).
+    const restore = () => { setSupportDraft(body); setSupportImageFile(imgFile); setSupportImagePreview(imgPreview); };
     try {
       let attachments = null;
       if (imgFile) {
@@ -1104,17 +1108,17 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
         id: LB.uid(), coaching_id: supportActiveTicketId, author_id: userId, type: 'general',
         body: body || '', ...(attachments ? { attachments } : {}),
       }).select('id, author_id, body, created_at, read_at, attachments').single();
-      if (!error && note) {
-        setSupportActiveNotes(prev => [...prev, note]);
-        const preview = attachments ? (body || '📷 Image') : body;
-        setStore(s => ({ ...s, supportTickets: (s.supportTickets || []).map(t =>
-          t.coachingId === supportActiveTicketId
-            ? { ...t, lastMessageAt: note.created_at, lastMessageBody: preview }
-            : t
-        )}));
-        LB.fnFetch(`${LB.SUPABASE_URL}/functions/v1/zane_coaching-notify`, { coachingId: supportActiveTicketId, preview });
-      }
-    } finally { setSupportSending(false); }
+      if (error || !note) { restore(); alert('Message failed to send. Please try again.'); return; }
+      setSupportActiveNotes(prev => [...prev, note]);
+      const preview = attachments ? (body || '📷 Image') : body;
+      setStore(s => ({ ...s, supportTickets: (s.supportTickets || []).map(t =>
+        t.coachingId === supportActiveTicketId
+          ? { ...t, lastMessageAt: note.created_at, lastMessageBody: preview }
+          : t
+      )}));
+      LB.fnFetch(`${LB.SUPABASE_URL}/functions/v1/zane_coaching-notify`, { coachingId: supportActiveTicketId, preview });
+    } catch (e) { restore(); alert(e.message || 'Message failed to send. Please try again.'); }
+    finally { setSupportSending(false); }
   };
 
   const handleCreateTicket = async () => {
@@ -1122,12 +1126,17 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     setSupportSending(true);
     const body = supportDraft.trim();
     const imgFile = supportImageFile;
+    const imgPreview = supportImagePreview;
     setSupportDraft('');
     setSupportImageFile(null);
     setSupportImagePreview(null);
+    // Restore the typed message + image on failure so it isn't silently lost
+    // (audit B4). A ticket created without a first message stays hidden from the
+    // admin inbox until the user retries (get_support_chats excludes it).
+    const restore = () => { setSupportDraft(body); setSupportImageFile(imgFile); setSupportImagePreview(imgPreview); };
     try {
       const { data: coachingId, error: ticketErr } = await LB.supabase.rpc('open_support_chat', { p_category: supportCategoryDraft });
-      if (ticketErr || !coachingId) return;
+      if (ticketErr || !coachingId) { restore(); alert('Could not open the ticket. Please try again.'); return; }
       let attachments = null;
       if (imgFile) {
         const url = await LB.uploadChatImage(imgFile, userId);
@@ -1137,7 +1146,8 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
         id: LB.uid(), coaching_id: coachingId, author_id: userId, type: 'general',
         body: body || '', ...(attachments ? { attachments } : {}),
       }).select('id, author_id, body, created_at, read_at, attachments').single();
-      if (!noteErr && note) {
+      if (noteErr || !note) { restore(); alert('Message failed to send. Please try again.'); return; }
+      {
         const preview = attachments ? (body || '📷 Image') : body;
         const newTicket = {
           coachingId, status: 'open', category: supportCategoryDraft,
@@ -1151,7 +1161,8 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
         setSupportView('thread');
         LB.fnFetch(`${LB.SUPABASE_URL}/functions/v1/zane_coaching-notify`, { coachingId, preview });
       }
-    } finally { setSupportSending(false); }
+    } catch (e) { restore(); alert(e.message || 'Could not create the ticket. Please try again.'); }
+    finally { setSupportSending(false); }
   };
 
   const handleAdminReply = async () => {
@@ -1159,9 +1170,13 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     setSupportAdminSending(true);
     const body = supportAdminDraft.trim();
     const imgFile = adminImageFile;
+    const imgPreview = adminImagePreview;
     setSupportAdminDraft('');
     setAdminImageFile(null);
     setAdminImagePreview(null);
+    // Restore the reply on failure so a swallowed write can't silently drop the
+    // admin's message while looking sent (audit B5).
+    const restore = () => { setSupportAdminDraft(body); setAdminImageFile(imgFile); setAdminImagePreview(imgPreview); };
     try {
       let attachments = null;
       if (imgFile) {
@@ -1172,12 +1187,12 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
         id: LB.uid(), coaching_id: supportTicket.coachingId, author_id: userId, type: 'general',
         body: body || '', ...(attachments ? { attachments } : {}),
       }).select('id, author_id, body, created_at, read_at, attachments').single();
-      if (!error && note) {
-        setSupportTicketNotes(prev => [...prev, note]);
-        const preview = attachments ? (body || '📷 Image') : body;
-        LB.fnFetch(`${LB.SUPABASE_URL}/functions/v1/zane_coaching-notify`, { coachingId: supportTicket.coachingId, preview });
-      }
-    } finally { setSupportAdminSending(false); }
+      if (error || !note) { restore(); alert('Reply failed to send. Please try again.'); return; }
+      setSupportTicketNotes(prev => [...prev, note]);
+      const preview = attachments ? (body || '📷 Image') : body;
+      LB.fnFetch(`${LB.SUPABASE_URL}/functions/v1/zane_coaching-notify`, { coachingId: supportTicket.coachingId, preview });
+    } catch (e) { restore(); alert(e.message || 'Reply failed to send. Please try again.'); }
+    finally { setSupportAdminSending(false); }
   };
 
   const sendBroadcast = async () => {
