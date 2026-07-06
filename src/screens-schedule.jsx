@@ -3018,7 +3018,7 @@ function PlanWizard({ store, setStore, go }) {
       if (dayFlash) return;
       setCustomDays(d => d.map((x, i) => i === dayIdx ? dt : x));
       setDayFlash(true);
-      setTimeout(() => { setDayFlash(false); goNext(); }, 320);
+      setTimeout(() => { setDayFlash(false); goNext(); }, 200);
     };
     const createDayType = () => {
       const nm = newDayTypeName.trim().toUpperCase();
@@ -3128,7 +3128,7 @@ function PlanWizard({ store, setStore, go }) {
   const overlayStyle = vp ? { ...overlayBase, position: 'fixed', left: 0, right: 0, top: vp.top, height: vp.height } : { ...overlayBase, position: 'fixed', inset: 0 };
   return (
     <div style={overlayStyle} onClick={e => { if (e.target === e.currentTarget) requestExit(); }}>
-      <div style={{ width: '100%', maxWidth: 360, maxHeight: '86vh', overflowY: 'auto', background: UI.bgRaised, border: `1px solid ${UI.hairStrong}`, borderRadius: 8, padding: '20px 20px 22px', display: 'flex', flexDirection: 'column', gap: 18, boxShadow: '0 32px 80px rgba(0,0,0,0.6)', animation: 'fadeUp 0.3s ease' }}>
+      <div style={{ position: 'relative', width: '100%', maxWidth: 360, maxHeight: '86vh', overflowY: 'auto', background: UI.bgRaised, border: `1px solid ${UI.hairStrong}`, borderRadius: 8, padding: '20px 20px 22px', display: 'flex', flexDirection: 'column', gap: 18, boxShadow: '0 32px 80px rgba(0,0,0,0.6)', animation: 'fadeUp 0.3s ease' }}>
         {confirming ? (
           <>
             <div style={{ fontFamily: UI.fontDisplay, fontSize: 22, color: UI.ink, fontWeight: 700, textTransform: 'uppercase' }}>Discard plan?</div>
@@ -3164,14 +3164,14 @@ function PlanWizard({ store, setStore, go }) {
             </div>
           </>
         )}
-      </div>
-      {dayFlash && (
-        <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}>
-          <div style={{ width: 92, height: 92, borderRadius: '50%', background: 'var(--accent)', border: '1px solid var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 12px 40px rgba(0,0,0,0.6)', animation: 'fadeUp 0.2s ease' }}>
-            <i className="fa-solid fa-check" style={{ fontSize: 42, color: '#0a0805' }} />
+        {dayFlash && (
+          <div style={{ position: 'absolute', inset: 0, borderRadius: 8, background: 'rgba(0,0,0,0.62)', display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}>
+            <div style={{ width: 88, height: 88, borderRadius: '50%', background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 12px 40px rgba(0,0,0,0.6)' }}>
+              <i className="fa-solid fa-check" style={{ fontSize: 40, color: '#0a0805' }} />
+            </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }
