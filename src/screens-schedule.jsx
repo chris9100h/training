@@ -1349,15 +1349,23 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
             parts.push('Flex');
             if (draft.sessions_per_week != null) parts.push(`${draft.sessions_per_week}×/wk`);
           }
-          if (draft.mesocycle_weeks != null) parts.push(`${draft.mesocycle_weeks}wk meso`);
+          const hasMeso = draft.mesocycle_weeks != null;
+          const sr = draft.mesocycle_start_rir ?? 3;
+          const er = draft.mesocycle_end_rir ?? 0;
+          const hellCycle = hasMeso && er < 0; // beyond-failure end → the box smoulders
+          if (hasMeso) {
+            parts.push(`${draft.mesocycle_weeks}wk meso`);
+            parts.push(`${sr}→${er} RIR${er < 0 ? ' 🔥' : ''}`);
+          }
           const summary = parts.join(' · ');
           return (
             <button onClick={() => setModifiersOpen(true)} style={{
               display: 'flex', alignItems: 'center', gap: 12, width: '100%',
-              background: summary ? `rgba(var(--accent-rgb),0.06)` : UI.bgRaised,
-              border: `1px solid ${summary ? UI.goldSoft : UI.hairStrong}`,
+              background: hellCycle ? 'rgba(210,45,0,0.10)' : (summary ? `rgba(var(--accent-rgb),0.06)` : UI.bgRaised),
+              border: `1px solid ${hellCycle ? 'rgba(255,120,40,0.6)' : (summary ? UI.goldSoft : UI.hairStrong)}`,
               borderRadius: 6, padding: '13px 16px', cursor: 'pointer', textAlign: 'left',
               WebkitTapHighlightColor: 'transparent',
+              ...(hellCycle ? { animation: 'hellGlow 2s ease-in-out infinite' } : {}),
             }}>
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={summary ? UI.gold : UI.inkSoft} strokeWidth="1.8" strokeLinecap="round">
                 <line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/>
@@ -1367,7 +1375,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
               </svg>
               <div style={{ flex: 1, textAlign: 'center' }}>
                 <div style={{ fontFamily: UI.fontUi, fontSize: 11, letterSpacing: '0.08em', textTransform: 'uppercase', color: summary ? UI.gold : UI.inkSoft, fontWeight: 600, marginBottom: summary ? 3 : 0 }}>Options</div>
-                {summary && <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.ink }}>{summary}</div>}
+                {summary && <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: hellCycle ? 'rgba(255,140,70,1)' : UI.ink, fontWeight: hellCycle ? 600 : 400 }}>{summary}</div>}
               </div>
               <svg width="8" height="14" viewBox="0 0 8 14" fill="none" stroke={UI.inkFaint} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M2 2l5 5-5 5"/>
