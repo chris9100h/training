@@ -2006,9 +2006,10 @@ function buildPlanSkeleton({ name, type, presetKey, customCount, customDays, wee
   const preset = SPLIT_PRESETS[presetKey];
   let days;
   if (type === 'weekday') {
-    // The split's rotation maps onto the chosen weekdays in order (round-robin);
-    // custom (no preset) → every chosen day starts as FULL. No explicit REST
-    // days: a weekday plan rests on the calendar days you didn't pick.
+    // The split's rotation maps onto the chosen weekdays in order (round-robin).
+    // The wizard requires exactly splitDayCount days for a fixed preset, so the
+    // rotation divides evenly. Custom (no preset) → every chosen day starts as
+    // FULL. No explicit REST days: a weekday plan rests on the days you skip.
     const block = preset ? preset.block : null;
     days = (weekdays || []).slice().sort((a, b) => a - b)
       .map((i, n) => ({ id: uid(), name: block ? block[n % block.length] : 'FULL', weekday: i, items: [] }));

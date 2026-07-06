@@ -2918,11 +2918,11 @@ function PlanWizard({ store, setStore, go }) {
   };
   const requestExit = () => { if (isDirty()) setConfirming(true); else exit(); };
 
-  // Weekday guard: a split's rotation can round-robin onto MORE days than its
-  // natural length, but mapping a 6-day split onto only 5 weekdays would drop
-  // part of the split, so require at least its day count.
-  const weekdaySplitCount = LB.splitDayCount(presetKey);
-  const weekdayShort = type === 'weekday' && weekdaySplitCount > 0 && weekdaysSel.length < weekdaySplitCount;
+  // Weekday guard: a fixed split must map onto EXACTLY its day count, otherwise
+  // the rotation doesn't divide evenly (PPL x2 onto 5 days → PUSH PULL LEGS PUSH
+  // PULL, i.e. LEGS trained less). Custom (no preset) is unconstrained.
+  const weekdayNeed = LB.splitDayCount(presetKey);   // 0 = custom
+  const weekdayMismatch = type === 'weekday' && weekdayNeed > 0 && weekdaysSel.length !== weekdayNeed;
   const dayIdx = step.startsWith('day') ? parseInt(step.slice(3), 10) : -1;
   const stepTitle = dayIdx >= 0 ? `Day ${dayIdx + 1}` : PLAN_TITLES[step];
   const stepIntro = dayIdx >= 0 ? `What's on day ${dayIdx + 1}?` : PLAN_INTRO[step];
@@ -3020,9 +3020,9 @@ function PlanWizard({ store, setStore, go }) {
               border: `1px solid ${on ? 'var(--accent)' : UI.hairStrong}`, WebkitTapHighlightColor: 'transparent' }}>{w}</button>;
         })}
       </div>
-      {weekdayShort
+      {weekdayMismatch
         ? <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: 'rgba(var(--danger-rgb),0.85)', textAlign: 'center', lineHeight: 1.4 }}>
-            This split needs at least {weekdaySplitCount} training days. Pick {weekdaySplitCount - weekdaysSel.length} more.
+            This split needs exactly {weekdayNeed} training days, so it divides evenly. {weekdaysSel.length < weekdayNeed ? `Pick ${weekdayNeed - weekdaysSel.length} more.` : `Remove ${weekdaysSel.length - weekdayNeed}.`}
           </div>
         : <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, textAlign: 'center', lineHeight: 1.4 }}>
             {presetKey && presetKey !== 'custom' ? 'Your split fills the days you pick, in order.' : 'Each day starts as Full Body. Set the type per day in the editor.'}
@@ -3057,7 +3057,7 @@ function PlanWizard({ store, setStore, go }) {
   const isFinal = step === 'meso';
   // Day-type steps auto-advance on pick, so no Next there.
   const needsNext = step === 'name' || step === 'weekdays' || (step === 'split' && presetKey === 'custom' && type !== 'weekday');
-  const canNext = step === 'name' ? !!name.trim() : step === 'weekdays' ? (weekdaysSel.length > 0 && !weekdayShort) : true;
+  const canNext = step === 'name' ? !!name.trim() : step === 'weekdays' ? (weekdaysSel.length > 0 && !weekdayMismatch) : true;
   const overlayBase = { zIndex: 9998, background: 'rgba(0,0,0,0.74)', backdropFilter: 'blur(14px)', WebkitBackdropFilter: 'blur(14px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 };
   const overlayStyle = vp ? { ...overlayBase, position: 'fixed', left: 0, right: 0, top: vp.top, height: vp.height } : { ...overlayBase, position: 'fixed', inset: 0 };
   return (
