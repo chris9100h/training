@@ -16,6 +16,15 @@
    Entry shape: { id: string, title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.486',
+    title: 'Fine, an Exercise Database',
+    items: [
+      "🗄️ There's a new \"Database\" tab in your exercise library, a curated catalog of the classics to browse, search and filter. Full honesty: I was against this one. I didn't want a bloated pile of movements nobody actually does clogging up the app. But enough of you asked (repeatedly, and reasonably) that I caved. On my terms, though: a deliberately lean list of lifts people genuinely train, not a thousand obscure variations you'd never touch.",
+      "➕ Nothing lands in your library behind your back. Tap Check & Add and the exercise opens pre-filled for a quick once-over (rename it, retag it, change how it's logged, whatever), and only when you hit save does it become your own, fully editable copy. The catalog stays read-only, your library stays yours. That was the whole compromise.",
+      "🧭 Building your own exercise is a proper guided flow now. Step-by-step pop-ups (name, muscles, size, equipment, movement, logging), each with a plain-language explanation of what it actually means (yes, including what \"Big/Medium/Small\" does: it just sets your default rest timer). Then a final review before you save. And you can pick how each exercise is logged: Weight & Reps, Reps only (for bodyweight work, no invented numbers), or a simple Checkbox to tick off planks and stretches.",
+    ],
+  },
+  {
     id: 'v2.485',
     title: 'Welcome Back',
     items: [
