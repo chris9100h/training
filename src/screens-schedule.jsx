@@ -1750,7 +1750,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
                       {hasMeso ? `${draft.mesocycle_weeks}-week mesocycle` : 'No mesocycle'}
                     </div>
                     <div style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint, marginTop: 2, lineHeight: 1.4 }}>
-                      {hasMeso ? 'RIR targets + auto-regulation feedback during training.' : 'Enable for RIR-based progressive overload.'}
+                      {hasMeso ? 'Auto-regulation feedback + a deload at the end.' : 'Enable for a structured, progressive training block.'}
                     </div>
                   </div>
                 </div>
@@ -1763,45 +1763,45 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
                         onChange={v => setDraft(d => ({ ...d, mesocycle_weeks: Math.min(8, Math.max(4, Math.round(v))) }))} />
                       {(() => {
                         const rirOn = LB.mesoRirEnabled(draft);
-                        return (
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 12 }}>
-                            <button onClick={() => setDraft(d => ({ ...d, mesocycle_rir_enabled: !LB.mesoRirEnabled(d) }))} style={{ flexShrink: 0, background: 'none', border: 'none', padding: 0, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
-                              <div style={{ width: 44, height: 26, borderRadius: 13, position: 'relative', background: rirOn ? UI.gold : UI.hairStrong, border: `0.5px solid ${rirOn ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong}`, transition: 'background 0.15s' }}>
-                                <div style={{ position: 'absolute', top: 3, left: rirOn ? 21 : 3, width: 20, height: 20, borderRadius: '50%', background: rirOn ? '#0a0805' : '#fff', transition: 'left 0.15s' }} />
-                              </div>
-                            </button>
-                            <div style={{ flex: 1 }}>
-                              <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.ink, fontWeight: 600 }}>RIR taper</div>
-                              <div style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint, marginTop: 2, lineHeight: 1.4 }}>
-                                {rirOn ? 'Weekly RIR targets during training.' : 'Off · volume + load progression only.'}
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })()}
-                      {LB.mesoRirEnabled(draft) && <>
-                      {(() => {
                         const sr = draft.mesocycle_start_rir ?? 3;
                         const er = draft.mesocycle_end_rir ?? 0;
                         return (
-                          <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
-                            <div style={{ flex: 1, textAlign: 'center' }}>
-                              <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>START RIR</div>
-                              <Stepper value={sr} step={1} min={0} suffix=" RIR"
-                                onChange={v => setDraft(d => ({ ...d, mesocycle_start_rir: Math.min(3, Math.max(0, Math.round(v))) }))} />
+                          <div style={{ marginTop: 14 }}>
+                            <div className="knurl" style={{ marginBottom: 12 }} />
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                              <span className="micro" style={{ color: rirOn ? UI.gold : UI.inkFaint, flex: 1 }}>RIR TAPER</span>
+                              <button onClick={() => setDraft(d => ({ ...d, mesocycle_rir_enabled: !LB.mesoRirEnabled(d) }))} style={{ flexShrink: 0, background: 'none', border: 'none', padding: 0, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+                                <div style={{ width: 44, height: 26, borderRadius: 13, position: 'relative', background: rirOn ? UI.gold : UI.hairStrong, border: `0.5px solid ${rirOn ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong}`, transition: 'background 0.15s' }}>
+                                  <div style={{ position: 'absolute', top: 3, left: rirOn ? 21 : 3, width: 20, height: 20, borderRadius: '50%', background: rirOn ? '#0a0805' : '#fff', transition: 'left 0.15s' }} />
+                                </div>
+                              </button>
                             </div>
-                            <div style={{ flex: 1, textAlign: 'center' }}>
-                              <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>END RIR</div>
-                              <Stepper value={er} step={1} min={-3} suffix=" RIR"
-                                onChange={v => setDraft(d => ({ ...d, mesocycle_end_rir: Math.min(0, Math.max(-3, Math.round(v))) }))} />
-                            </div>
+                            {rirOn ? (
+                              <>
+                                <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
+                                  <div style={{ flex: 1, textAlign: 'center' }}>
+                                    <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>START RIR</div>
+                                    <Stepper value={sr} step={1} min={0} suffix=" RIR"
+                                      onChange={v => setDraft(d => ({ ...d, mesocycle_start_rir: Math.min(3, Math.max(0, Math.round(v))) }))} />
+                                  </div>
+                                  <div style={{ flex: 1, textAlign: 'center' }}>
+                                    <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>END RIR</div>
+                                    <Stepper value={er} step={1} min={-3} suffix=" RIR"
+                                      onChange={v => setDraft(d => ({ ...d, mesocycle_end_rir: Math.min(0, Math.max(-3, Math.round(v))) }))} />
+                                  </div>
+                                </div>
+                                <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 10, textAlign: 'center', lineHeight: 1.5 }}>
+                                  {LB.mesoTaperPreview(draft.mesocycle_weeks, sr, er)}
+                                </div>
+                              </>
+                            ) : (
+                              <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 8, lineHeight: 1.5 }}>
+                                Off · runs on volume + load progression, then a deload.
+                              </div>
+                            )}
                           </div>
                         );
                       })()}
-                      <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 10, textAlign: 'center', lineHeight: 1.5 }}>
-                        {LB.mesoTaperPreview(draft.mesocycle_weeks, draft.mesocycle_start_rir ?? 3, draft.mesocycle_end_rir ?? 0)}
-                      </div>
-                      </>}
                       {mesoCompletions > 0 && (
                         <button onClick={() => setStore(s => ({
                           ...s,
@@ -3213,20 +3213,15 @@ function PlanWizard({ store, setStore, go }) {
             <Stepper value={mesoWeeks} onChange={v => setMesoWeeks(Math.min(8, Math.max(4, Math.round(v))))} step={1} min={4} />
           </div>
           <div className="knurl" style={{ margin: '2px 0' }} />
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span className="micro" style={{ color: mesoRirOn ? UI.gold : UI.inkFaint, flex: 1 }}>RIR TAPER</span>
             <button onClick={() => setMesoRirOn(o => !o)} style={{ flexShrink: 0, background: 'none', border: 'none', padding: 0, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
               <div style={{ width: 44, height: 26, borderRadius: 13, position: 'relative', background: mesoRirOn ? UI.gold : UI.hairStrong, border: `0.5px solid ${mesoRirOn ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong}`, transition: 'background 0.15s' }}>
                 <div style={{ position: 'absolute', top: 3, left: mesoRirOn ? 21 : 3, width: 20, height: 20, borderRadius: '50%', background: mesoRirOn ? '#0a0805' : '#fff', transition: 'left 0.15s' }} />
               </div>
             </button>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.ink, fontWeight: 600 }}>RIR taper</div>
-              <div style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint, marginTop: 2, lineHeight: 1.4 }}>
-                {mesoRirOn ? 'Weekly RIR targets during training.' : 'Off · volume + load progression only.'}
-              </div>
-            </div>
           </div>
-          {mesoRirOn && <>
+          {mesoRirOn ? <>
           <div style={{ display: 'flex', gap: 10 }}>
             <div style={{ flex: 1, textAlign: 'center' }}>
               <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>Start RIR</div>
@@ -3238,7 +3233,9 @@ function PlanWizard({ store, setStore, go }) {
             </div>
           </div>
           <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 2, textAlign: 'center', lineHeight: 1.5 }}>{LB.mesoTaperPreview(mesoWeeks, mesoStartRir, mesoEndRir)}</div>
-          </>}
+          </> : (
+            <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, textAlign: 'center', lineHeight: 1.5 }}>Off · volume + load progression, then a deload.</div>
+          )}
         </div>
       )}
     </div>;
