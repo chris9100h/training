@@ -995,6 +995,11 @@ async function testAsync(name, fn) {
     const sch = LB.buildPlanSkeleton({ name: 'wk', type: 'weekday', weekdays: [0, 2] });
     assert.ok(sch.days.every(d => d.name === 'FULL'));
   });
+  test('buildPlanSkeleton: weekday custom uses per-day types in weekday order', () => {
+    const sch = LB.buildPlanSkeleton({ name: 'wk', type: 'weekday', presetKey: 'custom', weekdays: [4, 0, 2], customDays: ['PUSH', 'PULL', 'LEGS'] });
+    // weekdays sort to [0,2,4]; customDays map onto them in order
+    assert.deepStrictEqual([...sch.days.map(d => `${d.name}@${d.weekday}`)], ['PUSH@0', 'PULL@2', 'LEGS@4']);
+  });
   test('buildPlanSkeleton: custom uses explicit per-day types (customDays wins)', () => {
     const sch = LB.buildPlanSkeleton({ name: 'c', type: 'cycle', presetKey: 'custom', customCount: 4, customDays: ['PUSH', 'PULL', 'REST', 'LEGS'] });
     assert.deepStrictEqual([...sch.days.map(d => d.name)], ['PUSH', 'PULL', 'REST', 'LEGS']);

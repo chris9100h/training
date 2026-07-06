@@ -2856,13 +2856,15 @@ const PLAN_INTRO = {
 // (weekday maps its rotation onto the chosen days too); the weekday-picker step
 // is weekday-only; a Custom cycle/flex split expands into one day-type picker
 // per day (day0..dayN-1) so the user sets each day up in its own step.
-function computePlanSteps({ type, presetKey, customCount }) {
+function computePlanSteps({ type, presetKey, customCount, weekdayCount }) {
   const steps = ['name', 'type'];
   if (type != null) {
     steps.push('split');
     if (type === 'weekday') steps.push('weekdays');
-    if ((type === 'cycle' || type === 'flex') && presetKey === 'custom') {
-      const n = Math.max(1, Math.round(customCount || 1));
+    if (presetKey === 'custom') {
+      // One day-type picker per day: cycle/flex use the count stepper, weekday
+      // uses however many weekdays were picked (after the weekdays step).
+      const n = type === 'weekday' ? (weekdayCount || 0) : Math.max(1, Math.round(customCount || 1));
       for (let i = 0; i < n; i++) steps.push('day' + i);
     }
   }
@@ -2904,7 +2906,7 @@ function PlanWizard({ store, setStore, go }) {
 
   const isDirty = () => !!name.trim() || type !== null || presetKey !== null || weekdaysSel.length > 0 || mesoOn;
   const exit = () => go({ name: 'plan' });
-  const stepArgs = { type, presetKey, customCount };
+  const stepArgs = { type, presetKey, customCount, weekdayCount: weekdaysSel.length };
   const applicable = computePlanSteps(stepArgs);
   const idx = applicable.indexOf(step);
   const hasPrev = idx > 0;
@@ -2929,8 +2931,11 @@ function PlanWizard({ store, setStore, go }) {
   const weekdayNeed = LB.splitDayCount(presetKey);   // 0 = custom
   const weekdayMismatch = type === 'weekday' && weekdayNeed > 0 && weekdaysSel.length !== weekdayNeed;
   const dayIdx = step.startsWith('day') ? parseInt(step.slice(3), 10) : -1;
-  const stepTitle = dayIdx >= 0 ? `Day ${dayIdx + 1}` : PLAN_TITLES[step];
-  const stepIntro = dayIdx >= 0 ? `What's on day ${dayIdx + 1}?` : PLAN_INTRO[step];
+  const sortedWeekdays = weekdaysSel.slice().sort((a, b) => a - b);
+  const dayLabel = dayIdx < 0 ? null
+    : (type === 'weekday' && sortedWeekdays[dayIdx] != null) ? WEEKDAYS[sortedWeekdays[dayIdx]] : `Day ${dayIdx + 1}`;
+  const stepTitle = dayIdx >= 0 ? dayLabel : PLAN_TITLES[step];
+  const stepIntro = dayIdx >= 0 ? `What's on ${dayLabel}?` : PLAN_INTRO[step];
 
   const create = () => {
     const sch = LB.buildPlanSkeleton({
@@ -3016,7 +3021,7 @@ function PlanWizard({ store, setStore, go }) {
     // firing two goNext calls (which would skip a day).
     const pickDay = (dt) => {
       if (dayFlash) return;
-      setCustomDays(d => d.map((x, i) => i === dayIdx ? dt : x));
+      setCustomDays(d => { const a = d.slice(); a[dayIdx] = dt; return a; }); // extends for weekday (sized by weekday count, not the stepper)
       setDayFlash(true);
       setTimeout(() => { setDayFlash(false); goNext(); }, 200);
     };
@@ -3090,7 +3095,7 @@ function PlanWizard({ store, setStore, go }) {
             This split needs exactly {weekdayNeed} training days, so it divides evenly. {weekdaysSel.length < weekdayNeed ? `Pick ${weekdayNeed - weekdaysSel.length} more.` : `Remove ${weekdaysSel.length - weekdayNeed}.`}
           </div>
         : <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, textAlign: 'center', lineHeight: 1.4 }}>
-            {presetKey && presetKey !== 'custom' ? 'Your split fills the days you pick, in order.' : 'Each day starts as Full Body. Set the type per day in the editor.'}
+            {presetKey === 'custom' ? "Next you'll set each day's type." : 'Your split fills the days you pick, in order.'}
           </div>}
     </div>;
   } else if (step === 'meso') {

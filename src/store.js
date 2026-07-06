@@ -2006,13 +2006,19 @@ function buildPlanSkeleton({ name, type, presetKey, customCount, customDays, wee
   const preset = SPLIT_PRESETS[presetKey];
   let days;
   if (type === 'weekday') {
-    // The split's rotation maps onto the chosen weekdays in order (round-robin).
-    // The wizard requires exactly splitDayCount days for a fixed preset, so the
-    // rotation divides evenly. Custom (no preset) → every chosen day starts as
-    // FULL. No explicit REST days: a weekday plan rests on the days you skip.
+    // A fixed preset's rotation maps onto the sorted weekdays (round-robin; the
+    // wizard requires exactly splitDayCount days so it divides evenly). Custom
+    // uses the per-day types the wizard collected (customDays, one per sorted
+    // weekday), else FULL. No explicit REST days: a weekday plan rests on the
+    // calendar days you skip.
     const block = preset ? preset.block : null;
     days = (weekdays || []).slice().sort((a, b) => a - b)
-      .map((i, n) => ({ id: uid(), name: block ? block[n % block.length] : 'FULL', weekday: i, items: [] }));
+      .map((i, n) => {
+        const name = presetKey === 'custom'
+          ? ((customDays && customDays[n]) || 'FULL')
+          : (block ? block[n % block.length] : 'FULL');
+        return { id: uid(), name, weekday: i, items: [] };
+      });
   } else {
     let types;
     if (presetKey === 'custom' || !preset) {
