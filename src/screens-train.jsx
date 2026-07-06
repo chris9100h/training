@@ -3653,6 +3653,30 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     return { totalSetsDone, expectedSec };
   }, [avgStats, session.entries, session.startedAt]);
 
+  // Beyond-failure meso: auto-arm the Lengthened Partials stepper (pre-filled to
+  // the prescribed count) on the current plain working set, so the partials are
+  // visible up front instead of silently attached on check-off. Armed once per
+  // set (mesoLpArmedRef) so cancelling on a set doesn't re-nag. Chains carry
+  // their own partials via the finisher seed, so skip while one is in flight.
+  // MUST sit above the `if (!entry)` early return (empty freestyle/bonus
+  // session): a hook after that return changes the hook count when the first
+  // exercise is added (entry null → set), which is React error #310. Derives
+  // the current set locally since currentSetIdx/isCurrentWarmup come later.
+  useEffectT(() => {
+    if (!entry || isCardio) return;
+    const sets = entry.sets || [];
+    const curIdx = sets.findIndex(s => !s.done);
+    const wCount = sets.filter(s => s.warmup).length;
+    const curWarmup = wCount > 0 && curIdx >= 0 && !!sets[curIdx]?.warmup;
+    if (mesoPartials <= 0 || curIdx < 0 || curWarmup) return;
+    if (dropSetIdx != null || myoSetIdx != null || avSetIdx != null || lpTarget != null) return;
+    const key = exIdx + '_' + curIdx;
+    if (mesoLpArmedRef.current.has(key)) return;
+    mesoLpArmedRef.current.add(key);
+    setLpTarget({ exIdx, setIdx: curIdx });
+    setLpCount(mesoPartials);
+  }, [entry, isCardio, exIdx, mesoPartials, dropSetIdx, myoSetIdx, avSetIdx, lpTarget]);
+
   if (!entry) {
     if (!session.isBonus) {
       return <Screen><Empty title="This session is empty" action={<Btn onClick={() => go({ name: 'home' })}>Back</Btn>} /></Screen>;
@@ -3705,20 +3729,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const allWorkingDone = workingSetsArr.length > 0 && workingSetsArr.every(s => s.done || s.skipped);
   const anyMissingData = !isNoWeightReps && workingSetsArr.some(st => !st.done && !st.skipped && ((!isBodyweight && st.kg == null) || (isUnilateral ? (st.repsL == null || st.repsR == null) : st.reps == null)));
 
-  // Beyond-failure meso: auto-arm the Lengthened Partials stepper (pre-filled to
-  // the prescribed count) on the current plain working set, so the partials are
-  // visible up front instead of silently attached on check-off. Armed once per
-  // set (mesoLpArmedRef) so cancelling on a set doesn't re-nag. Chains carry
-  // their own partials via the finisher seed, so skip while one is in flight.
-  useEffectT(() => {
-    if (mesoPartials <= 0 || currentSetIdx < 0 || isCurrentWarmup) return;
-    if (dropSetIdx != null || myoSetIdx != null || avSetIdx != null || lpTarget != null) return;
-    const key = exIdx + '_' + currentSetIdx;
-    if (mesoLpArmedRef.current.has(key)) return;
-    mesoLpArmedRef.current.add(key);
-    setLpTarget({ exIdx, setIdx: currentSetIdx });
-    setLpCount(mesoPartials);
-  }, [currentSetIdx, exIdx, mesoPartials, dropSetIdx, myoSetIdx, avSetIdx]);
+  // (The Lengthened-Partials auto-arm effect lives above the `if (!entry)`
+  // early return to keep the hook order stable; see the note there.)
 
   // Superset linking (Intensity sheet) is only offered before any working set
   // in the CURRENT group has started — retroactively linking a partially-run
