@@ -390,6 +390,14 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
     }) || null;
   }, [date, store.statusPeriods]);
   const dayMode = date === todayISO ? (store.statusMode ?? null) : (dayStatusPeriod?.mode || null);
+  // Flex plans have no programmed rest days, so the day is assumed training
+  // until the user says otherwise. The Training|Rest picker (flex-only) lets
+  // them override it; the choice persists on the log's targetsSnap.dayType.
+  const flexActive = useMemoH(
+    () => LB.isFlexPlan((store.schedules || []).find(s => s.id === store.activeScheduleId)),
+    [store.schedules, store.activeScheduleId]
+  );
+  const [dayTypeOverride, setDayTypeOverride] = useStateH(null);
   const empty = { weight: '', steps: '', protein: '', carbs: '', fat: '', fiber: '', calories: '', water: '', note: '', offPlanNote: '' };
   const [form, setForm] = useStateH(empty);
   // Net-carb mode: adds a fiber field; calories become (P + C − fiber)×4 + F×9.
@@ -407,7 +415,7 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
   const setCoachVal = (k, v) => setCoachForm(f => ({ ...f, [k]: v }));
   const [confirmEl, confirm] = useConfirm();
   // Snapshot of the form as it was opened, to detect unsaved edits on dismiss.
-  const initialSnap = useRefH({ form: empty, coach: {}, net: false });
+  const initialSnap = useRefH({ form: empty, coach: {}, net: false, dayType: null });
 
   // ── Glucose readings for this day ──
   const glUnit = glucoseUnit || 'mmol';
@@ -482,13 +490,16 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
       offPlanNote: existing.offPlanNote || '',
     } : empty;
     setForm(nextForm);
+    const dt = existing?.targetsSnap?.dayType === 'training' || existing?.targetsSnap?.dayType === 'rest'
+      ? existing.targetsSnap.dayType : null;
+    setDayTypeOverride(dt);
     const cf = {};
     coachFields.forEach(f => {
       const v = existing?.coachFields?.[f.key];
       cf[f.key] = f.type === 'stepper' ? (v != null ? v : null) : (v != null ? String(v) : '');
     });
     setCoachForm(cf);
-    initialSnap.current = { form: nextForm, coach: cf, net };
+    initialSnap.current = { form: nextForm, coach: cf, net, dayType: dt };
   }, [open, date, existing?.id]);
 
   const daysBack = healthDayDiff(date, LB.todayISO());
@@ -509,7 +520,8 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
   const isDirty = () =>
     JSON.stringify(form) !== JSON.stringify(initialSnap.current.form) ||
     JSON.stringify(coachForm) !== JSON.stringify(initialSnap.current.coach) ||
-    netCarbs !== initialSnap.current.net;
+    netCarbs !== initialSnap.current.net ||
+    dayTypeOverride !== initialSnap.current.dayType;
   const requestClose = async () => {
     if (isDirty() && !await confirm('Your changes to this day won\'t be saved.', { title: 'Discard changes?', ok: 'Discard', cancel: 'Keep editing', danger: true })) return;
     onClose();
@@ -521,13 +533,26 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
     const fiber = netCarbs ? healthInt(form.fiber) : null;
     const calories = form.calories !== '' ? healthInt(form.calories) : autoCals;
     // Today = treat as training if planned (assume the user will train).
-    // Past days = only training if a session was actually done.
-    const isTraining = date === LB.todayISO()
+    // Past days = only training if a session was actually done. A flex plan has
+    // no programmed rest days, so the user can override the assumption via the
+    // Training|Rest picker.
+    const assumedTraining = date === LB.todayISO()
       ? !!LB.plannedTrainingDay(store, date)
       : LB.isLoggedTrainingDay(store.sessions, date);
-    const { adherence, targetsSnap } = dayMode
+    const isTraining = (flexActive && dayTypeOverride) ? dayTypeOverride === 'training' : assumedTraining;
+    let { adherence, targetsSnap } = dayMode
       ? { adherence: null, targetsSnap: null }
       : LB.dailyLogAdherence({ protein, carbs, fat }, targets, isTraining);
+    // Persist an explicit flex day-type choice even when macro adherence didn't
+    // resolve (incomplete macros) or no macro targets are set, so the day's
+    // training/rest classification survives a reopen and keeps the health
+    // strip/target consistent.
+    if (!dayMode && flexActive && dayTypeOverride && !targetsSnap) {
+      const dayTarget = LB.dayTargetFromMacros(targets, isTraining);
+      targetsSnap = dayTarget
+        ? { ...dayTarget, dayType: isTraining ? 'training' : 'rest' }
+        : { dayType: isTraining ? 'training' : 'rest' };
+    }
     const savedCoachFields = {};
     coachFields.forEach(f => {
       const v = toResponse(f, coachForm[f.key]);
@@ -625,6 +650,37 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
           )}
         </div>
       )}
+
+      {flexActive && !dayMode && (() => {
+        const assumedTraining = date === todayISO
+          ? !!LB.plannedTrainingDay(store, date)
+          : LB.isLoggedTrainingDay(store.sessions, date);
+        const effectiveDayType = dayTypeOverride || (assumedTraining ? 'training' : 'rest');
+        return (
+          <div style={{ marginBottom: 18 }}>
+            <div style={{ display: 'flex', borderRadius: 6, overflow: 'hidden', border: `0.5px solid ${UI.hairStrong}` }}>
+              {[{ type: 'training', label: 'Training', icon: 'fa-dumbbell' }, { type: 'rest', label: 'Rest', icon: 'fa-bed' }].map(({ type, label, icon }, i) => {
+                const active = effectiveDayType === type;
+                return (
+                  <button key={type} onClick={() => setDayTypeOverride(type)} style={{
+                    flex: 1, padding: '12px 4px', cursor: 'pointer', border: 'none',
+                    borderLeft: i > 0 ? `0.5px solid ${UI.hairStrong}` : 'none',
+                    background: active ? 'var(--accent)' : 'transparent',
+                    display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5,
+                    WebkitTapHighlightColor: 'transparent', transition: 'background 0.15s',
+                  }}>
+                    <i className={`fa-solid ${icon}`} style={{ fontSize: 13, color: active ? '#0a0805' : UI.inkFaint }} />
+                    <span style={{ fontFamily: UI.fontUi, fontSize: 10, fontWeight: 600, letterSpacing: '0.07em', textTransform: 'uppercase', color: active ? '#0a0805' : UI.inkFaint }}>{label}</span>
+                  </button>
+                );
+              })}
+            </div>
+            <div style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.4 }}>
+              Flexible plans have no set rest days. Mark this day so its macro target fits.
+            </div>
+          </div>
+        );
+      })()}
 
       {tooOld && (
         <div style={{ fontSize: 11, color: 'var(--danger)', fontFamily: UI.fontUi, padding: '8px 10px', background: 'rgba(var(--danger-rgb),0.1)', borderRadius: 4, marginBottom: 14 }}>
@@ -1593,7 +1649,8 @@ function HealthScreen({ store, setStore, go, userId }) {
   const dayLabel = selectedDate === today ? 'Today' : healthFmtDate(selectedDate, { weekday: 'short', day: 'numeric', month: 'short' });
   const trainedSelected = LB.isLoggedTrainingDay(store.sessions, selectedDate);
   const cardioSelected = (store.cardioLogs || []).some(l => l.date === selectedDate);
-  const dayIsTraining = trainedSelected || (selectedDate >= today && !!LB.plannedTrainingDay(store, selectedDate));
+  // Honors a flex plan's explicit Training|Rest override (via targetsSnap.dayType).
+  const dayIsTraining = LB.isTrainingDayForDate(store, selectedDate);
   const selectedDayTarget = LB.dayTargetFromMacros(effectiveTargets, dayIsTraining);
   const cardEls = {
     week: <HealthWeekCard stats={weekStats} dragHandle={handle} targets={effectiveTargets} tf={tf} setTf={setTf} />,

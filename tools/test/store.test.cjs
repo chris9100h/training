@@ -1048,6 +1048,27 @@ async function testAsync(name, fn) {
     assert.ok(LB.mesoTaperPreview(6, 3, -2).includes('partials/set')); // negative end → partials note
   });
 
+  test('isTrainingDayForDate: flex override wins over the training assumption', () => {
+    const today = LB.todayISO();
+    const flexPlan = { id: 'p1', is_flex: true, days: [{ id: 'd1', name: 'FULL', items: [{ exId: 'e1' }] }] };
+    const base = { schedules: [flexPlan], activeScheduleId: 'p1', cycleIndex: 0, sessions: [], dailyLogs: [] };
+    // No override: a flex day with exercises is assumed a training day today.
+    assert.strictEqual(LB.isTrainingDayForDate(base, today), true);
+    // Explicit Rest override on the day's log → rest.
+    const rest = { ...base, dailyLogs: [{ date: today, targetsSnap: { dayType: 'rest' } }] };
+    assert.strictEqual(LB.isTrainingDayForDate(rest, today), false);
+    // Explicit Training override → training.
+    const train = { ...base, dailyLogs: [{ date: today, targetsSnap: { dayType: 'training' } }] };
+    assert.strictEqual(LB.isTrainingDayForDate(train, today), true);
+    // A logged session wins even against a stale Rest override.
+    const trained = { ...rest, sessions: [{ id: 's1', ended: today + 'T10:00:00Z', date: today }] };
+    assert.strictEqual(LB.isTrainingDayForDate(trained, today), true);
+    // The override only applies to flex plans, not cycle plans.
+    const cyclePlan = { id: 'p2', days: [{ id: 'd1', name: 'FULL', items: [{ exId: 'e1' }] }] };
+    const cycle = { schedules: [cyclePlan], activeScheduleId: 'p2', cycleStartDate: today, sessions: [], dailyLogs: [{ date: today, targetsSnap: { dayType: 'rest' } }] };
+    assert.strictEqual(LB.isTrainingDayForDate(cycle, today), true); // cycle ignores the log override
+  });
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();
