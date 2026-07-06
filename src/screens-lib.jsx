@@ -39,6 +39,14 @@ function LibraryScreen({ store, setStore, go, userId }) {
   const toggleEquipment = (v) => setFilterEquipment(t => { const n = t.includes(v) ? t.filter(x => x !== v) : [...t, v]; _lib.filterEquipment = n; return n; });
   const [filtersOpen, setFiltersOpen] = useStateL(_lib.filtersOpen);
   useEffectL(() => { _lib.filtersOpen = filtersOpen; }, [filtersOpen]);
+  const anyFilter = filterTags.length > 0 || filterRestCats.length > 0 || filterEquipment.length > 0 || filterUnilateral !== null || filterPlan !== null;
+  const clearFilters = () => {
+    setFilterTags([]); _lib.filterTags = [];
+    setFilterRestCats([]); _lib.filterRestCats = [];
+    setFilterUnilateral(null); _lib.filterUnilateral = null;
+    setFilterPlan(null); _lib.filterPlan = null;
+    setFilterEquipment([]); _lib.filterEquipment = [];
+  };
 
   const planExIds = useMemoL(() => new Set(
     store.schedules.flatMap(s => s.days.flatMap(d => (d.items || []).map(it => it.exId)))
@@ -452,9 +460,12 @@ function LibraryScreen({ store, setStore, go, userId }) {
                 <Pill gold={filterPlan === 'out'} onClick={() => togglePlan('out')} style={{ cursor: 'pointer' }}>Not in plan</Pill>
               </div>
             </div>
-            <Btn onClick={() => setFiltersOpen(false)} disabled={filtered.length === 0} style={{ opacity: filtered.length === 0 ? 0.4 : 1 }}>
-              {filtered.length === 0 ? 'No results' : `Show ${filtered.length} exercise${filtered.length === 1 ? '' : 's'}`}
-            </Btn>
+            <div style={{ display: 'flex', gap: 10 }}>
+              {anyFilter && <Btn kind="ghost" onClick={clearFilters} style={{ flexShrink: 0 }}>Clear all</Btn>}
+              <Btn onClick={() => setFiltersOpen(false)} disabled={filtered.length === 0} style={{ flex: 1, opacity: filtered.length === 0 ? 0.4 : 1 }}>
+                {filtered.length === 0 ? 'No results' : `Show ${filtered.length} exercise${filtered.length === 1 ? '' : 's'}`}
+              </Btn>
+            </div>
           </div>
         </Sheet>
       )}
@@ -696,14 +707,14 @@ function LoggingModeSection({ equipment, movementType, logMode, onLogMode, pullB
           {hasLoggedWeight ? (
             <>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                <Chip on={pullBodyweight} onClick={() => onPullBodyweight(true)}>Pull weight from Health</Chip>
+                <Chip on={pullBodyweight} onClick={() => onPullBodyweight(true)}>Use my bodyweight</Chip>
                 <Chip on={!pullBodyweight} onClick={() => onPullBodyweight(false)}>Enter manually</Chip>
               </div>
               {pullBodyweight && <div className="micro" style={{ color: UI.inkFaint, ...logNoteStyle }}>Starts each set at your latest logged bodyweight.</div>}
             </>
           ) : (
             <div className="micro" style={{ color: 'rgba(var(--danger-rgb),0.7)', ...logNoteStyle }}>
-              Log your weight first to auto-fill it — turn on the Health tab in Settings and add an entry.
+              Log your bodyweight first in the app's Health tab (enable it under Settings) to auto-fill it.
             </div>
           )}
         </div>
@@ -778,6 +789,8 @@ function ExerciseWizard({ step, setStep, onClose, isDirty, store,
     else if (isDirty()) setConfirming(true);
     else onClose();
   };
+  // Backdrop tap → leave the wizard, warning first if anything was entered.
+  const requestExit = () => { if (isDirty()) setConfirming(true); else onClose(); };
   const restLabel = (cat) => {
     const s = store?.settings || {};
     const sec = cat === 'big' ? (s.restBig ?? 180) : cat === 'medium' ? (s.restMedium ?? 120) : (s.restSmall ?? 90);
@@ -843,9 +856,9 @@ function ExerciseWizard({ step, setStep, onClose, isDirty, store,
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 6 }}>
           <span className="micro" style={{ color: UI.inkFaint }}>Starting weight</span>
           {hasLoggedWeight
-            ? [['pull', true, 'fa-heart-pulse', 'Pull from Health', 'Start each set at your latest logged bodyweight'], ['manual', false, 'fa-pen', 'Enter manually', 'Type the weight yourself']]
+            ? [['pull', true, 'fa-person', 'Use my bodyweight', 'Start each set at your latest logged bodyweight'], ['manual', false, 'fa-pen', 'Enter manually', 'Type the weight yourself']]
                 .map(([k, v, icon, label, sub]) => optRow({ key: k, icon, label, sub, active: pullBodyweight === v, onClick: () => setPullBodyweight(v) }))
-            : <div className="micro" style={{ color: 'rgba(var(--danger-rgb),0.7)', textTransform: 'none', letterSpacing: '0.02em', fontWeight: 400, lineHeight: 1.5 }}>Log your weight first to auto-fill it — turn on the Health tab in Settings and add an entry.</div>}
+            : <div className="micro" style={{ color: 'rgba(var(--danger-rgb),0.7)', textTransform: 'none', letterSpacing: '0.02em', fontWeight: 400, lineHeight: 1.5 }}>Log your bodyweight first in the app's Health tab (enable it under Settings) to auto-fill it.</div>}
         </div>
       )}
     </div>;
@@ -856,7 +869,7 @@ function ExerciseWizard({ step, setStep, onClose, isDirty, store,
   const overlayBase = { zIndex: 9998, background: 'rgba(0,0,0,0.74)', backdropFilter: 'blur(14px)', WebkitBackdropFilter: 'blur(14px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 };
   const overlayStyle = vp ? { ...overlayBase, position: 'fixed', left: 0, right: 0, top: vp.top, height: vp.height } : { ...overlayBase, position: 'fixed', inset: 0 };
   return (
-    <div style={overlayStyle}>
+    <div style={overlayStyle} onClick={e => { if (e.target === e.currentTarget) requestExit(); }}>
       <div style={{ width: '100%', maxWidth: 360, maxHeight: '86vh', overflowY: 'auto', background: UI.bgRaised, border: `1px solid ${UI.hairStrong}`, borderRadius: 8, padding: '20px 20px 22px', display: 'flex', flexDirection: 'column', gap: 18, boxShadow: '0 32px 80px rgba(0,0,0,0.6)', animation: 'fadeUp 0.3s ease' }}>
         {confirming ? (
           <>
@@ -902,22 +915,27 @@ function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = ''
   // being duplicated via "Check & Add": every field is pre-filled and the wizard
   // is skipped, dropping straight into the review sheet so the user can tweak
   // anything before committing. A plain "New exercise" has no seed.
+  // A fresh new exercise starts blank — EXCEPT the muscle group, which pre-fills
+  // from an active Library filter (initialTags) so "filter by Back → create" keeps
+  // Back selected (now shown in the muscle step, not silently skipped). Equipment/
+  // movement come from no filter, so they start unset. A catalog `seed` pre-fills
+  // everything (it IS a specific exercise being reviewed).
   const [name, setName] = useStateL(seed ? (seed.name || '') : initialName);
   const [selectedTags, setSelectedTags] = useStateL(seed ? (seed.tags ? [...seed.tags] : []) : initialTags);
   const [category, setCategory] = useStateL(seed?.category ?? null);
-  const [movementType, setMovementType] = useStateL(seed ? (seed.movement || 'bilateral') : 'bilateral');
+  const [movementType, setMovementType] = useStateL(seed ? (seed.movement || 'bilateral') : null);
   const [logMode, setLogMode] = useStateL(seed ? (seed.logMode || 'weight') : 'weight');
   const [pullBodyweight, setPullBodyweight] = useStateL(false);
   const [logModeTouched, setLogModeTouched] = useStateL(!!seed); // seed pre-sets the mode → don't auto-override
   const pickLogMode = (m) => { setLogModeTouched(true); setLogMode(m); };
-  const [equipment, setEquipment] = useStateL(seed ? (seed.equipment || 'no_equipment') : 'barbell_dual');
+  const [equipment, setEquipment] = useStateL(seed ? (seed.equipment || 'no_equipment') : null);
   const [note, setNote] = useStateL('');
   const [showSizeInfo, setShowSizeInfo] = useStateL(false);
   const [showBodyweightHint, setShowBodyweightHint] = useStateL(false);
-  // The creation wizard runs for a fresh exercise, starting at the first field
-  // not already seeded (a "create from search" opens with initialName/initialTags).
-  // A catalog seed skips the wizard entirely. null = wizard done → review sheet.
-  const [wizardStep, setWizardStep] = useStateL(seed ? null : (!initialName.trim() ? 'name' : (initialTags.length ? 'size' : 'muscle')));
+  // Fresh exercise → the wizard runs the full flow from the name step. A catalog
+  // seed skips it (null = review sheet). The wizard forces a pick at each step, so
+  // equipment/movement are never left unset by the time the review sheet renders.
+  const [wizardStep, setWizardStep] = useStateL(seed ? null : 'name');
   // Wizard equipment pick: activate the Health tab silently — the info sheet is
   // z-100 and would hide behind the z-9998 wizard; the pull toggle in the review
   // form covers the rest.
@@ -948,10 +966,11 @@ function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = ''
     onCreated?.(ex.id);
     onClose();
   };
-  // Guard against an accidental backdrop tap wiping a half-filled form.
+  // Guard against an accidental backdrop tap wiping a half-filled form. Everything
+  // starts unset now (equipment/movement null), so "dirty" = the user picked anything.
   const isDirty = () =>
     name.trim() !== initialName.trim() || selectedTags.length > 0 || category != null ||
-    movementType !== 'bilateral' || logModeTouched || equipment !== 'barbell_dual' || note.trim() !== '';
+    movementType != null || logModeTouched || equipment != null || note.trim() !== '';
   const requestClose = async () => {
     if (isDirty() && !await confirm('Your new exercise will be discarded.', { title: 'Leave without saving?', ok: 'Discard', cancel: 'Keep editing', danger: true })) return;
     onClose();
