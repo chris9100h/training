@@ -1017,6 +1017,14 @@ async function testAsync(name, fn) {
     const sch = LB.buildPlanSkeleton({ name: '   ', type: 'cycle', presetKey: 'full3' });
     assert.strictEqual(sch.name, 'My Plan');
   });
+  test('splitDayCount: block length x repeats, 0 for custom/unknown', () => {
+    assert.strictEqual(LB.splitDayCount('ppl6'), 6);
+    assert.strictEqual(LB.splitDayCount('ppl3'), 3);
+    assert.strictEqual(LB.splitDayCount('ul4'), 4);
+    assert.strictEqual(LB.splitDayCount('full3'), 3);
+    assert.strictEqual(LB.splitDayCount('custom'), 0);
+    assert.strictEqual(LB.splitDayCount(undefined), 0);
+  });
   test('frequencyHint / mesoTaperPreview render sensible text', () => {
     assert.strictEqual(LB.frequencyHint(3), 'That\'s a start.');
     assert.strictEqual(LB.frequencyHint(5), 'Solid.');

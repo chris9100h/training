@@ -2844,7 +2844,6 @@ function ExercisePicker({ store, setStore, onClose, onPick, singleSelect = false
 // then hands off to the editor. The shell is duplicated from ExerciseWizard
 // (screens-lib.jsx) on purpose, so the shipped exercise wizard stays untouched
 // and this one can grow its own stepper/reveal steps.
-const PLAN_ORDER = ['name', 'type', 'split', 'weekdays', 'meso'];
 const PLAN_TITLES = { name: 'Name your plan', type: 'Plan type', split: 'Training split', weekdays: 'Training days', meso: 'Mesocycle' };
 const PLAN_INTRO = {
   name: 'Give your plan a name. It shows up in your planner and history, and you can rename it any time.',
@@ -2853,20 +2852,22 @@ const PLAN_INTRO = {
   weekdays: 'Which days of the week do you train? Tap all that apply.',
   meso: 'A mesocycle runs a fixed number of weeks with a planned intensity ramp (RIR), then a deload. Leave it off for a normal, open-ended plan.',
 };
-function planStepApplicable(step, type) {
-  // Split applies to every type (weekday maps it onto the chosen days too);
-  // the weekday-picker step is weekday-only.
-  if (step === 'split') return type != null;
-  if (step === 'weekdays') return type === 'weekday';
-  return true;
-}
-function adjacentPlanStep(current, dir, type) {
-  let i = PLAN_ORDER.indexOf(current) + dir;
-  while (i >= 0 && i < PLAN_ORDER.length) {
-    if (planStepApplicable(PLAN_ORDER[i], type)) return PLAN_ORDER[i];
-    i += dir;
+// Ordered wizard steps for the current picks. Split applies to every type
+// (weekday maps its rotation onto the chosen days too); the weekday-picker step
+// is weekday-only; a Custom cycle/flex split expands into one day-type picker
+// per day (day0..dayN-1) so the user sets each day up in its own step.
+function computePlanSteps({ type, presetKey, customCount }) {
+  const steps = ['name', 'type'];
+  if (type != null) {
+    steps.push('split');
+    if (type === 'weekday') steps.push('weekdays');
+    if ((type === 'cycle' || type === 'flex') && presetKey === 'custom') {
+      const n = Math.max(1, Math.round(customCount || 1));
+      for (let i = 0; i < n; i++) steps.push('day' + i);
+    }
   }
-  return null;
+  steps.push('meso');
+  return steps;
 }
 
 function PlanWizard({ store, setStore, go }) {
@@ -2898,19 +2899,33 @@ function PlanWizard({ store, setStore, go }) {
 
   const isDirty = () => !!name.trim() || type !== null || presetKey !== null || weekdaysSel.length > 0 || mesoOn;
   const exit = () => go({ name: 'plan' });
-  const applicable = PLAN_ORDER.filter(s => planStepApplicable(s, type));
+  const stepArgs = { type, presetKey, customCount };
+  const applicable = computePlanSteps(stepArgs);
   const idx = applicable.indexOf(step);
-  const hasPrev = adjacentPlanStep(step, -1, type) != null;
-  // Picking the type can add/remove the split/weekdays step, so pass the new
-  // value synchronously (state hasn't flushed yet), like ExerciseWizard.goNext.
-  const goNext = (o = {}) => setStep(adjacentPlanStep(step, 1, o.type ?? type));
+  const hasPrev = idx > 0;
+  // A pick (type / preset) can change which steps exist, so recompute the list
+  // with the new value synchronously (state hasn't flushed yet), like the
+  // exercise wizard's goNext override.
+  const goNext = (o = {}) => {
+    const list = computePlanSteps({ ...stepArgs, ...o });
+    const i = list.indexOf(step);
+    setStep(list[Math.min(i + 1, list.length - 1)]);
+  };
   const goBack = () => {
-    const prev = adjacentPlanStep(step, -1, type);
-    if (prev) setStep(prev);
+    if (idx > 0) setStep(applicable[idx - 1]);
     else if (isDirty()) setConfirming(true);
     else exit();
   };
   const requestExit = () => { if (isDirty()) setConfirming(true); else exit(); };
+
+  // Weekday guard: a split's rotation can round-robin onto MORE days than its
+  // natural length, but mapping a 6-day split onto only 5 weekdays would drop
+  // part of the split, so require at least its day count.
+  const weekdaySplitCount = LB.splitDayCount(presetKey);
+  const weekdayShort = type === 'weekday' && weekdaySplitCount > 0 && weekdaysSel.length < weekdaySplitCount;
+  const dayIdx = step.startsWith('day') ? parseInt(step.slice(3), 10) : -1;
+  const stepTitle = dayIdx >= 0 ? `Day ${dayIdx + 1}` : PLAN_TITLES[step];
+  const stepIntro = dayIdx >= 0 ? `What's on day ${dayIdx + 1}?` : PLAN_INTRO[step];
 
   const create = () => {
     const sch = LB.buildPlanSkeleton({
@@ -2969,37 +2984,30 @@ function PlanWizard({ store, setStore, go }) {
         ['ul4', 'Upper / Lower', 'fa-table-columns', '4 days', 'Alternate upper- and lower-body days.'],
         ['ppl3', 'Push / Pull / Legs', 'fa-layer-group', '3 days', 'Push, then pull, then legs. One round per week.'],
         ['ppl6', 'Push / Pull / Legs x2', 'fa-layer-group', '6 days', 'PPL twice through for higher frequency.']]
-        .map(([val, label, icon, badge, sub]) => optRow({ key: val, icon, label, sub, badge, active: presetKey === val, onClick: () => { setPresetKey(val); goNext(); } }))}
-      {optRow({ key: 'custom', icon: 'fa-sliders', label: 'Custom', sub: 'Choose how many days and set each one up.', active: presetKey === 'custom', onClick: () => { setPresetKey('custom'); if (type === 'weekday') goNext(); } })}
-      {presetKey === 'custom' && type !== 'weekday' && (() => {
-        // Flex has no rest days, so REST isn't offered there.
-        const chipTypes = type === 'flex' ? STANDARD_DAY_TYPES.filter(t => t !== 'REST') : STANDARD_DAY_TYPES;
-        return (
-          <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '2px 4px' }}>
-              <span className="micro" style={{ color: UI.inkFaint }}>How many days</span>
-              <Stepper value={customCount} onChange={setCustomN} step={1} min={1} />
-            </div>
-            <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, textAlign: 'center', lineHeight: 1.4 }}>{LB.frequencyHint(customCount)}</div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 2 }}>
-              {customDays.map((t, n) => (
-                <div key={n} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span className="num" style={{ flexShrink: 0, width: 26, fontSize: 11, color: UI.inkFaint }}>D{n + 1}</span>
-                  <div style={{ display: 'flex', gap: 4, overflowX: 'auto', flex: 1, paddingBottom: 2, WebkitOverflowScrolling: 'touch' }}>
-                    {chipTypes.map(dt => {
-                      const on = t === dt;
-                      return <button key={dt} onClick={() => setCustomDays(d => d.map((x, i) => i === n ? dt : x))}
-                        style={{ flexShrink: 0, padding: '6px 9px', borderRadius: 4, cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 10, fontWeight: 600, letterSpacing: '0.04em',
-                          background: on ? 'rgba(var(--accent-rgb),0.14)' : UI.bgInset, color: on ? 'var(--accent)' : UI.inkFaint,
-                          border: `1px solid ${on ? 'var(--accent)' : UI.hairStrong}`, WebkitTapHighlightColor: 'transparent' }}>{dt}</button>;
-                    })}
-                  </div>
-                </div>
-              ))}
-            </div>
+        .map(([val, label, icon, badge, sub]) => optRow({ key: val, icon, label, sub, badge, active: presetKey === val, onClick: () => { setPresetKey(val); goNext({ presetKey: val }); } }))}
+      {optRow({ key: 'custom', icon: 'fa-sliders', label: 'Custom', sub: 'Choose how many days, then set each one up.', active: presetKey === 'custom', onClick: () => { setPresetKey('custom'); if (type === 'weekday') goNext({ presetKey: 'custom' }); } })}
+      {presetKey === 'custom' && type !== 'weekday' && (
+        <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '2px 4px' }}>
+            <span className="micro" style={{ color: UI.inkFaint }}>How many days</span>
+            <Stepper value={customCount} onChange={setCustomN} step={1} min={1} />
           </div>
-        );
-      })()}
+          <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, textAlign: 'center', lineHeight: 1.4 }}>{LB.frequencyHint(customCount)}</div>
+          {type === 'cycle' && <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, textAlign: 'center', lineHeight: 1.4, fontStyle: 'italic' }}>Tap Next to set each day. Don't forget to include your rest days.</div>}
+        </div>
+      )}
+    </div>;
+  } else if (dayIdx >= 0) {
+    // One day-type picker per day of a Custom cycle/flex split (flex has no REST).
+    const dayTypes = type === 'flex' ? STANDARD_DAY_TYPES.filter(t => t !== 'REST') : STANDARD_DAY_TYPES;
+    body = <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+      {dayTypes.map(dt => {
+        const on = customDays[dayIdx] === dt;
+        return <button key={dt} onClick={() => { setCustomDays(d => d.map((x, i) => i === dayIdx ? dt : x)); goNext(); }}
+          style={{ padding: '13px 6px', borderRadius: 6, cursor: 'pointer', textAlign: 'center', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, letterSpacing: '0.04em',
+            background: on ? 'rgba(var(--accent-rgb),0.12)' : UI.bgInset, color: on ? 'var(--accent)' : UI.inkFaint,
+            border: `1px solid ${on ? 'var(--accent)' : UI.hairStrong}`, WebkitTapHighlightColor: 'transparent' }}>{dt}</button>;
+      })}
     </div>;
   } else if (step === 'weekdays') {
     body = <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -3012,9 +3020,13 @@ function PlanWizard({ store, setStore, go }) {
               border: `1px solid ${on ? 'var(--accent)' : UI.hairStrong}`, WebkitTapHighlightColor: 'transparent' }}>{w}</button>;
         })}
       </div>
-      <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, textAlign: 'center', lineHeight: 1.4 }}>
-        {presetKey && presetKey !== 'custom' ? 'Your split fills the days you pick, in order.' : 'Each day starts as Full Body. Set the type per day in the editor.'}
-      </div>
+      {weekdayShort
+        ? <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: 'rgba(var(--danger-rgb),0.85)', textAlign: 'center', lineHeight: 1.4 }}>
+            This split needs at least {weekdaySplitCount} training days. Pick {weekdaySplitCount - weekdaysSel.length} more.
+          </div>
+        : <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, textAlign: 'center', lineHeight: 1.4 }}>
+            {presetKey && presetKey !== 'custom' ? 'Your split fills the days you pick, in order.' : 'Each day starts as Full Body. Set the type per day in the editor.'}
+          </div>}
     </div>;
   } else if (step === 'meso') {
     body = <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -3043,8 +3055,9 @@ function PlanWizard({ store, setStore, go }) {
   }
 
   const isFinal = step === 'meso';
-  const needsNext = step === 'name' || step === 'weekdays' || (step === 'split' && presetKey === 'custom');
-  const canNext = step === 'name' ? !!name.trim() : step === 'weekdays' ? weekdaysSel.length > 0 : true;
+  // Day-type steps auto-advance on pick, so no Next there.
+  const needsNext = step === 'name' || step === 'weekdays' || (step === 'split' && presetKey === 'custom' && type !== 'weekday');
+  const canNext = step === 'name' ? !!name.trim() : step === 'weekdays' ? (weekdaysSel.length > 0 && !weekdayShort) : true;
   const overlayBase = { zIndex: 9998, background: 'rgba(0,0,0,0.74)', backdropFilter: 'blur(14px)', WebkitBackdropFilter: 'blur(14px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 };
   const overlayStyle = vp ? { ...overlayBase, position: 'fixed', left: 0, right: 0, top: vp.top, height: vp.height } : { ...overlayBase, position: 'fixed', inset: 0 };
   return (
@@ -3069,10 +3082,10 @@ function PlanWizard({ store, setStore, go }) {
             </div>
             <div>
               <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10 }}>
-                <div style={{ fontFamily: UI.fontDisplay, fontSize: 23, color: 'var(--accent)', fontWeight: 400, textTransform: 'uppercase', letterSpacing: '0.02em', lineHeight: 1.1 }}>{PLAN_TITLES[step]}</div>
+                <div style={{ fontFamily: UI.fontDisplay, fontSize: 23, color: 'var(--accent)', fontWeight: 400, textTransform: 'uppercase', letterSpacing: '0.02em', lineHeight: 1.1 }}>{stepTitle}</div>
                 <span className="micro" style={{ color: UI.inkGhost, flexShrink: 0 }}>{idx + 1}/{applicable.length}</span>
               </div>
-              <div style={{ fontSize: 12.5, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5, marginTop: 7 }}>{PLAN_INTRO[step]}</div>
+              <div style={{ fontSize: 12.5, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5, marginTop: 7 }}>{stepIntro}</div>
             </div>
             {body}
             <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
