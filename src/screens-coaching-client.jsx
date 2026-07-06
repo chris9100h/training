@@ -548,7 +548,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
                   const ex = (clientStore.exercises || []).find(e => e.id === item.exId);
                   const last = LB.bestRecentEntry(clientStore, item.exId, todayDay.id);
                   const suggestion = LB.progressionSuggestion(clientStore, item.exId, todayDay.id, item.reps, item.repsPerSet || null, undefined, item.repsMax || null, item.progressionOffset ?? null);
-                  const bodyweightKg = ex?.equipment === 'bodyweight' ? LB.latestBodyweight(clientStore) : null;
+                  const bodyweightKg = LB.shouldPullBodyweight(ex) ? LB.latestBodyweight(clientStore) : null;
                   const seeds = LB.buildSeedSets(item, last, suggestion, ex?.unilateral, clientStore, bodyweightKg, clientStore.statusMode === 'deload');
                   const hasWeight = seeds.some(s => s.kg != null);
                   return (

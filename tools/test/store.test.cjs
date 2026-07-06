@@ -892,6 +892,31 @@ async function testAsync(name, fn) {
     assert.strictEqual(LB.getCyclePosForDate(patched, '2026-06-20'), pastPos);
   });
 
+  // ── exerciseLogMode / shouldPullBodyweight (logging modes) ──────────────────
+  test('exerciseLogMode: log_mode wins when set', () => {
+    assert.strictEqual(LB.exerciseLogMode({ log_mode: 'checkbox' }), 'checkbox');
+    assert.strictEqual(LB.exerciseLogMode({ log_mode: 'reps' }), 'reps');
+    assert.strictEqual(LB.exerciseLogMode({ log_mode: 'weight' }), 'weight');
+  });
+  test('exerciseLogMode: legacy fallback from no_weight_reps', () => {
+    assert.strictEqual(LB.exerciseLogMode({ no_weight_reps: true }), 'reps');
+    assert.strictEqual(LB.exerciseLogMode({ no_weight_reps: false }), 'weight');
+    assert.strictEqual(LB.exerciseLogMode({}), 'weight');
+    assert.strictEqual(LB.exerciseLogMode(null), 'weight');
+  });
+  test('exerciseLogMode: log_mode takes precedence over legacy flag', () => {
+    // a bodyweight weight-mode exercise still carries no_weight_reps=false, and
+    // a reps exercise carries no_weight_reps=true — but log_mode is authoritative
+    assert.strictEqual(LB.exerciseLogMode({ log_mode: 'weight', no_weight_reps: true }), 'weight');
+  });
+  test('shouldPullBodyweight: only bodyweight + explicit opt-in', () => {
+    assert.strictEqual(LB.shouldPullBodyweight({ equipment: 'bodyweight', pull_bodyweight: true }), true);
+    assert.strictEqual(LB.shouldPullBodyweight({ equipment: 'bodyweight', pull_bodyweight: false }), false);
+    assert.strictEqual(LB.shouldPullBodyweight({ equipment: 'bodyweight' }), false);
+    assert.strictEqual(LB.shouldPullBodyweight({ equipment: 'barbell_dual', pull_bodyweight: true }), false);
+    assert.strictEqual(LB.shouldPullBodyweight(null), false);
+  });
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();

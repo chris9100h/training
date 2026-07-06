@@ -598,17 +598,73 @@ async function captureNodeAsPng(node, { filename, dodgeAvatar = false, setCaptur
   }
 }
 
+// Shared "how is this logged" picker. Appears whenever load isn't inherent —
+// no_equipment / bodyweight equipment, or a mobility movement (the union, since
+// a mobility exercise may keep any equipment). Three modes resolve to
+// LB.exerciseLogMode; for bodyweight + Weight & Reps an opt-in toggle pulls the
+// user's logged bodyweight (LB.shouldPullBodyweight), gated on having logged one.
+const LOG_MODES = [['checkbox', 'Checkbox only'], ['reps', 'Reps only'], ['weight', 'Weight & Reps']];
+function loggingPickerVisible(equipment, movementType) {
+  return equipment === 'no_equipment' || equipment === 'bodyweight' || movementType === 'mobility';
+}
+const logNoteStyle = { marginTop: 8, textTransform: 'none', letterSpacing: '0.02em', fontWeight: 400, lineHeight: 1.5 };
+function LoggingModeSection({ equipment, movementType, logMode, onLogMode, pullBodyweight, onPullBodyweight, hasLoggedWeight }) {
+  if (!loggingPickerVisible(equipment, movementType)) return null;
+  const info = logMode === 'reps' ? 'Tracks reps only — no weight, adds 0 to volume.'
+             : logMode === 'checkbox' ? 'Just tick each set off — no reps or weight, 0 volume.'
+             : null;
+  const showPull = equipment === 'bodyweight' && logMode === 'weight';
+  return (
+    <div>
+      <span className="label">Logging</span>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+        {LOG_MODES.map(([val, label]) => (
+          <Chip key={val} on={logMode === val} onClick={() => onLogMode(val)}>{label}</Chip>
+        ))}
+      </div>
+      {info && <div className="micro" style={{ color: UI.inkFaint, ...logNoteStyle }}>{info}</div>}
+      {showPull && (
+        <div style={{ marginTop: 12 }}>
+          {hasLoggedWeight ? (
+            <>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                <Chip on={pullBodyweight} onClick={() => onPullBodyweight(true)}>Pull weight from Health</Chip>
+                <Chip on={!pullBodyweight} onClick={() => onPullBodyweight(false)}>Enter manually</Chip>
+              </div>
+              {pullBodyweight && <div className="micro" style={{ color: UI.inkFaint, ...logNoteStyle }}>Starts each set at your latest logged bodyweight.</div>}
+            </>
+          ) : (
+            <div className="micro" style={{ color: 'rgba(var(--danger-rgb),0.7)', ...logNoteStyle }}>
+              Log your weight first to auto-fill it — turn on the Health tab in Settings and add an entry.
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = '', initialTags = [] }) {
   const [confirmEl, confirm] = useConfirm();
   const [name, setName] = useStateL(initialName);
   const [selectedTags, setSelectedTags] = useStateL(initialTags);
   const [category, setCategory] = useStateL(null);
   const [movementType, setMovementType] = useStateL('bilateral');
-  const [noWeightReps, setNoWeightReps] = useStateL(false);
+  const [logMode, setLogMode] = useStateL('weight');
+  const [pullBodyweight, setPullBodyweight] = useStateL(false);
+  const [logModeTouched, setLogModeTouched] = useStateL(false);
+  const pickLogMode = (m) => { setLogModeTouched(true); setLogMode(m); };
   const [equipment, setEquipment] = useStateL('barbell_dual');
   const [note, setNote] = useStateL('');
   const [showSizeInfo, setShowSizeInfo] = useStateL(false);
   const [showBodyweightHint, setShowBodyweightHint] = useStateL(false);
+  // When the Logging picker first becomes relevant (no_equipment / bodyweight
+  // equipment, or a mobility movement) and the user hasn't chosen a mode yet,
+  // pre-select a sensible default — without clobbering a manual pick.
+  useEffectL(() => {
+    if (logModeTouched || !loggingPickerVisible(equipment, movementType)) return;
+    setLogMode(movementType === 'mobility' ? 'checkbox' : equipment === 'bodyweight' ? 'weight' : 'reps');
+  }, [equipment, movementType, logModeTouched]);
   const toggleTag = (m) => setSelectedTags(t => t.includes(m) ? t.filter(x => x !== m) : [...t, m]);
   const handleEquipmentChange = (key) => {
     setEquipment(key || 'no_equipment');
@@ -619,7 +675,8 @@ function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = ''
   };
   const save = () => {
     if (!name.trim()) return;
-    const ex = { id: LB.uid(), name: name.trim(), tags: selectedTags, category: category || null, unilateral: movementType === 'unilateral', movement_type: movementType, no_weight_reps: noWeightReps, equipment: equipment || null, note: note.trim(), progression_reps: null };
+    const effLogMode = loggingPickerVisible(equipment, movementType) ? logMode : 'weight';
+    const ex = { id: LB.uid(), name: name.trim(), tags: selectedTags, category: category || null, unilateral: movementType === 'unilateral', movement_type: movementType, no_weight_reps: effLogMode !== 'weight', log_mode: effLogMode, pull_bodyweight: (equipment === 'bodyweight' && effLogMode === 'weight' ? pullBodyweight : false), equipment: equipment || null, note: note.trim(), progression_reps: null };
     setStore(s => ({ ...s, exercises: [...s.exercises, ex] }));
     onCreated?.(ex.id);
     onClose();
@@ -627,7 +684,7 @@ function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = ''
   // Guard against an accidental backdrop tap wiping a half-filled form.
   const isDirty = () =>
     name.trim() !== initialName.trim() || selectedTags.length > 0 || category != null ||
-    movementType !== 'bilateral' || noWeightReps || equipment !== 'barbell_dual' || note.trim() !== '';
+    movementType !== 'bilateral' || logModeTouched || equipment !== 'barbell_dual' || note.trim() !== '';
   const requestClose = async () => {
     if (isDirty() && !await confirm('Your new exercise will be discarded.', { title: 'Leave without saving?', ok: 'Discard', cancel: 'Keep editing', danger: true })) return;
     onClose();
@@ -677,18 +734,16 @@ function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = ''
           <span className="label">Movement type</span>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
             {[['bilateral', 'Bilateral'], ['unilateral', 'Unilateral'], ['mobility', 'Mobility']].map(([val, label]) => (
-              <Chip key={val} on={movementType === val}
-                onClick={() => { setMovementType(val); setNoWeightReps(val === 'mobility'); if (val === 'mobility') setEquipment('no_equipment'); }}
-              >{label}</Chip>
+              <Chip key={val} on={movementType === val} onClick={() => setMovementType(val)}>{label}</Chip>
             ))}
           </div>
-          {movementType === 'mobility' && (
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
-              <Chip on={noWeightReps} onClick={() => setNoWeightReps(true)}>Checkbox only</Chip>
-              <Chip on={!noWeightReps} onClick={() => setNoWeightReps(false)}>Weight & Reps</Chip>
-            </div>
-          )}
         </div>
+        <LoggingModeSection
+          equipment={equipment} movementType={movementType}
+          logMode={logMode} onLogMode={pickLogMode}
+          pullBodyweight={pullBodyweight} onPullBodyweight={setPullBodyweight}
+          hasLoggedWeight={LB.latestBodyweight(store) != null}
+        />
         <Field label="Note (optional)">
           <textarea value={note} onChange={e => setNote(e.target.value)}
             placeholder="e.g. Cable pos 4, neutral grip, slow eccentric"
@@ -737,7 +792,8 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
   const [editTags, setEditTags] = useStateL(autoEdit ? [...(ex.tags || [])] : []);
   const [editCategory, setEditCategory] = useStateL(autoEdit ? (ex.category || null) : null);
   const [editMovementType, setEditMovementType] = useStateL(autoEdit ? (ex.movement_type ?? (ex.unilateral ? 'unilateral' : 'bilateral')) : 'bilateral');
-  const [editNoWeightReps, setEditNoWeightReps] = useStateL(autoEdit ? !!ex.no_weight_reps : false);
+  const [editLogMode, setEditLogMode] = useStateL(autoEdit ? LB.exerciseLogMode(ex) : 'weight');
+  const [editPullBodyweight, setEditPullBodyweight] = useStateL(autoEdit ? !!ex.pull_bodyweight : false);
   const [editEquipment, setEditEquipment] = useStateL(autoEdit ? (ex.equipment || null) : null);
   const [editYoutubeUrl, setEditYoutubeUrl] = useStateL(autoEdit ? (ex.youtube_url || '') : '');
   const [noteVal, setNoteVal] = useStateL(autoEdit ? (ex.note || '') : '');
@@ -760,13 +816,14 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
     }
   };
 
-  const startEdit = () => { setEditName(ex.name); setEditTags([...(ex.tags || [])]); setEditCategory(ex.category || null); setEditMovementType(ex.movement_type ?? (ex.unilateral ? 'unilateral' : 'bilateral')); setEditNoWeightReps(!!ex.no_weight_reps); setEditEquipment(ex.equipment || null); setEditYoutubeUrl(ex.youtube_url || ''); setNoteVal(ex.note || ''); setEditMode(true); };
+  const startEdit = () => { setEditName(ex.name); setEditTags([...(ex.tags || [])]); setEditCategory(ex.category || null); setEditMovementType(ex.movement_type ?? (ex.unilateral ? 'unilateral' : 'bilateral')); setEditLogMode(LB.exerciseLogMode(ex)); setEditPullBodyweight(!!ex.pull_bodyweight); setEditEquipment(ex.equipment || null); setEditYoutubeUrl(ex.youtube_url || ''); setNoteVal(ex.note || ''); setEditMode(true); };
   const cancelEdit = () => { if (autoEdit) advanceQueue(); else setEditMode(false); };
   const saveEdit = () => {
     if (!editName.trim()) return;
     setStore(s => {
+      const effLogMode = loggingPickerVisible(editEquipment, editMovementType) ? editLogMode : 'weight';
       const exercises = s.exercises.map(e => e.id === exId
-        ? { ...e, name: editName.trim(), tags: editTags, category: editCategory || null, unilateral: editMovementType === 'unilateral', movement_type: editMovementType, no_weight_reps: editNoWeightReps, equipment: editEquipment || null, note: noteVal.trim(), youtube_url: sanitizeYoutubeUrl(editYoutubeUrl) }
+        ? { ...e, name: editName.trim(), tags: editTags, category: editCategory || null, unilateral: editMovementType === 'unilateral', movement_type: editMovementType, no_weight_reps: effLogMode !== 'weight', log_mode: effLogMode, pull_bodyweight: (editEquipment === 'bodyweight' && effLogMode === 'weight' ? editPullBodyweight : false), equipment: editEquipment || null, note: noteVal.trim(), youtube_url: sanitizeYoutubeUrl(editYoutubeUrl) }
         : e);
       return { ...s, exercises };
     });
@@ -924,18 +981,16 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
               <span className="label">Movement type</span>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
                 {[['bilateral', 'Bilateral'], ['unilateral', 'Unilateral'], ['mobility', 'Mobility']].map(([val, label]) => (
-                  <Chip key={val} on={editMovementType === val}
-                    onClick={() => { setEditMovementType(val); setEditNoWeightReps(val === 'mobility'); if (val === 'mobility') setEditEquipment('no_equipment'); }}
-                  >{label}</Chip>
+                  <Chip key={val} on={editMovementType === val} onClick={() => setEditMovementType(val)}>{label}</Chip>
                 ))}
               </div>
-              {editMovementType === 'mobility' && (
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
-                  <Chip on={editNoWeightReps} onClick={() => setEditNoWeightReps(true)}>Checkbox only</Chip>
-                  <Chip on={!editNoWeightReps} onClick={() => setEditNoWeightReps(false)}>Weight & Reps</Chip>
-                </div>
-              )}
             </div>
+            <LoggingModeSection
+              equipment={editEquipment} movementType={editMovementType}
+              logMode={editLogMode} onLogMode={setEditLogMode}
+              pullBodyweight={editPullBodyweight} onPullBodyweight={setEditPullBodyweight}
+              hasLoggedWeight={LB.latestBodyweight(store) != null}
+            />
             <Field label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><i className="fa-brands fa-youtube" style={{ color: '#FF0000', fontSize: 12 }} />Form video</span>}>
               <TextInput value={editYoutubeUrl} onChange={setEditYoutubeUrl} placeholder="YouTube link (optional)" />
             </Field>

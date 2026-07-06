@@ -590,7 +590,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId })
         const seedRef = seedRefs[it.exId];
         const last = seedRef ?? LB.bestRecentEntry(store, it.exId, day.id);
         const suggestion = LB.progressionSuggestion(store, it.exId, day.id, it.reps, it.repsPerSet || null, seedRef, it.repsMax || null, it.progressionOffset ?? null);
-        const bodyweightKg = ex?.equipment === 'bodyweight' ? LB.latestBodyweight(store) : null;
+        const bodyweightKg = LB.shouldPullBodyweight(ex) ? LB.latestBodyweight(store) : null;
         const itAdj = (typeof applyMesoSetDeltaFromState === 'function') ? applyMesoSetDeltaFromState(it, day.id, resolvedMeso) : it;
         const weightBoost = mesoBoosts?.[it.exId + '_' + day.id] ?? null;
         let suggestionFinal = suggestion;

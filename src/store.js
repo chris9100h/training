@@ -328,7 +328,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
   const exerciseRows = (backup.exercises || []).map(e => {
     const newId = uid();
     idRemap[e.id] = newId;
-    return { id: newId, name: e.name, tags: e.tags ?? [], note: e.note ?? '', category: e.category ?? null, unilateral: e.unilateral ?? false, equipment: e.equipment ?? null, progression_reps: e.progression_reps ?? null, movement_type: e.movement_type ?? null, no_weight_reps: !!e.no_weight_reps, youtube_url: e.youtube_url ?? null, user_id: userId };
+    return { id: newId, name: e.name, tags: e.tags ?? [], note: e.note ?? '', category: e.category ?? null, unilateral: e.unilateral ?? false, equipment: e.equipment ?? null, progression_reps: e.progression_reps ?? null, movement_type: e.movement_type ?? null, no_weight_reps: !!e.no_weight_reps, log_mode: e.log_mode ?? null, pull_bodyweight: !!e.pull_bodyweight, youtube_url: e.youtube_url ?? null, user_id: userId };
   });
   // Exercises got fresh ids above — everything that references an exId must be
   // remapped or it dangles after restore. remapEx: single id; remapExKeyed:
@@ -702,7 +702,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   const histCutoff = historyWindowCutoffISO();
   const queries = [
     _supabase.from('zane_profiles').select('id, name, approved').eq('id', userId).maybeSingle(),
-    _supabase.from('zane_exercises').select('id, name, tags, note, category, unilateral, equipment, progression_reps, movement_type, no_weight_reps, youtube_url').eq('user_id', userId),
+    _supabase.from('zane_exercises').select('id, name, tags, note, category, unilateral, equipment, progression_reps, movement_type, no_weight_reps, log_mode, pull_bodyweight, youtube_url').eq('user_id', userId),
     _supabase.from('zane_schedules').select('id, name, days, archived, versions, is_flex, sessions_per_week, mesocycle_weeks, mesocycle_start_rir, mesocycle_end_rir').eq('user_id', userId),
     // Session METADATA stays complete (cheap; streaks/calendar need the full
     // date list) — the legacy entries JSONB is no longer selected.
@@ -1219,7 +1219,7 @@ async function syncStore(prev, next, userId) {
       return !p || JSON.stringify(p) !== JSON.stringify(e);
     });
     const removed = prev.exercises.filter(e => !next.exercises.find(x => x.id === e.id));
-    if (upsert.length)  ops.push(_supabase.from('zane_exercises').upsert(upsert.map(e => ({ id: e.id, name: e.name, tags: e.tags ?? [], note: e.note ?? '', category: e.category ?? null, unilateral: e.unilateral ?? false, equipment: e.equipment ?? null, progression_reps: e.progression_reps ?? null, movement_type: e.movement_type ?? null, no_weight_reps: !!e.no_weight_reps, youtube_url: e.youtube_url ?? null, user_id: userId }))));
+    if (upsert.length)  ops.push(_supabase.from('zane_exercises').upsert(upsert.map(e => ({ id: e.id, name: e.name, tags: e.tags ?? [], note: e.note ?? '', category: e.category ?? null, unilateral: e.unilateral ?? false, equipment: e.equipment ?? null, progression_reps: e.progression_reps ?? null, movement_type: e.movement_type ?? null, no_weight_reps: !!e.no_weight_reps, log_mode: e.log_mode ?? null, pull_bodyweight: !!e.pull_bodyweight, youtube_url: e.youtube_url ?? null, user_id: userId }))));
     if (removed.length) ops.push(_supabase.from('zane_exercises').delete().in('id', removed.map(e => e.id)));
   }
 
@@ -1721,6 +1721,23 @@ function latestBodyweight(store) {
   const logs = (store.dailyLogs || []).filter(l => l.weight != null);
   if (!logs.length) return null;
   return logs.slice().sort((a, b) => b.date.localeCompare(a.date))[0].weight;
+}
+
+// How an exercise is logged: 'checkbox' (tick only), 'reps' (reps, no weight)
+// or 'weight' (weight + reps). Resolves the new log_mode column, falling back to
+// the legacy no_weight_reps boolean (true → 'reps') for rows written before
+// Migration 0139 / by older clients.
+function exerciseLogMode(ex) {
+  if (ex?.log_mode) return ex.log_mode;
+  return ex?.no_weight_reps ? 'reps' : 'weight';
+}
+
+// Should a set's weight be pre-filled from the user's logged bodyweight? Only for
+// bodyweight-equipment exercises that explicitly opted in (pull_bodyweight). The
+// caller still has to have a logged weight (latestBodyweight != null) for it to
+// actually fill anything.
+function shouldPullBodyweight(ex) {
+  return ex?.equipment === 'bodyweight' && ex?.pull_bodyweight === true;
 }
 
 // Compute the seed-sets array when starting/logging a session for a planned item.
@@ -3751,7 +3768,7 @@ window.LB = {
   loadFromSupabase, syncStore, mergeSessions, withCarriedWindowEntries, historyWindowCutoffISO,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
   uid, todayISO, fmtISO, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, realignCycleForToday,
-  effReps, e1rm, isImprovement, isDecline, bestE1rmForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, latestBodyweight, inferCurrentExIdx, calcBlended,
+  effReps, e1rm, isImprovement, isDecline, bestE1rmForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, latestBodyweight, exerciseLogMode, shouldPullBodyweight, inferCurrentExIdx, calcBlended,
   refreshExerciseBests, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries,
   computeNextReminderAt,
   cancelPushover, adminSendEmail,

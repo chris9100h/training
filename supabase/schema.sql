@@ -48,6 +48,10 @@ CREATE TABLE public.zane_exercises (
   unilateral boolean NOT NULL DEFAULT false,
   equipment text,
   progression_reps integer,
+  movement_type text,
+  no_weight_reps boolean NOT NULL DEFAULT false,
+  log_mode text,
+  pull_bodyweight boolean NOT NULL DEFAULT false,
   youtube_url text
 );
 
