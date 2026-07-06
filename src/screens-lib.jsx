@@ -753,7 +753,8 @@ const WIZARD_EQUIP_META = {
 
 function ExerciseWizard({ step, setStep, onClose, isDirty, store,
   name, setName, selectedTags, setSelectedTags, category, setCategory,
-  equipment, onEquipment, movementType, setMovementType, logMode, pickLogMode }) {
+  equipment, onEquipment, movementType, setMovementType, logMode, pickLogMode,
+  pullBodyweight, setPullBodyweight }) {
   const [confirming, setConfirming] = useStateL(false);
   // Keep the card inside the VISIBLE viewport so the Name step's text input isn't
   // hidden behind the on-screen keyboard: visualViewport shrinks when the keyboard
@@ -831,13 +832,26 @@ function ExerciseWizard({ step, setStep, onClose, isDirty, store,
         .map(([val, label, icon, sub]) => optRow({ key: val, icon, label, sub, active: movementType === val, onClick: () => { setMovementType(val); goNext({ movementType: val }); } }))}
     </div>;
   } else if (step === 'logging') {
+    // For a bodyweight exercise, picking Weight & Reps reveals the pull-from-Health
+    // choice inline (and needs an explicit Next); other picks auto-advance.
+    const showPull = equipment === 'bodyweight' && logMode === 'weight';
+    const hasLoggedWeight = LB.latestBodyweight(store) != null;
     body = <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
       {[['checkbox', 'Checkbox only', 'fa-circle-check', 'Just tick each set off — no numbers, 0 volume'], ['reps', 'Reps only', 'fa-rotate', 'Count reps, no weight — adds 0 to volume'], ['weight', 'Weight & Reps', 'fa-dumbbell', 'Track both — the usual for weighted lifts']]
-        .map(([val, label, icon, sub]) => optRow({ key: val, icon, label, sub, active: logMode === val, onClick: () => { pickLogMode(val); goNext(); } }))}
+        .map(([val, label, icon, sub]) => optRow({ key: val, icon, label, sub, active: logMode === val, onClick: () => { pickLogMode(val); if (!(val === 'weight' && equipment === 'bodyweight')) goNext(); } }))}
+      {showPull && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 6 }}>
+          <span className="micro" style={{ color: UI.inkFaint }}>Starting weight</span>
+          {hasLoggedWeight
+            ? [['pull', true, 'fa-heart-pulse', 'Pull from Health', 'Start each set at your latest logged bodyweight'], ['manual', false, 'fa-pen', 'Enter manually', 'Type the weight yourself']]
+                .map(([k, v, icon, label, sub]) => optRow({ key: k, icon, label, sub, active: pullBodyweight === v, onClick: () => setPullBodyweight(v) }))
+            : <div className="micro" style={{ color: 'rgba(var(--danger-rgb),0.7)', textTransform: 'none', letterSpacing: '0.02em', fontWeight: 400, lineHeight: 1.5 }}>Log your weight first to auto-fill it — turn on the Health tab in Settings and add an entry.</div>}
+        </div>
+      )}
     </div>;
   }
 
-  const needsNext = step === 'name' || step === 'muscle';
+  const needsNext = step === 'name' || step === 'muscle' || (step === 'logging' && equipment === 'bodyweight' && logMode === 'weight');
   const canNext = step !== 'name' || name.trim();
   const overlayBase = { zIndex: 9998, background: 'rgba(0,0,0,0.74)', backdropFilter: 'blur(14px)', WebkitBackdropFilter: 'blur(14px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 };
   const overlayStyle = vp ? { ...overlayBase, position: 'fixed', left: 0, right: 0, top: vp.top, height: vp.height } : { ...overlayBase, position: 'fixed', inset: 0 };
@@ -952,6 +966,7 @@ function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = ''
         equipment={equipment} onEquipment={wizardSetEquipment}
         movementType={movementType} setMovementType={setMovementType}
         logMode={logMode} pickLogMode={pickLogMode}
+        pullBodyweight={pullBodyweight} setPullBodyweight={setPullBodyweight}
       />
     ) : (
     <Sheet open={true} onClose={requestClose} title={seed ? 'Review & add' : 'New exercise'}>
