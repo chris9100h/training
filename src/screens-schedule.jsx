@@ -2886,7 +2886,8 @@ function PlanWizard({ store, setStore, go }) {
   const [mesoEndRir, setMesoEndRir] = useStateS(0);
   const [creatingDayType, setCreatingDayType] = useStateS(false); // "+ Custom" name entry on a day-type step
   const [newDayTypeName, setNewDayTypeName] = useStateS('');
-  useEffectS(() => { setCreatingDayType(false); setNewDayTypeName(''); }, [step]); // reset the entry when the step changes
+  const [deleteTypeArm, setDeleteTypeArm] = useStateS(null); // custom type armed for a two-tap delete
+  useEffectS(() => { setCreatingDayType(false); setNewDayTypeName(''); setDeleteTypeArm(null); }, [step]); // reset on step change
 
   // Keep the card in the VISIBLE viewport so the Name step's input isn't hidden
   // behind the on-screen keyboard (same trick as ExerciseWizard).
@@ -2996,7 +2997,10 @@ function PlanWizard({ store, setStore, go }) {
             <Stepper value={customCount} onChange={setCustomN} step={1} min={1} />
           </div>
           <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, textAlign: 'center', lineHeight: 1.4 }}>{LB.frequencyHint(customCount)}</div>
-          {type === 'cycle' && <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, textAlign: 'center', lineHeight: 1.4, fontStyle: 'italic' }}>Tap Next to set each day. Don't forget to include your rest days.</div>}
+          {type === 'cycle' && <>
+            <div className="knurl" style={{ margin: '4px 0 2px' }} />
+            <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, textAlign: 'center', lineHeight: 1.4, fontStyle: 'italic' }}>Tap Next to set each day. Don't forget to include your rest days.</div>
+          </>}
         </div>
       )}
     </div>;
@@ -3013,29 +3017,53 @@ function PlanWizard({ store, setStore, go }) {
       if (!STANDARD_DAY_TYPES.includes(nm) && !customTypes.includes(nm)) setStore(s => ({ ...s, customDayTypes: [...(s.customDayTypes || []), nm] }));
       pickDay(nm);
     };
-    const chip = (dt, isCustom) => {
+    // Two-tap delete (the wizard sits above sheets, so a portaled confirm would
+    // hide behind it): first tap arms the ×, second removes. Existing plans keep
+    // their day names, only the palette entry is dropped (same as DayTypePicker).
+    const removeDayType = (dt) => {
+      if (deleteTypeArm !== dt) { setDeleteTypeArm(dt); return; }
+      setDeleteTypeArm(null);
+      setStore(s => ({ ...s, customDayTypes: (s.customDayTypes || []).filter(t => t !== dt) }));
+    };
+    const stdChip = (dt) => {
       const on = customDays[dayIdx] === dt;
       return <button key={dt} onClick={() => pickDay(dt)}
         style={{ padding: '13px 6px', borderRadius: 6, cursor: 'pointer', textAlign: 'center', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, letterSpacing: '0.04em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-          background: on ? 'rgba(var(--accent-rgb),0.12)' : (isCustom ? UI.goldFaint : UI.bgInset), color: on ? 'var(--accent)' : (isCustom ? UI.gold : UI.inkFaint),
-          border: `1px solid ${on ? 'var(--accent)' : (isCustom ? UI.goldSoft : UI.hairStrong)}`, WebkitTapHighlightColor: 'transparent' }}>{dt}</button>;
+          background: on ? 'rgba(var(--accent-rgb),0.12)' : UI.bgInset, color: on ? 'var(--accent)' : UI.inkFaint,
+          border: `1px solid ${on ? 'var(--accent)' : UI.hairStrong}`, WebkitTapHighlightColor: 'transparent' }}>{dt}</button>;
+    };
+    const customChip = (dt) => {
+      const on = customDays[dayIdx] === dt;
+      const armed = deleteTypeArm === dt;
+      return <div key={dt} style={{ display: 'flex', alignItems: 'stretch', borderRadius: 6, overflow: 'hidden', border: `1px solid ${armed ? UI.danger : (on ? 'var(--accent)' : UI.goldSoft)}` }}>
+        <button onClick={() => pickDay(dt)} style={{ flex: 1, minWidth: 0, padding: '13px 4px', border: 'none', cursor: 'pointer', textAlign: 'center', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, letterSpacing: '0.04em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+          background: on ? 'rgba(var(--accent-rgb),0.12)' : UI.goldFaint, color: on ? 'var(--accent)' : UI.gold, WebkitTapHighlightColor: 'transparent' }}>{dt}</button>
+        <button onClick={() => removeDayType(dt)} title={armed ? 'Tap again to remove' : 'Remove'} style={{ flexShrink: 0, background: armed ? 'rgba(var(--danger-rgb),0.15)' : UI.goldFaint, border: 'none', borderLeft: `0.5px solid ${armed ? UI.danger : UI.goldSoft}`, color: armed ? UI.danger : UI.gold, opacity: armed ? 1 : 0.55, padding: '0 9px', cursor: 'pointer', fontSize: 12, WebkitTapHighlightColor: 'transparent' }}>×</button>
+      </div>;
     };
     body = <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
-        {stdTypes.map(dt => chip(dt, false))}
-        {customTypes.map(dt => chip(dt, true))}
-        {!creatingDayType && <button onClick={() => setCreatingDayType(true)}
-          style={{ padding: '13px 6px', borderRadius: 6, cursor: 'pointer', textAlign: 'center', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, letterSpacing: '0.04em',
-            background: 'transparent', color: UI.inkFaint, border: `1px dashed ${UI.hairStrong}`, WebkitTapHighlightColor: 'transparent' }}>+ Custom</button>}
+        {stdTypes.map(stdChip)}
       </div>
-      {creatingDayType && (
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', padding: 10, background: UI.bgInset, border: `1px dashed ${UI.goldSoft}`, borderRadius: 6 }}>
-          <input autoFocus value={newDayTypeName} onChange={e => setNewDayTypeName(e.target.value.toUpperCase())} onKeyDown={e => e.key === 'Enter' && createDayType()} placeholder="e.g. PUSH1"
-            style={{ flex: 1, minWidth: 0, background: 'transparent', border: 'none', borderBottom: `1px solid ${UI.goldSoft}`, color: UI.gold, padding: '8px 0', fontFamily: UI.fontUi, fontSize: 14, letterSpacing: '0.08em', outline: 'none' }} />
-          <Btn kind="ghost" onClick={() => { setCreatingDayType(false); setNewDayTypeName(''); }} style={{ minHeight: 36, padding: '4px 10px', fontSize: 11 }}>×</Btn>
-          <Btn onClick={createDayType} disabled={!newDayTypeName.trim()} style={{ minHeight: 36, padding: '4px 12px', fontSize: 11, opacity: newDayTypeName.trim() ? 1 : 0.4 }}>Add</Btn>
-        </div>
+      {customTypes.length > 0 && (
+        <>
+          <div className="knurl" style={{ margin: '2px 0' }} />
+          <span className="label" style={{ color: UI.inkFaint }}>Custom days</span>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+            {customTypes.map(customChip)}
+          </div>
+        </>
       )}
+      {creatingDayType
+        ? <div style={{ display: 'flex', gap: 8, alignItems: 'center', padding: 10, background: UI.bgInset, border: `1px dashed ${UI.goldSoft}`, borderRadius: 6 }}>
+            <input autoFocus value={newDayTypeName} onChange={e => setNewDayTypeName(e.target.value.toUpperCase())} onKeyDown={e => e.key === 'Enter' && createDayType()} placeholder="e.g. PUSH1"
+              style={{ flex: 1, minWidth: 0, background: 'transparent', border: 'none', borderBottom: `1px solid ${UI.goldSoft}`, color: UI.gold, padding: '8px 0', fontFamily: UI.fontUi, fontSize: 14, letterSpacing: '0.08em', outline: 'none' }} />
+            <Btn kind="ghost" onClick={() => { setCreatingDayType(false); setNewDayTypeName(''); }} style={{ minHeight: 36, padding: '4px 10px', fontSize: 11 }}>×</Btn>
+            <Btn onClick={createDayType} disabled={!newDayTypeName.trim()} style={{ minHeight: 36, padding: '4px 12px', fontSize: 11, opacity: newDayTypeName.trim() ? 1 : 0.4 }}>Add</Btn>
+          </div>
+        : <button onClick={() => setCreatingDayType(true)}
+            style={{ padding: '12px 6px', borderRadius: 6, cursor: 'pointer', textAlign: 'center', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, letterSpacing: '0.04em',
+              background: 'transparent', color: UI.inkFaint, border: `1px dashed ${UI.hairStrong}`, WebkitTapHighlightColor: 'transparent' }}>+ Custom day type</button>}
     </div>;
   } else if (step === 'weekdays') {
     body = <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
