@@ -206,13 +206,13 @@ function LibraryScreen({ store, setStore, go, userId }) {
 
       {/* Tab strip */}
       <div style={{ display: 'flex', padding: '0 22px', borderBottom: `0.5px solid ${UI.hair}`, flexShrink: 0, marginTop: 8 }}>
-        {[['recent','Recent'],['all','All'],['db','Database']].map(([id,label]) => (
+        {[['recent','Recent'],['all','My exercises'],['db','Database']].map(([id,label]) => (
           <button key={id} onClick={() => setTab(id)} style={{
             flex: 1, background: 'transparent', border: 'none',
-            padding: '11px 0', cursor: 'pointer',
+            padding: '11px 0', cursor: 'pointer', whiteSpace: 'nowrap',
             color: tab === id ? UI.gold : UI.inkFaint,
             fontFamily: UI.fontUi, fontSize: 10, fontWeight: tab === id ? 600 : 400,
-            letterSpacing: '0.14em', textTransform: 'uppercase',
+            letterSpacing: '0.1em', textTransform: 'uppercase',
             borderBottom: `0.5px solid ${tab === id ? UI.gold : 'transparent'}`,
             marginBottom: -0.5,
             transition: 'color 0.2s',
@@ -460,11 +460,14 @@ function LibraryScreen({ store, setStore, go, userId }) {
                 <Pill gold={filterPlan === 'out'} onClick={() => togglePlan('out')} style={{ cursor: 'pointer' }}>Not in plan</Pill>
               </div>
             </div>
-            <div style={{ display: 'flex', gap: 10 }}>
-              {anyFilter && <Btn kind="ghost" onClick={clearFilters} style={{ flexShrink: 0 }}>Clear all</Btn>}
-              <Btn onClick={() => setFiltersOpen(false)} disabled={filtered.length === 0} style={{ flex: 1, opacity: filtered.length === 0 ? 0.4 : 1 }}>
-                {filtered.length === 0 ? 'No results' : `Show ${filtered.length} exercise${filtered.length === 1 ? '' : 's'}`}
-              </Btn>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {/* Two destinations: apply the filter and view either the user's own
+                  library or the catalog. Current tab is the primary button. */}
+              <div style={{ display: 'flex', gap: 10 }}>
+                <Btn kind={tab === 'all' ? undefined : 'ghost'} onClick={() => { setTab('all'); setFiltersOpen(false); }} disabled={filtered.length === 0} style={{ flex: 1, opacity: filtered.length === 0 ? 0.4 : 1 }}>Mine ({filtered.length})</Btn>
+                <Btn kind={tab === 'db' ? undefined : 'ghost'} onClick={() => { setTab('db'); setFiltersOpen(false); }} disabled={dbFiltered.length === 0} style={{ flex: 1, opacity: dbFiltered.length === 0 ? 0.4 : 1 }}>Database ({dbFiltered.length})</Btn>
+              </div>
+              {anyFilter && <Btn kind="ghost" onClick={clearFilters}>Clear all filters</Btn>}
             </div>
           </div>
         </Sheet>
@@ -710,7 +713,7 @@ function LoggingModeSection({ equipment, movementType, logMode, onLogMode, pullB
                 <Chip on={pullBodyweight} onClick={() => onPullBodyweight(true)}>Use my bodyweight</Chip>
                 <Chip on={!pullBodyweight} onClick={() => onPullBodyweight(false)}>Enter manually</Chip>
               </div>
-              {pullBodyweight && <div className="micro" style={{ color: UI.inkFaint, ...logNoteStyle }}>Starts each set at your latest logged bodyweight.</div>}
+              {pullBodyweight && <div className="micro" style={{ color: UI.inkFaint, ...logNoteStyle }}>Pulls your latest weight from the Health tab — tap Log there to record it.</div>}
             </>
           ) : (
             <div className="micro" style={{ color: 'rgba(var(--danger-rgb),0.7)', ...logNoteStyle }}>
@@ -856,7 +859,7 @@ function ExerciseWizard({ step, setStep, onClose, isDirty, store,
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 6 }}>
           <span className="micro" style={{ color: UI.inkFaint }}>Starting weight</span>
           {hasLoggedWeight
-            ? [['pull', true, 'fa-person', 'Use my bodyweight', 'Start each set at your latest logged bodyweight'], ['manual', false, 'fa-pen', 'Enter manually', 'Type the weight yourself']]
+            ? [['pull', true, 'fa-person', 'Use my bodyweight', 'Pulls your latest weight from the Health tab — tap Log there to record it'], ['manual', false, 'fa-pen', 'Enter manually', 'Type the weight yourself each session']]
                 .map(([k, v, icon, label, sub]) => optRow({ key: k, icon, label, sub, active: pullBodyweight === v, onClick: () => setPullBodyweight(v) }))
             : <div className="micro" style={{ color: 'rgba(var(--danger-rgb),0.7)', textTransform: 'none', letterSpacing: '0.02em', fontWeight: 400, lineHeight: 1.5 }}>Log your bodyweight first in the app's Health tab (enable it under Settings) to auto-fill it.</div>}
         </div>
