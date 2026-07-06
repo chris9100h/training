@@ -2884,6 +2884,9 @@ function PlanWizard({ store, setStore, go }) {
   const [mesoWeeks, setMesoWeeks] = useStateS(6);
   const [mesoStartRir, setMesoStartRir] = useStateS(3);
   const [mesoEndRir, setMesoEndRir] = useStateS(0);
+  const [creatingDayType, setCreatingDayType] = useStateS(false); // "+ Custom" name entry on a day-type step
+  const [newDayTypeName, setNewDayTypeName] = useStateS('');
+  useEffectS(() => { setCreatingDayType(false); setNewDayTypeName(''); }, [step]); // reset the entry when the step changes
 
   // Keep the card in the VISIBLE viewport so the Name step's input isn't hidden
   // behind the on-screen keyboard (same trick as ExerciseWizard).
@@ -2999,15 +3002,40 @@ function PlanWizard({ store, setStore, go }) {
     </div>;
   } else if (dayIdx >= 0) {
     // One day-type picker per day of a Custom cycle/flex split (flex has no REST).
-    const dayTypes = type === 'flex' ? STANDARD_DAY_TYPES.filter(t => t !== 'REST') : STANDARD_DAY_TYPES;
-    body = <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
-      {dayTypes.map(dt => {
-        const on = customDays[dayIdx] === dt;
-        return <button key={dt} onClick={() => { setCustomDays(d => d.map((x, i) => i === dayIdx ? dt : x)); goNext(); }}
+    // Offers the standard types, the user's own custom types, and a "+ Custom"
+    // name entry that persists to store.customDayTypes (same as DayTypePicker).
+    const stdTypes = type === 'flex' ? STANDARD_DAY_TYPES.filter(t => t !== 'REST') : STANDARD_DAY_TYPES;
+    const customTypes = store.customDayTypes || [];
+    const pickDay = (dt) => { setCustomDays(d => d.map((x, i) => i === dayIdx ? dt : x)); goNext(); };
+    const createDayType = () => {
+      const nm = newDayTypeName.trim().toUpperCase();
+      if (!nm) return;
+      if (!STANDARD_DAY_TYPES.includes(nm) && !customTypes.includes(nm)) setStore(s => ({ ...s, customDayTypes: [...(s.customDayTypes || []), nm] }));
+      pickDay(nm);
+    };
+    const chip = (dt, isCustom) => {
+      const on = customDays[dayIdx] === dt;
+      return <button key={dt} onClick={() => pickDay(dt)}
+        style={{ padding: '13px 6px', borderRadius: 6, cursor: 'pointer', textAlign: 'center', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, letterSpacing: '0.04em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+          background: on ? 'rgba(var(--accent-rgb),0.12)' : (isCustom ? UI.goldFaint : UI.bgInset), color: on ? 'var(--accent)' : (isCustom ? UI.gold : UI.inkFaint),
+          border: `1px solid ${on ? 'var(--accent)' : (isCustom ? UI.goldSoft : UI.hairStrong)}`, WebkitTapHighlightColor: 'transparent' }}>{dt}</button>;
+    };
+    body = <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+        {stdTypes.map(dt => chip(dt, false))}
+        {customTypes.map(dt => chip(dt, true))}
+        {!creatingDayType && <button onClick={() => setCreatingDayType(true)}
           style={{ padding: '13px 6px', borderRadius: 6, cursor: 'pointer', textAlign: 'center', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, letterSpacing: '0.04em',
-            background: on ? 'rgba(var(--accent-rgb),0.12)' : UI.bgInset, color: on ? 'var(--accent)' : UI.inkFaint,
-            border: `1px solid ${on ? 'var(--accent)' : UI.hairStrong}`, WebkitTapHighlightColor: 'transparent' }}>{dt}</button>;
-      })}
+            background: 'transparent', color: UI.inkFaint, border: `1px dashed ${UI.hairStrong}`, WebkitTapHighlightColor: 'transparent' }}>+ Custom</button>}
+      </div>
+      {creatingDayType && (
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', padding: 10, background: UI.bgInset, border: `1px dashed ${UI.goldSoft}`, borderRadius: 6 }}>
+          <input autoFocus value={newDayTypeName} onChange={e => setNewDayTypeName(e.target.value.toUpperCase())} onKeyDown={e => e.key === 'Enter' && createDayType()} placeholder="e.g. PUSH1"
+            style={{ flex: 1, minWidth: 0, background: 'transparent', border: 'none', borderBottom: `1px solid ${UI.goldSoft}`, color: UI.gold, padding: '8px 0', fontFamily: UI.fontUi, fontSize: 14, letterSpacing: '0.08em', outline: 'none' }} />
+          <Btn kind="ghost" onClick={() => { setCreatingDayType(false); setNewDayTypeName(''); }} style={{ minHeight: 36, padding: '4px 10px', fontSize: 11 }}>×</Btn>
+          <Btn onClick={createDayType} disabled={!newDayTypeName.trim()} style={{ minHeight: 36, padding: '4px 12px', fontSize: 11, opacity: newDayTypeName.trim() ? 1 : 0.4 }}>Add</Btn>
+        </div>
+      )}
     </div>;
   } else if (step === 'weekdays') {
     body = <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
