@@ -644,6 +644,114 @@ function LoggingModeSection({ equipment, movementType, logMode, onLogMode, pullB
   );
 }
 
+// ── Exercise-creation wizard ────────────────────────────────────────────────
+// A step-by-step pop-up flow (UnitPromptModal-style overlay) that guides through
+// a NEW exercise's fields one pick at a time, then hands off to the existing
+// ExerciseCreator sheet (pre-filled) for a final review/edit before saving. It
+// writes into the SAME state ExerciseCreator owns, so the hand-off is just
+// "stop showing the wizard" (wizardStep → null). Sits above Sheets (z 9998), so
+// its own discard prompt is inline rather than the portaled useConfirm sheet.
+const WIZARD_ORDER = ['name', 'muscle', 'size', 'equipment', 'movement', 'logging'];
+const WIZARD_TITLES = { name: 'Name your exercise', muscle: 'Muscle group', size: 'Exercise size', equipment: 'Equipment', movement: 'Movement type', logging: 'How do you log it?' };
+function wizardStepApplicable(step, equipment, movementType) {
+  return step === 'logging' ? loggingPickerVisible(equipment, movementType) : true;
+}
+function adjacentWizardStep(current, dir, equipment, movementType) {
+  let i = WIZARD_ORDER.indexOf(current) + dir;
+  while (i >= 0 && i < WIZARD_ORDER.length) {
+    if (wizardStepApplicable(WIZARD_ORDER[i], equipment, movementType)) return WIZARD_ORDER[i];
+    i += dir;
+  }
+  return null;
+}
+
+function ExerciseWizard({ step, setStep, onClose, isDirty,
+  name, setName, selectedTags, setSelectedTags, category, setCategory,
+  equipment, onEquipment, movementType, setMovementType, logMode, pickLogMode }) {
+  const [confirming, setConfirming] = useStateL(false);
+  const applicable = WIZARD_ORDER.filter(s => wizardStepApplicable(s, equipment, movementType));
+  const pos = applicable.indexOf(step) + 1;
+  const hasPrev = adjacentWizardStep(step, -1, equipment, movementType) != null;
+  const goNext = (o = {}) => setStep(adjacentWizardStep(step, 1, o.equipment ?? equipment, o.movementType ?? movementType));
+  const goBack = () => {
+    const prev = adjacentWizardStep(step, -1, equipment, movementType);
+    if (prev) setStep(prev);
+    else if (isDirty()) setConfirming(true);
+    else onClose();
+  };
+  const bigBtn = (onClick, active, main, sub) => (
+    <button key={main} onClick={onClick} style={{
+      width: '100%', padding: '13px 15px', borderRadius: 6, cursor: 'pointer', textAlign: 'left',
+      background: active ? 'rgba(var(--accent-rgb),0.12)' : UI.bgInset,
+      border: `1px solid ${active ? 'var(--accent)' : UI.hairStrong}`,
+      color: active ? 'var(--accent)' : UI.inkSoft, fontFamily: UI.fontUi,
+      display: 'flex', flexDirection: 'column', gap: 3, WebkitTapHighlightColor: 'transparent',
+    }}>
+      <span style={{ fontSize: 14, fontWeight: 600 }}>{main}</span>
+      {sub && <span className="micro" style={{ color: UI.inkFaint, textTransform: 'none', letterSpacing: '0.02em', fontWeight: 400 }}>{sub}</span>}
+    </button>
+  );
+
+  let body;
+  if (step === 'name') {
+    body = <TextInput value={name} onChange={v => setName(v.toUpperCase())} placeholder="e.g. BENCH PRESS" autoFocus />;
+  } else if (step === 'muscle') {
+    body = <MusclePills value={selectedTags} onChange={setSelectedTags} />;
+  } else if (step === 'size') {
+    body = <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {[['big', 'Big', 'Heavy compounds — squat, deadlift, press'], ['medium', 'Medium', 'Moderate — bench, pull-up, lunge'], ['small', 'Small', 'Isolation — curl, lateral raise']]
+        .map(([val, label, sub]) => bigBtn(() => { setCategory(val); goNext(); }, category === val, label, sub))}
+    </div>;
+  } else if (step === 'equipment') {
+    body = <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {EQUIPMENT_TYPES.map(({ key, label }) => bigBtn(() => { onEquipment(key); goNext({ equipment: key }); }, equipment === key, label))}
+    </div>;
+  } else if (step === 'movement') {
+    body = <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {[['bilateral', 'Bilateral', 'Both sides at once'], ['unilateral', 'Unilateral', 'One arm/leg at a time'], ['mobility', 'Mobility', 'Stretch / warm-up']]
+        .map(([val, label, sub]) => bigBtn(() => { setMovementType(val); goNext({ movementType: val }); }, movementType === val, label, sub))}
+    </div>;
+  } else if (step === 'logging') {
+    const subs = { checkbox: 'Tick each set off — no numbers, 0 volume', reps: 'Reps only, no weight, 0 volume', weight: 'Weight + reps' };
+    body = <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {LOG_MODES.map(([val, label]) => bigBtn(() => { pickLogMode(val); goNext(); }, logMode === val, label, subs[val]))}
+    </div>;
+  }
+
+  const needsNext = step === 'name' || step === 'muscle';
+  const canNext = step !== 'name' || name.trim();
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 9998, background: 'rgba(0,0,0,0.72)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 28 }}>
+      <div style={{ width: '100%', maxWidth: 340, maxHeight: '82vh', overflowY: 'auto', background: UI.bgRaised, border: `1px solid ${UI.hairStrong}`, borderRadius: 6, padding: '22px 20px', display: 'flex', flexDirection: 'column', gap: 16, boxShadow: '0 32px 80px rgba(0,0,0,0.6)', animation: 'fadeUp 0.3s ease' }}>
+        {confirming ? (
+          <>
+            <div style={{ fontFamily: UI.fontDisplay, fontSize: 20, color: UI.ink, fontWeight: 700, textTransform: 'uppercase' }}>Discard exercise?</div>
+            <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>Your new exercise won't be saved.</div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Btn kind="ghost" onClick={() => setConfirming(false)} style={{ flex: 1 }}>Keep editing</Btn>
+              <Btn onClick={onClose} style={{ flex: 1, background: UI.danger, borderColor: 'rgba(var(--danger-rgb),0.6)' }}>Discard</Btn>
+            </div>
+          </>
+        ) : (
+          <>
+            <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10 }}>
+              <div style={{ fontFamily: UI.fontDisplay, fontSize: 20, color: 'var(--accent)', fontWeight: 400, textTransform: 'uppercase' }}>{WIZARD_TITLES[step]}</div>
+              <span className="micro" style={{ color: UI.inkFaint, flexShrink: 0 }}>{pos} / {applicable.length}</span>
+            </div>
+            {body}
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+              <button onClick={goBack} style={{ background: 'transparent', border: 'none', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13, cursor: 'pointer', padding: '8px 4px', WebkitTapHighlightColor: 'transparent' }}>{hasPrev ? '← Back' : 'Cancel'}</button>
+              <div style={{ flex: 1 }} />
+              {step === 'size' && <button onClick={() => { setCategory(null); goNext(); }} style={{ background: 'transparent', border: 'none', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13, cursor: 'pointer', padding: '8px 10px', WebkitTapHighlightColor: 'transparent' }}>Skip</button>}
+              {needsNext && <Btn onClick={() => goNext()} disabled={!canNext} style={{ opacity: canNext ? 1 : 0.4 }}>Next</Btn>}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = '', initialTags = [] }) {
   const [confirmEl, confirm] = useConfirm();
   const [name, setName] = useStateL(initialName);
@@ -658,6 +766,17 @@ function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = ''
   const [note, setNote] = useStateL('');
   const [showSizeInfo, setShowSizeInfo] = useStateL(false);
   const [showBodyweightHint, setShowBodyweightHint] = useStateL(false);
+  // The creation wizard runs for a fresh exercise, starting at the first field
+  // not already seeded (a "create from search" opens with initialName/initialTags).
+  // null = wizard finished → the review/edit sheet renders.
+  const [wizardStep, setWizardStep] = useStateL(!initialName.trim() ? 'name' : (initialTags.length ? 'size' : 'muscle'));
+  // Wizard equipment pick: activate the Health tab silently — the info sheet is
+  // z-100 and would hide behind the z-9998 wizard; the pull toggle in the review
+  // form covers the rest.
+  const wizardSetEquipment = (key) => {
+    setEquipment(key || 'no_equipment');
+    if (key === 'bodyweight' && !store?.settings?.showHealthTab) setStore(s => ({ ...s, settings: { ...s.settings, showHealthTab: true } }));
+  };
   // When the Logging picker first becomes relevant (no_equipment / bodyweight
   // equipment, or a mobility movement) and the user hasn't chosen a mode yet,
   // pre-select a sensible default — without clobbering a manual pick.
@@ -691,10 +810,20 @@ function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = ''
   };
   return (
     <>
+    {wizardStep !== null ? (
+      <ExerciseWizard
+        step={wizardStep} setStep={setWizardStep} onClose={onClose} isDirty={isDirty}
+        name={name} setName={setName} selectedTags={selectedTags} setSelectedTags={setSelectedTags}
+        category={category} setCategory={setCategory}
+        equipment={equipment} onEquipment={wizardSetEquipment}
+        movementType={movementType} setMovementType={setMovementType}
+        logMode={logMode} pickLogMode={pickLogMode}
+      />
+    ) : (
     <Sheet open={true} onClose={requestClose} title="New exercise">
       <div onPointerDown={blurKbOnControlTap} style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
         <Field label="Name">
-          <TextInput value={name} onChange={v => setName(v.toUpperCase())} placeholder="e.g. BENCH PRESS" autoFocus />
+          <TextInput value={name} onChange={v => setName(v.toUpperCase())} placeholder="e.g. BENCH PRESS" />
         </Field>
         <div>
           <span className="label">Muscle group</span>
@@ -759,6 +888,7 @@ function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = ''
         <Btn onClick={save} style={{ opacity: name.trim() ? 1 : 0.4 }} disabled={!name.trim()}>Create</Btn>
       </div>
     </Sheet>
+    )}
     {showBodyweightHint && (
       <Sheet open={true} onClose={() => setShowBodyweightHint(false)} title="Health tab activated">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
