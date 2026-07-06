@@ -703,7 +703,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   const queries = [
     _supabase.from('zane_profiles').select('id, name, approved').eq('id', userId).maybeSingle(),
     _supabase.from('zane_exercises').select('id, name, tags, note, category, unilateral, equipment, progression_reps, movement_type, no_weight_reps, log_mode, pull_bodyweight, youtube_url').eq('user_id', userId),
-    _supabase.from('zane_schedules').select('id, name, days, archived, versions, is_flex, sessions_per_week, mesocycle_weeks, mesocycle_start_rir, mesocycle_end_rir').eq('user_id', userId),
+    _supabase.from('zane_schedules').select('id, name, days, archived, versions, is_flex, sessions_per_week, mesocycle_weeks, mesocycle_start_rir, mesocycle_end_rir, mesocycle_rir_enabled').eq('user_id', userId),
     // Session METADATA stays complete (cheap; streaks/calendar need the full
     // date list) — the legacy entries JSONB is no longer selected.
     _supabase.from('zane_sessions').select('id, schedule_id, day_id, day_name, date, started_at, ended, duration_minutes, feel, is_bonus, is_freestyle, is_deload')
@@ -2002,7 +2002,8 @@ function splitDayCount(presetKey) {
 //   weekdays    : array of weekday indices 0..6 (weekday plans only)
 //   mesoWeeks   : truthy → run as a mesocycle of that many weeks
 //   mesoStartRir/mesoEndRir : optional RIR taper endpoints (else app fallbacks 3/0)
-function buildPlanSkeleton({ name, type, presetKey, customCount, customDays, weekdays, mesoWeeks, mesoStartRir, mesoEndRir } = {}) {
+//   mesoRirEnabled : false → RIR taper off (volume + load progression + deload only)
+function buildPlanSkeleton({ name, type, presetKey, customCount, customDays, weekdays, mesoWeeks, mesoStartRir, mesoEndRir, mesoRirEnabled } = {}) {
   const preset = SPLIT_PRESETS[presetKey];
   // A customDays entry is a type string, or { name, items } (a day imported with
   // its exercises), or null (unpicked → FULL).
@@ -2049,8 +2050,19 @@ function buildPlanSkeleton({ name, type, presetKey, customCount, customDays, wee
     sch.mesocycle_weeks = mesoWeeks;
     if (mesoStartRir != null) sch.mesocycle_start_rir = mesoStartRir;
     if (mesoEndRir != null) sch.mesocycle_end_rir = mesoEndRir;
+    // Only persist the explicit "off" — default (undefined/true) leaves the DB
+    // default and reads as enabled everywhere.
+    if (mesoRirEnabled === false) sch.mesocycle_rir_enabled = false;
   }
   return sch;
+}
+
+// Whether a mesocycle's RIR taper is active. Default true: only an explicit
+// false disables the weekly RIR target watermark and the negative-RIR
+// lengthened-partials prescription (the meso then runs on volume + load
+// progression + deload alone).
+function mesoRirEnabled(sch) {
+  return sch?.mesocycle_rir_enabled !== false;
 }
 
 // Tongue-in-cheek note for a training-frequency / cycle-length number. Shared by
@@ -3933,7 +3945,7 @@ window.LB = {
   signIn, signUp, signOut, signInWithPasskey, registerPasskey, listPasskeys, deletePasskey, resetPassword, deleteAllData, exportBackup, importFromBackup, validateBackup,
   loadFromSupabase, syncStore, mergeSessions, withCarriedWindowEntries, historyWindowCutoffISO,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
-  uid, todayISO, fmtISO, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, buildPlanSkeleton, splitDayCount, frequencyHint, mesoTaperPreview, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, realignCycleForToday, todayCycleStripIndex,
+  uid, todayISO, fmtISO, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, buildPlanSkeleton, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, realignCycleForToday, todayCycleStripIndex,
   effReps, e1rm, isImprovement, isDecline, bestE1rmForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, latestBodyweight, exerciseLogMode, shouldPullBodyweight, systemExerciseToRow, inferCurrentExIdx, calcBlended,
   refreshExerciseBests, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries,
   computeNextReminderAt,

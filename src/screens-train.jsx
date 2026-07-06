@@ -2008,7 +2008,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const mesoSch = mesoState ? store.schedules?.find(s => s.id === mesoState.scheduleId) : null;
   const mesoStartRir = mesoSch?.mesocycle_start_rir ?? 3;
   const mesoEndRir = mesoSch?.mesocycle_end_rir ?? 0;
-  const mesoRirVal = (mesoWeek != null && mesoState?.weeks != null) ? LB.mesoRirForWeek(mesoWeek, mesoState.weeks, mesoStartRir, mesoEndRir) : null;
+  // RIR taper can be switched off per plan — then there's no weekly RIR target
+  // (null), which also suppresses the negative-RIR partials prescription below.
+  const mesoRirVal = (mesoWeek != null && mesoState?.weeks != null && LB.mesoRirEnabled(mesoSch)) ? LB.mesoRirForWeek(mesoWeek, mesoState.weeks, mesoStartRir, mesoEndRir) : null;
   // Final meso week: set-count deltas (and the growth/decline rotation feeding
   // them) are frozen. A set change written now can never reach a later session
   // in this block AND is wiped by the Meso-2 baseline reset anyway, so

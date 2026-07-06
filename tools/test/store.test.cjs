@@ -1048,6 +1048,27 @@ async function testAsync(name, fn) {
     assert.ok(LB.mesoTaperPreview(6, 3, -2).includes('partials/set')); // negative end → partials note
   });
 
+  test('mesoRirEnabled: default true, only explicit false disables', () => {
+    assert.strictEqual(LB.mesoRirEnabled({}), true);
+    assert.strictEqual(LB.mesoRirEnabled({ mesocycle_rir_enabled: true }), true);
+    assert.strictEqual(LB.mesoRirEnabled({ mesocycle_rir_enabled: null }), true);
+    assert.strictEqual(LB.mesoRirEnabled(undefined), true);
+    assert.strictEqual(LB.mesoRirEnabled({ mesocycle_rir_enabled: false }), false);
+  });
+
+  test('buildPlanSkeleton: mesoRirEnabled false is persisted, otherwise omitted', () => {
+    const off = LB.buildPlanSkeleton({ name: 'M', type: 'cycle', presetKey: 'ppl3', mesoWeeks: 6, mesoRirEnabled: false });
+    assert.strictEqual(off.mesocycle_rir_enabled, false);
+    assert.strictEqual(LB.mesoRirEnabled(off), false);
+    // Default (true / undefined) leaves the column unset so the DB default wins.
+    const on = LB.buildPlanSkeleton({ name: 'M', type: 'cycle', presetKey: 'ppl3', mesoWeeks: 6, mesoRirEnabled: true });
+    assert.strictEqual('mesocycle_rir_enabled' in on, false);
+    assert.strictEqual(LB.mesoRirEnabled(on), true);
+    // Non-meso plan never carries the flag.
+    const plain = LB.buildPlanSkeleton({ name: 'P', type: 'cycle', presetKey: 'ppl3', mesoRirEnabled: false });
+    assert.strictEqual('mesocycle_rir_enabled' in plain, false);
+  });
+
   test('isTrainingDayForDate: flex defaults to rest, override + logged session flip it', () => {
     const today = LB.todayISO();
     const flexPlan = { id: 'p1', is_flex: true, days: [{ id: 'd1', name: 'FULL', items: [{ exId: 'e1' }] }] };
