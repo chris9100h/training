@@ -1740,6 +1740,22 @@ function shouldPullBodyweight(ex) {
   return ex?.equipment === 'bodyweight' && ex?.pull_bodyweight === true;
 }
 
+// Turn a read-only system-catalog entry (window.SYSTEM_EXERCISES: compact shape
+// { movement, logMode }) into an editable store-shape user exercise with a fresh
+// id — the "duplicate into my library" action for the Exercise DB tab. The result
+// is exactly what syncStore's exercises upsert expects (Migration 0139 columns
+// included), so a copy is an ordinary user exercise from here on.
+function systemExerciseToRow(sysEx) {
+  const mv = sysEx.movement || 'bilateral';
+  const lm = sysEx.logMode || 'weight';
+  return {
+    id: uid(), name: sysEx.name, tags: sysEx.tags ? [...sysEx.tags] : [], note: '',
+    category: sysEx.category ?? null, unilateral: mv === 'unilateral', movement_type: mv,
+    log_mode: lm, no_weight_reps: lm !== 'weight', pull_bodyweight: false,
+    equipment: sysEx.equipment ?? null, progression_reps: null, youtube_url: null,
+  };
+}
+
 // Compute the seed-sets array when starting/logging a session for a planned item.
 // Honors smart-progression suggestions and falls back to last-session values.
 // bodyweightKg: prefill kg with this value when kg would otherwise be null (for bodyweight exercises).
@@ -3768,7 +3784,7 @@ window.LB = {
   loadFromSupabase, syncStore, mergeSessions, withCarriedWindowEntries, historyWindowCutoffISO,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
   uid, todayISO, fmtISO, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, realignCycleForToday,
-  effReps, e1rm, isImprovement, isDecline, bestE1rmForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, latestBodyweight, exerciseLogMode, shouldPullBodyweight, inferCurrentExIdx, calcBlended,
+  effReps, e1rm, isImprovement, isDecline, bestE1rmForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, latestBodyweight, exerciseLogMode, shouldPullBodyweight, systemExerciseToRow, inferCurrentExIdx, calcBlended,
   refreshExerciseBests, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries,
   computeNextReminderAt,
   cancelPushover, adminSendEmail,

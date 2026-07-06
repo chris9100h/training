@@ -30,6 +30,7 @@
   - `src/store.js` — Supabase-Lesen/Schreiben, Auth-Funktionen
   - `src/supabase.js` — Supabase JS Client (vendored)
   - `src/whatsnew.js` — Changelog-Historie (`window.WHATS_NEW`-Array, siehe „What's New / Changelog")
+  - `src/exercise-db.js` — read-only System-Übungskatalog (`window.SYSTEM_EXERCISES`, plain JS wie `whatsnew.js`: normales `<script>` in `index.html`, in `ASSETS` von `sw.js`). Kompakte Einträge `{ id: 'sys_…', name, tags, equipment, movement, logMode }` (Defaults: `movement`→`bilateral`, `logMode`→`weight`). Wird in der Library als **„Database"**-Tab angezeigt (read-only, durchsuchbar/filterbar); ein Tap auf **„+ Add"** dupliziert den Eintrag via `LB.systemExerciseToRow` (mappt `movement`→`movement_type`/`unilateral`, `logMode`→`log_mode`/`no_weight_reps`, frische `uid`) als **normale, editierbare User-Übung** in `store.exercises`. Bewusst **kein** direkter `sys_`-Referenz-Overlay — Pläne/Sessions halten nur User-eigene Ex-Ids, daher kein neuer Auflösungspfad/Sync-Sonderfall. „In library"-Markierung per Namensabgleich.
   - `supabase/` — Migrationen, Edge Functions, Schema
 
 ## Screens & Navigation

@@ -25,6 +25,7 @@ function LibraryScreen({ store, setStore, go, userId }) {
   const [creating, setCreating] = useStateL(false);
   const [selecting, setSelecting] = useStateL(false);
   const [selected, setSelected] = useStateL(new Set());
+  const [addedSysIds, setAddedSysIds] = useStateL(new Set()); // sys_ ids added to the library this session (for row feedback)
   const [filterTags, setFilterTags] = useStateL(_lib.filterTags);
   const [filterRestCats, setFilterRestCats] = useStateL(_lib.filterRestCats);
   const [filterUnilateral, setFilterUnilateral] = useStateL(_lib.filterUnilateral);
@@ -127,6 +128,32 @@ function LibraryScreen({ store, setStore, go, userId }) {
       .sort((a,b) => a.name.localeCompare(b.name));
   }, [store.exercises, q, filterTags, filterRestCats, filterUnilateral, filterPlan, filterEquipment, planExIds]);
 
+  // Read-only system catalog (Exercise DB tab), normalized to the row/filter shape
+  // the library already renders. Duplicate-on-add copies an entry into the user's
+  // own exercises (LB.systemExerciseToRow), so it never mixes into the user lists.
+  const systemDisplay = useMemoL(() => (window.SYSTEM_EXERCISES || []).map(s => ({
+    id: s.id, name: s.name, tags: s.tags || [], category: s.category ?? null,
+    unilateral: (s.movement || 'bilateral') === 'unilateral', movement_type: s.movement || 'bilateral',
+    equipment: s.equipment ?? null, _sys: s,
+  })), []);
+  const userNamesLower = useMemoL(() => new Set(store.exercises.map(e => (e.name || '').toUpperCase())), [store.exercises]);
+  const dbFiltered = useMemoL(() => {
+    const ql = q.toUpperCase();
+    return systemDisplay.filter(e => {
+      const matchSearch = !q || e.name.toUpperCase().includes(ql) || e.tags?.some(t => t.toUpperCase().includes(ql));
+      const matchTags = filterTags.length === 0 || filterTags.some(ft => e.tags?.includes(ft));
+      const matchUnilateral = filterUnilateral === null || !!e.unilateral === filterUnilateral;
+      const matchEquipment = filterEquipment.length === 0 ||
+        (filterEquipment.includes('none') && !e.equipment) ||
+        (e.equipment && filterEquipment.includes(e.equipment));
+      return matchSearch && matchTags && matchUnilateral && matchEquipment;
+    }).sort((a, b) => a.name.localeCompare(b.name));
+  }, [systemDisplay, q, filterTags, filterUnilateral, filterEquipment]);
+  const addSystemExercise = (sysEx) => {
+    setStore(s => ({ ...s, exercises: [...s.exercises, LB.systemExerciseToRow(sysEx)] }));
+    setAddedSysIds(prev => new Set(prev).add(sysEx.id));
+  };
+
   const allFilteredSelected = filtered.length > 0 && filtered.every(e => selected.has(e.id));
   const selectAll = () => setSelected(new Set(filtered.map(e => e.id)));
   const deselectAll = () => setSelected(new Set());
@@ -174,7 +201,7 @@ function LibraryScreen({ store, setStore, go, userId }) {
 
       {/* Tab strip */}
       <div style={{ display: 'flex', padding: '0 22px', borderBottom: `0.5px solid ${UI.hair}`, flexShrink: 0, marginTop: 8 }}>
-        {[['recent','Recent'],['all','All']].map(([id,label]) => (
+        {[['recent','Recent'],['all','All'],['db','Database']].map(([id,label]) => (
           <button key={id} onClick={() => setTab(id)} style={{
             flex: 1, background: 'transparent', border: 'none',
             padding: '11px 0', cursor: 'pointer',
@@ -189,7 +216,12 @@ function LibraryScreen({ store, setStore, go, userId }) {
       </div>
 
       <div style={{ padding: '18px 22px', paddingBottom: selecting ? 80 : 22, display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {tab === 'all' && (() => {
+        {tab === 'db' && (
+          <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5, marginBottom: 4 }}>
+            Browse the exercise catalog and add any to your library — added exercises become fully editable and can go straight into your plans.
+          </div>
+        )}
+        {(tab === 'all' || tab === 'db') && (() => {
           const activeCount = filterTags.length + filterRestCats.length + filterEquipment.length + (filterUnilateral !== null ? 1 : 0) + (filterPlan !== null ? 1 : 0);
           return (
             <>
@@ -301,6 +333,44 @@ function LibraryScreen({ store, setStore, go, userId }) {
         })}
         {tab === 'all' && filtered.length === 0 && (
           <Empty title="No exercises" action={<Btn onClick={() => setCreating(true)}>Add exercise</Btn>} icon={ICON_BARBELL} />
+        )}
+
+        {tab === 'db' && dbFiltered.map((e, fi) => {
+          const inLib = addedSysIds.has(e.id) || userNamesLower.has(e.name.toUpperCase());
+          const justAdded = addedSysIds.has(e.id);
+          return (
+            <React.Fragment key={e.id}>
+            <div onClick={() => { if (!inLib) addSystemExercise(e._sys); }} style={{
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12,
+              padding: '13px 0', cursor: inLib ? 'default' : 'pointer',
+            }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div className="display" style={{ fontSize: 19, color: UI.ink, lineHeight: 1.1 }}>{e.name}</div>
+                <div style={{ display: 'flex', gap: 4, marginTop: 4, flexWrap: 'wrap', alignItems: 'center' }}>
+                  {e.tags?.map(t => <Pill key={t}>{t}</Pill>)}
+                  {e.unilateral && <Pill style={{ color: UI.inkSoft, borderColor: UI.hair }}>Unilateral</Pill>}
+                  {e.equipment ? <Pill style={{ color: UI.inkFaint, borderColor: UI.hair, fontSize: 8 }}>{EQUIPMENT_TYPES.find(t => t.key === e.equipment)?.label ?? e.equipment}</Pill> : <Pill style={{ color: 'rgba(var(--danger-rgb),0.5)', borderColor: 'rgba(var(--danger-rgb),0.2)', fontSize: 8 }}>No equipment</Pill>}
+                </div>
+              </div>
+              {inLib ? (
+                <span style={{ flexShrink: 0, fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase', color: justAdded ? UI.gold : UI.inkFaint, display: 'flex', alignItems: 'center', gap: 5 }}>
+                  <i className="fa-solid fa-check" /> {justAdded ? 'Added' : 'In library'}
+                </span>
+              ) : (
+                <button onClick={ev => { ev.stopPropagation(); addSystemExercise(e._sys); }} style={{
+                  flexShrink: 0, background: UI.goldFaint, border: `1px solid ${UI.goldSoft}`, borderRadius: 4,
+                  padding: '7px 13px', cursor: 'pointer', color: UI.gold, fontFamily: UI.fontUi, fontSize: 11,
+                  fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: 5,
+                  WebkitTapHighlightColor: 'transparent',
+                }}><i className="fa-solid fa-plus" /> Add</button>
+              )}
+            </div>
+            {fi < dbFiltered.length - 1 && <div className="knurl" />}
+            </React.Fragment>
+          );
+        })}
+        {tab === 'db' && dbFiltered.length === 0 && (
+          <Empty title="No matches" sub="Try a different search or filter." icon={ICON_BARBELL} />
         )}
       </div>
 

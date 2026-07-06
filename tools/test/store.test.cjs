@@ -917,6 +917,38 @@ async function testAsync(name, fn) {
     assert.strictEqual(LB.shouldPullBodyweight(null), false);
   });
 
+  // ── systemExerciseToRow (Exercise DB → editable copy) ───────────────────────
+  test('systemExerciseToRow: normalizes catalog shape to a store row', () => {
+    const row = LB.systemExerciseToRow({ id: 'sys_x', name: 'Single-Arm Cable Row', tags: ['Back', 'Biceps'], equipment: 'cable', movement: 'unilateral', logMode: 'weight' });
+    assert.strictEqual(row.name, 'Single-Arm Cable Row');
+    assert.deepStrictEqual([...row.tags], ['Back', 'Biceps']);
+    assert.strictEqual(row.equipment, 'cable');
+    assert.strictEqual(row.movement_type, 'unilateral');
+    assert.strictEqual(row.unilateral, true);
+    assert.strictEqual(row.log_mode, 'weight');
+    assert.strictEqual(row.no_weight_reps, false);
+    assert.strictEqual(row.pull_bodyweight, false);
+    assert.ok(row.id && row.id !== 'sys_x'); // fresh id, not the catalog id
+    assert.strictEqual(row.progression_reps, null);
+  });
+  test('systemExerciseToRow: reps mode → no_weight_reps true; defaults when omitted', () => {
+    const reps = LB.systemExerciseToRow({ id: 'sys_p', name: 'Push-Up', tags: ['Chest'], equipment: 'bodyweight', logMode: 'reps' });
+    assert.strictEqual(reps.log_mode, 'reps');
+    assert.strictEqual(reps.no_weight_reps, true);
+    assert.strictEqual(reps.unilateral, false); // no movement → bilateral
+    assert.strictEqual(reps.movement_type, 'bilateral');
+    const bare = LB.systemExerciseToRow({ id: 'sys_b', name: 'Bench', tags: ['Chest'], equipment: 'barbell_dual' });
+    assert.strictEqual(bare.log_mode, 'weight'); // logMode omitted → weight
+    assert.strictEqual(bare.no_weight_reps, false);
+    assert.strictEqual(bare.movement_type, 'bilateral');
+  });
+  test('systemExerciseToRow: tags are copied, not shared by reference', () => {
+    const src = { id: 'sys_t', name: 'X', tags: ['Quads'], equipment: 'machine' };
+    const row = LB.systemExerciseToRow(src);
+    row.tags.push('Glutes');
+    assert.deepStrictEqual(src.tags, ['Quads']); // original untouched
+  });
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();
