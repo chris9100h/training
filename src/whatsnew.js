@@ -16,6 +16,16 @@
    Entry shape: { id: string, title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.495',
+    title: 'New plans, now with a guided setup',
+    items: [
+      "🧭 Building a plan is a walkthrough now: name it, pick how it runs (Cycle, Weekdays, or Flexible, each one actually explained), and choose a split. Full Body, Upper/Lower, Push/Pull/Legs, or build it day by day. You drop into the editor with the days already laid out.",
+      "📋 Steal from yourself: import a whole day, exercises included, from any of your other plans or a saved template. Pick several at once and they fill the following days for you.",
+      "🔥 Set up a mesocycle right in the flow, weeks plus the RIR ramp. Take the end RIR into the negatives and the plan starts glowing at you. That's not decoration, it's a warning.",
+      "🗄️ Adding an exercise while planning or mid-workout now reaches into the exercise database too, not just your own library.",
+    ],
+  },
+  {
     id: 'v2.486',
     title: 'Fine, an Exercise Database',
     items: [
