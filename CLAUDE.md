@@ -4,6 +4,7 @@
 
 - **Konversation mit dem Nutzer:** Deutsch
 - **App-UI, Code, Commits, Kommentare:** Englisch
+- **Keine Em-Dashes (—). Niemals.** Der Nutzer hasst sie. In keinem Output verwenden: nicht in Chat-Antworten, App-Texten, Code-Kommentaren, Commits oder What's-New. Stattdessen Komma, Doppelpunkt, Klammern, oder den Satz mit Punkt aufteilen.
 
 ## Architektur
 
