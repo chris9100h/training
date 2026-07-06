@@ -1968,6 +1968,45 @@ function isFlexPlan(sch) {
   return !!sch && sch.is_flex === true;
 }
 
+// Training-split presets for the plan setup wizard (screens-schedule.jsx):
+// key → ordered day-type sequence. 'custom' has no fixed pattern (the wizard
+// asks for a day count and fills FULL days). Types come from STANDARD_DAY_TYPES.
+const SPLIT_PRESETS = {
+  full3: ['FULL', 'FULL', 'FULL'],
+  ul4:   ['UPPER', 'LOWER', 'UPPER', 'LOWER'],
+  ppl3:  ['PUSH', 'PULL', 'LEGS'],
+  ppl6:  ['PUSH', 'PULL', 'LEGS', 'PUSH', 'PULL', 'LEGS'],
+};
+
+// Build a ready-to-register schedule object from the plan setup wizard's picks.
+// Single source of truth for the new-plan shape (snake_case passthrough columns;
+// only the local-only `mode` is stripped before upsert). The wizard appends the
+// result to store.schedules and navigates to the editor. The zane_meso_states
+// row is NOT created here — the home/train effects auto-start it once the plan
+// is activated.
+//   type      : 'cycle' | 'weekday' | 'flex'
+//   presetKey : a SPLIT_PRESETS key or 'custom' (cycle/flex only)
+//   customCount: day count when presetKey === 'custom'
+//   weekdays  : array of weekday indices 0..6 (weekday plans only)
+//   mesoWeeks : truthy → run as a mesocycle of that many weeks
+function buildPlanSkeleton({ name, type, presetKey, customCount, weekdays, mesoWeeks } = {}) {
+  let days;
+  if (type === 'weekday') {
+    days = (weekdays || []).slice().sort((a, b) => a - b)
+      .map(i => ({ id: uid(), name: 'FULL', weekday: i, items: [] }));
+  } else {
+    const types = presetKey === 'custom'
+      ? Array.from({ length: Math.max(1, Math.round(customCount || 1)) }, () => 'FULL')
+      : (SPLIT_PRESETS[presetKey] || ['FULL']);
+    days = types.map(t => ({ id: uid(), name: t, items: [] }));
+  }
+  const sch = { id: uid(), name: (name || '').trim() || 'My Plan', days, archived: false };
+  if (type === 'weekday') sch.mode = 'weekday';
+  if (type === 'flex') { sch.is_flex = true; sch.sessions_per_week = days.length || null; }
+  if (mesoWeeks) sch.mesocycle_weeks = mesoWeeks;
+  return sch;
+}
+
 function getPlanDaysForDate(schedule, dateStr) {
   const versions = schedule.versions;
   if (!versions?.length) return schedule.days || [];
@@ -3785,7 +3824,7 @@ window.LB = {
   signIn, signUp, signOut, signInWithPasskey, registerPasskey, listPasskeys, deletePasskey, resetPassword, deleteAllData, exportBackup, importFromBackup, validateBackup,
   loadFromSupabase, syncStore, mergeSessions, withCarriedWindowEntries, historyWindowCutoffISO,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
-  uid, todayISO, fmtISO, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, realignCycleForToday,
+  uid, todayISO, fmtISO, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, buildPlanSkeleton, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, realignCycleForToday,
   effReps, e1rm, isImprovement, isDecline, bestE1rmForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, latestBodyweight, exerciseLogMode, shouldPullBodyweight, systemExerciseToRow, inferCurrentExIdx, calcBlended,
   refreshExerciseBests, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries,
   computeNextReminderAt,

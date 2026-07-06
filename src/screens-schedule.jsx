@@ -2849,59 +2849,219 @@ function ExercisePicker({ store, setStore, onClose, onPick, singleSelect = false
   );
 }
 
-// ─── Create new schedule ─────────────────────────────────────────────
-function ScheduleNewScreen({ store, setStore, go, userId }) {
+// ─── Plan setup wizard ───────────────────────────────────────────────
+// Guided, beginner-friendly scaffold for a new plan: name → type → split (or
+// weekdays) → mesocycle, one decision per step with a plain-language explainer.
+// Mirrors the exercise-creation wizard's look (overlay card, segmented
+// progress, optRow rows). Builds only the skeleton via LB.buildPlanSkeleton,
+// then hands off to the editor. The shell is duplicated from ExerciseWizard
+// (screens-lib.jsx) on purpose, so the shipped exercise wizard stays untouched
+// and this one can grow its own stepper/reveal steps.
+const PLAN_ORDER = ['name', 'type', 'split', 'weekdays', 'meso'];
+const PLAN_TITLES = { name: 'Name your plan', type: 'Plan type', split: 'Training split', weekdays: 'Training days', meso: 'Mesocycle' };
+const PLAN_INTRO = {
+  name: 'Give your plan a name. It shows up in your planner and history, and you can rename it any time.',
+  type: 'How should your plan move forward? This decides when the next day comes up.',
+  split: "Pick a split and we'll lay out the days for you. You can rename, reorder, or add days next.",
+  weekdays: 'Which days of the week do you train? Tap all that apply.',
+  meso: 'A mesocycle runs a fixed number of weeks with a planned intensity ramp (RIR), then a deload. Leave it off for a normal, open-ended plan.',
+};
+function planStepApplicable(step, type) {
+  if (step === 'split') return type === 'cycle' || type === 'flex';
+  if (step === 'weekdays') return type === 'weekday';
+  return true;
+}
+function adjacentPlanStep(current, dir, type) {
+  let i = PLAN_ORDER.indexOf(current) + dir;
+  while (i >= 0 && i < PLAN_ORDER.length) {
+    if (planStepApplicable(PLAN_ORDER[i], type)) return PLAN_ORDER[i];
+    i += dir;
+  }
+  return null;
+}
+
+function PlanWizard({ store, setStore, go }) {
+  const [step, setStep] = useStateS('name');
+  const [confirming, setConfirming] = useStateS(false);
   const [name, setName] = useStateS('');
-  const [mode, setMode] = useStateS('cycle');
+  const [type, setType] = useStateS(null);            // 'cycle' | 'weekday' | 'flex'
+  const [presetKey, setPresetKey] = useStateS(null);  // SPLIT_PRESETS key | 'custom'
+  const [customCount, setCustomCount] = useStateS(3);
+  const [weekdaysSel, setWeekdaysSel] = useStateS([]); // weekday indices 0..6
+  const [mesoOn, setMesoOn] = useStateS(false);
+  const [mesoWeeks, setMesoWeeks] = useStateS(6);
+
+  // Keep the card in the VISIBLE viewport so the Name step's input isn't hidden
+  // behind the on-screen keyboard (same trick as ExerciseWizard).
+  const [vp, setVp] = useStateS(null);
+  useEffectS(() => {
+    const v = typeof window !== 'undefined' ? window.visualViewport : null;
+    if (!v) return;
+    const on = () => setVp({ top: v.offsetTop, height: v.height });
+    on();
+    v.addEventListener('resize', on); v.addEventListener('scroll', on);
+    return () => { v.removeEventListener('resize', on); v.removeEventListener('scroll', on); };
+  }, []);
+
+  const isDirty = () => !!name.trim() || type !== null || presetKey !== null || weekdaysSel.length > 0 || mesoOn;
+  const exit = () => go({ name: 'plan' });
+  const applicable = PLAN_ORDER.filter(s => planStepApplicable(s, type));
+  const idx = applicable.indexOf(step);
+  const hasPrev = adjacentPlanStep(step, -1, type) != null;
+  // Picking the type can add/remove the split/weekdays step, so pass the new
+  // value synchronously (state hasn't flushed yet), like ExerciseWizard.goNext.
+  const goNext = (o = {}) => setStep(adjacentPlanStep(step, 1, o.type ?? type));
+  const goBack = () => {
+    const prev = adjacentPlanStep(step, -1, type);
+    if (prev) setStep(prev);
+    else if (isDirty()) setConfirming(true);
+    else exit();
+  };
+  const requestExit = () => { if (isDirty()) setConfirming(true); else exit(); };
 
   const create = () => {
-    const newSch = {
-      id: LB.uid(),
-      name: name.trim() || 'My Plan',
-      days: [],
-      archived: false,
-      ...(mode === 'weekday' ? { mode: 'weekday' } : {}),
-    };
-    setStore(s => ({ ...s, schedules: [...s.schedules, newSch] }));
-    go({ name: 'schedule-edit', scheduleId: newSch.id });
+    const sch = LB.buildPlanSkeleton({
+      name, type: type || 'cycle', presetKey, customCount,
+      weekdays: weekdaysSel, mesoWeeks: mesoOn ? mesoWeeks : null,
+    });
+    setStore(s => ({ ...s, schedules: [...s.schedules, sch] }));
+    go({ name: 'schedule-edit', scheduleId: sch.id });
+  };
+  // Power-user escape: skip the walkthrough and start with an empty cycle plan
+  // (identical to the old quick-create), landing straight in the editor.
+  const skip = () => {
+    const sch = { id: LB.uid(), name: name.trim() || 'My Plan', days: [], archived: false };
+    setStore(s => ({ ...s, schedules: [...s.schedules, sch] }));
+    go({ name: 'schedule-edit', scheduleId: sch.id });
   };
 
-  return (
-    <Screen>
-      <TopBar title="New plan" onBack={() => go({ name: 'plan' })} />
-      <div style={{ padding: '22px 22px', display: 'flex', flexDirection: 'column', gap: 22 }}>
-        <div data-tour="schedule-name">
-          <Field label="Plan name">
-            <TextInput value={name} onChange={v => setName(v.toUpperCase())} placeholder="e.g. YEEZUSCREW" autoFocus />
-          </Field>
-        </div>
-
-        <Field label="Type">
-          <div data-tour="schedule-mode" style={{ display: 'flex', gap: 0, background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 4, padding: 3 }}>
-            {[
-              { key: 'cycle',   label: 'Cycle',    sub: 'repeating N-day cycle' },
-              { key: 'weekday', label: 'Weekdays', sub: 'fixed days of the week' },
-            ].map(m => (
-              <button key={m.key} onClick={() => setMode(m.key)} style={{
-                flex: 1, padding: '10px 8px', border: 'none', borderRadius: 4, cursor: 'pointer',
-                background: mode === m.key ? UI.bgRaised : 'transparent',
-                color: mode === m.key ? UI.ink : UI.inkFaint,
-                fontFamily: UI.fontUi, fontSize: 12, fontWeight: mode === m.key ? 600 : 400,
-                letterSpacing: '0.06em', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
-              }}>
-                <span>{m.label}</span>
-                <span className="micro" style={{ color: mode === m.key ? UI.inkFaint : UI.inkGhost, fontStyle: 'normal', textTransform: 'none', letterSpacing: 0, fontSize: 10 }}>{m.sub}</span>
-              </button>
-            ))}
-          </div>
-        </Field>
-
-        <Btn onClick={create} disabled={!name.trim()} style={{ opacity: name.trim() ? 1 : 0.4 }}>
-          Create plan →
-        </Btn>
-      </div>
-    </Screen>
+  // Rich option row: icon chip · label + explainer · (badge and/or check).
+  const optRow = ({ key, icon, label, sub, active, badge, onClick }) => (
+    <button key={key} onClick={onClick} style={{
+      width: '100%', display: 'flex', alignItems: 'center', gap: 12, textAlign: 'left',
+      padding: '12px 14px', borderRadius: 6, cursor: 'pointer',
+      background: active ? 'rgba(var(--accent-rgb),0.10)' : UI.bgInset,
+      border: `1px solid ${active ? 'var(--accent)' : UI.hairStrong}`,
+      WebkitTapHighlightColor: 'transparent', transition: 'border-color 0.12s, background 0.12s',
+    }}>
+      <span style={{
+        width: 40, height: 40, borderRadius: 6, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+        background: active ? 'rgba(var(--accent-rgb),0.16)' : UI.bgRaised,
+        border: `0.5px solid ${active ? 'rgba(var(--accent-rgb),0.4)' : UI.hair}`,
+      }}><i className={`fa-solid ${icon}`} style={{ fontSize: 16, color: active ? 'var(--accent)' : UI.inkFaint }} /></span>
+      <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
+        <span style={{ fontSize: 14, fontWeight: 600, color: active ? 'var(--accent)' : UI.ink, fontFamily: UI.fontUi }}>{label}</span>
+        {sub && <span className="micro" style={{ color: UI.inkFaint, textTransform: 'none', letterSpacing: '0.02em', fontWeight: 400, lineHeight: 1.35 }}>{sub}</span>}
+      </span>
+      {badge && <span className="num" style={{ flexShrink: 0, fontSize: 11, padding: '3px 7px', borderRadius: 4, color: active ? 'var(--accent)' : UI.inkSoft, background: active ? 'rgba(var(--accent-rgb),0.12)' : UI.bgRaised, border: `0.5px solid ${active ? 'rgba(var(--accent-rgb),0.35)' : UI.hair}` }}>{badge}</span>}
+      {!badge && active && <i className="fa-solid fa-circle-check" style={{ flexShrink: 0, fontSize: 17, color: 'var(--accent)' }} />}
+    </button>
   );
+
+  let body;
+  if (step === 'name') {
+    body = <TextInput value={name} onChange={v => setName(v.toUpperCase())} placeholder="e.g. YEEZUSCREW" autoFocus />;
+  } else if (step === 'type') {
+    body = <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {[['cycle', 'Cycle', 'fa-repeat', 'A repeating rotation (Day 1, 2, 3...). Advances by date, rest days included.'],
+        ['weekday', 'Weekdays', 'fa-calendar-days', 'Fixed days of the week (e.g. Mon/Wed/Fri). Skips the days between.'],
+        ['flex', 'Flexible', 'fa-shuffle', 'A rotation that only moves when you actually train or skip, never pushed by the calendar.']]
+        .map(([val, label, icon, sub]) => optRow({ key: val, icon, label, sub, active: type === val, onClick: () => { setType(val); goNext({ type: val }); } }))}
+    </div>;
+  } else if (step === 'split') {
+    body = <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {[['full3', 'Full Body', 'fa-user', '3 days', 'Every session trains the whole body. Great for 2 to 4 days a week.'],
+        ['ul4', 'Upper / Lower', 'fa-table-columns', '4 days', 'Alternate upper- and lower-body days.'],
+        ['ppl3', 'Push / Pull / Legs', 'fa-layer-group', '3 days', 'Push, then pull, then legs. One round per week.'],
+        ['ppl6', 'Push / Pull / Legs x2', 'fa-layer-group', '6 days', 'PPL twice through for higher frequency.']]
+        .map(([val, label, icon, badge, sub]) => optRow({ key: val, icon, label, sub, badge, active: presetKey === val, onClick: () => { setPresetKey(val); goNext(); } }))}
+      {optRow({ key: 'custom', icon: 'fa-sliders', label: 'Custom', sub: 'Choose how many days and set them up yourself.', active: presetKey === 'custom', onClick: () => setPresetKey('custom') })}
+      {presetKey === 'custom' && (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginTop: 6, padding: '6px 4px' }}>
+          <span className="micro" style={{ color: UI.inkFaint }}>How many days</span>
+          <Stepper value={customCount} onChange={v => setCustomCount(Math.min(8, Math.max(1, Math.round(v))))} step={1} min={1} suffix=" days" />
+        </div>
+      )}
+    </div>;
+  } else if (step === 'weekdays') {
+    body = <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
+      {WEEKDAYS.map((w, i) => {
+        const on = weekdaysSel.includes(i);
+        return <button key={w} onClick={() => setWeekdaysSel(on ? weekdaysSel.filter(x => x !== i) : [...weekdaysSel, i])}
+          style={{ padding: '12px 6px', borderRadius: 6, cursor: 'pointer', textAlign: 'center', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600,
+            background: on ? 'rgba(var(--accent-rgb),0.12)' : UI.bgInset, color: on ? 'var(--accent)' : UI.inkFaint,
+            border: `1px solid ${on ? 'var(--accent)' : UI.hairStrong}`, WebkitTapHighlightColor: 'transparent' }}>{w}</button>;
+      })}
+    </div>;
+  } else if (step === 'meso') {
+    body = <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {optRow({ key: 'standard', icon: 'fa-infinity', label: 'Standard plan', sub: 'Open-ended. Train it as long as you like.', active: !mesoOn, onClick: () => setMesoOn(false) })}
+      {optRow({ key: 'meso', icon: 'fa-chart-line', label: 'Mesocycle', sub: 'A fixed block with an intensity ramp and a deload at the end.', active: mesoOn, onClick: () => setMesoOn(true) })}
+      {mesoOn && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 6 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '6px 4px' }}>
+            <span className="micro" style={{ color: UI.inkFaint }}>How many weeks</span>
+            <Stepper value={mesoWeeks} onChange={v => setMesoWeeks(Math.min(8, Math.max(4, Math.round(v))))} step={1} min={4} suffix=" wk" />
+          </div>
+          <div className="micro" style={{ color: UI.inkFaint, textTransform: 'none', letterSpacing: '0.02em', fontWeight: 400, lineHeight: 1.5 }}>
+            Intensity ramps from 3 RIR down to 0 across the block, then a deload. Fine-tune the RIR under the plan's Options later.
+          </div>
+        </div>
+      )}
+    </div>;
+  }
+
+  const isFinal = step === 'meso';
+  const needsNext = step === 'name' || step === 'weekdays' || (step === 'split' && presetKey === 'custom');
+  const canNext = step === 'name' ? !!name.trim() : step === 'weekdays' ? weekdaysSel.length > 0 : true;
+  const overlayBase = { zIndex: 9998, background: 'rgba(0,0,0,0.74)', backdropFilter: 'blur(14px)', WebkitBackdropFilter: 'blur(14px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 };
+  const overlayStyle = vp ? { ...overlayBase, position: 'fixed', left: 0, right: 0, top: vp.top, height: vp.height } : { ...overlayBase, position: 'fixed', inset: 0 };
+  return (
+    <div style={overlayStyle} onClick={e => { if (e.target === e.currentTarget) requestExit(); }}>
+      <div style={{ width: '100%', maxWidth: 360, maxHeight: '86vh', overflowY: 'auto', background: UI.bgRaised, border: `1px solid ${UI.hairStrong}`, borderRadius: 8, padding: '20px 20px 22px', display: 'flex', flexDirection: 'column', gap: 18, boxShadow: '0 32px 80px rgba(0,0,0,0.6)', animation: 'fadeUp 0.3s ease' }}>
+        {confirming ? (
+          <>
+            <div style={{ fontFamily: UI.fontDisplay, fontSize: 22, color: UI.ink, fontWeight: 700, textTransform: 'uppercase' }}>Discard plan?</div>
+            <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>Your new plan won't be created.</div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Btn kind="ghost" onClick={() => setConfirming(false)} style={{ flex: 1 }}>Keep editing</Btn>
+              <Btn onClick={exit} style={{ flex: 1, background: UI.danger, borderColor: 'rgba(var(--danger-rgb),0.6)' }}>Discard</Btn>
+            </div>
+          </>
+        ) : (
+          <>
+            {/* Segmented progress */}
+            <div style={{ display: 'flex', gap: 4 }}>
+              {applicable.map((s, i) => (
+                <div key={s} style={{ flex: 1, height: 4, borderRadius: 999, background: i <= idx ? 'var(--accent)' : UI.hairStrong, opacity: i <= idx ? 1 : 0.5, transition: 'background 0.2s, opacity 0.2s' }} />
+              ))}
+            </div>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10 }}>
+                <div style={{ fontFamily: UI.fontDisplay, fontSize: 23, color: 'var(--accent)', fontWeight: 400, textTransform: 'uppercase', letterSpacing: '0.02em', lineHeight: 1.1 }}>{PLAN_TITLES[step]}</div>
+                <span className="micro" style={{ color: UI.inkGhost, flexShrink: 0 }}>{idx + 1}/{applicable.length}</span>
+              </div>
+              <div style={{ fontSize: 12.5, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5, marginTop: 7 }}>{PLAN_INTRO[step]}</div>
+            </div>
+            {body}
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+              <button onClick={goBack} style={{ background: 'transparent', border: 'none', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13, cursor: 'pointer', padding: '8px 4px', WebkitTapHighlightColor: 'transparent' }}>{hasPrev ? '← Back' : 'Cancel'}</button>
+              <div style={{ flex: 1 }} />
+              {(step === 'name' || step === 'type') && <button onClick={skip} style={{ background: 'transparent', border: 'none', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13, cursor: 'pointer', padding: '8px 10px', WebkitTapHighlightColor: 'transparent' }}>Skip setup</button>}
+              {isFinal
+                ? <Btn onClick={create}>Create plan →</Btn>
+                : (needsNext && <Btn onClick={() => goNext()} disabled={!canNext} style={{ opacity: canNext ? 1 : 0.4 }}>Next</Btn>)}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Create new schedule (hosts the guided plan wizard) ──────────────
+function ScheduleNewScreen({ store, setStore, go, userId }) {
+  return <PlanWizard store={store} setStore={setStore} go={go} />;
 }
 
 Object.assign(window.Screens, { PlanScreen, PlanViewerScreen, ScheduleEditScreen, ScheduleNewScreen, ExercisePicker, DayTypePicker });
