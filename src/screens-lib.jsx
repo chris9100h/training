@@ -155,9 +155,12 @@ function LibraryScreen({ store, setStore, go, userId }) {
       const matchEquipment = filterEquipment.length === 0 ||
         (filterEquipment.includes('none') && !e.equipment) ||
         (e.equipment && filterEquipment.includes(e.equipment));
-      return matchSearch && matchTags && matchUnilateral && matchEquipment;
+      const matchRestCat = filterRestCats.length === 0 ||
+        (filterRestCats.includes('none') && !e.category) ||
+        (e.category && filterRestCats.includes(e.category));
+      return matchSearch && matchTags && matchUnilateral && matchEquipment && matchRestCat;
     }).sort((a, b) => a.name.localeCompare(b.name));
-  }, [systemDisplay, q, filterTags, filterUnilateral, filterEquipment]);
+  }, [systemDisplay, q, filterTags, filterUnilateral, filterEquipment, filterRestCats]);
 
   const allFilteredSelected = filtered.length > 0 && filtered.every(e => selected.has(e.id));
   const selectAll = () => setSelected(new Set(filtered.map(e => e.id)));

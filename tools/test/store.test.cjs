@@ -931,6 +931,20 @@ async function testAsync(name, fn) {
     assert.ok(row.id && row.id !== 'sys_x'); // fresh id, not the catalog id
     assert.strictEqual(row.progression_reps, null);
   });
+  test('systemExerciseToRow: category (rest-timer size) carries through / defaults null', () => {
+    const withCat = LB.systemExerciseToRow({ id: 'sys_sq', name: 'Back Squat', tags: ['Quads'], equipment: 'barbell_dual', category: 'big' });
+    assert.strictEqual(withCat.category, 'big'); // rest size copied so the duplicate gets a real rest time
+    const noCat = LB.systemExerciseToRow({ id: 'sys_n', name: 'X', tags: ['Chest'], equipment: 'machine' });
+    assert.strictEqual(noCat.category, null); // absent → null (falls back to default rest)
+  });
+  test('every SYSTEM_EXERCISES entry has a valid rest-timer category', () => {
+    const dbSandbox = { window: {} };
+    vm.createContext(dbSandbox);
+    vm.runInContext(fs.readFileSync(path.join(__dirname, '../../src/exercise-db.js'), 'utf8'), dbSandbox, { filename: 'exercise-db.js' });
+    const valid = new Set(['big', 'medium', 'small']);
+    const bad = (dbSandbox.window.SYSTEM_EXERCISES || []).filter(e => !valid.has(e.category));
+    assert.strictEqual(bad.length, 0, `entries without a valid category: ${bad.map(e => e.name).join(', ')}`);
+  });
   test('systemExerciseToRow: reps mode → no_weight_reps true; defaults when omitted', () => {
     const reps = LB.systemExerciseToRow({ id: 'sys_p', name: 'Push-Up', tags: ['Chest'], equipment: 'bodyweight', logMode: 'reps' });
     assert.strictEqual(reps.log_mode, 'reps');
