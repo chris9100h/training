@@ -2016,10 +2016,10 @@ function buildPlanSkeleton({ name, type, presetKey, customCount, customDays, wee
   } else {
     let types;
     if (presetKey === 'custom' || !preset) {
-      // Custom: use the per-day types the wizard collected; fall back to a plain
-      // count of FULL days if none were supplied.
+      // Custom: use the per-day types the wizard collected (an unpicked day is
+      // null → FULL); fall back to a plain count of FULL days if none supplied.
       types = (customDays && customDays.length)
-        ? customDays.slice()
+        ? customDays.map(t => t || 'FULL')
         : Array.from({ length: Math.max(1, Math.round(customCount || 1)) }, () => 'FULL');
     } else if (type === 'flex') {
       // Flex has no rest days (position advances only on a logged session/skip).

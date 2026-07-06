@@ -2877,8 +2877,9 @@ function PlanWizard({ store, setStore, go }) {
   const [type, setType] = useStateS(null);            // 'cycle' | 'weekday' | 'flex'
   const [presetKey, setPresetKey] = useStateS(null);  // SPLIT_PRESETS key | 'custom'
   const [customCount, setCustomCount] = useStateS(3);
-  const [customDays, setCustomDays] = useStateS(['FULL', 'FULL', 'FULL']); // per-day types for a Custom split
-  const setCustomN = (n) => { const c = Math.max(1, Math.round(n)); setCustomCount(c); setCustomDays(d => { const a = d.slice(0, c); while (a.length < c) a.push('FULL'); return a; }); };
+  const [customDays, setCustomDays] = useStateS([null, null, null]); // per-day types for a Custom split (null = not picked yet)
+  const setCustomN = (n) => { const c = Math.max(1, Math.round(n)); setCustomCount(c); setCustomDays(d => { const a = d.slice(0, c); while (a.length < c) a.push(null); return a; }); };
+  const [dayFlash, setDayFlash] = useStateS(false); // brief checkmark when a day type is picked
   const [weekdaysSel, setWeekdaysSel] = useStateS([]); // weekday indices 0..6
   const [mesoOn, setMesoOn] = useStateS(false);
   const [mesoWeeks, setMesoWeeks] = useStateS(6);
@@ -2887,7 +2888,7 @@ function PlanWizard({ store, setStore, go }) {
   const [creatingDayType, setCreatingDayType] = useStateS(false); // "+ Custom" name entry on a day-type step
   const [newDayTypeName, setNewDayTypeName] = useStateS('');
   const [deleteTypeArm, setDeleteTypeArm] = useStateS(null); // custom type armed for a two-tap delete
-  useEffectS(() => { setCreatingDayType(false); setNewDayTypeName(''); setDeleteTypeArm(null); }, [step]); // reset on step change
+  useEffectS(() => { setCreatingDayType(false); setNewDayTypeName(''); setDeleteTypeArm(null); setDayFlash(false); }, [step]); // reset on step change
 
   // Keep the card in the VISIBLE viewport so the Name step's input isn't hidden
   // behind the on-screen keyboard (same trick as ExerciseWizard).
@@ -2992,8 +2993,8 @@ function PlanWizard({ store, setStore, go }) {
       {optRow({ key: 'custom', icon: 'fa-sliders', label: 'Custom', sub: 'Choose how many days, then set each one up.', active: presetKey === 'custom', onClick: () => { setPresetKey('custom'); if (type === 'weekday') goNext({ presetKey: 'custom' }); } })}
       {presetKey === 'custom' && type !== 'weekday' && (
         <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '2px 4px' }}>
-            <span className="micro" style={{ color: UI.inkFaint }}>How many days</span>
+          <div style={{ textAlign: 'center' }}>
+            <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>Days</div>
             <Stepper value={customCount} onChange={setCustomN} step={1} min={1} />
           </div>
           <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, textAlign: 'center', lineHeight: 1.4 }}>{LB.frequencyHint(customCount)}</div>
@@ -3010,7 +3011,15 @@ function PlanWizard({ store, setStore, go }) {
     // name entry that persists to store.customDayTypes (same as DayTypePicker).
     const stdTypes = type === 'flex' ? STANDARD_DAY_TYPES.filter(t => t !== 'REST') : STANDARD_DAY_TYPES;
     const customTypes = store.customDayTypes || [];
-    const pickDay = (dt) => { setCustomDays(d => d.map((x, i) => i === dayIdx ? dt : x)); goNext(); };
+    // Pick a day's type, flash a checkmark, then advance, so the day-to-day
+    // jump is noticeable. The guard stops a double-tap during the flash from
+    // firing two goNext calls (which would skip a day).
+    const pickDay = (dt) => {
+      if (dayFlash) return;
+      setCustomDays(d => d.map((x, i) => i === dayIdx ? dt : x));
+      setDayFlash(true);
+      setTimeout(() => { setDayFlash(false); goNext(); }, 320);
+    };
     const createDayType = () => {
       const nm = newDayTypeName.trim().toUpperCase();
       if (!nm) return;
@@ -3089,22 +3098,23 @@ function PlanWizard({ store, setStore, go }) {
       {optRow({ key: 'standard', icon: 'fa-infinity', label: 'Standard plan', sub: 'Open-ended. Train it as long as you like.', active: !mesoOn, onClick: () => setMesoOn(false) })}
       {optRow({ key: 'meso', icon: 'fa-chart-line', label: 'Mesocycle', sub: 'A fixed block with an intensity ramp and a deload at the end.', active: mesoOn, onClick: () => setMesoOn(true) })}
       {mesoOn && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 6 }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '6px 4px' }}>
-            <span className="micro" style={{ color: UI.inkFaint }}>How many weeks</span>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 6 }}>
+          <div style={{ textAlign: 'center' }}>
+            <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>Weeks</div>
             <Stepper value={mesoWeeks} onChange={v => setMesoWeeks(Math.min(8, Math.max(4, Math.round(v))))} step={1} min={4} />
           </div>
+          <div className="knurl" style={{ margin: '2px 0' }} />
           <div style={{ display: 'flex', gap: 10 }}>
             <div style={{ flex: 1, textAlign: 'center' }}>
-              <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>START RIR</div>
+              <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>Start RIR</div>
               <Stepper value={mesoStartRir} onChange={v => setMesoStartRir(Math.min(3, Math.max(0, Math.round(v))))} step={1} min={0} />
             </div>
             <div style={{ flex: 1, textAlign: 'center' }}>
-              <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>END RIR</div>
+              <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>End RIR</div>
               <Stepper value={mesoEndRir} onChange={v => setMesoEndRir(Math.min(0, Math.max(-3, Math.round(v))))} step={1} min={-3} />
             </div>
           </div>
-          <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 4, textAlign: 'center', lineHeight: 1.5 }}>{LB.mesoTaperPreview(mesoWeeks, mesoStartRir, mesoEndRir)}</div>
+          <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 2, textAlign: 'center', lineHeight: 1.5 }}>{LB.mesoTaperPreview(mesoWeeks, mesoStartRir, mesoEndRir)}</div>
         </div>
       )}
     </div>;
@@ -3155,6 +3165,13 @@ function PlanWizard({ store, setStore, go }) {
           </>
         )}
       </div>
+      {dayFlash && (
+        <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}>
+          <div style={{ width: 92, height: 92, borderRadius: '50%', background: 'rgba(var(--accent-rgb),0.18)', border: '1px solid var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 12px 40px rgba(0,0,0,0.5)', animation: 'fadeUp 0.2s ease' }}>
+            <i className="fa-solid fa-check" style={{ fontSize: 42, color: 'var(--accent)' }} />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
