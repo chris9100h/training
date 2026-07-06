@@ -1684,15 +1684,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
                 </div>
                 {hasGoal && (() => {
                   const spw = draft.sessions_per_week;
-                  const hint = spw >= 50 ? '50 sessions. You win.' :
-                               spw > 30  ? 'At this point the gym should pay you.' :
-                               spw > 20  ? 'Dude. Really?' :
-                               spw > 14  ? '…okay, you\'re serious about this.' :
-                               spw > 10  ? 'Calm down, dude.' :
-                               spw > 7   ? 'Oh, an overachiever. We see you.' :
-                               spw >= 4  ? 'Solid.' :
-                               spw >= 2  ? 'That\'s a start.' :
-                                           'Better than nothing.';
+                  const hint = LB.frequencyHint(spw);
                   return (
                     <div style={{ marginTop: 4 }}>
                       <Stepper value={spw} step={1} min={1} max={50}
@@ -1764,12 +1756,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
                         );
                       })()}
                       <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 10, textAlign: 'center', lineHeight: 1.5 }}>
-                        {(() => {
-                          const sr = draft.mesocycle_start_rir ?? 3;
-                          const er = draft.mesocycle_end_rir ?? 0;
-                          const peak = er < 0 ? `${er} RIR (0 RIR + ${-er} partial${er === -1 ? '' : 's'}/set) 🔥` : `${er} RIR`;
-                          return `Week 1 = ${sr} RIR · Week ${draft.mesocycle_weeks} = ${peak} · then deload`;
-                        })()}
+                        {LB.mesoTaperPreview(draft.mesocycle_weeks, draft.mesocycle_start_rir ?? 3, draft.mesocycle_end_rir ?? 0)}
                       </div>
                       {mesoCompletions > 0 && (
                         <button onClick={() => setStore(s => ({
@@ -2867,7 +2854,9 @@ const PLAN_INTRO = {
   meso: 'A mesocycle runs a fixed number of weeks with a planned intensity ramp (RIR), then a deload. Leave it off for a normal, open-ended plan.',
 };
 function planStepApplicable(step, type) {
-  if (step === 'split') return type === 'cycle' || type === 'flex';
+  // Split applies to every type (weekday maps it onto the chosen days too);
+  // the weekday-picker step is weekday-only.
+  if (step === 'split') return type != null;
   if (step === 'weekdays') return type === 'weekday';
   return true;
 }
@@ -2887,9 +2876,13 @@ function PlanWizard({ store, setStore, go }) {
   const [type, setType] = useStateS(null);            // 'cycle' | 'weekday' | 'flex'
   const [presetKey, setPresetKey] = useStateS(null);  // SPLIT_PRESETS key | 'custom'
   const [customCount, setCustomCount] = useStateS(3);
+  const [customDays, setCustomDays] = useStateS(['FULL', 'FULL', 'FULL']); // per-day types for a Custom split
+  const setCustomN = (n) => { const c = Math.max(1, Math.round(n)); setCustomCount(c); setCustomDays(d => { const a = d.slice(0, c); while (a.length < c) a.push('FULL'); return a; }); };
   const [weekdaysSel, setWeekdaysSel] = useStateS([]); // weekday indices 0..6
   const [mesoOn, setMesoOn] = useStateS(false);
   const [mesoWeeks, setMesoWeeks] = useStateS(6);
+  const [mesoStartRir, setMesoStartRir] = useStateS(3);
+  const [mesoEndRir, setMesoEndRir] = useStateS(0);
 
   // Keep the card in the VISIBLE viewport so the Name step's input isn't hidden
   // behind the on-screen keyboard (same trick as ExerciseWizard).
@@ -2921,8 +2914,10 @@ function PlanWizard({ store, setStore, go }) {
 
   const create = () => {
     const sch = LB.buildPlanSkeleton({
-      name, type: type || 'cycle', presetKey, customCount,
-      weekdays: weekdaysSel, mesoWeeks: mesoOn ? mesoWeeks : null,
+      name, type: type || 'cycle', presetKey, customCount, customDays, weekdays: weekdaysSel,
+      mesoWeeks: mesoOn ? mesoWeeks : null,
+      mesoStartRir: mesoOn ? mesoStartRir : null,
+      mesoEndRir: mesoOn ? mesoEndRir : null,
     });
     setStore(s => ({ ...s, schedules: [...s.schedules, sch] }));
     go({ name: 'schedule-edit', scheduleId: sch.id });
@@ -2975,23 +2970,51 @@ function PlanWizard({ store, setStore, go }) {
         ['ppl3', 'Push / Pull / Legs', 'fa-layer-group', '3 days', 'Push, then pull, then legs. One round per week.'],
         ['ppl6', 'Push / Pull / Legs x2', 'fa-layer-group', '6 days', 'PPL twice through for higher frequency.']]
         .map(([val, label, icon, badge, sub]) => optRow({ key: val, icon, label, sub, badge, active: presetKey === val, onClick: () => { setPresetKey(val); goNext(); } }))}
-      {optRow({ key: 'custom', icon: 'fa-sliders', label: 'Custom', sub: 'Choose how many days and set them up yourself.', active: presetKey === 'custom', onClick: () => setPresetKey('custom') })}
-      {presetKey === 'custom' && (
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginTop: 6, padding: '6px 4px' }}>
-          <span className="micro" style={{ color: UI.inkFaint }}>How many days</span>
-          <Stepper value={customCount} onChange={v => setCustomCount(Math.min(8, Math.max(1, Math.round(v))))} step={1} min={1} suffix=" days" />
-        </div>
-      )}
+      {optRow({ key: 'custom', icon: 'fa-sliders', label: 'Custom', sub: 'Choose how many days and set each one up.', active: presetKey === 'custom', onClick: () => { setPresetKey('custom'); if (type === 'weekday') goNext(); } })}
+      {presetKey === 'custom' && type !== 'weekday' && (() => {
+        // Flex has no rest days, so REST isn't offered there.
+        const chipTypes = type === 'flex' ? STANDARD_DAY_TYPES.filter(t => t !== 'REST') : STANDARD_DAY_TYPES;
+        return (
+          <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '2px 4px' }}>
+              <span className="micro" style={{ color: UI.inkFaint }}>How many days</span>
+              <Stepper value={customCount} onChange={setCustomN} step={1} min={1} />
+            </div>
+            <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, textAlign: 'center', lineHeight: 1.4 }}>{LB.frequencyHint(customCount)}</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 2 }}>
+              {customDays.map((t, n) => (
+                <div key={n} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span className="num" style={{ flexShrink: 0, width: 26, fontSize: 11, color: UI.inkFaint }}>D{n + 1}</span>
+                  <div style={{ display: 'flex', gap: 4, overflowX: 'auto', flex: 1, paddingBottom: 2, WebkitOverflowScrolling: 'touch' }}>
+                    {chipTypes.map(dt => {
+                      const on = t === dt;
+                      return <button key={dt} onClick={() => setCustomDays(d => d.map((x, i) => i === n ? dt : x))}
+                        style={{ flexShrink: 0, padding: '6px 9px', borderRadius: 4, cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 10, fontWeight: 600, letterSpacing: '0.04em',
+                          background: on ? 'rgba(var(--accent-rgb),0.14)' : UI.bgInset, color: on ? 'var(--accent)' : UI.inkFaint,
+                          border: `1px solid ${on ? 'var(--accent)' : UI.hairStrong}`, WebkitTapHighlightColor: 'transparent' }}>{dt}</button>;
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
     </div>;
   } else if (step === 'weekdays') {
-    body = <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
-      {WEEKDAYS.map((w, i) => {
-        const on = weekdaysSel.includes(i);
-        return <button key={w} onClick={() => setWeekdaysSel(on ? weekdaysSel.filter(x => x !== i) : [...weekdaysSel, i])}
-          style={{ padding: '12px 6px', borderRadius: 6, cursor: 'pointer', textAlign: 'center', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600,
-            background: on ? 'rgba(var(--accent-rgb),0.12)' : UI.bgInset, color: on ? 'var(--accent)' : UI.inkFaint,
-            border: `1px solid ${on ? 'var(--accent)' : UI.hairStrong}`, WebkitTapHighlightColor: 'transparent' }}>{w}</button>;
-      })}
+    body = <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
+        {WEEKDAYS.map((w, i) => {
+          const on = weekdaysSel.includes(i);
+          return <button key={w} onClick={() => setWeekdaysSel(on ? weekdaysSel.filter(x => x !== i) : [...weekdaysSel, i])}
+            style={{ padding: '12px 6px', borderRadius: 6, cursor: 'pointer', textAlign: 'center', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600,
+              background: on ? 'rgba(var(--accent-rgb),0.12)' : UI.bgInset, color: on ? 'var(--accent)' : UI.inkFaint,
+              border: `1px solid ${on ? 'var(--accent)' : UI.hairStrong}`, WebkitTapHighlightColor: 'transparent' }}>{w}</button>;
+        })}
+      </div>
+      <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, textAlign: 'center', lineHeight: 1.4 }}>
+        {presetKey && presetKey !== 'custom' ? 'Your split fills the days you pick, in order.' : 'Each day starts as Full Body. Set the type per day in the editor.'}
+      </div>
     </div>;
   } else if (step === 'meso') {
     body = <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -3001,11 +3024,19 @@ function PlanWizard({ store, setStore, go }) {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 6 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '6px 4px' }}>
             <span className="micro" style={{ color: UI.inkFaint }}>How many weeks</span>
-            <Stepper value={mesoWeeks} onChange={v => setMesoWeeks(Math.min(8, Math.max(4, Math.round(v))))} step={1} min={4} suffix=" wk" />
+            <Stepper value={mesoWeeks} onChange={v => setMesoWeeks(Math.min(8, Math.max(4, Math.round(v))))} step={1} min={4} />
           </div>
-          <div className="micro" style={{ color: UI.inkFaint, textTransform: 'none', letterSpacing: '0.02em', fontWeight: 400, lineHeight: 1.5 }}>
-            Intensity ramps from 3 RIR down to 0 across the block, then a deload. Fine-tune the RIR under the plan's Options later.
+          <div style={{ display: 'flex', gap: 10 }}>
+            <div style={{ flex: 1, textAlign: 'center' }}>
+              <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>START RIR</div>
+              <Stepper value={mesoStartRir} onChange={v => setMesoStartRir(Math.min(3, Math.max(0, Math.round(v))))} step={1} min={0} />
+            </div>
+            <div style={{ flex: 1, textAlign: 'center' }}>
+              <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>END RIR</div>
+              <Stepper value={mesoEndRir} onChange={v => setMesoEndRir(Math.min(0, Math.max(-3, Math.round(v))))} step={1} min={-3} />
+            </div>
           </div>
+          <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 4, textAlign: 'center', lineHeight: 1.5 }}>{LB.mesoTaperPreview(mesoWeeks, mesoStartRir, mesoEndRir)}</div>
         </div>
       )}
     </div>;

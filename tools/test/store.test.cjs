@@ -964,47 +964,65 @@ async function testAsync(name, fn) {
   });
 
   // ── buildPlanSkeleton (plan setup wizard → new schedule object) ─────────────
-  test('buildPlanSkeleton: cycle PPL3 → 3 typed days, no mode/flex', () => {
-    const sch = LB.buildPlanSkeleton({ name: 'test', type: 'cycle', presetKey: 'ppl3' });
-    assert.strictEqual(sch.name, 'test');
-    assert.strictEqual(sch.archived, false);
+  test('buildPlanSkeleton: cycle PPL x2 → REST closes each block', () => {
+    const sch = LB.buildPlanSkeleton({ name: 'test', type: 'cycle', presetKey: 'ppl6' });
     assert.strictEqual(sch.mode, undefined);       // cycle has no mode
     assert.strictEqual(sch.is_flex, undefined);
-    assert.deepStrictEqual([...sch.days.map(d => d.name)], ['PUSH', 'PULL', 'LEGS']);
+    assert.deepStrictEqual([...sch.days.map(d => d.name)], ['PUSH', 'PULL', 'LEGS', 'REST', 'PUSH', 'PULL', 'LEGS', 'REST']);
     assert.ok(sch.days.every(d => d.id && Array.isArray(d.items) && d.items.length === 0));
     assert.ok(sch.days[0].id !== sch.days[1].id); // fresh unique ids
-    assert.strictEqual(sch.days[0].weekday, undefined); // cycle days carry no weekday
   });
-  test('buildPlanSkeleton: weekday → mode + sorted weekday indices, FULL days', () => {
-    const sch = LB.buildPlanSkeleton({ name: 'wk', type: 'weekday', weekdays: [4, 0, 2] });
+  test('buildPlanSkeleton: cycle PPL x1 → one block + trailing REST', () => {
+    const sch = LB.buildPlanSkeleton({ name: 't', type: 'cycle', presetKey: 'ppl3' });
+    assert.deepStrictEqual([...sch.days.map(d => d.name)], ['PUSH', 'PULL', 'LEGS', 'REST']);
+  });
+  test('buildPlanSkeleton: flex has NO rest days (block repeated flat)', () => {
+    const sch = LB.buildPlanSkeleton({ name: 'fl', type: 'flex', presetKey: 'ppl6' });
+    assert.strictEqual(sch.is_flex, true);
+    assert.strictEqual(sch.sessions_per_week, 6);  // 6 training days, no rest
+    assert.strictEqual(sch.mode, undefined);
+    assert.deepStrictEqual([...sch.days.map(d => d.name)], ['PUSH', 'PULL', 'LEGS', 'PUSH', 'PULL', 'LEGS']);
+    assert.ok(!sch.days.some(d => d.name === 'REST'));
+  });
+  test('buildPlanSkeleton: weekday with a split → rotation maps onto sorted days', () => {
+    const sch = LB.buildPlanSkeleton({ name: 'wk', type: 'weekday', presetKey: 'ppl3', weekdays: [4, 0, 2] });
     assert.strictEqual(sch.mode, 'weekday');
     assert.deepStrictEqual([...sch.days.map(d => d.weekday)], [0, 2, 4]); // sorted
-    assert.ok(sch.days.every(d => d.name === 'FULL'));
+    assert.deepStrictEqual([...sch.days.map(d => d.name)], ['PUSH', 'PULL', 'LEGS']); // rotation in order
     assert.strictEqual(sch.is_flex, undefined);
   });
-  test('buildPlanSkeleton: flex → is_flex + sessions_per_week = day count, no mode', () => {
-    const sch = LB.buildPlanSkeleton({ name: 'fl', type: 'flex', presetKey: 'ul4' });
-    assert.strictEqual(sch.is_flex, true);
-    assert.strictEqual(sch.sessions_per_week, 4);
-    assert.strictEqual(sch.mode, undefined);
-    assert.deepStrictEqual([...sch.days.map(d => d.name)], ['UPPER', 'LOWER', 'UPPER', 'LOWER']);
-  });
-  test('buildPlanSkeleton: custom count → N FULL days (min 1)', () => {
-    const sch = LB.buildPlanSkeleton({ name: 'c', type: 'cycle', presetKey: 'custom', customCount: 5 });
-    assert.strictEqual(sch.days.length, 5);
+  test('buildPlanSkeleton: weekday custom (no preset) → FULL days', () => {
+    const sch = LB.buildPlanSkeleton({ name: 'wk', type: 'weekday', weekdays: [0, 2] });
     assert.ok(sch.days.every(d => d.name === 'FULL'));
-    const one = LB.buildPlanSkeleton({ name: 'c', type: 'cycle', presetKey: 'custom', customCount: 0 });
-    assert.strictEqual(one.days.length, 1); // floored to at least 1
   });
-  test('buildPlanSkeleton: meso weeks set when provided, absent otherwise', () => {
-    const meso = LB.buildPlanSkeleton({ name: 'm', type: 'cycle', presetKey: 'full3', mesoWeeks: 6 });
-    assert.strictEqual(meso.mesocycle_weeks, 6);
+  test('buildPlanSkeleton: custom uses explicit per-day types (customDays wins)', () => {
+    const sch = LB.buildPlanSkeleton({ name: 'c', type: 'cycle', presetKey: 'custom', customCount: 4, customDays: ['PUSH', 'PULL', 'REST', 'LEGS'] });
+    assert.deepStrictEqual([...sch.days.map(d => d.name)], ['PUSH', 'PULL', 'REST', 'LEGS']);
+    const fallback = LB.buildPlanSkeleton({ name: 'c', type: 'cycle', presetKey: 'custom', customCount: 5 });
+    assert.strictEqual(fallback.days.length, 5);   // no customDays → count of FULL
+    assert.ok(fallback.days.every(d => d.name === 'FULL'));
+    const one = LB.buildPlanSkeleton({ name: 'c', type: 'cycle', presetKey: 'custom', customCount: 0 });
+    assert.strictEqual(one.days.length, 1);        // floored to at least 1
+  });
+  test('buildPlanSkeleton: meso weeks + RIR set when provided, absent otherwise', () => {
+    const meso = LB.buildPlanSkeleton({ name: 'm', type: 'cycle', presetKey: 'full3', mesoWeeks: 8, mesoStartRir: 3, mesoEndRir: -1 });
+    assert.strictEqual(meso.mesocycle_weeks, 8);
+    assert.strictEqual(meso.mesocycle_start_rir, 3);
+    assert.strictEqual(meso.mesocycle_end_rir, -1);
     const noMeso = LB.buildPlanSkeleton({ name: 'm', type: 'cycle', presetKey: 'full3' });
     assert.strictEqual(noMeso.mesocycle_weeks, undefined);
+    assert.strictEqual(noMeso.mesocycle_start_rir, undefined);
   });
   test('buildPlanSkeleton: name falls back to "My Plan" when blank', () => {
     const sch = LB.buildPlanSkeleton({ name: '   ', type: 'cycle', presetKey: 'full3' });
     assert.strictEqual(sch.name, 'My Plan');
+  });
+  test('frequencyHint / mesoTaperPreview render sensible text', () => {
+    assert.strictEqual(LB.frequencyHint(3), 'That\'s a start.');
+    assert.strictEqual(LB.frequencyHint(5), 'Solid.');
+    assert.ok(LB.frequencyHint(25).length > 0);
+    assert.ok(LB.mesoTaperPreview(6, 3, 0).includes('Week 1 = 3 RIR'));
+    assert.ok(LB.mesoTaperPreview(6, 3, -2).includes('partials/set')); // negative end → partials note
   });
 
   console.log(`\n${pass} passed, ${fail} failed`);
