@@ -26,6 +26,7 @@ function LibraryScreen({ store, setStore, go, userId }) {
   const [selecting, setSelecting] = useStateL(false);
   const [selected, setSelected] = useStateL(new Set());
   const [addedSysIds, setAddedSysIds] = useStateL(new Set()); // sys_ ids added to the library this session (for row feedback)
+  const [dbSeed, setDbSeed] = useStateL(null); // catalog entry being reviewed via "Check & Add" (opens the review sheet)
   const [filterTags, setFilterTags] = useStateL(_lib.filterTags);
   const [filterRestCats, setFilterRestCats] = useStateL(_lib.filterRestCats);
   const [filterUnilateral, setFilterUnilateral] = useStateL(_lib.filterUnilateral);
@@ -149,10 +150,6 @@ function LibraryScreen({ store, setStore, go, userId }) {
       return matchSearch && matchTags && matchUnilateral && matchEquipment;
     }).sort((a, b) => a.name.localeCompare(b.name));
   }, [systemDisplay, q, filterTags, filterUnilateral, filterEquipment]);
-  const addSystemExercise = (sysEx) => {
-    setStore(s => ({ ...s, exercises: [...s.exercises, LB.systemExerciseToRow(sysEx)] }));
-    setAddedSysIds(prev => new Set(prev).add(sysEx.id));
-  };
 
   const allFilteredSelected = filtered.length > 0 && filtered.every(e => selected.has(e.id));
   const selectAll = () => setSelected(new Set(filtered.map(e => e.id)));
@@ -218,7 +215,7 @@ function LibraryScreen({ store, setStore, go, userId }) {
       <div style={{ padding: '18px 22px', paddingBottom: selecting ? 80 : 22, display: 'flex', flexDirection: 'column', gap: 8 }}>
         {tab === 'db' && (
           <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5, marginBottom: 4 }}>
-            Browse the exercise catalog and add any to your library — added exercises become fully editable and can go straight into your plans.
+            Browse the catalog and tap Check &amp; Add — review or tweak the exercise first, then it becomes your own editable copy, ready for your plans.
           </div>
         )}
         {(tab === 'all' || tab === 'db') && (() => {
@@ -340,7 +337,7 @@ function LibraryScreen({ store, setStore, go, userId }) {
           const justAdded = addedSysIds.has(e.id);
           return (
             <React.Fragment key={e.id}>
-            <div onClick={() => { if (!inLib) addSystemExercise(e._sys); }} style={{
+            <div onClick={() => { if (!inLib) setDbSeed(e._sys); }} style={{
               display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12,
               padding: '13px 0', cursor: inLib ? 'default' : 'pointer',
             }}>
@@ -357,12 +354,12 @@ function LibraryScreen({ store, setStore, go, userId }) {
                   <i className="fa-solid fa-check" /> {justAdded ? 'Added' : 'In library'}
                 </span>
               ) : (
-                <button onClick={ev => { ev.stopPropagation(); addSystemExercise(e._sys); }} style={{
+                <button onClick={ev => { ev.stopPropagation(); setDbSeed(e._sys); }} style={{
                   flexShrink: 0, background: UI.goldFaint, border: `1px solid ${UI.goldSoft}`, borderRadius: 4,
                   padding: '7px 13px', cursor: 'pointer', color: UI.gold, fontFamily: UI.fontUi, fontSize: 11,
                   fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: 5,
-                  WebkitTapHighlightColor: 'transparent',
-                }}><i className="fa-solid fa-plus" /> Add</button>
+                  WebkitTapHighlightColor: 'transparent', whiteSpace: 'nowrap',
+                }}><i className="fa-solid fa-plus" /> Check &amp; Add</button>
               )}
             </div>
             {fi < dbFiltered.length - 1 && <div className="knurl" />}
@@ -410,6 +407,7 @@ function LibraryScreen({ store, setStore, go, userId }) {
       )}
 
       {creating && <ExerciseCreator onClose={() => setCreating(false)} store={store} setStore={setStore} initialTags={filterTags} />}
+      {dbSeed && <ExerciseCreator seed={dbSeed} onClose={() => setDbSeed(null)} store={store} setStore={setStore} onCreated={() => setAddedSysIds(prev => new Set(prev).add(dbSeed.id))} />}
 
       {filtersOpen && (
         <Sheet open={true} onClose={() => setFiltersOpen(false)} title="Filter">
@@ -884,24 +882,28 @@ function ExerciseWizard({ step, setStep, onClose, isDirty, store,
   );
 }
 
-function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = '', initialTags = [] }) {
+function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = '', initialTags = [], seed = null }) {
   const [confirmEl, confirm] = useConfirm();
-  const [name, setName] = useStateL(initialName);
-  const [selectedTags, setSelectedTags] = useStateL(initialTags);
-  const [category, setCategory] = useStateL(null);
-  const [movementType, setMovementType] = useStateL('bilateral');
-  const [logMode, setLogMode] = useStateL('weight');
+  // `seed` = a system-catalog entry ({ name, tags, equipment, movement, logMode })
+  // being duplicated via "Check & Add": every field is pre-filled and the wizard
+  // is skipped, dropping straight into the review sheet so the user can tweak
+  // anything before committing. A plain "New exercise" has no seed.
+  const [name, setName] = useStateL(seed ? (seed.name || '') : initialName);
+  const [selectedTags, setSelectedTags] = useStateL(seed ? (seed.tags ? [...seed.tags] : []) : initialTags);
+  const [category, setCategory] = useStateL(seed?.category ?? null);
+  const [movementType, setMovementType] = useStateL(seed ? (seed.movement || 'bilateral') : 'bilateral');
+  const [logMode, setLogMode] = useStateL(seed ? (seed.logMode || 'weight') : 'weight');
   const [pullBodyweight, setPullBodyweight] = useStateL(false);
-  const [logModeTouched, setLogModeTouched] = useStateL(false);
+  const [logModeTouched, setLogModeTouched] = useStateL(!!seed); // seed pre-sets the mode → don't auto-override
   const pickLogMode = (m) => { setLogModeTouched(true); setLogMode(m); };
-  const [equipment, setEquipment] = useStateL('barbell_dual');
+  const [equipment, setEquipment] = useStateL(seed ? (seed.equipment || 'no_equipment') : 'barbell_dual');
   const [note, setNote] = useStateL('');
   const [showSizeInfo, setShowSizeInfo] = useStateL(false);
   const [showBodyweightHint, setShowBodyweightHint] = useStateL(false);
   // The creation wizard runs for a fresh exercise, starting at the first field
   // not already seeded (a "create from search" opens with initialName/initialTags).
-  // null = wizard finished → the review/edit sheet renders.
-  const [wizardStep, setWizardStep] = useStateL(!initialName.trim() ? 'name' : (initialTags.length ? 'size' : 'muscle'));
+  // A catalog seed skips the wizard entirely. null = wizard done → review sheet.
+  const [wizardStep, setWizardStep] = useStateL(seed ? null : (!initialName.trim() ? 'name' : (initialTags.length ? 'size' : 'muscle')));
   // Wizard equipment pick: activate the Health tab silently — the info sheet is
   // z-100 and would hide behind the z-9998 wizard; the pull toggle in the review
   // form covers the rest.
@@ -952,7 +954,7 @@ function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = ''
         logMode={logMode} pickLogMode={pickLogMode}
       />
     ) : (
-    <Sheet open={true} onClose={requestClose} title="New exercise">
+    <Sheet open={true} onClose={requestClose} title={seed ? 'Review & add' : 'New exercise'}>
       <div onPointerDown={blurKbOnControlTap} style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
         <Field label="Name">
           <TextInput value={name} onChange={v => setName(v.toUpperCase())} placeholder="e.g. BENCH PRESS" />
@@ -1017,7 +1019,7 @@ function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = ''
             }}
           />
         </Field>
-        <Btn onClick={save} style={{ opacity: name.trim() ? 1 : 0.4 }} disabled={!name.trim()}>Create</Btn>
+        <Btn onClick={save} style={{ opacity: name.trim() ? 1 : 0.4 }} disabled={!name.trim()}>{seed ? 'Add to library' : 'Create'}</Btn>
       </div>
     </Sheet>
     )}

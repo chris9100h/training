@@ -1740,11 +1740,13 @@ function shouldPullBodyweight(ex) {
   return ex?.equipment === 'bodyweight' && ex?.pull_bodyweight === true;
 }
 
-// Turn a read-only system-catalog entry (window.SYSTEM_EXERCISES: compact shape
-// { movement, logMode }) into an editable store-shape user exercise with a fresh
-// id — the "duplicate into my library" action for the Exercise DB tab. The result
-// is exactly what syncStore's exercises upsert expects (Migration 0139 columns
-// included), so a copy is an ordinary user exercise from here on.
+// Normalize a read-only system-catalog entry (window.SYSTEM_EXERCISES: compact
+// shape { movement, logMode }) into an editable store-shape user exercise with a
+// fresh id. The interactive "Check & Add" flow instead seeds ExerciseCreator's
+// review sheet (so the user can tweak before committing, and the form's save()
+// builds the row); this is the programmatic normalizer for any direct-duplication
+// path (e.g. the planned plan-editor picker). The result matches syncStore's
+// exercises upsert (Migration 0139 columns included).
 function systemExerciseToRow(sysEx) {
   const mv = sysEx.movement || 'bilateral';
   const lm = sysEx.logMode || 'weight';
