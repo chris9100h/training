@@ -390,6 +390,14 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
     }) || null;
   }, [date, store.statusPeriods]);
   const dayMode = date === todayISO ? (store.statusMode ?? null) : (dayStatusPeriod?.mode || null);
+  // Flex plans have no programmed rest days: the Training|Rest choice lives on
+  // the Health-tab header (HealthDateStrip) and persists to the log's
+  // targetsSnap.dayType. Here it only matters so a macro-less save can't wipe an
+  // existing override off the day's log.
+  const flexActive = useMemoH(
+    () => LB.isFlexPlan((store.schedules || []).find(s => s.id === store.activeScheduleId)),
+    [store.schedules, store.activeScheduleId]
+  );
   const empty = { weight: '', steps: '', protein: '', carbs: '', fat: '', fiber: '', calories: '', water: '', note: '', offPlanNote: '' };
   const [form, setForm] = useStateH(empty);
   // Net-carb mode: adds a fiber field; calories become (P + C − fiber)×4 + F×9.
@@ -520,14 +528,19 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
     const protein = healthInt(form.protein), carbs = healthInt(form.carbs), fat = healthInt(form.fat);
     const fiber = netCarbs ? healthInt(form.fiber) : null;
     const calories = form.calories !== '' ? healthInt(form.calories) : autoCals;
-    // Today = treat as training if planned (assume the user will train).
-    // Past days = only training if a session was actually done.
-    const isTraining = date === LB.todayISO()
-      ? !!LB.plannedTrainingDay(store, date)
-      : LB.isLoggedTrainingDay(store.sessions, date);
-    const { adherence, targetsSnap } = dayMode
+    // Single source of truth for the day type: a logged session wins, then a
+    // flex Training|Rest override (set from the header), then cycle/week's
+    // planned-day assumption (flex defaults to rest).
+    const isTraining = LB.isTrainingDayForDate(store, date);
+    let { adherence, targetsSnap } = dayMode
       ? { adherence: null, targetsSnap: null }
       : LB.dailyLogAdherence({ protein, carbs, fat }, targets, isTraining);
+    // Don't let a macro-less save (incomplete macros / no macro targets) wipe an
+    // existing flex day-type override off the log.
+    if (!dayMode && flexActive && !targetsSnap) {
+      const dt = existing?.targetsSnap?.dayType;
+      if (dt === 'training' || dt === 'rest') targetsSnap = { dayType: dt };
+    }
     const savedCoachFields = {};
     coachFields.forEach(f => {
       const v = toResponse(f, coachForm[f.key]);
@@ -1102,14 +1115,57 @@ function HealthWeekCard({ stats, dragHandle, targets, tf, setTf }) {
 
 // ─── Date strip (current week Mon–Sun) ────────────────────────────────────────
 
-function HealthDateStrip({ store, selectedDate, onSelect, onLog }) {
+function HealthDateStrip({ store, setStore, selectedDate, onSelect, onLog, targets }) {
   const today = LB.todayISO();
   const anchor = selectedDate || today;
   const anchorDate = new Date(anchor + 'T12:00:00');
   const jsDow = anchorDate.getDay();
   const monday = healthShiftISO(anchor, -((jsDow === 0 ? 7 : jsDow) - 1));
   const days = Array.from({ length: 7 }, (_, i) => healthShiftISO(monday, i));
-  const loggedSet = new Set((store.dailyLogs || []).map(l => l.date));
+  // A day counts as "logged" (gold marker) only if it carries real content — a
+  // flex day-type-only override log (just targetsSnap.dayType) must not light up.
+  const hasLogContent = l => l && (
+    l.weight != null || l.steps != null || l.protein != null || l.carbs != null ||
+    l.fat != null || l.fiber != null || l.waterMl != null || l.calories != null ||
+    (l.note && l.note.trim()) || (l.offPlanNote && l.offPlanNote.trim()) ||
+    (l.coachFields && Object.keys(l.coachFields).length)
+  );
+  const loggedSet = new Set((store.dailyLogs || []).filter(hasLogContent).map(l => l.date));
+
+  // Flex Training|Rest override for the selected day (header slider). Only in the
+  // user's own tab (setStore present, not the read-only coach view), only for a
+  // flex plan, and hidden when the day is under a status mode or already has a
+  // logged session (training is then settled).
+  const flexActive = LB.isFlexPlan((store.schedules || []).find(s => s.id === store.activeScheduleId));
+  const selDayStatus = flexActive ? (selectedDate === today
+    ? (store.statusMode ?? null)
+    : ((store.statusPeriods || []).find(p => {
+        const ts = new Date(selectedDate + 'T12:00:00').getTime();
+        const start = new Date(p.startedAt).getTime();
+        const end = p.endedAt ? new Date(p.endedAt).getTime() : Date.now();
+        return ts >= start && ts <= end;
+      })?.mode || null)) : null;
+  const showDayType = !!setStore && flexActive && !selDayStatus && !LB.isLoggedTrainingDay(store.sessions, selectedDate);
+  const selDayType = LB.isTrainingDayForDate(store, selectedDate) ? 'training' : 'rest';
+  const setFlexDayType = (type) => {
+    const existing = (store.dailyLogs || []).find(l => l.date === selectedDate);
+    // Rest is the flex default: a content-less override log is just dropped.
+    if (type === 'rest' && (!existing || !hasLogContent(existing))) {
+      if (existing) setStore(s => ({ ...s, dailyLogs: (s.dailyLogs || []).filter(l => l.date !== selectedDate) }));
+      return;
+    }
+    const isTraining = type === 'training';
+    const dayTarget = LB.dayTargetFromMacros(targets, isTraining);
+    const hasMacros = existing && existing.protein != null && existing.carbs != null && existing.fat != null;
+    const adherence = (dayTarget && hasMacros)
+      ? LB.macroAdherence({ protein: existing.protein, carbs: existing.carbs, fat: existing.fat }, dayTarget) : null;
+    const targetsSnap = dayTarget ? { ...dayTarget, dayType: type } : { dayType: type };
+    const now = new Date().toISOString();
+    const log = existing
+      ? { ...existing, adherence, targetsSnap, updatedAt: now }
+      : { id: LB.uid(), date: selectedDate, weight: null, steps: null, calories: null, protein: null, carbs: null, fat: null, fiber: null, waterMl: null, note: null, offPlanNote: null, coachFields: null, adherence, targetsSnap, updatedAt: now, createdAt: now };
+    setStore(s => ({ ...s, dailyLogs: [log, ...(s.dailyLogs || []).filter(l => l.date !== selectedDate)] }));
+  };
   const sunday = days[6];
   // Month label for the week — spans two months at a boundary (e.g. "MAY – JUN").
   const mLabel = iso => new Date(iso + 'T12:00:00').toLocaleDateString('en-GB', { month: 'short' }).toUpperCase();
@@ -1180,6 +1236,25 @@ function HealthDateStrip({ store, selectedDate, onSelect, onLog }) {
             style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', opacity: 0, cursor: 'pointer' }}
           />
         </div>
+        <div style={{ flex: 1 }} />
+        {showDayType && (
+          <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `1px solid ${UI.hairStrong}`, height: 34, flexShrink: 0 }}>
+            {[{ type: 'training', icon: 'fa-dumbbell', label: 'Training day' }, { type: 'rest', icon: 'fa-bed', label: 'Rest day' }].map(({ type, icon, label }, i) => {
+              const active = selDayType === type;
+              return (
+                <button key={type} onClick={() => setFlexDayType(type)} title={label} style={{
+                  padding: '0 14px', border: 'none', borderLeft: i > 0 ? `1px solid ${UI.hairStrong}` : 'none',
+                  background: active ? 'var(--accent)' : 'transparent',
+                  color: active ? '#0a0805' : UI.inkFaint, cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  WebkitTapHighlightColor: 'transparent', transition: 'background 0.15s',
+                }}>
+                  <i className={`fa-solid ${icon}`} style={{ fontSize: 13 }} />
+                </button>
+              );
+            })}
+          </div>
+        )}
         <div style={{ flex: 1 }} />
         {onLog && <button data-tour="health-log-btn" onClick={onLog} style={{
           height: 34, borderRadius: 4, border: 'none',
@@ -1425,38 +1500,45 @@ function HealthScreen({ store, setStore, go, userId }) {
     if (targets !== cachedTargets) setCachedTargets(targets);
   }, [targets]);
 
-  // Retroactive heal: if a past planned training day has no session, its daily log
-  // was saved with training targets but those macros were never earned — correct to rest.
+  // Two-sided retroactive heal for a past day's saved day type:
+  //  • DOWNGRADE training → rest: a training-tagged day with NO logged session
+  //    was never earned. For cycle/week that's a planned training day skipped
+  //    ("earn it"); for flex it's a proactive Training that wasn't trained.
+  //  • UPGRADE rest → training (all modes): a rest-tagged day that DID get a
+  //    logged session (incl. a freestyle session on a rest day) is really a
+  //    training day, so its target/adherence should follow.
+  // The two sets are disjoint (training+no-session vs rest+session), so a rewrite
+  // always flips the day out of both conditions — no oscillation. Adherence is
+  // recomputed against the new target; the dayType is corrected even when macro
+  // targets are absent (keeps the health strip/indicator honest).
+  const flexActive = useMemoH(
+    () => LB.isFlexPlan((store.schedules || []).find(s => s.id === store.activeScheduleId)),
+    [store.schedules, store.activeScheduleId]
+  );
   useEffectH(() => {
-    if (!effectiveTargets) return;
     const today = LB.todayISO();
     const dayOf = s => s.date ? s.date.slice(0, 10) : null;
     const sessionDates = new Set((store.sessions || []).filter(s => s.ended).map(dayOf).filter(Boolean));
+    const trainingTarget = LB.dayTargetFromMacros(effectiveTargets, true);
     const restTarget = LB.dayTargetFromMacros(effectiveTargets, false);
-    if (!restTarget) return;
-    const toHeal = (store.dailyLogs || []).filter(l =>
-      l.date < today &&
-      l.targetsSnap?.dayType === 'training' &&
-      !sessionDates.has(l.date) &&
-      !!LB.plannedTrainingDay(store, l.date)
-    );
-    if (!toHeal.length) return;
-    const healDates = new Set(toHeal.map(l => l.date));
-    const restSnap = { ...restTarget, dayType: 'rest' };
-    // Only rewrite logs whose adherence actually resolves — a null result would
-    // leave the log unchanged but still spawn a fresh array, re-triggering this
-    // effect forever (dailyLogs is a dep). Skip setStore when nothing changed.
     let changed = false;
     const nextLogs = (store.dailyLogs || []).map(l => {
-      if (!healDates.has(l.date)) return l;
-      const adherence = LB.macroAdherence({ protein: l.protein, carbs: l.carbs, fat: l.fat }, restTarget);
-      if (adherence == null) return l;
+      if (l.date >= today) return l;
+      const dt = l.targetsSnap?.dayType;
+      const hasSession = sessionDates.has(l.date);
+      let newType = null;
+      if (dt === 'training' && !hasSession && (flexActive || !!LB.plannedTrainingDay(store, l.date))) newType = 'rest';
+      else if (dt === 'rest' && hasSession) newType = 'training';
+      if (!newType) return l;
+      const target = newType === 'training' ? trainingTarget : restTarget;
+      const adherence = target ? LB.macroAdherence({ protein: l.protein, carbs: l.carbs, fat: l.fat }, target) : null;
+      const targetsSnap = target ? { ...target, dayType: newType } : { dayType: newType };
       changed = true;
-      return { ...l, adherence, targetsSnap: restSnap, updatedAt: new Date().toISOString() };
+      return { ...l, adherence, targetsSnap, updatedAt: new Date().toISOString() };
     });
     if (!changed) return;
     setStore(s => ({ ...s, dailyLogs: nextLogs }));
-  }, [store.sessions, store.dailyLogs, effectiveTargets]);
+  }, [store.sessions, store.dailyLogs, effectiveTargets, flexActive]);
 
   // Windowed series builder for the charts. The x-range is tightened to the
   // actual logged days inside the window (not the full timeframe) so a sparse
@@ -1593,7 +1675,8 @@ function HealthScreen({ store, setStore, go, userId }) {
   const dayLabel = selectedDate === today ? 'Today' : healthFmtDate(selectedDate, { weekday: 'short', day: 'numeric', month: 'short' });
   const trainedSelected = LB.isLoggedTrainingDay(store.sessions, selectedDate);
   const cardioSelected = (store.cardioLogs || []).some(l => l.date === selectedDate);
-  const dayIsTraining = trainedSelected || (selectedDate >= today && !!LB.plannedTrainingDay(store, selectedDate));
+  // Honors a flex plan's explicit Training|Rest override (via targetsSnap.dayType).
+  const dayIsTraining = LB.isTrainingDayForDate(store, selectedDate);
   const selectedDayTarget = LB.dayTargetFromMacros(effectiveTargets, dayIsTraining);
   const cardEls = {
     week: <HealthWeekCard stats={weekStats} dragHandle={handle} targets={effectiveTargets} tf={tf} setTf={setTf} />,
@@ -1679,7 +1762,7 @@ function HealthScreen({ store, setStore, go, userId }) {
         </div>
       )}
       <div ref={captureRef}>
-        <HealthDateStrip store={store} selectedDate={selectedDate} onSelect={setSelectedDate} onLog={() => setLogOpen(true)} />
+        <HealthDateStrip store={store} setStore={setStore} selectedDate={selectedDate} onSelect={setSelectedDate} onLog={() => setLogOpen(true)} targets={effectiveTargets} />
 
         {/* max-width cap so charts don't blow up on iPad. Reorderable cards —
            drag the grip to reorder; order persists per device. */}

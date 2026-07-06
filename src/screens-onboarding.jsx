@@ -30,18 +30,9 @@ window.TOURS = {
       placement: 'bottom',
     },
     {
-      route: 'schedule-new',
-      target: 'schedule-name',
-      title: 'Name your plan',
-      body: 'Something memorable — PUSH PULL LEGS, UPPER LOWER, or whatever fits your training style.',
-      placement: 'bottom',
-    },
-    {
-      route: 'schedule-new',
-      target: 'schedule-mode',
-      title: 'Cycle or Weekdays?',
-      body: 'Cycle: rotate Day 1 → 2 → 3 → back to 1, regardless of calendar day.\nWeekdays: assign sessions to specific days like Mon, Wed, Fri.',
-      placement: 'bottom',
+      target: null,
+      title: 'A guided setup',
+      body: 'Tap + and a quick walkthrough builds your plan with you: name it, pick how it moves (Cycle, Weekdays, or Flexible), choose a training split, and optionally run it as a mesocycle. It lays out the days, then you fill in the exercises.',
     },
     {
       target: null,

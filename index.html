@@ -177,6 +177,14 @@
   }
   .intensity-glow { animation: intensityGlow 2.5s ease-in-out infinite; }
 
+  /* Beyond-failure meso summary: the whole Options box smoulders when the end
+     RIR dips below 0 (hot orange inner, red outer, same palette as the ember
+     watermark) so a "hell cycle" reads at a glance. */
+  @keyframes hellGlow {
+    0%, 100% { box-shadow: 0 0 8px rgba(255,120,40,0.40), 0 0 24px rgba(210,45,0,0.22); }
+    50%      { box-shadow: 0 0 18px rgba(255,120,40,0.78), 0 0 42px rgba(210,45,0,0.42); }
+  }
+
   /* Beyond-failure meso: the RIR watermark literally catches fire as the
      target dips below 0. Everything is driven by inline custom props set per
      intensity (−1 → −3): --ember-op (base opacity), --ember-blur (glow

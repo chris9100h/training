@@ -1135,21 +1135,12 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
   const currentCycleNum = dayCount > 0 ? Math.floor(todayN / dayCount) : 0;
 
   // For versioned cycle plans with cycleOffset, "today's array index" in the strip
-  // differs from dayIdx (plan position). Without offset they're always equal.
-  const todayStripIdx = (() => {
-    if (!sch?.versions?.length || weekdayMode || isFlex) return dayIdx;
-    const todayISO = LB.todayISO();
-    const cn = LB.getCycleNumForDate(sch, todayISO);
-    if (!cn || cn <= 0) return dayIdx;
-    const cs = LB.getCycleStartForNum(sch, cn);
-    if (!cs) return dayIdx;
-    cs.setHours(12, 0, 0, 0);
-    const csStr = LB.fmtISO(cs);
-    const activeV = sch.versions.find(v => v.validFrom <= csStr) || sch.versions[sch.versions.length - 1];
-    const vOffset = activeV?.cycleOffset || 0;
-    const daysFromCycleStart = Math.round((new Date(todayISO + 'T12:00:00') - cs) / 86400000);
-    return Math.max(0, Math.min(daysFromCycleStart + vOffset, (sch.days?.length || 1) - 1));
-  })();
+  // differs from dayIdx (plan position). Extracted + unit-tested in store.js; the
+  // clamp uses the day count of the version active on today's cycle (what the
+  // strip renders), not sch.days — which holds the newest version and can be a
+  // future-scheduled one with a different day count (that mismatch used to put
+  // today's marker on the wrong cell).
+  const todayStripIdx = LB.todayCycleStripIndex(sch, LB.todayISO(), dayIdx);
 
   const [weekOffset, setWeekOffset] = useState(0);
   const [selectedWd, setSelectedWd] = useState(todayWd);

@@ -157,6 +157,9 @@ function PlanScreen({ store, setStore, go, userId }) {
           const mesoSt = s.mesocycle_weeks ? (store.mesoStates || []).find(m => m.scheduleId === s.id) : null;
           const mesoCompletions = mesoSt?.completions ?? 0;
           const mesoPending = mesoSt?.startDate && new Date(mesoSt.startDate + 'T12:00:00') > new Date();
+          // Current plan revision (newest version = highest number, like the editor's
+          // version bar). Only shown once a plan has actually been re-versioned (≥2).
+          const verCount = s.versions?.length || 0;
           return isActive ? (
             <BracketFrame key={s.id} gold onClick={() => go({ name: 'plan-view', scheduleId: s.id, fromPlan: true })} style={{ cursor: 'pointer', overflow: 'hidden' }}>
               {s.mesocycle_weeks && (
@@ -179,6 +182,11 @@ function PlanScreen({ store, setStore, go, userId }) {
                   {!mesoPending && mesoCompletions > 0 && (
                     <span style={{ fontFamily: UI.fontNum, fontSize: 10, fontWeight: 700, color: UI.gold, background: 'rgba(var(--accent-rgb),0.15)', borderRadius: 4, padding: '2px 6px', letterSpacing: '0.05em' }}>
                       MESO {mesoCompletions + 1}
+                    </span>
+                  )}
+                  {verCount >= 2 && (
+                    <span style={{ fontFamily: UI.fontNum, fontSize: 10, fontWeight: 700, color: UI.gold, background: UI.goldFaint, border: `1px solid ${UI.goldSoft}`, borderRadius: 4, padding: '2px 6px', letterSpacing: '0.05em' }}>
+                      V{verCount}
                     </span>
                   )}
                   <Pill gold>active</Pill>
@@ -210,11 +218,18 @@ function PlanScreen({ store, setStore, go, userId }) {
             <Frame key={s.id} onClick={() => go({ name: 'plan-view', scheduleId: s.id, fromPlan: true })} style={{ cursor: 'pointer', padding: '14px 16px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
                 <div className="display" style={{ fontSize: 20, color: UI.ink, lineHeight: 1.1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name}</div>
-                {!mesoPending && mesoCompletions > 0 && (
-                  <span style={{ fontFamily: UI.fontNum, fontSize: 10, fontWeight: 700, color: UI.inkSoft, background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 4, padding: '2px 6px', letterSpacing: '0.05em', flexShrink: 0, marginLeft: 8 }}>
-                    MESO {mesoCompletions + 1}
-                  </span>
-                )}
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0, marginLeft: 8 }}>
+                  {!mesoPending && mesoCompletions > 0 && (
+                    <span style={{ fontFamily: UI.fontNum, fontSize: 10, fontWeight: 700, color: UI.inkSoft, background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 4, padding: '2px 6px', letterSpacing: '0.05em' }}>
+                      MESO {mesoCompletions + 1}
+                    </span>
+                  )}
+                  {verCount >= 2 && (
+                    <span style={{ fontFamily: UI.fontNum, fontSize: 10, fontWeight: 700, color: UI.inkSoft, background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 4, padding: '2px 6px', letterSpacing: '0.05em' }}>
+                      V{verCount}
+                    </span>
+                  )}
+                </div>
               </div>
               <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>
                 {planDescriptor(s)}
@@ -1349,15 +1364,23 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
             parts.push('Flex');
             if (draft.sessions_per_week != null) parts.push(`${draft.sessions_per_week}×/wk`);
           }
-          if (draft.mesocycle_weeks != null) parts.push(`${draft.mesocycle_weeks}wk meso`);
+          const hasMeso = draft.mesocycle_weeks != null;
+          const sr = draft.mesocycle_start_rir ?? 3;
+          const er = draft.mesocycle_end_rir ?? 0;
+          const hellCycle = hasMeso && er < 0; // beyond-failure end → the box smoulders
+          if (hasMeso) {
+            parts.push(`${draft.mesocycle_weeks}wk meso`);
+            parts.push(`${sr}→${er} RIR${er < 0 ? ' 🔥' : ''}`);
+          }
           const summary = parts.join(' · ');
           return (
             <button onClick={() => setModifiersOpen(true)} style={{
               display: 'flex', alignItems: 'center', gap: 12, width: '100%',
-              background: summary ? `rgba(var(--accent-rgb),0.06)` : UI.bgRaised,
-              border: `1px solid ${summary ? UI.goldSoft : UI.hairStrong}`,
+              background: hellCycle ? 'rgba(210,45,0,0.10)' : (summary ? `rgba(var(--accent-rgb),0.06)` : UI.bgRaised),
+              border: `1px solid ${hellCycle ? 'rgba(255,120,40,0.6)' : (summary ? UI.goldSoft : UI.hairStrong)}`,
               borderRadius: 6, padding: '13px 16px', cursor: 'pointer', textAlign: 'left',
               WebkitTapHighlightColor: 'transparent',
+              ...(hellCycle ? { animation: 'hellGlow 2s ease-in-out infinite' } : {}),
             }}>
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={summary ? UI.gold : UI.inkSoft} strokeWidth="1.8" strokeLinecap="round">
                 <line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/>
@@ -1367,7 +1390,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
               </svg>
               <div style={{ flex: 1, textAlign: 'center' }}>
                 <div style={{ fontFamily: UI.fontUi, fontSize: 11, letterSpacing: '0.08em', textTransform: 'uppercase', color: summary ? UI.gold : UI.inkSoft, fontWeight: 600, marginBottom: summary ? 3 : 0 }}>Options</div>
-                {summary && <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.ink }}>{summary}</div>}
+                {summary && <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: hellCycle ? 'rgba(255,140,70,1)' : UI.ink, fontWeight: hellCycle ? 600 : 400 }}>{summary}</div>}
               </div>
               <svg width="8" height="14" viewBox="0 0 8 14" fill="none" stroke={UI.inkFaint} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M2 2l5 5-5 5"/>
@@ -1684,15 +1707,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
                 </div>
                 {hasGoal && (() => {
                   const spw = draft.sessions_per_week;
-                  const hint = spw >= 50 ? '50 sessions. You win.' :
-                               spw > 30  ? 'At this point the gym should pay you.' :
-                               spw > 20  ? 'Dude. Really?' :
-                               spw > 14  ? '…okay, you\'re serious about this.' :
-                               spw > 10  ? 'Calm down, dude.' :
-                               spw > 7   ? 'Oh, an overachiever. We see you.' :
-                               spw >= 4  ? 'Solid.' :
-                               spw >= 2  ? 'That\'s a start.' :
-                                           'Better than nothing.';
+                  const hint = LB.frequencyHint(spw);
                   return (
                     <div style={{ marginTop: 4 }}>
                       <Stepper value={spw} step={1} min={1} max={50}
@@ -1764,12 +1779,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
                         );
                       })()}
                       <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 10, textAlign: 'center', lineHeight: 1.5 }}>
-                        {(() => {
-                          const sr = draft.mesocycle_start_rir ?? 3;
-                          const er = draft.mesocycle_end_rir ?? 0;
-                          const peak = er < 0 ? `${er} RIR (0 RIR + ${-er} partial${er === -1 ? '' : 's'}/set) 🔥` : `${er} RIR`;
-                          return `Week 1 = ${sr} RIR · Week ${draft.mesocycle_weeks} = ${peak} · then deload`;
-                        })()}
+                        {LB.mesoTaperPreview(draft.mesocycle_weeks, draft.mesocycle_start_rir ?? 3, draft.mesocycle_end_rir ?? 0)}
                       </div>
                       {mesoCompletions > 0 && (
                         <button onClick={() => setStore(s => ({
@@ -2849,59 +2859,464 @@ function ExercisePicker({ store, setStore, onClose, onPick, singleSelect = false
   );
 }
 
-// ─── Create new schedule ─────────────────────────────────────────────
-function ScheduleNewScreen({ store, setStore, go, userId }) {
-  const [name, setName] = useStateS('');
-  const [mode, setMode] = useStateS('cycle');
+// ─── Plan setup wizard ───────────────────────────────────────────────
+// Guided, beginner-friendly scaffold for a new plan: name → type → split (or
+// weekdays) → mesocycle, one decision per step with a plain-language explainer.
+// Mirrors the exercise-creation wizard's look (overlay card, segmented
+// progress, optRow rows). Builds only the skeleton via LB.buildPlanSkeleton,
+// then hands off to the editor. The shell is duplicated from ExerciseWizard
+// (screens-lib.jsx) on purpose, so the shipped exercise wizard stays untouched
+// and this one can grow its own stepper/reveal steps.
+const PLAN_TITLES = { name: 'Name your plan', type: 'Plan type', split: 'Training split', weekdays: 'Training days', meso: 'Mesocycle' };
+const PLAN_INTRO = {
+  name: 'Give your plan a name. It shows up in your planner and history, and you can rename it any time.',
+  type: 'How should your plan move forward? This decides when the next day comes up.',
+  split: "Pick a split and we'll lay out the days for you. You can rename, reorder, or add days next.",
+  weekdays: 'Which days of the week do you train? Tap all that apply.',
+  meso: 'A mesocycle runs a fixed number of weeks with a planned intensity ramp (RIR), then a deload. Leave it off for a normal, open-ended plan.',
+};
+// Ordered wizard steps for the current picks. Split applies to every type
+// (weekday maps its rotation onto the chosen days too); the weekday-picker step
+// is weekday-only; a Custom cycle/flex split expands into one day-type picker
+// per day (day0..dayN-1) so the user sets each day up in its own step.
+function computePlanSteps({ type, presetKey, customCount, weekdayCount }) {
+  const steps = ['name', 'type'];
+  if (type != null) {
+    steps.push('split');
+    if (type === 'weekday') steps.push('weekdays');
+    if (presetKey === 'custom') {
+      // One day-type picker per day: cycle/flex use the count stepper, weekday
+      // uses however many weekdays were picked (after the weekdays step).
+      const n = type === 'weekday' ? (weekdayCount || 0) : Math.max(1, Math.round(customCount || 1));
+      for (let i = 0; i < n; i++) steps.push('day' + i);
+    }
+  }
+  steps.push('meso');
+  return steps;
+}
 
-  const create = () => {
-    const newSch = {
-      id: LB.uid(),
-      name: name.trim() || 'My Plan',
-      days: [],
-      archived: false,
-      ...(mode === 'weekday' ? { mode: 'weekday' } : {}),
-    };
-    setStore(s => ({ ...s, schedules: [...s.schedules, newSch] }));
-    go({ name: 'schedule-edit', scheduleId: newSch.id });
+function PlanWizard({ store, setStore, go }) {
+  const [step, setStep] = useStateS('name');
+  const [confirming, setConfirming] = useStateS(false);
+  const [name, setName] = useStateS('');
+  const [type, setType] = useStateS(null);            // 'cycle' | 'weekday' | 'flex'
+  const [presetKey, setPresetKey] = useStateS(null);  // SPLIT_PRESETS key | 'custom'
+  const [customCount, setCustomCount] = useStateS(3);
+  const [customDays, setCustomDays] = useStateS([null, null, null]); // per-day types for a Custom split (null = not picked yet)
+  const setCustomN = (n) => { const c = Math.max(1, Math.round(n)); setCustomCount(c); setCustomDays(d => { const a = d.slice(0, c); while (a.length < c) a.push(null); return a; }); };
+  const [dayFlash, setDayFlash] = useStateS(false); // brief checkmark when a day type is picked
+  const [weekdaysSel, setWeekdaysSel] = useStateS([]); // weekday indices 0..6
+  const [mesoOn, setMesoOn] = useStateS(false);
+  const [mesoWeeks, setMesoWeeks] = useStateS(6);
+  const [mesoStartRir, setMesoStartRir] = useStateS(3);
+  const [mesoEndRir, setMesoEndRir] = useStateS(0);
+  const [creatingDayType, setCreatingDayType] = useStateS(false); // "+ Custom" name entry on a day-type step
+  const [newDayTypeName, setNewDayTypeName] = useStateS('');
+  const [deleteTypeArm, setDeleteTypeArm] = useStateS(null); // custom type armed for a two-tap delete
+  const [importOpen, setImportOpen] = useStateS(false); // day-import view on a day step
+  const [importPlan, setImportPlan] = useStateS(null); // chosen source plan/group (step 2 of the import)
+  const [importSel, setImportSel] = useStateS(new Set()); // selected source-day keys to import
+  useEffectS(() => { setCreatingDayType(false); setNewDayTypeName(''); setDeleteTypeArm(null); setDayFlash(false); setImportOpen(false); setImportPlan(null); setImportSel(new Set()); }, [step]); // reset on step change
+
+  // Importable sources grouped for a two-step pick (plan → day), so a user with
+  // many plans doesn't face one giant flat list. Each group is a plan (its days
+  // that have exercises) plus a "Templates" group (saved workout templates).
+  const importGroups = useMemoS(() => {
+    const groups = [];
+    for (const s of store.schedules) {
+      const days = (s.days || [])
+        .map(d => ({ key: s.id + ':' + d.id, name: d.name, items: (d.items || []).filter(it => LB.findExercise(store, it.exId)) }))
+        .filter(d => d.items.length);
+      if (days.length) groups.push({ id: s.id, name: s.name, days });
+    }
+    const tplDays = (store.workoutTemplates || []).map(t => ({
+      key: 'tpl:' + t.id, name: t.name,
+      items: (t.exercises || []).filter(it => LB.findExercise(store, it.exId))
+        .map(it => ({ exId: it.exId, sets: it.sets || 3, reps: it.reps ?? 8, ...(it.repsPerSet ? { repsPerSet: it.repsPerSet } : {}), ...(it.repsMax != null ? { repsMax: it.repsMax } : {}), ...(it.progressionOffset != null ? { progressionOffset: it.progressionOffset } : {}), ...(it.supersetGroup ? { supersetGroup: it.supersetGroup } : {}) })),
+    })).filter(t => t.items.length);
+    if (tplDays.length) groups.push({ id: '__tpl', name: 'Templates', days: tplDays });
+    return groups;
+  }, [store.schedules, store.workoutTemplates]);
+  // Deep-copy items and give supersets fresh group ids (see DayEditor.copyItemsFromDay).
+  const copyImportItems = (items) => {
+    const gid = {};
+    return normalizeSupersets(items).map(it => {
+      const next = { ...it };
+      if (it.supersetGroup) { gid[it.supersetGroup] = gid[it.supersetGroup] || LB.uid(); next.supersetGroup = gid[it.supersetGroup]; }
+      return next;
+    });
   };
 
-  return (
-    <Screen>
-      <TopBar title="New plan" onBack={() => go({ name: 'plan' })} />
-      <div style={{ padding: '22px 22px', display: 'flex', flexDirection: 'column', gap: 22 }}>
-        <div data-tour="schedule-name">
-          <Field label="Plan name">
-            <TextInput value={name} onChange={v => setName(v.toUpperCase())} placeholder="e.g. YEEZUSCREW" autoFocus />
-          </Field>
-        </div>
+  // Keep the card in the VISIBLE viewport so the Name step's input isn't hidden
+  // behind the on-screen keyboard (same trick as ExerciseWizard).
+  const [vp, setVp] = useStateS(null);
+  useEffectS(() => {
+    const v = typeof window !== 'undefined' ? window.visualViewport : null;
+    if (!v) return;
+    const on = () => setVp({ top: v.offsetTop, height: v.height });
+    on();
+    v.addEventListener('resize', on); v.addEventListener('scroll', on);
+    return () => { v.removeEventListener('resize', on); v.removeEventListener('scroll', on); };
+  }, []);
 
-        <Field label="Type">
-          <div data-tour="schedule-mode" style={{ display: 'flex', gap: 0, background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 4, padding: 3 }}>
-            {[
-              { key: 'cycle',   label: 'Cycle',    sub: 'repeating N-day cycle' },
-              { key: 'weekday', label: 'Weekdays', sub: 'fixed days of the week' },
-            ].map(m => (
-              <button key={m.key} onClick={() => setMode(m.key)} style={{
-                flex: 1, padding: '10px 8px', border: 'none', borderRadius: 4, cursor: 'pointer',
-                background: mode === m.key ? UI.bgRaised : 'transparent',
-                color: mode === m.key ? UI.ink : UI.inkFaint,
-                fontFamily: UI.fontUi, fontSize: 12, fontWeight: mode === m.key ? 600 : 400,
-                letterSpacing: '0.06em', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
-              }}>
-                <span>{m.label}</span>
-                <span className="micro" style={{ color: mode === m.key ? UI.inkFaint : UI.inkGhost, fontStyle: 'normal', textTransform: 'none', letterSpacing: 0, fontSize: 10 }}>{m.sub}</span>
-              </button>
-            ))}
-          </div>
-        </Field>
+  const isDirty = () => !!name.trim() || type !== null || presetKey !== null || weekdaysSel.length > 0 || mesoOn;
+  const exit = () => go({ name: 'plan' });
+  const stepArgs = { type, presetKey, customCount, weekdayCount: weekdaysSel.length };
+  const applicable = computePlanSteps(stepArgs);
+  const idx = applicable.indexOf(step);
+  const hasPrev = idx > 0;
+  // A pick (type / preset) can change which steps exist, so recompute the list
+  // with the new value synchronously (state hasn't flushed yet), like the
+  // exercise wizard's goNext override.
+  const goNext = (o = {}) => {
+    const list = computePlanSteps({ ...stepArgs, ...o });
+    const i = list.indexOf(step);
+    setStep(list[Math.min(i + 1, list.length - 1)]);
+  };
+  const goBack = () => {
+    if (idx > 0) setStep(applicable[idx - 1]);
+    else if (isDirty()) setConfirming(true);
+    else exit();
+  };
+  const requestExit = () => { if (isDirty()) setConfirming(true); else exit(); };
 
-        <Btn onClick={create} disabled={!name.trim()} style={{ opacity: name.trim() ? 1 : 0.4 }}>
-          Create plan →
-        </Btn>
-      </div>
-    </Screen>
+  // Weekday guard: a fixed split must map onto EXACTLY its day count, otherwise
+  // the rotation doesn't divide evenly (PPL x2 onto 5 days → PUSH PULL LEGS PUSH
+  // PULL, i.e. LEGS trained less). Custom (no preset) is unconstrained.
+  const weekdayNeed = LB.splitDayCount(presetKey);   // 0 = custom
+  const weekdayMismatch = type === 'weekday' && weekdayNeed > 0 && weekdaysSel.length !== weekdayNeed;
+  const dayIdx = step.startsWith('day') ? parseInt(step.slice(3), 10) : -1;
+  const sortedWeekdays = weekdaysSel.slice().sort((a, b) => a - b);
+  const dayLabel = dayIdx < 0 ? null
+    : (type === 'weekday' && sortedWeekdays[dayIdx] != null) ? WEEKDAYS[sortedWeekdays[dayIdx]] : `Day ${dayIdx + 1}`;
+  const stepTitle = dayIdx >= 0 ? dayLabel : PLAN_TITLES[step];
+  const stepIntro = dayIdx >= 0 ? `What's on ${dayLabel}?` : PLAN_INTRO[step];
+
+  // Import the selected source days into this day step and the ones after it,
+  // each with its exercises. Cycle/flex grow the plan if the import runs past
+  // the end; weekday can't grow (its length is the chosen weekday count), so it
+  // fills only the remaining slots. Then jump past the filled days.
+  const doImport = () => {
+    const chosen = importPlan ? importPlan.days.filter(d => importSel.has(d.key)) : []; // in plan-day order
+    if (!chosen.length || dayIdx < 0) return;
+    const cap = type === 'weekday' ? Math.max(0, weekdaysSel.length - dayIdx) : chosen.length;
+    const use = chosen.slice(0, cap);
+    if (!use.length) return;
+    setCustomDays(d => { const a = d.slice(); use.forEach((src, k) => { a[dayIdx + k] = { name: src.name, items: copyImportItems(src.items) }; }); return a; });
+    const nextIdx = dayIdx + use.length;
+    let total;
+    if (type === 'weekday') { total = weekdaysSel.length; }
+    else { total = Math.max(customCount, nextIdx); if (total !== customCount) setCustomCount(total); }
+    setImportOpen(false); setImportSel(new Set());
+    setStep(nextIdx < total ? 'day' + nextIdx : 'meso');
+  };
+
+  const create = () => {
+    const sch = LB.buildPlanSkeleton({
+      name, type: type || 'cycle', presetKey, customCount, customDays, weekdays: weekdaysSel,
+      mesoWeeks: mesoOn ? mesoWeeks : null,
+      mesoStartRir: mesoOn ? mesoStartRir : null,
+      mesoEndRir: mesoOn ? mesoEndRir : null,
+    });
+    setStore(s => ({ ...s, schedules: [...s.schedules, sch] }));
+    go({ name: 'schedule-edit', scheduleId: sch.id });
+  };
+  // Power-user escape: skip the walkthrough and start with an empty cycle plan
+  // (identical to the old quick-create), landing straight in the editor.
+  const skip = () => {
+    const sch = { id: LB.uid(), name: name.trim() || 'My Plan', days: [], archived: false };
+    setStore(s => ({ ...s, schedules: [...s.schedules, sch] }));
+    go({ name: 'schedule-edit', scheduleId: sch.id });
+  };
+
+  // Rich option row: icon chip · label + explainer · (badge and/or check).
+  const optRow = ({ key, icon, label, sub, active, badge, onClick }) => (
+    <button key={key} onClick={onClick} style={{
+      width: '100%', display: 'flex', alignItems: 'center', gap: 12, textAlign: 'left',
+      padding: '12px 14px', borderRadius: 6, cursor: 'pointer',
+      background: active ? 'rgba(var(--accent-rgb),0.10)' : UI.bgInset,
+      border: `1px solid ${active ? 'var(--accent)' : UI.hairStrong}`,
+      WebkitTapHighlightColor: 'transparent', transition: 'border-color 0.12s, background 0.12s',
+    }}>
+      <span style={{
+        width: 40, height: 40, borderRadius: 6, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+        background: active ? 'rgba(var(--accent-rgb),0.16)' : UI.bgRaised,
+        border: `0.5px solid ${active ? 'rgba(var(--accent-rgb),0.4)' : UI.hair}`,
+      }}><i className={`fa-solid ${icon}`} style={{ fontSize: 16, color: active ? 'var(--accent)' : UI.inkFaint }} /></span>
+      <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
+        <span style={{ fontSize: 14, fontWeight: 600, color: active ? 'var(--accent)' : UI.ink, fontFamily: UI.fontUi }}>{label}</span>
+        {sub && <span className="micro" style={{ color: UI.inkFaint, textTransform: 'none', letterSpacing: '0.02em', fontWeight: 400, lineHeight: 1.35 }}>{sub}</span>}
+      </span>
+      {badge && <span className="num" style={{ flexShrink: 0, fontSize: 11, padding: '3px 7px', borderRadius: 4, color: active ? 'var(--accent)' : UI.inkSoft, background: active ? 'rgba(var(--accent-rgb),0.12)' : UI.bgRaised, border: `0.5px solid ${active ? 'rgba(var(--accent-rgb),0.35)' : UI.hair}` }}>{badge}</span>}
+      {!badge && active && <i className="fa-solid fa-circle-check" style={{ flexShrink: 0, fontSize: 17, color: 'var(--accent)' }} />}
+    </button>
   );
+
+  let body;
+  if (step === 'name') {
+    body = <TextInput value={name} onChange={v => setName(v.toUpperCase())} placeholder="e.g. YEEZUSCREW" autoFocus />;
+  } else if (step === 'type') {
+    body = <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {[['cycle', 'Cycle', 'fa-repeat', 'A repeating rotation (Day 1, 2, 3...). Advances by date, rest days included.'],
+        ['weekday', 'Weekdays', 'fa-calendar-days', 'Fixed days of the week (e.g. Mon/Wed/Fri). Skips the days between.'],
+        ['flex', 'Flexible', 'fa-shuffle', 'A rotation that only moves when you actually train or skip, never pushed by the calendar.']]
+        .map(([val, label, icon, sub]) => optRow({ key: val, icon, label, sub, active: type === val, onClick: () => { setType(val); goNext({ type: val }); } }))}
+    </div>;
+  } else if (step === 'split') {
+    body = <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {[['full3', 'Full Body', 'fa-user', '3 days', 'Every session trains the whole body. Great for 2 to 4 days a week.'],
+        ['ul4', 'Upper / Lower', 'fa-table-columns', '4 days', 'Alternate upper- and lower-body days.'],
+        ['ppl3', 'Push / Pull / Legs', 'fa-layer-group', '3 days', 'Push, then pull, then legs. One round per week.'],
+        ['ppl6', 'Push / Pull / Legs x2', 'fa-layer-group', '6 days', 'PPL twice through for higher frequency.']]
+        .map(([val, label, icon, badge, sub]) => optRow({ key: val, icon, label, sub, badge, active: presetKey === val, onClick: () => { setPresetKey(val); goNext({ presetKey: val }); } }))}
+      {optRow({ key: 'custom', icon: 'fa-sliders', label: 'Custom', sub: 'Choose how many days, then set each one up.', active: presetKey === 'custom', onClick: () => { setPresetKey('custom'); if (type === 'weekday') goNext({ presetKey: 'custom' }); } })}
+      {presetKey === 'custom' && type !== 'weekday' && (
+        <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <div style={{ textAlign: 'center' }}>
+            <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>Days</div>
+            <Stepper value={customCount} onChange={setCustomN} step={1} min={1} />
+          </div>
+          <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, textAlign: 'center', lineHeight: 1.4 }}>{LB.frequencyHint(customCount)}</div>
+          {type === 'cycle' && <>
+            <div className="knurl" style={{ margin: '4px 0 2px' }} />
+            <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, textAlign: 'center', lineHeight: 1.4, fontStyle: 'italic' }}>Tap Next to set each day. Don't forget to include your rest days.</div>
+          </>}
+        </div>
+      )}
+    </div>;
+  } else if (dayIdx >= 0) {
+    // One day-type picker per day of a Custom cycle/flex split (flex has no REST).
+    // Offers the standard types, the user's own custom types, and a "+ Custom"
+    // name entry that persists to store.customDayTypes (same as DayTypePicker).
+    const stdTypes = type === 'flex' ? STANDARD_DAY_TYPES.filter(t => t !== 'REST') : STANDARD_DAY_TYPES;
+    const customTypes = store.customDayTypes || [];
+    // Pick a day's type, flash a checkmark, then advance, so the day-to-day
+    // jump is noticeable. The guard stops a double-tap during the flash from
+    // firing two goNext calls (which would skip a day).
+    const pickDay = (dt) => {
+      if (dayFlash) return;
+      setCustomDays(d => { const a = d.slice(); a[dayIdx] = { name: dt, items: [] }; return a; }); // extends for weekday (sized by weekday count, not the stepper)
+      setDayFlash(true);
+      setTimeout(() => { setDayFlash(false); goNext(); }, 200);
+    };
+    const createDayType = () => {
+      const nm = newDayTypeName.trim().toUpperCase();
+      if (!nm) return;
+      if (!STANDARD_DAY_TYPES.includes(nm) && !customTypes.includes(nm)) setStore(s => ({ ...s, customDayTypes: [...(s.customDayTypes || []), nm] }));
+      pickDay(nm);
+    };
+    // Two-tap delete (the wizard sits above sheets, so a portaled confirm would
+    // hide behind it): first tap arms the ×, second removes. Existing plans keep
+    // their day names, only the palette entry is dropped (same as DayTypePicker).
+    const removeDayType = (dt) => {
+      if (deleteTypeArm !== dt) { setDeleteTypeArm(dt); return; }
+      setDeleteTypeArm(null);
+      setStore(s => ({ ...s, customDayTypes: (s.customDayTypes || []).filter(t => t !== dt) }));
+    };
+    const stdChip = (dt) => {
+      const on = customDays[dayIdx]?.name === dt;
+      return <button key={dt} onClick={() => pickDay(dt)}
+        style={{ padding: '13px 6px', borderRadius: 6, cursor: 'pointer', textAlign: 'center', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, letterSpacing: '0.04em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+          background: on ? 'rgba(var(--accent-rgb),0.12)' : UI.bgInset, color: on ? 'var(--accent)' : UI.inkFaint,
+          border: `1px solid ${on ? 'var(--accent)' : UI.hairStrong}`, WebkitTapHighlightColor: 'transparent' }}>{dt}</button>;
+    };
+    const customChip = (dt) => {
+      const on = customDays[dayIdx]?.name === dt;
+      const armed = deleteTypeArm === dt;
+      return <div key={dt} style={{ display: 'flex', alignItems: 'stretch', borderRadius: 6, overflow: 'hidden', border: `1px solid ${armed ? UI.danger : (on ? 'var(--accent)' : UI.goldSoft)}` }}>
+        <button onClick={() => pickDay(dt)} style={{ flex: 1, minWidth: 0, padding: '13px 4px', border: 'none', cursor: 'pointer', textAlign: 'center', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, letterSpacing: '0.04em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+          background: on ? 'rgba(var(--accent-rgb),0.12)' : UI.goldFaint, color: on ? 'var(--accent)' : UI.gold, WebkitTapHighlightColor: 'transparent' }}>{dt}</button>
+        <button onClick={() => removeDayType(dt)} title={armed ? 'Tap again to remove' : 'Remove'} style={{ flexShrink: 0, background: armed ? 'rgba(var(--danger-rgb),0.15)' : UI.goldFaint, border: 'none', borderLeft: `0.5px solid ${armed ? UI.danger : UI.goldSoft}`, color: armed ? UI.danger : UI.gold, opacity: armed ? 1 : 0.55, padding: '0 9px', cursor: 'pointer', fontSize: 12, WebkitTapHighlightColor: 'transparent' }}>×</button>
+      </div>;
+    };
+    body = <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+        {stdTypes.map(stdChip)}
+      </div>
+      {customTypes.length > 0 && (
+        <>
+          <div className="knurl" style={{ margin: '2px 0' }} />
+          <span className="label" style={{ color: UI.inkFaint }}>Custom days</span>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+            {customTypes.map(customChip)}
+          </div>
+        </>
+      )}
+      {creatingDayType
+        ? <div style={{ display: 'flex', gap: 8, alignItems: 'center', padding: 10, background: UI.bgInset, border: `1px dashed ${UI.goldSoft}`, borderRadius: 6 }}>
+            <input autoFocus value={newDayTypeName} onChange={e => setNewDayTypeName(e.target.value.toUpperCase())} onKeyDown={e => e.key === 'Enter' && createDayType()} placeholder="e.g. PUSH1"
+              style={{ flex: 1, minWidth: 0, background: 'transparent', border: 'none', borderBottom: `1px solid ${UI.goldSoft}`, color: UI.gold, padding: '8px 0', fontFamily: UI.fontUi, fontSize: 14, letterSpacing: '0.08em', outline: 'none' }} />
+            <Btn kind="ghost" onClick={() => { setCreatingDayType(false); setNewDayTypeName(''); }} style={{ minHeight: 36, padding: '4px 10px', fontSize: 11 }}>×</Btn>
+            <Btn onClick={createDayType} disabled={!newDayTypeName.trim()} style={{ minHeight: 36, padding: '4px 12px', fontSize: 11, opacity: newDayTypeName.trim() ? 1 : 0.4 }}>Add</Btn>
+          </div>
+        : <button onClick={() => setCreatingDayType(true)}
+            style={{ padding: '12px 6px', borderRadius: 6, cursor: 'pointer', textAlign: 'center', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, letterSpacing: '0.04em',
+              background: 'transparent', color: UI.inkFaint, border: `1px dashed ${UI.hairStrong}`, WebkitTapHighlightColor: 'transparent' }}>+ Custom day type</button>}
+      {!creatingDayType && importGroups.length > 0 && (
+        <button onClick={() => { setImportSel(new Set()); setImportPlan(null); setImportOpen(true); }}
+          style={{ padding: '12px 6px', borderRadius: 6, cursor: 'pointer', textAlign: 'center', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, letterSpacing: '0.04em', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+            background: UI.bgInset, color: UI.inkSoft, border: `1px solid ${UI.hairStrong}`, WebkitTapHighlightColor: 'transparent' }}>
+          <i className="fa-solid fa-file-import" style={{ fontSize: 12 }} /> Import a day from a plan
+        </button>
+      )}
+    </div>;
+  } else if (step === 'weekdays') {
+    body = <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
+        {WEEKDAYS.map((w, i) => {
+          const on = weekdaysSel.includes(i);
+          return <button key={w} onClick={() => setWeekdaysSel(on ? weekdaysSel.filter(x => x !== i) : [...weekdaysSel, i])}
+            style={{ padding: '12px 6px', borderRadius: 6, cursor: 'pointer', textAlign: 'center', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600,
+              background: on ? 'rgba(var(--accent-rgb),0.12)' : UI.bgInset, color: on ? 'var(--accent)' : UI.inkFaint,
+              border: `1px solid ${on ? 'var(--accent)' : UI.hairStrong}`, WebkitTapHighlightColor: 'transparent' }}>{w}</button>;
+        })}
+      </div>
+      {weekdayMismatch
+        ? <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: 'rgba(var(--danger-rgb),0.85)', textAlign: 'center', lineHeight: 1.4 }}>
+            This split needs exactly {weekdayNeed} training days, so it divides evenly. {weekdaysSel.length < weekdayNeed ? `Pick ${weekdayNeed - weekdaysSel.length} more.` : `Remove ${weekdaysSel.length - weekdayNeed}.`}
+          </div>
+        : <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, textAlign: 'center', lineHeight: 1.4 }}>
+            {presetKey === 'custom' ? "Next you'll set each day's type." : 'Your split fills the days you pick, in order.'}
+          </div>}
+    </div>;
+  } else if (step === 'meso') {
+    body = <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {optRow({ key: 'standard', icon: 'fa-infinity', label: 'Standard plan', sub: 'Open-ended. Train it as long as you like.', active: !mesoOn, onClick: () => setMesoOn(false) })}
+      {optRow({ key: 'meso', icon: 'fa-chart-line', label: 'Mesocycle', sub: 'A fixed block with an intensity ramp and a deload at the end.', active: mesoOn, onClick: () => setMesoOn(true) })}
+      {mesoOn && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 6 }}>
+          <div style={{ textAlign: 'center' }}>
+            <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>Weeks</div>
+            <Stepper value={mesoWeeks} onChange={v => setMesoWeeks(Math.min(8, Math.max(4, Math.round(v))))} step={1} min={4} />
+          </div>
+          <div className="knurl" style={{ margin: '2px 0' }} />
+          <div style={{ display: 'flex', gap: 10 }}>
+            <div style={{ flex: 1, textAlign: 'center' }}>
+              <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>Start RIR</div>
+              <Stepper value={mesoStartRir} onChange={v => setMesoStartRir(Math.min(3, Math.max(0, Math.round(v))))} step={1} min={0} />
+            </div>
+            <div style={{ flex: 1, textAlign: 'center' }}>
+              <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>End RIR</div>
+              <Stepper value={mesoEndRir} onChange={v => setMesoEndRir(Math.min(0, Math.max(-3, Math.round(v))))} step={1} min={-3} />
+            </div>
+          </div>
+          <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 2, textAlign: 'center', lineHeight: 1.5 }}>{LB.mesoTaperPreview(mesoWeeks, mesoStartRir, mesoEndRir)}</div>
+        </div>
+      )}
+    </div>;
+  }
+
+  const isFinal = step === 'meso';
+  // Day-type steps auto-advance on pick, so no Next there.
+  const needsNext = step === 'name' || step === 'weekdays' || (step === 'split' && presetKey === 'custom' && type !== 'weekday');
+  const canNext = step === 'name' ? !!name.trim() : step === 'weekdays' ? (weekdaysSel.length > 0 && !weekdayMismatch) : true;
+
+  // Wizard-native day-import view (the editor's DayCopyPicker is a z-100 Sheet
+  // that would render behind this z-9998 overlay, so it can't be reused). Two
+  // steps: pick a plan, then pick day(s) from it (so many plans stay readable).
+  const importHeader = (title) => <div style={{ fontFamily: UI.fontDisplay, fontSize: 23, color: 'var(--accent)', fontWeight: 400, textTransform: 'uppercase', letterSpacing: '0.02em', lineHeight: 1.1 }}>{title}</div>;
+  const importSub = (txt) => <div style={{ fontSize: 12.5, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>{txt}</div>;
+  const importTextBtn = (label, onClick) => <button onClick={onClick} style={{ background: 'transparent', border: 'none', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13, cursor: 'pointer', padding: '8px 4px', WebkitTapHighlightColor: 'transparent' }}>{label}</button>;
+  const importView = importPlan ? (
+    <>
+      {importHeader(importPlan.name)}
+      {importSub('Pick day(s) to import, their exercises come along. Several fill the next steps in order.')}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 320, overflowY: 'auto', overscrollBehavior: 'contain' }}>
+        {importPlan.days.map(d => {
+          const sel = importSel.has(d.key);
+          return <button key={d.key} onClick={() => setImportSel(s => { const n = new Set(s); if (n.has(d.key)) n.delete(d.key); else n.add(d.key); return n; })}
+            style={{ display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left', padding: '11px 12px', borderRadius: 6, cursor: 'pointer',
+              background: sel ? 'rgba(var(--accent-rgb),0.10)' : UI.bgInset, border: `1px solid ${sel ? 'var(--accent)' : UI.hairStrong}`, WebkitTapHighlightColor: 'transparent' }}>
+            <i className={`fa-solid ${sel ? 'fa-circle-check' : 'fa-circle'}`} style={{ fontSize: 16, color: sel ? 'var(--accent)' : UI.inkFaint, flexShrink: 0 }} />
+            <span style={{ flex: 1, minWidth: 0 }}>
+              <span style={{ display: 'block', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, color: sel ? 'var(--accent)' : UI.ink, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{d.name}</span>
+              <span className="micro" style={{ color: UI.inkFaint }}>{d.items.length} exercise{d.items.length !== 1 ? 's' : ''}</span>
+            </span>
+          </button>;
+        })}
+      </div>
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+        {importTextBtn('← Plans', () => { setImportPlan(null); setImportSel(new Set()); })}
+        <div style={{ flex: 1 }} />
+        <Btn onClick={doImport} disabled={importSel.size === 0} style={{ opacity: importSel.size ? 1 : 0.4 }}>{importSel.size ? `Import ${importSel.size} day${importSel.size !== 1 ? 's' : ''} →` : 'Import →'}</Btn>
+      </div>
+    </>
+  ) : (
+    <>
+      {importHeader('Import days')}
+      {importSub('Choose a plan to import a day from.')}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 340, overflowY: 'auto', overscrollBehavior: 'contain' }}>
+        {importGroups.map(g => (
+          <button key={g.id} onClick={() => { setImportPlan(g); setImportSel(new Set()); }}
+            style={{ display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left', padding: '12px 12px', borderRadius: 6, cursor: 'pointer', background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, WebkitTapHighlightColor: 'transparent' }}>
+            <span style={{ flex: 1, minWidth: 0 }}>
+              <span style={{ display: 'block', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, color: UI.ink, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{g.name}</span>
+              <span className="micro" style={{ color: UI.inkFaint }}>{g.days.length} day{g.days.length !== 1 ? 's' : ''}</span>
+            </span>
+            <i className="fa-solid fa-chevron-right" style={{ fontSize: 12, color: UI.inkFaint, flexShrink: 0 }} />
+          </button>
+        ))}
+      </div>
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+        {importTextBtn('← Cancel', () => { setImportOpen(false); setImportSel(new Set()); })}
+      </div>
+    </>
+  );
+  const overlayBase = { zIndex: 9998, background: 'rgba(0,0,0,0.74)', backdropFilter: 'blur(14px)', WebkitBackdropFilter: 'blur(14px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 };
+  const overlayStyle = vp ? { ...overlayBase, position: 'fixed', left: 0, right: 0, top: vp.top, height: vp.height } : { ...overlayBase, position: 'fixed', inset: 0 };
+  return (
+    <div style={overlayStyle} onClick={e => { if (e.target === e.currentTarget) requestExit(); }}>
+      <div style={{ position: 'relative', width: '100%', maxWidth: 360, maxHeight: '86vh', overflowY: 'auto', background: UI.bgRaised, border: `1px solid ${UI.hairStrong}`, borderRadius: 8, padding: '20px 20px 22px', display: 'flex', flexDirection: 'column', gap: 18, boxShadow: '0 32px 80px rgba(0,0,0,0.6)', animation: 'fadeUp 0.3s ease' }}>
+        {confirming ? (
+          <>
+            <div style={{ fontFamily: UI.fontDisplay, fontSize: 22, color: UI.ink, fontWeight: 700, textTransform: 'uppercase' }}>Discard plan?</div>
+            <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>Your new plan won't be created.</div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Btn kind="ghost" onClick={() => setConfirming(false)} style={{ flex: 1 }}>Keep editing</Btn>
+              <Btn onClick={exit} style={{ flex: 1, background: UI.danger, borderColor: 'rgba(var(--danger-rgb),0.6)' }}>Discard</Btn>
+            </div>
+          </>
+        ) : importOpen ? importView : (
+          <>
+            {/* Segmented progress */}
+            <div style={{ display: 'flex', gap: 4 }}>
+              {applicable.map((s, i) => (
+                <div key={s} style={{ flex: 1, height: 4, borderRadius: 999, background: i <= idx ? 'var(--accent)' : UI.hairStrong, opacity: i <= idx ? 1 : 0.5, transition: 'background 0.2s, opacity 0.2s' }} />
+              ))}
+            </div>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10 }}>
+                <div style={{ fontFamily: UI.fontDisplay, fontSize: 23, color: 'var(--accent)', fontWeight: 400, textTransform: 'uppercase', letterSpacing: '0.02em', lineHeight: 1.1 }}>{stepTitle}</div>
+                <span className="micro" style={{ color: UI.inkGhost, flexShrink: 0 }}>{idx + 1}/{applicable.length}</span>
+              </div>
+              <div style={{ fontSize: 12.5, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5, marginTop: 7 }}>{stepIntro}</div>
+            </div>
+            {body}
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+              <button onClick={goBack} style={{ background: 'transparent', border: 'none', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13, cursor: 'pointer', padding: '8px 4px', WebkitTapHighlightColor: 'transparent' }}>{hasPrev ? '← Back' : 'Cancel'}</button>
+              <div style={{ flex: 1 }} />
+              {(step === 'name' || step === 'type') && <button onClick={skip} style={{ background: 'transparent', border: 'none', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13, cursor: 'pointer', padding: '8px 10px', WebkitTapHighlightColor: 'transparent' }}>Skip setup</button>}
+              {isFinal
+                ? <Btn onClick={create}>Create plan →</Btn>
+                : (needsNext && <Btn onClick={() => goNext()} disabled={!canNext} style={{ opacity: canNext ? 1 : 0.4 }}>Next</Btn>)}
+            </div>
+          </>
+        )}
+        {dayFlash && (
+          <div style={{ position: 'absolute', inset: 0, borderRadius: 8, background: 'rgba(0,0,0,0.62)', display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}>
+            <div style={{ width: 88, height: 88, borderRadius: '50%', background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 12px 40px rgba(0,0,0,0.6)' }}>
+              <i className="fa-solid fa-check" style={{ fontSize: 40, color: '#0a0805' }} />
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Create new schedule (hosts the guided plan wizard) ──────────────
+function ScheduleNewScreen({ store, setStore, go, userId }) {
+  return <PlanWizard store={store} setStore={setStore} go={go} />;
 }
 
 Object.assign(window.Screens, { PlanScreen, PlanViewerScreen, ScheduleEditScreen, ScheduleNewScreen, ExercisePicker, DayTypePicker });

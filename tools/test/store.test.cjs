@@ -963,6 +963,130 @@ async function testAsync(name, fn) {
     assert.deepStrictEqual(src.tags, ['Quads']); // original untouched
   });
 
+  // ── buildPlanSkeleton (plan setup wizard → new schedule object) ─────────────
+  test('buildPlanSkeleton: cycle PPL x2 → REST closes each block', () => {
+    const sch = LB.buildPlanSkeleton({ name: 'test', type: 'cycle', presetKey: 'ppl6' });
+    assert.strictEqual(sch.mode, undefined);       // cycle has no mode
+    assert.strictEqual(sch.is_flex, undefined);
+    assert.deepStrictEqual([...sch.days.map(d => d.name)], ['PUSH', 'PULL', 'LEGS', 'REST', 'PUSH', 'PULL', 'LEGS', 'REST']);
+    assert.ok(sch.days.every(d => d.id && Array.isArray(d.items) && d.items.length === 0));
+    assert.ok(sch.days[0].id !== sch.days[1].id); // fresh unique ids
+  });
+  test('buildPlanSkeleton: cycle PPL x1 → one block + trailing REST', () => {
+    const sch = LB.buildPlanSkeleton({ name: 't', type: 'cycle', presetKey: 'ppl3' });
+    assert.deepStrictEqual([...sch.days.map(d => d.name)], ['PUSH', 'PULL', 'LEGS', 'REST']);
+  });
+  test('buildPlanSkeleton: flex has NO rest days (block repeated flat)', () => {
+    const sch = LB.buildPlanSkeleton({ name: 'fl', type: 'flex', presetKey: 'ppl6' });
+    assert.strictEqual(sch.is_flex, true);
+    assert.strictEqual(sch.sessions_per_week, 6);  // 6 training days, no rest
+    assert.strictEqual(sch.mode, undefined);
+    assert.deepStrictEqual([...sch.days.map(d => d.name)], ['PUSH', 'PULL', 'LEGS', 'PUSH', 'PULL', 'LEGS']);
+    assert.ok(!sch.days.some(d => d.name === 'REST'));
+  });
+  test('buildPlanSkeleton: weekday with a split → rotation maps onto sorted days', () => {
+    const sch = LB.buildPlanSkeleton({ name: 'wk', type: 'weekday', presetKey: 'ppl3', weekdays: [4, 0, 2] });
+    assert.strictEqual(sch.mode, 'weekday');
+    assert.deepStrictEqual([...sch.days.map(d => d.weekday)], [0, 2, 4]); // sorted
+    assert.deepStrictEqual([...sch.days.map(d => d.name)], ['PUSH', 'PULL', 'LEGS']); // rotation in order
+    assert.strictEqual(sch.is_flex, undefined);
+  });
+  test('buildPlanSkeleton: weekday custom (no preset) → FULL days', () => {
+    const sch = LB.buildPlanSkeleton({ name: 'wk', type: 'weekday', weekdays: [0, 2] });
+    assert.ok(sch.days.every(d => d.name === 'FULL'));
+  });
+  test('buildPlanSkeleton: weekday custom uses per-day types in weekday order', () => {
+    const sch = LB.buildPlanSkeleton({ name: 'wk', type: 'weekday', presetKey: 'custom', weekdays: [4, 0, 2], customDays: ['PUSH', 'PULL', 'LEGS'] });
+    // weekdays sort to [0,2,4]; customDays map onto them in order
+    assert.deepStrictEqual([...sch.days.map(d => `${d.name}@${d.weekday}`)], ['PUSH@0', 'PULL@2', 'LEGS@4']);
+  });
+  test('buildPlanSkeleton: custom uses explicit per-day types (customDays wins)', () => {
+    const sch = LB.buildPlanSkeleton({ name: 'c', type: 'cycle', presetKey: 'custom', customCount: 4, customDays: ['PUSH', 'PULL', 'REST', 'LEGS'] });
+    assert.deepStrictEqual([...sch.days.map(d => d.name)], ['PUSH', 'PULL', 'REST', 'LEGS']);
+    const fallback = LB.buildPlanSkeleton({ name: 'c', type: 'cycle', presetKey: 'custom', customCount: 5 });
+    assert.strictEqual(fallback.days.length, 5);   // no customDays → count of FULL
+    assert.ok(fallback.days.every(d => d.name === 'FULL'));
+    const one = LB.buildPlanSkeleton({ name: 'c', type: 'cycle', presetKey: 'custom', customCount: 0 });
+    assert.strictEqual(one.days.length, 1);        // floored to at least 1
+  });
+  test('buildPlanSkeleton: custom day can carry imported exercises (deep-copied)', () => {
+    const src = { name: 'LEG DAY', items: [{ exId: 'e1', sets: 3, reps: 8 }, { exId: 'e2', sets: 4, reps: 10 }] };
+    const sch = LB.buildPlanSkeleton({ type: 'cycle', presetKey: 'custom', customCount: 2, customDays: ['PUSH', src] });
+    assert.strictEqual(sch.days[0].name, 'PUSH');
+    assert.strictEqual(sch.days[0].items.length, 0);            // a typed day has no exercises
+    assert.strictEqual(sch.days[1].name, 'LEG DAY');
+    assert.strictEqual(sch.days[1].items.length, 2);            // imported exercises carried
+    sch.days[1].items[0].exId = 'CHANGED';
+    assert.strictEqual(src.items[0].exId, 'e1');                // source untouched (deep copy)
+  });
+  test('buildPlanSkeleton: meso weeks + RIR set when provided, absent otherwise', () => {
+    const meso = LB.buildPlanSkeleton({ name: 'm', type: 'cycle', presetKey: 'full3', mesoWeeks: 8, mesoStartRir: 3, mesoEndRir: -1 });
+    assert.strictEqual(meso.mesocycle_weeks, 8);
+    assert.strictEqual(meso.mesocycle_start_rir, 3);
+    assert.strictEqual(meso.mesocycle_end_rir, -1);
+    const noMeso = LB.buildPlanSkeleton({ name: 'm', type: 'cycle', presetKey: 'full3' });
+    assert.strictEqual(noMeso.mesocycle_weeks, undefined);
+    assert.strictEqual(noMeso.mesocycle_start_rir, undefined);
+  });
+  test('buildPlanSkeleton: name falls back to "My Plan" when blank', () => {
+    const sch = LB.buildPlanSkeleton({ name: '   ', type: 'cycle', presetKey: 'full3' });
+    assert.strictEqual(sch.name, 'My Plan');
+  });
+  test('splitDayCount: block length x repeats, 0 for custom/unknown', () => {
+    assert.strictEqual(LB.splitDayCount('ppl6'), 6);
+    assert.strictEqual(LB.splitDayCount('ppl3'), 3);
+    assert.strictEqual(LB.splitDayCount('ul4'), 4);
+    assert.strictEqual(LB.splitDayCount('full3'), 3);
+    assert.strictEqual(LB.splitDayCount('custom'), 0);
+    assert.strictEqual(LB.splitDayCount(undefined), 0);
+  });
+  test('frequencyHint / mesoTaperPreview render sensible text', () => {
+    assert.strictEqual(LB.frequencyHint(3), 'That\'s a start.');
+    assert.strictEqual(LB.frequencyHint(5), 'Solid.');
+    assert.ok(LB.frequencyHint(25).length > 0);
+    assert.ok(LB.mesoTaperPreview(6, 3, 0).includes('Week 1 = 3 RIR'));
+    assert.ok(LB.mesoTaperPreview(6, 3, -2).includes('partials/set')); // negative end → partials note
+  });
+
+  test('isTrainingDayForDate: flex defaults to rest, override + logged session flip it', () => {
+    const today = LB.todayISO();
+    const flexPlan = { id: 'p1', is_flex: true, days: [{ id: 'd1', name: 'FULL', items: [{ exId: 'e1' }] }] };
+    const base = { schedules: [flexPlan], activeScheduleId: 'p1', cycleIndex: 0, sessions: [], dailyLogs: [] };
+    // No override, no session: a flex day defaults to REST ("earn it").
+    assert.strictEqual(LB.isTrainingDayForDate(base, today), false);
+    // Explicit Rest override → still rest.
+    const rest = { ...base, dailyLogs: [{ date: today, targetsSnap: { dayType: 'rest' } }] };
+    assert.strictEqual(LB.isTrainingDayForDate(rest, today), false);
+    // Explicit Training override → training.
+    const train = { ...base, dailyLogs: [{ date: today, targetsSnap: { dayType: 'training' } }] };
+    assert.strictEqual(LB.isTrainingDayForDate(train, today), true);
+    // A logged session wins even against a stale Rest override.
+    const trained = { ...rest, sessions: [{ id: 's1', ended: today + 'T10:00:00Z', date: today }] };
+    assert.strictEqual(LB.isTrainingDayForDate(trained, today), true);
+    // Cycle/weekday keep the optimistic assumption and ignore the flex override.
+    const cyclePlan = { id: 'p2', days: [{ id: 'd1', name: 'FULL', items: [{ exId: 'e1' }] }] };
+    const cycle = { schedules: [cyclePlan], activeScheduleId: 'p2', cycleStartDate: today, sessions: [], dailyLogs: [{ date: today, targetsSnap: { dayType: 'rest' } }] };
+    assert.strictEqual(LB.isTrainingDayForDate(cycle, today), true); // planned today = training regardless
+  });
+
+  test('todayCycleStripIndex: a shorter future version does not shift today back', () => {
+    const mkDays = n => Array.from({ length: n }, (_, i) => ({ id: 'd' + i, name: 'D' + i, items: [] }));
+    // Active version: 9-day cycle starting 2026-04-26 (so 2026-07-06 is the last
+    // day, index 8, of cycle 8). A NEW 8-day version is scheduled from tomorrow.
+    const vOld = { validFrom: '2026-04-26', days: mkDays(9) };
+    const vNew = { validFrom: '2026-07-07', days: mkDays(8) };
+    const sch = { id: 'p', days: vNew.days, versions: [vNew, vOld] }; // newest-first; sch.days = future version
+    // Today is the 9th day (index 8) of the currently-active 9-day cycle.
+    assert.strictEqual(LB.getCycleNumForDate(sch, '2026-07-06'), 8);
+    assert.strictEqual(LB.todayCycleStripIndex(sch, '2026-07-06', 0), 8);
+    // Sanity: with no future version the newest version IS active, index unchanged.
+    const schNoFuture = { id: 'p', days: vOld.days, versions: [vOld] };
+    assert.strictEqual(LB.todayCycleStripIndex(schNoFuture, '2026-07-06', 0), 8);
+    // Guard clauses: unversioned / weekday / flex fall back to the passed index.
+    assert.strictEqual(LB.todayCycleStripIndex({ id: 'p', days: mkDays(9) }, '2026-07-06', 3), 3);
+    assert.strictEqual(LB.todayCycleStripIndex({ id: 'p', is_flex: true, days: mkDays(9), versions: [vOld] }, '2026-07-06', 2), 2);
+  });
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();

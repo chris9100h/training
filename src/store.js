@@ -1968,6 +1968,113 @@ function isFlexPlan(sch) {
   return !!sch && sch.is_flex === true;
 }
 
+// Training-split presets for the plan setup wizard (screens-schedule.jsx):
+// each is a base `block` of day-types repeated `repeats` times. How that turns
+// into days depends on the plan type (see buildPlanSkeleton): cycle closes each
+// block with a REST day, flex repeats the block flat (flex has no rest days),
+// weekday maps the block round-robin onto the chosen weekdays. Types come from
+// STANDARD_DAY_TYPES. 'custom' has no preset (the wizard asks for a day count).
+const SPLIT_PRESETS = {
+  full3: { block: ['FULL'], repeats: 3 },
+  ul4:   { block: ['UPPER', 'LOWER'], repeats: 2 },
+  ppl3:  { block: ['PUSH', 'PULL', 'LEGS'], repeats: 1 },
+  ppl6:  { block: ['PUSH', 'PULL', 'LEGS'], repeats: 2 },
+};
+
+// Natural training-day count of a split preset (block length x repeats); 0 for
+// custom / unknown. The wizard uses it to guard weekday plans (you can't map a
+// 6-day split onto only 5 weekdays).
+function splitDayCount(presetKey) {
+  const p = SPLIT_PRESETS[presetKey];
+  return p ? p.block.length * p.repeats : 0;
+}
+
+// Build a ready-to-register schedule object from the plan setup wizard's picks.
+// Single source of truth for the new-plan shape (snake_case passthrough columns;
+// only the local-only `mode` is stripped before upsert). The wizard appends the
+// result to store.schedules and navigates to the editor. The zane_meso_states
+// row is NOT created here — the home/train effects auto-start it once the plan
+// is activated.
+//   type        : 'cycle' | 'weekday' | 'flex'
+//   presetKey   : a SPLIT_PRESETS key or 'custom'
+//   customCount : day count when presetKey === 'custom' (cycle/flex only)
+//   customDays  : explicit per-day type list for a custom split (wins over count)
+//   weekdays    : array of weekday indices 0..6 (weekday plans only)
+//   mesoWeeks   : truthy → run as a mesocycle of that many weeks
+//   mesoStartRir/mesoEndRir : optional RIR taper endpoints (else app fallbacks 3/0)
+function buildPlanSkeleton({ name, type, presetKey, customCount, customDays, weekdays, mesoWeeks, mesoStartRir, mesoEndRir } = {}) {
+  const preset = SPLIT_PRESETS[presetKey];
+  // A customDays entry is a type string, or { name, items } (a day imported with
+  // its exercises), or null (unpicked → FULL).
+  const cdName = (cd) => (typeof cd === 'string' ? cd : cd && cd.name) || 'FULL';
+  const cdItems = (cd) => (cd && typeof cd === 'object' && Array.isArray(cd.items)) ? cd.items.map(x => ({ ...x })) : [];
+  let days;
+  if (type === 'weekday') {
+    // A fixed preset's rotation maps onto the sorted weekdays (round-robin; the
+    // wizard requires exactly splitDayCount days so it divides evenly). Custom
+    // uses the per-day picks (customDays, one per sorted weekday), incl. any
+    // imported exercises, else FULL. No explicit REST days: a weekday plan rests
+    // on the calendar days you skip.
+    const block = preset ? preset.block : null;
+    days = (weekdays || []).slice().sort((a, b) => a - b)
+      .map((i, n) => {
+        const cd = customDays && customDays[n];
+        const name = presetKey === 'custom' ? cdName(cd) : (block ? block[n % block.length] : 'FULL');
+        const items = presetKey === 'custom' ? cdItems(cd) : [];
+        return { id: uid(), name, weekday: i, items };
+      });
+  } else if (presetKey === 'custom' || !preset) {
+    // Custom: the per-day picks the wizard collected (unpicked → FULL, imported
+    // days carry their exercises); fall back to a plain count of FULL days.
+    const cds = (customDays && customDays.length)
+      ? customDays
+      : Array.from({ length: Math.max(1, Math.round(customCount || 1)) }, () => null);
+    days = cds.map(cd => ({ id: uid(), name: cdName(cd), items: cdItems(cd) }));
+  } else {
+    const types = [];
+    // Flex has no rest days (advances only on a logged session/skip); cycle
+    // closes each block with a REST day ("rest days included").
+    if (type === 'flex') { for (let r = 0; r < preset.repeats; r++) types.push(...preset.block); }
+    else { for (let r = 0; r < preset.repeats; r++) types.push(...preset.block, 'REST'); }
+    days = types.map(t => ({ id: uid(), name: t, items: [] }));
+  }
+  const sch = { id: uid(), name: (name || '').trim() || 'My Plan', days, archived: false };
+  if (type === 'weekday') sch.mode = 'weekday';
+  if (type === 'flex') {
+    sch.is_flex = true;
+    // Weekly goal = number of TRAINING days (flex has no rest days anyway).
+    sch.sessions_per_week = days.length || null;
+  }
+  if (mesoWeeks) {
+    sch.mesocycle_weeks = mesoWeeks;
+    if (mesoStartRir != null) sch.mesocycle_start_rir = mesoStartRir;
+    if (mesoEndRir != null) sch.mesocycle_end_rir = mesoEndRir;
+  }
+  return sch;
+}
+
+// Tongue-in-cheek note for a training-frequency / cycle-length number. Shared by
+// the flex "weekly goal" stepper and the wizard's custom cycle-length stepper so
+// both ladders stay identical.
+function frequencyHint(n) {
+  return n >= 50 ? '50 sessions. You win.' :
+         n > 30  ? 'At this point the gym should pay you.' :
+         n > 20  ? 'Dude. Really?' :
+         n > 14  ? '…okay, you\'re serious about this.' :
+         n > 10  ? 'Calm down, dude.' :
+         n > 7   ? 'Oh, an overachiever. We see you.' :
+         n >= 4  ? 'Solid.' :
+         n >= 2  ? 'That\'s a start.' :
+                   'Better than nothing.';
+}
+
+// One-line RIR-taper preview ("Week 1 = 3 RIR · Week N = 0 · then deload"),
+// shared by the plan editor's mesocycle section and the wizard's meso step.
+function mesoTaperPreview(weeks, startRir = 3, endRir = 0) {
+  const peak = endRir < 0 ? `${endRir} RIR (0 RIR + ${-endRir} partial${endRir === -1 ? '' : 's'}/set) 🔥` : `${endRir} RIR`;
+  return `Week 1 = ${startRir} RIR · Week ${weeks} = ${peak} · then deload`;
+}
+
 function getPlanDaysForDate(schedule, dateStr) {
   const versions = schedule.versions;
   if (!versions?.length) return schedule.days || [];
@@ -2160,6 +2267,30 @@ function realignCycleForToday(state, sch, todayStr, targetPos) {
     schedules: (state.schedules || []).map(s =>
       s.id === sch.id ? { ...s, days: versions[0].days, versions } : s),
   };
+}
+
+// "Today's array index" in the home cycle strip for a versioned cycle plan.
+// With a cycleOffset this differs from the plain plan position (dayIdx), so the
+// strip renders the version active on the shown cycle and marks the cell whose
+// date == today. The clamp MUST use the day count of the version active on that
+// cycle (what the strip renders), NOT sch.days — sch.days holds the NEWEST
+// version, which can be a future-scheduled version with a different day count.
+// Using sch.days there clipped today's index by the day-count delta and put the
+// "today" marker on the wrong (previous) cell after scheduling a shorter future
+// version. dateStr is passed in (normally todayISO()) so it stays testable.
+function todayCycleStripIndex(sch, dateStr, fallbackIdx) {
+  if (!sch?.versions?.length || isWeekdayPlan(sch) || isFlexPlan(sch)) return fallbackIdx;
+  const cn = getCycleNumForDate(sch, dateStr);
+  if (!cn || cn <= 0) return fallbackIdx;
+  const cs = getCycleStartForNum(sch, cn);
+  if (!cs) return fallbackIdx;
+  cs.setHours(12, 0, 0, 0);
+  const csStr = fmtISO(cs);
+  const activeV = sch.versions.find(v => v.validFrom <= csStr) || sch.versions[sch.versions.length - 1];
+  const vOffset = activeV?.cycleOffset || 0;
+  const daysFromCycleStart = Math.round((new Date(dateStr + 'T12:00:00') - cs) / 86400000);
+  const cycleLen = activeV?.days?.length || sch.days?.length || 1;
+  return Math.max(0, Math.min(daysFromCycleStart + vOffset, cycleLen - 1));
 }
 
 function todaysDay(state) {
@@ -3116,13 +3247,30 @@ function plannedTrainingDay(state, dateStr) {
   return null;
 }
 
-// Whether a date counts as a training day for health indicators. A day with a
-// logged (performed) session always counts. Otherwise a PLANNED training day
-// counts only while it's still today or in the future — a past planned day that
-// wasn't performed is downgraded to a rest day ("you have to earn it").
+// A flexible plan has no programmed rest days, so it defaults to REST ("earn
+// it") and only counts as training when the user proactively set it. That choice
+// is persisted on the day's daily-log targetsSnap.dayType and read back here.
+// Returns 'training' | 'rest' | null (not a flex plan / no explicit override).
+function flexDayTypeOverride(state, dateStr) {
+  const sch = state?.schedules?.find(s => s.id === state.activeScheduleId);
+  if (!isFlexPlan(sch)) return null;
+  const ds = (dateStr || '').slice(0, 10);
+  const dt = (state.dailyLogs || []).find(l => l.date === ds)?.targetsSnap?.dayType;
+  return dt === 'training' || dt === 'rest' ? dt : null;
+}
+
+// Whether a date counts as a training day for health indicators. A logged
+// (performed) session always counts. FLEX plans have no programmed rest days, so
+// they default to REST and only count as training when a session is logged or
+// the user proactively set training (persisted override). CYCLE/WEEKDAY plans
+// keep assuming the plan is followed: a planned training day counts while it's
+// still today or in the future (a past planned day skipped without a session is
+// reconciled to rest by the daily-log heal, "you have to earn it").
 function isTrainingDayForDate(state, dateStr) {
   const ds = (dateStr || '').slice(0, 10);
   if (isLoggedTrainingDay(state?.sessions, ds)) return true;
+  const sch = state?.schedules?.find(s => s.id === state.activeScheduleId);
+  if (isFlexPlan(sch)) return flexDayTypeOverride(state, ds) === 'training';
   if (ds >= todayISO() && plannedTrainingDay(state, ds)) return true;
   return false;
 }
@@ -3785,7 +3933,7 @@ window.LB = {
   signIn, signUp, signOut, signInWithPasskey, registerPasskey, listPasskeys, deletePasskey, resetPassword, deleteAllData, exportBackup, importFromBackup, validateBackup,
   loadFromSupabase, syncStore, mergeSessions, withCarriedWindowEntries, historyWindowCutoffISO,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
-  uid, todayISO, fmtISO, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, realignCycleForToday,
+  uid, todayISO, fmtISO, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, buildPlanSkeleton, splitDayCount, frequencyHint, mesoTaperPreview, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, realignCycleForToday, todayCycleStripIndex,
   effReps, e1rm, isImprovement, isDecline, bestE1rmForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, latestBodyweight, exerciseLogMode, shouldPullBodyweight, systemExerciseToRow, inferCurrentExIdx, calcBlended,
   refreshExerciseBests, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries,
   computeNextReminderAt,
