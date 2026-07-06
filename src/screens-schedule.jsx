@@ -185,7 +185,7 @@ function PlanScreen({ store, setStore, go, userId }) {
                     </span>
                   )}
                   {verCount >= 2 && (
-                    <span style={{ fontFamily: UI.fontNum, fontSize: 10, fontWeight: 700, color: UI.gold, background: 'rgba(var(--accent-rgb),0.15)', borderRadius: 4, padding: '2px 6px', letterSpacing: '0.05em' }}>
+                    <span style={{ fontFamily: UI.fontNum, fontSize: 10, fontWeight: 700, color: UI.gold, background: UI.goldFaint, border: `1px solid ${UI.goldSoft}`, borderRadius: 4, padding: '2px 6px', letterSpacing: '0.05em' }}>
                       V{verCount}
                     </span>
                   )}
