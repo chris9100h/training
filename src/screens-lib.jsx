@@ -665,12 +665,30 @@ function adjacentWizardStep(current, dir, equipment, movementType) {
   return null;
 }
 
-function ExerciseWizard({ step, setStep, onClose, isDirty,
+const WIZARD_INTRO = {
+  name: 'Give it a clear name — this is what shows up in your plans and history.',
+  muscle: 'Which muscle(s) does it train? Used to count your weekly sets per muscle. Pick one or more.',
+  size: 'This just sets the default rest timer between sets — heavier lifts need more recovery. You can still tweak rest any time during a workout.',
+  equipment: 'What do you load or do it with? This also decides how weight is entered while training.',
+  movement: 'How is it performed? Decides whether you log one number or one per side.',
+  logging: 'What do you want to record for each set while training?',
+};
+const WIZARD_EQUIP_META = {
+  no_equipment:   { icon: 'fa-ban',            sub: 'Bands, ab-wheel, sled — or nothing at all' },
+  bodyweight:     { icon: 'fa-person',         sub: 'Just your bodyweight (push-ups, pull-ups)' },
+  cable:          { icon: 'fa-grip-vertical',  sub: 'Cable pulley / stack' },
+  dumbbell:       { icon: 'fa-dumbbell',       sub: 'Dumbbells or kettlebells' },
+  barbell_dual:   { icon: 'fa-weight-hanging', sub: 'Barbell, plates on both sides' },
+  machine:        { icon: 'fa-sliders',        sub: 'Pin- or plate-loaded machine' },
+  barbell_single: { icon: 'fa-weight-hanging', sub: 'Landmine / single-loaded bar' },
+};
+
+function ExerciseWizard({ step, setStep, onClose, isDirty, store,
   name, setName, selectedTags, setSelectedTags, category, setCategory,
   equipment, onEquipment, movementType, setMovementType, logMode, pickLogMode }) {
   const [confirming, setConfirming] = useStateL(false);
   const applicable = WIZARD_ORDER.filter(s => wizardStepApplicable(s, equipment, movementType));
-  const pos = applicable.indexOf(step) + 1;
+  const idx = applicable.indexOf(step);
   const hasPrev = adjacentWizardStep(step, -1, equipment, movementType) != null;
   const goNext = (o = {}) => setStep(adjacentWizardStep(step, 1, o.equipment ?? equipment, o.movementType ?? movementType));
   const goBack = () => {
@@ -679,16 +697,31 @@ function ExerciseWizard({ step, setStep, onClose, isDirty,
     else if (isDirty()) setConfirming(true);
     else onClose();
   };
-  const bigBtn = (onClick, active, main, sub) => (
-    <button key={main} onClick={onClick} style={{
-      width: '100%', padding: '13px 15px', borderRadius: 6, cursor: 'pointer', textAlign: 'left',
-      background: active ? 'rgba(var(--accent-rgb),0.12)' : UI.bgInset,
+  const restLabel = (cat) => {
+    const s = store?.settings || {};
+    const sec = cat === 'big' ? (s.restBig ?? 180) : cat === 'medium' ? (s.restMedium ?? 120) : (s.restSmall ?? 90);
+    return sec % 60 === 0 ? `${sec / 60} min` : sec > 60 ? `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}` : `${sec}s`;
+  };
+  // Rich option row: icon chip · label + explainer · (rest badge and/or check).
+  const optRow = ({ key, icon, label, sub, active, badge, onClick }) => (
+    <button key={key} onClick={onClick} style={{
+      width: '100%', display: 'flex', alignItems: 'center', gap: 12, textAlign: 'left',
+      padding: '12px 14px', borderRadius: 6, cursor: 'pointer',
+      background: active ? 'rgba(var(--accent-rgb),0.10)' : UI.bgInset,
       border: `1px solid ${active ? 'var(--accent)' : UI.hairStrong}`,
-      color: active ? 'var(--accent)' : UI.inkSoft, fontFamily: UI.fontUi,
-      display: 'flex', flexDirection: 'column', gap: 3, WebkitTapHighlightColor: 'transparent',
+      WebkitTapHighlightColor: 'transparent', transition: 'border-color 0.12s, background 0.12s',
     }}>
-      <span style={{ fontSize: 14, fontWeight: 600 }}>{main}</span>
-      {sub && <span className="micro" style={{ color: UI.inkFaint, textTransform: 'none', letterSpacing: '0.02em', fontWeight: 400 }}>{sub}</span>}
+      <span style={{
+        width: 40, height: 40, borderRadius: 6, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+        background: active ? 'rgba(var(--accent-rgb),0.16)' : UI.bgRaised,
+        border: `0.5px solid ${active ? 'rgba(var(--accent-rgb),0.4)' : UI.hair}`,
+      }}><i className={`fa-solid ${icon}`} style={{ fontSize: 16, color: active ? 'var(--accent)' : UI.inkFaint }} /></span>
+      <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
+        <span style={{ fontSize: 14, fontWeight: 600, color: active ? 'var(--accent)' : UI.ink, fontFamily: UI.fontUi }}>{label}</span>
+        {sub && <span className="micro" style={{ color: UI.inkFaint, textTransform: 'none', letterSpacing: '0.02em', fontWeight: 400, lineHeight: 1.35 }}>{sub}</span>}
+      </span>
+      {badge && <span className="num" style={{ flexShrink: 0, fontSize: 11, padding: '3px 7px', borderRadius: 4, color: active ? 'var(--accent)' : UI.inkSoft, background: active ? 'rgba(var(--accent-rgb),0.12)' : UI.bgRaised, border: `0.5px solid ${active ? 'rgba(var(--accent-rgb),0.35)' : UI.hair}` }}>{badge}</span>}
+      {!badge && active && <i className="fa-solid fa-circle-check" style={{ flexShrink: 0, fontSize: 17, color: 'var(--accent)' }} />}
     </button>
   );
 
@@ -699,33 +732,33 @@ function ExerciseWizard({ step, setStep, onClose, isDirty,
     body = <MusclePills value={selectedTags} onChange={setSelectedTags} />;
   } else if (step === 'size') {
     body = <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      {[['big', 'Big', 'Heavy compounds — squat, deadlift, press'], ['medium', 'Medium', 'Moderate — bench, pull-up, lunge'], ['small', 'Small', 'Isolation — curl, lateral raise']]
-        .map(([val, label, sub]) => bigBtn(() => { setCategory(val); goNext(); }, category === val, label, sub))}
+      {[['big', 'Big', 'Heavy compounds — squat, deadlift, overhead press'], ['medium', 'Medium', 'Moderate lifts — bench, row, pull-up, lunge'], ['small', 'Small', 'Isolation — curls, lateral raises, extensions']]
+        .map(([val, label, sub]) => optRow({ key: val, icon: 'fa-stopwatch', label, sub, active: category === val, badge: restLabel(val) + ' rest', onClick: () => { setCategory(val); goNext(); } }))}
     </div>;
   } else if (step === 'equipment') {
     body = <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      {EQUIPMENT_TYPES.map(({ key, label }) => bigBtn(() => { onEquipment(key); goNext({ equipment: key }); }, equipment === key, label))}
+      {EQUIPMENT_TYPES.map(({ key, label }) => optRow({ key, icon: WIZARD_EQUIP_META[key].icon, label, sub: WIZARD_EQUIP_META[key].sub, active: equipment === key, onClick: () => { onEquipment(key); goNext({ equipment: key }); } }))}
     </div>;
   } else if (step === 'movement') {
     body = <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      {[['bilateral', 'Bilateral', 'Both sides at once'], ['unilateral', 'Unilateral', 'One arm/leg at a time'], ['mobility', 'Mobility', 'Stretch / warm-up']]
-        .map(([val, label, sub]) => bigBtn(() => { setMovementType(val); goNext({ movementType: val }); }, movementType === val, label, sub))}
+      {[['bilateral', 'Bilateral', 'fa-arrows-left-right', 'Both sides work together — one number per set'], ['unilateral', 'Unilateral', 'fa-arrow-right-long', 'One arm/leg at a time — logs left & right'], ['mobility', 'Mobility', 'fa-arrows-rotate', 'Stretch or warm-up — usually no load']]
+        .map(([val, label, icon, sub]) => optRow({ key: val, icon, label, sub, active: movementType === val, onClick: () => { setMovementType(val); goNext({ movementType: val }); } }))}
     </div>;
   } else if (step === 'logging') {
-    const subs = { checkbox: 'Tick each set off — no numbers, 0 volume', reps: 'Reps only, no weight, 0 volume', weight: 'Weight + reps' };
     body = <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      {LOG_MODES.map(([val, label]) => bigBtn(() => { pickLogMode(val); goNext(); }, logMode === val, label, subs[val]))}
+      {[['checkbox', 'Checkbox only', 'fa-circle-check', 'Just tick each set off — no numbers, 0 volume'], ['reps', 'Reps only', 'fa-rotate', 'Count reps, no weight — adds 0 to volume'], ['weight', 'Weight & Reps', 'fa-dumbbell', 'Track both — the usual for weighted lifts']]
+        .map(([val, label, icon, sub]) => optRow({ key: val, icon, label, sub, active: logMode === val, onClick: () => { pickLogMode(val); goNext(); } }))}
     </div>;
   }
 
   const needsNext = step === 'name' || step === 'muscle';
   const canNext = step !== 'name' || name.trim();
   return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 9998, background: 'rgba(0,0,0,0.72)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 28 }}>
-      <div style={{ width: '100%', maxWidth: 340, maxHeight: '82vh', overflowY: 'auto', background: UI.bgRaised, border: `1px solid ${UI.hairStrong}`, borderRadius: 6, padding: '22px 20px', display: 'flex', flexDirection: 'column', gap: 16, boxShadow: '0 32px 80px rgba(0,0,0,0.6)', animation: 'fadeUp 0.3s ease' }}>
+    <div style={{ position: 'fixed', inset: 0, zIndex: 9998, background: 'rgba(0,0,0,0.74)', backdropFilter: 'blur(14px)', WebkitBackdropFilter: 'blur(14px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+      <div style={{ width: '100%', maxWidth: 360, maxHeight: '86vh', overflowY: 'auto', background: UI.bgRaised, border: `1px solid ${UI.hairStrong}`, borderRadius: 8, padding: '20px 20px 22px', display: 'flex', flexDirection: 'column', gap: 18, boxShadow: '0 32px 80px rgba(0,0,0,0.6)', animation: 'fadeUp 0.3s ease' }}>
         {confirming ? (
           <>
-            <div style={{ fontFamily: UI.fontDisplay, fontSize: 20, color: UI.ink, fontWeight: 700, textTransform: 'uppercase' }}>Discard exercise?</div>
+            <div style={{ fontFamily: UI.fontDisplay, fontSize: 22, color: UI.ink, fontWeight: 700, textTransform: 'uppercase' }}>Discard exercise?</div>
             <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>Your new exercise won't be saved.</div>
             <div style={{ display: 'flex', gap: 8 }}>
               <Btn kind="ghost" onClick={() => setConfirming(false)} style={{ flex: 1 }}>Keep editing</Btn>
@@ -734,9 +767,18 @@ function ExerciseWizard({ step, setStep, onClose, isDirty,
           </>
         ) : (
           <>
-            <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10 }}>
-              <div style={{ fontFamily: UI.fontDisplay, fontSize: 20, color: 'var(--accent)', fontWeight: 400, textTransform: 'uppercase' }}>{WIZARD_TITLES[step]}</div>
-              <span className="micro" style={{ color: UI.inkFaint, flexShrink: 0 }}>{pos} / {applicable.length}</span>
+            {/* Segmented progress */}
+            <div style={{ display: 'flex', gap: 4 }}>
+              {applicable.map((s, i) => (
+                <div key={s} style={{ flex: 1, height: 4, borderRadius: 999, background: i <= idx ? 'var(--accent)' : UI.hairStrong, opacity: i <= idx ? 1 : 0.5, transition: 'background 0.2s, opacity 0.2s' }} />
+              ))}
+            </div>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10 }}>
+                <div style={{ fontFamily: UI.fontDisplay, fontSize: 23, color: 'var(--accent)', fontWeight: 400, textTransform: 'uppercase', letterSpacing: '0.02em', lineHeight: 1.1 }}>{WIZARD_TITLES[step]}</div>
+                <span className="micro" style={{ color: UI.inkGhost, flexShrink: 0 }}>{idx + 1}/{applicable.length}</span>
+              </div>
+              <div style={{ fontSize: 12.5, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5, marginTop: 7 }}>{WIZARD_INTRO[step]}</div>
             </div>
             {body}
             <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
@@ -812,7 +854,7 @@ function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = ''
     <>
     {wizardStep !== null ? (
       <ExerciseWizard
-        step={wizardStep} setStep={setWizardStep} onClose={onClose} isDirty={isDirty}
+        step={wizardStep} setStep={setWizardStep} onClose={onClose} isDirty={isDirty} store={store}
         name={name} setName={setName} selectedTags={selectedTags} setSelectedTags={setSelectedTags}
         category={category} setCategory={setCategory}
         equipment={equipment} onEquipment={wizardSetEquipment}
