@@ -3247,10 +3247,9 @@ function plannedTrainingDay(state, dateStr) {
   return null;
 }
 
-// For flexible plans there are no programmed rest days, so the current rotation
-// day is optimistically assumed to be a training day. The user can override a
-// given day to Rest (or back to Training) from the daily log; that choice is
-// persisted on the log's targetsSnap.dayType and is authoritative here.
+// A flexible plan has no programmed rest days, so it defaults to REST ("earn
+// it") and only counts as training when the user proactively set it. That choice
+// is persisted on the day's daily-log targetsSnap.dayType and read back here.
 // Returns 'training' | 'rest' | null (not a flex plan / no explicit override).
 function flexDayTypeOverride(state, dateStr) {
   const sch = state?.schedules?.find(s => s.id === state.activeScheduleId);
@@ -3260,16 +3259,18 @@ function flexDayTypeOverride(state, dateStr) {
   return dt === 'training' || dt === 'rest' ? dt : null;
 }
 
-// Whether a date counts as a training day for health indicators. A day with a
-// logged (performed) session always counts. A flex plan's explicit day-type
-// override wins next. Otherwise a PLANNED training day counts only while it's
-// still today or in the future, a past planned day that wasn't performed is
-// downgraded to a rest day ("you have to earn it").
+// Whether a date counts as a training day for health indicators. A logged
+// (performed) session always counts. FLEX plans have no programmed rest days, so
+// they default to REST and only count as training when a session is logged or
+// the user proactively set training (persisted override). CYCLE/WEEKDAY plans
+// keep assuming the plan is followed: a planned training day counts while it's
+// still today or in the future (a past planned day skipped without a session is
+// reconciled to rest by the daily-log heal, "you have to earn it").
 function isTrainingDayForDate(state, dateStr) {
   const ds = (dateStr || '').slice(0, 10);
   if (isLoggedTrainingDay(state?.sessions, ds)) return true;
-  const override = flexDayTypeOverride(state, ds);
-  if (override) return override === 'training';
+  const sch = state?.schedules?.find(s => s.id === state.activeScheduleId);
+  if (isFlexPlan(sch)) return flexDayTypeOverride(state, ds) === 'training';
   if (ds >= todayISO() && plannedTrainingDay(state, ds)) return true;
   return false;
 }
