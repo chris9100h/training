@@ -2710,6 +2710,51 @@ function ExercisePicker({ store, setStore, onClose, onPick, singleSelect = false
       .sort((a,b) => a.name.localeCompare(b.name));
   }, [store.exercises, q, filterTags]);
 
+  // System exercise catalog (exercise-db.js), surfaced on demand: only while
+  // searching or filtering, so the default quick-add view stays the user's own
+  // library. Catalog entries already in the library (by name) are hidden to
+  // avoid offering a duplicate.
+  const userNamesU = useMemoS(() => new Set(store.exercises.map(e => (e.name || '').toUpperCase())), [store.exercises]);
+  const dbActive = !!q || filterTags.length > 0;
+  const systemList = useMemoS(() => {
+    if (!dbActive) return [];
+    const ql = q.toUpperCase();
+    return (window.SYSTEM_EXERCISES || [])
+      .filter(s => !userNamesU.has((s.name || '').toUpperCase()))
+      .filter(s => {
+        const matchSearch = !q || s.name.toUpperCase().includes(ql) || s.tags?.some(t => t.toUpperCase().includes(ql));
+        const matchTags = filterTags.length === 0 || filterTags.some(ft => s.tags?.includes(ft));
+        return matchSearch && matchTags;
+      })
+      .sort((a,b) => a.name.localeCompare(b.name));
+  }, [dbActive, q, filterTags, userNamesU]);
+
+  // Resolve a picked id list to real user-exercise ids: a catalog (sys_) id is
+  // duplicated into store.exercises (or mapped to an existing same-named copy)
+  // so plans/sessions only ever hold user-owned ids. The new rows are added in
+  // one setStore before onPick, and doAdd/doSwap read the exercise from fresh
+  // state (functional setStore), so the just-created copy resolves correctly.
+  const finalizePick = (ids) => {
+    const sysById = new Map((window.SYSTEM_EXERCISES || []).map(s => [s.id, s]));
+    const newRows = [];
+    const resolved = ids.map(id => {
+      const sys = sysById.get(id);
+      if (!sys) return id;
+      const existing = store.exercises.find(e => (e.name || '').toUpperCase() === sys.name.toUpperCase());
+      if (existing) return existing.id;
+      const row = LB.systemExerciseToRow(sys);
+      newRows.push(row);
+      return row.id;
+    });
+    if (newRows.length) setStore(s => ({ ...s, exercises: [...s.exercises, ...newRows] }));
+    onPick(resolved);
+  };
+
+  const exactNameExists = !!q && (
+    store.exercises.some(e => e.name.toUpperCase() === q.toUpperCase()) ||
+    (window.SYSTEM_EXERCISES || []).some(s => s.name.toUpperCase() === q.toUpperCase())
+  );
+
   return (
     <Sheet open={true} onClose={onClose} title="Select exercises">
       <Field label="">
@@ -2726,7 +2771,7 @@ function ExercisePicker({ store, setStore, onClose, onPick, singleSelect = false
           const isSel = selected.includes(e.id);
           return (
             <React.Fragment key={e.id}>
-            <button onClick={() => singleSelect ? onPick([e.id]) : toggleSelect(e.id)} style={{
+            <button onClick={() => singleSelect ? finalizePick([e.id]) : toggleSelect(e.id)} style={{
               background: isSel ? UI.goldFaint : 'transparent', border: 'none', textAlign: 'left',
               padding: '11px 8px', cursor: 'pointer', borderRadius: 4,
               display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8,
@@ -2738,22 +2783,51 @@ function ExercisePicker({ store, setStore, onClose, onPick, singleSelect = false
                 {(e.tags || []).map(t => <Pill key={t} gold={isSel}>{t}</Pill>)}
               </div>
             </button>
-            {ei < list.length - 1 && <div className="knurl" />}
+            {(ei < list.length - 1 || systemList.length > 0) && <div className="knurl" />}
             </React.Fragment>
           );
         })}
-        {list.length === 0 && <div className="micro" style={{ padding: '20px 0', textAlign: 'center', color: UI.inkFaint }}>No exercises found</div>}
+        {systemList.length > 0 && (
+          <div className="micro" style={{ padding: '8px 8px 4px', color: UI.inkFaint, letterSpacing: '0.12em' }}>DATABASE</div>
+        )}
+        {systemList.map((s, si) => {
+          const isSel = selected.includes(s.id);
+          return (
+            <React.Fragment key={s.id}>
+            <button onClick={() => singleSelect ? finalizePick([s.id]) : toggleSelect(s.id)} style={{
+              background: isSel ? UI.goldFaint : 'transparent', border: 'none', textAlign: 'left',
+              padding: '11px 8px', cursor: 'pointer', borderRadius: 4,
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8,
+              width: '100%', boxSizing: 'border-box',
+            }}>
+              <span className="display" style={{ fontSize: 17, color: isSel ? UI.gold : UI.ink }}>{s.name}</span>
+              <div style={{ display: 'flex', gap: 4, flexShrink: 0, alignItems: 'center' }}>
+                {isSel && <i className="fa fa-check-circle" style={{ color: UI.gold, fontSize: 15 }} />}
+                <Pill style={{ color: UI.inkFaint, borderColor: UI.hair, fontSize: 8 }}>DB</Pill>
+                {(s.tags || []).map(t => <Pill key={t} gold={isSel}>{t}</Pill>)}
+              </div>
+            </button>
+            {si < systemList.length - 1 && <div className="knurl" />}
+            </React.Fragment>
+          );
+        })}
+        {list.length === 0 && systemList.length === 0 && <div className="micro" style={{ padding: '20px 0', textAlign: 'center', color: UI.inkFaint }}>No exercises found</div>}
+        {!dbActive && (window.SYSTEM_EXERCISES || []).length > 0 && (
+          <div className="micro" style={{ padding: '12px 8px 2px', textAlign: 'center', color: UI.inkGhost, letterSpacing: '0.04em', textTransform: 'none', fontStyle: 'italic' }}>
+            Search or pick a muscle to also add from the exercise database.
+          </div>
+        )}
       </div>
       {selected.length > 0 && (
-        <Btn onClick={() => onPick(selected)} style={{ marginTop: 12, width: '100%' }}>
+        <Btn onClick={() => finalizePick(selected)} style={{ marginTop: 12, width: '100%' }}>
           Add {selected.length} exercise{selected.length !== 1 ? 's' : ''} →
         </Btn>
       )}
-      {/* Check against every exercise, not just the tag-filtered `list` — an
-          existing exercise hidden by an active muscle-tag pill must still
-          suppress "+ Create", or picking it creates a duplicate that splits
-          its history/progression across two library entries. */}
-      {q && !store.exercises.find(e => e.name.toUpperCase() === q.toUpperCase()) && (
+      {/* Check against every exercise, not just the tag-filtered `list`: an
+          existing user OR catalog exercise with this exact name must suppress
+          "+ Create", or picking it creates a duplicate that splits its
+          history/progression across two library entries. */}
+      {q && !exactNameExists && (
         <button onClick={() => setCreatingNew(q)} style={{
           background: UI.goldFaint, border: `1px dashed ${UI.goldSoft}`,
           padding: '12px 14px', borderRadius: 4, cursor: 'pointer',
