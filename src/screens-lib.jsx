@@ -668,7 +668,7 @@ function adjacentWizardStep(current, dir, equipment, movementType) {
 const WIZARD_INTRO = {
   name: 'Give it a clear name — this is what shows up in your plans and history.',
   muscle: 'Which muscle(s) does it train? Used to count your weekly sets per muscle. Pick one or more.',
-  size: 'This just sets the default rest timer between sets — heavier lifts need more recovery. You can still tweak rest any time during a workout.',
+  size: 'The times below are your own rest timers — heavier lifts get more rest. Set them under Settings › Training › Session › Rest timers, or just tweak rest mid-workout.',
   equipment: 'What do you load or do it with? This also decides how weight is entered while training.',
   movement: 'How is it performed? Decides whether you log one number or one per side.',
   logging: 'What do you want to record for each set while training?',
@@ -687,6 +687,18 @@ function ExerciseWizard({ step, setStep, onClose, isDirty, store,
   name, setName, selectedTags, setSelectedTags, category, setCategory,
   equipment, onEquipment, movementType, setMovementType, logMode, pickLogMode }) {
   const [confirming, setConfirming] = useStateL(false);
+  // Keep the card inside the VISIBLE viewport so the Name step's text input isn't
+  // hidden behind the on-screen keyboard: visualViewport shrinks when the keyboard
+  // opens, so centering within it floats the card just above the keyboard.
+  const [vp, setVp] = useStateL(null);
+  useEffectL(() => {
+    const v = typeof window !== 'undefined' ? window.visualViewport : null;
+    if (!v) return;
+    const on = () => setVp({ top: v.offsetTop, height: v.height });
+    on();
+    v.addEventListener('resize', on); v.addEventListener('scroll', on);
+    return () => { v.removeEventListener('resize', on); v.removeEventListener('scroll', on); };
+  }, []);
   const applicable = WIZARD_ORDER.filter(s => wizardStepApplicable(s, equipment, movementType));
   const idx = applicable.indexOf(step);
   const hasPrev = adjacentWizardStep(step, -1, equipment, movementType) != null;
@@ -729,7 +741,13 @@ function ExerciseWizard({ step, setStep, onClose, isDirty, store,
   if (step === 'name') {
     body = <TextInput value={name} onChange={v => setName(v.toUpperCase())} placeholder="e.g. BENCH PRESS" autoFocus />;
   } else if (step === 'muscle') {
-    body = <MusclePills value={selectedTags} onChange={setSelectedTags} />;
+    body = <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+      {MUSCLES.map(m => {
+        const on = selectedTags.includes(m);
+        return <button key={m} onClick={() => setSelectedTags(on ? selectedTags.filter(x => x !== m) : [...selectedTags, m])}
+          style={{ ...pickChipStyle(on), width: '100%', textAlign: 'center', padding: '11px 6px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{m}</button>;
+      })}
+    </div>;
   } else if (step === 'size') {
     body = <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
       {[['big', 'Big', 'Heavy compounds — squat, deadlift, overhead press'], ['medium', 'Medium', 'Moderate lifts — bench, row, pull-up, lunge'], ['small', 'Small', 'Isolation — curls, lateral raises, extensions']]
@@ -753,8 +771,10 @@ function ExerciseWizard({ step, setStep, onClose, isDirty, store,
 
   const needsNext = step === 'name' || step === 'muscle';
   const canNext = step !== 'name' || name.trim();
+  const overlayBase = { zIndex: 9998, background: 'rgba(0,0,0,0.74)', backdropFilter: 'blur(14px)', WebkitBackdropFilter: 'blur(14px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 };
+  const overlayStyle = vp ? { ...overlayBase, position: 'fixed', left: 0, right: 0, top: vp.top, height: vp.height } : { ...overlayBase, position: 'fixed', inset: 0 };
   return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 9998, background: 'rgba(0,0,0,0.74)', backdropFilter: 'blur(14px)', WebkitBackdropFilter: 'blur(14px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+    <div style={overlayStyle}>
       <div style={{ width: '100%', maxWidth: 360, maxHeight: '86vh', overflowY: 'auto', background: UI.bgRaised, border: `1px solid ${UI.hairStrong}`, borderRadius: 8, padding: '20px 20px 22px', display: 'flex', flexDirection: 'column', gap: 18, boxShadow: '0 32px 80px rgba(0,0,0,0.6)', animation: 'fadeUp 0.3s ease' }}>
         {confirming ? (
           <>
