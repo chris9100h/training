@@ -2269,6 +2269,30 @@ function realignCycleForToday(state, sch, todayStr, targetPos) {
   };
 }
 
+// "Today's array index" in the home cycle strip for a versioned cycle plan.
+// With a cycleOffset this differs from the plain plan position (dayIdx), so the
+// strip renders the version active on the shown cycle and marks the cell whose
+// date == today. The clamp MUST use the day count of the version active on that
+// cycle (what the strip renders), NOT sch.days — sch.days holds the NEWEST
+// version, which can be a future-scheduled version with a different day count.
+// Using sch.days there clipped today's index by the day-count delta and put the
+// "today" marker on the wrong (previous) cell after scheduling a shorter future
+// version. dateStr is passed in (normally todayISO()) so it stays testable.
+function todayCycleStripIndex(sch, dateStr, fallbackIdx) {
+  if (!sch?.versions?.length || isWeekdayPlan(sch) || isFlexPlan(sch)) return fallbackIdx;
+  const cn = getCycleNumForDate(sch, dateStr);
+  if (!cn || cn <= 0) return fallbackIdx;
+  const cs = getCycleStartForNum(sch, cn);
+  if (!cs) return fallbackIdx;
+  cs.setHours(12, 0, 0, 0);
+  const csStr = fmtISO(cs);
+  const activeV = sch.versions.find(v => v.validFrom <= csStr) || sch.versions[sch.versions.length - 1];
+  const vOffset = activeV?.cycleOffset || 0;
+  const daysFromCycleStart = Math.round((new Date(dateStr + 'T12:00:00') - cs) / 86400000);
+  const cycleLen = activeV?.days?.length || sch.days?.length || 1;
+  return Math.max(0, Math.min(daysFromCycleStart + vOffset, cycleLen - 1));
+}
+
 function todaysDay(state) {
   const sch = state.schedules.find(s => s.id === state.activeScheduleId);
   if (!sch || !sch.days.length) return null;
@@ -3908,7 +3932,7 @@ window.LB = {
   signIn, signUp, signOut, signInWithPasskey, registerPasskey, listPasskeys, deletePasskey, resetPassword, deleteAllData, exportBackup, importFromBackup, validateBackup,
   loadFromSupabase, syncStore, mergeSessions, withCarriedWindowEntries, historyWindowCutoffISO,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
-  uid, todayISO, fmtISO, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, buildPlanSkeleton, splitDayCount, frequencyHint, mesoTaperPreview, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, realignCycleForToday,
+  uid, todayISO, fmtISO, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, buildPlanSkeleton, splitDayCount, frequencyHint, mesoTaperPreview, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, realignCycleForToday, todayCycleStripIndex,
   effReps, e1rm, isImprovement, isDecline, bestE1rmForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, latestBodyweight, exerciseLogMode, shouldPullBodyweight, systemExerciseToRow, inferCurrentExIdx, calcBlended,
   refreshExerciseBests, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries,
   computeNextReminderAt,

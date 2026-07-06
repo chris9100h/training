@@ -1069,6 +1069,24 @@ async function testAsync(name, fn) {
     assert.strictEqual(LB.isTrainingDayForDate(cycle, today), true); // cycle ignores the log override
   });
 
+  test('todayCycleStripIndex: a shorter future version does not shift today back', () => {
+    const mkDays = n => Array.from({ length: n }, (_, i) => ({ id: 'd' + i, name: 'D' + i, items: [] }));
+    // Active version: 9-day cycle starting 2026-04-26 (so 2026-07-06 is the last
+    // day, index 8, of cycle 8). A NEW 8-day version is scheduled from tomorrow.
+    const vOld = { validFrom: '2026-04-26', days: mkDays(9) };
+    const vNew = { validFrom: '2026-07-07', days: mkDays(8) };
+    const sch = { id: 'p', days: vNew.days, versions: [vNew, vOld] }; // newest-first; sch.days = future version
+    // Today is the 9th day (index 8) of the currently-active 9-day cycle.
+    assert.strictEqual(LB.getCycleNumForDate(sch, '2026-07-06'), 8);
+    assert.strictEqual(LB.todayCycleStripIndex(sch, '2026-07-06', 0), 8);
+    // Sanity: with no future version the newest version IS active, index unchanged.
+    const schNoFuture = { id: 'p', days: vOld.days, versions: [vOld] };
+    assert.strictEqual(LB.todayCycleStripIndex(schNoFuture, '2026-07-06', 0), 8);
+    // Guard clauses: unversioned / weekday / flex fall back to the passed index.
+    assert.strictEqual(LB.todayCycleStripIndex({ id: 'p', days: mkDays(9) }, '2026-07-06', 3), 3);
+    assert.strictEqual(LB.todayCycleStripIndex({ id: 'p', is_flex: true, days: mkDays(9), versions: [vOld] }, '2026-07-06', 2), 2);
+  });
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();
