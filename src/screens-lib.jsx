@@ -51,6 +51,14 @@ function LibraryScreen({ store, setStore, go, userId }) {
   const planExIds = useMemoL(() => new Set(
     store.schedules.flatMap(s => s.days.flatMap(d => (d.items || []).map(it => it.exId)))
   ), [store.schedules]);
+  // Catalog entries carry sys_ ids that are never in a plan, so plan-membership
+  // for the Database tab is resolved by NAME (same mapping as the "In library"
+  // check): a catalog row counts as in-plan when a same-named user exercise is.
+  const planExNamesLower = useMemoL(() => {
+    const names = new Set();
+    for (const e of store.exercises) if (planExIds.has(e.id)) names.add((e.name || '').toUpperCase());
+    return names;
+  }, [store.exercises, planExIds]);
 
   useEffectL(() => { _lib.tab = tab; }, [tab]);
   useEffectL(() => { _lib.q = q; }, [q]);
@@ -158,9 +166,11 @@ function LibraryScreen({ store, setStore, go, userId }) {
       const matchRestCat = filterRestCats.length === 0 ||
         (filterRestCats.includes('none') && !e.category) ||
         (e.category && filterRestCats.includes(e.category));
-      return matchSearch && matchTags && matchUnilateral && matchEquipment && matchRestCat;
+      const inPlan = planExNamesLower.has(e.name.toUpperCase());
+      const matchPlan = filterPlan === null || (filterPlan === 'in' ? inPlan : !inPlan);
+      return matchSearch && matchTags && matchUnilateral && matchEquipment && matchRestCat && matchPlan;
     }).sort((a, b) => a.name.localeCompare(b.name));
-  }, [systemDisplay, q, filterTags, filterUnilateral, filterEquipment, filterRestCats]);
+  }, [systemDisplay, q, filterTags, filterUnilateral, filterEquipment, filterRestCats, filterPlan, planExNamesLower]);
 
   const allFilteredSelected = filtered.length > 0 && filtered.every(e => selected.has(e.id));
   const selectAll = () => setSelected(new Set(filtered.map(e => e.id)));
@@ -283,7 +293,7 @@ function LibraryScreen({ store, setStore, go, userId }) {
                   {ex.tags?.map(t => <Pill key={t}>{t}</Pill>)}
                   {ex.category && <Pill style={{ color: UI.inkSoft, borderColor: UI.hair }}>{ex.category.charAt(0).toUpperCase() + ex.category.slice(1)}</Pill>}
                   {ex.unilateral && <Pill style={{ color: UI.inkSoft, borderColor: UI.hair }}>Unilateral</Pill>}
-                  {ex.equipment ? <Pill style={{ color: UI.inkFaint, borderColor: UI.hair, fontSize: 8 }}>{EQUIPMENT_TYPES.find(t => t.key === ex.equipment)?.label ?? ex.equipment}</Pill> : <Pill style={{ color: 'rgba(var(--danger-rgb),0.5)', borderColor: 'rgba(var(--danger-rgb),0.2)', fontSize: 8 }}>No equipment</Pill>}
+                  {ex.equipment ? <Pill style={{ color: UI.inkFaint, borderColor: UI.hair, fontSize: 8 }}>{EQUIPMENT_TYPES.find(t => t.key === ex.equipment)?.label ?? ex.equipment}</Pill> : <Pill style={{ color: 'rgba(var(--danger-rgb),0.5)', borderColor: 'rgba(var(--danger-rgb),0.2)', fontSize: 8 }}>Unspecified</Pill>}
                   {planExIds.has(ex.id) && <span style={{ color: UI.inkFaint, fontSize: 9, letterSpacing: '0.05em' }}>◆</span>}
                 </div>
               </div>
@@ -318,7 +328,7 @@ function LibraryScreen({ store, setStore, go, userId }) {
                   {e.tags?.map(t => <Pill key={t}>{t}</Pill>)}
                   {e.category && <Pill style={{ color: UI.inkSoft, borderColor: UI.hair }}>{e.category.charAt(0).toUpperCase() + e.category.slice(1)}</Pill>}
                   {e.unilateral && <Pill style={{ color: UI.inkSoft, borderColor: UI.hair }}>Unilateral</Pill>}
-                  {e.equipment ? <Pill style={{ color: UI.inkFaint, borderColor: UI.hair, fontSize: 8 }}>{EQUIPMENT_TYPES.find(t => t.key === e.equipment)?.label ?? e.equipment}</Pill> : <Pill style={{ color: 'rgba(var(--danger-rgb),0.5)', borderColor: 'rgba(var(--danger-rgb),0.2)', fontSize: 8 }}>No equipment</Pill>}
+                  {e.equipment ? <Pill style={{ color: UI.inkFaint, borderColor: UI.hair, fontSize: 8 }}>{EQUIPMENT_TYPES.find(t => t.key === e.equipment)?.label ?? e.equipment}</Pill> : <Pill style={{ color: 'rgba(var(--danger-rgb),0.5)', borderColor: 'rgba(var(--danger-rgb),0.2)', fontSize: 8 }}>Unspecified</Pill>}
                   {planExIds.has(e.id) && <span style={{ color: UI.inkFaint, fontSize: 9, letterSpacing: '0.05em' }}>◆</span>}
                 </div>
               </div>
@@ -356,8 +366,10 @@ function LibraryScreen({ store, setStore, go, userId }) {
                 <div className="display" style={{ fontSize: 19, color: UI.ink, lineHeight: 1.1 }}>{e.name}</div>
                 <div style={{ display: 'flex', gap: 4, marginTop: 4, flexWrap: 'wrap', alignItems: 'center' }}>
                   {e.tags?.map(t => <Pill key={t}>{t}</Pill>)}
+                  {e.category && <Pill style={{ color: UI.inkSoft, borderColor: UI.hair }}>{e.category.charAt(0).toUpperCase() + e.category.slice(1)}</Pill>}
                   {e.unilateral && <Pill style={{ color: UI.inkSoft, borderColor: UI.hair }}>Unilateral</Pill>}
-                  {e.equipment ? <Pill style={{ color: UI.inkFaint, borderColor: UI.hair, fontSize: 8 }}>{EQUIPMENT_TYPES.find(t => t.key === e.equipment)?.label ?? e.equipment}</Pill> : <Pill style={{ color: 'rgba(var(--danger-rgb),0.5)', borderColor: 'rgba(var(--danger-rgb),0.2)', fontSize: 8 }}>No equipment</Pill>}
+                  {e.equipment ? <Pill style={{ color: UI.inkFaint, borderColor: UI.hair, fontSize: 8 }}>{EQUIPMENT_TYPES.find(t => t.key === e.equipment)?.label ?? e.equipment}</Pill> : <Pill style={{ color: 'rgba(var(--danger-rgb),0.5)', borderColor: 'rgba(var(--danger-rgb),0.2)', fontSize: 8 }}>Unspecified</Pill>}
+                  {planExNamesLower.has(e.name.toUpperCase()) && <span style={{ color: UI.inkFaint, fontSize: 9, letterSpacing: '0.05em' }}>◆</span>}
                 </div>
               </div>
               {inLib ? (
@@ -450,7 +462,7 @@ function LibraryScreen({ store, setStore, go, userId }) {
             <div>
               <GoldSectionLabel style={{ color: UI.gold }}>EQUIPMENT</GoldSectionLabel>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                <Pill gold={filterEquipment.includes('none')} onClick={() => toggleEquipment('none')} style={{ cursor: 'pointer' }}>No equipment set</Pill>
+                <Pill gold={filterEquipment.includes('none')} onClick={() => toggleEquipment('none')} style={{ cursor: 'pointer' }}>Unspecified</Pill>
                 {EQUIPMENT_TYPES.map(({ key, label }) => (
                   <Pill key={key} gold={filterEquipment.includes(key)} onClick={() => toggleEquipment(key)} style={{ cursor: 'pointer' }}>{label}</Pill>
                 ))}
