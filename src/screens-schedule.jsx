@@ -2890,7 +2890,36 @@ function PlanWizard({ store, setStore, go }) {
   const [creatingDayType, setCreatingDayType] = useStateS(false); // "+ Custom" name entry on a day-type step
   const [newDayTypeName, setNewDayTypeName] = useStateS('');
   const [deleteTypeArm, setDeleteTypeArm] = useStateS(null); // custom type armed for a two-tap delete
-  useEffectS(() => { setCreatingDayType(false); setNewDayTypeName(''); setDeleteTypeArm(null); setDayFlash(false); }, [step]); // reset on step change
+  const [importOpen, setImportOpen] = useStateS(false); // day-import view on a day step
+  const [importSel, setImportSel] = useStateS(new Set()); // selected source-day keys to import
+  useEffectS(() => { setCreatingDayType(false); setNewDayTypeName(''); setDeleteTypeArm(null); setDayFlash(false); setImportOpen(false); setImportSel(new Set()); }, [step]); // reset on step change
+
+  // Days importable into the wizard: every day in the user's existing plans that
+  // has exercises, plus saved workout templates (converted to plan-item shape).
+  const importSources = useMemoS(() => {
+    const out = [];
+    for (const s of store.schedules) {
+      for (const d of (s.days || [])) {
+        const items = (d.items || []).filter(it => LB.findExercise(store, it.exId));
+        if (items.length) out.push({ key: s.id + ':' + d.id, plan: s.name, name: d.name, items });
+      }
+    }
+    for (const t of (store.workoutTemplates || [])) {
+      const items = (t.exercises || []).filter(it => LB.findExercise(store, it.exId))
+        .map(it => ({ exId: it.exId, sets: it.sets || 3, reps: it.reps ?? 8, ...(it.repsPerSet ? { repsPerSet: it.repsPerSet } : {}), ...(it.repsMax != null ? { repsMax: it.repsMax } : {}), ...(it.progressionOffset != null ? { progressionOffset: it.progressionOffset } : {}), ...(it.supersetGroup ? { supersetGroup: it.supersetGroup } : {}) }));
+      if (items.length) out.push({ key: 'tpl:' + t.id, plan: 'Template', name: t.name, items });
+    }
+    return out;
+  }, [store.schedules, store.workoutTemplates]);
+  // Deep-copy items and give supersets fresh group ids (see DayEditor.copyItemsFromDay).
+  const copyImportItems = (items) => {
+    const gid = {};
+    return normalizeSupersets(items).map(it => {
+      const next = { ...it };
+      if (it.supersetGroup) { gid[it.supersetGroup] = gid[it.supersetGroup] || LB.uid(); next.supersetGroup = gid[it.supersetGroup]; }
+      return next;
+    });
+  };
 
   // Keep the card in the VISIBLE viewport so the Name step's input isn't hidden
   // behind the on-screen keyboard (same trick as ExerciseWizard).
@@ -2936,6 +2965,25 @@ function PlanWizard({ store, setStore, go }) {
     : (type === 'weekday' && sortedWeekdays[dayIdx] != null) ? WEEKDAYS[sortedWeekdays[dayIdx]] : `Day ${dayIdx + 1}`;
   const stepTitle = dayIdx >= 0 ? dayLabel : PLAN_TITLES[step];
   const stepIntro = dayIdx >= 0 ? `What's on ${dayLabel}?` : PLAN_INTRO[step];
+
+  // Import the selected source days into this day step and the ones after it,
+  // each with its exercises. Cycle/flex grow the plan if the import runs past
+  // the end; weekday can't grow (its length is the chosen weekday count), so it
+  // fills only the remaining slots. Then jump past the filled days.
+  const doImport = () => {
+    const chosen = importSources.filter(s => importSel.has(s.key));
+    if (!chosen.length || dayIdx < 0) return;
+    const cap = type === 'weekday' ? Math.max(0, weekdaysSel.length - dayIdx) : chosen.length;
+    const use = chosen.slice(0, cap);
+    if (!use.length) return;
+    setCustomDays(d => { const a = d.slice(); use.forEach((src, k) => { a[dayIdx + k] = { name: src.name, items: copyImportItems(src.items) }; }); return a; });
+    const nextIdx = dayIdx + use.length;
+    let total;
+    if (type === 'weekday') { total = weekdaysSel.length; }
+    else { total = Math.max(customCount, nextIdx); if (total !== customCount) setCustomCount(total); }
+    setImportOpen(false); setImportSel(new Set());
+    setStep(nextIdx < total ? 'day' + nextIdx : 'meso');
+  };
 
   const create = () => {
     const sch = LB.buildPlanSkeleton({
@@ -3021,7 +3069,7 @@ function PlanWizard({ store, setStore, go }) {
     // firing two goNext calls (which would skip a day).
     const pickDay = (dt) => {
       if (dayFlash) return;
-      setCustomDays(d => { const a = d.slice(); a[dayIdx] = dt; return a; }); // extends for weekday (sized by weekday count, not the stepper)
+      setCustomDays(d => { const a = d.slice(); a[dayIdx] = { name: dt, items: [] }; return a; }); // extends for weekday (sized by weekday count, not the stepper)
       setDayFlash(true);
       setTimeout(() => { setDayFlash(false); goNext(); }, 200);
     };
@@ -3040,14 +3088,14 @@ function PlanWizard({ store, setStore, go }) {
       setStore(s => ({ ...s, customDayTypes: (s.customDayTypes || []).filter(t => t !== dt) }));
     };
     const stdChip = (dt) => {
-      const on = customDays[dayIdx] === dt;
+      const on = customDays[dayIdx]?.name === dt;
       return <button key={dt} onClick={() => pickDay(dt)}
         style={{ padding: '13px 6px', borderRadius: 6, cursor: 'pointer', textAlign: 'center', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, letterSpacing: '0.04em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
           background: on ? 'rgba(var(--accent-rgb),0.12)' : UI.bgInset, color: on ? 'var(--accent)' : UI.inkFaint,
           border: `1px solid ${on ? 'var(--accent)' : UI.hairStrong}`, WebkitTapHighlightColor: 'transparent' }}>{dt}</button>;
     };
     const customChip = (dt) => {
-      const on = customDays[dayIdx] === dt;
+      const on = customDays[dayIdx]?.name === dt;
       const armed = deleteTypeArm === dt;
       return <div key={dt} style={{ display: 'flex', alignItems: 'stretch', borderRadius: 6, overflow: 'hidden', border: `1px solid ${armed ? UI.danger : (on ? 'var(--accent)' : UI.goldSoft)}` }}>
         <button onClick={() => pickDay(dt)} style={{ flex: 1, minWidth: 0, padding: '13px 4px', border: 'none', cursor: 'pointer', textAlign: 'center', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, letterSpacing: '0.04em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
@@ -3078,6 +3126,13 @@ function PlanWizard({ store, setStore, go }) {
         : <button onClick={() => setCreatingDayType(true)}
             style={{ padding: '12px 6px', borderRadius: 6, cursor: 'pointer', textAlign: 'center', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, letterSpacing: '0.04em',
               background: 'transparent', color: UI.inkFaint, border: `1px dashed ${UI.hairStrong}`, WebkitTapHighlightColor: 'transparent' }}>+ Custom day type</button>}
+      {!creatingDayType && importSources.length > 0 && (
+        <button onClick={() => { setImportSel(new Set()); setImportOpen(true); }}
+          style={{ padding: '12px 6px', borderRadius: 6, cursor: 'pointer', textAlign: 'center', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, letterSpacing: '0.04em', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+            background: UI.bgInset, color: UI.inkSoft, border: `1px solid ${UI.hairStrong}`, WebkitTapHighlightColor: 'transparent' }}>
+          <i className="fa-solid fa-file-import" style={{ fontSize: 12 }} /> Import a day from a plan
+        </button>
+      )}
     </div>;
   } else if (step === 'weekdays') {
     body = <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -3129,6 +3184,34 @@ function PlanWizard({ store, setStore, go }) {
   // Day-type steps auto-advance on pick, so no Next there.
   const needsNext = step === 'name' || step === 'weekdays' || (step === 'split' && presetKey === 'custom' && type !== 'weekday');
   const canNext = step === 'name' ? !!name.trim() : step === 'weekdays' ? (weekdaysSel.length > 0 && !weekdayMismatch) : true;
+
+  // Wizard-native day-import view (the editor's DayCopyPicker is a z-100 Sheet
+  // that would render behind this z-9998 overlay, so it can't be reused).
+  const importView = (
+    <>
+      <div style={{ fontFamily: UI.fontDisplay, fontSize: 23, color: 'var(--accent)', fontWeight: 400, textTransform: 'uppercase', letterSpacing: '0.02em', lineHeight: 1.1 }}>Import days</div>
+      <div style={{ fontSize: 12.5, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>Pick day(s) from your plans, their exercises come along. Several days fill the next steps in order.</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 340, overflowY: 'auto', overscrollBehavior: 'contain' }}>
+        {importSources.map(src => {
+          const sel = importSel.has(src.key);
+          return <button key={src.key} onClick={() => setImportSel(s => { const n = new Set(s); if (n.has(src.key)) n.delete(src.key); else n.add(src.key); return n; })}
+            style={{ display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left', padding: '11px 12px', borderRadius: 6, cursor: 'pointer',
+              background: sel ? 'rgba(var(--accent-rgb),0.10)' : UI.bgInset, border: `1px solid ${sel ? 'var(--accent)' : UI.hairStrong}`, WebkitTapHighlightColor: 'transparent' }}>
+            <i className={`fa-solid ${sel ? 'fa-circle-check' : 'fa-circle'}`} style={{ fontSize: 16, color: sel ? 'var(--accent)' : UI.inkFaint, flexShrink: 0 }} />
+            <span style={{ flex: 1, minWidth: 0 }}>
+              <span style={{ display: 'block', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, color: sel ? 'var(--accent)' : UI.ink, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{src.name}</span>
+              <span className="micro" style={{ color: UI.inkFaint }}>{src.plan} · {src.items.length} exercise{src.items.length !== 1 ? 's' : ''}</span>
+            </span>
+          </button>;
+        })}
+      </div>
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+        <button onClick={() => { setImportOpen(false); setImportSel(new Set()); }} style={{ background: 'transparent', border: 'none', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13, cursor: 'pointer', padding: '8px 4px', WebkitTapHighlightColor: 'transparent' }}>← Cancel</button>
+        <div style={{ flex: 1 }} />
+        <Btn onClick={doImport} disabled={importSel.size === 0} style={{ opacity: importSel.size ? 1 : 0.4 }}>{importSel.size ? `Import ${importSel.size} day${importSel.size !== 1 ? 's' : ''} →` : 'Import →'}</Btn>
+      </div>
+    </>
+  );
   const overlayBase = { zIndex: 9998, background: 'rgba(0,0,0,0.74)', backdropFilter: 'blur(14px)', WebkitBackdropFilter: 'blur(14px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 };
   const overlayStyle = vp ? { ...overlayBase, position: 'fixed', left: 0, right: 0, top: vp.top, height: vp.height } : { ...overlayBase, position: 'fixed', inset: 0 };
   return (
@@ -3143,7 +3226,7 @@ function PlanWizard({ store, setStore, go }) {
               <Btn onClick={exit} style={{ flex: 1, background: UI.danger, borderColor: 'rgba(var(--danger-rgb),0.6)' }}>Discard</Btn>
             </div>
           </>
-        ) : (
+        ) : importOpen ? importView : (
           <>
             {/* Segmented progress */}
             <div style={{ display: 'flex', gap: 4 }}>

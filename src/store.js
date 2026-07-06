@@ -2004,39 +2004,38 @@ function splitDayCount(presetKey) {
 //   mesoStartRir/mesoEndRir : optional RIR taper endpoints (else app fallbacks 3/0)
 function buildPlanSkeleton({ name, type, presetKey, customCount, customDays, weekdays, mesoWeeks, mesoStartRir, mesoEndRir } = {}) {
   const preset = SPLIT_PRESETS[presetKey];
+  // A customDays entry is a type string, or { name, items } (a day imported with
+  // its exercises), or null (unpicked → FULL).
+  const cdName = (cd) => (typeof cd === 'string' ? cd : cd && cd.name) || 'FULL';
+  const cdItems = (cd) => (cd && typeof cd === 'object' && Array.isArray(cd.items)) ? cd.items.map(x => ({ ...x })) : [];
   let days;
   if (type === 'weekday') {
     // A fixed preset's rotation maps onto the sorted weekdays (round-robin; the
     // wizard requires exactly splitDayCount days so it divides evenly). Custom
-    // uses the per-day types the wizard collected (customDays, one per sorted
-    // weekday), else FULL. No explicit REST days: a weekday plan rests on the
-    // calendar days you skip.
+    // uses the per-day picks (customDays, one per sorted weekday), incl. any
+    // imported exercises, else FULL. No explicit REST days: a weekday plan rests
+    // on the calendar days you skip.
     const block = preset ? preset.block : null;
     days = (weekdays || []).slice().sort((a, b) => a - b)
       .map((i, n) => {
-        const name = presetKey === 'custom'
-          ? ((customDays && customDays[n]) || 'FULL')
-          : (block ? block[n % block.length] : 'FULL');
-        return { id: uid(), name, weekday: i, items: [] };
+        const cd = customDays && customDays[n];
+        const name = presetKey === 'custom' ? cdName(cd) : (block ? block[n % block.length] : 'FULL');
+        const items = presetKey === 'custom' ? cdItems(cd) : [];
+        return { id: uid(), name, weekday: i, items };
       });
+  } else if (presetKey === 'custom' || !preset) {
+    // Custom: the per-day picks the wizard collected (unpicked → FULL, imported
+    // days carry their exercises); fall back to a plain count of FULL days.
+    const cds = (customDays && customDays.length)
+      ? customDays
+      : Array.from({ length: Math.max(1, Math.round(customCount || 1)) }, () => null);
+    days = cds.map(cd => ({ id: uid(), name: cdName(cd), items: cdItems(cd) }));
   } else {
-    let types;
-    if (presetKey === 'custom' || !preset) {
-      // Custom: use the per-day types the wizard collected (an unpicked day is
-      // null → FULL); fall back to a plain count of FULL days if none supplied.
-      types = (customDays && customDays.length)
-        ? customDays.map(t => t || 'FULL')
-        : Array.from({ length: Math.max(1, Math.round(customCount || 1)) }, () => 'FULL');
-    } else if (type === 'flex') {
-      // Flex has no rest days (position advances only on a logged session/skip).
-      types = [];
-      for (let r = 0; r < preset.repeats; r++) types.push(...preset.block);
-    } else {
-      // Cycle: close each block with a REST day so "rest days included" holds
-      // (e.g. PPL x2 → PUSH PULL LEGS REST PUSH PULL LEGS REST).
-      types = [];
-      for (let r = 0; r < preset.repeats; r++) types.push(...preset.block, 'REST');
-    }
+    const types = [];
+    // Flex has no rest days (advances only on a logged session/skip); cycle
+    // closes each block with a REST day ("rest days included").
+    if (type === 'flex') { for (let r = 0; r < preset.repeats; r++) types.push(...preset.block); }
+    else { for (let r = 0; r < preset.repeats; r++) types.push(...preset.block, 'REST'); }
     days = types.map(t => ({ id: uid(), name: t, items: [] }));
   }
   const sch = { id: uid(), name: (name || '').trim() || 'My Plan', days, archived: false };

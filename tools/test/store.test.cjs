@@ -1009,6 +1009,16 @@ async function testAsync(name, fn) {
     const one = LB.buildPlanSkeleton({ name: 'c', type: 'cycle', presetKey: 'custom', customCount: 0 });
     assert.strictEqual(one.days.length, 1);        // floored to at least 1
   });
+  test('buildPlanSkeleton: custom day can carry imported exercises (deep-copied)', () => {
+    const src = { name: 'LEG DAY', items: [{ exId: 'e1', sets: 3, reps: 8 }, { exId: 'e2', sets: 4, reps: 10 }] };
+    const sch = LB.buildPlanSkeleton({ type: 'cycle', presetKey: 'custom', customCount: 2, customDays: ['PUSH', src] });
+    assert.strictEqual(sch.days[0].name, 'PUSH');
+    assert.strictEqual(sch.days[0].items.length, 0);            // a typed day has no exercises
+    assert.strictEqual(sch.days[1].name, 'LEG DAY');
+    assert.strictEqual(sch.days[1].items.length, 2);            // imported exercises carried
+    sch.days[1].items[0].exId = 'CHANGED';
+    assert.strictEqual(src.items[0].exId, 'e1');                // source untouched (deep copy)
+  });
   test('buildPlanSkeleton: meso weeks + RIR set when provided, absent otherwise', () => {
     const meso = LB.buildPlanSkeleton({ name: 'm', type: 'cycle', presetKey: 'full3', mesoWeeks: 8, mesoStartRir: 3, mesoEndRir: -1 });
     assert.strictEqual(meso.mesocycle_weeks, 8);
