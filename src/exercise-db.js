@@ -33,6 +33,7 @@ window.SYSTEM_EXERCISES = [
   { id: 'sys_pec_deck', name: 'Pec Deck', tags: ['Chest'], equipment: 'machine' },
   { id: 'sys_chest_dip', name: 'Chest Dip', tags: ['Chest', 'Triceps'], equipment: 'bodyweight' },
   { id: 'sys_push_up', name: 'Push-Up', tags: ['Chest', 'Triceps', 'Shoulders'], equipment: 'bodyweight', logMode: 'reps' },
+  { id: 'sys_single_arm_cable_fly', name: 'Single-Arm Cable Fly', tags: ['Chest'], equipment: 'cable', movement: 'unilateral' },
   // ── Back ──
   { id: 'sys_deadlift', name: 'Deadlift', tags: ['Back', 'Glutes', 'Hamstrings'], equipment: 'barbell_dual' },
   { id: 'sys_rack_pull', name: 'Rack Pull', tags: ['Back', 'Glutes', 'Hamstrings'], equipment: 'barbell_dual' },
@@ -57,6 +58,10 @@ window.SYSTEM_EXERCISES = [
   { id: 'sys_dumbbell_shrug', name: 'Dumbbell Shrug', tags: ['Back'], equipment: 'dumbbell' },
   { id: 'sys_neutral_grip_pulldown', name: 'Neutral-Grip Lat Pulldown', tags: ['Back', 'Biceps'], equipment: 'cable' },
   { id: 'sys_trap_bar_deadlift', name: 'Trap Bar Deadlift', tags: ['Back', 'Quads', 'Glutes'], equipment: 'barbell_dual' },
+  { id: 'sys_single_arm_cable_row', name: 'Single-Arm Cable Row', tags: ['Back', 'Biceps'], equipment: 'cable', movement: 'unilateral' },
+  { id: 'sys_wide_grip_cable_row', name: 'Wide-Grip Cable Row', tags: ['Back', 'Biceps'], equipment: 'cable' },
+  { id: 'sys_single_arm_pulldown', name: 'Single-Arm Lat Pulldown', tags: ['Back', 'Biceps'], equipment: 'cable', movement: 'unilateral' },
+  { id: 'sys_neutral_grip_pull_up', name: 'Neutral-Grip Pull-Up', tags: ['Back', 'Biceps'], equipment: 'bodyweight' },
   // ── Shoulders ──
   { id: 'sys_overhead_press', name: 'Overhead Press', tags: ['Shoulders', 'Triceps'], equipment: 'barbell_dual' },
   { id: 'sys_seated_barbell_ohp', name: 'Seated Barbell Overhead Press', tags: ['Shoulders', 'Triceps'], equipment: 'barbell_dual' },
@@ -75,6 +80,8 @@ window.SYSTEM_EXERCISES = [
   { id: 'sys_cable_upright_row', name: 'Cable Upright Row', tags: ['Shoulders', 'Back'], equipment: 'cable' },
   { id: 'sys_push_press', name: 'Push Press', tags: ['Shoulders', 'Triceps'], equipment: 'barbell_dual' },
   { id: 'sys_cable_rear_delt_fly', name: 'Cable Rear Delt Fly', tags: ['Shoulders'], equipment: 'cable' },
+  { id: 'sys_seated_db_shoulder_press', name: 'Seated Dumbbell Shoulder Press', tags: ['Shoulders', 'Triceps'], equipment: 'dumbbell' },
+  { id: 'sys_cable_front_raise', name: 'Cable Front Raise', tags: ['Shoulders'], equipment: 'cable' },
   // ── Biceps ──
   { id: 'sys_barbell_curl', name: 'Barbell Curl', tags: ['Biceps'], equipment: 'barbell_dual' },
   { id: 'sys_ez_bar_curl', name: 'EZ-Bar Curl', tags: ['Biceps'], equipment: 'barbell_dual' },
@@ -88,6 +95,7 @@ window.SYSTEM_EXERCISES = [
   { id: 'sys_bayesian_cable_curl', name: 'Bayesian Cable Curl', tags: ['Biceps'], equipment: 'cable', movement: 'unilateral' },
   { id: 'sys_spider_curl', name: 'Spider Curl', tags: ['Biceps'], equipment: 'dumbbell' },
   { id: 'sys_rope_hammer_curl', name: 'Cable Rope Hammer Curl', tags: ['Biceps', 'Forearms'], equipment: 'cable' },
+  { id: 'sys_alternating_curl', name: 'Alternating Dumbbell Curl', tags: ['Biceps'], equipment: 'dumbbell', movement: 'unilateral' },
   // ── Triceps ──
   { id: 'sys_close_grip_bench', name: 'Close-Grip Bench Press', tags: ['Triceps', 'Chest'], equipment: 'barbell_dual' },
   { id: 'sys_triceps_pushdown_rope', name: 'Rope Triceps Pushdown', tags: ['Triceps'], equipment: 'cable' },
@@ -102,6 +110,7 @@ window.SYSTEM_EXERCISES = [
   { id: 'sys_cable_kickback', name: 'Cable Kickback', tags: ['Triceps'], equipment: 'cable', movement: 'unilateral' },
   { id: 'sys_reverse_grip_pushdown', name: 'Reverse-Grip Triceps Pushdown', tags: ['Triceps'], equipment: 'cable' },
   { id: 'sys_diamond_push_up', name: 'Diamond Push-Up', tags: ['Triceps', 'Chest'], equipment: 'bodyweight', logMode: 'reps' },
+  { id: 'sys_single_arm_pushdown', name: 'Single-Arm Triceps Pushdown', tags: ['Triceps'], equipment: 'cable', movement: 'unilateral' },
   // ── Quads ──
   { id: 'sys_back_squat', name: 'Back Squat', tags: ['Quads', 'Glutes'], equipment: 'barbell_dual' },
   { id: 'sys_front_squat', name: 'Front Squat', tags: ['Quads', 'Glutes'], equipment: 'barbell_dual' },
@@ -117,6 +126,7 @@ window.SYSTEM_EXERCISES = [
   { id: 'sys_dumbbell_step_up', name: 'Dumbbell Step-Up', tags: ['Quads', 'Glutes'], equipment: 'dumbbell', movement: 'unilateral' },
   { id: 'sys_sissy_squat', name: 'Sissy Squat', tags: ['Quads'], equipment: 'bodyweight', logMode: 'reps' },
   { id: 'sys_wall_sit', name: 'Wall Sit', tags: ['Quads'], equipment: 'bodyweight', logMode: 'checkbox' },
+  { id: 'sys_single_leg_extension', name: 'Single-Leg Leg Extension', tags: ['Quads'], equipment: 'machine', movement: 'unilateral' },
   // ── Hamstrings ──
   { id: 'sys_romanian_deadlift', name: 'Romanian Deadlift', tags: ['Hamstrings', 'Glutes'], equipment: 'barbell_dual' },
   { id: 'sys_dumbbell_rdl', name: 'Dumbbell Romanian Deadlift', tags: ['Hamstrings', 'Glutes'], equipment: 'dumbbell' },
@@ -126,6 +136,7 @@ window.SYSTEM_EXERCISES = [
   { id: 'sys_seated_leg_curl', name: 'Seated Leg Curl', tags: ['Hamstrings'], equipment: 'machine' },
   { id: 'sys_nordic_curl', name: 'Nordic Hamstring Curl', tags: ['Hamstrings'], equipment: 'bodyweight', logMode: 'reps' },
   { id: 'sys_good_morning', name: 'Good Morning', tags: ['Hamstrings', 'Glutes', 'Back'], equipment: 'barbell_dual' },
+  { id: 'sys_single_leg_curl', name: 'Single-Leg Leg Curl', tags: ['Hamstrings'], equipment: 'machine', movement: 'unilateral' },
   // ── Glutes ──
   { id: 'sys_cable_pull_through', name: 'Cable Pull-Through', tags: ['Glutes', 'Hamstrings'], equipment: 'cable' },
   { id: 'sys_hip_thrust', name: 'Barbell Hip Thrust', tags: ['Glutes', 'Hamstrings'], equipment: 'barbell_dual' },
@@ -136,6 +147,7 @@ window.SYSTEM_EXERCISES = [
   { id: 'sys_cable_glute_kickback', name: 'Cable Glute Kickback', tags: ['Glutes'], equipment: 'cable', movement: 'unilateral' },
   { id: 'sys_kettlebell_swing', name: 'Kettlebell Swing', tags: ['Glutes', 'Hamstrings'], equipment: 'dumbbell' },
   { id: 'sys_single_leg_hip_thrust', name: 'Single-Leg Hip Thrust', tags: ['Glutes'], equipment: 'bodyweight', movement: 'unilateral', logMode: 'reps' },
+  { id: 'sys_machine_glute_kickback', name: 'Machine Glute Kickback', tags: ['Glutes'], equipment: 'machine', movement: 'unilateral' },
   // ── Calves ──
   { id: 'sys_standing_calf_raise', name: 'Standing Calf Raise', tags: ['Calves'], equipment: 'machine' },
   { id: 'sys_seated_calf_raise', name: 'Seated Calf Raise', tags: ['Calves'], equipment: 'machine' },
@@ -143,6 +155,7 @@ window.SYSTEM_EXERCISES = [
   { id: 'sys_dumbbell_calf_raise', name: 'Dumbbell Standing Calf Raise', tags: ['Calves'], equipment: 'dumbbell' },
   { id: 'sys_smith_calf_raise', name: 'Smith Machine Calf Raise', tags: ['Calves'], equipment: 'machine' },
   { id: 'sys_single_leg_calf_raise', name: 'Single-Leg Calf Raise', tags: ['Calves'], equipment: 'bodyweight', movement: 'unilateral', logMode: 'reps' },
+  { id: 'sys_donkey_calf_raise', name: 'Donkey Calf Raise', tags: ['Calves'], equipment: 'machine' },
   // ── Abs ──
   { id: 'sys_hanging_leg_raise', name: 'Hanging Leg Raise', tags: ['Abs'], equipment: 'bodyweight', logMode: 'reps' },
   { id: 'sys_hanging_knee_raise', name: 'Hanging Knee Raise', tags: ['Abs'], equipment: 'bodyweight', logMode: 'reps' },
