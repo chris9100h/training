@@ -2059,3 +2059,20 @@ $function$;
 
 REVOKE EXECUTE ON FUNCTION public.get_users_with_plans() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.get_users_with_plans() TO authenticated;
+
+-- ── Grants: anon lock-down of older SECURITY INVOKER RPCs (Migration 0141) ──
+
+REVOKE EXECUTE ON FUNCTION public.get_exercise_best_e1rm(uuid) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.get_exercise_best_e1rm(uuid) TO authenticated;
+REVOKE EXECUTE ON FUNCTION public.get_exercise_history(text, text, int, uuid) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.get_exercise_history(text, text, int, uuid) TO authenticated;
+REVOKE EXECUTE ON FUNCTION public.get_user_volume_stats(uuid) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.get_user_volume_stats(uuid) TO authenticated;
+REVOKE EXECUTE ON FUNCTION public.get_session_stats(uuid) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.get_session_stats(uuid) TO authenticated;
+REVOKE EXECUTE ON FUNCTION public.sync_sets_batch(jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.sync_sets_batch(jsonb) TO authenticated;
+REVOKE EXECUTE ON FUNCTION public.sync_daily_logs_batch(jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.sync_daily_logs_batch(jsonb) TO authenticated;
+REVOKE EXECUTE ON FUNCTION public.sync_meso_states_batch(jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.sync_meso_states_batch(jsonb) TO authenticated;

@@ -113,7 +113,7 @@ Migrationen liegen in `supabase/migrations/` als nummerierte SQL-Dateien. **Die 
 
 **Grant-Fallen bei neuen SECURITY-DEFINER-Funktionen** (beide real passiert, Volltext in `docs/database.md`):
 - Postgres vergibt bei `CREATE FUNCTION` automatisch `EXECUTE` an `PUBLIC`, davon erbt `anon` (unabhängig von einem gezielten `REVOKE ... FROM anon`). Jede neue Funktion braucht explizit `REVOKE EXECUTE ... FROM PUBLIC` + `GRANT EXECUTE ... TO authenticated` (rein interne Funktionen: kein Grant für `authenticated`).
-- Nach jeder neuen Funktion prüfen: `SELECT has_function_privilege('anon', 'public.<fn>(...)', 'execute');` muss `false` sein. (Eine `ALTER DEFAULT PRIVILEGES`-Regel gab `anon` früher zusätzlich direkte Grants; Root Cause in Migration 0132 entfernt.)
+- Nach jeder neuen Funktion prüfen (gilt für SECURITY DEFINER **und** INVOKER, siehe Migration 0141): `SELECT has_function_privilege('anon', 'public.<fn>(...)', 'execute');` muss `false` sein. (Eine `ALTER DEFAULT PRIVILEGES`-Regel gab `anon` früher zusätzlich direkte Grants; Root Cause in Migration 0132 entfernt.)
 
 **Tabellen-Kurzüberblick** (Details je Tabelle in `docs/database.md`):
 - `zane_exercises`: Übungs-Library (u.a. `log_mode`, `pull_bodyweight`, Legacy-Flags)
@@ -133,7 +133,7 @@ Migrationen liegen in `supabase/migrations/` als nummerierte SQL-Dateien. **Die 
 - Admin- (Signup-Approval, All-Users, Broadcast, Force-Update, VIP), Coaching- und Support-RPCs: siehe Referenz
 - Edge Function `auto-close-sessions`: schließt abgelaufene offene Sessions (Cron alle 15 min, Timeout je User via `session_timeout_minutes`)
 
-**Realtime:** nur `zane_coaching` und `zane_coaching_notes` sind in der `supabase_realtime`-Publikation (Live-Einladungen und -Nachrichten). Laufende Sessions haben keinen Realtime-Sync: der lokale Store ist die alleinige Quelle, ein Coach pollt `get_active_session_detail`.
+**Realtime:** von den App-Tabellen sind nur `zane_coaching` und `zane_coaching_notes` in der `supabase_realtime`-Publikation (Live-Einladungen und -Nachrichten); die dort ebenfalls gelisteten `door_events`/`motion_events` sind app-fremd (anderes Projekt in derselben DB, ignorieren). Laufende Sessions haben keinen Realtime-Sync: der lokale Store ist die alleinige Quelle, ein Coach pollt `get_active_session_detail`.
 
 ## History-Windowing (Kurzfassung)
 
