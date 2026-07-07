@@ -1713,6 +1713,18 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     if (!await confirm('All inputs will be lost.', { title: 'Cancel session?', ok: 'Cancel', cancel: 'Keep training', danger: true })) return;
     cancelPushover();
     try { localStorage.removeItem(MESO_ASKED_KEY + session.id); } catch {}
+    // Discard this session's in-progress meso feedback too. Every feedback answer
+    // writes a GROWING delta into the MESO_KEY localStorage cache (commitContrib
+    // adds on top of the inherited value), and getMesoState prefers that cache
+    // over the store whenever its updatedAt is newer. The store copy is only ever
+    // written by flushMesoStateToStore (clean finish), never during a session, so
+    // it still holds the correct pre-session delta. Without clearing the cache an
+    // abandoned session's delta survives and compounds on every cancel+restart
+    // (base+1 -> base+2 -> ...). Mirror the exact cleanup a clean finish does.
+    if (session.scheduleId) {
+      try { localStorage.removeItem(MESO_KEY + '-' + session.scheduleId); } catch {}
+      try { localStorage.removeItem(MESO_KEY); } catch {} // old single-key format
+    }
     setStore(s => ({
       ...s,
       sessions: s.sessions.filter(x => x.id !== session.id),
