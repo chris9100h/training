@@ -9,7 +9,7 @@ const _lib = { tab: 'recent', q: '', filterTags: [], filterRestCats: [], filterU
 // or the exercise detail). It is auto-seeded per user and re-created if removed,
 // so silently refusing just reads as "delete is broken" — which cost us a real
 // support ticket. Explain instead.
-const CARDIO_SYSTEM_MSG = "The Cardio exercise is built into the app and can't be deleted. It stays available so you can log cardio in any plan or session.";
+const CARDIO_SYSTEM_MSG = "System exercises can't be deleted. Cardio is here to stay, always ready to drop into a plan or session.";
 
 // Accept only http(s) YouTube URLs. React does NOT block javascript: hrefs in
 // production, so we validate on save (strip otherwise) and guard again at render.
@@ -323,7 +323,7 @@ function LibraryScreen({ store, setStore, go, userId }) {
             <div
               onClick={() => {
                 if (selecting) {
-                  if (isSystemCardio) { confirm(CARDIO_SYSTEM_MSG, { title: 'Built-in exercise', ok: 'Got it', cancel: null }); return; }
+                  if (isSystemCardio) { confirm(CARDIO_SYSTEM_MSG, { title: 'You shall not pass 🧙', ok: 'Got it', cancel: null }); return; }
                   toggleSelect(e.id); return;
                 }
                 go({ name: 'exercise', exId: e.id });
@@ -1248,7 +1248,7 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
                 }}>×</button>
               )
             ) : ex.movement_type === 'cardio' ? (
-              <button onClick={() => confirm(CARDIO_SYSTEM_MSG, { title: 'Built-in exercise', ok: 'Got it', cancel: null })} style={{
+              <button onClick={() => confirm(CARDIO_SYSTEM_MSG, { title: 'You shall not pass 🧙', ok: 'Got it', cancel: null })} style={{
                 background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5,
                 color: UI.inkFaint, padding: '4px 8px',
               }}>
