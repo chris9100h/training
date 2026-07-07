@@ -1463,11 +1463,15 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
         : (st.kg < prevSet.kg && repsA <= repsB) || (st.kg === prevSet.kg && repsA < repsB);
     };
     let improvements = 0, regressions = 0;
+    // The filter + sort is identical for every entry (they all share
+    // doneSession's id/dayId/ended), so build the candidate prior-session list
+    // ONCE instead of re-spreading and re-sorting the whole history per entry
+    // (was O(entries x n log n) — the single heaviest computation on Home).
+    const priorSessions = [...store.sessions]
+      .filter(x => x.ended && x.id !== doneSession.id && x.dayId === doneSession.dayId && x.ended < doneSession.ended)
+      .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''));
     doneSession.entries.forEach(e => {
-      const prev = [...store.sessions]
-        .filter(x => x.ended && x.id !== doneSession.id && x.dayId === doneSession.dayId && x.ended < doneSession.ended)
-        .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''))
-        .find(x => x.entries.some(en => en.exId === e.exId && en.sets.some(st => st.kg != null || st.reps != null)));
+      const prev = priorSessions.find(x => x.entries.some(en => en.exId === e.exId && en.sets.some(st => st.kg != null || st.reps != null)));
       const prevEntry = prev?.entries.find(en => en.exId === e.exId);
       if (!prevEntry) return;
       // Compare working sets by position, warmups AND skipped sets excluded on
