@@ -2737,7 +2737,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // replaces every `restRemaining === 0` / `> 0` gate in the JSX and flips only
   // twice per rest period instead of 4x/second.
   const sessionRef = useRefT(session); sessionRef.current = session;
+  const restStartRef = useRefT(restStart); restStartRef.current = restStart;
+  const restFiredRef = useRefT(false); // synchronous guard: fire the expiry effect at most once per rest
   const fireRestDone = () => {
+    if (restFiredRef.current) return;
+    restFiredRef.current = true;
     const wasPostWarmup = !sessionRef.current.startedAt;
     if (wasPostWarmup) {
       updateSession(sess => sess.startedAt ? sess : { ...sess, startedAt: new Date().toISOString() });
@@ -2780,21 +2784,38 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     return !!(rs && rd && Date.now() >= rs + rd * 1000);
   });
   const restExpiredRef = useRefT(restExpired); restExpiredRef.current = restExpired;
+  // Reset the once-per-rest fire guard whenever a NEW rest begins (restStart /
+  // restDuration change) — deliberately NOT on resume, so a rest that already
+  // beeped can't beep again when the app is foregrounded later.
+  useEffectT(() => { restFiredRef.current = false; }, [restStart, restDuration]);
+  // iOS discards a setTimeout that was pending in a backgrounded WebView and
+  // never restores it — so after any background→foreground cycle the armed rest
+  // timer is simply dead (even with minutes left). Bump a nonce on every resume
+  // so the arm effect below re-runs and re-arms with the correct remaining time
+  // (or fires immediately if the rest finished while backgrounded). The old
+  // 250ms poll survived this implicitly by just ticking again; this restores
+  // that robustness. Gated on an active rest so idle resumes don't re-render.
+  const [resumeNonce, setResumeNonce] = useStateT(0);
+  useEffectT(() => {
+    const onVis = () => { if (document.visibilityState === 'visible' && restStartRef.current != null) setResumeNonce(n => n + 1); };
+    document.addEventListener('visibilitychange', onVis);
+    return () => document.removeEventListener('visibilitychange', onVis);
+  }, []);
   useEffectT(() => {
     if (restStart == null) { setRestExpired(false); return; }
     const ms = restStart + activeRestDef * 1000 - Date.now();
     if (ms <= 0) {
-      // Already past finish time when (re)armed. Only fire on a genuine
-      // active→expired transition (e.g. −30s tapped to 0); a session that MOUNTS
-      // already-expired must NOT beep (matches the old poll, whose
-      // prevRestRemaining started at null).
+      // Past finish time when (re)armed — a genuine active→expired tap (−30s to
+      // 0) or a rest that elapsed while backgrounded. fireRestDone's
+      // restFiredRef guard makes this idempotent, so a session that MOUNTS
+      // already-expired (restExpired init true) or a second resume won't re-beep.
       if (!restExpiredRef.current) { setRestExpired(true); fireRestDone(); }
       return;
     }
     setRestExpired(false);
     const t = setTimeout(() => { setRestExpired(true); fireRestDone(); }, ms);
     return () => clearTimeout(t);
-  }, [restStart, restDuration]); // activeRestDef derives from these (= restDuration when set)
+  }, [restStart, restDuration, resumeNonce]); // + resumeNonce: re-arm after iOS kills the bg timer
   const [kbField, setKbField] = useStateT(null); // { setIdx, field }
   // IntensityChainSheet needs the keyboard's actual rendered height (not a
   // guessed constant — CustomKeyboard's real height varies with
