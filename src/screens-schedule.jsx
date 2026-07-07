@@ -435,7 +435,9 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
   const [seedRefs, setSeedRefs] = useStateS({});
   React.useEffect(() => {
     let cancelled = false;
-    if (!dayForSeed?.items?.length) { setSeedRefs({}); return; }
+    // In preview there is no history to seed from (fresh materialized exercises) —
+    // the preview shows the planned sets/reps instead, so skip the network call.
+    if (preview || !dayForSeed?.items?.length) { setSeedRefs({}); return; }
     LB.fetchSeedEntries(store, dayForSeed.items, dayForSeed.id, userId).then(refs => { if (!cancelled) setSeedRefs(refs || {}); });
     return () => { cancelled = true; };
   }, [dayForSeed?.id]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -634,7 +636,11 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
                 {isUni && <span className="micro" style={{ marginLeft: 6, color: UI.inkFaint }}>UNI</span>}
               </span>
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3, flexShrink: 0 }}>
-                {seedSets.map((st, si) => {
+                {preview ? (
+                  <span className="num" style={{ fontSize: 13, color: UI.inkSoft }}>
+                    {it.sets} × {(it.repsPerSet && it.repsPerSet.length) ? it.repsPerSet.join('/') : (it.repsMax != null ? `${it.reps}-${it.repsMax}` : it.reps)}
+                  </span>
+                ) : seedSets.map((st, si) => {
                   const kg = st.kg != null ? `${st.kg}${UI.unit()}` : '—';
                   // A null seeded rep count means the training screen would
                   // actually show a blank input for that set — falling back
@@ -660,9 +666,11 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
         return [frame];
       })}
       <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.5, marginTop: 2, textAlign: 'center' }}>
-        {day.items.some(i => LB.progressionEnabled(store, i.repsMax, i.progressionOffset))
-          ? <>Prefilled for your next session · <i className="fa-solid fa-arrow-up" style={{ fontSize: 8 }} /> = smart progression bump</>
-          : 'Prefilled from your last session'}
+        {preview
+          ? 'Planned sets × reps · weights fill in as you train'
+          : day.items.some(i => LB.progressionEnabled(store, i.repsMax, i.progressionOffset))
+            ? <>Prefilled for your next session · <i className="fa-solid fa-arrow-up" style={{ fontSize: 8 }} /> = smart progression bump</>
+            : 'Prefilled from your last session'}
       </div>
     </>
   );
