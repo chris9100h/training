@@ -825,7 +825,13 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     _supabase.from('zane_sessions').delete().in('id', orphanIds).then(() => {}, () => {});
   }
 
-  const { data: { user: authUser } } = await _supabase.auth.getUser();
+  // getSession() reads the session straight from local storage (no network);
+  // getUser() revalidates the token against the Auth server — a full round-trip
+  // serialized AFTER the whole query batch, just to read the email (which the
+  // cached session already carries). On the no-cache boot path this sat directly
+  // on the critical path to `ready`.
+  const { data: { session: authSession } } = await _supabase.auth.getSession();
+  const authUser = authSession?.user;
 
   // Build a lookup map: session_id → entry rows (sorted by entry_idx, already ordered)
   const entriesBySession = {};
@@ -2429,8 +2435,13 @@ function mergeSessions(freshSessions, curSessions, inProgressId, baseSessions = 
     ? new Set([...baseIds].filter(id => !curIdSet.has(id)))
     : null;
   const serverIds = new Set(freshSessions.map(s => s.id));
+  // Index cur sessions by id once (O(n)) instead of a linear .find per fresh
+  // session below, which made the merge O(fresh x cur) — quadratic in account
+  // age (hundreds of thousands of iterations for a multi-year daily user, run
+  // synchronously right after `ready` where it janks the first interaction).
+  const curById = new Map((curSessions || []).map(s => [s.id, s]));
   const sessions = freshSessions.filter(s => !locallyDeletedIds?.has(s.id)).map(s => {
-    const mem = (curSessions || []).find(x => x.id === s.id);
+    const mem = curById.get(s.id);
     if (!mem) return s;
     // The server's `ended` is authoritative: if another device (or the
     // auto-close cron) already finished this session while this device was

@@ -665,7 +665,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
   const exIdx = session.currentExIdx || 0;
   const entry = session.entries[exIdx];
-  const exercise = entry ? LB.findExercise(store, entry.exId) : null;
+  // Memoized on the slices findExercise actually reads (exercises + exId) so the
+  // 250ms `now` tick below no longer re-runs a linear scan of the whole library
+  // on every render — it only recomputes when the library or current exId change.
+  const exercise = useMemoT(() => (entry ? LB.findExercise(store, entry.exId) : null), [store.exercises, entry?.exId]);
 
   // "Last time" reference + remote best e1RM for this day type.
   // Matches LB.bestRecentEntry (best set at the current working weight across
@@ -680,7 +683,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // comparison (for NEW BEST).
   const [remoteLast, setRemoteLast] = useStateT({});
   const remoteBestE1rmRef = useRefT({}); // exId → best day-specific e1RM from server
-  const localLast = entry ? LB.bestRecentEntry(store, entry.exId, session.dayId) : null;
+  // Memoized on sessions (+ exId/dayId): bestRecentEntry filters and O(n log n)
+  // sorts the ENTIRE session history, which previously reran on every 250ms tick.
+  // The current (ended:null) session never affects it, so `entry` set logs don't
+  // need to invalidate — only a change to past sessions does.
+  const localLast = useMemoT(() => (entry ? LB.bestRecentEntry(store, entry.exId, session.dayId) : null), [store.sessions, entry?.exId, session.dayId]);
   useEffectT(() => {
     const exId = entry?.exId;
     if (!exId || remoteLast[exId] !== undefined) return;
@@ -2004,7 +2011,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     try { localStorage.removeItem(MESO_KEY); } catch {} // old single-key format
     try { localStorage.removeItem(MESO_ASKED_KEY + session.id); } catch {}
   };
-  const mesoWeek = mesoState ? mesoCurrentWeek(mesoState, store) : null;
+  // Memoized on everything mesoCurrentWeek reads (it filters all sessions twice
+  // for meso plans) plus a per-day token so the date-based week still advances at
+  // midnight — without this it recomputed on every 250ms tick for meso users.
+  const mesoWeek = useMemoT(() => (mesoState ? mesoCurrentWeek(mesoState, store) : null), [mesoState, store.schedules, store.cycleIndex, store.sessions, store.statusPeriods, LB.todayISO()]);
   const mesoSch = mesoState ? store.schedules?.find(s => s.id === mesoState.scheduleId) : null;
   const mesoStartRir = mesoSch?.mesocycle_start_rir ?? 3;
   const mesoEndRir = mesoSch?.mesocycle_end_rir ?? 0;
