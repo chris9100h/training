@@ -16,6 +16,16 @@
    Entry shape: { id: string, title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.508',
+    title: 'Programs, Off the Shelf',
+    items: [
+      "🏗️ Ready-made programs. Creating a plan now asks first: build your own, or start from a template? Tap Templates and you get five programs, sorted by the only thing that matters when you're starting out: how many days a week can you actually show up. Two through six days, one strong pick each (from Full Body up to a full six-day Push/Pull/Legs). Preview the whole thing in the plan viewer, tap \"Use this program,\" and you're training. Machine and dumbbell friendly, built as six-week mesocycles, and fully yours to edit the moment you pick it. Swap anything you don't like.",
+      "⚡ Snappier returns. Flicking back to the app mid-day used to hitch for a beat before it caught up. That stutter is gone, and cold starts are quicker too. Nothing to toggle, it is just faster now.",
+      "🎯 Intensity chains that stay put. Stack as many drop sets, myo-reps or AMRAP rounds as you want: the input row, the partials counter and your Add/Finish buttons now stay pinned above the keypad however long the chain gets. On iPhone they also stop at the clock instead of ducking behind it.",
+      "🧙 Two small ones: quitting a mesocycle session and restarting it no longer double-counts an earned set, and the built-in Cardio exercise finally tells you why it won't delete instead of just ignoring the tap. You shall not pass.",
+    ],
+  },
+  {
     id: 'v2.495',
     title: 'New plans, now with a guided setup',
     items: [
