@@ -116,6 +116,8 @@ CREATE TABLE public.zane_sets (
   done boolean NOT NULL DEFAULT false,
   skipped boolean NOT NULL DEFAULT false,
   warmup boolean NOT NULL DEFAULT false,
+  technique text,
+  drops jsonb,
   updated_at timestamp with time zone NOT NULL DEFAULT now()
 );
 
