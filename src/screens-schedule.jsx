@@ -49,11 +49,15 @@ function planDescriptor(s) {
 }
 
 // ─── PlanScreen ────────────────────────────────────────────────────
-function PlanScreen({ store, setStore, go, userId }) {
+function PlanScreen({ store, setStore, go, userId, openNewPlan }) {
   const [archivedOpen, setArchivedOpen] = useStateS(false);
   const [newPlanPicker, setNewPlanPicker] = useStateS(false);
   const [confirmEl, confirm] = useConfirm();
   const importRef = React.useRef(null);
+  // Home's "Create plan" CTA (no-plan state) routes here with openNewPlan so it
+  // opens the same Templates/Custom fork the + button does, instead of jumping
+  // straight into the wizard.
+  useEffectS(() => { if (openNewPlan) setNewPlanPicker(true); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const isDeload = store.statusMode === 'deload';
   const deloadRemaining = isDeload ? LB.deloadDaysRemaining(store) : null;

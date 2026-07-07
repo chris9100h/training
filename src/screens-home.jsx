@@ -2416,7 +2416,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
           <div style={{ padding: 22 }}>
             {hasPlans
               ? <Empty title="No active plan" sub="You have plans ready — just pick one to activate." action={<Btn onClick={() => go({ name: 'plan' })}>View plans</Btn>} icon={ICON_CALENDAR} />
-              : <Empty title="No plan yet" sub="Create a training plan to get started." action={<Btn onClick={() => go({ name: 'schedule-new' })}>Create plan</Btn>} icon={ICON_CALENDAR} />}
+              : <Empty title="No plan yet" sub="Create a training plan to get started." action={<Btn onClick={() => go({ name: 'plan', openNewPlan: true })}>Create plan</Btn>} icon={ICON_CALENDAR} />}
           </div>
         </div>
       )}
