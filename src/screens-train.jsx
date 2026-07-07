@@ -553,6 +553,61 @@ function groupsContiguous(entries) {
   return true;
 }
 
+// Live session clock, isolated into its own 1s-ticking leaf so removing the
+// parent's 250ms `now` poll doesn't freeze the elapsed time. Sekunden-Anzeige
+// braucht keine 250ms.
+function SessionClock({ startedAt, style }) {
+  const [, tick] = useStateT(0);
+  useEffectT(() => { const t = setInterval(() => tick(n => n + 1), 1000); return () => clearInterval(t); }, []);
+  const start = startedAt ? new Date(startedAt).getTime() : null;
+  const el = start ? Math.floor((Date.now() - start) / 1000) : 0;
+  const h = Math.floor(el / 3600), m = Math.floor((el % 3600) / 60), s = el % 60;
+  const str = h > 0
+    ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+    : `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  return <span className="num" style={style}>{str}</span>;
+}
+
+// Rest countdown display, isolated into its own 250ms-ticking leaf. The three
+// call sites (header chip, rest modal, warmup overlay) render a differently
+// styled number + progress bar of the SAME rest state; `variant` selects the
+// look. The parent owns the interactive wrappers and the expiry LOGIC
+// (restExpired via setTimeout) — this leaf is display only.
+function RestGauge({ restStart, restDef, variant }) {
+  const [, tick] = useStateT(0);
+  useEffectT(() => { const t = setInterval(() => tick(n => n + 1), 250); return () => clearInterval(t); }, []);
+  const active = restStart != null && restDef != null;
+  const el = active ? Math.floor((Date.now() - restStart) / 1000) : 0;
+  const remaining = active ? Math.max(0, restDef - el) : null;
+  const pct = active ? Math.max(0, Math.min(100, (el / restDef) * 100)) : 0;
+  const mmss = remaining != null ? `${Math.floor(remaining / 60)}:${(remaining % 60).toString().padStart(2, '0')}` : '—';
+  const done = remaining === 0;
+  if (variant === 'header') {
+    return (<>
+      <span className="num" style={{ color: UI.gold, fontSize: 14, letterSpacing: '0.14em', fontWeight: 500, animation: 'timerPulse 1.6s ease-in-out infinite' }}>{mmss}</span>
+      <div style={{ width: 44, height: 2, background: UI.hair, borderRadius: 4, overflow: 'hidden' }}>
+        <div style={{ height: '100%', width: `${pct}%`, background: UI.gold, transition: 'width 0.25s linear' }} />
+      </div>
+    </>);
+  }
+  if (variant === 'modal') {
+    return (<>
+      <div className="num" style={{ fontSize: 72, fontWeight: 300, letterSpacing: '-0.02em', lineHeight: 1, color: UI.gold, animation: done ? 'timerPulse 0.8s ease-in-out infinite' : 'none', cursor: done ? 'pointer' : 'default' }}>{mmss}</div>
+      {done && <div style={{ marginTop: 10, fontSize: 11, letterSpacing: '0.18em', color: UI.gold, fontFamily: UI.fontUi, fontWeight: 600 }}>GO</div>}
+      <div style={{ height: 2, background: UI.hair, borderRadius: 4, overflow: 'hidden', marginTop: 18, width: 200 }}>
+        <div style={{ height: '100%', width: `${pct}%`, background: UI.gold, transition: 'width 0.25s linear' }} />
+      </div>
+    </>);
+  }
+  // warmup overlay
+  return (<>
+    <div className="num" style={{ fontSize: 88, fontWeight: 300, letterSpacing: '-0.03em', lineHeight: 1, color: UI.gold, textShadow: '0 0 40px rgba(var(--accent-rgb),0.55), 0 0 80px rgba(var(--accent-rgb),0.25)', animation: 'timerPulse 1.6s ease-in-out infinite' }}>{mmss}</div>
+    <div style={{ height: 2, background: UI.hair, borderRadius: 4, overflow: 'hidden', marginTop: 22, width: 180 }}>
+      <div style={{ height: '100%', width: `${pct}%`, background: UI.gold, transition: 'width 0.25s linear' }} />
+    </div>
+  </>);
+}
+
 function TrainingScreen(props) {
   const session = props.store.sessions.find(s => s.id === props.sessionId);
   // Redirect from an effect — never call go() during render, and never return
@@ -1794,20 +1849,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       cancelPushover();
     }
   };
-  const [now, setNow] = useStateT(Date.now());
-  useEffectT(() => {
-    const t = setInterval(() => setNow(Date.now()), 250);
-    return () => clearInterval(t);
-  }, []);
-  const sessionStart = session.startedAt ? new Date(session.startedAt).getTime() : null;
-  const sessionElapsed = sessionStart ? Math.floor((now - sessionStart) / 1000) : 0;
-  const _sh = Math.floor(sessionElapsed / 3600);
-  const _sm = Math.floor((sessionElapsed % 3600) / 60);
-  const _ss = sessionElapsed % 60;
-  const sessionTimeStr = _sh > 0
-    ? `${_sh}:${String(_sm).padStart(2,'0')}:${String(_ss).padStart(2,'0')}`
-    : `${String(_sm).padStart(2,'0')}:${String(_ss).padStart(2,'0')}`;
-
+  // The 250ms `now` poll that re-rendered this whole screen 4x/second is gone.
+  // The session clock ticks inside the <SessionClock> leaf; the rest countdown
+  // inside <RestGauge>; the rest-expiry side effect runs off a setTimeout (see
+  // the restExpired block further below). Only three things read the old poll:
+  // the clock, the rest displays, and the pace bar (now Date.now()).
   const cat = exercise?.category;
   const restDef = cat === 'big'    ? (store.settings?.restBig    || 180)
                 : cat === 'medium' ? (store.settings?.restMedium || 120)
@@ -1815,55 +1861,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                 :                    (store.settings?.restDefault || 120);
   // Use the duration snapshotted when the timer started, not the current exercise's category
   const activeRestDef = (restStart !== null && restDuration !== null) ? restDuration : restDef;
-  const restElapsed = restStart ? Math.floor((now - restStart) / 1000) : null;
-  const restRemaining = restElapsed != null ? Math.max(0, activeRestDef - restElapsed) : null;
-  const restPct = restElapsed != null ? Math.max(0, Math.min(100, (restElapsed / activeRestDef) * 100)) : 0;
-
-  // beep + auto-open modal when rest timer hits zero
-  const prevRestRemaining = useRefT(null);
-  useEffectT(() => {
-    const prev = prevRestRemaining.current;
-    prevRestRemaining.current = restRemaining;
-    if (prev !== null && prev > 0 && restRemaining === 0) {
-      const wasPostWarmup = !session.startedAt;
-      if (wasPostWarmup) {
-        updateSession(sess => sess.startedAt ? sess : { ...sess, startedAt: new Date().toISOString() });
-      } else {
-        setRestModalOpen(true);
-      }
-      // gold screen flash 3×
-      let i = 0;
-      const flash = () => {
-        if (i >= 3) return;
-        setScreenFlash(true);
-        setTimeout(() => { setScreenFlash(false); i++; setTimeout(flash, 140); }, 220);
-      };
-      flash();
-      // audio: two beeps + higher tone (blocked by iOS silent switch, but nice to have)
-      // Reuse the shared AudioContext created during a prior user gesture — creating
-      // a new one here (timer tick, no gesture) causes iOS to suspend it immediately
-      // and resume() silently fails, so the sound never plays.
-      try {
-        if (!audioCtxRef.current) audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
-        const ctx = audioCtxRef.current;
-        const play = () => {
-          const beep = (t, freq, dur) => {
-            const osc = ctx.createOscillator();
-            const gain = ctx.createGain();
-            osc.connect(gain); gain.connect(ctx.destination);
-            osc.type = 'sine'; osc.frequency.value = freq;
-            gain.gain.setValueAtTime(0.35, t);
-            gain.gain.exponentialRampToValueAtTime(0.001, t + dur);
-            osc.start(t); osc.stop(t + dur);
-          };
-          beep(ctx.currentTime,        880, 0.14);
-          beep(ctx.currentTime + 0.18, 880, 0.14);
-          beep(ctx.currentTime + 0.36, 1320, 0.28);
-        };
-        ctx.state === 'suspended' ? ctx.resume().then(play) : play();
-      } catch (_) {}
-    }
-  }, [restRemaining]);
+  // restElapsed/restRemaining/restPct moved into the <RestGauge> leaf; the
+  // beep/auto-open side effect moved to the restExpired setTimeout below.
 
   const [flashSet, setFlashSet] = useStateT(null);
   const [improvedSet, setImprovedSet] = useStateT(false);
@@ -2730,6 +2729,72 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
   const tempoTimerRef = useRefT(null);
   const audioCtxRef = useRefT(null);
+
+  // ── Rest-timer expiry (replaces the old 250ms restRemaining poll) ──────────
+  // The rest displays tick inside <RestGauge>; only the expiry SIDE EFFECT
+  // (beep + auto-open modal + post-warmup startedAt) still runs in the parent,
+  // driven by a setTimeout armed at the rest's known finish time. restExpired
+  // replaces every `restRemaining === 0` / `> 0` gate in the JSX and flips only
+  // twice per rest period instead of 4x/second.
+  const sessionRef = useRefT(session); sessionRef.current = session;
+  const fireRestDone = () => {
+    const wasPostWarmup = !sessionRef.current.startedAt;
+    if (wasPostWarmup) {
+      updateSession(sess => sess.startedAt ? sess : { ...sess, startedAt: new Date().toISOString() });
+    } else {
+      setRestModalOpen(true);
+    }
+    // gold screen flash 3×
+    let i = 0;
+    const flash = () => {
+      if (i >= 3) return;
+      setScreenFlash(true);
+      setTimeout(() => { setScreenFlash(false); i++; setTimeout(flash, 140); }, 220);
+    };
+    flash();
+    // audio: two beeps + higher tone. Reuse the shared AudioContext created
+    // during a prior user gesture — a new one on a timer tick gets suspended by
+    // iOS and never plays.
+    try {
+      if (!audioCtxRef.current) audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
+      const ctx = audioCtxRef.current;
+      const play = () => {
+        const beep = (t, freq, dur) => {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.connect(gain); gain.connect(ctx.destination);
+          osc.type = 'sine'; osc.frequency.value = freq;
+          gain.gain.setValueAtTime(0.35, t);
+          gain.gain.exponentialRampToValueAtTime(0.001, t + dur);
+          osc.start(t); osc.stop(t + dur);
+        };
+        beep(ctx.currentTime,        880, 0.14);
+        beep(ctx.currentTime + 0.18, 880, 0.14);
+        beep(ctx.currentTime + 0.36, 1320, 0.28);
+      };
+      ctx.state === 'suspended' ? ctx.resume().then(play) : play();
+    } catch (_) {}
+  };
+  const [restExpired, setRestExpired] = useStateT(() => {
+    const rs = session.restStart ?? null, rd = session.restDuration ?? null;
+    return !!(rs && rd && Date.now() >= rs + rd * 1000);
+  });
+  const restExpiredRef = useRefT(restExpired); restExpiredRef.current = restExpired;
+  useEffectT(() => {
+    if (restStart == null) { setRestExpired(false); return; }
+    const ms = restStart + activeRestDef * 1000 - Date.now();
+    if (ms <= 0) {
+      // Already past finish time when (re)armed. Only fire on a genuine
+      // active→expired transition (e.g. −30s tapped to 0); a session that MOUNTS
+      // already-expired must NOT beep (matches the old poll, whose
+      // prevRestRemaining started at null).
+      if (!restExpiredRef.current) { setRestExpired(true); fireRestDone(); }
+      return;
+    }
+    setRestExpired(false);
+    const t = setTimeout(() => { setRestExpired(true); fireRestDone(); }, ms);
+    return () => clearTimeout(t);
+  }, [restStart, restDuration]); // activeRestDef derives from these (= restDuration when set)
   const [kbField, setKbField] = useStateT(null); // { setIdx, field }
   // IntensityChainSheet needs the keyboard's actual rendered height (not a
   // guessed constant — CustomKeyboard's real height varies with
@@ -4038,25 +4103,17 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             })()}
             {warmupActive
               ? <span className="num" style={{ color: UI.gold, fontSize: 14, letterSpacing: '0.16em', fontWeight: 500, animation: 'timerPulse 1.6s ease-in-out infinite' }}>WARMUP</span>
-              : <span className="num" style={{ color: UI.gold, fontSize: 14, letterSpacing: '0.16em', fontWeight: 500 }}>{sessionTimeStr}</span>
+              : <SessionClock startedAt={session.startedAt} style={{ color: UI.gold, fontSize: 14, letterSpacing: '0.16em', fontWeight: 500 }} />
             }
           </div>
           {/* rest countdown — only when active */}
-          {restStart && restRemaining > 0 && (<>
+          {restStart && !restExpired && (<>
             <div style={{ width: 0.5, height: 14, background: UI.hairStrong, flexShrink: 0 }} />
             <button onClick={() => setRestModalOpen(true)} style={{
               flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4,
               background: 'none', border: 'none', cursor: 'pointer', padding: 0,
             }}>
-              <span className="num" style={{
-                color: UI.gold, fontSize: 14, letterSpacing: '0.14em', fontWeight: 500,
-                animation: 'timerPulse 1.6s ease-in-out infinite',
-              }}>
-                {Math.floor(restRemaining/60)}:{(restRemaining%60).toString().padStart(2,'0')}
-              </span>
-              <div style={{ width: 44, height: 2, background: UI.hair, borderRadius: 4, overflow: 'hidden' }}>
-                <div style={{ height: '100%', width: `${restPct}%`, background: UI.gold, transition: 'width 0.25s linear' }} />
-              </div>
+              <RestGauge variant="header" restStart={restStart} restDef={activeRestDef} />
             </button>
           </>)}
         </div>
@@ -4076,7 +4133,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       {/* Pace bar — positional comparison vs same point in last session */}
       {paceBase && (() => {
         const { totalSetsDone, expectedSec } = paceBase;
-        const elapsedSec = (now - new Date(session.startedAt).getTime()) / 1000;
+        const elapsedSec = (Date.now() - new Date(session.startedAt).getTime()) / 1000;
         const diffMin = Math.round((elapsedSec - expectedSec) / 60);
         if (Math.abs(diffMin) < 2) return null;
         const ahead = diffMin < 0;
@@ -5030,11 +5087,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             <div className="knurl" />
             <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0' }}>
               <span>Duration</span>
-              <span className="num" style={{ color: UI.ink }}>{sessionTimeStr}</span>
+              <SessionClock startedAt={session.startedAt} style={{ color: UI.ink }} />
             </div>
           </div>
           {session.isFreestyle && (() => {
-            const elapsedMin = Math.floor(sessionElapsed / 60);
+            const elapsedMin = session.startedAt ? Math.floor((Date.now() - new Date(session.startedAt).getTime()) / 60000) : 0;
             const msg = elapsedMin < 10
               ? "Really done already? The barbell's barely warm — how about one more exercise?"
               : elapsedMin < 20
@@ -5055,7 +5112,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           {(() => {
             const onAddEx = () => { addAndJumpRef.current = true; setFinishOpen(false); setAddOpen(true); };
             if (session.isFreestyle) {
-              const elapsedMin = Math.floor(sessionElapsed / 60);
+              const elapsedMin = session.startedAt ? Math.floor((Date.now() - new Date(session.startedAt).getTime()) / 60000) : 0;
               if (elapsedMin < 20) {
                 return <Btn className="intensity-glow" onClick={onAddEx} style={{ width: '100%', marginBottom: 8 }}>+ Add another exercise</Btn>;
               } else if (elapsedMin < 45) {
@@ -5819,27 +5876,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 24, paddingBottom: 8 }}>
           {/* big countdown */}
           <div style={{ textAlign: 'center' }}
-            onClick={restRemaining === 0 ? () => { cancelPushover(); persistRestStart(null); setRestModalOpen(false); } : undefined}
+            onClick={restExpired ? () => { cancelPushover(); persistRestStart(null); setRestModalOpen(false); } : undefined}
           >
-            <div className="num" style={{
-              fontSize: 72, fontWeight: 300, letterSpacing: '-0.02em', lineHeight: 1,
-              color: UI.gold,
-              animation: restRemaining === 0 ? 'timerPulse 0.8s ease-in-out infinite' : 'none',
-              cursor: restRemaining === 0 ? 'pointer' : 'default',
-            }}>
-              {restRemaining != null
-                ? `${Math.floor(restRemaining/60)}:${(restRemaining%60).toString().padStart(2,'0')}`
-                : '—'}
-            </div>
-            {restRemaining === 0 && (
-              <div style={{ marginTop: 10, fontSize: 11, letterSpacing: '0.18em', color: UI.gold, fontFamily: UI.fontUi, fontWeight: 600 }}>
-                GO
-              </div>
-            )}
-            {/* progress bar */}
-            <div style={{ height: 2, background: UI.hair, borderRadius: 4, overflow: 'hidden', marginTop: 18, width: 200 }}>
-              <div style={{ height: '100%', width: `${restPct}%`, background: UI.gold, transition: 'width 0.25s linear' }} />
-            </div>
+            <RestGauge variant="modal" restStart={restStart} restDef={activeRestDef} />
           </div>
           {/* controls */}
           <div style={{ display: 'flex', gap: 10, width: '100%' }}>
@@ -5991,22 +6030,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             textAlign: 'center', marginBottom: 48,
           }}>{warmupEntry?.name}</div>
 
-          {/* Big countdown */}
-          <div className="num" style={{
-            fontSize: 88, fontWeight: 300, letterSpacing: '-0.03em', lineHeight: 1,
-            color: UI.gold,
-            textShadow: '0 0 40px rgba(var(--accent-rgb),0.55), 0 0 80px rgba(var(--accent-rgb),0.25)',
-            animation: 'timerPulse 1.6s ease-in-out infinite',
-          }}>
-            {restRemaining != null
-              ? `${Math.floor(restRemaining / 60)}:${(restRemaining % 60).toString().padStart(2, '0')}`
-              : '—'}
-          </div>
-
-          {/* Progress bar */}
-          <div style={{ height: 2, background: UI.hair, borderRadius: 4, overflow: 'hidden', marginTop: 22, width: 180 }}>
-            <div style={{ height: '100%', width: `${restPct}%`, background: UI.gold, transition: 'width 0.25s linear' }} />
-          </div>
+          {/* Big countdown + progress bar (own 250ms leaf) */}
+          <RestGauge variant="warmup" restStart={restStart} restDef={activeRestDef} />
 
           {/* Start now */}
           <button onClick={startNow} style={{
