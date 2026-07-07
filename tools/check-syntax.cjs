@@ -24,7 +24,7 @@ const jsxSources = [...m[1].matchAll(/'([^']+)'/g)].map(x => x[1]);
 
 // Plain scripts loaded via <script src> (vendored supabase.js excluded:
 // minified third-party bundle, not authored here).
-const plainSources = ['src/store.js', 'src/whatsnew.js', 'sw.js'];
+const plainSources = ['src/store.js', 'src/whatsnew.js', 'sw.js', 'src/programs-db.js'];
 
 // Files that share one global scope in the browser (everything except sw.js,
 // which runs in its own Service Worker realm, and vendored supabase.js). A

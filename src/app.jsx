@@ -420,10 +420,25 @@ function App() {
           const delDaily   = delDel(base?.dailyLogs,   s.dailyLogs);
           const delCardio  = delDel(base?.cardioLogs,  s.cardioLogs);
           const delGlucose = delDel(base?.glucoseLogs, s.glucoseLogs);
+          const nextDaily   = [...localOnlyDaily,   ...LB.mergeCollectionById(fresh.dailyLogs, s.dailyLogs, base?.dailyLogs, delDaily)];
+          const nextCardio  = [...localOnlyCardio,  ...LB.mergeCollectionById(fresh.cardioLogs, s.cardioLogs, base?.cardioLogs, delCardio)];
+          const nextGlucose = [...localOnlyGlucose, ...LB.mergeCollectionById(fresh.glucoseLogs || [], s.glucoseLogs, base?.glucoseLogs, delGlucose)];
+          // refreshHealthLogs re-maps every row into a fresh object, so these
+          // merged arrays are new references even when nothing actually changed —
+          // which forced a full re-render of the active screen on EVERY
+          // foreground (the reported reactivation stutter). Bail out when content
+          // is unchanged, and keep each unchanged collection's previous reference
+          // so its downstream useMemos don't needlessly recompute either.
+          const sameLogs = (a, b) => (a || []).length === (b || []).length &&
+            (a || []).every((x, i) => x === b[i] || JSON.stringify(x) === JSON.stringify(b[i]));
+          const dSame = sameLogs(nextDaily, s.dailyLogs);
+          const cSame = sameLogs(nextCardio, s.cardioLogs);
+          const gSame = sameLogs(nextGlucose, s.glucoseLogs);
+          if (dSame && cSame && gSame) return s;
           return { ...s,
-            dailyLogs:   [...localOnlyDaily,   ...LB.mergeCollectionById(fresh.dailyLogs, s.dailyLogs, base?.dailyLogs, delDaily)],
-            cardioLogs:  [...localOnlyCardio,  ...LB.mergeCollectionById(fresh.cardioLogs, s.cardioLogs, base?.cardioLogs, delCardio)],
-            glucoseLogs: [...localOnlyGlucose, ...LB.mergeCollectionById(fresh.glucoseLogs || [], s.glucoseLogs, base?.glucoseLogs, delGlucose)],
+            dailyLogs:   dSame ? s.dailyLogs : nextDaily,
+            cardioLogs:  cSame ? s.cardioLogs : nextCardio,
+            glucoseLogs: gSame ? s.glucoseLogs : nextGlucose,
           };
         });
       }).catch(() => {});
@@ -1235,9 +1250,11 @@ function App() {
   let screen;
   switch (route.name) {
     case 'home':          screen = <window.Screens.HomeScreen {...props} />; break;
-    case 'plan':          screen = <window.Screens.PlanScreen {...props} />; break;
+    case 'plan':          screen = <window.Screens.PlanScreen {...props} openNewPlan={route.openNewPlan} />; break;
     case 'plan-view':     screen = <window.Screens.PlanViewerScreen {...props} scheduleId={route.scheduleId} fromPlan={route.fromPlan} />; break;
     case 'schedule-new':  screen = <window.Screens.ScheduleNewScreen {...props} />; break;
+    case 'schedule-templates': screen = <window.Screens.ProgramTemplatesScreen {...props} />; break;
+    case 'plan-preview':  screen = <window.Screens.ProgramPreviewScreen {...props} programId={route.programId} />; break;
     case 'schedule-edit': screen = <window.Screens.ScheduleEditScreen {...props} scheduleId={route.scheduleId} versionFrom={route.versionFrom} />; break;
     case 'train':         screen = <window.Screens.TrainingScreen {...props} sessionId={route.sessionId} />; break;
     case 'lib':           screen = <window.Screens.LibraryScreen {...props} />; break;

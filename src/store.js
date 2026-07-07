@@ -825,7 +825,13 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     _supabase.from('zane_sessions').delete().in('id', orphanIds).then(() => {}, () => {});
   }
 
-  const { data: { user: authUser } } = await _supabase.auth.getUser();
+  // getSession() reads the session straight from local storage (no network);
+  // getUser() revalidates the token against the Auth server — a full round-trip
+  // serialized AFTER the whole query batch, just to read the email (which the
+  // cached session already carries). On the no-cache boot path this sat directly
+  // on the critical path to `ready`.
+  const { data: { session: authSession } } = await _supabase.auth.getSession();
+  const authUser = authSession?.user;
 
   // Build a lookup map: session_id → entry rows (sorted by entry_idx, already ordered)
   const entriesBySession = {};
@@ -1078,12 +1084,20 @@ async function autoArchiveMissedDays(userId, state) {
     id: uid(), user_id: userId, date, day_id: dayId, day_name: dayName,
     skip_reason: '—', skipped_at: nowISO,
   }));
-  const { error } = await _supabase.from('zane_skips').insert(rows);
-  if (error) { console.error('auto-archive missed days:', error); return; }
+  // Add the archived skips to the returned state and fire the INSERT WITHOUT
+  // awaiting it. This pass used to block loadFromSupabase's resolution — the
+  // no-cache path to `ready` — on a network write. The rows are deterministic
+  // by (date, day) and this pass reruns on every boot, so a failed write is
+  // simply recreated next launch; nothing is lost by not awaiting. Matches the
+  // pre-existing best-effort semantics (the old code only console.error'd on
+  // failure, it never propagated the error).
   state.skips.push(...rows.map(r => ({
     id: r.id, date: r.date, dayId: r.day_id, dayName: r.day_name,
     skipReason: r.skip_reason, skippedAt: r.skipped_at,
   })));
+  _supabase.from('zane_skips').insert(rows).then(({ error }) => {
+    if (error) console.error('auto-archive missed days:', error);
+  });
 }
 
 // ─── SYNC ────────────────────────────────────────────────────────────────
@@ -1801,8 +1815,12 @@ function buildSeedSets(it, last, suggestion, isUni, store, bodyweightKg = null, 
       // trigger threshold, not a user-drawn boundary, so it stays
       // uncapped — matches classic Smart Progression's long-standing
       // behavior of nudging reps up every session regardless.
+      // The cap only limits the +1 nudge, never the floor: if last session
+      // already went past repsMax (e.g. 13 reps on an 8-12 range, taken to
+      // failure), seed that actual count, not repsMax. Dropping back to 12 would
+      // prescribe LESS than the user just proved they can do at that same weight.
       const cap = it.repsMax;
-      const bump = (v) => v == null ? null : (cap != null ? Math.min(v + 1, cap) : v + 1);
+      const bump = (v) => v == null ? null : (cap != null ? Math.max(v, Math.min(v + 1, cap)) : v + 1);
       return isUni
         ? { kg: dl(seedKg), repsL: bump(prev.repsL), repsR: bump(prev.repsR), done: false }
         : { kg: dl(seedKg), reps: bump(prev.reps), done: false };
@@ -2055,6 +2073,55 @@ function buildPlanSkeleton({ name, type, presetKey, customCount, customDays, wee
     if (mesoRirEnabled === false) sch.mesocycle_rir_enabled = false;
   }
   return sch;
+}
+
+// Instantiate a pre-built program (a window.SYSTEM_PROGRAMS entry) into an
+// editable flex-mesocycle plan. Pure: returns { schedule, newExercises } and
+// mutates nothing — the caller appends both in one setStore and navigates to the
+// editor, exactly like PlanWizard.create().
+// Each program item references a system-catalog exercise BY NAME. We resolve each
+// to one of the USER's own exercises: reuse a same-named one if it exists, else
+// materialize an editable copy via systemExerciseToRow — the same name-dedup
+// ExercisePicker.finalizePick uses, so plans never hold sys_ ids and history for
+// an exercise the user already owns never splits. A name repeated across days
+// resolves to a single materialized row. Days are fed to buildPlanSkeleton as
+// customDays with type 'flex' (advance on a logged session, sessions_per_week =
+// day count, no fixed weekdays — the beginner-friendly "how many days can you"
+// model).
+function instantiateProgram(state, program) {
+  const catalog = (typeof window !== 'undefined' && window.SYSTEM_EXERCISES) || [];
+  const sysByName = new Map(catalog.map(s => [(s.name || '').toUpperCase(), s]));
+  const userByName = new Map((state.exercises || []).map(e => [(e.name || '').toUpperCase(), e.id]));
+  const newExercises = [];
+  const resolve = (exName) => {
+    const key = (exName || '').toUpperCase();
+    const existing = userByName.get(key);
+    if (existing) return existing;
+    const sys = sysByName.get(key);
+    if (!sys) return null; // unknown name — guarded (a store.test.cjs check keeps the catalog honest)
+    const row = systemExerciseToRow(sys);
+    newExercises.push(row);
+    userByName.set(key, row.id);
+    return row.id;
+  };
+  const customDays = (program.days || []).map(d => ({
+    name: d.name,
+    items: (d.items || []).map(it => {
+      const exId = resolve(it.ex);
+      if (!exId) return null;
+      return { exId, sets: it.sets || 2, reps: it.reps ?? 8, ...(it.repsMax != null ? { repsMax: it.repsMax } : {}) };
+    }).filter(Boolean),
+  }));
+  const meso = program.meso || {};
+  const schedule = buildPlanSkeleton({
+    name: program.name,
+    type: 'flex',
+    customDays,
+    mesoWeeks: meso.weeks || null,
+    mesoStartRir: meso.startRir != null ? meso.startRir : null,
+    mesoEndRir: meso.endRir != null ? meso.endRir : null,
+  });
+  return { schedule, newExercises };
 }
 
 // Whether a mesocycle's RIR taper is active. Default true: only an explicit
@@ -2429,8 +2496,13 @@ function mergeSessions(freshSessions, curSessions, inProgressId, baseSessions = 
     ? new Set([...baseIds].filter(id => !curIdSet.has(id)))
     : null;
   const serverIds = new Set(freshSessions.map(s => s.id));
+  // Index cur sessions by id once (O(n)) instead of a linear .find per fresh
+  // session below, which made the merge O(fresh x cur) — quadratic in account
+  // age (hundreds of thousands of iterations for a multi-year daily user, run
+  // synchronously right after `ready` where it janks the first interaction).
+  const curById = new Map((curSessions || []).map(s => [s.id, s]));
   const sessions = freshSessions.filter(s => !locallyDeletedIds?.has(s.id)).map(s => {
-    const mem = (curSessions || []).find(x => x.id === s.id);
+    const mem = curById.get(s.id);
     if (!mem) return s;
     // The server's `ended` is authoritative: if another device (or the
     // auto-close cron) already finished this session while this device was
@@ -3945,7 +4017,7 @@ window.LB = {
   signIn, signUp, signOut, signInWithPasskey, registerPasskey, listPasskeys, deletePasskey, resetPassword, deleteAllData, exportBackup, importFromBackup, validateBackup,
   loadFromSupabase, syncStore, mergeSessions, withCarriedWindowEntries, historyWindowCutoffISO,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
-  uid, todayISO, fmtISO, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, buildPlanSkeleton, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, realignCycleForToday, todayCycleStripIndex,
+  uid, todayISO, fmtISO, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, buildPlanSkeleton, instantiateProgram, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, realignCycleForToday, todayCycleStripIndex,
   effReps, e1rm, isImprovement, isDecline, bestE1rmForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, latestBodyweight, exerciseLogMode, shouldPullBodyweight, systemExerciseToRow, inferCurrentExIdx, calcBlended,
   refreshExerciseBests, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries,
   computeNextReminderAt,

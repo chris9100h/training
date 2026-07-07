@@ -553,6 +553,61 @@ function groupsContiguous(entries) {
   return true;
 }
 
+// Live session clock, isolated into its own 1s-ticking leaf so removing the
+// parent's 250ms `now` poll doesn't freeze the elapsed time. Sekunden-Anzeige
+// braucht keine 250ms.
+function SessionClock({ startedAt, style }) {
+  const [, tick] = useStateT(0);
+  useEffectT(() => { const t = setInterval(() => tick(n => n + 1), 1000); return () => clearInterval(t); }, []);
+  const start = startedAt ? new Date(startedAt).getTime() : null;
+  const el = start ? Math.floor((Date.now() - start) / 1000) : 0;
+  const h = Math.floor(el / 3600), m = Math.floor((el % 3600) / 60), s = el % 60;
+  const str = h > 0
+    ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+    : `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  return <span className="num" style={style}>{str}</span>;
+}
+
+// Rest countdown display, isolated into its own 250ms-ticking leaf. The three
+// call sites (header chip, rest modal, warmup overlay) render a differently
+// styled number + progress bar of the SAME rest state; `variant` selects the
+// look. The parent owns the interactive wrappers and the expiry LOGIC
+// (restExpired via setTimeout) — this leaf is display only.
+function RestGauge({ restStart, restDef, variant }) {
+  const [, tick] = useStateT(0);
+  useEffectT(() => { const t = setInterval(() => tick(n => n + 1), 250); return () => clearInterval(t); }, []);
+  const active = restStart != null && restDef != null;
+  const el = active ? Math.floor((Date.now() - restStart) / 1000) : 0;
+  const remaining = active ? Math.max(0, restDef - el) : null;
+  const pct = active ? Math.max(0, Math.min(100, (el / restDef) * 100)) : 0;
+  const mmss = remaining != null ? `${Math.floor(remaining / 60)}:${(remaining % 60).toString().padStart(2, '0')}` : '—';
+  const done = remaining === 0;
+  if (variant === 'header') {
+    return (<>
+      <span className="num" style={{ color: UI.gold, fontSize: 14, letterSpacing: '0.14em', fontWeight: 500, animation: 'timerPulse 1.6s ease-in-out infinite' }}>{mmss}</span>
+      <div style={{ width: 44, height: 2, background: UI.hair, borderRadius: 4, overflow: 'hidden' }}>
+        <div style={{ height: '100%', width: `${pct}%`, background: UI.gold, transition: 'width 0.25s linear' }} />
+      </div>
+    </>);
+  }
+  if (variant === 'modal') {
+    return (<>
+      <div className="num" style={{ fontSize: 72, fontWeight: 300, letterSpacing: '-0.02em', lineHeight: 1, color: UI.gold, animation: done ? 'timerPulse 0.8s ease-in-out infinite' : 'none', cursor: done ? 'pointer' : 'default' }}>{mmss}</div>
+      {done && <div style={{ marginTop: 10, fontSize: 11, letterSpacing: '0.18em', color: UI.gold, fontFamily: UI.fontUi, fontWeight: 600 }}>GO</div>}
+      <div style={{ height: 2, background: UI.hair, borderRadius: 4, overflow: 'hidden', marginTop: 18, width: 200 }}>
+        <div style={{ height: '100%', width: `${pct}%`, background: UI.gold, transition: 'width 0.25s linear' }} />
+      </div>
+    </>);
+  }
+  // warmup overlay
+  return (<>
+    <div className="num" style={{ fontSize: 88, fontWeight: 300, letterSpacing: '-0.03em', lineHeight: 1, color: UI.gold, textShadow: '0 0 40px rgba(var(--accent-rgb),0.55), 0 0 80px rgba(var(--accent-rgb),0.25)', animation: 'timerPulse 1.6s ease-in-out infinite' }}>{mmss}</div>
+    <div style={{ height: 2, background: UI.hair, borderRadius: 4, overflow: 'hidden', marginTop: 22, width: 180 }}>
+      <div style={{ height: '100%', width: `${pct}%`, background: UI.gold, transition: 'width 0.25s linear' }} />
+    </div>
+  </>);
+}
+
 function TrainingScreen(props) {
   const session = props.store.sessions.find(s => s.id === props.sessionId);
   // Redirect from an effect — never call go() during render, and never return
@@ -665,7 +720,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
   const exIdx = session.currentExIdx || 0;
   const entry = session.entries[exIdx];
-  const exercise = entry ? LB.findExercise(store, entry.exId) : null;
+  // Memoized on the slices findExercise actually reads (exercises + exId) so the
+  // 250ms `now` tick below no longer re-runs a linear scan of the whole library
+  // on every render — it only recomputes when the library or current exId change.
+  const exercise = useMemoT(() => (entry ? LB.findExercise(store, entry.exId) : null), [store.exercises, entry?.exId]);
 
   // "Last time" reference + remote best e1RM for this day type.
   // Matches LB.bestRecentEntry (best set at the current working weight across
@@ -680,7 +738,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // comparison (for NEW BEST).
   const [remoteLast, setRemoteLast] = useStateT({});
   const remoteBestE1rmRef = useRefT({}); // exId → best day-specific e1RM from server
-  const localLast = entry ? LB.bestRecentEntry(store, entry.exId, session.dayId) : null;
+  // Memoized on sessions (+ exId/dayId): bestRecentEntry filters and O(n log n)
+  // sorts the ENTIRE session history, which previously reran on every 250ms tick.
+  // The current (ended:null) session never affects it, so `entry` set logs don't
+  // need to invalidate — only a change to past sessions does.
+  const localLast = useMemoT(() => (entry ? LB.bestRecentEntry(store, entry.exId, session.dayId) : null), [store.sessions, entry?.exId, session.dayId]);
   useEffectT(() => {
     const exId = entry?.exId;
     if (!exId || remoteLast[exId] !== undefined) return;
@@ -1706,6 +1768,18 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     if (!await confirm('All inputs will be lost.', { title: 'Cancel session?', ok: 'Cancel', cancel: 'Keep training', danger: true })) return;
     cancelPushover();
     try { localStorage.removeItem(MESO_ASKED_KEY + session.id); } catch {}
+    // Discard this session's in-progress meso feedback too. Every feedback answer
+    // writes a GROWING delta into the MESO_KEY localStorage cache (commitContrib
+    // adds on top of the inherited value), and getMesoState prefers that cache
+    // over the store whenever its updatedAt is newer. The store copy is only ever
+    // written by flushMesoStateToStore (clean finish), never during a session, so
+    // it still holds the correct pre-session delta. Without clearing the cache an
+    // abandoned session's delta survives and compounds on every cancel+restart
+    // (base+1 -> base+2 -> ...). Mirror the exact cleanup a clean finish does.
+    if (session.scheduleId) {
+      try { localStorage.removeItem(MESO_KEY + '-' + session.scheduleId); } catch {}
+      try { localStorage.removeItem(MESO_KEY); } catch {} // old single-key format
+    }
     setStore(s => ({
       ...s,
       sessions: s.sessions.filter(x => x.id !== session.id),
@@ -1775,20 +1849,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       cancelPushover();
     }
   };
-  const [now, setNow] = useStateT(Date.now());
-  useEffectT(() => {
-    const t = setInterval(() => setNow(Date.now()), 250);
-    return () => clearInterval(t);
-  }, []);
-  const sessionStart = session.startedAt ? new Date(session.startedAt).getTime() : null;
-  const sessionElapsed = sessionStart ? Math.floor((now - sessionStart) / 1000) : 0;
-  const _sh = Math.floor(sessionElapsed / 3600);
-  const _sm = Math.floor((sessionElapsed % 3600) / 60);
-  const _ss = sessionElapsed % 60;
-  const sessionTimeStr = _sh > 0
-    ? `${_sh}:${String(_sm).padStart(2,'0')}:${String(_ss).padStart(2,'0')}`
-    : `${String(_sm).padStart(2,'0')}:${String(_ss).padStart(2,'0')}`;
-
+  // The 250ms `now` poll that re-rendered this whole screen 4x/second is gone.
+  // The session clock ticks inside the <SessionClock> leaf; the rest countdown
+  // inside <RestGauge>; the rest-expiry side effect runs off a setTimeout (see
+  // the restExpired block further below). Only three things read the old poll:
+  // the clock, the rest displays, and the pace bar (now Date.now()).
   const cat = exercise?.category;
   const restDef = cat === 'big'    ? (store.settings?.restBig    || 180)
                 : cat === 'medium' ? (store.settings?.restMedium || 120)
@@ -1796,55 +1861,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                 :                    (store.settings?.restDefault || 120);
   // Use the duration snapshotted when the timer started, not the current exercise's category
   const activeRestDef = (restStart !== null && restDuration !== null) ? restDuration : restDef;
-  const restElapsed = restStart ? Math.floor((now - restStart) / 1000) : null;
-  const restRemaining = restElapsed != null ? Math.max(0, activeRestDef - restElapsed) : null;
-  const restPct = restElapsed != null ? Math.max(0, Math.min(100, (restElapsed / activeRestDef) * 100)) : 0;
-
-  // beep + auto-open modal when rest timer hits zero
-  const prevRestRemaining = useRefT(null);
-  useEffectT(() => {
-    const prev = prevRestRemaining.current;
-    prevRestRemaining.current = restRemaining;
-    if (prev !== null && prev > 0 && restRemaining === 0) {
-      const wasPostWarmup = !session.startedAt;
-      if (wasPostWarmup) {
-        updateSession(sess => sess.startedAt ? sess : { ...sess, startedAt: new Date().toISOString() });
-      } else {
-        setRestModalOpen(true);
-      }
-      // gold screen flash 3×
-      let i = 0;
-      const flash = () => {
-        if (i >= 3) return;
-        setScreenFlash(true);
-        setTimeout(() => { setScreenFlash(false); i++; setTimeout(flash, 140); }, 220);
-      };
-      flash();
-      // audio: two beeps + higher tone (blocked by iOS silent switch, but nice to have)
-      // Reuse the shared AudioContext created during a prior user gesture — creating
-      // a new one here (timer tick, no gesture) causes iOS to suspend it immediately
-      // and resume() silently fails, so the sound never plays.
-      try {
-        if (!audioCtxRef.current) audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
-        const ctx = audioCtxRef.current;
-        const play = () => {
-          const beep = (t, freq, dur) => {
-            const osc = ctx.createOscillator();
-            const gain = ctx.createGain();
-            osc.connect(gain); gain.connect(ctx.destination);
-            osc.type = 'sine'; osc.frequency.value = freq;
-            gain.gain.setValueAtTime(0.35, t);
-            gain.gain.exponentialRampToValueAtTime(0.001, t + dur);
-            osc.start(t); osc.stop(t + dur);
-          };
-          beep(ctx.currentTime,        880, 0.14);
-          beep(ctx.currentTime + 0.18, 880, 0.14);
-          beep(ctx.currentTime + 0.36, 1320, 0.28);
-        };
-        ctx.state === 'suspended' ? ctx.resume().then(play) : play();
-      } catch (_) {}
-    }
-  }, [restRemaining]);
+  // restElapsed/restRemaining/restPct moved into the <RestGauge> leaf; the
+  // beep/auto-open side effect moved to the restExpired setTimeout below.
 
   const [flashSet, setFlashSet] = useStateT(null);
   const [improvedSet, setImprovedSet] = useStateT(false);
@@ -2004,7 +2022,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     try { localStorage.removeItem(MESO_KEY); } catch {} // old single-key format
     try { localStorage.removeItem(MESO_ASKED_KEY + session.id); } catch {}
   };
-  const mesoWeek = mesoState ? mesoCurrentWeek(mesoState, store) : null;
+  // Memoized on everything mesoCurrentWeek reads (it filters all sessions twice
+  // for meso plans) plus a per-day token so the date-based week still advances at
+  // midnight — without this it recomputed on every 250ms tick for meso users.
+  const mesoWeek = useMemoT(() => (mesoState ? mesoCurrentWeek(mesoState, store) : null), [mesoState, store.schedules, store.cycleIndex, store.sessions, store.statusPeriods, LB.todayISO()]);
   const mesoSch = mesoState ? store.schedules?.find(s => s.id === mesoState.scheduleId) : null;
   const mesoStartRir = mesoSch?.mesocycle_start_rir ?? 3;
   const mesoEndRir = mesoSch?.mesocycle_end_rir ?? 0;
@@ -2708,6 +2729,100 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
   const tempoTimerRef = useRefT(null);
   const audioCtxRef = useRefT(null);
+
+  // ── Rest-timer expiry (replaces the old 250ms restRemaining poll) ──────────
+  // The rest displays tick inside <RestGauge>; only the expiry SIDE EFFECT
+  // (beep + auto-open modal + post-warmup startedAt) still runs in the parent,
+  // driven by a setTimeout armed at the rest's known finish time. restExpired
+  // replaces every `restRemaining === 0` / `> 0` gate in the JSX and flips only
+  // twice per rest period instead of 4x/second.
+  const sessionRef = useRefT(session); sessionRef.current = session;
+  const restStartRef = useRefT(restStart); restStartRef.current = restStart;
+  const restFiredRef = useRefT(false); // synchronous guard: fire the expiry effect at most once per rest
+  const fireRestDone = () => {
+    if (restFiredRef.current) return;
+    restFiredRef.current = true;
+    const wasPostWarmup = !sessionRef.current.startedAt;
+    if (wasPostWarmup) {
+      updateSession(sess => sess.startedAt ? sess : { ...sess, startedAt: new Date().toISOString() });
+    } else {
+      setRestModalOpen(true);
+    }
+    // gold screen flash 3×
+    let i = 0;
+    const flash = () => {
+      if (i >= 3) return;
+      setScreenFlash(true);
+      setTimeout(() => { setScreenFlash(false); i++; setTimeout(flash, 140); }, 220);
+    };
+    flash();
+    // audio: two beeps + higher tone. Reuse the shared AudioContext created
+    // during a prior user gesture — a new one on a timer tick gets suspended by
+    // iOS and never plays.
+    try {
+      if (!audioCtxRef.current) audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
+      const ctx = audioCtxRef.current;
+      const play = () => {
+        const beep = (t, freq, dur) => {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.connect(gain); gain.connect(ctx.destination);
+          osc.type = 'sine'; osc.frequency.value = freq;
+          gain.gain.setValueAtTime(0.35, t);
+          gain.gain.exponentialRampToValueAtTime(0.001, t + dur);
+          osc.start(t); osc.stop(t + dur);
+        };
+        beep(ctx.currentTime,        880, 0.14);
+        beep(ctx.currentTime + 0.18, 880, 0.14);
+        beep(ctx.currentTime + 0.36, 1320, 0.28);
+      };
+      // iOS only resumes a suspended AudioContext on a user gesture. On a resume
+      // (app was backgrounded) resume().then(play) would queue a STALE beep that
+      // fires on the user's NEXT tap (the "beep only when I check the next set"
+      // bug). Play only when the context is already running; otherwise best-effort
+      // resume for next time and skip this beep — the modal + gold flash already
+      // signal the rest is over, and a push fired while the app was backgrounded.
+      if (ctx.state === 'running') play();
+      else ctx.resume().catch(() => {});
+    } catch (_) {}
+  };
+  const [restExpired, setRestExpired] = useStateT(() => {
+    const rs = session.restStart ?? null, rd = session.restDuration ?? null;
+    return !!(rs && rd && Date.now() >= rs + rd * 1000);
+  });
+  const restExpiredRef = useRefT(restExpired); restExpiredRef.current = restExpired;
+  // Reset the once-per-rest fire guard whenever a NEW rest begins (restStart /
+  // restDuration change) — deliberately NOT on resume, so a rest that already
+  // beeped can't beep again when the app is foregrounded later.
+  useEffectT(() => { restFiredRef.current = false; }, [restStart, restDuration]);
+  // iOS discards a setTimeout that was pending in a backgrounded WebView and
+  // never restores it — so after any background→foreground cycle the armed rest
+  // timer is simply dead (even with minutes left). Bump a nonce on every resume
+  // so the arm effect below re-runs and re-arms with the correct remaining time
+  // (or fires immediately if the rest finished while backgrounded). The old
+  // 250ms poll survived this implicitly by just ticking again; this restores
+  // that robustness. Gated on an active rest so idle resumes don't re-render.
+  const [resumeNonce, setResumeNonce] = useStateT(0);
+  useEffectT(() => {
+    const onVis = () => { if (document.visibilityState === 'visible' && restStartRef.current != null) setResumeNonce(n => n + 1); };
+    document.addEventListener('visibilitychange', onVis);
+    return () => document.removeEventListener('visibilitychange', onVis);
+  }, []);
+  useEffectT(() => {
+    if (restStart == null) { setRestExpired(false); return; }
+    const ms = restStart + activeRestDef * 1000 - Date.now();
+    if (ms <= 0) {
+      // Past finish time when (re)armed — a genuine active→expired tap (−30s to
+      // 0) or a rest that elapsed while backgrounded. fireRestDone's
+      // restFiredRef guard makes this idempotent, so a session that MOUNTS
+      // already-expired (restExpired init true) or a second resume won't re-beep.
+      if (!restExpiredRef.current) { setRestExpired(true); fireRestDone(); }
+      return;
+    }
+    setRestExpired(false);
+    const t = setTimeout(() => { setRestExpired(true); fireRestDone(); }, ms);
+    return () => clearTimeout(t);
+  }, [restStart, restDuration, resumeNonce]); // + resumeNonce: re-arm after iOS kills the bg timer
   const [kbField, setKbField] = useStateT(null); // { setIdx, field }
   // IntensityChainSheet needs the keyboard's actual rendered height (not a
   // guessed constant — CustomKeyboard's real height varies with
@@ -4016,25 +4131,17 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             })()}
             {warmupActive
               ? <span className="num" style={{ color: UI.gold, fontSize: 14, letterSpacing: '0.16em', fontWeight: 500, animation: 'timerPulse 1.6s ease-in-out infinite' }}>WARMUP</span>
-              : <span className="num" style={{ color: UI.gold, fontSize: 14, letterSpacing: '0.16em', fontWeight: 500 }}>{sessionTimeStr}</span>
+              : <SessionClock startedAt={session.startedAt} style={{ color: UI.gold, fontSize: 14, letterSpacing: '0.16em', fontWeight: 500 }} />
             }
           </div>
           {/* rest countdown — only when active */}
-          {restStart && restRemaining > 0 && (<>
+          {restStart && !restExpired && (<>
             <div style={{ width: 0.5, height: 14, background: UI.hairStrong, flexShrink: 0 }} />
             <button onClick={() => setRestModalOpen(true)} style={{
               flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4,
               background: 'none', border: 'none', cursor: 'pointer', padding: 0,
             }}>
-              <span className="num" style={{
-                color: UI.gold, fontSize: 14, letterSpacing: '0.14em', fontWeight: 500,
-                animation: 'timerPulse 1.6s ease-in-out infinite',
-              }}>
-                {Math.floor(restRemaining/60)}:{(restRemaining%60).toString().padStart(2,'0')}
-              </span>
-              <div style={{ width: 44, height: 2, background: UI.hair, borderRadius: 4, overflow: 'hidden' }}>
-                <div style={{ height: '100%', width: `${restPct}%`, background: UI.gold, transition: 'width 0.25s linear' }} />
-              </div>
+              <RestGauge variant="header" restStart={restStart} restDef={activeRestDef} />
             </button>
           </>)}
         </div>
@@ -4054,7 +4161,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       {/* Pace bar — positional comparison vs same point in last session */}
       {paceBase && (() => {
         const { totalSetsDone, expectedSec } = paceBase;
-        const elapsedSec = (now - new Date(session.startedAt).getTime()) / 1000;
+        const elapsedSec = (Date.now() - new Date(session.startedAt).getTime()) / 1000;
         const diffMin = Math.round((elapsedSec - expectedSec) / 60);
         if (Math.abs(diffMin) < 2) return null;
         const ahead = diffMin < 0;
@@ -4142,7 +4249,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         })}
       </div>
 
-      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden', padding: `0 22px ${kbField ? 240 : 20}px`, display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden', padding: '0 22px 20px', display: 'flex', flexDirection: 'column', gap: 16 }}>
       {entry ? (<>
 
         {/* Exercise name */}
@@ -4322,7 +4429,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             </Btn>
           </Frame>
         ) : heroSet && (
-          <BracketFrame gold padding={0}>
+          // Hell-cycle glow: the hero card smoulders (same hellGlow the meso
+          // Options box uses) once the meso RIR target hits 0 or goes negative
+          // (beyond failure), matching the red/ember RIR watermark. Working sets
+          // only, not warm-ups or deload.
+          <BracketFrame gold padding={0} style={(mesoState && mesoRirVal != null && mesoRirVal <= 0 && !isCurrentWarmup && !isMesoDeloadSession) ? { animation: 'hellGlow 2s ease-in-out infinite' } : undefined}>
             {mesoState && mesoRirVal != null && !isCurrentWarmup && !isMesoDeloadSession && (() => {
               // Escalate the RIR watermark as the block gets crazier: gold above
               // failure, red at 0 RIR, then a hotter, faster ember-flicker the
@@ -4336,7 +4447,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               // layer warm palette via CSS custom props (see @keyframes
               // meso-ember). animationDuration overridden per intensity.
               const emberVars = fire ? {
-                '--ember-op': (0.16 + neg * 0.07).toFixed(2),
+                '--ember-op': (0.52 + neg * 0.08).toFixed(2),
                 '--ember-blur': `${8 + neg * 15}px`,
                 '--ember-glow1': `rgba(255,${120 + neg * 22},${25 + neg * 8},0.92)`,
                 '--ember-glow2': `rgba(255,${Math.max(0, 60 - neg * 14)},0,${(0.4 + neg * 0.08).toFixed(2)})`,
@@ -4345,7 +4456,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               const coreColor = fire ? ['#ff6a2a', '#ff801a', '#ffa510'][neg - 1] : (mesoRirVal === 0 ? 'rgba(220,53,69,1)' : UI.gold);
               return (
                 <>
-                <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', overflow: 'hidden' }}>
+                <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', overflow: 'hidden', zIndex: 3 }}>
                   {/* RIR + partials gloss rotate together as ONE unit around the
                       card's centre (not each span on its own) so the long
                       "(0 RIR + N partials)" line stays centred under the number
@@ -4372,14 +4483,15 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                     )}
                   </div>
                 </div>
-                {/* Scrim: a bg-toned radial veil painted OVER the ember but
-                    UNDER the content (which is z-indexed above it) so the
-                    foreground numbers/labels stay legible against the fire in
-                    ANY accent colour and theme, while the card edges stay
-                    ablaze. Fire mode only — the faint non-fire watermark
-                    (opacity 0.09/0.13) needs no veil, just the z-order lift. */}
-                {fire && <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none',
-                  background: 'radial-gradient(ellipse 78% 72% at 50% 56%, rgba(var(--bg-rgb),0.62) 0%, rgba(var(--bg-rgb),0.42) 42%, rgba(var(--bg-rgb),0) 78%)' }} />}
+                {/* Scrim: a bg-toned radial veil BETWEEN the (now background)
+                    weight/reps and the ember. z-order is content(1) < scrim(2) <
+                    ember(3), so in a beyond-failure week the RIR is the hero of
+                    the card and the numbers recede behind it (still fully shown,
+                    and editable, in the set list below). The radial center knocks
+                    the big numbers back while the card edges stay ablaze. Fire
+                    mode only. */}
+                {fire && <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 2,
+                  background: 'radial-gradient(ellipse 82% 76% at 50% 56%, rgba(var(--bg-rgb),0.72) 0%, rgba(var(--bg-rgb),0.5) 44%, rgba(var(--bg-rgb),0) 80%)' }} />}
                 </>
               );
             })()}
@@ -5008,11 +5120,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             <div className="knurl" />
             <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0' }}>
               <span>Duration</span>
-              <span className="num" style={{ color: UI.ink }}>{sessionTimeStr}</span>
+              <SessionClock startedAt={session.startedAt} style={{ color: UI.ink }} />
             </div>
           </div>
           {session.isFreestyle && (() => {
-            const elapsedMin = Math.floor(sessionElapsed / 60);
+            const elapsedMin = session.startedAt ? Math.floor((Date.now() - new Date(session.startedAt).getTime()) / 60000) : 0;
             const msg = elapsedMin < 10
               ? "Really done already? The barbell's barely warm — how about one more exercise?"
               : elapsedMin < 20
@@ -5033,7 +5145,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           {(() => {
             const onAddEx = () => { addAndJumpRef.current = true; setFinishOpen(false); setAddOpen(true); };
             if (session.isFreestyle) {
-              const elapsedMin = Math.floor(sessionElapsed / 60);
+              const elapsedMin = session.startedAt ? Math.floor((Date.now() - new Date(session.startedAt).getTime()) / 60000) : 0;
               if (elapsedMin < 20) {
                 return <Btn className="intensity-glow" onClick={onAddEx} style={{ width: '100%', marginBottom: 8 }}>+ Add another exercise</Btn>;
               } else if (elapsedMin < 45) {
@@ -5295,7 +5407,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         accent
       >
         {dropSetIdx != null && (
-          <div style={{ display: 'flex', flexDirection: 'column', maxHeight: 'inherit', minHeight: 0 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0 }}>
             <div style={{ flexShrink: 0, display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', padding: '0 4px 8px' }}>
               <span style={chainTitleStyle}>DROP SET</span>
               <button onClick={requestCloseChainSheet} style={{ background: 'none', border: 'none', color: UI.inkFaint, fontSize: 10, fontFamily: UI.fontUi, cursor: 'pointer', padding: '2px 4px', letterSpacing: '0.08em' }}>CANCEL</button>
@@ -5341,6 +5453,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   </div>
                 );
               })}
+            </div>
+            {/* Partials belong to the action bar: pin them (flexShrink:0) below
+                the scrolling row list so they stay visible above the keypad. */}
+            <div style={{ flexShrink: 0 }}>
               <FinisherPartials count={finisherPartials} onChange={setFinisherPartials} />
             </div>
             {(() => {
@@ -5380,7 +5496,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         )}
 
         {avSetIdx != null && (
-          <div style={{ display: 'flex', flexDirection: 'column', maxHeight: 'inherit', minHeight: 0 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0 }}>
             <div style={{ flexShrink: 0, display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', padding: '0 4px 8px' }}>
               <span style={chainTitleStyle}>AMRAP VARIATIONS</span>
               <button onClick={requestCloseChainSheet} style={{ background: 'none', border: 'none', color: UI.inkFaint, fontSize: 10, fontFamily: UI.fontUi, cursor: 'pointer', padding: '2px 4px', letterSpacing: '0.08em' }}>CANCEL</button>
@@ -5442,6 +5558,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   </div>
                 );
               })}
+            </div>
+            <div style={{ flexShrink: 0 }}>
               <FinisherPartials count={finisherPartials} onChange={setFinisherPartials} />
             </div>
             {(() => {
@@ -5493,7 +5611,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           const canFinish = myoDrops.filter(d => d.reps != null && (isNoWeightReps || isBodyweight || d.kg != null)).length >= 2;
           const activationDone = myoDrops[0]?.reps != null;
           return (
-            <div style={{ display: 'flex', flexDirection: 'column', maxHeight: 'inherit', minHeight: 0 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0 }}>
               <div style={{ flexShrink: 0 }}>
                 <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', padding: '0 4px 8px' }}>
                   <span style={chainTitleStyle}>{myoTechnique === 'myorep_match' ? 'MYO REP MATCH' : 'MYO-REPS'}</span>
@@ -5594,6 +5712,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                     </div>
                   );
                 })}
+              </div>
+              <div style={{ flexShrink: 0 }}>
                 <FinisherPartials count={finisherPartials} onChange={setFinisherPartials} />
               </div>
               <div style={{ flexShrink: 0, display: 'flex', gap: 8, padding: '4px 4px 10px' }}>
@@ -5797,27 +5917,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 24, paddingBottom: 8 }}>
           {/* big countdown */}
           <div style={{ textAlign: 'center' }}
-            onClick={restRemaining === 0 ? () => { cancelPushover(); persistRestStart(null); setRestModalOpen(false); } : undefined}
+            onClick={restExpired ? () => { cancelPushover(); persistRestStart(null); setRestModalOpen(false); } : undefined}
           >
-            <div className="num" style={{
-              fontSize: 72, fontWeight: 300, letterSpacing: '-0.02em', lineHeight: 1,
-              color: UI.gold,
-              animation: restRemaining === 0 ? 'timerPulse 0.8s ease-in-out infinite' : 'none',
-              cursor: restRemaining === 0 ? 'pointer' : 'default',
-            }}>
-              {restRemaining != null
-                ? `${Math.floor(restRemaining/60)}:${(restRemaining%60).toString().padStart(2,'0')}`
-                : '—'}
-            </div>
-            {restRemaining === 0 && (
-              <div style={{ marginTop: 10, fontSize: 11, letterSpacing: '0.18em', color: UI.gold, fontFamily: UI.fontUi, fontWeight: 600 }}>
-                GO
-              </div>
-            )}
-            {/* progress bar */}
-            <div style={{ height: 2, background: UI.hair, borderRadius: 4, overflow: 'hidden', marginTop: 18, width: 200 }}>
-              <div style={{ height: '100%', width: `${restPct}%`, background: UI.gold, transition: 'width 0.25s linear' }} />
-            </div>
+            <RestGauge variant="modal" restStart={restStart} restDef={activeRestDef} />
           </div>
           {/* controls */}
           <div style={{ display: 'flex', gap: 10, width: '100%' }}>
@@ -5969,22 +6071,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             textAlign: 'center', marginBottom: 48,
           }}>{warmupEntry?.name}</div>
 
-          {/* Big countdown */}
-          <div className="num" style={{
-            fontSize: 88, fontWeight: 300, letterSpacing: '-0.03em', lineHeight: 1,
-            color: UI.gold,
-            textShadow: '0 0 40px rgba(var(--accent-rgb),0.55), 0 0 80px rgba(var(--accent-rgb),0.25)',
-            animation: 'timerPulse 1.6s ease-in-out infinite',
-          }}>
-            {restRemaining != null
-              ? `${Math.floor(restRemaining / 60)}:${(restRemaining % 60).toString().padStart(2, '0')}`
-              : '—'}
-          </div>
-
-          {/* Progress bar */}
-          <div style={{ height: 2, background: UI.hair, borderRadius: 4, overflow: 'hidden', marginTop: 22, width: 180 }}>
-            <div style={{ height: '100%', width: `${restPct}%`, background: UI.gold, transition: 'width 0.25s linear' }} />
-          </div>
+          {/* Big countdown + progress bar (own 250ms leaf) */}
+          <RestGauge variant="warmup" restStart={restStart} restDef={activeRestDef} />
 
           {/* Start now */}
           <button onClick={startNow} style={{

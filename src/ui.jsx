@@ -734,7 +734,26 @@ function Sheet({ open, onClose, title, titleColor, children, keyboardHeight = 0,
           // branch — which is why "all other sheets work fine" was true.
           padding: `16px 22px ${floating ? '18px' : 'calc(env(safe-area-inset-bottom, 8px) + 22px)'}`,
           animation: 'sheet-up 0.22s ease',
-          maxHeight: floating ? `${vvHeight - 32}px` : '88dvh', overflow: 'auto', overscrollBehavior: 'contain',
+          // With a custom keypad open, become a flex column so the content
+          // child is bounded to the panel's OWN content box and shrinks to fit
+          // (its inner list scrolls), which keeps the child's header + action
+          // row pinned above the keypad. As a plain block, the child's
+          // maxHeight:'inherit' resolved to the panel's border-box height, so
+          // it overran the content box by the panel's padding + drag handle and
+          // pushed the actions out of view no matter how the maxHeight was
+          // tuned. Only the chain sheet passes keyboardHeight, so no other
+          // sheet is touched.
+          ...(keyboardHeight > 0 && { display: 'flex', flexDirection: 'column' }),
+          // Subtract keyboardHeight (the caller-declared custom keypad; 0 for
+          // every native-keyboard sheet, whose vvHeight already shrank on its
+          // own). Without it the panel could grow to the full viewport minus 32
+          // even though only the space ABOVE the custom keypad is usable, so a
+          // long drop/myo/AMRAP chain overflowed its bottom (the active input
+          // row + action buttons) down behind the keypad once the list got tall
+          // enough. Clamp at 0 so a mis-measured keypad can't force it negative.
+          // Also subtract env(safe-area-inset-top) so the panel's top stops at
+          // the iPhone status-bar/clock line instead of sliding up behind it.
+          maxHeight: floating ? `calc(${Math.max(0, vvHeight - keyboardHeight)}px - env(safe-area-inset-top, 0px) - 32px)` : '88dvh', overflow: 'auto', overscrollBehavior: 'contain',
         }}>
           <div style={{ width: 36, height: 3, background: accent ? 'var(--accent)' : UI.hairStrong, borderRadius: 4, margin: '0 auto 16px' }} />
           {title && (

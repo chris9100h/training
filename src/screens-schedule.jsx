@@ -49,10 +49,15 @@ function planDescriptor(s) {
 }
 
 // ─── PlanScreen ────────────────────────────────────────────────────
-function PlanScreen({ store, setStore, go, userId }) {
+function PlanScreen({ store, setStore, go, userId, openNewPlan }) {
   const [archivedOpen, setArchivedOpen] = useStateS(false);
+  const [newPlanPicker, setNewPlanPicker] = useStateS(false);
   const [confirmEl, confirm] = useConfirm();
   const importRef = React.useRef(null);
+  // Home's "Create plan" CTA (no-plan state) routes here with openNewPlan so it
+  // opens the same Templates/Custom fork the + button does, instead of jumping
+  // straight into the wizard.
+  useEffectS(() => { if (openNewPlan) setNewPlanPicker(true); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const isDeload = store.statusMode === 'deload';
   const deloadRemaining = isDeload ? LB.deloadDaysRemaining(store) : null;
@@ -123,7 +128,7 @@ function PlanScreen({ store, setStore, go, userId }) {
               borderRadius: 4, padding: '5px 10px', cursor: 'pointer',
               color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase',
             }}>Import</button>
-            <button data-tour="plan-new-btn" onClick={() => go({ name: 'schedule-new' })} style={{
+            <button data-tour="plan-new-btn" onClick={() => setNewPlanPicker(true)} style={{
               width: 32, height: 32, borderRadius: 4,
               border: `1px solid ${UI.goldSoft}`, background: UI.goldFaint,
               color: UI.gold, cursor: 'pointer', fontSize: 20, lineHeight: 1,
@@ -132,6 +137,7 @@ function PlanScreen({ store, setStore, go, userId }) {
           </div>
         }
       />
+      {newPlanPicker && <NewPlanPickerModal onClose={() => setNewPlanPicker(false)} go={go} />}
       <SubTabBar
         tabs={[
           { id: 'plan',   label: 'Workout',   icon: 'fa-dumbbell' },
@@ -145,7 +151,7 @@ function PlanScreen({ store, setStore, go, userId }) {
         {store.schedules.length === 0 && (
           <Empty title="No plans yet"
             sub="Create a training plan to start sessions."
-            action={<Btn data-tour="plan-new-btn" onClick={() => go({ name: 'schedule-new' })}>Create plan</Btn>}
+            action={<Btn data-tour="plan-new-btn" onClick={() => setNewPlanPicker(true)}>Create plan</Btn>}
             icon={ICON_CALENDAR} />
         )}
         {[...store.schedules.filter(s => !s.archived)].sort((a, b) => {
@@ -286,7 +292,12 @@ function PlanScreen({ store, setStore, go, userId }) {
 // Reached from the home rest-day card. Day chips switch between days
 // (like the exercise chips in training); each day shows the weights/reps
 // that will be prefilled when training, with no controls that change it.
-function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId }) {
+// preview mode: `store` is a SYNTHETIC store containing the not-yet-saved
+// schedule + its materialized exercises (so every lookup resolves), fromPlan is
+// false (hides Activate/Edit/backup/version actions), and a two-button bar
+// commits it: onUse (Use as is → the plan view) or onEdit (Edit this plan → the
+// editor). onBack overrides the default back target.
+function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, preview, onUse, onEdit, onBack }) {
   const sch = store.schedules.find(s => s.id === (scheduleId || store.activeScheduleId));
   const isWeekday = sch ? LB.isWeekdayPlan(sch) : false;
   const isFlex = sch ? LB.isFlexPlan(sch) : false;
@@ -429,7 +440,9 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId })
   const [seedRefs, setSeedRefs] = useStateS({});
   React.useEffect(() => {
     let cancelled = false;
-    if (!dayForSeed?.items?.length) { setSeedRefs({}); return; }
+    // In preview there is no history to seed from (fresh materialized exercises) —
+    // the preview shows the planned sets/reps instead, so skip the network call.
+    if (preview || !dayForSeed?.items?.length) { setSeedRefs({}); return; }
     LB.fetchSeedEntries(store, dayForSeed.items, dayForSeed.id, userId).then(refs => { if (!cancelled) setSeedRefs(refs || {}); });
     return () => { cancelled = true; };
   }, [dayForSeed?.id]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -628,7 +641,11 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId })
                 {isUni && <span className="micro" style={{ marginLeft: 6, color: UI.inkFaint }}>UNI</span>}
               </span>
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3, flexShrink: 0 }}>
-                {seedSets.map((st, si) => {
+                {preview ? (
+                  <span className="num" style={{ fontSize: 13, color: UI.inkSoft }}>
+                    {it.sets} × {(it.repsPerSet && it.repsPerSet.length) ? it.repsPerSet.join('/') : (it.repsMax != null ? `${it.reps}-${it.repsMax}` : it.reps)}
+                  </span>
+                ) : seedSets.map((st, si) => {
                   const kg = st.kg != null ? `${st.kg}${UI.unit()}` : '—';
                   // A null seeded rep count means the training screen would
                   // actually show a blank input for that set — falling back
@@ -654,9 +671,11 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId })
         return [frame];
       })}
       <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.5, marginTop: 2, textAlign: 'center' }}>
-        {day.items.some(i => LB.progressionEnabled(store, i.repsMax, i.progressionOffset))
-          ? <>Prefilled for your next session · <i className="fa-solid fa-arrow-up" style={{ fontSize: 8 }} /> = smart progression bump</>
-          : 'Prefilled from your last session'}
+        {preview
+          ? 'Planned sets × reps · weights fill in as you train'
+          : day.items.some(i => LB.progressionEnabled(store, i.repsMax, i.progressionOffset))
+            ? <>Prefilled for your next session · <i className="fa-solid fa-arrow-up" style={{ fontSize: 8 }} /> = smart progression bump</>
+            : 'Prefilled from your last session'}
       </div>
     </>
   );
@@ -748,7 +767,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId })
             ? displayDays.map(d => WEEKDAYS[d.weekday]).join(' · ')
             : `${displayDays.length}-day cycle · ${trainingDayCount} ${trainingDayCount === 1 ? 'workout' : 'workouts'}`;
         })()}
-        onBack={() => go({ name: fromPlan ? 'plan' : 'home' })}
+        onBack={onBack || (() => go({ name: fromPlan ? 'plan' : 'home' }))}
         right={fromPlan ? (
           <button onClick={() => go({ name: 'schedule-edit', scheduleId: sch.id, versionFrom: selectedVersion?.validFrom })} style={{
             background: 'transparent', border: `1px solid ${UI.hairStrong}`,
@@ -1060,6 +1079,13 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId })
           </MiniSheet>
         );
       })()}
+      {preview && (<>
+        <div className="knurl" />
+        <div style={{ flexShrink: 0, padding: `10px 22px calc(env(safe-area-inset-bottom, 8px) + 10px)`, display: 'flex', gap: 10 }}>
+          <Btn kind="ghost" onClick={onEdit} style={{ flex: 1, minHeight: 46 }}>Edit this plan</Btn>
+          <Btn onClick={onUse} style={{ flex: 1, minHeight: 46 }}>Use as is</Btn>
+        </div>
+      </>)}
     </Screen>
   );
 }
@@ -3152,7 +3178,34 @@ function PlanWizard({ store, setStore, go }) {
         <button onClick={() => removeDayType(dt)} title={armed ? 'Tap again to remove' : 'Remove'} style={{ flexShrink: 0, background: armed ? 'rgba(var(--danger-rgb),0.15)' : UI.goldFaint, border: 'none', borderLeft: `0.5px solid ${armed ? UI.danger : UI.goldSoft}`, color: armed ? UI.danger : UI.gold, opacity: armed ? 1 : 0.55, padding: '0 9px', cursor: 'pointer', fontSize: 12, WebkitTapHighlightColor: 'transparent' }}>×</button>
       </div>;
     };
+    // Overview of the days chosen so far, so a long Custom cycle/flex plan doesn't
+    // lose the thread: every day with its picked type (— if still open), the day
+    // being edited highlighted. Scrolls internally if the plan is very long.
+    const dayN = type === 'weekday' ? sortedWeekdays.length : customDays.length;
+    const dayShort = (i) => (type === 'weekday' && sortedWeekdays[i] != null) ? WEEKDAYS[sortedWeekdays[i]] : `D${i + 1}`;
+    const overview = dayN > 1 ? (
+      <div style={{ padding: '9px 10px', borderRadius: 6, background: UI.bgInset, border: `1px solid ${UI.hairStrong}` }}>
+        <span className="label" style={{ color: UI.inkFaint, display: 'block', marginBottom: 7 }}>Plan so far</span>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, maxHeight: 132, overflowY: 'auto', overscrollBehavior: 'contain' }}>
+          {Array.from({ length: dayN }, (_, i) => {
+            const picked = customDays[i] && customDays[i].name;
+            const isCur = i === dayIdx;
+            return (
+              <div key={i} style={{
+                display: 'flex', alignItems: 'center', gap: 4, padding: '3px 7px', borderRadius: 4, whiteSpace: 'nowrap',
+                border: `1px solid ${isCur ? 'var(--accent)' : (picked ? UI.hairStrong : UI.hair)}`,
+                background: isCur ? 'rgba(var(--accent-rgb),0.12)' : (picked ? UI.bgRaised : 'transparent'),
+              }}>
+                <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.04em', color: isCur ? 'var(--accent)' : UI.inkFaint }}>{dayShort(i)}</span>
+                <span style={{ fontFamily: UI.fontUi, fontSize: 10, color: picked ? (isCur ? 'var(--accent)' : UI.inkSoft) : UI.inkGhost }}>{picked || '—'}</span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    ) : null;
     body = <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {overview}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
         {stdTypes.map(stdChip)}
       </div>
@@ -3349,9 +3402,124 @@ function PlanWizard({ store, setStore, go }) {
   );
 }
 
-// ─── Create new schedule (hosts the guided plan wizard) ──────────────
+// ─── Create new schedule ─────────────────────────────────────────────
+// Wizard-only (the guided Custom builder). The Templates-vs-Custom choice is a
+// modal on the Plan screen (NewPlanPickerModal); Templates routes to
+// ProgramTemplatesScreen. Kept wizard-only so the coaching plan-builder, which
+// renders this directly, is unchanged.
 function ScheduleNewScreen({ store, setStore, go, userId }) {
   return <PlanWizard store={store} setStore={setStore} go={go} />;
 }
 
-Object.assign(window.Screens, { PlanScreen, PlanViewerScreen, ScheduleEditScreen, ScheduleNewScreen, ExercisePicker, DayTypePicker });
+// The "New plan" chooser, styled like the unit picker: a centered modal with two
+// side-by-side options. Rendered inline by PlanScreen's + button (not a route).
+function NewPlanPickerModal({ onClose, go }) {
+  const opt = (icon, label, sub, onClick) => (
+    <button onClick={onClick} style={{
+      flex: 1, padding: '16px 0', borderRadius: 6, cursor: 'pointer',
+      background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, color: UI.inkSoft,
+      fontFamily: UI.fontUi, textAlign: 'center', WebkitTapHighlightColor: 'transparent',
+      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8,
+    }}>
+      <i className={`fa-solid ${icon}`} style={{ fontSize: 20, color: UI.inkFaint }} />
+      <div>
+        <div style={{ fontSize: 14, fontWeight: 600, color: UI.ink }}>{label}</div>
+        <div style={{ fontSize: 10, color: UI.inkFaint, marginTop: 2 }}>{sub}</div>
+      </div>
+    </button>
+  );
+  return (
+    <div onClick={onClose} style={{
+      position: 'fixed', inset: 0, zIndex: 9998, background: 'rgba(0,0,0,0.72)',
+      backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 32,
+    }}>
+      <div onClick={e => e.stopPropagation()} style={{
+        width: '100%', maxWidth: 340, background: UI.bgRaised, border: `1px solid ${UI.hairStrong}`,
+        borderRadius: 6, padding: '28px 24px', display: 'flex', flexDirection: 'column', gap: 16,
+        boxShadow: '0 32px 80px rgba(0,0,0,0.6)', animation: 'fadeUp 0.3s ease',
+      }}>
+        <div>
+          <div style={{ fontFamily: UI.fontDisplay, fontSize: 22, color: 'var(--accent)', fontWeight: 400, marginBottom: 8, textTransform: 'uppercase' }}>New plan</div>
+          <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>Start from a ready-made program, or build your own.</div>
+        </div>
+        <div style={{ display: 'flex', gap: 10 }}>
+          {opt('fa-layer-group', 'Templates', 'Ready-made', () => { onClose(); go({ name: 'schedule-templates' }); })}
+          {opt('fa-sliders', 'Custom', 'Build your own', () => { onClose(); go({ name: 'schedule-new' }); })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Lists the pre-built programs. Tapping one instantiates it (LB.instantiateProgram)
+// and opens it in the existing plan viewer, where the user reviews and activates
+// it — same as any other plan (consistent with the Custom flow, which also creates
+// an unactivated plan before it is used).
+function ProgramTemplatesScreen({ store, setStore, go }) {
+  const programs = (typeof window !== 'undefined' && window.SYSTEM_PROGRAMS) || [];
+  return (
+    <Screen scroll={false}>
+      <TopBar title="Templates" onBack={() => go({ name: 'plan' })} />
+      <div style={{ flex: 1, overflowY: 'auto', padding: '14px 22px 40px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div className="micro" style={{ color: UI.inkFaint, textTransform: 'none', letterSpacing: '0.02em', lineHeight: 1.5, marginBottom: 4 }}>
+          Beginner-ready programs, each built as a 6-week mesocycle. Pick by how many days you can train each week.
+        </div>
+        {programs.map(p => (
+          <button key={p.id} onClick={() => go({ name: 'plan-preview', programId: p.id })} style={{
+            width: '100%', textAlign: 'left', background: UI.bgInset, border: `1px solid ${UI.hairStrong}`,
+            borderRadius: 8, padding: 14, cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 8,
+            WebkitTapHighlightColor: 'transparent',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span style={{ flex: 1, fontFamily: UI.fontDisplay, fontSize: 20, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.02em', color: UI.ink }}>{p.name}</span>
+              <span className="num" style={{ flexShrink: 0, fontSize: 11, padding: '3px 8px', borderRadius: 4, color: 'var(--accent)', background: 'rgba(var(--accent-rgb),0.12)', border: `0.5px solid rgba(var(--accent-rgb),0.35)` }}>{p.daysPerWeek}×/week</span>
+            </div>
+            <span style={{ fontSize: 12.5, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.45 }}>{p.blurb}</span>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 2 }}>
+              {p.days.map((d, i) => (
+                <span key={i} className="micro" style={{ color: UI.inkFaint, background: UI.bgRaised, border: `0.5px solid ${UI.hair}`, borderRadius: 4, padding: '3px 6px', textTransform: 'none', letterSpacing: '0.02em' }}>{d.name}</span>
+              ))}
+            </div>
+          </button>
+        ))}
+      </div>
+    </Screen>
+  );
+}
+
+// Transient preview of a program in the real plan viewer. instantiateProgram runs
+// once (memoized) into an in-memory schedule + exercises that are NOT saved; a
+// synthetic store lets the viewer resolve every exId. "Use as is" / "Edit this
+// plan" both commit it to the real store (append exercises + schedule); they only
+// differ in where you land. So browsing templates never litters the library with
+// half-chosen plans.
+function ProgramPreviewScreen({ store, setStore, go, userId, programId }) {
+  const program = ((typeof window !== 'undefined' && window.SYSTEM_PROGRAMS) || []).find(p => p.id === programId);
+  const built = useMemoS(() => program ? LB.instantiateProgram(store, program) : null, [programId]); // eslint-disable-line react-hooks/exhaustive-deps
+  if (!built) {
+    return (
+      <Screen>
+        <TopBar title="Templates" onBack={() => go({ name: 'schedule-templates' })} />
+        <div style={{ padding: 22 }}><Empty title="Program not found" icon={ICON_CALENDAR} /></div>
+      </Screen>
+    );
+  }
+  const synthStore = { ...store, schedules: [...store.schedules, built.schedule], exercises: [...store.exercises, ...built.newExercises] };
+  const finalize = (dest) => {
+    setStore(s => ({ ...s, exercises: [...(s.exercises || []), ...built.newExercises], schedules: [...(s.schedules || []), built.schedule] }));
+    go(dest);
+  };
+  return (
+    <PlanViewerScreen
+      store={synthStore} setStore={setStore} go={go} userId={userId}
+      scheduleId={built.schedule.id} fromPlan={false}
+      preview
+      onUse={() => finalize({ name: 'plan-view', scheduleId: built.schedule.id, fromPlan: true })}
+      onEdit={() => finalize({ name: 'schedule-edit', scheduleId: built.schedule.id })}
+      onBack={() => go({ name: 'schedule-templates' })}
+    />
+  );
+}
+
+Object.assign(window.Screens, { PlanScreen, PlanViewerScreen, ScheduleEditScreen, ScheduleNewScreen, ProgramTemplatesScreen, ProgramPreviewScreen, ExercisePicker, DayTypePicker });

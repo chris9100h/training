@@ -5,6 +5,12 @@ const { useState: useStateL, useMemo: useMemoL, useRef: useRefL, useEffect: useE
 // Persists library filter state across navigation (survives remounts)
 const _lib = { tab: 'recent', q: '', filterTags: [], filterRestCats: [], filterUnilateral: null, filterPlan: null, filterEquipment: [], filtersOpen: false };
 
+// Shown when a user tries to delete the built-in CARDIO exercise (bulk-select
+// or the exercise detail). It is auto-seeded per user and re-created if removed,
+// so silently refusing just reads as "delete is broken" — which cost us a real
+// support ticket. Explain instead.
+const CARDIO_SYSTEM_MSG = "System exercises can't be deleted. Cardio is here to stay, always ready to drop into a plan or session.";
+
 // Accept only http(s) YouTube URLs. React does NOT block javascript: hrefs in
 // production, so we validate on save (strip otherwise) and guard again at render.
 // Returns the normalized URL string, or null if it is not a valid YouTube link.
@@ -315,7 +321,13 @@ function LibraryScreen({ store, setStore, go, userId }) {
           return (
             <React.Fragment key={e.id}>
             <div
-              onClick={() => (selecting && !isSystemCardio) ? toggleSelect(e.id) : go({ name: 'exercise', exId: e.id })}
+              onClick={() => {
+                if (selecting) {
+                  if (isSystemCardio) { confirm(CARDIO_SYSTEM_MSG, { title: 'You shall not pass 🧙', ok: 'Got it', cancel: null }); return; }
+                  toggleSelect(e.id); return;
+                }
+                go({ name: 'exercise', exId: e.id });
+              }}
               style={{
                 display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12,
                 padding: '13px 0',
@@ -333,14 +345,18 @@ function LibraryScreen({ store, setStore, go, userId }) {
                 </div>
               </div>
               {selecting ? (
-                <div style={{
-                  width: 20, height: 20, borderRadius: 4, flexShrink: 0,
-                  border: `1px solid ${isSelected ? UI.danger : UI.hairStrong}`,
-                  background: isSelected ? UI.danger : 'transparent',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                }}>
-                  {isSelected && <span style={{ color: '#fff', fontSize: 11, lineHeight: 1 }}>✓</span>}
-                </div>
+                isSystemCardio ? (
+                  <i className="fa-solid fa-lock" title="Built-in, can't be deleted" style={{ fontSize: 12, color: UI.inkFaint, flexShrink: 0, width: 20, textAlign: 'center' }} />
+                ) : (
+                  <div style={{
+                    width: 20, height: 20, borderRadius: 4, flexShrink: 0,
+                    border: `1px solid ${isSelected ? UI.danger : UI.hairStrong}`,
+                    background: isSelected ? UI.danger : 'transparent',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  }}>
+                    {isSelected && <span style={{ color: '#fff', fontSize: 11, lineHeight: 1 }}>✓</span>}
+                  </div>
+                )
               ) : (
                 <ChevronRight />
               )}
@@ -1232,7 +1248,13 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
                 }}>×</button>
               )
             ) : ex.movement_type === 'cardio' ? (
-              <span className="micro" style={{ color: UI.inkFaint, letterSpacing: '0.1em' }}>SYSTEM</span>
+              <button onClick={() => confirm(CARDIO_SYSTEM_MSG, { title: 'You shall not pass 🧙', ok: 'Got it', cancel: null })} style={{
+                background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5,
+                color: UI.inkFaint, padding: '4px 8px',
+              }}>
+                <i className="fa-solid fa-lock" style={{ fontSize: 10 }} />
+                <span className="micro" style={{ letterSpacing: '0.1em' }}>SYSTEM</span>
+              </button>
             ) : (
               <>
                 <button onClick={startEdit} style={{

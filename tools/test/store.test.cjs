@@ -30,6 +30,13 @@ function loadStore() {
   sandbox.global = sandbox;
   vm.createContext(sandbox);
   vm.runInContext(code, sandbox, { filename: 'store.js' });
+  // Load the read-only data catalogs into the same window so LB helpers that read
+  // window.* (e.g. instantiateProgram → window.SYSTEM_EXERCISES) see them, exactly
+  // as the browser does via the plain <script> tags in index.html.
+  for (const f of ['src/exercise-db.js', 'src/programs-db.js']) {
+    const src = fs.readFileSync(path.join(__dirname, '../../', f), 'utf8');
+    new Function('window', src)(sandbox.window);
+  }
   return sandbox.window.LB;
 }
 
@@ -736,6 +743,15 @@ async function testAsync(name, fn) {
     const seeded = LB.buildSeedSets(it, belowCap, null, false, noSmartProgStore, null);
     assert.strictEqual(seeded[0].reps, 10);
   });
+  test('buildSeedSets never seeds below last session, even past a Range item\'s repsMax', () => {
+    // Last session went to failure at 13 on an 8-12 range at the same weight.
+    // The cap must not drop the seed back to 12 (that would prescribe less than
+    // the user just proved they can do); seed the actual 13.
+    const it = { sets: 1, reps: 8, repsMax: 12 };
+    const pastCap = { entry: { sets: [{ warmup: false, kg: 100, reps: 13, done: true }] } };
+    const seeded = LB.buildSeedSets(it, pastCap, null, false, noSmartProgStore, null);
+    assert.strictEqual(seeded[0].reps, 13);
+  });
   test('buildSeedSets leaves the classic (non-Range) +1 nudge uncapped past the global ceiling', () => {
     // Only a Range item's own repsMax caps the nudge — the global default /
     // a custom progressionOffset ceiling is just an internal trigger
@@ -1106,6 +1122,69 @@ async function testAsync(name, fn) {
     // Guard clauses: unversioned / weekday / flex fall back to the passed index.
     assert.strictEqual(LB.todayCycleStripIndex({ id: 'p', days: mkDays(9) }, '2026-07-06', 3), 3);
     assert.strictEqual(LB.todayCycleStripIndex({ id: 'p', is_flex: true, days: mkDays(9), versions: [vOld] }, '2026-07-06', 2), 2);
+  });
+
+  // ── Pre-built programs (programs-db.js + LB.instantiateProgram) ─────────────
+  const _catWin = {};
+  new Function('window', fs.readFileSync(path.join(__dirname, '../../src/exercise-db.js'), 'utf8'))(_catWin);
+  new Function('window', fs.readFileSync(path.join(__dirname, '../../src/programs-db.js'), 'utf8'))(_catWin);
+  const SYS_EX = _catWin.SYSTEM_EXERCISES || [];
+  const SYS_PROG = _catWin.SYSTEM_PROGRAMS || [];
+
+  test('every pre-built program references only real catalog exercises', () => {
+    const names = new Set(SYS_EX.map(e => (e.name || '').toUpperCase()));
+    const missing = [];
+    for (const p of SYS_PROG) for (const d of p.days) for (const it of d.items) {
+      if (!names.has((it.ex || '').toUpperCase())) missing.push(`${p.name}/${d.name}: ${it.ex}`);
+    }
+    assert.deepStrictEqual(missing, [], 'unknown exercise names: ' + missing.join(', '));
+  });
+
+  test('pre-built programs are well-formed (unique ids, ~16 sets/session, valid Range reps)', () => {
+    assert.ok(SYS_PROG.length >= 1, 'expected at least one program');
+    const ids = SYS_PROG.map(p => p.id);
+    assert.strictEqual(new Set(ids).size, ids.length, 'program ids must be unique');
+    for (const p of SYS_PROG) {
+      assert.strictEqual(p.days.length, p.daysPerWeek, `${p.name}: days must match daysPerWeek`);
+      for (const d of p.days) {
+        const sets = d.items.reduce((a, it) => a + it.sets, 0);
+        assert.ok(sets >= 14 && sets <= 18, `${p.name}/${d.name}: ${sets} sets outside 14-18`);
+        for (const it of d.items) {
+          assert.ok(it.reps > 0, `${p.name}/${d.name}/${it.ex}: reps must be > 0`);
+          if (it.repsMax != null) assert.ok(it.repsMax >= it.reps, `${p.name}/${d.name}/${it.ex}: repsMax < reps`);
+        }
+      }
+    }
+  });
+
+  test('instantiateProgram builds a flex mesocycle with materialized (non-sys_) exercises', () => {
+    const program = SYS_PROG.find(p => p.id === 'prog_fb3') || SYS_PROG[0];
+    const { schedule, newExercises } = LB.instantiateProgram({ exercises: [] }, program);
+    assert.strictEqual(schedule.is_flex, true);
+    assert.strictEqual(schedule.sessions_per_week, program.days.length);
+    assert.strictEqual(schedule.mesocycle_weeks, program.meso.weeks);
+    assert.strictEqual(schedule.mesocycle_start_rir, program.meso.startRir);
+    assert.strictEqual(schedule.mesocycle_end_rir, program.meso.endRir);
+    assert.strictEqual(schedule.days.length, program.days.length);
+    const exIds = new Set(newExercises.map(e => e.id));
+    for (const d of schedule.days) for (const it of d.items) {
+      assert.ok(!String(it.exId).startsWith('sys_'), 'plan item must not hold a sys_ id');
+      assert.ok(exIds.has(it.exId), 'plan item must reference a materialized exercise');
+      assert.ok(it.sets > 0 && it.reps > 0, 'item sets/reps carried over');
+    }
+    // A name repeated across days materializes ONE row (dedup): unique names == new rows.
+    const uniq = new Set();
+    for (const d of program.days) for (const it of d.items) uniq.add(it.ex.toUpperCase());
+    assert.strictEqual(newExercises.length, uniq.size, 'one materialized row per unique exercise name');
+  });
+
+  test('instantiateProgram reuses a same-named existing user exercise instead of duplicating', () => {
+    const program = SYS_PROG.find(p => p.id === 'prog_fb3') || SYS_PROG[0];
+    const usedName = program.days[0].items[0].ex;
+    const state = { exercises: [{ id: 'user_existing', name: usedName, tags: [] }] };
+    const { schedule, newExercises } = LB.instantiateProgram(state, program);
+    assert.ok(!newExercises.some(e => (e.name || '').toUpperCase() === usedName.toUpperCase()), 'must not duplicate a same-named exercise');
+    assert.ok(schedule.days.some(d => d.items.some(it => it.exId === 'user_existing')), 'plan item must reference the reused existing exercise id');
   });
 
   console.log(`\n${pass} passed, ${fail} failed`);
