@@ -5407,7 +5407,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         accent
       >
         {dropSetIdx != null && (
-          <div style={{ display: 'flex', flexDirection: 'column', maxHeight: 'inherit', minHeight: 0 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0 }}>
             <div style={{ flexShrink: 0, display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', padding: '0 4px 8px' }}>
               <span style={chainTitleStyle}>DROP SET</span>
               <button onClick={requestCloseChainSheet} style={{ background: 'none', border: 'none', color: UI.inkFaint, fontSize: 10, fontFamily: UI.fontUi, cursor: 'pointer', padding: '2px 4px', letterSpacing: '0.08em' }}>CANCEL</button>
@@ -5492,7 +5492,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         )}
 
         {avSetIdx != null && (
-          <div style={{ display: 'flex', flexDirection: 'column', maxHeight: 'inherit', minHeight: 0 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0 }}>
             <div style={{ flexShrink: 0, display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', padding: '0 4px 8px' }}>
               <span style={chainTitleStyle}>AMRAP VARIATIONS</span>
               <button onClick={requestCloseChainSheet} style={{ background: 'none', border: 'none', color: UI.inkFaint, fontSize: 10, fontFamily: UI.fontUi, cursor: 'pointer', padding: '2px 4px', letterSpacing: '0.08em' }}>CANCEL</button>
@@ -5605,7 +5605,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           const canFinish = myoDrops.filter(d => d.reps != null && (isNoWeightReps || isBodyweight || d.kg != null)).length >= 2;
           const activationDone = myoDrops[0]?.reps != null;
           return (
-            <div style={{ display: 'flex', flexDirection: 'column', maxHeight: 'inherit', minHeight: 0 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0 }}>
               <div style={{ flexShrink: 0 }}>
                 <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', padding: '0 4px 8px' }}>
                   <span style={chainTitleStyle}>{myoTechnique === 'myorep_match' ? 'MYO REP MATCH' : 'MYO-REPS'}</span>

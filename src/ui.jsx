@@ -734,6 +734,16 @@ function Sheet({ open, onClose, title, titleColor, children, keyboardHeight = 0,
           // branch — which is why "all other sheets work fine" was true.
           padding: `16px 22px ${floating ? '18px' : 'calc(env(safe-area-inset-bottom, 8px) + 22px)'}`,
           animation: 'sheet-up 0.22s ease',
+          // With a custom keypad open, become a flex column so the content
+          // child is bounded to the panel's OWN content box and shrinks to fit
+          // (its inner list scrolls), which keeps the child's header + action
+          // row pinned above the keypad. As a plain block, the child's
+          // maxHeight:'inherit' resolved to the panel's border-box height, so
+          // it overran the content box by the panel's padding + drag handle and
+          // pushed the actions out of view no matter how the maxHeight was
+          // tuned. Only the chain sheet passes keyboardHeight, so no other
+          // sheet is touched.
+          ...(keyboardHeight > 0 && { display: 'flex', flexDirection: 'column' }),
           // Subtract keyboardHeight (the caller-declared custom keypad; 0 for
           // every native-keyboard sheet, whose vvHeight already shrank on its
           // own). Without it the panel could grow to the full viewport minus 32
