@@ -66,7 +66,8 @@ CREATE TABLE public.zane_schedules (
   sessions_per_week integer,
   mesocycle_weeks integer,
   mesocycle_start_rir integer,
-  mesocycle_end_rir integer
+  mesocycle_end_rir integer,
+  mesocycle_rir_enabled boolean NOT NULL DEFAULT true
 );
 
 CREATE TABLE public.zane_sessions (

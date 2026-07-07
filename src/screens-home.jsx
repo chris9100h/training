@@ -2558,12 +2558,13 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                   </span>
                 );
               }
-              const rir = (typeof mesoRirForWeek === 'function') ? mesoRirForWeek(week, weeks, sch.mesocycle_start_rir ?? 3, sch.mesocycle_end_rir ?? 0) : null;
-              if (rir == null) return null;
+              // RIR taper can be off per plan — then show just the week counter,
+              // no RIR suffix.
+              const rir = (LB.mesoRirEnabled(sch) && typeof mesoRirForWeek === 'function') ? mesoRirForWeek(week, weeks, sch.mesocycle_start_rir ?? 3, sch.mesocycle_end_rir ?? 0) : null;
               const unit = weekdayMode ? 'W' : 'C';
               return (
                 <span style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase', color: UI.inkSoft, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '2px 8px' }}>
-                  {mesoLabel} {unit}{week}/{weeks} · {rir} RIR
+                  {mesoLabel} {unit}{week}/{weeks}{rir != null ? ` · ${rir} RIR` : ''}
                 </span>
               );
             })() : (
