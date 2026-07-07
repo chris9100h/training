@@ -4447,7 +4447,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               // layer warm palette via CSS custom props (see @keyframes
               // meso-ember). animationDuration overridden per intensity.
               const emberVars = fire ? {
-                '--ember-op': (0.26 + neg * 0.05).toFixed(2),
+                '--ember-op': (0.52 + neg * 0.08).toFixed(2),
                 '--ember-blur': `${8 + neg * 15}px`,
                 '--ember-glow1': `rgba(255,${120 + neg * 22},${25 + neg * 8},0.92)`,
                 '--ember-glow2': `rgba(255,${Math.max(0, 60 - neg * 14)},0,${(0.4 + neg * 0.08).toFixed(2)})`,
@@ -4456,7 +4456,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               const coreColor = fire ? ['#ff6a2a', '#ff801a', '#ffa510'][neg - 1] : (mesoRirVal === 0 ? 'rgba(220,53,69,1)' : UI.gold);
               return (
                 <>
-                <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', overflow: 'hidden' }}>
+                <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', overflow: 'hidden', zIndex: 3 }}>
                   {/* RIR + partials gloss rotate together as ONE unit around the
                       card's centre (not each span on its own) so the long
                       "(0 RIR + N partials)" line stays centred under the number
@@ -4483,14 +4483,15 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                     )}
                   </div>
                 </div>
-                {/* Scrim: a bg-toned radial veil painted OVER the ember but
-                    UNDER the content (which is z-indexed above it) so the
-                    foreground numbers/labels stay legible against the fire in
-                    ANY accent colour and theme, while the card edges stay
-                    ablaze. Fire mode only — the faint non-fire watermark
-                    (opacity 0.09/0.13) needs no veil, just the z-order lift. */}
-                {fire && <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none',
-                  background: 'radial-gradient(ellipse 78% 72% at 50% 56%, rgba(var(--bg-rgb),0.62) 0%, rgba(var(--bg-rgb),0.42) 42%, rgba(var(--bg-rgb),0) 78%)' }} />}
+                {/* Scrim: a bg-toned radial veil BETWEEN the (now background)
+                    weight/reps and the ember. z-order is content(1) < scrim(2) <
+                    ember(3), so in a beyond-failure week the RIR is the hero of
+                    the card and the numbers recede behind it (still fully shown,
+                    and editable, in the set list below). The radial center knocks
+                    the big numbers back while the card edges stay ablaze. Fire
+                    mode only. */}
+                {fire && <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 2,
+                  background: 'radial-gradient(ellipse 82% 76% at 50% 56%, rgba(var(--bg-rgb),0.72) 0%, rgba(var(--bg-rgb),0.5) 44%, rgba(var(--bg-rgb),0) 80%)' }} />}
                 </>
               );
             })()}
