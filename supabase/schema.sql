@@ -2076,3 +2076,40 @@ REVOKE EXECUTE ON FUNCTION public.sync_daily_logs_batch(jsonb) FROM PUBLIC, anon
 GRANT EXECUTE ON FUNCTION public.sync_daily_logs_batch(jsonb) TO authenticated;
 REVOKE EXECUTE ON FUNCTION public.sync_meso_states_batch(jsonb) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.sync_meso_states_batch(jsonb) TO authenticated;
+
+-- ── Ops: schema inventory for the db-drift workflow (Migration 0142) ────────
+
+CREATE OR REPLACE FUNCTION public.admin_schema_inventory()
+RETURNS jsonb
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path TO 'public'
+AS $$
+  SELECT jsonb_build_object(
+    'columns', (
+      SELECT jsonb_agg(jsonb_build_object('t', table_name, 'c', column_name)
+                       ORDER BY table_name, ordinal_position)
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+    ),
+    'functions', (
+      SELECT jsonb_agg(jsonb_build_object(
+               'f', p.proname,
+               'sig', p.oid::regprocedure::text,
+               'anon_exec', has_function_privilege('anon', p.oid, 'execute'),
+               'definer', p.prosecdef)
+             ORDER BY p.proname)
+      FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE n.nspname = 'public'
+    ),
+    'realtime', (
+      SELECT COALESCE(jsonb_agg(tablename ORDER BY tablename), '[]'::jsonb)
+      FROM pg_publication_tables
+      WHERE pubname = 'supabase_realtime'
+    )
+  );
+$$;
+
+REVOKE EXECUTE ON FUNCTION public.admin_schema_inventory() FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.admin_schema_inventory() TO service_role;

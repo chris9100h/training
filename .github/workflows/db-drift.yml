@@ -1,0 +1,27 @@
+name: DB drift check
+
+# Weekly live audit of the Supabase database against supabase/schema.sql and
+# docs/database.md (tools/check-db-live.cjs). Stage 1 (tables/columns via the
+# PostgREST OpenAPI spec, anon RPC exposure) needs no secrets. Stage 2
+# (authoritative columns, anon grants, realtime publication) activates once
+# the SUPABASE_SERVICE_ROLE_KEY repository secret is set and Migration 0142
+# has been applied; setup steps are in the header of tools/check-db-live.cjs.
+#
+# Note: scheduled workflows only run on the default branch. Exit code 2 means
+# an operational error (network/auth), exit code 1 means real drift.
+on:
+  schedule:
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: node tools/check-db-live.cjs
+        env:
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}

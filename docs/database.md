@@ -10,6 +10,14 @@ Abschnitt „Datenbank (Supabase)"). `supabase/schema.sql` ist der vollständige
 Schema-Snapshot (Tabellen, RLS, Funktionen, Trigger, Realtime) und muss immer mit
 dem Live-Schema übereinstimmen.
 
+**Drift-Checks (automatisiert):** `tools/check-db-docs.cjs` (CI, bei jedem Push)
+replayt alle Migrationen und schlägt fehl, wenn Tabellen/Spalten/Funktionen nicht
+in `schema.sql` und dieser Datei nachgezogen wurden. `tools/check-db-live.cjs`
+(`.github/workflows/db-drift.yml`, wöchentlich + manuell) vergleicht zusätzlich
+die echte Datenbank: Spalten via PostgREST-OpenAPI (Stufe 1, anon-Key) bzw.
+`admin_schema_inventory()` (Stufe 2, Service-Key), anon-EXECUTE-Grants und die
+Realtime-Publikation.
+
 ## Tabellen & Spalten
 
 ### `zane_exercises`
@@ -282,6 +290,7 @@ Serverseitige History-Aggregate (Migrationen 0059/0060, SECURITY INVOKER, option
 - **`handle_new_user()`** → `trigger` (SECURITY DEFINER): legt beim Anlegen eines Auth-Users die `zane_user_settings`-Zeile an (ON CONFLICT DO NOTHING); Trigger `on_auth_user_created` auf `auth.users`.
 - **VIP-Backgrounds** (Migration 0103): **`get_user_vip_backgrounds()`** → `TABLE(email text, bg_key text)` (Admin, alle gesetzten Backgrounds) / **`set_user_vip_background(p_email text, p_bg_key text)`** → `text` (Admin, setzt `zane_user_settings.vip_background` für den User per Email; leerer Key = löschen).
 - **`get_force_update_nonce()`** → `text` / **`admin_force_update()`** → `void` (setzen/lesen nur `zane_app_config.force_update_nonce`, Admin-Setter): pusht das „New version available"-Update-Banner an **alle** verbundenen Clients, ohne dass ein `sw.js`-Cache-Bump nötig ist (der laut Deployment-Regeln nur auf ausdrückliche Aufforderung passiert, die meisten Deploys lösen also keinen Banner aus). `app.jsx`s `checkForceUpdate` pollt die Nonce im selben Rhythmus wie den bestehenden `sw.js`-Text-Versions-Check (`checkSwUpdate`) und vergleicht sie gegen den localStorage-Key `logbook-force-nonce-seen`, nach demselben „erstes Sichten = Baseline, kein Banner"-Prinzip, damit ein brandneues Gerät nie fälschlich ein Update angezeigt bekommt. Ein Klick auf „Update" führt über `applyUpdate`/`LB.clearCachesAndReload()` immer zu einem echten frischen Reload, unabhängig davon, ob wirklich ein neuer Service Worker existiert. Migration 0131. Admin-UI: Settings → Admin → „Force refresh all users". Daneben „Test update banner" (kein Server-Call, setzt nur lokal `updateAvailable=true` zum Testen der Banner-UI).
+- **`admin_schema_inventory()`** → `jsonb` (STABLE SECURITY DEFINER, **internal/ops-only**): liefert das komplette Schema-Inventar für den wöchentlichen Drift-Check (`tools/check-db-live.cjs` via `.github/workflows/db-drift.yml`): alle public-Spalten (`information_schema`), je Funktion `has_function_privilege('anon', ...)` und die `supabase_realtime`-Publikation. Kein Grant für `anon`/`authenticated`, nur `service_role` (Aufruf per PostgREST mit dem Service-Key aus dem GitHub-Actions-Secret `SUPABASE_SERVICE_ROLE_KEY`). Migration 0142.
 - **`auto-close-sessions`** (Edge Function): schließt abgelaufene offene Sessions. Keine Sets → Session + Entries löschen (butt start); mit Sets → `ended` = letztes `updated_at` der Sets, `duration_minutes` berechnen, `in_progress_session_id` clearen; optional Pushover-Notification. Wird per Cron alle 15 Minuten aufgerufen (Supabase Dashboard → Edge Functions → Schedule). Timeout pro User in `session_timeout_minutes` (default 90 min).
 
 ### Grant-Fallen bei neuen SECURITY-DEFINER-Funktionen

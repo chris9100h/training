@@ -19,3 +19,7 @@ jobs:
       - run: npm install --no-save --no-package-lock @babel/standalone@7.29.0
       - run: node tools/check-syntax.cjs
       - run: node tools/test/store.test.cjs
+      # Replays all migrations and verifies schema.sql + docs/database.md
+      # were updated alongside them (offline half of the DB drift checks;
+      # the live half runs weekly via db-drift.yml).
+      - run: node tools/check-db-docs.cjs
