@@ -734,7 +734,14 @@ function Sheet({ open, onClose, title, titleColor, children, keyboardHeight = 0,
           // branch — which is why "all other sheets work fine" was true.
           padding: `16px 22px ${floating ? '18px' : 'calc(env(safe-area-inset-bottom, 8px) + 22px)'}`,
           animation: 'sheet-up 0.22s ease',
-          maxHeight: floating ? `${vvHeight - 32}px` : '88dvh', overflow: 'auto', overscrollBehavior: 'contain',
+          // Subtract keyboardHeight (the caller-declared custom keypad; 0 for
+          // every native-keyboard sheet, whose vvHeight already shrank on its
+          // own). Without it the panel could grow to the full viewport minus 32
+          // even though only the space ABOVE the custom keypad is usable, so a
+          // long drop/myo/AMRAP chain overflowed its bottom (the active input
+          // row + action buttons) down behind the keypad once the list got tall
+          // enough. Clamp at 0 so a mis-measured keypad can't force it negative.
+          maxHeight: floating ? `${Math.max(0, vvHeight - keyboardHeight - 32)}px` : '88dvh', overflow: 'auto', overscrollBehavior: 'contain',
         }}>
           <div style={{ width: 36, height: 3, background: accent ? 'var(--accent)' : UI.hairStrong, borderRadius: 4, margin: '0 auto 16px' }} />
           {title && (
