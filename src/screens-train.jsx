@@ -4429,7 +4429,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             </Btn>
           </Frame>
         ) : heroSet && (
-          <BracketFrame gold padding={0}>
+          // Hell-cycle glow: the hero card smoulders (same hellGlow the meso
+          // Options box uses) once the meso RIR target hits 0 or goes negative
+          // (beyond failure), matching the red/ember RIR watermark. Working sets
+          // only, not warm-ups or deload.
+          <BracketFrame gold padding={0} style={(mesoState && mesoRirVal != null && mesoRirVal <= 0 && !isCurrentWarmup && !isMesoDeloadSession) ? { animation: 'hellGlow 2s ease-in-out infinite' } : undefined}>
             {mesoState && mesoRirVal != null && !isCurrentWarmup && !isMesoDeloadSession && (() => {
               // Escalate the RIR watermark as the block gets crazier: gold above
               // failure, red at 0 RIR, then a hotter, faster ember-flicker the
