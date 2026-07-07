@@ -751,7 +751,9 @@ function Sheet({ open, onClose, title, titleColor, children, keyboardHeight = 0,
           // long drop/myo/AMRAP chain overflowed its bottom (the active input
           // row + action buttons) down behind the keypad once the list got tall
           // enough. Clamp at 0 so a mis-measured keypad can't force it negative.
-          maxHeight: floating ? `${Math.max(0, vvHeight - keyboardHeight - 32)}px` : '88dvh', overflow: 'auto', overscrollBehavior: 'contain',
+          // Also subtract env(safe-area-inset-top) so the panel's top stops at
+          // the iPhone status-bar/clock line instead of sliding up behind it.
+          maxHeight: floating ? `calc(${Math.max(0, vvHeight - keyboardHeight)}px - env(safe-area-inset-top, 0px) - 32px)` : '88dvh', overflow: 'auto', overscrollBehavior: 'contain',
         }}>
           <div style={{ width: 36, height: 3, background: accent ? 'var(--accent)' : UI.hairStrong, borderRadius: 4, margin: '0 auto 16px' }} />
           {title && (

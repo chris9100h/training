@@ -5453,6 +5453,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   </div>
                 );
               })}
+            </div>
+            {/* Partials belong to the action bar: pin them (flexShrink:0) below
+                the scrolling row list so they stay visible above the keypad. */}
+            <div style={{ flexShrink: 0 }}>
               <FinisherPartials count={finisherPartials} onChange={setFinisherPartials} />
             </div>
             {(() => {
@@ -5554,6 +5558,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   </div>
                 );
               })}
+            </div>
+            <div style={{ flexShrink: 0 }}>
               <FinisherPartials count={finisherPartials} onChange={setFinisherPartials} />
             </div>
             {(() => {
@@ -5706,6 +5712,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                     </div>
                   );
                 })}
+              </div>
+              <div style={{ flexShrink: 0 }}>
                 <FinisherPartials count={finisherPartials} onChange={setFinisherPartials} />
               </div>
               <div style={{ flexShrink: 0, display: 'flex', gap: 8, padding: '4px 4px 10px' }}>
