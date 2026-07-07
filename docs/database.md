@@ -1,0 +1,289 @@
+# Datenbank-Referenz (Supabase)
+
+Vollständige Referenz aller Tabellen, Spalten, RPCs und der Realtime-Konfiguration.
+Die Spalten-Doku enthält bewusst auch die Verhaltens-Contracts der App (wie eine
+Spalte gelesen, geschrieben und aufgelöst wird). Vor Arbeit an Migrationen,
+`store.js`-Sync oder Features mit DB-Berührung den passenden Abschnitt lesen.
+
+**Pflege-Regel:** Bei jeder DB-Änderung diese Datei mitziehen (Workflow: CLAUDE.md,
+Abschnitt „Datenbank (Supabase)"). `supabase/schema.sql` ist der vollständige
+Schema-Snapshot (Tabellen, RLS, Funktionen, Trigger, Realtime) und muss immer mit
+dem Live-Schema übereinstimmen.
+
+## Tabellen & Spalten
+
+### `zane_exercises`
+
+Übungs-Library des Users.
+
+- `id` (text), `user_id` (uuid), `name`, `note`, `category` (text), `tags` (text[]), `equipment` (text)
+- `unilateral` (boolean), `movement_type` (text: 'bilateral'|'unilateral'|'mobility')
+- `no_weight_reps` (boolean, default false): **legacy** binary "no weight" flag; superseded by `log_mode` but kept written in sync (`no_weight_reps = log_mode <> 'weight'`) so older cached clients still hide the weight field. Read via the `LB.exerciseLogMode` fallback, never trust it alone once `log_mode` exists.
+- `log_mode` (text, nullable): how the exercise is logged. `'checkbox'` (tick each set, no numbers, 0 volume) | `'reps'` (reps only, no weight, 0 volume) | `'weight'` (weight + reps); null ≈ `'weight'`. Resolved by `LB.exerciseLogMode(ex)` (log_mode wins, else legacy `no_weight_reps ? 'reps' : 'weight'`). The exercise editor shows a **Logging** picker whenever `equipment ∈ {no_equipment, bodyweight}` OR `movement_type === 'mobility'`; loaded equipment is always weight+reps. Migration 0139.
+- `pull_bodyweight` (boolean, default false): opt-in, pulls the user's latest logged bodyweight (`LB.latestBodyweight`) as the set's starting weight. Only meaningful for `equipment='bodyweight'` + `log_mode='weight'`; the editor toggle is only enableable once a weight has been logged. Replaces the old implicit auto-pull that fired for every bodyweight exercise. Resolved by `LB.shouldPullBodyweight(ex)`. Backfilled `true` for existing bodyweight rows to preserve behaviour. Migration 0139.
+- `progression_reps` (int, **deprecated/legacy**): used to be a global cross-plan "Rep Target" editable in the exercise screen that silently overrode every plan's per-item reps on save; removed from the UI once per-plan-item Range mode plus the per-exercise Smart Progression override (`repsMax`/`progressionOffset`, Migrations 0134/0135) made it redundant and conflicting. Column kept for old data / backward-compat reads only (e.g. `addExercise`'s new-item seed default in `screens-schedule.jsx`); no longer written to by any UI.
+- `youtube_url` (text, nullable): optional form-reference video; shown as a play button in the exercise editor/detail and during training. Migration 0106.
+
+### `zane_workout_templates`
+
+- `id` (text), `user_id` (uuid), `name` (text), `created_at` (timestamptz)
+- `exercises` (jsonb): `[{ exId, name, sets, reps, repsPerSet, repsMax, progressionOffset, supersetGroup }]`, structure only, no logged sets. `repsMax` optional: top of a Range reps target, `reps` holds the floor, mutually exclusive with `repsPerSet`. `progressionOffset` optional: per-exercise Smart Progression override, `0` = off, `N` = on with base+N ceiling, unset = inherits the global setting.
+- Store field: `store.workoutTemplates`. Synced via `syncStore` diff (like `cardioPlans`). Saved from a finished freestyle session, used to start a freestyle session ("From template") or imported into a plan day (Plans|Templates sub-tab in the day import picker). Migration 0107.
+
+### `zane_schedule_backups`
+
+- `id` (text), `user_id` (uuid), `schedule_id` (text), `schedule_name` (text), `days` (jsonb: same format as `zane_schedules.days`, always a non-empty array), `created_at` (timestamptz)
+- Automatic snapshots of a schedule's `days`, written fire-and-forget from `syncStore` whenever `days` changes to a valid non-empty array. Never written if `days` is empty or malformed (guards against backing up broken state). Used by the "Backups" button in the plan viewer to restore a previous day layout. Initial snapshot of all valid plans inserted via Migration 0114.
+
+### `zane_meso_states`
+
+One row per (user, plan). Store field: `store.mesoStates`. Migration 0120.
+
+- `id` (text): `userId + '_' + scheduleId`, deterministisch
+- `user_id` (uuid), `schedule_id` (text), `weeks` (int), `start_date` (text, YYYY-MM-DD), `start_cycle_index` (int, default 0)
+- `deltas` (jsonb, default `{}`): `{ exId_dayId: ±N }` set count adjustments
+- `joint_flags` (jsonb, default `{}`): `{ exId: true }` flagged exercises
+- `pump_low_counts` (jsonb, default `{}`): `{ exId: N }` low-pump counter
+- `weight_boosts` (jsonb, default `{}`): `{ exId_dayId: increment }` earned weight increases for next session
+- `growth_counts` (jsonb, default `{}`): `{ exId_dayId: N }` how many set-grants that exercise has received this meso block, from either a "Volume: Not enough" answer **or** a low-soreness recovery signal ("Never sore" / "Healed a while ago"). Both share this pool so the two feedback questions stay fair to each other; kept separate from `deltas` so an unrelated shrink event never distorts turn fairness. Used to rotate which exercise of a muscle group grows next (fewest grants among those still below their own per-exercise `deltas` ceiling wins, ties toward the muscle group's main/first lift; a newly swapped-in exercise is seeded at the group's current max instead of 0 so it can't cut ahead) instead of always growing only the main lift. Store field `growthCounts`. Migration 0130.
+- `completions` (int, default 0): how many meso blocks completed on this plan
+- `pending_meso2` (boolean, default false): set when the last meso week finishes and the user chose to start a deload first; cleared when the user responds to the Meso 2 offer on the home screen after deload ends. Store field `pendingMeso2`. Migration 0121.
+- `started_at` (timestamptz, nullable): exact block-start timestamp; `mesoCurrentWeek` prefers it over the date-only `start_date` so a previous block's sessions logged the same calendar day the new block starts can't fast-forward the flex week/RIR counter. Store field `startedAt`; was client-only until it round-trips through the DB in Migration 0138.
+- `created_at`, `updated_at` (timestamptz)
+- Synced via `syncStore` diff. Ersetzt den per-Device localStorage-Key `logbook-meso-state` (Meso-Fortschritt ist cross-device). localStorage dient während einer Training-Session als schneller Write-Through-Cache; am Session-Ende via `flushMesoStateToStore()` in den Store (→ DB) geflusht.
+
+### `zane_feature_grants`
+
+- `feature` (text), `email` (text)
+
+### `zane_profiles`
+
+- `id` (uuid), `name` (text)
+- `approved` (boolean, default = `signup_default_approved()`): auto-approved, außer die globale Flag `zane_app_config.signup_requires_approval` ist an
+
+### `zane_app_config`
+
+Globale Admin-Config (RLS an, nur SECURITY-DEFINER-Funktionen greifen zu). Treibt den Column-Default von `zane_profiles.approved`; ein Flip ändert also nur künftige Signups.
+
+- `id` (int, Singleton = 1)
+- `signup_requires_approval` (boolean, default true)
+- `auto_approve_remaining` (int, nullable): Batch-Budget. Ist Approval aus und das Budget gesetzt, dekrementiert jedes neue Signup es via `signup_consume_budget()` (AFTER-INSERT-Trigger auf `zane_profiles`); bei 0 schaltet der Trigger `signup_requires_approval` wieder an und löscht das Budget.
+- `force_update_nonce` (text, nullable): gesetzt von `admin_force_update()`, pusht das "New version available"-Banner an alle Clients ohne `sw.js`-Cache-Bump. Migration 0131.
+
+### `zane_push_subscriptions`
+
+- `id` (text: endpoint URL), `user_id` (uuid), `endpoint` (text), `p256dh` (text: client EC public key, base64url), `auth` (text: auth secret, base64url), `created_at` (timestamptz)
+- One row per device per user; managed by `subscribeWebPush`/`unsubscribeWebPush` in `store.js`; 410/404 responses auto-prune stale rows via the `web-push` Edge Function. Migration 0080.
+
+### `zane_pushover_active`
+
+- `id` (text), `nonce` (text)
+
+### `zane_schedules`
+
+- `id` (text), `user_id` (uuid), `name` (text), `days` (jsonb), `archived` (boolean, default false)
+- `versions` (jsonb, default `[]`): array of `{ validFrom: 'YYYY-MM-DD', days: [...] }` sorted newest first; used for plan-change-from-date versioning
+- `is_flex` (boolean, default false): **Flexible plan**, a cycle variant whose position advances only on a logged session/skip, never by calendar date; rest days can't push the plan forward. Migration 0090.
+- `sessions_per_week` (int, nullable): weekly training-frequency goal, the adherence denominator for flex plans. Migration 0090.
+- `mesocycle_weeks` (int, nullable): when set, this plan runs as a mesocycle of that many weeks (RIR taper + auto-regulation feedback during training). Truthy = meso active on the plan, which auto-starts a `zane_meso_states` row and suppresses the generic 8-week auto-deload nudge. Set/cleared in the plan editor's Mesocycle toggle.
+- `mesocycle_start_rir` (int, nullable, app-fallback 3): RIR target for meso week 1, range 0 bis 3.
+- `mesocycle_end_rir` (int, nullable, app-fallback 0): RIR target for the final/peak meso week, range -3 bis 0. A **negative** end drives auto-prescribed lengthened partials during training: `|RIR|` partials per working set. `LB.mesoRirForWeek(week, weeks, startRir, endRir)` tapers linearly between the two. Migration 0133.
+- `mesocycle_rir_enabled` (boolean, default true): **RIR taper on/off**. When false the meso still runs on volume (delta) auto-regulation, load progression and deload, but the weekly RIR target watermark and the negative-RIR lengthened-partials prescription are both suppressed. Resolved by `LB.mesoRirEnabled(sch)` (`!== false`, so only an explicit false disables; a bare null can't mean "off" because the app falls back to 3/0). Toggled by a **RIR taper** switch in the plan wizard's Meso step and the editor Options sheet (below the weeks stepper; it hides the Start/End RIR steppers + taper preview when off). `mesoRirVal` in the training screen becomes null when off, which gates both the watermark and `mesoPartials`. Migration 0140.
+
+Verhalten:
+
+- **Schedule-Objekte sind ein DB-Column-Passthrough:** die snake_case-Spalten `is_flex`/`sessions_per_week`/`mesocycle_weeks`/`mesocycle_start_rir`/`mesocycle_end_rir`/`mesocycle_rir_enabled`/`days`/`versions`/`archived` liegen unverändert auf dem Store-Objekt; nur das local-only `mode`-Feld wird vor dem Upsert entfernt.
+- `LB.isFlexPlan(sch)` = `sch.is_flex === true`; ein Flex-Plan ist nie ein Weekday-Plan.
+- **Flex-Position = `cycleIndex`** (action-advanced; `todaysDay`/`nextDay` lesen ihn direkt und ignorieren `cycleStartDate`, das für Flex null bleibt). Streak-/Missed-Workout-Karten und die datumsbasierten Home-Strip-Marker sind für Flex ausgeblendet; der Home-Strip zeigt die Rotation (`D1…Dn`) mit hervorgehobenem Next-up-Tag.
+
+### `zane_sessions`
+
+- `id` (text), `user_id` (uuid), `schedule_id`, `day_id`, `day_name` (text), `date`, `started_at`, `ended` (timestamptz), `duration_minutes` (int), `feel` (text: easy|good|hard|very_hard|max)
+- `entries` (jsonb): **legacy, wird nicht mehr geschrieben**. Seit Migration 0058 sind `zane_session_entries`/`zane_sets` die alleinige Quelle, alte Zeilen behalten ihren JSONB-Stand. Erst per separater Migration droppen, wenn alle Clients ≥ v2.085 sind (alte SW-Caches laden sonst noch den alten Boot-Code, dessen Select dann 400 würfe).
+- `is_deload` (boolean, default false): session logged during a deload week; excluded from progression seeds, regression detection and PR baselines so a light week never skews training. Store field `isDeload`, stripped from the row when false. Migration 0108.
+
+### `zane_session_entries`
+
+- `id` (text), `session_id` (text), `user_id` (uuid), `entry_idx` (int), `ex_id` (text), `name` (text), `planned_sets` (int), `planned_reps` (int), `planned_reps_per_set` (integer[]), `note` (text), `superset_group` (text)
+- `planned_reps_max` (int, nullable): top of a **Range** reps target set in the plan/template item editor, e.g. "8-12"; `planned_reps` holds the floor. Store field `plannedRepsMax`. For a Range-mode exercise this also replaces Smart Progression's global `progression_range_top` add-on as the weight-increase ceiling; see `progressionSuggestion`/`progressionTargetForSet`. Migration 0134.
+- `planned_progression_offset` (int, nullable): **per-exercise Smart Progression override**, settable in the Uniform/Per-Set sets-reps editor independent of Range mode. `null` = inherit the global `smart_progression`/`progression_range_top` setting, `0` = explicitly **off** for this exercise regardless of the global toggle, `N` = explicitly **on** with a ceiling of base reps + `N`. Store field `plannedProgressionOffset`. `0` is a meaningful, distinct value: always use `??`/`!= null` checks against it, never `||`. Resolved together with `planned_reps_max` by the shared `LB.progressionEnabled`/`LB.progressionCeilingFor` helpers in `store.js` (a Range item's `repsMax` always wins over an offset). Migration 0135.
+
+### `zane_sets`
+
+- `id` (text), `session_id` (text), `entry_id` (text), `user_id` (uuid), `set_idx` (int), `kg` (numeric), `reps` (int), `reps_l` (int), `reps_r` (int), `done` (boolean), `skipped` (boolean), `warmup` (boolean), `updated_at` (timestamptz)
+- `technique` (text, nullable): intensity technique, `'drop'` | `'rest_pause'` | `'myorep'`. Migration 0115.
+- `drops` (jsonb, nullable): for drop sets, `[{kg, reps}, ...]` ordered heaviest→lightest. `drops[0]` mirrors the top-level `kg`/`reps` so progression seeds use the first drop; only the first drop counts toward volume and doneSetCount. Migration 0115.
+
+### `zane_coaching`
+
+- `id` (text), `coach_id` (uuid), `client_id` (uuid), `status` (text: pending|active), `created_at` (timestamptz), `checkin_requested_at` (timestamptz, nullable), `checkin_enabled` (boolean, default true)
+- `checkin_schema` (jsonb, nullable): coach-definiertes Formular-Schema; null = `CHECKIN_DEFAULT_SCHEMA`
+- `support_status` (text, nullable: 'open'|'in_progress'|'resolved'), `support_category` (text, nullable: 'feature_request'|'bug'|'question')
+- `archived` (boolean, default false), `archived_at` (timestamptz, nullable)
+
+Sonderfälle und RLS:
+
+- **Support-Ticket** (Migrationen 0085/0086): eine Zeile mit id-Präfix `support_` zwischen User (`client_id`) und Admin (`coach_id`), die `support_status`/`support_category` trägt und die bestehende Coaching-Chat-/Realtime-Infrastruktur wiederverwendet (kein neuer Client-Code). Verwaltet über `open_support_chat`/`set_support_status`/`archive_support_ticket`/`delete_support_ticket`/`get_support_chats`/`get_archived_support_chats`/`get_user_support_chats`.
+- **Self-Coaching:** eine Zeile mit `coach_id == client_id` (id-Präfix `self_`) bedeutet „be your own coach". Sie wird aus allen Coach-/Client-Listen herausgefiltert (`get_coach_info`, `get_coaching_clients`, `get_coach_clients_status`, `get_coach_checkin_status`) und ermöglicht das volle Coaching-Dashboard für die eigenen Daten.
+- **RLS-Härtung (Migration 0125):** Die INSERT-Policy verlangt `status='pending' AND coach_id<>client_id` (ein Coach kann sich keine *aktive* Beziehung zu fremden Accounts mehr selbst anlegen), UPDATE-Policies haben `WITH CHECK`, und der Trigger `zane_coaching_guard_update` macht `coach_id`/`client_id` unveränderlich und erlaubt nur dem Client den Status-Wechsel (pending→active). `find_user_by_email` ist nicht mehr direkt für `anon`/`authenticated` ausführbar (nur intern via `invite_client`).
+- **Migration 0137 (Audit A2):** die INSERT-Policy „coach can invite" ist entfernt und der direkte `INSERT`-Grant auf `zane_coaching` für `anon`/`authenticated` entzogen. Coaching-Zeilen entstehen ausschließlich über die SECURITY-DEFINER-RPCs (`invite_client`/`enable_self_coaching`/`open_support_chat`/`admin_broadcast_message`), sodass niemand mehr per Direkt-POST beliebige Pending-Einladungen (Spam) anlegen kann.
+
+### `zane_coaching_threads`
+
+- `id` (text), `coaching_id` (text), `name` (text), `created_by` (uuid), `created_at` (timestamptz)
+
+### `zane_coaching_notes`
+
+- `id` (text), `coaching_id` (text), `author_id` (uuid), `thread_id` (text, nullable → references `zane_coaching_threads`), `type` (text: session|plan|general|change), `entity_id` (text, nullable), `entity_name` (text, nullable), `body` (text), `created_at` (timestamptz), `read_at` (timestamptz, nullable)
+- `attachments` (jsonb, nullable): `[{ url, name, type }]` image attachments; uploaded to the public `chat-attachments` storage bucket; rendered as thumbnails in the ChatThread + support-ticket bubbles. Migration 0104.
+
+### `zane_coaching_macros`
+
+- `id` (text), `coaching_id` (text), `set_by` (uuid), `set_at` (timestamptz), `calories_training` (int), `protein_training` (int), `carbs_training` (int), `fat_training` (int), `calories_rest` (int), `protein_rest` (int), `carbs_rest` (int), `fat_rest` (int)
+
+### `zane_checkins`
+
+- `id` (text), `coaching_id` (text), `client_id` (uuid), `week_start` (date), `checked_in_at` (timestamptz)
+- `responses` (jsonb, nullable): all field values keyed by field key, primary storage since Migration 0065
+- `weight_today` (numeric), `weight_avg_last_week` (numeric), `off_plan_notes` (text), `hydration_ml` (int), `days_trained` (int), `performance_vs_last_week` (text: worse|same|improved), `steps` (int), `cardio_minutes` (int), `cardio_distance_m` (int), `cardio_pace_feeling` (int 1-6), `cardio_effort` (int 1-10), `goal_note` (text), `hunger` (int), `sleep_quality` (int), `life_stress` (int), `work_stress` (int), `tiredness` (int), `issues_notes` (text), `general_note` (text)
+- UNIQUE (coaching_id, week_start)
+
+### `zane_glucose_logs`
+
+- `id` (text), `user_id` (uuid), `date` (text, YYYY-MM-DD), `time` (text, HH:MM, lokale Uhrzeit der Messung), `value_mmol` (numeric: immer in mmol/L gespeichert; Anzeige-Einheit ist ein per-User-Setting), `context` (text: 'fasted'|'fed'|'other'), `note` (text, nullable), `created_at` (timestamptz)
+- Store field: `store.glucoseLogs`. Mehrere Messungen pro Tag möglich. Wird direkt via Supabase aus der Glucose-Sektion des DailyLogSheet geschrieben (kein syncStore-Diff). Migration 0101.
+
+### `zane_cardio_logs`
+
+- `id` (text), `user_id` (uuid), `date` (text, YYYY-MM-DD), `type` (text, nullable), `duration_minutes` (int), `distance_m` (numeric, nullable), `pace_feeling` (int 1-6, nullable), `effort` (int 1-10, nullable), `note` (text, nullable), `created_at` (timestamptz)
+- `session_id` (text, nullable): verknüpft einen Cardio-Log, der als Teil einer Training-Session geloggt wurde, mit seiner `zane_sessions`-Zeile
+
+### `zane_cardio_plans`
+
+- `id` (text), `user_id` (uuid), `name` (text), `activity_type` (text: 'running'|'walking'|'cycling'|'swimming'|'rowing'|'elliptical'|'hiking'), `archived` (boolean, default false), `mode` (text: 'manual'|'goal'), `created_at` (timestamptz)
+- `days` (jsonb: `{ mon: true, wed: true, ... }`)
+- `manual_targets` (jsonb, nullable: `{ mon: { target_type, distance_m, duration_minutes }, ... }`)
+- `goal` (jsonb, nullable: `{ type: 'distance'|'pace', target_distance_m, target_duration_minutes }`), `goal_due_date` (date, nullable)
+- `start_fitness` (jsonb, nullable: `{ distance_m, duration_minutes, pace_s_per_km }`)
+- `generated_weeks` (jsonb, nullable: Array von `{ distance_m, duration_minutes, pace_s_per_km }`, indiziert nach Woche)
+- `plan_start_date` (date, nullable: Start des Goal-Plans)
+- Store field: `store.cardioPlans` (camelCase-Mapping). Migration 0094.
+
+### `zane_daily_logs`
+
+Eine Zeile pro Tag, Quelle für den Health-Tab. UNIQUE (user_id, date). Migration 0069.
+
+- `id` (text), `user_id` (uuid), `date` (text, YYYY-MM-DD), `weight` (numeric, nullable), `steps` (int, nullable), `calories` (int, nullable), `protein` (int, nullable), `carbs` (int, nullable: immer **total** carbs), `fat` (int, nullable), `water_ml` (int, nullable), `note` (text, nullable), `created_at` (timestamptz)
+- `fiber` (int, nullable): nur im Net-Carb-Modus gesetzt; Kalorien dann = `(protein + carbs - fiber)×4 + fat×9`. Migration 0073.
+- `adherence` (numeric, nullable): Makro-Adherence-% persistiert **zum Speicherzeitpunkt**; auf Total-Carbs gerechnet, fiber beeinflusst sie nicht.
+- `targets_snap` (jsonb, nullable): `{ protein, carbs, fat, calories, dayType }` Snapshot, damit eine spätere Target-Änderung nie vergangene Adherence umschreibt. `dayType` (`'training'`|`'rest'`) trägt zusätzlich den **Flex-Plan-Tagestyp-Override**: ein Flex-Plan hat keine programmierten Rest-Tage, `isTrainingDayForDate` default't ihn deshalb auf **rest** ("earn it") und zählt einen Flex-Tag nur als Training, wenn eine Session geloggt ist oder der User proaktiv Training gesetzt hat. Die Wahl sitzt auf einem kleinen **Training | Rest**-Slider (fa-dumbbell/fa-bed) im **Health-Tab-Header** (`HealthDateStrip`, mittig zwischen Kalender-Icon und LOG, nur Flex, ausgeblendet während eines Status-Tags oder sobald eine Session geloggt ist, nur im User-Tab via `setStore`-Prop). Er schreibt **sofort** in diese Spalte (ein inhaltsloser Rest-Override wird verworfen, da rest der Default ist; ein inhaltsloser Log lässt den "logged"-Marker im Header nie aufleuchten). `LB.flexDayTypeOverride(state, date)` liest ihn zurück. Cycle-/Weekday-Pläne behalten die optimistische "Plan wird befolgt"-Annahme (geplanter Trainingstag heute/zukünftig = training) und ignorieren den Flex-Override. Ein **zweiseitiger Daily-Log-Heal** (`screens-health.jsx`) gleicht vergangene Tage ab: **Downgrade** training→rest, wenn ein training-getaggter Tag keine Session hatte (Cycle/Week: geplanter Tag geskippt, oder Flex: proaktives Training nicht durchgeführt), und **Upgrade** rest→training (alle Modi), wenn ein rest-getaggter Tag eine geloggte Session bekam (inkl. Freestyle-Session an einem Rest-Tag); die beiden Mengen sind disjunkt, es gibt also keine Oszillation.
+- `off_plan_note` (text, nullable): täglicher Off-Plan-Hinweis; store field `offPlanNote`; `dailyLogsWeekPrefill` akkumuliert alle Tages-Notizen mit "DD.MM.YYYY - "-Präfix in `off_plan_notes`. Migration 0079.
+- `daily_coach_fields` (jsonb, nullable): beliebige key→value-Map für coach-konfigurierte tägliche Tracking-Felder; Keys matchen `checkin_schema`-Feld-Keys mit `show_in_health_log: true`. Store field `coachFields`. Migration 0078.
+- `updated_at` (timestamptz, default now()): Staleness-Guard für den Multi-Device-Upsert; store field `updatedAt`, bei jedem Save gesetzt. Migration 0096.
+
+Sync-Verhalten:
+
+- **Sync via `sync_daily_logs_batch`-RPC** (kein plain Upsert): löst Konflikte auf (user_id, date) unter Beibehaltung der bestehenden id und überschreibt nur, wenn das eingehende `updated_at` neuer ist. So kollidieren zwei Geräte, die denselben Tag loggen, nicht auf UNIQUE(user_id, date), und ein staler Offline-Edit kann keinen neueren Stand clobbern (Migration 0096).
+- Der Cache-first-Merge in `app.jsx` dedupliziert Daily Logs zusätzlich **per Datum** (Server gewinnt), damit eine vor der RPC entstandene divergente id nicht als doppelter Tag erscheint.
+- RLS: eigene Zeilen + Coach-of-Client-Reads (so füllt `loadClientStore` das `clientStore.dailyLogs` für den Coach-„Daily"-Tab, keine extra RPC).
+
+### `zane_skips`
+
+- `id` (text), `user_id` (uuid), `date` (text), `day_id` (text), `day_name` (text), `skip_reason` (text), `skipped_at` (timestamptz)
+
+### `zane_status_periods`
+
+Historie der Sick/Vacation/Deload-Phasen. Store field: `store.statusPeriods`. Migration 0083.
+
+- `id` (text), `user_id` (uuid), `mode` (text: 'sick'|'vacation'|'deload'), `started_at` (timestamptz), `ended_at` (timestamptz, nullable: null = aktuell aktiv)
+- **Deload** (Migration 0108, Overlay-Modell) nutzt diesen Mechanismus mit `mode='deload'`: der Cycle läuft normal weiter, aber `buildSeedSets` befüllt Lasten mit ~50% vor (via `window.__DELOAD`-Global, gespiegelt aus `statusMode` in `app.jsx`), der Home-Strip-Titel zeigt `DELOAD`, der Training-Header ein `DELOAD · 50%`-Badge, und geloggte Sessions werden `is_deload` geflaggt. Start/Ende via `LB.startDeload`/`LB.endDeload`; endet automatisch nach einem Cycle/einer Woche (bzw. für Flex: dem Wochen-Session-Ziel an Deload-Sessions) via `LB.deloadElapsed`, geprüft auf dem Home-Screen. Die Plan-Tab-Karte hat den Toggle-Button; ein 8-Wochen-Nudge (verankert an `deload_prompt_dismissed_at`) bietet einen Deload an.
+- RLS: eigene Zeilen + Coach-of-Client-Reads (Migration 0084, damit `computeWeeklyAdherence` Sick-/Vacation-Tage aus dem Trainings-Adherence-Score des Clients ausschließen kann).
+- Spiegel von `zane_user_settings.status_mode`/`status_mode_since` (das ist der schnelle Current-State-Cache; diese Tabelle ist die volle Historie für Stats). Genutzt von den StatsTab-Konsistenzkarten "Missed Workouts" / "Of Which Sick/Away". Geschrieben von `openStatusPeriod`/`closeStatusPeriod`/`updateStatusPeriodStart` in `store.js`.
+
+### `zane_user_settings`
+
+Eine Zeile je User. Neue Settings immer an den drei Stellen in `store.js` ergänzen (siehe CLAUDE.md, Abschnitt „Store").
+
+Basisspalten: `user_id` (uuid), `active_schedule_id` (text), `cycle_index` (int), `cycle_start_date` (text), `last_advanced_date` (date), `week_plan_start_date` (date), `in_progress_session_id` (text), `unit` (text), `rest_default`/`rest_big`/`rest_medium`/`rest_small` (int), `push_enabled` (boolean), `pushover_user_key` (text), `cycle_week_view` (boolean), `accent_color` (text), `dark_mode` (text), `tempo_enabled` (boolean), `tempo_eccentric` (numeric), `tempo_concentric` (numeric), `smart_progression` (boolean), `progression_range_top` (int), `equipment_config` (jsonb), `custom_day_types` (text[]), `reminder_enabled` (boolean), `reminder_time` (text, HH:MM), `next_reminder_at` (timestamptz), `show_warmup_in_summary` (boolean), `show_coaching_tab` (boolean), `be_your_own_coach` (boolean), `session_timeout_minutes` (int, default 90)
+
+Weitere Spalten:
+
+- `use_pushover` (boolean, default false): wenn true und ein `pushover_user_key` gesetzt ist, gehen Rest-Timer-Notifications via Pushover statt Web Push. Store field `usePushover`. Migration 0081.
+- `auto_close_notify` (jsonb, nullable): `{ dayName, date, durationMinutes }`, von der Edge Function geschrieben, von der App beim ersten Lesen gecleart.
+- `macro_targets` (jsonb, nullable): persönliche Health-Tab-Targets `{ proteinTraining, carbsTraining, fatTraining, caloriesTraining, proteinRest, carbsRest, fatRest, caloriesRest }`. Store field `macroTargets`.
+- `show_health_tab` (boolean, default false): pinnt den Health-Tab. Store field `showHealthTab`.
+- `onboarding_completed` (boolean, default false): gesetzt nach Welcome-Tour oder erster Session. Store field `onboardingCompleted`.
+- `net_carbs` (boolean, default false): Health-Tab-Carb-Modus, Net-Carb-Tracking ergänzt ein Fiber-Feld. Store field `netCarbs`. Migration 0073.
+- `status_mode` (text, nullable: 'sick'|'vacation'|'deload'): schneller Current-State-Cache des aktiven Status-Modus. Store field `statusMode`. Migration 0082, 'deload' ergänzt in 0108.
+- `status_mode_since` (timestamptz, nullable): Start des aktuellen Status-Modus. Store field `statusModeSince`. Migration 0082.
+- `deload_prompt_dismissed_at` (timestamptz, nullable): Anker für den 8-Wochen-Deload-Nudge; gebumpt, wann immer der Prompt gezeigt/beantwortet wird. Store field `deloadPromptDismissedAt`. Migration 0108.
+- `active_cardio_plan_id` (text, nullable): id des einen aktuell aktiven Cardio-Plans; nur dieser erscheint auf dem Home-Widget und befüllt Cardio-Logs vor. Store field `activeCardioPlanId`; neue Pläne werden bei Anlage auto-aktiviert. Migration 0095.
+- `show_regression` (boolean, default true): wenn false, ist das Regression-Overlay im Training-Screen unterdrückt. Store field `showRegression`. Migration 0100.
+- `glucose_unit` (text, default 'mmol'): Anzeige-Einheit für Blutzucker, 'mmol' = mmol/L, 'mgdl' = mg/dL; Werte in `zane_glucose_logs` sind immer in mmol/L gespeichert. Store field `glucoseUnit`. Migration 0101.
+- `weight_fill_down` (boolean, default true): wenn true, füllt das Editieren eines Set-Gewichts im Training dasselbe Gewicht in nachfolgende noch nicht erledigte Working-Sets. Store field `weightFillDown`.
+- `manual_calories` (boolean, default false): Health-Tab-Modus, Kalorien direkt eingeben statt aus Makros ableiten. Store field `manualCalories`.
+- `default_checkin_schema` (jsonb, nullable): wiederverwendbares Default-Check-in-Formular-Schema eines Coaches, angewandt auf neue Coaching-Beziehungen. Store field `defaultCheckinSchema`.
+- `vip_background` (text, nullable): admin-vergebener dekorativer Background-Key; gesetzt via `set_user_vip_background`. Store field `vipBackground`. Migration 0103.
+- `sw_version` (text, nullable): letzte SW-Cache-Version (z.B. `'v2.445'`), die dieses Gerät beim Boot gemeldet hat, direkt aus dem Cache Storage gelesen. Store field `swVersion`; lässt den Admin erkennen, ob ein User mit Bug-Report auf einem stalen Cache festhängt, ohne ihn nach den Settings fragen zu müssen. Migration 0123.
+
+## RPCs & Realtime
+
+### Feature-Grants & Admin
+
+- **`check_active_users_access()`** → `boolean`: gibt true zurück, wenn der aufrufende User das `active_users`-Feature hat (Admin oder per `zane_feature_grants`)
+- **`get_active_users_grants()`** → `TABLE(email text)`: listet alle Emails mit `active_users`-Grant (nur Admin)
+- **`set_active_users_grant(p_email text, p_granted boolean)`** → `void`: erteilt oder entzieht den `active_users`-Grant (nur Admin)
+- **`get_all_users_admin()`** → `TABLE(user_id uuid, name text, email text, sw_version text, created_at timestamptz, approved boolean, plan_count int)`: alle registrierten Accounts (nur Admin, hardcoded auf `office@btc-prime.biz`, unabhängig vom `active_users`-Feature-Grant); die einzige Datenquelle des „All users"-Screens im Admin-Sheet (Settings). Der vereint die früheren separaten „Recent sign-ups"- und „Onboarded"-Ansichten als Client-seitige Filter (neue Sign-ups anhand `created_at`/localStorage `logbook-seen-signups`, Onboarded anhand `plan_count > 0`) plus Suche nach Name/Email und Filter „nur veraltete Version" (gegen die eigene, per Cache Storage ermittelte Version); deckt jeden Account ab, unabhängig von Aktivität. Migration 0123, `plan_count` in 0124.
+- **`get_user_detail_admin(p_user_id uuid)`** → `jsonb` (nur Admin): volle Plan-Details eines Users (`active_schedule_id` + alle `plans` mit Tagen/Items inkl. aufgelöstem Übungsnamen/movement_type/unilateral) für die „All users"-Detailansicht beim Antippen einer Zeile.
+- **`get_active_sessions_overview()`** → `TABLE(...)`: aktive + kürzlich beendete Sessions aller User inkl. Sets/Dauer-Statistik (gated by feature grant)
+- **`get_active_session_detail(p_user_id uuid, p_session_id text)`** → `TABLE(...)`: Volldetail einer Session inkl. Historienvergleich (avg. Dauer, Sets, letzte Session; gated by feature grant). Gibt zusätzlich die `unit` ('kg'|'lbs') des Trainierenden zurück (Migration 0068), damit die Coach-Spectator-/Comparison-Ansicht Gewichte im Einheiten-Label des Clients zeigt; gespeicherte Zahlen werden nie umgerechnet.
+
+### Signup & Approval
+
+- **`get_signup_config()`** → `TABLE(requires_approval boolean, auto_approve_remaining int)` / **`set_signup_requires_approval(p_value boolean)`** → `void` (setzt den Master-Toggle, löscht dabei jedes Batch-Budget) / **`set_auto_approve_budget(p_count int)`** → `void` (öffnet die Registrierung für `p_count` Signups, danach Selbst-Sperre; `p_count ≤ 0` sperrt sofort): alle nur Admin. **`get_signup_requires_approval()`** → `boolean` existiert weiter (Legacy). **`signup_default_approved()`** → `boolean` (SECURITY DEFINER) ist die invertierte Flag und dient als Column-Default für `zane_profiles.approved`; **`signup_consume_budget()`** ist die Trigger-Funktion (AFTER INSERT auf `zane_profiles`), die das Budget runterzählt und bei 0 wieder zusperrt.
+- **`get_recent_signups(p_limit int default 50)`** → `TABLE(user_id uuid, name text, email text, created_at timestamptz, approved boolean)`: jüngste Registrierungen (approved + pending) für den Admin-„Recent sign-ups"-Feed im Account-Tab (nur Admin). „Got it"-Dismiss pro Gerät via localStorage `logbook-seen-signups`. Migration 0075.
+- **`get_pending_users()`** → `TABLE(user_id uuid, name text, email text, created_at timestamptz)` / **`approve_user(p_user_id uuid)`** → `void` / **`decline_user(p_user_id uuid)`** → `void` (löscht das Profil): Approval-Workflow für die Registrierungs-Freigabe, wenn `signup_requires_approval` an ist (alle nur Admin). **`get_users_with_plans()`** → `TABLE(user_id, name, email, joined_at, approved, plan_count)` ist die **Legacy**-„Onboarded"-Ansicht (nur User mit ≥1 Plan); von `get_all_users_admin` abgelöst, aber noch vorhanden.
+
+### Sync-RPCs (Staleness-Guards)
+
+- **`sync_sets_batch(p_sets jsonb)`** → `void`: Batch-Upsert für Sets mit `updated_at`-Guard; updated eine Zeile nur, wenn das eingehende `updated_at` neuer ist als das gespeicherte (verhindert, dass stale kbApply-Writes fertige Sets überschreiben).
+- **`sync_daily_logs_batch(p_logs jsonb)`** → `void` (SECURITY INVOKER): Batch-Upsert für Daily Logs, löst Konflikte auf (user_id, date) unter Beibehaltung der bestehenden id, mit `updated_at`-Staleness-Guard. Ersetzt den plain Upsert, damit Multi-Device-Edits desselben Tages nicht auf UNIQUE(user_id, date) kollidieren und ein staler Write keinen neueren überschreibt. Migration 0096.
+- **`sync_meso_states_batch(p_states jsonb)`** → `void` (SECURITY INVOKER): Batch-Upsert für Meso-States mit `updated_at`-Staleness-Guard, damit zwei Geräte, die denselben Meso-Plan trainieren, sich nicht still gegenseitig `deltas`/`joint_flags`/`weight_boosts`/`growth_counts` clobbern. Migration 0122 (`growth_counts` ergänzt in 0130, `started_at` in 0138: beim Update COALESCEd, damit ein älterer Client, der es weglässt, den Anker nicht nullen kann).
+
+### Session-Daten & History-Aggregate
+
+- **`zane_entries_json(p_session_id text)`** → `jsonb` (SECURITY DEFINER, **internal-only**): baut das store-förmige (camelCase) `entries`-Array einer Session aus den relationalen Tabellen (`zane_session_entries`/`zane_sets`). Quelle der Wahrheit seit Migration 0058; von `get_active_session_detail`/`get_active_sessions_overview` genutzt, damit die Coach-/Spectator-Ansicht nicht mehr vom Legacy-JSONB abhängt. **Kein Client-Rollen-Grant** (Migration 0136): die Funktion filtert nur nach `session_id` ohne Owner-/Coach-Check, ein direkter Aufruf wäre also ein Cross-Tenant-Read (IDOR). `EXECUTE` ist für `anon`/`authenticated`/`PUBLIC` entzogen; die definer-owned Reporting-RPCs rufen sie intern trotzdem auf (laufen als Owner). Der Client schreibt das JSONB nicht mehr (`sessionToRow` in `store.js` lässt `entries` aus). Gibt seit Migration 0134 zusätzlich `plannedRepsMax` und seit 0135 `plannedProgressionOffset` zurück.
+
+Serverseitige History-Aggregate (Migrationen 0059/0060, SECURITY INVOKER, optional `p_user_id` für Coach-Zugriff):
+
+- **`get_exercise_best_e1rm(p_user_id?)`** → `TABLE(ex_id, best_e1rm)`: bestes All-Time-e1RM (Epley) je Übung über beendete Sessions. Beim Boot geladen und als `store.exerciseBests` gecacht; `bestE1rmForExercise` = max(Aggregat, lokal geladenes Fenster). Beim Training-Mount refresht (`refreshExerciseBests`).
+- **`get_exercise_history(p_ex_id, p_day_id?, p_limit?, p_user_id?)`** → `TABLE(session_id, day_id, date, ended, sets jsonb)`: jüngste beendete Sessions mit dieser Übung. Genutzt von `fetchSeedEntries` (Seeds/Progression beim Session-Start, nur wenn das lokale Fenster < 3 Treffer hat), der „Last time"-Karte im Training (Fallback) und beiden Exercise-History-Ansichten (lokal sofort, Server erweitert auf volle Historie).
+- **`get_user_volume_stats(p_user_id?)`** → `TABLE(session_count, total_volume, total_minutes, total_done_sets)`: All-Time-Summen. Vom Client derzeit **nicht** aufgerufen: die Stats summieren lokal über `totalVolume()`/`doneSetCount()`, die für gefensterte Sessions auf die `get_session_stats`-Aggregate zurückfallen (exakt, offline-fähig, schließt frisch beendete Sessions sofort ein).
+- **`get_session_stats(p_user_id?)`** → `TABLE(session_id, exercise_count, done_sets, volume)`: per-Session-Aggregate aller beendeten Sessions (Migration 0060). Beim Boot geladen und als `aggVolume`/`aggDoneSets`/`aggExercises` an die Sessions gehängt; `totalVolume`/`doneSetCount` nutzen sie als Fallback für Sessions ohne geladene Sets (History-Liste, Best Session, Coach-Listen). Semantik = Client-Logik für beendete Sessions (done-Flag nicht erforderlich). `sessionToRow` filtert die `agg*`-Felder beim Sync wieder heraus.
+
+### Coaching & Support
+
+- **`get_coach_info()`** → `TABLE(coaching_id text, coach_id uuid, coach_email text, coach_name text, status text)`: gibt die Coach-Beziehung des aufrufenden Clients zurück (wer coacht mich); Self-Coaching-Zeilen ausgeschlossen.
+- **`get_coaching_clients()`** → `TABLE(coaching_id text, client_id uuid, client_email text, client_name text, status text, checkin_enabled boolean)`: listet alle Clients des aufrufenden Coaches inkl. `checkin_enabled`-Flag; Self-Coaching-Zeilen ausgeschlossen.
+- **`get_coach_clients_status()`** → `TABLE(client_id uuid, in_progress_session_id text)`: Live-Trainingsstatus aller aktiven Clients eines Coaches (SECURITY DEFINER, umgeht RLS auf `zane_user_settings`); Self-Coaching-Zeilen (`coach_id == client_id`) ausgeschlossen.
+- **`enable_self_coaching()`** → `text`: legt (idempotent) eine Self-Coaching-Zeile an (`coach_id = client_id = auth.uid()`, status active, id-Präfix `self_`) und gibt deren id zurück. Aktiviert „be your own coach".
+- **`admin_broadcast_message(p_body text)`** → `int` (nur Admin): sendet eine Nachricht an **alle** User auf einmal, indem für jeden User (der noch keins hat) ein Support-Ticket (`support_<user_id>`) angelegt und eine `zane_coaching_notes`-Zeile vom Admin eingefügt wird. Nutzt bewusst die bestehende, bereits überall ausgelieferte Support-/Realtime-Infrastruktur (kein neuer Client-Code nötig, erreicht auch User auf altem App-Stand) statt eines neuen Banner-Systems. Gibt die Anzahl benachrichtigter User zurück. Migration 0127. Admin-UI: Settings → Admin → „Message all users". **`get_support_chats()` blendet ein Ticket aus, solange der User selbst noch keine Nachricht geschickt hat** (Migration 0129): sonst würde ein Broadcast die Admin-Inbox mit einem Eintrag pro User fluten und echte offene Anfragen verdecken; taucht wieder auf, sobald der User antwortet.
+- **Support-Tickets** (Migrationen 0085/0086, Archiv `archive_support_tickets`): ein Support-Ticket ist eine `zane_coaching`-Zeile mit id-Präfix `support_` (siehe Tabellen-Doku). RPCs: **`open_support_chat(p_category text default 'question')`** → `text` (User öffnet ein Ticket, `p_category` ∈ feature_request|bug|question, gibt die id zurück), **`get_user_support_chats()`** → `TABLE(...)` (die eigenen Tickets des Users inkl. `archived`/`unread_count`), **`get_support_chats()`** → `TABLE(...)` (Admin-Inbox offener Tickets; blendet Tickets ohne User-Nachricht aus, Migration 0129), **`get_archived_support_chats()`** → `TABLE(...)` (Admin, archivierte Tickets), **`set_support_status(p_coaching_id, p_status)`** → `void` (Admin, open|in_progress|resolved), **`archive_support_ticket(p_coaching_id)`** / **`delete_support_ticket(p_coaching_id)`** → `void` (Admin).
+
+### Sonstiges
+
+- **VIP-Backgrounds** (Migration 0103): **`get_user_vip_backgrounds()`** → `TABLE(email text, bg_key text)` (Admin, alle gesetzten Backgrounds) / **`set_user_vip_background(p_email text, p_bg_key text)`** → `text` (Admin, setzt `zane_user_settings.vip_background` für den User per Email; leerer Key = löschen).
+- **`get_force_update_nonce()`** → `text` / **`admin_force_update()`** → `void` (setzen/lesen nur `zane_app_config.force_update_nonce`, Admin-Setter): pusht das „New version available"-Update-Banner an **alle** verbundenen Clients, ohne dass ein `sw.js`-Cache-Bump nötig ist (der laut Deployment-Regeln nur auf ausdrückliche Aufforderung passiert, die meisten Deploys lösen also keinen Banner aus). `app.jsx`s `checkForceUpdate` pollt die Nonce im selben Rhythmus wie den bestehenden `sw.js`-Text-Versions-Check (`checkSwUpdate`) und vergleicht sie gegen den localStorage-Key `logbook-force-nonce-seen`, nach demselben „erstes Sichten = Baseline, kein Banner"-Prinzip, damit ein brandneues Gerät nie fälschlich ein Update angezeigt bekommt. Ein Klick auf „Update" führt über `applyUpdate`/`LB.clearCachesAndReload()` immer zu einem echten frischen Reload, unabhängig davon, ob wirklich ein neuer Service Worker existiert. Migration 0131. Admin-UI: Settings → Admin → „Force refresh all users". Daneben „Test update banner" (kein Server-Call, setzt nur lokal `updateAvailable=true` zum Testen der Banner-UI).
+- **`auto-close-sessions`** (Edge Function): schließt abgelaufene offene Sessions. Keine Sets → Session + Entries löschen (butt start); mit Sets → `ended` = letztes `updated_at` der Sets, `duration_minutes` berechnen, `in_progress_session_id` clearen; optional Pushover-Notification. Wird per Cron alle 15 Minuten aufgerufen (Supabase Dashboard → Edge Functions → Schedule). Timeout pro User in `session_timeout_minutes` (default 90 min).
+
+### Grant-Fallen bei neuen SECURITY-DEFINER-Funktionen
+
+**Falle 1 (PUBLIC-Vererbung):** Postgres vergibt beim `CREATE FUNCTION` automatisch `EXECUTE` an die Pseudo-Rolle `PUBLIC`; davon erbt auch `anon`, **unabhängig** von einem gezielten `REVOKE ... FROM anon` (das war der Fehler in Migration 0125, korrigiert in 0128). Jede neue SECURITY-DEFINER-Funktion braucht explizit `REVOKE EXECUTE ON FUNCTION ... FROM PUBLIC` + `GRANT EXECUTE ON FUNCTION ... TO authenticated` (Ausnahme: rein intern aufgerufene Funktionen wie `find_user_by_email` bekommen kein Grant für `authenticated`).
+
+**Falle 2 (Default Privileges, Migration 0132):** Zusätzlich zur PUBLIC-Vererbung existierte auf diesem Projekt eine `ALTER DEFAULT PRIVILEGES`-Regel (Rolle `postgres`, Schema `public`), die `anon` bei **jeder neu erstellten** Funktion automatisch einen direkten `EXECUTE`-Grant gab. Das ist ein expliziter Grant an `anon` selbst, kein geerbter über PUBLIC, und wird von `REVOKE ... FROM PUBLIC` **nicht** mitentfernt. Entdeckt an den beiden Migration-0131-Funktionen, die trotz korrektem `REVOKE FROM PUBLIC` weiterhin von `anon` ausführbar waren (verifiziert mit `has_function_privilege('anon', ...)`), während alle vorher existierenden Funktionen korrekt gesperrt waren. Migration 0132 hat die Default-Privileges-Regel für die Rolle `postgres` entfernt (Root Cause, schützt alle künftigen Funktionen) und zusätzlich explizit `REVOKE EXECUTE ... FROM anon` auf die beiden betroffenen Funktionen gesetzt. (Die gleiche Default-Privileges-Regel existiert auch für die Rolle `supabase_admin`, die vom Projekt aber nicht änderbar ist: „permission denied to change default privileges"; der tatsächlich genutzte Migrationspfad läuft nachweislich als `postgres` und ist gefixt.)
+
+**Kontrolle nach jeder neuen SECURITY-DEFINER-Funktion:** `SELECT has_function_privilege('anon', 'public.<fn>(...)', 'execute');` muss `false` ergeben.
+
+### Realtime
+
+`zane_coaching` und `zane_coaching_notes` sind in der `supabase_realtime`-Publikation: ermöglicht Live-Coaching-Einladungen und -Nachrichten. **Cross-Device Live-Sync laufender Sessions wurde entfernt** (der lokale Store ist die alleinige Quelle für eine laufende Session; ein Coach sieht die Live-Session eines Clients per Polling via `get_active_session_detail`, nicht über Realtime). `subscribeToChanges(userId, onCoachingNote, onCoachingInvite)` abonniert nur noch die Coaching-Tabellen.
