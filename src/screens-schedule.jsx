@@ -288,7 +288,11 @@ function PlanScreen({ store, setStore, go, userId }) {
 // Reached from the home rest-day card. Day chips switch between days
 // (like the exercise chips in training); each day shows the weights/reps
 // that will be prefilled when training, with no controls that change it.
-function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId }) {
+// preview mode: `store` is a SYNTHETIC store containing the not-yet-saved
+// schedule + its materialized exercises (so every lookup resolves), fromPlan is
+// false (hides Activate/Edit/backup/version actions), and a "Use this program"
+// bar (onUse) commits it. onBack overrides the default back target.
+function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, preview, onUse, onBack }) {
   const sch = store.schedules.find(s => s.id === (scheduleId || store.activeScheduleId));
   const isWeekday = sch ? LB.isWeekdayPlan(sch) : false;
   const isFlex = sch ? LB.isFlexPlan(sch) : false;
@@ -750,7 +754,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId })
             ? displayDays.map(d => WEEKDAYS[d.weekday]).join(' · ')
             : `${displayDays.length}-day cycle · ${trainingDayCount} ${trainingDayCount === 1 ? 'workout' : 'workouts'}`;
         })()}
-        onBack={() => go({ name: fromPlan ? 'plan' : 'home' })}
+        onBack={onBack || (() => go({ name: fromPlan ? 'plan' : 'home' }))}
         right={fromPlan ? (
           <button onClick={() => go({ name: 'schedule-edit', scheduleId: sch.id, versionFrom: selectedVersion?.validFrom })} style={{
             background: 'transparent', border: `1px solid ${UI.hairStrong}`,
@@ -1062,6 +1066,12 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId })
           </MiniSheet>
         );
       })()}
+      {preview && (<>
+        <div className="knurl" />
+        <div style={{ flexShrink: 0, padding: `10px 22px calc(env(safe-area-inset-bottom, 8px) + 10px)` }}>
+          <Btn onClick={onUse} style={{ width: '100%', minHeight: 46 }}>Use this program</Btn>
+        </div>
+      </>)}
     </Screen>
   );
 }
@@ -3407,15 +3417,6 @@ function NewPlanPickerModal({ onClose, go }) {
 // an unactivated plan before it is used).
 function ProgramTemplatesScreen({ store, setStore, go }) {
   const programs = (typeof window !== 'undefined' && window.SYSTEM_PROGRAMS) || [];
-  const use = (program) => {
-    const { schedule, newExercises } = LB.instantiateProgram(store, program);
-    setStore(s => ({
-      ...s,
-      exercises: [...(s.exercises || []), ...newExercises],
-      schedules: [...(s.schedules || []), schedule],
-    }));
-    go({ name: 'plan-view', scheduleId: schedule.id, fromPlan: true });
-  };
   return (
     <Screen scroll={false}>
       <TopBar title="Templates" onBack={() => go({ name: 'plan' })} />
@@ -3424,7 +3425,7 @@ function ProgramTemplatesScreen({ store, setStore, go }) {
           Beginner-ready programs, each built as a 6-week mesocycle. Pick by how many days you can train each week.
         </div>
         {programs.map(p => (
-          <button key={p.id} onClick={() => use(p)} style={{
+          <button key={p.id} onClick={() => go({ name: 'plan-preview', programId: p.id })} style={{
             width: '100%', textAlign: 'left', background: UI.bgInset, border: `1px solid ${UI.hairStrong}`,
             borderRadius: 8, padding: 14, cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 8,
             WebkitTapHighlightColor: 'transparent',
@@ -3446,4 +3447,34 @@ function ProgramTemplatesScreen({ store, setStore, go }) {
   );
 }
 
-Object.assign(window.Screens, { PlanScreen, PlanViewerScreen, ScheduleEditScreen, ScheduleNewScreen, ProgramTemplatesScreen, ExercisePicker, DayTypePicker });
+// Transient preview of a program in the real plan viewer. instantiateProgram runs
+// once (memoized) into an in-memory schedule + exercises that are NOT saved; a
+// synthetic store lets the viewer resolve every exId. "Use this program" (onUse)
+// commits it to the real store and opens the saved plan. So browsing templates
+// never litters the library with half-chosen plans.
+function ProgramPreviewScreen({ store, setStore, go, userId, programId }) {
+  const program = ((typeof window !== 'undefined' && window.SYSTEM_PROGRAMS) || []).find(p => p.id === programId);
+  const built = useMemoS(() => program ? LB.instantiateProgram(store, program) : null, [programId]); // eslint-disable-line react-hooks/exhaustive-deps
+  if (!built) {
+    return (
+      <Screen>
+        <TopBar title="Templates" onBack={() => go({ name: 'schedule-templates' })} />
+        <div style={{ padding: 22 }}><Empty title="Program not found" icon={ICON_CALENDAR} /></div>
+      </Screen>
+    );
+  }
+  const synthStore = { ...store, schedules: [...store.schedules, built.schedule], exercises: [...store.exercises, ...built.newExercises] };
+  const commit = () => {
+    setStore(s => ({ ...s, exercises: [...(s.exercises || []), ...built.newExercises], schedules: [...(s.schedules || []), built.schedule] }));
+    go({ name: 'plan-view', scheduleId: built.schedule.id, fromPlan: true });
+  };
+  return (
+    <PlanViewerScreen
+      store={synthStore} setStore={setStore} go={go} userId={userId}
+      scheduleId={built.schedule.id} fromPlan={false}
+      preview onUse={commit} onBack={() => go({ name: 'schedule-templates' })}
+    />
+  );
+}
+
+Object.assign(window.Screens, { PlanScreen, PlanViewerScreen, ScheduleEditScreen, ScheduleNewScreen, ProgramTemplatesScreen, ProgramPreviewScreen, ExercisePicker, DayTypePicker });
