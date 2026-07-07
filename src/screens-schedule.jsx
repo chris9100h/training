@@ -290,9 +290,10 @@ function PlanScreen({ store, setStore, go, userId }) {
 // that will be prefilled when training, with no controls that change it.
 // preview mode: `store` is a SYNTHETIC store containing the not-yet-saved
 // schedule + its materialized exercises (so every lookup resolves), fromPlan is
-// false (hides Activate/Edit/backup/version actions), and a "Use this program"
-// bar (onUse) commits it. onBack overrides the default back target.
-function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, preview, onUse, onBack }) {
+// false (hides Activate/Edit/backup/version actions), and a two-button bar
+// commits it: onUse (Use as is → the plan view) or onEdit (Edit this plan → the
+// editor). onBack overrides the default back target.
+function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, preview, onUse, onEdit, onBack }) {
   const sch = store.schedules.find(s => s.id === (scheduleId || store.activeScheduleId));
   const isWeekday = sch ? LB.isWeekdayPlan(sch) : false;
   const isFlex = sch ? LB.isFlexPlan(sch) : false;
@@ -1076,8 +1077,9 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
       })()}
       {preview && (<>
         <div className="knurl" />
-        <div style={{ flexShrink: 0, padding: `10px 22px calc(env(safe-area-inset-bottom, 8px) + 10px)` }}>
-          <Btn onClick={onUse} style={{ width: '100%', minHeight: 46 }}>Use this program</Btn>
+        <div style={{ flexShrink: 0, padding: `10px 22px calc(env(safe-area-inset-bottom, 8px) + 10px)`, display: 'flex', gap: 10 }}>
+          <Btn kind="ghost" onClick={onEdit} style={{ flex: 1, minHeight: 46 }}>Edit this plan</Btn>
+          <Btn onClick={onUse} style={{ flex: 1, minHeight: 46 }}>Use as is</Btn>
         </div>
       </>)}
     </Screen>
@@ -3457,9 +3459,10 @@ function ProgramTemplatesScreen({ store, setStore, go }) {
 
 // Transient preview of a program in the real plan viewer. instantiateProgram runs
 // once (memoized) into an in-memory schedule + exercises that are NOT saved; a
-// synthetic store lets the viewer resolve every exId. "Use this program" (onUse)
-// commits it to the real store and opens the saved plan. So browsing templates
-// never litters the library with half-chosen plans.
+// synthetic store lets the viewer resolve every exId. "Use as is" / "Edit this
+// plan" both commit it to the real store (append exercises + schedule); they only
+// differ in where you land. So browsing templates never litters the library with
+// half-chosen plans.
 function ProgramPreviewScreen({ store, setStore, go, userId, programId }) {
   const program = ((typeof window !== 'undefined' && window.SYSTEM_PROGRAMS) || []).find(p => p.id === programId);
   const built = useMemoS(() => program ? LB.instantiateProgram(store, program) : null, [programId]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -3472,15 +3475,18 @@ function ProgramPreviewScreen({ store, setStore, go, userId, programId }) {
     );
   }
   const synthStore = { ...store, schedules: [...store.schedules, built.schedule], exercises: [...store.exercises, ...built.newExercises] };
-  const commit = () => {
+  const finalize = (dest) => {
     setStore(s => ({ ...s, exercises: [...(s.exercises || []), ...built.newExercises], schedules: [...(s.schedules || []), built.schedule] }));
-    go({ name: 'plan-view', scheduleId: built.schedule.id, fromPlan: true });
+    go(dest);
   };
   return (
     <PlanViewerScreen
       store={synthStore} setStore={setStore} go={go} userId={userId}
       scheduleId={built.schedule.id} fromPlan={false}
-      preview onUse={commit} onBack={() => go({ name: 'schedule-templates' })}
+      preview
+      onUse={() => finalize({ name: 'plan-view', scheduleId: built.schedule.id, fromPlan: true })}
+      onEdit={() => finalize({ name: 'schedule-edit', scheduleId: built.schedule.id })}
+      onBack={() => go({ name: 'schedule-templates' })}
     />
   );
 }
