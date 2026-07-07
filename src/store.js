@@ -1084,12 +1084,20 @@ async function autoArchiveMissedDays(userId, state) {
     id: uid(), user_id: userId, date, day_id: dayId, day_name: dayName,
     skip_reason: '—', skipped_at: nowISO,
   }));
-  const { error } = await _supabase.from('zane_skips').insert(rows);
-  if (error) { console.error('auto-archive missed days:', error); return; }
+  // Add the archived skips to the returned state and fire the INSERT WITHOUT
+  // awaiting it. This pass used to block loadFromSupabase's resolution — the
+  // no-cache path to `ready` — on a network write. The rows are deterministic
+  // by (date, day) and this pass reruns on every boot, so a failed write is
+  // simply recreated next launch; nothing is lost by not awaiting. Matches the
+  // pre-existing best-effort semantics (the old code only console.error'd on
+  // failure, it never propagated the error).
   state.skips.push(...rows.map(r => ({
     id: r.id, date: r.date, dayId: r.day_id, dayName: r.day_name,
     skipReason: r.skip_reason, skippedAt: r.skipped_at,
   })));
+  _supabase.from('zane_skips').insert(rows).then(({ error }) => {
+    if (error) console.error('auto-archive missed days:', error);
+  });
 }
 
 // ─── SYNC ────────────────────────────────────────────────────────────────
