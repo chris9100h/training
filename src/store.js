@@ -2075,6 +2075,55 @@ function buildPlanSkeleton({ name, type, presetKey, customCount, customDays, wee
   return sch;
 }
 
+// Instantiate a pre-built program (a window.SYSTEM_PROGRAMS entry) into an
+// editable flex-mesocycle plan. Pure: returns { schedule, newExercises } and
+// mutates nothing — the caller appends both in one setStore and navigates to the
+// editor, exactly like PlanWizard.create().
+// Each program item references a system-catalog exercise BY NAME. We resolve each
+// to one of the USER's own exercises: reuse a same-named one if it exists, else
+// materialize an editable copy via systemExerciseToRow — the same name-dedup
+// ExercisePicker.finalizePick uses, so plans never hold sys_ ids and history for
+// an exercise the user already owns never splits. A name repeated across days
+// resolves to a single materialized row. Days are fed to buildPlanSkeleton as
+// customDays with type 'flex' (advance on a logged session, sessions_per_week =
+// day count, no fixed weekdays — the beginner-friendly "how many days can you"
+// model).
+function instantiateProgram(state, program) {
+  const catalog = (typeof window !== 'undefined' && window.SYSTEM_EXERCISES) || [];
+  const sysByName = new Map(catalog.map(s => [(s.name || '').toUpperCase(), s]));
+  const userByName = new Map((state.exercises || []).map(e => [(e.name || '').toUpperCase(), e.id]));
+  const newExercises = [];
+  const resolve = (exName) => {
+    const key = (exName || '').toUpperCase();
+    const existing = userByName.get(key);
+    if (existing) return existing;
+    const sys = sysByName.get(key);
+    if (!sys) return null; // unknown name — guarded (a store.test.cjs check keeps the catalog honest)
+    const row = systemExerciseToRow(sys);
+    newExercises.push(row);
+    userByName.set(key, row.id);
+    return row.id;
+  };
+  const customDays = (program.days || []).map(d => ({
+    name: d.name,
+    items: (d.items || []).map(it => {
+      const exId = resolve(it.ex);
+      if (!exId) return null;
+      return { exId, sets: it.sets || 2, reps: it.reps ?? 8, ...(it.repsMax != null ? { repsMax: it.repsMax } : {}) };
+    }).filter(Boolean),
+  }));
+  const meso = program.meso || {};
+  const schedule = buildPlanSkeleton({
+    name: program.name,
+    type: 'flex',
+    customDays,
+    mesoWeeks: meso.weeks || null,
+    mesoStartRir: meso.startRir != null ? meso.startRir : null,
+    mesoEndRir: meso.endRir != null ? meso.endRir : null,
+  });
+  return { schedule, newExercises };
+}
+
 // Whether a mesocycle's RIR taper is active. Default true: only an explicit
 // false disables the weekly RIR target watermark and the negative-RIR
 // lengthened-partials prescription (the meso then runs on volume + load
@@ -3968,7 +4017,7 @@ window.LB = {
   signIn, signUp, signOut, signInWithPasskey, registerPasskey, listPasskeys, deletePasskey, resetPassword, deleteAllData, exportBackup, importFromBackup, validateBackup,
   loadFromSupabase, syncStore, mergeSessions, withCarriedWindowEntries, historyWindowCutoffISO,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
-  uid, todayISO, fmtISO, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, buildPlanSkeleton, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, realignCycleForToday, todayCycleStripIndex,
+  uid, todayISO, fmtISO, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, buildPlanSkeleton, instantiateProgram, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, realignCycleForToday, todayCycleStripIndex,
   effReps, e1rm, isImprovement, isDecline, bestE1rmForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, latestBodyweight, exerciseLogMode, shouldPullBodyweight, systemExerciseToRow, inferCurrentExIdx, calcBlended,
   refreshExerciseBests, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries,
   computeNextReminderAt,

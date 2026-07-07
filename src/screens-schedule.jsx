@@ -3349,9 +3349,128 @@ function PlanWizard({ store, setStore, go }) {
   );
 }
 
-// ─── Create new schedule (hosts the guided plan wizard) ──────────────
+// ─── Create new schedule ─────────────────────────────────────────────
+// Fork: a ready-made program (Templates) or the guided builder (Custom). Custom
+// renders the shipped PlanWizard unchanged; Templates lists window.SYSTEM_PROGRAMS
+// and instantiates the chosen one via LB.instantiateProgram. Same
+// {store,setStore,go,userId} signature so the app route and the coaching caller
+// both keep working.
 function ScheduleNewScreen({ store, setStore, go, userId }) {
-  return <PlanWizard store={store} setStore={setStore} go={go} />;
+  const [choice, setChoice] = useStateS(null); // null | 'custom' | 'templates'
+  if (choice === 'custom') return <PlanWizard store={store} setStore={setStore} go={go} />;
+  if (choice === 'templates') return <ProgramTemplatesScreen store={store} setStore={setStore} go={go} onBack={() => setChoice(null)} />;
+  return <PlanStartScreen onTemplates={() => setChoice('templates')} onCustom={() => setChoice('custom')} onBack={() => go({ name: 'plan' })} />;
+}
+
+// The Templates-vs-Custom fork shown first when creating a plan.
+function PlanStartScreen({ onTemplates, onCustom, onBack }) {
+  const choice = (icon, label, sub, gold, onClick) => (
+    <button onClick={onClick} style={{
+      width: '100%', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 14,
+      padding: 16, borderRadius: 8, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+      background: gold ? 'rgba(var(--accent-rgb),0.08)' : UI.bgInset,
+      border: `1px solid ${gold ? 'var(--accent)' : UI.hairStrong}`,
+    }}>
+      <span style={{
+        width: 46, height: 46, borderRadius: 8, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+        background: gold ? 'rgba(var(--accent-rgb),0.16)' : UI.bgRaised,
+        border: `0.5px solid ${gold ? 'rgba(var(--accent-rgb),0.4)' : UI.hair}`,
+      }}><i className={`fa-solid ${icon}`} style={{ fontSize: 19, color: gold ? 'var(--accent)' : UI.inkFaint }} /></span>
+      <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 3 }}>
+        <span style={{ fontSize: 15, fontWeight: 600, color: gold ? 'var(--accent)' : UI.ink, fontFamily: UI.fontUi }}>{label}</span>
+        <span className="micro" style={{ color: UI.inkFaint, textTransform: 'none', letterSpacing: '0.02em', fontWeight: 400, lineHeight: 1.4 }}>{sub}</span>
+      </span>
+      <i className="fa-solid fa-chevron-right" style={{ flexShrink: 0, fontSize: 13, color: UI.inkFaint }} />
+    </button>
+  );
+  return (
+    <Screen scroll={false}>
+      <TopBar title="New plan" onBack={onBack} />
+      <div style={{ flex: 1, overflowY: 'auto', padding: '20px 22px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div className="micro" style={{ color: UI.inkFaint, letterSpacing: '0.12em', marginBottom: 2 }}>HOW DO YOU WANT TO START?</div>
+        {choice('fa-layer-group', 'Ready-made program', 'Pick a proven beginner program by how many days you can train. Set up in one tap.', true, onTemplates)}
+        {choice('fa-sliders', 'Build your own', 'The guided builder: name it, choose a split, set your days and mesocycle.', false, onCustom)}
+      </div>
+    </Screen>
+  );
+}
+
+// Lists the pre-built programs; a tap opens a full preview before committing.
+function ProgramTemplatesScreen({ store, setStore, go, onBack }) {
+  const [selected, setSelected] = useStateS(null);
+  const programs = (typeof window !== 'undefined' && window.SYSTEM_PROGRAMS) || [];
+  const use = (program) => {
+    const { schedule, newExercises } = LB.instantiateProgram(store, program);
+    setStore(s => ({
+      ...s,
+      exercises: [...(s.exercises || []), ...newExercises],
+      schedules: [...(s.schedules || []), schedule],
+    }));
+    go({ name: 'schedule-edit', scheduleId: schedule.id });
+  };
+  if (selected) return <ProgramDetail program={selected} onBack={() => setSelected(null)} onUse={() => use(selected)} />;
+  return (
+    <Screen scroll={false}>
+      <TopBar title="Templates" onBack={onBack} />
+      <div style={{ flex: 1, overflowY: 'auto', padding: '14px 22px 40px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div className="micro" style={{ color: UI.inkFaint, textTransform: 'none', letterSpacing: '0.02em', lineHeight: 1.5, marginBottom: 4 }}>
+          Beginner-ready programs, each built as a 6-week mesocycle. Pick by how many days you can train each week.
+        </div>
+        {programs.map(p => (
+          <button key={p.id} onClick={() => setSelected(p)} style={{
+            width: '100%', textAlign: 'left', background: UI.bgInset, border: `1px solid ${UI.hairStrong}`,
+            borderRadius: 8, padding: 14, cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 8,
+            WebkitTapHighlightColor: 'transparent',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span style={{ flex: 1, fontFamily: UI.fontDisplay, fontSize: 20, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.02em', color: UI.ink }}>{p.name}</span>
+              <span className="num" style={{ flexShrink: 0, fontSize: 11, padding: '3px 8px', borderRadius: 4, color: 'var(--accent)', background: 'rgba(var(--accent-rgb),0.12)', border: `0.5px solid rgba(var(--accent-rgb),0.35)` }}>{p.daysPerWeek}×/week</span>
+            </div>
+            <span style={{ fontSize: 12.5, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.45 }}>{p.blurb}</span>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 2 }}>
+              {p.days.map((d, i) => (
+                <span key={i} className="micro" style={{ color: UI.inkFaint, background: UI.bgRaised, border: `0.5px solid ${UI.hair}`, borderRadius: 4, padding: '3px 6px', textTransform: 'none', letterSpacing: '0.02em' }}>{d.name}</span>
+              ))}
+            </div>
+          </button>
+        ))}
+      </div>
+    </Screen>
+  );
+}
+
+// Full preview of one program (every day + exercise) with the commit button.
+function ProgramDetail({ program, onBack, onUse }) {
+  const repsLabel = (it) => it.repsMax != null ? `${it.reps}-${it.repsMax}` : `${it.reps}`;
+  return (
+    <Screen scroll={false}>
+      <TopBar title={program.name} onBack={onBack} />
+      <div style={{ flex: 1, overflowY: 'auto', padding: '14px 22px 20px' }}>
+        <div className="micro" style={{ color: 'var(--accent)', letterSpacing: '0.12em', marginBottom: 6 }}>
+          {program.daysPerWeek}×/WEEK · {(program.meso && program.meso.weeks) || 6}-WEEK MESOCYCLE · FLEXIBLE
+        </div>
+        <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5, marginBottom: 20 }}>{program.blurb}</div>
+        {program.days.map((d, di) => (
+          <div key={di} style={{ marginBottom: 18 }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 6 }}>
+              <span style={{ fontFamily: UI.fontDisplay, fontSize: 18, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.03em', color: 'var(--accent)' }}>{d.name}</span>
+              <span className="micro" style={{ color: UI.inkFaint }}>{d.items.reduce((a, it) => a + it.sets, 0)} sets</span>
+            </div>
+            {d.items.map((it, ii) => (
+              <div key={ii} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 0', borderBottom: ii < d.items.length - 1 ? `0.5px solid ${UI.hair}` : 'none' }}>
+                <span style={{ fontSize: 13.5, color: UI.ink, fontFamily: UI.fontUi }}>{it.ex}</span>
+                <span className="num" style={{ fontSize: 12, color: UI.inkSoft, flexShrink: 0, marginLeft: 12 }}>{it.sets} × {repsLabel(it)}</span>
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+      <div className="knurl" />
+      <div style={{ flexShrink: 0, padding: `10px 22px calc(env(safe-area-inset-bottom, 8px) + 10px)` }}>
+        <Btn onClick={onUse} style={{ width: '100%', minHeight: 46 }}>Use this program</Btn>
+      </div>
+    </Screen>
+  );
 }
 
 Object.assign(window.Screens, { PlanScreen, PlanViewerScreen, ScheduleEditScreen, ScheduleNewScreen, ExercisePicker, DayTypePicker });

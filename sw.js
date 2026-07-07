@@ -13,6 +13,7 @@ const ASSETS = [
   BASE + '/src/supabase.js',
   BASE + '/src/whatsnew.js',
   BASE + '/src/exercise-db.js',
+  BASE + '/src/programs-db.js',
   BASE + '/src/ui.jsx',
   BASE + '/src/screens-home.jsx',
   BASE + '/src/screens-schedule.jsx',
