@@ -2776,7 +2776,14 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         beep(ctx.currentTime + 0.18, 880, 0.14);
         beep(ctx.currentTime + 0.36, 1320, 0.28);
       };
-      ctx.state === 'suspended' ? ctx.resume().then(play) : play();
+      // iOS only resumes a suspended AudioContext on a user gesture. On a resume
+      // (app was backgrounded) resume().then(play) would queue a STALE beep that
+      // fires on the user's NEXT tap (the "beep only when I check the next set"
+      // bug). Play only when the context is already running; otherwise best-effort
+      // resume for next time and skip this beep — the modal + gold flash already
+      // signal the rest is over, and a push fired while the app was backgrounded.
+      if (ctx.state === 'running') play();
+      else ctx.resume().catch(() => {});
     } catch (_) {}
   };
   const [restExpired, setRestExpired] = useStateT(() => {
