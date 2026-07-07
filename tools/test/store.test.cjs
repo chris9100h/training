@@ -736,6 +736,15 @@ async function testAsync(name, fn) {
     const seeded = LB.buildSeedSets(it, belowCap, null, false, noSmartProgStore, null);
     assert.strictEqual(seeded[0].reps, 10);
   });
+  test('buildSeedSets never seeds below last session, even past a Range item\'s repsMax', () => {
+    // Last session went to failure at 13 on an 8-12 range at the same weight.
+    // The cap must not drop the seed back to 12 (that would prescribe less than
+    // the user just proved they can do); seed the actual 13.
+    const it = { sets: 1, reps: 8, repsMax: 12 };
+    const pastCap = { entry: { sets: [{ warmup: false, kg: 100, reps: 13, done: true }] } };
+    const seeded = LB.buildSeedSets(it, pastCap, null, false, noSmartProgStore, null);
+    assert.strictEqual(seeded[0].reps, 13);
+  });
   test('buildSeedSets leaves the classic (non-Range) +1 nudge uncapped past the global ceiling', () => {
     // Only a Range item's own repsMax caps the nudge — the global default /
     // a custom progressionOffset ceiling is just an internal trigger

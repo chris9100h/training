@@ -1815,8 +1815,12 @@ function buildSeedSets(it, last, suggestion, isUni, store, bodyweightKg = null, 
       // trigger threshold, not a user-drawn boundary, so it stays
       // uncapped — matches classic Smart Progression's long-standing
       // behavior of nudging reps up every session regardless.
+      // The cap only limits the +1 nudge, never the floor: if last session
+      // already went past repsMax (e.g. 13 reps on an 8-12 range, taken to
+      // failure), seed that actual count, not repsMax. Dropping back to 12 would
+      // prescribe LESS than the user just proved they can do at that same weight.
       const cap = it.repsMax;
-      const bump = (v) => v == null ? null : (cap != null ? Math.min(v + 1, cap) : v + 1);
+      const bump = (v) => v == null ? null : (cap != null ? Math.max(v, Math.min(v + 1, cap)) : v + 1);
       return isUni
         ? { kg: dl(seedKg), repsL: bump(prev.repsL), repsR: bump(prev.repsR), done: false }
         : { kg: dl(seedKg), reps: bump(prev.reps), done: false };
