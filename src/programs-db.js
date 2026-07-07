@@ -8,12 +8,12 @@
 // many days can you train?" - one strong program per frequency. Current-trend
 // volume: 2 working sets per exercise, more exercise variety, ~16 sets/session.
 // Exercises are referenced by their EXACT catalog name (window.SYSTEM_EXERCISES);
-// tools/test/store.test.cjs validates every name resolves. Reps are Range mode
-// (floor-ceiling). Rest comes from each exercise own category.
+// tools/test/store.test.cjs validates every name resolves. Reps are Range mode.
 //
-// Per-day exercise order follows fixed rules: on any day with leg movements the
-// leg curl leads, Leg Extension goes directly after it, then the heavy leg
-// movements; calves always come last on days that train them.
+// Fixed exercise-order rules (owner): on any day that trains legs a SEATED leg
+// curl leads (hamstrings pumped first), then Leg Extension, then the heavy leg
+// movements (unilateral split-squat work before the big bilateral compound);
+// calves always come last on days that train them.
 (function () {
   // Item shorthand: r(name, repsFloor, repsCeil, sets=2)
   const r = (ex, lo, hi, sets) => ({ ex, sets: sets || 2, reps: lo, repsMax: hi });
@@ -36,8 +36,8 @@
           r("Rope Triceps Pushdown", 10, 15),
         ] },
         { name: "Full Body B", items: [
+          r("Seated Leg Curl", 10, 15),
           r("Hack Squat", 10, 15),
-          r("Dumbbell Romanian Deadlift", 10, 12),
           r("Incline Dumbbell Press", 8, 12),
           r("Seated Cable Row", 8, 12),
           r("Cable Lateral Raise", 12, 20),
@@ -63,8 +63,8 @@
           r("Rope Triceps Pushdown", 10, 15),
         ] },
         { name: "Full Body B", items: [
+          r("Seated Leg Curl", 10, 15),
           r("Hack Squat", 10, 15),
-          r("Dumbbell Romanian Deadlift", 10, 12),
           r("Incline Dumbbell Press", 8, 12),
           r("Seated Cable Row", 8, 12),
           r("Cable Lateral Raise", 12, 20),
@@ -73,8 +73,8 @@
           r("Standing Calf Raise", 10, 15),
         ] },
         { name: "Full Body C", items: [
-          r("Lying Leg Curl", 10, 15),
-          r("Goblet Squat", 10, 15),
+          r("Seated Leg Curl", 10, 15),
+          r("Romanian Deadlift", 8, 12),
           r("Pec Deck", 12, 15),
           r("Neutral-Grip Lat Pulldown", 8, 12),
           r("Machine Shoulder Press", 10, 12),
@@ -102,10 +102,10 @@
         { name: "Lower A", items: [
           r("Seated Leg Curl", 10, 15),
           r("Leg Extension", 12, 20),
+          r("Bulgarian Split Squat", 10, 12),
           r("Leg Press", 10, 15),
           r("Dumbbell Romanian Deadlift", 10, 12),
           r("Machine Hip Thrust", 10, 15),
-          r("Bulgarian Split Squat", 10, 12),
           r("Cable Crunch", 12, 20),
           r("Standing Calf Raise", 10, 15),
         ] },
@@ -113,14 +113,14 @@
           r("Incline Machine Press", 8, 12),
           r("Pec Deck", 12, 15),
           r("Neutral-Grip Lat Pulldown", 8, 12),
-          r("Chest-Supported Dumbbell Row", 10, 12),
+          r("Chest-Supported T-Bar Row", 10, 12),
           r("Cable Lateral Raise", 12, 20),
           r("Reverse Pec Deck", 12, 20),
           r("Hammer Curl", 10, 15),
           r("Overhead Cable Triceps Extension", 10, 15),
         ] },
         { name: "Lower B", items: [
-          r("Lying Leg Curl", 10, 15),
+          r("Seated Leg Curl", 10, 15),
           r("Leg Extension", 12, 20),
           r("Hack Squat", 10, 15),
           r("Dumbbell Romanian Deadlift", 10, 12),
@@ -149,7 +149,7 @@
         { name: "Pull", items: [
           r("Lat Pulldown", 8, 12),
           r("Seated Cable Row", 8, 12),
-          r("Chest-Supported Dumbbell Row", 10, 12),
+          r("Chest-Supported T-Bar Row", 10, 12),
           r("Neutral-Grip Lat Pulldown", 8, 12),
           r("Reverse Pec Deck", 12, 20),
           r("Face Pull", 12, 20),
@@ -159,12 +159,12 @@
         { name: "Legs", items: [
           r("Seated Leg Curl", 10, 15),
           r("Leg Extension", 12, 20),
+          r("Bulgarian Split Squat", 10, 12),
           r("Leg Press", 10, 15),
           r("Dumbbell Romanian Deadlift", 10, 12),
           r("Machine Hip Thrust", 10, 15),
           r("Cable Crunch", 12, 20),
           r("Standing Calf Raise", 10, 15),
-          r("Seated Calf Raise", 10, 15),
         ] },
         { name: "Upper", items: [
           r("Incline Machine Press", 8, 12),
@@ -177,14 +177,14 @@
           r("Bar Triceps Pushdown", 10, 15),
         ] },
         { name: "Lower", items: [
-          r("Lying Leg Curl", 10, 15),
+          r("Seated Leg Curl", 10, 15),
           r("Leg Extension", 12, 20),
-          r("Hack Squat", 10, 15),
           r("Bulgarian Split Squat", 10, 12),
+          r("Hack Squat", 10, 15),
+          r("Dumbbell Romanian Deadlift", 10, 12),
           r("Machine Hip Thrust", 10, 15),
           r("Hanging Knee Raise", 12, 15),
           r("Standing Calf Raise", 10, 15),
-          r("Seated Calf Raise", 10, 15),
         ] },
       ],
     },
@@ -206,7 +206,7 @@
         { name: "Pull A", items: [
           r("Lat Pulldown", 8, 12),
           r("Seated Cable Row", 8, 12),
-          r("Chest-Supported Dumbbell Row", 10, 12),
+          r("Chest-Supported T-Bar Row", 10, 12),
           r("Reverse Pec Deck", 12, 20),
           r("Face Pull", 12, 20),
           r("Dumbbell Shrug", 10, 15),
@@ -219,9 +219,9 @@
           r("Leg Press", 10, 15),
           r("Dumbbell Romanian Deadlift", 10, 12),
           r("Machine Hip Thrust", 10, 15),
+          r("Walking Lunge", 10, 12),
           r("Cable Crunch", 12, 20),
           r("Standing Calf Raise", 10, 15),
-          r("Seated Calf Raise", 10, 15),
         ] },
         { name: "Push B", items: [
           r("Incline Machine Press", 8, 12),
@@ -244,14 +244,14 @@
           r("Hammer Curl", 10, 15),
         ] },
         { name: "Legs B", items: [
-          r("Lying Leg Curl", 10, 15),
+          r("Seated Leg Curl", 10, 15),
           r("Leg Extension", 12, 20),
-          r("Hack Squat", 10, 15),
           r("Bulgarian Split Squat", 10, 12),
+          r("Hack Squat", 10, 15),
+          r("Leg Press", 10, 15),
           r("Machine Hip Thrust", 10, 15),
           r("Hanging Knee Raise", 12, 15),
           r("Standing Calf Raise", 10, 15),
-          r("Seated Calf Raise", 10, 15),
         ] },
       ],
     },

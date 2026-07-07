@@ -46,6 +46,7 @@ window.SYSTEM_EXERCISES = [
   { id: 'sys_barbell_row', name: 'Barbell Row', tags: ['Back', 'Biceps'], equipment: 'barbell_dual', category: 'medium' },
   { id: 'sys_pendlay_row', name: 'Pendlay Row', tags: ['Back', 'Biceps'], equipment: 'barbell_dual', category: 'medium' },
   { id: 'sys_t_bar_row', name: 'T-Bar Row', tags: ['Back', 'Biceps'], equipment: 'barbell_single', category: 'medium' },
+  { id: 'sys_chest_supported_t_bar_row', name: 'Chest-Supported T-Bar Row', tags: ['Back', 'Biceps'], equipment: 'machine', category: 'medium' },
   { id: 'sys_dumbbell_row', name: 'Single-Arm Dumbbell Row', tags: ['Back', 'Biceps'], equipment: 'dumbbell', category: 'medium', movement: 'unilateral' },
   { id: 'sys_chest_supported_row', name: 'Chest-Supported Dumbbell Row', tags: ['Back', 'Biceps'], equipment: 'dumbbell', category: 'medium' },
   { id: 'sys_meadows_row', name: 'Meadows Row', tags: ['Back', 'Biceps'], equipment: 'barbell_single', category: 'medium', movement: 'unilateral' },
