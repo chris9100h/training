@@ -4447,7 +4447,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               // layer warm palette via CSS custom props (see @keyframes
               // meso-ember). animationDuration overridden per intensity.
               const emberVars = fire ? {
-                '--ember-op': (0.16 + neg * 0.07).toFixed(2),
+                '--ember-op': (0.26 + neg * 0.05).toFixed(2),
                 '--ember-blur': `${8 + neg * 15}px`,
                 '--ember-glow1': `rgba(255,${120 + neg * 22},${25 + neg * 8},0.92)`,
                 '--ember-glow2': `rgba(255,${Math.max(0, 60 - neg * 14)},0,${(0.4 + neg * 0.08).toFixed(2)})`,
