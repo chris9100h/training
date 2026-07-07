@@ -3178,7 +3178,34 @@ function PlanWizard({ store, setStore, go }) {
         <button onClick={() => removeDayType(dt)} title={armed ? 'Tap again to remove' : 'Remove'} style={{ flexShrink: 0, background: armed ? 'rgba(var(--danger-rgb),0.15)' : UI.goldFaint, border: 'none', borderLeft: `0.5px solid ${armed ? UI.danger : UI.goldSoft}`, color: armed ? UI.danger : UI.gold, opacity: armed ? 1 : 0.55, padding: '0 9px', cursor: 'pointer', fontSize: 12, WebkitTapHighlightColor: 'transparent' }}>×</button>
       </div>;
     };
+    // Overview of the days chosen so far, so a long Custom cycle/flex plan doesn't
+    // lose the thread: every day with its picked type (— if still open), the day
+    // being edited highlighted. Scrolls internally if the plan is very long.
+    const dayN = type === 'weekday' ? sortedWeekdays.length : customDays.length;
+    const dayShort = (i) => (type === 'weekday' && sortedWeekdays[i] != null) ? WEEKDAYS[sortedWeekdays[i]] : `D${i + 1}`;
+    const overview = dayN > 1 ? (
+      <div style={{ padding: '9px 10px', borderRadius: 6, background: UI.bgInset, border: `1px solid ${UI.hairStrong}` }}>
+        <span className="label" style={{ color: UI.inkFaint, display: 'block', marginBottom: 7 }}>Plan so far</span>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, maxHeight: 132, overflowY: 'auto', overscrollBehavior: 'contain' }}>
+          {Array.from({ length: dayN }, (_, i) => {
+            const picked = customDays[i] && customDays[i].name;
+            const isCur = i === dayIdx;
+            return (
+              <div key={i} style={{
+                display: 'flex', alignItems: 'center', gap: 4, padding: '3px 7px', borderRadius: 4, whiteSpace: 'nowrap',
+                border: `1px solid ${isCur ? 'var(--accent)' : (picked ? UI.hairStrong : UI.hair)}`,
+                background: isCur ? 'rgba(var(--accent-rgb),0.12)' : (picked ? UI.bgRaised : 'transparent'),
+              }}>
+                <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.04em', color: isCur ? 'var(--accent)' : UI.inkFaint }}>{dayShort(i)}</span>
+                <span style={{ fontFamily: UI.fontUi, fontSize: 10, color: picked ? (isCur ? 'var(--accent)' : UI.inkSoft) : UI.inkGhost }}>{picked || '—'}</span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    ) : null;
     body = <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {overview}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
         {stdTypes.map(stdChip)}
       </div>
