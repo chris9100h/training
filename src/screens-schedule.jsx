@@ -1545,9 +1545,10 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
 
         {LB.is531Plan(draft) && draft.program_data?.mainLifts && (() => {
           const u531 = draft.program_data.unit || 'kg';
+          const KIND_SHORT = { squat: 'Squat', bench: 'Bench', deadlift: 'Deadlift', ohp: 'OHP' };
           const tmSummary = Object.keys(draft.program_data.mainLifts).map(exId => {
             const ml = draft.program_data.mainLifts[exId];
-            const nm = (LB.findExercise(store, exId)?.name || 'Lift').split(' ').pop();
+            const nm = KIND_SHORT[ml.kind] || (LB.findExercise(store, exId)?.name || 'Lift').split(' ').pop();
             return `${nm} ${ml.tm ?? '—'}`;
           }).join('   ·   ');
           return (
@@ -1714,18 +1715,20 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
             <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.6 }}>
               About 90% of your best single. Every working weight is a percentage of this, so nudging it here reshapes the whole cycle. Tap a number to type it, or step with +/−.
             </div>
-            {Object.keys(draft.program_data.mainLifts).map(exId => {
-              const ml = draft.program_data.mainLifts[exId];
-              const name531 = LB.findExercise(store, exId)?.name || 'Lift';
-              const u531 = draft.program_data.unit || 'kg';
-              return (
-                <div key={exId} style={{ background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 4, padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  <span style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.inkSoft, letterSpacing: '0.02em', textTransform: 'uppercase' }}>{name531}</span>
-                  <TmField value={ml.tm} step={u531 === 'lbs' ? 5 : 2.5} suffix={u531}
-                    onChange={v => setDraft(d => ({ ...d, program_data: { ...d.program_data, mainLifts: { ...d.program_data.mainLifts, [exId]: { ...d.program_data.mainLifts[exId], tm: v } } } }))} />
-                </div>
-              );
-            })}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+              {Object.keys(draft.program_data.mainLifts).map(exId => {
+                const ml = draft.program_data.mainLifts[exId];
+                const name531 = LB.findExercise(store, exId)?.name || 'Lift';
+                const u531 = draft.program_data.unit || 'kg';
+                return (
+                  <div key={exId} style={{ background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 4, padding: '10px 8px', display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'center' }}>
+                    <span style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkSoft, letterSpacing: '0.02em', textTransform: 'uppercase', textAlign: 'center', lineHeight: 1.3 }}>{name531}</span>
+                    <TmField value={ml.tm} step={u531 === 'lbs' ? 5 : 2.5} suffix={u531} compact
+                      onChange={v => setDraft(d => ({ ...d, program_data: { ...d.program_data, mainLifts: { ...d.program_data.mainLifts, [exId]: { ...d.program_data.mainLifts[exId], tm: v } } } }))} />
+                  </div>
+                );
+              })}
+            </div>
           </div>
         )}
       </Sheet>
@@ -3595,7 +3598,7 @@ function ProgramPreviewScreen({ store, setStore, go, userId, programId }) {
 // entry for big jumps (a 150 kg TM shouldn't take 60 taps from zero). Keeps a
 // raw text string so a decimal like "152.5" survives mid-typing; value/onChange
 // speak numbers, or null when blank.
-function TmField({ value, onChange, step = 2.5, suffix }) {
+function TmField({ value, onChange, step = 2.5, suffix, compact = false }) {
   const round = (v) => Math.round(v * 1000) / 1000;
   const [raw, setRaw] = useStateS(value == null ? '' : String(value));
   const [focused, setFocused] = useStateS(false);
@@ -3611,29 +3614,30 @@ function TmField({ value, onChange, step = 2.5, suffix }) {
     setRaw(String(next));
     onChange(next);
   };
+  const btnSz = compact ? 36 : 44;
   const btn = {
-    width: 44, height: 44, padding: 0, borderRadius: 4, flexShrink: 0,
+    width: btnSz, height: btnSz, padding: 0, borderRadius: 4, flexShrink: 0,
     border: `1px solid ${UI.hairStrong}`, background: 'transparent', color: UI.ink,
-    cursor: 'pointer', fontSize: 22, lineHeight: 1, fontWeight: 300, WebkitTapHighlightColor: 'transparent',
+    cursor: 'pointer', fontSize: compact ? 19 : 22, lineHeight: 1, fontWeight: 300, WebkitTapHighlightColor: 'transparent',
   };
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'center' }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: compact ? 6 : 10, justifyContent: 'center' }}>
       <button onClick={() => bump(-step)} style={btn} aria-label="Decrease">−</button>
       {/* Boxed and accent-on-focus so it reads clearly as a field you type into,
           not just a number the steppers nudge. */}
       <label style={{
-        flex: 1, maxWidth: 190, minHeight: 52, boxSizing: 'border-box',
+        flex: 1, maxWidth: compact ? 'none' : 190, minHeight: compact ? 44 : 52, boxSizing: 'border-box',
         display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
         background: UI.bgInset, border: `1.5px solid ${focused ? 'var(--accent)' : UI.hairStrong}`,
-        borderRadius: 6, padding: '0 10px', cursor: 'text',
+        borderRadius: 6, padding: compact ? '0 6px' : '0 10px', cursor: 'text',
       }}>
         <input
-          type="text" inputMode="decimal" placeholder="tap to type" value={raw}
+          type="text" inputMode="decimal" placeholder={compact ? 'type' : 'tap to type'} value={raw}
           onChange={(e) => push(e.target.value)}
           onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
-          style={{ width: '100%', minWidth: 0, textAlign: 'center', background: 'transparent', border: 'none', outline: 'none', fontFamily: UI.fontNum, fontSize: raw ? 30 : 15, color: raw ? UI.ink : UI.inkFaint, fontVariantNumeric: 'tabular-nums' }}
+          style={{ width: '100%', minWidth: 0, textAlign: 'center', background: 'transparent', border: 'none', outline: 'none', fontFamily: UI.fontNum, fontSize: raw ? (compact ? 20 : 30) : (compact ? 12 : 15), color: raw ? UI.ink : UI.inkFaint, fontVariantNumeric: 'tabular-nums' }}
         />
-        {raw && suffix && <span style={{ fontSize: 13, color: UI.inkFaint, flexShrink: 0 }}>{suffix}</span>}
+        {raw && suffix && <span style={{ fontSize: compact ? 10 : 13, color: UI.inkFaint, flexShrink: 0 }}>{suffix}</span>}
       </label>
       <button onClick={() => bump(step)} style={btn} aria-label="Increase">+</button>
     </div>
