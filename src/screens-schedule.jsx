@@ -3547,6 +3547,7 @@ function ProgramPreviewScreen({ store, setStore, go, userId, programId }) {
 function TmField({ value, onChange, step = 2.5, suffix }) {
   const round = (v) => Math.round(v * 1000) / 1000;
   const [raw, setRaw] = useStateS(value == null ? '' : String(value));
+  const [focused, setFocused] = useStateS(false);
   const push = (s) => {
     if (s !== '' && !/^\d*\.?\d*$/.test(s)) return; // ignore stray non-numeric input
     setRaw(s);
@@ -3565,17 +3566,24 @@ function TmField({ value, onChange, step = 2.5, suffix }) {
     cursor: 'pointer', fontSize: 22, lineHeight: 1, fontWeight: 300, WebkitTapHighlightColor: 'transparent',
   };
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'center' }}>
-      <button onClick={() => bump(-step)} style={btn}>−</button>
-      <div style={{ flex: 1, display: 'flex', alignItems: 'baseline', justifyContent: 'center', gap: 4, minWidth: 100 }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'center' }}>
+      <button onClick={() => bump(-step)} style={btn} aria-label="Decrease">−</button>
+      {/* Boxed and accent-on-focus so it reads clearly as a field you type into,
+          not just a number the steppers nudge. */}
+      <label style={{
+        flex: 1, maxWidth: 190, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
+        background: UI.bgInset, border: `1.5px solid ${focused ? 'var(--accent)' : UI.hairStrong}`,
+        borderRadius: 6, padding: '8px 10px', cursor: 'text',
+      }}>
         <input
-          type="text" inputMode="decimal" placeholder="—" value={raw}
+          type="text" inputMode="decimal" placeholder="tap to type" value={raw}
           onChange={(e) => push(e.target.value)}
-          style={{ width: 96, textAlign: 'center', background: 'transparent', border: 'none', outline: 'none', fontFamily: UI.fontNum, fontSize: 36, color: UI.ink, fontVariantNumeric: 'tabular-nums' }}
+          onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
+          style={{ width: '100%', minWidth: 0, textAlign: 'center', background: 'transparent', border: 'none', outline: 'none', fontFamily: UI.fontNum, fontSize: raw ? 30 : 15, color: raw ? UI.ink : UI.inkFaint, fontVariantNumeric: 'tabular-nums' }}
         />
-        {suffix && <span style={{ fontSize: 14, color: UI.inkFaint }}>{suffix}</span>}
-      </div>
-      <button onClick={() => bump(step)} style={btn}>+</button>
+        {raw && suffix && <span style={{ fontSize: 13, color: UI.inkFaint, flexShrink: 0 }}>{suffix}</span>}
+      </label>
+      <button onClick={() => bump(step)} style={btn} aria-label="Increase">+</button>
     </div>
   );
 }
@@ -3639,7 +3647,7 @@ function FiveThreeOneSetupScreen({ store, setStore, go, userId }) {
       <TopBar title="5/3/1 Setup" onBack={() => go({ name: 'schedule-templates' })} />
       <div style={{ flex: 1, overflowY: 'auto', padding: '14px 22px 40px', display: 'flex', flexDirection: 'column', gap: 14 }}>
         <div className="micro" style={{ color: UI.inkFaint, textTransform: 'none', letterSpacing: '0.02em', lineHeight: 1.5 }}>
-          Set a Training Max for each lift (about 90% of your best single). Every working weight is a percentage of it, waving 5s / 3s / 1s across a 4-week cycle. Numbers prefill from your history where we have it.
+          Set a Training Max for each lift (about 90% of your best single). Tap the number to type it, or nudge with +/-. Every working weight is a percentage of it, waving 5s / 3s / 1s across a 4-week cycle. Prefilled from your history where we have it.
         </div>
 
         <Card style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -3691,7 +3699,7 @@ function FiveThreeOneSetupScreen({ store, setStore, go, userId }) {
       </div>
 
       {picker && (
-        <ExercisePicker store={store} setStore={setStore} onClose={() => setPicker(null)} onPick={addAssist} singleSelect />
+        <ExercisePicker store={store} setStore={setStore} onClose={() => setPicker(null)} onPick={addAssist} />
       )}
     </Screen>
   );
