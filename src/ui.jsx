@@ -1039,7 +1039,11 @@ function Field({ label, children, style = {} }) {
   );
 }
 
-function TextInput({ value, onChange, placeholder, type = 'text', autoFocus, ...rest }) {
+// Pass `onToggleReveal` (and the controlled `reveal` boolean) to render a
+// password show/hide eye on the right. The caller owns the reveal state and
+// drives `type` from it, so a single toggle can reveal a whole group of fields
+// (e.g. password + repeat) by sharing one state across them.
+function TextInput({ value, onChange, placeholder, type = 'text', autoFocus, reveal, onToggleReveal, ...rest }) {
   const [focus, setFocus] = React.useState(false);
   const inputRef = React.useRef(null);
   const savedSel = React.useRef(null);
@@ -1067,6 +1071,7 @@ function TextInput({ value, onChange, placeholder, type = 'text', autoFocus, ...
       borderBottom: `1px solid ${focus ? UI.gold : UI.hairStrong}`,
       transition: 'border-color 0.2s',
       padding: '8px 0',
+      display: 'flex', alignItems: 'center', gap: 8,
     }}>
       <input
         ref={inputRef}
@@ -1078,10 +1083,25 @@ function TextInput({ value, onChange, placeholder, type = 'text', autoFocus, ...
         onFocus={() => setFocus(true)} onBlur={() => setFocus(false)}
         {...rest}
         style={{
-          width: '100%', background: 'transparent', border: 'none', outline: 'none',
+          flex: 1, minWidth: 0, background: 'transparent', border: 'none', outline: 'none',
           color: UI.ink, fontFamily: UI.fontUi, fontSize: 16, padding: 0,
         }}
       />
+      {onToggleReveal && (
+        <button
+          type="button"
+          onClick={onToggleReveal}
+          tabIndex={-1}
+          aria-label={reveal ? 'Hide password' : 'Show password'}
+          style={{
+            flexShrink: 0, background: 'none', border: 'none', padding: '0 2px', cursor: 'pointer',
+            color: reveal ? UI.gold : UI.inkFaint, display: 'flex', alignItems: 'center',
+            WebkitTapHighlightColor: 'transparent',
+          }}
+        >
+          <i className={reveal ? 'fa-solid fa-eye-slash' : 'fa-solid fa-eye'} style={{ fontSize: 14 }} />
+        </button>
+      )}
     </div>
   );
 }

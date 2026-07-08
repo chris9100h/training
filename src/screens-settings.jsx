@@ -527,6 +527,7 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
   const [pwConfirm, setPwConfirm] = useStateSet('');
   const [pwLoading, setPwLoading] = useStateSet(false);
   const [pwMsg, setPwMsg] = useStateSet(null);
+  const [showPw, setShowPw] = useStateSet(false); // one eye toggles all three change-password fields
   const [changeEmailSheet, setChangeEmailSheet] = useStateSet(false);
   const [emailNew, setEmailNew] = useStateSet('');
   const [emailLoading, setEmailLoading] = useStateSet(false);
@@ -1755,7 +1756,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
               <Hairline style={{ margin: '14px 0' }} />
             </>
           )}
-          <NavRow label="Change password" onTap={() => { setPwMsg(null); setPwCurrent(''); setPwNew(''); setPwConfirm(''); setChangePasswordSheet(true); }} first />
+          <NavRow label="Change password" onTap={() => { setPwMsg(null); setPwCurrent(''); setPwNew(''); setPwConfirm(''); setShowPw(false); setChangePasswordSheet(true); }} first />
           <Hairline style={{ margin: '14px 0' }} />
           <NavRow label="Change email" onTap={() => { setEmailMsg(null); setEmailNew(''); setChangeEmailSheet(true); }} first />
           <div style={{ marginTop: 24 }}>
@@ -1768,22 +1769,28 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       <PasskeySheet open={passkeySheet} onClose={() => setPasskeySheet(false)} />
 
       {/* ══ Change Password Sheet ══ */}
-      <SettingsSheet open={changePasswordSheet} onClose={() => { setChangePasswordSheet(false); setPwCurrent(''); setPwNew(''); setPwConfirm(''); setPwMsg(null); }} title="Change password">
+      <SettingsSheet open={changePasswordSheet} onClose={() => { setChangePasswordSheet(false); setPwCurrent(''); setPwNew(''); setPwConfirm(''); setPwMsg(null); setShowPw(false); }} title="Change password">
         {(() => {
           const iStyle = SETTINGS_INPUT_STYLE;
           return (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginBottom: 8 }}>
               <div>
                 <div className="micro" style={{ marginBottom: 6 }}>CURRENT PASSWORD</div>
-                <input type="password" value={pwCurrent} onChange={e => setPwCurrent(e.target.value)} placeholder="Current password" style={iStyle} autoComplete="current-password" />
+                <div style={{ position: 'relative' }}>
+                  <input type={showPw ? 'text' : 'password'} value={pwCurrent} onChange={e => setPwCurrent(e.target.value)} placeholder="Current password" style={{ ...iStyle, paddingRight: 40 }} autoComplete="current-password" />
+                  <button type="button" onClick={() => setShowPw(v => !v)} tabIndex={-1} aria-label={showPw ? 'Hide passwords' : 'Show passwords'}
+                    style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', padding: 4, cursor: 'pointer', color: showPw ? 'var(--accent)' : UI.inkFaint, display: 'flex', alignItems: 'center', WebkitTapHighlightColor: 'transparent' }}>
+                    <i className={showPw ? 'fa-solid fa-eye-slash' : 'fa-solid fa-eye'} style={{ fontSize: 14 }} />
+                  </button>
+                </div>
               </div>
               <div>
                 <div className="micro" style={{ marginBottom: 6 }}>NEW PASSWORD</div>
-                <input type="password" value={pwNew} onChange={e => setPwNew(e.target.value)} placeholder="Min. 6 characters" style={iStyle} autoComplete="new-password" />
+                <input type={showPw ? 'text' : 'password'} value={pwNew} onChange={e => setPwNew(e.target.value)} placeholder="Min. 6 characters" style={iStyle} autoComplete="new-password" />
               </div>
               <div>
                 <div className="micro" style={{ marginBottom: 6 }}>CONFIRM NEW PASSWORD</div>
-                <input type="password" value={pwConfirm} onChange={e => setPwConfirm(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleChangePassword()} placeholder="Repeat new password" style={iStyle} autoComplete="new-password" />
+                <input type={showPw ? 'text' : 'password'} value={pwConfirm} onChange={e => setPwConfirm(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleChangePassword()} placeholder="Repeat new password" style={iStyle} autoComplete="new-password" />
                 {pwConfirm.length > 0 && pwNew !== pwConfirm && (
                   <div style={{ fontSize: 12, color: UI.danger, fontFamily: UI.fontUi, marginTop: 6 }}>Passwords do not match</div>
                 )}

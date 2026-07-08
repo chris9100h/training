@@ -103,6 +103,7 @@ function LoginScreen() {
   const [error, setError]         = useState('');
   const [resetSent, setResetSent] = useState(false);
   const [swVersion, setSwVersion] = useState('');
+  const [showPw, setShowPw]       = useState(false); // one eye toggles both password + repeat
   const formRef = useRef(null);
 
   useEffect(() => {
@@ -122,7 +123,7 @@ function LoginScreen() {
     return () => form.removeEventListener('input', handler);
   }, []);
 
-  const switchMode = (m) => { setMode(m); setError(''); setPassword(''); setConfirm(''); setResetSent(false); };
+  const switchMode = (m) => { setMode(m); setError(''); setPassword(''); setConfirm(''); setResetSent(false); setShowPw(false); };
 
   const pwMatch = password === confirm;
   const canLogin    = email.trim() && password.length >= 6;
@@ -234,12 +235,13 @@ function LoginScreen() {
               <TextInput value={email} onChange={setEmail} placeholder="you@example.com" autoFocus={isLogin} autoComplete="email" name="email" type="email" />
             </Field>
             <Field label="Password">
-              <TextInput value={password} onChange={setPassword} type="password" placeholder="min. 6 characters"
-                autoComplete={isLogin ? 'current-password' : 'new-password'} name="password" />
+              <TextInput value={password} onChange={setPassword} type={showPw ? 'text' : 'password'} placeholder="min. 6 characters"
+                autoComplete={isLogin ? 'current-password' : 'new-password'} name="password"
+                reveal={showPw} onToggleReveal={() => setShowPw(v => !v)} />
             </Field>
             {!isLogin && (
               <Field label="Repeat password">
-                <TextInput value={confirm} onChange={setConfirm} type="password" placeholder="repeat password"
+                <TextInput value={confirm} onChange={setConfirm} type={showPw ? 'text' : 'password'} placeholder="repeat password"
                   autoComplete="new-password" />
               </Field>
             )}
@@ -358,6 +360,7 @@ function SetPasswordScreen({ onDone, isRecovery }) {
   const [confirm, setConfirm]   = useState('');
   const [loading, setLoading]   = useState(false);
   const [error, setError]       = useState('');
+  const [showPw, setShowPw]     = useState(false); // one eye toggles both password + confirm
 
   const canSubmit = password.length >= 6 && password === confirm;
 
@@ -416,10 +419,11 @@ function SetPasswordScreen({ onDone, isRecovery }) {
             </Field>
           )}
           <Field label="Password">
-            <TextInput value={password} onChange={setPassword} type="password" placeholder="min. 6 characters" autoFocus={isRecovery} />
+            <TextInput value={password} onChange={setPassword} type={showPw ? 'text' : 'password'} placeholder="min. 6 characters" autoFocus={isRecovery}
+              reveal={showPw} onToggleReveal={() => setShowPw(v => !v)} />
           </Field>
           <Field label="Confirm password">
-            <TextInput value={confirm} onChange={setConfirm} type="password" placeholder="repeat password"
+            <TextInput value={confirm} onChange={setConfirm} type={showPw ? 'text' : 'password'} placeholder="repeat password"
               onKeyDown={e => e.key === 'Enter' && submit()} />
           </Field>
           {password.length > 0 && confirm.length > 0 && password !== confirm && (
