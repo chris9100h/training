@@ -2231,7 +2231,7 @@ function build531Plan(state, config) {
   for (const lift of (config.lifts || [])) {
     const mainId = resolve(lift.ex);
     if (!mainId) continue;
-    mainLifts[mainId] = { tm: (lift.tm != null ? lift.tm : null), kind: lift.kind };
+    mainLifts[mainId] = { tm: (lift.tm != null ? lift.tm : null), kind: lift.kind, stall: 0 };
     const items = [{ exId: mainId, sets: 3, reps: 5 }];
     const picks = ((config.assistance && config.assistance[lift.kind]) || []).slice(0, 4);
     for (const aName of picks) {
@@ -2240,9 +2240,16 @@ function build531Plan(state, config) {
     }
     customDays.push({ name: FTO_DAY_NAME[lift.kind] || lift.kind, items });
   }
+  // Seed the TM history with each lift's starting Training Max (cycle 0), so the
+  // progress chart has a first point and every later bump/reset appends to it.
+  const tmHistory = {};
+  for (const exId of Object.keys(mainLifts)) {
+    const t = mainLifts[exId].tm;
+    tmHistory[exId] = (t != null) ? [{ cycle: 0, tm: t, reason: 'start' }] : [];
+  }
   const schedule = buildPlanSkeleton({ name: config.name || '5/3/1', type: 'flex', customDays });
   schedule.program_type = '531';
-  schedule.program_data = { unit, includeDeload, mainLifts };
+  schedule.program_data = { unit, includeDeload, mainLifts, tmHistory };
   return { schedule, newExercises };
 }
 
@@ -2309,19 +2316,60 @@ function compute531CycleBumps(sch, sessions, cycleIdx) {
     const allHit = hits.length > 0 && hits.every(Boolean);
     const oldTm = ml.tm;
     const newTm = (allHit && oldTm != null) ? round531(oldTm + tmBump531(ml.kind, unit), unit) : oldTm;
-    result[exId] = { kind: ml.kind, oldTm, newTm, bumped: !!(allHit && oldTm != null && newTm > oldTm) };
+    result[exId] = { kind: ml.kind, oldTm, newTm, bumped: !!(allHit && oldTm != null && newTm > oldTm), missed: hits.length > 0 && !allHit };
   }
   return result;
 }
 
-// Fold computed bumps back into a program_data object and stamp bumpedCycle so
-// the cycle-end prompt fires exactly once per cycle. Pure.
-function apply531Bumps(programData, bumps, cycleIdx) {
-  const mainLifts = { ...((programData && programData.mainLifts) || {}) };
+// Reset a lift after this many missed cycles in a row (Wendler's stall rule).
+const RESET_531_STALL = 2;
+
+// Fold a completed 5/3/1 cycle into program_data. Per lift (from compute531-
+// CycleBumps): a hit bumps the TM and clears its stall; a miss increments the
+// stall and, once it reaches RESET_531_STALL in a row, resets the TM to 90% of
+// the current one (Wendler's reset) and clears the stall; a lift not trained
+// this cycle is left untouched. Every automatic change appends a tmHistory
+// point (stamped with the just-started cycle), and bumpedCycle is set so the
+// prompt fires once. Pure. Returns { programData, bumped, held, reset }, each
+// list [{ kind, oldTm, newTm }] for the summary.
+function resolve531CycleEnd(pd, bumps, cycleIdx) {
+  const unit = (pd && pd.unit) || 'kg';
+  const nextMain = { ...((pd && pd.mainLifts) || {}) };
+  const nextHist = { ...((pd && pd.tmHistory) || {}) };
+  const bumped = [], held = [], reset = [];
+  const cycleNo = cycleIdx + 1; // the cycle the new TM will be used in
+  const append = (exId, tm, reason) => { nextHist[exId] = [...(nextHist[exId] || []), { cycle: cycleNo, tm, reason }]; };
   for (const exId of Object.keys(bumps || {})) {
-    if (mainLifts[exId]) mainLifts[exId] = { ...mainLifts[exId], tm: bumps[exId].newTm };
+    const b = bumps[exId];
+    const ml = nextMain[exId] || {};
+    if (b.bumped) {
+      nextMain[exId] = { ...ml, tm: b.newTm, stall: 0 };
+      append(exId, b.newTm, 'bump');
+      bumped.push({ kind: b.kind, oldTm: b.oldTm, newTm: b.newTm });
+    } else if (b.missed) {
+      const stall = (ml.stall || 0) + 1;
+      if (stall >= RESET_531_STALL && b.oldTm != null) {
+        const rtm = round531(b.oldTm * 0.9, unit);
+        nextMain[exId] = { ...ml, tm: rtm, stall: 0 };
+        append(exId, rtm, 'reset');
+        reset.push({ kind: b.kind, oldTm: b.oldTm, newTm: rtm });
+      } else {
+        nextMain[exId] = { ...ml, stall };
+        held.push({ kind: b.kind, oldTm: b.oldTm, newTm: b.oldTm });
+      }
+    }
   }
-  return { ...(programData || {}), mainLifts, bumpedCycle: cycleIdx };
+  return { programData: { ...(pd || {}), mainLifts: nextMain, tmHistory: nextHist, bumpedCycle: cycleIdx }, bumped, held, reset };
+}
+
+// From an AMRAP-implied 1RM: the "fair" Training Max (90% of it) and whether
+// that sits at least one normal bump above the current TM — i.e. the top set
+// says you could carry more than the plan is handing you. { tm, higher }.
+function suggest531Tm(est1rm, currentTm, kind, unit) {
+  if (!est1rm || est1rm <= 0) return { tm: null, higher: false };
+  const fair = tmFrom531(est1rm, unit);
+  const higher = fair != null && currentTm != null && fair >= currentTm + tmBump531(kind, unit);
+  return { tm: fair, higher };
 }
 
 // Whether a mesocycle's RIR taper is active. Default true: only an explicit
@@ -4217,7 +4265,7 @@ window.LB = {
   signIn, signUp, signOut, signInWithPasskey, registerPasskey, listPasskeys, deletePasskey, resetPassword, deleteAllData, exportBackup, importFromBackup, validateBackup,
   loadFromSupabase, syncStore, mergeSessions, withCarriedWindowEntries, historyWindowCutoffISO,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
-  uid, todayISO, fmtISO, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, buildPlanSkeleton, instantiateProgram, is531Plan, round531, tmFrom531, tmBump531, weeks531, week531, fiveThreeOneSets, build531Plan, current531Week, current531Cycle, compute531CycleBumps, apply531Bumps, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, realignCycleForToday, todayCycleStripIndex,
+  uid, todayISO, fmtISO, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, buildPlanSkeleton, instantiateProgram, is531Plan, round531, tmFrom531, tmBump531, weeks531, week531, fiveThreeOneSets, build531Plan, current531Week, current531Cycle, compute531CycleBumps, resolve531CycleEnd, suggest531Tm, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, realignCycleForToday, todayCycleStripIndex,
   effReps, e1rm, isImprovement, isDecline, bestE1rmForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, latestBodyweight, exerciseLogMode, shouldPullBodyweight, systemExerciseToRow, inferCurrentExIdx, calcBlended,
   refreshExerciseBests, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries,
   computeNextReminderAt,

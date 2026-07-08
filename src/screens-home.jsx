@@ -1701,17 +1701,20 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     if (doneCycle < 0 || doneCycle <= (pd.bumpedCycle ?? -1)) return;
     cycle531Checked.current = true;
     const bumps = LB.compute531CycleBumps(sch, store.sessions, doneCycle);
-    const nextPd = LB.apply531Bumps(pd, bumps, doneCycle);
+    const outcome = LB.resolve531CycleEnd(pd, bumps, doneCycle);
+    const nextPd = outcome.programData;
     const schId = sch.id;
     setStore(s => ({ ...s, schedules: s.schedules.map(x => x.id === schId ? { ...x, program_data: nextPd } : x) }));
     (async () => {
       const u = pd.unit || 'kg';
       const label = { squat: 'Squat', bench: 'Bench', deadlift: 'Deadlift', ohp: 'Press' };
-      const up = Object.values(bumps).filter(b => b.bumped);
-      const held = Object.values(bumps).length - up.length;
-      const summary = up.length
-        ? `Cycle ${doneCycle + 1} done. Training Max up:\n${up.map(b => `${label[b.kind] || b.kind} ${b.oldTm} → ${b.newTm}${u}`).join('\n')}${held ? `\n${held} held (missed the top-set reps).` : ''}`
-        : `Cycle ${doneCycle + 1} done. TMs held this time (missed the top-set reps).`;
+      const ln = (b) => `${label[b.kind] || b.kind} ${b.oldTm} → ${b.newTm}${u}`;
+      const parts = [];
+      if (outcome.bumped.length) parts.push(`Training Max up:\n${outcome.bumped.map(ln).join('\n')}`);
+      if (outcome.reset.length) parts.push(`Stalled twice, Training Max reset to 90%:\n${outcome.reset.map(ln).join('\n')}`);
+      if (outcome.held.length) parts.push(`${outcome.held.length} held (missed the top-set reps).`);
+      const body = parts.length ? parts.join('\n\n') : 'TMs held this time (missed the top-set reps).';
+      const summary = `Cycle ${doneCycle + 1} done.\n\n${body}`;
       if (pd.includeDeload === false) {
         const yes = await confirm(`${summary}\n\nInsert a deload week before the next cycle?`,
           { title: '5/3/1 cycle complete', ok: 'Deload week', cancel: 'Skip', preventBackdropClose: true });

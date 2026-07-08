@@ -4391,6 +4391,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             const week = deloadActive ? 4 : (LB.current531Week(s531, store.sessions) || 1);
             const u = s531.program_data.unit || 'kg';
             const wave = LB.fiveThreeOneSets(main.tm, week, u);
+            // Once the AMRAP top set is logged, estimate the 1RM it implies and,
+            // if that points to a meaningfully higher Training Max, nudge.
+            const topDone = (entry.sets || []).find(s => s.amrap && s.done && s.kg != null && s.reps != null);
+            const est = topDone ? LB.e1rm(topDone.kg, topDone.reps) : null;
+            const sugg = est ? LB.suggest531Tm(est, main.tm, main.kind, u) : null;
             return (
               <div style={{ marginTop: 10, padding: '10px 12px', background: 'rgba(var(--accent-rgb),0.06)', border: `1px solid ${UI.goldSoft}`, borderRadius: 6 }}>
                 <div className="micro-gold" style={{ marginBottom: 7 }}>5/3/1 · {deloadActive ? 'DELOAD' : `WEEK ${week}${week === 4 ? ' · DELOAD' : ''}`} · TM {main.tm}{u}</div>
@@ -4401,6 +4406,18 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                     </span>
                   ))}
                 </div>
+                {est != null && (
+                  <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${UI.hairStrong}` }}>
+                    <div className="num" style={{ fontSize: 12, color: UI.inkSoft }}>
+                      Top set {topDone.kg}<span style={{ color: UI.inkFaint }}>×</span>{topDone.reps} → est. 1RM <span style={{ color: UI.gold }}>~{LB.round531(est, u)}{u}</span>
+                    </div>
+                    {sugg?.higher && (
+                      <div className="micro-gold" style={{ marginTop: 5, letterSpacing: '0.04em', lineHeight: 1.45 }}>
+                        That points to a Training Max near {sugg.tm}{u}, you're stronger than this cycle assumes.
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             );
           })()}

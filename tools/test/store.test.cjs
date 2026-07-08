@@ -1244,31 +1244,80 @@ async function testAsync(name, fn) {
     assert.strictEqual(LB.current531Week({ program_type: null }, mk(4)), null);
   });
 
-  test('compute531CycleBumps / apply531Bumps: bump only when AMRAP hit min reps weeks 1-3', () => {
+  test('compute531CycleBumps flags hit/miss; resolve531CycleEnd bumps, stalls, resets, logs history', () => {
     const mkSch = (lifts) => ({ id: 'p', program_type: '531', days: lifts.map(() => ({})),
-      program_data: { unit: 'kg', includeDeload: false, mainLifts: Object.fromEntries(lifts.map(m => [m.id, { tm: m.tm, kind: m.kind }])) } });
+      program_data: { unit: 'kg', includeDeload: false,
+        mainLifts: Object.fromEntries(lifts.map(m => [m.id, { tm: m.tm, kind: m.kind, stall: m.stall || 0 }])),
+        tmHistory: Object.fromEntries(lifts.map(m => [m.id, [{ cycle: 0, tm: m.tm, reason: 'start' }]])) } });
     // one session: warmup + two straight sets + a final AMRAP set at topReps
     const mkSess = (exId, i, topReps) => ({ id: exId + '_' + i, ended: '2026-01-' + String(i + 1).padStart(2, '0') + 'T10:00:00', scheduleId: 'p',
       entries: [{ exId, sets: [{ kg: 40, reps: 5, warmup: true }, { kg: 60, reps: 5 }, { kg: 70, reps: 4 }, { kg: 80, reps: topReps }] }] });
     // single lift, dayCount 1 -> sessions 0,1,2 are weeks 1,2,3 of cycle 0
     const sq = mkSch([{ id: 'sq', tm: 100, kind: 'squat' }]);
-    let r = LB.compute531CycleBumps(sq, [mkSess('sq', 0, 5), mkSess('sq', 1, 3), mkSess('sq', 2, 1)], 0);
+    const hitCycle = [mkSess('sq', 0, 5), mkSess('sq', 1, 3), mkSess('sq', 2, 1)];
+    const missCycle = [mkSess('sq', 0, 5), mkSess('sq', 1, 3), mkSess('sq', 2, 0)];
+
+    // compute: hit -> bumped, miss -> missed, no data -> neither
+    let r = LB.compute531CycleBumps(sq, hitCycle, 0);
     assert.strictEqual(r.sq.newTm, 105);           // squat lower body: +5 kg
     assert.strictEqual(r.sq.bumped, true);
-    // miss week 3 (0 < 1): hold
-    r = LB.compute531CycleBumps(sq, [mkSess('sq', 0, 5), mkSess('sq', 1, 3), mkSess('sq', 2, 0)], 0);
-    assert.strictEqual(r.sq.newTm, 100);
+    assert.strictEqual(r.sq.missed, false);
+    r = LB.compute531CycleBumps(sq, missCycle, 0);
     assert.strictEqual(r.sq.bumped, false);
+    assert.strictEqual(r.sq.missed, true);
+    const noData = LB.compute531CycleBumps(sq, [], 0).sq;
+    assert.strictEqual(noData.bumped, false);
+    assert.strictEqual(noData.missed, false);
     // bench upper body: +2.5 kg
     const bp = mkSch([{ id: 'bp', tm: 80, kind: 'bench' }]);
-    r = LB.compute531CycleBumps(bp, [mkSess('bp', 0, 5), mkSess('bp', 1, 3), mkSess('bp', 2, 1)], 0);
-    assert.strictEqual(r.bp.newTm, 82.5);
-    // apply folds the new TMs in and stamps bumpedCycle
-    const pd = LB.apply531Bumps(sq.program_data, LB.compute531CycleBumps(sq, [mkSess('sq', 0, 5), mkSess('sq', 1, 3), mkSess('sq', 2, 1)], 0), 0);
-    assert.strictEqual(pd.mainLifts.sq.tm, 105);
-    assert.strictEqual(pd.bumpedCycle, 0);
-    // no data for the cycle -> no bump (safe default)
-    assert.strictEqual(LB.compute531CycleBumps(sq, [], 0).sq.bumped, false);
+    assert.strictEqual(LB.compute531CycleBumps(bp, [mkSess('bp', 0, 5), mkSess('bp', 1, 3), mkSess('bp', 2, 1)], 0).bp.newTm, 82.5);
+
+    // resolve: a hit bumps, clears stall, appends a 'bump' point, stamps bumpedCycle
+    let res = LB.resolve531CycleEnd(sq.program_data, LB.compute531CycleBumps(sq, hitCycle, 0), 0);
+    assert.strictEqual(res.programData.mainLifts.sq.tm, 105);
+    assert.strictEqual(res.programData.mainLifts.sq.stall, 0);
+    assert.strictEqual(res.programData.bumpedCycle, 0);
+    assert.strictEqual(res.bumped.length, 1);
+    assert.strictEqual(res.programData.tmHistory.sq.map(h => h.reason).join(','), 'start,bump');
+    assert.strictEqual(res.programData.tmHistory.sq[1].tm, 105);
+
+    // resolve: first miss holds, stall -> 1, no new history point
+    res = LB.resolve531CycleEnd(sq.program_data, LB.compute531CycleBumps(sq, missCycle, 0), 0);
+    assert.strictEqual(res.programData.mainLifts.sq.tm, 100);
+    assert.strictEqual(res.programData.mainLifts.sq.stall, 1);
+    assert.strictEqual(res.held.length, 1);
+    assert.strictEqual(res.reset.length, 0);
+    assert.strictEqual(res.programData.tmHistory.sq.length, 1);
+
+    // resolve: second miss in a row (stall already 1) -> reset TM to 90%, stall 0, 'reset' point
+    const stalled = mkSch([{ id: 'sq', tm: 100, kind: 'squat', stall: 1 }]);
+    res = LB.resolve531CycleEnd(stalled.program_data, LB.compute531CycleBumps(stalled, missCycle, 0), 0);
+    assert.strictEqual(res.programData.mainLifts.sq.tm, 90);   // round531(100 * 0.9) = 90
+    assert.strictEqual(res.programData.mainLifts.sq.stall, 0);
+    assert.strictEqual(res.reset.length, 1);
+    assert.strictEqual(res.programData.tmHistory.sq.map(h => h.reason).join(','), 'start,reset');
+
+    // resolve: lifts with no data this cycle are left untouched (no stall, no history)
+    const two = mkSch([{ id: 'sq', tm: 100, kind: 'squat' }, { id: 'bp', tm: 80, kind: 'bench' }]);
+    res = LB.resolve531CycleEnd(two.program_data, LB.compute531CycleBumps(two, [], 0), 0);
+    assert.strictEqual(res.programData.mainLifts.bp.tm, 80);
+    assert.strictEqual(res.programData.mainLifts.bp.stall || 0, 0);
+    assert.strictEqual((res.programData.tmHistory.bp || []).length, 1);
+    assert.strictEqual(res.bumped.length + res.held.length + res.reset.length, 0);
+  });
+
+  test('suggest531Tm: fair TM from an AMRAP-implied 1RM, flags when it beats the current TM', () => {
+    // 102 x 12 -> est 1RM 142.8 -> fair TM 90% = 128.52 -> round 127.5, above 120 + 2.5
+    let s = LB.suggest531Tm(LB.e1rm(102, 12), 120, 'bench', 'kg');
+    assert.strictEqual(s.tm, 127.5);
+    assert.strictEqual(s.higher, true);
+    // 102 x 8 -> est 1RM 129.2 -> fair ~117.5, not a full increment above 120
+    s = LB.suggest531Tm(LB.e1rm(102, 8), 120, 'bench', 'kg');
+    assert.strictEqual(s.higher, false);
+    // no estimate -> null / not higher
+    const none = LB.suggest531Tm(0, 120, 'bench', 'kg');
+    assert.strictEqual(none.tm, null);
+    assert.strictEqual(none.higher, false);
   });
 
   test('build531Plan: catalog names resolve, 4 days, program_data stamped, assistance capped', () => {
@@ -1290,6 +1339,16 @@ async function testAsync(name, fn) {
     const ml = schedule.program_data.mainLifts;
     assert.strictEqual(Object.keys(ml).length, 4);
     assert.strictEqual(Object.values(ml).map(v => v.kind).sort().join(','), 'bench,deadlift,ohp,squat');
+    // each lift starts un-stalled with a seeded TM-history point at cycle 0
+    const th = schedule.program_data.tmHistory;
+    assert.strictEqual(Object.keys(th).length, 4, 'tmHistory seeded per lift');
+    for (const exId of Object.keys(ml)) {
+      assert.strictEqual(ml[exId].stall, 0, 'lift seeded with stall 0');
+      assert.strictEqual(th[exId].length, 1, 'one seed point per lift');
+      assert.strictEqual(th[exId][0].reason, 'start');
+      assert.strictEqual(th[exId][0].tm, ml[exId].tm);
+      assert.strictEqual(th[exId][0].cycle, 0);
+    }
     for (const d of schedule.days) for (const it of d.items) assert.ok(!String(it.exId).startsWith('sys_'), 'no sys_ id in plan');
     for (const exId of Object.keys(ml)) assert.ok(!exId.startsWith('sys_'), 'no sys_ id in mainLifts');
     for (const d of schedule.days) {

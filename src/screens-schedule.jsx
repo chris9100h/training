@@ -166,6 +166,9 @@ function PlanScreen({ store, setStore, go, userId, openNewPlan }) {
           // Current plan revision (newest version = highest number, like the editor's
           // version bar). Only shown once a plan has actually been re-versioned (≥2).
           const verCount = s.versions?.length || 0;
+          const is531 = LB.is531Plan(s);
+          const cyc531 = is531 ? LB.current531Cycle(s, store.sessions) + 1 : 0;
+          const wk531 = is531 ? (LB.current531Week(s, store.sessions) || 1) : 0;
           return isActive ? (
             <BracketFrame key={s.id} gold onClick={() => go({ name: 'plan-view', scheduleId: s.id, fromPlan: true })} style={{ cursor: 'pointer', overflow: 'hidden' }}>
               {s.mesocycle_weeks && (
@@ -193,6 +196,11 @@ function PlanScreen({ store, setStore, go, userId, openNewPlan }) {
                   {!mesoPending && mesoCompletions > 0 && (
                     <span style={{ fontFamily: UI.fontNum, fontSize: 10, fontWeight: 700, color: UI.gold, background: 'rgba(var(--accent-rgb),0.15)', borderRadius: 4, padding: '2px 6px', letterSpacing: '0.05em' }}>
                       MESO {mesoCompletions + 1}
+                    </span>
+                  )}
+                  {is531 && (
+                    <span style={{ fontFamily: UI.fontNum, fontSize: 10, fontWeight: 700, color: UI.gold, background: 'rgba(var(--accent-rgb),0.15)', borderRadius: 4, padding: '2px 6px', letterSpacing: '0.05em' }}>
+                      C{cyc531} · W{wk531}
                     </span>
                   )}
                   {verCount >= 2 && (
@@ -233,6 +241,11 @@ function PlanScreen({ store, setStore, go, userId, openNewPlan }) {
                   {!mesoPending && mesoCompletions > 0 && (
                     <span style={{ fontFamily: UI.fontNum, fontSize: 10, fontWeight: 700, color: UI.inkSoft, background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 4, padding: '2px 6px', letterSpacing: '0.05em' }}>
                       MESO {mesoCompletions + 1}
+                    </span>
+                  )}
+                  {is531 && (
+                    <span style={{ fontFamily: UI.fontNum, fontSize: 10, fontWeight: 700, color: UI.inkSoft, background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 4, padding: '2px 6px', letterSpacing: '0.05em' }}>
+                      C{cyc531} · W{wk531}
                     </span>
                   )}
                   {verCount >= 2 && (
@@ -290,6 +303,81 @@ function PlanScreen({ store, setStore, go, userId, openNewPlan }) {
       </div>
       {confirmEl}
     </Screen>
+  );
+}
+
+// Tiny area+line chart of a lift's Training Max across cycles (app chart style).
+// Reset points (a Wendler 90% drop) are marked in the danger colour so a dip
+// reads at a glance. Needs >= 2 points.
+function TmChart({ points }) {
+  const vals = points.map(p => p.tm).filter(v => v != null);
+  if (vals.length < 2) return null;
+  const W = 260, H = 56, padX = 6, padY = 9;
+  const min = Math.min(...vals), max = Math.max(...vals);
+  const range = (max - min) || 1;
+  const n = vals.length;
+  const xOf = (i) => padX + (i / (n - 1)) * (W - 2 * padX);
+  const yOf = (v) => padY + (1 - (v - min) / range) * (H - 2 * padY);
+  const base = H - padY;
+  const pts = vals.map((v, i) => `${xOf(i).toFixed(1)},${yOf(v).toFixed(1)}`).join(' ');
+  return (
+    <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display: 'block', overflow: 'visible' }}>
+      <polygon points={`${xOf(0).toFixed(1)},${base} ${pts} ${xOf(n - 1).toFixed(1)},${base}`} fill="rgba(var(--accent-rgb),0.12)" />
+      <polyline points={pts} fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+      {vals.map((v, i) => (
+        <circle key={i} cx={xOf(i).toFixed(1)} cy={yOf(v).toFixed(1)} r={i === n - 1 ? 3 : 2}
+          fill={points[i]?.reason === 'reset' ? 'rgba(var(--danger-rgb),0.9)' : 'var(--accent)'} />
+      ))}
+    </svg>
+  );
+}
+
+// Read-only 5/3/1 progress: current cycle/week plus each main lift's Training
+// Max and how it has moved across cycles. Renders nothing for non-5/3/1 plans.
+function FiveThreeOneProgress({ sch, store }) {
+  if (!LB.is531Plan(sch)) return null;
+  const pd = sch.program_data || {};
+  const ml = pd.mainLifts || {};
+  const hist = pd.tmHistory || {};
+  const unit = pd.unit || 'kg';
+  const exIds = Object.keys(ml);
+  if (!exIds.length) return null;
+  const cycle = LB.current531Cycle(sch, store.sessions) + 1;
+  const week = LB.current531Week(sch, store.sessions) || 1;
+  const ORDER = { squat: 0, bench: 1, deadlift: 2, ohp: 3 };
+  exIds.sort((a, b) => (ORDER[ml[a].kind] ?? 9) - (ORDER[ml[b].kind] ?? 9));
+  return (
+    <div style={{ background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 8, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
+        <span className="label" style={{ marginBottom: 0, color: UI.gold }}>5/3/1 Progress</span>
+        <span className="num" style={{ fontSize: 12, color: UI.inkSoft }}>Cycle {cycle} · Week {week}</span>
+      </div>
+      {exIds.map(exId => {
+        const name = LB.findExercise(store, exId)?.name || 'Lift';
+        const pts = hist[exId] || [];
+        const tm = ml[exId].tm;
+        const start = pts.length ? pts[0].tm : null;
+        const delta = (start != null && tm != null) ? tm - start : null;
+        return (
+          <div key={exId}>
+            <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 5 }}>
+              <span style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.inkSoft, textTransform: 'uppercase', letterSpacing: '0.02em' }}>{name}</span>
+              <span className="num" style={{ fontSize: 13, color: UI.ink }}>
+                {tm != null ? `${tm}${unit}` : '—'}
+                {delta != null && delta !== 0 && (
+                  <span style={{ fontSize: 10, color: delta > 0 ? UI.gold : 'rgba(var(--danger-rgb),0.85)', marginLeft: 6 }}>
+                    {delta > 0 ? '↑' : '↓'}{Math.abs(delta)}
+                  </span>
+                )}
+              </span>
+            </div>
+            {pts.length >= 2
+              ? <TmChart points={pts} />
+              : <div className="micro" style={{ color: UI.inkFaint }}>No cycles completed yet.</div>}
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
@@ -824,6 +912,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
 
           {/* Right: day content */}
           <div style={{ flex: 1, minWidth: 0, overflowY: 'auto', overflowX: 'hidden', padding: '20px 32px 24px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <FiveThreeOneProgress sch={sch} store={store} />
             {dayHeader}
             {exerciseList}
           </div>
@@ -864,6 +953,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
           </div>
 
           <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden', padding: '0 22px 20px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <FiveThreeOneProgress sch={sch} store={store} />
             {dayHeader}
             {exerciseList}
           </div>
@@ -1726,11 +1816,23 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
               const ml = draft.program_data.mainLifts[exId];
               const name531 = LB.findExercise(store, exId)?.name || 'Lift';
               const u531 = draft.program_data.unit || 'kg';
+              // Training Max the user's logged history now implies (90% of best e1rm).
+              const recalc531 = LB.tmFrom531(LB.bestE1rmForExercise(store, exId), u531);
+              const setTm = (v) => setDraft(d => ({ ...d, program_data: { ...d.program_data, mainLifts: { ...d.program_data.mainLifts, [exId]: { ...d.program_data.mainLifts[exId], tm: v } } } }));
               return (
                 <div key={exId} style={{ background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 4, padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 8 }}>
                   <span style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.inkSoft, letterSpacing: '0.02em', textTransform: 'uppercase' }}>{name531}</span>
-                  <TmField value={ml.tm} step={u531 === 'lbs' ? 5 : 2.5} suffix={u531}
-                    onChange={v => setDraft(d => ({ ...d, program_data: { ...d.program_data, mainLifts: { ...d.program_data.mainLifts, [exId]: { ...d.program_data.mainLifts[exId], tm: v } } } }))} />
+                  <TmField value={ml.tm} step={u531 === 'lbs' ? 5 : 2.5} suffix={u531} onChange={setTm} />
+                  {recalc531 != null && recalc531 !== ml.tm && (
+                    <button onClick={() => setTm(recalc531)} style={{
+                      alignSelf: 'center', background: 'none', border: 'none', cursor: 'pointer',
+                      color: UI.gold, fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.04em',
+                      padding: '2px 4px', display: 'flex', alignItems: 'center', gap: 6, WebkitTapHighlightColor: 'transparent',
+                    }}>
+                      <i className="fa-solid fa-arrow-rotate-left" style={{ fontSize: 10 }} />
+                      Set from history · {recalc531}{u531}
+                    </button>
+                  )}
                 </div>
               );
             })}
