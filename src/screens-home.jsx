@@ -1714,19 +1714,46 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     (async () => {
       const u = pd.unit || 'kg';
       const label = { squat: 'Squat', bench: 'Bench', deadlift: 'Deadlift', ohp: 'Press' };
-      const ln = (b) => `${label[b.kind] || b.kind} ${b.oldTm} → ${b.newTm}${u}`;
-      const parts = [];
-      if (outcome.bumped.length) parts.push(`Training Max up:\n${outcome.bumped.map(ln).join('\n')}`);
-      if (outcome.reset.length) parts.push(`Stalled twice, Training Max reset to 90%:\n${outcome.reset.map(ln).join('\n')}`);
-      if (outcome.held.length) parts.push(`${outcome.held.length} held (missed the top-set reps).`);
-      const body = parts.length ? parts.join('\n\n') : 'TMs held this time (missed the top-set reps).';
-      const summary = `Cycle ${doneCycle + 1} done.\n\n${body}`;
+      const cycleNo = doneCycle + 1;
+      // One lift per row: name, old → new (new bold, up in gold / reset in danger),
+      // and a gain badge, a proper "you got stronger" moment, not a run-on line.
+      const line = (b, tone, key) => (
+        <div key={key} style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 14, padding: '8px 2px', borderTop: `1px solid ${UI.hair}` }}>
+          <span style={{ fontFamily: UI.fontUi, fontSize: 13, fontWeight: 700, color: UI.inkSoft, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{label[b.kind] || b.kind}</span>
+          <span className="num" style={{ fontSize: 15, whiteSpace: 'nowrap' }}>
+            <span style={{ color: UI.inkFaint }}>{b.oldTm}</span>
+            <span style={{ color: UI.inkFaint, margin: '0 6px' }}>→</span>
+            <span style={{ color: tone === 'reset' ? 'rgba(var(--danger-rgb),0.9)' : tone === 'up' ? 'var(--accent)' : UI.inkSoft, fontWeight: 700 }}>{b.newTm}{u}</span>
+            {tone === 'up' && <span style={{ color: 'var(--accent)', marginLeft: 8, fontSize: 12, fontWeight: 700 }}>↑{Math.round((b.newTm - b.oldTm) * 10) / 10}</span>}
+          </span>
+        </div>
+      );
+      const gained = outcome.bumped.length;
+      const header = gained
+        ? `💪 You got stronger: ${gained} lift${gained > 1 ? 's' : ''} up`
+        : outcome.reset.length ? `Reset and reload, back to it` : `Cycle ${cycleNo} in the books`;
+      const body = (
+        <div style={{ textAlign: 'left' }}>
+          <div style={{ textAlign: 'center', fontFamily: UI.fontDisplay, fontSize: 17, fontWeight: 700, color: UI.gold, letterSpacing: '0.02em', marginBottom: 4, textTransform: 'uppercase' }}>Cycle {cycleNo} conquered 🏆</div>
+          <div style={{ textAlign: 'center', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, color: UI.inkSoft, letterSpacing: '0.04em', marginBottom: 16 }}>{header}</div>
+          {outcome.bumped.map((b, i) => line(b, 'up', 'b' + i))}
+          {outcome.reset.map((b, i) => line(b, 'reset', 'r' + i))}
+          {outcome.held.map((b, i) => line(b, 'hold', 'h' + i))}
+          {outcome.reset.length > 0 && <div style={{ fontSize: 11, color: 'rgba(var(--danger-rgb),0.85)', marginTop: 12, textAlign: 'center', lineHeight: 1.45 }}>Stalled twice, Training Max reset to 90% to build back up.</div>}
+          {outcome.held.length > 0 && !outcome.reset.length && !gained && <div style={{ fontSize: 11, color: UI.inkFaint, marginTop: 12, textAlign: 'center' }}>Held this time, missed the top-set reps. Get them next round.</div>}
+        </div>
+      );
       if (pd.includeDeload === false) {
-        const yes = await confirm(`${summary}\n\nInsert a deload week before the next cycle?`,
-          { title: '5/3/1 cycle complete', ok: 'Deload week', cancel: 'Skip', preventBackdropClose: true });
+        const msg = (
+          <div>
+            {body}
+            <div style={{ fontSize: 13, color: UI.inkSoft, marginTop: 18, textAlign: 'center', lineHeight: 1.5 }}>Take a deload week before the next cycle?</div>
+          </div>
+        );
+        const yes = await confirm(msg, { title: '5/3/1 cycle complete', ok: 'Deload week', cancel: 'Skip', preventBackdropClose: true });
         if (yes) { try { await LB.startDeload(userId, store, setStore, new Date().toISOString()); } catch (_) {} }
       } else {
-        await confirm(summary, { title: '5/3/1 cycle complete', ok: 'Got it', cancel: null });
+        await confirm(body, { title: '5/3/1 cycle complete', ok: 'Got it', cancel: null });
       }
     })();
   }, [store?.sessions, sch?.id, store?.statusMode, store?.inProgress]);

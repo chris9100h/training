@@ -1010,7 +1010,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const PROGRESSION_NAV_DELAY_MS = 1600;
 
   // A 5/3/1 built-in deload week (week 4, 40/50/60% off the TM) is a normal
-  // logged session — not an app deload (statusMode) and not session.isDeload —
+  // logged session (not an app deload via statusMode, not session.isDeload),
   // but its loads are intentionally light. So it must count as a deload for the
   // regression flash and the low-weight outlier guard, or both fire falsely.
   const is531DeloadSession = (() => {
