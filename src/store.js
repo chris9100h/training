@@ -1676,7 +1676,12 @@ function entryVolume(entry, ended) {
     return st.done;
   }).reduce((s, st) => {
     const reps = effReps(st) ?? 0;
-    return s + (+st.kg || 0) * reps;
+    // Negative load only occurs on assisted exercises (machine/band assistance
+    // stored as negative kg). Assistance is not lifted weight, so it adds no
+    // volume: clamp to 0. A graduated assisted set that crossed into real added
+    // weight (positive kg) counts normally.
+    const kg = +st.kg;
+    return s + (kg > 0 ? kg : 0) * reps;
   }, 0);
 }
 function totalVolume(session, exercises) {
@@ -1758,6 +1763,16 @@ function exerciseLogMode(ex) {
   return ex?.no_weight_reps ? 'reps' : 'weight';
 }
 
+// An "assisted" exercise (assisted dip / pull-up / chin-up) stores the machine
+// or band assistance as a NEGATIVE load: less assistance is a higher (less
+// negative) kg, so the sign-agnostic isImprovement/isDecline read progress
+// correctly with no inversion. The load can graduate past zero into real added
+// weight. "Best" for assisted is the highest kg (least assistance), not an
+// Epley e1RM, and assistance contributes no volume (see entryVolume).
+function isAssisted(ex) {
+  return ex?.movement_type === 'assisted';
+}
+
 // Should a set's weight be pre-filled from the user's logged bodyweight? Only for
 // bodyweight-equipment exercises that explicitly opted in (pull_bodyweight). The
 // caller still has to have a logged weight (latestBodyweight != null) for it to
@@ -1820,7 +1835,10 @@ function buildSeedSets(it, last, suggestion, isUni, store, bodyweightKg = null, 
   const deloadActive = deloadOverride != null
     ? deloadOverride === true
     : (typeof window !== 'undefined' && window.__DELOAD === true);
-  const deload = deloadActive && bodyweightKg == null;
+  // Assisted exercises store a negative load, so halving it would REDUCE the
+  // assistance (harder), the opposite of a deload. Leave assisted loads as-is.
+  const isAssistedEx = isAssisted((store?.exercises || []).find(e => e.id === it.exId));
+  const deload = deloadActive && bodyweightKg == null && !isAssistedEx;
   const dl = (kg) => (deload && kg != null) ? Math.round((kg * 0.5) / 2.5) * 2.5 : kg;
   return Array.from({ length: it.sets }).map((_, i) => {
     const prev = workingSets[i];
@@ -4350,7 +4368,7 @@ window.LB = {
   loadFromSupabase, syncStore, mergeSessions, withCarriedWindowEntries, historyWindowCutoffISO,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
   uid, todayISO, fmtISO, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, healScheduleWeekdays, buildPlanSkeleton, instantiateProgram, is531Plan, round531, tmFrom531, tmBump531, weeks531, week531, fiveThreeOneSets, build531Plan, current531Week, current531Cycle, compute531CycleBumps, resolve531CycleEnd, suggest531Tm, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, realignCycleForToday, todayCycleStripIndex,
-  effReps, fmtDuration, e1rm, isImprovement, isDecline, bestE1rmForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, buildTimeSeedSets, latestBodyweight, exerciseLogMode, shouldPullBodyweight, systemExerciseToRow, inferCurrentExIdx, calcBlended,
+  effReps, fmtDuration, e1rm, isImprovement, isDecline, bestE1rmForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, buildTimeSeedSets, latestBodyweight, exerciseLogMode, isAssisted, shouldPullBodyweight, systemExerciseToRow, inferCurrentExIdx, calcBlended,
   refreshExerciseBests, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries,
   computeNextReminderAt,
   cancelPushover, adminSendEmail,

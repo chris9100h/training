@@ -1460,6 +1460,29 @@ async function testAsync(name, fn) {
     assert.strictEqual(LB.doneSetCount(mixed), 1, 'only the working logged time set counts');
   });
 
+  test('assisted sets: negative load adds no volume, still counts as done; graduated positive counts', () => {
+    assert.strictEqual(LB.isAssisted({ movement_type: 'assisted' }), true);
+    assert.strictEqual(LB.isAssisted({ movement_type: 'bilateral' }), false);
+    assert.strictEqual(LB.isAssisted({}), false);
+    // assisted dips: assistance stored negative, no volume, but the sets are done
+    const ended = { ended: '2026-01-01', entries: [{ exId: 'ad', sets: [
+      { kg: -40, reps: 8, done: true }, { kg: -35, reps: 6, done: true },
+    ] }] };
+    assert.strictEqual(LB.totalVolume(ended, []), 0, 'negative assistance adds no volume');
+    assert.strictEqual(LB.doneSetCount(ended), 2, 'both assisted sets count as done');
+    // less assistance (-35) beats more (-40): improvement, no false regression
+    const prev = { kg: -40, reps: 8, done: true };
+    const curr = { kg: -35, reps: 8, done: true };
+    assert.strictEqual(LB.isImprovement(curr, prev), true, 'less assistance is an improvement');
+    assert.strictEqual(LB.isDecline(curr, prev), false, 'less assistance is not a decline');
+    assert.strictEqual(LB.isDecline({ kg: -45, reps: 8, done: true }, prev), true, 'more assistance is a decline');
+    // graduated past zero into real added weight: that positive load counts as volume
+    const grad = { ended: '2026-01-01', entries: [{ exId: 'ad', sets: [
+      { kg: -5, reps: 8, done: true }, { kg: 10, reps: 5, done: true },
+    ] }] };
+    assert.strictEqual(LB.totalVolume(grad, []), 50, 'only the positive graduated set adds volume (10x5)');
+  });
+
   test('time-based history: recent-session lookup finds time-only sessions and carries timeSec', () => {
     const state = { sessions: [
       { id: 's1', ended: '2026-01-01T10:00:00', dayId: 'd1', entries: [{ exId: 'jr', sets: [

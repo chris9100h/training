@@ -2204,7 +2204,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     // a weighted movement at all) or a time-based first exercise (a kg ramp on
     // a countdown exercise would just prepend three dead weight rows): offering
     // "3 sets · Treadmill" with every preview weight blank made no sense.
-    if (firstEx?.equipment === 'bodyweight' || firstEx?.movement_type === 'cardio' || LB.exerciseLogMode(firstEx) === 'time') {
+    if (firstEx?.equipment === 'bodyweight' || firstEx?.movement_type === 'cardio' || LB.exerciseLogMode(firstEx) === 'time' || LB.isAssisted(firstEx)) {
       const session = {
         id: LB.uid(), scheduleId: sch.id, dayId: activeDay.id, dayName: activeDay.name,
         date: sessionDateISO, startedAt: new Date().toISOString(), entries, currentExIdx: 0, cyclePos,
@@ -2425,7 +2425,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     const extra = (!isTodaysDay || alreadyDoneToday) ? { isBonus: true } : {};
     const firstEx = LB.findExercise(store, day.items?.[0]?.exId);
     loggingRef.current = false;
-    if (firstEx?.equipment === 'bodyweight' || firstEx?.movement_type === 'cardio' || LB.exerciseLogMode(firstEx) === 'time') {
+    if (firstEx?.equipment === 'bodyweight' || firstEx?.movement_type === 'cardio' || LB.exerciseLogMode(firstEx) === 'time' || LB.isAssisted(firstEx)) {
       const session = {
         id: LB.uid(), scheduleId: sch?.id, dayId: day.id, dayName: day.name,
         date: LB.todayISO(), startedAt: new Date().toISOString(),
@@ -2452,7 +2452,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     const autoSkipId = autoSkip?.skipReason === '—' ? autoSkip.id : null;
     const firstEx = LB.findExercise(store, dayData?.items?.[0]?.exId);
     loggingRef.current = false;
-    if (firstEx?.equipment === 'bodyweight' || firstEx?.movement_type === 'cardio' || LB.exerciseLogMode(firstEx) === 'time') {
+    if (firstEx?.equipment === 'bodyweight' || firstEx?.movement_type === 'cardio' || LB.exerciseLogMode(firstEx) === 'time' || LB.isAssisted(firstEx)) {
       const session = { id: LB.uid(), scheduleId: sch?.id, dayId, dayName, date: LB.fmtISO(date), startedAt: new Date().toISOString(), ended: null, entries, currentExIdx: 0, cyclePos: null };
       setStore(s => ({
         ...s,

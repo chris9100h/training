@@ -464,9 +464,12 @@ function PlateCalcSheet({ open, onClose, initialWeight, availablePlates }) {
 }
 
 // ─── Custom Keyboard ──────────────────────────────────────────────────
-function CustomKeyboard({ visible, field, onType, onBackspace, onAdjust, onConfirm, onDismiss, onPlateCalc, confirmDisabled }) {
+function CustomKeyboard({ visible, field, onType, onBackspace, onAdjust, onConfirm, onDismiss, onPlateCalc, onSign, assisted, confirmDisabled }) {
   if (!visible) return null;
   const isKg = field === 'kg';
+  // Assisted kg entry swaps the plate-calc key (useless on a negative load) for
+  // a ± sign toggle.
+  const showSign = assisted && isKg;
   const H = 40;
   const base = {
     background: 'var(--bg-raised)', border: `0.5px solid var(--hair)`, borderRadius: 6,
@@ -491,7 +494,9 @@ function CustomKeyboard({ visible, field, onType, onBackspace, onAdjust, onConfi
       <div style={{ maxWidth: 480, margin: '0 auto', display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gridTemplateRows: `repeat(5, ${H}px)`, gap: 4 }}>
         {/* Row 1: ↓ 🏋 ↑ | ✓ (spans rows 1-4) */}
         <button style={act} onPointerDown={e => { e.preventDefault(); e.stopPropagation(); onAdjust(-1); }}>↓</button>
-        <button style={act} onPointerDown={e => { e.preventDefault(); e.stopPropagation(); onPlateCalc(); }}><i className="fa-solid fa-dumbbell" style={{ fontSize: 11 }} /></button>
+        {showSign
+          ? <button style={{ ...act, fontSize: 18, fontFamily: UI.fontNum }} onPointerDown={e => { e.preventDefault(); e.stopPropagation(); onSign(); }}>±</button>
+          : <button style={act} onPointerDown={e => { e.preventDefault(); e.stopPropagation(); onPlateCalc(); }}><i className="fa-solid fa-dumbbell" style={{ fontSize: 11 }} /></button>}
         <button style={act} onPointerDown={e => { e.preventDefault(); e.stopPropagation(); onAdjust(1); }}>↑</button>
         <button
           onPointerDown={e => { e.preventDefault(); e.stopPropagation(); if (!confirmDisabled) onConfirm(); }}
@@ -1130,7 +1135,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       let loggedKg = null;
       let refKg = null;
       let increment = 2.5;
-      if (!isNoWeightReps) {
+      // Assisted exercises carry a negative (or graduating) load, so the
+      // low-weight "mistype" comparison against a reference doesn't apply.
+      if (!isNoWeightReps && !LB.isAssisted(exercise)) {
         refKg = suggestion ? (suggestion.kg ?? null) : (prevSet ? prevSet.kg : null);
         if (refKg != null && refKg > 0) {
           const catCfg = exercise?.equipment ? (store.settings?.equipmentConfig?.[exercise.equipment] ?? {}) : {};
@@ -3226,7 +3233,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const kbTypeChar = (char) => {
     if (!kbFieldRef.current) { _log(`TYPE '${char}' → NULL kbField (swallowed!)`); return; }
     const { setIdx, field } = kbFieldRef.current;
-    const base = kbFreshRef.current ? '' : kbRawRef.current;
+    // Assisted exercises log a negative load: a freshly-typed kg starts with a
+    // minus so the user just taps the assistance amount. The ± key flips it back
+    // to positive once they graduate past bodyweight.
+    const base = kbFreshRef.current ? (field === 'kg' && LB.isAssisted(exercise) ? '-' : '') : kbRawRef.current;
     if (char === ',' && (field !== 'kg' || base.includes(','))) return;
     const newRaw = base + char;
     kbRawRef.current = newRaw;
@@ -3234,6 +3244,21 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     setKbRaw(newRaw);
     setKbFresh(false);
     _log(`TYPE '${char}' → '${newRaw}' (set${setIdx} ${field})`);
+    kbApply(newRaw, field, setIdx);
+  };
+
+  // ± key (assisted only): flip the sign of the current kg entry. Assistance is
+  // negative; graduating to real added weight makes it positive.
+  const kbSignToggle = () => {
+    if (!kbFieldRef.current) return;
+    const { setIdx, field } = kbFieldRef.current;
+    if (field !== 'kg') return;
+    const cur = kbRawRef.current || '';
+    const newRaw = cur.startsWith('-') ? cur.slice(1) : '-' + cur;
+    kbRawRef.current = newRaw;
+    kbFreshRef.current = false;
+    setKbRaw(newRaw);
+    setKbFresh(false);
     kbApply(newRaw, field, setIdx);
   };
 
@@ -3311,7 +3336,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     if (field === 'kg') {
       const cur = parseFloat(kbRawRef.current.replace(',', '.')) || 0;
       const step = (exercise?.equipment && store.settings?.equipmentConfig?.[exercise.equipment]?.increment) || 1.25;
-      const next = Math.max(0, Math.round((cur + dir * step) * 100) / 100);
+      const raw = Math.round((cur + dir * step) * 100) / 100;
+      // Assisted exercises range into the negative (assistance) and can step past
+      // zero into added weight; every other exercise stays clamped at 0.
+      const next = LB.isAssisted(exercise) ? raw : Math.max(0, raw);
       const newRaw = String(next).replace('.', ',');
       kbRawRef.current = newRaw;
       setKbRaw(newRaw);
@@ -5171,9 +5199,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           </div>
 
           {/* Intensity techniques are kg/reps flows (drop-set, myo-reps, ...):
-              a time-based exercise has neither field, the picker would only
-              open a dead end, so it is hidden there. */}
-          {!isCardio && !isTime && (
+              a time-based exercise has neither field, and an assisted exercise's
+              negative load makes drop-sets nonsensical, so the picker is hidden
+              for both. */}
+          {!isCardio && !isTime && !LB.isAssisted(exercise) && (
             <button className="intensity-glow" onClick={() => setIntensityOpen(true)} style={{
               width: '100%', marginTop: 6, padding: '8px 0',
               background: 'rgba(var(--accent-rgb),0.08)',
@@ -6462,6 +6491,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         }
         onDismiss={() => { kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false; setKbField(null); setKbRaw(''); setKbFresh(false); armKbShield(); }}
         onPlateCalc={() => setPlateCalcOpen(true)}
+        onSign={kbSignToggle}
+        assisted={LB.isAssisted(exercise)}
       />
 
       <PlateCalcSheet

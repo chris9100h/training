@@ -718,6 +718,9 @@ async function captureNodeAsPng(node, { filename, dodgeAvatar = false, setCaptur
 // user's logged bodyweight (LB.shouldPullBodyweight), gated on having logged one.
 const LOG_MODES = [['checkbox', 'Checkbox only'], ['reps', 'Reps only'], ['time', 'Time'], ['weight', 'Weight & Reps']];
 function loggingPickerVisible(equipment, movementType) {
+  // Assisted always logs weight (the negative assistance load), so the logging
+  // picker is skipped and weight mode is forced (same path mobility/checkbox use).
+  if (movementType === 'assisted') return false;
   return equipment === 'no_equipment' || equipment === 'bodyweight' || movementType === 'mobility';
 }
 const logNoteStyle = { marginTop: 8, textTransform: 'none', letterSpacing: '0.02em', fontWeight: 400, lineHeight: 1.5 };
@@ -876,7 +879,7 @@ function ExerciseWizard({ step, setStep, onClose, isDirty, store,
     </div>;
   } else if (step === 'movement') {
     body = <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      {[['bilateral', 'Bilateral', 'fa-arrows-left-right', 'Both sides work together — one number per set'], ['unilateral', 'Unilateral', 'fa-arrow-right-long', 'One arm/leg at a time — logs left & right'], ['mobility', 'Mobility', 'fa-arrows-rotate', 'Stretch or warm-up — usually no load']]
+      {[['bilateral', 'Bilateral', 'fa-arrows-left-right', 'Both sides work together, one number per set'], ['unilateral', 'Unilateral', 'fa-arrow-right-long', 'One arm/leg at a time, logs left & right'], ['assisted', 'Assisted', 'fa-hands-holding', 'A machine or band takes weight off, logged as a negative load'], ['mobility', 'Mobility', 'fa-arrows-rotate', 'Stretch or warm-up, usually no load']]
         .map(([val, label, icon, sub]) => optRow({ key: val, icon, label, sub, active: movementType === val, onClick: () => { setMovementType(val); goNext({ movementType: val }); } }))}
     </div>;
   } else if (step === 'logging') {
@@ -1065,7 +1068,7 @@ function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = ''
         <div>
           <span className="label">Movement type</span>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
-            {[['bilateral', 'Bilateral'], ['unilateral', 'Unilateral'], ['mobility', 'Mobility']].map(([val, label]) => (
+            {[['bilateral', 'Bilateral'], ['unilateral', 'Unilateral'], ['assisted', 'Assisted'], ['mobility', 'Mobility']].map(([val, label]) => (
               <Chip key={val} on={movementType === val} onClick={() => setMovementType(val)}>{label}</Chip>
             ))}
           </div>
@@ -1217,16 +1220,29 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
     return s.reps ? LB.e1rm(s.kg, s.reps) : 0;
   };
 
-  // Time-based exercise: the chart/PR math tracks the best DURATION per
-  // session instead of an estimated 1RM (kg-null sets estimate to 0, which
-  // used to leave the chart and history rows empty for time exercises).
+  // Time-based exercise: the chart/PR math tracks the best DURATION per session
+  // instead of an estimated 1RM. Assisted exercise: it tracks the best (highest,
+  // least-negative) LOAD, since Epley on a negative kg is nonsense and "best" is
+  // "least assistance". Both would otherwise leave the chart/PR empty (kg-null or
+  // negative estimates get filtered out).
   const isTimeEx = LB.exerciseLogMode(ex) === 'time';
-  const valForSet = (s) => isTimeEx ? (!s.warmup && s.timeSec != null ? s.timeSec : 0) : e1rmForSet(s);
+  const isAssistedEx = LB.isAssisted(ex);
+  const valForSet = (s) => {
+    if (isTimeEx) return (!s.warmup && s.timeSec != null ? s.timeSec : 0);
+    if (isAssistedEx) return (!s.warmup && s.kg != null ? s.kg : null);
+    return e1rmForSet(s);
+  };
 
   const points = history.map(h => {
+    if (isAssistedEx) {
+      // Signed load, so a fixed 0 seed would beat every negative set: reduce
+      // over the present values only.
+      const vals = (h.entry.sets || []).map(valForSet).filter(v => v != null);
+      return vals.length ? { date: h.session.date, est: Math.max(...vals) } : null;
+    }
     const best = (h.entry.sets || []).reduce((m, s) => Math.max(m, valForSet(s)), 0);
     return { date: h.session.date, est: best };
-  }).filter(p => p.est > 0).reverse();
+  }).filter(p => p && (isAssistedEx || p.est > 0)).reverse();
 
   const pr = points.length ? Math.max(...points.map(p => p.est)) : 0;
 
@@ -1328,7 +1344,7 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
             <div>
               <span className="label">Movement type</span>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
-                {[['bilateral', 'Bilateral'], ['unilateral', 'Unilateral'], ['mobility', 'Mobility']].map(([val, label]) => (
+                {[['bilateral', 'Bilateral'], ['unilateral', 'Unilateral'], ['assisted', 'Assisted'], ['mobility', 'Mobility']].map(([val, label]) => (
                   <Chip key={val} on={editMovementType === val} onClick={() => setEditMovementType(val)}>{label}</Chip>
                 ))}
               </div>
@@ -1367,6 +1383,7 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
             {ex.category && <Pill gold>{ex.category.charAt(0).toUpperCase() + ex.category.slice(1)}</Pill>}
             {ex.movement_type === 'unilateral' || (ex.unilateral && !ex.movement_type) ? <Pill gold>Unilateral</Pill> : null}
+            {ex.movement_type === 'assisted' && <Pill gold>Assisted</Pill>}
             {ex.movement_type === 'mobility' && <Pill gold>Mobility</Pill>}
             {ex.movement_type === 'cardio' && <Pill gold>Cardio</Pill>}
             {(ex.tags || []).map(t => <Pill key={t} gold>{t}</Pill>)}
@@ -1397,12 +1414,14 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
         <div style={{ display: 'flex', justifyContent: 'space-around', padding: '6px 0' }}>
           {isTimeEx
             ? <SubDial label="Best Time" value={bestTime ? LB.fmtDuration(bestTime) : '—'} size={90} gold />
+            : isAssistedEx
+            ? <SubDial label="Best Load" value={points.length ? Math.round(pr) : '—'} sub={UI.unit()} size={90} gold />
             : <SubDial label="1RM PR" value={pr ? Math.round(pr) : '—'} sub={UI.unit()} size={90} gold />}
           <SubDial label="Sessions" value={history.length} size={90} />
-          {!isTimeEx && <SubDial label="Vol PR" value={volPr ? Math.round(volPr) : '—'} sub={UI.unit()} size={90} gold />}
+          {!isTimeEx && !isAssistedEx && <SubDial label="Vol PR" value={volPr ? Math.round(volPr) : '—'} sub={UI.unit()} size={90} gold />}
         </div>
 
-        {points.length > 1 && <ProgressChart points={points} title={isTimeEx ? 'BEST TIME · HISTORY' : undefined} fmtVal={isTimeEx ? LB.fmtDuration : undefined} />}
+        {points.length > 1 && <ProgressChart points={points} title={isTimeEx ? 'BEST TIME · HISTORY' : isAssistedEx ? 'BEST LOAD · HISTORY' : undefined} fmtVal={isTimeEx ? LB.fmtDuration : undefined} />}
 
         {/* Note — read-only here; edited via the Edit button's form below */}
         <div>
