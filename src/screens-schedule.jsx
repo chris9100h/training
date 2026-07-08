@@ -34,6 +34,15 @@ function MiniSheet({ zIndex = 300, dim = true, onClose, style, children }) {
 
 const daysArr = s => Array.isArray(s?.days) ? s.days : [];
 
+// A plan flagged weekday (mode === 'weekday') can still surface a day with no
+// valid weekday index: the version-aware viewer rendering an older cycle-era
+// snapshot, or a partially switched plan. Guard every weekday label so a
+// missing / out-of-range index degrades to the day's position instead of
+// crashing the screen (WEEKDAYS_FULL[undefined].toUpperCase() throws).
+const validWeekdayIdx = wd => Number.isInteger(wd) && wd >= 0 && wd <= 6;
+const weekdayShortLabel = (wd, posIdx) => validWeekdayIdx(wd) ? WEEKDAYS[wd] : `Day ${posIdx + 1}`;
+const weekdayFullLabel = (wd, posIdx) => validWeekdayIdx(wd) ? WEEKDAYS_FULL[wd] : `Day ${posIdx + 1}`;
+
 // One-line plan summary shown in the plan list and viewer header.
 function planDescriptor(s) {
   const trainingDays = daysArr(s).filter(d => d.items.length).length;
@@ -43,7 +52,7 @@ function planDescriptor(s) {
     return `Flexible · ${trainingDays} ${trainingDays === 1 ? 'workout' : 'workouts'}${goal ? ` · ${goal}×/week` : ''}${mesoSuffix}`;
   }
   if (LB.isWeekdayPlan(s)) {
-    return `${s.days.length} training days · ${[...s.days].sort((a,b)=>a.weekday-b.weekday).map(d=>WEEKDAYS[d.weekday]).join(' · ')}${mesoSuffix}`;
+    return `${s.days.length} training days · ${[...s.days].sort((a,b)=>a.weekday-b.weekday).map((d, i)=>weekdayShortLabel(d.weekday, i)).join(' · ')}${mesoSuffix}`;
   }
   return `${s.days.length}-day cycle · ${trainingDays} training days${mesoSuffix}`;
 }
@@ -580,7 +589,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
   const dayIdx = displayDays.findIndex(d => d.id === day.id);
   const isRest = !day.items.length;
   const isTodaySel = day.id === todayDayId;
-  const dayLabel = isWeekday ? WEEKDAYS_FULL[day.weekday] : `Day ${dayIdx + 1}`;
+  const dayLabel = isWeekday ? weekdayFullLabel(day.weekday, dayIdx) : `Day ${dayIdx + 1}`;
   const trainingDayCount = displayDays.filter(d => d.items.length).length;
   // In a non-active version no day is live, so the selected (viewed) day gets a
   // neutral highlight rather than the gold "today/active" accent.
@@ -876,7 +885,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
         sub={(() => {
           if (isFlex) return `Flexible · ${trainingDayCount} ${trainingDayCount === 1 ? 'workout' : 'workouts'}${sch.sessions_per_week ? ` · ${sch.sessions_per_week}×/week` : ''}`;
           return isWeekday
-            ? displayDays.map(d => WEEKDAYS[d.weekday]).join(' · ')
+            ? displayDays.map((d, i) => weekdayShortLabel(d.weekday, i)).join(' · ')
             : `${displayDays.length}-day cycle · ${trainingDayCount} ${trainingDayCount === 1 ? 'workout' : 'workouts'}`;
         })()}
         onBack={onBack || (() => go({ name: fromPlan ? 'plan' : 'home' }))}
@@ -905,7 +914,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
                 const active = d.id === selectedDayId;
                 const isToday = d.id === todayDayId;
                 const rest = !d.items.length;
-                const sub = isWeekday ? WEEKDAYS[d.weekday] : `Day ${i + 1}`;
+                const sub = isWeekday ? weekdayShortLabel(d.weekday, i) : `Day ${i + 1}`;
                 return (
                   <button key={d.id} onClick={() => setSelectedDayId(d.id)} style={{
                     flexShrink: 0, padding: '8px 12px 6px', borderRadius: 4,
@@ -949,7 +958,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
               const active = d.id === selectedDayId;
               const isToday = d.id === todayDayId;
               const rest = !d.items.length;
-              const sub = isWeekday ? WEEKDAYS[d.weekday] : `Day ${i + 1}`;
+              const sub = isWeekday ? weekdayShortLabel(d.weekday, i) : `Day ${i + 1}`;
               return (
                 <button key={d.id} onClick={() => setSelectedDayId(d.id)} style={{
                   flexShrink: 0, maxWidth: 120, padding: '6px 12px 4px', borderRadius: 4,
