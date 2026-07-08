@@ -41,6 +41,7 @@ Read-only Katalog `window.SYSTEM_EXERCISES`; plain JS wie `whatsnew.js` (normale
 - Ein „Skip setup"-Ausgang (Name/Type-Schritt) legt wie früher einen leeren Cycle-Plan an.
 - Die Wizard-Shell ist bewusst aus `ExerciseWizard` (`screens-lib.jsx`) dupliziert, damit der ausgelieferte Exercise Wizard unberührt bleibt.
 - Die Onboarding-Tour navigiert nicht mehr in `schedule-new` (früher zwei `data-tour`-Spotlights `schedule-name`/`schedule-mode`), sondern beschreibt den geführten Setup in einer `target:null`-Karte (sonst z-index-Kollision mit dem z-9998-Overlay).
+- **Weekday-Self-Heal / Label-Guard:** `isWeekdayPlan` gilt schon, sobald `mode:'weekday'` **oder** irgendein Tag ein `weekday` hat. Ein Weekday-Plan mit Tagen **ohne** gültigen `weekday` (0-6) crashte den Plan-Viewer (`WEEKDAYS_FULL[undefined].toUpperCase()`). Solche Pläne stammen aus Alt-Daten: vor Cache 2.464 behielt der Cycle→Weekday-Switch die Tage, statt sie zu leeren. Zwei Absicherungen: (1) `LB.healScheduleWeekdays(sch)` in `loadFromSupabase` weist fehlenden Tagen die nächsten freien Mon..So-Slots zu (Reihenfolge bleibt, >7 Tage → Demotion auf Cycle; verirrter `weekday` auf einem Nicht-Weekday-Plan wird gestrippt), heilt nur `sch.days` (nicht historische `versions[]`); (2) `weekdayShortLabel`/`weekdayFullLabel` in `screens-schedule.jsx` rendern jeden Wochentag-Label mit Fallback `Day N` statt zu crashen (fängt alte Cycle-Ära-Versions-Snapshots ab, die legitim keine Wochentage haben).
 
 ## History-Windowing (Boot lädt nicht mehr die ganze Historie)
 

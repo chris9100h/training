@@ -863,7 +863,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   const result = {
     user: { name: profileRes.data?.name || '', email: isCoachLoad ? '' : (authUser?.email || ''), approved: profileRes.data?.approved ?? false },
     exercises: exRes.data || [],
-    schedules: (schRes.data || []).map(s => ({
+    schedules: (schRes.data || []).map(s => healScheduleWeekdays({
       ...s,
       days: Array.isArray(s.days) ? s.days : [],
       versions: Array.isArray(s.versions) ? s.versions : [],
@@ -1999,6 +1999,48 @@ function isWeekdayPlan(sch) {
 // weekday plan.
 function isFlexPlan(sch) {
   return !!sch && sch.is_flex === true;
+}
+
+// Self-heal a plan whose weekday data is inconsistent, so it stays schedulable
+// and never trips the viewer. Repairs legacy shapes that predate the 2.464
+// mode-switch fix (Cycle -> Weekday now clears the days; older builds kept
+// them, leaving a weekday plan with weekday-less days):
+//   - mode 'weekday' with days missing a valid weekday index: give each such
+//     day the next free Mon..Sun slot, preserving day order. If they can't fit
+//     the 7-day week (more than 7 days), demote the plan to a plain cycle.
+//   - a stray weekday clinging to only some days of a non-weekday plan (which
+//     makes isWeekdayPlan misfire): strip it back to a clean cycle.
+// Only sch.days (the live structure) is touched; versions[] snapshots stay as
+// is, since an old cycle-era version legitimately has no weekdays and the
+// viewer's weekday-label guard renders those as "Day N". Pure: returns the same
+// object when nothing needs healing.
+function healScheduleWeekdays(sch) {
+  if (!sch || !Array.isArray(sch.days) || sch.days.length === 0) return sch;
+  const validWd = wd => Number.isInteger(wd) && wd >= 0 && wd <= 6;
+  const days = sch.days;
+  const allValid = days.every(d => validWd(d.weekday));
+  if (sch.mode === 'weekday') {
+    if (allValid) return sch;
+    const taken = new Set(days.filter(d => validWd(d.weekday)).map(d => d.weekday));
+    const need = days.filter(d => !validWd(d.weekday)).length;
+    const free = [];
+    for (let i = 0; i <= 6 && free.length < need; i++) if (!taken.has(i)) free.push(i);
+    if (free.length < need) {
+      // More days than a week holds: this was never a real weekday plan, so keep
+      // the days and their order as a cycle.
+      return { ...sch, mode: undefined, days: days.map(d => { const nd = { ...d }; delete nd.weekday; return nd; }) };
+    }
+    let fi = 0;
+    return { ...sch, days: days.map(d => validWd(d.weekday) ? d : { ...d, weekday: free[fi++] }) };
+  }
+  // Not weekday mode: a stray weekday on some (not all) days makes isWeekdayPlan
+  // true and can crash the viewer. Clean it back to a pure cycle. An all-weekday
+  // cycle plan is effectively a weekday plan already and renders fine, so leave
+  // that alone.
+  if (!allValid && days.some(d => d.weekday != null)) {
+    return { ...sch, days: days.map(d => { const nd = { ...d }; delete nd.weekday; return nd; }) };
+  }
+  return sch;
 }
 
 // Training-split presets for the plan setup wizard (screens-schedule.jsx):
@@ -4280,7 +4322,7 @@ window.LB = {
   signIn, signUp, signOut, signInWithPasskey, registerPasskey, listPasskeys, deletePasskey, resetPassword, deleteAllData, exportBackup, importFromBackup, validateBackup,
   loadFromSupabase, syncStore, mergeSessions, withCarriedWindowEntries, historyWindowCutoffISO,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
-  uid, todayISO, fmtISO, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, buildPlanSkeleton, instantiateProgram, is531Plan, round531, tmFrom531, tmBump531, weeks531, week531, fiveThreeOneSets, build531Plan, current531Week, current531Cycle, compute531CycleBumps, resolve531CycleEnd, suggest531Tm, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, realignCycleForToday, todayCycleStripIndex,
+  uid, todayISO, fmtISO, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, healScheduleWeekdays, buildPlanSkeleton, instantiateProgram, is531Plan, round531, tmFrom531, tmBump531, weeks531, week531, fiveThreeOneSets, build531Plan, current531Week, current531Cycle, compute531CycleBumps, resolve531CycleEnd, suggest531Tm, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, realignCycleForToday, todayCycleStripIndex,
   effReps, fmtDuration, e1rm, isImprovement, isDecline, bestE1rmForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, latestBodyweight, exerciseLogMode, shouldPullBodyweight, systemExerciseToRow, inferCurrentExIdx, calcBlended,
   refreshExerciseBests, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries,
   computeNextReminderAt,

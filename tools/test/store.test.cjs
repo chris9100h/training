@@ -1085,6 +1085,65 @@ async function testAsync(name, fn) {
     assert.strictEqual('mesocycle_rir_enabled' in plain, false);
   });
 
+  // ── healScheduleWeekdays (self-heal legacy weekday plans) ───────────────────
+  test('healScheduleWeekdays: weekday plan with no weekdays gets Mon-first slots, order kept', () => {
+    const sch = { id: 'p1', mode: 'weekday', days: [
+      { id: 'a', name: 'PUSH', items: [] }, { id: 'b', name: 'PULL', items: [] },
+      { id: 'c', name: 'LEGS', items: [] }, { id: 'd', name: 'UPPER', items: [] },
+      { id: 'e', name: 'LOWER', items: [] },
+    ] };
+    const healed = LB.healScheduleWeekdays(sch);
+    assert.strictEqual(healed.mode, 'weekday');
+    assert.strictEqual(healed.days.map(d => d.weekday).join(','), '0,1,2,3,4');
+    assert.strictEqual(healed.days.map(d => d.name).join(','), 'PUSH,PULL,LEGS,UPPER,LOWER');
+    assert.strictEqual(LB.isWeekdayPlan(healed), true);
+  });
+
+  test('healScheduleWeekdays: fills gaps around already-valid weekdays', () => {
+    const sch = { id: 'p1', mode: 'weekday', days: [
+      { id: 'a', name: 'A', weekday: 2, items: [] }, // valid, stays
+      { id: 'b', name: 'B', items: [] },             // → first free = 0
+      { id: 'c', name: 'C', weekday: 5, items: [] }, // valid, stays
+      { id: 'd', name: 'D', items: [] },             // → next free = 1
+    ] };
+    assert.strictEqual(LB.healScheduleWeekdays(sch).days.map(d => d.weekday).join(','), '2,0,5,1');
+  });
+
+  test('healScheduleWeekdays: consistent weekday plan is returned untouched', () => {
+    const sch = { id: 'p1', mode: 'weekday', days: [
+      { id: 'a', name: 'A', weekday: 0, items: [] }, { id: 'b', name: 'B', weekday: 3, items: [] },
+    ] };
+    assert.strictEqual(LB.healScheduleWeekdays(sch), sch); // same reference, no churn
+  });
+
+  test('healScheduleWeekdays: more than 7 weekday-less days demote to a cycle', () => {
+    const days = Array.from({ length: 8 }, (_, i) => ({ id: 'd' + i, name: 'D', items: [] }));
+    const healed = LB.healScheduleWeekdays({ id: 'p1', mode: 'weekday', days });
+    assert.strictEqual(healed.mode, undefined);
+    assert.strictEqual(healed.days.some(d => 'weekday' in d), false);
+    assert.strictEqual(healed.days.length, 8);
+  });
+
+  test('healScheduleWeekdays: stray weekday on a non-weekday plan is stripped to a clean cycle', () => {
+    const sch = { id: 'p1', days: [
+      { id: 'a', name: 'A', weekday: 2, items: [] }, { id: 'b', name: 'B', items: [] },
+    ] };
+    const healed = LB.healScheduleWeekdays(sch);
+    assert.strictEqual(healed.days.some(d => 'weekday' in d), false);
+    assert.strictEqual(LB.isWeekdayPlan(healed), false);
+  });
+
+  test('healScheduleWeekdays: plain cycle / flex / all-weekday plans pass through unchanged', () => {
+    const cycle = { id: 'p1', days: [{ id: 'a', name: 'A', items: [] }, { id: 'b', name: 'REST', items: [] }] };
+    assert.strictEqual(LB.healScheduleWeekdays(cycle), cycle);
+    const flex = { id: 'p2', is_flex: true, days: [{ id: 'a', name: 'A', items: [] }] };
+    assert.strictEqual(LB.healScheduleWeekdays(flex), flex);
+    // Every day already carries a valid weekday (effectively a weekday plan even
+    // without the mode flag) → renders fine, leave it be.
+    const allWd = { id: 'p3', days: [{ id: 'a', name: 'A', weekday: 1, items: [] }, { id: 'b', name: 'B', weekday: 4, items: [] }] };
+    assert.strictEqual(LB.healScheduleWeekdays(allWd), allWd);
+  });
+
   test('isTrainingDayForDate: flex defaults to rest, override + logged session flip it', () => {
     const today = LB.todayISO();
     const flexPlan = { id: 'p1', is_flex: true, days: [{ id: 'd1', name: 'FULL', items: [{ exId: 'e1' }] }] };
