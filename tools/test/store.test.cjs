@@ -1244,6 +1244,33 @@ async function testAsync(name, fn) {
     assert.strictEqual(LB.current531Week({ program_type: null }, mk(4)), null);
   });
 
+  test('compute531CycleBumps / apply531Bumps: bump only when AMRAP hit min reps weeks 1-3', () => {
+    const mkSch = (lifts) => ({ id: 'p', program_type: '531', days: lifts.map(() => ({})),
+      program_data: { unit: 'kg', includeDeload: false, mainLifts: Object.fromEntries(lifts.map(m => [m.id, { tm: m.tm, kind: m.kind }])) } });
+    // one session: warmup + two straight sets + a final AMRAP set at topReps
+    const mkSess = (exId, i, topReps) => ({ id: exId + '_' + i, ended: '2026-01-' + String(i + 1).padStart(2, '0') + 'T10:00:00', scheduleId: 'p',
+      entries: [{ exId, sets: [{ kg: 40, reps: 5, warmup: true }, { kg: 60, reps: 5 }, { kg: 70, reps: 4 }, { kg: 80, reps: topReps }] }] });
+    // single lift, dayCount 1 -> sessions 0,1,2 are weeks 1,2,3 of cycle 0
+    const sq = mkSch([{ id: 'sq', tm: 100, kind: 'squat' }]);
+    let r = LB.compute531CycleBumps(sq, [mkSess('sq', 0, 5), mkSess('sq', 1, 3), mkSess('sq', 2, 1)], 0);
+    assert.strictEqual(r.sq.newTm, 105);           // squat lower body: +5 kg
+    assert.strictEqual(r.sq.bumped, true);
+    // miss week 3 (0 < 1): hold
+    r = LB.compute531CycleBumps(sq, [mkSess('sq', 0, 5), mkSess('sq', 1, 3), mkSess('sq', 2, 0)], 0);
+    assert.strictEqual(r.sq.newTm, 100);
+    assert.strictEqual(r.sq.bumped, false);
+    // bench upper body: +2.5 kg
+    const bp = mkSch([{ id: 'bp', tm: 80, kind: 'bench' }]);
+    r = LB.compute531CycleBumps(bp, [mkSess('bp', 0, 5), mkSess('bp', 1, 3), mkSess('bp', 2, 1)], 0);
+    assert.strictEqual(r.bp.newTm, 82.5);
+    // apply folds the new TMs in and stamps bumpedCycle
+    const pd = LB.apply531Bumps(sq.program_data, LB.compute531CycleBumps(sq, [mkSess('sq', 0, 5), mkSess('sq', 1, 3), mkSess('sq', 2, 1)], 0), 0);
+    assert.strictEqual(pd.mainLifts.sq.tm, 105);
+    assert.strictEqual(pd.bumpedCycle, 0);
+    // no data for the cycle -> no bump (safe default)
+    assert.strictEqual(LB.compute531CycleBumps(sq, [], 0).sq.bumped, false);
+  });
+
   test('build531Plan: catalog names resolve, 4 days, program_data stamped, assistance capped', () => {
     const FTO = _catWin.FIVE_THREE_ONE;
     assert.ok(FTO && Array.isArray(FTO.lifts) && FTO.lifts.length === 4, 'FIVE_THREE_ONE has 4 lifts');

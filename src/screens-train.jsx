@@ -4378,12 +4378,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             if (!LB.is531Plan(s531) || !entry) return null;
             const main = s531.program_data?.mainLifts?.[entry.exId];
             if (!main || main.tm == null) return null;
-            const week = LB.current531Week(s531, store.sessions) || 1;
+            const deloadActive = store.statusMode === 'deload';
+            const week = deloadActive ? 4 : (LB.current531Week(s531, store.sessions) || 1);
             const u = s531.program_data.unit || 'kg';
             const wave = LB.fiveThreeOneSets(main.tm, week, u);
             return (
               <div style={{ marginTop: 10, padding: '10px 12px', background: 'rgba(var(--accent-rgb),0.06)', border: `1px solid ${UI.goldSoft}`, borderRadius: 6 }}>
-                <div className="micro-gold" style={{ marginBottom: 7 }}>5/3/1 · WEEK {week}{week === 4 ? ' · DELOAD' : ''} · TM {main.tm}{u}</div>
+                <div className="micro-gold" style={{ marginBottom: 7 }}>5/3/1 · {deloadActive ? 'DELOAD' : `WEEK ${week}${week === 4 ? ' · DELOAD' : ''}`} · TM {main.tm}{u}</div>
                 <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
                   {wave.map((ws, i) => (
                     <span key={i} className="num" style={{ fontSize: 14, color: ws.amrap ? UI.gold : UI.inkSoft }}>

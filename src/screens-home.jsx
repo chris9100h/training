@@ -1686,6 +1686,42 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     }
   }, [store?.statusMode, store?.statusModeSince, store?.sessions]);
 
+  // 5/3/1 cycle-end: once a cycle completes, bump each main lift's Training Max
+  // per its AMRAP results (Wendler's rule), announce it, and, only for a plan
+  // with no built-in deload, offer to insert a deload week first. program_data
+  // .bumpedCycle gates it to once per cycle and rides the schedule row, so the
+  // guard survives cross-device sync (unlike a localStorage key).
+  const cycle531Checked = useRef(false);
+  useEffect(() => {
+    if (cycle531Checked.current) return;
+    if (store?.statusMode || store?.inProgress) return;
+    if (!sch || !LB.is531Plan(sch)) return;
+    const pd = sch.program_data || {};
+    const doneCycle = LB.current531Cycle(sch, store.sessions) - 1; // last completed cycle
+    if (doneCycle < 0 || doneCycle <= (pd.bumpedCycle ?? -1)) return;
+    cycle531Checked.current = true;
+    const bumps = LB.compute531CycleBumps(sch, store.sessions, doneCycle);
+    const nextPd = LB.apply531Bumps(pd, bumps, doneCycle);
+    const schId = sch.id;
+    setStore(s => ({ ...s, schedules: s.schedules.map(x => x.id === schId ? { ...x, program_data: nextPd } : x) }));
+    (async () => {
+      const u = pd.unit || 'kg';
+      const label = { squat: 'Squat', bench: 'Bench', deadlift: 'Deadlift', ohp: 'Press' };
+      const up = Object.values(bumps).filter(b => b.bumped);
+      const held = Object.values(bumps).length - up.length;
+      const summary = up.length
+        ? `Cycle ${doneCycle + 1} done. Training Max up:\n${up.map(b => `${label[b.kind] || b.kind} ${b.oldTm} → ${b.newTm}${u}`).join('\n')}${held ? `\n${held} held (missed the top-set reps).` : ''}`
+        : `Cycle ${doneCycle + 1} done. TMs held this time (missed the top-set reps).`;
+      if (pd.includeDeload === false) {
+        const yes = await confirm(`${summary}\n\nInsert a deload week before the next cycle?`,
+          { title: '5/3/1 cycle complete', ok: 'Deload week', cancel: 'Skip', preventBackdropClose: true });
+        if (yes) { try { await LB.startDeload(userId, store, setStore, new Date().toISOString()); } catch (_) {} }
+      } else {
+        await confirm(summary, { title: '5/3/1 cycle complete', ok: 'Got it', cancel: null });
+      }
+    })();
+  }, [store?.sessions, sch?.id, store?.statusMode, store?.inProgress]);
+
   // After a meso-triggered deload ends (or if pendingMeso2 is set without an active deload),
   // offer to start Meso 2, continue as a regular cycle, or deactivate the plan.
   const pendingMeso2Checked = useRef(false);
@@ -2059,7 +2095,9 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       const p531 = LB.is531Plan(sch) ? (sch.program_data || null) : null;
       const main531 = p531 && p531.mainLifts && p531.mainLifts[it.exId];
       if (main531 && main531.tm != null) {
-        const wk531 = LB.current531Week(sch, store.sessions) || 1;
+        // An active deload (statusMode) forces the week-4 deload wave, so a plan
+        // without a built-in deload can still take an inserted light week.
+        const wk531 = store.statusMode === 'deload' ? 4 : (LB.current531Week(sch, store.sessions) || 1);
         const waveSets = LB.fiveThreeOneSets(main531.tm, wk531, p531.unit || 'kg');
         return {
           exId: it.exId, name: ex?.name || '?',

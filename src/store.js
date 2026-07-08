@@ -2269,6 +2269,61 @@ function current531Cycle(sch, sessions) {
   return Math.floor(Math.floor(trained / dayCount) / weeks531(includeDeload));
 }
 
+// Decide each main lift's next Training Max after a completed 5/3/1 cycle.
+// Wendler's rule: the TM only goes up if the AMRAP top set hit its required
+// minimum reps across weeks 1-3 (week1 >= 5, week2 >= 3, week3 >= 1, read from
+// the wave table); any miss holds it. Weeks are derived from logged-session
+// order, the same counting as current531Week, and the AMRAP set is the last
+// working (non-warmup, non-skipped) set of the main lift's entry. Returns
+// { exId: { kind, oldTm, newTm, bumped } } (empty if not a 531 plan).
+function compute531CycleBumps(sch, sessions, cycleIdx) {
+  if (!is531Plan(sch)) return {};
+  const pd = sch.program_data || {};
+  const mainLifts = pd.mainLifts || {};
+  const unit = pd.unit || 'kg';
+  const dayCount = (sch.days || []).length || 1;
+  const maxWeek = weeks531(pd.includeDeload !== false);
+  const amrapMin = (wk) => { const w = FTO_WAVES[wk]; const top = w && w[w.length - 1]; return (top && top.amrap) ? top.reps : null; };
+  const planSessions = (sessions || [])
+    .filter(s => s.ended && !s.isDeload && s.scheduleId === sch.id)
+    .slice()
+    .sort((a, b) => ((a.ended || '') < (b.ended || '') ? -1 : (a.ended || '') > (b.ended || '') ? 1 : 0));
+  const perLift = {}; // exId -> [hitBool, ...] across weeks 1-3
+  planSessions.forEach((s, idx) => {
+    const completedWeeks = Math.floor(idx / dayCount);
+    if (Math.floor(completedWeeks / maxWeek) !== cycleIdx) return;
+    const min = amrapMin((completedWeeks % maxWeek) + 1);
+    if (min == null) return; // deload week: no AMRAP, no signal
+    const mainEntry = (s.entries || []).find(e => mainLifts[e.exId]);
+    if (!mainEntry) return;
+    const working = (mainEntry.sets || []).filter(st => !st.warmup && !st.skipped);
+    const amrap = working[working.length - 1];
+    const reps = amrap ? effReps(amrap) : null;
+    if (reps == null) return;
+    (perLift[mainEntry.exId] = perLift[mainEntry.exId] || []).push(reps >= min);
+  });
+  const result = {};
+  for (const exId of Object.keys(mainLifts)) {
+    const ml = mainLifts[exId];
+    const hits = perLift[exId] || [];
+    const allHit = hits.length > 0 && hits.every(Boolean);
+    const oldTm = ml.tm;
+    const newTm = (allHit && oldTm != null) ? round531(oldTm + tmBump531(ml.kind, unit), unit) : oldTm;
+    result[exId] = { kind: ml.kind, oldTm, newTm, bumped: !!(allHit && oldTm != null && newTm > oldTm) };
+  }
+  return result;
+}
+
+// Fold computed bumps back into a program_data object and stamp bumpedCycle so
+// the cycle-end prompt fires exactly once per cycle. Pure.
+function apply531Bumps(programData, bumps, cycleIdx) {
+  const mainLifts = { ...((programData && programData.mainLifts) || {}) };
+  for (const exId of Object.keys(bumps || {})) {
+    if (mainLifts[exId]) mainLifts[exId] = { ...mainLifts[exId], tm: bumps[exId].newTm };
+  }
+  return { ...(programData || {}), mainLifts, bumpedCycle: cycleIdx };
+}
+
 // Whether a mesocycle's RIR taper is active. Default true: only an explicit
 // false disables the weekly RIR target watermark and the negative-RIR
 // lengthened-partials prescription (the meso then runs on volume + load
@@ -4162,7 +4217,7 @@ window.LB = {
   signIn, signUp, signOut, signInWithPasskey, registerPasskey, listPasskeys, deletePasskey, resetPassword, deleteAllData, exportBackup, importFromBackup, validateBackup,
   loadFromSupabase, syncStore, mergeSessions, withCarriedWindowEntries, historyWindowCutoffISO,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
-  uid, todayISO, fmtISO, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, buildPlanSkeleton, instantiateProgram, is531Plan, round531, tmFrom531, tmBump531, weeks531, week531, fiveThreeOneSets, build531Plan, current531Week, current531Cycle, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, realignCycleForToday, todayCycleStripIndex,
+  uid, todayISO, fmtISO, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, buildPlanSkeleton, instantiateProgram, is531Plan, round531, tmFrom531, tmBump531, weeks531, week531, fiveThreeOneSets, build531Plan, current531Week, current531Cycle, compute531CycleBumps, apply531Bumps, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, realignCycleForToday, todayCycleStripIndex,
   effReps, e1rm, isImprovement, isDecline, bestE1rmForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, latestBodyweight, exerciseLogMode, shouldPullBodyweight, systemExerciseToRow, inferCurrentExIdx, calcBlended,
   refreshExerciseBests, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries,
   computeNextReminderAt,
