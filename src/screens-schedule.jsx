@@ -3571,9 +3571,10 @@ function TmField({ value, onChange, step = 2.5, suffix }) {
       {/* Boxed and accent-on-focus so it reads clearly as a field you type into,
           not just a number the steppers nudge. */}
       <label style={{
-        flex: 1, maxWidth: 190, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
+        flex: 1, maxWidth: 190, minHeight: 52, boxSizing: 'border-box',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
         background: UI.bgInset, border: `1.5px solid ${focused ? 'var(--accent)' : UI.hairStrong}`,
-        borderRadius: 6, padding: '8px 10px', cursor: 'text',
+        borderRadius: 6, padding: '0 10px', cursor: 'text',
       }}>
         <input
           type="text" inputMode="decimal" placeholder="tap to type" value={raw}
