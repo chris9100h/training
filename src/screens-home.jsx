@@ -2142,6 +2142,25 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
           note: '', supersetGroup: it.supersetGroup || null,
         };
       }
+      // Time-based exercise (log_mode 'time'): seed each set's target duration
+      // from the item's per-set targets, else the last logged time for that set,
+      // else a 30s default. No history-based weight/rep progression.
+      if (LB.exerciseLogMode(ex) === 'time') {
+        const nSets = Math.max(1, it.sets || 1);
+        const perSet = Array.isArray(it.timeSecPerSet) ? it.timeSecPerSet : null;
+        const lastTime = seedRefs[it.exId] ?? LB.bestRecentEntry(store, it.exId, dayId);
+        const lastSets = (lastTime?.entry?.sets || []).filter(s => !s.warmup);
+        const seedTime = (i) => (perSet && perSet[i] != null) ? perSet[i]
+          : (lastSets[i]?.timeSec != null) ? lastSets[i].timeSec
+          : (perSet && perSet.length && perSet[perSet.length - 1] != null) ? perSet[perSet.length - 1]
+          : 30;
+        return {
+          exId: it.exId, name: ex?.name || '?',
+          plannedSets: nSets, plannedReps: null, plannedRepsPerSet: null,
+          sets: Array.from({ length: nSets }, (_, i) => ({ timeSec: seedTime(i), done: false })),
+          note: '', supersetGroup: it.supersetGroup || null,
+        };
+      }
       const last = seedRefs[it.exId] ?? LB.bestRecentEntry(store, it.exId, dayId);
       const isUnilateral = ex?.unilateral || false;
       const suggestion = LB.progressionSuggestion(store, it.exId, dayId, it.reps, it.repsPerSet || null, seedRefs[it.exId], it.repsMax || null, it.progressionOffset ?? null);
@@ -2370,6 +2389,13 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       const ex = LB.findExercise(store, it.exId);
       if (ex?.movement_type === 'cardio') {
         return { exId: it.exId, name: ex.name, isCardio: true, plannedSets: 0, plannedReps: null, plannedRepsPerSet: null, sets: [], cardioDone: false, cardioData: null, note: '', supersetGroup: it.supersetGroup || null };
+      }
+      if (LB.exerciseLogMode(ex) === 'time') {
+        const nSets = Math.max(1, it.sets || 1);
+        const perSet = Array.isArray(it.timeSecPerSet) ? it.timeSecPerSet : null;
+        const lastSets = ((seedRefs[it.exId] ?? LB.bestRecentEntry(store, it.exId, null))?.entry?.sets || []).filter(s => !s.warmup);
+        const seedTime = (i) => (perSet && perSet[i] != null) ? perSet[i] : (lastSets[i]?.timeSec != null) ? lastSets[i].timeSec : (perSet && perSet.length && perSet[perSet.length - 1] != null) ? perSet[perSet.length - 1] : 30;
+        return { exId: it.exId, name: ex?.name || '?', plannedSets: nSets, plannedReps: null, plannedRepsPerSet: null, sets: Array.from({ length: nSets }, (_, i) => ({ timeSec: seedTime(i), done: false })), note: '', supersetGroup: it.supersetGroup || null };
       }
       const last = seedRefs[it.exId] ?? LB.bestRecentEntry(store, it.exId, null);
       const isUni = ex?.unilateral || false;

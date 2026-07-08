@@ -1228,6 +1228,11 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
     (h.entry.sets || []).reduce((sum, s) => s.kg == null ? sum : sum + s.kg * (LB.effReps(s) ?? 0), 0)
   )) : 0;
 
+  // Time-based exercise: best (longest) logged duration across all history.
+  const isTimeEx = LB.exerciseLogMode(ex) === 'time';
+  const bestTime = isTimeEx ? history.reduce((m, h) =>
+    (h.entry.sets || []).reduce((mm, s) => s.timeSec != null ? Math.max(mm, s.timeSec) : mm, m), 0) : 0;
+
   const queuePos = editQueueTotal > 0 ? editQueueTotal - editQueue.length : 0;
 
   return (
@@ -1386,9 +1391,11 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
 
         {/* Stats — SubDials */}
         <div style={{ display: 'flex', justifyContent: 'space-around', padding: '6px 0' }}>
-          <SubDial label="1RM PR" value={pr ? Math.round(pr) : '—'} sub={UI.unit()} size={90} gold />
+          {isTimeEx
+            ? <SubDial label="Best Time" value={bestTime ? LB.fmtDuration(bestTime) : '—'} size={90} gold />
+            : <SubDial label="1RM PR" value={pr ? Math.round(pr) : '—'} sub={UI.unit()} size={90} gold />}
           <SubDial label="Sessions" value={history.length} size={90} />
-          <SubDial label="Vol PR" value={volPr ? Math.round(volPr) : '—'} sub={UI.unit()} size={90} gold />
+          {!isTimeEx && <SubDial label="Vol PR" value={volPr ? Math.round(volPr) : '—'} sub={UI.unit()} size={90} gold />}
         </div>
 
         {points.length > 1 && <ProgressChart points={points} />}
@@ -3170,7 +3177,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                           fontFamily: UI.fontNum, fontSize: 12,
                           color: isWarm ? UI.inkFaint : highlight ? UI.goldLight : decline ? 'rgba(var(--danger-rgb),0.85)' : UI.ink,
                         }}>
-                          {isCheckboxOnly ? (st.done ? '✓' : '○') : (<>
+                          {isCheckboxOnly ? (st.done ? '✓' : '○') : st.timeSec != null ? LB.fmtDuration(st.timeSec) : (<>
                             {isWarm && <span style={{ fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.1em', color: UI.inkFaint, marginRight: 4 }}>W</span>}
                             {st.kg ?? '—'}<span style={{ color: isWarm ? UI.inkGhost : highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, fontSize: 10 }}>{UI.unit()}</span><span style={{ color: isWarm ? UI.inkGhost : highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, margin: '0 1px' }}>×</span>{(st.repsL != null || st.repsR != null) ? `L${st.repsL ?? '?'}/R${st.repsR ?? '?'}` : (st.reps ?? '—')}{pr && <i className="fa-solid fa-dumbbell" style={{ fontSize: 8, color: UI.gold, marginLeft: 4 }} />}
                           </>)}
@@ -3381,6 +3388,7 @@ function SessionEditSheet({ session, duration, exercises, onClose, onSave }) {
 function fmtCompareSet(st) {
   if (!st) return '—';
   if (st.skipped && !st.done) return 'skipped';
+  if (st.timeSec != null) return LB.fmtDuration(st.timeSec);
   const tr = LB.techniqueRounds(st);
   if (tr.kind === 'lengthened_partial') {
     const main = `${st.kg != null ? st.kg + UI.unit() : '—'} × ${st.reps ?? '—'}`;
@@ -3758,6 +3766,7 @@ function ComparisonScreen({ session, onDismiss, go, userName }) {
           const fmtSet = s => {
             if (!s) return '—';
             if (s.skipped && !s.done) return 'skipped';
+            if (s.timeSec != null) return LB.fmtDuration(s.timeSec);
             const tr = LB.techniqueRounds(s);
             if (tr.kind === 'lengthened_partial') {
               const main = `${s.kg != null ? s.kg + unit : '—'} × ${s.reps ?? '—'}`;
