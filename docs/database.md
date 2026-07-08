@@ -14,9 +14,12 @@ dem Live-Schema übereinstimmen.
 replayt alle Migrationen und schlägt fehl, wenn Tabellen/Spalten/Funktionen nicht
 in `schema.sql` und dieser Datei nachgezogen wurden. `tools/check-db-live.cjs`
 (`.github/workflows/db-drift.yml`, wöchentlich + manuell) vergleicht zusätzlich
-die echte Datenbank: Spalten via PostgREST-OpenAPI (Stufe 1, anon-Key) bzw.
-`admin_schema_inventory()` (Stufe 2, Service-Key), anon-EXECUTE-Grants und die
-Realtime-Publikation.
+die echte Datenbank. Mit Service-Key (GitHub-Secret `SUPABASE_SERVICE_ROLE_KEY`):
+volles Inventar via `admin_schema_inventory()` (Spalten in beide Richtungen,
+anon-EXECUTE-Grants, Realtime-Publikation). Ohne Key: Existenz-Probe aller
+`schema.sql`-Spalten per anonymer Read-only-Selects. (Die PostgREST-OpenAPI-Spec
+unter `/rest/v1/` wäre die schlankere Quelle, ist bei Supabase aber nur noch mit
+dem service_role-Key abrufbar.)
 
 ## Tabellen & Spalten
 
