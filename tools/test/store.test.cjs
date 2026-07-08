@@ -1187,6 +1187,44 @@ async function testAsync(name, fn) {
     assert.ok(schedule.days.some(d => d.items.some(it => it.exId === 'user_existing')), 'plan item must reference the reused existing exercise id');
   });
 
+  test('5/3/1 wave math: percentages, rounding, AMRAP top set', () => {
+    const w1 = LB.fiveThreeOneSets(100, 1, 'kg');
+    // Compare by value via join(): LB runs in a vm realm, so its arrays are not
+    // reference-equal to this realm's and assert.deepStrictEqual would reject them.
+    assert.strictEqual(w1.map(s => s.kg).join(','), '65,75,85');
+    assert.strictEqual(w1.map(s => s.reps).join(','), '5,5,5');
+    assert.strictEqual(w1[2].amrap, true);
+    assert.ok(!w1[0].amrap && !w1[1].amrap, 'only the top set is AMRAP');
+    // rounds to 2.5 kg: 70/80/90% of 102.5 = 71.75/82/92.25
+    assert.strictEqual(LB.fiveThreeOneSets(102.5, 2, 'kg').map(s => s.kg).join(','), '72.5,82.5,92.5');
+    // lbs rounds to 5: 65/75/85% of 185 = 120.25/138.75/157.25
+    assert.strictEqual(LB.fiveThreeOneSets(185, 1, 'lbs').map(s => s.kg).join(','), '120,140,155');
+    // week 3 tapers to a single AMRAP rep; week 4 is the deload (no AMRAP)
+    assert.strictEqual(LB.fiveThreeOneSets(100, 3, 'kg')[2].reps, 1);
+    assert.ok(LB.fiveThreeOneSets(100, 4, 'kg').every(s => !s.amrap));
+    // null TM (preview before setup) yields null loads but keeps reps/pct
+    const wp = LB.fiveThreeOneSets(null, 1, 'kg');
+    assert.strictEqual(wp[0].kg, null);
+    assert.strictEqual(wp[0].pct, 65);
+  });
+
+  test('5/3/1 TM helpers: from-1RM, per-cycle bump, week clamp, plan flag', () => {
+    assert.strictEqual(LB.tmFrom531(100, 'kg'), 90);
+    assert.strictEqual(LB.tmFrom531(102, 'kg'), 92.5); // 91.8 rounds to 92.5
+    assert.strictEqual(LB.tmFrom531(0, 'kg'), null);
+    assert.strictEqual(LB.tmBump531('squat', 'kg'), 5);
+    assert.strictEqual(LB.tmBump531('bench', 'kg'), 2.5);
+    assert.strictEqual(LB.tmBump531('deadlift', 'lbs'), 10);
+    assert.strictEqual(LB.tmBump531('ohp', 'lbs'), 5);
+    assert.strictEqual(LB.week531(0, true), 1);
+    assert.strictEqual(LB.week531(3, true), 4);
+    assert.strictEqual(LB.week531(4, true), 1); // next cycle wraps to week 1
+    assert.strictEqual(LB.week531(3, false), 1); // 3-week block wraps without a deload
+    assert.strictEqual(LB.is531Plan({ program_type: '531' }), true);
+    assert.strictEqual(LB.is531Plan({ program_type: null }), false);
+    assert.strictEqual(LB.is531Plan(null), false);
+  });
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();

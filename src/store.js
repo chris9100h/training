@@ -703,7 +703,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   const queries = [
     _supabase.from('zane_profiles').select('id, name, approved').eq('id', userId).maybeSingle(),
     _supabase.from('zane_exercises').select('id, name, tags, note, category, unilateral, equipment, progression_reps, movement_type, no_weight_reps, log_mode, pull_bodyweight, youtube_url').eq('user_id', userId),
-    _supabase.from('zane_schedules').select('id, name, days, archived, versions, is_flex, sessions_per_week, mesocycle_weeks, mesocycle_start_rir, mesocycle_end_rir, mesocycle_rir_enabled').eq('user_id', userId),
+    _supabase.from('zane_schedules').select('id, name, days, archived, versions, is_flex, sessions_per_week, mesocycle_weeks, mesocycle_start_rir, mesocycle_end_rir, mesocycle_rir_enabled, program_type, program_data').eq('user_id', userId),
     // Session METADATA stays complete (cheap; streaks/calendar need the full
     // date list) — the legacy entries JSONB is no longer selected.
     _supabase.from('zane_sessions').select('id, schedule_id, day_id, day_name, date, started_at, ended, duration_minutes, feel, is_bonus, is_freestyle, is_deload')
@@ -2122,6 +2122,74 @@ function instantiateProgram(state, program) {
     mesoEndRir: meso.endRir != null ? meso.endRir : null,
   });
   return { schedule, newExercises };
+}
+
+// ── 5/3/1 (Wendler) program math ────────────────────────────────────────────
+// A schedule with program_type '531' runs Wendler 5/3/1: every working weight
+// is a percentage of a stored per-lift Training Max (program_data.mainLifts),
+// not derived from logged history. These helpers are pure and unit-tested; the
+// seeding/runtime wiring lives in screens-home.jsx / screens-train.jsx.
+// Unit note: like the rest of the app, loads live in the .kg field, but a lbs
+// user's numbers ARE lbs (no conversion). Rounding and TM bumps key off the
+// program's stored unit, never a hardcoded kg step.
+const FTO_WAVES = {
+  1: [{ pct: 65, reps: 5 }, { pct: 75, reps: 5 }, { pct: 85, reps: 5, amrap: true }],
+  2: [{ pct: 70, reps: 3 }, { pct: 80, reps: 3 }, { pct: 90, reps: 3, amrap: true }],
+  3: [{ pct: 75, reps: 5 }, { pct: 85, reps: 3 }, { pct: 95, reps: 1, amrap: true }],
+  4: [{ pct: 40, reps: 5 }, { pct: 50, reps: 5 }, { pct: 60, reps: 5 }], // optional deload
+};
+
+function is531Plan(sch) {
+  return !!sch && sch.program_type === '531';
+}
+
+// Smallest loadable step for the plan's unit: 2.5 kg or 5 lb. Every 5/3/1
+// weight is rounded to this so the bar can actually be loaded.
+function round531(val, unit) {
+  if (val == null || !isFinite(val)) return null;
+  const inc = unit === 'lbs' ? 5 : 2.5;
+  return Math.round(val / inc) * inc;
+}
+
+// Training Max = 90% of a (true or estimated) 1RM, rounded to the load step.
+function tmFrom531(oneRm, unit) {
+  if (!oneRm || oneRm <= 0) return null;
+  return round531(oneRm * 0.9, unit);
+}
+
+// Per-cycle TM increase: lower body (squat/deadlift) climbs twice as fast as
+// upper (bench/ohp): +5/+2.5 kg, or +10/+5 lb.
+function tmBump531(kind, unit) {
+  const lower = kind === 'squat' || kind === 'deadlift';
+  if (unit === 'lbs') return lower ? 10 : 5;
+  return lower ? 5 : 2.5;
+}
+
+// Number of weeks in one block: 4 with the optional deload, else 3.
+function weeks531(includeDeload) {
+  return includeDeload ? 4 : 3;
+}
+
+// The clamped week index (1..maxWeek) inside the current block, from a running
+// count of completed weeks. Week 4 (deload) only exists when opted in.
+function week531(completedWeeks, includeDeload) {
+  const maxWeek = weeks531(includeDeload);
+  const w = (Math.max(0, completedWeeks) % maxWeek) + 1;
+  return Math.min(maxWeek, Math.max(1, w));
+}
+
+// The three prescribed working sets for one lift in a given week. Each set's
+// load is round(pct * tm); a null tm yields null loads (preview before setup).
+// The top set of weeks 1-3 is an AMRAP ("+"), its reps being the required
+// minimum. pct is returned for display ("85% x 5+").
+function fiveThreeOneSets(tm, week, unit) {
+  const wave = FTO_WAVES[week] || FTO_WAVES[1];
+  return wave.map(s => ({
+    kg: (tm != null) ? round531(tm * s.pct / 100, unit) : null,
+    reps: s.reps,
+    pct: s.pct,
+    ...(s.amrap ? { amrap: true } : {}),
+  }));
 }
 
 // Whether a mesocycle's RIR taper is active. Default true: only an explicit
@@ -4017,7 +4085,7 @@ window.LB = {
   signIn, signUp, signOut, signInWithPasskey, registerPasskey, listPasskeys, deletePasskey, resetPassword, deleteAllData, exportBackup, importFromBackup, validateBackup,
   loadFromSupabase, syncStore, mergeSessions, withCarriedWindowEntries, historyWindowCutoffISO,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
-  uid, todayISO, fmtISO, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, buildPlanSkeleton, instantiateProgram, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, realignCycleForToday, todayCycleStripIndex,
+  uid, todayISO, fmtISO, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, buildPlanSkeleton, instantiateProgram, is531Plan, round531, tmFrom531, tmBump531, weeks531, week531, fiveThreeOneSets, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, realignCycleForToday, todayCycleStripIndex,
   effReps, e1rm, isImprovement, isDecline, bestE1rmForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, latestBodyweight, exerciseLogMode, shouldPullBodyweight, systemExerciseToRow, inferCurrentExIdx, calcBlended,
   refreshExerciseBests, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries,
   computeNextReminderAt,
