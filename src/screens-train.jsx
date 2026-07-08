@@ -915,6 +915,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     const idx = (e.sets || []).findIndex(s => !s.warmup && !s.done && !s.skipped);
     if (idx < 0) return null;
     const ex = store.exercises?.find(x => x.id === e.exId);
+    if (LB.exerciseLogMode(ex) === 'time') return null; // no numeric field to focus
     const noWeight = !!ex?.no_weight_reps;
     const uni = (ex?.movement_type ?? (ex?.unilateral ? 'unilateral' : 'bilateral')) === 'unilateral';
     const repsField = uni ? 'repsL' : 'reps';
@@ -929,6 +930,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // following warmup) — used when navigation stays put, so the field type
   // mirrors this entry's own kg/reps shape rather than re-deriving it.
   const nextOwnFocus = (setsArr, afterIdx) => {
+    if (isTime) return null; // time sets have no keyboard field to auto-focus
     const idx = setsArr.findIndex((s, i) => i > afterIdx && !s.done && !s.skipped);
     if (idx < 0) return null;
     const repsField = isUnilateral ? 'repsL' : 'reps';
@@ -3498,7 +3500,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const firstFieldForExercise = (ex) => {
     const m = LB.exerciseLogMode(ex);
     if (m === 'weight') return 'kg';
-    if (m === 'checkbox') return null;
+    if (m === 'checkbox' || m === 'time') return null;
     return ex?.movement_type === 'unilateral' ? 'repsL' : 'reps';
   };
 
