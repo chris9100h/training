@@ -1286,7 +1286,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
     if (!d || !(d.tm > 0)) return;
     const cycle = LB.current531Cycle(draft, store.sessions);
     const { programData, items } = LB.add531MainLift(draft.program_data, { exId: d.exId, kind: d.body, tm: d.tm, cycle });
-    const day = { id: LB.uid(), name: d.name, items };
+    const day = { id: LB.uid(), name: LB.findExercise(store, d.exId)?.name || d.name, items };
     setDraft(dr => ({ ...dr, program_data: programData, days: [...dr.days, day] }));
     setAddLiftDraft(null);
   };
@@ -1958,7 +1958,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
           const d = addLiftDraft;
           return (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-              <div style={{ fontFamily: UI.fontDisplay, fontSize: 20, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.02em', color: UI.ink }}>{d.name}</div>
+              <div style={{ fontFamily: UI.fontDisplay, fontSize: 20, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.02em', color: UI.ink }}>{LB.findExercise(store, d.exId)?.name || d.name}</div>
               <div className="micro" style={{ color: UI.inkFaint, textTransform: 'none', letterSpacing: '0.02em', lineHeight: 1.5 }}>
                 Adds a 5/3/1 day for this lift, waving 5s / 3s / 1s off its Training Max. Assistance you add to the day stays on normal progression.
               </div>
@@ -4012,7 +4012,7 @@ function FiveThreeOneSetupScreen({ store, setStore, go, userId }) {
       name: '5/3/1', unit, includeDeload,
       lifts: [
         ...FTO.lifts.map(l => ({ kind: l.kind, ex: l.ex, tm: tms[l.kind] ?? null })),
-        ...extraLifts.map(x => ({ kind: x.body, ex: x.exId, tm: x.tm ?? null, name: x.name, assistance: assistanceOn ? (x.assistance || []) : [] })),
+        ...extraLifts.map(x => ({ kind: x.body, ex: x.exId, tm: x.tm ?? null, name: LB.findExercise(store, x.exId)?.name || x.name, assistance: assistanceOn ? (x.assistance || []) : [] })),
       ],
       assistance: assistanceOn ? assist : {},
     };
@@ -4073,7 +4073,7 @@ function FiveThreeOneSetupScreen({ store, setStore, go, userId }) {
         {extraLifts.map(x => (
           <Card key={x.id} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-              <span style={{ fontFamily: UI.fontDisplay, fontSize: 18, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.02em', color: UI.ink }}>{x.name}</span>
+              <span style={{ fontFamily: UI.fontDisplay, fontSize: 18, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.02em', color: UI.ink }}>{LB.findExercise(store, x.exId)?.name || x.name}</span>
               <button onClick={() => removeMainLift(x.id)} aria-label="Remove lift" style={{ background: 'none', border: 'none', color: UI.inkFaint, cursor: 'pointer', padding: 0, fontSize: 18, lineHeight: 1 }}>×</button>
             </div>
             <div>
