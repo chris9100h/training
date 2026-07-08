@@ -4772,12 +4772,15 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                     <div aria-hidden="true" style={{
                       // Fill the money zone with fire, corner to corner: top at the
                       // weight/rep box tops (never up into the knurl above), bottom just
-                      // under the "go all out" caption, full row width. farthest-corner
-                      // keeps colour all the way into the four corners instead of fading
-                      // to a central oval.
-                      position: 'absolute', top: 9, bottom: 8, left: 0, right: 0, zIndex: 0,
+                      // under the "go all out" caption, full row width. The radial fades
+                      // to transparent at the far corners so the left/right edges feather
+                      // out; a vertical mask feathers the top/bottom edges the same way,
+                      // so nothing looks hard-cut. (No mask support just shows the radial.)
+                      position: 'absolute', top: 9, bottom: 4, left: 0, right: 0, zIndex: 0,
                       pointerEvents: 'none',
-                      background: 'radial-gradient(farthest-corner at 50% 50%, rgba(255,120,40,0.28), rgba(210,45,0,0.18) 55%, rgba(210,45,0,0.10) 100%)',
+                      background: 'radial-gradient(farthest-corner at 50% 50%, rgba(255,120,40,0.28), rgba(210,45,0,0.16) 55%, transparent 100%)',
+                      WebkitMaskImage: 'linear-gradient(180deg, transparent 0%, #000 13%, #000 87%, transparent 100%)',
+                      maskImage: 'linear-gradient(180deg, transparent 0%, #000 13%, #000 87%, transparent 100%)',
                       animation: 'hellPulse 2s ease-in-out infinite',
                     }} />
                   )}
