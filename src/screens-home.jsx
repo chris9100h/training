@@ -2143,23 +2143,17 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
         };
       }
       // Time-based exercise (log_mode 'time'): seed each set's target duration
-      // from the item's per-set targets, else the last logged time for that set,
-      // else a 30s default. No history-based weight/rep progression.
+      // (buildTimeSeedSets: authored target, else last logged time, else 30s).
+      // seedRefs carries timeSec too (get_exercise_history since migration
+      // 0145), so an exercise whose last session left the boot window still
+      // seeds its real last duration instead of the default.
       if (LB.exerciseLogMode(ex) === 'time') {
-        const nSets = Math.max(1, it.sets || 1);
-        const perSet = Array.isArray(it.timeSecPerSet) ? it.timeSecPerSet : null;
-        // Local reference only: server history (seedRefs / get_exercise_history)
-        // does not carry timeSec, so read the last logged session directly.
-        const lastTime = LB.bestRecentEntry(store, it.exId, dayId);
-        const lastSets = (lastTime?.entry?.sets || []).filter(s => !s.warmup);
-        const seedTime = (i) => (perSet && perSet[i] != null) ? perSet[i]
-          : (lastSets[i]?.timeSec != null) ? lastSets[i].timeSec
-          : (perSet && perSet.length && perSet[perSet.length - 1] != null) ? perSet[perSet.length - 1]
-          : 30;
+        const lastTime = seedRefs[it.exId] ?? LB.bestRecentEntry(store, it.exId, dayId);
+        const sets = LB.buildTimeSeedSets(it, lastTime);
         return {
           exId: it.exId, name: ex?.name || '?',
-          plannedSets: nSets, plannedReps: null, plannedRepsPerSet: null,
-          sets: Array.from({ length: nSets }, (_, i) => ({ timeSec: seedTime(i), done: false })),
+          plannedSets: sets.length, plannedReps: null, plannedRepsPerSet: null,
+          sets,
           note: '', supersetGroup: it.supersetGroup || null,
         };
       }
@@ -2206,10 +2200,11 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     // slot's future date — see Mike's "trained Jul 9" ticket.
     const sessionDateISO = (isFlex || isFutureSlot) ? LB.todayISO() : LB.fmtISO(sessionDate);
     loggingRef.current = false;
-    // No warmup ramp for bodyweight (no meaningful load to ramp) or cardio
-    // (not a weighted movement at all) — offering "3 sets · Treadmill" with
-    // every preview weight blank made no sense.
-    if (firstEx?.equipment === 'bodyweight' || firstEx?.movement_type === 'cardio') {
+    // No warmup ramp for bodyweight (no meaningful load to ramp), cardio (not
+    // a weighted movement at all) or a time-based first exercise (a kg ramp on
+    // a countdown exercise would just prepend three dead weight rows): offering
+    // "3 sets · Treadmill" with every preview weight blank made no sense.
+    if (firstEx?.equipment === 'bodyweight' || firstEx?.movement_type === 'cardio' || LB.exerciseLogMode(firstEx) === 'time') {
       const session = {
         id: LB.uid(), scheduleId: sch.id, dayId: activeDay.id, dayName: activeDay.name,
         date: sessionDateISO, startedAt: new Date().toISOString(), entries, currentExIdx: 0, cyclePos,
@@ -2393,11 +2388,8 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
         return { exId: it.exId, name: ex.name, isCardio: true, plannedSets: 0, plannedReps: null, plannedRepsPerSet: null, sets: [], cardioDone: false, cardioData: null, note: '', supersetGroup: it.supersetGroup || null };
       }
       if (LB.exerciseLogMode(ex) === 'time') {
-        const nSets = Math.max(1, it.sets || 1);
-        const perSet = Array.isArray(it.timeSecPerSet) ? it.timeSecPerSet : null;
-        const lastSets = (LB.bestRecentEntry(store, it.exId, null)?.entry?.sets || []).filter(s => !s.warmup);
-        const seedTime = (i) => (perSet && perSet[i] != null) ? perSet[i] : (lastSets[i]?.timeSec != null) ? lastSets[i].timeSec : (perSet && perSet.length && perSet[perSet.length - 1] != null) ? perSet[perSet.length - 1] : 30;
-        return { exId: it.exId, name: ex?.name || '?', plannedSets: nSets, plannedReps: null, plannedRepsPerSet: null, sets: Array.from({ length: nSets }, (_, i) => ({ timeSec: seedTime(i), done: false })), note: '', supersetGroup: it.supersetGroup || null };
+        const sets = LB.buildTimeSeedSets(it, seedRefs[it.exId] ?? LB.bestRecentEntry(store, it.exId, null));
+        return { exId: it.exId, name: ex?.name || '?', plannedSets: sets.length, plannedReps: null, plannedRepsPerSet: null, sets, note: '', supersetGroup: it.supersetGroup || null };
       }
       const last = seedRefs[it.exId] ?? LB.bestRecentEntry(store, it.exId, null);
       const isUni = ex?.unilateral || false;
@@ -2433,7 +2425,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     const extra = (!isTodaysDay || alreadyDoneToday) ? { isBonus: true } : {};
     const firstEx = LB.findExercise(store, day.items?.[0]?.exId);
     loggingRef.current = false;
-    if (firstEx?.equipment === 'bodyweight' || firstEx?.movement_type === 'cardio') {
+    if (firstEx?.equipment === 'bodyweight' || firstEx?.movement_type === 'cardio' || LB.exerciseLogMode(firstEx) === 'time') {
       const session = {
         id: LB.uid(), scheduleId: sch?.id, dayId: day.id, dayName: day.name,
         date: LB.todayISO(), startedAt: new Date().toISOString(),
@@ -2460,7 +2452,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     const autoSkipId = autoSkip?.skipReason === '—' ? autoSkip.id : null;
     const firstEx = LB.findExercise(store, dayData?.items?.[0]?.exId);
     loggingRef.current = false;
-    if (firstEx?.equipment === 'bodyweight' || firstEx?.movement_type === 'cardio') {
+    if (firstEx?.equipment === 'bodyweight' || firstEx?.movement_type === 'cardio' || LB.exerciseLogMode(firstEx) === 'time') {
       const session = { id: LB.uid(), scheduleId: sch?.id, dayId, dayName, date: LB.fmtISO(date), startedAt: new Date().toISOString(), ended: null, entries, currentExIdx: 0, cyclePos: null };
       setStore(s => ({
         ...s,

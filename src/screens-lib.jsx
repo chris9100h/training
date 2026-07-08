@@ -1217,8 +1217,14 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
     return s.reps ? LB.e1rm(s.kg, s.reps) : 0;
   };
 
+  // Time-based exercise: the chart/PR math tracks the best DURATION per
+  // session instead of an estimated 1RM (kg-null sets estimate to 0, which
+  // used to leave the chart and history rows empty for time exercises).
+  const isTimeEx = LB.exerciseLogMode(ex) === 'time';
+  const valForSet = (s) => isTimeEx ? (!s.warmup && s.timeSec != null ? s.timeSec : 0) : e1rmForSet(s);
+
   const points = history.map(h => {
-    const best = (h.entry.sets || []).reduce((m, s) => Math.max(m, e1rmForSet(s)), 0);
+    const best = (h.entry.sets || []).reduce((m, s) => Math.max(m, valForSet(s)), 0);
     return { date: h.session.date, est: best };
   }).filter(p => p.est > 0).reverse();
 
@@ -1228,10 +1234,8 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
     (h.entry.sets || []).reduce((sum, s) => s.kg == null ? sum : sum + s.kg * (LB.effReps(s) ?? 0), 0)
   )) : 0;
 
-  // Time-based exercise: best (longest) logged duration across all history.
-  const isTimeEx = LB.exerciseLogMode(ex) === 'time';
-  const bestTime = isTimeEx ? history.reduce((m, h) =>
-    (h.entry.sets || []).reduce((mm, s) => s.timeSec != null ? Math.max(mm, s.timeSec) : mm, m), 0) : 0;
+  // Best (longest) logged duration = the PR of a time exercise.
+  const bestTime = isTimeEx ? pr : 0;
 
   const queuePos = editQueueTotal > 0 ? editQueueTotal - editQueue.length : 0;
 
@@ -1398,7 +1402,7 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
           {!isTimeEx && <SubDial label="Vol PR" value={volPr ? Math.round(volPr) : '—'} sub={UI.unit()} size={90} gold />}
         </div>
 
-        {points.length > 1 && <ProgressChart points={points} />}
+        {points.length > 1 && <ProgressChart points={points} title={isTimeEx ? 'BEST TIME · HISTORY' : undefined} fmtVal={isTimeEx ? LB.fmtDuration : undefined} />}
 
         {/* Note — read-only here; edited via the Edit button's form below */}
         <div>
@@ -1415,7 +1419,7 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
           <Bezel>HISTORY</Bezel>
           <div style={{ marginTop: 8 }}>
             {history.slice(0, 10).map((h, hi) => {
-              const sessionBest = h.entry.sets.reduce((m, s) => Math.max(m, e1rmForSet(s)), 0);
+              const sessionBest = h.entry.sets.reduce((m, s) => Math.max(m, valForSet(s)), 0);
               const isPR = pr > 0 && sessionBest > 0 && Math.abs(sessionBest - pr) < 0.01;
               return (
                 <React.Fragment key={h.session.id}>
@@ -1435,15 +1439,17 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
                         <span style={{ fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.1em', color: UI.gold, background: UI.goldFaint, border: `0.5px solid ${UI.goldSoft}`, borderRadius: 4, padding: '1px 5px' }}>PR</span>
                       )}
                     </div>
-                    <div style={{ display: 'flex', gap: 8 }}>
-                      {h.entry.sets.filter(s => s.kg != null && !s.warmup).map((s, i) => {
-                        const isBest = sessionBest > 0 && Math.abs(e1rmForSet(s) - sessionBest) < 0.01;
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                      {h.entry.sets.filter(s => (s.kg != null || s.timeSec != null) && !s.warmup).map((s, i) => {
+                        const isBest = sessionBest > 0 && Math.abs(valForSet(s) - sessionBest) < 0.01;
                         const repsStr = (s.repsL != null || s.repsR != null)
                           ? `L${s.repsL ?? '?'}/R${s.repsR ?? '?'}`
                           : s.reps;
                         return (
                           <span key={i} className="num" style={{ fontSize: 13, color: isBest ? UI.gold : UI.ink }}>
-                            {s.kg}<span style={{ color: isBest ? UI.goldSoft : UI.inkFaint }}>×</span>{repsStr}
+                            {s.timeSec != null
+                              ? LB.fmtDuration(s.timeSec)
+                              : <>{s.kg}<span style={{ color: isBest ? UI.goldSoft : UI.inkFaint }}>×</span>{repsStr}</>}
                           </span>
                         );
                       })}
@@ -1475,7 +1481,7 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
   );
 }
 
-function ProgressChart({ points }) {
+function ProgressChart({ points, title, fmtVal }) {
   const w = 280, h = 108, padT = 8, padB = 20, padL = 36, padR = 8;
   const max = Math.max(...points.map(p => p.est));
   const min = Math.min(...points.map(p => p.est));
@@ -1489,14 +1495,17 @@ function ProgressChart({ points }) {
   const path = xy.map(([x,y], i) => `${i===0?'M':'L'}${x.toFixed(1)},${y.toFixed(1)}`).join(' ');
   const fmtDate = d => new Date(d).toLocaleDateString('en', { month: 'short', day: 'numeric' });
   const unit = UI.unit();
+  // Default axis: rounded kg/lbs values (est. 1RM). A time exercise passes
+  // fmtVal (fmtDuration) and its own title, the geometry stays identical.
+  const axisVal = (v, last) => fmtVal ? fmtVal(Math.round(v)) : (last ? `${Math.round(v)} ${unit}` : Math.round(v));
   return (
     <div style={{ padding: '10px 0', maxWidth: 380 }}>
-      <div className="micro" style={{ marginBottom: 8, color: UI.inkFaint }}>EST. 1RM · HISTORY</div>
+      <div className="micro" style={{ marginBottom: 8, color: UI.inkFaint }}>{title || 'EST. 1RM · HISTORY'}</div>
       <svg viewBox={`0 0 ${w} ${h}`} width="100%" style={{ display: 'block' }}>
         {gridVals.map((v, i) => (
           <g key={`g${i}`}>
             {i > 0 && <line x1={padL} y1={yOf(v).toFixed(1)} x2={w - padR} y2={yOf(v).toFixed(1)} stroke={UI.hair} strokeWidth="0.5" strokeDasharray="3 3" />}
-            <text x={padL - 5} y={(yOf(v) + 3).toFixed(1)} textAnchor="end" fontSize="8" fill={UI.inkFaint} fontFamily={UI.fontNum}>{i === 3 ? `${Math.round(v)} ${unit}` : Math.round(v)}</text>
+            <text x={padL - 5} y={(yOf(v) + 3).toFixed(1)} textAnchor="end" fontSize="8" fill={UI.inkFaint} fontFamily={UI.fontNum}>{axisVal(v, i === 3)}</text>
           </g>
         ))}
         <line x1={padL} y1={padT} x2={padL} y2={h - padB} stroke={UI.hair} strokeWidth="0.5" />
@@ -2599,15 +2608,22 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
   const saveAsTemplate = () => {
     const name = tplName.trim();
     if (!name) return;
-    const exercises = (s.entries || []).map(e => ({
-      exId: e.exId, name: e.name,
-      sets: e.plannedSets || (e.sets || []).filter(st => !st.warmup).length || 3,
-      reps: e.plannedReps ?? null,
-      repsPerSet: e.plannedRepsPerSet ?? null,
-      repsMax: e.plannedRepsMax ?? null,
-      progressionOffset: e.plannedProgressionOffset ?? null,
-      supersetGroup: e.supersetGroup ?? null,
-    }));
+    const exercises = (s.entries || []).map(e => {
+      // Time-based entry: derive per-set duration targets from the logged sets
+      // so a template built from this session carries the times along (there is
+      // no editor UI authoring timeSecPerSet yet, this IS the authoring path).
+      const times = (e.sets || []).filter(st => !st.warmup).map(st => st.timeSec ?? null);
+      return {
+        exId: e.exId, name: e.name,
+        sets: e.plannedSets || (e.sets || []).filter(st => !st.warmup).length || 3,
+        reps: e.plannedReps ?? null,
+        repsPerSet: e.plannedRepsPerSet ?? null,
+        repsMax: e.plannedRepsMax ?? null,
+        progressionOffset: e.plannedProgressionOffset ?? null,
+        supersetGroup: e.supersetGroup ?? null,
+        ...(times.some(t => t != null) ? { timeSecPerSet: times } : {}),
+      };
+    });
     const tpl = { id: LB.uid(), name, exercises, createdAt: new Date().toISOString() };
     setStore(st => ({ ...st, workoutTemplates: [tpl, ...(st.workoutTemplates || [])] }));
     setTplFormOpen(false);
@@ -4213,13 +4229,14 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
                     {s.warmup ? 'W' : i + 1}
                   </span>
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
+                    {/* Time-based set: one duration instead of kg x reps */}
                     <span className="num" style={{ fontSize: 20, color: UI.ink, fontWeight: 300 }}>
-                      {s.kg != null ? s.kg : '—'}
+                      {s.timeSec != null ? LB.fmtDuration(s.timeSec) : s.kg != null ? s.kg : '—'}
                     </span>
-                    {s.kg != null && <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.08em' }}>{unit}</span>}
+                    {s.timeSec == null && s.kg != null && <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.08em' }}>{unit}</span>}
                   </div>
                   <div style={{ textAlign: 'center' }}>
-                    {unilateral ? (
+                    {s.timeSec != null ? null : unilateral ? (
                       <span className="num" style={{ fontSize: 14, color: UI.ink }}>
                         {s.repsL ?? '—'}<span style={{ color: UI.inkFaint, fontSize: 11 }}> / </span>{s.repsR ?? '—'}
                       </span>
@@ -4279,12 +4296,12 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
                         <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
                           {s.skipped
                             ? <span className="num" style={{ fontSize: 13, color: UI.inkFaint }}>skipped</span>
-                            : <><span className="num" style={{ fontSize: 16, color: UI.inkSoft }}>{s.kg != null ? s.kg : '—'}</span>
-                               {s.kg != null && <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi }}>{unit}</span>}</>
+                            : <><span className="num" style={{ fontSize: 16, color: UI.inkSoft }}>{s.timeSec != null ? LB.fmtDuration(s.timeSec) : s.kg != null ? s.kg : '—'}</span>
+                               {s.timeSec == null && s.kg != null && <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi }}>{unit}</span>}</>
                           }
                         </div>
                         <div style={{ display: 'flex', alignItems: 'baseline', gap: 4, justifyContent: 'center' }}>
-                          {!s.skipped && <>
+                          {!s.skipped && s.timeSec == null && <>
                             <span className="num" style={{ fontSize: 16, color: UI.inkSoft }}>{s.reps != null ? s.reps : '—'}</span>
                             {s.reps != null && <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi }}>reps</span>}
                           </>}

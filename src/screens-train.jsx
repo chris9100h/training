@@ -850,9 +850,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const progressionTargetForSet = (workingSetIdx) => {
     if (!LB.progressionEnabled(store, entry?.plannedRepsMax, entry?.plannedProgressionOffset)) return null;
     // Progression itself is suppressed during deload (see completeSet's
-    // isDeloadSession guard) — showing the "≥X reps · next weight" hint
-    // anyway would promise an unlock that can never actually fire.
-    if (store.statusMode === 'deload' || session.isDeload) return null;
+    // isDeloadSession guard): showing the "≥X reps · next weight" hint anyway
+    // would promise an unlock that can never actually fire. The 5/3/1 built-in
+    // week 4 counts too: assistance items run through this hint while the same
+    // deload gate blocks their unlock.
+    if (store.statusMode === 'deload' || session.isDeload || is531DeloadSession) return null;
     const perSet = entry?.plannedRepsPerSet;
     const perSetVal = perSet && perSet.length > 1
       ? (perSet[workingSetIdx] ?? perSet[perSet.length - 1])
@@ -5168,7 +5170,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             })}
           </div>
 
-          {!isCardio && (
+          {/* Intensity techniques are kg/reps flows (drop-set, myo-reps, ...):
+              a time-based exercise has neither field, the picker would only
+              open a dead end, so it is hidden there. */}
+          {!isCardio && !isTime && (
             <button className="intensity-glow" onClick={() => setIntensityOpen(true)} style={{
               width: '100%', marginTop: 6, padding: '8px 0',
               background: 'rgba(var(--accent-rgb),0.08)',

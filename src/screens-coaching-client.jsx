@@ -458,6 +458,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
                   // in sync by hand).
                   const fmtSetChip = (s) => {
                     if (s.skipped && !s.done) return 'skipped';
+                    if (s.timeSec != null) return LB.fmtDuration(s.timeSec); // time-based set: one duration, no kg x reps
                     const tr = LB.techniqueRounds(s);
                     if (tr.kind === 'lengthened_partial') {
                       const main = `${s.kg ?? '—'}${unit} × ${s.reps ?? s.repsL ?? '—'}`;
@@ -473,7 +474,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
                   const techniqueLabel = (s) => LB.techniqueRounds(s).badge;
                   return (todaySession.entries || []).map((e, i) => {
                     const lastResult = e.exId ? LB.lastSessionForExercise(storeWithoutToday, e.exId, todaySession.dayId) : null;
-                    const lastSets = (lastResult?.entry?.sets || []).filter(s => !s.warmup && (s.kg != null || s.reps != null));
+                    const lastSets = (lastResult?.entry?.sets || []).filter(s => !s.warmup && (s.kg != null || s.reps != null || s.timeSec != null));
                     // If any set in the row carries a technique badge, every set
                     // needs equal reserved space above its chip — otherwise a
                     // plain set's chip sits noticeably higher than a badged
@@ -550,7 +551,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
                   const suggestion = LB.progressionSuggestion(clientStore, item.exId, todayDay.id, item.reps, item.repsPerSet || null, undefined, item.repsMax || null, item.progressionOffset ?? null);
                   const bodyweightKg = LB.shouldPullBodyweight(ex) ? LB.latestBodyweight(clientStore) : null;
                   const seeds = LB.buildSeedSets(item, last, suggestion, ex?.unilateral, clientStore, bodyweightKg, clientStore.statusMode === 'deload');
-                  const hasWeight = seeds.some(s => s.kg != null);
+                  const hasWeight = seeds.some(s => s.kg != null || s.timeSec != null);
                   return (
                     <div key={idx} style={{ padding: '12px 4px', borderBottom: `0.5px solid ${UI.hair}` }}>
                       <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 6 }}>
@@ -562,10 +563,10 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
                         {hasWeight ? seeds.map((s, j) => (
                           <span key={j} className="num" style={{ fontSize: 12, color: UI.ink, background: UI.bgInset, borderRadius: 4, padding: '3px 8px', border: `0.5px solid ${UI.hairStrong}` }}>
-                            {s.kg ?? '—'}{unit} × {s.reps ?? s.repsL ?? '—'}
+                            {s.timeSec != null ? LB.fmtDuration(s.timeSec) : <>{s.kg ?? '—'}{unit} × {s.reps ?? s.repsL ?? '—'}</>}
                           </span>
                         )) : (
-                          <span style={{ fontSize: 11, color: UI.inkGhost, fontFamily: UI.fontUi }}>First time — no weight data yet</span>
+                          <span style={{ fontSize: 11, color: UI.inkGhost, fontFamily: UI.fontUi }}>First time, no weight data yet</span>
                         )}
                       </div>
                     </div>
@@ -1092,7 +1093,7 @@ function InlineExHistory({ exId, dayId, exName, sessions, exercises, onBack, uni
         const entry = (s.entries || []).find(e => e.exId === exId);
         if (!entry) return null;
         const working = (entry.sets || []).filter(st => !st.warmup && !st.skipped);
-        if (!working.some(st => st.kg != null || st.reps != null)) return null;
+        if (!working.some(st => st.kg != null || st.reps != null || st.timeSec != null)) return null;
         return { ended: s.ended, sets: working };
       })
       .filter(Boolean)
@@ -1100,9 +1101,18 @@ function InlineExHistory({ exId, dayId, exName, sessions, exercises, onBack, uni
     [sessions, exId, dayId]
   );
 
-  const getValue = (st) => metric === 'reps'
-    ? (isUni ? (st.repsL != null ? Math.min(st.repsL ?? 0, st.repsR ?? 0) : (st.reps ?? null)) : (st.reps ?? null))
-    : (st.kg ?? null);
+  // Time-based exercise: detected from the data itself (the coach side has no
+  // reliable exercise definition for the client's library). Chart plots the
+  // logged durations, the kg/reps metric toggle makes no sense here.
+  const isTimeEx = exSessions.some(s => s.sets.some(st => st.timeSec != null));
+
+  const getValue = (st) => {
+    if (!st) return null;
+    if (isTimeEx) return st.timeSec ?? null;
+    return metric === 'reps'
+      ? (isUni ? (st.repsL != null ? Math.min(st.repsL ?? 0, st.repsR ?? 0) : (st.reps ?? null)) : (st.reps ?? null))
+      : (st.kg ?? null);
+  };
 
   const maxSets = Math.max(...exSessions.map(s => s.sets.length), 1);
   const allVals = exSessions.flatMap(s => s.sets.map(getValue)).filter(v => v != null);
@@ -1135,7 +1145,9 @@ function InlineExHistory({ exId, dayId, exName, sessions, exercises, onBack, uni
         </button>
         <div style={{ flex: 1, fontSize: 14, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>{exName}</div>
         <div style={{ display: 'flex', gap: 6 }}>
-          {['kg', 'reps'].map(m => (
+          {isTimeEx ? (
+            <span className="micro" style={{ color: UI.gold, letterSpacing: '0.12em' }}>DURATION</span>
+          ) : ['kg', 'reps'].map(m => (
             <button key={m} onClick={() => setMetric(m)} style={{
               padding: '4px 10px', borderRadius: 4, cursor: 'pointer',
               border: `1px solid ${metric === m ? UI.gold : UI.hairStrong}`,
@@ -1155,7 +1167,7 @@ function InlineExHistory({ exId, dayId, exName, sessions, exercises, onBack, uni
             {gridVals.map((v, i) => { const y = yPos(v); return (
               <g key={i}>
                 <line x1={PAD_L} y1={y} x2={VW - PAD_R} y2={y} stroke={UI.hair} strokeWidth="0.5" strokeDasharray="3 3" />
-                <text x={PAD_L - 5} y={y + 3.5} textAnchor="end" fontSize="8" fontFamily="JetBrains Mono, monospace" fill={UI.inkFaint}>{Math.round(v)}</text>
+                <text x={PAD_L - 5} y={y + 3.5} textAnchor="end" fontSize="8" fontFamily="JetBrains Mono, monospace" fill={UI.inkFaint}>{isTimeEx ? LB.fmtDuration(Math.round(v)) : Math.round(v)}</text>
               </g>
             ); })}
             {Array.from({ length: maxSets }, (_, si) => {
@@ -1180,9 +1192,11 @@ function InlineExHistory({ exId, dayId, exName, sessions, exercises, onBack, uni
                 <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                   {sess.sets.map((st, si) => (
                     <span key={si} style={{ border: `1px solid ${UI.hair}`, borderRadius: 4, padding: '2px 7px', fontFamily: UI.fontNum, fontSize: 11, color: UI.ink }}>
-                      {st.kg ?? '—'}<span style={{ color: UI.inkFaint, fontSize: 9 }}>{unit}</span>
-                      <span style={{ color: UI.inkFaint, margin: '0 1px' }}>×</span>
-                      {isUni ? `L${st.repsL ?? '?'}/R${st.repsR ?? '?'}` : (st.reps ?? '—')}
+                      {st.timeSec != null ? LB.fmtDuration(st.timeSec) : (<>
+                        {st.kg ?? '—'}<span style={{ color: UI.inkFaint, fontSize: 9 }}>{unit}</span>
+                        <span style={{ color: UI.inkFaint, margin: '0 1px' }}>×</span>
+                        {isUni ? `L${st.repsL ?? '?'}/R${st.repsR ?? '?'}` : (st.reps ?? '—')}
+                      </>)}
                     </span>
                   ))}
                 </div>
@@ -1298,7 +1312,7 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
           </div>
           {(selected.entries || []).map((e, i) => {
             const lastResult = e.exId ? LB.lastSessionForExercise(storeWithoutSelected, e.exId, selected.dayId) : null;
-            const lastSets = (lastResult?.entry?.sets || []).filter(s => !s.warmup && (s.kg != null || s.reps != null));
+            const lastSets = (lastResult?.entry?.sets || []).filter(s => !s.warmup && (s.kg != null || s.reps != null || s.timeSec != null));
             // This compact coach/self-coaching view had no intensity-technique
             // awareness at all — a drop-set/myo-rep/lengthened-partial set just
             // showed its main kg×reps (drops[0] mirrors the top-level fields)
@@ -1306,6 +1320,7 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
             // Shared with ClientOverviewTab via LB.techniqueRounds — see there.
             const fmtSetChip = (s) => {
               if (s.skipped && !s.done) return 'skipped';
+              if (s.timeSec != null) return LB.fmtDuration(s.timeSec); // time-based set: one duration, no kg x reps
               const tr = LB.techniqueRounds(s);
               if (tr.kind === 'lengthened_partial') {
                 const main = `${s.kg ?? '—'}${unit} × ${s.reps ?? s.repsL ?? '—'}`;

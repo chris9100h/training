@@ -1296,6 +1296,14 @@ async function testAsync(name, fn) {
     // app-deload sessions (statusMode) don't advance the 5/3/1 count
     const withDeload = [...mk(4), { id: 'd', ended: '2026-02-01', scheduleId: 'p531', isDeload: true }];
     assert.strictEqual(LB.current531Week(sch, withDeload), 2);
+    // bonus sessions carry the plan's scheduleId but don't advance the plan
+    // position, so they must not advance the wave either (a bonus finished
+    // with "advance cycle" loses its isBonus flag and then counts normally)
+    const withBonus = [...mk(4), { id: 'b1', ended: '2026-02-02', scheduleId: 'p531', isBonus: true }, { id: 'b2', ended: '2026-02-03', scheduleId: 'p531', isBonus: true }];
+    assert.strictEqual(LB.current531Week(sch, withBonus), 2);
+    assert.strictEqual(LB.current531Cycle(sch, [...mk(15), { id: 'b3', ended: '2026-02-04', scheduleId: 'p531', isBonus: true }]), 0); // bonus can't tip the cycle end
+    // in-progress sessions (ended null) never count
+    assert.strictEqual(LB.current531Week(sch, [...mk(4), { id: 'ip', ended: null, scheduleId: 'p531' }]), 2);
     // a 3-week block (deload off) wraps faster
     const sch3 = { ...sch, program_data: { includeDeload: false } };
     assert.strictEqual(LB.current531Week(sch3, mk(8)), 3);   // 8/4 = 2 -> week 3
@@ -1460,6 +1468,29 @@ async function testAsync(name, fn) {
     const ref = LB.bestRecentEntry(state, 'jr', 'd1');
     assert.ok(ref, 'bestRecentEntry returns a reference for a time exercise');
     assert.strictEqual((ref.entry.sets || []).map(s => s.timeSec).join(','), '75,75,60', 'reference carries per-set timeSec');
+  });
+
+  test('buildTimeSeedSets: authored target > last logged > authored tail > 30s default', () => {
+    const last = { entry: { sets: [{ timeSec: 75, done: true }, { timeSec: 60, done: true }] } };
+    // authored per-set targets win where present; a null slot falls through to
+    // the last logged time at that position, then the default
+    assert.strictEqual(LB.buildTimeSeedSets({ sets: 3, timeSecPerSet: [45, null, null] }, last).map(s => s.timeSec).join(','), '45,60,30');
+    // a shorter authored list extends via its tail value
+    assert.strictEqual(LB.buildTimeSeedSets({ sets: 3, timeSecPerSet: [45] }, null).map(s => s.timeSec).join(','), '45,45,45');
+    // no authored targets: last logged per position, default beyond
+    assert.strictEqual(LB.buildTimeSeedSets({ sets: 3 }, last).map(s => s.timeSec).join(','), '75,60,30');
+    // no history at all: 30s default, at least one set
+    assert.strictEqual(LB.buildTimeSeedSets({ sets: 0 }, null).map(s => s.timeSec).join(','), '30');
+    // every seeded set starts unchecked
+    assert.strictEqual(LB.buildTimeSeedSets({ sets: 2 }, last).every(s => s.done === false), true);
+  });
+
+  test('buildSeedSets routes time-mode items to buildTimeSeedSets (in-session swap path)', () => {
+    const store = { exercises: [{ id: 'jr', name: 'Jump Rope', log_mode: 'time' }], settings: {} };
+    const last = { entry: { sets: [{ timeSec: 90, done: true }] } };
+    const seeds = LB.buildSeedSets({ exId: 'jr', sets: 2 }, last, null, false, store, null);
+    assert.strictEqual(seeds.map(s => s.timeSec).join(','), '90,30', 'swap seeds durations, not kg/reps');
+    assert.strictEqual(seeds.some(s => 'kg' in s), false, 'no weight fields on time seeds');
   });
 
   console.log(`\n${pass} passed, ${fail} failed`);

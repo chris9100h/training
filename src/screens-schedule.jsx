@@ -103,7 +103,10 @@ function PlanScreen({ store, setStore, go, userId, openNewPlan }) {
           } else {
             const newId = LB.uid();
             idMap[ex.id] = newId;
-            newExercises.push({ id: newId, name: ex.name, tags: ex.tags || [], note: ex.note || '', category: ex.category || null, unilateral: ex.unilateral || false, equipment: ex.equipment || null, progression_reps: ex.progression_reps || null });
+            // Behavior flags must survive the import: log_mode 'time' drives the
+            // countdown UI, no_weight_reps/movement_type/pull_bodyweight drive
+            // row layout and bodyweight prefill.
+            newExercises.push({ id: newId, name: ex.name, tags: ex.tags || [], note: ex.note || '', category: ex.category || null, unilateral: ex.unilateral || false, equipment: ex.equipment || null, progression_reps: ex.progression_reps || null, movement_type: ex.movement_type || null, log_mode: ex.log_mode || null, no_weight_reps: ex.no_weight_reps || false, pull_bodyweight: ex.pull_bodyweight || false });
           }
         });
         const remapDays = (days) => (days || []).map(d => ({
@@ -118,6 +121,18 @@ function PlanScreen({ store, setStore, go, userId, openNewPlan }) {
           days: remapDays(data.schedule.days),
           versions: (data.schedule.versions || []).map(v => ({ ...v, days: remapDays(v.days) })),
         };
+        // 5/3/1 program data references exercises BY ID (mainLifts/tmHistory are
+        // keyed on exId): remap those keys to the resolved local ids, and drop
+        // bumpedCycle so the imported copy counts its cycles from zero (a stale
+        // guard from the source plan would silently swallow the first TM bumps).
+        if (sch.program_data && typeof sch.program_data === 'object') {
+          const remapKeys = (obj) => { const out = {}; for (const k of Object.keys(obj || {})) out[idMap[k] || k] = obj[k]; return out; };
+          const pd = { ...sch.program_data };
+          if (pd.mainLifts) pd.mainLifts = remapKeys(pd.mainLifts);
+          if (pd.tmHistory) pd.tmHistory = remapKeys(pd.tmHistory);
+          delete pd.bumpedCycle;
+          sch.program_data = pd;
+        }
         setStore(s => ({ ...s, exercises: [...s.exercises, ...newExercises], schedules: [...s.schedules, sch] }));
         go({ name: 'plan-view', scheduleId: sch.id, fromPlan: true });
       } catch (_) { alert('Could not read plan file.'); }
@@ -617,6 +632,9 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
     copy.days = copy.days.map(d => ({ ...d, id: LB.uid() }));
     copy.archived = false;
     delete copy.versions;
+    // A 5/3/1 copy starts counting cycles from zero: drop the source's
+    // bumpedCycle guard or the copy's first cycle-end bumps get swallowed.
+    if (copy.program_data) delete copy.program_data.bumpedCycle;
     setStore(s => ({ ...s, schedules: [...s.schedules, copy] }));
     go({ name: 'plan-view', scheduleId: copy.id, fromPlan: true });
   };
@@ -625,7 +643,15 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
     const exIds = new Set();
     versionDays.forEach(d => d.items.forEach(it => { if (it.exId) exIds.add(it.exId); }));
     const exercises = store.exercises.filter(e => exIds.has(e.id));
-    const payload = { type: 'zane-plan', version: 1, schedule: { name: sch.name, days: versionDays }, exercises };
+    // Carry the plan-level behavior fields, not just name + days: without them
+    // an imported flex plan lost is_flex, a weekday plan its mode, a meso plan
+    // its taper config, and a 5/3/1 plan its entire program (program_type +
+    // program_data: TMs, wave seeding, progress history).
+    const scheduleOut = { name: sch.name, days: versionDays };
+    for (const k of ['mode', 'is_flex', 'sessions_per_week', 'mesocycle_weeks', 'mesocycle_start_rir', 'mesocycle_end_rir', 'mesocycle_rir_enabled', 'program_type', 'program_data']) {
+      if (sch[k] != null) scheduleOut[k] = sch[k];
+    }
+    const payload = { type: 'zane-plan', version: 1, schedule: scheduleOut, exercises };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -2232,7 +2258,7 @@ function DayCopyPicker({ store, schedule, currentDayId, onClose, onCopy, multiSe
   const importTemplate = (t) => {
     const items = normalizeSupersets((t.exercises || [])
       .filter(it => LB.findExercise(store, it.exId))
-      .map(it => ({ exId: it.exId, sets: it.sets || 3, reps: it.reps ?? 8, ...(it.repsPerSet ? { repsPerSet: it.repsPerSet } : {}), ...(it.repsMax != null ? { repsMax: it.repsMax } : {}), ...(it.progressionOffset != null ? { progressionOffset: it.progressionOffset } : {}), ...(it.supersetGroup ? { supersetGroup: it.supersetGroup } : {}) })));
+      .map(it => ({ exId: it.exId, sets: it.sets || 3, reps: it.reps ?? 8, ...(it.repsPerSet ? { repsPerSet: it.repsPerSet } : {}), ...(it.repsMax != null ? { repsMax: it.repsMax } : {}), ...(it.progressionOffset != null ? { progressionOffset: it.progressionOffset } : {}), ...(Array.isArray(it.timeSecPerSet) ? { timeSecPerSet: it.timeSecPerSet } : {}), ...(it.supersetGroup ? { supersetGroup: it.supersetGroup } : {}) })));
     const day = { id: LB.uid(), name: t.name, items };
     if (multiSelect) onCopy([{ day, migrateId: undefined }]);
     else onCopy(day, undefined);
@@ -3173,7 +3199,7 @@ function PlanWizard({ store, setStore, go }) {
     const tplDays = (store.workoutTemplates || []).map(t => ({
       key: 'tpl:' + t.id, name: t.name,
       items: (t.exercises || []).filter(it => LB.findExercise(store, it.exId))
-        .map(it => ({ exId: it.exId, sets: it.sets || 3, reps: it.reps ?? 8, ...(it.repsPerSet ? { repsPerSet: it.repsPerSet } : {}), ...(it.repsMax != null ? { repsMax: it.repsMax } : {}), ...(it.progressionOffset != null ? { progressionOffset: it.progressionOffset } : {}), ...(it.supersetGroup ? { supersetGroup: it.supersetGroup } : {}) })),
+        .map(it => ({ exId: it.exId, sets: it.sets || 3, reps: it.reps ?? 8, ...(it.repsPerSet ? { repsPerSet: it.repsPerSet } : {}), ...(it.repsMax != null ? { repsMax: it.repsMax } : {}), ...(it.progressionOffset != null ? { progressionOffset: it.progressionOffset } : {}), ...(Array.isArray(it.timeSecPerSet) ? { timeSecPerSet: it.timeSecPerSet } : {}), ...(it.supersetGroup ? { supersetGroup: it.supersetGroup } : {}) })),
     })).filter(t => t.items.length);
     if (tplDays.length) groups.push({ id: '__tpl', name: 'Templates', days: tplDays });
     return groups;

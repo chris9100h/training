@@ -1784,10 +1784,31 @@ function systemExerciseToRow(sysEx) {
   };
 }
 
+// Seed sets for a time-based item (log_mode 'time'): per-set target duration
+// from the item's authored targets, else the last logged duration at that set
+// position, else the last authored target, else a 30s default. `last` is the
+// usual { entry: { sets } } reference (bestRecentEntry or a fetchSeedEntries
+// row, both carry timeSec). Shared by the session-start builders and
+// buildSeedSets (in-session swap) so the ladders can't drift apart.
+function buildTimeSeedSets(it, last) {
+  const nSets = Math.max(1, it.sets || 1);
+  const perSet = Array.isArray(it.timeSecPerSet) ? it.timeSecPerSet : null;
+  const lastSets = (last?.entry?.sets || []).filter(s => !s.warmup);
+  const seedTime = (i) => (perSet && perSet[i] != null) ? perSet[i]
+    : (lastSets[i]?.timeSec != null) ? lastSets[i].timeSec
+    : (perSet && perSet.length && perSet[perSet.length - 1] != null) ? perSet[perSet.length - 1]
+    : 30;
+  return Array.from({ length: nSets }, (_, i) => ({ timeSec: seedTime(i), done: false }));
+}
+
 // Compute the seed-sets array when starting/logging a session for a planned item.
 // Honors smart-progression suggestions and falls back to last-session values.
 // bodyweightKg: prefill kg with this value when kg would otherwise be null (for bodyweight exercises).
 function buildSeedSets(it, last, suggestion, isUni, store, bodyweightKg = null, deloadOverride = null) {
+  // Time-based exercises have no weight/rep progression: seed target durations
+  // instead. This is the path the in-session exercise swap takes; the normal
+  // session-start builders branch to buildTimeSeedSets themselves.
+  if (exerciseLogMode((store?.exercises || []).find(e => e.id === it.exId)) === 'time') return buildTimeSeedSets(it, last);
   const workingSets = (last?.entry?.sets || []).filter(s => !s.warmup);
   const repsPerSet = it.repsPerSet;
   // Deload overlay: halve the seeded LOAD (not bodyweight, not reps) so a
@@ -2314,12 +2335,19 @@ function build531Plan(state, config) {
 // logged on it: every full pass through the plan's days is one week, wrapping
 // into the next cycle at maxWeek. Mirrors mesoCurrentWeek's flex counting.
 // Only ended, non-app-deload sessions on this plan count; 5/3/1's own week-4
-// deload is a normal logged session, so it still advances the count.
+// deload is a normal logged session, so it still advances the count. Bonus
+// sessions are excluded: they carry the plan's scheduleId but explicitly do
+// not advance the plan position (a bonus finished with "advance cycle" loses
+// its isBonus flag and then counts, matching the flex-position semantics).
+function count531Sessions(sch, sessions) {
+  return (sessions || []).filter(s => s.ended && !s.isDeload && !s.isBonus && s.scheduleId === sch.id);
+}
+
 function current531Week(sch, sessions) {
   if (!is531Plan(sch)) return null;
   const dayCount = (sch.days || []).length || 1;
   const includeDeload = sch.program_data?.includeDeload !== false;
-  const trained = (sessions || []).filter(s => s.ended && !s.isDeload && s.scheduleId === sch.id).length;
+  const trained = count531Sessions(sch, sessions).length;
   return week531(Math.floor(trained / dayCount), includeDeload);
 }
 
@@ -2329,7 +2357,7 @@ function current531Cycle(sch, sessions) {
   if (!is531Plan(sch)) return 0;
   const dayCount = (sch.days || []).length || 1;
   const includeDeload = sch.program_data?.includeDeload !== false;
-  const trained = (sessions || []).filter(s => s.ended && !s.isDeload && s.scheduleId === sch.id).length;
+  const trained = count531Sessions(sch, sessions).length;
   return Math.floor(Math.floor(trained / dayCount) / weeks531(includeDeload));
 }
 
@@ -2348,8 +2376,7 @@ function compute531CycleBumps(sch, sessions, cycleIdx) {
   const dayCount = (sch.days || []).length || 1;
   const maxWeek = weeks531(pd.includeDeload !== false);
   const amrapMin = (wk) => { const w = FTO_WAVES[wk]; const top = w && w[w.length - 1]; return (top && top.amrap) ? top.reps : null; };
-  const planSessions = (sessions || [])
-    .filter(s => s.ended && !s.isDeload && s.scheduleId === sch.id)
+  const planSessions = count531Sessions(sch, sessions)
     .slice()
     .sort((a, b) => ((a.ended || '') < (b.ended || '') ? -1 : (a.ended || '') > (b.ended || '') ? 1 : 0));
   const perLift = {}; // exId -> [hitBool, ...] across weeks 1-3
@@ -4323,7 +4350,7 @@ window.LB = {
   loadFromSupabase, syncStore, mergeSessions, withCarriedWindowEntries, historyWindowCutoffISO,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
   uid, todayISO, fmtISO, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, healScheduleWeekdays, buildPlanSkeleton, instantiateProgram, is531Plan, round531, tmFrom531, tmBump531, weeks531, week531, fiveThreeOneSets, build531Plan, current531Week, current531Cycle, compute531CycleBumps, resolve531CycleEnd, suggest531Tm, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, realignCycleForToday, todayCycleStripIndex,
-  effReps, fmtDuration, e1rm, isImprovement, isDecline, bestE1rmForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, latestBodyweight, exerciseLogMode, shouldPullBodyweight, systemExerciseToRow, inferCurrentExIdx, calcBlended,
+  effReps, fmtDuration, e1rm, isImprovement, isDecline, bestE1rmForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, buildTimeSeedSets, latestBodyweight, exerciseLogMode, shouldPullBodyweight, systemExerciseToRow, inferCurrentExIdx, calcBlended,
   refreshExerciseBests, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries,
   computeNextReminderAt,
   cancelPushover, adminSendEmail,

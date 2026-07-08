@@ -1437,8 +1437,9 @@ AS $function$
     (SELECT COUNT(*) FROM zane_session_entries e WHERE e.session_id = s.id)::int AS exercise_count,
     (SELECT COUNT(*) FROM zane_sets st WHERE st.session_id = s.id
        AND NOT st.warmup AND NOT st.skipped
-       AND st.kg IS NOT NULL
-       AND (st.reps IS NOT NULL OR st.reps_l IS NOT NULL OR st.reps_r IS NOT NULL))::int AS done_sets,
+       AND ((st.kg IS NOT NULL
+             AND (st.reps IS NOT NULL OR st.reps_l IS NOT NULL OR st.reps_r IS NOT NULL))
+            OR st.time_sec IS NOT NULL))::int AS done_sets,
     COALESCE((SELECT SUM(st.kg * COALESCE(
         CASE WHEN st.reps_l IS NOT NULL OR st.reps_r IS NOT NULL
              THEN LEAST(COALESCE(st.reps_l, st.reps_r), COALESCE(st.reps_r, st.reps_l))
