@@ -16,6 +16,20 @@
    Entry shape: { id: string, title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.511',
+    title: 'The road so far…',
+    items: [
+      "🏋️ Training grew claws. Drop Sets, Myo-Reps & Myo-Rep Match, Lengthened Partials and AMRAP Variations all landed: tap INTENSITY on any set and go past failure, no workarounds. Superset or Giant Set anything mid-workout, add or swap exercises on the fly with sets seeded from your history, and Smarter Progression now anchors on your best recent set (not just your last one), tunable per exercise with your rep target in view the whole time. When you finish, Compare Sessions lines you up set by set against a past workout of the same day.",
+      "📈 Mesocycles turned the app into a real coach. Make any plan a 4 to 8 week block: target RIR counts down, quick per-exercise check-ins auto-tune your volume, and earned weight boosts compound across blocks. Feeling brave? Hell Mode lets you set your own RIR taper or go negative for automatic partials past failure (the number literally catches fire 🔥). And deload week pre-fills your weights at 50%, on tap or nudged automatically after 8 cycles.",
+      "🗂️ Building plans got a lot friendlier. A guided setup walks you from name to split, ready-made programs (2 to 6 days a week) are one tap to preview and use, and a curated exercise Database holds the classics to browse and add. Paste a YouTube link onto any exercise and a play button shows up right when you train it, import a whole training day (history and all) from another plan or template, and flexible plans, dated version history and automatic backups keep everything safe.",
+      "❤️ A full Health tab arrived: weight, macros, steps, water and adherence, all charted. Track blood glucose with context tags and reference bands, log cardio live with a background stopwatch (or by hand) alongside goal-based Cardio Plans that build the progression for you, and flip on Sick & Vacation mode to pause everything and pick back up right where you left off.",
+      "🔔 Getting in and getting pinged got easier. Native push handles rest timers, coaching and reminders with no third-party app, passkeys let you sign in with Face ID, Touch ID or your PIN, and password reset plus in-app email and password changes and install-as-app guides round it out.",
+      "🎓 Coaching leveled up too: fully custom weekly check-in forms with a live preview, photos in coaching chat both ways, and a built-in Support Center with live ticket status.",
+      "✨ And a pile of everything else: Quick Actions (pull down on Home), Freestyle and Bonus workouts, saveable templates, a plate calculator, mixed units, 10 accent colors, light and OLED themes, and guided tours for all of it. Under the hood the app starts instantly no matter how much history you carry, works fully offline, and multi-device sync stopped stepping on itself.",
+      "🎸 That's the road so far. Now carry on. 💪",
+    ],
+  },
+  {
     id: 'v2.508',
     title: 'Programs, Off the Shelf',
     items: [
