@@ -4770,17 +4770,16 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   <div style={{ position: 'relative' }}>
                   {amrapArmed && (
                     <div aria-hidden="true" style={{
-                      // Fill the money zone with fire, corner to corner: top at the
-                      // weight/rep box tops (never up into the knurl above), bottom just
-                      // under the "go all out" caption, full row width. The radial fades
-                      // to transparent at the far corners so the left/right edges feather
-                      // out; a vertical mask feathers the top/bottom edges the same way,
-                      // so nothing looks hard-cut. (No mask support just shows the radial.)
-                      position: 'absolute', top: 9, bottom: 4, left: 0, right: 0, zIndex: 0,
+                      // Fill the money zone with fire and let it breathe out softly on
+                      // every side. The radial fades to transparent at the left/right
+                      // edges; a 5px blur feathers the top/bottom and rounds the corners
+                      // off (with the 8px radius) so nothing reads as a hard-cut rectangle.
+                      // Reaches a little past the boxes top and just under the caption.
+                      position: 'absolute', top: 5, bottom: -4, left: 0, right: 0, zIndex: 0,
                       pointerEvents: 'none',
-                      background: 'radial-gradient(farthest-corner at 50% 50%, rgba(255,120,40,0.28), rgba(210,45,0,0.16) 55%, transparent 100%)',
-                      WebkitMaskImage: 'linear-gradient(180deg, transparent 0%, #000 13%, #000 87%, transparent 100%)',
-                      maskImage: 'linear-gradient(180deg, transparent 0%, #000 13%, #000 87%, transparent 100%)',
+                      borderRadius: 8,
+                      background: 'radial-gradient(52% 135% at 50% 50%, rgba(255,120,40,0.34), rgba(210,45,0,0.18) 52%, transparent 100%)',
+                      filter: 'blur(5px)',
                       animation: 'hellPulse 2s ease-in-out infinite',
                     }} />
                   )}
