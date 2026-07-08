@@ -1372,6 +1372,25 @@ async function testAsync(name, fn) {
     assert.ok(!withId.newExercises.some(e => e.id === 'user_ex1'), 'owned exId not duplicated');
   });
 
+  test('time-based sets: fmtDuration formats, 0 volume, still counted as done', () => {
+    assert.strictEqual(LB.fmtDuration(45), '45s');
+    assert.strictEqual(LB.fmtDuration(60), '1:00');
+    assert.strictEqual(LB.fmtDuration(75), '1:15');
+    assert.strictEqual(LB.fmtDuration(600), '10:00');
+    assert.strictEqual(LB.fmtDuration(null), '');
+    // a finished HIIT session: three logged intervals, no weight
+    const ended = { ended: '2026-01-01', entries: [{ exId: 'jr', sets: [
+      { timeSec: 75, done: true }, { timeSec: 75, done: true }, { timeSec: 60, done: true },
+    ] }] };
+    assert.strictEqual(LB.totalVolume(ended, []), 0, 'time sets add nothing to volume');
+    assert.strictEqual(LB.doneSetCount(ended), 3, 'all three time sets count as done');
+    // warm-ups/skipped never count
+    const mixed = { ended: '2026-01-01', entries: [{ exId: 'jr', sets: [
+      { timeSec: 30, warmup: true }, { timeSec: 75, done: true }, { timeSec: 60, skipped: true },
+    ] }] };
+    assert.strictEqual(LB.doneSetCount(mixed), 1, 'only the working logged time set counts');
+  });
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();

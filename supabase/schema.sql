@@ -115,6 +115,7 @@ CREATE TABLE public.zane_sets (
   reps integer,
   reps_l integer,
   reps_r integer,
+  time_sec integer,
   done boolean NOT NULL DEFAULT false,
   skipped boolean NOT NULL DEFAULT false,
   warmup boolean NOT NULL DEFAULT false,
@@ -1051,7 +1052,7 @@ CREATE OR REPLACE FUNCTION public.sync_sets_batch(p_sets jsonb)
 AS $function$
   INSERT INTO zane_sets (
     id, session_id, entry_id, user_id,
-    set_idx, kg, reps, reps_l, reps_r,
+    set_idx, kg, reps, reps_l, reps_r, time_sec,
     done, skipped, warmup, technique, drops, updated_at
   )
   SELECT
@@ -1064,6 +1065,7 @@ AS $function$
     (s->>'reps')::int,
     (s->>'reps_l')::int,
     (s->>'reps_r')::int,
+    (s->>'time_sec')::int,
     COALESCE((s->>'done')::boolean,    false),
     COALESCE((s->>'skipped')::boolean, false),
     COALESCE((s->>'warmup')::boolean,  false),
@@ -1076,6 +1078,7 @@ AS $function$
     reps       = EXCLUDED.reps,
     reps_l     = EXCLUDED.reps_l,
     reps_r     = EXCLUDED.reps_r,
+    time_sec   = EXCLUDED.time_sec,
     done       = EXCLUDED.done,
     skipped    = EXCLUDED.skipped,
     warmup     = EXCLUDED.warmup,
@@ -1163,6 +1166,7 @@ AS $function$
         SELECT jsonb_agg(
           jsonb_build_object(
             'kg', st.kg, 'reps', st.reps, 'repsL', st.reps_l, 'repsR', st.reps_r,
+            'timeSec', st.time_sec,
             'done', st.done, 'skipped', st.skipped, 'warmup', st.warmup,
             'technique', st.technique, 'drops', st.drops
           ) ORDER BY st.set_idx)

@@ -151,6 +151,7 @@ Verhalten:
 ### `zane_sets`
 
 - `id` (text), `session_id` (text), `entry_id` (text), `user_id` (uuid), `set_idx` (int), `kg` (numeric), `reps` (int), `reps_l` (int), `reps_r` (int), `done` (boolean), `skipped` (boolean), `warmup` (boolean), `updated_at` (timestamptz)
+- `time_sec` (int, nullable): logged duration in seconds for a time-based set (`log_mode = 'time'`, e.g. HIIT or a max hold). Adds 0 to volume, counts as done once set. Synced through `sync_sets_batch` and surfaced by `zane_entries_json` (`timeSec`). Migration 0144.
 - `technique` (text, nullable): intensity technique, `'drop'` | `'rest_pause'` | `'myorep'`. Migration 0115.
 - `drops` (jsonb, nullable): for drop sets, `[{kg, reps}, ...]` ordered heaviest→lightest. `drops[0]` mirrors the top-level `kg`/`reps` so progression seeds use the first drop; only the first drop counts toward volume and doneSetCount. Migration 0115.
 

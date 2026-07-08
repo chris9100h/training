@@ -688,6 +688,7 @@ function mapEntryRows(entryRows) {
         reps: st.reps,
         repsL: st.reps_l,
         repsR: st.reps_r,
+        timeSec: st.time_sec ?? null,
         done: st.done,
         skipped: st.skipped,
         warmup: st.warmup,
@@ -1118,6 +1119,7 @@ async function _syncEntryRelational(sessions, userId, prevSessions, onStep) {
   // Normalize set fields for comparison — guards against null vs undefined and missing
   // keys when comparing sets from an old (pre-migration) store format with new format.
   const normSet = s => [s.kg ?? null, s.reps ?? null, s.repsL ?? null, s.repsR ?? null,
+                        s.timeSec ?? null,
                         s.done ? 1 : 0, s.skipped ? 1 : 0, s.warmup ? 1 : 0,
                         s.technique ?? '', JSON.stringify(s.drops ?? null)].join('|');
 
@@ -1168,6 +1170,7 @@ async function _syncEntryRelational(sessions, userId, prevSessions, onStep) {
             reps: set.reps ?? null,
             reps_l: set.repsL ?? null,
             reps_r: set.repsR ?? null,
+            time_sec: set.timeSec ?? null,
             done: set.done ?? false,
             skipped: set.skipped ?? false,
             warmup: set.warmup ?? false,
@@ -1574,6 +1577,15 @@ function weekEnd(weekStart) {
   return new Date(new Date(weekStart + 'T12:00:00').getTime() + 6 * 86400000).toISOString().slice(0, 10);
 }
 
+// Format a duration in seconds for display: "45s" under a minute, "1:15" at or
+// above (mm:ss). Used by time-based (log_mode 'time') exercises.
+function fmtDuration(sec) {
+  if (sec == null || !isFinite(sec)) return '';
+  const s = Math.max(0, Math.round(sec));
+  if (s < 60) return `${s}s`;
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+
 // Effective reps for a set — for unilateral sets, the weaker side is the bottleneck.
 function effReps(st) {
   if (st.repsL != null || st.repsR != null) {
@@ -1687,7 +1699,7 @@ function doneSetCount(session) {
   return (session.entries || []).reduce((c, e) =>
     c + (e.sets || []).filter(st => {
       if (st.warmup || st.skipped) return false;
-      if (ended) return st.kg != null && (st.reps != null || st.repsL != null || st.repsR != null);
+      if (ended) return st.timeSec != null || (st.kg != null && (st.reps != null || st.repsL != null || st.repsR != null));
       return st.done;
     }).length, 0);
 }
@@ -4266,7 +4278,7 @@ window.LB = {
   loadFromSupabase, syncStore, mergeSessions, withCarriedWindowEntries, historyWindowCutoffISO,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
   uid, todayISO, fmtISO, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, buildPlanSkeleton, instantiateProgram, is531Plan, round531, tmFrom531, tmBump531, weeks531, week531, fiveThreeOneSets, build531Plan, current531Week, current531Cycle, compute531CycleBumps, resolve531CycleEnd, suggest531Tm, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, realignCycleForToday, todayCycleStripIndex,
-  effReps, e1rm, isImprovement, isDecline, bestE1rmForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, latestBodyweight, exerciseLogMode, shouldPullBodyweight, systemExerciseToRow, inferCurrentExIdx, calcBlended,
+  effReps, fmtDuration, e1rm, isImprovement, isDecline, bestE1rmForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, latestBodyweight, exerciseLogMode, shouldPullBodyweight, systemExerciseToRow, inferCurrentExIdx, calcBlended,
   refreshExerciseBests, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries,
   computeNextReminderAt,
   cancelPushover, adminSendEmail,
