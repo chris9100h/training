@@ -1111,6 +1111,43 @@ function TextInput({ value, onChange, placeholder, type = 'text', autoFocus, rev
 // Kept in sync with store.settings.unit by app.jsx on every render.
 UI.unit = () => (typeof window !== 'undefined' && window.__UNIT) || 'kg';
 
+// True when the app runs inside a third-party app's in-app browser (X,
+// Instagram, Facebook, TikTok, ...) rather than a real browser. Those WKWebView
+// or custom-tab environments frequently block cross-origin fetches to Supabase
+// (ITP, content blockers, request abort on backgrounding), which surfaces as a
+// bare "Load failed" on sign up or login. Heuristic, not exhaustive: it matches
+// the common UA tokens plus iOS WebViews that are neither Safari, nor a known
+// browser, nor an installed PWA.
+UI.isInAppBrowser = () => {
+  if (typeof navigator === 'undefined') return false;
+  const ua = navigator.userAgent || '';
+  if (/FBAN|FBAV|FB_IAB|Instagram|Twitter|Line\/|MicroMessenger|Snapchat|TikTok|musical_ly|Pinterest|LinkedInApp|GSA\//i.test(ua)) return true;
+  const isIOS = /iPhone|iPod|iPad/i.test(ua) && !window.MSStream;
+  if (isIOS) {
+    const isSafari = /Safari/i.test(ua) && /Version\//i.test(ua);
+    const isKnownBrowser = /CriOS|FxiOS|EdgiOS|OPiOS/i.test(ua);
+    const isStandalone = window.navigator.standalone === true;
+    if (!isSafari && !isKnownBrowser && !isStandalone) return true;
+  }
+  return false;
+};
+
+// Turn an auth or network error into a user-facing message. WebKit reports a
+// failed fetch as "Load failed" (Chromium says "Failed to fetch") with no HTTP
+// response, most common inside in-app browsers, so translate those into an
+// actionable hint instead of leaking the raw string. Also softens the
+// "already registered" case into a nudge to log in.
+UI.authErrorMessage = (e, fallback = 'Something went wrong') => {
+  const msg = (e && e.message) || '';
+  if (/load failed|failed to fetch|networkerror|network request failed|the network connection was lost/i.test(msg)) {
+    return 'Network error. Check your connection. If you opened this from another app like X or Instagram, open it in Safari or Chrome and try again.';
+  }
+  if (/already registered|already exists|already been registered/i.test(msg)) {
+    return 'This email is already registered. Try logging in instead.';
+  }
+  return msg || fallback;
+};
+
 // Chart Y-axis domain with breathing room. Pads by 5% of the visible value
 // SPAN (max − min) — not of the value itself — so a point keeps a consistent
 // gap from the edge no matter how far the data sits from zero. (Value-based

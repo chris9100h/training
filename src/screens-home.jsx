@@ -137,7 +137,7 @@ function LoginScreen() {
     try {
       await LB.signIn(e2, p2);
     } catch (e) {
-      setError(e.message || 'Sign in failed');
+      setError(UI.authErrorMessage(e, 'Sign in failed'));
     } finally {
       setLoading(false);
     }
@@ -151,13 +151,14 @@ function LoginScreen() {
       await LB.signUp(email.trim(), password, name.trim(), unit);
       localStorage.setItem('logbook-unit-prompted', '1');
     } catch (e) {
-      setError(e.message || 'Registration failed');
+      setError(UI.authErrorMessage(e, 'Registration failed'));
       setLoading(false);
     }
   };
 
   const isLogin = mode === 'login';
   const isForgot = mode === 'forgot';
+  const inAppBrowser = UI.isInAppBrowser();
 
   const submitReset = async () => {
     const e2 = email.trim();
@@ -167,7 +168,7 @@ function LoginScreen() {
       await LB.resetPassword(e2, 'https://zane-wo.com/');
       setResetSent(true);
     } catch (e) {
-      setError(e.message || 'Failed to send reset link');
+      setError(UI.authErrorMessage(e, 'Failed to send reset link'));
     } finally {
       setLoading(false);
     }
@@ -183,6 +184,17 @@ function LoginScreen() {
 
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '0 32px 24px', position: 'relative', zIndex: 1, marginTop: 'auto', marginBottom: 'auto' }}>
         <img src="icons/zane-logo.png" style={{ width: '92%', maxWidth: 500, objectFit: 'contain', marginBottom: 28 }} />
+
+        {inAppBrowser && (
+          <div style={{
+            width: '100%', marginBottom: 20, padding: '10px 14px',
+            background: 'rgba(var(--accent-rgb),0.08)', border: `1px solid rgba(var(--accent-rgb),0.28)`,
+            borderRadius: 6, fontFamily: UI.fontUi, fontSize: 12, color: UI.inkSoft, lineHeight: 1.55,
+          }}>
+            <i className="fa-solid fa-circle-info" style={{ color: 'var(--accent)', marginRight: 6 }} />
+            You are in an in-app browser, where sign up and login often fail. For the full app, open this page in Safari or Chrome (use the menu, then "Open in browser").
+          </div>
+        )}
 
         {/* Tab switcher — hidden in forgot mode */}
         {!isForgot ? (
@@ -394,7 +406,7 @@ function SetPasswordScreen({ onDone, isRecovery }) {
         onDone();
       }
     } catch (e) {
-      setError(e.message || 'Failed to set password');
+      setError(UI.authErrorMessage(e, 'Failed to set password'));
       setLoading(false);
     }
   };

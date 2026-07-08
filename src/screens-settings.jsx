@@ -1321,12 +1321,17 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     setPwLoading(true); setPwMsg(null);
     try {
       const { error: signInErr } = await LB.supabase.auth.signInWithPassword({ email: store.user?.email || '', password: pwCurrent });
-      if (signInErr) { setPwMsg({ text: 'Current password is incorrect', ok: false }); return; }
+      if (signInErr) {
+        // A network drop here must not masquerade as a wrong password.
+        const isNet = /load failed|failed to fetch|networkerror|network request failed/i.test(signInErr.message || '');
+        setPwMsg({ text: isNet ? UI.authErrorMessage(signInErr) : 'Current password is incorrect', ok: false });
+        return;
+      }
       const { error: updateErr } = await LB.supabase.auth.updateUser({ password: pwNew });
-      if (updateErr) { setPwMsg({ text: updateErr.message || 'Failed to update password', ok: false }); }
+      if (updateErr) { setPwMsg({ text: UI.authErrorMessage(updateErr, 'Failed to update password'), ok: false }); }
       else { setPwMsg({ text: 'Password updated successfully', ok: true }); setPwCurrent(''); setPwNew(''); setPwConfirm(''); }
     } catch (e) {
-      setPwMsg({ text: e.message || 'Something went wrong', ok: false });
+      setPwMsg({ text: UI.authErrorMessage(e, 'Something went wrong'), ok: false });
     } finally {
       setPwLoading(false);
     }
