@@ -1542,6 +1542,26 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
           Tap a day to edit its type and exercises.
         </div>
 
+        {LB.is531Plan(draft) && draft.program_data?.mainLifts && (
+          <div>
+            <div className="label" style={{ marginBottom: 8 }}>Training Maxes</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {Object.keys(draft.program_data.mainLifts).map(exId => {
+                const ml = draft.program_data.mainLifts[exId];
+                const name531 = LB.findExercise(store, exId)?.name || 'Lift';
+                const u531 = draft.program_data.unit || 'kg';
+                return (
+                  <div key={exId} style={{ background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 4, padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    <span style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.inkSoft, letterSpacing: '0.02em', textTransform: 'uppercase' }}>{name531}</span>
+                    <TmField value={ml.tm} step={u531 === 'lbs' ? 5 : 2.5} suffix={u531}
+                      onChange={v => setDraft(d => ({ ...d, program_data: { ...d.program_data, mainLifts: { ...d.program_data.mainLifts, [exId]: { ...d.program_data.mainLifts[exId], tm: v } } } }))} />
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
           <Btn kind="ghost" onClick={toggleArchive} style={{ flex: 1, fontSize: 12, color: UI.inkSoft, borderColor: UI.hairStrong }}>
             {draft.archived ? 'Unarchive' : 'Archive plan'}
