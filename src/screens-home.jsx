@@ -2052,6 +2052,22 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       if (ex?.movement_type === 'cardio') {
         return { exId: it.exId, name: ex.name, isCardio: true, plannedSets: 0, plannedReps: null, plannedRepsPerSet: null, sets: [], cardioDone: false, cardioData: null, note: '', supersetGroup: it.supersetGroup || null };
       }
+      // 5/3/1 main lift: seed each set as round(pct * TM) off the current week's
+      // wave, bypassing history progression. The top working set of weeks 1-3 is
+      // an AMRAP. Assistance items aren't in mainLifts, so they fall through to
+      // the normal history-based path below.
+      const p531 = LB.is531Plan(sch) ? (sch.program_data || null) : null;
+      const main531 = p531 && p531.mainLifts && p531.mainLifts[it.exId];
+      if (main531 && main531.tm != null) {
+        const wk531 = LB.current531Week(sch, store.sessions) || 1;
+        const waveSets = LB.fiveThreeOneSets(main531.tm, wk531, p531.unit || 'kg');
+        return {
+          exId: it.exId, name: ex?.name || '?',
+          plannedSets: waveSets.length, plannedReps: null, plannedRepsPerSet: null,
+          sets: waveSets.map(ws => ({ kg: ws.kg, reps: ws.reps, done: false, ...(ws.amrap ? { amrap: true } : {}) })),
+          note: '', supersetGroup: it.supersetGroup || null,
+        };
+      }
       const last = seedRefs[it.exId] ?? LB.bestRecentEntry(store, it.exId, dayId);
       const isUnilateral = ex?.unilateral || false;
       const suggestion = LB.progressionSuggestion(store, it.exId, dayId, it.reps, it.repsPerSet || null, seedRefs[it.exId], it.repsMax || null, it.progressionOffset ?? null);

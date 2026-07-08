@@ -2246,6 +2246,29 @@ function build531Plan(state, config) {
   return { schedule, newExercises };
 }
 
+// The current 5/3/1 week (1..maxWeek) for a plan, from how many sessions are
+// logged on it: every full pass through the plan's days is one week, wrapping
+// into the next cycle at maxWeek. Mirrors mesoCurrentWeek's flex counting.
+// Only ended, non-app-deload sessions on this plan count; 5/3/1's own week-4
+// deload is a normal logged session, so it still advances the count.
+function current531Week(sch, sessions) {
+  if (!is531Plan(sch)) return null;
+  const dayCount = (sch.days || []).length || 1;
+  const includeDeload = sch.program_data?.includeDeload !== false;
+  const trained = (sessions || []).filter(s => s.ended && !s.isDeload && s.scheduleId === sch.id).length;
+  return week531(Math.floor(trained / dayCount), includeDeload);
+}
+
+// 0-based cycle index (how many full 3- or 4-week blocks are complete) for a
+// 5/3/1 plan. Drives the per-cycle TM bump.
+function current531Cycle(sch, sessions) {
+  if (!is531Plan(sch)) return 0;
+  const dayCount = (sch.days || []).length || 1;
+  const includeDeload = sch.program_data?.includeDeload !== false;
+  const trained = (sessions || []).filter(s => s.ended && !s.isDeload && s.scheduleId === sch.id).length;
+  return Math.floor(Math.floor(trained / dayCount) / weeks531(includeDeload));
+}
+
 // Whether a mesocycle's RIR taper is active. Default true: only an explicit
 // false disables the weekly RIR target watermark and the negative-RIR
 // lengthened-partials prescription (the meso then runs on volume + load
@@ -4139,7 +4162,7 @@ window.LB = {
   signIn, signUp, signOut, signInWithPasskey, registerPasskey, listPasskeys, deletePasskey, resetPassword, deleteAllData, exportBackup, importFromBackup, validateBackup,
   loadFromSupabase, syncStore, mergeSessions, withCarriedWindowEntries, historyWindowCutoffISO,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
-  uid, todayISO, fmtISO, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, buildPlanSkeleton, instantiateProgram, is531Plan, round531, tmFrom531, tmBump531, weeks531, week531, fiveThreeOneSets, build531Plan, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, realignCycleForToday, todayCycleStripIndex,
+  uid, todayISO, fmtISO, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, buildPlanSkeleton, instantiateProgram, is531Plan, round531, tmFrom531, tmBump531, weeks531, week531, fiveThreeOneSets, build531Plan, current531Week, current531Cycle, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, realignCycleForToday, todayCycleStripIndex,
   effReps, e1rm, isImprovement, isDecline, bestE1rmForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, latestBodyweight, exerciseLogMode, shouldPullBodyweight, systemExerciseToRow, inferCurrentExIdx, calcBlended,
   refreshExerciseBests, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries,
   computeNextReminderAt,

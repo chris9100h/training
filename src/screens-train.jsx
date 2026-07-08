@@ -4371,6 +4371,29 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               {(exercise?.tags || []).map(t => <Pill key={t}>{t}</Pill>)}
             </div>
           )}
+          {/* 5/3/1 wave for this main lift: the prescribed sets off the Training
+              Max for the current week, top set an AMRAP (+). */}
+          {(() => {
+            const s531 = store.schedules?.find(x => x.id === session.scheduleId);
+            if (!LB.is531Plan(s531) || !entry) return null;
+            const main = s531.program_data?.mainLifts?.[entry.exId];
+            if (!main || main.tm == null) return null;
+            const week = LB.current531Week(s531, store.sessions) || 1;
+            const u = s531.program_data.unit || 'kg';
+            const wave = LB.fiveThreeOneSets(main.tm, week, u);
+            return (
+              <div style={{ marginTop: 10, padding: '10px 12px', background: 'rgba(var(--accent-rgb),0.06)', border: `1px solid ${UI.goldSoft}`, borderRadius: 6 }}>
+                <div className="micro-gold" style={{ marginBottom: 7 }}>5/3/1 · WEEK {week}{week === 4 ? ' · DELOAD' : ''} · TM {main.tm}{u}</div>
+                <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                  {wave.map((ws, i) => (
+                    <span key={i} className="num" style={{ fontSize: 14, color: ws.amrap ? UI.gold : UI.inkSoft }}>
+                      {ws.kg}<span style={{ color: UI.inkFaint }}>×</span>{ws.reps}{ws.amrap ? '+' : ''}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
           {/* Meso swap suggestions */}
           {mesoState && exercise && (() => {
             const flags = [];

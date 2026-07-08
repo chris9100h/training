@@ -1225,6 +1225,25 @@ async function testAsync(name, fn) {
     assert.strictEqual(LB.is531Plan(null), false);
   });
 
+  test('current531Week / current531Cycle count logged sessions into weeks and cycles', () => {
+    const sch = { id: 'p531', program_type: '531', days: [{}, {}, {}, {}], program_data: { includeDeload: true } };
+    const mk = (n) => Array.from({ length: n }, (_, i) => ({ id: 's' + i, ended: '2026-01-01', scheduleId: 'p531' }));
+    assert.strictEqual(LB.current531Week(sch, []), 1);
+    assert.strictEqual(LB.current531Week(sch, mk(4)), 2);   // 4 sessions = one full pass = week 2
+    assert.strictEqual(LB.current531Week(sch, mk(12)), 4);  // 12/4 = 3 weeks done -> week 4
+    assert.strictEqual(LB.current531Week(sch, mk(16)), 1);  // 16/4 = 4 -> next cycle, week 1
+    assert.strictEqual(LB.current531Cycle(sch, mk(16)), 1);
+    assert.strictEqual(LB.current531Cycle(sch, mk(15)), 0);
+    // app-deload sessions (statusMode) don't advance the 5/3/1 count
+    const withDeload = [...mk(4), { id: 'd', ended: '2026-02-01', scheduleId: 'p531', isDeload: true }];
+    assert.strictEqual(LB.current531Week(sch, withDeload), 2);
+    // a 3-week block (deload off) wraps faster
+    const sch3 = { ...sch, program_data: { includeDeload: false } };
+    assert.strictEqual(LB.current531Week(sch3, mk(8)), 3);   // 8/4 = 2 -> week 3
+    assert.strictEqual(LB.current531Week(sch3, mk(12)), 1);  // 12/4 = 3 -> wraps to week 1
+    assert.strictEqual(LB.current531Week({ program_type: null }, mk(4)), null);
+  });
+
   test('build531Plan: catalog names resolve, 4 days, program_data stamped, assistance capped', () => {
     const FTO = _catWin.FIVE_THREE_ONE;
     assert.ok(FTO && Array.isArray(FTO.lifts) && FTO.lifts.length === 4, 'FIVE_THREE_ONE has 4 lifts');
