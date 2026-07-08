@@ -1245,6 +1245,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
     const progressionResult = (() => {
       if (isDeloadSession) return null;
+      if (LB.is531MainLift(store, entry.exId, session.dayId)) return null; // 5/3/1 main lifts climb via the Training Max, never the Smart Progression toast
       if (!LB.progressionEnabled(store, entry?.plannedRepsMax, entry?.plannedProgressionOffset)) return null;
       if (!updatedSets.filter(s => !s.warmup).every(s => s.done || s.skipped)) return null;
       const catCfg = exercise?.equipment ? (store.settings?.equipmentConfig?.[exercise.equipment] ?? {}) : {};

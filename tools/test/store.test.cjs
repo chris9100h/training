@@ -1426,6 +1426,37 @@ async function testAsync(name, fn) {
     assert.strictEqual(res.schedule.days[0].items.map(i => i.exId).join(','), 'row1,aid1');
   });
 
+  test('is531MainLift: true only for a registered main lift on the plan owning the day', () => {
+    const store = {
+      schedules: [
+        { id: 'p531', program_type: '531', days: [{ id: 'd1', items: [{ exId: 'sq' }, { exId: 'leg' }] }],
+          program_data: { mainLifts: { sq: { tm: 100, kind: 'squat', stall: 0 } } } },
+        { id: 'pnorm', days: [{ id: 'd2', items: [{ exId: 'sq' }] }] },
+      ],
+    };
+    assert.strictEqual(LB.is531MainLift(store, 'sq', 'd1'), true);   // main lift on the 531 day
+    assert.strictEqual(LB.is531MainLift(store, 'leg', 'd1'), false); // assistance, not a main lift
+    assert.strictEqual(LB.is531MainLift(store, 'sq', 'd2'), false);  // same exId, but a normal plan's day
+    assert.strictEqual(LB.is531MainLift(store, 'sq', null), false);  // no day (freestyle) -> false
+    assert.strictEqual(LB.is531MainLift(store, null, 'd1'), false);
+  });
+
+  test('progressionSuggestion: suppressed for a 5/3/1 main lift, normal for its assistance', () => {
+    const store = {
+      settings: { smartProgression: true },
+      exercises: [{ id: 'sq', name: 'Squat' }, { id: 'leg', name: 'Leg Press' }],
+      schedules: [
+        { id: 'p531', program_type: '531', days: [{ id: 'd1', items: [{ exId: 'sq' }, { exId: 'leg' }] }],
+          program_data: { mainLifts: { sq: { tm: 100, kind: 'squat', stall: 0 } } } },
+      ],
+    };
+    // A reference where the working set cleared its target, so progression WOULD fire.
+    const ref = { entry: { sets: [{ kg: 100, reps: 10, warmup: false }] } };
+    assert.strictEqual(LB.progressionSuggestion(store, 'sq', 'd1', 5, null, ref, null, null), null, 'main lift never gets a Smart Progression bump');
+    const sugg = LB.progressionSuggestion(store, 'leg', 'd1', 5, null, ref, null, null);
+    assert.ok(sugg && sugg.kg > 100, 'assistance on the 531 day still progresses');
+  });
+
   test('build531Plan: catalog names resolve, 4 days, program_data stamped, assistance uncapped', () => {
     const FTO = _catWin.FIVE_THREE_ONE;
     assert.ok(FTO && Array.isArray(FTO.lifts) && FTO.lifts.length === 4, 'FIVE_THREE_ONE has 4 lifts');
