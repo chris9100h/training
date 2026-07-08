@@ -1704,6 +1704,19 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
                 + Add day
               </Btn>
             </div>
+            {LB.is531Plan(draft) && (
+              <>
+                <button onClick={() => setAddLiftPicking(true)} style={{
+                  width: '100%', marginTop: 6, padding: '11px 0', borderRadius: 4, cursor: 'pointer',
+                  border: `1px dashed ${UI.goldSoft}`, background: UI.goldFaint, color: UI.gold,
+                  fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, letterSpacing: '0.04em',
+                  WebkitTapHighlightColor: 'transparent',
+                }}>+ Add progression day</button>
+                <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.6, marginTop: 8 }}>
+                  "+ Add day" adds a normal day that runs on Smart Progression, not 5/3/1. Use "+ Add progression day" to add another main lift: it gets its own day that waves 5s / 3s / 1s and bumps its Training Max every cycle.
+                </div>
+              </>
+            )}
           </div>
         )}
 
@@ -1914,13 +1927,6 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
                 </div>
               );
             })}
-            {/* A 5/3/1 plan is a flex plan, so it can carry any number of main
-                lifts. Adding one registers it and appends a new Wendler day. */}
-            <button onClick={() => setAddLiftPicking(true)} style={{
-              padding: '11px 0', borderRadius: 4, cursor: 'pointer', border: `1px dashed ${UI.hairStrong}`,
-              background: 'transparent', color: UI.gold, fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600,
-              letterSpacing: '0.04em', WebkitTapHighlightColor: 'transparent',
-            }}>+ Add main lift</button>
           </div>
         )}
       </Sheet>
