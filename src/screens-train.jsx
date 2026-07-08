@@ -6098,7 +6098,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                 {entry?.name}{historyLoading ? ' · updating…' : ''}
               </div>
               {shown.map((h, hi) => {
-                const working = (h.sets || []).filter(s => !s.warmup && !s.skipped && (s.kg != null || s.reps != null));
+                const working = (h.sets || []).filter(s => !s.warmup && !s.skipped && (s.kg != null || s.reps != null || s.timeSec != null));
                 if (!working.length) return null;
                 const sessionBest = working.reduce((m, s) => Math.max(m, e1rmForSet(s)), 0);
                 const isPR = pr > 0 && sessionBest > 0 && Math.abs(sessionBest - pr) < 0.01;
@@ -6118,7 +6118,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                             const repsStr = (s.repsL != null || s.repsR != null) ? `L${s.repsL ?? '?'}/R${s.repsR ?? '?'}` : s.reps;
                             return (
                               <span key={i} className="num" style={{ fontSize: 13, color: isBest ? UI.gold : UI.ink }}>
-                                {s.kg != null ? <>{s.kg}<span style={{ color: isBest ? UI.goldSoft : UI.inkFaint }}>×</span>{repsStr}</> : repsStr}
+                                {s.timeSec != null ? LB.fmtDuration(s.timeSec) : s.kg != null ? <>{s.kg}<span style={{ color: isBest ? UI.goldSoft : UI.inkFaint }}>×</span>{repsStr}</> : repsStr}
                               </span>
                             );
                           })}

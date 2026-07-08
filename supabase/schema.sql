@@ -1375,6 +1375,7 @@ AS $function$
     COALESCE((
       SELECT jsonb_agg(jsonb_build_object(
         'kg', st.kg, 'reps', st.reps, 'repsL', st.reps_l, 'repsR', st.reps_r,
+        'timeSec', st.time_sec,
         'done', st.done, 'skipped', st.skipped, 'warmup', st.warmup
       ) ORDER BY st.set_idx)
       FROM zane_sets st WHERE st.entry_id = e.id
@@ -1386,7 +1387,7 @@ AS $function$
     AND s.ended IS NOT NULL
     AND (p_day_id IS NULL OR s.day_id = p_day_id)
     AND EXISTS (SELECT 1 FROM zane_sets st2 WHERE st2.entry_id = e.id
-                AND (st2.kg IS NOT NULL OR st2.reps IS NOT NULL OR st2.reps_l IS NOT NULL OR st2.reps_r IS NOT NULL))
+                AND (st2.kg IS NOT NULL OR st2.reps IS NOT NULL OR st2.reps_l IS NOT NULL OR st2.reps_r IS NOT NULL OR st2.time_sec IS NOT NULL))
   ORDER BY s.ended DESC
   LIMIT GREATEST(p_limit, 1);
 $function$;

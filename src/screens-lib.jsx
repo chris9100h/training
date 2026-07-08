@@ -4406,6 +4406,7 @@ function ExerciseHistoryScreen({ store, go, exId, dayId, exName, back, userId })
 
   const ex = store.exercises.find(e => e.id === exId);
   const isUni = !!ex?.unilateral;
+  const isTimeEx = LB.exerciseLogMode(ex) === 'time';
   const displayName = exName || ex?.name || '?';
 
   // Local window renders instantly; the server history extends the chart to
@@ -4426,7 +4427,7 @@ function ExerciseHistoryScreen({ store, go, exId, dayId, exName, back, userId })
         const entry = s.entries.find(e => e.exId === exId);
         if (!entry) return null;
         const working = entry.sets.filter(st => !st.warmup && !st.skipped);
-        if (!working.some(st => st.kg != null || st.reps != null)) return null;
+        if (!working.some(st => st.kg != null || st.reps != null || st.timeSec != null)) return null;
         return { id: s.id, ended: s.ended, sets: working };
       })
       .filter(Boolean);
@@ -4435,7 +4436,7 @@ function ExerciseHistoryScreen({ store, go, exId, dayId, exName, back, userId })
       .filter(r => !seen.has(r.sessionId))
       .map(r => {
         const working = (r.sets || []).filter(st => !st.warmup && !st.skipped);
-        if (!working.some(st => st.kg != null || st.reps != null)) return null;
+        if (!working.some(st => st.kg != null || st.reps != null || st.timeSec != null)) return null;
         return { id: r.sessionId, ended: r.ended, sets: working };
       })
       .filter(Boolean);
@@ -4452,6 +4453,7 @@ function ExerciseHistoryScreen({ store, go, exId, dayId, exName, back, userId })
     // shorter session's slot at that index is undefined, not a set with
     // null values.
     if (!st) return null;
+    if (isTimeEx) return st.timeSec ?? null;
     if (metric === 'reps') return isUni
       ? (st.repsL != null ? Math.min(st.repsL ?? 0, st.repsR ?? 0) : (st.reps ?? null))
       : (st.reps ?? null);
@@ -4510,7 +4512,9 @@ function ExerciseHistoryScreen({ store, go, exId, dayId, exName, back, userId })
 
           {/* Metric toggle + session count */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
-            {['kg', 'reps'].map(m => (
+            {isTimeEx ? (
+              <span className="micro" style={{ color: UI.gold, letterSpacing: '0.12em' }}>DURATION</span>
+            ) : ['kg', 'reps'].map(m => (
               <button key={m} onClick={() => setMetric(m)} style={{
                 padding: '5px 14px', borderRadius: 4, cursor: 'pointer',
                 border: `1px solid ${metric === m ? UI.gold : UI.hairStrong}`,
@@ -4537,7 +4541,7 @@ function ExerciseHistoryScreen({ store, go, exId, dayId, exName, back, userId })
                 <g key={i}>
                   <line x1={PAD_L} y1={y} x2={VW - PAD_R} y2={y} stroke={UI.hair} strokeWidth="0.5" strokeDasharray="3 3" />
                   <text x={PAD_L - 5} y={y + 3.5} textAnchor="end" fontSize="8" fontFamily="JetBrains Mono, monospace" fill={UI.inkFaint}>
-                    {Math.round(v)}
+                    {isTimeEx ? LB.fmtDuration(v) : Math.round(v)}
                   </text>
                 </g>
               );
@@ -4604,7 +4608,9 @@ function ExerciseHistoryScreen({ store, go, exId, dayId, exName, back, userId })
                       border: `1px solid ${UI.hair}`, borderRadius: 4, padding: '2px 7px',
                       fontFamily: UI.fontNum, fontSize: 11, color: UI.ink,
                     }}>
-                      {tr.kind === 'lengthened_partial' ? (
+                      {st.timeSec != null ? (
+                        LB.fmtDuration(st.timeSec)
+                      ) : tr.kind === 'lengthened_partial' ? (
                         <>{st.kg ?? '—'}<span style={{ color: UI.inkFaint, fontSize: 9 }}>{UI.unit()}</span><span style={{ color: UI.inkFaint, margin: '0 1px' }}>×</span>{st.reps ?? '—'}</>
                       ) : tr.kind ? (
                         tr.rounds.map((d, di) => (
