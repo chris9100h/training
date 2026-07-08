@@ -3900,6 +3900,15 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     ? entry.sets.findIndex(s => !s.warmup)
     : currentSetIdx;
   const heroSet = bgSetIdx >= 0 ? entry.sets[bgSetIdx] : null;
+  // 5/3/1: the week-3 top set (95% × 1+, the heaviest single of the whole cycle)
+  // is peak intensity, so the hero card catches fire (same hellGlow as a
+  // beyond-failure meso set) while you grind that AMRAP. Working sets only.
+  const heroHell531 = (() => {
+    if (!heroSet?.amrap || isCurrentWarmup || store.statusMode === 'deload') return false;
+    const sch531 = store.schedules?.find(x => x.id === session.scheduleId);
+    if (!LB.is531Plan(sch531)) return false;
+    return (LB.current531Week(sch531, store.sessions) || 1) === 3;
+  })();
   // Warmups are seeded only onto whichever entry the session-start builder
   // picked (screens-home.jsx), normally entries[0] — but mid-session superset
   // linking can now move that entry away from position 0, so the WARMUP
@@ -4541,8 +4550,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           // Hell-cycle glow: the hero card smoulders (same hellGlow the meso
           // Options box uses) once the meso RIR target hits 0 or goes negative
           // (beyond failure), matching the red/ember RIR watermark. Working sets
-          // only, not warm-ups or deload.
-          <BracketFrame gold padding={0} style={(mesoState && mesoRirVal != null && mesoRirVal <= 0 && !isCurrentWarmup && !isMesoDeloadSession) ? { animation: 'hellGlow 2s ease-in-out infinite' } : undefined}>
+          // only, not warm-ups or deload. Also fires on the 5/3/1 week-3 top
+          // single (heroHell531), the heaviest, most intense rep of the cycle.
+          <BracketFrame gold padding={0} style={((mesoState && mesoRirVal != null && mesoRirVal <= 0 && !isCurrentWarmup && !isMesoDeloadSession) || heroHell531) ? { animation: 'hellGlow 2s ease-in-out infinite' } : undefined}>
             {mesoState && mesoRirVal != null && !isCurrentWarmup && !isMesoDeloadSession && (() => {
               // Escalate the RIR watermark as the block gets crazier: gold above
               // failure, red at 0 RIR, then a hotter, faster ember-flicker the
@@ -4760,9 +4770,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   <div style={{ position: 'relative' }}>
                   {amrapArmed && (
                     <div aria-hidden="true" style={{
-                      position: 'absolute', top: -6, bottom: -6, left: 0, right: 0, zIndex: 0,
+                      // Start at the top edge of the weight/rep boxes (the row's ~10px
+                      // top padding) so the glow never bleeds up into the knurl above.
+                      position: 'absolute', top: 9, bottom: -6, left: 0, right: 0, zIndex: 0,
                       pointerEvents: 'none',
-                      background: 'radial-gradient(60% 130% at 50% 50%, rgba(255,120,40,0.26), rgba(210,45,0,0.11) 48%, transparent 72%)',
+                      background: 'radial-gradient(60% 130% at 50% 45%, rgba(255,120,40,0.26), rgba(210,45,0,0.11) 48%, transparent 72%)',
                       animation: 'hellPulse 2s ease-in-out infinite',
                     }} />
                   )}
