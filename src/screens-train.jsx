@@ -4744,6 +4744,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               const repPlaceholder = rpsTargets && rpsTargets.length > 1
                 ? String(rpsTargets[workingRowNum - 1] ?? rpsTargets[rpsTargets.length - 1])
                 : '—';
+              // 5/3/1 AMRAP: the top "+" set only ignites once every working set above it is logged.
+              const priorWorkingDone = entry.sets.every((st, si) => si >= i || st.warmup || st.done || st.skipped);
+              const amrapArmed = s.amrap && !s.done && !s.skipped && priorWorkingDone;
               return (
                 <React.Fragment key={i}>
                   {showWorkingSep && (
@@ -4753,6 +4756,15 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                       </div>
                       <div className="knurl" style={{ marginBottom: 2 }} />
                     </>
+                  )}
+                  <div style={{ position: 'relative' }}>
+                  {amrapArmed && (
+                    <div aria-hidden="true" style={{
+                      position: 'absolute', top: -6, bottom: -6, left: 0, right: 0, zIndex: 0,
+                      pointerEvents: 'none',
+                      background: 'radial-gradient(60% 130% at 50% 50%, rgba(255,120,40,0.26), rgba(210,45,0,0.11) 48%, transparent 72%)',
+                      animation: 'hellPulse 2s ease-in-out infinite',
+                    }} />
                   )}
                   {(() => {
                     const isDropActive = dropSetIdx === i && !s.done;
@@ -4766,10 +4778,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                       gridTemplateColumns: isIntensityActive ? '28px 1fr' : (isCheckbox ? '28px 1fr 28px' : isRepsOnly ? (isUnilateral ? '28px 1fr 44px 44px 28px' : '28px 1fr 56px 28px') : (isUnilateral ? '28px 1fr 72px 44px 44px 28px' : '28px 1fr 72px 56px 28px')),
                       gap: 8, alignItems: 'center',
                       padding: '10px 6px',
+                      position: 'relative', zIndex: 1,
                       opacity: s.done || s.skipped ? (isWarmupRow ? 0.3 : 0.4) : 1,
-                      // The 5/3/1 AMRAP set smoulders (same hellGlow as the beyond-failure meso) until it's logged.
-                      ...(s.amrap && !s.done && !s.skipped ? { borderRadius: 6 } : {}),
-                      animation: flashSet === i ? 'rowFlash 1.4s ease forwards' : (s.amrap && !s.done && !s.skipped ? 'hellGlow 2s ease-in-out infinite' : 'none'),
+                      animation: flashSet === i ? 'rowFlash 1.4s ease forwards' : 'none',
                     }}>
                       <div style={{
                         width: 24, height: 24, borderRadius: 4, flexShrink: 0,
@@ -4875,11 +4886,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                     </div>
                     );
                   })()}
-                  {s.amrap && !s.done && !s.skipped && (
-                    <div className="micro-gold" style={{ padding: '0 6px 8px 36px', letterSpacing: '0.1em', lineHeight: 1.4 }}>
+                  {amrapArmed && (
+                    <div className="micro-gold" style={{ position: 'relative', zIndex: 1, textAlign: 'center', padding: '0 6px 8px', letterSpacing: '0.14em', lineHeight: 1.4 }}>
                       GO ALL OUT, as many reps as you can
                     </div>
                   )}
+                  </div>
                   {lpTarget?.exIdx === exIdx && lpTarget?.setIdx === i && !s.done && (() => {
                     const missingData = !isNoWeightReps && ((!isBodyweight && s.kg == null) || (!(kbField?.setIdx === i && kbField?.field !== 'kg') && (isUnilateral ? (s.repsL == null || s.repsR == null) : s.reps == null)));
                     return (

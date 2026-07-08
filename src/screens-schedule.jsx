@@ -1120,6 +1120,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
   const [editingDay, setEditingDay] = useStateS(null);
   const [mesoInfoOpen, setMesoInfoOpen] = useStateS(false);
   const [modifiersOpen, setModifiersOpen] = useStateS(false);
+  const [tmEditOpen, setTmEditOpen] = useStateS(false);
   // Weekday-mode whole-day import: pick a source day, then a weekday to place it on.
   const [importDayOpen, setImportDayOpen] = useStateS(false);
   const [pendingImportDay, setPendingImportDay] = useStateS(null); // { name, items, migrateId } awaiting a weekday
@@ -1542,25 +1543,28 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
           Tap a day to edit its type and exercises.
         </div>
 
-        {LB.is531Plan(draft) && draft.program_data?.mainLifts && (
-          <div>
-            <div className="label" style={{ marginBottom: 8 }}>Training Maxes</div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {Object.keys(draft.program_data.mainLifts).map(exId => {
-                const ml = draft.program_data.mainLifts[exId];
-                const name531 = LB.findExercise(store, exId)?.name || 'Lift';
-                const u531 = draft.program_data.unit || 'kg';
-                return (
-                  <div key={exId} style={{ background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 4, padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 8 }}>
-                    <span style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.inkSoft, letterSpacing: '0.02em', textTransform: 'uppercase' }}>{name531}</span>
-                    <TmField value={ml.tm} step={u531 === 'lbs' ? 5 : 2.5} suffix={u531}
-                      onChange={v => setDraft(d => ({ ...d, program_data: { ...d.program_data, mainLifts: { ...d.program_data.mainLifts, [exId]: { ...d.program_data.mainLifts[exId], tm: v } } } }))} />
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
+        {LB.is531Plan(draft) && draft.program_data?.mainLifts && (() => {
+          const u531 = draft.program_data.unit || 'kg';
+          const tmSummary = Object.keys(draft.program_data.mainLifts).map(exId => {
+            const ml = draft.program_data.mainLifts[exId];
+            const nm = (LB.findExercise(store, exId)?.name || 'Lift').split(' ').pop();
+            return `${nm} ${ml.tm ?? '—'}`;
+          }).join('   ·   ');
+          return (
+            <button onClick={() => setTmEditOpen(true)} style={{
+              display: 'flex', alignItems: 'center', gap: 12, width: '100%',
+              background: `rgba(var(--accent-rgb),0.06)`, border: `1px solid ${UI.goldSoft}`,
+              borderRadius: 6, padding: '13px 16px', cursor: 'pointer', textAlign: 'left',
+              WebkitTapHighlightColor: 'transparent',
+            }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontFamily: UI.fontUi, fontSize: 11, letterSpacing: '0.08em', textTransform: 'uppercase', color: UI.gold, fontWeight: 600, marginBottom: 3 }}>Edit Training Max</div>
+                <div className="num" style={{ fontSize: 12, color: UI.inkSoft }}>{tmSummary} {u531}</div>
+              </div>
+              <span style={{ color: UI.gold, fontSize: 16, opacity: 0.7 }}>→</span>
+            </button>
+          );
+        })()}
 
         <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
           <Btn kind="ghost" onClick={toggleArchive} style={{ flex: 1, fontSize: 12, color: UI.inkSoft, borderColor: UI.hairStrong }}>
@@ -1703,6 +1707,28 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
           </div>
         </MiniSheet>
       )}
+
+      <Sheet open={tmEditOpen} onClose={() => setTmEditOpen(false)} title="Training Maxes">
+        {draft.program_data?.mainLifts && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.6 }}>
+              About 90% of your best single. Every working weight is a percentage of this, so nudging it here reshapes the whole cycle. Tap a number to type it, or step with +/−.
+            </div>
+            {Object.keys(draft.program_data.mainLifts).map(exId => {
+              const ml = draft.program_data.mainLifts[exId];
+              const name531 = LB.findExercise(store, exId)?.name || 'Lift';
+              const u531 = draft.program_data.unit || 'kg';
+              return (
+                <div key={exId} style={{ background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 4, padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <span style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.inkSoft, letterSpacing: '0.02em', textTransform: 'uppercase' }}>{name531}</span>
+                  <TmField value={ml.tm} step={u531 === 'lbs' ? 5 : 2.5} suffix={u531}
+                    onChange={v => setDraft(d => ({ ...d, program_data: { ...d.program_data, mainLifts: { ...d.program_data.mainLifts, [exId]: { ...d.program_data.mainLifts[exId], tm: v } } } }))} />
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </Sheet>
 
       <Sheet open={modifiersOpen} onClose={() => setModifiersOpen(false)} title="Options">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
