@@ -3873,7 +3873,7 @@ function FiveThreeOneSetupScreen({ store, setStore, go, userId }) {
     const kind = picker?.kind;
     setAssist(a => {
       const merged = [...(a[kind] || [])];
-      for (const id of arr) if (merged.length < 4 && !merged.includes(id)) merged.push(id);
+      for (const id of arr) if (!merged.includes(id)) merged.push(id);
       return { ...a, [kind]: merged };
     });
     setPicker(null);
@@ -3933,9 +3933,7 @@ function FiveThreeOneSetupScreen({ store, setStore, go, userId }) {
                       <button onClick={() => removeAssist(l.kind, ref)} aria-label="Remove" style={{ background: 'none', border: 'none', color: UI.inkFaint, cursor: 'pointer', padding: 0, fontSize: 15, lineHeight: 1 }}>×</button>
                     </span>
                   ))}
-                  {(assist[l.kind] || []).length < 4 && (
-                    <button onClick={() => setPicker({ kind: l.kind })} style={{ background: 'none', border: `1px dashed ${UI.hairStrong}`, borderRadius: 4, padding: '4px 10px', fontSize: 12, color: UI.gold, cursor: 'pointer', fontFamily: UI.fontUi, WebkitTapHighlightColor: 'transparent' }}>+ Add</button>
-                  )}
+                  <button onClick={() => setPicker({ kind: l.kind })} style={{ background: 'none', border: `1px dashed ${UI.hairStrong}`, borderRadius: 4, padding: '4px 10px', fontSize: 12, color: UI.gold, cursor: 'pointer', fontFamily: UI.fontUi, WebkitTapHighlightColor: 'transparent' }}>+ Add</button>
                 </div>
               </div>
             )}

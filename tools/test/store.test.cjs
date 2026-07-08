@@ -1387,7 +1387,7 @@ async function testAsync(name, fn) {
     assert.strictEqual(none.higher, false);
   });
 
-  test('build531Plan: catalog names resolve, 4 days, program_data stamped, assistance capped', () => {
+  test('build531Plan: catalog names resolve, 4 days, program_data stamped, assistance uncapped', () => {
     const FTO = _catWin.FIVE_THREE_ONE;
     assert.ok(FTO && Array.isArray(FTO.lifts) && FTO.lifts.length === 4, 'FIVE_THREE_ONE has 4 lifts');
     const names = new Set(SYS_EX.map(e => (e.name || '').toUpperCase()));
@@ -1421,14 +1421,16 @@ async function testAsync(name, fn) {
     for (const d of schedule.days) {
       assert.strictEqual(d.items[0].sets, 3);
       assert.ok(ml[d.items[0].exId], 'day leads with a tracked main lift');
-      assert.ok(d.items.length >= 1 && d.items.length <= 5, 'main + up to 4 assistance');
+      assert.ok(d.items.length >= 1, 'day has at least its main lift');
       for (let i = 1; i < d.items.length; i++) assert.ok(!ml[d.items[i].exId], 'assistance is not a tracked main lift');
     }
     assert.ok(newExercises.length >= 4, 'materialized the main lifts (and assistance)');
-    // assistance is capped at 4 even when oversupplied
-    const over = LB.build531Plan({ exercises: [] }, { unit: 'kg', lifts: [FTO.lifts[0]],
-      assistance: { squat: ['Leg Press', 'Seated Leg Curl', 'Standing Calf Raise', 'Dumbbell Curl', 'Cable Crunch'] } });
-    assert.strictEqual(over.schedule.days[0].items.length, 5, 'main + 4 assistance max');
+    // assistance is uncapped: supply as many as you like (owned ids so they all
+    // resolve), and every one comes through
+    const ownedAssist = ['a1', 'a2', 'a3', 'a4', 'a5'].map(id => ({ id, name: id }));
+    const over = LB.build531Plan({ exercises: ownedAssist }, { unit: 'kg', lifts: [FTO.lifts[0]],
+      assistance: { squat: ['a1', 'a2', 'a3', 'a4', 'a5'] } });
+    assert.strictEqual(over.schedule.days[0].items.length, 6, 'main + all 5 assistance, no cap');
     // no assistance -> just the main lift per day
     const bare = LB.build531Plan({ exercises: [] }, { unit: 'kg', lifts: FTO.lifts.map(l => ({ ...l, tm: 100 })), assistance: {} });
     for (const d of bare.schedule.days) assert.strictEqual(d.items.length, 1, 'main lift only when assistance is off');
