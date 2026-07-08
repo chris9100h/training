@@ -1272,6 +1272,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
   // Adding an extra 5/3/1 main lift: pick an exercise, then classify + set a TM.
   const [addLiftPicking, setAddLiftPicking] = useStateS(false);
   const [addLiftDraft, setAddLiftDraft] = useStateS(null); // { exId, name, body, tm }
+  const [addDayChoice, setAddDayChoice] = useStateS(false); // 531 plans: pick Smart vs 5/3/1 progression before adding a day
   const startAddMainLift = (ids) => {
     setAddLiftPicking(false);
     const exId = Array.isArray(ids) ? ids[0] : ids;
@@ -1700,23 +1701,10 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
                   </div>
                 );
               })}
-              <Btn kind="ghost" onClick={() => setPickingType(true)} style={{ borderStyle: 'dashed', fontSize: 12 }}>
+              <Btn kind="ghost" onClick={() => LB.is531Plan(draft) ? setAddDayChoice(true) : setPickingType(true)} style={{ borderStyle: 'dashed', fontSize: 12 }}>
                 + Add day
               </Btn>
             </div>
-            {LB.is531Plan(draft) && (
-              <>
-                <button onClick={() => setAddLiftPicking(true)} style={{
-                  width: '100%', marginTop: 6, padding: '11px 0', borderRadius: 4, cursor: 'pointer',
-                  border: `1px dashed ${UI.goldSoft}`, background: UI.goldFaint, color: UI.gold,
-                  fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, letterSpacing: '0.04em',
-                  WebkitTapHighlightColor: 'transparent',
-                }}>+ Add progression day</button>
-                <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.6, marginTop: 8 }}>
-                  "+ Add day" adds a normal day that runs on Smart Progression, not 5/3/1. Use "+ Add progression day" to add another main lift: it gets its own day that waves 5s / 3s / 1s and bumps its Training Max every cycle.
-                </div>
-              </>
-            )}
           </div>
         )}
 
@@ -1929,6 +1917,35 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
             })}
           </div>
         )}
+      </Sheet>
+
+      {/* 5/3/1 plans fork here: a new day either rides Smart Progression (the
+          normal day-type flow) or becomes a Wendler main lift (its own day that
+          waves and bumps a Training Max). Non-531 plans skip this and go
+          straight to the day-type picker. */}
+      <Sheet open={addDayChoice} onClose={() => setAddDayChoice(false)} title="Add day">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.6 }}>
+            How should this day progress?
+          </div>
+          {[
+            { key: 'smart', title: 'Smart Progression', desc: 'A normal day you build yourself. Loads step up from your rep-range history and end-of-session feedback.', pick: () => { setAddDayChoice(false); setPickingType(true); } },
+            { key: '531', title: '5/3/1 Progression', desc: 'Pick one lift. It gets its own day that waves 5s / 3s / 1s off a Training Max, which bumps every cycle.', pick: () => { setAddDayChoice(false); setAddLiftPicking(true); } },
+          ].map(opt => (
+            <button key={opt.key} onClick={opt.pick} style={{
+              display: 'flex', alignItems: 'center', gap: 12, width: '100%',
+              background: UI.bgInset, border: `1px solid ${UI.hairStrong}`,
+              borderRadius: 6, padding: '13px 14px', cursor: 'pointer', textAlign: 'left',
+              WebkitTapHighlightColor: 'transparent',
+            }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, fontWeight: 600, marginBottom: 3 }}>{opt.title}</div>
+                <div className="micro" style={{ color: UI.inkFaint, textTransform: 'none', letterSpacing: '0.02em', lineHeight: 1.5 }}>{opt.desc}</div>
+              </div>
+              <span style={{ color: UI.inkFaint, fontSize: 16, flexShrink: 0 }}>→</span>
+            </button>
+          ))}
+        </div>
       </Sheet>
 
       {addLiftPicking && (
