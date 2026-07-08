@@ -3928,6 +3928,9 @@ function FiveThreeOneSetupScreen({ store, setStore, go, userId }) {
     for (const l of (FTO?.lifts || [])) a[l.kind] = []; // user picks their own, nothing prefilled
     return a;
   });
+  // Extra main lifts beyond the canonical four: [{ id, exId, name, body, tm, assistance }].
+  const [extraLifts, setExtraLifts] = useStateS([]);
+  const [addingMainLift, setAddingMainLift] = useStateS(false);
   if (!FTO) return <Screen><TopBar title="5/3/1" onBack={() => go({ name: 'schedule-programs' })} /></Screen>;
 
   const LIFT_LABEL = { squat: 'Squat', bench: 'Bench Press', deadlift: 'Deadlift', ohp: 'Overhead Press' };
@@ -3935,6 +3938,18 @@ function FiveThreeOneSetupScreen({ store, setStore, go, userId }) {
   const removeAssist = (kind, ref) => setAssist(a => ({ ...a, [kind]: (a[kind] || []).filter(x => x !== ref) }));
   const addAssist = (ids) => {
     const arr = Array.isArray(ids) ? ids : [ids];
+    // Assistance can target a canonical lift (picker.kind) or an extra lift (picker.extraId).
+    if (picker?.extraId) {
+      const eid = picker.extraId;
+      setExtraLifts(list => list.map(x => {
+        if (x.id !== eid) return x;
+        const merged = [...(x.assistance || [])];
+        for (const id of arr) if (!merged.includes(id)) merged.push(id);
+        return { ...x, assistance: merged };
+      }));
+      setPicker(null);
+      return;
+    }
     const kind = picker?.kind;
     setAssist(a => {
       const merged = [...(a[kind] || [])];
@@ -3943,12 +3958,39 @@ function FiveThreeOneSetupScreen({ store, setStore, go, userId }) {
     });
     setPicker(null);
   };
-  const canCreate = (FTO.lifts || []).every(l => tms[l.kind] != null && tms[l.kind] > 0);
+  // Extra main lifts: pick one or more exercises, prefill each TM from history,
+  // default to upper. Skip any that already sit on a canonical or extra lift.
+  const addMainLift = (ids) => {
+    setAddingMainLift(false);
+    const arr = Array.isArray(ids) ? ids : [ids];
+    const isCanonical = (exId) => FTO.lifts.some(l => {
+      const ex = (store.exercises || []).find(e => (e.name || '').toUpperCase() === l.ex.toUpperCase());
+      return ex && ex.id === exId;
+    });
+    setExtraLifts(list => {
+      const next = [...list];
+      for (const exId of arr) {
+        if (!exId || next.some(x => x.exId === exId) || isCanonical(exId)) continue; // no duplicate main lifts
+        const ex = LB.findExercise(store, exId);
+        const t = ex ? LB.tmFrom531(LB.bestE1rmForExercise(store, exId), unit) : null;
+        next.push({ id: LB.uid(), exId, name: ex?.name || 'Lift', body: 'upper', tm: t, assistance: [] });
+      }
+      return next;
+    });
+  };
+  const setExtra = (id, patch) => setExtraLifts(list => list.map(x => x.id === id ? { ...x, ...patch } : x));
+  const removeMainLift = (id) => setExtraLifts(list => list.filter(x => x.id !== id));
+  const removeExtraAssist = (id, ref) => setExtraLifts(list => list.map(x => x.id === id ? { ...x, assistance: (x.assistance || []).filter(a => a !== ref) } : x));
+  const canCreate = (FTO.lifts || []).every(l => tms[l.kind] != null && tms[l.kind] > 0)
+    && extraLifts.every(x => x.tm != null && x.tm > 0);
   const create = () => {
     if (!canCreate) return;
     const config = {
       name: '5/3/1', unit, includeDeload,
-      lifts: FTO.lifts.map(l => ({ kind: l.kind, ex: l.ex, tm: tms[l.kind] ?? null })),
+      lifts: [
+        ...FTO.lifts.map(l => ({ kind: l.kind, ex: l.ex, tm: tms[l.kind] ?? null })),
+        ...extraLifts.map(x => ({ kind: x.body, ex: x.exId, tm: x.tm ?? null, name: x.name, assistance: assistanceOn ? (x.assistance || []) : [] })),
+      ],
       assistance: assistanceOn ? assist : {},
     };
     const { schedule, newExercises } = LB.build531Plan(store, config);
@@ -4005,6 +4047,56 @@ function FiveThreeOneSetupScreen({ store, setStore, go, userId }) {
           </Card>
         ))}
 
+        {extraLifts.map(x => (
+          <Card key={x.id} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+              <span style={{ fontFamily: UI.fontDisplay, fontSize: 18, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.02em', color: UI.ink }}>{x.name}</span>
+              <button onClick={() => removeMainLift(x.id)} aria-label="Remove lift" style={{ background: 'none', border: 'none', color: UI.inkFaint, cursor: 'pointer', padding: 0, fontSize: 18, lineHeight: 1 }}>×</button>
+            </div>
+            <div>
+              <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>Per-cycle increase</div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                {[['lower', 'Lower body'], ['upper', 'Upper body']].map(([body, label]) => (
+                  <button key={body} onClick={() => setExtra(x.id, { body })} style={{
+                    flex: 1, padding: '10px 8px', borderRadius: 4, cursor: 'pointer',
+                    border: `1px solid ${x.body === body ? UI.gold : UI.hairStrong}`,
+                    background: x.body === body ? UI.goldFaint : 'transparent',
+                    color: x.body === body ? UI.gold : UI.inkFaint,
+                    fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, WebkitTapHighlightColor: 'transparent',
+                  }}>{label}<span style={{ display: 'block', fontSize: 10, opacity: 0.8, marginTop: 2 }}>+{LB.tmBump531(body, unit)}{unit}/cycle</span></button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>Training Max</div>
+              <TmField value={x.tm} onChange={v => setExtra(x.id, { tm: v })} step={step} suffix={unit} />
+            </div>
+            {assistanceOn && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div className="micro" style={{ color: UI.inkFaint }}>Assistance</div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+                  {(x.assistance || []).map(ref => (
+                    <span key={ref} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: UI.bgRaised, border: `0.5px solid ${UI.hair}`, borderRadius: 4, padding: '4px 8px', fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi }}>
+                      {displayName(ref)}
+                      <button onClick={() => removeExtraAssist(x.id, ref)} aria-label="Remove" style={{ background: 'none', border: 'none', color: UI.inkFaint, cursor: 'pointer', padding: 0, fontSize: 15, lineHeight: 1 }}>×</button>
+                    </span>
+                  ))}
+                  <button onClick={() => setPicker({ extraId: x.id })} style={{ background: 'none', border: `1px dashed ${UI.hairStrong}`, borderRadius: 4, padding: '4px 10px', fontSize: 12, color: UI.gold, cursor: 'pointer', fontFamily: UI.fontUi, WebkitTapHighlightColor: 'transparent' }}>+ Add</button>
+                </div>
+              </div>
+            )}
+          </Card>
+        ))}
+
+        <button onClick={() => setAddingMainLift(true)} style={{
+          background: 'none', border: `1px dashed ${UI.hairStrong}`, borderRadius: 6,
+          padding: '12px', fontSize: 13, color: UI.gold, cursor: 'pointer',
+          fontFamily: UI.fontUi, fontWeight: 600, WebkitTapHighlightColor: 'transparent',
+        }}>+ Add another lift</button>
+        <div className="micro" style={{ color: UI.inkFaint, textTransform: 'none', letterSpacing: '0.02em', lineHeight: 1.5, marginTop: -6 }}>
+          Each extra lift gets its own 5/3/1 day and climbs by Wendler's rules. Assistance you attach rides normal progression.
+        </div>
+
         <Btn onClick={create} disabled={!canCreate} style={{ width: '100%', marginTop: 4, opacity: canCreate ? 1 : 0.5, cursor: canCreate ? 'pointer' : 'default' }}>
           {canCreate ? 'Create 5/3/1 plan' : 'Set a Training Max for each lift'}
         </Btn>
@@ -4012,6 +4104,9 @@ function FiveThreeOneSetupScreen({ store, setStore, go, userId }) {
 
       {picker && (
         <ExercisePicker store={store} setStore={setStore} onClose={() => setPicker(null)} onPick={addAssist} />
+      )}
+      {addingMainLift && (
+        <ExercisePicker store={store} setStore={setStore} onClose={() => setAddingMainLift(false)} onPick={addMainLift} />
       )}
     </Screen>
   );
