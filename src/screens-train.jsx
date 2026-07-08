@@ -1071,6 +1071,22 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   };
   useEffectT(() => () => clearTimeout(countdownTimerRef.current), []);
 
+  // NEW BEST decision, shared by completeSet and the technique finishers. For an
+  // assisted exercise "best" is the highest (least-negative) load, compared kg
+  // to kg with no Epley and no >0 gate (loads are negative). Everything else
+  // uses the estimated 1RM, folding in the local + windowed-server best.
+  const isNewBestSet = (kg, reps) => {
+    if (!entry || newBestShownRef.current[entry.exId]) return false;
+    if (LB.isAssisted(exercise)) {
+      if (kg == null) return false;
+      const prior = LB.bestAssistLoad(store, entry.exId, session.id);
+      return prior != null && kg > prior;
+    }
+    const cE1rm = (kg != null && reps != null && reps > 0) ? LB.e1rm(kg, reps) : 0;
+    const priorBest = Math.max(LB.bestE1rmForExercise(store, entry.exId, session.id), remoteBestE1rmRef.current[entry.exId] || 0);
+    return cE1rm > 0 && priorBest > 0 && cE1rm > priorBest;
+  };
+
   const completeSet = (setIdx, bypassOutlierCheck = false, advanceFocus = false, extraPatch = null) => {
     // Lengthened partials only ever completes via finishLengthenedPartial,
     // which supplies extraPatch with the chosen partials count — every other
@@ -1283,10 +1299,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     } else if (!entry.sets[setIdx]?.warmup && !isDeloadSession) {
       const completed = entry.sets[setIdx];
       const cReps = LB.effReps(completed);
-      const cE1rm = (completed?.kg != null && cReps != null && cReps > 0) ? LB.e1rm(completed.kg, cReps) : 0;
-      const localBest = LB.bestE1rmForExercise(store, entry.exId, session.id);
-      const priorBest = Math.max(localBest, remoteBestE1rmRef.current[entry.exId] || 0);
-      const isNewBest = cE1rm > 0 && priorBest > 0 && cE1rm > priorBest && !newBestShownRef.current[entry.exId];
+      const isNewBest = isNewBestSet(completed?.kg ?? null, cReps);
       if (isNewBest) {
         newBestShownRef.current[entry.exId] = true;
         setNewBestSet(true);
@@ -1326,10 +1339,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       const prevWS = (last?.entry?.sets || []).filter(s => !s.warmup);
       const wIdx = entry.sets.slice(0, targetIdx + 1).filter(s => !s.warmup).length - 1;
       const prevSet = wIdx >= 0 ? prevWS[wIdx] : undefined;
-      const cE1rm = LB.e1rm(firstSet.kg, firstSet.reps);
-      const localBest = LB.bestE1rmForExercise(store, entry.exId, session.id);
-      const priorBest = Math.max(localBest, remoteBestE1rmRef.current[entry.exId] || 0);
-      const isNewBest = cE1rm > 0 && priorBest > 0 && cE1rm > priorBest && !newBestShownRef.current[entry.exId];
+      const isNewBest = isNewBestSet(firstSet.kg, firstSet.reps);
       if (isNewBest) {
         newBestShownRef.current[entry.exId] = true;
         setNewBestSet(true); overlayHoldMs = FLASH_NAV_DELAY_MS; setTimeout(() => setNewBestSet(false), 2500);
@@ -6119,8 +6129,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       <Sheet open={historyOpen} onClose={() => setHistoryOpen(false)} title="History">
         {(() => {
           const rows = historyRows ?? localHistory;
-          const pr = entry ? LB.bestE1rmForExercise(store, entry.exId) : 0;
+          // Assisted: "best" is the least-negative load, not an Epley e1RM.
+          const isAssistedEx = LB.isAssisted(exercise);
+          const pr = !entry ? 0 : isAssistedEx ? LB.bestAssistLoad(store, entry.exId) : LB.bestE1rmForExercise(store, entry.exId);
           const e1rmForSet = (s) => { const r = LB.effReps(s); return (s.kg != null && r > 0) ? LB.e1rm(s.kg, r) : 0; };
+          const bestKgOf = (sets) => { const vals = sets.map(s => s.kg).filter(v => v != null); return vals.length ? Math.max(...vals) : null; };
           if (!rows.length) {
             return (
               <div className="micro" style={{ color: UI.inkFaint, textAlign: 'center', padding: '20px 0' }}>
@@ -6137,8 +6150,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               {shown.map((h, hi) => {
                 const working = (h.sets || []).filter(s => !s.warmup && !s.skipped && (s.kg != null || s.reps != null || s.timeSec != null));
                 if (!working.length) return null;
-                const sessionBest = working.reduce((m, s) => Math.max(m, e1rmForSet(s)), 0);
-                const isPR = pr > 0 && sessionBest > 0 && Math.abs(sessionBest - pr) < 0.01;
+                const sessionBest = isAssistedEx ? bestKgOf(working) : working.reduce((m, s) => Math.max(m, e1rmForSet(s)), 0);
+                const isPR = isAssistedEx
+                  ? (pr != null && sessionBest != null && Math.abs(sessionBest - pr) < 0.01)
+                  : (pr > 0 && sessionBest > 0 && Math.abs(sessionBest - pr) < 0.01);
                 return (
                   <React.Fragment key={h.sessionId || hi}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', padding: '11px 0', gap: 10 }}>
@@ -6151,7 +6166,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                         </div>
                         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                           {working.map((s, i) => {
-                            const isBest = sessionBest > 0 && Math.abs(e1rmForSet(s) - sessionBest) < 0.01;
+                            const isBest = isAssistedEx
+                              ? (s.kg != null && sessionBest != null && Math.abs(s.kg - sessionBest) < 0.01)
+                              : (sessionBest > 0 && Math.abs(e1rmForSet(s) - sessionBest) < 0.01);
                             const repsStr = (s.repsL != null || s.repsR != null) ? `L${s.repsL ?? '?'}/R${s.repsR ?? '?'}` : s.reps;
                             return (
                               <span key={i} className="num" style={{ fontSize: 13, color: isBest ? UI.gold : UI.ink }}>

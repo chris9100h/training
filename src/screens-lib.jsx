@@ -1438,8 +1438,13 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
           <Bezel>HISTORY</Bezel>
           <div style={{ marginTop: 8 }}>
             {history.slice(0, 10).map((h, hi) => {
-              const sessionBest = h.entry.sets.reduce((m, s) => Math.max(m, valForSet(s)), 0);
-              const isPR = pr > 0 && sessionBest > 0 && Math.abs(sessionBest - pr) < 0.01;
+              // Assisted loads are negative, so a 0-seeded reduce would never
+              // beat them: max over the present values, and a signed PR compare.
+              const sVals = (h.entry.sets || []).map(valForSet).filter(v => v != null);
+              const sessionBest = sVals.length ? Math.max(...sVals) : (isAssistedEx ? null : 0);
+              const isPR = isAssistedEx
+                ? (points.length > 0 && sessionBest != null && Math.abs(sessionBest - pr) < 0.01)
+                : (pr > 0 && sessionBest > 0 && Math.abs(sessionBest - pr) < 0.01);
               return (
                 <React.Fragment key={h.session.id}>
                 <div
@@ -1460,7 +1465,9 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
                     </div>
                     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                       {h.entry.sets.filter(s => (s.kg != null || s.timeSec != null) && !s.warmup).map((s, i) => {
-                        const isBest = sessionBest > 0 && Math.abs(valForSet(s) - sessionBest) < 0.01;
+                        const isBest = isAssistedEx
+                          ? (sessionBest != null && valForSet(s) != null && Math.abs(valForSet(s) - sessionBest) < 0.01)
+                          : (sessionBest > 0 && Math.abs(valForSet(s) - sessionBest) < 0.01);
                         const repsStr = (s.repsL != null || s.repsR != null)
                           ? `L${s.repsL ?? '?'}/R${s.repsR ?? '?'}`
                           : s.reps;

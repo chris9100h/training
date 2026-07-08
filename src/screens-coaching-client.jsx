@@ -1101,14 +1101,18 @@ function InlineExHistory({ exId, dayId, exName, sessions, exercises, onBack, uni
     [sessions, exId, dayId]
   );
 
-  // Time-based exercise: detected from the data itself (the coach side has no
-  // reliable exercise definition for the client's library). Chart plots the
-  // logged durations, the kg/reps metric toggle makes no sense here.
+  // Time-based / assisted exercise: detected from the data itself (the coach
+  // side has no reliable exercise definition for the client's library). Time
+  // plots the durations; assisted (any negative load) plots the load, where a
+  // higher (less-negative) kg is less assistance. The kg/reps metric toggle
+  // makes no sense for either.
   const isTimeEx = exSessions.some(s => s.sets.some(st => st.timeSec != null));
+  const isAssistedEx = !isTimeEx && exSessions.some(s => s.sets.some(st => st.kg != null && st.kg < 0));
 
   const getValue = (st) => {
     if (!st) return null;
     if (isTimeEx) return st.timeSec ?? null;
+    if (isAssistedEx) return st.kg ?? null;
     return metric === 'reps'
       ? (isUni ? (st.repsL != null ? Math.min(st.repsL ?? 0, st.repsR ?? 0) : (st.reps ?? null)) : (st.reps ?? null))
       : (st.kg ?? null);
@@ -1147,6 +1151,8 @@ function InlineExHistory({ exId, dayId, exName, sessions, exercises, onBack, uni
         <div style={{ display: 'flex', gap: 6 }}>
           {isTimeEx ? (
             <span className="micro" style={{ color: UI.gold, letterSpacing: '0.12em' }}>DURATION</span>
+          ) : isAssistedEx ? (
+            <span className="micro" style={{ color: UI.gold, letterSpacing: '0.12em' }}>ASSISTED</span>
           ) : ['kg', 'reps'].map(m => (
             <button key={m} onClick={() => setMetric(m)} style={{
               padding: '4px 10px', borderRadius: 4, cursor: 'pointer',

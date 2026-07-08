@@ -1483,6 +1483,22 @@ async function testAsync(name, fn) {
     assert.strictEqual(LB.totalVolume(grad, []), 50, 'only the positive graduated set adds volume (10x5)');
   });
 
+  test('bestAssistLoad: highest (least-negative) load across ended sessions, null when empty', () => {
+    const state = { sessions: [
+      { id: 's1', ended: '2026-01-01', dayId: 'd1', entries: [{ exId: 'ad', sets: [{ kg: -40, reps: 8 }, { kg: -45, reps: 6 }] }] },
+      { id: 's2', ended: '2026-01-08', dayId: 'd1', entries: [{ exId: 'ad', sets: [{ kg: -35, reps: 8 }, { kg: -30, reps: 5 }] }] },
+      { id: 's3', ended: null, dayId: 'd1', entries: [{ exId: 'ad', sets: [{ kg: -20, reps: 8 }] }] }, // in-progress, ignored
+    ] };
+    assert.strictEqual(LB.bestAssistLoad(state, 'ad'), -30, 'least assistance is -30 (highest kg among ended)');
+    assert.strictEqual(LB.bestAssistLoad(state, 'ad', 's2'), -40, 'excluding s2 leaves -40 as the best');
+    assert.strictEqual(LB.bestAssistLoad(state, 'nope'), null, 'no history returns null (not 0)');
+    // warm-ups/skipped never count
+    const state2 = { sessions: [{ id: 's1', ended: '2026-01-01', entries: [{ exId: 'ad', sets: [
+      { kg: -10, reps: 8, warmup: true }, { kg: -40, reps: 8 },
+    ] }] }] };
+    assert.strictEqual(LB.bestAssistLoad(state2, 'ad'), -40, 'the -10 warm-up does not count as the best');
+  });
+
   test('time-based history: recent-session lookup finds time-only sessions and carries timeSec', () => {
     const state = { sessions: [
       { id: 's1', ended: '2026-01-01T10:00:00', dayId: 'd1', entries: [{ exId: 'jr', sets: [

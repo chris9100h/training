@@ -1645,6 +1645,26 @@ function bestE1rmForExercise(state, exId, excludeSessionId = null, dayId = null)
   return best;
 }
 
+// The "PR" of an assisted exercise: the highest (least-negative, i.e. least
+// assistance) load logged across ended sessions. Local window only, no Epley,
+// no server aggregate, no 0 seed (loads are negative). Returns null when there
+// is no history. Mirrors bestE1rmForExercise's session/set filtering.
+function bestAssistLoad(state, exId, excludeSessionId = null, dayId = null) {
+  let best = null;
+  for (const s of state.sessions || []) {
+    if (!s.ended || s.isDeload || (excludeSessionId && s.id === excludeSessionId)) continue;
+    if (dayId && s.dayId !== dayId) continue;
+    for (const e of (s.entries || [])) {
+      if (e.exId !== exId) continue;
+      for (const st of (e.sets || [])) {
+        if (st.warmup || st.skipped || st.kg == null) continue;
+        if (best == null || st.kg > best) best = st.kg;
+      }
+    }
+  }
+  return best;
+}
+
 // Re-fetch the all-time best-e1RM aggregate (once per session start / training
 // mount). Resolves with the fresh map, or null when offline / on error — the
 // caller keeps the cached map in that case.
@@ -4368,7 +4388,7 @@ window.LB = {
   loadFromSupabase, syncStore, mergeSessions, withCarriedWindowEntries, historyWindowCutoffISO,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
   uid, todayISO, fmtISO, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, healScheduleWeekdays, buildPlanSkeleton, instantiateProgram, is531Plan, round531, tmFrom531, tmBump531, weeks531, week531, fiveThreeOneSets, build531Plan, current531Week, current531Cycle, compute531CycleBumps, resolve531CycleEnd, suggest531Tm, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, realignCycleForToday, todayCycleStripIndex,
-  effReps, fmtDuration, e1rm, isImprovement, isDecline, bestE1rmForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, buildTimeSeedSets, latestBodyweight, exerciseLogMode, isAssisted, shouldPullBodyweight, systemExerciseToRow, inferCurrentExIdx, calcBlended,
+  effReps, fmtDuration, e1rm, isImprovement, isDecline, bestE1rmForExercise, bestAssistLoad, totalVolume, entryVolume, doneSetCount, buildSeedSets, buildTimeSeedSets, latestBodyweight, exerciseLogMode, isAssisted, shouldPullBodyweight, systemExerciseToRow, inferCurrentExIdx, calcBlended,
   refreshExerciseBests, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries,
   computeNextReminderAt,
   cancelPushover, adminSendEmail,
