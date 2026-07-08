@@ -1253,6 +1253,7 @@ function App() {
     case 'plan':          screen = <window.Screens.PlanScreen {...props} openNewPlan={route.openNewPlan} />; break;
     case 'plan-view':     screen = <window.Screens.PlanViewerScreen {...props} scheduleId={route.scheduleId} fromPlan={route.fromPlan} />; break;
     case 'schedule-new':  screen = <window.Screens.ScheduleNewScreen {...props} />; break;
+    case 'schedule-programs': screen = <window.Screens.StructuredProgramsScreen {...props} />; break;
     case 'schedule-templates': screen = <window.Screens.ProgramTemplatesScreen {...props} />; break;
     case 'schedule-531':  screen = <window.Screens.FiveThreeOneSetupScreen {...props} />; break;
     case 'plan-preview':  screen = <window.Screens.ProgramPreviewScreen {...props} programId={route.programId} />; break;

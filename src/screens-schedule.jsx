@@ -1968,6 +1968,11 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
           })()}
 
           {(() => {
+            // A 5/3/1 plan runs its own periodization (TM waves + automatic
+            // per-cycle progression), so a mesocycle on top is meaningless: the
+            // block lengths don't even line up (a meso is 4 weeks minimum, a
+            // 5/3/1 block is 3 or 4). Hide the whole toggle for 5/3/1.
+            if (LB.is531Plan(draft)) return null;
             const hasMeso = draft.mesocycle_weeks != null;
             const toggleMeso = () => setDraft(d => ({ ...d, mesocycle_weeks: d.mesocycle_weeks != null ? null : 6 }));
             return (
@@ -3633,18 +3638,21 @@ function ScheduleNewScreen({ store, setStore, go, userId }) {
 // The "New plan" chooser, styled like the unit picker: a centered modal with two
 // side-by-side options. Rendered inline by PlanScreen's + button (not a route).
 function NewPlanPickerModal({ onClose, go }) {
-  const opt = (icon, label, sub, onClick) => (
+  // Three options as a vertical list (was two side-by-side tiles): a full
+  // structured Program, a ready-made split Template, or a Custom build.
+  const opt = (icon, label, sub, onClick, accent) => (
     <button onClick={onClick} style={{
-      flex: 1, padding: '16px 0', borderRadius: 6, cursor: 'pointer',
-      background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, color: UI.inkSoft,
-      fontFamily: UI.fontUi, textAlign: 'center', WebkitTapHighlightColor: 'transparent',
-      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8,
+      width: '100%', padding: '13px 14px', borderRadius: 6, cursor: 'pointer',
+      background: UI.bgInset, border: `1px solid ${accent ? UI.goldSoft : UI.hairStrong}`, color: UI.inkSoft,
+      fontFamily: UI.fontUi, textAlign: 'left', WebkitTapHighlightColor: 'transparent',
+      display: 'flex', alignItems: 'center', gap: 14,
     }}>
-      <i className={`fa-solid ${icon}`} style={{ fontSize: 20, color: UI.inkFaint }} />
-      <div>
+      <i className={`fa-solid ${icon}`} style={{ fontSize: 19, color: accent ? 'var(--accent)' : UI.inkFaint, width: 24, textAlign: 'center', flexShrink: 0 }} />
+      <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontSize: 14, fontWeight: 600, color: UI.ink }}>{label}</div>
-        <div style={{ fontSize: 10, color: UI.inkFaint, marginTop: 2 }}>{sub}</div>
+        <div style={{ fontSize: 11, color: UI.inkFaint, marginTop: 2 }}>{sub}</div>
       </div>
+      <i className="fa-solid fa-chevron-right" style={{ fontSize: 11, color: UI.inkFaint, flexShrink: 0 }} />
     </button>
   );
   return (
@@ -3660,31 +3668,32 @@ function NewPlanPickerModal({ onClose, go }) {
       }}>
         <div>
           <div style={{ fontFamily: UI.fontDisplay, fontSize: 22, color: 'var(--accent)', fontWeight: 400, marginBottom: 8, textTransform: 'uppercase' }}>New plan</div>
-          <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>Start from a ready-made program, or build your own.</div>
+          <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>Start from a full program, a ready-made split, or build your own.</div>
         </div>
-        <div style={{ display: 'flex', gap: 10 }}>
-          {opt('fa-layer-group', 'Templates', 'Ready-made', () => { onClose(); go({ name: 'schedule-templates' }); })}
-          {opt('fa-sliders', 'Custom', 'Build your own', () => { onClose(); go({ name: 'schedule-new' }); })}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {opt('fa-trophy', 'Programs', 'Structured, self-progressing (like 5/3/1)', () => { onClose(); go({ name: 'schedule-programs' }); }, true)}
+          {opt('fa-layer-group', 'Templates', 'Ready-made splits to make your own', () => { onClose(); go({ name: 'schedule-templates' }); })}
+          {opt('fa-sliders', 'Custom', 'Build it from scratch', () => { onClose(); go({ name: 'schedule-new' }); })}
         </div>
       </div>
     </div>
   );
 }
 
-// Lists the pre-built programs. Tapping one instantiates it (LB.instantiateProgram)
-// and opens it in the existing plan viewer, where the user reviews and activates
-// it — same as any other plan (consistent with the Custom flow, which also creates
-// an unactivated plan before it is used).
-function ProgramTemplatesScreen({ store, setStore, go }) {
-  const programs = (typeof window !== 'undefined' && window.SYSTEM_PROGRAMS) || [];
+// Structured programs: complete programs that run their own periodization and
+// progression (5/3/1 today, more of its kind later). Kept separate from the
+// rep-range Templates because they are set up once (e.g. per-lift Training
+// Maxes) and then drive the loads themselves. Reached from the New plan modal.
+function StructuredProgramsScreen({ store, setStore, go }) {
+  const has531 = typeof window !== 'undefined' && !!window.FIVE_THREE_ONE;
   return (
     <Screen scroll={false}>
-      <TopBar title="Templates" onBack={() => go({ name: 'plan' })} />
+      <TopBar title="Programs" onBack={() => go({ name: 'plan' })} />
       <div style={{ flex: 1, overflowY: 'auto', padding: '14px 22px 40px', display: 'flex', flexDirection: 'column', gap: 10 }}>
         <div className="micro" style={{ color: UI.inkFaint, textTransform: 'none', letterSpacing: '0.02em', lineHeight: 1.5, marginBottom: 4 }}>
-          Ready-made programs to start from. Preview any one, then use it as is or edit it.
+          Complete programs that handle their own progression. Set one up once, then just train.
         </div>
-        {(typeof window !== 'undefined' && window.FIVE_THREE_ONE) && (
+        {has531 ? (
           <button onClick={() => go({ name: 'schedule-531' })} style={{
             width: '100%', textAlign: 'left', background: UI.bgInset, border: `1px solid ${UI.goldSoft}`,
             borderRadius: 8, padding: 14, cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 8,
@@ -3701,7 +3710,27 @@ function ProgramTemplatesScreen({ store, setStore, go }) {
               ))}
             </div>
           </button>
+        ) : (
+          <Empty title="No programs yet" icon={ICON_CALENDAR} />
         )}
+      </div>
+    </Screen>
+  );
+}
+
+// Lists the ready-made rep-range splits. Tapping one instantiates it
+// (LB.instantiateProgram) and opens it in the plan viewer, where the user
+// reviews and activates it, same as any other plan (consistent with the Custom
+// flow, which also creates an unactivated plan before it is used).
+function ProgramTemplatesScreen({ store, setStore, go }) {
+  const programs = (typeof window !== 'undefined' && window.SYSTEM_PROGRAMS) || [];
+  return (
+    <Screen scroll={false}>
+      <TopBar title="Templates" onBack={() => go({ name: 'plan' })} />
+      <div style={{ flex: 1, overflowY: 'auto', padding: '14px 22px 40px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div className="micro" style={{ color: UI.inkFaint, textTransform: 'none', letterSpacing: '0.02em', lineHeight: 1.5, marginBottom: 4 }}>
+          Ready-made training splits to start from. Preview any one, then use it as is or edit it.
+        </div>
         {programs.map(p => (
           <button key={p.id} onClick={() => go({ name: 'plan-preview', programId: p.id })} style={{
             width: '100%', textAlign: 'left', background: UI.bgInset, border: `1px solid ${UI.hairStrong}`,
@@ -3834,7 +3863,7 @@ function FiveThreeOneSetupScreen({ store, setStore, go, userId }) {
     for (const l of (FTO?.lifts || [])) a[l.kind] = []; // user picks their own, nothing prefilled
     return a;
   });
-  if (!FTO) return <Screen><TopBar title="5/3/1" onBack={() => go({ name: 'schedule-templates' })} /></Screen>;
+  if (!FTO) return <Screen><TopBar title="5/3/1" onBack={() => go({ name: 'schedule-programs' })} /></Screen>;
 
   const LIFT_LABEL = { squat: 'Squat', bench: 'Bench Press', deadlift: 'Deadlift', ohp: 'Overhead Press' };
   const displayName = (ref) => { const ex = (store.exercises || []).find(e => e.id === ref); return ex ? ex.name : ref; };
@@ -3864,7 +3893,7 @@ function FiveThreeOneSetupScreen({ store, setStore, go, userId }) {
 
   return (
     <Screen scroll={false}>
-      <TopBar title="5/3/1 Setup" onBack={() => go({ name: 'schedule-templates' })} />
+      <TopBar title="5/3/1 Setup" onBack={() => go({ name: 'schedule-programs' })} />
       <div style={{ flex: 1, overflowY: 'auto', padding: '14px 22px 40px', display: 'flex', flexDirection: 'column', gap: 14 }}>
         <div className="micro" style={{ color: UI.inkFaint, textTransform: 'none', letterSpacing: '0.02em', lineHeight: 1.5 }}>
           Set a Training Max for each lift (about 90% of your best single). Tap the number to type it, or nudge with +/-. Every working weight is a percentage of it, waving 5s / 3s / 1s across a 4-week cycle. Prefilled from your history where we have it.
@@ -3925,4 +3954,4 @@ function FiveThreeOneSetupScreen({ store, setStore, go, userId }) {
   );
 }
 
-Object.assign(window.Screens, { PlanScreen, PlanViewerScreen, ScheduleEditScreen, ScheduleNewScreen, ProgramTemplatesScreen, ProgramPreviewScreen, FiveThreeOneSetupScreen, ExercisePicker, DayTypePicker });
+Object.assign(window.Screens, { PlanScreen, PlanViewerScreen, ScheduleEditScreen, ScheduleNewScreen, StructuredProgramsScreen, ProgramTemplatesScreen, ProgramPreviewScreen, FiveThreeOneSetupScreen, ExercisePicker, DayTypePicker });
