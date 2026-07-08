@@ -1012,11 +1012,11 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
               <div style={{ display: 'flex', gap: 10 }}>
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi, marginBottom: 3 }}>MIN</div>
-                  <input type="number" value={fd.min} onChange={e => set('min', e.target.value)} style={inp} />
+                  <input type="text" value={fd.min} onChange={e => set('min', e.target.value)} style={inp} />
                 </div>
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi, marginBottom: 3 }}>MAX</div>
-                  <input type="number" value={fd.max} onChange={e => set('max', e.target.value)} style={inp} />
+                  <input type="text" value={fd.max} onChange={e => set('max', e.target.value)} style={inp} />
                 </div>
               </div>
             </div>
@@ -1026,7 +1026,7 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
             <div>
               {fieldHeader('Rows', 'rows')}
               {renderHelp('rows')}
-              <input type="number" min="1" max="8" value={fd.rows} onChange={e => set('rows', e.target.value)} style={inp} />
+              <input type="text" min="1" max="8" value={fd.rows} onChange={e => set('rows', e.target.value)} style={inp} />
             </div>
           )}
 
@@ -1535,7 +1535,7 @@ function ClientNutritionTab({ coachingId, userId }) {
     <div style={{ flex: 1 }}>
       <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>{label}</div>
       <div style={{ position: 'relative' }}>
-        <input type="number" inputMode="numeric" value={form[fieldKey]}
+        <input type="text" inputMode="numeric" value={form[fieldKey]}
           onChange={e => setForm(f => ({ ...f, [fieldKey]: e.target.value }))}
           placeholder="—" style={inputStyle} />
         <span style={unitStyle}>{unit}</span>

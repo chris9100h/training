@@ -725,7 +725,7 @@ function CardioQuickLogSheet({ open, onClose, store, setStore, userId, editLog, 
       <div style={{ display: 'flex', gap: 8, marginBottom: 14, alignItems: 'flex-end' }}>
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.07em' }}>Duration (min)</div>
-          <input type="number" inputMode="numeric" placeholder="—" value={form.duration} onChange={e => set('duration', e.target.value)} style={inputStyle} />
+          <input type="text" inputMode="numeric" placeholder="—" value={form.duration} onChange={e => set('duration', e.target.value)} style={inputStyle} />
         </div>
         <div style={{ flex: 1 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
@@ -742,7 +742,7 @@ function CardioQuickLogSheet({ open, onClose, store, setStore, userId, editLog, 
               ))}
             </div>
           </div>
-          <input type="number" inputMode="decimal" placeholder="—" value={form.distance} onChange={e => set('distance', e.target.value)} style={inputStyle} />
+          <input type="text" inputMode="decimal" placeholder="—" value={form.distance} onChange={e => set('distance', e.target.value)} style={inputStyle} />
         </div>
       </div>
 
@@ -929,7 +929,7 @@ function CardioFinishFlow({ open, durationMin, store, setStore, onClose, onPR })
             ))}
           </div>
         </div>
-        <input type="number" inputMode="decimal" placeholder="—" value={form.distance} onChange={e => set('distance', e.target.value)} style={inputStyle} />
+        <input type="text" inputMode="decimal" placeholder="—" value={form.distance} onChange={e => set('distance', e.target.value)} style={inputStyle} />
       </>
     );
     if (step === 3) return (
@@ -1354,6 +1354,12 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
   const isFutureSlot = sessionDate > (() => { const d = new Date(); d.setHours(12,0,0,0); return d; })();
 
   const periodLabel = useMemo(() => {
+    if (LB.is531Plan(sch)) {
+      const c531 = LB.current531Cycle(sch, store.sessions) + 1;
+      const w531 = LB.current531Week(sch, store.sessions) || 1;
+      const dl531 = w531 === 4 || (store.statusMode === 'deload' && weekOffset === 0);
+      return dl531 ? `CYCLE ${c531} · DELOAD` : `CYCLE ${c531} · WEEK ${w531}`;
+    }
     if (store.statusMode === 'deload' && weekOffset === 0) return 'DELOAD';
     if (isFlex) return 'FLEXIBLE';
     if (weekdayMode) {
@@ -1387,7 +1393,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     }
     const cycleNum = currentCycleNum + weekOffset + 1;
     return `CYCLE ${cycleNum}`;
-  }, [isFlex, weekdayMode, cycleWeekView, weekOffset, currentCycleNum, todayWd, store.cycleStartDate, dayCount, sch, store.statusMode]);
+  }, [isFlex, weekdayMode, cycleWeekView, weekOffset, currentCycleNum, todayWd, store.cycleStartDate, dayCount, sch, store.statusMode, store.sessions]);
 
   const cardLabel = useMemo(() => {
     // During a deload, today's label reads DELOAD instead of TODAY/NEXT UP so
@@ -1685,6 +1691,72 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       LB.endDeload(userId, store, setStore);
     }
   }, [store?.statusMode, store?.statusModeSince, store?.sessions]);
+
+  // 5/3/1 cycle-end: once a cycle completes, bump each main lift's Training Max
+  // per its AMRAP results (Wendler's rule), announce it, and, only for a plan
+  // with no built-in deload, offer to insert a deload week first. program_data
+  // .bumpedCycle gates it to once per cycle and rides the schedule row, so the
+  // guard survives cross-device sync (unlike a localStorage key).
+  const cycle531Checked = useRef(false);
+  useEffect(() => {
+    if (cycle531Checked.current) return;
+    if (store?.statusMode || store?.inProgress) return;
+    if (!sch || !LB.is531Plan(sch)) return;
+    const pd = sch.program_data || {};
+    const doneCycle = LB.current531Cycle(sch, store.sessions) - 1; // last completed cycle
+    if (doneCycle < 0 || doneCycle <= (pd.bumpedCycle ?? -1)) return;
+    cycle531Checked.current = true;
+    const bumps = LB.compute531CycleBumps(sch, store.sessions, doneCycle);
+    const outcome = LB.resolve531CycleEnd(pd, bumps, doneCycle);
+    const nextPd = outcome.programData;
+    const schId = sch.id;
+    setStore(s => ({ ...s, schedules: s.schedules.map(x => x.id === schId ? { ...x, program_data: nextPd } : x) }));
+    (async () => {
+      const u = pd.unit || 'kg';
+      const label = { squat: 'Squat', bench: 'Bench', deadlift: 'Deadlift', ohp: 'Press' };
+      const cycleNo = doneCycle + 1;
+      // One lift per row: name, old → new (new bold, up in gold / reset in danger),
+      // and a gain badge, a proper "you got stronger" moment, not a run-on line.
+      const line = (b, tone, key) => (
+        <div key={key} style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 14, padding: '8px 2px', borderTop: `1px solid ${UI.hair}` }}>
+          <span style={{ fontFamily: UI.fontUi, fontSize: 13, fontWeight: 700, color: UI.inkSoft, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{label[b.kind] || LB.findExercise(store, b.exId)?.name || b.kind}</span>
+          <span className="num" style={{ fontSize: 15, whiteSpace: 'nowrap' }}>
+            <span style={{ color: UI.inkFaint }}>{b.oldTm}</span>
+            <span style={{ color: UI.inkFaint, margin: '0 6px' }}>→</span>
+            <span style={{ color: tone === 'reset' ? 'rgba(var(--danger-rgb),0.9)' : tone === 'up' ? 'var(--accent)' : UI.inkSoft, fontWeight: 700 }}>{b.newTm}{u}</span>
+            {tone === 'up' && <span style={{ color: 'var(--accent)', marginLeft: 8, fontSize: 12, fontWeight: 700 }}>↑{Math.round((b.newTm - b.oldTm) * 10) / 10}</span>}
+          </span>
+        </div>
+      );
+      const gained = outcome.bumped.length;
+      const header = gained
+        ? `💪 You got stronger: ${gained} lift${gained > 1 ? 's' : ''} up`
+        : outcome.reset.length ? `Reset and reload, back to it` : `Cycle ${cycleNo} in the books`;
+      const body = (
+        <div style={{ textAlign: 'left' }}>
+          <div style={{ textAlign: 'center', fontFamily: UI.fontDisplay, fontSize: 17, fontWeight: 700, color: UI.gold, letterSpacing: '0.02em', marginBottom: 4, textTransform: 'uppercase' }}>Cycle {cycleNo} conquered 🏆</div>
+          <div style={{ textAlign: 'center', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, color: UI.inkSoft, letterSpacing: '0.04em', marginBottom: 16 }}>{header}</div>
+          {outcome.bumped.map((b, i) => line(b, 'up', 'b' + i))}
+          {outcome.reset.map((b, i) => line(b, 'reset', 'r' + i))}
+          {outcome.held.map((b, i) => line(b, 'hold', 'h' + i))}
+          {outcome.reset.length > 0 && <div style={{ fontSize: 11, color: 'rgba(var(--danger-rgb),0.85)', marginTop: 12, textAlign: 'center', lineHeight: 1.45 }}>Stalled twice, Training Max reset to 90% to build back up.</div>}
+          {outcome.held.length > 0 && !outcome.reset.length && !gained && <div style={{ fontSize: 11, color: UI.inkFaint, marginTop: 12, textAlign: 'center' }}>Held this time, missed the top-set reps. Get them next round.</div>}
+        </div>
+      );
+      if (pd.includeDeload === false) {
+        const msg = (
+          <div>
+            {body}
+            <div style={{ fontSize: 13, color: UI.inkSoft, marginTop: 18, textAlign: 'center', lineHeight: 1.5 }}>Take a deload week before the next cycle?</div>
+          </div>
+        );
+        const yes = await confirm(msg, { title: '5/3/1 cycle complete', ok: 'Deload week', cancel: 'Skip', preventBackdropClose: true });
+        if (yes) { try { await LB.startDeload(userId, store, setStore, new Date().toISOString()); } catch (_) {} }
+      } else {
+        await confirm(body, { title: '5/3/1 cycle complete', ok: 'Got it', cancel: null });
+      }
+    })();
+  }, [store?.sessions, sch?.id, store?.statusMode, store?.inProgress]);
 
   // After a meso-triggered deload ends (or if pendingMeso2 is set without an active deload),
   // offer to start Meso 2, continue as a regular cycle, or deactivate the plan.
@@ -2052,6 +2124,39 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       if (ex?.movement_type === 'cardio') {
         return { exId: it.exId, name: ex.name, isCardio: true, plannedSets: 0, plannedReps: null, plannedRepsPerSet: null, sets: [], cardioDone: false, cardioData: null, note: '', supersetGroup: it.supersetGroup || null };
       }
+      // 5/3/1 main lift: seed each set as round(pct * TM) off the current week's
+      // wave, bypassing history progression. The top working set of weeks 1-3 is
+      // an AMRAP. Assistance items aren't in mainLifts, so they fall through to
+      // the normal history-based path below.
+      const p531 = LB.is531Plan(sch) ? (sch.program_data || null) : null;
+      const main531 = p531 && p531.mainLifts && p531.mainLifts[it.exId];
+      if (main531 && main531.tm != null) {
+        // An active deload (statusMode) forces the week-4 deload wave, so a plan
+        // without a built-in deload can still take an inserted light week.
+        const wk531 = store.statusMode === 'deload' ? 4 : (LB.current531Week(sch, store.sessions) || 1);
+        const waveSets = LB.fiveThreeOneSets(main531.tm, wk531, p531.unit || 'kg');
+        return {
+          exId: it.exId, name: ex?.name || '?',
+          plannedSets: waveSets.length, plannedReps: null, plannedRepsPerSet: null,
+          sets: waveSets.map(ws => ({ kg: ws.kg, reps: ws.reps, done: false, ...(ws.amrap ? { amrap: true } : {}) })),
+          note: '', supersetGroup: it.supersetGroup || null,
+        };
+      }
+      // Time-based exercise (log_mode 'time'): seed each set's target duration
+      // (buildTimeSeedSets: authored target, else last logged time, else 30s).
+      // seedRefs carries timeSec too (get_exercise_history since migration
+      // 0145), so an exercise whose last session left the boot window still
+      // seeds its real last duration instead of the default.
+      if (LB.exerciseLogMode(ex) === 'time') {
+        const lastTime = seedRefs[it.exId] ?? LB.bestRecentEntry(store, it.exId, dayId);
+        const sets = LB.buildTimeSeedSets(it, lastTime);
+        return {
+          exId: it.exId, name: ex?.name || '?',
+          plannedSets: sets.length, plannedReps: null, plannedRepsPerSet: null,
+          sets,
+          note: '', supersetGroup: it.supersetGroup || null,
+        };
+      }
       const last = seedRefs[it.exId] ?? LB.bestRecentEntry(store, it.exId, dayId);
       const isUnilateral = ex?.unilateral || false;
       const suggestion = LB.progressionSuggestion(store, it.exId, dayId, it.reps, it.repsPerSet || null, seedRefs[it.exId], it.repsMax || null, it.progressionOffset ?? null);
@@ -2095,10 +2200,11 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     // slot's future date — see Mike's "trained Jul 9" ticket.
     const sessionDateISO = (isFlex || isFutureSlot) ? LB.todayISO() : LB.fmtISO(sessionDate);
     loggingRef.current = false;
-    // No warmup ramp for bodyweight (no meaningful load to ramp) or cardio
-    // (not a weighted movement at all) — offering "3 sets · Treadmill" with
-    // every preview weight blank made no sense.
-    if (firstEx?.equipment === 'bodyweight' || firstEx?.movement_type === 'cardio') {
+    // No warmup ramp for bodyweight (no meaningful load to ramp), cardio (not
+    // a weighted movement at all) or a time-based first exercise (a kg ramp on
+    // a countdown exercise would just prepend three dead weight rows): offering
+    // "3 sets · Treadmill" with every preview weight blank made no sense.
+    if (firstEx?.equipment === 'bodyweight' || firstEx?.movement_type === 'cardio' || LB.exerciseLogMode(firstEx) === 'time' || LB.isAssisted(firstEx)) {
       const session = {
         id: LB.uid(), scheduleId: sch.id, dayId: activeDay.id, dayName: activeDay.name,
         date: sessionDateISO, startedAt: new Date().toISOString(), entries, currentExIdx: 0, cyclePos,
@@ -2281,6 +2387,10 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       if (ex?.movement_type === 'cardio') {
         return { exId: it.exId, name: ex.name, isCardio: true, plannedSets: 0, plannedReps: null, plannedRepsPerSet: null, sets: [], cardioDone: false, cardioData: null, note: '', supersetGroup: it.supersetGroup || null };
       }
+      if (LB.exerciseLogMode(ex) === 'time') {
+        const sets = LB.buildTimeSeedSets(it, seedRefs[it.exId] ?? LB.bestRecentEntry(store, it.exId, null));
+        return { exId: it.exId, name: ex?.name || '?', plannedSets: sets.length, plannedReps: null, plannedRepsPerSet: null, sets, note: '', supersetGroup: it.supersetGroup || null };
+      }
       const last = seedRefs[it.exId] ?? LB.bestRecentEntry(store, it.exId, null);
       const isUni = ex?.unilateral || false;
       const suggestion = LB.progressionSuggestion(store, it.exId, null, it.reps, it.repsPerSet, seedRefs[it.exId], it.repsMax || null, it.progressionOffset ?? null);
@@ -2315,7 +2425,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     const extra = (!isTodaysDay || alreadyDoneToday) ? { isBonus: true } : {};
     const firstEx = LB.findExercise(store, day.items?.[0]?.exId);
     loggingRef.current = false;
-    if (firstEx?.equipment === 'bodyweight' || firstEx?.movement_type === 'cardio') {
+    if (firstEx?.equipment === 'bodyweight' || firstEx?.movement_type === 'cardio' || LB.exerciseLogMode(firstEx) === 'time' || LB.isAssisted(firstEx)) {
       const session = {
         id: LB.uid(), scheduleId: sch?.id, dayId: day.id, dayName: day.name,
         date: LB.todayISO(), startedAt: new Date().toISOString(),
@@ -2342,7 +2452,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     const autoSkipId = autoSkip?.skipReason === '—' ? autoSkip.id : null;
     const firstEx = LB.findExercise(store, dayData?.items?.[0]?.exId);
     loggingRef.current = false;
-    if (firstEx?.equipment === 'bodyweight' || firstEx?.movement_type === 'cardio') {
+    if (firstEx?.equipment === 'bodyweight' || firstEx?.movement_type === 'cardio' || LB.exerciseLogMode(firstEx) === 'time' || LB.isAssisted(firstEx)) {
       const session = { id: LB.uid(), scheduleId: sch?.id, dayId, dayName, date: LB.fmtISO(date), startedAt: new Date().toISOString(), ended: null, entries, currentExIdx: 0, cyclePos: null };
       setStore(s => ({
         ...s,

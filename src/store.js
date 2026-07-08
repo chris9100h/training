@@ -688,6 +688,7 @@ function mapEntryRows(entryRows) {
         reps: st.reps,
         repsL: st.reps_l,
         repsR: st.reps_r,
+        timeSec: st.time_sec ?? null,
         done: st.done,
         skipped: st.skipped,
         warmup: st.warmup,
@@ -703,7 +704,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   const queries = [
     _supabase.from('zane_profiles').select('id, name, approved').eq('id', userId).maybeSingle(),
     _supabase.from('zane_exercises').select('id, name, tags, note, category, unilateral, equipment, progression_reps, movement_type, no_weight_reps, log_mode, pull_bodyweight, youtube_url').eq('user_id', userId),
-    _supabase.from('zane_schedules').select('id, name, days, archived, versions, is_flex, sessions_per_week, mesocycle_weeks, mesocycle_start_rir, mesocycle_end_rir, mesocycle_rir_enabled').eq('user_id', userId),
+    _supabase.from('zane_schedules').select('id, name, days, archived, versions, is_flex, sessions_per_week, mesocycle_weeks, mesocycle_start_rir, mesocycle_end_rir, mesocycle_rir_enabled, program_type, program_data').eq('user_id', userId),
     // Session METADATA stays complete (cheap; streaks/calendar need the full
     // date list) — the legacy entries JSONB is no longer selected.
     _supabase.from('zane_sessions').select('id, schedule_id, day_id, day_name, date, started_at, ended, duration_minutes, feel, is_bonus, is_freestyle, is_deload')
@@ -862,7 +863,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   const result = {
     user: { name: profileRes.data?.name || '', email: isCoachLoad ? '' : (authUser?.email || ''), approved: profileRes.data?.approved ?? false },
     exercises: exRes.data || [],
-    schedules: (schRes.data || []).map(s => ({
+    schedules: (schRes.data || []).map(s => healScheduleWeekdays({
       ...s,
       days: Array.isArray(s.days) ? s.days : [],
       versions: Array.isArray(s.versions) ? s.versions : [],
@@ -1118,6 +1119,7 @@ async function _syncEntryRelational(sessions, userId, prevSessions, onStep) {
   // Normalize set fields for comparison — guards against null vs undefined and missing
   // keys when comparing sets from an old (pre-migration) store format with new format.
   const normSet = s => [s.kg ?? null, s.reps ?? null, s.repsL ?? null, s.repsR ?? null,
+                        s.timeSec ?? null,
                         s.done ? 1 : 0, s.skipped ? 1 : 0, s.warmup ? 1 : 0,
                         s.technique ?? '', JSON.stringify(s.drops ?? null)].join('|');
 
@@ -1168,6 +1170,7 @@ async function _syncEntryRelational(sessions, userId, prevSessions, onStep) {
             reps: set.reps ?? null,
             reps_l: set.repsL ?? null,
             reps_r: set.repsR ?? null,
+            time_sec: set.timeSec ?? null,
             done: set.done ?? false,
             skipped: set.skipped ?? false,
             warmup: set.warmup ?? false,
@@ -1574,6 +1577,15 @@ function weekEnd(weekStart) {
   return new Date(new Date(weekStart + 'T12:00:00').getTime() + 6 * 86400000).toISOString().slice(0, 10);
 }
 
+// Format a duration in seconds for display: "45s" under a minute, "1:15" at or
+// above (mm:ss). Used by time-based (log_mode 'time') exercises.
+function fmtDuration(sec) {
+  if (sec == null || !isFinite(sec)) return '';
+  const s = Math.max(0, Math.round(sec));
+  if (s < 60) return `${s}s`;
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+
 // Effective reps for a set — for unilateral sets, the weaker side is the bottleneck.
 function effReps(st) {
   if (st.repsL != null || st.repsR != null) {
@@ -1633,6 +1645,26 @@ function bestE1rmForExercise(state, exId, excludeSessionId = null, dayId = null)
   return best;
 }
 
+// The "PR" of an assisted exercise: the highest (least-negative, i.e. least
+// assistance) load logged across ended sessions. Local window only, no Epley,
+// no server aggregate, no 0 seed (loads are negative). Returns null when there
+// is no history. Mirrors bestE1rmForExercise's session/set filtering.
+function bestAssistLoad(state, exId, excludeSessionId = null, dayId = null) {
+  let best = null;
+  for (const s of state.sessions || []) {
+    if (!s.ended || s.isDeload || (excludeSessionId && s.id === excludeSessionId)) continue;
+    if (dayId && s.dayId !== dayId) continue;
+    for (const e of (s.entries || [])) {
+      if (e.exId !== exId) continue;
+      for (const st of (e.sets || [])) {
+        if (st.warmup || st.skipped || st.kg == null) continue;
+        if (best == null || st.kg > best) best = st.kg;
+      }
+    }
+  }
+  return best;
+}
+
 // Re-fetch the all-time best-e1RM aggregate (once per session start / training
 // mount). Resolves with the fresh map, or null when offline / on error — the
 // caller keeps the cached map in that case.
@@ -1664,7 +1696,12 @@ function entryVolume(entry, ended) {
     return st.done;
   }).reduce((s, st) => {
     const reps = effReps(st) ?? 0;
-    return s + (+st.kg || 0) * reps;
+    // Negative load only occurs on assisted exercises (machine/band assistance
+    // stored as negative kg). Assistance is not lifted weight, so it adds no
+    // volume: clamp to 0. A graduated assisted set that crossed into real added
+    // weight (positive kg) counts normally.
+    const kg = +st.kg;
+    return s + (kg > 0 ? kg : 0) * reps;
   }, 0);
 }
 function totalVolume(session, exercises) {
@@ -1687,7 +1724,7 @@ function doneSetCount(session) {
   return (session.entries || []).reduce((c, e) =>
     c + (e.sets || []).filter(st => {
       if (st.warmup || st.skipped) return false;
-      if (ended) return st.kg != null && (st.reps != null || st.repsL != null || st.repsR != null);
+      if (ended) return st.timeSec != null || (st.kg != null && (st.reps != null || st.repsL != null || st.repsR != null));
       return st.done;
     }).length, 0);
 }
@@ -1746,6 +1783,16 @@ function exerciseLogMode(ex) {
   return ex?.no_weight_reps ? 'reps' : 'weight';
 }
 
+// An "assisted" exercise (assisted dip / pull-up / chin-up) stores the machine
+// or band assistance as a NEGATIVE load: less assistance is a higher (less
+// negative) kg, so the sign-agnostic isImprovement/isDecline read progress
+// correctly with no inversion. The load can graduate past zero into real added
+// weight. "Best" for assisted is the highest kg (least assistance), not an
+// Epley e1RM, and assistance contributes no volume (see entryVolume).
+function isAssisted(ex) {
+  return ex?.movement_type === 'assisted';
+}
+
 // Should a set's weight be pre-filled from the user's logged bodyweight? Only for
 // bodyweight-equipment exercises that explicitly opted in (pull_bodyweight). The
 // caller still has to have a logged weight (latestBodyweight != null) for it to
@@ -1772,10 +1819,31 @@ function systemExerciseToRow(sysEx) {
   };
 }
 
+// Seed sets for a time-based item (log_mode 'time'): per-set target duration
+// from the item's authored targets, else the last logged duration at that set
+// position, else the last authored target, else a 30s default. `last` is the
+// usual { entry: { sets } } reference (bestRecentEntry or a fetchSeedEntries
+// row, both carry timeSec). Shared by the session-start builders and
+// buildSeedSets (in-session swap) so the ladders can't drift apart.
+function buildTimeSeedSets(it, last) {
+  const nSets = Math.max(1, it.sets || 1);
+  const perSet = Array.isArray(it.timeSecPerSet) ? it.timeSecPerSet : null;
+  const lastSets = (last?.entry?.sets || []).filter(s => !s.warmup);
+  const seedTime = (i) => (perSet && perSet[i] != null) ? perSet[i]
+    : (lastSets[i]?.timeSec != null) ? lastSets[i].timeSec
+    : (perSet && perSet.length && perSet[perSet.length - 1] != null) ? perSet[perSet.length - 1]
+    : 30;
+  return Array.from({ length: nSets }, (_, i) => ({ timeSec: seedTime(i), done: false }));
+}
+
 // Compute the seed-sets array when starting/logging a session for a planned item.
 // Honors smart-progression suggestions and falls back to last-session values.
 // bodyweightKg: prefill kg with this value when kg would otherwise be null (for bodyweight exercises).
 function buildSeedSets(it, last, suggestion, isUni, store, bodyweightKg = null, deloadOverride = null) {
+  // Time-based exercises have no weight/rep progression: seed target durations
+  // instead. This is the path the in-session exercise swap takes; the normal
+  // session-start builders branch to buildTimeSeedSets themselves.
+  if (exerciseLogMode((store?.exercises || []).find(e => e.id === it.exId)) === 'time') return buildTimeSeedSets(it, last);
   const workingSets = (last?.entry?.sets || []).filter(s => !s.warmup);
   const repsPerSet = it.repsPerSet;
   // Deload overlay: halve the seeded LOAD (not bodyweight, not reps) so a
@@ -1787,7 +1855,10 @@ function buildSeedSets(it, last, suggestion, isUni, store, bodyweightKg = null, 
   const deloadActive = deloadOverride != null
     ? deloadOverride === true
     : (typeof window !== 'undefined' && window.__DELOAD === true);
-  const deload = deloadActive && bodyweightKg == null;
+  // Assisted exercises store a negative load, so halving it would REDUCE the
+  // assistance (harder), the opposite of a deload. Leave assisted loads as-is.
+  const isAssistedEx = isAssisted((store?.exercises || []).find(e => e.id === it.exId));
+  const deload = deloadActive && bodyweightKg == null && !isAssistedEx;
   const dl = (kg) => (deload && kg != null) ? Math.round((kg * 0.5) / 2.5) * 2.5 : kg;
   return Array.from({ length: it.sets }).map((_, i) => {
     const prev = workingSets[i];
@@ -1851,7 +1922,7 @@ function recentSessionsForExercise(state, exId, dayId = null, limit = 3) {
   const out = [];
   for (const s of sessions) {
     const entry = (s.entries || []).find(e => e.exId === exId &&
-      (e.sets || []).some(x => x.kg != null || x.reps != null || x.repsL != null || x.repsR != null));
+      (e.sets || []).some(x => x.kg != null || x.reps != null || x.repsL != null || x.repsR != null || x.timeSec != null));
     if (entry) out.push({ session: s, entry });
     if (out.length >= limit) break;
   }
@@ -1876,6 +1947,9 @@ function bestEntryFromSetLists(perSession) {
       if (r == null) continue;
       if (bestReps == null || r > bestReps) { bestReps = r; best = cand; }
     }
+    // Time-based sets carry no kg/reps to compare, so `best` stays the most
+    // recent set — pass its duration through as the reference / seed.
+    if (best.timeSec != null) return { kg: curKg, timeSec: best.timeSec, done: false, skipped: false, warmup: false };
     return (best.repsL != null || best.repsR != null)
       ? { kg: curKg, repsL: best.repsL ?? null, repsR: best.repsR ?? null, done: false, skipped: false, warmup: false }
       : { kg: curKg, reps: best.reps ?? null, done: false, skipped: false, warmup: false };
@@ -1984,6 +2058,48 @@ function isWeekdayPlan(sch) {
 // weekday plan.
 function isFlexPlan(sch) {
   return !!sch && sch.is_flex === true;
+}
+
+// Self-heal a plan whose weekday data is inconsistent, so it stays schedulable
+// and never trips the viewer. Repairs legacy shapes that predate the 2.464
+// mode-switch fix (Cycle -> Weekday now clears the days; older builds kept
+// them, leaving a weekday plan with weekday-less days):
+//   - mode 'weekday' with days missing a valid weekday index: give each such
+//     day the next free Mon..Sun slot, preserving day order. If they can't fit
+//     the 7-day week (more than 7 days), demote the plan to a plain cycle.
+//   - a stray weekday clinging to only some days of a non-weekday plan (which
+//     makes isWeekdayPlan misfire): strip it back to a clean cycle.
+// Only sch.days (the live structure) is touched; versions[] snapshots stay as
+// is, since an old cycle-era version legitimately has no weekdays and the
+// viewer's weekday-label guard renders those as "Day N". Pure: returns the same
+// object when nothing needs healing.
+function healScheduleWeekdays(sch) {
+  if (!sch || !Array.isArray(sch.days) || sch.days.length === 0) return sch;
+  const validWd = wd => Number.isInteger(wd) && wd >= 0 && wd <= 6;
+  const days = sch.days;
+  const allValid = days.every(d => validWd(d.weekday));
+  if (sch.mode === 'weekday') {
+    if (allValid) return sch;
+    const taken = new Set(days.filter(d => validWd(d.weekday)).map(d => d.weekday));
+    const need = days.filter(d => !validWd(d.weekday)).length;
+    const free = [];
+    for (let i = 0; i <= 6 && free.length < need; i++) if (!taken.has(i)) free.push(i);
+    if (free.length < need) {
+      // More days than a week holds: this was never a real weekday plan, so keep
+      // the days and their order as a cycle.
+      return { ...sch, mode: undefined, days: days.map(d => { const nd = { ...d }; delete nd.weekday; return nd; }) };
+    }
+    let fi = 0;
+    return { ...sch, days: days.map(d => validWd(d.weekday) ? d : { ...d, weekday: free[fi++] }) };
+  }
+  // Not weekday mode: a stray weekday on some (not all) days makes isWeekdayPlan
+  // true and can crash the viewer. Clean it back to a pure cycle. An all-weekday
+  // cycle plan is effectively a weekday plan already and renders fine, so leave
+  // that alone.
+  if (!allValid && days.some(d => d.weekday != null)) {
+    return { ...sch, days: days.map(d => { const nd = { ...d }; delete nd.weekday; return nd; }) };
+  }
+  return sch;
 }
 
 // Training-split presets for the plan setup wizard (screens-schedule.jsx):
@@ -2122,6 +2238,287 @@ function instantiateProgram(state, program) {
     mesoEndRir: meso.endRir != null ? meso.endRir : null,
   });
   return { schedule, newExercises };
+}
+
+// ── 5/3/1 (Wendler) program math ────────────────────────────────────────────
+// A schedule with program_type '531' runs Wendler 5/3/1: every working weight
+// is a percentage of a stored per-lift Training Max (program_data.mainLifts),
+// not derived from logged history. These helpers are pure and unit-tested; the
+// seeding/runtime wiring lives in screens-home.jsx / screens-train.jsx.
+// Unit note: like the rest of the app, loads live in the .kg field, but a lbs
+// user's numbers ARE lbs (no conversion). Rounding and TM bumps key off the
+// program's stored unit, never a hardcoded kg step.
+const FTO_WAVES = {
+  1: [{ pct: 65, reps: 5 }, { pct: 75, reps: 5 }, { pct: 85, reps: 5, amrap: true }],
+  2: [{ pct: 70, reps: 3 }, { pct: 80, reps: 3 }, { pct: 90, reps: 3, amrap: true }],
+  3: [{ pct: 75, reps: 5 }, { pct: 85, reps: 3 }, { pct: 95, reps: 1, amrap: true }],
+  4: [{ pct: 40, reps: 5 }, { pct: 50, reps: 5 }, { pct: 60, reps: 5 }], // optional deload
+};
+
+function is531Plan(sch) {
+  return !!sch && sch.program_type === '531';
+}
+
+// Smallest loadable step for the plan's unit: 2.5 kg or 5 lb. Every 5/3/1
+// weight is rounded to this so the bar can actually be loaded.
+function round531(val, unit) {
+  if (val == null || !isFinite(val)) return null;
+  const inc = unit === 'lbs' ? 5 : 2.5;
+  return Math.round(val / inc) * inc;
+}
+
+// Training Max = 90% of a (true or estimated) 1RM, rounded to the load step.
+function tmFrom531(oneRm, unit) {
+  if (!oneRm || oneRm <= 0) return null;
+  return round531(oneRm * 0.9, unit);
+}
+
+// Per-cycle TM increase: lower body (squat/deadlift) climbs twice as fast as
+// upper (bench/ohp): +5/+2.5 kg, or +10/+5 lb. Extra main lifts added beyond the
+// canonical four carry kind 'lower' or 'upper' to pick the same two rates.
+function tmBump531(kind, unit) {
+  const lower = kind === 'squat' || kind === 'deadlift' || kind === 'lower';
+  if (unit === 'lbs') return lower ? 10 : 5;
+  return lower ? 5 : 2.5;
+}
+
+// Number of weeks in one block: 4 with the optional deload, else 3.
+function weeks531(includeDeload) {
+  return includeDeload ? 4 : 3;
+}
+
+// The clamped week index (1..maxWeek) inside the current block, from a running
+// count of completed weeks. Week 4 (deload) only exists when opted in.
+function week531(completedWeeks, includeDeload) {
+  const maxWeek = weeks531(includeDeload);
+  const w = (Math.max(0, completedWeeks) % maxWeek) + 1;
+  return Math.min(maxWeek, Math.max(1, w));
+}
+
+// The three prescribed working sets for one lift in a given week. Each set's
+// load is round(pct * tm); a null tm yields null loads (preview before setup).
+// The top set of weeks 1-3 is an AMRAP ("+"), its reps being the required
+// minimum. pct is returned for display ("85% x 5+").
+function fiveThreeOneSets(tm, week, unit) {
+  const wave = FTO_WAVES[week] || FTO_WAVES[1];
+  return wave.map(s => ({
+    kg: (tm != null) ? round531(tm * s.pct / 100, unit) : null,
+    reps: s.reps,
+    pct: s.pct,
+    ...(s.amrap ? { amrap: true } : {}),
+  }));
+}
+
+const FTO_DAY_NAME = { squat: 'Squat', bench: 'Bench', deadlift: 'Deadlift', ohp: 'Press' };
+
+// Instantiate a 5/3/1 program into an editable flex plan. config (collected by
+// the setup wizard):
+//   { name?, unit, includeDeload, lifts: [{ kind, ex, tm }],
+//     assistance: { <kind>: [exName, ...] } }
+// Resolves every exercise name to one of the user's own (reuse-or-materialize,
+// exactly like instantiateProgram, so plans never hold sys_ ids), builds one
+// flex day per main lift (3 working sets + any picked assistance items),
+// and stamps program_type '531' + program_data with per-lift Training Maxes
+// keyed by the RESOLVED exId. Assistance stays an ordinary Range item on normal
+// Smart Progression. Returns { schedule, newExercises }; mutates nothing.
+function build531Plan(state, config) {
+  const catalog = (typeof window !== 'undefined' && window.SYSTEM_EXERCISES) || [];
+  const sysByName = new Map(catalog.map(s => [(s.name || '').toUpperCase(), s]));
+  const userByName = new Map((state.exercises || []).map(e => [(e.name || '').toUpperCase(), e.id]));
+  const byId = new Set((state.exercises || []).map(e => e.id));
+  const newExercises = [];
+  // exRef is a catalog name OR an already-owned user exercise id (assistance
+  // picked in the wizard arrives as an id); owned ids pass straight through.
+  const resolve = (exRef) => {
+    if (exRef && byId.has(exRef)) return exRef;
+    const key = (exRef || '').toUpperCase();
+    const existing = userByName.get(key);
+    if (existing) return existing;
+    const sys = sysByName.get(key);
+    if (!sys) return null;
+    const row = systemExerciseToRow(sys);
+    newExercises.push(row);
+    userByName.set(key, row.id);
+    return row.id;
+  };
+  const unit = config.unit === 'lbs' ? 'lbs' : 'kg';
+  const includeDeload = config.includeDeload !== false;
+  const mainLifts = {};
+  const customDays = [];
+  for (const lift of (config.lifts || [])) {
+    const mainId = resolve(lift.ex);
+    if (!mainId) continue;
+    mainLifts[mainId] = { tm: (lift.tm != null ? lift.tm : null), kind: lift.kind, stall: 0 };
+    const items = [{ exId: mainId, sets: 3, reps: 5 }];
+    // Assistance can ride on the lift itself (extra lifts, keyed by exId) or on
+    // the shared config.assistance map (the canonical four, keyed by kind).
+    const picks = (lift.assistance && lift.assistance.length) ? lift.assistance : ((config.assistance && config.assistance[lift.kind]) || []);
+    for (const aName of picks) {
+      const aId = resolve(aName);
+      if (aId) items.push({ exId: aId, sets: 3, reps: 8, repsMax: 12 });
+    }
+    // Canonical lifts get their short day name; an extra lift names its day after
+    // the exercise (lift.name), never the bare 'upper'/'lower' classification.
+    customDays.push({ name: FTO_DAY_NAME[lift.kind] || lift.name || lift.kind, items });
+  }
+  // Seed the TM history with each lift's starting Training Max (cycle 0), so the
+  // progress chart has a first point and every later bump/reset appends to it.
+  const tmHistory = {};
+  for (const exId of Object.keys(mainLifts)) {
+    const t = mainLifts[exId].tm;
+    tmHistory[exId] = (t != null) ? [{ cycle: 0, tm: t, reason: 'start' }] : [];
+  }
+  const schedule = buildPlanSkeleton({ name: config.name || '5/3/1', type: 'flex', customDays });
+  schedule.program_type = '531';
+  schedule.program_data = { unit, includeDeload, mainLifts, tmHistory };
+  return { schedule, newExercises };
+}
+
+// Register one more main lift on an existing 5/3/1 plan's program_data (the
+// editor's "add main lift" flow; build531Plan handles the from-scratch setup).
+// A 5/3/1 plan is a flex plan, so it can carry any number of lifts/days. Pure:
+// returns { programData, items } and the caller assembles the day
+// ({ id, name, items }) and appends it to sch.days. `exId` is an already-resolved
+// user exercise id; `kind` is a canonical lift or 'upper'/'lower' (drives the
+// per-cycle bump); `cycle` stamps the tmHistory start point (the plan's current
+// cycle, so the chart starts where the lift was added). `assistanceIds` become
+// ordinary Range items (Smart Progression, never tracked in mainLifts).
+function add531MainLift(pd, config = {}) {
+  const exId = config.exId;
+  const kind = config.kind || 'upper';
+  const tm = config.tm != null ? config.tm : null;
+  const nextMain = { ...((pd && pd.mainLifts) || {}), [exId]: { tm, kind, stall: 0 } };
+  const nextHist = { ...((pd && pd.tmHistory) || {}) };
+  nextHist[exId] = tm != null ? [{ cycle: config.cycle || 0, tm, reason: 'start' }] : [];
+  const items = [{ exId, sets: 3, reps: 5 }];
+  for (const aId of (config.assistanceIds || [])) if (aId) items.push({ exId: aId, sets: 3, reps: 8, repsMax: 12 });
+  return { programData: { ...(pd || {}), mainLifts: nextMain, tmHistory: nextHist }, items };
+}
+
+// The current 5/3/1 week (1..maxWeek) for a plan, from how many sessions are
+// logged on it: every full pass through the plan's days is one week, wrapping
+// into the next cycle at maxWeek. Mirrors mesoCurrentWeek's flex counting.
+// Only ended, non-app-deload sessions on this plan count; 5/3/1's own week-4
+// deload is a normal logged session, so it still advances the count. Bonus
+// sessions are excluded: they carry the plan's scheduleId but explicitly do
+// not advance the plan position (a bonus finished with "advance cycle" loses
+// its isBonus flag and then counts, matching the flex-position semantics).
+function count531Sessions(sch, sessions) {
+  return (sessions || []).filter(s => s.ended && !s.isDeload && !s.isBonus && s.scheduleId === sch.id);
+}
+
+function current531Week(sch, sessions) {
+  if (!is531Plan(sch)) return null;
+  const dayCount = (sch.days || []).length || 1;
+  const includeDeload = sch.program_data?.includeDeload !== false;
+  const trained = count531Sessions(sch, sessions).length;
+  return week531(Math.floor(trained / dayCount), includeDeload);
+}
+
+// 0-based cycle index (how many full 3- or 4-week blocks are complete) for a
+// 5/3/1 plan. Drives the per-cycle TM bump.
+function current531Cycle(sch, sessions) {
+  if (!is531Plan(sch)) return 0;
+  const dayCount = (sch.days || []).length || 1;
+  const includeDeload = sch.program_data?.includeDeload !== false;
+  const trained = count531Sessions(sch, sessions).length;
+  return Math.floor(Math.floor(trained / dayCount) / weeks531(includeDeload));
+}
+
+// Decide each main lift's next Training Max after a completed 5/3/1 cycle.
+// Wendler's rule: the TM only goes up if the AMRAP top set hit its required
+// minimum reps across weeks 1-3 (week1 >= 5, week2 >= 3, week3 >= 1, read from
+// the wave table); any miss holds it. Weeks are derived from logged-session
+// order, the same counting as current531Week, and the AMRAP set is the last
+// working (non-warmup, non-skipped) set of the main lift's entry. Returns
+// { exId: { kind, oldTm, newTm, bumped } } (empty if not a 531 plan).
+function compute531CycleBumps(sch, sessions, cycleIdx) {
+  if (!is531Plan(sch)) return {};
+  const pd = sch.program_data || {};
+  const mainLifts = pd.mainLifts || {};
+  const unit = pd.unit || 'kg';
+  const dayCount = (sch.days || []).length || 1;
+  const maxWeek = weeks531(pd.includeDeload !== false);
+  const amrapMin = (wk) => { const w = FTO_WAVES[wk]; const top = w && w[w.length - 1]; return (top && top.amrap) ? top.reps : null; };
+  const planSessions = count531Sessions(sch, sessions)
+    .slice()
+    .sort((a, b) => ((a.ended || '') < (b.ended || '') ? -1 : (a.ended || '') > (b.ended || '') ? 1 : 0));
+  const perLift = {}; // exId -> [hitBool, ...] across weeks 1-3
+  planSessions.forEach((s, idx) => {
+    const completedWeeks = Math.floor(idx / dayCount);
+    if (Math.floor(completedWeeks / maxWeek) !== cycleIdx) return;
+    const min = amrapMin((completedWeeks % maxWeek) + 1);
+    if (min == null) return; // deload week: no AMRAP, no signal
+    const mainEntry = (s.entries || []).find(e => mainLifts[e.exId]);
+    if (!mainEntry) return;
+    const working = (mainEntry.sets || []).filter(st => !st.warmup && !st.skipped);
+    const amrap = working[working.length - 1];
+    const reps = amrap ? effReps(amrap) : null;
+    if (reps == null) return;
+    (perLift[mainEntry.exId] = perLift[mainEntry.exId] || []).push(reps >= min);
+  });
+  const result = {};
+  for (const exId of Object.keys(mainLifts)) {
+    const ml = mainLifts[exId];
+    const hits = perLift[exId] || [];
+    const allHit = hits.length > 0 && hits.every(Boolean);
+    const oldTm = ml.tm;
+    const newTm = (allHit && oldTm != null) ? round531(oldTm + tmBump531(ml.kind, unit), unit) : oldTm;
+    result[exId] = { exId, kind: ml.kind, oldTm, newTm, bumped: !!(allHit && oldTm != null && newTm > oldTm), missed: hits.length > 0 && !allHit };
+  }
+  return result;
+}
+
+// Reset a lift after this many missed cycles in a row (Wendler's stall rule).
+const RESET_531_STALL = 2;
+
+// Fold a completed 5/3/1 cycle into program_data. Per lift (from compute531-
+// CycleBumps): a hit bumps the TM and clears its stall; a miss increments the
+// stall and, once it reaches RESET_531_STALL in a row, resets the TM to 90% of
+// the current one (Wendler's reset) and clears the stall; a lift not trained
+// this cycle is left untouched. Every automatic change appends a tmHistory
+// point (stamped with the just-started cycle), and bumpedCycle is set so the
+// prompt fires once. Pure. Returns { programData, bumped, held, reset }, each
+// list [{ exId, kind, oldTm, newTm }] for the summary (exId lets the prompt name
+// an extra lift after its exercise instead of its 'upper'/'lower' class).
+function resolve531CycleEnd(pd, bumps, cycleIdx) {
+  const unit = (pd && pd.unit) || 'kg';
+  const nextMain = { ...((pd && pd.mainLifts) || {}) };
+  const nextHist = { ...((pd && pd.tmHistory) || {}) };
+  const bumped = [], held = [], reset = [];
+  const cycleNo = cycleIdx + 1; // the cycle the new TM will be used in
+  const append = (exId, tm, reason) => { nextHist[exId] = [...(nextHist[exId] || []), { cycle: cycleNo, tm, reason }]; };
+  for (const exId of Object.keys(bumps || {})) {
+    const b = bumps[exId];
+    const ml = nextMain[exId] || {};
+    if (b.bumped) {
+      nextMain[exId] = { ...ml, tm: b.newTm, stall: 0 };
+      append(exId, b.newTm, 'bump');
+      bumped.push({ exId, kind: b.kind, oldTm: b.oldTm, newTm: b.newTm });
+    } else if (b.missed) {
+      const stall = (ml.stall || 0) + 1;
+      if (stall >= RESET_531_STALL && b.oldTm != null) {
+        const rtm = round531(b.oldTm * 0.9, unit);
+        nextMain[exId] = { ...ml, tm: rtm, stall: 0 };
+        append(exId, rtm, 'reset');
+        reset.push({ exId, kind: b.kind, oldTm: b.oldTm, newTm: rtm });
+      } else {
+        nextMain[exId] = { ...ml, stall };
+        held.push({ exId, kind: b.kind, oldTm: b.oldTm, newTm: b.oldTm });
+      }
+    }
+  }
+  return { programData: { ...(pd || {}), mainLifts: nextMain, tmHistory: nextHist, bumpedCycle: cycleIdx }, bumped, held, reset };
+}
+
+// From an AMRAP-implied 1RM: the "fair" Training Max (90% of it) and whether
+// that sits at least one normal bump above the current TM — i.e. the top set
+// says you could carry more than the plan is handing you. { tm, higher }.
+function suggest531Tm(est1rm, currentTm, kind, unit) {
+  if (!est1rm || est1rm <= 0) return { tm: null, higher: false };
+  const fair = tmFrom531(est1rm, unit);
+  const higher = fair != null && currentTm != null && fair >= currentTm + tmBump531(kind, unit);
+  return { tm: fair, higher };
 }
 
 // Whether a mesocycle's RIR taper is active. Default true: only an explicit
@@ -2639,6 +3036,16 @@ function progressionEnabled(store, plannedRepsMax, progressionOffset) {
   if (progressionOffset != null) return true;
   return !!store.settings?.smartProgression;
 }
+// True when exId is a registered 5/3/1 main lift on the plan that owns dayId.
+// Main lifts progress only through the Wendler Training-Max bump at cycle end,
+// so Smart Progression (the "hit +N reps, add weight" flow and its unlocked
+// toast) must never fire for them, even when the global setting is on.
+// Assistance work on a 5/3/1 day is an ordinary item and still progresses.
+function is531MainLift(store, exId, dayId) {
+  if (!store || !exId || !dayId) return false;
+  const plan = (store.schedules || []).find(s => (s.days || []).some(d => d.id === dayId));
+  return !!(plan && is531Plan(plan) && (plan.program_data?.mainLifts || {})[exId]);
+}
 // The reps ceiling to hit for a given base rep count. Only meaningful when
 // progressionEnabled(...) is true for the same inputs.
 function progressionCeilingFor(store, base, plannedRepsMax, progressionOffset) {
@@ -2652,6 +3059,7 @@ function progressionCeilingFor(store, base, plannedRepsMax, progressionOffset) {
 // used when the exercise's recent history lives outside the boot window.
 function progressionSuggestion(store, exId, dayId, plannedReps, plannedRepsPerSet, refOverride, plannedRepsMax, progressionOffset) {
   if (!progressionEnabled(store, plannedRepsMax, progressionOffset)) return null;
+  if (is531MainLift(store, exId, dayId)) return null; // 5/3/1 main lifts climb via the Training Max, not Smart Progression
   const ex = findExercise(store, exId);
   const catCfg = ex?.equipment ? (store.settings?.equipmentConfig?.[ex.equipment] ?? {}) : {};
   const increment = catCfg.increment ?? 2.5;
@@ -4017,8 +4425,8 @@ window.LB = {
   signIn, signUp, signOut, signInWithPasskey, registerPasskey, listPasskeys, deletePasskey, resetPassword, deleteAllData, exportBackup, importFromBackup, validateBackup,
   loadFromSupabase, syncStore, mergeSessions, withCarriedWindowEntries, historyWindowCutoffISO,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
-  uid, todayISO, fmtISO, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, buildPlanSkeleton, instantiateProgram, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, realignCycleForToday, todayCycleStripIndex,
-  effReps, e1rm, isImprovement, isDecline, bestE1rmForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, latestBodyweight, exerciseLogMode, shouldPullBodyweight, systemExerciseToRow, inferCurrentExIdx, calcBlended,
+  uid, todayISO, fmtISO, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, is531MainLift, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, healScheduleWeekdays, buildPlanSkeleton, instantiateProgram, is531Plan, round531, tmFrom531, tmBump531, weeks531, week531, fiveThreeOneSets, build531Plan, add531MainLift, current531Week, current531Cycle, compute531CycleBumps, resolve531CycleEnd, suggest531Tm, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, realignCycleForToday, todayCycleStripIndex,
+  effReps, fmtDuration, e1rm, isImprovement, isDecline, bestE1rmForExercise, bestAssistLoad, totalVolume, entryVolume, doneSetCount, buildSeedSets, buildTimeSeedSets, latestBodyweight, exerciseLogMode, isAssisted, shouldPullBodyweight, systemExerciseToRow, inferCurrentExIdx, calcBlended,
   refreshExerciseBests, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries,
   computeNextReminderAt,
   cancelPushover, adminSendEmail,

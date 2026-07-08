@@ -584,7 +584,7 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
   const numField = (k, label, unit) => (
     <div style={{ flex: 1 }}>
       <div style={labelStyle}>{label}{unit ? ` (${unit})` : ''}</div>
-      <input type="number" inputMode="decimal" placeholder="—" value={form[k]} onChange={e => set(k, e.target.value)} style={inputStyle} />
+      <input type="text" inputMode="decimal" placeholder="—" value={form[k]} onChange={e => set(k, e.target.value)} style={inputStyle} />
     </div>
   );
 
@@ -683,7 +683,7 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
       )}
       <div style={{ marginBottom: 16 }}>
         <div style={labelStyle}>Calories (kcal){autoCals != null && form.calories === '' ? (netCarbs ? ' · net carbs' : ' · from macros') : ''}</div>
-        <input type="number" inputMode="decimal" placeholder={autoCals != null ? String(autoCals) : '—'} value={form.calories} onChange={e => set('calories', e.target.value)} style={inputStyle} />
+        <input type="text" inputMode="decimal" placeholder={autoCals != null ? String(autoCals) : '—'} value={form.calories} onChange={e => set('calories', e.target.value)} style={inputStyle} />
       </div>
 
       <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>HYDRATION</div>
@@ -750,7 +750,7 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
                 <div style={{ display: 'flex', gap: 8 }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={labelStyle}>Value ({glucoseUnitLabel(glUnit)})</div>
-                    <input type="number" inputMode="decimal" placeholder="—" value={glForm.value} onChange={e => setGl('value', e.target.value)} style={{ ...glInputSt, fontFamily: UI.fontNum }} autoFocus />
+                    <input type="text" inputMode="decimal" placeholder="—" value={glForm.value} onChange={e => setGl('value', e.target.value)} style={{ ...glInputSt, fontFamily: UI.fontNum }} autoFocus />
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={labelStyle}>Time</div>
@@ -874,7 +874,7 @@ function MacroTargetSheet({ open, onClose, store, setStore, coachingMacros }) {
   const num = (k, lbl) => (
     <div style={{ flex: 1 }}>
       <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>{lbl}</div>
-      <input type="number" inputMode="numeric" placeholder="—" value={form[k]} onChange={e => setForm(f => ({ ...f, [k]: e.target.value }))} style={inputStyle} />
+      <input type="text" inputMode="numeric" placeholder="—" value={form[k]} onChange={e => setForm(f => ({ ...f, [k]: e.target.value }))} style={inputStyle} />
     </div>
   );
   const section = (suffix, label, cals) => (

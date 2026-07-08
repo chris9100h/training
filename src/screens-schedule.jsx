@@ -34,6 +34,15 @@ function MiniSheet({ zIndex = 300, dim = true, onClose, style, children }) {
 
 const daysArr = s => Array.isArray(s?.days) ? s.days : [];
 
+// A plan flagged weekday (mode === 'weekday') can still surface a day with no
+// valid weekday index: the version-aware viewer rendering an older cycle-era
+// snapshot, or a partially switched plan. Guard every weekday label so a
+// missing / out-of-range index degrades to the day's position instead of
+// crashing the screen (WEEKDAYS_FULL[undefined].toUpperCase() throws).
+const validWeekdayIdx = wd => Number.isInteger(wd) && wd >= 0 && wd <= 6;
+const weekdayShortLabel = (wd, posIdx) => validWeekdayIdx(wd) ? WEEKDAYS[wd] : `Day ${posIdx + 1}`;
+const weekdayFullLabel = (wd, posIdx) => validWeekdayIdx(wd) ? WEEKDAYS_FULL[wd] : `Day ${posIdx + 1}`;
+
 // One-line plan summary shown in the plan list and viewer header.
 function planDescriptor(s) {
   const trainingDays = daysArr(s).filter(d => d.items.length).length;
@@ -43,7 +52,7 @@ function planDescriptor(s) {
     return `Flexible · ${trainingDays} ${trainingDays === 1 ? 'workout' : 'workouts'}${goal ? ` · ${goal}×/week` : ''}${mesoSuffix}`;
   }
   if (LB.isWeekdayPlan(s)) {
-    return `${s.days.length} training days · ${[...s.days].sort((a,b)=>a.weekday-b.weekday).map(d=>WEEKDAYS[d.weekday]).join(' · ')}${mesoSuffix}`;
+    return `${s.days.length} training days · ${[...s.days].sort((a,b)=>a.weekday-b.weekday).map((d, i)=>weekdayShortLabel(d.weekday, i)).join(' · ')}${mesoSuffix}`;
   }
   return `${s.days.length}-day cycle · ${trainingDays} training days${mesoSuffix}`;
 }
@@ -94,7 +103,10 @@ function PlanScreen({ store, setStore, go, userId, openNewPlan }) {
           } else {
             const newId = LB.uid();
             idMap[ex.id] = newId;
-            newExercises.push({ id: newId, name: ex.name, tags: ex.tags || [], note: ex.note || '', category: ex.category || null, unilateral: ex.unilateral || false, equipment: ex.equipment || null, progression_reps: ex.progression_reps || null });
+            // Behavior flags must survive the import: log_mode 'time' drives the
+            // countdown UI, no_weight_reps/movement_type/pull_bodyweight drive
+            // row layout and bodyweight prefill.
+            newExercises.push({ id: newId, name: ex.name, tags: ex.tags || [], note: ex.note || '', category: ex.category || null, unilateral: ex.unilateral || false, equipment: ex.equipment || null, progression_reps: ex.progression_reps || null, movement_type: ex.movement_type || null, log_mode: ex.log_mode || null, no_weight_reps: ex.no_weight_reps || false, pull_bodyweight: ex.pull_bodyweight || false });
           }
         });
         const remapDays = (days) => (days || []).map(d => ({
@@ -109,6 +121,18 @@ function PlanScreen({ store, setStore, go, userId, openNewPlan }) {
           days: remapDays(data.schedule.days),
           versions: (data.schedule.versions || []).map(v => ({ ...v, days: remapDays(v.days) })),
         };
+        // 5/3/1 program data references exercises BY ID (mainLifts/tmHistory are
+        // keyed on exId): remap those keys to the resolved local ids, and drop
+        // bumpedCycle so the imported copy counts its cycles from zero (a stale
+        // guard from the source plan would silently swallow the first TM bumps).
+        if (sch.program_data && typeof sch.program_data === 'object') {
+          const remapKeys = (obj) => { const out = {}; for (const k of Object.keys(obj || {})) out[idMap[k] || k] = obj[k]; return out; };
+          const pd = { ...sch.program_data };
+          if (pd.mainLifts) pd.mainLifts = remapKeys(pd.mainLifts);
+          if (pd.tmHistory) pd.tmHistory = remapKeys(pd.tmHistory);
+          delete pd.bumpedCycle;
+          sch.program_data = pd;
+        }
         setStore(s => ({ ...s, exercises: [...s.exercises, ...newExercises], schedules: [...s.schedules, sch] }));
         go({ name: 'plan-view', scheduleId: sch.id, fromPlan: true });
       } catch (_) { alert('Could not read plan file.'); }
@@ -166,11 +190,21 @@ function PlanScreen({ store, setStore, go, userId, openNewPlan }) {
           // Current plan revision (newest version = highest number, like the editor's
           // version bar). Only shown once a plan has actually been re-versioned (≥2).
           const verCount = s.versions?.length || 0;
+          const is531 = LB.is531Plan(s);
+          const cyc531 = is531 ? LB.current531Cycle(s, store.sessions) + 1 : 0;
+          const wk531 = is531 ? (LB.current531Week(s, store.sessions) || 1) : 0;
+          const deload531 = is531 && (wk531 === 4 || (isActive && store.statusMode === 'deload'));
+          const label531 = deload531 ? `C${cyc531} · DELOAD` : `C${cyc531} · W${wk531}`;
           return isActive ? (
             <BracketFrame key={s.id} gold onClick={() => go({ name: 'plan-view', scheduleId: s.id, fromPlan: true })} style={{ cursor: 'pointer', overflow: 'hidden' }}>
               {s.mesocycle_weeks && (
                 <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', overflow: 'hidden' }}>
                   <span className="display-it" style={{ fontSize: 52, fontWeight: 900, letterSpacing: '0.18em', color: UI.gold, opacity: mesoPending ? 0.04 : 0.07, transform: 'rotate(-22deg)', whiteSpace: 'nowrap', userSelect: 'none' }}>MESOCYCLE</span>
+                </div>
+              )}
+              {LB.is531Plan(s) && (
+                <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', overflow: 'hidden' }}>
+                  <span className="display-it" style={{ fontSize: 58, fontWeight: 900, letterSpacing: '0.12em', color: UI.gold, opacity: 0.07, transform: 'rotate(-22deg)', whiteSpace: 'nowrap', userSelect: 'none' }}>5/3/1</span>
                 </div>
               )}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
@@ -188,6 +222,11 @@ function PlanScreen({ store, setStore, go, userId, openNewPlan }) {
                   {!mesoPending && mesoCompletions > 0 && (
                     <span style={{ fontFamily: UI.fontNum, fontSize: 10, fontWeight: 700, color: UI.gold, background: 'rgba(var(--accent-rgb),0.15)', borderRadius: 4, padding: '2px 6px', letterSpacing: '0.05em' }}>
                       MESO {mesoCompletions + 1}
+                    </span>
+                  )}
+                  {is531 && (
+                    <span style={{ fontFamily: UI.fontNum, fontSize: 10, fontWeight: 700, color: UI.gold, background: 'rgba(var(--accent-rgb),0.15)', border: `1px solid ${UI.goldSoft}`, borderRadius: 4, padding: '2px 6px', letterSpacing: '0.05em' }}>
+                      {label531}
                     </span>
                   )}
                   {verCount >= 2 && (
@@ -228,6 +267,11 @@ function PlanScreen({ store, setStore, go, userId, openNewPlan }) {
                   {!mesoPending && mesoCompletions > 0 && (
                     <span style={{ fontFamily: UI.fontNum, fontSize: 10, fontWeight: 700, color: UI.inkSoft, background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 4, padding: '2px 6px', letterSpacing: '0.05em' }}>
                       MESO {mesoCompletions + 1}
+                    </span>
+                  )}
+                  {is531 && (
+                    <span style={{ fontFamily: UI.fontNum, fontSize: 10, fontWeight: 700, color: UI.inkSoft, background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 4, padding: '2px 6px', letterSpacing: '0.05em' }}>
+                      {label531}
                     </span>
                   )}
                   {verCount >= 2 && (
@@ -288,6 +332,80 @@ function PlanScreen({ store, setStore, go, userId, openNewPlan }) {
   );
 }
 
+// Tiny area+line chart of a lift's Training Max across cycles (app chart style).
+// Reset points (a Wendler 90% drop) are marked in the danger colour so a dip
+// reads at a glance. Needs >= 2 points.
+function TmChart({ points }) {
+  const vals = points.map(p => p.tm).filter(v => v != null);
+  if (vals.length < 2) return null;
+  const W = 260, H = 56, padX = 6, padY = 9;
+  const min = Math.min(...vals), max = Math.max(...vals);
+  const range = (max - min) || 1;
+  const n = vals.length;
+  const xOf = (i) => padX + (i / (n - 1)) * (W - 2 * padX);
+  const yOf = (v) => padY + (1 - (v - min) / range) * (H - 2 * padY);
+  const base = H - padY;
+  const pts = vals.map((v, i) => `${xOf(i).toFixed(1)},${yOf(v).toFixed(1)}`).join(' ');
+  return (
+    <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display: 'block', overflow: 'visible' }}>
+      <polygon points={`${xOf(0).toFixed(1)},${base} ${pts} ${xOf(n - 1).toFixed(1)},${base}`} fill="rgba(var(--accent-rgb),0.12)" />
+      <polyline points={pts} fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+      {vals.map((v, i) => (
+        <circle key={i} cx={xOf(i).toFixed(1)} cy={yOf(v).toFixed(1)} r={i === n - 1 ? 3 : 2}
+          fill={points[i]?.reason === 'reset' ? 'rgba(var(--danger-rgb),0.9)' : 'var(--accent)'} />
+      ))}
+    </svg>
+  );
+}
+
+// Read-only 5/3/1 progress: current cycle/week plus each main lift's Training
+// Max and how it has moved across cycles. Renders nothing for non-5/3/1 plans.
+function FiveThreeOneProgress({ sch, store }) {
+  if (!LB.is531Plan(sch)) return null;
+  const pd = sch.program_data || {};
+  const ml = pd.mainLifts || {};
+  const hist = pd.tmHistory || {};
+  const unit = pd.unit || 'kg';
+  const exIds = Object.keys(ml);
+  if (!exIds.length) return null;
+  const cycle = LB.current531Cycle(sch, store.sessions) + 1;
+  const week = LB.current531Week(sch, store.sessions) || 1;
+  const ORDER = { squat: 0, bench: 1, deadlift: 2, ohp: 3 };
+  exIds.sort((a, b) => (ORDER[ml[a].kind] ?? 9) - (ORDER[ml[b].kind] ?? 9));
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'center' }}>
+        <span className="num" style={{ fontSize: 13, color: UI.gold, letterSpacing: '0.04em' }}>Cycle {cycle} · Week {week}</span>
+      </div>
+      {exIds.map(exId => {
+        const name = LB.findExercise(store, exId)?.name || 'Lift';
+        const pts = hist[exId] || [];
+        const tm = ml[exId].tm;
+        const start = pts.length ? pts[0].tm : null;
+        const delta = (start != null && tm != null) ? tm - start : null;
+        return (
+          <div key={exId}>
+            <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 5 }}>
+              <span style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.inkSoft, textTransform: 'uppercase', letterSpacing: '0.02em' }}>{name}</span>
+              <span className="num" style={{ fontSize: 13, color: UI.ink }}>
+                {tm != null ? `${tm}${unit}` : '—'}
+                {delta != null && delta !== 0 && (
+                  <span style={{ fontSize: 10, color: delta > 0 ? UI.gold : 'rgba(var(--danger-rgb),0.85)', marginLeft: 6 }}>
+                    {delta > 0 ? '↑' : '↓'}{Math.abs(delta)}
+                  </span>
+                )}
+              </span>
+            </div>
+            {pts.length >= 2
+              ? <TmChart points={pts} />
+              : <div className="micro" style={{ color: UI.inkFaint }}>No cycles completed yet.</div>}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ─── Plan viewer — fully read-only, no edit affordances ───────────────
 // Reached from the home rest-day card. Day chips switch between days
 // (like the exercise chips in training); each day shows the weights/reps
@@ -342,6 +460,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
     : null;
 
   const [selectedDayId, setSelectedDayId] = useStateS(() => todayDayId || displayDays[0]?.id || null);
+  const [progress531Open, setProgress531Open] = useStateS(false);
   const chipRowRef = React.useRef(null);
 
   // Switching versions moves the selection to today's day (if shown) or the
@@ -485,7 +604,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
   const dayIdx = displayDays.findIndex(d => d.id === day.id);
   const isRest = !day.items.length;
   const isTodaySel = day.id === todayDayId;
-  const dayLabel = isWeekday ? WEEKDAYS_FULL[day.weekday] : `Day ${dayIdx + 1}`;
+  const dayLabel = isWeekday ? weekdayFullLabel(day.weekday, dayIdx) : `Day ${dayIdx + 1}`;
   const trainingDayCount = displayDays.filter(d => d.items.length).length;
   // In a non-active version no day is live, so the selected (viewed) day gets a
   // neutral highlight rather than the gold "today/active" accent.
@@ -513,6 +632,9 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
     copy.days = copy.days.map(d => ({ ...d, id: LB.uid() }));
     copy.archived = false;
     delete copy.versions;
+    // A 5/3/1 copy starts counting cycles from zero: drop the source's
+    // bumpedCycle guard or the copy's first cycle-end bumps get swallowed.
+    if (copy.program_data) delete copy.program_data.bumpedCycle;
     setStore(s => ({ ...s, schedules: [...s.schedules, copy] }));
     go({ name: 'plan-view', scheduleId: copy.id, fromPlan: true });
   };
@@ -521,7 +643,15 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
     const exIds = new Set();
     versionDays.forEach(d => d.items.forEach(it => { if (it.exId) exIds.add(it.exId); }));
     const exercises = store.exercises.filter(e => exIds.has(e.id));
-    const payload = { type: 'zane-plan', version: 1, schedule: { name: sch.name, days: versionDays }, exercises };
+    // Carry the plan-level behavior fields, not just name + days: without them
+    // an imported flex plan lost is_flex, a weekday plan its mode, a meso plan
+    // its taper config, and a 5/3/1 plan its entire program (program_type +
+    // program_data: TMs, wave seeding, progress history).
+    const scheduleOut = { name: sch.name, days: versionDays };
+    for (const k of ['mode', 'is_flex', 'sessions_per_week', 'mesocycle_weeks', 'mesocycle_start_rir', 'mesocycle_end_rir', 'mesocycle_rir_enabled', 'program_type', 'program_data']) {
+      if (sch[k] != null) scheduleOut[k] = sch[k];
+    }
+    const payload = { type: 'zane-plan', version: 1, schedule: scheduleOut, exercises };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -680,6 +810,23 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
     </>
   );
 
+  // 5/3/1 progress is tucked behind a full-width button (like Edit Training Max)
+  // so it doesn't eat the plan viewer; tapping it opens the chart sheet.
+  const progress531Btn = LB.is531Plan(sch) ? (() => {
+    const cyc = LB.current531Cycle(sch, store.sessions) + 1;
+    const wk = LB.current531Week(sch, store.sessions) || 1;
+    return (
+      <button onClick={() => setProgress531Open(true)} style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, width: '100%',
+        background: `rgba(var(--accent-rgb),0.06)`, border: `1px solid ${UI.goldSoft}`,
+        borderRadius: 8, padding: '13px 16px', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+      }}>
+        <span style={{ fontFamily: UI.fontUi, fontSize: 12, letterSpacing: '0.08em', textTransform: 'uppercase', color: UI.gold, fontWeight: 600 }}>Show 5/3/1 progress</span>
+        <span className="num" style={{ fontSize: 12, color: UI.inkSoft }}>C{cyc} · W{wk} →</span>
+      </button>
+    );
+  })() : null;
+
   const fmtVDate = (iso) => new Date(iso + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   const versionBar = versions && (() => {
     const vNum = versions.length - safeVerIdx;
@@ -764,7 +911,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
         sub={(() => {
           if (isFlex) return `Flexible · ${trainingDayCount} ${trainingDayCount === 1 ? 'workout' : 'workouts'}${sch.sessions_per_week ? ` · ${sch.sessions_per_week}×/week` : ''}`;
           return isWeekday
-            ? displayDays.map(d => WEEKDAYS[d.weekday]).join(' · ')
+            ? displayDays.map((d, i) => weekdayShortLabel(d.weekday, i)).join(' · ')
             : `${displayDays.length}-day cycle · ${trainingDayCount} ${trainingDayCount === 1 ? 'workout' : 'workouts'}`;
         })()}
         onBack={onBack || (() => go({ name: fromPlan ? 'plan' : 'home' }))}
@@ -793,7 +940,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
                 const active = d.id === selectedDayId;
                 const isToday = d.id === todayDayId;
                 const rest = !d.items.length;
-                const sub = isWeekday ? WEEKDAYS[d.weekday] : `Day ${i + 1}`;
+                const sub = isWeekday ? weekdayShortLabel(d.weekday, i) : `Day ${i + 1}`;
                 return (
                   <button key={d.id} onClick={() => setSelectedDayId(d.id)} style={{
                     flexShrink: 0, padding: '8px 12px 6px', borderRadius: 4,
@@ -819,6 +966,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
 
           {/* Right: day content */}
           <div style={{ flex: 1, minWidth: 0, overflowY: 'auto', overflowX: 'hidden', padding: '20px 32px 24px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {progress531Btn}
             {dayHeader}
             {exerciseList}
           </div>
@@ -836,7 +984,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
               const active = d.id === selectedDayId;
               const isToday = d.id === todayDayId;
               const rest = !d.items.length;
-              const sub = isWeekday ? WEEKDAYS[d.weekday] : `Day ${i + 1}`;
+              const sub = isWeekday ? weekdayShortLabel(d.weekday, i) : `Day ${i + 1}`;
               return (
                 <button key={d.id} onClick={() => setSelectedDayId(d.id)} style={{
                   flexShrink: 0, maxWidth: 120, padding: '6px 12px 4px', borderRadius: 4,
@@ -859,11 +1007,16 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
           </div>
 
           <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden', padding: '0 22px 20px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {progress531Btn}
             {dayHeader}
             {exerciseList}
           </div>
         </>
       )}
+
+      <Sheet open={progress531Open} onClose={() => setProgress531Open(false)} title="5/3/1 Progress">
+        <FiveThreeOneProgress sch={sch} store={store} />
+      </Sheet>
 
       {reactivateSheet && (
         <MiniSheet onClose={() => setReactivateSheet(false)}>
@@ -1115,6 +1268,28 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
   const [editingDay, setEditingDay] = useStateS(null);
   const [mesoInfoOpen, setMesoInfoOpen] = useStateS(false);
   const [modifiersOpen, setModifiersOpen] = useStateS(false);
+  const [tmEditOpen, setTmEditOpen] = useStateS(false);
+  // Adding an extra 5/3/1 main lift: pick an exercise, then classify + set a TM.
+  const [addLiftPicking, setAddLiftPicking] = useStateS(false);
+  const [addLiftDraft, setAddLiftDraft] = useStateS(null); // { exId, name, body, tm }
+  const [addDayChoice, setAddDayChoice] = useStateS(false); // 531 plans: pick Smart vs 5/3/1 progression before adding a day
+  const startAddMainLift = (ids) => {
+    setAddLiftPicking(false);
+    const exId = Array.isArray(ids) ? ids[0] : ids;
+    if (!exId) return;
+    const ex = LB.findExercise(store, exId);
+    const u = draft.program_data?.unit || 'kg';
+    setAddLiftDraft({ exId, name: ex?.name || 'Lift', body: 'upper', tm: LB.tmFrom531(LB.bestE1rmForExercise(store, exId), u) });
+  };
+  const confirmAddMainLift = () => {
+    const d = addLiftDraft;
+    if (!d || !(d.tm > 0)) return;
+    const cycle = LB.current531Cycle(draft, store.sessions);
+    const { programData, items } = LB.add531MainLift(draft.program_data, { exId: d.exId, kind: d.body, tm: d.tm, cycle });
+    const day = { id: LB.uid(), name: LB.findExercise(store, d.exId)?.name || d.name, items };
+    setDraft(dr => ({ ...dr, program_data: programData, days: [...dr.days, day] }));
+    setAddLiftDraft(null);
+  };
   // Weekday-mode whole-day import: pick a source day, then a weekday to place it on.
   const [importDayOpen, setImportDayOpen] = useStateS(false);
   const [pendingImportDay, setPendingImportDay] = useStateS(null); // { name, items, migrateId } awaiting a weekday
@@ -1526,7 +1701,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
                   </div>
                 );
               })}
-              <Btn kind="ghost" onClick={() => setPickingType(true)} style={{ borderStyle: 'dashed', fontSize: 12 }}>
+              <Btn kind="ghost" onClick={() => LB.is531Plan(draft) ? setAddDayChoice(true) : setPickingType(true)} style={{ borderStyle: 'dashed', fontSize: 12 }}>
                 + Add day
               </Btn>
             </div>
@@ -1536,6 +1711,37 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
         <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.7 }}>
           Tap a day to edit its type and exercises.
         </div>
+
+        {LB.is531Plan(draft) && draft.program_data?.mainLifts && (() => {
+          const u531 = draft.program_data.unit || 'kg';
+          const KIND_SHORT = { squat: 'Squat', bench: 'Bench', deadlift: 'Deadlift', ohp: 'OHP' };
+          const lifts = Object.keys(draft.program_data.mainLifts);
+          return (
+            <button onClick={() => setTmEditOpen(true)} style={{
+              display: 'flex', alignItems: 'center', gap: 12, width: '100%',
+              background: `rgba(var(--accent-rgb),0.06)`, border: `1px solid ${UI.goldSoft}`,
+              borderRadius: 6, padding: '13px 16px', cursor: 'pointer', textAlign: 'left',
+              WebkitTapHighlightColor: 'transparent',
+            }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontFamily: UI.fontUi, fontSize: 11, letterSpacing: '0.08em', textTransform: 'uppercase', color: UI.gold, fontWeight: 600, marginBottom: 8 }}>Edit Training Max</div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', columnGap: 16, rowGap: 6 }}>
+                  {lifts.map(exId => {
+                    const ml = draft.program_data.mainLifts[exId];
+                    const nm = KIND_SHORT[ml.kind] || (LB.findExercise(store, exId)?.name || 'Lift').split(' ').pop();
+                    return (
+                      <div key={exId} style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
+                        <span style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, letterSpacing: '0.02em' }}>{nm}</span>
+                        <span className="num" style={{ fontSize: 13, color: UI.inkSoft }}>{ml.tm ?? '—'}<span style={{ fontSize: 9, color: UI.inkFaint }}> {u531}</span></span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+              <span style={{ color: UI.gold, fontSize: 16, opacity: 0.7, flexShrink: 0 }}>→</span>
+            </button>
+          );
+        })()}
 
         <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
           <Btn kind="ghost" onClick={toggleArchive} style={{ flex: 1, fontSize: 12, color: UI.inkSoft, borderColor: UI.hairStrong }}>
@@ -1679,6 +1885,107 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
         </MiniSheet>
       )}
 
+      <Sheet open={tmEditOpen} onClose={() => setTmEditOpen(false)} title="Training Maxes">
+        {draft.program_data?.mainLifts && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.6 }}>
+              About 90% of your best single. Every working weight is a percentage of this, so nudging it here reshapes the whole cycle. Tap a number to type it, or step with +/−.
+            </div>
+            {Object.keys(draft.program_data.mainLifts).map(exId => {
+              const ml = draft.program_data.mainLifts[exId];
+              const name531 = LB.findExercise(store, exId)?.name || 'Lift';
+              const u531 = draft.program_data.unit || 'kg';
+              // Training Max the user's logged history now implies (90% of best e1rm).
+              const recalc531 = LB.tmFrom531(LB.bestE1rmForExercise(store, exId), u531);
+              const setTm = (v) => setDraft(d => ({ ...d, program_data: { ...d.program_data, mainLifts: { ...d.program_data.mainLifts, [exId]: { ...d.program_data.mainLifts[exId], tm: v } } } }));
+              return (
+                <div key={exId} style={{ background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 4, padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <span style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.inkSoft, letterSpacing: '0.02em', textTransform: 'uppercase' }}>{name531}</span>
+                  <TmField value={ml.tm} step={u531 === 'lbs' ? 5 : 2.5} suffix={u531} onChange={setTm} />
+                  {recalc531 != null && recalc531 !== ml.tm && (
+                    <button onClick={() => setTm(recalc531)} style={{
+                      alignSelf: 'center', background: 'none', border: 'none', cursor: 'pointer',
+                      color: UI.gold, fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.04em',
+                      padding: '2px 4px', display: 'flex', alignItems: 'center', gap: 6, WebkitTapHighlightColor: 'transparent',
+                    }}>
+                      <i className="fa-solid fa-arrow-rotate-left" style={{ fontSize: 10 }} />
+                      Set from history · {recalc531}{u531}
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </Sheet>
+
+      {/* 5/3/1 plans fork here: a new day either rides Smart Progression (the
+          normal day-type flow) or becomes a Wendler main lift (its own day that
+          waves and bumps a Training Max). Non-531 plans skip this and go
+          straight to the day-type picker. */}
+      <Sheet open={addDayChoice} onClose={() => setAddDayChoice(false)} title="Add day">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.6 }}>
+            How should this day progress?
+          </div>
+          {[
+            { key: 'smart', title: 'Smart Progression', desc: 'A normal day you build yourself. Loads step up from your rep-range history and end-of-session feedback.', pick: () => { setAddDayChoice(false); setPickingType(true); } },
+            { key: '531', title: '5/3/1 Progression', desc: 'Pick one lift. It gets its own day that waves 5s / 3s / 1s off a Training Max, which bumps every cycle.', pick: () => { setAddDayChoice(false); setAddLiftPicking(true); } },
+          ].map(opt => (
+            <button key={opt.key} onClick={opt.pick} style={{
+              display: 'flex', alignItems: 'center', gap: 12, width: '100%',
+              background: UI.bgInset, border: `1px solid ${UI.hairStrong}`,
+              borderRadius: 6, padding: '13px 14px', cursor: 'pointer', textAlign: 'left',
+              WebkitTapHighlightColor: 'transparent',
+            }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, fontWeight: 600, marginBottom: 3 }}>{opt.title}</div>
+                <div className="micro" style={{ color: UI.inkFaint, textTransform: 'none', letterSpacing: '0.02em', lineHeight: 1.5 }}>{opt.desc}</div>
+              </div>
+              <span style={{ color: UI.inkFaint, fontSize: 16, flexShrink: 0 }}>→</span>
+            </button>
+          ))}
+        </div>
+      </Sheet>
+
+      {addLiftPicking && (
+        <ExercisePicker store={store} setStore={setStore} onClose={() => setAddLiftPicking(false)} onPick={startAddMainLift} />
+      )}
+
+      <Sheet open={addLiftDraft != null} onClose={() => setAddLiftDraft(null)} title="Add main lift">
+        {addLiftDraft && (() => {
+          const u = draft.program_data?.unit || 'kg';
+          const d = addLiftDraft;
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              <div style={{ fontFamily: UI.fontDisplay, fontSize: 20, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.02em', color: UI.ink }}>{LB.findExercise(store, d.exId)?.name || d.name}</div>
+              <div className="micro" style={{ color: UI.inkFaint, textTransform: 'none', letterSpacing: '0.02em', lineHeight: 1.5 }}>
+                Adds a 5/3/1 day for this lift, waving 5s / 3s / 1s off its Training Max. Assistance you add to the day stays on normal progression.
+              </div>
+              <div>
+                <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>Per-cycle increase</div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  {[['lower', 'Lower body'], ['upper', 'Upper body']].map(([body, label]) => (
+                    <button key={body} onClick={() => setAddLiftDraft(x => ({ ...x, body }))} style={{
+                      flex: 1, padding: '10px 8px', borderRadius: 4, cursor: 'pointer',
+                      border: `1px solid ${d.body === body ? UI.gold : UI.hairStrong}`,
+                      background: d.body === body ? UI.goldFaint : 'transparent',
+                      color: d.body === body ? UI.gold : UI.inkFaint,
+                      fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, WebkitTapHighlightColor: 'transparent',
+                    }}>{label}<span style={{ display: 'block', fontSize: 10, opacity: 0.8, marginTop: 2 }}>+{LB.tmBump531(body, u)}{u}/cycle</span></button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>Training Max</div>
+                <TmField value={d.tm} step={u === 'lbs' ? 5 : 2.5} suffix={u} onChange={v => setAddLiftDraft(x => ({ ...x, tm: v }))} />
+              </div>
+              <Btn onClick={confirmAddMainLift} disabled={!(d.tm > 0)} style={{ opacity: d.tm > 0 ? 1 : 0.5, cursor: d.tm > 0 ? 'pointer' : 'default' }}>Add lift</Btn>
+            </div>
+          );
+        })()}
+      </Sheet>
+
       <Sheet open={modifiersOpen} onClose={() => setModifiersOpen(false)} title="Options">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
 
@@ -1749,6 +2056,11 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
           })()}
 
           {(() => {
+            // A 5/3/1 plan runs its own periodization (TM waves + automatic
+            // per-cycle progression), so a mesocycle on top is meaningless: the
+            // block lengths don't even line up (a meso is 4 weeks minimum, a
+            // 5/3/1 block is 3 or 4). Hide the whole toggle for 5/3/1.
+            if (LB.is531Plan(draft)) return null;
             const hasMeso = draft.mesocycle_weeks != null;
             const toggleMeso = () => setDraft(d => ({ ...d, mesocycle_weeks: d.mesocycle_weeks != null ? null : 6 }));
             return (
@@ -2039,7 +2351,7 @@ function DayCopyPicker({ store, schedule, currentDayId, onClose, onCopy, multiSe
   const importTemplate = (t) => {
     const items = normalizeSupersets((t.exercises || [])
       .filter(it => LB.findExercise(store, it.exId))
-      .map(it => ({ exId: it.exId, sets: it.sets || 3, reps: it.reps ?? 8, ...(it.repsPerSet ? { repsPerSet: it.repsPerSet } : {}), ...(it.repsMax != null ? { repsMax: it.repsMax } : {}), ...(it.progressionOffset != null ? { progressionOffset: it.progressionOffset } : {}), ...(it.supersetGroup ? { supersetGroup: it.supersetGroup } : {}) })));
+      .map(it => ({ exId: it.exId, sets: it.sets || 3, reps: it.reps ?? 8, ...(it.repsPerSet ? { repsPerSet: it.repsPerSet } : {}), ...(it.repsMax != null ? { repsMax: it.repsMax } : {}), ...(it.progressionOffset != null ? { progressionOffset: it.progressionOffset } : {}), ...(Array.isArray(it.timeSecPerSet) ? { timeSecPerSet: it.timeSecPerSet } : {}), ...(it.supersetGroup ? { supersetGroup: it.supersetGroup } : {}) })));
     const day = { id: LB.uid(), name: t.name, items };
     if (multiSelect) onCopy([{ day, migrateId: undefined }]);
     else onCopy(day, undefined);
@@ -2980,7 +3292,7 @@ function PlanWizard({ store, setStore, go }) {
     const tplDays = (store.workoutTemplates || []).map(t => ({
       key: 'tpl:' + t.id, name: t.name,
       items: (t.exercises || []).filter(it => LB.findExercise(store, it.exId))
-        .map(it => ({ exId: it.exId, sets: it.sets || 3, reps: it.reps ?? 8, ...(it.repsPerSet ? { repsPerSet: it.repsPerSet } : {}), ...(it.repsMax != null ? { repsMax: it.repsMax } : {}), ...(it.progressionOffset != null ? { progressionOffset: it.progressionOffset } : {}), ...(it.supersetGroup ? { supersetGroup: it.supersetGroup } : {}) })),
+        .map(it => ({ exId: it.exId, sets: it.sets || 3, reps: it.reps ?? 8, ...(it.repsPerSet ? { repsPerSet: it.repsPerSet } : {}), ...(it.repsMax != null ? { repsMax: it.repsMax } : {}), ...(it.progressionOffset != null ? { progressionOffset: it.progressionOffset } : {}), ...(Array.isArray(it.timeSecPerSet) ? { timeSecPerSet: it.timeSecPerSet } : {}), ...(it.supersetGroup ? { supersetGroup: it.supersetGroup } : {}) })),
     })).filter(t => t.items.length);
     if (tplDays.length) groups.push({ id: '__tpl', name: 'Templates', days: tplDays });
     return groups;
@@ -3414,18 +3726,21 @@ function ScheduleNewScreen({ store, setStore, go, userId }) {
 // The "New plan" chooser, styled like the unit picker: a centered modal with two
 // side-by-side options. Rendered inline by PlanScreen's + button (not a route).
 function NewPlanPickerModal({ onClose, go }) {
-  const opt = (icon, label, sub, onClick) => (
+  // Three options as a vertical list (was two side-by-side tiles): a full
+  // structured Program, a ready-made split Template, or a Custom build.
+  const opt = (icon, label, sub, onClick, accent) => (
     <button onClick={onClick} style={{
-      flex: 1, padding: '16px 0', borderRadius: 6, cursor: 'pointer',
-      background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, color: UI.inkSoft,
-      fontFamily: UI.fontUi, textAlign: 'center', WebkitTapHighlightColor: 'transparent',
-      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8,
+      width: '100%', padding: '13px 14px', borderRadius: 6, cursor: 'pointer',
+      background: UI.bgInset, border: `1px solid ${accent ? UI.goldSoft : UI.hairStrong}`, color: UI.inkSoft,
+      fontFamily: UI.fontUi, textAlign: 'left', WebkitTapHighlightColor: 'transparent',
+      display: 'flex', alignItems: 'center', gap: 14,
     }}>
-      <i className={`fa-solid ${icon}`} style={{ fontSize: 20, color: UI.inkFaint }} />
-      <div>
+      <i className={`fa-solid ${icon}`} style={{ fontSize: 19, color: accent ? 'var(--accent)' : UI.inkFaint, width: 24, textAlign: 'center', flexShrink: 0 }} />
+      <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontSize: 14, fontWeight: 600, color: UI.ink }}>{label}</div>
-        <div style={{ fontSize: 10, color: UI.inkFaint, marginTop: 2 }}>{sub}</div>
+        <div style={{ fontSize: 11, color: UI.inkFaint, marginTop: 2 }}>{sub}</div>
       </div>
+      <i className="fa-solid fa-chevron-right" style={{ fontSize: 11, color: UI.inkFaint, flexShrink: 0 }} />
     </button>
   );
   return (
@@ -3441,21 +3756,60 @@ function NewPlanPickerModal({ onClose, go }) {
       }}>
         <div>
           <div style={{ fontFamily: UI.fontDisplay, fontSize: 22, color: 'var(--accent)', fontWeight: 400, marginBottom: 8, textTransform: 'uppercase' }}>New plan</div>
-          <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>Start from a ready-made program, or build your own.</div>
+          <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>Start from a full program, a ready-made split, or build your own.</div>
         </div>
-        <div style={{ display: 'flex', gap: 10 }}>
-          {opt('fa-layer-group', 'Templates', 'Ready-made', () => { onClose(); go({ name: 'schedule-templates' }); })}
-          {opt('fa-sliders', 'Custom', 'Build your own', () => { onClose(); go({ name: 'schedule-new' }); })}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {opt('fa-trophy', 'Programs', 'Structured and self-progressing', () => { onClose(); go({ name: 'schedule-programs' }); }, true)}
+          {opt('fa-layer-group', 'Templates', 'Ready-made splits to make your own', () => { onClose(); go({ name: 'schedule-templates' }); })}
+          {opt('fa-sliders', 'Custom', 'Build it from scratch', () => { onClose(); go({ name: 'schedule-new' }); })}
         </div>
       </div>
     </div>
   );
 }
 
-// Lists the pre-built programs. Tapping one instantiates it (LB.instantiateProgram)
-// and opens it in the existing plan viewer, where the user reviews and activates
-// it — same as any other plan (consistent with the Custom flow, which also creates
-// an unactivated plan before it is used).
+// Structured programs: complete programs that run their own periodization and
+// progression (5/3/1 today, more of its kind later). Kept separate from the
+// rep-range Templates because they are set up once (e.g. per-lift Training
+// Maxes) and then drive the loads themselves. Reached from the New plan modal.
+function StructuredProgramsScreen({ store, setStore, go }) {
+  const has531 = typeof window !== 'undefined' && !!window.FIVE_THREE_ONE;
+  return (
+    <Screen scroll={false}>
+      <TopBar title="Programs" onBack={() => go({ name: 'plan' })} />
+      <div style={{ flex: 1, overflowY: 'auto', padding: '14px 22px 40px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div className="micro" style={{ color: UI.inkFaint, textTransform: 'none', letterSpacing: '0.02em', lineHeight: 1.5, marginBottom: 4 }}>
+          Complete programs that handle their own progression. Set one up once, then just train.
+        </div>
+        {has531 ? (
+          <button onClick={() => go({ name: 'schedule-531' })} style={{
+            width: '100%', textAlign: 'left', background: UI.bgInset, border: `1px solid ${UI.goldSoft}`,
+            borderRadius: 8, padding: 14, cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 8,
+            WebkitTapHighlightColor: 'transparent',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span style={{ flex: 1, fontFamily: UI.fontDisplay, fontSize: 20, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.02em', color: UI.ink }}>{window.FIVE_THREE_ONE.name}</span>
+              <span className="num" style={{ flexShrink: 0, fontSize: 11, padding: '3px 8px', borderRadius: 4, color: 'var(--accent)', background: 'rgba(var(--accent-rgb),0.12)', border: `0.5px solid rgba(var(--accent-rgb),0.35)` }}>{window.FIVE_THREE_ONE.level}</span>
+            </div>
+            <span style={{ fontSize: 12.5, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.45 }}>{window.FIVE_THREE_ONE.blurb}</span>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 2 }}>
+              {window.FIVE_THREE_ONE.lifts.map((l, i) => (
+                <span key={i} className="micro" style={{ color: UI.inkFaint, background: UI.bgRaised, border: `0.5px solid ${UI.hair}`, borderRadius: 4, padding: '3px 6px', textTransform: 'none', letterSpacing: '0.02em' }}>{l.ex}</span>
+              ))}
+            </div>
+          </button>
+        ) : (
+          <Empty title="No programs yet" icon={ICON_CALENDAR} />
+        )}
+      </div>
+    </Screen>
+  );
+}
+
+// Lists the ready-made rep-range splits. Tapping one instantiates it
+// (LB.instantiateProgram) and opens it in the plan viewer, where the user
+// reviews and activates it, same as any other plan (consistent with the Custom
+// flow, which also creates an unactivated plan before it is used).
 function ProgramTemplatesScreen({ store, setStore, go }) {
   const programs = (typeof window !== 'undefined' && window.SYSTEM_PROGRAMS) || [];
   return (
@@ -3463,7 +3817,7 @@ function ProgramTemplatesScreen({ store, setStore, go }) {
       <TopBar title="Templates" onBack={() => go({ name: 'plan' })} />
       <div style={{ flex: 1, overflowY: 'auto', padding: '14px 22px 40px', display: 'flex', flexDirection: 'column', gap: 10 }}>
         <div className="micro" style={{ color: UI.inkFaint, textTransform: 'none', letterSpacing: '0.02em', lineHeight: 1.5, marginBottom: 4 }}>
-          Beginner-ready programs, each built as a 6-week mesocycle. Pick by how many days you can train each week.
+          Ready-made training splits to start from. Preview any one, then use it as is or edit it.
         </div>
         {programs.map(p => (
           <button key={p.id} onClick={() => go({ name: 'plan-preview', programId: p.id })} style={{
@@ -3522,4 +3876,263 @@ function ProgramPreviewScreen({ store, setStore, go, userId, programId }) {
   );
 }
 
-Object.assign(window.Screens, { PlanScreen, PlanViewerScreen, ScheduleEditScreen, ScheduleNewScreen, ProgramTemplatesScreen, ProgramPreviewScreen, ExercisePicker, DayTypePicker });
+// A Stepper with a typable number in the middle: +/- for fine nudges, direct
+// entry for big jumps (a 150 kg TM shouldn't take 60 taps from zero). Keeps a
+// raw text string so a decimal like "152.5" survives mid-typing; value/onChange
+// speak numbers, or null when blank.
+function TmField({ value, onChange, step = 2.5, suffix }) {
+  const round = (v) => Math.round(v * 1000) / 1000;
+  const [raw, setRaw] = useStateS(value == null ? '' : String(value));
+  const [focused, setFocused] = useStateS(false);
+  const push = (s) => {
+    if (s !== '' && !/^\d*\.?\d*$/.test(s)) return; // ignore stray non-numeric input
+    setRaw(s);
+    if (s === '' || s === '.') return onChange(null);
+    const n = Number(s);
+    if (isFinite(n)) onChange(n);
+  };
+  const bump = (delta) => {
+    const next = Math.max(0, round((Number(raw) || 0) + delta));
+    setRaw(String(next));
+    onChange(next);
+  };
+  const btn = {
+    width: 44, height: 44, padding: 0, borderRadius: 4, flexShrink: 0,
+    border: `1px solid ${UI.hairStrong}`, background: 'transparent', color: UI.ink,
+    cursor: 'pointer', fontSize: 22, lineHeight: 1, fontWeight: 300, WebkitTapHighlightColor: 'transparent',
+  };
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'center' }}>
+      <button onClick={() => bump(-step)} style={btn} aria-label="Decrease">−</button>
+      {/* Boxed and accent-on-focus so it reads clearly as a field you type into,
+          not just a number the steppers nudge. */}
+      <label style={{
+        flex: 1, maxWidth: 190, minHeight: 52, boxSizing: 'border-box',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
+        background: UI.bgInset, border: `1.5px solid ${focused ? 'var(--accent)' : UI.hairStrong}`,
+        borderRadius: 6, padding: '0 10px', cursor: 'text',
+      }}>
+        <input
+          type="text" inputMode="decimal" placeholder="tap to type" value={raw}
+          onChange={(e) => push(e.target.value)}
+          onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
+          style={{ width: '100%', minWidth: 0, textAlign: 'center', background: 'transparent', border: 'none', outline: 'none', fontFamily: UI.fontNum, fontSize: raw ? 30 : 15, color: raw ? UI.ink : UI.inkFaint, fontVariantNumeric: 'tabular-nums' }}
+        />
+        {raw && suffix && <span style={{ fontSize: 13, color: UI.inkFaint, flexShrink: 0 }}>{suffix}</span>}
+      </label>
+      <button onClick={() => bump(step)} style={btn} aria-label="Increase">+</button>
+    </div>
+  );
+}
+
+// Wendler 5/3/1 setup. Unlike the rep-range templates (which go straight to a
+// preview), 5/3/1 needs a Training Max per lift and an assistance choice first,
+// so it gets its own screen. TMs prefill from 90% of each lift's best e1RM when
+// the user already trains it, else stay blank. "Create" commits via
+// LB.build531Plan and lands in the editor, like the Custom wizard.
+function FiveThreeOneSetupScreen({ store, setStore, go, userId }) {
+  const FTO = (typeof window !== 'undefined' && window.FIVE_THREE_ONE) || null;
+  const unit = UI.unit();
+  const step = unit === 'lbs' ? 5 : 2.5;
+  const [assistanceOn, setAssistanceOn] = useStateS(true);
+  const [includeDeload, setIncludeDeload] = useStateS(true);
+  const [picker, setPicker] = useStateS(null); // { kind } while choosing assistance
+  const [tms, setTms] = useStateS(() => {
+    const t = {};
+    for (const l of (FTO?.lifts || [])) {
+      const ex = (store.exercises || []).find(e => (e.name || '').toUpperCase() === l.ex.toUpperCase());
+      const e1 = ex ? LB.bestE1rmForExercise(store, ex.id) : 0;
+      t[l.kind] = e1 > 0 ? LB.tmFrom531(e1, unit) : null;
+    }
+    return t;
+  });
+  const [assist, setAssist] = useStateS(() => {
+    const a = {};
+    for (const l of (FTO?.lifts || [])) a[l.kind] = []; // user picks their own, nothing prefilled
+    return a;
+  });
+  // Extra main lifts beyond the canonical four: [{ id, exId, name, body, tm, assistance }].
+  const [extraLifts, setExtraLifts] = useStateS([]);
+  const [addingMainLift, setAddingMainLift] = useStateS(false);
+  if (!FTO) return <Screen><TopBar title="5/3/1" onBack={() => go({ name: 'schedule-programs' })} /></Screen>;
+
+  const LIFT_LABEL = { squat: 'Squat', bench: 'Bench Press', deadlift: 'Deadlift', ohp: 'Overhead Press' };
+  const displayName = (ref) => { const ex = (store.exercises || []).find(e => e.id === ref); return ex ? ex.name : ref; };
+  const removeAssist = (kind, ref) => setAssist(a => ({ ...a, [kind]: (a[kind] || []).filter(x => x !== ref) }));
+  const addAssist = (ids) => {
+    const arr = Array.isArray(ids) ? ids : [ids];
+    // Assistance can target a canonical lift (picker.kind) or an extra lift (picker.extraId).
+    if (picker?.extraId) {
+      const eid = picker.extraId;
+      setExtraLifts(list => list.map(x => {
+        if (x.id !== eid) return x;
+        const merged = [...(x.assistance || [])];
+        for (const id of arr) if (!merged.includes(id)) merged.push(id);
+        return { ...x, assistance: merged };
+      }));
+      setPicker(null);
+      return;
+    }
+    const kind = picker?.kind;
+    setAssist(a => {
+      const merged = [...(a[kind] || [])];
+      for (const id of arr) if (!merged.includes(id)) merged.push(id);
+      return { ...a, [kind]: merged };
+    });
+    setPicker(null);
+  };
+  // Extra main lifts: pick one or more exercises, prefill each TM from history,
+  // default to upper. Skip any that already sit on a canonical or extra lift.
+  const addMainLift = (ids) => {
+    setAddingMainLift(false);
+    const arr = Array.isArray(ids) ? ids : [ids];
+    const isCanonical = (exId) => FTO.lifts.some(l => {
+      const ex = (store.exercises || []).find(e => (e.name || '').toUpperCase() === l.ex.toUpperCase());
+      return ex && ex.id === exId;
+    });
+    setExtraLifts(list => {
+      const next = [...list];
+      for (const exId of arr) {
+        if (!exId || next.some(x => x.exId === exId) || isCanonical(exId)) continue; // no duplicate main lifts
+        const ex = LB.findExercise(store, exId);
+        const t = ex ? LB.tmFrom531(LB.bestE1rmForExercise(store, exId), unit) : null;
+        next.push({ id: LB.uid(), exId, name: ex?.name || 'Lift', body: 'upper', tm: t, assistance: [] });
+      }
+      return next;
+    });
+  };
+  const setExtra = (id, patch) => setExtraLifts(list => list.map(x => x.id === id ? { ...x, ...patch } : x));
+  const removeMainLift = (id) => setExtraLifts(list => list.filter(x => x.id !== id));
+  const removeExtraAssist = (id, ref) => setExtraLifts(list => list.map(x => x.id === id ? { ...x, assistance: (x.assistance || []).filter(a => a !== ref) } : x));
+  const canCreate = (FTO.lifts || []).every(l => tms[l.kind] != null && tms[l.kind] > 0)
+    && extraLifts.every(x => x.tm != null && x.tm > 0);
+  const create = () => {
+    if (!canCreate) return;
+    const config = {
+      name: '5/3/1', unit, includeDeload,
+      lifts: [
+        ...FTO.lifts.map(l => ({ kind: l.kind, ex: l.ex, tm: tms[l.kind] ?? null })),
+        ...extraLifts.map(x => ({ kind: x.body, ex: x.exId, tm: x.tm ?? null, name: LB.findExercise(store, x.exId)?.name || x.name, assistance: assistanceOn ? (x.assistance || []) : [] })),
+      ],
+      assistance: assistanceOn ? assist : {},
+    };
+    const { schedule, newExercises } = LB.build531Plan(store, config);
+    setStore(s => ({ ...s, exercises: [...(s.exercises || []), ...newExercises], schedules: [...(s.schedules || []), schedule] }));
+    go({ name: 'schedule-edit', scheduleId: schedule.id });
+  };
+
+  return (
+    <Screen scroll={false}>
+      <TopBar title="5/3/1 Setup" onBack={() => go({ name: 'schedule-programs' })} />
+      <div style={{ flex: 1, overflowY: 'auto', padding: '14px 22px 40px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <div className="micro" style={{ color: UI.inkFaint, textTransform: 'none', letterSpacing: '0.02em', lineHeight: 1.5 }}>
+          Set a Training Max for each lift (about 90% of your best single). Tap the number to type it, or nudge with +/-. Every working weight is a percentage of it, waving 5s / 3s / 1s across a 4-week cycle. Prefilled from your history where we have it.
+        </div>
+
+        <Card style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, fontWeight: 600 }}>Assistance work</div>
+              <div className="micro" style={{ color: UI.inkFaint, textTransform: 'none', letterSpacing: '0.02em' }}>A few extra exercises per day</div>
+            </div>
+            <Toggle on={assistanceOn} onToggle={() => setAssistanceOn(v => !v)} />
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, fontWeight: 600 }}>Deload week</div>
+              <div className="micro" style={{ color: UI.inkFaint, textTransform: 'none', letterSpacing: '0.02em' }}>A light week 4 (40/50/60%) each cycle</div>
+            </div>
+            <Toggle on={includeDeload} onToggle={() => setIncludeDeload(v => !v)} />
+          </div>
+        </Card>
+
+        {FTO.lifts.map(l => (
+          <Card key={l.kind} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
+              <span style={{ fontFamily: UI.fontDisplay, fontSize: 18, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.02em', color: UI.ink }}>{LIFT_LABEL[l.kind]}</span>
+              <span className="micro" style={{ color: UI.inkFaint }}>Training Max</span>
+            </div>
+            <TmField value={tms[l.kind]} onChange={v => setTms(t => ({ ...t, [l.kind]: v }))} step={step} suffix={unit} />
+            {assistanceOn && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div className="micro" style={{ color: UI.inkFaint }}>Assistance</div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+                  {(assist[l.kind] || []).map(ref => (
+                    <span key={ref} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: UI.bgRaised, border: `0.5px solid ${UI.hair}`, borderRadius: 4, padding: '4px 8px', fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi }}>
+                      {displayName(ref)}
+                      <button onClick={() => removeAssist(l.kind, ref)} aria-label="Remove" style={{ background: 'none', border: 'none', color: UI.inkFaint, cursor: 'pointer', padding: 0, fontSize: 15, lineHeight: 1 }}>×</button>
+                    </span>
+                  ))}
+                  <button onClick={() => setPicker({ kind: l.kind })} style={{ background: 'none', border: `1px dashed ${UI.hairStrong}`, borderRadius: 4, padding: '4px 10px', fontSize: 12, color: UI.gold, cursor: 'pointer', fontFamily: UI.fontUi, WebkitTapHighlightColor: 'transparent' }}>+ Add</button>
+                </div>
+              </div>
+            )}
+          </Card>
+        ))}
+
+        {extraLifts.map(x => (
+          <Card key={x.id} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+              <span style={{ fontFamily: UI.fontDisplay, fontSize: 18, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.02em', color: UI.ink }}>{LB.findExercise(store, x.exId)?.name || x.name}</span>
+              <button onClick={() => removeMainLift(x.id)} aria-label="Remove lift" style={{ background: 'none', border: 'none', color: UI.inkFaint, cursor: 'pointer', padding: 0, fontSize: 18, lineHeight: 1 }}>×</button>
+            </div>
+            <div>
+              <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>Per-cycle increase</div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                {[['lower', 'Lower body'], ['upper', 'Upper body']].map(([body, label]) => (
+                  <button key={body} onClick={() => setExtra(x.id, { body })} style={{
+                    flex: 1, padding: '10px 8px', borderRadius: 4, cursor: 'pointer',
+                    border: `1px solid ${x.body === body ? UI.gold : UI.hairStrong}`,
+                    background: x.body === body ? UI.goldFaint : 'transparent',
+                    color: x.body === body ? UI.gold : UI.inkFaint,
+                    fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, WebkitTapHighlightColor: 'transparent',
+                  }}>{label}<span style={{ display: 'block', fontSize: 10, opacity: 0.8, marginTop: 2 }}>+{LB.tmBump531(body, unit)}{unit}/cycle</span></button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>Training Max</div>
+              <TmField value={x.tm} onChange={v => setExtra(x.id, { tm: v })} step={step} suffix={unit} />
+            </div>
+            {assistanceOn && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div className="micro" style={{ color: UI.inkFaint }}>Assistance</div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+                  {(x.assistance || []).map(ref => (
+                    <span key={ref} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: UI.bgRaised, border: `0.5px solid ${UI.hair}`, borderRadius: 4, padding: '4px 8px', fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi }}>
+                      {displayName(ref)}
+                      <button onClick={() => removeExtraAssist(x.id, ref)} aria-label="Remove" style={{ background: 'none', border: 'none', color: UI.inkFaint, cursor: 'pointer', padding: 0, fontSize: 15, lineHeight: 1 }}>×</button>
+                    </span>
+                  ))}
+                  <button onClick={() => setPicker({ extraId: x.id })} style={{ background: 'none', border: `1px dashed ${UI.hairStrong}`, borderRadius: 4, padding: '4px 10px', fontSize: 12, color: UI.gold, cursor: 'pointer', fontFamily: UI.fontUi, WebkitTapHighlightColor: 'transparent' }}>+ Add</button>
+                </div>
+              </div>
+            )}
+          </Card>
+        ))}
+
+        <button onClick={() => setAddingMainLift(true)} style={{
+          background: 'none', border: `1px dashed ${UI.hairStrong}`, borderRadius: 6,
+          padding: '12px', fontSize: 13, color: UI.gold, cursor: 'pointer',
+          fontFamily: UI.fontUi, fontWeight: 600, WebkitTapHighlightColor: 'transparent',
+        }}>+ Add another lift</button>
+        <div className="micro" style={{ color: UI.inkFaint, textTransform: 'none', letterSpacing: '0.02em', lineHeight: 1.5, marginTop: -6 }}>
+          Each extra lift gets its own 5/3/1 day and climbs by Wendler's rules. Assistance you attach rides normal progression.
+        </div>
+
+        <Btn onClick={create} disabled={!canCreate} style={{ width: '100%', marginTop: 4, opacity: canCreate ? 1 : 0.5, cursor: canCreate ? 'pointer' : 'default' }}>
+          {canCreate ? 'Create 5/3/1 plan' : 'Set a Training Max for each lift'}
+        </Btn>
+      </div>
+
+      {picker && (
+        <ExercisePicker store={store} setStore={setStore} onClose={() => setPicker(null)} onPick={addAssist} />
+      )}
+      {addingMainLift && (
+        <ExercisePicker store={store} setStore={setStore} onClose={() => setAddingMainLift(false)} onPick={addMainLift} />
+      )}
+    </Screen>
+  );
+}
+
+Object.assign(window.Screens, { PlanScreen, PlanViewerScreen, ScheduleEditScreen, ScheduleNewScreen, StructuredProgramsScreen, ProgramTemplatesScreen, ProgramPreviewScreen, FiveThreeOneSetupScreen, ExercisePicker, DayTypePicker });

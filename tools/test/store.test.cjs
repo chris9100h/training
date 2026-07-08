@@ -1085,6 +1085,65 @@ async function testAsync(name, fn) {
     assert.strictEqual('mesocycle_rir_enabled' in plain, false);
   });
 
+  // ── healScheduleWeekdays (self-heal legacy weekday plans) ───────────────────
+  test('healScheduleWeekdays: weekday plan with no weekdays gets Mon-first slots, order kept', () => {
+    const sch = { id: 'p1', mode: 'weekday', days: [
+      { id: 'a', name: 'PUSH', items: [] }, { id: 'b', name: 'PULL', items: [] },
+      { id: 'c', name: 'LEGS', items: [] }, { id: 'd', name: 'UPPER', items: [] },
+      { id: 'e', name: 'LOWER', items: [] },
+    ] };
+    const healed = LB.healScheduleWeekdays(sch);
+    assert.strictEqual(healed.mode, 'weekday');
+    assert.strictEqual(healed.days.map(d => d.weekday).join(','), '0,1,2,3,4');
+    assert.strictEqual(healed.days.map(d => d.name).join(','), 'PUSH,PULL,LEGS,UPPER,LOWER');
+    assert.strictEqual(LB.isWeekdayPlan(healed), true);
+  });
+
+  test('healScheduleWeekdays: fills gaps around already-valid weekdays', () => {
+    const sch = { id: 'p1', mode: 'weekday', days: [
+      { id: 'a', name: 'A', weekday: 2, items: [] }, // valid, stays
+      { id: 'b', name: 'B', items: [] },             // → first free = 0
+      { id: 'c', name: 'C', weekday: 5, items: [] }, // valid, stays
+      { id: 'd', name: 'D', items: [] },             // → next free = 1
+    ] };
+    assert.strictEqual(LB.healScheduleWeekdays(sch).days.map(d => d.weekday).join(','), '2,0,5,1');
+  });
+
+  test('healScheduleWeekdays: consistent weekday plan is returned untouched', () => {
+    const sch = { id: 'p1', mode: 'weekday', days: [
+      { id: 'a', name: 'A', weekday: 0, items: [] }, { id: 'b', name: 'B', weekday: 3, items: [] },
+    ] };
+    assert.strictEqual(LB.healScheduleWeekdays(sch), sch); // same reference, no churn
+  });
+
+  test('healScheduleWeekdays: more than 7 weekday-less days demote to a cycle', () => {
+    const days = Array.from({ length: 8 }, (_, i) => ({ id: 'd' + i, name: 'D', items: [] }));
+    const healed = LB.healScheduleWeekdays({ id: 'p1', mode: 'weekday', days });
+    assert.strictEqual(healed.mode, undefined);
+    assert.strictEqual(healed.days.some(d => 'weekday' in d), false);
+    assert.strictEqual(healed.days.length, 8);
+  });
+
+  test('healScheduleWeekdays: stray weekday on a non-weekday plan is stripped to a clean cycle', () => {
+    const sch = { id: 'p1', days: [
+      { id: 'a', name: 'A', weekday: 2, items: [] }, { id: 'b', name: 'B', items: [] },
+    ] };
+    const healed = LB.healScheduleWeekdays(sch);
+    assert.strictEqual(healed.days.some(d => 'weekday' in d), false);
+    assert.strictEqual(LB.isWeekdayPlan(healed), false);
+  });
+
+  test('healScheduleWeekdays: plain cycle / flex / all-weekday plans pass through unchanged', () => {
+    const cycle = { id: 'p1', days: [{ id: 'a', name: 'A', items: [] }, { id: 'b', name: 'REST', items: [] }] };
+    assert.strictEqual(LB.healScheduleWeekdays(cycle), cycle);
+    const flex = { id: 'p2', is_flex: true, days: [{ id: 'a', name: 'A', items: [] }] };
+    assert.strictEqual(LB.healScheduleWeekdays(flex), flex);
+    // Every day already carries a valid weekday (effectively a weekday plan even
+    // without the mode flag) → renders fine, leave it be.
+    const allWd = { id: 'p3', days: [{ id: 'a', name: 'A', weekday: 1, items: [] }, { id: 'b', name: 'B', weekday: 4, items: [] }] };
+    assert.strictEqual(LB.healScheduleWeekdays(allWd), allWd);
+  });
+
   test('isTrainingDayForDate: flex defaults to rest, override + logged session flip it', () => {
     const today = LB.todayISO();
     const flexPlan = { id: 'p1', is_flex: true, days: [{ id: 'd1', name: 'FULL', items: [{ exId: 'e1' }] }] };
@@ -1185,6 +1244,364 @@ async function testAsync(name, fn) {
     const { schedule, newExercises } = LB.instantiateProgram(state, program);
     assert.ok(!newExercises.some(e => (e.name || '').toUpperCase() === usedName.toUpperCase()), 'must not duplicate a same-named exercise');
     assert.ok(schedule.days.some(d => d.items.some(it => it.exId === 'user_existing')), 'plan item must reference the reused existing exercise id');
+  });
+
+  test('5/3/1 wave math: percentages, rounding, AMRAP top set', () => {
+    const w1 = LB.fiveThreeOneSets(100, 1, 'kg');
+    // Compare by value via join(): LB runs in a vm realm, so its arrays are not
+    // reference-equal to this realm's and assert.deepStrictEqual would reject them.
+    assert.strictEqual(w1.map(s => s.kg).join(','), '65,75,85');
+    assert.strictEqual(w1.map(s => s.reps).join(','), '5,5,5');
+    assert.strictEqual(w1[2].amrap, true);
+    assert.ok(!w1[0].amrap && !w1[1].amrap, 'only the top set is AMRAP');
+    // rounds to 2.5 kg: 70/80/90% of 102.5 = 71.75/82/92.25
+    assert.strictEqual(LB.fiveThreeOneSets(102.5, 2, 'kg').map(s => s.kg).join(','), '72.5,82.5,92.5');
+    // lbs rounds to 5: 65/75/85% of 185 = 120.25/138.75/157.25
+    assert.strictEqual(LB.fiveThreeOneSets(185, 1, 'lbs').map(s => s.kg).join(','), '120,140,155');
+    // week 3 tapers to a single AMRAP rep; week 4 is the deload (no AMRAP)
+    assert.strictEqual(LB.fiveThreeOneSets(100, 3, 'kg')[2].reps, 1);
+    assert.ok(LB.fiveThreeOneSets(100, 4, 'kg').every(s => !s.amrap));
+    // null TM (preview before setup) yields null loads but keeps reps/pct
+    const wp = LB.fiveThreeOneSets(null, 1, 'kg');
+    assert.strictEqual(wp[0].kg, null);
+    assert.strictEqual(wp[0].pct, 65);
+  });
+
+  test('5/3/1 TM helpers: from-1RM, per-cycle bump, week clamp, plan flag', () => {
+    assert.strictEqual(LB.tmFrom531(100, 'kg'), 90);
+    assert.strictEqual(LB.tmFrom531(102, 'kg'), 92.5); // 91.8 rounds to 92.5
+    assert.strictEqual(LB.tmFrom531(0, 'kg'), null);
+    assert.strictEqual(LB.tmBump531('squat', 'kg'), 5);
+    assert.strictEqual(LB.tmBump531('bench', 'kg'), 2.5);
+    assert.strictEqual(LB.tmBump531('deadlift', 'lbs'), 10);
+    assert.strictEqual(LB.tmBump531('ohp', 'lbs'), 5);
+    assert.strictEqual(LB.week531(0, true), 1);
+    assert.strictEqual(LB.week531(3, true), 4);
+    assert.strictEqual(LB.week531(4, true), 1); // next cycle wraps to week 1
+    assert.strictEqual(LB.week531(3, false), 1); // 3-week block wraps without a deload
+    assert.strictEqual(LB.is531Plan({ program_type: '531' }), true);
+    assert.strictEqual(LB.is531Plan({ program_type: null }), false);
+    assert.strictEqual(LB.is531Plan(null), false);
+  });
+
+  test('current531Week / current531Cycle count logged sessions into weeks and cycles', () => {
+    const sch = { id: 'p531', program_type: '531', days: [{}, {}, {}, {}], program_data: { includeDeload: true } };
+    const mk = (n) => Array.from({ length: n }, (_, i) => ({ id: 's' + i, ended: '2026-01-01', scheduleId: 'p531' }));
+    assert.strictEqual(LB.current531Week(sch, []), 1);
+    assert.strictEqual(LB.current531Week(sch, mk(4)), 2);   // 4 sessions = one full pass = week 2
+    assert.strictEqual(LB.current531Week(sch, mk(12)), 4);  // 12/4 = 3 weeks done -> week 4
+    assert.strictEqual(LB.current531Week(sch, mk(16)), 1);  // 16/4 = 4 -> next cycle, week 1
+    assert.strictEqual(LB.current531Cycle(sch, mk(16)), 1);
+    assert.strictEqual(LB.current531Cycle(sch, mk(15)), 0);
+    // app-deload sessions (statusMode) don't advance the 5/3/1 count
+    const withDeload = [...mk(4), { id: 'd', ended: '2026-02-01', scheduleId: 'p531', isDeload: true }];
+    assert.strictEqual(LB.current531Week(sch, withDeload), 2);
+    // bonus sessions carry the plan's scheduleId but don't advance the plan
+    // position, so they must not advance the wave either (a bonus finished
+    // with "advance cycle" loses its isBonus flag and then counts normally)
+    const withBonus = [...mk(4), { id: 'b1', ended: '2026-02-02', scheduleId: 'p531', isBonus: true }, { id: 'b2', ended: '2026-02-03', scheduleId: 'p531', isBonus: true }];
+    assert.strictEqual(LB.current531Week(sch, withBonus), 2);
+    assert.strictEqual(LB.current531Cycle(sch, [...mk(15), { id: 'b3', ended: '2026-02-04', scheduleId: 'p531', isBonus: true }]), 0); // bonus can't tip the cycle end
+    // in-progress sessions (ended null) never count
+    assert.strictEqual(LB.current531Week(sch, [...mk(4), { id: 'ip', ended: null, scheduleId: 'p531' }]), 2);
+    // a 3-week block (deload off) wraps faster
+    const sch3 = { ...sch, program_data: { includeDeload: false } };
+    assert.strictEqual(LB.current531Week(sch3, mk(8)), 3);   // 8/4 = 2 -> week 3
+    assert.strictEqual(LB.current531Week(sch3, mk(12)), 1);  // 12/4 = 3 -> wraps to week 1
+    assert.strictEqual(LB.current531Week({ program_type: null }, mk(4)), null);
+  });
+
+  test('compute531CycleBumps flags hit/miss; resolve531CycleEnd bumps, stalls, resets, logs history', () => {
+    const mkSch = (lifts) => ({ id: 'p', program_type: '531', days: lifts.map(() => ({})),
+      program_data: { unit: 'kg', includeDeload: false,
+        mainLifts: Object.fromEntries(lifts.map(m => [m.id, { tm: m.tm, kind: m.kind, stall: m.stall || 0 }])),
+        tmHistory: Object.fromEntries(lifts.map(m => [m.id, [{ cycle: 0, tm: m.tm, reason: 'start' }]])) } });
+    // one session: warmup + two straight sets + a final AMRAP set at topReps
+    const mkSess = (exId, i, topReps) => ({ id: exId + '_' + i, ended: '2026-01-' + String(i + 1).padStart(2, '0') + 'T10:00:00', scheduleId: 'p',
+      entries: [{ exId, sets: [{ kg: 40, reps: 5, warmup: true }, { kg: 60, reps: 5 }, { kg: 70, reps: 4 }, { kg: 80, reps: topReps }] }] });
+    // single lift, dayCount 1 -> sessions 0,1,2 are weeks 1,2,3 of cycle 0
+    const sq = mkSch([{ id: 'sq', tm: 100, kind: 'squat' }]);
+    const hitCycle = [mkSess('sq', 0, 5), mkSess('sq', 1, 3), mkSess('sq', 2, 1)];
+    const missCycle = [mkSess('sq', 0, 5), mkSess('sq', 1, 3), mkSess('sq', 2, 0)];
+
+    // compute: hit -> bumped, miss -> missed, no data -> neither
+    let r = LB.compute531CycleBumps(sq, hitCycle, 0);
+    assert.strictEqual(r.sq.newTm, 105);           // squat lower body: +5 kg
+    assert.strictEqual(r.sq.bumped, true);
+    assert.strictEqual(r.sq.missed, false);
+    r = LB.compute531CycleBumps(sq, missCycle, 0);
+    assert.strictEqual(r.sq.bumped, false);
+    assert.strictEqual(r.sq.missed, true);
+    const noData = LB.compute531CycleBumps(sq, [], 0).sq;
+    assert.strictEqual(noData.bumped, false);
+    assert.strictEqual(noData.missed, false);
+    // bench upper body: +2.5 kg
+    const bp = mkSch([{ id: 'bp', tm: 80, kind: 'bench' }]);
+    assert.strictEqual(LB.compute531CycleBumps(bp, [mkSess('bp', 0, 5), mkSess('bp', 1, 3), mkSess('bp', 2, 1)], 0).bp.newTm, 82.5);
+
+    // resolve: a hit bumps, clears stall, appends a 'bump' point, stamps bumpedCycle
+    let res = LB.resolve531CycleEnd(sq.program_data, LB.compute531CycleBumps(sq, hitCycle, 0), 0);
+    assert.strictEqual(res.programData.mainLifts.sq.tm, 105);
+    assert.strictEqual(res.programData.mainLifts.sq.stall, 0);
+    assert.strictEqual(res.programData.bumpedCycle, 0);
+    assert.strictEqual(res.bumped.length, 1);
+    assert.strictEqual(res.programData.tmHistory.sq.map(h => h.reason).join(','), 'start,bump');
+    assert.strictEqual(res.programData.tmHistory.sq[1].tm, 105);
+
+    // resolve: first miss holds, stall -> 1, no new history point
+    res = LB.resolve531CycleEnd(sq.program_data, LB.compute531CycleBumps(sq, missCycle, 0), 0);
+    assert.strictEqual(res.programData.mainLifts.sq.tm, 100);
+    assert.strictEqual(res.programData.mainLifts.sq.stall, 1);
+    assert.strictEqual(res.held.length, 1);
+    assert.strictEqual(res.reset.length, 0);
+    assert.strictEqual(res.programData.tmHistory.sq.length, 1);
+
+    // resolve: second miss in a row (stall already 1) -> reset TM to 90%, stall 0, 'reset' point
+    const stalled = mkSch([{ id: 'sq', tm: 100, kind: 'squat', stall: 1 }]);
+    res = LB.resolve531CycleEnd(stalled.program_data, LB.compute531CycleBumps(stalled, missCycle, 0), 0);
+    assert.strictEqual(res.programData.mainLifts.sq.tm, 90);   // round531(100 * 0.9) = 90
+    assert.strictEqual(res.programData.mainLifts.sq.stall, 0);
+    assert.strictEqual(res.reset.length, 1);
+    assert.strictEqual(res.programData.tmHistory.sq.map(h => h.reason).join(','), 'start,reset');
+
+    // resolve: lifts with no data this cycle are left untouched (no stall, no history)
+    const two = mkSch([{ id: 'sq', tm: 100, kind: 'squat' }, { id: 'bp', tm: 80, kind: 'bench' }]);
+    res = LB.resolve531CycleEnd(two.program_data, LB.compute531CycleBumps(two, [], 0), 0);
+    assert.strictEqual(res.programData.mainLifts.bp.tm, 80);
+    assert.strictEqual(res.programData.mainLifts.bp.stall || 0, 0);
+    assert.strictEqual((res.programData.tmHistory.bp || []).length, 1);
+    assert.strictEqual(res.bumped.length + res.held.length + res.reset.length, 0);
+  });
+
+  test('suggest531Tm: fair TM from an AMRAP-implied 1RM, flags when it beats the current TM', () => {
+    // 102 x 12 -> est 1RM 142.8 -> fair TM 90% = 128.52 -> round 127.5, above 120 + 2.5
+    let s = LB.suggest531Tm(LB.e1rm(102, 12), 120, 'bench', 'kg');
+    assert.strictEqual(s.tm, 127.5);
+    assert.strictEqual(s.higher, true);
+    // 102 x 8 -> est 1RM 129.2 -> fair ~117.5, not a full increment above 120
+    s = LB.suggest531Tm(LB.e1rm(102, 8), 120, 'bench', 'kg');
+    assert.strictEqual(s.higher, false);
+    // no estimate -> null / not higher
+    const none = LB.suggest531Tm(0, 120, 'bench', 'kg');
+    assert.strictEqual(none.tm, null);
+    assert.strictEqual(none.higher, false);
+  });
+
+  test('tmBump531: extra lifts bump by upper/lower class like the canonical four', () => {
+    assert.strictEqual(LB.tmBump531('lower', 'kg'), 5);   // like squat/deadlift
+    assert.strictEqual(LB.tmBump531('upper', 'kg'), 2.5); // like bench/ohp
+    assert.strictEqual(LB.tmBump531('lower', 'lbs'), 10);
+    assert.strictEqual(LB.tmBump531('upper', 'lbs'), 5);
+    assert.strictEqual(LB.tmBump531('squat', 'kg'), 5);   // canonical unchanged
+    assert.strictEqual(LB.tmBump531('bench', 'kg'), 2.5);
+  });
+
+  test('add531MainLift: registers a lift on existing program_data, seeds a Wendler day', () => {
+    const pd = { unit: 'kg', mainLifts: { sq: { tm: 100, kind: 'squat', stall: 0 } }, tmHistory: { sq: [{ cycle: 0, tm: 100, reason: 'start' }] } };
+    const { programData, items } = LB.add531MainLift(pd, { exId: 'row', kind: 'upper', tm: 60, cycle: 2, assistanceIds: ['a1', 'a2'] });
+    assert.strictEqual(programData.mainLifts.row.tm, 60);
+    assert.strictEqual(programData.mainLifts.row.kind, 'upper');
+    assert.strictEqual(programData.mainLifts.row.stall, 0);
+    assert.strictEqual(programData.mainLifts.sq.tm, 100, 'existing lift untouched');
+    // history stamped at the plan's current cycle (chart starts where it was added)
+    assert.strictEqual(programData.tmHistory.row.map(h => `${h.cycle}:${h.reason}`).join(','), '2:start');
+    // the day: main lift (3x5) + assistance as Range items (Smart Progression)
+    assert.strictEqual(items.map(i => i.exId).join(','), 'row,a1,a2');
+    assert.strictEqual(items[0].sets, 3);
+    assert.strictEqual(items[0].reps, 5);
+    assert.strictEqual(items[1].repsMax, 12);
+    // no TM yet -> empty history, no start point
+    const noTm = LB.add531MainLift(pd, { exId: 'ohp2', kind: 'lower' });
+    assert.strictEqual(noTm.programData.mainLifts.ohp2.tm, null);
+    assert.strictEqual(noTm.programData.tmHistory.ohp2.length, 0);
+  });
+
+  test('build531Plan: an extra lift names its day after the exercise and carries its own assistance', () => {
+    const res = LB.build531Plan({ exercises: [{ id: 'row1', name: 'Barbell Row' }, { id: 'aid1', name: 'Face Pull' }] }, {
+      unit: 'kg', lifts: [{ kind: 'lower', ex: 'row1', tm: 60, name: 'Barbell Row', assistance: ['aid1'] }],
+    });
+    assert.strictEqual(res.schedule.days.length, 1);
+    assert.strictEqual(res.schedule.days[0].name, 'Barbell Row', 'day named after the exercise, not "lower"');
+    assert.strictEqual(res.schedule.program_data.mainLifts.row1.kind, 'lower');
+    assert.strictEqual(res.schedule.days[0].items.map(i => i.exId).join(','), 'row1,aid1');
+  });
+
+  test('is531MainLift: true only for a registered main lift on the plan owning the day', () => {
+    const store = {
+      schedules: [
+        { id: 'p531', program_type: '531', days: [{ id: 'd1', items: [{ exId: 'sq' }, { exId: 'leg' }] }],
+          program_data: { mainLifts: { sq: { tm: 100, kind: 'squat', stall: 0 } } } },
+        { id: 'pnorm', days: [{ id: 'd2', items: [{ exId: 'sq' }] }] },
+      ],
+    };
+    assert.strictEqual(LB.is531MainLift(store, 'sq', 'd1'), true);   // main lift on the 531 day
+    assert.strictEqual(LB.is531MainLift(store, 'leg', 'd1'), false); // assistance, not a main lift
+    assert.strictEqual(LB.is531MainLift(store, 'sq', 'd2'), false);  // same exId, but a normal plan's day
+    assert.strictEqual(LB.is531MainLift(store, 'sq', null), false);  // no day (freestyle) -> false
+    assert.strictEqual(LB.is531MainLift(store, null, 'd1'), false);
+  });
+
+  test('progressionSuggestion: suppressed for a 5/3/1 main lift, normal for its assistance', () => {
+    const store = {
+      settings: { smartProgression: true },
+      exercises: [{ id: 'sq', name: 'Squat' }, { id: 'leg', name: 'Leg Press' }],
+      schedules: [
+        { id: 'p531', program_type: '531', days: [{ id: 'd1', items: [{ exId: 'sq' }, { exId: 'leg' }] }],
+          program_data: { mainLifts: { sq: { tm: 100, kind: 'squat', stall: 0 } } } },
+      ],
+    };
+    // A reference where the working set cleared its target, so progression WOULD fire.
+    const ref = { entry: { sets: [{ kg: 100, reps: 10, warmup: false }] } };
+    assert.strictEqual(LB.progressionSuggestion(store, 'sq', 'd1', 5, null, ref, null, null), null, 'main lift never gets a Smart Progression bump');
+    const sugg = LB.progressionSuggestion(store, 'leg', 'd1', 5, null, ref, null, null);
+    assert.ok(sugg && sugg.kg > 100, 'assistance on the 531 day still progresses');
+  });
+
+  test('build531Plan: catalog names resolve, 4 days, program_data stamped, assistance uncapped', () => {
+    const FTO = _catWin.FIVE_THREE_ONE;
+    assert.ok(FTO && Array.isArray(FTO.lifts) && FTO.lifts.length === 4, 'FIVE_THREE_ONE has 4 lifts');
+    const names = new Set(SYS_EX.map(e => (e.name || '').toUpperCase()));
+    for (const l of FTO.lifts) assert.ok(names.has((l.ex || '').toUpperCase()), 'main lift in catalog: ' + l.ex);
+    const config = {
+      unit: 'kg', includeDeload: true,
+      lifts: FTO.lifts.map((l, i) => ({ ...l, tm: [140, 100, 180, 60][i] })),
+      assistance: { squat: ['Leg Press', 'Seated Leg Curl'], bench: ['Incline Dumbbell Press'], deadlift: ['Lat Pulldown'], ohp: ['Machine Lateral Raise'] },
+    };
+    const { schedule, newExercises } = LB.build531Plan({ exercises: [] }, config);
+    assert.strictEqual(schedule.program_type, '531');
+    assert.strictEqual(schedule.is_flex, true);
+    assert.strictEqual(schedule.days.length, 4);
+    assert.strictEqual(schedule.program_data.unit, 'kg');
+    assert.strictEqual(schedule.program_data.includeDeload, true);
+    const ml = schedule.program_data.mainLifts;
+    assert.strictEqual(Object.keys(ml).length, 4);
+    assert.strictEqual(Object.values(ml).map(v => v.kind).sort().join(','), 'bench,deadlift,ohp,squat');
+    // each lift starts un-stalled with a seeded TM-history point at cycle 0
+    const th = schedule.program_data.tmHistory;
+    assert.strictEqual(Object.keys(th).length, 4, 'tmHistory seeded per lift');
+    for (const exId of Object.keys(ml)) {
+      assert.strictEqual(ml[exId].stall, 0, 'lift seeded with stall 0');
+      assert.strictEqual(th[exId].length, 1, 'one seed point per lift');
+      assert.strictEqual(th[exId][0].reason, 'start');
+      assert.strictEqual(th[exId][0].tm, ml[exId].tm);
+      assert.strictEqual(th[exId][0].cycle, 0);
+    }
+    for (const d of schedule.days) for (const it of d.items) assert.ok(!String(it.exId).startsWith('sys_'), 'no sys_ id in plan');
+    for (const exId of Object.keys(ml)) assert.ok(!exId.startsWith('sys_'), 'no sys_ id in mainLifts');
+    for (const d of schedule.days) {
+      assert.strictEqual(d.items[0].sets, 3);
+      assert.ok(ml[d.items[0].exId], 'day leads with a tracked main lift');
+      assert.ok(d.items.length >= 1, 'day has at least its main lift');
+      for (let i = 1; i < d.items.length; i++) assert.ok(!ml[d.items[i].exId], 'assistance is not a tracked main lift');
+    }
+    assert.ok(newExercises.length >= 4, 'materialized the main lifts (and assistance)');
+    // assistance is uncapped: supply as many as you like (owned ids so they all
+    // resolve), and every one comes through
+    const ownedAssist = ['a1', 'a2', 'a3', 'a4', 'a5'].map(id => ({ id, name: id }));
+    const over = LB.build531Plan({ exercises: ownedAssist }, { unit: 'kg', lifts: [FTO.lifts[0]],
+      assistance: { squat: ['a1', 'a2', 'a3', 'a4', 'a5'] } });
+    assert.strictEqual(over.schedule.days[0].items.length, 6, 'main + all 5 assistance, no cap');
+    // no assistance -> just the main lift per day
+    const bare = LB.build531Plan({ exercises: [] }, { unit: 'kg', lifts: FTO.lifts.map(l => ({ ...l, tm: 100 })), assistance: {} });
+    for (const d of bare.schedule.days) assert.strictEqual(d.items.length, 1, 'main lift only when assistance is off');
+    // assistance supplied as an already-owned exId (wizard picks) passes through, not re-materialized
+    const owned = { id: 'user_ex1', name: 'My Curl', tags: [] };
+    const withId = LB.build531Plan({ exercises: [owned] }, { unit: 'kg', lifts: [{ ...FTO.lifts[0], tm: 100 }], assistance: { squat: ['user_ex1'] } });
+    assert.ok(withId.schedule.days[0].items.some(it => it.exId === 'user_ex1'), 'owned assistance exId reused');
+    assert.ok(!withId.newExercises.some(e => e.id === 'user_ex1'), 'owned exId not duplicated');
+  });
+
+  test('time-based sets: fmtDuration formats, 0 volume, still counted as done', () => {
+    assert.strictEqual(LB.fmtDuration(45), '45s');
+    assert.strictEqual(LB.fmtDuration(60), '1:00');
+    assert.strictEqual(LB.fmtDuration(75), '1:15');
+    assert.strictEqual(LB.fmtDuration(600), '10:00');
+    assert.strictEqual(LB.fmtDuration(null), '');
+    // a finished HIIT session: three logged intervals, no weight
+    const ended = { ended: '2026-01-01', entries: [{ exId: 'jr', sets: [
+      { timeSec: 75, done: true }, { timeSec: 75, done: true }, { timeSec: 60, done: true },
+    ] }] };
+    assert.strictEqual(LB.totalVolume(ended, []), 0, 'time sets add nothing to volume');
+    assert.strictEqual(LB.doneSetCount(ended), 3, 'all three time sets count as done');
+    // warm-ups/skipped never count
+    const mixed = { ended: '2026-01-01', entries: [{ exId: 'jr', sets: [
+      { timeSec: 30, warmup: true }, { timeSec: 75, done: true }, { timeSec: 60, skipped: true },
+    ] }] };
+    assert.strictEqual(LB.doneSetCount(mixed), 1, 'only the working logged time set counts');
+  });
+
+  test('assisted sets: negative load adds no volume, still counts as done; graduated positive counts', () => {
+    assert.strictEqual(LB.isAssisted({ movement_type: 'assisted' }), true);
+    assert.strictEqual(LB.isAssisted({ movement_type: 'bilateral' }), false);
+    assert.strictEqual(LB.isAssisted({}), false);
+    // assisted dips: assistance stored negative, no volume, but the sets are done
+    const ended = { ended: '2026-01-01', entries: [{ exId: 'ad', sets: [
+      { kg: -40, reps: 8, done: true }, { kg: -35, reps: 6, done: true },
+    ] }] };
+    assert.strictEqual(LB.totalVolume(ended, []), 0, 'negative assistance adds no volume');
+    assert.strictEqual(LB.doneSetCount(ended), 2, 'both assisted sets count as done');
+    // less assistance (-35) beats more (-40): improvement, no false regression
+    const prev = { kg: -40, reps: 8, done: true };
+    const curr = { kg: -35, reps: 8, done: true };
+    assert.strictEqual(LB.isImprovement(curr, prev), true, 'less assistance is an improvement');
+    assert.strictEqual(LB.isDecline(curr, prev), false, 'less assistance is not a decline');
+    assert.strictEqual(LB.isDecline({ kg: -45, reps: 8, done: true }, prev), true, 'more assistance is a decline');
+    // graduated past zero into real added weight: that positive load counts as volume
+    const grad = { ended: '2026-01-01', entries: [{ exId: 'ad', sets: [
+      { kg: -5, reps: 8, done: true }, { kg: 10, reps: 5, done: true },
+    ] }] };
+    assert.strictEqual(LB.totalVolume(grad, []), 50, 'only the positive graduated set adds volume (10x5)');
+  });
+
+  test('bestAssistLoad: highest (least-negative) load across ended sessions, null when empty', () => {
+    const state = { sessions: [
+      { id: 's1', ended: '2026-01-01', dayId: 'd1', entries: [{ exId: 'ad', sets: [{ kg: -40, reps: 8 }, { kg: -45, reps: 6 }] }] },
+      { id: 's2', ended: '2026-01-08', dayId: 'd1', entries: [{ exId: 'ad', sets: [{ kg: -35, reps: 8 }, { kg: -30, reps: 5 }] }] },
+      { id: 's3', ended: null, dayId: 'd1', entries: [{ exId: 'ad', sets: [{ kg: -20, reps: 8 }] }] }, // in-progress, ignored
+    ] };
+    assert.strictEqual(LB.bestAssistLoad(state, 'ad'), -30, 'least assistance is -30 (highest kg among ended)');
+    assert.strictEqual(LB.bestAssistLoad(state, 'ad', 's2'), -40, 'excluding s2 leaves -40 as the best');
+    assert.strictEqual(LB.bestAssistLoad(state, 'nope'), null, 'no history returns null (not 0)');
+    // warm-ups/skipped never count
+    const state2 = { sessions: [{ id: 's1', ended: '2026-01-01', entries: [{ exId: 'ad', sets: [
+      { kg: -10, reps: 8, warmup: true }, { kg: -40, reps: 8 },
+    ] }] }] };
+    assert.strictEqual(LB.bestAssistLoad(state2, 'ad'), -40, 'the -10 warm-up does not count as the best');
+  });
+
+  test('time-based history: recent-session lookup finds time-only sessions and carries timeSec', () => {
+    const state = { sessions: [
+      { id: 's1', ended: '2026-01-01T10:00:00', dayId: 'd1', entries: [{ exId: 'jr', sets: [
+        { timeSec: 75, done: true }, { timeSec: 75, done: true }, { timeSec: 60, done: true },
+      ] }] },
+    ] };
+    assert.strictEqual(LB.recentSessionsForExercise(state, 'jr', 'd1').length, 1, 'time-only session is found');
+    const ref = LB.bestRecentEntry(state, 'jr', 'd1');
+    assert.ok(ref, 'bestRecentEntry returns a reference for a time exercise');
+    assert.strictEqual((ref.entry.sets || []).map(s => s.timeSec).join(','), '75,75,60', 'reference carries per-set timeSec');
+  });
+
+  test('buildTimeSeedSets: authored target > last logged > authored tail > 30s default', () => {
+    const last = { entry: { sets: [{ timeSec: 75, done: true }, { timeSec: 60, done: true }] } };
+    // authored per-set targets win where present; a null slot falls through to
+    // the last logged time at that position, then the default
+    assert.strictEqual(LB.buildTimeSeedSets({ sets: 3, timeSecPerSet: [45, null, null] }, last).map(s => s.timeSec).join(','), '45,60,30');
+    // a shorter authored list extends via its tail value
+    assert.strictEqual(LB.buildTimeSeedSets({ sets: 3, timeSecPerSet: [45] }, null).map(s => s.timeSec).join(','), '45,45,45');
+    // no authored targets: last logged per position, default beyond
+    assert.strictEqual(LB.buildTimeSeedSets({ sets: 3 }, last).map(s => s.timeSec).join(','), '75,60,30');
+    // no history at all: 30s default, at least one set
+    assert.strictEqual(LB.buildTimeSeedSets({ sets: 0 }, null).map(s => s.timeSec).join(','), '30');
+    // every seeded set starts unchecked
+    assert.strictEqual(LB.buildTimeSeedSets({ sets: 2 }, last).every(s => s.done === false), true);
+  });
+
+  test('buildSeedSets routes time-mode items to buildTimeSeedSets (in-session swap path)', () => {
+    const store = { exercises: [{ id: 'jr', name: 'Jump Rope', log_mode: 'time' }], settings: {} };
+    const last = { entry: { sets: [{ timeSec: 90, done: true }] } };
+    const seeds = LB.buildSeedSets({ exId: 'jr', sets: 2 }, last, null, false, store, null);
+    assert.strictEqual(seeds.map(s => s.timeSec).join(','), '90,30', 'swap seeds durations, not kg/reps');
+    assert.strictEqual(seeds.some(s => 'kg' in s), false, 'no weight fields on time seeds');
   });
 
   console.log(`\n${pass} passed, ${fail} failed`);

@@ -716,8 +716,11 @@ async function captureNodeAsPng(node, { filename, dodgeAvatar = false, setCaptur
 // a mobility exercise may keep any equipment). Three modes resolve to
 // LB.exerciseLogMode; for bodyweight + Weight & Reps an opt-in toggle pulls the
 // user's logged bodyweight (LB.shouldPullBodyweight), gated on having logged one.
-const LOG_MODES = [['checkbox', 'Checkbox only'], ['reps', 'Reps only'], ['weight', 'Weight & Reps']];
+const LOG_MODES = [['checkbox', 'Checkbox only'], ['reps', 'Reps only'], ['time', 'Time'], ['weight', 'Weight & Reps']];
 function loggingPickerVisible(equipment, movementType) {
+  // Assisted always logs weight (the negative assistance load), so the logging
+  // picker is skipped and weight mode is forced (same path mobility/checkbox use).
+  if (movementType === 'assisted') return false;
   return equipment === 'no_equipment' || equipment === 'bodyweight' || movementType === 'mobility';
 }
 const logNoteStyle = { marginTop: 8, textTransform: 'none', letterSpacing: '0.02em', fontWeight: 400, lineHeight: 1.5 };
@@ -725,6 +728,7 @@ function LoggingModeSection({ equipment, movementType, logMode, onLogMode, pullB
   if (!loggingPickerVisible(equipment, movementType)) return null;
   const info = logMode === 'reps' ? 'Tracks reps only — no weight, adds 0 to volume.'
              : logMode === 'checkbox' ? 'Just tick each set off — no reps or weight, 0 volume.'
+             : logMode === 'time' ? 'Time each set with a countdown, no weight, 0 volume. Great for HIIT or holds.'
              : null;
   const showPull = equipment === 'bodyweight' && logMode === 'weight';
   return (
@@ -875,7 +879,7 @@ function ExerciseWizard({ step, setStep, onClose, isDirty, store,
     </div>;
   } else if (step === 'movement') {
     body = <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      {[['bilateral', 'Bilateral', 'fa-arrows-left-right', 'Both sides work together — one number per set'], ['unilateral', 'Unilateral', 'fa-arrow-right-long', 'One arm/leg at a time — logs left & right'], ['mobility', 'Mobility', 'fa-arrows-rotate', 'Stretch or warm-up — usually no load']]
+      {[['bilateral', 'Bilateral', 'fa-arrows-left-right', 'Both sides work together, one number per set'], ['unilateral', 'Unilateral', 'fa-arrow-right-long', 'One arm/leg at a time, logs left & right'], ['assisted', 'Assisted', 'fa-hands-holding', 'A machine or band takes weight off, logged as a negative load'], ['mobility', 'Mobility', 'fa-arrows-rotate', 'Stretch or warm-up, usually no load']]
         .map(([val, label, icon, sub]) => optRow({ key: val, icon, label, sub, active: movementType === val, onClick: () => { setMovementType(val); goNext({ movementType: val }); } }))}
     </div>;
   } else if (step === 'logging') {
@@ -884,7 +888,7 @@ function ExerciseWizard({ step, setStep, onClose, isDirty, store,
     const showPull = equipment === 'bodyweight' && logMode === 'weight';
     const hasLoggedWeight = LB.latestBodyweight(store) != null;
     body = <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      {[['checkbox', 'Checkbox only', 'fa-circle-check', 'Just tick each set off — no numbers, 0 volume'], ['reps', 'Reps only', 'fa-rotate', 'Count reps, no weight — adds 0 to volume'], ['weight', 'Weight & Reps', 'fa-dumbbell', 'Track both — the usual for weighted lifts']]
+      {[['checkbox', 'Checkbox only', 'fa-circle-check', 'Just tick each set off — no numbers, 0 volume'], ['reps', 'Reps only', 'fa-rotate', 'Count reps, no weight — adds 0 to volume'], ['time', 'Time', 'fa-stopwatch', 'Countdown per set, no weight, 0 volume'], ['weight', 'Weight & Reps', 'fa-dumbbell', 'Track both — the usual for weighted lifts']]
         .map(([val, label, icon, sub]) => optRow({ key: val, icon, label, sub, active: logMode === val, onClick: () => { pickLogMode(val); if (!(val === 'weight' && equipment === 'bodyweight')) goNext(); } }))}
       {showPull && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 6 }}>
@@ -1064,7 +1068,7 @@ function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = ''
         <div>
           <span className="label">Movement type</span>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
-            {[['bilateral', 'Bilateral'], ['unilateral', 'Unilateral'], ['mobility', 'Mobility']].map(([val, label]) => (
+            {[['bilateral', 'Bilateral'], ['unilateral', 'Unilateral'], ['assisted', 'Assisted'], ['mobility', 'Mobility']].map(([val, label]) => (
               <Chip key={val} on={movementType === val} onClick={() => setMovementType(val)}>{label}</Chip>
             ))}
           </div>
@@ -1216,16 +1220,38 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
     return s.reps ? LB.e1rm(s.kg, s.reps) : 0;
   };
 
+  // Time-based exercise: the chart/PR math tracks the best DURATION per session
+  // instead of an estimated 1RM. Assisted exercise: it tracks the best (highest,
+  // least-negative) LOAD, since Epley on a negative kg is nonsense and "best" is
+  // "least assistance". Both would otherwise leave the chart/PR empty (kg-null or
+  // negative estimates get filtered out).
+  const isTimeEx = LB.exerciseLogMode(ex) === 'time';
+  const isAssistedEx = LB.isAssisted(ex);
+  const valForSet = (s) => {
+    if (isTimeEx) return (!s.warmup && s.timeSec != null ? s.timeSec : 0);
+    if (isAssistedEx) return (!s.warmup && s.kg != null ? s.kg : null);
+    return e1rmForSet(s);
+  };
+
   const points = history.map(h => {
-    const best = (h.entry.sets || []).reduce((m, s) => Math.max(m, e1rmForSet(s)), 0);
+    if (isAssistedEx) {
+      // Signed load, so a fixed 0 seed would beat every negative set: reduce
+      // over the present values only.
+      const vals = (h.entry.sets || []).map(valForSet).filter(v => v != null);
+      return vals.length ? { date: h.session.date, est: Math.max(...vals) } : null;
+    }
+    const best = (h.entry.sets || []).reduce((m, s) => Math.max(m, valForSet(s)), 0);
     return { date: h.session.date, est: best };
-  }).filter(p => p.est > 0).reverse();
+  }).filter(p => p && (isAssistedEx || p.est > 0)).reverse();
 
   const pr = points.length ? Math.max(...points.map(p => p.est)) : 0;
 
   const volPr = history.length ? Math.max(...history.map(h =>
     (h.entry.sets || []).reduce((sum, s) => s.kg == null ? sum : sum + s.kg * (LB.effReps(s) ?? 0), 0)
   )) : 0;
+
+  // Best (longest) logged duration = the PR of a time exercise.
+  const bestTime = isTimeEx ? pr : 0;
 
   const queuePos = editQueueTotal > 0 ? editQueueTotal - editQueue.length : 0;
 
@@ -1318,7 +1344,7 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
             <div>
               <span className="label">Movement type</span>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
-                {[['bilateral', 'Bilateral'], ['unilateral', 'Unilateral'], ['mobility', 'Mobility']].map(([val, label]) => (
+                {[['bilateral', 'Bilateral'], ['unilateral', 'Unilateral'], ['assisted', 'Assisted'], ['mobility', 'Mobility']].map(([val, label]) => (
                   <Chip key={val} on={editMovementType === val} onClick={() => setEditMovementType(val)}>{label}</Chip>
                 ))}
               </div>
@@ -1357,6 +1383,7 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
             {ex.category && <Pill gold>{ex.category.charAt(0).toUpperCase() + ex.category.slice(1)}</Pill>}
             {ex.movement_type === 'unilateral' || (ex.unilateral && !ex.movement_type) ? <Pill gold>Unilateral</Pill> : null}
+            {ex.movement_type === 'assisted' && <Pill gold>Assisted</Pill>}
             {ex.movement_type === 'mobility' && <Pill gold>Mobility</Pill>}
             {ex.movement_type === 'cardio' && <Pill gold>Cardio</Pill>}
             {(ex.tags || []).map(t => <Pill key={t} gold>{t}</Pill>)}
@@ -1385,12 +1412,16 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
 
         {/* Stats — SubDials */}
         <div style={{ display: 'flex', justifyContent: 'space-around', padding: '6px 0' }}>
-          <SubDial label="1RM PR" value={pr ? Math.round(pr) : '—'} sub={UI.unit()} size={90} gold />
+          {isTimeEx
+            ? <SubDial label="Best Time" value={bestTime ? LB.fmtDuration(bestTime) : '—'} size={90} gold />
+            : isAssistedEx
+            ? <SubDial label="Best Load" value={points.length ? Math.round(pr) : '—'} sub={UI.unit()} size={90} gold />
+            : <SubDial label="1RM PR" value={pr ? Math.round(pr) : '—'} sub={UI.unit()} size={90} gold />}
           <SubDial label="Sessions" value={history.length} size={90} />
-          <SubDial label="Vol PR" value={volPr ? Math.round(volPr) : '—'} sub={UI.unit()} size={90} gold />
+          {!isTimeEx && !isAssistedEx && <SubDial label="Vol PR" value={volPr ? Math.round(volPr) : '—'} sub={UI.unit()} size={90} gold />}
         </div>
 
-        {points.length > 1 && <ProgressChart points={points} />}
+        {points.length > 1 && <ProgressChart points={points} title={isTimeEx ? 'BEST TIME · HISTORY' : isAssistedEx ? 'BEST LOAD · HISTORY' : undefined} fmtVal={isTimeEx ? LB.fmtDuration : undefined} />}
 
         {/* Note — read-only here; edited via the Edit button's form below */}
         <div>
@@ -1407,8 +1438,13 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
           <Bezel>HISTORY</Bezel>
           <div style={{ marginTop: 8 }}>
             {history.slice(0, 10).map((h, hi) => {
-              const sessionBest = h.entry.sets.reduce((m, s) => Math.max(m, e1rmForSet(s)), 0);
-              const isPR = pr > 0 && sessionBest > 0 && Math.abs(sessionBest - pr) < 0.01;
+              // Assisted loads are negative, so a 0-seeded reduce would never
+              // beat them: max over the present values, and a signed PR compare.
+              const sVals = (h.entry.sets || []).map(valForSet).filter(v => v != null);
+              const sessionBest = sVals.length ? Math.max(...sVals) : (isAssistedEx ? null : 0);
+              const isPR = isAssistedEx
+                ? (points.length > 0 && sessionBest != null && Math.abs(sessionBest - pr) < 0.01)
+                : (pr > 0 && sessionBest > 0 && Math.abs(sessionBest - pr) < 0.01);
               return (
                 <React.Fragment key={h.session.id}>
                 <div
@@ -1427,15 +1463,19 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
                         <span style={{ fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.1em', color: UI.gold, background: UI.goldFaint, border: `0.5px solid ${UI.goldSoft}`, borderRadius: 4, padding: '1px 5px' }}>PR</span>
                       )}
                     </div>
-                    <div style={{ display: 'flex', gap: 8 }}>
-                      {h.entry.sets.filter(s => s.kg != null && !s.warmup).map((s, i) => {
-                        const isBest = sessionBest > 0 && Math.abs(e1rmForSet(s) - sessionBest) < 0.01;
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                      {h.entry.sets.filter(s => (s.kg != null || s.timeSec != null) && !s.warmup).map((s, i) => {
+                        const isBest = isAssistedEx
+                          ? (sessionBest != null && valForSet(s) != null && Math.abs(valForSet(s) - sessionBest) < 0.01)
+                          : (sessionBest > 0 && Math.abs(valForSet(s) - sessionBest) < 0.01);
                         const repsStr = (s.repsL != null || s.repsR != null)
                           ? `L${s.repsL ?? '?'}/R${s.repsR ?? '?'}`
                           : s.reps;
                         return (
                           <span key={i} className="num" style={{ fontSize: 13, color: isBest ? UI.gold : UI.ink }}>
-                            {s.kg}<span style={{ color: isBest ? UI.goldSoft : UI.inkFaint }}>×</span>{repsStr}
+                            {s.timeSec != null
+                              ? LB.fmtDuration(s.timeSec)
+                              : <>{s.kg}<span style={{ color: isBest ? UI.goldSoft : UI.inkFaint }}>×</span>{repsStr}</>}
                           </span>
                         );
                       })}
@@ -1467,7 +1507,7 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
   );
 }
 
-function ProgressChart({ points }) {
+function ProgressChart({ points, title, fmtVal }) {
   const w = 280, h = 108, padT = 8, padB = 20, padL = 36, padR = 8;
   const max = Math.max(...points.map(p => p.est));
   const min = Math.min(...points.map(p => p.est));
@@ -1481,14 +1521,17 @@ function ProgressChart({ points }) {
   const path = xy.map(([x,y], i) => `${i===0?'M':'L'}${x.toFixed(1)},${y.toFixed(1)}`).join(' ');
   const fmtDate = d => new Date(d).toLocaleDateString('en', { month: 'short', day: 'numeric' });
   const unit = UI.unit();
+  // Default axis: rounded kg/lbs values (est. 1RM). A time exercise passes
+  // fmtVal (fmtDuration) and its own title, the geometry stays identical.
+  const axisVal = (v, last) => fmtVal ? fmtVal(Math.round(v)) : (last ? `${Math.round(v)} ${unit}` : Math.round(v));
   return (
     <div style={{ padding: '10px 0', maxWidth: 380 }}>
-      <div className="micro" style={{ marginBottom: 8, color: UI.inkFaint }}>EST. 1RM · HISTORY</div>
+      <div className="micro" style={{ marginBottom: 8, color: UI.inkFaint }}>{title || 'EST. 1RM · HISTORY'}</div>
       <svg viewBox={`0 0 ${w} ${h}`} width="100%" style={{ display: 'block' }}>
         {gridVals.map((v, i) => (
           <g key={`g${i}`}>
             {i > 0 && <line x1={padL} y1={yOf(v).toFixed(1)} x2={w - padR} y2={yOf(v).toFixed(1)} stroke={UI.hair} strokeWidth="0.5" strokeDasharray="3 3" />}
-            <text x={padL - 5} y={(yOf(v) + 3).toFixed(1)} textAnchor="end" fontSize="8" fill={UI.inkFaint} fontFamily={UI.fontNum}>{i === 3 ? `${Math.round(v)} ${unit}` : Math.round(v)}</text>
+            <text x={padL - 5} y={(yOf(v) + 3).toFixed(1)} textAnchor="end" fontSize="8" fill={UI.inkFaint} fontFamily={UI.fontNum}>{axisVal(v, i === 3)}</text>
           </g>
         ))}
         <line x1={padL} y1={padT} x2={padL} y2={h - padB} stroke={UI.hair} strokeWidth="0.5" />
@@ -2591,15 +2634,22 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
   const saveAsTemplate = () => {
     const name = tplName.trim();
     if (!name) return;
-    const exercises = (s.entries || []).map(e => ({
-      exId: e.exId, name: e.name,
-      sets: e.plannedSets || (e.sets || []).filter(st => !st.warmup).length || 3,
-      reps: e.plannedReps ?? null,
-      repsPerSet: e.plannedRepsPerSet ?? null,
-      repsMax: e.plannedRepsMax ?? null,
-      progressionOffset: e.plannedProgressionOffset ?? null,
-      supersetGroup: e.supersetGroup ?? null,
-    }));
+    const exercises = (s.entries || []).map(e => {
+      // Time-based entry: derive per-set duration targets from the logged sets
+      // so a template built from this session carries the times along (there is
+      // no editor UI authoring timeSecPerSet yet, this IS the authoring path).
+      const times = (e.sets || []).filter(st => !st.warmup).map(st => st.timeSec ?? null);
+      return {
+        exId: e.exId, name: e.name,
+        sets: e.plannedSets || (e.sets || []).filter(st => !st.warmup).length || 3,
+        reps: e.plannedReps ?? null,
+        repsPerSet: e.plannedRepsPerSet ?? null,
+        repsMax: e.plannedRepsMax ?? null,
+        progressionOffset: e.plannedProgressionOffset ?? null,
+        supersetGroup: e.supersetGroup ?? null,
+        ...(times.some(t => t != null) ? { timeSecPerSet: times } : {}),
+      };
+    });
     const tpl = { id: LB.uid(), name, exercises, createdAt: new Date().toISOString() };
     setStore(st => ({ ...st, workoutTemplates: [tpl, ...(st.workoutTemplates || [])] }));
     setTplFormOpen(false);
@@ -3169,7 +3219,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                           fontFamily: UI.fontNum, fontSize: 12,
                           color: isWarm ? UI.inkFaint : highlight ? UI.goldLight : decline ? 'rgba(var(--danger-rgb),0.85)' : UI.ink,
                         }}>
-                          {isCheckboxOnly ? (st.done ? '✓' : '○') : (<>
+                          {st.timeSec != null ? LB.fmtDuration(st.timeSec) : isCheckboxOnly ? (st.done ? '✓' : '○') : (<>
                             {isWarm && <span style={{ fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.1em', color: UI.inkFaint, marginRight: 4 }}>W</span>}
                             {st.kg ?? '—'}<span style={{ color: isWarm ? UI.inkGhost : highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, fontSize: 10 }}>{UI.unit()}</span><span style={{ color: isWarm ? UI.inkGhost : highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, margin: '0 1px' }}>×</span>{(st.repsL != null || st.repsR != null) ? `L${st.repsL ?? '?'}/R${st.repsR ?? '?'}` : (st.reps ?? '—')}{pr && <i className="fa-solid fa-dumbbell" style={{ fontSize: 8, color: UI.gold, marginLeft: 4 }} />}
                           </>)}
@@ -3322,7 +3372,7 @@ function SessionEditSheet({ session, duration, exercises, onClose, onSave }) {
                           </>
                         ) : (
                           <>
-                            <input type="number" inputMode="decimal" step="0.5" value={st.kg ?? ''}
+                            <input type="text" inputMode="decimal" step="0.5" value={st.kg ?? ''}
                               placeholder="—" onFocus={e => e.target.select()}
                               onChange={ev => updateSet(eIdx, sIdx, { kg: ev.target.value === '' ? null : +ev.target.value })}
                               style={numInputStyle} />
@@ -3330,12 +3380,12 @@ function SessionEditSheet({ session, duration, exercises, onClose, onSave }) {
                             <span style={{ color: UI.hair, fontSize: 14, margin: '0 2px', fontFamily: UI.fontDisplay, fontStyle: 'italic' }}>×</span>
                             {isUnilateral ? (
                               <>
-                                <input type="number" inputMode="numeric" value={st.repsL ?? ''}
+                                <input type="text" inputMode="numeric" value={st.repsL ?? ''}
                                   placeholder="—" onFocus={e => e.target.select()}
                                   onChange={ev => updateSet(eIdx, sIdx, { repsL: ev.target.value === '' ? null : +ev.target.value })}
                                   style={numInputStyle} />
                                 <span className="num" style={{ color: UI.inkFaint, fontSize: 11 }}>L</span>
-                                <input type="number" inputMode="numeric" value={st.repsR ?? ''}
+                                <input type="text" inputMode="numeric" value={st.repsR ?? ''}
                                   placeholder="—" onFocus={e => e.target.select()}
                                   onChange={ev => updateSet(eIdx, sIdx, { repsR: ev.target.value === '' ? null : +ev.target.value })}
                                   style={numInputStyle} />
@@ -3343,7 +3393,7 @@ function SessionEditSheet({ session, duration, exercises, onClose, onSave }) {
                               </>
                             ) : (
                               <>
-                                <input type="number" inputMode="numeric" value={st.reps ?? ''}
+                                <input type="text" inputMode="numeric" value={st.reps ?? ''}
                                   placeholder="—" onFocus={e => e.target.select()}
                                   onChange={ev => updateSet(eIdx, sIdx, { reps: ev.target.value === '' ? null : +ev.target.value })}
                                   style={numInputStyle} />
@@ -3380,6 +3430,7 @@ function SessionEditSheet({ session, duration, exercises, onClose, onSave }) {
 function fmtCompareSet(st) {
   if (!st) return '—';
   if (st.skipped && !st.done) return 'skipped';
+  if (st.timeSec != null) return LB.fmtDuration(st.timeSec);
   const tr = LB.techniqueRounds(st);
   if (tr.kind === 'lengthened_partial') {
     const main = `${st.kg != null ? st.kg + UI.unit() : '—'} × ${st.reps ?? '—'}`;
@@ -3757,6 +3808,7 @@ function ComparisonScreen({ session, onDismiss, go, userName }) {
           const fmtSet = s => {
             if (!s) return '—';
             if (s.skipped && !s.done) return 'skipped';
+            if (s.timeSec != null) return LB.fmtDuration(s.timeSec);
             const tr = LB.techniqueRounds(s);
             if (tr.kind === 'lengthened_partial') {
               const main = `${s.kg != null ? s.kg + unit : '—'} × ${s.reps ?? '—'}`;
@@ -4203,13 +4255,14 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
                     {s.warmup ? 'W' : i + 1}
                   </span>
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
+                    {/* Time-based set: one duration instead of kg x reps */}
                     <span className="num" style={{ fontSize: 20, color: UI.ink, fontWeight: 300 }}>
-                      {s.kg != null ? s.kg : '—'}
+                      {s.timeSec != null ? LB.fmtDuration(s.timeSec) : s.kg != null ? s.kg : '—'}
                     </span>
-                    {s.kg != null && <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.08em' }}>{unit}</span>}
+                    {s.timeSec == null && s.kg != null && <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.08em' }}>{unit}</span>}
                   </div>
                   <div style={{ textAlign: 'center' }}>
-                    {unilateral ? (
+                    {s.timeSec != null ? null : unilateral ? (
                       <span className="num" style={{ fontSize: 14, color: UI.ink }}>
                         {s.repsL ?? '—'}<span style={{ color: UI.inkFaint, fontSize: 11 }}> / </span>{s.repsR ?? '—'}
                       </span>
@@ -4269,12 +4322,12 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
                         <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
                           {s.skipped
                             ? <span className="num" style={{ fontSize: 13, color: UI.inkFaint }}>skipped</span>
-                            : <><span className="num" style={{ fontSize: 16, color: UI.inkSoft }}>{s.kg != null ? s.kg : '—'}</span>
-                               {s.kg != null && <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi }}>{unit}</span>}</>
+                            : <><span className="num" style={{ fontSize: 16, color: UI.inkSoft }}>{s.timeSec != null ? LB.fmtDuration(s.timeSec) : s.kg != null ? s.kg : '—'}</span>
+                               {s.timeSec == null && s.kg != null && <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi }}>{unit}</span>}</>
                           }
                         </div>
                         <div style={{ display: 'flex', alignItems: 'baseline', gap: 4, justifyContent: 'center' }}>
-                          {!s.skipped && <>
+                          {!s.skipped && s.timeSec == null && <>
                             <span className="num" style={{ fontSize: 16, color: UI.inkSoft }}>{s.reps != null ? s.reps : '—'}</span>
                             {s.reps != null && <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi }}>reps</span>}
                           </>}
@@ -4396,6 +4449,7 @@ function ExerciseHistoryScreen({ store, go, exId, dayId, exName, back, userId })
 
   const ex = store.exercises.find(e => e.id === exId);
   const isUni = !!ex?.unilateral;
+  const isTimeEx = LB.exerciseLogMode(ex) === 'time';
   const displayName = exName || ex?.name || '?';
 
   // Local window renders instantly; the server history extends the chart to
@@ -4416,7 +4470,7 @@ function ExerciseHistoryScreen({ store, go, exId, dayId, exName, back, userId })
         const entry = s.entries.find(e => e.exId === exId);
         if (!entry) return null;
         const working = entry.sets.filter(st => !st.warmup && !st.skipped);
-        if (!working.some(st => st.kg != null || st.reps != null)) return null;
+        if (!working.some(st => st.kg != null || st.reps != null || st.timeSec != null)) return null;
         return { id: s.id, ended: s.ended, sets: working };
       })
       .filter(Boolean);
@@ -4425,7 +4479,7 @@ function ExerciseHistoryScreen({ store, go, exId, dayId, exName, back, userId })
       .filter(r => !seen.has(r.sessionId))
       .map(r => {
         const working = (r.sets || []).filter(st => !st.warmup && !st.skipped);
-        if (!working.some(st => st.kg != null || st.reps != null)) return null;
+        if (!working.some(st => st.kg != null || st.reps != null || st.timeSec != null)) return null;
         return { id: r.sessionId, ended: r.ended, sets: working };
       })
       .filter(Boolean);
@@ -4442,6 +4496,7 @@ function ExerciseHistoryScreen({ store, go, exId, dayId, exName, back, userId })
     // shorter session's slot at that index is undefined, not a set with
     // null values.
     if (!st) return null;
+    if (isTimeEx) return st.timeSec ?? null;
     if (metric === 'reps') return isUni
       ? (st.repsL != null ? Math.min(st.repsL ?? 0, st.repsR ?? 0) : (st.reps ?? null))
       : (st.reps ?? null);
@@ -4500,7 +4555,9 @@ function ExerciseHistoryScreen({ store, go, exId, dayId, exName, back, userId })
 
           {/* Metric toggle + session count */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
-            {['kg', 'reps'].map(m => (
+            {isTimeEx ? (
+              <span className="micro" style={{ color: UI.gold, letterSpacing: '0.12em' }}>DURATION</span>
+            ) : ['kg', 'reps'].map(m => (
               <button key={m} onClick={() => setMetric(m)} style={{
                 padding: '5px 14px', borderRadius: 4, cursor: 'pointer',
                 border: `1px solid ${metric === m ? UI.gold : UI.hairStrong}`,
@@ -4527,7 +4584,7 @@ function ExerciseHistoryScreen({ store, go, exId, dayId, exName, back, userId })
                 <g key={i}>
                   <line x1={PAD_L} y1={y} x2={VW - PAD_R} y2={y} stroke={UI.hair} strokeWidth="0.5" strokeDasharray="3 3" />
                   <text x={PAD_L - 5} y={y + 3.5} textAnchor="end" fontSize="8" fontFamily="JetBrains Mono, monospace" fill={UI.inkFaint}>
-                    {Math.round(v)}
+                    {isTimeEx ? LB.fmtDuration(v) : Math.round(v)}
                   </text>
                 </g>
               );
@@ -4594,7 +4651,9 @@ function ExerciseHistoryScreen({ store, go, exId, dayId, exName, back, userId })
                       border: `1px solid ${UI.hair}`, borderRadius: 4, padding: '2px 7px',
                       fontFamily: UI.fontNum, fontSize: 11, color: UI.ink,
                     }}>
-                      {tr.kind === 'lengthened_partial' ? (
+                      {st.timeSec != null ? (
+                        LB.fmtDuration(st.timeSec)
+                      ) : tr.kind === 'lengthened_partial' ? (
                         <>{st.kg ?? '—'}<span style={{ color: UI.inkFaint, fontSize: 9 }}>{UI.unit()}</span><span style={{ color: UI.inkFaint, margin: '0 1px' }}>×</span>{st.reps ?? '—'}</>
                       ) : tr.kind ? (
                         tr.rounds.map((d, di) => (

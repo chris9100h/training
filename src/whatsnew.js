@@ -16,6 +16,46 @@
    Entry shape: { id: string, title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.518',
+    title: 'No Lift Left Behind',
+    items: [
+      "💪 Assisted pull-ups and dips finally count. Not ready for a strict rep yet? Mark any exercise as \"Assisted\" and log how much help you're leaning on, whether it's a band or the machine stack. Here's the clever part: less help is progress, so every time you shave the assistance down the app logs a new best and cheers you on. Track the whole climb, right up to your first unassisted rep.",
+      "🏋️ 5/3/1 stretches to fit you. Beyond the classic four, add as many main lifts as you like: a fifth, a sixth, whatever your training calls for. Each new one gets its own day, waves 5s / 3s / 1s off its Training Max, and bumps automatically cycle to cycle, exactly like the originals. Set them up at the start, or later in the editor: tap \"+ Add day\" and choose 5/3/1 Progression. (Assistance work also dropped its four-per-day limit, so pile on the accessories.)",
+    ],
+  },
+  {
+    id: 'v2.515',
+    title: '5/3/1, By the Book',
+    items: [
+      "🏋️ Wendler's 5/3/1 landed as a ready-made program. Start a new plan, tap Programs, and choose 5/3/1: set your four main lifts and their Training Maxes (or let the app estimate them from your history), and every working weight for every week gets calculated for you. No percentage math on the gym floor, ever.",
+      "🔥 The famous \"+\" sets are here in full. On your top set you go for as many reps as you can, and the whole row catches fire while you grind it out. Hit your target reps across the cycle and the app bumps your Training Max automatically next time around. Stall twice and it walks the weight back so you can build momentum up again. Classic 5/3/1, no spreadsheet required.",
+      "📈 Watch it climb. Your plan shows exactly which cycle and week you're on, and a per-lift chart tracks how your Training Maxes have moved over time. Prefer to steer yourself? Edit any Max by hand, or tap \"Set from history\" to pull the number your best recent single implies.",
+    ],
+  },
+  {
+    id: 'v2.514',
+    title: 'Now on the Clock',
+    items: [
+      "⏱️ Exercises can run on time instead of reps. Planks, dead hangs, jump rope, HIIT intervals, wall sits: anything you measure in seconds. When you build or edit an exercise, pick \"Time\" as how it's logged, and it tracks a duration per set instead of weight and reps.",
+      "🟢 Set your target, tap GO. A full-screen countdown takes over, ticks down, beeps, and checks the set off for you the moment it hits zero. Bailing early? Tap Stop and it logs however long you actually held on. No fumbling with a separate timer app mid-plank.",
+      "🏆 Your Best Time stays front and center in the exercise history, so you always know the number to beat. Watch it climb session over session.",
+    ],
+  },
+  {
+    id: 'v2.511',
+    title: 'The road so far…',
+    items: [
+      "🏋️ Training grew claws. Drop Sets, Myo-Reps & Myo-Rep Match, Lengthened Partials and AMRAP Variations all landed: tap INTENSITY on any set and go past failure, no workarounds. Superset or Giant Set anything mid-workout, add or swap exercises on the fly with sets seeded from your history, and Smarter Progression now anchors on your best recent set (not just your last one), tunable per exercise with your rep target in view the whole time. When you finish, Compare Sessions lines you up set by set against a past workout of the same day.",
+      "📈 Mesocycles turned the app into a real coach. Make any plan a 4 to 8 week block: target RIR counts down, quick per-exercise check-ins auto-tune your volume, and earned weight boosts compound across blocks. Feeling brave? Hell Mode lets you set your own RIR taper or go negative for automatic partials past failure (the number literally catches fire 🔥). And deload week pre-fills your weights at 50%, on tap or nudged automatically after 8 cycles.",
+      "🗂️ Building plans got a lot friendlier. A guided setup walks you from name to split, ready-made programs (2 to 6 days a week) are one tap to preview and use, and a curated exercise Database holds the classics to browse and add. Paste a YouTube link onto any exercise and a play button shows up right when you train it, import a whole training day (history and all) from another plan or template, and flexible plans, dated version history and automatic backups keep everything safe.",
+      "❤️ A full Health tab arrived: weight, macros, steps, water and adherence, all charted. Track blood glucose with context tags and reference bands, log cardio live with a background stopwatch (or by hand) alongside goal-based Cardio Plans that build the progression for you, and flip on Sick & Vacation mode to pause everything and pick back up right where you left off.",
+      "🔔 Getting in and getting pinged got easier. Native push handles rest timers, coaching and reminders with no third-party app, passkeys let you sign in with Face ID, Touch ID or your PIN, and password reset plus in-app email and password changes and install-as-app guides round it out.",
+      "🎓 Coaching leveled up too: fully custom weekly check-in forms with a live preview, photos in coaching chat both ways, and a built-in Support Center with live ticket status.",
+      "✨ And a pile of everything else: Quick Actions (pull down on Home), Freestyle and Bonus workouts, saveable templates, a plate calculator, mixed units, 10 accent colors, light and OLED themes, and guided tours for all of it. Under the hood the app starts instantly no matter how much history you carry, works fully offline, and multi-device sync stopped stepping on itself.",
+      "🎸 That's the road so far. Now carry on. 💪",
+    ],
+  },
+  {
     id: 'v2.508',
     title: 'Programs, Off the Shelf',
     items: [

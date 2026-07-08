@@ -464,9 +464,12 @@ function PlateCalcSheet({ open, onClose, initialWeight, availablePlates }) {
 }
 
 // ─── Custom Keyboard ──────────────────────────────────────────────────
-function CustomKeyboard({ visible, field, onType, onBackspace, onAdjust, onConfirm, onDismiss, onPlateCalc, confirmDisabled }) {
+function CustomKeyboard({ visible, field, onType, onBackspace, onAdjust, onConfirm, onDismiss, onPlateCalc, onSign, assisted, confirmDisabled }) {
   if (!visible) return null;
   const isKg = field === 'kg';
+  // Assisted kg entry swaps the plate-calc key (useless on a negative load) for
+  // a ± sign toggle.
+  const showSign = assisted && isKg;
   const H = 40;
   const base = {
     background: 'var(--bg-raised)', border: `0.5px solid var(--hair)`, borderRadius: 6,
@@ -491,7 +494,9 @@ function CustomKeyboard({ visible, field, onType, onBackspace, onAdjust, onConfi
       <div style={{ maxWidth: 480, margin: '0 auto', display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gridTemplateRows: `repeat(5, ${H}px)`, gap: 4 }}>
         {/* Row 1: ↓ 🏋 ↑ | ✓ (spans rows 1-4) */}
         <button style={act} onPointerDown={e => { e.preventDefault(); e.stopPropagation(); onAdjust(-1); }}>↓</button>
-        <button style={act} onPointerDown={e => { e.preventDefault(); e.stopPropagation(); onPlateCalc(); }}><i className="fa-solid fa-dumbbell" style={{ fontSize: 11 }} /></button>
+        {showSign
+          ? <button style={{ ...act, fontSize: 18, fontFamily: UI.fontNum }} onPointerDown={e => { e.preventDefault(); e.stopPropagation(); onSign(); }}>±</button>
+          : <button style={act} onPointerDown={e => { e.preventDefault(); e.stopPropagation(); onPlateCalc(); }}><i className="fa-solid fa-dumbbell" style={{ fontSize: 11 }} /></button>}
         <button style={act} onPointerDown={e => { e.preventDefault(); e.stopPropagation(); onAdjust(1); }}>↑</button>
         <button
           onPointerDown={e => { e.preventDefault(); e.stopPropagation(); if (!confirmDisabled) onConfirm(); }}
@@ -606,6 +611,24 @@ function RestGauge({ restStart, restDef, variant }) {
       <div style={{ height: '100%', width: `${pct}%`, background: UI.gold, transition: 'width 0.25s linear' }} />
     </div>
   </>);
+}
+
+// Countdown for a time-based (log_mode 'time') set: ticks every 250ms, shows the
+// remaining mm:ss and a depleting bar, and fires onDone exactly once at zero.
+function TimeCountdown({ startedAt, total }) {
+  const [, tick] = useStateT(0);
+  useEffectT(() => { const t = setInterval(() => tick(n => n + 1), 250); return () => clearInterval(t); }, []);
+  const el = Math.max(0, (Date.now() - startedAt) / 1000);
+  const remaining = Math.max(0, total - el);
+  const pct = total > 0 ? Math.min(100, (el / total) * 100) : 100;
+  return (
+    <div style={{ textAlign: 'center' }}>
+      <div className="num" style={{ fontSize: 92, fontWeight: 300, letterSpacing: '-0.03em', lineHeight: 1, color: UI.gold, textShadow: '0 0 40px rgba(var(--accent-rgb),0.55), 0 0 80px rgba(var(--accent-rgb),0.25)', animation: remaining <= 3 ? 'timerPulse 0.7s ease-in-out infinite' : 'none' }}>{LB.fmtDuration(Math.ceil(remaining))}</div>
+      <div style={{ height: 3, background: UI.hair, borderRadius: 4, overflow: 'hidden', marginTop: 24, width: 220, marginLeft: 'auto', marginRight: 'auto' }}>
+        <div style={{ height: '100%', width: `${100 - pct}%`, background: UI.gold, transition: 'width 0.25s linear' }} />
+      </div>
+    </div>
+  );
 }
 
 function TrainingScreen(props) {
@@ -774,19 +797,69 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     return () => { on = false; };
   }, [entry?.exId]);
   const last = localLast ?? (entry ? remoteLast[entry.exId] : null) ?? null;
+
+  // Cross-day history for the tapped exercise name. The in-training "last time"
+  // above is day-slot specific (bestRecentEntry / fetchExerciseHistory both key
+  // on session.dayId), so an exercise pushed harder on another day reads as
+  // stale here. This sheet pulls the exercise's real recent history across ALL
+  // days straight from the server (get_exercise_history, not the 70-day local
+  // window), local-first with a server overlay so it also works offline.
+  const [historyOpen, setHistoryOpen] = useStateT(false);
+  const [historyRows, setHistoryRows] = useStateT(null); // server rows; null until fetched (falls back to localHistory)
+  const [historyLoading, setHistoryLoading] = useStateT(false);
+  const historyDayNames = useMemoT(() => {
+    const m = {};
+    for (const s of (store.sessions || [])) if (s.id) m[s.id] = s.dayName;
+    return m;
+  }, [store.sessions]);
+  const localHistory = useMemoT(() => {
+    if (!entry?.exId) return [];
+    const rows = [];
+    for (const s of (store.sessions || [])) {
+      if (!s.ended || s.isDeload || s.id === session.id) continue;
+      const e = (s.entries || []).find(en => en.exId === entry.exId);
+      if (!e || !(e.sets || []).some(st => !st.warmup && !st.skipped)) continue;
+      rows.push({ sessionId: s.id, date: s.date, dayName: s.dayName, sets: e.sets });
+    }
+    rows.sort((a, b) => (b.date > a.date ? 1 : b.date < a.date ? -1 : 0));
+    return rows;
+  }, [store.sessions, entry?.exId, session.id]);
+  useEffectT(() => {
+    if (!historyOpen || !entry?.exId) return;
+    const exId = entry.exId;
+    let on = true;
+    setHistoryRows(null); // drop the previous exercise's rows; localHistory shows meanwhile
+    setHistoryLoading(true);
+    LB.fetchExerciseHistory(exId, null, 15, userId)
+      .then(rows => {
+        if (!on) return;
+        const deloadIds = new Set((store.sessions || []).filter(s => s.isDeload).map(s => s.id));
+        const mapped = (rows || [])
+          .filter(r => r.sessionId !== session.id && !deloadIds.has(r.sessionId))
+          .map(r => ({ sessionId: r.sessionId, date: r.date, dayName: historyDayNames[r.sessionId] || '', sets: r.sets || [] }));
+        setHistoryRows(mapped);
+        setHistoryLoading(false);
+      })
+      .catch(() => { if (on) setHistoryLoading(false); }); // keep null so the local fallback stays visible offline
+    return () => { on = false; };
+  }, [historyOpen, entry?.exId]);
+
   const isCardio = !!entry?.isCardio;
   const isUnilateral = !isCardio && (exercise?.movement_type ?? (exercise?.unilateral ? 'unilateral' : 'bilateral')) === 'unilateral';
   const logMode = !isCardio ? LB.exerciseLogMode(exercise) : 'weight';
   const isCheckbox = logMode === 'checkbox';   // tick only, no numbers
   const isRepsOnly = logMode === 'reps';       // reps cell, no weight
-  const isNoWeightReps = isCheckbox || isRepsOnly; // "no weight column" — keeps all existing kg/header/hero gates
+  const isTime = logMode === 'time';           // countdown + duration, no weight
+  const isNoWeightReps = isCheckbox || isRepsOnly || isTime; // "no weight column" — keeps all existing kg/header/hero gates
   const isBodyweight = !isCardio && exercise?.equipment === 'bodyweight';
   const progressionTargetForSet = (workingSetIdx) => {
     if (!LB.progressionEnabled(store, entry?.plannedRepsMax, entry?.plannedProgressionOffset)) return null;
     // Progression itself is suppressed during deload (see completeSet's
-    // isDeloadSession guard) — showing the "≥X reps · next weight" hint
-    // anyway would promise an unlock that can never actually fire.
-    if (store.statusMode === 'deload' || session.isDeload) return null;
+    // isDeloadSession guard): showing the "≥X reps · next weight" hint anyway
+    // would promise an unlock that can never actually fire. The 5/3/1 built-in
+    // week 4 counts too: assistance items run through this hint while the same
+    // deload gate blocks their unlock.
+    if (store.statusMode === 'deload' || session.isDeload || is531DeloadSession) return null;
     const perSet = entry?.plannedRepsPerSet;
     const perSetVal = perSet && perSet.length > 1
       ? (perSet[workingSetIdx] ?? perSet[perSet.length - 1])
@@ -849,6 +922,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     const idx = (e.sets || []).findIndex(s => !s.warmup && !s.done && !s.skipped);
     if (idx < 0) return null;
     const ex = store.exercises?.find(x => x.id === e.exId);
+    if (LB.exerciseLogMode(ex) === 'time') return null; // no numeric field to focus
     const noWeight = !!ex?.no_weight_reps;
     const uni = (ex?.movement_type ?? (ex?.unilateral ? 'unilateral' : 'bilateral')) === 'unilateral';
     const repsField = uni ? 'repsL' : 'reps';
@@ -863,6 +937,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // following warmup) — used when navigation stays put, so the field type
   // mirrors this entry's own kg/reps shape rather than re-deriving it.
   const nextOwnFocus = (setsArr, afterIdx) => {
+    if (isTime) return null; // time sets have no keyboard field to auto-focus
     const idx = setsArr.findIndex((s, i) => i > afterIdx && !s.done && !s.skipped);
     if (idx < 0) return null;
     const repsField = isUnilateral ? 'repsL' : 'reps';
@@ -945,6 +1020,73 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     }
   };
 
+  // How long after a completed set we swap to the next exercise (or open the
+  // finish sheet) while a NEW BEST / IMPROVEMENT / REGRESSION flash is showing.
+  // That flash is fully opaque from ~200ms to ~1800ms (improvedFade over its
+  // 2.5s life) before fading out. Swapping at 700ms happens completely hidden
+  // behind it, so as the flash fades the next exercise is already rendered
+  // underneath: a smooth reveal instead of the old abrupt jump that only fired
+  // once the flash had fully cleared at 2500ms. The flash keeps its own full
+  // 2.5s hide timers; only the navigation moved earlier. The flash sits above
+  // the finish sheet (z 150+ vs 100), so the last-set case reveals cleanly too.
+  const FLASH_NAV_DELAY_MS = 700;
+
+  // PROGRESSION UNLOCKED works the same way but appears 800ms later (it waits
+  // out that delay before showing) and lives 4s, opaque from ~1120ms to
+  // ~3680ms. Swapping at 1600ms lands well inside that opaque window, so the
+  // next exercise is already on screen by the time it fades out at 4800ms.
+  const PROGRESSION_NAV_DELAY_MS = 1600;
+
+  // A 5/3/1 built-in deload week (week 4, 40/50/60% off the TM) is a normal
+  // logged session (not an app deload via statusMode, not session.isDeload),
+  // but its loads are intentionally light. So it must count as a deload for the
+  // regression flash and the low-weight outlier guard, or both fire falsely.
+  const is531DeloadSession = (() => {
+    const s531 = store.schedules?.find(x => x.id === session.scheduleId);
+    return LB.is531Plan(s531) && LB.current531Week(s531, store.sessions) === 4;
+  })();
+
+  // Time-based set: tapping GO opens the countdown overlay. The parent owns the
+  // expiry (setTimeout), like the rest timer; the leaf is display-only. At zero
+  // it auto-checks the set with the full target; Stop logs the elapsed time.
+  const startCountdown = (setIdx, total) => {
+    if (!(total > 0)) return;
+    clearTimeout(countdownTimerRef.current);
+    const cd = { setIdx, total, startedAt: Date.now() };
+    countdownRef.current = cd;
+    setCountdown(cd);
+    try { if (!audioCtxRef.current) audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)(); if (audioCtxRef.current.state === 'suspended') audioCtxRef.current.resume(); } catch (_) {}
+    countdownTimerRef.current = setTimeout(() => finishCountdown(true), total * 1000);
+  };
+  const finishCountdown = (completed) => {
+    clearTimeout(countdownTimerRef.current);
+    countdownTimerRef.current = null;
+    const cd = countdownRef.current;
+    countdownRef.current = null;
+    setCountdown(null);
+    if (!cd) return;
+    if (completed) { try { playBeep('go', 3); } catch (_) {} }
+    const logged = completed ? cd.total : Math.min(cd.total, Math.max(1, Math.round((Date.now() - cd.startedAt) / 1000)));
+    completeSet(cd.setIdx, true, true, { timeSec: logged });
+  };
+  useEffectT(() => () => clearTimeout(countdownTimerRef.current), []);
+
+  // NEW BEST decision, shared by completeSet and the technique finishers. For an
+  // assisted exercise "best" is the highest (least-negative) load, compared kg
+  // to kg with no Epley and no >0 gate (loads are negative). Everything else
+  // uses the estimated 1RM, folding in the local + windowed-server best.
+  const isNewBestSet = (kg, reps) => {
+    if (!entry || newBestShownRef.current[entry.exId]) return false;
+    if (LB.isAssisted(exercise)) {
+      if (kg == null) return false;
+      const prior = LB.bestAssistLoad(store, entry.exId, session.id);
+      return prior != null && kg > prior;
+    }
+    const cE1rm = (kg != null && reps != null && reps > 0) ? LB.e1rm(kg, reps) : 0;
+    const priorBest = Math.max(LB.bestE1rmForExercise(store, entry.exId, session.id), remoteBestE1rmRef.current[entry.exId] || 0);
+    return cE1rm > 0 && priorBest > 0 && cE1rm > priorBest;
+  };
+
   const completeSet = (setIdx, bypassOutlierCheck = false, advanceFocus = false, extraPatch = null) => {
     // Lengthened partials only ever completes via finishLengthenedPartial,
     // which supplies extraPatch with the chosen partials count — every other
@@ -976,7 +1118,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // When both are off we show a combined message.
     // Skipped during deload — loads are intentionally reduced, comparisons
     // against the pre-deload reference would always fire as "too low".
-    const _isDeloadSet = store.statusMode === 'deload' || session.isDeload;
+    const _isDeloadSet = store.statusMode === 'deload' || session.isDeload || is531DeloadSession;
     if (!bypassOutlierCheck && !entry.sets[setIdx]?.warmup && !_isDeloadSet) {
       const wIdx = entry.sets.slice(0, setIdx + 1).filter(s => !s.warmup).length - 1;
       const prevWorkingSets = (last?.entry?.sets || []).filter(s => !s.warmup);
@@ -1009,7 +1151,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       let loggedKg = null;
       let refKg = null;
       let increment = 2.5;
-      if (!isNoWeightReps) {
+      // Assisted exercises carry a negative (or graduating) load, so the
+      // low-weight "mistype" comparison against a reference doesn't apply.
+      if (!isNoWeightReps && !LB.isAssisted(exercise)) {
         refKg = suggestion ? (suggestion.kg ?? null) : (prevSet ? prevSet.kg : null);
         if (refKg != null && refKg > 0) {
           const catCfg = exercise?.equipment ? (store.settings?.equipmentConfig?.[exercise.equipment] ?? {}) : {};
@@ -1096,11 +1240,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
     // During a deload the loads are deliberately light — suppress all
     // progression/PR/improvement/regression overlays so a planned easy week
-    // never reads as a jump or a decline.
-    const isDeloadSession = store.statusMode === 'deload' || session.isDeload;
+    // never reads as a jump or a decline. Includes the 5/3/1 built-in week 4.
+    const isDeloadSession = store.statusMode === 'deload' || session.isDeload || is531DeloadSession;
 
     const progressionResult = (() => {
       if (isDeloadSession) return null;
+      if (LB.is531MainLift(store, entry.exId, session.dayId)) return null; // 5/3/1 main lifts climb via the Training Max, never the Smart Progression toast
       if (!LB.progressionEnabled(store, entry?.plannedRepsMax, entry?.plannedProgressionOffset)) return null;
       if (!updatedSets.filter(s => !s.warmup).every(s => s.done || s.skipped)) return null;
       const catCfg = exercise?.equipment ? (store.settings?.equipmentConfig?.[exercise.equipment] ?? {}) : {};
@@ -1133,18 +1278,21 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // all-time e1RM record for this exercise — independent of smart
     // progression, max once per exercise. A first-ever set (no record yet) and
     // bodyweight sets (no kg) never count as a new best.
-    // overlayHoldMs stretches the auto-advance delay below to match whichever
-    // of these toasts is showing, so navigating to the next exercise doesn't
-    // cut its display short. Every overlay (including progression) now only
-    // ever schedules its own show/hide timers here — the actual navigation
-    // decision happens exactly once, further down, in the superset-aware
-    // code shared by every completion. Previously PROGRESSION UNLOCKED ran an
-    // entirely separate, non-superset-aware navigate(1) on its own 4.8s
-    // timer, which could fire well after (and override) wherever the
-    // superset flow had already correctly moved the user on to.
+    // overlayHoldMs is the delay before the shared navigation below swaps to
+    // the next exercise. We pull it well under each overlay's display time
+    // (FLASH_NAV_DELAY_MS for the three flashes, PROGRESSION_NAV_DELAY_MS for
+    // the longer progression toast) so the swap happens hidden behind the
+    // still-opaque overlay and the next exercise is already there as it fades,
+    // instead of jumping in only once the overlay fully clears. Every overlay
+    // only ever schedules its own show/hide timers here; the navigation
+    // decision happens exactly once, further down, in the superset-aware code
+    // shared by every completion. (Previously PROGRESSION UNLOCKED ran a
+    // separate, non-superset-aware navigate(1) on its own 4.8s timer that
+    // could override wherever the superset flow had already moved the user
+    // on to.)
     let overlayHoldMs = 0;
     if (progressionResult) {
-      overlayHoldMs = 4800; // 800ms delay + 4000ms display, matching the toast's own timing below
+      overlayHoldMs = PROGRESSION_NAV_DELAY_MS; // swap mid-overlay; the show/hide timers below keep their own 800ms + 4000ms
       setTimeout(() => {
         setProgressionUnlocked(progressionResult);
         setTimeout(() => setProgressionUnlocked(null), 4000);
@@ -1152,24 +1300,21 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     } else if (!entry.sets[setIdx]?.warmup && !isDeloadSession) {
       const completed = entry.sets[setIdx];
       const cReps = LB.effReps(completed);
-      const cE1rm = (completed?.kg != null && cReps != null && cReps > 0) ? LB.e1rm(completed.kg, cReps) : 0;
-      const localBest = LB.bestE1rmForExercise(store, entry.exId, session.id);
-      const priorBest = Math.max(localBest, remoteBestE1rmRef.current[entry.exId] || 0);
-      const isNewBest = cE1rm > 0 && priorBest > 0 && cE1rm > priorBest && !newBestShownRef.current[entry.exId];
+      const isNewBest = isNewBestSet(completed?.kg ?? null, cReps);
       if (isNewBest) {
         newBestShownRef.current[entry.exId] = true;
         setNewBestSet(true);
-        overlayHoldMs = 2500;
+        overlayHoldMs = FLASH_NAV_DELAY_MS;
         setTimeout(() => setNewBestSet(false), 2500);
       } else if (isImprovement(completed, prevSet)) {
         setImprovedSet(true);
-        overlayHoldMs = 2500;
+        overlayHoldMs = FLASH_NAV_DELAY_MS;
         setTimeout(() => setImprovedSet(false), 2500);
       } else {
         const anyImprovementBefore = entry.sets.slice(0, setIdx).some((s, k) => isImprovement(s, prevWorkingSetFor(k)));
         if (!anyImprovementBefore && isDecline(completed, prevSet) && store.settings?.showRegression !== false) {
           setRegressionSet(true);
-          overlayHoldMs = 2500;
+          overlayHoldMs = FLASH_NAV_DELAY_MS;
           setTimeout(() => setRegressionSet(false), 2500);
         }
       }
@@ -1189,21 +1334,18 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // passed through as-is (not reconstructed) so isImprovement/isDecline see
   // exactly what they always did. Returns overlayHoldMs for finishSetNavigation.
   const flashOverlayForCompletedSet = (targetIdx, firstSet) => {
-    const isDeloadSession = store.statusMode === 'deload' || session.isDeload;
+    const isDeloadSession = store.statusMode === 'deload' || session.isDeload || is531DeloadSession;
     let overlayHoldMs = 0;
     if (!entry.sets[targetIdx]?.warmup && !isDeloadSession && firstSet.kg != null && firstSet.reps > 0) {
       const prevWS = (last?.entry?.sets || []).filter(s => !s.warmup);
       const wIdx = entry.sets.slice(0, targetIdx + 1).filter(s => !s.warmup).length - 1;
       const prevSet = wIdx >= 0 ? prevWS[wIdx] : undefined;
-      const cE1rm = LB.e1rm(firstSet.kg, firstSet.reps);
-      const localBest = LB.bestE1rmForExercise(store, entry.exId, session.id);
-      const priorBest = Math.max(localBest, remoteBestE1rmRef.current[entry.exId] || 0);
-      const isNewBest = cE1rm > 0 && priorBest > 0 && cE1rm > priorBest && !newBestShownRef.current[entry.exId];
+      const isNewBest = isNewBestSet(firstSet.kg, firstSet.reps);
       if (isNewBest) {
         newBestShownRef.current[entry.exId] = true;
-        setNewBestSet(true); overlayHoldMs = 2500; setTimeout(() => setNewBestSet(false), 2500);
+        setNewBestSet(true); overlayHoldMs = FLASH_NAV_DELAY_MS; setTimeout(() => setNewBestSet(false), 2500);
       } else if (isImprovement(firstSet, prevSet)) {
-        setImprovedSet(true); overlayHoldMs = 2500; setTimeout(() => setImprovedSet(false), 2500);
+        setImprovedSet(true); overlayHoldMs = FLASH_NAV_DELAY_MS; setTimeout(() => setImprovedSet(false), 2500);
       } else {
         const anyImpBefore = entry.sets.slice(0, targetIdx).some((s, k) => {
           if (s.warmup) return false;
@@ -1211,7 +1353,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           return isImprovement(s, wk >= 0 ? prevWS[wk] : undefined);
         });
         if (!anyImpBefore && isDecline(firstSet, prevSet) && store.settings?.showRegression !== false) {
-          setRegressionSet(true); overlayHoldMs = 2500; setTimeout(() => setRegressionSet(false), 2500);
+          setRegressionSet(true); overlayHoldMs = FLASH_NAV_DELAY_MS; setTimeout(() => setRegressionSet(false), 2500);
         }
       }
     }
@@ -1868,6 +2010,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const [improvedSet, setImprovedSet] = useStateT(false);
   const [regressionSet, setRegressionSet] = useStateT(false);
   const [newBestSet, setNewBestSet] = useStateT(false);
+  // Time-based (log_mode 'time') countdown overlay: { setIdx, total, startedAt }.
+  const [countdown, setCountdown] = useStateT(null);
+  const countdownRef = useRefT(null);
+  const countdownTimerRef = useRefT(null);
   const newBestShownRef = useRefT({}); // exId → true once a NEW BEST flashed (max once per exercise per session)
   const [cardioPR, setCardioPR] = useStateT(null);
   const [progressionUnlocked, setProgressionUnlocked] = useStateT(null);
@@ -3098,7 +3244,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const kbTypeChar = (char) => {
     if (!kbFieldRef.current) { _log(`TYPE '${char}' → NULL kbField (swallowed!)`); return; }
     const { setIdx, field } = kbFieldRef.current;
-    const base = kbFreshRef.current ? '' : kbRawRef.current;
+    // Assisted exercises log a negative load: a freshly-typed kg starts with a
+    // minus so the user just taps the assistance amount. The ± key flips it back
+    // to positive once they graduate past bodyweight.
+    const base = kbFreshRef.current ? (field === 'kg' && LB.isAssisted(exercise) ? '-' : '') : kbRawRef.current;
     if (char === ',' && (field !== 'kg' || base.includes(','))) return;
     const newRaw = base + char;
     kbRawRef.current = newRaw;
@@ -3106,6 +3255,21 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     setKbRaw(newRaw);
     setKbFresh(false);
     _log(`TYPE '${char}' → '${newRaw}' (set${setIdx} ${field})`);
+    kbApply(newRaw, field, setIdx);
+  };
+
+  // ± key (assisted only): flip the sign of the current kg entry. Assistance is
+  // negative; graduating to real added weight makes it positive.
+  const kbSignToggle = () => {
+    if (!kbFieldRef.current) return;
+    const { setIdx, field } = kbFieldRef.current;
+    if (field !== 'kg') return;
+    const cur = kbRawRef.current || '';
+    const newRaw = cur.startsWith('-') ? cur.slice(1) : '-' + cur;
+    kbRawRef.current = newRaw;
+    kbFreshRef.current = false;
+    setKbRaw(newRaw);
+    setKbFresh(false);
     kbApply(newRaw, field, setIdx);
   };
 
@@ -3128,7 +3292,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       if (field === 'kg') {
         const cur = parseFloat(kbRawRef.current.replace(',', '.')) || 0;
         const step = (exercise?.equipment && store.settings?.equipmentConfig?.[exercise.equipment]?.increment) || 1.25;
-        const next = Math.max(0, Math.round((cur + dir * step) * 100) / 100);
+        const raw = Math.round((cur + dir * step) * 100) / 100;
+        const next = LB.isAssisted(exercise) ? raw : Math.max(0, raw);
         const newRaw = String(next).replace('.', ',');
         kbRawRef.current = newRaw;
         setKbRaw(newRaw);
@@ -3147,7 +3312,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       if (field === 'kg') {
         const cur = parseFloat(kbRawRef.current.replace(',', '.')) || 0;
         const step = (exercise?.equipment && store.settings?.equipmentConfig?.[exercise.equipment]?.increment) || 1.25;
-        const next = Math.max(0, Math.round((cur + dir * step) * 100) / 100);
+        const raw = Math.round((cur + dir * step) * 100) / 100;
+        const next = LB.isAssisted(exercise) ? raw : Math.max(0, raw);
         const newRaw = String(next).replace('.', ',');
         kbRawRef.current = newRaw;
         setKbRaw(newRaw);
@@ -3166,7 +3332,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       if (field === 'kg') {
         const cur = parseFloat(kbRawRef.current.replace(',', '.')) || 0;
         const step = (exercise?.equipment && store.settings?.equipmentConfig?.[exercise.equipment]?.increment) || 1.25;
-        const next = Math.max(0, Math.round((cur + dir * step) * 100) / 100);
+        const raw = Math.round((cur + dir * step) * 100) / 100;
+        const next = LB.isAssisted(exercise) ? raw : Math.max(0, raw);
         const newRaw = String(next).replace('.', ',');
         kbRawRef.current = newRaw;
         setKbRaw(newRaw);
@@ -3183,7 +3350,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     if (field === 'kg') {
       const cur = parseFloat(kbRawRef.current.replace(',', '.')) || 0;
       const step = (exercise?.equipment && store.settings?.equipmentConfig?.[exercise.equipment]?.increment) || 1.25;
-      const next = Math.max(0, Math.round((cur + dir * step) * 100) / 100);
+      const raw = Math.round((cur + dir * step) * 100) / 100;
+      // Assisted exercises range into the negative (assistance) and can step past
+      // zero into added weight; every other exercise stays clamped at 0.
+      const next = LB.isAssisted(exercise) ? raw : Math.max(0, raw);
       const newRaw = String(next).replace('.', ',');
       kbRawRef.current = newRaw;
       setKbRaw(newRaw);
@@ -3374,7 +3544,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const firstFieldForExercise = (ex) => {
     const m = LB.exerciseLogMode(ex);
     if (m === 'weight') return 'kg';
-    if (m === 'checkbox') return null;
+    if (m === 'checkbox' || m === 'time') return null;
     return ex?.movement_type === 'unilateral' ? 'repsL' : 'reps';
   };
 
@@ -3833,6 +4003,15 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     ? entry.sets.findIndex(s => !s.warmup)
     : currentSetIdx;
   const heroSet = bgSetIdx >= 0 ? entry.sets[bgSetIdx] : null;
+  // 5/3/1: the week-3 top set (95% × 1+, the heaviest single of the whole cycle)
+  // is peak intensity, so the hero card catches fire (same hellGlow as a
+  // beyond-failure meso set) while you grind that AMRAP. Working sets only.
+  const heroHell531 = (() => {
+    if (!heroSet?.amrap || isCurrentWarmup || store.statusMode === 'deload') return false;
+    const sch531 = store.schedules?.find(x => x.id === session.scheduleId);
+    if (!LB.is531Plan(sch531)) return false;
+    return (LB.current531Week(sch531, store.sessions) || 1) === 3;
+  })();
   // Warmups are seeded only onto whichever entry the session-start builder
   // picked (screens-home.jsx), normally entries[0] — but mid-session superset
   // linking can now move that entry away from position 0, so the WARMUP
@@ -4255,14 +4434,32 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         {/* Exercise name */}
         <div style={{ flexShrink: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div className="display" style={{
-              flex: 1, minWidth: 0,
-              fontSize: entry.name.length > 28 ? 16 : entry.name.length > 22 ? 20 : entry.name.length > 16 ? 26 : 32,
-              color: UI.ink, lineHeight: 1.05, letterSpacing: '0.02em', fontWeight: 700,
-              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-            }}>
-              {entry.name}
-            </div>
+            {isCardio ? (
+              <div className="display" style={{
+                flex: 1, minWidth: 0,
+                fontSize: entry.name.length > 28 ? 16 : entry.name.length > 22 ? 20 : entry.name.length > 16 ? 26 : 32,
+                color: UI.ink, lineHeight: 1.05, letterSpacing: '0.02em', fontWeight: 700,
+                whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+              }}>
+                {entry.name}
+              </div>
+            ) : (
+              <button onClick={() => setHistoryOpen(true)} aria-label="Show exercise history" style={{
+                flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 9,
+                background: 'transparent', border: 'none', padding: 0, margin: 0,
+                cursor: 'pointer', textAlign: 'left', WebkitTapHighlightColor: 'transparent',
+              }}>
+                <span className="display" style={{
+                  minWidth: 0, flexShrink: 1,
+                  fontSize: entry.name.length > 28 ? 16 : entry.name.length > 22 ? 20 : entry.name.length > 16 ? 26 : 32,
+                  color: UI.ink, lineHeight: 1.05, letterSpacing: '0.02em', fontWeight: 700,
+                  whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                }}>
+                  {entry.name}
+                </span>
+                <i className="fa-solid fa-clock-rotate-left" style={{ flexShrink: 0, fontSize: 13, color: UI.inkFaint }} />
+              </button>
+            )}
             {exercise?.youtube_url && (
               <a href={exercise.youtube_url} target="_blank" rel="noopener noreferrer"
                 aria-label="Watch form video"
@@ -4286,6 +4483,47 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               {(exercise?.tags || []).map(t => <Pill key={t}>{t}</Pill>)}
             </div>
           )}
+          {/* 5/3/1 wave for this main lift: the prescribed sets off the Training
+              Max for the current week, top set an AMRAP (+). */}
+          {(() => {
+            const s531 = store.schedules?.find(x => x.id === session.scheduleId);
+            if (!LB.is531Plan(s531) || !entry) return null;
+            const main = s531.program_data?.mainLifts?.[entry.exId];
+            if (!main || main.tm == null) return null;
+            const deloadActive = store.statusMode === 'deload';
+            const week = deloadActive ? 4 : (LB.current531Week(s531, store.sessions) || 1);
+            const u = s531.program_data.unit || 'kg';
+            const wave = LB.fiveThreeOneSets(main.tm, week, u);
+            // Once the AMRAP top set is logged, estimate the 1RM it implies and,
+            // if that points to a meaningfully higher Training Max, nudge.
+            const topDone = (entry.sets || []).find(s => s.amrap && s.done && s.kg != null && s.reps != null);
+            const est = topDone ? LB.e1rm(topDone.kg, topDone.reps) : null;
+            const sugg = est ? LB.suggest531Tm(est, main.tm, main.kind, u) : null;
+            return (
+              <div style={{ marginTop: 10, padding: '10px 12px', background: 'rgba(var(--accent-rgb),0.06)', border: `1px solid ${UI.goldSoft}`, borderRadius: 6 }}>
+                <div className="micro-gold" style={{ marginBottom: 7 }}>5/3/1 · {deloadActive ? 'DELOAD' : `WEEK ${week}${week === 4 ? ' · DELOAD' : ''}`} · TM {main.tm}{u}</div>
+                <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                  {wave.map((ws, i) => (
+                    <span key={i} className="num" style={{ fontSize: 14, color: ws.amrap ? UI.gold : UI.inkSoft }}>
+                      {ws.kg}<span style={{ color: UI.inkFaint }}>×</span>{ws.reps}{ws.amrap ? '+' : ''}
+                    </span>
+                  ))}
+                </div>
+                {est != null && (
+                  <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${UI.hairStrong}` }}>
+                    <div className="num" style={{ fontSize: 12, color: UI.inkSoft }}>
+                      Top set {topDone.kg}<span style={{ color: UI.inkFaint }}>×</span>{topDone.reps} → est. 1RM <span style={{ color: UI.gold }}>~{LB.round531(est, u)}{u}</span>
+                    </div>
+                    {sugg?.higher && (
+                      <div className="micro-gold" style={{ marginTop: 5, letterSpacing: '0.04em', lineHeight: 1.45 }}>
+                        That points to a Training Max near {sugg.tm}{u}, you're stronger than this cycle assumes.
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
           {/* Meso swap suggestions */}
           {mesoState && exercise && (() => {
             const flags = [];
@@ -4366,7 +4604,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                 <div style={{ marginBottom: 14 }}>
                   <div className="label" style={{ marginBottom: 6 }}>Duration (min)</div>
                   <input
-                    type="number" inputMode="numeric" value={cardioForm.duration}
+                    type="text" inputMode="numeric" value={cardioForm.duration}
                     onChange={e => setCardioForm(f => ({ ...f, duration: e.target.value }))}
                     placeholder="e.g. 30"
                     style={{ width: '100%', boxSizing: 'border-box', background: 'transparent', border: 'none', borderBottom: `0.5px solid ${UI.hairStrong}`, padding: '6px 0', color: UI.ink, fontFamily: UI.fontNum, fontSize: 22, outline: 'none' }}
@@ -4384,7 +4622,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                     </div>
                   </div>
                   <input
-                    type="number" inputMode="decimal" value={cardioForm.distance}
+                    type="text" inputMode="decimal" value={cardioForm.distance}
                     onChange={e => setCardioForm(f => ({ ...f, distance: e.target.value }))}
                     placeholder={`0.00 ${cardioForm.distUnit}`}
                     style={{ width: '100%', boxSizing: 'border-box', background: 'transparent', border: 'none', borderBottom: `0.5px solid ${UI.hairStrong}`, padding: '6px 0', color: UI.ink, fontFamily: UI.fontNum, fontSize: 22, outline: 'none' }}
@@ -4432,8 +4670,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           // Hell-cycle glow: the hero card smoulders (same hellGlow the meso
           // Options box uses) once the meso RIR target hits 0 or goes negative
           // (beyond failure), matching the red/ember RIR watermark. Working sets
-          // only, not warm-ups or deload.
-          <BracketFrame gold padding={0} style={(mesoState && mesoRirVal != null && mesoRirVal <= 0 && !isCurrentWarmup && !isMesoDeloadSession) ? { animation: 'hellGlow 2s ease-in-out infinite' } : undefined}>
+          // only, not warm-ups or deload. Also fires on the 5/3/1 week-3 top
+          // single (heroHell531), the heaviest, most intense rep of the cycle.
+          <BracketFrame gold padding={0} style={((mesoState && mesoRirVal != null && mesoRirVal <= 0 && !isCurrentWarmup && !isMesoDeloadSession) || heroHell531) ? { animation: 'hellGlow 2s ease-in-out infinite' } : undefined}>
             {mesoState && mesoRirVal != null && !isCurrentWarmup && !isMesoDeloadSession && (() => {
               // Escalate the RIR watermark as the block gets crazier: gold above
               // failure, red at 0 RIR, then a hotter, faster ember-flicker the
@@ -4589,6 +4828,27 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                 )}
               </div>}
 
+              {/* Time-based hero: big target duration + a stepper, and a GO that opens the countdown */}
+              {isTime && (
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16, padding: '2px 14px 0' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                    <button onClick={() => updateSet(bgSetIdx, { timeSec: Math.max(5, (heroSet.timeSec || 0) - 5) })} style={{ width: 40, height: 40, borderRadius: 6, border: `1px solid ${UI.hairStrong}`, background: 'transparent', color: UI.ink, fontSize: 24, lineHeight: 1, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>−</button>
+                    <div style={{ textAlign: 'center' }}>
+                      <div className="num" style={{ fontSize: 56, fontWeight: 300, color: UI.gold, letterSpacing: '-0.02em', lineHeight: 1 }}>{LB.fmtDuration(heroSet.timeSec || 0)}</div>
+                      <div className="micro" style={{ marginTop: 3 }}>TARGET</div>
+                    </div>
+                    <button onClick={() => updateSet(bgSetIdx, { timeSec: (heroSet.timeSec || 0) + 5 })} style={{ width: 40, height: 40, borderRadius: 6, border: `1px solid ${UI.hairStrong}`, background: 'transparent', color: UI.ink, fontSize: 22, lineHeight: 1, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>+</button>
+                  </div>
+                  <button onClick={() => startCountdown(bgSetIdx, heroSet.timeSec)} disabled={!(heroSet.timeSec > 0)} style={{
+                    width: '80%', minHeight: 46, borderRadius: 6, border: `1px solid var(--accent-deep)`,
+                    background: `linear-gradient(180deg, var(--accent-light), var(--accent))`,
+                    color: '#0a0805', cursor: 'pointer',
+                    fontFamily: UI.fontUi, fontWeight: 700, fontSize: 14, letterSpacing: '0.16em',
+                    boxShadow: '0 8px 30px rgba(var(--accent-rgb),0.30)', WebkitTapHighlightColor: 'transparent',
+                  }}>GO</button>
+                </div>
+              )}
+
             </div>
           </BracketFrame>
         )}
@@ -4635,6 +4895,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               const repPlaceholder = rpsTargets && rpsTargets.length > 1
                 ? String(rpsTargets[workingRowNum - 1] ?? rpsTargets[rpsTargets.length - 1])
                 : '—';
+              // 5/3/1 AMRAP: the top "+" set only ignites once every working set above it is logged.
+              const priorWorkingDone = entry.sets.every((st, si) => si >= i || st.warmup || st.done || st.skipped);
+              const amrapArmed = s.amrap && !s.done && !s.skipped && priorWorkingDone;
               return (
                 <React.Fragment key={i}>
                   {showWorkingSep && (
@@ -4645,6 +4908,22 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                       <div className="knurl" style={{ marginBottom: 2 }} />
                     </>
                   )}
+                  <div style={{ position: 'relative' }}>
+                  {amrapArmed && (
+                    <div aria-hidden="true" style={{
+                      // Fill the money zone with fire and let it breathe out softly on
+                      // every side. The radial fades to transparent at the left/right
+                      // edges; a 5px blur feathers the top/bottom and rounds the corners
+                      // off (with the 8px radius) so nothing reads as a hard-cut rectangle.
+                      // Reaches a little past the boxes top and just under the caption.
+                      position: 'absolute', top: 5, bottom: -4, left: 0, right: 0, zIndex: 0,
+                      pointerEvents: 'none',
+                      borderRadius: 8,
+                      background: 'radial-gradient(52% 135% at 50% 50%, rgba(255,120,40,0.34), rgba(210,45,0,0.18) 52%, transparent 100%)',
+                      filter: 'blur(5px)',
+                      animation: 'hellPulse 2s ease-in-out infinite',
+                    }} />
+                  )}
                   {(() => {
                     const isDropActive = dropSetIdx === i && !s.done;
                     const isMyoActive = myoSetIdx === i && !s.done;
@@ -4654,9 +4933,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                     return (
                     <div data-kb-row={i} style={{
                       display: 'grid',
-                      gridTemplateColumns: isIntensityActive ? '28px 1fr' : (isCheckbox ? '28px 1fr 28px' : isRepsOnly ? (isUnilateral ? '28px 1fr 44px 44px 28px' : '28px 1fr 56px 28px') : (isUnilateral ? '28px 1fr 72px 44px 44px 28px' : '28px 1fr 72px 56px 28px')),
+                      gridTemplateColumns: isIntensityActive ? '28px 1fr' : (isTime ? '28px 1fr auto 28px' : isCheckbox ? '28px 1fr 28px' : isRepsOnly ? (isUnilateral ? '28px 1fr 44px 44px 28px' : '28px 1fr 56px 28px') : (isUnilateral ? '28px 1fr 72px 44px 44px 28px' : '28px 1fr 72px 56px 28px')),
                       gap: 8, alignItems: 'center',
-                      padding: '10px 4px',
+                      padding: '10px 6px',
+                      position: 'relative', zIndex: 1,
                       opacity: s.done || s.skipped ? (isWarmupRow ? 0.3 : 0.4) : 1,
                       animation: flashSet === i ? 'rowFlash 1.4s ease forwards' : 'none',
                     }}>
@@ -4669,7 +4949,16 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                         color: isCurrent ? UI.gold : s.done ? UI.goldDeep : UI.inkFaint,
                       }}>{isWarmupRow ? `W${warmupRowNum}` : workingRowNum}</div>
 
-                      {isIntensityActive ? null : isCheckbox ? <div /> : (
+                      {isIntensityActive ? null : isTime ? (
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <button onPointerDown={e => e.stopPropagation()} onClick={() => updateSet(i, { timeSec: Math.max(5, (s.timeSec || 0) - 5) })} disabled={s.done || s.skipped} style={{ width: 26, height: 26, borderRadius: 4, border: `1px solid ${UI.hairStrong}`, background: 'transparent', color: UI.ink, fontSize: 18, lineHeight: 1, cursor: 'pointer', WebkitTapHighlightColor: 'transparent', opacity: (s.done || s.skipped) ? 0.4 : 1 }}>−</button>
+                            <span className="num" style={{ fontSize: 20, color: (s.done || s.skipped) ? UI.inkFaint : UI.gold, minWidth: 54, textAlign: 'center' }}>{LB.fmtDuration(s.timeSec || 0)}</span>
+                            <button onPointerDown={e => e.stopPropagation()} onClick={() => updateSet(i, { timeSec: (s.timeSec || 0) + 5 })} disabled={s.done || s.skipped} style={{ width: 26, height: 26, borderRadius: 4, border: `1px solid ${UI.hairStrong}`, background: 'transparent', color: UI.ink, fontSize: 16, lineHeight: 1, cursor: 'pointer', WebkitTapHighlightColor: 'transparent', opacity: (s.done || s.skipped) ? 0.4 : 1 }}>+</button>
+                          </div>
+                          {prevSet?.timeSec != null && <span className="micro" style={{ color: UI.inkFaint }}>last {LB.fmtDuration(prevSet.timeSec)}</span>}
+                        </div>
+                      ) : isCheckbox ? <div /> : (
                         (s.technique === 'drop' || s.technique === 'myorep' || s.technique === 'myorep_match' || s.technique === 'lengthened_partial' || s.technique === 'amrap_variations') && s.done
                           ? <div style={{ display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'flex-start' }}>
                               <span style={{
@@ -4713,7 +5002,20 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                         }))}
                       />}
 
-                      {!isIntensityActive && !isCheckbox && (isUnilateral ? (
+                      {!isIntensityActive && isTime && <button
+                        onPointerDown={e => e.stopPropagation()}
+                        disabled={s.done || s.skipped || !(s.timeSec > 0)}
+                        onClick={e => { e.stopPropagation(); if (s.done || s.skipped) return; startCountdown(i, s.timeSec); }}
+                        style={{
+                          minWidth: 54, height: 42, borderRadius: 6, border: `1px solid var(--accent-deep)`,
+                          background: (s.done || s.skipped) ? 'transparent' : `linear-gradient(180deg, var(--accent-light), var(--accent))`,
+                          color: (s.done || s.skipped) ? UI.inkFaint : '#0a0805', cursor: 'pointer',
+                          fontFamily: UI.fontUi, fontWeight: 700, fontSize: 12, letterSpacing: '0.14em',
+                          WebkitTapHighlightColor: 'transparent', justifySelf: 'center',
+                          opacity: (s.done || s.skipped) ? 0.35 : 1,
+                        }}>GO</button>}
+
+                      {!isIntensityActive && !isCheckbox && !isTime && (isUnilateral ? (
                         <>
                           <KbCell text={kbField?.setIdx === i && kbField?.field === 'repsL' ? kbRaw : (s.repsL ?? '')} placeholder="L" disabled={s.done || s.skipped} onActivate={() => activateKb(i, 'repsL')} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), ...(kbField?.setIdx === i && kbField?.field === 'repsL' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }} />
                           <KbCell text={kbField?.setIdx === i && kbField?.field === 'repsR' ? kbRaw : (s.repsR ?? '')} placeholder="R" disabled={s.done || s.skipped} onActivate={() => activateKb(i, 'repsR')} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), ...(kbField?.setIdx === i && kbField?.field === 'repsR' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }} />
@@ -4764,6 +5066,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                     </div>
                     );
                   })()}
+                  {amrapArmed && (
+                    <div className="micro-gold" style={{ position: 'relative', zIndex: 1, textAlign: 'center', padding: '0 6px 8px', letterSpacing: '0.14em', lineHeight: 1.4 }}>
+                      GO ALL OUT, as many reps as you can
+                    </div>
+                  )}
+                  </div>
                   {lpTarget?.exIdx === exIdx && lpTarget?.setIdx === i && !s.done && (() => {
                     const missingData = !isNoWeightReps && ((!isBodyweight && s.kg == null) || (!(kbField?.setIdx === i && kbField?.field !== 'kg') && (isUnilateral ? (s.repsL == null || s.repsR == null) : s.reps == null)));
                     return (
@@ -4904,7 +5212,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             })}
           </div>
 
-          {!isCardio && (
+          {/* Intensity techniques are kg/reps flows (drop-set, myo-reps, ...):
+              a time-based exercise has neither field, so the picker is hidden
+              there. Assisted works fine (a drop set just adds assistance:
+              -30 -> -40 -> -50, same descending direction as dropping weight). */}
+          {!isCardio && !isTime && (
             <button className="intensity-glow" onClick={() => setIntensityOpen(true)} style={{
               width: '100%', marginTop: 6, padding: '8px 0',
               background: 'rgba(var(--accent-rgb),0.08)',
@@ -5812,6 +6124,72 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         <Btn onClick={saveExNote} style={{ marginTop: 12, width: '100%' }}>Save</Btn>
       </Sheet>
 
+      {/* Exercise history, opened by tapping the exercise name. Cross-day and
+          straight from the server, so a "last time" that reads stale for this
+          day slot can be checked without leaving the session. */}
+      <Sheet open={historyOpen} onClose={() => setHistoryOpen(false)} title="History">
+        {(() => {
+          const rows = historyRows ?? localHistory;
+          // Assisted: "best" is the least-negative load, not an Epley e1RM.
+          const isAssistedEx = LB.isAssisted(exercise);
+          const pr = !entry ? 0 : isAssistedEx ? LB.bestAssistLoad(store, entry.exId) : LB.bestE1rmForExercise(store, entry.exId);
+          const e1rmForSet = (s) => { const r = LB.effReps(s); return (s.kg != null && r > 0) ? LB.e1rm(s.kg, r) : 0; };
+          const bestKgOf = (sets) => { const vals = sets.map(s => s.kg).filter(v => v != null); return vals.length ? Math.max(...vals) : null; };
+          if (!rows.length) {
+            return (
+              <div className="micro" style={{ color: UI.inkFaint, textAlign: 'center', padding: '20px 0' }}>
+                {historyLoading ? 'Loading…' : 'No history yet'}
+              </div>
+            );
+          }
+          const shown = rows.slice(0, 12);
+          return (
+            <div>
+              <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>
+                {entry?.name}{historyLoading ? ' · updating…' : ''}
+              </div>
+              {shown.map((h, hi) => {
+                const working = (h.sets || []).filter(s => !s.warmup && !s.skipped && (s.kg != null || s.reps != null || s.timeSec != null));
+                if (!working.length) return null;
+                const sessionBest = isAssistedEx ? bestKgOf(working) : working.reduce((m, s) => Math.max(m, e1rmForSet(s)), 0);
+                const isPR = isAssistedEx
+                  ? (pr != null && sessionBest != null && Math.abs(sessionBest - pr) < 0.01)
+                  : (pr > 0 && sessionBest > 0 && Math.abs(sessionBest - pr) < 0.01);
+                return (
+                  <React.Fragment key={h.sessionId || hi}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', padding: '11px 0', gap: 10 }}>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 5 }}>
+                          <span className="num" style={{ fontSize: 10, color: isPR ? UI.gold : UI.inkFaint, letterSpacing: '0.05em' }}>
+                            {LB.parseDate(h.date).toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: '2-digit' })}
+                          </span>
+                          {isPR && <span style={{ fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.1em', color: UI.gold, background: UI.goldFaint, border: `0.5px solid ${UI.goldSoft}`, borderRadius: 4, padding: '1px 5px' }}>PR</span>}
+                        </div>
+                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                          {working.map((s, i) => {
+                            const isBest = isAssistedEx
+                              ? (s.kg != null && sessionBest != null && Math.abs(s.kg - sessionBest) < 0.01)
+                              : (sessionBest > 0 && Math.abs(e1rmForSet(s) - sessionBest) < 0.01);
+                            const repsStr = (s.repsL != null || s.repsR != null) ? `L${s.repsL ?? '?'}/R${s.repsR ?? '?'}` : s.reps;
+                            return (
+                              <span key={i} className="num" style={{ fontSize: 13, color: isBest ? UI.gold : UI.ink }}>
+                                {s.timeSec != null ? LB.fmtDuration(s.timeSec) : s.kg != null ? <>{s.kg}<span style={{ color: isBest ? UI.goldSoft : UI.inkFaint }}>×</span>{repsStr}</> : repsStr}
+                              </span>
+                            );
+                          })}
+                        </div>
+                      </div>
+                      {h.dayName && <span className="micro" style={{ color: UI.inkFaint, flexShrink: 0 }}>{h.dayName}</span>}
+                    </div>
+                    {hi < shown.length - 1 && <div className="knurl" />}
+                  </React.Fragment>
+                );
+              })}
+            </div>
+          );
+        })()}
+      </Sheet>
+
       {/* plan diff */}
       <Sheet open={planDiffOpen} onClose={() => { setPlanDiffOpen(false); finish(pendingFeel); setPendingFeel(null); }} title="Session changes">
         <div style={{ fontSize: 13, color: UI.inkSoft, marginBottom: 12 }}>vs. plan:</div>
@@ -5943,6 +6321,25 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       </Sheet>
 
       {kbField && <div style={{ height: 225 }} />}
+
+      {/* ── Time-based countdown overlay ────────────────────────────────────── */}
+      {countdown && (
+        <>
+          <div style={{ position: 'fixed', inset: 0, zIndex: 60, background: 'rgba(8,6,3,0.92)', backdropFilter: 'blur(3px)', WebkitBackdropFilter: 'blur(3px)' }} />
+          <div style={{ position: 'fixed', inset: 0, zIndex: 61, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 24, paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 24px)' }}>
+            <div className="micro-gold" style={{ letterSpacing: '0.2em', marginBottom: 6, textAlign: 'center' }}>{entry.name}</div>
+            <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.inkSoft, letterSpacing: '0.18em', marginBottom: 34, textTransform: 'uppercase', fontWeight: 600 }}>Go go go</div>
+            <TimeCountdown startedAt={countdown.startedAt} total={countdown.total} />
+            <button onClick={() => finishCountdown(false)} style={{
+              marginTop: 44, padding: '12px 44px', borderRadius: 6,
+              background: 'transparent', border: `1px solid ${UI.hairStrong}`,
+              color: UI.inkSoft, cursor: 'pointer',
+              fontFamily: UI.fontUi, fontSize: 12, letterSpacing: '0.16em', textTransform: 'uppercase', fontWeight: 600,
+              WebkitTapHighlightColor: 'transparent',
+            }}>Stop</button>
+          </div>
+        </>
+      )}
 
       {/* ── Warmup overlay ──────────────────────────────────────────────────── */}
       {warmupSetsRemaining && warmupOverlaySet && (
@@ -6115,6 +6512,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         }
         onDismiss={() => { kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false; setKbField(null); setKbRaw(''); setKbFresh(false); armKbShield(); }}
         onPlateCalc={() => setPlateCalcOpen(true)}
+        onSign={kbSignToggle}
+        assisted={LB.isAssisted(exercise)}
       />
 
       <PlateCalcSheet

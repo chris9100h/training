@@ -256,4 +256,21 @@
       ],
     },
   ];
+
+  // Wendler 5/3/1. Structurally different from the rep-range programs above
+  // (percentages off a per-lift Training Max, not rep ranges), so it lives on
+  // its own global. The setup wizard reads this for the lift list only;
+  // assistance is chosen there by the user (nothing prefilled), up to 4 per
+  // lift, a middle ground between minimal and Boring But Big. LB.build531Plan
+  // turns the filled-in config into a schedule with program_type '531'.
+  window.FIVE_THREE_ONE = {
+    id: "prog_531", name: "5/3/1", level: "Intermediate",
+    blurb: "Wendler's classic strength base. Four main lifts, each driven off a Training Max, waving 5s / 3s / 1s across a 4-week cycle. Slow, boring, and it just works.",
+    lifts: [
+      { kind: "squat", ex: "Back Squat" },
+      { kind: "bench", ex: "Barbell Bench Press" },
+      { kind: "deadlift", ex: "Deadlift" },
+      { kind: "ohp", ex: "Overhead Press" },
+    ],
+  };
 })();

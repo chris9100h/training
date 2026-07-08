@@ -67,7 +67,9 @@ CREATE TABLE public.zane_schedules (
   mesocycle_weeks integer,
   mesocycle_start_rir integer,
   mesocycle_end_rir integer,
-  mesocycle_rir_enabled boolean NOT NULL DEFAULT true
+  mesocycle_rir_enabled boolean NOT NULL DEFAULT true,
+  program_type text,
+  program_data jsonb
 );
 
 CREATE TABLE public.zane_sessions (
@@ -113,6 +115,7 @@ CREATE TABLE public.zane_sets (
   reps integer,
   reps_l integer,
   reps_r integer,
+  time_sec integer,
   done boolean NOT NULL DEFAULT false,
   skipped boolean NOT NULL DEFAULT false,
   warmup boolean NOT NULL DEFAULT false,
@@ -1049,7 +1052,7 @@ CREATE OR REPLACE FUNCTION public.sync_sets_batch(p_sets jsonb)
 AS $function$
   INSERT INTO zane_sets (
     id, session_id, entry_id, user_id,
-    set_idx, kg, reps, reps_l, reps_r,
+    set_idx, kg, reps, reps_l, reps_r, time_sec,
     done, skipped, warmup, technique, drops, updated_at
   )
   SELECT
@@ -1062,6 +1065,7 @@ AS $function$
     (s->>'reps')::int,
     (s->>'reps_l')::int,
     (s->>'reps_r')::int,
+    (s->>'time_sec')::int,
     COALESCE((s->>'done')::boolean,    false),
     COALESCE((s->>'skipped')::boolean, false),
     COALESCE((s->>'warmup')::boolean,  false),
@@ -1074,6 +1078,7 @@ AS $function$
     reps       = EXCLUDED.reps,
     reps_l     = EXCLUDED.reps_l,
     reps_r     = EXCLUDED.reps_r,
+    time_sec   = EXCLUDED.time_sec,
     done       = EXCLUDED.done,
     skipped    = EXCLUDED.skipped,
     warmup     = EXCLUDED.warmup,
@@ -1161,6 +1166,7 @@ AS $function$
         SELECT jsonb_agg(
           jsonb_build_object(
             'kg', st.kg, 'reps', st.reps, 'repsL', st.reps_l, 'repsR', st.reps_r,
+            'timeSec', st.time_sec,
             'done', st.done, 'skipped', st.skipped, 'warmup', st.warmup,
             'technique', st.technique, 'drops', st.drops
           ) ORDER BY st.set_idx)
@@ -1369,6 +1375,7 @@ AS $function$
     COALESCE((
       SELECT jsonb_agg(jsonb_build_object(
         'kg', st.kg, 'reps', st.reps, 'repsL', st.reps_l, 'repsR', st.reps_r,
+        'timeSec', st.time_sec,
         'done', st.done, 'skipped', st.skipped, 'warmup', st.warmup
       ) ORDER BY st.set_idx)
       FROM zane_sets st WHERE st.entry_id = e.id
@@ -1380,7 +1387,7 @@ AS $function$
     AND s.ended IS NOT NULL
     AND (p_day_id IS NULL OR s.day_id = p_day_id)
     AND EXISTS (SELECT 1 FROM zane_sets st2 WHERE st2.entry_id = e.id
-                AND (st2.kg IS NOT NULL OR st2.reps IS NOT NULL OR st2.reps_l IS NOT NULL OR st2.reps_r IS NOT NULL))
+                AND (st2.kg IS NOT NULL OR st2.reps IS NOT NULL OR st2.reps_l IS NOT NULL OR st2.reps_r IS NOT NULL OR st2.time_sec IS NOT NULL))
   ORDER BY s.ended DESC
   LIMIT GREATEST(p_limit, 1);
 $function$;
@@ -1430,8 +1437,9 @@ AS $function$
     (SELECT COUNT(*) FROM zane_session_entries e WHERE e.session_id = s.id)::int AS exercise_count,
     (SELECT COUNT(*) FROM zane_sets st WHERE st.session_id = s.id
        AND NOT st.warmup AND NOT st.skipped
-       AND st.kg IS NOT NULL
-       AND (st.reps IS NOT NULL OR st.reps_l IS NOT NULL OR st.reps_r IS NOT NULL))::int AS done_sets,
+       AND ((st.kg IS NOT NULL
+             AND (st.reps IS NOT NULL OR st.reps_l IS NOT NULL OR st.reps_r IS NOT NULL))
+            OR st.time_sec IS NOT NULL))::int AS done_sets,
     COALESCE((SELECT SUM(st.kg * COALESCE(
         CASE WHEN st.reps_l IS NOT NULL OR st.reps_r IS NOT NULL
              THEN LEAST(COALESCE(st.reps_l, st.reps_r), COALESCE(st.reps_r, st.reps_l))
