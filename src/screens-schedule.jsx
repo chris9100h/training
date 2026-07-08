@@ -3540,6 +3540,46 @@ function ProgramPreviewScreen({ store, setStore, go, userId, programId }) {
   );
 }
 
+// A Stepper with a typable number in the middle: +/- for fine nudges, direct
+// entry for big jumps (a 150 kg TM shouldn't take 60 taps from zero). Keeps a
+// raw text string so a decimal like "152.5" survives mid-typing; value/onChange
+// speak numbers, or null when blank.
+function TmField({ value, onChange, step = 2.5, suffix }) {
+  const round = (v) => Math.round(v * 1000) / 1000;
+  const [raw, setRaw] = useStateS(value == null ? '' : String(value));
+  const push = (s) => {
+    if (s !== '' && !/^\d*\.?\d*$/.test(s)) return; // ignore stray non-numeric input
+    setRaw(s);
+    if (s === '' || s === '.') return onChange(null);
+    const n = Number(s);
+    if (isFinite(n)) onChange(n);
+  };
+  const bump = (delta) => {
+    const next = Math.max(0, round((Number(raw) || 0) + delta));
+    setRaw(String(next));
+    onChange(next);
+  };
+  const btn = {
+    width: 44, height: 44, padding: 0, borderRadius: 4, flexShrink: 0,
+    border: `1px solid ${UI.hairStrong}`, background: 'transparent', color: UI.ink,
+    cursor: 'pointer', fontSize: 22, lineHeight: 1, fontWeight: 300, WebkitTapHighlightColor: 'transparent',
+  };
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'center' }}>
+      <button onClick={() => bump(-step)} style={btn}>−</button>
+      <div style={{ flex: 1, display: 'flex', alignItems: 'baseline', justifyContent: 'center', gap: 4, minWidth: 100 }}>
+        <input
+          type="text" inputMode="decimal" placeholder="—" value={raw}
+          onChange={(e) => push(e.target.value)}
+          style={{ width: 96, textAlign: 'center', background: 'transparent', border: 'none', outline: 'none', fontFamily: UI.fontNum, fontSize: 36, color: UI.ink, fontVariantNumeric: 'tabular-nums' }}
+        />
+        {suffix && <span style={{ fontSize: 14, color: UI.inkFaint }}>{suffix}</span>}
+      </div>
+      <button onClick={() => bump(step)} style={btn}>+</button>
+    </div>
+  );
+}
+
 // Wendler 5/3/1 setup. Unlike the rep-range templates (which go straight to a
 // preview), 5/3/1 needs a Training Max per lift and an assistance choice first,
 // so it gets its own screen. TMs prefill from 90% of each lift's best e1RM when
@@ -3563,7 +3603,7 @@ function FiveThreeOneSetupScreen({ store, setStore, go, userId }) {
   });
   const [assist, setAssist] = useStateS(() => {
     const a = {};
-    for (const l of (FTO?.lifts || [])) a[l.kind] = (FTO.assistance[l.kind] || []).slice(0, 3);
+    for (const l of (FTO?.lifts || [])) a[l.kind] = []; // user picks their own, nothing prefilled
     return a;
   });
   if (!FTO) return <Screen><TopBar title="5/3/1" onBack={() => go({ name: 'schedule-templates' })} /></Screen>;
@@ -3576,7 +3616,7 @@ function FiveThreeOneSetupScreen({ store, setStore, go, userId }) {
     const kind = picker?.kind;
     setAssist(a => {
       const merged = [...(a[kind] || [])];
-      for (const id of arr) if (merged.length < 3 && !merged.includes(id)) merged.push(id);
+      for (const id of arr) if (merged.length < 4 && !merged.includes(id)) merged.push(id);
       return { ...a, [kind]: merged };
     });
     setPicker(null);
@@ -3625,7 +3665,7 @@ function FiveThreeOneSetupScreen({ store, setStore, go, userId }) {
               <span style={{ fontFamily: UI.fontDisplay, fontSize: 18, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.02em', color: UI.ink }}>{LIFT_LABEL[l.kind]}</span>
               <span className="micro" style={{ color: UI.inkFaint }}>Training Max</span>
             </div>
-            <Stepper value={tms[l.kind]} onChange={v => setTms(t => ({ ...t, [l.kind]: v }))} step={step} min={0} suffix={unit} big />
+            <TmField value={tms[l.kind]} onChange={v => setTms(t => ({ ...t, [l.kind]: v }))} step={step} suffix={unit} />
             {assistanceOn && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <div className="micro" style={{ color: UI.inkFaint }}>Assistance</div>
@@ -3636,7 +3676,7 @@ function FiveThreeOneSetupScreen({ store, setStore, go, userId }) {
                       <button onClick={() => removeAssist(l.kind, ref)} aria-label="Remove" style={{ background: 'none', border: 'none', color: UI.inkFaint, cursor: 'pointer', padding: 0, fontSize: 15, lineHeight: 1 }}>×</button>
                     </span>
                   ))}
-                  {(assist[l.kind] || []).length < 3 && (
+                  {(assist[l.kind] || []).length < 4 && (
                     <button onClick={() => setPicker({ kind: l.kind })} style={{ background: 'none', border: `1px dashed ${UI.hairStrong}`, borderRadius: 4, padding: '4px 10px', fontSize: 12, color: UI.gold, cursor: 'pointer', fontFamily: UI.fontUi, WebkitTapHighlightColor: 'transparent' }}>+ Add</button>
                   )}
                 </div>

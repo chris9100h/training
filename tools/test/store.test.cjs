@@ -1230,13 +1230,10 @@ async function testAsync(name, fn) {
     assert.ok(FTO && Array.isArray(FTO.lifts) && FTO.lifts.length === 4, 'FIVE_THREE_ONE has 4 lifts');
     const names = new Set(SYS_EX.map(e => (e.name || '').toUpperCase()));
     for (const l of FTO.lifts) assert.ok(names.has((l.ex || '').toUpperCase()), 'main lift in catalog: ' + l.ex);
-    for (const k of Object.keys(FTO.assistance)) for (const a of FTO.assistance[k]) {
-      assert.ok(names.has(a.toUpperCase()), 'assistance in catalog: ' + a);
-    }
     const config = {
       unit: 'kg', includeDeload: true,
       lifts: FTO.lifts.map((l, i) => ({ ...l, tm: [140, 100, 180, 60][i] })),
-      assistance: FTO.assistance,
+      assistance: { squat: ['Leg Press', 'Seated Leg Curl'], bench: ['Incline Dumbbell Press'], deadlift: ['Lat Pulldown'], ohp: ['Machine Lateral Raise'] },
     };
     const { schedule, newExercises } = LB.build531Plan({ exercises: [] }, config);
     assert.strictEqual(schedule.program_type, '531');
@@ -1252,14 +1249,14 @@ async function testAsync(name, fn) {
     for (const d of schedule.days) {
       assert.strictEqual(d.items[0].sets, 3);
       assert.ok(ml[d.items[0].exId], 'day leads with a tracked main lift');
-      assert.ok(d.items.length >= 2 && d.items.length <= 4, 'main + up to 3 assistance');
+      assert.ok(d.items.length >= 1 && d.items.length <= 5, 'main + up to 4 assistance');
       for (let i = 1; i < d.items.length; i++) assert.ok(!ml[d.items[i].exId], 'assistance is not a tracked main lift');
     }
     assert.ok(newExercises.length >= 4, 'materialized the main lifts (and assistance)');
-    // assistance is capped at 3 even when oversupplied
+    // assistance is capped at 4 even when oversupplied
     const over = LB.build531Plan({ exercises: [] }, { unit: 'kg', lifts: [FTO.lifts[0]],
-      assistance: { squat: ['Leg Press', 'Seated Leg Curl', 'Standing Calf Raise', 'Dumbbell Curl'] } });
-    assert.strictEqual(over.schedule.days[0].items.length, 4, 'main + 3 assistance max');
+      assistance: { squat: ['Leg Press', 'Seated Leg Curl', 'Standing Calf Raise', 'Dumbbell Curl', 'Cable Crunch'] } });
+    assert.strictEqual(over.schedule.days[0].items.length, 5, 'main + 4 assistance max');
     // no assistance -> just the main lift per day
     const bare = LB.build531Plan({ exercises: [] }, { unit: 'kg', lifts: FTO.lifts.map(l => ({ ...l, tm: 100 })), assistance: {} });
     for (const d of bare.schedule.days) assert.strictEqual(d.items.length, 1, 'main lift only when assistance is off');

@@ -2200,7 +2200,7 @@ const FTO_DAY_NAME = { squat: 'Squat', bench: 'Bench', deadlift: 'Deadlift', ohp
 //     assistance: { <kind>: [exName, ...] } }
 // Resolves every exercise name to one of the user's own (reuse-or-materialize,
 // exactly like instantiateProgram, so plans never hold sys_ ids), builds one
-// flex day per main lift (3 working sets + up to 3 picked assistance items),
+// flex day per main lift (3 working sets + up to 4 picked assistance items),
 // and stamps program_type '531' + program_data with per-lift Training Maxes
 // keyed by the RESOLVED exId. Assistance stays an ordinary Range item on normal
 // Smart Progression. Returns { schedule, newExercises }; mutates nothing.
@@ -2233,7 +2233,7 @@ function build531Plan(state, config) {
     if (!mainId) continue;
     mainLifts[mainId] = { tm: (lift.tm != null ? lift.tm : null), kind: lift.kind };
     const items = [{ exId: mainId, sets: 3, reps: 5 }];
-    const picks = ((config.assistance && config.assistance[lift.kind]) || []).slice(0, 3);
+    const picks = ((config.assistance && config.assistance[lift.kind]) || []).slice(0, 4);
     for (const aName of picks) {
       const aId = resolve(aName);
       if (aId) items.push({ exId: aId, sets: 3, reps: 8, repsMax: 12 });
