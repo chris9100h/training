@@ -3463,8 +3463,26 @@ function ProgramTemplatesScreen({ store, setStore, go }) {
       <TopBar title="Templates" onBack={() => go({ name: 'plan' })} />
       <div style={{ flex: 1, overflowY: 'auto', padding: '14px 22px 40px', display: 'flex', flexDirection: 'column', gap: 10 }}>
         <div className="micro" style={{ color: UI.inkFaint, textTransform: 'none', letterSpacing: '0.02em', lineHeight: 1.5, marginBottom: 4 }}>
-          Beginner-ready programs, each built as a 6-week mesocycle. Pick by how many days you can train each week.
+          Ready-made programs to start from. Preview any one, then use it as is or edit it.
         </div>
+        {(typeof window !== 'undefined' && window.FIVE_THREE_ONE) && (
+          <button onClick={() => go({ name: 'schedule-531' })} style={{
+            width: '100%', textAlign: 'left', background: UI.bgInset, border: `1px solid ${UI.goldSoft}`,
+            borderRadius: 8, padding: 14, cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 8,
+            WebkitTapHighlightColor: 'transparent',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span style={{ flex: 1, fontFamily: UI.fontDisplay, fontSize: 20, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.02em', color: UI.ink }}>{window.FIVE_THREE_ONE.name}</span>
+              <span className="num" style={{ flexShrink: 0, fontSize: 11, padding: '3px 8px', borderRadius: 4, color: 'var(--accent)', background: 'rgba(var(--accent-rgb),0.12)', border: `0.5px solid rgba(var(--accent-rgb),0.35)` }}>{window.FIVE_THREE_ONE.level}</span>
+            </div>
+            <span style={{ fontSize: 12.5, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.45 }}>{window.FIVE_THREE_ONE.blurb}</span>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 2 }}>
+              {window.FIVE_THREE_ONE.lifts.map((l, i) => (
+                <span key={i} className="micro" style={{ color: UI.inkFaint, background: UI.bgRaised, border: `0.5px solid ${UI.hair}`, borderRadius: 4, padding: '3px 6px', textTransform: 'none', letterSpacing: '0.02em' }}>{l.ex}</span>
+              ))}
+            </div>
+          </button>
+        )}
         {programs.map(p => (
           <button key={p.id} onClick={() => go({ name: 'plan-preview', programId: p.id })} style={{
             width: '100%', textAlign: 'left', background: UI.bgInset, border: `1px solid ${UI.hairStrong}`,
@@ -3522,4 +3540,121 @@ function ProgramPreviewScreen({ store, setStore, go, userId, programId }) {
   );
 }
 
-Object.assign(window.Screens, { PlanScreen, PlanViewerScreen, ScheduleEditScreen, ScheduleNewScreen, ProgramTemplatesScreen, ProgramPreviewScreen, ExercisePicker, DayTypePicker });
+// Wendler 5/3/1 setup. Unlike the rep-range templates (which go straight to a
+// preview), 5/3/1 needs a Training Max per lift and an assistance choice first,
+// so it gets its own screen. TMs prefill from 90% of each lift's best e1RM when
+// the user already trains it, else stay blank. "Create" commits via
+// LB.build531Plan and lands in the editor, like the Custom wizard.
+function FiveThreeOneSetupScreen({ store, setStore, go, userId }) {
+  const FTO = (typeof window !== 'undefined' && window.FIVE_THREE_ONE) || null;
+  const unit = UI.unit();
+  const step = unit === 'lbs' ? 5 : 2.5;
+  const [assistanceOn, setAssistanceOn] = useStateS(true);
+  const [includeDeload, setIncludeDeload] = useStateS(true);
+  const [picker, setPicker] = useStateS(null); // { kind } while choosing assistance
+  const [tms, setTms] = useStateS(() => {
+    const t = {};
+    for (const l of (FTO?.lifts || [])) {
+      const ex = (store.exercises || []).find(e => (e.name || '').toUpperCase() === l.ex.toUpperCase());
+      const e1 = ex ? LB.bestE1rmForExercise(store, ex.id) : 0;
+      t[l.kind] = e1 > 0 ? LB.tmFrom531(e1, unit) : null;
+    }
+    return t;
+  });
+  const [assist, setAssist] = useStateS(() => {
+    const a = {};
+    for (const l of (FTO?.lifts || [])) a[l.kind] = (FTO.assistance[l.kind] || []).slice(0, 3);
+    return a;
+  });
+  if (!FTO) return <Screen><TopBar title="5/3/1" onBack={() => go({ name: 'schedule-templates' })} /></Screen>;
+
+  const LIFT_LABEL = { squat: 'Squat', bench: 'Bench Press', deadlift: 'Deadlift', ohp: 'Overhead Press' };
+  const displayName = (ref) => { const ex = (store.exercises || []).find(e => e.id === ref); return ex ? ex.name : ref; };
+  const removeAssist = (kind, ref) => setAssist(a => ({ ...a, [kind]: (a[kind] || []).filter(x => x !== ref) }));
+  const addAssist = (ids) => {
+    const arr = Array.isArray(ids) ? ids : [ids];
+    const kind = picker?.kind;
+    setAssist(a => {
+      const merged = [...(a[kind] || [])];
+      for (const id of arr) if (merged.length < 3 && !merged.includes(id)) merged.push(id);
+      return { ...a, [kind]: merged };
+    });
+    setPicker(null);
+  };
+  const canCreate = (FTO.lifts || []).every(l => tms[l.kind] != null && tms[l.kind] > 0);
+  const create = () => {
+    if (!canCreate) return;
+    const config = {
+      name: '5/3/1', unit, includeDeload,
+      lifts: FTO.lifts.map(l => ({ kind: l.kind, ex: l.ex, tm: tms[l.kind] ?? null })),
+      assistance: assistanceOn ? assist : {},
+    };
+    const { schedule, newExercises } = LB.build531Plan(store, config);
+    setStore(s => ({ ...s, exercises: [...(s.exercises || []), ...newExercises], schedules: [...(s.schedules || []), schedule] }));
+    go({ name: 'schedule-edit', scheduleId: schedule.id });
+  };
+
+  return (
+    <Screen scroll={false}>
+      <TopBar title="5/3/1 Setup" onBack={() => go({ name: 'schedule-templates' })} />
+      <div style={{ flex: 1, overflowY: 'auto', padding: '14px 22px 40px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <div className="micro" style={{ color: UI.inkFaint, textTransform: 'none', letterSpacing: '0.02em', lineHeight: 1.5 }}>
+          Set a Training Max for each lift (about 90% of your best single). Every working weight is a percentage of it, waving 5s / 3s / 1s across a 4-week cycle. Numbers prefill from your history where we have it.
+        </div>
+
+        <Card style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, fontWeight: 600 }}>Assistance work</div>
+              <div className="micro" style={{ color: UI.inkFaint, textTransform: 'none', letterSpacing: '0.02em' }}>A few extra exercises per day</div>
+            </div>
+            <Toggle on={assistanceOn} onToggle={() => setAssistanceOn(v => !v)} />
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, fontWeight: 600 }}>Deload week</div>
+              <div className="micro" style={{ color: UI.inkFaint, textTransform: 'none', letterSpacing: '0.02em' }}>A light week 4 (40/50/60%) each cycle</div>
+            </div>
+            <Toggle on={includeDeload} onToggle={() => setIncludeDeload(v => !v)} />
+          </div>
+        </Card>
+
+        {FTO.lifts.map(l => (
+          <Card key={l.kind} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
+              <span style={{ fontFamily: UI.fontDisplay, fontSize: 18, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.02em', color: UI.ink }}>{LIFT_LABEL[l.kind]}</span>
+              <span className="micro" style={{ color: UI.inkFaint }}>Training Max</span>
+            </div>
+            <Stepper value={tms[l.kind]} onChange={v => setTms(t => ({ ...t, [l.kind]: v }))} step={step} min={0} suffix={unit} big />
+            {assistanceOn && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div className="micro" style={{ color: UI.inkFaint }}>Assistance</div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+                  {(assist[l.kind] || []).map(ref => (
+                    <span key={ref} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: UI.bgRaised, border: `0.5px solid ${UI.hair}`, borderRadius: 4, padding: '4px 8px', fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi }}>
+                      {displayName(ref)}
+                      <button onClick={() => removeAssist(l.kind, ref)} aria-label="Remove" style={{ background: 'none', border: 'none', color: UI.inkFaint, cursor: 'pointer', padding: 0, fontSize: 15, lineHeight: 1 }}>×</button>
+                    </span>
+                  ))}
+                  {(assist[l.kind] || []).length < 3 && (
+                    <button onClick={() => setPicker({ kind: l.kind })} style={{ background: 'none', border: `1px dashed ${UI.hairStrong}`, borderRadius: 4, padding: '4px 10px', fontSize: 12, color: UI.gold, cursor: 'pointer', fontFamily: UI.fontUi, WebkitTapHighlightColor: 'transparent' }}>+ Add</button>
+                  )}
+                </div>
+              </div>
+            )}
+          </Card>
+        ))}
+
+        <Btn onClick={create} disabled={!canCreate} style={{ width: '100%', marginTop: 4, opacity: canCreate ? 1 : 0.5, cursor: canCreate ? 'pointer' : 'default' }}>
+          {canCreate ? 'Create 5/3/1 plan' : 'Set a Training Max for each lift'}
+        </Btn>
+      </div>
+
+      {picker && (
+        <ExercisePicker store={store} setStore={setStore} onClose={() => setPicker(null)} onPick={addAssist} singleSelect />
+      )}
+    </Screen>
+  );
+}
+
+Object.assign(window.Screens, { PlanScreen, PlanViewerScreen, ScheduleEditScreen, ScheduleNewScreen, ProgramTemplatesScreen, ProgramPreviewScreen, FiveThreeOneSetupScreen, ExercisePicker, DayTypePicker });

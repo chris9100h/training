@@ -2208,9 +2208,13 @@ function build531Plan(state, config) {
   const catalog = (typeof window !== 'undefined' && window.SYSTEM_EXERCISES) || [];
   const sysByName = new Map(catalog.map(s => [(s.name || '').toUpperCase(), s]));
   const userByName = new Map((state.exercises || []).map(e => [(e.name || '').toUpperCase(), e.id]));
+  const byId = new Set((state.exercises || []).map(e => e.id));
   const newExercises = [];
-  const resolve = (exName) => {
-    const key = (exName || '').toUpperCase();
+  // exRef is a catalog name OR an already-owned user exercise id (assistance
+  // picked in the wizard arrives as an id); owned ids pass straight through.
+  const resolve = (exRef) => {
+    if (exRef && byId.has(exRef)) return exRef;
+    const key = (exRef || '').toUpperCase();
     const existing = userByName.get(key);
     if (existing) return existing;
     const sys = sysByName.get(key);

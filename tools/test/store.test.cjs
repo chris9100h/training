@@ -1260,6 +1260,14 @@ async function testAsync(name, fn) {
     const over = LB.build531Plan({ exercises: [] }, { unit: 'kg', lifts: [FTO.lifts[0]],
       assistance: { squat: ['Leg Press', 'Seated Leg Curl', 'Standing Calf Raise', 'Dumbbell Curl'] } });
     assert.strictEqual(over.schedule.days[0].items.length, 4, 'main + 3 assistance max');
+    // no assistance -> just the main lift per day
+    const bare = LB.build531Plan({ exercises: [] }, { unit: 'kg', lifts: FTO.lifts.map(l => ({ ...l, tm: 100 })), assistance: {} });
+    for (const d of bare.schedule.days) assert.strictEqual(d.items.length, 1, 'main lift only when assistance is off');
+    // assistance supplied as an already-owned exId (wizard picks) passes through, not re-materialized
+    const owned = { id: 'user_ex1', name: 'My Curl', tags: [] };
+    const withId = LB.build531Plan({ exercises: [owned] }, { unit: 'kg', lifts: [{ ...FTO.lifts[0], tm: 100 }], assistance: { squat: ['user_ex1'] } });
+    assert.ok(withId.schedule.days[0].items.some(it => it.exId === 'user_ex1'), 'owned assistance exId reused');
+    assert.ok(!withId.newExercises.some(e => e.id === 'user_ex1'), 'owned exId not duplicated');
   });
 
   console.log(`\n${pass} passed, ${fail} failed`);

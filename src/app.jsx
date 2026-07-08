@@ -1254,6 +1254,7 @@ function App() {
     case 'plan-view':     screen = <window.Screens.PlanViewerScreen {...props} scheduleId={route.scheduleId} fromPlan={route.fromPlan} />; break;
     case 'schedule-new':  screen = <window.Screens.ScheduleNewScreen {...props} />; break;
     case 'schedule-templates': screen = <window.Screens.ProgramTemplatesScreen {...props} />; break;
+    case 'schedule-531':  screen = <window.Screens.FiveThreeOneSetupScreen {...props} />; break;
     case 'plan-preview':  screen = <window.Screens.ProgramPreviewScreen {...props} programId={route.programId} />; break;
     case 'schedule-edit': screen = <window.Screens.ScheduleEditScreen {...props} scheduleId={route.scheduleId} versionFrom={route.versionFrom} />; break;
     case 'train':         screen = <window.Screens.TrainingScreen {...props} sessionId={route.sessionId} />; break;
