@@ -3281,7 +3281,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       if (field === 'kg') {
         const cur = parseFloat(kbRawRef.current.replace(',', '.')) || 0;
         const step = (exercise?.equipment && store.settings?.equipmentConfig?.[exercise.equipment]?.increment) || 1.25;
-        const next = Math.max(0, Math.round((cur + dir * step) * 100) / 100);
+        const raw = Math.round((cur + dir * step) * 100) / 100;
+        const next = LB.isAssisted(exercise) ? raw : Math.max(0, raw);
         const newRaw = String(next).replace('.', ',');
         kbRawRef.current = newRaw;
         setKbRaw(newRaw);
@@ -3300,7 +3301,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       if (field === 'kg') {
         const cur = parseFloat(kbRawRef.current.replace(',', '.')) || 0;
         const step = (exercise?.equipment && store.settings?.equipmentConfig?.[exercise.equipment]?.increment) || 1.25;
-        const next = Math.max(0, Math.round((cur + dir * step) * 100) / 100);
+        const raw = Math.round((cur + dir * step) * 100) / 100;
+        const next = LB.isAssisted(exercise) ? raw : Math.max(0, raw);
         const newRaw = String(next).replace('.', ',');
         kbRawRef.current = newRaw;
         setKbRaw(newRaw);
@@ -3319,7 +3321,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       if (field === 'kg') {
         const cur = parseFloat(kbRawRef.current.replace(',', '.')) || 0;
         const step = (exercise?.equipment && store.settings?.equipmentConfig?.[exercise.equipment]?.increment) || 1.25;
-        const next = Math.max(0, Math.round((cur + dir * step) * 100) / 100);
+        const raw = Math.round((cur + dir * step) * 100) / 100;
+        const next = LB.isAssisted(exercise) ? raw : Math.max(0, raw);
         const newRaw = String(next).replace('.', ',');
         kbRawRef.current = newRaw;
         setKbRaw(newRaw);
@@ -5199,10 +5202,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           </div>
 
           {/* Intensity techniques are kg/reps flows (drop-set, myo-reps, ...):
-              a time-based exercise has neither field, and an assisted exercise's
-              negative load makes drop-sets nonsensical, so the picker is hidden
-              for both. */}
-          {!isCardio && !isTime && !LB.isAssisted(exercise) && (
+              a time-based exercise has neither field, so the picker is hidden
+              there. Assisted works fine (a drop set just adds assistance:
+              -30 -> -40 -> -50, same descending direction as dropping weight). */}
+          {!isCardio && !isTime && (
             <button className="intensity-glow" onClick={() => setIntensityOpen(true)} style={{
               width: '100%', marginTop: 6, padding: '8px 0',
               background: 'rgba(var(--accent-rgb),0.08)',
