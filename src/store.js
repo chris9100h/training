@@ -2274,9 +2274,10 @@ function tmFrom531(oneRm, unit) {
 }
 
 // Per-cycle TM increase: lower body (squat/deadlift) climbs twice as fast as
-// upper (bench/ohp): +5/+2.5 kg, or +10/+5 lb.
+// upper (bench/ohp): +5/+2.5 kg, or +10/+5 lb. Extra main lifts added beyond the
+// canonical four carry kind 'lower' or 'upper' to pick the same two rates.
 function tmBump531(kind, unit) {
-  const lower = kind === 'squat' || kind === 'deadlift';
+  const lower = kind === 'squat' || kind === 'deadlift' || kind === 'lower';
   if (unit === 'lbs') return lower ? 10 : 5;
   return lower ? 5 : 2.5;
 }
@@ -2349,12 +2350,16 @@ function build531Plan(state, config) {
     if (!mainId) continue;
     mainLifts[mainId] = { tm: (lift.tm != null ? lift.tm : null), kind: lift.kind, stall: 0 };
     const items = [{ exId: mainId, sets: 3, reps: 5 }];
-    const picks = (config.assistance && config.assistance[lift.kind]) || [];
+    // Assistance can ride on the lift itself (extra lifts, keyed by exId) or on
+    // the shared config.assistance map (the canonical four, keyed by kind).
+    const picks = (lift.assistance && lift.assistance.length) ? lift.assistance : ((config.assistance && config.assistance[lift.kind]) || []);
     for (const aName of picks) {
       const aId = resolve(aName);
       if (aId) items.push({ exId: aId, sets: 3, reps: 8, repsMax: 12 });
     }
-    customDays.push({ name: FTO_DAY_NAME[lift.kind] || lift.kind, items });
+    // Canonical lifts get their short day name; an extra lift names its day after
+    // the exercise (lift.name), never the bare 'upper'/'lower' classification.
+    customDays.push({ name: FTO_DAY_NAME[lift.kind] || lift.name || lift.kind, items });
   }
   // Seed the TM history with each lift's starting Training Max (cycle 0), so the
   // progress chart has a first point and every later bump/reset appends to it.
@@ -2367,6 +2372,27 @@ function build531Plan(state, config) {
   schedule.program_type = '531';
   schedule.program_data = { unit, includeDeload, mainLifts, tmHistory };
   return { schedule, newExercises };
+}
+
+// Register one more main lift on an existing 5/3/1 plan's program_data (the
+// editor's "add main lift" flow; build531Plan handles the from-scratch setup).
+// A 5/3/1 plan is a flex plan, so it can carry any number of lifts/days. Pure:
+// returns { programData, items } and the caller assembles the day
+// ({ id, name, items }) and appends it to sch.days. `exId` is an already-resolved
+// user exercise id; `kind` is a canonical lift or 'upper'/'lower' (drives the
+// per-cycle bump); `cycle` stamps the tmHistory start point (the plan's current
+// cycle, so the chart starts where the lift was added). `assistanceIds` become
+// ordinary Range items (Smart Progression, never tracked in mainLifts).
+function add531MainLift(pd, config = {}) {
+  const exId = config.exId;
+  const kind = config.kind || 'upper';
+  const tm = config.tm != null ? config.tm : null;
+  const nextMain = { ...((pd && pd.mainLifts) || {}), [exId]: { tm, kind, stall: 0 } };
+  const nextHist = { ...((pd && pd.tmHistory) || {}) };
+  nextHist[exId] = tm != null ? [{ cycle: config.cycle || 0, tm, reason: 'start' }] : [];
+  const items = [{ exId, sets: 3, reps: 5 }];
+  for (const aId of (config.assistanceIds || [])) if (aId) items.push({ exId: aId, sets: 3, reps: 8, repsMax: 12 });
+  return { programData: { ...(pd || {}), mainLifts: nextMain, tmHistory: nextHist }, items };
 }
 
 // The current 5/3/1 week (1..maxWeek) for a plan, from how many sessions are
@@ -2438,7 +2464,7 @@ function compute531CycleBumps(sch, sessions, cycleIdx) {
     const allHit = hits.length > 0 && hits.every(Boolean);
     const oldTm = ml.tm;
     const newTm = (allHit && oldTm != null) ? round531(oldTm + tmBump531(ml.kind, unit), unit) : oldTm;
-    result[exId] = { kind: ml.kind, oldTm, newTm, bumped: !!(allHit && oldTm != null && newTm > oldTm), missed: hits.length > 0 && !allHit };
+    result[exId] = { exId, kind: ml.kind, oldTm, newTm, bumped: !!(allHit && oldTm != null && newTm > oldTm), missed: hits.length > 0 && !allHit };
   }
   return result;
 }
@@ -2453,7 +2479,8 @@ const RESET_531_STALL = 2;
 // this cycle is left untouched. Every automatic change appends a tmHistory
 // point (stamped with the just-started cycle), and bumpedCycle is set so the
 // prompt fires once. Pure. Returns { programData, bumped, held, reset }, each
-// list [{ kind, oldTm, newTm }] for the summary.
+// list [{ exId, kind, oldTm, newTm }] for the summary (exId lets the prompt name
+// an extra lift after its exercise instead of its 'upper'/'lower' class).
 function resolve531CycleEnd(pd, bumps, cycleIdx) {
   const unit = (pd && pd.unit) || 'kg';
   const nextMain = { ...((pd && pd.mainLifts) || {}) };
@@ -2467,17 +2494,17 @@ function resolve531CycleEnd(pd, bumps, cycleIdx) {
     if (b.bumped) {
       nextMain[exId] = { ...ml, tm: b.newTm, stall: 0 };
       append(exId, b.newTm, 'bump');
-      bumped.push({ kind: b.kind, oldTm: b.oldTm, newTm: b.newTm });
+      bumped.push({ exId, kind: b.kind, oldTm: b.oldTm, newTm: b.newTm });
     } else if (b.missed) {
       const stall = (ml.stall || 0) + 1;
       if (stall >= RESET_531_STALL && b.oldTm != null) {
         const rtm = round531(b.oldTm * 0.9, unit);
         nextMain[exId] = { ...ml, tm: rtm, stall: 0 };
         append(exId, rtm, 'reset');
-        reset.push({ kind: b.kind, oldTm: b.oldTm, newTm: rtm });
+        reset.push({ exId, kind: b.kind, oldTm: b.oldTm, newTm: rtm });
       } else {
         nextMain[exId] = { ...ml, stall };
-        held.push({ kind: b.kind, oldTm: b.oldTm, newTm: b.oldTm });
+        held.push({ exId, kind: b.kind, oldTm: b.oldTm, newTm: b.oldTm });
       }
     }
   }
@@ -4387,7 +4414,7 @@ window.LB = {
   signIn, signUp, signOut, signInWithPasskey, registerPasskey, listPasskeys, deletePasskey, resetPassword, deleteAllData, exportBackup, importFromBackup, validateBackup,
   loadFromSupabase, syncStore, mergeSessions, withCarriedWindowEntries, historyWindowCutoffISO,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
-  uid, todayISO, fmtISO, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, healScheduleWeekdays, buildPlanSkeleton, instantiateProgram, is531Plan, round531, tmFrom531, tmBump531, weeks531, week531, fiveThreeOneSets, build531Plan, current531Week, current531Cycle, compute531CycleBumps, resolve531CycleEnd, suggest531Tm, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, realignCycleForToday, todayCycleStripIndex,
+  uid, todayISO, fmtISO, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, healScheduleWeekdays, buildPlanSkeleton, instantiateProgram, is531Plan, round531, tmFrom531, tmBump531, weeks531, week531, fiveThreeOneSets, build531Plan, add531MainLift, current531Week, current531Cycle, compute531CycleBumps, resolve531CycleEnd, suggest531Tm, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, realignCycleForToday, todayCycleStripIndex,
   effReps, fmtDuration, e1rm, isImprovement, isDecline, bestE1rmForExercise, bestAssistLoad, totalVolume, entryVolume, doneSetCount, buildSeedSets, buildTimeSeedSets, latestBodyweight, exerciseLogMode, isAssisted, shouldPullBodyweight, systemExerciseToRow, inferCurrentExIdx, calcBlended,
   refreshExerciseBests, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries,
   computeNextReminderAt,

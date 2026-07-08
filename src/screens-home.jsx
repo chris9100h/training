@@ -1719,7 +1719,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       // and a gain badge, a proper "you got stronger" moment, not a run-on line.
       const line = (b, tone, key) => (
         <div key={key} style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 14, padding: '8px 2px', borderTop: `1px solid ${UI.hair}` }}>
-          <span style={{ fontFamily: UI.fontUi, fontSize: 13, fontWeight: 700, color: UI.inkSoft, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{label[b.kind] || b.kind}</span>
+          <span style={{ fontFamily: UI.fontUi, fontSize: 13, fontWeight: 700, color: UI.inkSoft, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{label[b.kind] || LB.findExercise(store, b.exId)?.name || b.kind}</span>
           <span className="num" style={{ fontSize: 15, whiteSpace: 'nowrap' }}>
             <span style={{ color: UI.inkFaint }}>{b.oldTm}</span>
             <span style={{ color: UI.inkFaint, margin: '0 6px' }}>→</span>

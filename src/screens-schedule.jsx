@@ -1269,6 +1269,26 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
   const [mesoInfoOpen, setMesoInfoOpen] = useStateS(false);
   const [modifiersOpen, setModifiersOpen] = useStateS(false);
   const [tmEditOpen, setTmEditOpen] = useStateS(false);
+  // Adding an extra 5/3/1 main lift: pick an exercise, then classify + set a TM.
+  const [addLiftPicking, setAddLiftPicking] = useStateS(false);
+  const [addLiftDraft, setAddLiftDraft] = useStateS(null); // { exId, name, body, tm }
+  const startAddMainLift = (ids) => {
+    setAddLiftPicking(false);
+    const exId = Array.isArray(ids) ? ids[0] : ids;
+    if (!exId) return;
+    const ex = LB.findExercise(store, exId);
+    const u = draft.program_data?.unit || 'kg';
+    setAddLiftDraft({ exId, name: ex?.name || 'Lift', body: 'upper', tm: LB.tmFrom531(LB.bestE1rmForExercise(store, exId), u) });
+  };
+  const confirmAddMainLift = () => {
+    const d = addLiftDraft;
+    if (!d || !(d.tm > 0)) return;
+    const cycle = LB.current531Cycle(draft, store.sessions);
+    const { programData, items } = LB.add531MainLift(draft.program_data, { exId: d.exId, kind: d.body, tm: d.tm, cycle });
+    const day = { id: LB.uid(), name: d.name, items };
+    setDraft(dr => ({ ...dr, program_data: programData, days: [...dr.days, day] }));
+    setAddLiftDraft(null);
+  };
   // Weekday-mode whole-day import: pick a source day, then a weekday to place it on.
   const [importDayOpen, setImportDayOpen] = useStateS(false);
   const [pendingImportDay, setPendingImportDay] = useStateS(null); // { name, items, migrateId } awaiting a weekday
@@ -1894,8 +1914,53 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
                 </div>
               );
             })}
+            {/* A 5/3/1 plan is a flex plan, so it can carry any number of main
+                lifts. Adding one registers it and appends a new Wendler day. */}
+            <button onClick={() => setAddLiftPicking(true)} style={{
+              padding: '11px 0', borderRadius: 4, cursor: 'pointer', border: `1px dashed ${UI.hairStrong}`,
+              background: 'transparent', color: UI.gold, fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600,
+              letterSpacing: '0.04em', WebkitTapHighlightColor: 'transparent',
+            }}>+ Add main lift</button>
           </div>
         )}
+      </Sheet>
+
+      {addLiftPicking && (
+        <ExercisePicker store={store} setStore={setStore} onClose={() => setAddLiftPicking(false)} onPick={startAddMainLift} />
+      )}
+
+      <Sheet open={addLiftDraft != null} onClose={() => setAddLiftDraft(null)} title="Add main lift">
+        {addLiftDraft && (() => {
+          const u = draft.program_data?.unit || 'kg';
+          const d = addLiftDraft;
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              <div style={{ fontFamily: UI.fontDisplay, fontSize: 20, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.02em', color: UI.ink }}>{d.name}</div>
+              <div className="micro" style={{ color: UI.inkFaint, textTransform: 'none', letterSpacing: '0.02em', lineHeight: 1.5 }}>
+                Adds a 5/3/1 day for this lift, waving 5s / 3s / 1s off its Training Max. Assistance you add to the day stays on normal progression.
+              </div>
+              <div>
+                <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>Per-cycle increase</div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  {[['lower', 'Lower body'], ['upper', 'Upper body']].map(([body, label]) => (
+                    <button key={body} onClick={() => setAddLiftDraft(x => ({ ...x, body }))} style={{
+                      flex: 1, padding: '10px 8px', borderRadius: 4, cursor: 'pointer',
+                      border: `1px solid ${d.body === body ? UI.gold : UI.hairStrong}`,
+                      background: d.body === body ? UI.goldFaint : 'transparent',
+                      color: d.body === body ? UI.gold : UI.inkFaint,
+                      fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, WebkitTapHighlightColor: 'transparent',
+                    }}>{label}<span style={{ display: 'block', fontSize: 10, opacity: 0.8, marginTop: 2 }}>+{LB.tmBump531(body, u)}{u}/cycle</span></button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>Training Max</div>
+                <TmField value={d.tm} step={u === 'lbs' ? 5 : 2.5} suffix={u} onChange={v => setAddLiftDraft(x => ({ ...x, tm: v }))} />
+              </div>
+              <Btn onClick={confirmAddMainLift} disabled={!(d.tm > 0)} style={{ opacity: d.tm > 0 ? 1 : 0.5, cursor: d.tm > 0 ? 'pointer' : 'default' }}>Add lift</Btn>
+            </div>
+          );
+        })()}
       </Sheet>
 
       <Sheet open={modifiersOpen} onClose={() => setModifiersOpen(false)} title="Options">

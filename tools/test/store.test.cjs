@@ -1387,6 +1387,45 @@ async function testAsync(name, fn) {
     assert.strictEqual(none.higher, false);
   });
 
+  test('tmBump531: extra lifts bump by upper/lower class like the canonical four', () => {
+    assert.strictEqual(LB.tmBump531('lower', 'kg'), 5);   // like squat/deadlift
+    assert.strictEqual(LB.tmBump531('upper', 'kg'), 2.5); // like bench/ohp
+    assert.strictEqual(LB.tmBump531('lower', 'lbs'), 10);
+    assert.strictEqual(LB.tmBump531('upper', 'lbs'), 5);
+    assert.strictEqual(LB.tmBump531('squat', 'kg'), 5);   // canonical unchanged
+    assert.strictEqual(LB.tmBump531('bench', 'kg'), 2.5);
+  });
+
+  test('add531MainLift: registers a lift on existing program_data, seeds a Wendler day', () => {
+    const pd = { unit: 'kg', mainLifts: { sq: { tm: 100, kind: 'squat', stall: 0 } }, tmHistory: { sq: [{ cycle: 0, tm: 100, reason: 'start' }] } };
+    const { programData, items } = LB.add531MainLift(pd, { exId: 'row', kind: 'upper', tm: 60, cycle: 2, assistanceIds: ['a1', 'a2'] });
+    assert.strictEqual(programData.mainLifts.row.tm, 60);
+    assert.strictEqual(programData.mainLifts.row.kind, 'upper');
+    assert.strictEqual(programData.mainLifts.row.stall, 0);
+    assert.strictEqual(programData.mainLifts.sq.tm, 100, 'existing lift untouched');
+    // history stamped at the plan's current cycle (chart starts where it was added)
+    assert.strictEqual(programData.tmHistory.row.map(h => `${h.cycle}:${h.reason}`).join(','), '2:start');
+    // the day: main lift (3x5) + assistance as Range items (Smart Progression)
+    assert.strictEqual(items.map(i => i.exId).join(','), 'row,a1,a2');
+    assert.strictEqual(items[0].sets, 3);
+    assert.strictEqual(items[0].reps, 5);
+    assert.strictEqual(items[1].repsMax, 12);
+    // no TM yet -> empty history, no start point
+    const noTm = LB.add531MainLift(pd, { exId: 'ohp2', kind: 'lower' });
+    assert.strictEqual(noTm.programData.mainLifts.ohp2.tm, null);
+    assert.strictEqual(noTm.programData.tmHistory.ohp2.length, 0);
+  });
+
+  test('build531Plan: an extra lift names its day after the exercise and carries its own assistance', () => {
+    const res = LB.build531Plan({ exercises: [{ id: 'row1', name: 'Barbell Row' }, { id: 'aid1', name: 'Face Pull' }] }, {
+      unit: 'kg', lifts: [{ kind: 'lower', ex: 'row1', tm: 60, name: 'Barbell Row', assistance: ['aid1'] }],
+    });
+    assert.strictEqual(res.schedule.days.length, 1);
+    assert.strictEqual(res.schedule.days[0].name, 'Barbell Row', 'day named after the exercise, not "lower"');
+    assert.strictEqual(res.schedule.program_data.mainLifts.row1.kind, 'lower');
+    assert.strictEqual(res.schedule.days[0].items.map(i => i.exId).join(','), 'row1,aid1');
+  });
+
   test('build531Plan: catalog names resolve, 4 days, program_data stamped, assistance uncapped', () => {
     const FTO = _catWin.FIVE_THREE_ONE;
     assert.ok(FTO && Array.isArray(FTO.lifts) && FTO.lifts.length === 4, 'FIVE_THREE_ONE has 4 lifts');
