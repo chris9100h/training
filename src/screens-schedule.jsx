@@ -349,10 +349,9 @@ function FiveThreeOneProgress({ sch, store }) {
   const ORDER = { squat: 0, bench: 1, deadlift: 2, ohp: 3 };
   exIds.sort((a, b) => (ORDER[ml[a].kind] ?? 9) - (ORDER[ml[b].kind] ?? 9));
   return (
-    <div style={{ background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 8, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
-        <span className="label" style={{ marginBottom: 0, color: UI.gold }}>5/3/1 Progress</span>
-        <span className="num" style={{ fontSize: 12, color: UI.inkSoft }}>Cycle {cycle} · Week {week}</span>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'center' }}>
+        <span className="num" style={{ fontSize: 13, color: UI.gold, letterSpacing: '0.04em' }}>Cycle {cycle} · Week {week}</span>
       </div>
       {exIds.map(exId => {
         const name = LB.findExercise(store, exId)?.name || 'Lift';
@@ -437,6 +436,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
     : null;
 
   const [selectedDayId, setSelectedDayId] = useStateS(() => todayDayId || displayDays[0]?.id || null);
+  const [progress531Open, setProgress531Open] = useStateS(false);
   const chipRowRef = React.useRef(null);
 
   // Switching versions moves the selection to today's day (if shown) or the
@@ -775,6 +775,23 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
     </>
   );
 
+  // 5/3/1 progress is tucked behind a full-width button (like Edit Training Max)
+  // so it doesn't eat the plan viewer; tapping it opens the chart sheet.
+  const progress531Btn = LB.is531Plan(sch) ? (() => {
+    const cyc = LB.current531Cycle(sch, store.sessions) + 1;
+    const wk = LB.current531Week(sch, store.sessions) || 1;
+    return (
+      <button onClick={() => setProgress531Open(true)} style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, width: '100%',
+        background: `rgba(var(--accent-rgb),0.06)`, border: `1px solid ${UI.goldSoft}`,
+        borderRadius: 8, padding: '13px 16px', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+      }}>
+        <span style={{ fontFamily: UI.fontUi, fontSize: 12, letterSpacing: '0.08em', textTransform: 'uppercase', color: UI.gold, fontWeight: 600 }}>Show 5/3/1 progress</span>
+        <span className="num" style={{ fontSize: 12, color: UI.inkSoft }}>C{cyc} · W{wk} →</span>
+      </button>
+    );
+  })() : null;
+
   const fmtVDate = (iso) => new Date(iso + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   const versionBar = versions && (() => {
     const vNum = versions.length - safeVerIdx;
@@ -914,7 +931,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
 
           {/* Right: day content */}
           <div style={{ flex: 1, minWidth: 0, overflowY: 'auto', overflowX: 'hidden', padding: '20px 32px 24px', display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <FiveThreeOneProgress sch={sch} store={store} />
+            {progress531Btn}
             {dayHeader}
             {exerciseList}
           </div>
@@ -955,12 +972,16 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
           </div>
 
           <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden', padding: '0 22px 20px', display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <FiveThreeOneProgress sch={sch} store={store} />
+            {progress531Btn}
             {dayHeader}
             {exerciseList}
           </div>
         </>
       )}
+
+      <Sheet open={progress531Open} onClose={() => setProgress531Open(false)} title="5/3/1 Progress">
+        <FiveThreeOneProgress sch={sch} store={store} />
+      </Sheet>
 
       {reactivateSheet && (
         <MiniSheet onClose={() => setReactivateSheet(false)}>
