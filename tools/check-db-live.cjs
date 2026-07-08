@@ -4,27 +4,34 @@
 // docs/database.md. The offline counterpart (migrations vs repo files, runs
 // on every push) is tools/check-db-docs.cjs.
 //
-// Stage 1 (always, no secrets): uses the public anon key from src/store.js.
-//   - PostgREST OpenAPI spec (/rest/v1/) lists every table+column the anon
-//     role can see: compared against schema.sql and docs/database.md.
-//   - The spec's /rpc/ paths list every function anon may EXECUTE: must be
-//     empty (grant leak canary, see "Grant-Fallen" in docs/database.md).
+// Two modes, picked automatically:
 //
-// Stage 2 (runs when SUPABASE_SERVICE_ROLE_KEY is set): calls the
+// Inventory mode (when SUPABASE_SERVICE_ROLE_KEY is set): calls the
 // admin_schema_inventory() RPC (Migration 0142) for the authoritative view:
-//   - all columns from information_schema (independent of anon grants)
-//   - has_function_privilege('anon', ...) for every public function
-//   - the supabase_realtime publication
+//   - all public columns from information_schema, compared both ways against
+//     schema.sql and docs/database.md
+//   - has_function_privilege('anon', ...) for every public function (grant
+//     leak canary, see "Grant-Fallen" in docs/database.md): must be false
+//   - the supabase_realtime publication members
 //
-// Setup for stage 2:
+// Probe mode (no secret): uses the public anon key from src/store.js and
+// checks that every zane_ table/column in schema.sql still exists live, via
+// read-only PostgREST selects with limit=1 (RLS applies, returns no data).
+// Limitation: columns added live but missing from schema.sql are invisible
+// in this mode; only inventory mode catches those. (The PostgREST OpenAPI
+// spec under /rest/v1/ would show them, but Supabase now serves that
+// endpoint to the service_role key only, hence this design.)
+//
+// Setup for inventory mode:
 //   1. Run Migration 0142 (creates admin_schema_inventory, service_role only).
 //   2. GitHub repo -> Settings -> Secrets and variables -> Actions ->
-//      "New repository secret": name SUPABASE_SERVICE_ROLE_KEY, value from
-//      Supabase Dashboard -> Project Settings -> API -> service_role key.
-//   The workflow picks it up automatically on the next run.
+//      "New repository secret": name SUPABASE_SERVICE_ROLE_KEY (exactly),
+//      value from Supabase Dashboard -> Project Settings -> API ->
+//      service_role key. The workflow picks it up on the next run; the log
+//      line "service key: present/not set" shows whether it arrived.
 //
-// Test hooks (offline development): --spec <file> and --inventory <file>
-// read saved JSON responses instead of hitting the network.
+// Test hook (offline development): --inventory <file> reads a saved
+// inventory JSON instead of hitting the network.
 
 const fs = require('fs');
 const path = require('path');
@@ -108,7 +115,7 @@ const SUPABASE_URL =
 const ANON_KEY =
   process.env.SUPABASE_ANON_KEY ||
   fromStoreJs(/const SUPABASE_ANON_KEY = '([^']+)'/, 'SUPABASE_ANON_KEY');
-const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+const SERVICE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
 
 const args = process.argv.slice(2);
 const argVal = (name) => {
@@ -119,99 +126,105 @@ const argVal = (name) => {
 const errors = [];
 const infos = [];
 
-function compareTable(t, liveCols, source) {
-  const repo = schemaTables.get(t);
-  if (!repo) {
-    errors.push(`${source}: table ${t} exists live but not in supabase/schema.sql`);
-    return;
-  }
-  for (const c of [...liveCols].sort()) {
-    if (!repo.has(c)) errors.push(`${source}: column ${t}.${c} exists live but not in supabase/schema.sql`);
-  }
-  for (const c of [...repo].sort()) {
-    if (!liveCols.has(c)) errors.push(`${source}: column ${t}.${c} is in supabase/schema.sql but not live`);
-  }
-  const sec = docSections.get(t);
-  if (!sec) {
-    errors.push(`${source}: table ${t} has no section in docs/database.md`);
-    return;
-  }
-  for (const c of [...liveCols].sort()) {
-    if (!sec.includes('`' + c + '`') && !sec.includes(c)) {
-      errors.push(`${source}: live column ${t}.${c} is not mentioned in its docs/database.md section`);
-    }
-  }
-}
-
-async function getJson(url, key, opts = {}) {
+async function req(url, key, opts = {}) {
   const res = await fetch(url, {
     ...opts,
     headers: { apikey: key, Authorization: `Bearer ${key}`, ...(opts.headers || {}) },
   });
-  if (!res.ok) {
-    const body = (await res.text()).slice(0, 300);
-    const err = new Error(`${opts.method || 'GET'} ${url} -> HTTP ${res.status}: ${body}`);
-    err.operational = true;
-    throw err;
-  }
-  return res.json();
+  return res;
 }
 
-// ── Stage 1: anon OpenAPI spec ───────────────────────────────────────────────
+// ── Probe mode: verify schema.sql columns still exist live (anon key) ───────
 
-async function stage1() {
-  const specFile = argVal('--spec');
-  const spec = specFile
-    ? JSON.parse(fs.readFileSync(specFile, 'utf8'))
-    : await getJson(`${SUPABASE_URL}/rest/v1/`, ANON_KEY, {
-        headers: { Accept: 'application/openapi+json, application/json' },
-      });
-
-  const defs = spec.definitions || {};
-  const liveTables = Object.keys(defs).filter((t) => t.startsWith('zane_'));
-  if (!liveTables.length) {
-    throw Object.assign(
-      new Error('stage 1: OpenAPI spec contains no zane_ tables (anon table grants revoked? spec format changed?)'),
-      { operational: true }
-    );
-  }
-  for (const t of liveTables.sort()) {
-    compareTable(t, new Set(Object.keys(defs[t].properties || {})), 'stage1');
-  }
-  for (const t of [...schemaTables.keys()].sort()) {
-    if (t.startsWith('zane_') && !(t in defs)) {
-      errors.push(`stage1: table ${t} is in supabase/schema.sql but not visible live (dropped, or anon grant revoked?)`);
+async function probeMode() {
+  infos.push('probe mode: verifying schema.sql columns exist live (cannot discover live-only columns; set the service key for full coverage)');
+  const zaneTables = [...schemaTables.entries()].filter(([t]) => t.startsWith('zane_')).sort();
+  for (const [t, colsSet] of zaneTables) {
+    const cols = [...colsSet].sort();
+    const url = `${SUPABASE_URL}/rest/v1/${t}?select=${cols.join(',')}&limit=1`;
+    const res = await req(url, ANON_KEY);
+    if (res.ok) continue;
+    if (res.status === 404) {
+      errors.push(`probe: table ${t} is in supabase/schema.sql but does not exist live`);
+      continue;
     }
+    if (res.status === 401 || res.status === 403) {
+      infos.push(`probe: table ${t} not readable with the anon key (grant revoked?), cannot verify`);
+      continue;
+    }
+    if (res.status === 400) {
+      // Some column is unknown live: probe one by one to name all of them.
+      let allFine = true;
+      for (const c of cols) {
+        const r1 = await req(`${SUPABASE_URL}/rest/v1/${t}?select=${c}&limit=1`, ANON_KEY);
+        if (r1.status === 400) {
+          errors.push(`probe: column ${t}.${c} is in supabase/schema.sql but does not exist live`);
+          allFine = false;
+        }
+      }
+      if (allFine) {
+        const body = (await res.text()).slice(0, 200);
+        errors.push(`probe: table ${t} rejected the full column select but every single column probe passed (odd, check manually): ${body}`);
+      }
+      continue;
+    }
+    const body = (await res.text()).slice(0, 200);
+    throw Object.assign(new Error(`probe: GET ${t} -> HTTP ${res.status}: ${body}`), { operational: true });
   }
-
-  const anonRpcs = Object.keys(spec.paths || {})
-    .filter((p) => p.startsWith('/rpc/'))
-    .map((p) => p.slice(5))
-    .sort();
-  for (const fn of anonRpcs) {
-    errors.push(`stage1: function ${fn} is EXECUTEable by anon (see "Grant-Fallen" in docs/database.md; expected: none)`);
-  }
-
-  const foreign = Object.keys(defs).filter((t) => !t.startsWith('zane_')).sort();
-  if (foreign.length) infos.push(`stage1: non-app tables visible live (ignored): ${foreign.join(', ')}`);
-  infos.push(`stage1 checked ${liveTables.length} live tables against schema.sql + docs, ${anonRpcs.length} anon-executable RPCs`);
+  infos.push(`probe mode checked ${zaneTables.length} tables / ${zaneTables.reduce((n, [, s]) => n + s.size, 0)} columns from schema.sql against the live database`);
 }
 
-// ── Stage 2: authoritative inventory via service role ────────────────────────
+// ── Inventory mode: authoritative check via admin_schema_inventory() ────────
 
-async function stage2() {
-  const invFile = argVal('--inventory');
-  if (!invFile && !SERVICE_KEY) {
-    infos.push('stage2 skipped: SUPABASE_SERVICE_ROLE_KEY not set (see header of this file for setup)');
+function compareTable(t, liveCols) {
+  const repo = schemaTables.get(t);
+  if (!repo) {
+    errors.push(`inventory: table ${t} exists live but not in supabase/schema.sql`);
     return;
   }
-  const inv = invFile
-    ? JSON.parse(fs.readFileSync(invFile, 'utf8'))
-    : await getJson(`${SUPABASE_URL}/rest/v1/rpc/admin_schema_inventory`, SERVICE_KEY, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: '{}',
-      });
+  for (const c of [...liveCols].sort()) {
+    if (!repo.has(c)) errors.push(`inventory: column ${t}.${c} exists live but not in supabase/schema.sql`);
+  }
+  for (const c of [...repo].sort()) {
+    if (!liveCols.has(c)) errors.push(`inventory: column ${t}.${c} is in supabase/schema.sql but not live`);
+  }
+  const sec = docSections.get(t);
+  if (!sec) {
+    errors.push(`inventory: table ${t} has no section in docs/database.md`);
+    return;
+  }
+  for (const c of [...liveCols].sort()) {
+    if (!sec.includes('`' + c + '`') && !sec.includes(c)) {
+      errors.push(`inventory: live column ${t}.${c} is not mentioned in its docs/database.md section`);
+    }
+  }
+}
+
+async function inventoryMode(invFile) {
+  let inv;
+  if (invFile) {
+    inv = JSON.parse(fs.readFileSync(invFile, 'utf8'));
+  } else {
+    const res = await req(`${SUPABASE_URL}/rest/v1/rpc/admin_schema_inventory`, SERVICE_KEY, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+    });
+    if (res.status === 404) {
+      throw Object.assign(
+        new Error('inventory: admin_schema_inventory() not found. Has Migration 0142 been applied?'),
+        { operational: true }
+      );
+    }
+    if (!res.ok) {
+      const body = (await res.text()).slice(0, 300);
+      throw Object.assign(
+        new Error(`inventory: POST rpc/admin_schema_inventory -> HTTP ${res.status}: ${body} (service key wrong or lacking EXECUTE?)`),
+        { operational: true }
+      );
+    }
+    inv = await res.json();
+  }
 
   const byTable = new Map();
   for (const { t, c } of inv.columns || []) {
@@ -219,42 +232,44 @@ async function stage2() {
     byTable.get(t).add(c);
   }
   for (const [t, cols] of [...byTable.entries()].sort()) {
-    if (t.startsWith('zane_')) compareTable(t, cols, 'stage2');
+    if (t.startsWith('zane_')) compareTable(t, cols);
   }
   for (const t of [...schemaTables.keys()].sort()) {
     if (t.startsWith('zane_') && !byTable.has(t)) {
-      errors.push(`stage2: table ${t} is in supabase/schema.sql but does not exist live`);
+      errors.push(`inventory: table ${t} is in supabase/schema.sql but does not exist live`);
     }
   }
 
   for (const fn of inv.functions || []) {
     if (fn.anon_exec) {
-      errors.push(`stage2: has_function_privilege('anon', '${fn.sig || fn.f}') = true (expected: false for every function)`);
+      errors.push(`inventory: has_function_privilege('anon', '${fn.sig || fn.f}') = true (expected: false for every function)`);
     }
   }
 
   const rt = (inv.realtime || []).map(String);
   const rtZane = new Set(rt.filter((t) => t.startsWith('zane_')));
   for (const t of [...EXPECTED_REALTIME].sort()) {
-    if (!rtZane.has(t)) errors.push(`stage2: ${t} is missing from the supabase_realtime publication`);
+    if (!rtZane.has(t)) errors.push(`inventory: ${t} is missing from the supabase_realtime publication`);
   }
   for (const t of [...rtZane].sort()) {
     if (!EXPECTED_REALTIME.has(t)) {
-      errors.push(`stage2: unexpected app table ${t} in the supabase_realtime publication (update docs + EXPECTED_REALTIME in this script if intended)`);
+      errors.push(`inventory: unexpected app table ${t} in the supabase_realtime publication (update docs + EXPECTED_REALTIME in this script if intended)`);
     }
   }
   const rtForeign = rt.filter((t) => !t.startsWith('zane_')).sort();
-  if (rtForeign.length) infos.push(`stage2: non-app tables in realtime publication (ignored): ${rtForeign.join(', ')}`);
+  if (rtForeign.length) infos.push(`inventory: non-app tables in realtime publication (ignored): ${rtForeign.join(', ')}`);
 
   const foreign = [...byTable.keys()].filter((t) => !t.startsWith('zane_')).sort();
-  if (foreign.length) infos.push(`stage2: non-app tables in public schema (ignored): ${foreign.join(', ')}`);
-  infos.push(`stage2 checked ${[...byTable.keys()].filter((t) => t.startsWith('zane_')).length} live tables, ${(inv.functions || []).length} functions, realtime publication`);
+  if (foreign.length) infos.push(`inventory: non-app tables in public schema (ignored): ${foreign.join(', ')}`);
+  infos.push(`inventory mode checked ${[...byTable.keys()].filter((t) => t.startsWith('zane_')).length} live tables, ${(inv.functions || []).length} functions, realtime publication`);
 }
 
 (async () => {
+  console.log(`service key: ${SERVICE_KEY ? `present (${SERVICE_KEY.length} chars)` : 'not set'}`);
   try {
-    await stage1();
-    await stage2();
+    const invFile = argVal('--inventory');
+    if (invFile || SERVICE_KEY) await inventoryMode(invFile);
+    else await probeMode();
   } catch (e) {
     console.error(`check-db-live: ${e.message}`);
     process.exit(e.operational ? 2 : 1);
