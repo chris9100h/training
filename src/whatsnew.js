@@ -16,6 +16,14 @@
    Entry shape: { id: string, title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.518',
+    title: 'No Lift Left Behind',
+    items: [
+      "💪 Assisted pull-ups and dips finally count. Not ready for a strict rep yet? Mark any exercise as \"Assisted\" and log how much help you're leaning on, whether it's a band or the machine stack. Here's the clever part: less help is progress, so every time you shave the assistance down the app logs a new best and cheers you on. Track the whole climb, right up to your first unassisted rep.",
+      "🏋️ 5/3/1 stretches to fit you. Beyond the classic four, add as many main lifts as you like: a fifth, a sixth, whatever your training calls for. Each new one gets its own day, waves 5s / 3s / 1s off its Training Max, and bumps automatically cycle to cycle, exactly like the originals. Set them up at the start, or later in the editor: tap \"+ Add day\" and choose 5/3/1 Progression. (Assistance work also dropped its four-per-day limit, so pile on the accessories.)",
+    ],
+  },
+  {
     id: 'v2.515',
     title: '5/3/1, By the Book',
     items: [
