@@ -4770,11 +4770,14 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   <div style={{ position: 'relative' }}>
                   {amrapArmed && (
                     <div aria-hidden="true" style={{
-                      // Start at the top edge of the weight/rep boxes (the row's ~10px
-                      // top padding) so the glow never bleeds up into the knurl above.
-                      position: 'absolute', top: 9, bottom: -6, left: 0, right: 0, zIndex: 0,
+                      // Fill the money zone with fire, corner to corner: top at the
+                      // weight/rep box tops (never up into the knurl above), bottom just
+                      // under the "go all out" caption, full row width. farthest-corner
+                      // keeps colour all the way into the four corners instead of fading
+                      // to a central oval.
+                      position: 'absolute', top: 9, bottom: 8, left: 0, right: 0, zIndex: 0,
                       pointerEvents: 'none',
-                      background: 'radial-gradient(60% 130% at 50% 45%, rgba(255,120,40,0.26), rgba(210,45,0,0.11) 48%, transparent 72%)',
+                      background: 'radial-gradient(farthest-corner at 50% 50%, rgba(255,120,40,0.28), rgba(210,45,0,0.18) 55%, rgba(210,45,0,0.10) 100%)',
                       animation: 'hellPulse 2s ease-in-out infinite',
                     }} />
                   )}
