@@ -956,6 +956,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // the finish sheet (z 150+ vs 100), so the last-set case reveals cleanly too.
   const FLASH_NAV_DELAY_MS = 700;
 
+  // PROGRESSION UNLOCKED works the same way but appears 800ms later (it waits
+  // out that delay before showing) and lives 4s, opaque from ~1120ms to
+  // ~3680ms. Swapping at 1600ms lands well inside that opaque window, so the
+  // next exercise is already on screen by the time it fades out at 4800ms.
+  const PROGRESSION_NAV_DELAY_MS = 1600;
+
   const completeSet = (setIdx, bypassOutlierCheck = false, advanceFocus = false, extraPatch = null) => {
     // Lengthened partials only ever completes via finishLengthenedPartial,
     // which supplies extraPatch with the chosen partials count — every other
@@ -1145,20 +1151,20 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // progression, max once per exercise. A first-ever set (no record yet) and
     // bodyweight sets (no kg) never count as a new best.
     // overlayHoldMs is the delay before the shared navigation below swaps to
-    // the next exercise. For these three flashes we pull it in to
-    // FLASH_NAV_DELAY_MS (well under their 2.5s display) so the swap happens
-    // hidden behind the still-opaque flash and the next exercise is already
-    // there as it fades, instead of jumping in only once the flash fully
-    // clears. PROGRESSION UNLOCKED keeps its longer hold (its numbers want
-    // reading). Every overlay only ever schedules its own show/hide timers
-    // here; the navigation decision happens exactly once, further down, in the
-    // superset-aware code shared by every completion. (Previously PROGRESSION
-    // UNLOCKED ran a separate, non-superset-aware navigate(1) on its own 4.8s
-    // timer that could override wherever the superset flow had already moved
-    // the user on to.)
+    // the next exercise. We pull it well under each overlay's display time
+    // (FLASH_NAV_DELAY_MS for the three flashes, PROGRESSION_NAV_DELAY_MS for
+    // the longer progression toast) so the swap happens hidden behind the
+    // still-opaque overlay and the next exercise is already there as it fades,
+    // instead of jumping in only once the overlay fully clears. Every overlay
+    // only ever schedules its own show/hide timers here; the navigation
+    // decision happens exactly once, further down, in the superset-aware code
+    // shared by every completion. (Previously PROGRESSION UNLOCKED ran a
+    // separate, non-superset-aware navigate(1) on its own 4.8s timer that
+    // could override wherever the superset flow had already moved the user
+    // on to.)
     let overlayHoldMs = 0;
     if (progressionResult) {
-      overlayHoldMs = 4800; // 800ms delay + 4000ms display, matching the toast's own timing below
+      overlayHoldMs = PROGRESSION_NAV_DELAY_MS; // swap mid-overlay; the show/hide timers below keep their own 800ms + 4000ms
       setTimeout(() => {
         setProgressionUnlocked(progressionResult);
         setTimeout(() => setProgressionUnlocked(null), 4000);
