@@ -945,6 +945,17 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     }
   };
 
+  // How long after a completed set we swap to the next exercise (or open the
+  // finish sheet) while a NEW BEST / IMPROVEMENT / REGRESSION flash is showing.
+  // That flash is fully opaque from ~200ms to ~1800ms (improvedFade over its
+  // 2.5s life) before fading out. Swapping at 700ms happens completely hidden
+  // behind it, so as the flash fades the next exercise is already rendered
+  // underneath: a smooth reveal instead of the old abrupt jump that only fired
+  // once the flash had fully cleared at 2500ms. The flash keeps its own full
+  // 2.5s hide timers; only the navigation moved earlier. The flash sits above
+  // the finish sheet (z 150+ vs 100), so the last-set case reveals cleanly too.
+  const FLASH_NAV_DELAY_MS = 700;
+
   const completeSet = (setIdx, bypassOutlierCheck = false, advanceFocus = false, extraPatch = null) => {
     // Lengthened partials only ever completes via finishLengthenedPartial,
     // which supplies extraPatch with the chosen partials count — every other
@@ -1133,15 +1144,18 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // all-time e1RM record for this exercise — independent of smart
     // progression, max once per exercise. A first-ever set (no record yet) and
     // bodyweight sets (no kg) never count as a new best.
-    // overlayHoldMs stretches the auto-advance delay below to match whichever
-    // of these toasts is showing, so navigating to the next exercise doesn't
-    // cut its display short. Every overlay (including progression) now only
-    // ever schedules its own show/hide timers here — the actual navigation
-    // decision happens exactly once, further down, in the superset-aware
-    // code shared by every completion. Previously PROGRESSION UNLOCKED ran an
-    // entirely separate, non-superset-aware navigate(1) on its own 4.8s
-    // timer, which could fire well after (and override) wherever the
-    // superset flow had already correctly moved the user on to.
+    // overlayHoldMs is the delay before the shared navigation below swaps to
+    // the next exercise. For these three flashes we pull it in to
+    // FLASH_NAV_DELAY_MS (well under their 2.5s display) so the swap happens
+    // hidden behind the still-opaque flash and the next exercise is already
+    // there as it fades, instead of jumping in only once the flash fully
+    // clears. PROGRESSION UNLOCKED keeps its longer hold (its numbers want
+    // reading). Every overlay only ever schedules its own show/hide timers
+    // here; the navigation decision happens exactly once, further down, in the
+    // superset-aware code shared by every completion. (Previously PROGRESSION
+    // UNLOCKED ran a separate, non-superset-aware navigate(1) on its own 4.8s
+    // timer that could override wherever the superset flow had already moved
+    // the user on to.)
     let overlayHoldMs = 0;
     if (progressionResult) {
       overlayHoldMs = 4800; // 800ms delay + 4000ms display, matching the toast's own timing below
@@ -1159,17 +1173,17 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       if (isNewBest) {
         newBestShownRef.current[entry.exId] = true;
         setNewBestSet(true);
-        overlayHoldMs = 2500;
+        overlayHoldMs = FLASH_NAV_DELAY_MS;
         setTimeout(() => setNewBestSet(false), 2500);
       } else if (isImprovement(completed, prevSet)) {
         setImprovedSet(true);
-        overlayHoldMs = 2500;
+        overlayHoldMs = FLASH_NAV_DELAY_MS;
         setTimeout(() => setImprovedSet(false), 2500);
       } else {
         const anyImprovementBefore = entry.sets.slice(0, setIdx).some((s, k) => isImprovement(s, prevWorkingSetFor(k)));
         if (!anyImprovementBefore && isDecline(completed, prevSet) && store.settings?.showRegression !== false) {
           setRegressionSet(true);
-          overlayHoldMs = 2500;
+          overlayHoldMs = FLASH_NAV_DELAY_MS;
           setTimeout(() => setRegressionSet(false), 2500);
         }
       }
@@ -1201,9 +1215,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       const isNewBest = cE1rm > 0 && priorBest > 0 && cE1rm > priorBest && !newBestShownRef.current[entry.exId];
       if (isNewBest) {
         newBestShownRef.current[entry.exId] = true;
-        setNewBestSet(true); overlayHoldMs = 2500; setTimeout(() => setNewBestSet(false), 2500);
+        setNewBestSet(true); overlayHoldMs = FLASH_NAV_DELAY_MS; setTimeout(() => setNewBestSet(false), 2500);
       } else if (isImprovement(firstSet, prevSet)) {
-        setImprovedSet(true); overlayHoldMs = 2500; setTimeout(() => setImprovedSet(false), 2500);
+        setImprovedSet(true); overlayHoldMs = FLASH_NAV_DELAY_MS; setTimeout(() => setImprovedSet(false), 2500);
       } else {
         const anyImpBefore = entry.sets.slice(0, targetIdx).some((s, k) => {
           if (s.warmup) return false;
@@ -1211,7 +1225,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           return isImprovement(s, wk >= 0 ? prevWS[wk] : undefined);
         });
         if (!anyImpBefore && isDecline(firstSet, prevSet) && store.settings?.showRegression !== false) {
-          setRegressionSet(true); overlayHoldMs = 2500; setTimeout(() => setRegressionSet(false), 2500);
+          setRegressionSet(true); overlayHoldMs = FLASH_NAV_DELAY_MS; setTimeout(() => setRegressionSet(false), 2500);
         }
       }
     }
