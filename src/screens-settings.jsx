@@ -240,27 +240,133 @@ function HowToSheet({ open, onClose }) {
 }
 
 // ─── CHANGELOG SHEET ─────────────────────────────────────────────────
+
+// ISO 8601 week number + week-numbering year for a 'YYYY-MM-DD' string.
+function changelogIsoWeek(dateStr) {
+  const [y, m, d] = String(dateStr || '').split('-').map(Number);
+  if (!y || !m || !d) return { year: 0, week: 0 };
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() - ((dt.getUTCDay() + 6) % 7) + 3); // Thursday decides the year
+  const isoYear = dt.getUTCFullYear();
+  const firstThu = new Date(Date.UTC(isoYear, 0, 4));              // Jan 4 always sits in week 1
+  firstThu.setUTCDate(firstThu.getUTCDate() - ((firstThu.getUTCDay() + 6) % 7) + 3);
+  return { year: isoYear, week: 1 + Math.round((dt - firstThu) / (7 * 86400000)) };
+}
+
+// Monday-Sunday span of the week containing dateStr, e.g. "16-22 Jun" (or
+// "29 Jun - 5 Jul" across a month boundary).
+function changelogWeekRange(dateStr) {
+  const [y, m, d] = String(dateStr || '').split('-').map(Number);
+  if (!y) return '';
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  const mon = new Date(dt); mon.setUTCDate(dt.getUTCDate() - ((dt.getUTCDay() + 6) % 7));
+  const sun = new Date(mon); sun.setUTCDate(mon.getUTCDate() + 6);
+  const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  return mon.getUTCMonth() === sun.getUTCMonth()
+    ? `${mon.getUTCDate()}-${sun.getUTCDate()} ${MON[mon.getUTCMonth()]}`
+    : `${mon.getUTCDate()} ${MON[mon.getUTCMonth()]} - ${sun.getUTCDate()} ${MON[sun.getUTCMonth()]}`;
+}
+
 function ChangelogSheet({ open, onClose }) {
-  const [selected, setSelected] = useStateSet(null);
-  const handleClose = () => { onClose(); setSelected(null); };
+  const [selected, setSelected] = useStateSet(null);         // one entry -> its message
+  const [selectedWeek, setSelectedWeek] = useStateSet(null); // week group -> its titles
+  const [selectedYear, setSelectedYear] = useStateSet(null); // older year -> its weeks
+  const handleClose = () => { onClose(); setSelected(null); setSelectedWeek(null); setSelectedYear(null); };
+
+  // Newest 5 shown directly; the rest grouped by ISO week. Weeks of the newest
+  // year stay on the top level; older years collapse into a year group, so the
+  // list stays short no matter how many releases pile up.
+  const { latest, currentWeeks, olderYears } = React.useMemo(() => {
+    const all = window.WHATS_NEW || [];
+    const latest = all.slice(0, 5);
+    const newestYear = all.length ? changelogIsoWeek(all[0].date).year : 0;
+    const weekMap = new Map();
+    for (const e of all.slice(5)) {
+      const { year, week } = changelogIsoWeek(e.date);
+      const key = year + '-' + String(week).padStart(2, '0');
+      if (!weekMap.has(key)) weekMap.set(key, { key, year, week, date: e.date, entries: [] });
+      weekMap.get(key).entries.push(e);
+    }
+    const weeks = [...weekMap.values()]; // insertion order == newest-first
+    const yearMap = new Map();
+    for (const w of weeks.filter(w => w.year !== newestYear)) {
+      if (!yearMap.has(w.year)) yearMap.set(w.year, { year: w.year, weeks: [], count: 0 });
+      const g = yearMap.get(w.year); g.weeks.push(w); g.count += w.entries.length;
+    }
+    return { latest, currentWeeks: weeks.filter(w => w.year === newestYear), olderYears: [...yearMap.values()] };
+  }, []);
+
+  const rowBtn = { width: '100%', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '12px 0', WebkitTapHighlightColor: 'transparent' };
+  const chevron = () => <svg width="5" height="9" viewBox="0 0 6 10" fill="none" stroke={UI.inkFaint} strokeWidth="1.3" strokeLinecap="round"><path d="M1 1l4 4-4 4" /></svg>;
+  const badge = (n) => <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--accent)', background: 'rgba(var(--accent-rgb),0.12)', borderRadius: 999, padding: '1px 8px', fontFamily: UI.fontUi }}>{n}</span>;
+  const titleRow = (entry) => (
+    <button onClick={() => setSelected(entry)} style={rowBtn}>
+      <span style={{ fontSize: 15, fontWeight: 500, color: UI.ink, fontFamily: UI.fontUi, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{entry.title}</span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+        <span className="micro" style={{ color: UI.inkFaint }}>{entry.id}</span>
+        {chevron()}
+      </div>
+    </button>
+  );
+  const weekRow = (w) => (
+    <button onClick={() => setSelectedWeek(w)} style={rowBtn}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, overflow: 'hidden' }}>
+        <span style={{ fontSize: 15, fontWeight: 500, color: UI.ink, fontFamily: UI.fontUi, whiteSpace: 'nowrap' }}>CW{w.week}-{w.year}</span>
+        <span style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{changelogWeekRange(w.date)}</span>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+        {badge(w.entries.length)}
+        {chevron()}
+      </div>
+    </button>
+  );
+  const withDividers = (nodes) => nodes.map((node, i) => (
+    <div key={node.key}>{node.el}{i < nodes.length - 1 && <div className="knurl" />}</div>
+  ));
+
+  const topRows = [
+    ...latest.map(e => ({ key: e.id, el: titleRow(e) })),
+    ...currentWeeks.map(w => ({ key: w.key, el: weekRow(w) })),
+    ...olderYears.map(yg => ({ key: 'y' + yg.year, el: (
+      <button onClick={() => setSelectedYear(yg)} style={rowBtn}>
+        <span style={{ fontSize: 15, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi }}>{yg.year}</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>{badge(yg.count)}{chevron()}</div>
+      </button>
+    ) })),
+  ];
+  const earlierStart = latest.length; // index where the grouped-by-week section begins
+
   return (
     <>
       <SettingsSheet open={open} onClose={handleClose} title="Changelog">
         <div style={{ display: 'flex', flexDirection: 'column', paddingBottom: 8 }}>
-          {(window.WHATS_NEW || []).map((entry, i) => (
-            <div key={entry.id}>
-              <button onClick={() => setSelected(entry)} style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '12px 0', WebkitTapHighlightColor: 'transparent' }}>
-                <span style={{ fontSize: 15, fontWeight: 500, color: UI.ink, fontFamily: UI.fontUi, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{entry.title}</span>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-                  <span className="micro" style={{ color: UI.inkFaint }}>{entry.id}</span>
-                  <svg width="5" height="9" viewBox="0 0 6 10" fill="none" stroke={UI.inkFaint} strokeWidth="1.3" strokeLinecap="round"><path d="M1 1l4 4-4 4" /></svg>
-                </div>
-              </button>
-              {i < (window.WHATS_NEW || []).length - 1 && <div className="knurl" />}
-            </div>
+          {topRows.map((node, i) => (
+            <React.Fragment key={node.key}>
+              {i === earlierStart && topRows.length > earlierStart && (
+                <div className="micro" style={{ color: UI.inkFaint, padding: '16px 0 6px' }}>Earlier</div>
+              )}
+              {node.el}
+              {i < topRows.length - 1 && i + 1 !== earlierStart && <div className="knurl" />}
+            </React.Fragment>
           ))}
         </div>
       </SettingsSheet>
+
+      {/* Older year -> its weeks */}
+      <SettingsSheet open={!!selectedYear} onClose={() => setSelectedYear(null)} title={selectedYear ? String(selectedYear.year) : ''}>
+        <div style={{ display: 'flex', flexDirection: 'column', paddingBottom: 8 }}>
+          {withDividers((selectedYear?.weeks || []).map(w => ({ key: w.key, el: weekRow(w) })))}
+        </div>
+      </SettingsSheet>
+
+      {/* Week -> its titles */}
+      <SettingsSheet open={!!selectedWeek} onClose={() => setSelectedWeek(null)} title={selectedWeek ? `CW${selectedWeek.week}-${selectedWeek.year}` : ''}>
+        <div style={{ display: 'flex', flexDirection: 'column', paddingBottom: 8 }}>
+          {withDividers((selectedWeek?.entries || []).map(e => ({ key: e.id, el: titleRow(e) })))}
+        </div>
+      </SettingsSheet>
+
+      {/* Entry -> its message */}
       <SettingsSheet open={!!selected} onClose={() => setSelected(null)} title={selected?.title || ''}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, paddingBottom: 8 }}>
           {(selected?.items || []).map((item, j) => (
