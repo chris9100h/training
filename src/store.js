@@ -2192,6 +2192,56 @@ function fiveThreeOneSets(tm, week, unit) {
   }));
 }
 
+const FTO_DAY_NAME = { squat: 'Squat', bench: 'Bench', deadlift: 'Deadlift', ohp: 'Press' };
+
+// Instantiate a 5/3/1 program into an editable flex plan. config (collected by
+// the setup wizard):
+//   { name?, unit, includeDeload, lifts: [{ kind, ex, tm }],
+//     assistance: { <kind>: [exName, ...] } }
+// Resolves every exercise name to one of the user's own (reuse-or-materialize,
+// exactly like instantiateProgram, so plans never hold sys_ ids), builds one
+// flex day per main lift (3 working sets + up to 3 picked assistance items),
+// and stamps program_type '531' + program_data with per-lift Training Maxes
+// keyed by the RESOLVED exId. Assistance stays an ordinary Range item on normal
+// Smart Progression. Returns { schedule, newExercises }; mutates nothing.
+function build531Plan(state, config) {
+  const catalog = (typeof window !== 'undefined' && window.SYSTEM_EXERCISES) || [];
+  const sysByName = new Map(catalog.map(s => [(s.name || '').toUpperCase(), s]));
+  const userByName = new Map((state.exercises || []).map(e => [(e.name || '').toUpperCase(), e.id]));
+  const newExercises = [];
+  const resolve = (exName) => {
+    const key = (exName || '').toUpperCase();
+    const existing = userByName.get(key);
+    if (existing) return existing;
+    const sys = sysByName.get(key);
+    if (!sys) return null;
+    const row = systemExerciseToRow(sys);
+    newExercises.push(row);
+    userByName.set(key, row.id);
+    return row.id;
+  };
+  const unit = config.unit === 'lbs' ? 'lbs' : 'kg';
+  const includeDeload = config.includeDeload !== false;
+  const mainLifts = {};
+  const customDays = [];
+  for (const lift of (config.lifts || [])) {
+    const mainId = resolve(lift.ex);
+    if (!mainId) continue;
+    mainLifts[mainId] = { tm: (lift.tm != null ? lift.tm : null), kind: lift.kind };
+    const items = [{ exId: mainId, sets: 3, reps: 5 }];
+    const picks = ((config.assistance && config.assistance[lift.kind]) || []).slice(0, 3);
+    for (const aName of picks) {
+      const aId = resolve(aName);
+      if (aId) items.push({ exId: aId, sets: 3, reps: 8, repsMax: 12 });
+    }
+    customDays.push({ name: FTO_DAY_NAME[lift.kind] || lift.kind, items });
+  }
+  const schedule = buildPlanSkeleton({ name: config.name || '5/3/1', type: 'flex', customDays });
+  schedule.program_type = '531';
+  schedule.program_data = { unit, includeDeload, mainLifts };
+  return { schedule, newExercises };
+}
+
 // Whether a mesocycle's RIR taper is active. Default true: only an explicit
 // false disables the weekly RIR target watermark and the negative-RIR
 // lengthened-partials prescription (the meso then runs on volume + load
@@ -4085,7 +4135,7 @@ window.LB = {
   signIn, signUp, signOut, signInWithPasskey, registerPasskey, listPasskeys, deletePasskey, resetPassword, deleteAllData, exportBackup, importFromBackup, validateBackup,
   loadFromSupabase, syncStore, mergeSessions, withCarriedWindowEntries, historyWindowCutoffISO,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
-  uid, todayISO, fmtISO, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, buildPlanSkeleton, instantiateProgram, is531Plan, round531, tmFrom531, tmBump531, weeks531, week531, fiveThreeOneSets, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, realignCycleForToday, todayCycleStripIndex,
+  uid, todayISO, fmtISO, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, buildPlanSkeleton, instantiateProgram, is531Plan, round531, tmFrom531, tmBump531, weeks531, week531, fiveThreeOneSets, build531Plan, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, realignCycleForToday, todayCycleStripIndex,
   effReps, e1rm, isImprovement, isDecline, bestE1rmForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, latestBodyweight, exerciseLogMode, shouldPullBodyweight, systemExerciseToRow, inferCurrentExIdx, calcBlended,
   refreshExerciseBests, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries,
   computeNextReminderAt,

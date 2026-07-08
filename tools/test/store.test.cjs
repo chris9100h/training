@@ -1225,6 +1225,43 @@ async function testAsync(name, fn) {
     assert.strictEqual(LB.is531Plan(null), false);
   });
 
+  test('build531Plan: catalog names resolve, 4 days, program_data stamped, assistance capped', () => {
+    const FTO = _catWin.FIVE_THREE_ONE;
+    assert.ok(FTO && Array.isArray(FTO.lifts) && FTO.lifts.length === 4, 'FIVE_THREE_ONE has 4 lifts');
+    const names = new Set(SYS_EX.map(e => (e.name || '').toUpperCase()));
+    for (const l of FTO.lifts) assert.ok(names.has((l.ex || '').toUpperCase()), 'main lift in catalog: ' + l.ex);
+    for (const k of Object.keys(FTO.assistance)) for (const a of FTO.assistance[k]) {
+      assert.ok(names.has(a.toUpperCase()), 'assistance in catalog: ' + a);
+    }
+    const config = {
+      unit: 'kg', includeDeload: true,
+      lifts: FTO.lifts.map((l, i) => ({ ...l, tm: [140, 100, 180, 60][i] })),
+      assistance: FTO.assistance,
+    };
+    const { schedule, newExercises } = LB.build531Plan({ exercises: [] }, config);
+    assert.strictEqual(schedule.program_type, '531');
+    assert.strictEqual(schedule.is_flex, true);
+    assert.strictEqual(schedule.days.length, 4);
+    assert.strictEqual(schedule.program_data.unit, 'kg');
+    assert.strictEqual(schedule.program_data.includeDeload, true);
+    const ml = schedule.program_data.mainLifts;
+    assert.strictEqual(Object.keys(ml).length, 4);
+    assert.strictEqual(Object.values(ml).map(v => v.kind).sort().join(','), 'bench,deadlift,ohp,squat');
+    for (const d of schedule.days) for (const it of d.items) assert.ok(!String(it.exId).startsWith('sys_'), 'no sys_ id in plan');
+    for (const exId of Object.keys(ml)) assert.ok(!exId.startsWith('sys_'), 'no sys_ id in mainLifts');
+    for (const d of schedule.days) {
+      assert.strictEqual(d.items[0].sets, 3);
+      assert.ok(ml[d.items[0].exId], 'day leads with a tracked main lift');
+      assert.ok(d.items.length >= 2 && d.items.length <= 4, 'main + up to 3 assistance');
+      for (let i = 1; i < d.items.length; i++) assert.ok(!ml[d.items[i].exId], 'assistance is not a tracked main lift');
+    }
+    assert.ok(newExercises.length >= 4, 'materialized the main lifts (and assistance)');
+    // assistance is capped at 3 even when oversupplied
+    const over = LB.build531Plan({ exercises: [] }, { unit: 'kg', lifts: [FTO.lifts[0]],
+      assistance: { squat: ['Leg Press', 'Seated Leg Curl', 'Standing Calf Raise', 'Dumbbell Curl'] } });
+    assert.strictEqual(over.schedule.days[0].items.length, 4, 'main + 3 assistance max');
+  });
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();
