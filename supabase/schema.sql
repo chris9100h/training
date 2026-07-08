@@ -116,6 +116,8 @@ CREATE TABLE public.zane_sets (
   done boolean NOT NULL DEFAULT false,
   skipped boolean NOT NULL DEFAULT false,
   warmup boolean NOT NULL DEFAULT false,
+  technique text,
+  drops jsonb,
   updated_at timestamp with time zone NOT NULL DEFAULT now()
 );
 
@@ -2057,3 +2059,57 @@ $function$;
 
 REVOKE EXECUTE ON FUNCTION public.get_users_with_plans() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.get_users_with_plans() TO authenticated;
+
+-- ── Grants: anon lock-down of older SECURITY INVOKER RPCs (Migration 0141) ──
+
+REVOKE EXECUTE ON FUNCTION public.get_exercise_best_e1rm(uuid) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.get_exercise_best_e1rm(uuid) TO authenticated;
+REVOKE EXECUTE ON FUNCTION public.get_exercise_history(text, text, int, uuid) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.get_exercise_history(text, text, int, uuid) TO authenticated;
+REVOKE EXECUTE ON FUNCTION public.get_user_volume_stats(uuid) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.get_user_volume_stats(uuid) TO authenticated;
+REVOKE EXECUTE ON FUNCTION public.get_session_stats(uuid) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.get_session_stats(uuid) TO authenticated;
+REVOKE EXECUTE ON FUNCTION public.sync_sets_batch(jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.sync_sets_batch(jsonb) TO authenticated;
+REVOKE EXECUTE ON FUNCTION public.sync_daily_logs_batch(jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.sync_daily_logs_batch(jsonb) TO authenticated;
+REVOKE EXECUTE ON FUNCTION public.sync_meso_states_batch(jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.sync_meso_states_batch(jsonb) TO authenticated;
+
+-- ── Ops: schema inventory for the db-drift workflow (Migration 0142) ────────
+
+CREATE OR REPLACE FUNCTION public.admin_schema_inventory()
+RETURNS jsonb
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path TO 'public'
+AS $$
+  SELECT jsonb_build_object(
+    'columns', (
+      SELECT jsonb_agg(jsonb_build_object('t', table_name, 'c', column_name)
+                       ORDER BY table_name, ordinal_position)
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+    ),
+    'functions', (
+      SELECT jsonb_agg(jsonb_build_object(
+               'f', p.proname,
+               'sig', p.oid::regprocedure::text,
+               'anon_exec', has_function_privilege('anon', p.oid, 'execute'),
+               'definer', p.prosecdef)
+             ORDER BY p.proname)
+      FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE n.nspname = 'public'
+    ),
+    'realtime', (
+      SELECT COALESCE(jsonb_agg(tablename ORDER BY tablename), '[]'::jsonb)
+      FROM pg_publication_tables
+      WHERE pubname = 'supabase_realtime'
+    )
+  );
+$$;
+
+REVOKE EXECUTE ON FUNCTION public.admin_schema_inventory() FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.admin_schema_inventory() TO service_role;
