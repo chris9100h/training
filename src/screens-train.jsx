@@ -774,6 +774,53 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     return () => { on = false; };
   }, [entry?.exId]);
   const last = localLast ?? (entry ? remoteLast[entry.exId] : null) ?? null;
+
+  // Cross-day history for the tapped exercise name. The in-training "last time"
+  // above is day-slot specific (bestRecentEntry / fetchExerciseHistory both key
+  // on session.dayId), so an exercise pushed harder on another day reads as
+  // stale here. This sheet pulls the exercise's real recent history across ALL
+  // days straight from the server (get_exercise_history, not the 70-day local
+  // window), local-first with a server overlay so it also works offline.
+  const [historyOpen, setHistoryOpen] = useStateT(false);
+  const [historyRows, setHistoryRows] = useStateT(null); // server rows; null until fetched (falls back to localHistory)
+  const [historyLoading, setHistoryLoading] = useStateT(false);
+  const historyDayNames = useMemoT(() => {
+    const m = {};
+    for (const s of (store.sessions || [])) if (s.id) m[s.id] = s.dayName;
+    return m;
+  }, [store.sessions]);
+  const localHistory = useMemoT(() => {
+    if (!entry?.exId) return [];
+    const rows = [];
+    for (const s of (store.sessions || [])) {
+      if (!s.ended || s.isDeload || s.id === session.id) continue;
+      const e = (s.entries || []).find(en => en.exId === entry.exId);
+      if (!e || !(e.sets || []).some(st => !st.warmup && !st.skipped)) continue;
+      rows.push({ sessionId: s.id, date: s.date, dayName: s.dayName, sets: e.sets });
+    }
+    rows.sort((a, b) => (b.date > a.date ? 1 : b.date < a.date ? -1 : 0));
+    return rows;
+  }, [store.sessions, entry?.exId, session.id]);
+  useEffectT(() => {
+    if (!historyOpen || !entry?.exId) return;
+    const exId = entry.exId;
+    let on = true;
+    setHistoryRows(null); // drop the previous exercise's rows; localHistory shows meanwhile
+    setHistoryLoading(true);
+    LB.fetchExerciseHistory(exId, null, 15, userId)
+      .then(rows => {
+        if (!on) return;
+        const deloadIds = new Set((store.sessions || []).filter(s => s.isDeload).map(s => s.id));
+        const mapped = (rows || [])
+          .filter(r => r.sessionId !== session.id && !deloadIds.has(r.sessionId))
+          .map(r => ({ sessionId: r.sessionId, date: r.date, dayName: historyDayNames[r.sessionId] || '', sets: r.sets || [] }));
+        setHistoryRows(mapped);
+        setHistoryLoading(false);
+      })
+      .catch(() => { if (on) setHistoryLoading(false); }); // keep null so the local fallback stays visible offline
+    return () => { on = false; };
+  }, [historyOpen, entry?.exId]);
+
   const isCardio = !!entry?.isCardio;
   const isUnilateral = !isCardio && (exercise?.movement_type ?? (exercise?.unilateral ? 'unilateral' : 'bilateral')) === 'unilateral';
   const logMode = !isCardio ? LB.exerciseLogMode(exercise) : 'weight';
@@ -4275,14 +4322,32 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         {/* Exercise name */}
         <div style={{ flexShrink: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div className="display" style={{
-              flex: 1, minWidth: 0,
-              fontSize: entry.name.length > 28 ? 16 : entry.name.length > 22 ? 20 : entry.name.length > 16 ? 26 : 32,
-              color: UI.ink, lineHeight: 1.05, letterSpacing: '0.02em', fontWeight: 700,
-              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-            }}>
-              {entry.name}
-            </div>
+            {isCardio ? (
+              <div className="display" style={{
+                flex: 1, minWidth: 0,
+                fontSize: entry.name.length > 28 ? 16 : entry.name.length > 22 ? 20 : entry.name.length > 16 ? 26 : 32,
+                color: UI.ink, lineHeight: 1.05, letterSpacing: '0.02em', fontWeight: 700,
+                whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+              }}>
+                {entry.name}
+              </div>
+            ) : (
+              <button onClick={() => setHistoryOpen(true)} aria-label="Show exercise history" style={{
+                flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 9,
+                background: 'transparent', border: 'none', padding: 0, margin: 0,
+                cursor: 'pointer', textAlign: 'left', WebkitTapHighlightColor: 'transparent',
+              }}>
+                <span className="display" style={{
+                  minWidth: 0, flexShrink: 1,
+                  fontSize: entry.name.length > 28 ? 16 : entry.name.length > 22 ? 20 : entry.name.length > 16 ? 26 : 32,
+                  color: UI.ink, lineHeight: 1.05, letterSpacing: '0.02em', fontWeight: 700,
+                  whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                }}>
+                  {entry.name}
+                </span>
+                <i className="fa-solid fa-clock-rotate-left" style={{ flexShrink: 0, fontSize: 13, color: UI.inkFaint }} />
+              </button>
+            )}
             {exercise?.youtube_url && (
               <a href={exercise.youtube_url} target="_blank" rel="noopener noreferrer"
                 aria-label="Watch form video"
@@ -5830,6 +5895,65 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           }}
         />
         <Btn onClick={saveExNote} style={{ marginTop: 12, width: '100%' }}>Save</Btn>
+      </Sheet>
+
+      {/* Exercise history, opened by tapping the exercise name. Cross-day and
+          straight from the server, so a "last time" that reads stale for this
+          day slot can be checked without leaving the session. */}
+      <Sheet open={historyOpen} onClose={() => setHistoryOpen(false)} title="History">
+        {(() => {
+          const rows = historyRows ?? localHistory;
+          const pr = entry ? LB.bestE1rmForExercise(store, entry.exId) : 0;
+          const e1rmForSet = (s) => { const r = LB.effReps(s); return (s.kg != null && r > 0) ? LB.e1rm(s.kg, r) : 0; };
+          if (!rows.length) {
+            return (
+              <div className="micro" style={{ color: UI.inkFaint, textAlign: 'center', padding: '20px 0' }}>
+                {historyLoading ? 'Loading…' : 'No history yet'}
+              </div>
+            );
+          }
+          const shown = rows.slice(0, 12);
+          return (
+            <div>
+              <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>
+                {entry?.name}{historyLoading ? ' · updating…' : ''}
+              </div>
+              {shown.map((h, hi) => {
+                const working = (h.sets || []).filter(s => !s.warmup && !s.skipped && (s.kg != null || s.reps != null));
+                if (!working.length) return null;
+                const sessionBest = working.reduce((m, s) => Math.max(m, e1rmForSet(s)), 0);
+                const isPR = pr > 0 && sessionBest > 0 && Math.abs(sessionBest - pr) < 0.01;
+                return (
+                  <React.Fragment key={h.sessionId || hi}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', padding: '11px 0', gap: 10 }}>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 5 }}>
+                          <span className="num" style={{ fontSize: 10, color: isPR ? UI.gold : UI.inkFaint, letterSpacing: '0.05em' }}>
+                            {LB.parseDate(h.date).toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: '2-digit' })}
+                          </span>
+                          {isPR && <span style={{ fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.1em', color: UI.gold, background: UI.goldFaint, border: `0.5px solid ${UI.goldSoft}`, borderRadius: 4, padding: '1px 5px' }}>PR</span>}
+                        </div>
+                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                          {working.map((s, i) => {
+                            const isBest = sessionBest > 0 && Math.abs(e1rmForSet(s) - sessionBest) < 0.01;
+                            const repsStr = (s.repsL != null || s.repsR != null) ? `L${s.repsL ?? '?'}/R${s.repsR ?? '?'}` : s.reps;
+                            return (
+                              <span key={i} className="num" style={{ fontSize: 13, color: isBest ? UI.gold : UI.ink }}>
+                                {s.kg != null ? <>{s.kg}<span style={{ color: isBest ? UI.goldSoft : UI.inkFaint }}>×</span>{repsStr}</> : repsStr}
+                              </span>
+                            );
+                          })}
+                        </div>
+                      </div>
+                      {h.dayName && <span className="micro" style={{ color: UI.inkFaint, flexShrink: 0 }}>{h.dayName}</span>}
+                    </div>
+                    {hi < shown.length - 1 && <div className="knurl" />}
+                  </React.Fragment>
+                );
+              })}
+            </div>
+          );
+        })()}
       </Sheet>
 
       {/* plan diff */}
