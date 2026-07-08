@@ -19,7 +19,7 @@ window.WHATS_NEW = [
     id: 'v2.515',
     title: '5/3/1, By the Book',
     items: [
-      "🏋️ Wendler's 5/3/1 landed as a ready-made program. Start a new plan, tap Templates, and choose 5/3/1: set your four main lifts and their Training Maxes (or let the app estimate them from your history), and every working weight for every week gets calculated for you. No percentage math on the gym floor, ever.",
+      "🏋️ Wendler's 5/3/1 landed as a ready-made program. Start a new plan, tap Programs, and choose 5/3/1: set your four main lifts and their Training Maxes (or let the app estimate them from your history), and every working weight for every week gets calculated for you. No percentage math on the gym floor, ever.",
       "🔥 The famous \"+\" sets are here in full. On your top set you go for as many reps as you can, and the whole row catches fire while you grind it out. Hit your target reps across the cycle and the app bumps your Training Max automatically next time around. Stall twice and it walks the weight back so you can build momentum up again. Classic 5/3/1, no spreadsheet required.",
       "📈 Watch it climb. Your plan shows exactly which cycle and week you're on, and a per-lift chart tracks how your Training Maxes have moved over time. Prefer to steer yourself? Edit any Max by hand, or tap \"Set from history\" to pull the number your best recent single implies.",
     ],

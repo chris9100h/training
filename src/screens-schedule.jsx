@@ -3671,7 +3671,7 @@ function NewPlanPickerModal({ onClose, go }) {
           <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>Start from a full program, a ready-made split, or build your own.</div>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {opt('fa-trophy', 'Programs', 'Structured, self-progressing (like 5/3/1)', () => { onClose(); go({ name: 'schedule-programs' }); }, true)}
+          {opt('fa-trophy', 'Programs', 'Structured and self-progressing', () => { onClose(); go({ name: 'schedule-programs' }); }, true)}
           {opt('fa-layer-group', 'Templates', 'Ready-made splits to make your own', () => { onClose(); go({ name: 'schedule-templates' }); })}
           {opt('fa-sliders', 'Custom', 'Build it from scratch', () => { onClose(); go({ name: 'schedule-new' }); })}
         </div>
