@@ -716,7 +716,7 @@ async function captureNodeAsPng(node, { filename, dodgeAvatar = false, setCaptur
 // a mobility exercise may keep any equipment). Three modes resolve to
 // LB.exerciseLogMode; for bodyweight + Weight & Reps an opt-in toggle pulls the
 // user's logged bodyweight (LB.shouldPullBodyweight), gated on having logged one.
-const LOG_MODES = [['checkbox', 'Checkbox only'], ['reps', 'Reps only'], ['weight', 'Weight & Reps']];
+const LOG_MODES = [['checkbox', 'Checkbox only'], ['reps', 'Reps only'], ['time', 'Time'], ['weight', 'Weight & Reps']];
 function loggingPickerVisible(equipment, movementType) {
   return equipment === 'no_equipment' || equipment === 'bodyweight' || movementType === 'mobility';
 }
@@ -725,6 +725,7 @@ function LoggingModeSection({ equipment, movementType, logMode, onLogMode, pullB
   if (!loggingPickerVisible(equipment, movementType)) return null;
   const info = logMode === 'reps' ? 'Tracks reps only — no weight, adds 0 to volume.'
              : logMode === 'checkbox' ? 'Just tick each set off — no reps or weight, 0 volume.'
+             : logMode === 'time' ? 'Time each set with a countdown, no weight, 0 volume. Great for HIIT or holds.'
              : null;
   const showPull = equipment === 'bodyweight' && logMode === 'weight';
   return (
@@ -884,7 +885,7 @@ function ExerciseWizard({ step, setStep, onClose, isDirty, store,
     const showPull = equipment === 'bodyweight' && logMode === 'weight';
     const hasLoggedWeight = LB.latestBodyweight(store) != null;
     body = <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      {[['checkbox', 'Checkbox only', 'fa-circle-check', 'Just tick each set off — no numbers, 0 volume'], ['reps', 'Reps only', 'fa-rotate', 'Count reps, no weight — adds 0 to volume'], ['weight', 'Weight & Reps', 'fa-dumbbell', 'Track both — the usual for weighted lifts']]
+      {[['checkbox', 'Checkbox only', 'fa-circle-check', 'Just tick each set off — no numbers, 0 volume'], ['reps', 'Reps only', 'fa-rotate', 'Count reps, no weight — adds 0 to volume'], ['time', 'Time', 'fa-stopwatch', 'Countdown per set, no weight, 0 volume'], ['weight', 'Weight & Reps', 'fa-dumbbell', 'Track both — the usual for weighted lifts']]
         .map(([val, label, icon, sub]) => optRow({ key: val, icon, label, sub, active: logMode === val, onClick: () => { pickLogMode(val); if (!(val === 'weight' && equipment === 'bodyweight')) goNext(); } }))}
       {showPull && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 6 }}>

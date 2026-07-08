@@ -608,6 +608,24 @@ function RestGauge({ restStart, restDef, variant }) {
   </>);
 }
 
+// Countdown for a time-based (log_mode 'time') set: ticks every 250ms, shows the
+// remaining mm:ss and a depleting bar, and fires onDone exactly once at zero.
+function TimeCountdown({ startedAt, total }) {
+  const [, tick] = useStateT(0);
+  useEffectT(() => { const t = setInterval(() => tick(n => n + 1), 250); return () => clearInterval(t); }, []);
+  const el = Math.max(0, (Date.now() - startedAt) / 1000);
+  const remaining = Math.max(0, total - el);
+  const pct = total > 0 ? Math.min(100, (el / total) * 100) : 100;
+  return (
+    <div style={{ textAlign: 'center' }}>
+      <div className="num" style={{ fontSize: 92, fontWeight: 300, letterSpacing: '-0.03em', lineHeight: 1, color: UI.gold, textShadow: '0 0 40px rgba(var(--accent-rgb),0.55), 0 0 80px rgba(var(--accent-rgb),0.25)', animation: remaining <= 3 ? 'timerPulse 0.7s ease-in-out infinite' : 'none' }}>{LB.fmtDuration(Math.ceil(remaining))}</div>
+      <div style={{ height: 3, background: UI.hair, borderRadius: 4, overflow: 'hidden', marginTop: 24, width: 220, marginLeft: 'auto', marginRight: 'auto' }}>
+        <div style={{ height: '100%', width: `${100 - pct}%`, background: UI.gold, transition: 'width 0.25s linear' }} />
+      </div>
+    </div>
+  );
+}
+
 function TrainingScreen(props) {
   const session = props.store.sessions.find(s => s.id === props.sessionId);
   // Redirect from an effect — never call go() during render, and never return
@@ -826,7 +844,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const logMode = !isCardio ? LB.exerciseLogMode(exercise) : 'weight';
   const isCheckbox = logMode === 'checkbox';   // tick only, no numbers
   const isRepsOnly = logMode === 'reps';       // reps cell, no weight
-  const isNoWeightReps = isCheckbox || isRepsOnly; // "no weight column" — keeps all existing kg/header/hero gates
+  const isTime = logMode === 'time';           // countdown + duration, no weight
+  const isNoWeightReps = isCheckbox || isRepsOnly || isTime; // "no weight column" — keeps all existing kg/header/hero gates
   const isBodyweight = !isCardio && exercise?.equipment === 'bodyweight';
   const progressionTargetForSet = (workingSetIdx) => {
     if (!LB.progressionEnabled(store, entry?.plannedRepsMax, entry?.plannedProgressionOffset)) return null;
@@ -1017,6 +1036,31 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     const s531 = store.schedules?.find(x => x.id === session.scheduleId);
     return LB.is531Plan(s531) && LB.current531Week(s531, store.sessions) === 4;
   })();
+
+  // Time-based set: tapping GO opens the countdown overlay. The parent owns the
+  // expiry (setTimeout), like the rest timer; the leaf is display-only. At zero
+  // it auto-checks the set with the full target; Stop logs the elapsed time.
+  const startCountdown = (setIdx, total) => {
+    if (!(total > 0)) return;
+    clearTimeout(countdownTimerRef.current);
+    const cd = { setIdx, total, startedAt: Date.now() };
+    countdownRef.current = cd;
+    setCountdown(cd);
+    try { if (!audioCtxRef.current) audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)(); if (audioCtxRef.current.state === 'suspended') audioCtxRef.current.resume(); } catch (_) {}
+    countdownTimerRef.current = setTimeout(() => finishCountdown(true), total * 1000);
+  };
+  const finishCountdown = (completed) => {
+    clearTimeout(countdownTimerRef.current);
+    countdownTimerRef.current = null;
+    const cd = countdownRef.current;
+    countdownRef.current = null;
+    setCountdown(null);
+    if (!cd) return;
+    if (completed) { try { playBeep('go', 3); } catch (_) {} }
+    const logged = completed ? cd.total : Math.min(cd.total, Math.max(1, Math.round((Date.now() - cd.startedAt) / 1000)));
+    completeSet(cd.setIdx, true, true, { timeSec: logged });
+  };
+  useEffectT(() => () => clearTimeout(countdownTimerRef.current), []);
 
   const completeSet = (setIdx, bypassOutlierCheck = false, advanceFocus = false, extraPatch = null) => {
     // Lengthened partials only ever completes via finishLengthenedPartial,
@@ -1944,6 +1988,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const [improvedSet, setImprovedSet] = useStateT(false);
   const [regressionSet, setRegressionSet] = useStateT(false);
   const [newBestSet, setNewBestSet] = useStateT(false);
+  // Time-based (log_mode 'time') countdown overlay: { setIdx, total, startedAt }.
+  const [countdown, setCountdown] = useStateT(null);
+  const countdownRef = useRefT(null);
+  const countdownTimerRef = useRefT(null);
   const newBestShownRef = useRefT({}); // exId → true once a NEW BEST flashed (max once per exercise per session)
   const [cardioPR, setCardioPR] = useStateT(null);
   const [progressionUnlocked, setProgressionUnlocked] = useStateT(null);
@@ -4734,6 +4782,27 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                 )}
               </div>}
 
+              {/* Time-based hero: big target duration + a stepper, and a GO that opens the countdown */}
+              {isTime && (
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16, padding: '2px 14px 0' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                    <button onClick={() => updateSet(bgSetIdx, { timeSec: Math.max(5, (heroSet.timeSec || 0) - 5) })} style={{ width: 40, height: 40, borderRadius: 6, border: `1px solid ${UI.hairStrong}`, background: 'transparent', color: UI.ink, fontSize: 24, lineHeight: 1, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>−</button>
+                    <div style={{ textAlign: 'center' }}>
+                      <div className="num" style={{ fontSize: 56, fontWeight: 300, color: UI.gold, letterSpacing: '-0.02em', lineHeight: 1 }}>{LB.fmtDuration(heroSet.timeSec || 0)}</div>
+                      <div className="micro" style={{ marginTop: 3 }}>TARGET</div>
+                    </div>
+                    <button onClick={() => updateSet(bgSetIdx, { timeSec: (heroSet.timeSec || 0) + 5 })} style={{ width: 40, height: 40, borderRadius: 6, border: `1px solid ${UI.hairStrong}`, background: 'transparent', color: UI.ink, fontSize: 22, lineHeight: 1, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>+</button>
+                  </div>
+                  <button onClick={() => startCountdown(bgSetIdx, heroSet.timeSec)} disabled={!(heroSet.timeSec > 0)} style={{
+                    width: '80%', minHeight: 46, borderRadius: 6, border: `1px solid var(--accent-deep)`,
+                    background: `linear-gradient(180deg, var(--accent-light), var(--accent))`,
+                    color: '#0a0805', cursor: 'pointer',
+                    fontFamily: UI.fontUi, fontWeight: 700, fontSize: 14, letterSpacing: '0.16em',
+                    boxShadow: '0 8px 30px rgba(var(--accent-rgb),0.30)', WebkitTapHighlightColor: 'transparent',
+                  }}>GO</button>
+                </div>
+              )}
+
             </div>
           </BracketFrame>
         )}
@@ -4818,7 +4887,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                     return (
                     <div data-kb-row={i} style={{
                       display: 'grid',
-                      gridTemplateColumns: isIntensityActive ? '28px 1fr' : (isCheckbox ? '28px 1fr 28px' : isRepsOnly ? (isUnilateral ? '28px 1fr 44px 44px 28px' : '28px 1fr 56px 28px') : (isUnilateral ? '28px 1fr 72px 44px 44px 28px' : '28px 1fr 72px 56px 28px')),
+                      gridTemplateColumns: isIntensityActive ? '28px 1fr' : (isTime ? '28px 1fr auto 28px' : isCheckbox ? '28px 1fr 28px' : isRepsOnly ? (isUnilateral ? '28px 1fr 44px 44px 28px' : '28px 1fr 56px 28px') : (isUnilateral ? '28px 1fr 72px 44px 44px 28px' : '28px 1fr 72px 56px 28px')),
                       gap: 8, alignItems: 'center',
                       padding: '10px 6px',
                       position: 'relative', zIndex: 1,
@@ -4834,7 +4903,16 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                         color: isCurrent ? UI.gold : s.done ? UI.goldDeep : UI.inkFaint,
                       }}>{isWarmupRow ? `W${warmupRowNum}` : workingRowNum}</div>
 
-                      {isIntensityActive ? null : isCheckbox ? <div /> : (
+                      {isIntensityActive ? null : isTime ? (
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <button onPointerDown={e => e.stopPropagation()} onClick={() => updateSet(i, { timeSec: Math.max(5, (s.timeSec || 0) - 5) })} disabled={s.done || s.skipped} style={{ width: 26, height: 26, borderRadius: 4, border: `1px solid ${UI.hairStrong}`, background: 'transparent', color: UI.ink, fontSize: 18, lineHeight: 1, cursor: 'pointer', WebkitTapHighlightColor: 'transparent', opacity: (s.done || s.skipped) ? 0.4 : 1 }}>−</button>
+                            <span className="num" style={{ fontSize: 20, color: (s.done || s.skipped) ? UI.inkFaint : UI.gold, minWidth: 54, textAlign: 'center' }}>{LB.fmtDuration(s.timeSec || 0)}</span>
+                            <button onPointerDown={e => e.stopPropagation()} onClick={() => updateSet(i, { timeSec: (s.timeSec || 0) + 5 })} disabled={s.done || s.skipped} style={{ width: 26, height: 26, borderRadius: 4, border: `1px solid ${UI.hairStrong}`, background: 'transparent', color: UI.ink, fontSize: 16, lineHeight: 1, cursor: 'pointer', WebkitTapHighlightColor: 'transparent', opacity: (s.done || s.skipped) ? 0.4 : 1 }}>+</button>
+                          </div>
+                          {prevSet?.timeSec != null && <span className="micro" style={{ color: UI.inkFaint }}>last {LB.fmtDuration(prevSet.timeSec)}</span>}
+                        </div>
+                      ) : isCheckbox ? <div /> : (
                         (s.technique === 'drop' || s.technique === 'myorep' || s.technique === 'myorep_match' || s.technique === 'lengthened_partial' || s.technique === 'amrap_variations') && s.done
                           ? <div style={{ display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'flex-start' }}>
                               <span style={{
@@ -4878,7 +4956,20 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                         }))}
                       />}
 
-                      {!isIntensityActive && !isCheckbox && (isUnilateral ? (
+                      {!isIntensityActive && isTime && <button
+                        onPointerDown={e => e.stopPropagation()}
+                        disabled={s.done || s.skipped || !(s.timeSec > 0)}
+                        onClick={e => { e.stopPropagation(); if (s.done || s.skipped) return; startCountdown(i, s.timeSec); }}
+                        style={{
+                          minWidth: 54, height: 42, borderRadius: 6, border: `1px solid var(--accent-deep)`,
+                          background: (s.done || s.skipped) ? 'transparent' : `linear-gradient(180deg, var(--accent-light), var(--accent))`,
+                          color: (s.done || s.skipped) ? UI.inkFaint : '#0a0805', cursor: 'pointer',
+                          fontFamily: UI.fontUi, fontWeight: 700, fontSize: 12, letterSpacing: '0.14em',
+                          WebkitTapHighlightColor: 'transparent', justifySelf: 'center',
+                          opacity: (s.done || s.skipped) ? 0.35 : 1,
+                        }}>GO</button>}
+
+                      {!isIntensityActive && !isCheckbox && !isTime && (isUnilateral ? (
                         <>
                           <KbCell text={kbField?.setIdx === i && kbField?.field === 'repsL' ? kbRaw : (s.repsL ?? '')} placeholder="L" disabled={s.done || s.skipped} onActivate={() => activateKb(i, 'repsL')} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), ...(kbField?.setIdx === i && kbField?.field === 'repsL' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }} />
                           <KbCell text={kbField?.setIdx === i && kbField?.field === 'repsR' ? kbRaw : (s.repsR ?? '')} placeholder="R" disabled={s.done || s.skipped} onActivate={() => activateKb(i, 'repsR')} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), ...(kbField?.setIdx === i && kbField?.field === 'repsR' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }} />
@@ -6173,6 +6264,25 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       </Sheet>
 
       {kbField && <div style={{ height: 225 }} />}
+
+      {/* ── Time-based countdown overlay ────────────────────────────────────── */}
+      {countdown && (
+        <>
+          <div style={{ position: 'fixed', inset: 0, zIndex: 60, background: 'rgba(8,6,3,0.92)', backdropFilter: 'blur(3px)', WebkitBackdropFilter: 'blur(3px)' }} />
+          <div style={{ position: 'fixed', inset: 0, zIndex: 61, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 24, paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 24px)' }}>
+            <div className="micro-gold" style={{ letterSpacing: '0.2em', marginBottom: 6, textAlign: 'center' }}>{entry.name}</div>
+            <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.inkSoft, letterSpacing: '0.18em', marginBottom: 34, textTransform: 'uppercase', fontWeight: 600 }}>Go go go</div>
+            <TimeCountdown startedAt={countdown.startedAt} total={countdown.total} />
+            <button onClick={() => finishCountdown(false)} style={{
+              marginTop: 44, padding: '12px 44px', borderRadius: 6,
+              background: 'transparent', border: `1px solid ${UI.hairStrong}`,
+              color: UI.inkSoft, cursor: 'pointer',
+              fontFamily: UI.fontUi, fontSize: 12, letterSpacing: '0.16em', textTransform: 'uppercase', fontWeight: 600,
+              WebkitTapHighlightColor: 'transparent',
+            }}>Stop</button>
+          </div>
+        </>
+      )}
 
       {/* ── Warmup overlay ──────────────────────────────────────────────────── */}
       {warmupSetsRemaining && warmupOverlaySet && (
