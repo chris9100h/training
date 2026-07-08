@@ -21,6 +21,31 @@ anon-EXECUTE-Grants, Realtime-Publikation). Ohne Key: Existenz-Probe aller
 unter `/rest/v1/` wäre die schlankere Quelle, ist bei Supabase aber nur noch mit
 dem service_role-Key abrufbar.)
 
+**Playbook: db-drift-Workflow schlägt fehl** (der Nutzer postet typischerweise
+das Actions-Log). Fehlschläge sofort bereinigen, nicht liegen lassen; jede
+Bereinigung endet damit, dass `node tools/check-db-docs.cjs` lokal grün ist und
+der Nutzer den Workflow re-runnt (Actions → „DB drift check" → Run workflow).
+
+- **Exit-Code 2 (operational):** kein Drift, sondern Netz/Auth/Setup. Erste
+  Log-Zeile prüfen: `service key: not set` heißt Secret-Name falsch (muss exakt
+  `SUPABASE_SERVICE_ROLE_KEY` heißen). „Has Migration 0142 been applied?" heißt:
+  Nutzer bitten, Migration 0142 auszuführen. Sonst: Supabase-Erreichbarkeit.
+- **Exit-Code 1 (echter Drift), je nach Meldung:**
+  - *Spalte/Tabelle existiert live, fehlt im Repo:* Es wurde an den Migrationen
+    vorbei live geändert (SQL-Editor/Dashboard). Mit dem Nutzer klären, ob die
+    Änderung bleiben soll. Ja: als idempotente Migration nachziehen
+    (`IF NOT EXISTS`) und `schema.sql` + diese Datei nachdokumentieren.
+    Nein: Nutzer baut sie live zurück.
+  - *Spalte/Tabelle im Repo, fehlt live:* Entweder wurde eine Migration nie
+    ausgeführt (Nutzer bitten, sie auszuführen) oder live wurde etwas
+    entfernt. Erst klären, dann Repo oder DB angleichen; nie stillschweigend
+    aus der Doku löschen.
+  - *`anon_exec = true`:* Grant-Falle (siehe unten), REVOKE-Migration nach dem
+    Muster von 0141 nachschieben.
+  - *Unerwartete App-Tabelle in der Realtime-Publikation:* Wenn gewollt, die
+    Realtime-Doku (hier + CLAUDE.md) **und** `EXPECTED_REALTIME` in
+    `tools/check-db-live.cjs` nachziehen; sonst Publikation bereinigen lassen.
+
 ## Tabellen & Spalten
 
 ### `zane_exercises`
