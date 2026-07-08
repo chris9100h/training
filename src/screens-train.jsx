@@ -1169,8 +1169,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
     // During a deload the loads are deliberately light — suppress all
     // progression/PR/improvement/regression overlays so a planned easy week
-    // never reads as a jump or a decline.
-    const isDeloadSession = store.statusMode === 'deload' || session.isDeload;
+    // never reads as a jump or a decline. Includes the 5/3/1 built-in week 4.
+    const isDeloadSession = store.statusMode === 'deload' || session.isDeload || is531DeloadSession;
 
     const progressionResult = (() => {
       if (isDeloadSession) return null;
