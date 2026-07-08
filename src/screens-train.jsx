@@ -5,12 +5,6 @@
 
 const { useState: useStateT, useEffect: useEffectT, useRef: useRefT, useMemo: useMemoT, useLayoutEffect: useLayoutEffectT } = React;
 
-// Soft "hell" smoulder (same orange/red fire palette as the hellGlow box-shadow)
-// rendered as a radial gradient that stays transparent through the middle and
-// only glows toward the edges, so it reads as fire licking the sides rather than
-// a lit-up box with an outline. Pair with the hellPulse keyframe (opacity breath).
-const HELL_SMOULDER = 'radial-gradient(65% 100% at 50% 50%, transparent 30%, transparent 55%, rgba(255,120,40,0.24) 85%, rgba(210,45,0,0.14) 100%)';
-
 
 // ─── Mesocycle helpers ─────────────────────────────────────────────────────────
 const MESO_KEY = 'logbook-meso-state';
@@ -4544,13 +4538,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             </Btn>
           </Frame>
         ) : heroSet && (
-          // Hell-cycle smoulder: once the meso RIR target hits 0 or goes negative
-          // (beyond failure), a soft hellPulse fire licks the hero card's edges,
-          // matching the red/ember RIR watermark. A radial smoulder (not the
-          // hellGlow box-shadow) so it doesn't read as a lit-up box. Working sets
+          // Hell-cycle glow: the hero card smoulders (same hellGlow the meso
+          // Options box uses) once the meso RIR target hits 0 or goes negative
+          // (beyond failure), matching the red/ember RIR watermark. Working sets
           // only, not warm-ups or deload.
-          <div style={{ position: 'relative' }}>
-          <BracketFrame gold padding={0}>
+          <BracketFrame gold padding={0} style={(mesoState && mesoRirVal != null && mesoRirVal <= 0 && !isCurrentWarmup && !isMesoDeloadSession) ? { animation: 'hellGlow 2s ease-in-out infinite' } : undefined}>
             {mesoState && mesoRirVal != null && !isCurrentWarmup && !isMesoDeloadSession && (() => {
               // Escalate the RIR watermark as the block gets crazier: gold above
               // failure, red at 0 RIR, then a hotter, faster ember-flicker the
@@ -4708,14 +4700,6 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
             </div>
           </BracketFrame>
-          {mesoState && mesoRirVal != null && mesoRirVal <= 0 && !isCurrentWarmup && !isMesoDeloadSession && (
-            <div aria-hidden="true" style={{
-              position: 'absolute', inset: -2, zIndex: 3, pointerEvents: 'none',
-              background: HELL_SMOULDER,
-              animation: 'hellPulse 2s ease-in-out infinite',
-            }} />
-          )}
-          </div>
         )}
 
         {/* All sets list — hidden for cardio */}
@@ -4776,9 +4760,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   <div style={{ position: 'relative' }}>
                   {amrapArmed && (
                     <div aria-hidden="true" style={{
-                      position: 'absolute', top: -8, bottom: -8, left: -14, right: -14, zIndex: 0,
+                      position: 'absolute', top: -6, bottom: -6, left: 0, right: 0, zIndex: 0,
                       pointerEvents: 'none',
-                      background: HELL_SMOULDER,
+                      background: 'radial-gradient(60% 130% at 50% 50%, rgba(255,120,40,0.26), rgba(210,45,0,0.11) 48%, transparent 72%)',
                       animation: 'hellPulse 2s ease-in-out infinite',
                     }} />
                   )}
