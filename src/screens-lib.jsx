@@ -3372,7 +3372,7 @@ function SessionEditSheet({ session, duration, exercises, onClose, onSave }) {
                           </>
                         ) : (
                           <>
-                            <input type="number" inputMode="decimal" step="0.5" value={st.kg ?? ''}
+                            <input type="text" inputMode="decimal" step="0.5" value={st.kg ?? ''}
                               placeholder="—" onFocus={e => e.target.select()}
                               onChange={ev => updateSet(eIdx, sIdx, { kg: ev.target.value === '' ? null : +ev.target.value })}
                               style={numInputStyle} />
@@ -3380,12 +3380,12 @@ function SessionEditSheet({ session, duration, exercises, onClose, onSave }) {
                             <span style={{ color: UI.hair, fontSize: 14, margin: '0 2px', fontFamily: UI.fontDisplay, fontStyle: 'italic' }}>×</span>
                             {isUnilateral ? (
                               <>
-                                <input type="number" inputMode="numeric" value={st.repsL ?? ''}
+                                <input type="text" inputMode="numeric" value={st.repsL ?? ''}
                                   placeholder="—" onFocus={e => e.target.select()}
                                   onChange={ev => updateSet(eIdx, sIdx, { repsL: ev.target.value === '' ? null : +ev.target.value })}
                                   style={numInputStyle} />
                                 <span className="num" style={{ color: UI.inkFaint, fontSize: 11 }}>L</span>
-                                <input type="number" inputMode="numeric" value={st.repsR ?? ''}
+                                <input type="text" inputMode="numeric" value={st.repsR ?? ''}
                                   placeholder="—" onFocus={e => e.target.select()}
                                   onChange={ev => updateSet(eIdx, sIdx, { repsR: ev.target.value === '' ? null : +ev.target.value })}
                                   style={numInputStyle} />
@@ -3393,7 +3393,7 @@ function SessionEditSheet({ session, duration, exercises, onClose, onSave }) {
                               </>
                             ) : (
                               <>
-                                <input type="number" inputMode="numeric" value={st.reps ?? ''}
+                                <input type="text" inputMode="numeric" value={st.reps ?? ''}
                                   placeholder="—" onFocus={e => e.target.select()}
                                   onChange={ev => updateSet(eIdx, sIdx, { reps: ev.target.value === '' ? null : +ev.target.value })}
                                   style={numInputStyle} />

@@ -4604,7 +4604,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                 <div style={{ marginBottom: 14 }}>
                   <div className="label" style={{ marginBottom: 6 }}>Duration (min)</div>
                   <input
-                    type="number" inputMode="numeric" value={cardioForm.duration}
+                    type="text" inputMode="numeric" value={cardioForm.duration}
                     onChange={e => setCardioForm(f => ({ ...f, duration: e.target.value }))}
                     placeholder="e.g. 30"
                     style={{ width: '100%', boxSizing: 'border-box', background: 'transparent', border: 'none', borderBottom: `0.5px solid ${UI.hairStrong}`, padding: '6px 0', color: UI.ink, fontFamily: UI.fontNum, fontSize: 22, outline: 'none' }}
@@ -4622,7 +4622,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                     </div>
                   </div>
                   <input
-                    type="number" inputMode="decimal" value={cardioForm.distance}
+                    type="text" inputMode="decimal" value={cardioForm.distance}
                     onChange={e => setCardioForm(f => ({ ...f, distance: e.target.value }))}
                     placeholder={`0.00 ${cardioForm.distUnit}`}
                     style={{ width: '100%', boxSizing: 'border-box', background: 'transparent', border: 'none', borderBottom: `0.5px solid ${UI.hairStrong}`, padding: '6px 0', color: UI.ink, fontFamily: UI.fontNum, fontSize: 22, outline: 'none' }}

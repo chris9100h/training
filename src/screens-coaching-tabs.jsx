@@ -925,7 +925,7 @@ function FieldWidget({ field, value, onChange, distUnit, setDistUnit, inputStyle
             ))}
           </div>
         </div>
-        <input type="number" inputMode="decimal" placeholder="–" value={value || ''} onChange={e => onChange(e.target.value)} style={inputStyle} />
+        <input type="text" inputMode="decimal" placeholder="–" value={value || ''} onChange={e => onChange(e.target.value)} style={inputStyle} />
       </>
     );
   }
@@ -945,11 +945,11 @@ function FieldWidget({ field, value, onChange, distUnit, setDistUnit, inputStyle
       <>
         <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4 }}>{lbl}</div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <input type="number" inputMode="numeric" min="0" max="99" placeholder="mm"
+          <input type="text" inputMode="numeric" min="0" max="99" placeholder="mm"
             value={mins} onChange={e => combine(e.target.value, secs)}
             style={{ ...inputStyle, textAlign: 'center', flex: 1 }} />
           <span style={{ color: UI.inkFaint, fontFamily: UI.fontNum, fontSize: 18, lineHeight: 1, flexShrink: 0 }}>:</span>
-          <input type="number" inputMode="numeric" min="0" max="59" placeholder="ss"
+          <input type="text" inputMode="numeric" min="0" max="59" placeholder="ss"
             value={secs} onChange={e => combine(mins, e.target.value)}
             style={{ ...inputStyle, textAlign: 'center', flex: 1 }} />
         </div>
@@ -961,7 +961,7 @@ function FieldWidget({ field, value, onChange, distUnit, setDistUnit, inputStyle
     return (
       <>
         <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4 }}>{lbl}</div>
-        <input type="number" inputMode={field.type === 'decimal' ? 'decimal' : 'numeric'}
+        <input type="text" inputMode={field.type === 'decimal' ? 'decimal' : 'numeric'}
           step={field.type === 'decimal' ? '0.1' : '1'} placeholder="–"
           value={value || ''} onChange={e => onChange(e.target.value)} style={inputStyle} />
       </>

@@ -725,7 +725,7 @@ function CardioQuickLogSheet({ open, onClose, store, setStore, userId, editLog, 
       <div style={{ display: 'flex', gap: 8, marginBottom: 14, alignItems: 'flex-end' }}>
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.07em' }}>Duration (min)</div>
-          <input type="number" inputMode="numeric" placeholder="—" value={form.duration} onChange={e => set('duration', e.target.value)} style={inputStyle} />
+          <input type="text" inputMode="numeric" placeholder="—" value={form.duration} onChange={e => set('duration', e.target.value)} style={inputStyle} />
         </div>
         <div style={{ flex: 1 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
@@ -742,7 +742,7 @@ function CardioQuickLogSheet({ open, onClose, store, setStore, userId, editLog, 
               ))}
             </div>
           </div>
-          <input type="number" inputMode="decimal" placeholder="—" value={form.distance} onChange={e => set('distance', e.target.value)} style={inputStyle} />
+          <input type="text" inputMode="decimal" placeholder="—" value={form.distance} onChange={e => set('distance', e.target.value)} style={inputStyle} />
         </div>
       </div>
 
@@ -929,7 +929,7 @@ function CardioFinishFlow({ open, durationMin, store, setStore, onClose, onPR })
             ))}
           </div>
         </div>
-        <input type="number" inputMode="decimal" placeholder="—" value={form.distance} onChange={e => set('distance', e.target.value)} style={inputStyle} />
+        <input type="text" inputMode="decimal" placeholder="—" value={form.distance} onChange={e => set('distance', e.target.value)} style={inputStyle} />
       </>
     );
     if (step === 3) return (
