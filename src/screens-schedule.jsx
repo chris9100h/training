@@ -169,6 +169,8 @@ function PlanScreen({ store, setStore, go, userId, openNewPlan }) {
           const is531 = LB.is531Plan(s);
           const cyc531 = is531 ? LB.current531Cycle(s, store.sessions) + 1 : 0;
           const wk531 = is531 ? (LB.current531Week(s, store.sessions) || 1) : 0;
+          const deload531 = is531 && (wk531 === 4 || (isActive && store.statusMode === 'deload'));
+          const label531 = deload531 ? `C${cyc531} · DELOAD` : `C${cyc531} · W${wk531}`;
           return isActive ? (
             <BracketFrame key={s.id} gold onClick={() => go({ name: 'plan-view', scheduleId: s.id, fromPlan: true })} style={{ cursor: 'pointer', overflow: 'hidden' }}>
               {s.mesocycle_weeks && (
@@ -199,8 +201,8 @@ function PlanScreen({ store, setStore, go, userId, openNewPlan }) {
                     </span>
                   )}
                   {is531 && (
-                    <span style={{ fontFamily: UI.fontNum, fontSize: 10, fontWeight: 700, color: UI.gold, background: 'rgba(var(--accent-rgb),0.15)', borderRadius: 4, padding: '2px 6px', letterSpacing: '0.05em' }}>
-                      C{cyc531} · W{wk531}
+                    <span style={{ fontFamily: UI.fontNum, fontSize: 10, fontWeight: 700, color: UI.gold, background: 'rgba(var(--accent-rgb),0.15)', border: `1px solid ${UI.goldSoft}`, borderRadius: 4, padding: '2px 6px', letterSpacing: '0.05em' }}>
+                      {label531}
                     </span>
                   )}
                   {verCount >= 2 && (
@@ -245,7 +247,7 @@ function PlanScreen({ store, setStore, go, userId, openNewPlan }) {
                   )}
                   {is531 && (
                     <span style={{ fontFamily: UI.fontNum, fontSize: 10, fontWeight: 700, color: UI.inkSoft, background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 4, padding: '2px 6px', letterSpacing: '0.05em' }}>
-                      C{cyc531} · W{wk531}
+                      {label531}
                     </span>
                   )}
                   {verCount >= 2 && (
