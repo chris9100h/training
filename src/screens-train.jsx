@@ -1009,6 +1009,15 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // next exercise is already on screen by the time it fades out at 4800ms.
   const PROGRESSION_NAV_DELAY_MS = 1600;
 
+  // A 5/3/1 built-in deload week (week 4, 40/50/60% off the TM) is a normal
+  // logged session — not an app deload (statusMode) and not session.isDeload —
+  // but its loads are intentionally light. So it must count as a deload for the
+  // regression flash and the low-weight outlier guard, or both fire falsely.
+  const is531DeloadSession = (() => {
+    const s531 = store.schedules?.find(x => x.id === session.scheduleId);
+    return LB.is531Plan(s531) && LB.current531Week(s531, store.sessions) === 4;
+  })();
+
   const completeSet = (setIdx, bypassOutlierCheck = false, advanceFocus = false, extraPatch = null) => {
     // Lengthened partials only ever completes via finishLengthenedPartial,
     // which supplies extraPatch with the chosen partials count — every other
@@ -1040,7 +1049,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // When both are off we show a combined message.
     // Skipped during deload — loads are intentionally reduced, comparisons
     // against the pre-deload reference would always fire as "too low".
-    const _isDeloadSet = store.statusMode === 'deload' || session.isDeload;
+    const _isDeloadSet = store.statusMode === 'deload' || session.isDeload || is531DeloadSession;
     if (!bypassOutlierCheck && !entry.sets[setIdx]?.warmup && !_isDeloadSet) {
       const wIdx = entry.sets.slice(0, setIdx + 1).filter(s => !s.warmup).length - 1;
       const prevWorkingSets = (last?.entry?.sets || []).filter(s => !s.warmup);
@@ -1256,7 +1265,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // passed through as-is (not reconstructed) so isImprovement/isDecline see
   // exactly what they always did. Returns overlayHoldMs for finishSetNavigation.
   const flashOverlayForCompletedSet = (targetIdx, firstSet) => {
-    const isDeloadSession = store.statusMode === 'deload' || session.isDeload;
+    const isDeloadSession = store.statusMode === 'deload' || session.isDeload || is531DeloadSession;
     let overlayHoldMs = 0;
     if (!entry.sets[targetIdx]?.warmup && !isDeloadSession && firstSet.kg != null && firstSet.reps > 0) {
       const prevWS = (last?.entry?.sets || []).filter(s => !s.warmup);
