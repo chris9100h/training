@@ -1391,6 +1391,18 @@ async function testAsync(name, fn) {
     assert.strictEqual(LB.doneSetCount(mixed), 1, 'only the working logged time set counts');
   });
 
+  test('time-based history: recent-session lookup finds time-only sessions and carries timeSec', () => {
+    const state = { sessions: [
+      { id: 's1', ended: '2026-01-01T10:00:00', dayId: 'd1', entries: [{ exId: 'jr', sets: [
+        { timeSec: 75, done: true }, { timeSec: 75, done: true }, { timeSec: 60, done: true },
+      ] }] },
+    ] };
+    assert.strictEqual(LB.recentSessionsForExercise(state, 'jr', 'd1').length, 1, 'time-only session is found');
+    const ref = LB.bestRecentEntry(state, 'jr', 'd1');
+    assert.ok(ref, 'bestRecentEntry returns a reference for a time exercise');
+    assert.strictEqual((ref.entry.sets || []).map(s => s.timeSec).join(','), '75,75,60', 'reference carries per-set timeSec');
+  });
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();

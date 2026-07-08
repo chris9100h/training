@@ -2148,7 +2148,9 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       if (LB.exerciseLogMode(ex) === 'time') {
         const nSets = Math.max(1, it.sets || 1);
         const perSet = Array.isArray(it.timeSecPerSet) ? it.timeSecPerSet : null;
-        const lastTime = seedRefs[it.exId] ?? LB.bestRecentEntry(store, it.exId, dayId);
+        // Local reference only: server history (seedRefs / get_exercise_history)
+        // does not carry timeSec, so read the last logged session directly.
+        const lastTime = LB.bestRecentEntry(store, it.exId, dayId);
         const lastSets = (lastTime?.entry?.sets || []).filter(s => !s.warmup);
         const seedTime = (i) => (perSet && perSet[i] != null) ? perSet[i]
           : (lastSets[i]?.timeSec != null) ? lastSets[i].timeSec
@@ -2393,7 +2395,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       if (LB.exerciseLogMode(ex) === 'time') {
         const nSets = Math.max(1, it.sets || 1);
         const perSet = Array.isArray(it.timeSecPerSet) ? it.timeSecPerSet : null;
-        const lastSets = ((seedRefs[it.exId] ?? LB.bestRecentEntry(store, it.exId, null))?.entry?.sets || []).filter(s => !s.warmup);
+        const lastSets = (LB.bestRecentEntry(store, it.exId, null)?.entry?.sets || []).filter(s => !s.warmup);
         const seedTime = (i) => (perSet && perSet[i] != null) ? perSet[i] : (lastSets[i]?.timeSec != null) ? lastSets[i].timeSec : (perSet && perSet.length && perSet[perSet.length - 1] != null) ? perSet[perSet.length - 1] : 30;
         return { exId: it.exId, name: ex?.name || '?', plannedSets: nSets, plannedReps: null, plannedRepsPerSet: null, sets: Array.from({ length: nSets }, (_, i) => ({ timeSec: seedTime(i), done: false })), note: '', supersetGroup: it.supersetGroup || null };
       }

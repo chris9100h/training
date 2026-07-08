@@ -1863,7 +1863,7 @@ function recentSessionsForExercise(state, exId, dayId = null, limit = 3) {
   const out = [];
   for (const s of sessions) {
     const entry = (s.entries || []).find(e => e.exId === exId &&
-      (e.sets || []).some(x => x.kg != null || x.reps != null || x.repsL != null || x.repsR != null));
+      (e.sets || []).some(x => x.kg != null || x.reps != null || x.repsL != null || x.repsR != null || x.timeSec != null));
     if (entry) out.push({ session: s, entry });
     if (out.length >= limit) break;
   }
@@ -1888,6 +1888,9 @@ function bestEntryFromSetLists(perSession) {
       if (r == null) continue;
       if (bestReps == null || r > bestReps) { bestReps = r; best = cand; }
     }
+    // Time-based sets carry no kg/reps to compare, so `best` stays the most
+    // recent set — pass its duration through as the reference / seed.
+    if (best.timeSec != null) return { kg: curKg, timeSec: best.timeSec, done: false, skipped: false, warmup: false };
     return (best.repsL != null || best.repsR != null)
       ? { kg: curKg, repsL: best.repsL ?? null, repsR: best.repsR ?? null, done: false, skipped: false, warmup: false }
       : { kg: curKg, reps: best.reps ?? null, done: false, skipped: false, warmup: false };
