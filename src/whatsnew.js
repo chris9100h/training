@@ -5,7 +5,8 @@
    up on everything at once. See CLAUDE.md "What's New / Changelog".
 
    To announce something (ONLY on the user's request):
-     1. Add a new entry to the TOP of the array with a fresh, unique `id`.
+     1. Add a new entry to the TOP of the array with a fresh, unique `id` and
+        today's `date` (YYYY-MM-DD, the day it is published).
      2. Bump the sw.js cache version so the update ships.
    Never remove entries that cover unique features — they are the history returning users catch up on.
    Redundant entries (fully subsumed by a newer one) may be removed to keep the changelog clean.
@@ -13,10 +14,11 @@
    crisp bullet points, no tech jargon, no internal names. Leave the array
    empty ([]) to show nothing.
 
-   Entry shape: { id: string, title: string, items: string[] } */
+   Entry shape: { id: string, date: string (YYYY-MM-DD), title: string, items: string[] } */
 window.WHATS_NEW = [
   {
     id: 'v2.518',
+    date: '2026-07-08',
     title: 'No Lift Left Behind',
     items: [
       "💪 Assisted pull-ups and dips finally count. Not ready for a strict rep yet? Mark any exercise as \"Assisted\" and log how much help you're leaning on, whether it's a band or the machine stack. Here's the clever part: less help is progress, so every time you shave the assistance down the app logs a new best and cheers you on. Track the whole climb, right up to your first unassisted rep.",
@@ -25,6 +27,7 @@ window.WHATS_NEW = [
   },
   {
     id: 'v2.515',
+    date: '2026-07-08',
     title: '5/3/1, By the Book',
     items: [
       "🏋️ Wendler's 5/3/1 landed as a ready-made program. Start a new plan, tap Programs, and choose 5/3/1: set your four main lifts and their Training Maxes (or let the app estimate them from your history), and every working weight for every week gets calculated for you. No percentage math on the gym floor, ever.",
@@ -34,6 +37,7 @@ window.WHATS_NEW = [
   },
   {
     id: 'v2.514',
+    date: '2026-07-08',
     title: 'Now on the Clock',
     items: [
       "⏱️ Exercises can run on time instead of reps. Planks, dead hangs, jump rope, HIIT intervals, wall sits: anything you measure in seconds. When you build or edit an exercise, pick \"Time\" as how it's logged, and it tracks a duration per set instead of weight and reps.",
@@ -43,6 +47,7 @@ window.WHATS_NEW = [
   },
   {
     id: 'v2.511',
+    date: '2026-07-08',
     title: 'The road so far…',
     items: [
       "🏋️ Training grew claws. Drop Sets, Myo-Reps & Myo-Rep Match, Lengthened Partials and AMRAP Variations all landed: tap INTENSITY on any set and go past failure, no workarounds. Superset or Giant Set anything mid-workout, add or swap exercises on the fly with sets seeded from your history, and Smarter Progression now anchors on your best recent set (not just your last one), tunable per exercise with your rep target in view the whole time. When you finish, Compare Sessions lines you up set by set against a past workout of the same day.",
@@ -57,6 +62,7 @@ window.WHATS_NEW = [
   },
   {
     id: 'v2.508',
+    date: '2026-07-07',
     title: 'Programs, Off the Shelf',
     items: [
       "🏗️ Ready-made programs. Creating a plan now asks first: build your own, or start from a template? Tap Templates and you get five programs, sorted by the only thing that matters when you're starting out: how many days a week can you actually show up. Two through six days, one strong pick each (from Full Body up to a full six-day Push/Pull/Legs). Preview the whole thing in the plan viewer, tap \"Use this program,\" and you're training. Machine and dumbbell friendly, built as six-week mesocycles, and fully yours to edit the moment you pick it. Swap anything you don't like.",
@@ -67,6 +73,7 @@ window.WHATS_NEW = [
   },
   {
     id: 'v2.495',
+    date: '2026-07-06',
     title: 'New plans, now with a guided setup',
     items: [
       "🧭 Building a plan is a walkthrough now: name it, pick how it runs (Cycle, Weekdays, or Flexible, each one actually explained), and choose a split. Full Body, Upper/Lower, Push/Pull/Legs, or build it day by day. You drop into the editor with the days already laid out.",
@@ -77,6 +84,7 @@ window.WHATS_NEW = [
   },
   {
     id: 'v2.486',
+    date: '2026-07-06',
     title: 'Fine, an Exercise Database',
     items: [
       "🗄️ There's a new \"Database\" tab in your exercise library, a curated catalog of the classics to browse, search and filter. Full honesty: I was against this one. I didn't want a bloated pile of movements nobody actually does clogging up the app. But enough of you asked (repeatedly, and reasonably) that I caved. On my terms, though: a deliberately lean list of lifts people genuinely train, not a thousand obscure variations you'd never touch.",
@@ -86,6 +94,7 @@ window.WHATS_NEW = [
   },
   {
     id: 'v2.485',
+    date: '2026-07-05',
     title: 'Welcome Back',
     items: [
       "🏖️ Back from a vacation or sick break? The moment you flip your status back to normal, your cycle plan asks the one question that matters: which day do you want to pick up on? Tap it and today snaps right there. Clean restart from Day 1 after being sick? Go for it. Rather continue where you left off? Also fine — your call.",
@@ -95,6 +104,7 @@ window.WHATS_NEW = [
   },
   {
     id: 'v2.484',
+    date: '2026-07-05',
     title: 'Whole Days, Any Plan',
     items: [
       "📅 Weekday plans can now import a whole day — not just its exercises. Pull your leg day (history and all) from another plan or a template, tap which weekday it lands on, done. Cycle plans could already do this; weekdays finally caught up.",
@@ -105,6 +115,7 @@ window.WHATS_NEW = [
   },
   {
     id: 'v2.482',
+    date: '2026-07-05',
     title: 'Reps, Your Rules',
     items: [
       "🎯 New Range mode for reps — set a target like 8–12 instead of one fixed number, right next to Uniform and Per Set in the plan editor. It's now the default for freshly added exercises, since most lifts are trained across a window, not one exact count.",
@@ -115,6 +126,7 @@ window.WHATS_NEW = [
   },
   {
     id: 'v2.479',
+    date: '2026-07-04',
     title: 'Mesocycles: Hell Mode',
     items: [
       "🎚️ Your mesocycle's RIR taper is now yours to set — choose where week 1 starts (0–3 RIR) and where the final week peaks. Find it in the plan editor's Mesocycle section.",
@@ -124,6 +136,7 @@ window.WHATS_NEW = [
   },
   {
     id: 'v2.474',
+    date: '2026-07-04',
     title: 'Nothing Left Behind',
     items: [
       "🎯 Drop Set, Myo-Reps, Myo-Rep Match, and AMRAP Variations now open in their own clean panel instead of squeezing into the set list — the weight/rep row and your Finish/Add buttons stay put no matter how far you've scrolled or how many drops you've stacked up. It also now sits cleanly above the number pad instead of overlapping it.",
@@ -135,6 +148,7 @@ window.WHATS_NEW = [
   },
   {
     id: 'v2.460',
+    date: '2026-07-03',
     title: 'Sweating the Small Stuff',
     items: [
       "🎯 Fixed: reordering fields inside a check-in category (Coaching → Customize Check-in) used to lift the row, look convincing, then quietly put it right back where it started. Every single time. It actually reorders now.",
@@ -144,6 +158,7 @@ window.WHATS_NEW = [
   },
   {
     id: 'v2.458',
+    date: '2026-07-03',
     title: 'AMRAP Variations',
     items: [
       "🔀 New intensity technique: AMRAP Variations. Turn any working set into back-to-back AMRAP rounds — same weight, no rest between them, chase reps until you can't anymore. Switching grip or variation each round is entirely optional: the label starts pre-filled with your current exercise, so you only touch it if you actually change something up. Find it under INTENSITY on any set.",
@@ -153,6 +168,7 @@ window.WHATS_NEW = [
   },
   {
     id: 'v2.457',
+    date: '2026-07-02',
     title: 'Compare Sessions, Sharper',
     items: [
       "📊 Compare Sessions — the set-by-set, side-by-side view against a past session of the same workout day — is now one tap away right after you finish too, not just from your history. Look for the button right under the volume delta on the Well Done screen.",
@@ -162,6 +178,7 @@ window.WHATS_NEW = [
   },
   {
     id: 'v2.455',
+    date: '2026-07-02',
     title: 'Second Thoughts, Officially Allowed',
     items: [
       "✏️ Mesocycle check-ins (Soreness, Joint, Pump & Volume) are no longer one-tap-and-it's-final — pick an answer, then confirm it, and revisit anything from a new 'Session feedback' button in the training footer, sorted by muscle group with Joint feedback and General feedback split apart. Change your mind as often as you like — nothing's sent anywhere until you finish the workout.",
@@ -174,6 +191,7 @@ window.WHATS_NEW = [
   },
   {
     id: 'v2.450',
+    date: '2026-07-01',
     title: 'We Wrote The Manual',
     items: [
       "🧭 Four new guided tours — Quick Actions, Cardio Plans, Deload/Sick/Vacation, and Customize — walk you through features you might've never noticed. Find them all in Settings → How to…",
@@ -183,6 +201,7 @@ window.WHATS_NEW = [
   },
   {
     id: 'v2.445',
+    date: '2026-07-01',
     title: 'Bug Hunt',
     items: [
       '🔗 Supersets and Giant Sets got a full reliability pass — a cardio exercise in a group now correctly hands off to its training partner, "Check All" respects the group too, and dragging exercises around the chip strip can no longer accidentally split a pair apart.',
@@ -194,6 +213,7 @@ window.WHATS_NEW = [
   },
   {
     id: 'v2.444',
+    date: '2026-07-01',
     title: 'Supersets, Unchained',
     items: [
       '🔗 Superset or Giant Set any exercise mid-workout — no pre-planning required. Tap INTENSITY on an exercise\'s first set and choose Superset to pair it with another exercise in your session, or a new one. Already paired up? The same button becomes Giant Set, adding a third exercise to the rotation.',
@@ -206,6 +226,7 @@ window.WHATS_NEW = [
   },
   {
     id: 'v2.439',
+    date: '2026-06-30',
     title: 'Mesocycles',
     items: [
       'Turn any plan into a mesocycle (4–8 weeks). Target RIR counts down from 3 → 0 as the block progresses — the big glowing number in the training hero is your weekly cue, so you always know exactly how hard to push.',
@@ -216,6 +237,7 @@ window.WHATS_NEW = [
   },
   {
     id: 'v2.438',
+    date: '2026-06-30',
     title: 'Freestyle, for Humans',
     items: [
       'The finish screen now has a big "Add another exercise" button — so adding exercises to a freestyle workout is impossible to miss. If you ever wondered how to squeeze in one more movement, wonder no more.',
@@ -225,6 +247,7 @@ window.WHATS_NEW = [
   },
   {
     id: 'v2.437',
+    date: '2026-06-30',
     title: 'Lengthened Partials',
     items: [
       'New intensity technique: finish your full reps, then keep pumping out partials at the bottom of the movement — the stretched position where the muscle is under the most tension. Your muscle fibres will hate you. In a good way.',
@@ -235,6 +258,7 @@ window.WHATS_NEW = [
   },
   {
     id: 'v2.422',
+    date: '2026-06-29',
     title: '⚡ Drop Sets, Myo-Reps & Myo-Rep Match',
     items: [
       '⚡ Intensity techniques are here. Tap the glowing INTENSITY button under any exercise during training to unlock three new ways to train past failure — no extra logging, no workarounds, just tap and go.',
@@ -246,6 +270,7 @@ window.WHATS_NEW = [
   },
   {
     id: 'v2.421',
+    date: '2026-06-29',
     title: 'Fewer Taps, No Nasty Surprises',
     items: [
       '🏋️ Multi-add exercises to a plan day: select several at once and drop them all in with a single tap. No more opening the picker ten times for ten exercises.',
@@ -255,6 +280,7 @@ window.WHATS_NEW = [
   },
   {
     id: 'v2.419',
+    date: '2026-06-29',
     title: 'Mixed Units — finally',
     items: [
       '🇬🇧 For everyone who lifts in kg but runs in miles: there\'s now a "Mixed" option in your unit settings. kg for iron, miles for cardio. Civilised.',
@@ -263,6 +289,7 @@ window.WHATS_NEW = [
   },
   {
     id: 'v2.418',
+    date: '2026-06-27',
     title: 'Bug Fix + Plan Backups',
     items: [
       '🐛 Critical bug fixed: deleting any exercise from your library was silently wiping all training days from every plan. It didn\'t matter if the exercise was used in a plan or not — gone. This is now fixed.',
@@ -272,6 +299,7 @@ window.WHATS_NEW = [
   },
   {
     id: 'v2.416',
+    date: '2026-06-27',
     title: 'Smarter Plan Versioning',
     items: [
       'Renaming a training day now also triggers the "apply from date" question — not just adding or removing days. Changed Push to Chest? The app asks from when, so the history of each day stays where it belongs.',
@@ -282,6 +310,7 @@ window.WHATS_NEW = [
   },
   {
     id: 'v2.415',
+    date: '2026-06-27',
     title: 'Your Flex Plan, Your Rules',
     items: [
       'The weekly session goal on flex plans is now optional — toggle it on for consistency tracking, or leave it off and just train when life allows. No target, no guilt.',
@@ -291,6 +320,7 @@ window.WHATS_NEW = [
   },
   {
     id: 'v2.414',
+    date: '2026-06-27',
     title: 'Light Mode Polish',
     items: [
       'Cards, surfaces and borders are now properly visible in light mode — all the subtle cream tints have been replaced with theme-aware ink tints.',
@@ -300,6 +330,7 @@ window.WHATS_NEW = [
   },
   {
     id: 'v2.412',
+    date: '2026-06-26',
     title: 'Deload week, templates & more',
     items: [
       'Deload week is here — start one from the Plans tab (or wait for the app to nudge you). Weights pre-fill at 50% of your last session automatically. One full cycle or week later the deload ends by itself and training picks up exactly where it left off.',
@@ -312,6 +343,7 @@ window.WHATS_NEW = [
   },
   {
     id: 'v2.406',
+    date: '2026-06-26',
     title: 'Blood Glucose Tracking',
     items: [
       'Log blood glucose readings any time of day — straight from the daily log sheet. Add as many readings as you want, pick the context (fasted, fed, or other), and attach a note if something was off.',
@@ -322,6 +354,7 @@ window.WHATS_NEW = [
   },
   {
     id: 'v2.405',
+    date: '2026-06-26',
     title: 'Training settings & a rest timer fix',
     items: [
       'Training settings are now organised into three sub-sections — Session, Weights & Progression, and Notifications. Easier to find things, less scrolling.',
@@ -332,6 +365,7 @@ window.WHATS_NEW = [
   },
   {
     id: 'v2.404',
+    date: '2026-06-26',
     title: 'Push done right + visual polish',
     items: [
       'Push notifications are now properly verified before going live — enter the 6-digit code from the notification and the toggle flips on. A countdown bar shows the remaining 2 minutes; it turns orange under 30 seconds.',
@@ -341,6 +375,7 @@ window.WHATS_NEW = [
   },
   {
     id: 'v2.401',
+    date: '2026-06-23',
     title: 'Smoother taps',
     items: [
       'Building an exercise is way less fiddly: muscle groups and equipment are now tap-anywhere chips instead of a dropdown — no more chasing a button that hides a few pixels above your finger (looking at you, iOS 👀).',
@@ -350,6 +385,7 @@ window.WHATS_NEW = [
   },
   {
     id: 'v2.400',
+    date: '2026-06-23',
     title: 'Fresh paint & a tidy-up',
     items: [
       'Bottom nav bar got a glow-up: the active tab is now a bold, gold-filled key instead of a thin outline — same job, a lot more presence.',
@@ -361,6 +397,7 @@ window.WHATS_NEW = [
   },
   {
     id: 'v2.395',
+    date: '2026-06-22',
     title: 'Cardio Plans',
     items: [
       'Set a running, cycling or any cardio goal — target distance, due date, days per week — and the app builds a week-by-week progression that gets you there. Load increases gradually with a built-in recovery week every four weeks.',
@@ -371,6 +408,7 @@ window.WHATS_NEW = [
   },
   {
     id: 'v2.394',
+    date: '2026-06-22',
     title: 'Flexible session replacement',
     items: [
       'When you finish a session that wasn\'t on the plan, you now choose what happens to your cycle: continue from the day you just trained, keep the original cycle on track, or log it as a bonus without advancing',
@@ -382,6 +420,7 @@ window.WHATS_NEW = [
   },
   {
     id: 'v2.393',
+    date: '2026-06-22',
     title: 'Under the hood',
     items: [
       'Push notification when a support message arrives, in both directions',
@@ -393,6 +432,7 @@ window.WHATS_NEW = [
   },
   {
     id: 'v2.390',
+    date: '2026-06-20',
     title: 'Flexible Plans',
     items: [
       'Cycle plans can now be flexible — no fixed weekdays and no rest days. The rotation only moves forward when you actually train, so a missed day never pushes your plan out of sync. Great for an unpredictable week: Sun–Tue–Thu one week, Mon–Wed–Sat the next.',
@@ -403,6 +443,7 @@ window.WHATS_NEW = [
   },
   {
     id: 'v2.382',
+    date: '2026-06-20',
     title: 'Quick Actions & Bonus Workouts',
     items: [
       'New Quick Actions menu — pull down on the home screen to log a workout, daily data, cardio, a check-in, or message your coach without navigating anywhere.',
@@ -413,6 +454,7 @@ window.WHATS_NEW = [
   },
   {
     id: 'v2.381',
+    date: '2026-06-19',
     title: 'Support Center',
     items: [
       'Report questions, bugs, or feature requests directly from the app — Settings → Support Center.',
@@ -423,6 +465,7 @@ window.WHATS_NEW = [
   },
   {
     id: 'v2.380',
+    date: '2026-06-19',
     title: 'Account — Change Password & Email, Training Reminder',
     items: [
       'You can now change your password and email address directly in the app — Settings → Account → Change password / Change email. No need to go through a sign-out flow.',
@@ -432,6 +475,7 @@ window.WHATS_NEW = [
   },
   {
     id: 'v2.378',
+    date: '2026-06-19',
     title: 'Sick & Vacation Mode',
     items: [
       'Set your status to Sick or Vacation in the Health tab — while active, no macro adherence is tracked and your home screen reflects your current state instead of showing a training prompt.',
@@ -442,6 +486,7 @@ window.WHATS_NEW = [
   },
   {
     id: 'v2.376',
+    date: '2026-06-19',
     title: 'Install Zane as an app',
     items: [
       'A new step-by-step guide walks you through adding Zane to your home screen on iPhone or Android — find it under Settings → How to… → Install as app.',
@@ -451,6 +496,7 @@ window.WHATS_NEW = [
   },
   {
     id: 'v2.375',
+    date: '2026-06-19',
     title: 'Push Notifications Redesigned',
     items: [
       'Pushover has been replaced by native Web Push — rest timer alerts, coaching messages, and training reminders now all work without a third-party app.',
@@ -461,6 +507,7 @@ window.WHATS_NEW = [
   },
   {
     id: 'v2.373',
+    date: '2026-06-19',
     title: 'Sign in with your face or fingerprint',
     items: [
       'Passkeys replace your password with Face ID, Touch ID or your device PIN — nothing to remember, nothing to type.',
@@ -471,6 +518,7 @@ window.WHATS_NEW = [
   },
   {
     id: 'v2.371',
+    date: '2026-06-19',
     title: 'Forgot your password?',
     items: [
       'A "Forgot password?" link now appears below the login button — tap it, enter your email, and you\'ll receive a reset link within seconds.',
@@ -479,6 +527,7 @@ window.WHATS_NEW = [
   },
   {
     id: 'v2.369',
+    date: '2026-06-19',
     title: 'Drag to reorder exercises',
     items: [
       'Long-press any exercise chip during a session to drag it to a new position — works on touch and desktop',
@@ -488,6 +537,7 @@ window.WHATS_NEW = [
   },
   {
     id: 'v2.368',
+    date: '2026-06-19',
     title: 'Training screen: set controls redesigned',
     items: [
       'Add Set, Remove Set, and Check All are now three clearly labelled buttons at the bottom of the set list — no more hunting for a small icon',
@@ -497,6 +547,7 @@ window.WHATS_NEW = [
   },
   {
     id: 'v2.364',
+    date: '2026-06-18',
     title: 'Bodyweight exercises & mid-session edits',
     items: [
       'New "Bodyweight" equipment type — assign it to pull-ups, dips, push-ups etc. Your logged body weight (Health tab) auto-fills as the seed weight, and warmup percentages are skipped.',
@@ -508,6 +559,7 @@ window.WHATS_NEW = [
   },
   {
     id: 'v2.363',
+    date: '2026-06-17',
     title: 'Colors, typing & plan history fixes',
     items: [
       '4 new accent colors: Orange, Violet, Teal, Indigo — now 10 total in a tidy 2-row grid.',
@@ -520,6 +572,7 @@ window.WHATS_NEW = [
   },
   {
     id: 'v2.352',
+    date: '2026-06-17',
     title: 'Health & History Charts',
     items: [
       'Tap a workout day in History to see two charts: Effort over time and the new Volume over time — spot training trends and load progression at a glance.',
@@ -531,6 +584,7 @@ window.WHATS_NEW = [
   },
   {
     id: 'v2.324',
+    date: '2026-06-15',
     title: 'Guided Tours & Unit Preference',
     items: [
       'New guided tours in Settings → How to… — interactive walkthroughs that navigate the real app and spotlight the exact elements.',
@@ -541,6 +595,7 @@ window.WHATS_NEW = [
   },
   {
     id: 'v2.276',
+    date: '2026-06-14',
     title: 'Weight fill-down control',
     items: [
       'When you enter a weight for a set, the app normally copies it to all remaining sets in that exercise — great for straight sets.',
@@ -551,6 +606,7 @@ window.WHATS_NEW = [
   },
   {
     id: 'v2.256',
+    date: '2026-06-14',
     title: 'A Healthy Update',
     items: [
       'Plan and Library are now one tab with a built-in switcher — one fewer tab in the bar.',
@@ -568,6 +624,7 @@ window.WHATS_NEW = [
   },
   {
     id: 'v2.235',
+    date: '2026-06-13',
     title: 'Live cardio',
     items: [
       'Time your cardio as you go. Tap CARDIO on the home screen, choose Start live, and a stopwatch counts your session up — no need to remember the minutes afterwards.',
@@ -578,6 +635,7 @@ window.WHATS_NEW = [
   },
   {
     id: 'v2.220',
+    date: '2026-06-13',
     title: 'Settings Redesign, Training Tools & No Interruptions',
     items: [
       'Sorry — that won\'t happen again. 😄 Update banners now wait until your session is done — your workout will never be interrupted again.',
@@ -592,6 +650,7 @@ window.WHATS_NEW = [
   },
   {
     id: 'v2.181',
+    date: '2026-06-12',
     title: 'Your cardio bests, celebrated',
     items: [
       'Log a cardio session that beats your history and the app marks the moment — a full-screen ★ NEW BEST for a new fastest pace, longest distance or longest session.',
@@ -601,6 +660,7 @@ window.WHATS_NEW = [
   },
   {
     id: 'v2.180',
+    date: '2026-06-12',
     title: 'Custom check-ins — now with preview',
     items: [
       'Build a fully custom weekly check-in form: add your own fields, group them into sections, pick scales, icons and exactly what your clients report.',
@@ -611,6 +671,7 @@ window.WHATS_NEW = [
   },
   {
     id: 'v2.134',
+    date: '2026-06-11',
     title: 'Cardio & Mobility',
     items: [
       'Log cardio two ways: tap CARDIO on the home screen for a quick standalone log, or add the CARDIO exercise to any training day — it saves to your cardio history automatically when the session ends. Cardio never counts toward volume or workout streaks.',
@@ -622,6 +683,7 @@ window.WHATS_NEW = [
   },
   {
     id: 'v2.087',
+    date: '2026-06-11',
     title: 'Fast start, no matter how long you\'ve trained',
     items: [
       'The app now starts equally fast whether you logged in last week or have years of training behind you — opening time and memory use no longer grow with your history.',
@@ -631,6 +693,7 @@ window.WHATS_NEW = [
   },
   {
     id: 'v2.083',
+    date: '2026-06-11',
     title: 'A big reliability tune-up',
     items: [
       'You can now see when your data is still saving. Make changes offline and a small "not synced" marker appears, then clears itself the moment you\'re back online — so nothing slips through unsaved.',
@@ -641,6 +704,7 @@ window.WHATS_NEW = [
   },
   {
     id: 'v2.072',
+    date: '2026-06-11',
     title: 'Smarter progression — always aim higher',
     items: [
       'The app now anchors your next session on your best recent performance, not just the last one — so a tough day never drags your progression backwards.',
@@ -650,6 +714,7 @@ window.WHATS_NEW = [
   },
   {
     id: 'v2.068',
+    date: '2026-06-11',
     title: 'Faster, offline & flexible plans',
     items: [
       'The app now starts much faster and works fully offline — open it anytime, even without a connection, and your training is right there.',
