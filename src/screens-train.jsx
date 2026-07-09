@@ -409,7 +409,7 @@ function PlateCalcSheet({ open, onClose, initialWeight, availablePlates }) {
                       position: 'absolute',
                       width: hole, height: hole, borderRadius: '50%',
                       background: 'var(--bg)',
-                      boxShadow: '0 0 0 1.5px rgba(255,255,255,0.18)',
+                      boxShadow: '0 0 0 1.5px rgba(var(--knurl-rgb),0.18)',
                     }} />
                   </div>
                   <span style={{ fontFamily: UI.fontNum, fontSize: 12, color: UI.inkSoft, letterSpacing: '0.02em' }}>{p} × {n}</span>
@@ -1074,6 +1074,24 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     completeSet(cd.setIdx, true, true, { timeSec: logged });
   };
   useEffectT(() => () => clearTimeout(countdownTimerRef.current), []);
+  // iOS discards a setTimeout pending in a backgrounded WebView, so the countdown
+  // auto-complete would never fire after a background→foreground cycle. Re-arm
+  // from startedAt on resume (or fire immediately if the target already elapsed
+  // while away), mirroring the rest timer.
+  const finishCountdownRef = useRefT(finishCountdown); finishCountdownRef.current = finishCountdown;
+  useEffectT(() => {
+    const onVis = () => {
+      if (document.visibilityState !== 'visible') return;
+      const cd = countdownRef.current;
+      if (!cd) return;
+      clearTimeout(countdownTimerRef.current);
+      const remainMs = cd.startedAt + cd.total * 1000 - Date.now();
+      if (remainMs <= 0) finishCountdownRef.current(true);
+      else countdownTimerRef.current = setTimeout(() => finishCountdownRef.current(true), remainMs);
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => document.removeEventListener('visibilitychange', onVis);
+  }, []);
 
   // NEW BEST decision, shared by completeSet and the technique finishers. For an
   // assisted exercise "best" is the highest (least-negative) load, compared kg
@@ -1178,7 +1196,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
       // Determine violations
       let weightBad = false, weightHigh = false;
-      if (refKg != null && refKg > 0 && loggedKg != null && loggedKg > 0) {
+      // 5/3/1 main lifts swing ~20% week to week by design (65/75/85% waves,
+      // built-in deload), so comparing against last session's load throws false
+      // outlier prompts, so skip them like the progression toast does below.
+      if (!LB.is531MainLift(store, entry.exId, session.dayId) && refKg != null && refKg > 0 && loggedKg != null && loggedKg > 0) {
         const tooLow  = loggedKg < refKg - increment * 5;
         const tooHigh = loggedKg > refKg * 1.5;
         if (tooLow || tooHigh) { weightBad = true; weightHigh = tooHigh; }
@@ -1310,7 +1331,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     } else if (!entry.sets[setIdx]?.warmup && !isDeloadSession) {
       const completed = entry.sets[setIdx];
       const cReps = LB.effReps(completed);
-      const isNewBest = isNewBestSet(completed?.kg ?? null, cReps, completed?.timeSec ?? null);
+      // For a countdown-completed time set the actually-logged duration arrives
+      // in extraPatch (entry.sets[setIdx] still holds the pre-patch target), so
+      // an early STOP doesn't over-report against the prior best.
+      const isNewBest = isNewBestSet(completed?.kg ?? null, cReps, extraPatch?.timeSec ?? completed?.timeSec ?? null);
       if (isNewBest) {
         newBestShownRef.current[entry.exId] = true;
         setNewBestSet(true);
@@ -1588,6 +1612,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         // one the user is looking at.
         entries: sess.entries.map((e, i) => {
           if (i !== exIdx && !(group && e.supersetGroup === group)) return e;
+          if (e.isCardio) return e; // cardio carries no working sets to keep in lockstep
           const ex = LB.findExercise(store, e.exId);
           const uni = (ex?.movement_type ?? (ex?.unilateral ? 'unilateral' : 'bilateral')) === 'unilateral';
           const bwKg = LB.shouldPullBodyweight(ex) ? LB.latestBodyweight(store) : null;
@@ -1615,7 +1640,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     const workingSets = entry.sets.map((s, i) => ({ s, i })).filter(({ s }) => !s.warmup);
     if (workingSets.length <= 1) return;
     const group = entry.supersetGroup;
-    const members = group ? session.entries.filter(e => e.supersetGroup === group) : [entry];
+    // Cardio members carry no working sets, so exclude them from the lockstep
+    // count guard (else their 0 working sets would always block a removal).
+    const members = (group ? session.entries.filter(e => e.supersetGroup === group) : [entry]).filter(e => !e.isCardio);
     // Superset/giant-set partners must keep matching working-set counts (see
     // addSet) — refuse if any member is already down to its last working
     // set, rather than let counts diverge.
@@ -1627,6 +1654,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         ...sess,
         entries: sess.entries.map((e, i) => {
           if (i !== exIdx && !(grp && e.supersetGroup === grp)) return e;
+          if (e.isCardio) return e; // cardio carries no working sets
           const eWorkingSets = e.sets.map((s, k) => ({ s, k })).filter(({ s }) => !s.warmup);
           const lastWorking = eWorkingSets[eWorkingSets.length - 1];
           return lastWorking ? { ...e, sets: e.sets.filter((_, k) => k !== lastWorking.k) } : e;
@@ -5241,7 +5269,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               a time-based exercise has neither field, so the picker is hidden
               there. Assisted works fine (a drop set just adds assistance:
               -30 -> -40 -> -50, same descending direction as dropping weight). */}
-          {!isCardio && !isTime && (
+          {!isCardio && !isTime && !isCheckbox && (
             <button className="intensity-glow" onClick={() => setIntensityOpen(true)} style={{
               width: '100%', marginTop: 6, padding: '8px 0',
               background: 'rgba(var(--accent-rgb),0.08)',
@@ -5400,7 +5428,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         </>) : (<>
           {(() => {
             const pending = entrySets.find(s => !s.done && !s.skipped);
-            const hasVal = pending && (pending.kg != null || pending.reps != null || pending.repsL != null || pending.repsR != null);
+            // Checkbox sets carry no numbers (tick to complete) and time sets log
+            // a duration, so gate the primary CTA on a pending set existing, not
+            // on kg/reps being present, or it stays permanently disabled for them.
+            const hasVal = !!pending && (isCheckbox || pending.timeSec != null || pending.kg != null || pending.reps != null || pending.repsL != null || pending.repsR != null);
             const hasFeedback = mesoFeedbackGroups.length > 0;
             return (
               <Btn onClick={checkSet} disabled={!hasVal} style={{ flex: hasFeedback ? 1 : 2, minHeight: 44, padding: hasFeedback ? '10px 4px' : '10px 16px' }}>
@@ -6740,7 +6771,15 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       {mesoGainSheetOpen && (
         <Sheet open={mesoGainSheetOpen} onClose={() => {
           setMesoGainSheetOpen(false);
-          go({ name: 'session', sessionId: mesoGainNavRef.current, justFinished: true });
+          // Mirror the "Got it" button: a swipe/backdrop dismiss must still run
+          // the end-of-mesocycle flow (deload / Meso N / deactivate offers),
+          // not skip straight to the session summary.
+          if (mesoJustCompletedRef.current) {
+            mesoJustCompletedRef.current = false;
+            handleMesoComplete();
+          } else {
+            go({ name: 'session', sessionId: mesoGainNavRef.current, justFinished: true });
+          }
         }} title="Next session">
           <div style={{ fontFamily: UI.fontUi, fontSize: 13, color: UI.inkSoft, marginBottom: 20, lineHeight: 1.5 }}>
             Based on your feedback, here's what changes next time:

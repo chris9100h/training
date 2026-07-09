@@ -2278,11 +2278,12 @@ function buildPlanSkeleton({ name, type, presetKey, customCount, customDays, wee
         return { id: uid(), name, weekday: i, items };
       });
   } else if (presetKey === 'custom' || !preset) {
-    // Custom: the per-day picks the wizard collected (unpicked → FULL, imported
-    // days carry their exercises); fall back to a plain count of FULL days.
-    const cds = (customDays && customDays.length)
-      ? customDays
-      : Array.from({ length: Math.max(1, Math.round(customCount || 1)) }, () => null);
+    // Custom cycle/flex: the day count is customCount (the wizard sizes the
+    // day-steps by it). Read the per-day picks by index, but never trust
+    // customDays.length: a stale array left over from a weekday-sized pass
+    // before a plan-type switch would otherwise inflate the day count.
+    const n = Math.max(1, Math.round(customCount || (customDays && customDays.length) || 1));
+    const cds = Array.from({ length: n }, (_, i) => (customDays && customDays[i]) || null);
     days = cds.map(cd => ({ id: uid(), name: cdName(cd), items: cdItems(cd) }));
   } else {
     const types = [];

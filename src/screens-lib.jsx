@@ -77,23 +77,36 @@ function LibraryScreen({ store, setStore, go, userId }) {
     return next;
   });
 
+  // Strip deleted exIds from a 5/3/1 program_data (mainLifts/tmHistory are keyed
+  // by exId), so deleting a main lift doesn't leave orphaned program entries.
+  const stripProgramData = (pd, del) => {
+    if (!pd || typeof pd !== 'object' || (!pd.mainLifts && !pd.tmHistory)) return pd;
+    const clean = obj => { if (!obj) return obj; const out = {}; for (const k in obj) if (!del.has(k)) out[k] = obj[k]; return out; };
+    return { ...pd, ...(pd.mainLifts ? { mainLifts: clean(pd.mainLifts) } : {}), ...(pd.tmHistory ? { tmHistory: clean(pd.tmHistory) } : {}) };
+  };
+
   const deleteSelected = async () => {
-    if (!await confirm(`Previous sessions will be preserved.`, { title: `Delete ${selected.size} exercise${selected.size > 1 ? 's' : ''}?`, ok: 'Delete', danger: true })) return;
-    const stripItems = items => (items || []).filter(item => !selected.has(item.exId));
+    // System cardio can't be deleted (matches the individual-tap guard), so drop
+    // it from the effective set: Select All → Delete must not remove it.
+    const del = new Set([...selected].filter(id => (store.exercises.find(e => e.id === id)?.movement_type) !== 'cardio'));
+    if (del.size === 0) { exitSelect(); return; }
+    if (!await confirm(`Previous sessions will be preserved.`, { title: `Delete ${del.size} exercise${del.size > 1 ? 's' : ''}?`, ok: 'Delete', danger: true })) return;
+    const stripItems = items => (items || []).filter(item => !del.has(item.exId));
     setStore(s => ({
       ...s,
-      exercises: s.exercises.filter(e => !selected.has(e.id)),
+      exercises: s.exercises.filter(e => !del.has(e.id)),
       schedules: s.schedules.map(sch => ({
         ...sch,
         days: (sch.days || []).map(day => ({ ...day, items: stripItems(day.items) })),
         versions: (sch.versions || []).map(v => ({ ...v, days: (v.days || []).map(day => ({ ...day, items: stripItems(day.items) })) })),
+        ...(sch.program_data ? { program_data: stripProgramData(sch.program_data, del) } : {}),
       })),
     }));
     exitSelect();
   };
 
   const editSelected = () => {
-    const ordered = filtered.filter(e => selected.has(e.id)).map(e => e.id);
+    const ordered = filtered.filter(e => selected.has(e.id) && e.movement_type !== 'cardio').map(e => e.id);
     if (ordered.length === 0) return;
     exitSelect();
     const [first, ...rest] = ordered;
@@ -179,7 +192,9 @@ function LibraryScreen({ store, setStore, go, userId }) {
   }, [systemDisplay, q, filterTags, filterUnilateral, filterEquipment, filterRestCats, filterPlan, planExNamesLower]);
 
   const allFilteredSelected = filtered.length > 0 && filtered.every(e => selected.has(e.id));
-  const selectAll = () => setSelected(new Set(filtered.map(e => e.id)));
+  // System cardio can't be deleted/edited (matches the individual-tap guard), so
+  // never select it in bulk.
+  const selectAll = () => setSelected(new Set(filtered.filter(e => e.movement_type !== 'cardio').map(e => e.id)));
   const deselectAll = () => setSelected(new Set());
 
   const topBarRight = selecting ? (
@@ -1191,15 +1206,22 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
 
   const deleteExercise = async () => {
     if (!await confirm('Previous sessions will be preserved.', { title: `Delete "${ex.name}"?`, ok: 'Delete', danger: true })) return;
+    const stripItems = items => (items || []).filter(item => item.exId !== exId);
+    // Also strip plan version snapshots and any 5/3/1 program_data keyed by this
+    // exId, mirroring the bulk delete, so no dangling references remain.
+    const cleanPd = (pd) => {
+      if (!pd || typeof pd !== 'object' || (!pd.mainLifts && !pd.tmHistory)) return pd;
+      const drop = obj => { if (!obj || !(exId in obj)) return obj; const { [exId]: _removed, ...rest } = obj; return rest; };
+      return { ...pd, ...(pd.mainLifts ? { mainLifts: drop(pd.mainLifts) } : {}), ...(pd.tmHistory ? { tmHistory: drop(pd.tmHistory) } : {}) };
+    };
     setStore(s => ({
       ...s,
       exercises: s.exercises.filter(e => e.id !== exId),
       schedules: s.schedules.map(sch => ({
         ...sch,
-        days: (sch.days || []).map(day => ({
-          ...day,
-          items: (day.items || []).filter(item => item.exId !== exId),
-        })),
+        days: (sch.days || []).map(day => ({ ...day, items: stripItems(day.items) })),
+        versions: (sch.versions || []).map(v => ({ ...v, days: (v.days || []).map(day => ({ ...day, items: stripItems(day.items) })) })),
+        ...(sch.program_data ? { program_data: cleanPd(sch.program_data) } : {}),
       })),
     }));
     go({ name: 'lib' });
@@ -1273,6 +1295,14 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
 
   // Best (longest) logged duration = the PR of a time exercise.
   const bestTime = isTimeEx ? pr : 0;
+  // Reps-only exercises have no weight PR: surface their best rep count instead.
+  // Checkbox exercises have no numeric stat at all, so they show only Sessions.
+  const logModeEx = LB.exerciseLogMode(ex);
+  const isRepsOnlyEx = logModeEx === 'reps';
+  const isCheckboxEx = logModeEx === 'checkbox';
+  const bestReps = isRepsOnlyEx
+    ? history.reduce((m, h) => Math.max(m, ...(h.entry.sets || []).filter(s => !s.warmup).map(s => LB.effReps(s) ?? 0), 0), 0)
+    : 0;
 
   const queuePos = editQueueTotal > 0 ? editQueueTotal - editQueue.length : 0;
 
@@ -1438,9 +1468,13 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
             ? <SubDial label="Best Time" value={bestTime ? LB.fmtDuration(bestTime) : '—'} size={90} gold />
             : isAssistedEx
             ? <SubDial label="Best Load" value={points.length ? Math.round(pr) : '—'} sub={UI.unit()} size={90} gold />
+            : isRepsOnlyEx
+            ? <SubDial label="Best reps" value={bestReps || '—'} size={90} gold />
+            : isCheckboxEx
+            ? null
             : <SubDial label="1RM PR" value={pr ? Math.round(pr) : '—'} sub={UI.unit()} size={90} gold />}
           <SubDial label="Sessions" value={history.length} size={90} />
-          {!isTimeEx && !isAssistedEx && <SubDial label="Vol PR" value={volPr ? Math.round(volPr) : '—'} sub={UI.unit()} size={90} gold />}
+          {!isTimeEx && !isAssistedEx && !isRepsOnlyEx && !isCheckboxEx && <SubDial label="Vol PR" value={volPr ? Math.round(volPr) : '—'} sub={UI.unit()} size={90} gold />}
         </div>
 
         {points.length > 1 && <ProgressChart points={points} title={isTimeEx ? 'BEST TIME · HISTORY' : isAssistedEx ? 'BEST LOAD · HISTORY' : undefined} fmtVal={isTimeEx ? LB.fmtDuration : undefined} />}

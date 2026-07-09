@@ -515,6 +515,7 @@ function LastSessionStrip({ session, onClick, exercises, dailyLogs }) {
 }
 
 function RecentBannerDay({ banner, setStore, onOpenSkipSheet, onLog }) {
+  const [confirmEl, confirm] = useConfirm();
   const { dateKey, dayName, daysAgo, skip, dayId } = banner;
   const dateLabel = daysAgo === 1 ? 'YESTERDAY' : `${daysAgo}D AGO`;
   if (skip) {
@@ -529,7 +530,8 @@ function RecentBannerDay({ banner, setStore, onOpenSkipSheet, onLog }) {
         <button onClick={() => onOpenSkipSheet({ mode: 'edit', skipId: skip.id, currentReason: skip.skipReason, data: { dateKey, dayId: skip.dayId, dayName } })} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px 6px', color: UI.inkFaint, display: 'flex', alignItems: 'center' }}>
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
         </button>
-        <button onClick={() => { setStore(s => ({ ...s, skips: (s.skips || []).filter(x => x.id !== skip.id) })); }} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px 2px', color: UI.danger, fontSize: 18, lineHeight: 1, fontFamily: UI.fontUi }}>×</button>
+        <button onClick={async () => { if (await confirm('Delete this skip? The day goes back to unlogged.', { ok: 'Delete', danger: true })) setStore(s => ({ ...s, skips: (s.skips || []).filter(x => x.id !== skip.id) })); }} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px 2px', color: UI.danger, fontSize: 18, lineHeight: 1, fontFamily: UI.fontUi }}>×</button>
+        {confirmEl}
       </div>
     );
   }
@@ -1025,7 +1027,7 @@ const getCycleStartForNum = LB.getCycleStartForNum;
 // most-recent candidate; any skip record at all excludes a day) and
 // allMissedDays (full list further back; a '—' "soft skip" placeholder still
 // counts as missed). isSkipped lets each caller apply its own inclusion rule.
-function findMissedTrainingDays(sch, { weekdayMode, cycleStartDate, weekPlanStartDate, sessions, skipsMap, maxDaysAgo, isSkipped }) {
+function findMissedTrainingDays(sch, { weekdayMode, cycleStartDate, weekPlanStartDate, sessions, skipsMap, maxDaysAgo, isSkipped, statusModeFor }) {
   if (!sch) return [];
   const todayD = new Date(); todayD.setHours(12, 0, 0, 0);
   const sessionDates = new Set(sessions.filter(s => s.ended).map(s => s.date.slice(0, 10)));
@@ -1036,6 +1038,9 @@ function findMissedTrainingDays(sch, { weekdayMode, cycleStartDate, weekPlanStar
     if (sessionDates.has(dateKey)) continue;
     const sk = skipsMap.get(dateKey);
     if (isSkipped(sk)) continue;
+    // A day inside a sick/vacation/deload period is not a missed session,
+    // matching the day strip, which greys those days out via statusPeriodModeFor.
+    if (statusModeFor && statusModeFor(dateKey)) continue;
     let trainingDay = null;
     if (weekdayMode) {
       if (weekPlanStartDate && dateKey < weekPlanStartDate) continue;
@@ -1371,6 +1376,10 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
 
   const periodLabel = useMemo(() => {
     if (LB.is531Plan(sch)) {
+      // current531Cycle/Week derive purely from logged sessions (always the
+      // CURRENT position), so they'd be wrong for a browsed-back week. Show a
+      // neutral label off today rather than a misleading cycle/week.
+      if (weekOffset !== 0) return '5/3/1';
       const c531 = LB.current531Cycle(sch, store.sessions) + 1;
       const w531 = LB.current531Week(sch, store.sessions) || 1;
       const dl531 = w531 === 4 || (store.statusMode === 'deload' && weekOffset === 0);
@@ -2076,15 +2085,17 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       weekdayMode, cycleStartDate: store.cycleStartDate, weekPlanStartDate: store.weekPlanStartDate,
       sessions: store.sessions, skipsMap, maxDaysAgo: 30,
       isSkipped: sk => !!sk, // any skip record at all — already actioned, edit via calendar card
+      statusModeFor: statusPeriodModeFor,
     });
     return first || null;
-  }, [sch, weekdayMode, store.cycleStartDate, store.sessions, store.skips, skipsMap]);
+  }, [sch, weekdayMode, store.cycleStartDate, store.sessions, store.skips, skipsMap, statusPeriodModeFor]);
 
   const allMissedDays = useMemo(() => findMissedTrainingDays(sch, {
     weekdayMode, cycleStartDate: store.cycleStartDate, weekPlanStartDate: store.weekPlanStartDate,
     sessions: store.sessions, skipsMap, maxDaysAgo: 14,
     isSkipped: sk => sk && sk.skipReason !== '—',
-  }), [sch, weekdayMode, store.cycleStartDate, store.sessions, store.skips, skipsMap]);
+    statusModeFor: statusPeriodModeFor,
+  }), [sch, weekdayMode, store.cycleStartDate, store.sessions, store.skips, skipsMap, statusPeriodModeFor]);
 
   useEffect(() => {
     const coaching = store.coaching;
@@ -2965,7 +2976,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                       <button onClick={() => setSkipReasonModal({ mode: 'edit', skipId: selectedDateSkip.id, currentReason: selectedDateSkip.skipReason, data: { dateKey: LB.fmtISO(sessionDate), dayId: activeDay?.id, dayName: activeDay?.name } })} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px 6px', color: UI.inkFaint, display: 'flex', alignItems: 'center' }}>
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
                       </button>
-                      <button onClick={() => { setStore(s => ({ ...s, skips: (s.skips || []).filter(x => x.id !== selectedDateSkip.id) })); }} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px 2px', color: UI.danger, fontSize: 18, lineHeight: 1, fontFamily: UI.fontUi }}>×</button>
+                      <button onClick={async () => { if (await confirm('Delete this skip? The day goes back to unlogged.', { ok: 'Delete', danger: true })) setStore(s => ({ ...s, skips: (s.skips || []).filter(x => x.id !== selectedDateSkip.id) })); }} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px 2px', color: UI.danger, fontSize: 18, lineHeight: 1, fontFamily: UI.fontUi }}>×</button>
                     </div>
                   </Frame>
                 )}
