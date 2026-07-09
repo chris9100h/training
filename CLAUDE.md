@@ -110,6 +110,7 @@ Migrationen liegen in `supabase/migrations/` als nummerierte SQL-Dateien. **Die 
 2. Den Nutzer explizit darauf hinweisen, dass sie ausgeführt werden muss
 3. `docs/database.md` aktualisieren (Tabellen/Spalten bzw. RPCs; bei neuen Tabellen auch den Kurzüberblick unten in dieser Datei)
 4. `supabase/schema.sql` aktualisieren: der vollständige aktuelle Snapshot (Tabellen, RLS, Funktionen, Trigger, Realtime), muss immer mit dem Live-Schema übereinstimmen
+5. **Gehört die neue Spalte/Tabelle in ein User-Backup?** Dann Export (`loadFromSupabase`) **und** Import (`importFromBackup`) in `store.js` nachziehen, sonst geht sie beim Restore verloren. Das CI-Gate `tools/check-backup-coverage.cjs` erzwingt das: fehlt eine Spalte, schlägt es fehl und druckt einen fertigen Fix-Prompt. Ist die Spalte/Tabelle bewusst **nicht** im Backup (Admin/Device/Coaching), im Tool auf die Allowlist bzw. `EXCLUDED` setzen (mit Begründung).
 
 **Bei Tabellen-Umbenennung zusätzlich:** `supabase/functions/` durchsuchen. Edge Functions greifen per REST direkt auf Tabellennamen zu (z.B. `dbFetch('zane_pushover_active?...')`), kein Compiler warnt bei falschen Namen. Alle Treffer fixen und neu deployen.
 
