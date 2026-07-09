@@ -458,6 +458,18 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
       ...s,
       days: remapDays(s.days),
       versions: Array.isArray(s.versions) ? s.versions.map(v => ({ ...v, days: remapDays(v.days) })) : s.versions,
+      // 5/3/1 program_data.mainLifts / tmHistory are keyed BY exId, so they must
+      // be remapped to the fresh ids too or they dangle against the remapped day
+      // items after restore (mirrors the single-plan share path in
+      // screens-schedule.jsx). bumpedCycle is a source-plan guard: drop it so the
+      // restored copy counts cycles from zero.
+      ...(s.program_data && typeof s.program_data === 'object' ? (() => {
+        const pd = { ...s.program_data };
+        if (pd.mainLifts) pd.mainLifts = remapExKeyed(pd.mainLifts);
+        if (pd.tmHistory) pd.tmHistory = remapExKeyed(pd.tmHistory);
+        delete pd.bumpedCycle;
+        return { program_data: pd };
+      })() : {}),
       user_id: userId,
     })))));
     stepsDone++;
@@ -1652,7 +1664,13 @@ function e1rm(kg, reps) {
 // More weight at no worse than -2 reps, or same/more weight at more reps.
 function isImprovement(curr, prev) {
   // done=true wins: if both done+skipped are set, treat as done
-  if (!prev || !curr || !curr.done || curr.kg == null || prev.kg == null) return false;
+  if (!prev || !curr || !curr.done) return false;
+  // Time-based sets carry a duration, not kg x reps: a longer hold beats a
+  // shorter one (planks, dead hangs, wall sits). Both sides must be timed.
+  if (curr.timeSec != null || prev.timeSec != null) {
+    return curr.timeSec != null && prev.timeSec != null && curr.timeSec > prev.timeSec;
+  }
+  if (curr.kg == null || prev.kg == null) return false;
   const rA = effReps(curr); const rB = effReps(prev);
   if (rA == null || rB == null) return false;
   return (curr.kg > prev.kg && rA >= rB - 2) || (curr.kg >= prev.kg && rA > rB);
@@ -1661,7 +1679,12 @@ function isDecline(curr, prev) {
   // done=true wins: only treat as skipped when truly skipped (not also done)
   if (!prev || !curr || (curr.skipped && !curr.done)) return false;
   if (prev.skipped && !prev.done) return false; // prev was already skipped, no baseline to decline from
-  if (!curr.done || curr.kg == null || prev.kg == null) return false;
+  if (!curr.done) return false;
+  // Time-based sets: a shorter hold than last time is a decline.
+  if (curr.timeSec != null || prev.timeSec != null) {
+    return curr.timeSec != null && prev.timeSec != null && curr.timeSec < prev.timeSec;
+  }
+  if (curr.kg == null || prev.kg == null) return false;
   const rA = effReps(curr); const rB = effReps(prev);
   if (rA == null || rB == null) return false;
   return (curr.kg < prev.kg && rA <= rB) || (curr.kg === prev.kg && rA < rB);
@@ -1706,6 +1729,25 @@ function bestAssistLoad(state, exId, excludeSessionId = null, dayId = null) {
       for (const st of (e.sets || [])) {
         if (st.warmup || st.skipped || st.kg == null) continue;
         if (best == null || st.kg > best) best = st.kg;
+      }
+    }
+  }
+  return best;
+}
+
+// The "PR" of a time-based exercise: the longest duration (seconds) logged
+// across ended sessions. Local window only, returns null when there is no
+// history. Mirrors bestAssistLoad's session/set filtering.
+function bestTimeForExercise(state, exId, excludeSessionId = null, dayId = null) {
+  let best = null;
+  for (const s of state.sessions || []) {
+    if (!s.ended || s.isDeload || (excludeSessionId && s.id === excludeSessionId)) continue;
+    if (dayId && s.dayId !== dayId) continue;
+    for (const e of (s.entries || [])) {
+      if (e.exId !== exId) continue;
+      for (const st of (e.sets || [])) {
+        if (st.warmup || st.skipped || st.timeSec == null) continue;
+        if (best == null || st.timeSec > best) best = st.timeSec;
       }
     }
   }
@@ -4503,7 +4545,7 @@ window.LB = {
   loadFromSupabase, syncStore, mergeSessions, withCarriedWindowEntries, historyWindowCutoffISO,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
   uid, todayISO, fmtISO, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, is531MainLift, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, healScheduleWeekdays, buildPlanSkeleton, instantiateProgram, is531Plan, round531, tmFrom531, tmBump531, weeks531, week531, fiveThreeOneSets, build531Plan, add531MainLift, current531Week, current531Cycle, compute531CycleBumps, resolve531CycleEnd, suggest531Tm, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, realignCycleForToday, todayCycleStripIndex,
-  effReps, fmtDuration, e1rm, isImprovement, isDecline, bestE1rmForExercise, bestAssistLoad, totalVolume, entryVolume, doneSetCount, buildSeedSets, buildTimeSeedSets, latestBodyweight, bodyweightForDate, exerciseLogMode, isAssisted, shouldPullBodyweight, systemExerciseToRow, inferCurrentExIdx, calcBlended,
+  effReps, fmtDuration, e1rm, isImprovement, isDecline, bestE1rmForExercise, bestAssistLoad, bestTimeForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, buildTimeSeedSets, latestBodyweight, bodyweightForDate, exerciseLogMode, isAssisted, shouldPullBodyweight, systemExerciseToRow, inferCurrentExIdx, calcBlended,
   refreshExerciseBests, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries,
   computeNextReminderAt,
   cancelPushover, adminSendEmail,

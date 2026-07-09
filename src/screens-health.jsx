@@ -1427,6 +1427,10 @@ function HealthScreen({ store, setStore, go, userId }) {
     const modeChanged = mode !== current;
     if (!modeChanged && !startDateStr) return;
     const since = mode ? startedAt : null;
+    // Snapshot for rollback: setStore below applies optimistically before the
+    // write, so a failed write must restore the prior status (a swallowed error
+    // otherwise leaves the UI showing a status change that never persisted).
+    const prevStatus = { statusMode: store.statusMode, statusModeSince: store.statusModeSince, statusPeriods: store.statusPeriods };
     setStore(s => {
       const updatedPeriods = mode
         ? modeChanged
@@ -1445,7 +1449,12 @@ function HealthScreen({ store, setStore, go, userId }) {
       } else {
         await LB.updateStatusPeriodStart(userId, startedAt);
       }
-    } catch (e) { console.error('status period write failed', e); }
+    } catch (e) {
+      console.error('status period write failed', e);
+      setStore(s => ({ ...s, ...prevStatus }));
+      alert('Could not update your status. Please try again.');
+      return;
+    }
     if (coachingId && modeChanged) {
       try {
         const body = mode === 'sick'     ? 'Status: Sick — taking a break from training.'

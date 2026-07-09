@@ -2337,6 +2337,21 @@ function dayTypeChip(dashed) {
 // multiSelect=true (default): day level shows checkboxes + confirm button,
 //   onCopy(Array<{day, migrateId}>) called with all selected days.
 // multiSelect=false: single-click immediately calls onCopy(day, migrateId).
+// Warn before a day-level import pulls 5/3/1 main lifts into a plan that is not
+// the same 5/3/1 program. A single day carries no program_data, so the Training
+// Max, percentage sets and the AMRAP top set do not travel: the lift silently
+// converts to an ordinary exercise and starts running Smart Progression instead.
+// Returns true to proceed, false to cancel.
+async function confirm531LiftImport(srcPlan, items, targetIs531) {
+  if (!srcPlan || targetIs531 || !LB.is531Plan(srcPlan)) return true;
+  const hasMain = (items || []).some(it => srcPlan.program_data?.mainLifts?.[it.exId]);
+  if (!hasMain) return true;
+  return await confirm(
+    'This day has 5/3/1 main lifts. Imported here they become ordinary exercises: the Training Max, percentage sets and the AMRAP top set do not come along, and Smart Progression takes over instead. Import anyway?',
+    { title: '5/3/1 lifts will convert', ok: 'Import anyway' }
+  );
+}
+
 function DayCopyPicker({ store, schedule, currentDayId, onClose, onCopy, multiSelect = true }) {
   const [selectedPlan, setSelectedPlan] = useStateS(null);
   const [selectedIds, setSelectedIds] = useStateS(new Set());
@@ -2351,7 +2366,7 @@ function DayCopyPicker({ store, schedule, currentDayId, onClose, onCopy, multiSe
   const importTemplate = (t) => {
     const items = normalizeSupersets((t.exercises || [])
       .filter(it => LB.findExercise(store, it.exId))
-      .map(it => ({ exId: it.exId, sets: it.sets || 3, reps: it.reps ?? 8, ...(it.repsPerSet ? { repsPerSet: it.repsPerSet } : {}), ...(it.repsMax != null ? { repsMax: it.repsMax } : {}), ...(it.progressionOffset != null ? { progressionOffset: it.progressionOffset } : {}), ...(Array.isArray(it.timeSecPerSet) ? { timeSecPerSet: it.timeSecPerSet } : {}), ...(it.supersetGroup ? { supersetGroup: it.supersetGroup } : {}) })));
+      .map(it => ({ exId: it.exId, sets: it.sets || 3, ...(it.reps != null ? { reps: it.reps } : {}), ...(it.repsPerSet ? { repsPerSet: it.repsPerSet } : {}), ...(it.repsMax != null ? { repsMax: it.repsMax } : {}), ...(it.progressionOffset != null ? { progressionOffset: it.progressionOffset } : {}), ...(Array.isArray(it.timeSecPerSet) ? { timeSecPerSet: it.timeSecPerSet } : {}), ...(it.supersetGroup ? { supersetGroup: it.supersetGroup } : {}) })));
     const day = { id: LB.uid(), name: t.name, items };
     if (multiSelect) onCopy([{ day, migrateId: undefined }]);
     else onCopy(day, undefined);
@@ -2850,7 +2865,9 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
     setEditQueue({ indices, pos: 0 });
     setEditingItem(indices[0]);
   };
-  const copyItemsFromDay = (sourceDay, migrateId) => {
+  const copyItemsFromDay = async (sourceDay, migrateId) => {
+    const srcPlan = (store.schedules || []).find(s => (s.days || []).some(d => d.id === sourceDay.id));
+    if (!await confirm531LiftImport(srcPlan, sourceDay.items, LB.is531Plan(draft))) return;
     // Deep-copy each item and remap superset group ids — a shallow spread
     // would share item objects (and group ids) with the source day.
     const gidMap = {};
@@ -3299,7 +3316,7 @@ function PlanWizard({ store, setStore, go }) {
     const tplDays = (store.workoutTemplates || []).map(t => ({
       key: 'tpl:' + t.id, name: t.name,
       items: (t.exercises || []).filter(it => LB.findExercise(store, it.exId))
-        .map(it => ({ exId: it.exId, sets: it.sets || 3, reps: it.reps ?? 8, ...(it.repsPerSet ? { repsPerSet: it.repsPerSet } : {}), ...(it.repsMax != null ? { repsMax: it.repsMax } : {}), ...(it.progressionOffset != null ? { progressionOffset: it.progressionOffset } : {}), ...(Array.isArray(it.timeSecPerSet) ? { timeSecPerSet: it.timeSecPerSet } : {}), ...(it.supersetGroup ? { supersetGroup: it.supersetGroup } : {}) })),
+        .map(it => ({ exId: it.exId, sets: it.sets || 3, ...(it.reps != null ? { reps: it.reps } : {}), ...(it.repsPerSet ? { repsPerSet: it.repsPerSet } : {}), ...(it.repsMax != null ? { repsMax: it.repsMax } : {}), ...(it.progressionOffset != null ? { progressionOffset: it.progressionOffset } : {}), ...(Array.isArray(it.timeSecPerSet) ? { timeSecPerSet: it.timeSecPerSet } : {}), ...(it.supersetGroup ? { supersetGroup: it.supersetGroup } : {}) })),
     })).filter(t => t.items.length);
     if (tplDays.length) groups.push({ id: '__tpl', name: 'Templates', days: tplDays });
     return groups;
@@ -3363,12 +3380,14 @@ function PlanWizard({ store, setStore, go }) {
   // each with its exercises. Cycle/flex grow the plan if the import runs past
   // the end; weekday can't grow (its length is the chosen weekday count), so it
   // fills only the remaining slots. Then jump past the filled days.
-  const doImport = () => {
+  const doImport = async () => {
     const chosen = importPlan ? importPlan.days.filter(d => importSel.has(d.key)) : []; // in plan-day order
     if (!chosen.length || dayIdx < 0) return;
     const cap = type === 'weekday' ? Math.max(0, weekdaysSel.length - dayIdx) : chosen.length;
     const use = chosen.slice(0, cap);
     if (!use.length) return;
+    const srcPlan = (store.schedules || []).find(s => s.id === importPlan?.id);
+    if (!await confirm531LiftImport(srcPlan, use.flatMap(d => d.items || []), false)) return;
     setCustomDays(d => { const a = d.slice(); use.forEach((src, k) => { a[dayIdx + k] = { name: src.name, items: copyImportItems(src.items) }; }); return a; });
     const nextIdx = dayIdx + use.length;
     let total;

@@ -736,7 +736,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           .eq('coaching_id', supportActiveTicketId)
           .neq('author_id', userId)
           .is('read_at', null)
-          .then(() => { if (!mounted) return; setStore(s => {
+          .then(({ error }) => { if (error || !mounted) return; setStore(s => {
             const ticket = (s.supportTickets || []).find(t => t.coachingId === supportActiveTicketId);
             const delta = ticket ? ticket.unreadCount : 0;
             return {
@@ -782,7 +782,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       .eq('coaching_id', supportTicket.coachingId)
       .neq('author_id', userId)
       .is('read_at', null)
-      .then(() => { if (!mounted) return; setSupportInbox(prev => prev.map(t => t.coaching_id === supportTicket.coachingId ? { ...t, unread_count: 0 } : t)); });
+      .then(({ error }) => { if (error || !mounted) return; setSupportInbox(prev => prev.map(t => t.coaching_id === supportTicket.coachingId ? { ...t, unread_count: 0 } : t)); });
     // Poll for read_at updates on admin's sent messages (seen indicator)
     const poll = setInterval(() => {
       if (!mounted) return;
@@ -1377,7 +1377,8 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
   const handleArchiveTicket = async () => {
     if (!supportTicket) return;
     const coachingId = supportTicket.coachingId;
-    await LB.supabase.rpc('archive_support_ticket', { p_coaching_id: coachingId });
+    const { error } = await LB.supabase.rpc('archive_support_ticket', { p_coaching_id: coachingId });
+    if (error) { alert('Could not archive the ticket: ' + error.message); return; }
     setSupportInbox(prev => prev.filter(t => t.coaching_id !== coachingId));
     setSupportTicket(null);
     setSupportAdminDraft('');
@@ -1410,10 +1411,14 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       const paths = (notesWithAttachments || []).flatMap(n =>
         (n.attachments || []).map(a => a.url?.startsWith(storagePrefix) ? a.url.slice(storagePrefix.length) : null).filter(Boolean)
       );
+      // Delete the ticket rows first and only purge storage attachments once
+      // that succeeded, so a failed delete can't orphan a ticket whose
+      // attachments are already gone.
+      const { error: delErr } = await LB.supabase.rpc('delete_support_ticket', { p_coaching_id: coachingId });
+      if (delErr) { alert('Could not delete the ticket: ' + delErr.message); return; }
       if (paths.length > 0) {
         await LB.supabase.storage.from('chat-attachments').remove(paths).catch(() => {});
       }
-      await LB.supabase.rpc('delete_support_ticket', { p_coaching_id: coachingId });
       setSupportInbox(prev => prev.filter(t => t.coaching_id !== coachingId));
       setSupportTicket(null);
       setSupportAdminDraft('');

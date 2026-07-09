@@ -496,7 +496,11 @@ function CustomKeyboard({ visible, field, onType, onBackspace, onAdjust, onConfi
         <button style={act} onPointerDown={e => { e.preventDefault(); e.stopPropagation(); onAdjust(-1); }}>↓</button>
         {showSign
           ? <button style={{ ...act, fontSize: 18, fontFamily: UI.fontNum }} onPointerDown={e => { e.preventDefault(); e.stopPropagation(); onSign(); }}>±</button>
-          : <button style={act} onPointerDown={e => { e.preventDefault(); e.stopPropagation(); onPlateCalc(); }}><i className="fa-solid fa-dumbbell" style={{ fontSize: 11 }} /></button>}
+          : isKg
+            /* Plate calc only makes sense on a positive barbell load: hide the
+               dumbbell key on reps/time fields and on assisted (negative) loads. */
+            ? <button style={act} onPointerDown={e => { e.preventDefault(); e.stopPropagation(); onPlateCalc(); }}><i className="fa-solid fa-dumbbell" style={{ fontSize: 11 }} /></button>
+            : <div style={{ ...act, background: 'transparent', border: 'none', cursor: 'default' }} />}
         <button style={act} onPointerDown={e => { e.preventDefault(); e.stopPropagation(); onAdjust(1); }}>↑</button>
         <button
           onPointerDown={e => { e.preventDefault(); e.stopPropagation(); if (!confirmDisabled) onConfirm(); }}
@@ -1075,8 +1079,14 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // assisted exercise "best" is the highest (least-negative) load, compared kg
   // to kg with no Epley and no >0 gate (loads are negative). Everything else
   // uses the estimated 1RM, folding in the local + windowed-server best.
-  const isNewBestSet = (kg, reps) => {
+  const isNewBestSet = (kg, reps, timeSec = null) => {
     if (!entry || newBestShownRef.current[entry.exId]) return false;
+    // Time-based exercise: "best" is the longest duration ever logged.
+    if (LB.exerciseLogMode(exercise) === 'time') {
+      if (timeSec == null) return false;
+      const prior = LB.bestTimeForExercise(store, entry.exId, session.id);
+      return prior != null && timeSec > prior;
+    }
     if (LB.isAssisted(exercise)) {
       if (kg == null) return false;
       const prior = LB.bestAssistLoad(store, entry.exId, session.id);
@@ -1300,7 +1310,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     } else if (!entry.sets[setIdx]?.warmup && !isDeloadSession) {
       const completed = entry.sets[setIdx];
       const cReps = LB.effReps(completed);
-      const isNewBest = isNewBestSet(completed?.kg ?? null, cReps);
+      const isNewBest = isNewBestSet(completed?.kg ?? null, cReps, completed?.timeSec ?? null);
       if (isNewBest) {
         newBestShownRef.current[entry.exId] = true;
         setNewBestSet(true);
@@ -3481,6 +3491,21 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             if (isNewCardio) {
               return { ...e, exId: newExId, name: newEx?.name || e.name, isCardio: true, plannedSets: 0, sets: [], cardioDone: false, cardioData: null };
             }
+            // Reshape the sets when the swapped-in exercise logs differently
+            // (time vs weight/reps) or flips assisted-ness, so a time/assisted
+            // exercise never inherits the old weight-shaped sets, and vice versa.
+            const oldEx = LB.findExercise(s, e.exId);
+            const modeChanged = LB.exerciseLogMode(oldEx) !== LB.exerciseLogMode(newEx);
+            const assistChanged = (oldEx?.movement_type === 'assisted') !== (newEx?.movement_type === 'assisted');
+            if (modeChanged || assistChanged) {
+              const isUni = newEx?.movement_type === 'unilateral';
+              const bwKg = LB.shouldPullBodyweight(newEx) ? LB.latestBodyweight(s) ?? null : null;
+              const last = LB.bestRecentEntry(s, newExId, session.dayId);
+              const suggestion = LB.progressionSuggestion(s, newExId, session.dayId, null, null, last);
+              const setCount = e.sets?.length || e.plannedSets || 3;
+              const seedSets = LB.buildSeedSets({ exId: newExId, sets: setCount, repsPerSet: null }, last, suggestion, isUni, s, bwKg);
+              return { ...e, exId: newExId, name: newEx?.name || e.name, sets: seedSets };
+            }
             return { ...e, exId: newExId, name: newEx?.name || e.name };
           }),
         }),
@@ -3509,7 +3534,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           const bwKg = LB.shouldPullBodyweight(newEx) ? LB.latestBodyweight(s) ?? null : null;
           const last = LB.bestRecentEntry(s, newExId, session.dayId);
           const suggestion = LB.progressionSuggestion(s, newExId, session.dayId, null, null, last);
-          const seedSets = LB.buildSeedSets({ sets: 3, repsPerSet: null }, last, suggestion, isUni, s, bwKg);
+          const seedSets = LB.buildSeedSets({ exId: newExId, sets: 3, repsPerSet: null }, last, suggestion, isUni, s, bwKg);
           newEntry = { exId: newExId, name: newEx?.name || newExId, plannedSets: 3, plannedReps: null, plannedRepsPerSet: null, sets: seedSets, note: '', supersetGroup: null, addedDuringSession: true };
         }
         return {
@@ -3574,7 +3599,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         const suggestion = LB.progressionSuggestion(s, newExId, session.dayId, null, null, last);
         const mother = targetIdx !== null ? sess.entries[targetIdx] : null;
         const setCount = mother ? (mother.plannedSets ?? mother.sets?.length ?? 3) : 3;
-        const seedSets = LB.buildSeedSets({ sets: setCount, repsPerSet: null }, last, suggestion, isUni, s, bwKg);
+        const seedSets = LB.buildSeedSets({ exId: newExId, sets: setCount, repsPerSet: null }, last, suggestion, isUni, s, bwKg);
         newEntry = { exId: newExId, name: newEx?.name || newExId, plannedSets: setCount, plannedReps: null, plannedRepsPerSet: null, sets: seedSets, note: '', supersetGroup: group, addedDuringSession: true };
       }
       const withNew = [
@@ -6130,11 +6155,14 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       <Sheet open={historyOpen} onClose={() => setHistoryOpen(false)} title="History">
         {(() => {
           const rows = historyRows ?? localHistory;
-          // Assisted: "best" is the least-negative load, not an Epley e1RM.
+          // Assisted: "best" is the least-negative load; time-based: the longest
+          // duration; everything else: an Epley e1RM.
           const isAssistedEx = LB.isAssisted(exercise);
-          const pr = !entry ? 0 : isAssistedEx ? LB.bestAssistLoad(store, entry.exId) : LB.bestE1rmForExercise(store, entry.exId);
+          const isTimeEx = LB.exerciseLogMode(exercise) === 'time';
+          const pr = !entry ? 0 : isTimeEx ? LB.bestTimeForExercise(store, entry.exId) : isAssistedEx ? LB.bestAssistLoad(store, entry.exId) : LB.bestE1rmForExercise(store, entry.exId);
           const e1rmForSet = (s) => { const r = LB.effReps(s); return (s.kg != null && r > 0) ? LB.e1rm(s.kg, r) : 0; };
           const bestKgOf = (sets) => { const vals = sets.map(s => s.kg).filter(v => v != null); return vals.length ? Math.max(...vals) : null; };
+          const bestTimeOf = (sets) => { const vals = sets.map(s => s.timeSec).filter(v => v != null); return vals.length ? Math.max(...vals) : null; };
           if (!rows.length) {
             return (
               <div className="micro" style={{ color: UI.inkFaint, textAlign: 'center', padding: '20px 0' }}>
@@ -6151,8 +6179,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               {shown.map((h, hi) => {
                 const working = (h.sets || []).filter(s => !s.warmup && !s.skipped && (s.kg != null || s.reps != null || s.timeSec != null));
                 if (!working.length) return null;
-                const sessionBest = isAssistedEx ? bestKgOf(working) : working.reduce((m, s) => Math.max(m, e1rmForSet(s)), 0);
-                const isPR = isAssistedEx
+                const sessionBest = isTimeEx ? bestTimeOf(working) : isAssistedEx ? bestKgOf(working) : working.reduce((m, s) => Math.max(m, e1rmForSet(s)), 0);
+                const isPR = (isAssistedEx || isTimeEx)
                   ? (pr != null && sessionBest != null && Math.abs(sessionBest - pr) < 0.01)
                   : (pr > 0 && sessionBest > 0 && Math.abs(sessionBest - pr) < 0.01);
                 return (
@@ -6167,7 +6195,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                         </div>
                         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                           {working.map((s, i) => {
-                            const isBest = isAssistedEx
+                            const isBest = isTimeEx
+                              ? (s.timeSec != null && sessionBest != null && Math.abs(s.timeSec - sessionBest) < 0.01)
+                              : isAssistedEx
                               ? (s.kg != null && sessionBest != null && Math.abs(s.kg - sessionBest) < 0.01)
                               : (sessionBest > 0 && Math.abs(e1rmForSet(s) - sessionBest) < 0.01);
                             const repsStr = (s.repsL != null || s.repsR != null) ? `L${s.repsL ?? '?'}/R${s.repsR ?? '?'}` : s.reps;
