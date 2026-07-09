@@ -1461,7 +1461,12 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
   };
 
   const handleDeleteAll = async () => {
-    if (!await confirm('This action cannot be undone.', { title: 'Delete all data?', ok: 'Delete all', danger: true })) return;
+    const email = store.user?.email || 'this account';
+    const ok = await confirm(
+      <>This permanently erases every workout, plan and log for <b style={{ color: UI.ink }}>{email}</b>, then signs you out. It cannot be undone.</>,
+      { title: 'Delete all data?', ok: 'Delete all', danger: true, requireText: 'Delete my data' }
+    );
+    if (!ok) return;
     await LB.deleteAllData(userId); await LB.signOut();
   };
 

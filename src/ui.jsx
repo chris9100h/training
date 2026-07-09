@@ -839,22 +839,36 @@ const ICON_CALENDAR = (
 // ─── useConfirm ─────────────────────────────────────────────────────
 function useConfirm() {
   const [state, setState] = React.useState(null);
-  const confirm = (message, { title = 'Confirm?', ok = 'OK', cancel = 'Cancel', danger = false, preventBackdropClose = false } = {}) =>
-    new Promise(resolve => setState({ message, title, ok, cancel, danger, preventBackdropClose, resolve }));
-  const close = (result) => { state?.resolve(result); setState(null); };
+  // requireText: when set, the user must type this phrase (case-insensitive) to
+  // unlock the confirm button — a deliberate friction gate for irreversible,
+  // account-wide actions (e.g. Delete all data).
+  const [typed, setTyped] = React.useState('');
+  const confirm = (message, { title = 'Confirm?', ok = 'OK', cancel = 'Cancel', danger = false, preventBackdropClose = false, requireText = null } = {}) =>
+    new Promise(resolve => { setTyped(''); setState({ message, title, ok, cancel, danger, preventBackdropClose, requireText, resolve }); });
+  const close = (result) => { state?.resolve(result); setState(null); setTyped(''); };
+  const okLocked = !!state?.requireText && typed.trim().toLowerCase() !== state.requireText.toLowerCase();
   // Portal into document.body so the confirm sheet always sits above any other
   // Sheet (both zIndex: 100) regardless of where confirmEl is placed in the tree.
   const el = state && ReactDOM.createPortal(
     <Sheet open={true} onClose={state.preventBackdropClose ? null : () => close(false)}>
       <div style={{ fontFamily: UI.fontDisplay, fontSize: 26, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: UI.ink, marginBottom: 10, textAlign: 'center' }}>{state.title}</div>
-      <div style={{ fontSize: 14, color: UI.inkSoft, marginBottom: 22, lineHeight: 1.5, textAlign: 'center' }}>{state.message}</div>
+      <div style={{ fontSize: 14, color: UI.inkSoft, marginBottom: state.requireText ? 16 : 22, lineHeight: 1.5, textAlign: 'center' }}>{state.message}</div>
+      {state.requireText && (
+        <div style={{ marginBottom: 22 }}>
+          <div className="micro" style={{ color: UI.inkFaint, textTransform: 'none', letterSpacing: '0.02em', lineHeight: 1.5, marginBottom: 6, textAlign: 'center' }}>
+            Type <b style={{ color: UI.ink }}>{state.requireText}</b> to confirm
+          </div>
+          <TextInput value={typed} onChange={setTyped} placeholder={state.requireText} autoFocus />
+        </div>
+      )}
       <div style={{ display: 'flex', gap: 8 }}>
         {/* cancel: null → single-button alert mode (nothing to actually
             confirm/deny, just an explanation to acknowledge). */}
         {state.cancel && <Btn kind="ghost" onClick={() => close(false)} style={{ flex: 1 }}>{state.cancel}</Btn>}
-        <Btn onClick={() => close(true)} style={{
+        <Btn onClick={() => close(true)} disabled={okLocked} style={{
           flex: state.cancel ? 2 : 1,
           ...(state.danger ? { background: UI.danger, borderColor: 'rgba(var(--danger-rgb),0.6)', boxShadow: '0 6px 20px rgba(var(--danger-rgb),0.25)' } : {}),
+          ...(okLocked ? { opacity: 0.4, cursor: 'not-allowed', boxShadow: 'none' } : {}),
         }}>{state.ok}</Btn>
       </div>
     </Sheet>,
