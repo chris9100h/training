@@ -158,7 +158,9 @@ function cpNearestDateForKey(k, todayISO) {
 }
 
 function cpTodayLog(plan, cardioLogs, todayISO) {
-  return (cardioLogs || []).find(l => l.date === todayISO && l.type === plan.activityType) || null;
+  const norm = (s) => (s || '').trim().toLowerCase();
+  const planType = norm(plan.activityType);
+  return (cardioLogs || []).find(l => l.date === todayISO && norm(l.type) === planType) || null;
 }
 
 // ─── CardioPlanDetailSheet ─────────────────────────────────────────────────

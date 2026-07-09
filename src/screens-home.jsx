@@ -637,6 +637,7 @@ function CardioQuickLogSheet({ open, onClose, store, setStore, userId, editLog, 
   useEffect(() => {
     if (!open) return;
     const du = LB.cardioDistUnit();
+    setDistUnitState(du);
     const next = editLog ? {
       date: editLog.date,
       type: editLog.type || '',

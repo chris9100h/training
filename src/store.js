@@ -1670,6 +1670,12 @@ function isImprovement(curr, prev) {
   if (curr.timeSec != null || prev.timeSec != null) {
     return curr.timeSec != null && prev.timeSec != null && curr.timeSec > prev.timeSec;
   }
+  // Reps-only exercises (no weight, no duration, e.g. bodyweight push-ups):
+  // more reps than last time beats fewer.
+  if (curr.kg == null && prev.kg == null) {
+    const rC = effReps(curr); const rP = effReps(prev);
+    return rC != null && rP != null && rC > rP;
+  }
   if (curr.kg == null || prev.kg == null) return false;
   const rA = effReps(curr); const rB = effReps(prev);
   if (rA == null || rB == null) return false;
@@ -1683,6 +1689,11 @@ function isDecline(curr, prev) {
   // Time-based sets: a shorter hold than last time is a decline.
   if (curr.timeSec != null || prev.timeSec != null) {
     return curr.timeSec != null && prev.timeSec != null && curr.timeSec < prev.timeSec;
+  }
+  // Reps-only exercises: fewer reps than last time is a decline.
+  if (curr.kg == null && prev.kg == null) {
+    const rC = effReps(curr); const rP = effReps(prev);
+    return rC != null && rP != null && rC < rP;
   }
   if (curr.kg == null || prev.kg == null) return false;
   const rA = effReps(curr); const rB = effReps(prev);
@@ -1824,7 +1835,10 @@ function doneSetCount(session) {
   return (session.entries || []).reduce((c, e) =>
     c + (e.sets || []).filter(st => {
       if (st.warmup || st.skipped) return false;
-      if (ended) return st.timeSec != null || (st.kg != null && (st.reps != null || st.repsL != null || st.repsR != null));
+      // Count any logged evidence for the set's type, not just kg x reps: a
+      // reps-only (bodyweight) or checkbox (mobility) done set has kg == null but
+      // was fully logged, and must still count.
+      if (ended) return st.done || st.timeSec != null || st.kg != null || st.reps != null || st.repsL != null || st.repsR != null;
       return st.done;
     }).length, 0);
 }

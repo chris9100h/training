@@ -2341,7 +2341,10 @@ function HistoryScreen({ store, setStore, go, userId, initialTab }) {
             const items = [];
             let lastGroup = null;
             filteredSessions.forEach(s => {
-              const group = getGroup(s.date);
+              // Group by the same field the list is sorted on (ended), not the
+              // start date, or a session whose start/ended fall in different week
+              // buckets flips the header back and emits a duplicate group key.
+              const group = getGroup((s.ended || s.date).slice(0, 10));
               const firstInGroup = group !== lastGroup;
               if (firstInGroup) { items.push({ type: 'header', label: group, key: `h-${group}`, isFirst: items.length === 0 }); lastGroup = group; }
               items.push({ type: 'session', session: s, key: s.id, firstInGroup });
@@ -2757,23 +2760,36 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
   // cutoff is deliberately kept (instead of reusing bestE1rmForExercise, which
   // has no such cutoff) so a session's PR status reflects only what was known
   // at the time it happened, not later sessions bleeding backward into it.
+  // Per-exercise "best" ranking value on a per-type scale: weighted → e1RM,
+  // assisted → least-negative load (kg is stored negative), reps-only → reps,
+  // time → seconds. The maps are keyed by exId, so every value for one exId
+  // shares a scale and comparisons stay valid.
+  const prValueOf = (st, exId) => {
+    if (!st.done) return null;
+    const exObj = store.exercises.find(x => x.id === exId);
+    if (LB.isAssisted(exObj)) return st.kg != null ? st.kg : null;
+    if (LB.exerciseLogMode(exObj) === 'time') return st.timeSec ?? null;
+    if (st.kg == null) { const r = LB.effReps(st); return (r != null && r > 0) ? r : null; }
+    if (!prRepsValid(st, exId)) return null;
+    return LB.e1rm(st.kg, prReps(st, exId));
+  };
   const prMap = {};
   store.sessions.filter(x => x.ended && x.id !== s.id && x.ended < s.ended && !x.isDeload).forEach(sess =>
-    sess.entries.forEach(e => e.sets.filter(st => st.done && st.kg != null && prRepsValid(st, e.exId)).forEach(st => {
-      const val = LB.e1rm(st.kg, prReps(st, e.exId));
-      if (!(val > (prMap[e.exId] ?? -Infinity))) return;
+    sess.entries.forEach(e => e.sets.forEach(st => {
+      const val = prValueOf(st, e.exId);
+      if (val == null || !(val > (prMap[e.exId] ?? -Infinity))) return;
       prMap[e.exId] = val;
     }))
   );
   const sessionBestMap = {};
-  s.entries.forEach(e => e.sets.filter(st => st.done && st.kg != null && prRepsValid(st, e.exId)).forEach(st => {
-    const val = LB.e1rm(st.kg, prReps(st, e.exId));
-    if (!(val > (sessionBestMap[e.exId] ?? -Infinity))) return;
+  s.entries.forEach(e => e.sets.forEach(st => {
+    const val = prValueOf(st, e.exId);
+    if (val == null || !(val > (sessionBestMap[e.exId] ?? -Infinity))) return;
     sessionBestMap[e.exId] = val;
   }));
   const isPR = (st, exId) => {
-    if (!st.done || st.kg == null || !prRepsValid(st, exId)) return false;
-    const val = LB.e1rm(st.kg, prReps(st, exId));
+    const val = prValueOf(st, exId);
+    if (val == null) return false;
     const sessionBest = sessionBestMap[exId];
     if (sessionBest == null || val !== sessionBest) return false;
     const best = prMap[exId];
@@ -3371,9 +3387,12 @@ function SessionEditSheet({ session, duration, exercises, onClose, onSave }) {
       // wall-clock time — started_at/ended carry the actual times.
       patch.date = draftDate + 'T12:00:00.000Z';
     }
-    const mins = parseInt(draftDuration, 10);
-    if (!isNaN(mins) && mins > 0) {
-      patch.durationMinutes = mins;
+    // Only touch duration when the field was actually changed: it is seeded from
+    // round(duration/5)*5, so an untouched save would otherwise snap a true 42
+    // min down to 40. Selecting the "—" (0) option clears the duration.
+    if (draftDuration !== origDuration) {
+      const mins = parseInt(draftDuration, 10);
+      patch.durationMinutes = (!isNaN(mins) && mins > 0) ? mins : null;
     }
     onSave(patch);
   };
@@ -3396,7 +3415,7 @@ function SessionEditSheet({ session, duration, exercises, onClose, onSave }) {
         <div>
           <span className="label">Date</span>
           <div style={{ width: '100%', overflow: 'hidden', borderRadius: 4, marginTop: 6 }}>
-            <input type="date" value={draftDate} onChange={e => setDraftDate(e.target.value)} style={{ ...inputStyle, textAlign: 'center', textAlignLast: 'center' }} />
+            <input type="date" value={draftDate} max={LB.todayISO()} onChange={e => setDraftDate(e.target.value)} style={{ ...inputStyle, textAlign: 'center', textAlignLast: 'center' }} />
           </div>
         </div>
         <div>
@@ -3497,6 +3516,8 @@ function fmtCompareSet(st) {
     const suffix = tr.totalReps != null ? ` (${tr.totalReps})` : '';
     return tr.partials > 0 ? `${chain}${suffix} +${tr.partials} partials` : `${chain}${suffix}`;
   }
+  // Checkbox / no-numeric completed set: show a tick, not a meaningless '— × —'.
+  if (st.done && st.kg == null && st.reps == null && st.repsL == null && st.repsR == null) return '✓';
   const repsStr = (st.repsL != null || st.repsR != null) ? `L${st.repsL ?? '?'}/R${st.repsR ?? '?'}` : (st.reps ?? '—');
   return `${st.kg != null ? st.kg + UI.unit() : '—'} × ${repsStr}`;
 }
@@ -3724,8 +3745,13 @@ function SessionCompareScreen({ store, setStore, go, sessionId, compareId, back 
               const sets = (entry.sets || []).filter(st => !st.warmup);
               const cmpSets = (cmpEntry?.sets || []).filter(st => !st.warmup);
               const maxLen = Math.max(sets.length, cmpSets.length);
-              const entryVolA = LB.entryVolume(entry, true, store.exercises.find(x => x.id === entry.exId), bwA);
-              const entryVolB = cmpEntry ? LB.entryVolume(cmpEntry, true, store.exercises.find(x => x.id === cmpEntry.exId), bwB) : 0;
+              // Mirror totalVolume's guard: mobility exercises don't contribute to
+              // the header total, so their per-exercise delta must be 0 too (cardio
+              // is already filtered out of the compare loop).
+              const cmpExObj = store.exercises.find(x => x.id === entry.exId);
+              const isMobilityEx = cmpExObj?.movement_type === 'mobility';
+              const entryVolA = isMobilityEx ? 0 : LB.entryVolume(entry, true, cmpExObj, bwA);
+              const entryVolB = (cmpEntry && !isMobilityEx) ? LB.entryVolume(cmpEntry, true, store.exercises.find(x => x.id === cmpEntry.exId), bwB) : 0;
               const entryDelta = entryVolA - entryVolB;
               const entryDeltaRounded = Math.round(entryDelta);
               return (
@@ -4502,12 +4528,16 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
 
 
 function ExerciseHistoryScreen({ store, go, exId, dayId, exName, back, userId }) {
-  const [metric, setMetric] = useStateL('kg');
-  const [showCount, setShowCount] = useStateL(20);
-
   const ex = store.exercises.find(e => e.id === exId);
   const isUni = !!ex?.unilateral;
-  const isTimeEx = LB.exerciseLogMode(ex) === 'time';
+  const logModeEx = LB.exerciseLogMode(ex);
+  const isTimeEx = logModeEx === 'time';
+  const isRepsOnlyEx = logModeEx === 'reps';
+  const isAssistedEx = LB.isAssisted(ex);
+  // Reps-only exercises have no weight, so open on the reps metric (the kg metric
+  // would draw an empty chart).
+  const [metric, setMetric] = useStateL(isRepsOnlyEx ? 'reps' : 'kg');
+  const [showCount, setShowCount] = useStateL(20);
   const displayName = exName || ex?.name || '?';
 
   // Local window renders instantly; the server history extends the chart to
@@ -4528,7 +4558,7 @@ function ExerciseHistoryScreen({ store, go, exId, dayId, exName, back, userId })
         const entry = s.entries.find(e => e.exId === exId);
         if (!entry) return null;
         const working = entry.sets.filter(st => !st.warmup && !st.skipped);
-        if (!working.some(st => st.kg != null || st.reps != null || st.timeSec != null)) return null;
+        if (!working.some(st => st.kg != null || st.reps != null || st.repsL != null || st.repsR != null || st.timeSec != null || st.done)) return null;
         return { id: s.id, ended: s.ended, sets: working };
       })
       .filter(Boolean);
@@ -4537,7 +4567,7 @@ function ExerciseHistoryScreen({ store, go, exId, dayId, exName, back, userId })
       .filter(r => !seen.has(r.sessionId))
       .map(r => {
         const working = (r.sets || []).filter(st => !st.warmup && !st.skipped);
-        if (!working.some(st => st.kg != null || st.reps != null || st.timeSec != null)) return null;
+        if (!working.some(st => st.kg != null || st.reps != null || st.repsL != null || st.repsR != null || st.timeSec != null || st.done)) return null;
         return { id: r.sessionId, ended: r.ended, sets: working };
       })
       .filter(Boolean);
