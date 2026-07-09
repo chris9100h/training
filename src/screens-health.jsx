@@ -84,7 +84,12 @@ function computeHealthWeekStats({ logs, sessions, cardioLogs, planningState, tf,
   const sumK = k => { const vs = inPeriod.map(l => l[k]).filter(v => v != null); return vs.length ? vs.reduce((s, v) => s + v, 0) : null; };
   const sessionDatesInPeriod = new Set((sessions || []).filter(s => s.ended).map(s => dayOf(s)).filter(d => d && d >= from && d <= to));
   const trainingsDone = sessionDatesInPeriod.size;
-  const trainingsPlanned = allDays.filter(d => d <= today && LB.plannedTrainingDay(planningState, d)).length;
+  // A completed session proves that day was a training day, so count done days
+  // as planned too. plannedTrainingDay evaluates a past day against the CURRENT
+  // plan, so after switching to a plan with fewer weekly training days the
+  // sessions done under the old plan would otherwise exceed the new plan's
+  // planned count (e.g. "4 / 1"). Flooring planned at done keeps it sane.
+  const trainingsPlanned = allDays.filter(d => d <= today && (LB.plannedTrainingDay(planningState, d) || sessionDatesInPeriod.has(d))).length;
   // Training days for macro target avg: future planned days count as training (not yet missed),
   // past planned days only count if a session was actually done (missed = rest day, no earned macros).
   const trainingDaysInPeriod = allDays.filter(d => {
