@@ -899,6 +899,7 @@ DECLARE
   v_client_id uuid;
   v_id        text;
   v_existing  text;
+  v_schema    jsonb;
 BEGIN
   v_client_id := find_user_by_email(p_email);
   IF v_client_id IS NULL THEN
@@ -917,9 +918,11 @@ BEGIN
   IF FOUND THEN
     RETURN 'ERROR:already_coached';
   END IF;
+  SELECT default_checkin_schema INTO v_schema
+    FROM zane_user_settings WHERE user_id = auth.uid();
   v_id := 'cch_' || gen_random_uuid()::text;
-  INSERT INTO zane_coaching (id, coach_id, client_id, status)
-    VALUES (v_id, auth.uid(), v_client_id, 'pending');
+  INSERT INTO zane_coaching (id, coach_id, client_id, status, checkin_schema)
+    VALUES (v_id, auth.uid(), v_client_id, 'pending', v_schema);
   RETURN v_id;
 END
 $function$;
