@@ -6,6 +6,7 @@ name: Syntax check
 on:
   push:
   pull_request:
+  workflow_dispatch: # allow running the checks manually from the Actions tab
 
 jobs:
   transpile:
