@@ -781,7 +781,7 @@ function LoggingModeSection({ equipment, movementType, logMode, onLogMode, pullB
 // none is logged, matching the bodyweight logging hint.
 function AssistedVolumeNote({ hasLoggedWeight }) {
   return hasLoggedWeight
-    ? <div className="micro" style={{ color: UI.inkFaint, ...logNoteStyle }}>Volume uses your logged bodyweight minus the assistance, so assisted sets count too.</div>
+    ? <div className="micro" style={{ color: 'rgba(var(--danger-rgb),0.7)', ...logNoteStyle }}>Volume uses your logged bodyweight minus the assistance, so assisted sets count too.</div>
     : <div className="micro" style={{ color: 'rgba(var(--danger-rgb),0.7)', ...logNoteStyle }}>Log your bodyweight first in the app's Health tab (enable it under Settings) so assisted sets count toward volume.</div>;
 }
 const WIZARD_ORDER = ['name', 'muscle', 'size', 'equipment', 'movement', 'logging'];
