@@ -522,15 +522,15 @@ CREATE POLICY "recipient can mark read" ON public.zane_coaching_notes FOR UPDATE
 CREATE POLICY "participants can delete notes" ON public.zane_coaching_notes FOR DELETE TO public USING ((EXISTS ( SELECT 1 FROM zane_coaching c WHERE ((c.id = zane_coaching_notes.coaching_id) AND ((c.coach_id = (select auth.uid())) OR (c.client_id = (select auth.uid())))))));
 
 -- coaching_macros
-CREATE POLICY "Coach can manage macros" ON public.zane_coaching_macros FOR ALL TO public USING ((EXISTS ( SELECT 1 FROM zane_coaching WHERE ((zane_coaching.id = zane_coaching_macros.coaching_id) AND (zane_coaching.coach_id = (select auth.uid()))))));
-CREATE POLICY "Client can read macros" ON public.zane_coaching_macros FOR SELECT TO public USING ((EXISTS ( SELECT 1 FROM zane_coaching WHERE ((zane_coaching.id = zane_coaching_macros.coaching_id) AND (zane_coaching.client_id = (select auth.uid()))))));
+CREATE POLICY "Coach can manage macros" ON public.zane_coaching_macros FOR ALL TO public USING ((EXISTS ( SELECT 1 FROM zane_coaching WHERE ((zane_coaching.id = zane_coaching_macros.coaching_id) AND (zane_coaching.coach_id = (select auth.uid())) AND (zane_coaching.status = 'active'::text) AND (zane_coaching.id !~~ 'support_%'::text)))));
+CREATE POLICY "Client can read macros" ON public.zane_coaching_macros FOR SELECT TO public USING ((EXISTS ( SELECT 1 FROM zane_coaching WHERE ((zane_coaching.id = zane_coaching_macros.coaching_id) AND (zane_coaching.client_id = (select auth.uid())) AND (zane_coaching.status = 'active'::text) AND (zane_coaching.id !~~ 'support_%'::text)))));
 
 -- checkins
 CREATE POLICY "checkins_client" ON public.zane_checkins FOR ALL TO authenticated
   USING ((client_id = (select auth.uid())))
   WITH CHECK (((client_id = (select auth.uid())) AND (EXISTS ( SELECT 1 FROM zane_coaching c WHERE ((c.id = zane_checkins.coaching_id) AND (c.client_id = (select auth.uid())))))));
 CREATE POLICY "checkins_coach_read" ON public.zane_checkins FOR SELECT TO authenticated
-  USING ((EXISTS ( SELECT 1 FROM zane_coaching WHERE ((zane_coaching.id = zane_checkins.coaching_id) AND (zane_coaching.coach_id = (select auth.uid())) AND (zane_coaching.status = 'active'::text)))));
+  USING ((EXISTS ( SELECT 1 FROM zane_coaching WHERE ((zane_coaching.id = zane_checkins.coaching_id) AND (zane_coaching.coach_id = (select auth.uid())) AND (zane_coaching.coach_id <> zane_coaching.client_id) AND (zane_coaching.status = 'active'::text) AND (zane_coaching.id !~~ 'support_%'::text)))));
 
 -- ── Functions (verbatim from the live database) ────────────────────────────────
 
@@ -1027,7 +1027,7 @@ declare
   v_week_start date;
 begin
   v_week_start := current_date
-    - (extract(dow from current_date)::int) * interval '1 day'
+    - (extract(isodow from current_date)::int) * interval '1 day'
     - interval '6 days';
 
   return query
@@ -1042,7 +1042,8 @@ begin
   from zane_coaching c
   where c.coach_id = auth.uid()
     and c.coach_id <> c.client_id
-    and c.status = 'active';
+    and c.status = 'active'
+    and c.id not like 'support_%';
 end;
 $function$;
 
