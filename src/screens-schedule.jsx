@@ -3211,11 +3211,11 @@ function ExercisePicker({ store, setStore, onClose, onPick, singleSelect = false
           store={store}
           setStore={setStore}
           onCreated={(id) => {
-            // A freshly created exercise joins the pending multi-selection and the
-            // picker stays open, so building a day from several existing lifts plus
-            // a new one no longer collapses to just the new one. With nothing
-            // pending (or in single-pick mode) it still adds and closes right away.
-            if (singleSelect || selected.length === 0) finalizePick([id]);
+            // Multi-pick: a freshly created exercise always joins the selection and
+            // the picker stays open (confirm with the "Add N" button), whether it is
+            // the first pick or one of several, so creating never collapses the
+            // multi-pick to a single one. Single-pick mode adds and closes.
+            if (singleSelect) finalizePick([id]);
             else { setSelected(s => s.includes(id) ? s : [...s, id]); setQ(''); }
           }}
           onClose={() => setCreatingNew(null)}
