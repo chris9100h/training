@@ -1040,7 +1040,8 @@ function findMissedTrainingDays(sch, { weekdayMode, cycleStartDate, weekPlanStar
     if (isSkipped(sk)) continue;
     // A day inside a sick/vacation/deload period is not a missed session,
     // matching the day strip, which greys those days out via statusPeriodModeFor.
-    if (statusModeFor && statusModeFor(dateKey)) continue;
+    // statusModeFor expects a Date (it calls .getTime()), so pass d, not dateKey.
+    if (statusModeFor && statusModeFor(d)) continue;
     let trainingDay = null;
     if (weekdayMode) {
       if (weekPlanStartDate && dateKey < weekPlanStartDate) continue;
