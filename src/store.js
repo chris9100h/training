@@ -787,7 +787,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     isCoachLoad ? null : _supabase.rpc('get_coach_info'),
     isCoachLoad ? null : _supabase.rpc('get_coaching_clients'),
     isCoachLoad ? null : _supabase.from('zane_coaching_notes')
-      .select('id, coaching_id, author_id, type, entity_id, entity_name, body, created_at, thread_id')
+      .select('id, coaching_id, author_id, type, entity_id, entity_name, body, created_at, thread_id, attachments')
       .is('read_at', null)
       .neq('author_id', userId)
       .not('coaching_id', 'like', 'support_%'),
@@ -1092,6 +1092,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         threadId: n.thread_id,
         body: n.body,
         createdAt: n.created_at,
+        attachments: n.attachments || null,
       })),
     },
     supportTickets: (supportTicketsRes?.data || []).map(t => ({
@@ -3252,7 +3253,7 @@ async function reloadCoachingState(userId) {
     _supabase.rpc('get_coach_info'),
     _supabase.rpc('get_coaching_clients'),
     _supabase.from('zane_coaching_notes')
-      .select('id, coaching_id, author_id, type, entity_id, entity_name, body, created_at, thread_id')
+      .select('id, coaching_id, author_id, type, entity_id, entity_name, body, created_at, thread_id, attachments')
       .is('read_at', null)
       .neq('author_id', userId),
     _supabase.from('zane_coaching').select('id, checkin_requested_at, checkin_enabled').eq('client_id', userId).eq('status', 'active').neq('coach_id', userId).maybeSingle(),
@@ -3277,6 +3278,7 @@ async function reloadCoachingState(userId) {
       id: n.id, coachingId: n.coaching_id, authorId: n.author_id,
       type: n.type, entityId: n.entity_id, entityName: n.entity_name,
       threadId: n.thread_id, body: n.body, createdAt: n.created_at,
+      attachments: n.attachments || null,
     })),
   };
 }
@@ -3507,7 +3509,9 @@ async function requestCheckin(coachingId, userId) {
   await addCoachingNote(coachingId, 'general', null, null,
     'Your coach is requesting your weekly check-in. Please fill it in when you get a chance.',
     userId, threadId);
-  await _supabase.from('zane_coaching').update({ checkin_requested_at: new Date().toISOString() }).eq('id', coachingId);
+  // unwrap so a failed update rejects (the client resolves { error } instead of
+  // throwing); callers surface the failure rather than showing a false "Sent".
+  await unwrap(_supabase.from('zane_coaching').update({ checkin_requested_at: new Date().toISOString() }).eq('id', coachingId));
 }
 
 function checkinWeekStart() {

@@ -38,7 +38,7 @@ function CoachingBannerGroup({ store, setStore, userId, go }) {
       <i className="fa-solid fa-headset" style={{ color: 'var(--accent)', fontSize: 14 }} />
       <span style={{ flex: 1, textAlign: 'left', fontSize: 13, color: UI.ink }}>{label}</span>
       <span style={{
-        background: 'var(--accent)', color: '#fff', borderRadius: 999,
+        background: 'var(--accent)', color: '#0a0805', borderRadius: 999,
         fontSize: 11, fontWeight: 700, minWidth: 18, height: 18,
         display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px',
       }}>{count}</span>
@@ -163,6 +163,9 @@ function CoachingTabCoachView({ store, setStore, userId, go, hideTopBar = false 
       if (result?.startsWith('ERROR:self')) { setInviteError('Cannot coach yourself.'); return; }
       if (result?.startsWith('ERROR:exists')) { setInviteError('Invite already sent or coaching already active.'); return; }
       if (result?.startsWith('ERROR:already_coached')) { setInviteError('This person already has an active coach.'); return; }
+      // Any other ERROR:* (rate-limit, permission, a future code) must not fall
+      // through to the success path and pretend the invite was sent.
+      if (result?.startsWith('ERROR:')) { setInviteError('Could not send invite.'); return; }
       setInviteEmail('');
       setInviteOpen(false);
       const coaching = await LB.reloadCoachingState(userId);
@@ -196,7 +199,9 @@ function CoachingTabCoachView({ store, setStore, userId, go, hideTopBar = false 
   };
 
   const handleRequestCheckin = async (coachingId) => {
-    try { await LB.requestCheckin(coachingId, userId); } catch (e) { console.error(e); }
+    // Let failures propagate so the card can surface an error instead of
+    // flashing a false "Sent" while the reminder never went out.
+    await LB.requestCheckin(coachingId, userId);
   };
 
   const AddIcon = () => (
@@ -342,12 +347,18 @@ function CoachingTabClientCard({ client, inProgress, statusMode, unreadCount, ch
     go({ name: 'coaching-client', coachingId: client.id, clientId: client.clientId, clientName: client.clientName, checkinAt, backRoute: 'coaching' });
   };
 
-  const handleRequest = (e) => {
+  const handleRequest = async (e) => {
     e.stopPropagation();
     if (requested) return;
-    setRequested(true);
-    onRequestCheckin();
-    setTimeout(() => setRequested(false), 4000);
+    // Only flip to "Sent" once the request actually succeeded; surface failures
+    // instead of silently swallowing them and pretending the client was nudged.
+    try {
+      await onRequestCheckin();
+      setRequested(true);
+      setTimeout(() => setRequested(false), 4000);
+    } catch (_) {
+      alert('Could not send the reminder. Please try again.');
+    }
   };
 
   const handleDismissCheckin = (e) => {
@@ -1087,11 +1098,14 @@ function CheckInForm({ coachingId, clientId, userId, weekStart, existing, prefil
 
   const set = (key, val) => setForm(f => ({ ...f, [key]: val }));
 
-  const missing = allFields.filter(f => f.required).filter(f => { const v = form[f.key]; return v === '' || v == null; }).map(f => f.label);
+  // Validate against the PARSED value (what actually gets submitted), not the
+  // raw string: letters in a required number field or '0' in a required distance
+  // field parse to null in toResponse and would otherwise submit silently absent.
+  const missing = allFields.filter(f => f.required).filter(f => toResponse(f, form[f.key], distUnit) == null).map(f => f.label);
   const canSubmit = missing.length === 0;
 
   const handleSubmit = async () => {
-    if (!canSubmit) { setError(`Can't submit — please fill in: ${missing.join(', ')}.`); return; }
+    if (!canSubmit) { setError(`Can't submit, please fill in: ${missing.join(', ')}.`); return; }
     setSaving(true); setError('');
     try {
       const responses = {};
@@ -1128,10 +1142,10 @@ function CheckInForm({ coachingId, clientId, userId, weekStart, existing, prefil
       {(prefill || dailyPrefill || perfPrefill != null) && !existing && (
         <div style={{ fontSize: 10, color: 'var(--accent)', fontFamily: UI.fontUi, padding: '6px 10px', background: `rgba(var(--accent-rgb),0.08)`, borderRadius: 6, border: `0.5px solid rgba(var(--accent-rgb),0.2)` }}>
           {dailyPrefill
-            ? `Prefilled from your daily logs${prefill ? ' & cardio' : ''} this week — review before submitting`
+            ? `Prefilled from your daily logs${prefill ? ' & cardio' : ''} this week, review before submitting`
             : prefill
               ? `Cardio prefilled from ${prefill.count} log${prefill.count !== 1 ? 's' : ''} this week`
-              : `Prefilled from this week's training — review before submitting`}
+              : `Prefilled from this week's training, review before submitting`}
         </div>
       )}
       {sections.map(section => {
@@ -1205,7 +1219,12 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
     return <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.1em' }}>LOADING…</div></div>;
   }
 
-  const resolvedSchema = schema || store?.settings?.defaultCheckinSchema || CHECKIN_DEFAULT_SCHEMA;
+  // A real coached client must never fall back to their OWN default schema (the
+  // coach can't see it, so the two sides would diverge). The coach's default is
+  // stamped onto the coaching row when set, so a null row means the built-in
+  // default on both sides. Only self-coaching legitimately uses the own default
+  // (self rows are excluded from the coach-side stamping).
+  const resolvedSchema = schema || (isSelf ? store?.settings?.defaultCheckinSchema : null) || CHECKIN_DEFAULT_SCHEMA;
 
   // Preview: build a fake check-in from the current training week's accumulated data
   const previewDailyPrefill = LB.dailyLogsWeekPrefill(store?.dailyLogs, previewWeekStart, store?.sessions, resolvedSchema);
@@ -1235,8 +1254,8 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
         <div style={{ padding: '10px 14px 0', flexShrink: 0 }}>
           <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>
             {isNew
-              ? <>Week of <strong>{fmtWeek(formWeek)}</strong> — covers Mon–Sun of last week.</>
-              : <>Editing <strong>week of {fmtWeek(formWeek)}</strong> — the change is logged to your coach.</>}
+              ? <>Week of <strong>{fmtWeek(formWeek)}</strong>. Covers Mon–Sun of last week.</>
+              : <>Editing <strong>week of {fmtWeek(formWeek)}</strong>. The change is logged to your coach.</>}
           </div>
           <button onClick={() => setEditTarget(null)} style={{ background: 'transparent', border: 'none', fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, cursor: 'pointer', padding: '4px 0' }}>← Cancel</button>
         </div>
@@ -1305,7 +1324,7 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 6 }}>
               <span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: 'var(--ok)', flexShrink: 0 }} />
-              <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.07em', textTransform: 'uppercase' }}>In progress — data still accumulating</span>
+              <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.07em', textTransform: 'uppercase' }}>In progress, data still accumulating</span>
             </div>
             <CheckInCard
               ci={{ weekStart: previewWeekStart, responses: previewResponses }}
@@ -1352,7 +1371,7 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
               <div style={{ paddingLeft: 16 }}>
                 {past.map(ci => (
                   <div key={ci.id} style={{ borderTop: `0.5px solid ${UI.hair}` }}>
-                    <CheckInCard ci={ci} prevCi={past[past.indexOf(ci) + 1]} schema={resolvedSchema} embedded onEdit={() => setEditTarget(ci)} onDelete={() => handleDelete(ci)} confirmingDelete={confirmDelete === ci.id} coachingMacrosHistory={coachingMacrosHistory} />
+                    <CheckInCard ci={ci} prevCi={past[past.indexOf(ci) + 1]} schema={resolvedSchema} embedded onEdit={checkinEnabled ? () => setEditTarget(ci) : undefined} onDelete={checkinEnabled ? () => handleDelete(ci) : undefined} confirmingDelete={confirmDelete === ci.id} coachingMacrosHistory={coachingMacrosHistory} />
                   </div>
                 ))}
               </div>
@@ -1406,7 +1425,7 @@ function CheckInRequestModal({ coaching }) {
           onClick={handleOk}
           style={{
             width: '100%', padding: 14, background: 'var(--accent)', border: 'none',
-            borderRadius: 6, fontSize: 15, fontWeight: 700, color: '#fff',
+            borderRadius: 6, fontSize: 15, fontWeight: 700, color: '#0a0805',
             fontFamily: UI.fontUi, cursor: 'pointer', letterSpacing: '0.05em',
           }}
         >
@@ -1524,15 +1543,31 @@ function CoachingTabClientView({ store, setStore, userId, go, hideTopBar = false
 function ClientNutritionReadView({ coachingId }) {
   const [macros, setMacros] = useStateC(null);
   const [loading, setLoading] = useStateC(true);
+  const [loadErr, setLoadErr] = useStateC(false);
 
-  useEffectC(() => {
+  const load = () => {
+    setLoading(true); setLoadErr(false);
     LB.loadCoachingMacros(coachingId)
       .then(data => setMacros(data[0] || null))
+      .catch(() => setLoadErr(true))
       .finally(() => setLoading(false));
-  }, [coachingId]);
+  };
+  useEffectC(() => { load(); }, [coachingId]);
 
   if (loading) {
     return <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.1em' }}>LOADING…</div></div>;
+  }
+
+  // Distinguish a failed load from a genuine "coach set nothing": the empty
+  // state below asserts the coach hasn't added targets, which is wrong on error.
+  if (loadErr) {
+    return (
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, padding: 32 }}>
+        <i className="fa-solid fa-utensils" style={{ fontSize: 28, color: UI.inkGhost }} />
+        <div style={{ fontSize: 13, color: 'rgba(var(--danger-rgb),0.8)', fontFamily: UI.fontUi, textAlign: 'center' }}>Couldn't load macro targets.</div>
+        <button onClick={load} style={{ background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '8px 16px', cursor: 'pointer', color: UI.ink, fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600 }}>Retry</button>
+      </div>
+    );
   }
 
   if (!macros) {

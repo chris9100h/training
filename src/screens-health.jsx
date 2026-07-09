@@ -987,6 +987,7 @@ function HealthMetricsCard({ log, dateLabel, isToday, onJumpToday, dragHandle, t
         {stat('Weight', log?.weight != null ? log.weight : null, wUnit)}
         {stat('Steps', log?.steps != null ? log.steps.toLocaleString() : null)}
         {stat('Calories', log?.calories != null ? log.calories : null)}
+        {stat('Water', log?.waterMl != null ? (Math.round(log.waterMl / 100) / 10) : null, 'L')}
       </div>
       <div style={{ display: 'flex', gap: 12 }}>
         {stat('Protein', log?.protein != null ? log.protein : null, 'g')}
@@ -1006,6 +1007,12 @@ function HealthMetricsCard({ log, dateLabel, isToday, onJumpToday, dragHandle, t
         <div style={{ marginTop: 14, paddingTop: 14, borderTop: `0.5px solid ${UI.hair}` }}>
           <div className="micro" style={{ color: UI.inkFaint, marginBottom: 5 }}>OFF-PLAN</div>
           <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{log.offPlanNote}</div>
+        </div>
+      )}
+      {log?.note && (
+        <div style={{ marginTop: 14, paddingTop: 14, borderTop: `0.5px solid ${UI.hair}` }}>
+          <div className="micro" style={{ color: UI.inkFaint, marginBottom: 5 }}>NOTE</div>
+          <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{log.note}</div>
         </div>
       )}
     </Card>

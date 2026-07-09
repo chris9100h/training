@@ -29,6 +29,7 @@ const UI = {
   danger:    'var(--danger)',
   ok:        'var(--ok)',
   warn:      'var(--warn)',
+  info:      'var(--info)',
   fontUi:      '"Inter", system-ui, sans-serif',
   fontNum:     '"JetBrains Mono", ui-monospace, monospace',
   fontDisplay: '"Big Shoulders Display", "Arial Narrow", sans-serif',

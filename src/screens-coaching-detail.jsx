@@ -432,7 +432,7 @@ function CheckInTrendCards({ recent, schema, clientUnit }) {
     <>
       {chartModal && <LineChartSheet {...chartModal} onClose={() => setChartModal(null)} />}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <div className="micro" style={{ color: UI.inkFaint }}>TRENDS — {n} CHECK-IN{n !== 1 ? 'S' : ''}</div>
+        <div className="micro" style={{ color: UI.inkFaint }}>TRENDS · {n} CHECK-IN{n !== 1 ? 'S' : ''}</div>
         {n >= 2 && (
           <button onClick={handleExport} disabled={exporting} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, color: exporting ? UI.inkFaint : UI.gold, fontSize: 13, lineHeight: 1 }}>
             <i className={`fa-solid ${exporting ? 'fa-spinner fa-spin' : 'fa-share-from-square'}`} />
@@ -469,7 +469,7 @@ function generatePreviewData(schema) {
     'Felt strong this week, hit all my sessions and stuck to the plan.',
     'A couple of social meals on the weekend, otherwise on track.',
     'Sleep was a little off midweek but energy held up well.',
-    'Right knee felt a bit tight on squats — kept the weight conservative.',
+    'Right knee felt a bit tight on squats, kept the weight conservative.',
   ];
 
   const baseOf = f => {
@@ -627,7 +627,7 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
     min:           'Lowest selectable value on the stepper scale.',
     max:           'Highest selectable value on the stepper scale.',
     rows:          'How many lines tall the text area appears in the form (1–8). More rows = more vertical space.',
-    options:       'Add one button per option as plain text (e.g. Worse, Same, Improved). The text is shown to the client and saved as-is; its position sets the rank used in trends — order them to match your trend direction.',
+    options:       'Add one button per option as plain text (e.g. Worse, Same, Improved). The text is shown to the client and saved as-is; its position sets the rank used in trends, order them to match your trend direction.',
     unit:          'Text appended after the value in trend charts. Use "weight" to auto-switch between kg and lbs based on the client\'s setting.',
     hint:          'Small helper text shown below the input to guide the client (e.g. "1 = easy, 10 = max").',
     section_label: 'The heading shown above this group of fields in the check-in form.',
@@ -714,17 +714,33 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
     if (fd.icon.trim()) f.icon = fd.icon.trim();
     if (fd.unit) f.unit = fd.unit;
     if (fd.hint.trim()) f.hint = fd.hint.trim();
-    if (fd.type === 'stepper') { f.min = parseInt(fd.min) || 1; f.max = parseInt(fd.max) || 10; }
+    if (fd.type === 'stepper') {
+      // Guarantee a valid, non-empty range: an inverted or zero-width min/max
+      // renders zero stepper buttons on the client (Array.from({length: max-min+1})),
+      // leaving a required field unfillable. Swap if inverted, widen if equal.
+      let mn = parseInt(fd.min); if (isNaN(mn)) mn = 1;
+      let mx = parseInt(fd.max); if (isNaN(mx)) mx = 10;
+      if (mx < mn) { const t = mn; mn = mx; mx = t; }
+      if (mx === mn) mx = mn + 1;
+      f.min = mn; f.max = mx;
+    }
+    // A percent field is read-only (prefilled FROM LOGS), so it can never be
+    // hand-filled: marking it required would permanently block submission.
+    if (fd.type === 'percent') f.required = false;
     if (fd.type === 'text') f.rows = parseInt(fd.rows) || 2;
     if (['integer', 'decimal', 'stepper'].includes(fd.type) && fd.show_in_health_log) {
       f.show_in_health_log = true;
       f.health_log_agg = fd.health_log_agg || 'avg';
     }
     if (fd.type === 'choice') {
-      // Each option stores its own text as the value; the position gives the
-      // rank used for trends (see the direction hint in the editor). Empty
+      // `value` is the STABLE identifier written into check-in responses; the
+      // position gives the rank used for trends (see the direction hint). Seed
+      // value from the label only when the option is first created, then never
+      // rewrite it: renaming an option's label must not orphan historical
+      // responses keyed to the old text (only the display label changes). Empty
       // options are dropped.
-      f.options = fd.options.filter(o => String(o.label ?? '').trim()).map(o => ({ ...o }));
+      f.options = fd.options.filter(o => String(o.label ?? '').trim())
+        .map(o => ({ ...o, label: o.label.trim(), value: (o.value ?? '') !== '' ? o.value : o.label.trim() }));
       if (fd.labeled) f.labeled = true;
     }
     setDraft(d => {
@@ -828,7 +844,7 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
   };
 
   const TYPE_LABEL = { text: 'Text', integer: 'Int', decimal: 'Dec', stepper: 'Steps', choice: 'Choice' };
-  const TYPE_COLOR = { text: UI.inkSoft, integer: 'var(--accent)', decimal: 'var(--accent)', stepper: UI.gold, choice: '#7b8cde' };
+  const TYPE_COLOR = { text: UI.inkSoft, integer: 'var(--accent)', decimal: 'var(--accent)', stepper: UI.gold, choice: UI.info };
   const inp = { width: '100%', background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '9px 10px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, outline: 'none', boxSizing: 'border-box' };
   const lbl = { fontSize: 10, fontWeight: 700, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.08em', textTransform: 'uppercase' };
   const fieldHeader = (text, helpKey) => (
@@ -895,7 +911,10 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
   if (view === 'edit-field' && fieldDraft) {
     const fd = fieldDraft;
     const set = (k, v) => setFieldDraft(f => ({ ...f, [k]: v }));
-    const canSave = fd.label.trim().length > 0;
+    // A choice needs at least two real options, or the client renders an empty
+    // button row and (if required) can never submit.
+    const validChoiceOptions = (fd.options || []).filter(o => String(o.label ?? '').trim());
+    const canSave = fd.label.trim().length > 0 && (fd.type !== 'choice' || validChoiceOptions.length >= 2);
 
     return (
       <div style={overlayStyle}>
@@ -957,7 +976,7 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
                 <div style={{ flex: 1 }}>
                   <div style={{ ...lbl, marginBottom: 3 }}>Track daily in health log</div>
                   <div style={{ fontSize: 11, color: UI.inkGhost, fontFamily: UI.fontUi, lineHeight: 1.4 }}>
-                    Client logs this field daily — weekly aggregate prefills the check-in
+                    Client logs this field daily, weekly aggregate prefills the check-in
                   </div>
                 </div>
                 {renderToggle(fd.show_in_health_log, () => set('show_in_health_log', !fd.show_in_health_log))}
@@ -1047,7 +1066,7 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
                 {fd.options.map((o, i) => (
                   <div key={i} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                     <div style={{ width: 22, flex: '0 0 22px', textAlign: 'center', fontSize: 12, color: UI.inkGhost, fontFamily: UI.fontUi }}>{i + 1}</div>
-                    <input value={o.label} onChange={e => set('options', fd.options.map((x, j) => j === i ? { ...x, value: e.target.value, label: e.target.value } : x))}
+                    <input value={o.label} onChange={e => set('options', fd.options.map((x, j) => j === i ? { ...x, label: e.target.value } : x))}
                       placeholder="e.g. Improved" style={{ ...inp, flex: 1, fontSize: 13 }} />
                     <button onClick={() => set('options', fd.options.filter((_, j) => j !== i))}
                       style={{ background: 'none', border: 'none', padding: 4, cursor: 'pointer', color: 'rgba(var(--danger-rgb),0.8)', fontSize: 16, lineHeight: 1, flexShrink: 0 }}>
@@ -1055,14 +1074,14 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
                     </button>
                   </div>
                 ))}
-                {!fd.options.length && <div style={{ fontSize: 12, color: UI.inkGhost, fontFamily: UI.fontUi, textAlign: 'center', padding: '8px 0' }}>No options yet — tap + ADD</div>}
+                {!fd.options.length && <div style={{ fontSize: 12, color: UI.inkGhost, fontFamily: UI.fontUi, textAlign: 'center', padding: '8px 0' }}>No options yet, tap + ADD</div>}
               </div>
               {fd.direction && fd.options.length > 0 && (
                 <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5, marginTop: 8, padding: '7px 10px', background: 'rgba(var(--accent-rgb),0.08)', borderRadius: 6, display: 'flex', alignItems: 'center', gap: 7 }}>
                   <i className={`fa-solid ${fd.direction === 'higher_better' ? 'fa-arrow-up' : 'fa-arrow-down'}`} style={{ color: 'var(--accent)', fontSize: 12, flexShrink: 0 }} />
                   <span>{fd.direction === 'higher_better'
-                    ? 'Higher counts as better — order from worst (top) to best (bottom).'
-                    : 'Lower counts as better — order from best (top) to worst (bottom).'}</span>
+                    ? 'Higher counts as better, order from worst (top) to best (bottom).'
+                    : 'Lower counts as better, order from best (top) to worst (bottom).'}</span>
                 </div>
               )}
             </div>
@@ -1072,7 +1091,7 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
             <div>
               {fieldHeader('Unit suffix', 'unit')}
               {renderHelp('unit')}
-              <input value={fd.unit} onChange={e => set('unit', e.target.value)} placeholder='e.g. ml, kcal — or "weight"' style={inp} />
+              <input value={fd.unit} onChange={e => set('unit', e.target.value)} placeholder='e.g. ml, kcal (or "weight")' style={inp} />
             </div>
           )}
 
@@ -1351,7 +1370,16 @@ function ClientCheckInsTab({ coachingId, checkinEnabled = true, onToggle, toggli
   const { checkins, loadErr, setLoadErr, schema, setSchema, coachingMacrosHistory, load } = useCoachingCheckins(coachingId);
   const [builderOpen, setBuilderOpen] = useStateC(false);
 
-  const resolvedSchema = schema || store?.settings?.defaultCheckinSchema || CHECKIN_DEFAULT_SCHEMA;
+  // What the client actually submitted with: when the coaching row has no saved
+  // schema, both sides must fall back to the built-in default. The coach's OWN
+  // default_checkin_schema is invisible to the client (RLS), so using it here
+  // made the coach review with a different form than the client filled. Only the
+  // per-row schema, then the shared built-in default. (Charts/cards elsewhere in
+  // this file already resolve this way; line 1354 was the odd one out.)
+  const resolvedSchema = schema || CHECKIN_DEFAULT_SCHEMA;
+  // The builder, in contrast, seeds a fresh/edited schema from the coach's saved
+  // default so customizing a not-yet-configured client starts from their template.
+  const builderInitial = schema || store?.settings?.defaultCheckinSchema || CHECKIN_DEFAULT_SCHEMA;
 
   const toggleRow = (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', borderBottom: `0.5px solid ${UI.hair}`, flexShrink: 0 }}>
@@ -1372,7 +1400,7 @@ function ClientCheckInsTab({ coachingId, checkinEnabled = true, onToggle, toggli
   );
 
   const builder = builderOpen && (
-    <CheckInSchemaBuilder coachingId={coachingId} initial={resolvedSchema}
+    <CheckInSchemaBuilder coachingId={coachingId} initial={builderInitial}
       onSave={s => { setSchema(s); setBuilderOpen(false); }}
       onSaveForAll={async (s) => {
         await LB.saveDefaultCheckinSchema(s, userId);
