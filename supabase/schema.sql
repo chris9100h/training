@@ -1401,17 +1401,26 @@ CREATE OR REPLACE FUNCTION public.get_user_volume_stats(p_user_id uuid DEFAULT N
 AS $function$
   WITH uid AS (SELECT COALESCE(p_user_id, auth.uid()) AS id),
   ended AS (
-    SELECT s.id, s.duration_minutes, s.started_at, s.ended
+    SELECT s.id, s.user_id, s.date, s.duration_minutes, s.started_at, s.ended
     FROM zane_sessions s WHERE s.user_id = (SELECT id FROM uid) AND s.ended IS NOT NULL
   )
   SELECT
     (SELECT COUNT(*) FROM ended)::bigint AS session_count,
     COALESCE((
-      SELECT SUM(st.kg * (
-        CASE WHEN st.reps_l IS NOT NULL OR st.reps_r IS NOT NULL
+      SELECT SUM(
+        CASE WHEN ex.movement_type = 'assisted'
+             THEN GREATEST(0, COALESCE((
+                    SELECT dl.weight FROM zane_daily_logs dl
+                    WHERE dl.user_id = en.user_id AND dl.weight IS NOT NULL
+                    ORDER BY abs(dl.date::date - en.date::date) LIMIT 1), 0) + st.kg)
+             ELSE st.kg END
+        * (CASE WHEN st.reps_l IS NOT NULL OR st.reps_r IS NOT NULL
              THEN LEAST(COALESCE(st.reps_l, st.reps_r), COALESCE(st.reps_r, st.reps_l))
              ELSE st.reps END))
-      FROM zane_sets st JOIN ended en ON en.id = st.session_id
+      FROM zane_sets st
+      JOIN ended en ON en.id = st.session_id
+      LEFT JOIN zane_session_entries e ON e.id = st.entry_id
+      LEFT JOIN zane_exercises ex ON ex.id = e.ex_id
       WHERE NOT st.warmup AND NOT st.skipped AND st.kg IS NOT NULL
         AND COALESCE(CASE WHEN st.reps_l IS NOT NULL OR st.reps_r IS NOT NULL
              THEN LEAST(COALESCE(st.reps_l, st.reps_r), COALESCE(st.reps_r, st.reps_l))
@@ -1428,6 +1437,10 @@ $function$;
 -- list / "best session" card / coach session lists need volume + set/exercise
 -- counts for sessions whose sets weren't loaded. Semantics match the client's
 -- totalVolume()/doneSetCount() for ended sessions (done flag not required).
+-- Volume mirrors the client entryVolume(): assisted sets (movement_type =
+-- 'assisted', negative-load assistance) count GREATEST(0, bodyweight + kg) * reps
+-- using the logged bodyweight closest to the session date; without a logged
+-- bodyweight the term is GREATEST(0, kg). Non-assisted sets are raw kg * reps.
 CREATE OR REPLACE FUNCTION public.get_session_stats(p_user_id uuid DEFAULT NULL)
  RETURNS TABLE(session_id text, exercise_count integer, done_sets integer, volume double precision)
  LANGUAGE sql STABLE SECURITY INVOKER SET search_path TO 'public'
@@ -1440,11 +1453,20 @@ AS $function$
        AND ((st.kg IS NOT NULL
              AND (st.reps IS NOT NULL OR st.reps_l IS NOT NULL OR st.reps_r IS NOT NULL))
             OR st.time_sec IS NOT NULL))::int AS done_sets,
-    COALESCE((SELECT SUM(st.kg * COALESCE(
-        CASE WHEN st.reps_l IS NOT NULL OR st.reps_r IS NOT NULL
+    COALESCE((SELECT SUM(
+        CASE WHEN ex.movement_type = 'assisted'
+             THEN GREATEST(0, COALESCE((
+                    SELECT dl.weight FROM zane_daily_logs dl
+                    WHERE dl.user_id = s.user_id AND dl.weight IS NOT NULL
+                    ORDER BY abs(dl.date::date - s.date::date) LIMIT 1), 0) + st.kg)
+             ELSE st.kg END
+        * COALESCE(CASE WHEN st.reps_l IS NOT NULL OR st.reps_r IS NOT NULL
              THEN LEAST(COALESCE(st.reps_l, st.reps_r), COALESCE(st.reps_r, st.reps_l))
              ELSE st.reps END, 0))
-      FROM zane_sets st WHERE st.session_id = s.id
+      FROM zane_sets st
+      LEFT JOIN zane_session_entries e ON e.id = st.entry_id
+      LEFT JOIN zane_exercises ex ON ex.id = e.ex_id
+      WHERE st.session_id = s.id
         AND NOT st.warmup AND NOT st.skipped
         AND st.kg IS NOT NULL
         AND (st.reps IS NOT NULL OR st.reps_l IS NOT NULL OR st.reps_r IS NOT NULL)

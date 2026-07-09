@@ -5426,7 +5426,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0' }}>
               <span>Volume</span>
               <span className="num" style={{ color: UI.gold }}>
-                {Math.round(LB.totalVolume(session, store.exercises)).toLocaleString('en-US')} {UI.unit()}
+                {Math.round(LB.totalVolume(session, store.exercises, store.dailyLogs)).toLocaleString('en-US')} {UI.unit()}
               </span>
             </div>
             <div className="knurl" />

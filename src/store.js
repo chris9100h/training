@@ -1695,31 +1695,42 @@ async function refreshExerciseBests(userId) {
 // Volume for a single session entry (one exercise) — same working-set filter
 // totalVolume uses, factored out so per-exercise volume (e.g. a session
 // compare view) doesn't duplicate the filter logic.
-function entryVolume(entry, ended) {
+// exercise + bodyweightKg let assisted exercises count real volume: their load
+// is stored as NEGATIVE assistance, so the weight actually moved is the user's
+// bodyweight minus that assistance (= bodyweightKg + kg). Pass them through from
+// totalVolume; callers without exercise/bodyweight context fall back to the old
+// clamp-to-0 behavior.
+function entryVolume(entry, ended, exercise, bodyweightKg) {
   if (!entry || entry.isCardio) return 0;
+  const assisted = isAssisted(exercise);
   return (entry.sets || []).filter(st => {
     if (st.warmup || st.skipped) return false;
     if (ended) return st.kg != null && (st.reps != null || st.repsL != null || st.repsR != null);
     return st.done;
   }).reduce((s, st) => {
     const reps = effReps(st) ?? 0;
-    // Negative load only occurs on assisted exercises (machine/band assistance
-    // stored as negative kg). Assistance is not lifted weight, so it adds no
-    // volume: clamp to 0. A graduated assisted set that crossed into real added
-    // weight (positive kg) counts normally.
     const kg = +st.kg;
+    if (assisted) {
+      // Assisted: bodyweight minus assistance (kg is negative during assistance,
+      // positive once graduated into added weight). Clamp to 0 if assistance
+      // exceeds bodyweight. Without a logged bodyweight, fall back to the old
+      // behavior (assistance adds 0, a graduated positive load counts on its own).
+      const load = bodyweightKg != null ? bodyweightKg + kg : kg;
+      return s + Math.max(0, load) * reps;
+    }
+    // Non-assisted loads are never negative; the clamp is a no-op safety net.
     return s + (kg > 0 ? kg : 0) * reps;
   }, 0);
 }
-function totalVolume(session, exercises) {
+function totalVolume(session, exercises, dailyLogs) {
   const ended = !!session.ended;
   if (ended && !(session.entries || []).length && session.aggVolume != null) return session.aggVolume;
-  const excludedIds = exercises
-    ? new Set(exercises.filter(e => e.movement_type === 'mobility' || e.movement_type === 'cardio').map(e => e.id))
-    : null;
+  const exMap = exercises ? new Map(exercises.map(e => [e.id, e])) : null;
+  const bw = bodyweightForDate(dailyLogs, session.date);
   return (session.entries || []).reduce((sum, entry) => {
-    if (excludedIds && excludedIds.has(entry.exId)) return sum;
-    return sum + entryVolume(entry, ended);
+    const ex = exMap ? exMap.get(entry.exId) : null;
+    if (ex && (ex.movement_type === 'mobility' || ex.movement_type === 'cardio')) return sum;
+    return sum + entryVolume(entry, ended, ex, bw);
   }, 0);
 }
 
@@ -1781,6 +1792,24 @@ function latestBodyweight(store) {
   return logs.slice().sort((a, b) => b.date.localeCompare(a.date))[0].weight;
 }
 
+// The logged bodyweight closest (in calendar days) to a given date, or null when
+// nothing is logged. Assisted-exercise volume uses the bodyweight around the
+// session, not just the newest one, so old sessions stay historically accurate.
+// dailyLogs is the array (store.dailyLogs / clientStore.dailyLogs); dates are
+// 'YYYY-MM-DD' strings, the session date an ISO timestamp.
+function bodyweightForDate(dailyLogs, dateISO) {
+  const logs = (dailyLogs || []).filter(l => l.weight != null && l.date);
+  if (!logs.length) return null;
+  if (!dateISO) return logs.slice().sort((a, b) => b.date.localeCompare(a.date))[0].weight;
+  const target = new Date(String(dateISO).slice(0, 10)).getTime();
+  let best = null, bestDiff = Infinity;
+  for (const l of logs) {
+    const diff = Math.abs(new Date(String(l.date).slice(0, 10)).getTime() - target);
+    if (diff < bestDiff) { bestDiff = diff; best = l.weight; }
+  }
+  return best;
+}
+
 // How an exercise is logged: 'checkbox' (tick only), 'reps' (reps, no weight)
 // or 'weight' (weight + reps). Resolves the new log_mode column, falling back to
 // the legacy no_weight_reps boolean (true → 'reps') for rows written before
@@ -1795,7 +1824,8 @@ function exerciseLogMode(ex) {
 // negative) kg, so the sign-agnostic isImprovement/isDecline read progress
 // correctly with no inversion. The load can graduate past zero into real added
 // weight. "Best" for assisted is the highest kg (least assistance), not an
-// Epley e1RM, and assistance contributes no volume (see entryVolume).
+// Epley e1RM. Volume counts the real load moved (bodyweight minus assistance)
+// when a bodyweight is logged, else assistance adds no volume (see entryVolume).
 function isAssisted(ex) {
   return ex?.movement_type === 'assisted';
 }
@@ -4433,7 +4463,7 @@ window.LB = {
   loadFromSupabase, syncStore, mergeSessions, withCarriedWindowEntries, historyWindowCutoffISO,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
   uid, todayISO, fmtISO, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, is531MainLift, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, healScheduleWeekdays, buildPlanSkeleton, instantiateProgram, is531Plan, round531, tmFrom531, tmBump531, weeks531, week531, fiveThreeOneSets, build531Plan, add531MainLift, current531Week, current531Cycle, compute531CycleBumps, resolve531CycleEnd, suggest531Tm, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, realignCycleForToday, todayCycleStripIndex,
-  effReps, fmtDuration, e1rm, isImprovement, isDecline, bestE1rmForExercise, bestAssistLoad, totalVolume, entryVolume, doneSetCount, buildSeedSets, buildTimeSeedSets, latestBodyweight, exerciseLogMode, isAssisted, shouldPullBodyweight, systemExerciseToRow, inferCurrentExIdx, calcBlended,
+  effReps, fmtDuration, e1rm, isImprovement, isDecline, bestE1rmForExercise, bestAssistLoad, totalVolume, entryVolume, doneSetCount, buildSeedSets, buildTimeSeedSets, latestBodyweight, bodyweightForDate, exerciseLogMode, isAssisted, shouldPullBodyweight, systemExerciseToRow, inferCurrentExIdx, calcBlended,
   refreshExerciseBests, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries,
   computeNextReminderAt,
   cancelPushover, adminSendEmail,
