@@ -17,6 +17,15 @@
    Entry shape: { id: string, date: string (YYYY-MM-DD), title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.529',
+    date: '2026-07-09',
+    title: 'Coach, Now In the Loop',
+    items: [
+      "🧑‍🏫 Your coach's view of you just got a lot less blind. Running 5/3/1? They now see your current cycle and week plus every lift's Training Max trend, right on your card. On a mesocycle? They see the week and RIR target too. Supersets show up grouped and labeled in your session history instead of looking like two random exercises, and your prescribed rep target now sits right next to what you actually logged.",
+      "🏆 Timed exercises finally get their moment: hold a plank a few seconds longer than ever and you get the same NEW BEST celebration a heavier lift earns. Your in-training History sheet now highlights the best hold time too, not just the best weight.",
+    ],
+  },
+  {
     id: 'v2.518',
     date: '2026-07-08',
     title: 'No Lift Left Behind',
