@@ -333,6 +333,105 @@ function computeWeeklyAdherence(clientStore, weeksBack = 6) {
   }).filter(Boolean);
 }
 
+// ─── Recently-shipped-feature surfacing for the coach's single-client view ────
+// These render program/session context the athlete already sees but the coach
+// dashboard previously dropped: 5/3/1 cycle/TM progress, mesocycle block status,
+// superset grouping, and the per-set rep target. All read-only, all from the
+// client's already-loaded clientStore; nothing here mutates.
+
+// Format a plan item's prescribed target: per-set (12/10/8), range (8-12),
+// single (8), or time-based durations. Returns null when there's nothing to show.
+function fmtRepTarget(item) {
+  if (!item) return null;
+  if (Array.isArray(item.timeSecPerSet) && item.timeSecPerSet.length) {
+    return item.timeSecPerSet.map(t => LB.fmtDuration(t)).join(' / ');
+  }
+  if (item.repsPerSet && item.repsPerSet.length) return item.repsPerSet.join('/');
+  if (item.repsMax != null) return `${item.reps}-${item.repsMax}`;
+  return item.reps != null ? String(item.reps) : null;
+}
+
+// Resolve the prescribed plan item for a logged session entry, from the schedule
+// the session belongs to. The target value reflects the plan's current
+// prescription (plans rarely rewrite historical targets); returns null when the
+// day/item can't be matched, so a wrong target is never shown.
+function planItemForEntry(clientStore, session, exId) {
+  if (!exId || !session) return null;
+  const sch = (clientStore.schedules || []).find(s => s.id === session.scheduleId);
+  if (!sch) return null;
+  const day = (sch.days || []).find(d => d.id === session.dayId);
+  if (!day) return null;
+  return (day.items || []).find(it => it.exId === exId) || null;
+}
+
+// Superset/giant-set annotation for the read-only session views: consecutive
+// entries sharing a supersetGroup get a header on the first member and a left
+// accent rail on every member, so paired work reads differently from straight sets.
+function supersetInfo(entries, i) {
+  const grp = entries[i] && entries[i].supersetGroup;
+  if (!grp) return { member: false, start: false, size: 0 };
+  const start = i === 0 || entries[i - 1].supersetGroup !== grp;
+  const size = entries.filter(e => e.supersetGroup === grp).length;
+  return { member: true, start, size };
+}
+function SupersetHeader({ size }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '10px 14px 2px' }}>
+      <i className="fa-solid fa-link" style={{ fontSize: 9, color: UI.gold }} />
+      <span className="micro" style={{ color: UI.gold, letterSpacing: '0.14em' }}>{LB.supersetLabel(size)}</span>
+    </div>
+  );
+}
+
+// Program status card: 5/3/1 cycle/week + per-lift Training-Max progress, and
+// mesocycle block week / RIR target. Both come straight from the client's
+// schedule + mesoStates already in the coach's clientStore. Renders nothing for
+// a plain plan. mesoCurrentWeek / FiveThreeOneProgress are cross-file globals
+// (screens-train / screens-schedule), guarded like the athlete-side callers.
+function ClientProgramStatus({ sch, clientStore }) {
+  if (!sch) return null;
+  const is531 = LB.is531Plan(sch);
+  const isMeso = !is531 && !!sch.mesocycle_weeks;
+  if (!is531 && !isMeso) return null;
+
+  let mesoBadge = null;
+  if (isMeso) {
+    const m = (clientStore.mesoStates || []).find(x => x.scheduleId === sch.id) || null;
+    const weeks = sch.mesocycle_weeks;
+    const mesoNum = (m?.completions ?? 0) + 1;
+    const label = `MESO${mesoNum > 1 ? ' ' + mesoNum : ''}`;
+    if (clientStore.statusMode === 'deload') {
+      mesoBadge = `${label} · DELOAD`;
+    } else {
+      const week = (m && typeof mesoCurrentWeek === 'function') ? mesoCurrentWeek(m, clientStore) : null;
+      const rir = (week != null && LB.mesoRirEnabled(sch) && typeof LB.mesoRirForWeek === 'function')
+        ? LB.mesoRirForWeek(week, weeks, sch.mesocycle_start_rir ?? 3, sch.mesocycle_end_rir ?? 0)
+        : null;
+      const unit = LB.isWeekdayPlan(sch) ? 'W' : 'C';
+      mesoBadge = week == null
+        ? `${label} · not started`
+        : `${label} · ${unit}${week}/${weeks}${rir != null ? ` · ${rir} RIR` : ''}`;
+    }
+  }
+
+  return (
+    <>
+      <div className="micro" style={{ color: UI.inkFaint, margin: '0 0 8px', paddingLeft: 2 }}>PROGRAM</div>
+      <div style={{ padding: '14px 16px', background: UI.bgInset, borderRadius: 8, border: `0.5px solid ${UI.hair}`, marginBottom: 20 }}>
+        {isMeso && mesoBadge && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <i className="fa-solid fa-layer-group" style={{ fontSize: 12, color: UI.gold }} />
+            <span className="num" style={{ fontSize: 13, color: UI.inkSoft, letterSpacing: '0.04em' }}>{mesoBadge}</span>
+          </div>
+        )}
+        {is531 && typeof FiveThreeOneProgress === 'function' && (
+          <FiveThreeOneProgress sch={sch} store={clientStore} />
+        )}
+      </div>
+    </>
+  );
+}
+
 function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession }) {
   const sessions = clientStore.sessions || [];
   const ended = sessions.filter(s => s.ended).sort((a, b) => (b.ended || '').localeCompare(a.ended || ''));
@@ -473,6 +572,10 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
                   };
                   const techniqueLabel = (s) => LB.techniqueRounds(s).badge;
                   return (todaySession.entries || []).map((e, i) => {
+                    const entriesArr = todaySession.entries || [];
+                    const ss = supersetInfo(entriesArr, i);
+                    const planItem = planItemForEntry(clientStore, todaySession, e.exId);
+                    const tgtStr = planItem ? fmtRepTarget(planItem) : null;
                     const lastResult = e.exId ? LB.lastSessionForExercise(storeWithoutToday, e.exId, todaySession.dayId) : null;
                     const lastSets = (lastResult?.entry?.sets || []).filter(s => !s.warmup && (s.kg != null || s.reps != null || s.timeSec != null));
                     // If any set in the row carries a technique badge, every set
@@ -496,8 +599,15 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
                     };
                     const amrapLabelStyle = { fontSize: 8, color: UI.inkGhost, maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' };
                     return (
-                      <div key={i} style={{ padding: '10px 0', borderBottom: `0.5px solid ${UI.hair}` }}>
-                        <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600, marginBottom: 6 }}>{e.name}</div>
+                      <React.Fragment key={i}>
+                        {ss.start && <SupersetHeader size={ss.size} />}
+                        <div style={{ padding: '10px 0', borderBottom: `0.5px solid ${UI.hair}`, ...(ss.member ? { borderLeft: `2px solid rgba(var(--accent-rgb),0.35)`, paddingLeft: 12 } : {}) }}>
+                        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8, marginBottom: 6 }}>
+                          <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>{e.name}</div>
+                          {tgtStr && (
+                            <span className="micro" style={{ color: UI.inkGhost, flexShrink: 0, whiteSpace: 'nowrap' }}>PLAN {planItem.sets ? `${planItem.sets}×` : ''}{tgtStr}</span>
+                          )}
+                        </div>
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'flex-start', marginBottom: lastSets.length ? 5 : 0 }}>
                           {workingSets.map((s, j) => {
                             const prev = lastSets[j];
@@ -539,6 +649,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
                           </div>
                         )}
                       </div>
+                      </React.Fragment>
                     );
                   });
                 })()}
@@ -556,9 +667,12 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
                     <div key={idx} style={{ padding: '12px 4px', borderBottom: `0.5px solid ${UI.hair}` }}>
                       <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 6 }}>
                         <div style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>{ex?.name || item.exId}</div>
-                        {item.sets && item.reps && (
-                          <span className="micro" style={{ color: UI.inkFaint }}>{item.sets} × {item.repsMax != null ? `${item.reps}-${item.repsMax}` : item.reps}</span>
-                        )}
+                        {(() => {
+                          const tgt = fmtRepTarget(item);
+                          return item.sets && tgt ? (
+                            <span className="micro" style={{ color: UI.inkFaint }}>{item.sets} × {tgt}</span>
+                          ) : null;
+                        })()}
                       </div>
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
                         {hasWeight ? seeds.map((s, j) => (
@@ -621,6 +735,9 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
       ) : (
         <div style={{ padding: '12px 16px', background: UI.bgInset, borderRadius: 8, border: `0.5px solid ${UI.hair}`, marginBottom: 20, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>No active plan</div>
       )}
+
+      {/* Program status (5/3/1 cycle/TM + mesocycle week/RIR) */}
+      {activeSch && <ClientProgramStatus sch={activeSch} clientStore={clientStore} />}
 
       {/* Recent sessions */}
       <div className="micro" style={{ color: UI.inkFaint, margin: '0 0 8px', paddingLeft: 2 }}>
@@ -1317,6 +1434,10 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
             <StatBox label="Duration" value={selected.durationMinutes ? `${selected.durationMinutes}m` : '—'} />
           </div>
           {(selected.entries || []).map((e, i) => {
+            const entriesArr = selected.entries || [];
+            const ss = supersetInfo(entriesArr, i);
+            const planItem = planItemForEntry(clientStore, selected, e.exId);
+            const tgtStr = planItem ? fmtRepTarget(planItem) : null;
             const lastResult = e.exId ? LB.lastSessionForExercise(storeWithoutSelected, e.exId, selected.dayId) : null;
             const lastSets = (lastResult?.entry?.sets || []).filter(s => !s.warmup && (s.kg != null || s.reps != null || s.timeSec != null));
             // This compact coach/self-coaching view had no intensity-technique
@@ -1360,13 +1481,20 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
             };
             const amrapLabelStyle = { fontSize: 8, color: UI.inkGhost, maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' };
             return (
-              <div key={i}
-                onClick={() => e.exId && selected.dayId && setHistEx({ exId: e.exId, dayId: selected.dayId, exName: e.name })}
-                style={{ padding: '10px 14px', borderBottom: `0.5px solid ${UI.hair}`, cursor: e.exId ? 'pointer' : 'default', WebkitTapHighlightColor: 'transparent' }}
-              >
-                <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600, marginBottom: 6 }}>
-                  {e.name}{e.exId && <span style={{ fontSize: 11, color: UI.inkFaint, marginLeft: 5 }}>›</span>}
-                </div>
+              <React.Fragment key={i}>
+                {ss.start && <SupersetHeader size={ss.size} />}
+                <div
+                  onClick={() => e.exId && selected.dayId && setHistEx({ exId: e.exId, dayId: selected.dayId, exName: e.name })}
+                  style={{ padding: '10px 14px', borderBottom: `0.5px solid ${UI.hair}`, cursor: e.exId ? 'pointer' : 'default', WebkitTapHighlightColor: 'transparent', ...(ss.member ? { borderLeft: `2px solid rgba(var(--accent-rgb),0.35)`, paddingLeft: 12 } : {}) }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8, marginBottom: 6 }}>
+                    <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>
+                      {e.name}{e.exId && <span style={{ fontSize: 11, color: UI.inkFaint, marginLeft: 5 }}>›</span>}
+                    </div>
+                    {tgtStr && (
+                      <span className="micro" style={{ color: UI.inkGhost, flexShrink: 0, whiteSpace: 'nowrap' }}>PLAN {planItem.sets ? `${planItem.sets}×` : ''}{tgtStr}</span>
+                    )}
+                  </div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'flex-start', marginBottom: lastSets.length ? 5 : 0 }}>
                   {workingSets.map((s, j) => {
                     const prev = lastSets[j];
@@ -1407,7 +1535,8 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
                     <span style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi }}>{fmtDate(lastResult.session.date)}</span>
                   </div>
                 )}
-              </div>
+                </div>
+              </React.Fragment>
             );
           })}
         </div>
