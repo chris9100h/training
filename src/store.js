@@ -399,6 +399,14 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
     macro_targets: sett.macroTargets ?? null,
     show_health_tab: sett.showHealthTab ?? false,
     onboarding_completed: sett.onboardingCompleted ?? false,
+    show_regression: sett.showRegression ?? true,
+    glucose_unit: sett.glucoseUnit ?? 'mmol',
+    default_checkin_schema: sett.defaultCheckinSchema ?? null,
+    vip_background: sett.vipBackground ?? null,
+    active_cardio_plan_id: backup.activeCardioPlanId ?? null,
+    status_mode: backup.statusMode ?? null,
+    status_mode_since: backup.statusModeSince ?? null,
+    deload_prompt_dismissed_at: backup.deloadPromptDismissedAt ?? null,
   };
 
   // Pre-count chunks upfront so the UI can show accurate progress.
