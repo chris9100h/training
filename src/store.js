@@ -221,8 +221,15 @@ async function signUp(email, password, name, unit = null) {
   });
   if (error) throw error;
   if (data.session) {
-    // email confirmation disabled — user is immediately logged in
-    await setupNewUser(data.user.id, name, unit);
+    // Email confirmation disabled: the auth user exists and is signed in now.
+    // Creating the profile/settings rows is best-effort here. If it fails (e.g. a
+    // flaky in-app-browser network drop after the signup POST already succeeded),
+    // loadFromSupabase recreates them from user_metadata on first load, so a
+    // failure here must NOT surface as a registration error and strand a user
+    // whose account was in fact created.
+    try {
+      await setupNewUser(data.user.id, name, unit);
+    } catch (_) { /* self-heals in loadFromSupabase */ }
   }
   // if no session: email confirmation required, setupNewUser runs on first loadFromSupabase
   return data;
