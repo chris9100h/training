@@ -1530,27 +1530,45 @@ async function testAsync(name, fn) {
     assert.strictEqual(LB.doneSetCount(mixed), 1, 'only the working logged time set counts');
   });
 
-  test('assisted sets: negative load adds no volume, still counts as done; graduated positive counts', () => {
+  test('assisted volume: bodyweight minus assistance, fallback without a logged weight', () => {
     assert.strictEqual(LB.isAssisted({ movement_type: 'assisted' }), true);
     assert.strictEqual(LB.isAssisted({ movement_type: 'bilateral' }), false);
     assert.strictEqual(LB.isAssisted({}), false);
-    // assisted dips: assistance stored negative, no volume, but the sets are done
-    const ended = { ended: '2026-01-01', entries: [{ exId: 'ad', sets: [
+    const exs = [{ id: 'ad', movement_type: 'assisted' }];
+    const bw80 = [{ date: '2026-01-01', weight: 80 }];
+    // assisted dips: assistance stored negative, both sets are done
+    const ended = { ended: '2026-01-01', date: '2026-01-01', entries: [{ exId: 'ad', sets: [
       { kg: -40, reps: 8, done: true }, { kg: -35, reps: 6, done: true },
     ] }] };
-    assert.strictEqual(LB.totalVolume(ended, []), 0, 'negative assistance adds no volume');
     assert.strictEqual(LB.doneSetCount(ended), 2, 'both assisted sets count as done');
+    // no exercise meta / no logged bodyweight: old behavior, assistance adds nothing
+    assert.strictEqual(LB.totalVolume(ended, []), 0, 'no exercise meta → assistance adds no volume');
+    assert.strictEqual(LB.totalVolume(ended, exs), 0, 'assisted but no logged bodyweight → 0');
+    // bodyweight 80: (80-40)*8 + (80-35)*6 = 320 + 270 = 590
+    assert.strictEqual(LB.totalVolume(ended, exs, bw80), 590, 'bodyweight minus assistance counts');
+    // assistance exceeding bodyweight clamps to 0
+    assert.strictEqual(LB.totalVolume(ended, exs, [{ date: '2026-01-01', weight: 30 }]), 0, 'assistance > bodyweight clamps to 0');
     // less assistance (-35) beats more (-40): improvement, no false regression
     const prev = { kg: -40, reps: 8, done: true };
     const curr = { kg: -35, reps: 8, done: true };
     assert.strictEqual(LB.isImprovement(curr, prev), true, 'less assistance is an improvement');
     assert.strictEqual(LB.isDecline(curr, prev), false, 'less assistance is not a decline');
     assert.strictEqual(LB.isDecline({ kg: -45, reps: 8, done: true }, prev), true, 'more assistance is a decline');
-    // graduated past zero into real added weight: that positive load counts as volume
-    const grad = { ended: '2026-01-01', entries: [{ exId: 'ad', sets: [
+    // graduated past zero into added weight: bodyweight applies across the whole range
+    const grad = { ended: '2026-01-01', date: '2026-01-01', entries: [{ exId: 'ad', sets: [
       { kg: -5, reps: 8, done: true }, { kg: 10, reps: 5, done: true },
     ] }] };
-    assert.strictEqual(LB.totalVolume(grad, []), 50, 'only the positive graduated set adds volume (10x5)');
+    assert.strictEqual(LB.totalVolume(grad, []), 50, 'fallback: only the positive graduated set counts (10x5)');
+    assert.strictEqual(LB.totalVolume(grad, exs, bw80), 1050, 'with bodyweight: (80-5)*8 + (80+10)*5 = 1050');
+  });
+
+  test('bodyweightForDate: nearest logged weight to a date, null when none', () => {
+    const logs = [{ date: '2026-01-01', weight: 80 }, { date: '2026-02-01', weight: 82 }, { date: '2026-03-01', weight: 78 }];
+    assert.strictEqual(LB.bodyweightForDate(logs, '2026-01-05'), 80, 'closest is Jan 1');
+    assert.strictEqual(LB.bodyweightForDate(logs, '2026-02-05'), 82, 'closest is Feb 1');
+    assert.strictEqual(LB.bodyweightForDate(logs, '2026-03-05'), 78, 'closest is Mar 1');
+    assert.strictEqual(LB.bodyweightForDate([], '2026-01-01'), null, 'no logs → null');
+    assert.strictEqual(LB.bodyweightForDate([{ date: '2026-01-01', weight: null }], '2026-01-01'), null, 'null weight ignored');
   });
 
   test('bestAssistLoad: highest (least-negative) load across ended sessions, null when empty', () => {

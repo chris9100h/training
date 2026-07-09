@@ -492,7 +492,7 @@ function SkipReasonSheet({ modal, onClose, setStore, userId }) {
   );
 }
 
-function LastSessionStrip({ session, onClick, exercises }) {
+function LastSessionStrip({ session, onClick, exercises, dailyLogs }) {
   return (
     <Frame onClick={onClick} style={{ flexShrink: 0, padding: '12px 16px', cursor: 'pointer' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
@@ -504,7 +504,7 @@ function LastSessionStrip({ session, onClick, exercises }) {
               {LB.parseDate(session.date).toLocaleDateString('en-US', { day:'2-digit', month:'short' }).toUpperCase()}
             </span>
             <span className="num" style={{ color: UI.gold, fontSize: 11 }}>
-              {Math.round(LB.totalVolume(session, exercises)).toLocaleString('en-US')}<span style={{ color: UI.inkFaint }}>{UI.unit()}</span>
+              {Math.round(LB.totalVolume(session, exercises, dailyLogs)).toLocaleString('en-US')}<span style={{ color: UI.inkFaint }}>{UI.unit()}</span>
             </span>
           </div>
         </div>
@@ -3015,7 +3015,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                 <div className="micro" style={{ marginBottom: 3 }}>LAST SESSION</div>
                 <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, flexWrap: 'wrap' }}>
                   <span className="display" style={{ fontSize: 15, color: UI.ink, lineHeight: 1 }}>{lastSession.dayName}</span>
-                  <span className="num" style={{ color: UI.gold, fontSize: 10 }}>{Math.round(LB.totalVolume(lastSession)).toLocaleString('en-US')}<span style={{ color: UI.inkFaint }}>{UI.unit()}</span></span>
+                  <span className="num" style={{ color: UI.gold, fontSize: 10 }}>{Math.round(LB.totalVolume(lastSession, store.exercises, store.dailyLogs)).toLocaleString('en-US')}<span style={{ color: UI.inkFaint }}>{UI.unit()}</span></span>
                 </div>
               </Frame>
               <Frame onClick={() => setNotLoggedModalOpen(true)} style={{ flex: 1, minWidth: 0, padding: '10px 12px', background: 'rgba(var(--danger-rgb),0.15)', border: '0.5px solid rgba(var(--danger-rgb),0.40)', cursor: 'pointer' }}>
@@ -3026,7 +3026,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
               </Frame>
             </div>
           ) : lastSession ? (
-            <LastSessionStrip session={lastSession} onClick={() => go({ name: 'session', sessionId: lastSession.id, back: { name: 'home' } })} exercises={store.exercises} />
+            <LastSessionStrip session={lastSession} onClick={() => go({ name: 'session', sessionId: lastSession.id, back: { name: 'home' } })} exercises={store.exercises} dailyLogs={store.dailyLogs} />
           ) : (
             <RecentBannerDay banner={recentBannerDay} store={store} setStore={setStore} go={go} sch={sch} userId={userId} onOpenSkipSheet={setSkipReasonModal} onLog={startBacklogSession} />
           )}

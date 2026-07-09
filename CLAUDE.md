@@ -53,10 +53,12 @@ Diese Datei enthält die verbindlichen Regeln und den Überblick; sie bewusst sc
 - Der Store ist ein einzelnes React-State-Objekt in `app.jsx`.
 - `syncStore(prev, next, userId)` in `store.js` diff't prev/next und schreibt nur geänderte Felder nach Supabase.
 - Store-Updates immer via `setStore(s => ({ ...s, ... }))`, nie direkt mutieren.
-- **Neue Settings** müssen immer an drei Stellen in `store.js` ergänzt werden:
+- **Neue Settings** müssen immer an vier Stellen in `store.js` ergänzt werden:
   1. `loadFromSupabase`: Mapping DB → Store
   2. `settingsChanged`-Check in `syncStore`
   3. `upsert`-Objekt in `syncStore`
+  4. `settingsRow` in `importFromBackup` (sonst geht die Einstellung beim Restore verloren)
+  Das CI-Gate `tools/check-backup-coverage.cjs` erzwingt Punkt 4 (und die Backup-Abdeckung aller Tabellen) automatisch.
 
 ## Theme & Styling
 
@@ -79,7 +81,7 @@ Diese Datei enthält die verbindlichen Regeln und den Überblick; sie bewusst sc
 ## Konventionen
 
 - **Supabase-Schreibzugriffe müssen Fehler propagieren.** Der JS-Client wirft bei fehlgeschlagenen Writes **nicht**, sondern löst mit `{ error }` auf (auch bei Netzwerkfehlern). Jeder Write im Sync-/Diff-Pfad läuft deshalb über `unwrap(...)` in `store.js` (wirft bei `{ error }`); nur so greift der Retry in `flushSync` (`app.jsx`) und nur so kann eine fehlgeschlagene Speicherung nicht als Erfolg durchgehen. In Screens bei direkten Supabase-Calls immer `{ error }` prüfen, bevor optimistisch UI/State aktualisiert wird.
-- **CI-Gate (kein Build-Step!):** `tools/check-syntax.cjs` transpiliert alle Quellen exakt wie der In-App-Loader, `tools/test/store.test.cjs` testet die Store-Kernlogik, `tools/check-db-docs.cjs` prüft Migrationen gegen `schema.sql`/`docs/database.md`; alle drei laufen via `.github/workflows/check.yml` bei jedem Push. Die JSX-Dateiliste im Check wird aus dem `SOURCES`-Array in `index.html` geparst; neue `.jsx` also wie gehabt dort eintragen, dann ist sie automatisch abgedeckt. Zusätzlich vergleicht `tools/check-db-live.cjs` (`db-drift.yml`, wöchentlich) die echte DB gegen Snapshot und Doku. **Postet der Nutzer einen fehlgeschlagenen Drift-Lauf, sofort nach dem Playbook in `docs/database.md` („Drift-Checks") bereinigen.**
+- **CI-Gate (kein Build-Step!):** `tools/check-syntax.cjs` transpiliert alle Quellen exakt wie der In-App-Loader, `tools/test/store.test.cjs` testet die Store-Kernlogik, `tools/check-db-docs.cjs` prüft Migrationen gegen `schema.sql`/`docs/database.md`, `tools/check-backup-coverage.cjs` fährt export→import im Sandbox und stellt sicher, dass ein Backup jede Schema-Spalte round-trippt (schlägt fehl mit fertigem Fix-Prompt); alle vier laufen via `.github/workflows/check.yml` bei jedem Push. Die JSX-Dateiliste im Check wird aus dem `SOURCES`-Array in `index.html` geparst; neue `.jsx` also wie gehabt dort eintragen, dann ist sie automatisch abgedeckt. Zusätzlich vergleicht `tools/check-db-live.cjs` (`db-drift.yml`, wöchentlich) die echte DB gegen Snapshot und Doku. **Postet der Nutzer einen fehlgeschlagenen Drift-Lauf, sofort nach dem Playbook in `docs/database.md` („Drift-Checks") bereinigen.**
 - **DB-Spalten:** `snake_case` (z.B. `accent_color`) · **Store-Felder:** `camelCase` (z.B. `accentColor`)
 - **localStorage-Keys** (einige Settings liegen parallel im localStorage für schnellen Zugriff vor dem Store-Load; bestehende Keys konsistent halten):
   - `logbook-accent-color`, `logbook-push-enabled`, `logbook-cycle-week-view`
@@ -108,6 +110,7 @@ Migrationen liegen in `supabase/migrations/` als nummerierte SQL-Dateien. **Die 
 2. Den Nutzer explizit darauf hinweisen, dass sie ausgeführt werden muss
 3. `docs/database.md` aktualisieren (Tabellen/Spalten bzw. RPCs; bei neuen Tabellen auch den Kurzüberblick unten in dieser Datei)
 4. `supabase/schema.sql` aktualisieren: der vollständige aktuelle Snapshot (Tabellen, RLS, Funktionen, Trigger, Realtime), muss immer mit dem Live-Schema übereinstimmen
+5. **Gehört die neue Spalte/Tabelle in ein User-Backup?** Dann Export (`loadFromSupabase`) **und** Import (`importFromBackup`) in `store.js` nachziehen, sonst geht sie beim Restore verloren. Das CI-Gate `tools/check-backup-coverage.cjs` erzwingt das: fehlt eine Spalte, schlägt es fehl und druckt einen fertigen Fix-Prompt. Ist die Spalte/Tabelle bewusst **nicht** im Backup (Admin/Device/Coaching), im Tool auf die Allowlist bzw. `EXCLUDED` setzen (mit Begründung).
 
 **Bei Tabellen-Umbenennung zusätzlich:** `supabase/functions/` durchsuchen. Edge Functions greifen per REST direkt auf Tabellennamen zu (z.B. `dbFetch('zane_pushover_active?...')`), kein Compiler warnt bei falschen Namen. Alle Treffer fixen und neu deployen.
 

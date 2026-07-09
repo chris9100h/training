@@ -1115,15 +1115,18 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
   const saveNickname = () => { const t = nickname.trim(); if (!t || t === store.user?.name) return; setStore(s => ({ ...s, user: { ...s.user, name: t } })); };
   const exportData = async (filename) => {
     const backup = await LB.exportBackup(store, userId);
-    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = filename || `zane-${LB.todayISO()}.json`; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+    const { blob, gz } = await LB.backupToBlob(backup);
+    const base = filename || `zane-${LB.todayISO()}.json`;
+    const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = gz ? `${base}.gz` : base; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
   const runImport = () => {
     // input.click() must be synchronous in the user-gesture handler (iOS Safari).
-    const input = document.createElement('input'); input.type = 'file'; input.accept = '.json';
+    const input = document.createElement('input'); input.type = 'file'; input.accept = '.json,.gz,application/json,application/gzip';
     input.onchange = async (e) => {
       const file = e.target.files?.[0]; if (!file) return;
-      let backup; try { backup = JSON.parse(await file.text()); } catch (_) { await confirm('The selected file is not valid JSON.', { title: 'Invalid file', ok: 'OK' }); return; }
+      let backup;
+      try { backup = JSON.parse(await LB.readBackupText(file)); }
+      catch (e) { await confirm(/compress/i.test(e?.message || '') ? e.message : 'The selected file is not valid JSON.', { title: 'Invalid file', ok: 'OK' }); return; }
       const invalid = LB.validateBackup(backup);
       if (invalid) { await confirm(invalid, { title: 'Invalid backup', ok: 'OK' }); return; }
 
@@ -1461,7 +1464,12 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
   };
 
   const handleDeleteAll = async () => {
-    if (!await confirm('This action cannot be undone.', { title: 'Delete all data?', ok: 'Delete all', danger: true })) return;
+    const email = store.user?.email || 'this account';
+    const ok = await confirm(
+      <>This permanently erases every workout, plan and log for <b style={{ color: UI.ink }}>{email}</b>, then signs you out. It cannot be undone.</>,
+      { title: 'Delete all data?', ok: 'Delete all', danger: true, requireText: 'Delete my data' }
+    );
+    if (!ok) return;
     await LB.deleteAllData(userId); await LB.signOut();
   };
 

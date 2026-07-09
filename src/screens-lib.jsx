@@ -717,6 +717,13 @@ async function captureNodeAsPng(node, { filename, dodgeAvatar = false, setCaptur
 // LB.exerciseLogMode; for bodyweight + Weight & Reps an opt-in toggle pulls the
 // user's logged bodyweight (LB.shouldPullBodyweight), gated on having logged one.
 const LOG_MODES = [['checkbox', 'Checkbox only'], ['reps', 'Reps only'], ['time', 'Time'], ['weight', 'Weight & Reps']];
+// Assisted (band/machine takes bodyweight off) only makes sense when the base load
+// IS the user's bodyweight: bodyweight, or a machine (assisted pull-up/dip). On
+// external-load equipment (cable/dumbbell/barbell) the floor is just zero added
+// weight, there is nothing to assist. Gates the movement picker's Assisted option.
+function assistedAllowed(equipment) {
+  return equipment === 'bodyweight' || equipment === 'machine';
+}
 function loggingPickerVisible(equipment, movementType) {
   // Assisted always logs weight (the negative assistance load), so the logging
   // picker is skipped and weight mode is forced (same path mobility/checkbox use).
@@ -768,6 +775,15 @@ function LoggingModeSection({ equipment, movementType, logMode, onLogMode, pullB
 // writes into the SAME state ExerciseCreator owns, so the hand-off is just
 // "stop showing the wizard" (wizardStep → null). Sits above Sheets (z 9998), so
 // its own discard prompt is inline rather than the portaled useConfirm sheet.
+
+// Shown under the movement picker when Assisted is selected. Assisted volume needs
+// a logged bodyweight (load moved = bodyweight minus assistance): warn in red when
+// none is logged, matching the bodyweight logging hint.
+function AssistedVolumeNote({ hasLoggedWeight }) {
+  return hasLoggedWeight
+    ? <div className="micro" style={{ color: 'rgba(var(--danger-rgb),0.7)', ...logNoteStyle }}>Volume uses your logged bodyweight minus the assistance, so assisted sets count too.</div>
+    : <div className="micro" style={{ color: 'rgba(var(--danger-rgb),0.7)', ...logNoteStyle }}>Log your bodyweight first in the app's Health tab (enable it under Settings) so assisted sets count toward volume.</div>;
+}
 const WIZARD_ORDER = ['name', 'muscle', 'size', 'equipment', 'movement', 'logging'];
 const WIZARD_TITLES = { name: 'Name your exercise', muscle: 'Muscle group', size: 'Exercise size', equipment: 'Equipment', movement: 'Movement type', logging: 'How do you log it?' };
 function wizardStepApplicable(step, equipment, movementType) {
@@ -880,6 +896,7 @@ function ExerciseWizard({ step, setStep, onClose, isDirty, store,
   } else if (step === 'movement') {
     body = <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
       {[['bilateral', 'Bilateral', 'fa-arrows-left-right', 'Both sides work together, one number per set'], ['unilateral', 'Unilateral', 'fa-arrow-right-long', 'One arm/leg at a time, logs left & right'], ['assisted', 'Assisted', 'fa-hands-holding', 'A machine or band takes weight off, logged as a negative load'], ['mobility', 'Mobility', 'fa-arrows-rotate', 'Stretch or warm-up, usually no load']]
+        .filter(([val]) => val !== 'assisted' || assistedAllowed(equipment) || movementType === 'assisted')
         .map(([val, label, icon, sub]) => optRow({ key: val, icon, label, sub, active: movementType === val, onClick: () => { setMovementType(val); goNext({ movementType: val }); } }))}
     </div>;
   } else if (step === 'logging') {
@@ -979,6 +996,7 @@ function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = ''
   // form covers the rest.
   const wizardSetEquipment = (key) => {
     setEquipment(key || 'no_equipment');
+    if (!assistedAllowed(key || 'no_equipment') && movementType === 'assisted') setMovementType('bilateral');
     if (key === 'bodyweight' && !store?.settings?.showHealthTab) setStore(s => ({ ...s, settings: { ...s.settings, showHealthTab: true } }));
   };
   // When the Logging picker first becomes relevant (no_equipment / bodyweight
@@ -991,6 +1009,7 @@ function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = ''
   const toggleTag = (m) => setSelectedTags(t => t.includes(m) ? t.filter(x => x !== m) : [...t, m]);
   const handleEquipmentChange = (key) => {
     setEquipment(key || 'no_equipment');
+    if (!assistedAllowed(key || 'no_equipment') && movementType === 'assisted') setMovementType('bilateral');
     if (key === 'bodyweight' && !store?.settings?.showHealthTab) {
       setStore(s => ({ ...s, settings: { ...s.settings, showHealthTab: true } }));
       setShowBodyweightHint(true);
@@ -1068,10 +1087,11 @@ function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = ''
         <div>
           <span className="label">Movement type</span>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
-            {[['bilateral', 'Bilateral'], ['unilateral', 'Unilateral'], ['assisted', 'Assisted'], ['mobility', 'Mobility']].map(([val, label]) => (
+            {[['bilateral', 'Bilateral'], ['unilateral', 'Unilateral'], ['assisted', 'Assisted'], ['mobility', 'Mobility']].filter(([val]) => val !== 'assisted' || assistedAllowed(equipment) || movementType === 'assisted').map(([val, label]) => (
               <Chip key={val} on={movementType === val} onClick={() => setMovementType(val)}>{label}</Chip>
             ))}
           </div>
+          {movementType === 'assisted' && <AssistedVolumeNote hasLoggedWeight={LB.latestBodyweight(store) != null} />}
         </div>
         <LoggingModeSection
           equipment={equipment} movementType={movementType}
@@ -1137,6 +1157,7 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
   const [showBodyweightHint, setShowBodyweightHint] = useStateL(false);
   const handleEditEquipmentChange = (key) => {
     setEditEquipment(key || null);
+    if (!assistedAllowed(key) && editMovementType === 'assisted') setEditMovementType('bilateral');
     if (key === 'bodyweight' && !store.settings?.showHealthTab) {
       setStore(s => ({ ...s, settings: { ...s.settings, showHealthTab: true } }));
       setShowBodyweightHint(true);
@@ -1344,10 +1365,11 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
             <div>
               <span className="label">Movement type</span>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
-                {[['bilateral', 'Bilateral'], ['unilateral', 'Unilateral'], ['assisted', 'Assisted'], ['mobility', 'Mobility']].map(([val, label]) => (
+                {[['bilateral', 'Bilateral'], ['unilateral', 'Unilateral'], ['assisted', 'Assisted'], ['mobility', 'Mobility']].filter(([val]) => val !== 'assisted' || assistedAllowed(editEquipment) || editMovementType === 'assisted').map(([val, label]) => (
                   <Chip key={val} on={editMovementType === val} onClick={() => setEditMovementType(val)}>{label}</Chip>
                 ))}
               </div>
+              {editMovementType === 'assisted' && <AssistedVolumeNote hasLoggedWeight={LB.latestBodyweight(store) != null} />}
             </div>
             <LoggingModeSection
               equipment={editEquipment} movementType={editMovementType}
@@ -1636,7 +1658,7 @@ function CardioTypeDetailSheet({ type, logs, open, onClose }) {
 }
 
 // ─── WORKOUT EFFORT CHART ─────────────────────────────────────────────
-function WorkoutEffortSheet({ dayId, dayName, sessions, exercises, onClose }) {
+function WorkoutEffortSheet({ dayId, dayName, sessions, exercises, dailyLogs, onClose }) {
   const FEEL_NUM = { easy: 1, good: 2, hard: 3, very_hard: 4, max: 5 };
   const FEEL_LBL = { 1: 'Easy', 2: 'Good', 3: 'Hard', 4: 'Very Hard', 5: 'Max' };
   const fmtDate = iso => { const d = new Date(iso + 'T12:00:00'); return `${d.getDate()} ${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()]}`; };
@@ -1651,7 +1673,7 @@ function WorkoutEffortSheet({ dayId, dayName, sessions, exercises, onClose }) {
     .filter(p => p.value);
 
   const volumePts = filtered
-    .map(s => ({ date: s.date.slice(0, 10), value: LB.totalVolume(s, exercises) }))
+    .map(s => ({ date: s.date.slice(0, 10), value: LB.totalVolume(s, exercises, dailyLogs) }))
     .filter(p => p.value > 0);
 
   const W = 300, padL = 52, padR = 16, padTop = 36, padBottom = 26, plotH = 100;
@@ -1837,7 +1859,7 @@ function StatsTab({ store, sessions, go }) {
       const wSun = new Date(wMon); wSun.setDate(wMon.getDate() + 6);
       const vol = sessions
         .filter(s => { const d = LB.parseDate(s.date); return d >= wMon && d <= wSun; })
-        .reduce((sum, s) => sum + LB.totalVolume(s, store.exercises), 0);
+        .reduce((sum, s) => sum + LB.totalVolume(s, store.exercises, store.dailyLogs), 0);
       const label = wMon.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
       weeks.push({ label, vol });
     }
@@ -1845,7 +1867,7 @@ function StatsTab({ store, sessions, go }) {
   }, [sessions, todayKey]);
 
   // All-time stats
-  const totalVol = sessions.reduce((sum, s) => sum + LB.totalVolume(s, store.exercises), 0);
+  const totalVol = sessions.reduce((sum, s) => sum + LB.totalVolume(s, store.exercises, store.dailyLogs), 0);
   const avgVol = sessions.length ? Math.round(totalVol / sessions.length) : 0;
   const durations = sessions
     .map(s => s.durationMinutes != null
@@ -1856,7 +1878,7 @@ function StatsTab({ store, sessions, go }) {
   const maxDuration = durations.length ? Math.max(...durations) : 0;
 
   // Best session by volume
-  const bestSession = sessions.length ? sessions.reduce((best, s) => LB.totalVolume(s, store.exercises) > LB.totalVolume(best, store.exercises) ? s : best, sessions[0]) : null;
+  const bestSession = sessions.length ? sessions.reduce((best, s) => LB.totalVolume(s, store.exercises, store.dailyLogs) > LB.totalVolume(best, store.exercises, store.dailyLogs) ? s : best, sessions[0]) : null;
 
   // Streaks — rest days are transparent, only missed training days break the streak
   const sessionDateSet = new Set(sessions.map(s => s.date.slice(0, 10)));
@@ -2102,7 +2124,7 @@ function StatsTab({ store, sessions, go }) {
                 </div>
               </div>
               <div style={{ textAlign: 'right' }}>
-                <div className="num" style={{ fontSize: 22, color: UI.gold }}>{Math.round(LB.totalVolume(bestSession)).toLocaleString('en-US')}</div>
+                <div className="num" style={{ fontSize: 22, color: UI.gold }}>{Math.round(LB.totalVolume(bestSession, store.exercises, store.dailyLogs)).toLocaleString('en-US')}</div>
                 <div className="micro" style={{ color: UI.inkFaint }}>{UI.unit()}</div>
               </div>
             </div>
@@ -2300,7 +2322,7 @@ function HistoryScreen({ store, setStore, go, userId, initialTab }) {
               }
               const s = item.session;
               const setsLogged = LB.doneSetCount(s);
-              const vol = LB.totalVolume(s, store.exercises);
+              const vol = LB.totalVolume(s, store.exercises, store.dailyLogs);
               const date = LB.parseDate(s.date);
               const days = Math.round((Date.now() - date) / 86400000);
               const isToday = days === 0;
@@ -2516,7 +2538,7 @@ function HistoryScreen({ store, setStore, go, userId, initialTab }) {
         );
       })()}
       {confirmEl}
-      {effortChart && <WorkoutEffortSheet dayId={effortChart.dayId} dayName={effortChart.dayName} sessions={sessions} exercises={store.exercises} onClose={() => setEffortChart(null)} />}
+      {effortChart && <WorkoutEffortSheet dayId={effortChart.dayId} dayName={effortChart.dayName} sessions={sessions} exercises={store.exercises} dailyLogs={store.dailyLogs} onClose={() => setEffortChart(null)} />}
     </Screen>
   );
 }
@@ -2622,7 +2644,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
     return () => { on = false; };
   }, [needsEntries, sessionId]);
   if (!s) return null;
-  const vol = LB.totalVolume(s, store.exercises);
+  const vol = LB.totalVolume(s, store.exercises, store.dailyLogs);
   const duration = s.durationMinutes != null
     ? s.durationMinutes
     : (s.ended && (s.startedAt ?? s.date) ? Math.round((new Date(s.ended) - new Date(s.startedAt ?? s.date)) / 60000) : null);
@@ -2683,7 +2705,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
   const prevSameDay = store.sessions
     .filter(x => x.ended && x.id !== s.id && x.ended < s.ended && x.dayId === s.dayId && !x.isDeload)
     .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''))[0];
-  const volDelta = prevSameDay != null ? vol - LB.totalVolume(prevSameDay, store.exercises) : null;
+  const volDelta = prevSameDay != null ? vol - LB.totalVolume(prevSameDay, store.exercises, store.dailyLogs) : null;
   const compareCandidates = sameDaySessions(store.sessions, s);
 
   const exIsUnilateral = (exId) => !!store.exercises.find(x => x.id === exId)?.unilateral;
@@ -3566,8 +3588,10 @@ function SessionCompareScreen({ store, setStore, go, sessionId, compareId, back 
 
   if (!s || !cmp) return null;
 
-  const volA = LB.totalVolume(s, store.exercises);
-  const volB = LB.totalVolume(cmp, store.exercises);
+  const volA = LB.totalVolume(s, store.exercises, store.dailyLogs);
+  const volB = LB.totalVolume(cmp, store.exercises, store.dailyLogs);
+  const bwA = LB.bodyweightForDate(store.dailyLogs, s.date);
+  const bwB = LB.bodyweightForDate(store.dailyLogs, cmp.date);
   const volDelta = volA - volB;
   const volDeltaRounded = Math.round(volDelta);
   const fmtDate = (d, opts) => LB.parseDate(d).toLocaleDateString('en-US', opts || { weekday: 'short', day: 'numeric', month: 'short' });
@@ -3666,8 +3690,8 @@ function SessionCompareScreen({ store, setStore, go, sessionId, compareId, back 
               const sets = (entry.sets || []).filter(st => !st.warmup);
               const cmpSets = (cmpEntry?.sets || []).filter(st => !st.warmup);
               const maxLen = Math.max(sets.length, cmpSets.length);
-              const entryVolA = LB.entryVolume(entry, true);
-              const entryVolB = cmpEntry ? LB.entryVolume(cmpEntry, true) : 0;
+              const entryVolA = LB.entryVolume(entry, true, store.exercises.find(x => x.id === entry.exId), bwA);
+              const entryVolB = cmpEntry ? LB.entryVolume(cmpEntry, true, store.exercises.find(x => x.id === cmpEntry.exId), bwB) : 0;
               const entryDelta = entryVolA - entryVolB;
               const entryDeltaRounded = Math.round(entryDelta);
               return (

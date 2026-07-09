@@ -23,3 +23,6 @@ jobs:
       # were updated alongside them (offline half of the DB drift checks;
       # the live half runs weekly via db-drift.yml).
       - run: node tools/check-db-docs.cjs
+      # Runs export→import in a sandbox and verifies a backup round-trips every
+      # schema column, so export/import can't silently drift from the DB.
+      - run: node tools/check-backup-coverage.cjs

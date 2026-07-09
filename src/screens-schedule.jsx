@@ -3210,7 +3210,14 @@ function ExercisePicker({ store, setStore, onClose, onPick, singleSelect = false
           initialTags={filterTags}
           store={store}
           setStore={setStore}
-          onCreated={(id) => { onPick([id]); }}
+          onCreated={(id) => {
+            // Multi-pick: a freshly created exercise always joins the selection and
+            // the picker stays open (confirm with the "Add N" button), whether it is
+            // the first pick or one of several, so creating never collapses the
+            // multi-pick to a single one. Single-pick mode adds and closes.
+            if (singleSelect) finalizePick([id]);
+            else { setSelected(s => s.includes(id) ? s : [...s, id]); setQ(''); }
+          }}
           onClose={() => setCreatingNew(null)}
         />
       )}
