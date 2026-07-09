@@ -651,6 +651,38 @@ async function exportBackup(store, userId) {
   };
 }
 
+// Serialize a backup object for download. Minified JSON (no pretty-print, so the
+// file is not tens of thousands of lines) and gzip-compressed when the browser
+// supports CompressionStream (a JSON backup shrinks roughly 10x). Returns
+// { blob, gz }; gz=false is the plain-JSON fallback on older browsers.
+// readBackupText reverses it.
+async function backupToBlob(backup) {
+  const json = JSON.stringify(backup);
+  if (typeof CompressionStream !== 'undefined') {
+    try {
+      const stream = new Blob([json]).stream().pipeThrough(new CompressionStream('gzip'));
+      const blob = await new Response(stream).blob();
+      return { blob, gz: true };
+    } catch (_) { /* fall through to uncompressed */ }
+  }
+  return { blob: new Blob([json], { type: 'application/json' }), gz: false };
+}
+
+// Read a backup file back to its JSON text, transparently gunzipping a gzipped
+// export (detected by the 1f 8b magic bytes). Plain-JSON exports (older backups)
+// pass through unchanged, so both formats still import.
+async function readBackupText(file) {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  if (bytes.length >= 2 && bytes[0] === 0x1f && bytes[1] === 0x8b) {
+    if (typeof DecompressionStream === 'undefined') {
+      throw new Error('This backup is compressed and this browser cannot open it. Try a newer browser or device.');
+    }
+    const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'));
+    return await new Response(stream).text();
+  }
+  return new TextDecoder().decode(bytes);
+}
+
 // ─── SETUP NEW USER ──────────────────────────────────────────────────────
 
 async function setupNewUser(userId, name, unit) {
@@ -4459,7 +4491,7 @@ window.LB = {
   SUPABASE_URL, SUPABASE_ANON_KEY, PUSHOVER_URL, WEB_PUSH_URL, fnFetch,
   subscribeWebPush, unsubscribeWebPush, getWebPushSubscription,
   QS_EMAILS, hasQuickSwitchSession, quickSwitch, saveQsName, getQsName,
-  signIn, signUp, signOut, signInWithPasskey, registerPasskey, listPasskeys, deletePasskey, resetPassword, deleteAllData, exportBackup, importFromBackup, validateBackup,
+  signIn, signUp, signOut, signInWithPasskey, registerPasskey, listPasskeys, deletePasskey, resetPassword, deleteAllData, exportBackup, backupToBlob, readBackupText, importFromBackup, validateBackup,
   loadFromSupabase, syncStore, mergeSessions, withCarriedWindowEntries, historyWindowCutoffISO,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
   uid, todayISO, fmtISO, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, is531MainLift, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, healScheduleWeekdays, buildPlanSkeleton, instantiateProgram, is531Plan, round531, tmFrom531, tmBump531, weeks531, week531, fiveThreeOneSets, build531Plan, add531MainLift, current531Week, current531Cycle, compute531CycleBumps, resolve531CycleEnd, suggest531Tm, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, realignCycleForToday, todayCycleStripIndex,
