@@ -14,6 +14,7 @@ window.FEATURE_MAP = {
   version: '2026-07-10',
   categories: [
     { id: "start", label: "Getting started", icon: "fa-flag-checkered", blurb: "Create your account and get set up." },
+    { id: "settings", label: "Personalize & data", icon: "fa-gear", blurb: "Make it yours and keep it safe." },
     { id: "home", label: "Home & dashboard", icon: "fa-house", blurb: "What you see every time you open the app." },
     { id: "plans", label: "Training plans", icon: "fa-calendar-days", blurb: "Build the split you run week to week." },
     { id: "logging", label: "Logging a workout", icon: "fa-dumbbell", blurb: "Run and record the session itself." },
@@ -23,7 +24,6 @@ window.FEATURE_MAP = {
     { id: "cardio", label: "Cardio", icon: "fa-person-running", blurb: "Plan and log conditioning work." },
     { id: "coachClient", label: "Coaching (as a lifter)", icon: "fa-user", blurb: "Work with a coach inside the app." },
     { id: "coachCoach", label: "Coaching (as a coach)", icon: "fa-user-tie", blurb: "Tools for running your roster." },
-    { id: "settings", label: "Personalize & data", icon: "fa-gear", blurb: "Make it yours and keep it safe." },
   ],
   cards: [
     { id: "start.sign-in", cat: "start", role: "user", name: "Sign in", summary: "Sign in with your email and password or a passkey, get a heads-up if you are in an in-app browser where login often fails, and sign out again when you are done.", actions: ["Sign in with email and password", "Sign in with a passkey", "Reveal the password with the eye toggle", "See a warning inside in-app browsers", "Sign out on this device"] },
