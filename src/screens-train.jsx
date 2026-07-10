@@ -5332,15 +5332,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                     const ws = wsStretch || { kg: null, timeSec: 30 };
                     const kgActive = kbField?.setIdx === 'stretch' && kbField?.target === 'ws' && kbField?.field === 'kg';
                     const secActive = kbField?.setIdx === 'stretch' && kbField?.target === 'ws' && kbField?.field === 'sec';
-                    // Same column template as the set row above, so the WEIGHT box
-                    // lands directly under the KG box and HOLD under REPS.
-                    const wsGrid = isRepsOnly
-                      ? (isUnilateral ? '28px 1fr 44px 44px 28px' : '28px 1fr 56px 28px')
-                      : (isUnilateral ? '28px 1fr 72px 44px 44px 28px' : '28px 1fr 72px 56px 28px');
                     return (
                       <div style={{ background: 'rgba(var(--accent-rgb),0.05)', borderRadius: 6, margin: '2px 0 6px' }}>
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 6px 2px' }}>
-                          <span className="micro-gold" style={{ paddingLeft: 36 }}>WEIGHTED STRETCH</span>
+                          <span className="micro-gold">WEIGHTED STRETCH</span>
                           <button onClick={() => {
                             setWsTarget(null); setWsStretch(null);
                             // Close the custom keypad too if it's still open on this stretch.
@@ -5350,21 +5345,29 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                             }
                           }} style={{ background: 'none', border: 'none', color: UI.inkFaint, fontSize: 10, fontFamily: UI.fontUi, cursor: 'pointer', padding: '2px 4px', letterSpacing: '0.08em' }}>CANCEL</button>
                         </div>
-                        <div style={{ display: 'grid', gridTemplateColumns: wsGrid, gap: 8, alignItems: 'end', padding: '2px 6px 8px' }}>
+                        {/* Boxes right-aligned with labels above, same slight
+                            stagger as the chain-sheet finisher: they sit a touch
+                            past the set's KG/REPS (which stop short of the hidden
+                            checkbox column), not dead-centered under them. */}
+                        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 16, justifyContent: 'flex-end', flexWrap: 'wrap', padding: '2px 6px 8px' }}>
                           {stretchShowWeight && (
-                            <div style={{ gridColumn: 3, display: 'flex', flexDirection: 'column', gap: 3 }}>
-                              <span className="micro" style={{ color: UI.inkFaint, textAlign: 'center' }}>WEIGHT</span>
-                              <KbCell text={kgActive ? kbRaw : (ws.kg != null ? String(ws.kg).replace('.', ',') : '')} placeholder="—" onActivate={() => activateStretchKb('ws', null, 'kg')}
-                                style={{ ...setInputStyle(false, kgActive), ...(kgActive ? { boxShadow: 'inset 0 -2px 0 var(--accent)' } : {}) }} />
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 3, alignItems: 'center' }}>
+                              <span className="micro" style={{ color: UI.inkFaint }}>WEIGHT</span>
+                              <div style={{ width: 72 }}>
+                                <KbCell text={kgActive ? kbRaw : (ws.kg != null ? String(ws.kg).replace('.', ',') : '')} placeholder="—" onActivate={() => activateStretchKb('ws', null, 'kg')}
+                                  style={{ ...setInputStyle(false, kgActive), ...(kgActive ? { boxShadow: 'inset 0 -2px 0 var(--accent)' } : {}) }} />
+                              </div>
                             </div>
                           )}
-                          <div style={{ gridColumn: stretchShowWeight ? 4 : 3, display: 'flex', flexDirection: 'column', gap: 3 }}>
-                            <span className="micro" style={{ color: UI.inkFaint, textAlign: 'center' }}>HOLD·S</span>
-                            <KbCell text={secActive ? kbRaw : (ws.timeSec != null ? String(ws.timeSec) : '')} placeholder="—" onActivate={() => activateStretchKb('ws', null, 'sec')}
-                              style={{ ...setInputStyle(false, secActive), ...(secActive ? { boxShadow: 'inset 0 -2px 0 var(--accent)' } : {}) }} />
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 3, alignItems: 'center' }}>
+                            <span className="micro" style={{ color: UI.inkFaint }}>HOLD·S</span>
+                            <div style={{ width: 56 }}>
+                              <KbCell text={secActive ? kbRaw : (ws.timeSec != null ? String(ws.timeSec) : '')} placeholder="—" onActivate={() => activateStretchKb('ws', null, 'sec')}
+                                style={{ ...setInputStyle(false, secActive), ...(secActive ? { boxShadow: 'inset 0 -2px 0 var(--accent)' } : {}) }} />
+                            </div>
                           </div>
                         </div>
-                        <div style={{ padding: '0 6px 8px', paddingLeft: 36 }}>
+                        <div style={{ padding: '0 6px 8px' }}>
                           {/* missingData (the underlying set has no kg/reps yet) is
                               the only block — the stretch always carries a hold, so
                               FINISH never dims for a "zero" stretch like partials do. */}
