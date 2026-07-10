@@ -27,6 +27,7 @@ const ASSETS = [
   BASE + '/src/screens-health.jsx',
   BASE + '/src/screens-onboarding.jsx',
   BASE + '/src/screens-cardio.jsx',
+  BASE + '/src/screens-featuremap.jsx',
   BASE + '/src/app.jsx',
   BASE + '/icons/icon-192.png',
   BASE + '/icons/icon-512.png',

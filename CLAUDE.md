@@ -129,6 +129,7 @@ Migrationen liegen in `supabase/migrations/` als nummerierte SQL-Dateien. **Die 
 - `zane_coaching` (+ `_threads`, `_notes`, `_macros`) und `zane_checkins`: Coaching; Sonderfälle Support-Tickets (id-Präfix `support_`) und Self-Coaching (`self_`) · `zane_checkin_schema_templates`: bis zu 5 gespeicherte Check-in-Schema-Vorlagen je Coach
 - `zane_user_settings`: eine Zeile je User, alle Settings
 - `zane_profiles`, `zane_app_config`, `zane_feature_grants`, `zane_push_subscriptions`, `zane_pushover_active`: Accounts, Admin-Config, Grants, Push
+- `zane_feature_map`: admin-kuratierter In-App-Feature-Katalog (`FeatureMapScreen`), welt-lesbar, Writes nur Admin; nicht im Backup
 
 **Wichtige RPCs/Functions** (alle Signaturen in `docs/database.md`):
 - `sync_sets_batch` / `sync_daily_logs_batch` / `sync_meso_states_batch`: Batch-Upserts mit `updated_at`-Staleness-Guard (Multi-Device-Schutz)

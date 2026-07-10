@@ -112,6 +112,19 @@ Globale Admin-Config (RLS an, nur SECURITY-DEFINER-Funktionen greifen zu). Treib
 - `auto_approve_remaining` (int, nullable): Batch-Budget. Ist Approval aus und das Budget gesetzt, dekrementiert jedes neue Signup es via `signup_consume_budget()` (AFTER-INSERT-Trigger auf `zane_profiles`); bei 0 schaltet der Trigger `signup_requires_approval` wieder an und löscht das Budget.
 - `force_update_nonce` (text, nullable): gesetzt von `admin_force_update()`, pusht das "New version available"-Banner an alle Clients ohne `sw.js`-Cache-Bump. Migration 0131.
 
+### `zane_feature_map`
+
+Admin-kuratierter In-App-Feature-Katalog ("was kann die App"), gerendert im `FeatureMapScreen` (`src/screens-featuremap.jsx`). Eine Zeile pro Karte. **Nicht** im User-Backup (globale Admin-Content-Tabelle, in `check-backup-coverage.cjs` `EXCLUDED`). Migration 0154.
+
+- `id` (uuid, default `gen_random_uuid()`)
+- `cat` (text): Kategorie-Id (Anzeige-Reihenfolge/Meta in `FM_CATEGORIES` im Screen, nicht in der DB)
+- `name` (text), `summary` (text, default `''`)
+- `role` (text, default `'user'`, CHECK `user`/`coach`/`both`): für wen die Karte gilt
+- `actions` (jsonb, default `'[]'`): Liste kurzer Aktions-Strings
+- `sort` (int, default 0): Reihenfolge innerhalb der Kategorie
+- `created_at`, `updated_at` (timestamptz, default `now()`; `updated_at` wird vom Screen beim Update mitgeschrieben)
+- **RLS:** SELECT für alle `authenticated` (`feature_map_read`), INSERT/UPDATE/DELETE nur Admin via `auth.email() = 'office@btc-prime.biz'`. Kein RPC: der Admin-Screen macht direkte authentifizierte Writes, die RLS begrenzt. Einstieg vorerst nur im Admin-Bereich der Settings; Daten sind bereits welt-lesbar, ein späteres Öffnen für alle User braucht keine Schema-Änderung.
+
 ### `zane_push_subscriptions`
 
 - `id` (text: endpoint URL), `user_id` (uuid), `endpoint` (text), `p256dh` (text: client EC public key, base64url), `auth` (text: auth secret, base64url), `created_at` (timestamptz)

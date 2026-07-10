@@ -38,6 +38,21 @@ CREATE TABLE public.zane_app_config (
   CONSTRAINT zane_app_config_singleton CHECK (id = 1)
 );
 
+-- Admin-curated in-app feature map (what the app can do). World-readable for
+-- signed-in users; writes admin-only via RLS. Migration 0154.
+CREATE TABLE public.zane_feature_map (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  cat text NOT NULL,
+  name text NOT NULL,
+  role text NOT NULL DEFAULT 'user' CHECK (role IN ('user','coach','both')),
+  summary text NOT NULL DEFAULT '',
+  actions jsonb NOT NULL DEFAULT '[]'::jsonb,
+  sort int NOT NULL DEFAULT 0,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX idx_zane_feature_map_cat_sort ON public.zane_feature_map (cat, sort);
+
 CREATE TABLE public.zane_exercises (
   id text NOT NULL,
   user_id uuid NOT NULL,
@@ -420,6 +435,7 @@ CREATE INDEX IF NOT EXISTS idx_zane_skips_user_id              ON public.zane_sk
 
 ALTER TABLE public.zane_profiles         ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.zane_app_config       ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.zane_feature_map      ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.zane_exercises        ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.zane_schedules        ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.zane_sessions         ENABLE ROW LEVEL SECURITY;
@@ -441,6 +457,12 @@ ALTER TABLE public.zane_checkins         ENABLE ROW LEVEL SECURITY;
 -- profiles
 CREATE POLICY "own profile" ON public.zane_profiles FOR ALL TO public USING (((select auth.uid()) = id));
 CREATE POLICY "coach can read client profile" ON public.zane_profiles FOR SELECT TO public USING (zane_is_coach_of(id));
+
+-- feature_map: any signed-in user reads; only the admin writes
+CREATE POLICY "feature_map_read" ON public.zane_feature_map FOR SELECT TO authenticated USING (true);
+CREATE POLICY "feature_map_admin_insert" ON public.zane_feature_map FOR INSERT TO authenticated WITH CHECK ((select auth.email()) = 'office@btc-prime.biz');
+CREATE POLICY "feature_map_admin_update" ON public.zane_feature_map FOR UPDATE TO authenticated USING ((select auth.email()) = 'office@btc-prime.biz') WITH CHECK ((select auth.email()) = 'office@btc-prime.biz');
+CREATE POLICY "feature_map_admin_delete" ON public.zane_feature_map FOR DELETE TO authenticated USING ((select auth.email()) = 'office@btc-prime.biz');
 
 -- exercises
 CREATE POLICY "own exercises" ON public.zane_exercises FOR ALL TO public USING (((select auth.uid()) = user_id));
