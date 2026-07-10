@@ -17,6 +17,15 @@
    Entry shape: { id: string, date: string (YYYY-MM-DD), title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.533',
+    date: '2026-07-10',
+    title: 'Coach, Save Your Work',
+    items: [
+      "📌 Coaches, your check-in form now has a save point. Building a form and want to push it to every client? You'll get a heads-up first, plus a one-tap way to save what everyone currently has before it gets replaced. Keep up to five named templates (a bulking-phase form, a cutting-phase form, whatever fits your season), apply one instantly, or update it in place once you've tweaked it further. Self-coaching yourself? Same toolbox, all yours.",
+      "🧹 A big cleanup pass swept through Training, History, Health and Coaching. Bodyweight and time-based exercises now show up correctly in your PRs, best times and history charts, switching plans can't make \"workouts done\" outnumber \"workouts planned\" anymore, and a long list of smaller display and edge-case glitches got squashed along the way. Nothing you had to do, just a smoother app underneath.",
+    ],
+  },
+  {
     id: 'v2.529',
     date: '2026-07-09',
     title: 'Coach, Now In the Loop',
