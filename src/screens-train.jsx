@@ -260,9 +260,39 @@ function KbCell({ text, placeholder, style, disabled, onActivate }) {
 function FinisherStep({ label, onClick }) {
   return <button onClick={onClick} style={{ width: 28, height: 28, borderRadius: 4, border: `1px solid ${UI.hairStrong}`, background: 'transparent', color: UI.inkFaint, fontSize: 16, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', WebkitTapHighlightColor: 'transparent' }}>{label}</button>;
 }
+// A plain type-in box for the weighted-stretch editor (weight or seconds).
+// Keeps its own text buffer so typing stays smooth (decimals, a trailing
+// comma) and commits the parsed number upward on every change. A native
+// <input> on purpose: the user asked for direct type-in boxes here instead
+// of steppers. Empty commits null for weight (decimal, means bodyweight) or 0
+// for seconds. `initial` is read once on mount, so committing back up never
+// fights what the user is typing.
+function StretchField({ initial, onChange, decimal, suffix, width, ariaLabel }) {
+  const [txt, setTxt] = useStateT(initial == null ? '' : String(initial).replace('.', ','));
+  const commit = (raw) => {
+    setTxt(raw);
+    if (raw.trim() === '') { onChange(decimal ? null : 0); return; }
+    const num = decimal ? parseFloat(raw.replace(',', '.')) : parseInt(raw.replace(/[^\d]/g, ''), 10);
+    if (!isNaN(num)) onChange(num);
+  };
+  return (
+    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+      <input
+        type="text" inputMode={decimal ? 'decimal' : 'numeric'}
+        value={txt} onChange={e => commit(e.target.value)} aria-label={ariaLabel}
+        style={{
+          width: width || 60, boxSizing: 'border-box', textAlign: 'center',
+          background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 4,
+          padding: '8px 6px', color: UI.gold, fontFamily: UI.fontNum, fontSize: 16,
+          outline: 'none', WebkitAppearance: 'none',
+        }}
+      />
+      {suffix && <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi }}>{suffix}</span>}
+    </div>
+  );
+}
 function Finisher({ partials, onPartials, stretch, onStretch, defaultKg, kgStep, showWeight }) {
   const [open, setOpen] = useStateT(partials > 0 || !!stretch);
-  const step = kgStep || 2.5;
   if (!open) return (
     <button onClick={() => setOpen(true)} style={{
       background: 'none', border: 'none', color: UI.inkFaint,
@@ -295,17 +325,11 @@ function Finisher({ partials, onPartials, stretch, onStretch, defaultKg, kgStep,
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 16, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
             {showWeight && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <FinisherStep label="−" onClick={() => onStretch({ ...stretch, kg: Math.max(0, Math.round(((stretch.kg ?? 0) - step) * 100) / 100) })} />
-                <span className="num" style={{ fontSize: 15, minWidth: 52, textAlign: 'center', color: UI.ink }}>{stretch.kg != null ? stretch.kg : 0}<span style={{ fontSize: 10, color: UI.inkFaint }}> {UI.unit()}</span></span>
-                <FinisherStep label="+" onClick={() => onStretch({ ...stretch, kg: Math.round(((stretch.kg ?? 0) + step) * 100) / 100 })} />
-              </div>
+              <StretchField initial={stretch.kg} decimal suffix={UI.unit()} width={68} ariaLabel="Stretch weight"
+                onChange={(v) => onStretch({ ...stretch, kg: v })} />
             )}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <FinisherStep label="−" onClick={() => onStretch({ ...stretch, timeSec: Math.max(5, stretch.timeSec - 5) })} />
-              <span className="num" style={{ fontSize: 15, minWidth: 40, textAlign: 'center', color: UI.ink }}>{stretch.timeSec}<span style={{ fontSize: 10, color: UI.inkFaint }}>s</span></span>
-              <FinisherStep label="+" onClick={() => onStretch({ ...stretch, timeSec: stretch.timeSec + 5 })} />
-            </div>
+            <StretchField initial={stretch.timeSec} suffix="s" width={56} ariaLabel="Stretch hold seconds"
+              onChange={(v) => onStretch({ ...stretch, timeSec: v == null ? 0 : v })} />
           </div>
         </div>
       )}
@@ -5256,7 +5280,6 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   {wsTarget?.exIdx === exIdx && wsTarget?.setIdx === i && !s.done && (() => {
                     const missingData = !isNoWeightReps && ((!isBodyweight && s.kg == null) || (!(kbField?.setIdx === i && kbField?.field !== 'kg') && (isUnilateral ? (s.repsL == null || s.repsR == null) : s.reps == null)));
                     const ws = wsStretch || { kg: null, timeSec: 30 };
-                    const wsStep = { width: 32, height: 32, borderRadius: 4, border: `1px solid ${UI.hairStrong}`, background: 'transparent', color: UI.inkFaint, fontSize: 18, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', WebkitTapHighlightColor: 'transparent' };
                     return (
                       <div style={{ marginLeft: 36, paddingLeft: 10, borderLeft: `2px solid rgba(var(--accent-rgb),0.3)` }}>
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 4px 2px' }}>
@@ -5267,16 +5290,14 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                           {stretchShowWeight && (
                             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                               <span className="micro" style={{ color: UI.inkFaint }}>Weight</span>
-                              <button onClick={() => setWsStretch(p => ({ timeSec: 30, ...(p || {}), kg: Math.max(0, Math.round((((p?.kg) ?? 0) - stretchKgStep) * 100) / 100) }))} style={wsStep}>−</button>
-                              <span className="num" style={{ fontSize: 18, minWidth: 46, textAlign: 'center', color: UI.gold }}>{ws.kg != null ? String(ws.kg).replace('.', ',') : 0}<span style={{ fontSize: 10, color: UI.inkFaint }}> {UI.unit()}</span></span>
-                              <button onClick={() => setWsStretch(p => ({ timeSec: 30, ...(p || {}), kg: Math.round((((p?.kg) ?? 0) + stretchKgStep) * 100) / 100 }))} style={wsStep}>+</button>
+                              <StretchField initial={ws.kg} decimal suffix={UI.unit()} width={72} ariaLabel="Stretch weight"
+                                onChange={(v) => setWsStretch(p => ({ timeSec: 30, ...(p || {}), kg: v }))} />
                             </div>
                           )}
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                             <span className="micro" style={{ color: UI.inkFaint }}>Hold</span>
-                            <button onClick={() => setWsStretch(p => ({ kg: null, ...(p || {}), timeSec: Math.max(5, ((p?.timeSec) ?? 30) - 5) }))} style={wsStep}>−</button>
-                            <span className="num" style={{ fontSize: 18, minWidth: 40, textAlign: 'center', color: UI.gold }}>{ws.timeSec}<span style={{ fontSize: 10, color: UI.inkFaint }}>s</span></span>
-                            <button onClick={() => setWsStretch(p => ({ kg: null, ...(p || {}), timeSec: ((p?.timeSec) ?? 30) + 5 }))} style={wsStep}>+</button>
+                            <StretchField initial={ws.timeSec} suffix="s" width={60} ariaLabel="Stretch hold seconds"
+                              onChange={(v) => setWsStretch(p => ({ kg: null, ...(p || {}), timeSec: v == null ? 0 : v }))} />
                           </div>
                         </div>
                         <div style={{ padding: '0 4px 10px' }}>
