@@ -260,38 +260,7 @@ function KbCell({ text, placeholder, style, disabled, onActivate }) {
 function FinisherStep({ label, onClick }) {
   return <button onClick={onClick} style={{ width: 28, height: 28, borderRadius: 4, border: `1px solid ${UI.hairStrong}`, background: 'transparent', color: UI.inkFaint, fontSize: 16, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', WebkitTapHighlightColor: 'transparent' }}>{label}</button>;
 }
-// A plain type-in box for the weighted-stretch editor (weight or seconds).
-// Keeps its own text buffer so typing stays smooth (decimals, a trailing
-// comma) and commits the parsed number upward on every change. A native
-// <input> on purpose: the user asked for direct type-in boxes here instead
-// of steppers. Empty commits null for weight (decimal, means bodyweight) or 0
-// for seconds. `initial` is read once on mount, so committing back up never
-// fights what the user is typing.
-function StretchField({ initial, onChange, decimal, suffix, width, ariaLabel }) {
-  const [txt, setTxt] = useStateT(initial == null ? '' : String(initial).replace('.', ','));
-  const commit = (raw) => {
-    setTxt(raw);
-    if (raw.trim() === '') { onChange(decimal ? null : 0); return; }
-    const num = decimal ? parseFloat(raw.replace(',', '.')) : parseInt(raw.replace(/[^\d]/g, ''), 10);
-    if (!isNaN(num)) onChange(num);
-  };
-  return (
-    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-      <input
-        type="text" inputMode={decimal ? 'decimal' : 'numeric'}
-        value={txt} onChange={e => commit(e.target.value)} aria-label={ariaLabel}
-        style={{
-          width: width || 60, boxSizing: 'border-box', textAlign: 'center',
-          background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 4,
-          padding: '8px 6px', color: UI.gold, fontFamily: UI.fontNum, fontSize: 16,
-          outline: 'none', WebkitAppearance: 'none',
-        }}
-      />
-      {suffix && <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi }}>{suffix}</span>}
-    </div>
-  );
-}
-function Finisher({ partials, onPartials, stretch, onStretch, defaultKg, kgStep, showWeight }) {
+function Finisher({ partials, onPartials, stretch, onStretch, defaultKg, showWeight, onActivateStretch, stretchActiveField, kbRaw }) {
   const [open, setOpen] = useStateT(partials > 0 || !!stretch);
   if (!open) return (
     <button onClick={() => setOpen(true)} style={{
@@ -323,13 +292,23 @@ function Finisher({ partials, onPartials, stretch, onStretch, defaultKg, kgStep,
             <span className="micro" style={{ color: UI.gold }}>Weighted stretch</span>
             <button onClick={() => onStretch(null)} title="Remove" style={{ background: 'none', border: 'none', color: UI.inkFaint, fontSize: 14, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>✕</button>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 16, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 16, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
             {showWeight && (
-              <StretchField initial={stretch.kg} decimal suffix={UI.unit()} width={68} ariaLabel="Stretch weight"
-                onChange={(v) => onStretch({ ...stretch, kg: v })} />
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 3, alignItems: 'center' }}>
+                <span className="micro" style={{ color: UI.inkFaint }}>WEIGHT</span>
+                <div style={{ width: 72 }}>
+                  <KbCell text={stretchActiveField === 'kg' ? kbRaw : (stretch.kg != null ? String(stretch.kg).replace('.', ',') : '')} placeholder="—" onActivate={() => onActivateStretch('kg')}
+                    style={{ ...setInputStyle(false, stretchActiveField === 'kg'), ...(stretchActiveField === 'kg' ? { boxShadow: 'inset 0 -2px 0 var(--accent)' } : {}) }} />
+                </div>
+              </div>
             )}
-            <StretchField initial={stretch.timeSec} suffix="s" width={56} ariaLabel="Stretch hold seconds"
-              onChange={(v) => onStretch({ ...stretch, timeSec: v == null ? 0 : v })} />
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 3, alignItems: 'center' }}>
+              <span className="micro" style={{ color: UI.inkFaint }}>HOLD·S</span>
+              <div style={{ width: 56 }}>
+                <KbCell text={stretchActiveField === 'sec' ? kbRaw : (stretch.timeSec != null ? String(stretch.timeSec) : '')} placeholder="—" onActivate={() => onActivateStretch('sec')}
+                  style={{ ...setInputStyle(false, stretchActiveField === 'sec'), ...(stretchActiveField === 'sec' ? { boxShadow: 'inset 0 -2px 0 var(--accent)' } : {}) }} />
+              </div>
+            </div>
           </div>
         </div>
       )}
@@ -951,10 +930,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const isTime = logMode === 'time';           // countdown + duration, no weight
   const isNoWeightReps = isCheckbox || isRepsOnly || isTime; // "no weight column" — keeps all existing kg/header/hero gates
   const isBodyweight = !isCardio && exercise?.equipment === 'bodyweight';
-  // Weighted-stretch finisher context: the weight stepper's increment (per
-  // equipment config, else unit default) and whether the stretch carries a
-  // weight at all (bodyweight / no-weight exercises hold at bodyweight).
-  const stretchKgStep = (exercise?.equipment ? store.settings?.equipmentConfig?.[exercise.equipment]?.increment : null) ?? (UI.unit() === 'lbs' ? 5 : 2.5);
+  // Weighted-stretch finisher: whether the stretch carries a weight at all
+  // (bodyweight / no-weight exercises just hold at bodyweight). The keypad's
+  // own kbAdjust reads the equipment increment directly for the +/- keys.
   const stretchShowWeight = !isNoWeightReps && !isBodyweight;
   const progressionTargetForSet = (workingSetIdx) => {
     if (!LB.progressionEnabled(store, entry?.plannedRepsMax, entry?.plannedProgressionOffset)) return null;
@@ -2188,6 +2166,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const [lpCount, setLpCount] = useStateT(0); // in-progress partials count for lpTarget, committed to the set only on Finish
   const [wsTarget, setWsTarget] = useStateT(null); // { exIdx, setIdx } | null — standalone weighted-stretch, same inline pattern as lpTarget (row keeps its kg/reps, checkbox becomes a stretch editor + FINISH)
   const [wsStretch, setWsStretch] = useStateT(null); // { kg, timeSec } | null — in-flight stretch (weight + hold) for wsTarget, committed to the set only on Finish
+  const wsStretchRef = useRefT(null); // mirror for the custom keypad handlers (they read refs, not stale closures)
+  wsStretchRef.current = wsStretch;
   const [avSetIdx, setAvSetIdx] = useStateT(null);
   const [avDrops, setAvDrops] = useStateT([]); // [{ kg, reps, label }, ...] — AMRAP Variations rounds
   const [avLabelFocusDi, setAvLabelFocusDi] = useStateT(null); // which round's variation-name box is focused (native text input, accent underline)
@@ -3326,7 +3306,47 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     setTimeout(() => scrollChainRowIntoView('data-av-row', dropIdx), 80);
   };
 
+  // Weighted-stretch fields (standalone set OR a per-round chain finisher) run
+  // through the same custom keypad as everything else — never a native <input>,
+  // so iOS never opens its own keyboard here. One shared namespace keyed by
+  // `target`: 'ws' edits the standalone wsStretch, 'drop'/'myo'/'av' edit the
+  // stretch nested on drops[dropIdx] of that chain. `field` is 'kg' or 'sec'.
+  const readStretch = (target, dropIdx) => (
+    target === 'ws' ? (wsStretchRef.current || {})
+    : target === 'drop' ? (dropDropsRef.current[dropIdx]?.stretch || {})
+    : target === 'myo' ? (myoDropsRef.current[dropIdx]?.stretch || {})
+    : (avDropsRef.current[dropIdx]?.stretch || {})
+  );
+  const setStretchVal = (target, dropIdx, patch) => {
+    if (target === 'ws') { setWsStretch(prev => ({ kg: null, timeSec: null, ...(prev || {}), ...patch })); return; }
+    const setter = target === 'drop' ? setDropDrops : target === 'myo' ? setMyoDrops : setAvDrops;
+    setter(prev => prev.map((d, i) => i === dropIdx ? { ...d, stretch: { kg: null, timeSec: null, ...(d.stretch || {}), ...patch } } : d));
+  };
+  const activateStretchKb = (target, dropIdx, field) => {
+    const src = readStretch(target, dropIdx);
+    const val = field === 'kg'
+      ? (src.kg != null ? String(src.kg).replace('.', ',') : '')
+      : (src.timeSec != null ? String(src.timeSec) : '');
+    kbFieldRef.current = { setIdx: 'stretch', target, dropIdx, field };
+    kbRawRef.current = val;
+    kbFreshRef.current = true;
+    setKbField({ setIdx: 'stretch', target, dropIdx, field });
+    setKbRaw(val);
+    setKbFresh(true);
+  };
+
   const kbApply = (newRaw, field, setIdx) => {
+    if (setIdx === 'stretch') {
+      const { target, dropIdx } = kbFieldRef.current || {};
+      if (field === 'kg') {
+        const num = newRaw === '' ? null : parseFloat(newRaw.replace(',', '.'));
+        if (newRaw === '' || !isNaN(num)) setStretchVal(target, dropIdx, { kg: num });
+      } else {
+        const num = newRaw === '' ? null : parseInt(newRaw, 10);
+        if (newRaw === '' || !isNaN(num)) setStretchVal(target, dropIdx, { timeSec: num });
+      }
+      return;
+    }
     if (setIdx === 'drop') {
       const dropIdx = kbFieldRef.current?.dropIdx;
       if (typeof dropIdx !== 'number') return;
@@ -3435,6 +3455,23 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const kbAdjust = (dir) => {
     if (!kbFieldRef.current) return;
     const { setIdx, field } = kbFieldRef.current;
+    if (setIdx === 'stretch') {
+      const { target, dropIdx } = kbFieldRef.current;
+      if (field === 'kg') {
+        const cur = parseFloat(kbRawRef.current.replace(',', '.')) || 0;
+        const step = (exercise?.equipment && store.settings?.equipmentConfig?.[exercise.equipment]?.increment) || 1.25;
+        const next = Math.max(0, Math.round((cur + dir * step) * 100) / 100);
+        const newRaw = String(next).replace('.', ',');
+        kbRawRef.current = newRaw; setKbRaw(newRaw);
+        setStretchVal(target, dropIdx, { kg: next });
+      } else {
+        const cur = parseInt(kbRawRef.current, 10) || 0;
+        const next = Math.max(0, cur + dir * 5); // seconds step by 5, like time exercises
+        kbRawRef.current = String(next); setKbRaw(String(next));
+        setStretchVal(target, dropIdx, { timeSec: next });
+      }
+      return;
+    }
     if (setIdx === 'drop') {
       const { dropIdx } = kbFieldRef.current;
       if (field === 'kg') {
@@ -3528,6 +3565,19 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const kbConfirm = () => {
     if (!kbFieldRef.current) { _log('kbConfirm: NULL kbField (ignored)'); return; }
     const { setIdx, field } = kbFieldRef.current;
+    if (setIdx === 'stretch') {
+      const { target, dropIdx } = kbFieldRef.current;
+      kbApply(kbRawRef.current, field, setIdx);
+      if (field === 'kg') {
+        // Weight confirmed -> jump to the hold-seconds box of the same stretch.
+        activateStretchKb(target, dropIdx, 'sec');
+      } else {
+        kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false;
+        setKbField(null); setKbRaw(''); setKbFresh(false);
+        armKbShield();
+      }
+      return;
+    }
     if (setIdx === 'drop') {
       const { dropIdx } = kbFieldRef.current;
       kbApply(kbRawRef.current, field, setIdx);
@@ -5280,31 +5330,44 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   {wsTarget?.exIdx === exIdx && wsTarget?.setIdx === i && !s.done && (() => {
                     const missingData = !isNoWeightReps && ((!isBodyweight && s.kg == null) || (!(kbField?.setIdx === i && kbField?.field !== 'kg') && (isUnilateral ? (s.repsL == null || s.repsR == null) : s.reps == null)));
                     const ws = wsStretch || { kg: null, timeSec: 30 };
+                    const kgActive = kbField?.setIdx === 'stretch' && kbField?.target === 'ws' && kbField?.field === 'kg';
+                    const secActive = kbField?.setIdx === 'stretch' && kbField?.target === 'ws' && kbField?.field === 'sec';
+                    // Same column template as the set row above, so the WEIGHT box
+                    // lands directly under the KG box and HOLD under REPS.
+                    const wsGrid = isRepsOnly
+                      ? (isUnilateral ? '28px 1fr 44px 44px 28px' : '28px 1fr 56px 28px')
+                      : (isUnilateral ? '28px 1fr 72px 44px 44px 28px' : '28px 1fr 72px 56px 28px');
                     return (
-                      <div style={{ marginLeft: 36, paddingLeft: 10, borderLeft: `2px solid rgba(var(--accent-rgb),0.3)` }}>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 4px 2px' }}>
-                          <span className="micro-gold">WEIGHTED STRETCH</span>
-                          <button onClick={() => { setWsTarget(null); setWsStretch(null); }} style={{ background: 'none', border: 'none', color: UI.inkFaint, fontSize: 10, fontFamily: UI.fontUi, cursor: 'pointer', padding: '2px 4px', letterSpacing: '0.08em' }}>CANCEL</button>
+                      <div style={{ background: 'rgba(var(--accent-rgb),0.05)', borderRadius: 6, margin: '2px 0 6px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 6px 2px' }}>
+                          <span className="micro-gold" style={{ paddingLeft: 36 }}>WEIGHTED STRETCH</span>
+                          <button onClick={() => {
+                            setWsTarget(null); setWsStretch(null);
+                            // Close the custom keypad too if it's still open on this stretch.
+                            if (kbFieldRef.current?.setIdx === 'stretch' && kbFieldRef.current?.target === 'ws') {
+                              kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false;
+                              setKbField(null); setKbRaw(''); setKbFresh(false);
+                            }
+                          }} style={{ background: 'none', border: 'none', color: UI.inkFaint, fontSize: 10, fontFamily: UI.fontUi, cursor: 'pointer', padding: '2px 4px', letterSpacing: '0.08em' }}>CANCEL</button>
                         </div>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: stretchShowWeight ? 'space-between' : 'flex-end', gap: 12, padding: '4px 4px 10px', flexWrap: 'wrap' }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: wsGrid, gap: 8, alignItems: 'end', padding: '2px 6px 8px' }}>
                           {stretchShowWeight && (
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                              <span className="micro" style={{ color: UI.inkFaint }}>Weight</span>
-                              <StretchField initial={ws.kg} decimal suffix={UI.unit()} width={72} ariaLabel="Stretch weight"
-                                onChange={(v) => setWsStretch(p => ({ timeSec: 30, ...(p || {}), kg: v }))} />
+                            <div style={{ gridColumn: 3, display: 'flex', flexDirection: 'column', gap: 3 }}>
+                              <span className="micro" style={{ color: UI.inkFaint, textAlign: 'center' }}>WEIGHT</span>
+                              <KbCell text={kgActive ? kbRaw : (ws.kg != null ? String(ws.kg).replace('.', ',') : '')} placeholder="—" onActivate={() => activateStretchKb('ws', null, 'kg')}
+                                style={{ ...setInputStyle(false, kgActive), ...(kgActive ? { boxShadow: 'inset 0 -2px 0 var(--accent)' } : {}) }} />
                             </div>
                           )}
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                            <span className="micro" style={{ color: UI.inkFaint }}>Hold</span>
-                            <StretchField initial={ws.timeSec} suffix="s" width={60} ariaLabel="Stretch hold seconds"
-                              onChange={(v) => setWsStretch(p => ({ kg: null, ...(p || {}), timeSec: v == null ? 0 : v }))} />
+                          <div style={{ gridColumn: stretchShowWeight ? 4 : 3, display: 'flex', flexDirection: 'column', gap: 3 }}>
+                            <span className="micro" style={{ color: UI.inkFaint, textAlign: 'center' }}>HOLD·S</span>
+                            <KbCell text={secActive ? kbRaw : (ws.timeSec != null ? String(ws.timeSec) : '')} placeholder="—" onActivate={() => activateStretchKb('ws', null, 'sec')}
+                              style={{ ...setInputStyle(false, secActive), ...(secActive ? { boxShadow: 'inset 0 -2px 0 var(--accent)' } : {}) }} />
                           </div>
                         </div>
-                        <div style={{ padding: '0 4px 10px' }}>
-                          {/* missingData (the underlying set has no kg/reps yet)
-                              is the only block — the stretch itself is always
-                              valid (timeSec floor is 5s), so FINISH never dims
-                              for a "zero" stretch the way lengthened partials does. */}
+                        <div style={{ padding: '0 6px 8px', paddingLeft: 36 }}>
+                          {/* missingData (the underlying set has no kg/reps yet) is
+                              the only block — the stretch always carries a hold, so
+                              FINISH never dims for a "zero" stretch like partials do. */}
                           <button onClick={() => finishWeightedStretch(i)}
                             disabled={missingData}
                             style={{
@@ -5886,6 +5949,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                 setWsTarget({ exIdx, setIdx: target });
                 setWsStretch({ kg: stretchShowWeight ? (s?.kg ?? null) : null, timeSec: 30 });
                 setIntensityOpen(false);
+                // Open the custom keypad straight on the first stretch box.
+                setTimeout(() => activateStretchKb('ws', null, stretchShowWeight ? 'kg' : 'sec'), 200);
               }} style={btnBase(true)}>
                 <i className="fa-solid fa-weight-hanging" style={{ fontSize: 18, color: 'var(--accent)', width: 20, textAlign: 'center', flexShrink: 0 }} />
                 <div>
@@ -5992,7 +6057,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                         WebkitTapHighlightColor: 'transparent',
                       }}>×</button>
                   </div>
-                  <Finisher partials={d.partials || 0} onPartials={(v) => setDropDrops(prev => prev.map((r, idx) => idx === di ? { ...r, partials: v > 0 ? v : undefined } : r))} stretch={d.stretch || null} onStretch={(v) => setDropDrops(prev => prev.map((r, idx) => idx === di ? { ...r, stretch: v || undefined } : r))} defaultKg={d.kg ?? null} kgStep={stretchKgStep} showWeight={stretchShowWeight} />
+                  <Finisher partials={d.partials || 0} onPartials={(v) => setDropDrops(prev => prev.map((r, idx) => idx === di ? { ...r, partials: v > 0 ? v : undefined } : r))} stretch={d.stretch || null} onStretch={(v) => setDropDrops(prev => prev.map((r, idx) => idx === di ? { ...r, stretch: v || undefined } : r))} defaultKg={d.kg ?? null} showWeight={stretchShowWeight} onActivateStretch={(f) => activateStretchKb('drop', di, f)} stretchActiveField={kbField?.setIdx === 'stretch' && kbField?.target === 'drop' && kbField?.dropIdx === di ? kbField.field : null} kbRaw={kbRaw} />
                   </div>
                 );
               })}
@@ -6093,7 +6158,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                           WebkitTapHighlightColor: 'transparent',
                         }}>×</button>
                     </div>
-                    <Finisher partials={d.partials || 0} onPartials={(v) => setAvDrops(prev => prev.map((r, idx) => idx === di ? { ...r, partials: v > 0 ? v : undefined } : r))} stretch={d.stretch || null} onStretch={(v) => setAvDrops(prev => prev.map((r, idx) => idx === di ? { ...r, stretch: v || undefined } : r))} defaultKg={d.kg ?? null} kgStep={stretchKgStep} showWeight={stretchShowWeight} />
+                    <Finisher partials={d.partials || 0} onPartials={(v) => setAvDrops(prev => prev.map((r, idx) => idx === di ? { ...r, partials: v > 0 ? v : undefined } : r))} stretch={d.stretch || null} onStretch={(v) => setAvDrops(prev => prev.map((r, idx) => idx === di ? { ...r, stretch: v || undefined } : r))} defaultKg={d.kg ?? null} showWeight={stretchShowWeight} onActivateStretch={(f) => activateStretchKb('av', di, f)} stretchActiveField={kbField?.setIdx === 'stretch' && kbField?.target === 'av' && kbField?.dropIdx === di ? kbField.field : null} kbRaw={kbRaw} />
                   </div>
                 );
               })}
@@ -6247,7 +6312,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                           }}>×</button>
                       )}
                     </div>
-                    {!isActiv && <Finisher partials={d.partials || 0} onPartials={(v) => setMyoDrops(prev => prev.map((r, idx) => idx === di ? { ...r, partials: v > 0 ? v : undefined } : r))} stretch={d.stretch || null} onStretch={(v) => setMyoDrops(prev => prev.map((r, idx) => idx === di ? { ...r, stretch: v || undefined } : r))} defaultKg={d.kg ?? null} kgStep={stretchKgStep} showWeight={stretchShowWeight} />}
+                    {!isActiv && <Finisher partials={d.partials || 0} onPartials={(v) => setMyoDrops(prev => prev.map((r, idx) => idx === di ? { ...r, partials: v > 0 ? v : undefined } : r))} stretch={d.stretch || null} onStretch={(v) => setMyoDrops(prev => prev.map((r, idx) => idx === di ? { ...r, stretch: v || undefined } : r))} defaultKg={d.kg ?? null} showWeight={stretchShowWeight} onActivateStretch={(f) => activateStretchKb('myo', di, f)} stretchActiveField={kbField?.setIdx === 'stretch' && kbField?.target === 'myo' && kbField?.dropIdx === di ? kbField.field : null} kbRaw={kbRaw} />}
                     </div>
                   );
                 })}
