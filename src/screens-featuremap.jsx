@@ -15,8 +15,6 @@
 const { useState: useStateFM, useEffect: useEffectFM, useMemo: useMemoFM } = React;
 
 const FM_ADMIN_EMAIL = 'office@btc-prime.biz';
-// DB columns of an override row (kept in sync with migration 0155).
-const FM_OV_COLS = ['card_id', 'hidden', 'is_custom', 'cat', 'name', 'role', 'summary', 'actions', 'sort', 'created_at', 'updated_at'];
 
 const FM_ROLES = {
   user:  { label: 'Lifter', color: 'var(--accent)' },
@@ -38,6 +36,25 @@ function fmTrivial(r) {
     r.cat == null && r.name == null && r.role == null && r.summary == null && r.actions == null;
 }
 function fmCleanActions(a) { return (a || []).map(x => (x || '').trim()).filter(Boolean); }
+
+// Build a uniform upsert payload: NOT-NULL columns (hidden, is_custom) always
+// present, every nullable column explicit. Uniform shape matters because a
+// batched upsert unions the row keys, and any row missing a NOT-NULL column
+// would be sent as NULL and rejected.
+function fmPayload(row) {
+  return {
+    card_id: row.card_id,
+    hidden: !!row.hidden,
+    is_custom: !!row.is_custom,
+    cat: row.cat != null ? row.cat : null,
+    name: row.name != null ? row.name : null,
+    role: row.role != null ? row.role : null,
+    summary: row.summary != null ? row.summary : null,
+    actions: row.actions != null ? row.actions : null,
+    sort: row.sort != null ? row.sort : null,
+    updated_at: row.updated_at || new Date().toISOString(),
+  };
+}
 
 // Merge the catalog with the admin overrides into the effective, ordered list.
 function fmMerge(catalog, ov) {
@@ -131,7 +148,7 @@ function FeatureMapScreen({ store, go }) {
     const row = { ...existing, ...patch, card_id };
     if (fmTrivial(row)) return removeOverride(card_id);
     row.updated_at = new Date().toISOString();
-    const payload = {}; FM_OV_COLS.forEach(k => { if (row[k] !== undefined) payload[k] = row[k]; });
+    const payload = fmPayload(row);
     setBusy(true);
     try {
       const { error } = await LB.supabase.from('zane_feature_map').upsert(payload, { onConflict: 'card_id' });
@@ -188,7 +205,7 @@ function FeatureMapScreen({ store, go }) {
     for (const { card_id, sort } of changes) {
       const row = { ...(ov[card_id] || { card_id }), card_id, sort };
       if (fmTrivial(row)) { deletes.push(card_id); delete next[card_id]; }
-      else { row.updated_at = new Date().toISOString(); const p = {}; FM_OV_COLS.forEach(k => { if (row[k] !== undefined) p[k] = row[k]; }); upserts.push(p); next[card_id] = row; }
+      else { row.updated_at = new Date().toISOString(); upserts.push(fmPayload(row)); next[card_id] = row; }
     }
     setBusy(true);
     try {
@@ -204,14 +221,17 @@ function FeatureMapScreen({ store, go }) {
   const reorderCategory = async (catId, from, to) => {
     const vis = merged.filter(c => c.cat === catId && (!c.hidden || showHidden)).sort((a, b) => a.sort - b.sort);
     if (from < 0 || to < 0 || from >= vis.length || to >= vis.length || from === to) return;
+    // Reuse the existing sort "slots" (ascending) and re-assign them to the new
+    // order. Only cards in the moved range change; hidden cards keep their sort,
+    // and no new numbers are introduced (so no gaps or collisions).
+    const slots = vis.map(c => c.sort);
     const arr = vis.slice(); const [moved] = arr.splice(from, 1); arr.splice(to, 0, moved);
-    const hidden = merged.filter(c => c.cat === catId && c.hidden && !showHidden).sort((a, b) => a.sort - b.sort);
-    const newOrder = [...arr, ...hidden];
     const changes = [];
-    newOrder.forEach((c, i) => {
-      if (c.sort === i) return; // unchanged
-      const backToDefault = !c.isCustom && catalogIdx[c.id] === i;
-      changes.push({ card_id: c.id, sort: backToDefault ? null : i });
+    arr.forEach((c, i) => {
+      const target = slots[i];
+      if (c.sort === target) return; // unchanged
+      const backToDefault = !c.isCustom && catalogIdx[c.id] === target;
+      changes.push({ card_id: c.id, sort: backToDefault ? null : target });
     });
     if (changes.length) await applyOrder(changes);
   };
