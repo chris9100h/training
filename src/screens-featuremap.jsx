@@ -12,7 +12,7 @@
 
    Shares globals: UI, Screen, TopBar, Sheet, Btn, Field, TextInput, LB, React. */
 
-const { useState: useStateFM, useEffect: useEffectFM, useMemo: useMemoFM } = React;
+const { useState: useStateFM, useEffect: useEffectFM, useMemo: useMemoFM, useRef: useRefFM } = React;
 
 const FM_ADMIN_EMAIL = 'office@btc-prime.biz';
 
@@ -101,6 +101,10 @@ function FeatureMapScreen({ store, go }) {
   const [busy, setBusy]       = useStateFM(false);
   const [showHidden, setShowHidden] = useStateFM(false);
   const [confirmReset, setConfirmReset] = useStateFM(false);
+  const [catFilter, setCatFilter] = useStateFM('all');
+  const [showTop, setShowTop] = useStateFM(false);
+  const topRef = useRefFM(null);
+  const scRef = useRefFM(null);
 
   useEffectFM(() => {
     if (!isAdmin) { setOv({}); return; }
@@ -115,6 +119,22 @@ function FeatureMapScreen({ store, go }) {
     })();
     return () => { alive = false; };
   }, [isAdmin]);
+
+  // Back-to-top: the Screen wrapper is the scroll container (its overflow:auto).
+  // Grab it from the top sentinel's parent, watch its scroll, toggle the button.
+  useEffectFM(() => {
+    const sc = topRef.current && topRef.current.parentElement;
+    if (!sc) return;
+    scRef.current = sc;
+    const onScroll = () => setShowTop(sc.scrollTop > 500);
+    sc.addEventListener('scroll', onScroll, { passive: true });
+    onScroll();
+    return () => sc.removeEventListener('scroll', onScroll);
+  }, []);
+  const scrollToTop = () => {
+    const sc = scRef.current; if (!sc) return;
+    if (sc.scrollTo) sc.scrollTo({ top: 0, behavior: 'smooth' }); else sc.scrollTop = 0;
+  };
 
   const merged = useMemoFM(() => ov ? fmMerge(catalog, ov) : [], [ov, catalog]);
 
@@ -137,6 +157,12 @@ function FeatureMapScreen({ store, go }) {
       return { meta: fmCatMeta(id), all, visible };
     });
   }, [merged, query, roleFilter, isAdmin, showHidden, catalog]);
+
+  const catChips = useMemoFM(() =>
+    catalog.categories
+      .map(c => ({ id: c.id, label: c.label, count: merged.filter(m => m.cat === c.id && !m.hidden).length }))
+      .filter(c => c.count > 0),
+    [catalog, merged]);
 
   const overrideCount = ov ? Object.keys(ov).length : 0;
   const hiddenCount = merged.filter(c => c.hidden).length;
@@ -257,6 +283,7 @@ function FeatureMapScreen({ store, go }) {
 
   return (
     <Screen>
+      <div ref={topRef} aria-hidden="true" style={{ height: 0 }} />
       <TopBar
         title="Feature map"
         sub={isAdmin ? 'Admin preview' : 'What the app can do'}
@@ -314,6 +341,17 @@ function FeatureMapScreen({ store, go }) {
               }}>{t.label}</button>
             ))}
           </div>
+
+          {catChips.length > 1 && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              <button onClick={() => { setCatFilter('all'); scrollToTop(); }} style={fmPill(catFilter === 'all')}>All</button>
+              {catChips.map(c => (
+                <button key={c.id} onClick={() => { setCatFilter(c.id); scrollToTop(); }} style={fmPill(catFilter === c.id)}>
+                  {c.label}<span className="num" style={{ marginLeft: 5, opacity: 0.75 }}>{c.count}</span>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         {loadErr && (
@@ -322,7 +360,8 @@ function FeatureMapScreen({ store, go }) {
 
         {!loading && grouped.map(g => {
           const filtering = query.trim() !== '' || roleFilter !== 'all';
-          const showSection = g.visible.length > 0 || (isAdmin && !filtering);
+          const inCat = catFilter === 'all' || g.meta.id === catFilter;
+          const showSection = inCat && (g.visible.length > 0 || (isAdmin && !filtering));
           if (!showSection) return null;
           return (
             <section key={g.meta.id} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -370,6 +409,20 @@ function FeatureMapScreen({ store, go }) {
           onClose={() => setEditing(null)}
           onSave={() => saveEditor(editing)}
           onRevert={(!editing._isNew && !editing.isCustom && editing.edited) ? () => revertEdit(editing.id) : null} />
+      )}
+
+      {showTop && (
+        <button onClick={scrollToTop} aria-label="Back to top" title="Back to top" style={{
+          position: 'fixed', zIndex: 60,
+          right: 'max(16px, calc(50vw - 204px))',
+          bottom: 'calc(16px + env(safe-area-inset-bottom, 0px))',
+          width: 46, height: 46, borderRadius: '50%',
+          border: `1px solid ${UI.hairStrong}`, background: UI.bgCard, color: 'var(--accent)',
+          cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+          boxShadow: '0 8px 24px rgba(0,0,0,0.4)', WebkitTapHighlightColor: 'transparent',
+        }}>
+          <i className="fa-solid fa-chevron-up" />
+        </button>
       )}
     </Screen>
   );

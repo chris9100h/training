@@ -83,9 +83,14 @@
 
   /* catnav */
   .catnav{max-width:var(--maxw);margin:0 auto;padding:18px 24px 4px;display:flex;flex-wrap:wrap;gap:8px;}
-  .catnav a{text-decoration:none;color:var(--ink-soft);font-family:var(--f-mono);font-size:11px;letter-spacing:0.04em;padding:6px 10px;border-radius:999px;border:1px solid var(--hair);background:var(--panel);}
-  .catnav a:hover{color:var(--ink);border-color:var(--accent);}
-  .catnav a .n{color:var(--accent);}
+  .catnav button{cursor:pointer;color:var(--ink-soft);font-family:var(--f-mono);font-size:11px;letter-spacing:0.04em;padding:6px 11px;border-radius:999px;border:1px solid var(--hair);background:var(--panel);}
+  .catnav button:hover{color:var(--ink);border-color:var(--accent);}
+  .catnav button.active{color:var(--bg);background:var(--accent);border-color:var(--accent);}
+  .catnav button .n{color:var(--accent);}
+  .catnav button.active .n{color:var(--bg);}
+  .totop{position:fixed;right:20px;bottom:calc(20px + env(safe-area-inset-bottom,0px));z-index:40;width:46px;height:46px;border-radius:50%;border:1px solid var(--hair-strong);background:color-mix(in srgb,var(--panel) 92%,transparent);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);color:var(--accent);cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 8px 24px rgba(0,0,0,0.35);opacity:0;pointer-events:none;transform:translateY(8px);transition:opacity .2s ease,transform .2s ease;}
+  .totop.show{opacity:1;pointer-events:auto;transform:none;}
+  .totop svg{width:20px;height:20px;}
 
   main{max-width:var(--maxw);margin:0 auto;padding:16px 24px 40px;}
   .cat{padding-top:32px;scroll-margin-top:76px;}
@@ -98,7 +103,8 @@
   .cat-meta{margin-left:auto;flex:none;text-align:right;padding-top:4px;}
   .cat-meta .c{font-family:var(--f-display);font-weight:800;font-size:28px;color:var(--accent);line-height:1;}
   .cat-meta .l{font-family:var(--f-mono);font-size:9px;letter-spacing:0.16em;text-transform:uppercase;color:var(--ink-faint);margin-top:4px;}
-  .grid{margin-top:16px;display:flex;flex-direction:column;gap:10px;}
+  .grid{margin-top:16px;display:grid;grid-template-columns:1fr;gap:10px;align-items:start;}
+  @media(min-width:760px){.grid{grid-template-columns:1fr 1fr;}}
 
   .card{position:relative;background:var(--panel);border:1px solid var(--hair);border-radius:8px;overflow:hidden;transition:border-color .16s ease;}
   .card::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--role-color,var(--accent));}
@@ -163,6 +169,10 @@
   <div class="stamp" id="stampFoot"></div>
 </div></footer>
 
+<button class="totop" id="toTop" aria-label="Back to top" title="Back to top">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 15 6-6 6 6"/></svg>
+</button>
+
 <script src="src/feature-map-db.js"></script>
 <script>
 (function(){
@@ -187,10 +197,11 @@
   var catalog=document.getElementById('catalog'), catnav=document.getElementById('catnav');
   var cards=(FM.cards||[]).filter(function(c){return !c.hidden;});
   var byCat={}; cards.forEach(function(c){(byCat[c.cat]=byCat[c.cat]||[]).push(c);});
+  var CATS_SHOWN=(FM.categories||[]).filter(function(c){return (byCat[c.id]||[]).length;});
+  var activeCat='all';
 
   (FM.categories||[]).forEach(function(cat){
     var items=byCat[cat.id]||[]; if(!items.length) return;
-    var a=document.createElement('a'); a.href='#cat-'+cat.id; a.innerHTML=esc(cat.label)+' <span class="n num">'+items.length+'</span>'; catnav.appendChild(a);
     var sec=document.createElement('section'); sec.className='cat'; sec.id='cat-'+cat.id; sec.dataset.cat=cat.id;
     sec.innerHTML='<div class="cat-head"><div class="cat-ico">'+svg(cat.id)+'</div>'+
       '<div><h2 class="cat-title">'+esc(cat.label)+'</h2><p class="cat-blurb">'+esc(cat.blurb||'')+'</p></div>'+
@@ -224,17 +235,30 @@
   function apply(){
     var term=q.value.trim().toLowerCase(), shown=0;
     document.querySelectorAll('.cat').forEach(function(sec){
+      var inCat = (activeCat==='all' || sec.dataset.cat===activeCat);
       var s=0;
       sec.querySelectorAll('.card').forEach(function(card){
         var roleOk = role==='all' || (role==='lifter'&&(card.dataset.role==='user'||card.dataset.role==='both')) || (role==='coach'&&(card.dataset.role==='coach'||card.dataset.role==='both'));
         var textOk = !term || card.dataset.text.indexOf(term)>=0;
-        var ok=roleOk&&textOk; card.classList.toggle('hidden',!ok); if(ok)s++;
+        var ok=inCat&&roleOk&&textOk; card.classList.toggle('hidden',!ok); if(ok)s++;
       });
       sec.classList.toggle('hidden',s===0); shown+=s;
     });
     countEl.innerHTML='<b>'+shown+'</b> / '+total+' shown';
     emptyEl.classList.toggle('show',shown===0);
   }
+  function buildNav(){
+    catnav.innerHTML='';
+    function mk(id,label,count){
+      var b=document.createElement('button'); b.dataset.cat=id; if(activeCat===id) b.className='active';
+      b.innerHTML=esc(label)+(count!=null?' <span class="n num">'+count+'</span>':'');
+      b.addEventListener('click',function(){ activeCat=id; buildNav(); apply(); catnav.scrollIntoView({block:'start'}); });
+      return b;
+    }
+    catnav.appendChild(mk('all','All',total));
+    CATS_SHOWN.forEach(function(c){ catnav.appendChild(mk(c.id,c.label,(byCat[c.id]||[]).length)); });
+  }
+  buildNav();
   q.addEventListener('input',apply);
   document.querySelectorAll('.seg button').forEach(function(b){b.addEventListener('click',function(){role=b.dataset.role;document.querySelectorAll('.seg button').forEach(function(x){x.setAttribute('aria-pressed',x===b?'true':'false');});apply();});});
   apply();
@@ -248,6 +272,11 @@
     var dark=cur?cur==='dark':matchMedia('(prefers-color-scheme: dark)').matches;
     document.documentElement.setAttribute('data-theme',dark?'light':'dark');
   });
+
+  // back to top
+  var toTop=document.getElementById('toTop');
+  window.addEventListener('scroll',function(){ toTop.classList.toggle('show', window.scrollY>500); },{passive:true});
+  toTop.addEventListener('click',function(){ window.scrollTo({top:0,behavior:'smooth'}); });
 })();
 </script>
 </body>
