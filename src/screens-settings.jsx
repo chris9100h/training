@@ -1612,11 +1612,9 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             )}
           </Btn>
         )}
-        {isAdmin && (
-          <Btn kind="ghost" onClick={() => go({ name: 'featuremap' })} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-            Feature map
-          </Btn>
-        )}
+        <Btn kind="ghost" onClick={() => go({ name: 'featuremap' })} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+          Feature map
+        </Btn>
         <Btn kind="ghost" onClick={handleSignOut} style={{ color: UI.danger, borderColor: 'rgba(var(--danger-rgb),0.2)' }}>Sign out</Btn>
         <div className="micro" style={{ textAlign: 'center', marginTop: 4 }}>Zane · {swVersion || '…'} · Data in Supabase</div>
       </div>
