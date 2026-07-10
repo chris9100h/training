@@ -17,6 +17,16 @@
    Entry shape: { id: string, date: string (YYYY-MM-DD), title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.540',
+    date: '2026-07-10',
+    title: 'Stretch, But Make It Heavy',
+    items: [
+      "🧘 New intensity technique: Weighted Stretch. A timed, loaded hold in the fully stretched position right after your set, DC-training style. It gets its own weight (usually lighter than your working set) and its own timer, so you're not just eyeballing \"a bit of a stretch\", you're logging exactly what you did.",
+      "🎯 Finishers got a serious upgrade. Tap \"+ Finisher\" on any intensity technique (drop sets, myo-reps, AMRAP variations, lengthened partials) or a plain working set, and choose partials or a weighted stretch. And it's no longer a one-shot deal: attach a finisher to every round in a chain, not just the last one.",
+      "📊 Nothing hides in the fine print. Whatever you log shows up everywhere it should, your completed set, your session history, and your coach's view all display exactly which round got which finisher.",
+    ],
+  },
+  {
     id: 'v2.535',
     date: '2026-07-10',
     title: 'Meet the Feature Map 🗺️',
