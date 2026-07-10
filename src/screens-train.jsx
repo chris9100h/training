@@ -270,23 +270,24 @@ function Finisher({ partials, onPartials, stretch, onStretch, defaultKg, kgStep,
       padding: '4px 4px 8px', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
     }}>+ FINISHER</button>
   );
-  const row = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px 4px' };
+  const addChip = (label, onClick) => (
+    <button onClick={onClick} style={{ background: 'rgba(var(--accent-rgb),0.08)', border: '1px solid rgba(var(--accent-rgb),0.35)', borderRadius: 4, color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.06em', padding: '5px 9px', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>{label}</button>
+  );
   return (
     <div style={{ padding: '2px 0 8px' }}>
-      <div style={row}>
-        <span className="micro" style={{ color: UI.inkFaint }}>Partials</span>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <FinisherStep label="−" onClick={() => onPartials(Math.max(0, partials - 1))} />
-          <span className="num" style={{ fontSize: 16, minWidth: 14, textAlign: 'center', color: partials > 0 ? UI.gold : UI.inkFaint }}>{partials}</span>
-          <FinisherStep label="+" onClick={() => onPartials(partials + 1)} />
+      {/* Partials editor: only shown once chosen (partials > 0); − to 0 removes it. */}
+      {partials > 0 && (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px 4px' }}>
+          <span className="micro" style={{ color: UI.gold }}>Partials</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <FinisherStep label="−" onClick={() => onPartials(Math.max(0, partials - 1))} />
+            <span className="num" style={{ fontSize: 16, minWidth: 14, textAlign: 'center', color: UI.gold }}>{partials}</span>
+            <FinisherStep label="+" onClick={() => onPartials(partials + 1)} />
+          </div>
         </div>
-      </div>
-      {!stretch ? (
-        <div style={row}>
-          <span className="micro" style={{ color: UI.inkFaint }}>Weighted stretch</span>
-          <button onClick={() => onStretch({ kg: showWeight ? (defaultKg ?? null) : null, timeSec: 30 })} style={{ background: 'none', border: 'none', color: UI.gold, fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', padding: '4px', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>+ ADD</button>
-        </div>
-      ) : (
+      )}
+      {/* Weighted-stretch editor: only shown once chosen (stretch != null). */}
+      {stretch && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '4px 4px' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <span className="micro" style={{ color: UI.gold }}>Weighted stretch</span>
@@ -306,6 +307,13 @@ function Finisher({ partials, onPartials, stretch, onStretch, defaultKg, kgStep,
               <FinisherStep label="+" onClick={() => onStretch({ ...stretch, timeSec: stretch.timeSec + 5 })} />
             </div>
           </div>
+        </div>
+      )}
+      {/* The choice: chips to add whichever finisher isn't there yet. */}
+      {(partials === 0 || !stretch) && (
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', padding: '4px 4px' }}>
+          {partials === 0 && addChip('+ Partials', () => onPartials(1))}
+          {!stretch && addChip('+ Weighted stretch', () => onStretch({ kg: showWeight ? (defaultKg ?? null) : null, timeSec: 30 }))}
         </div>
       )}
     </div>
