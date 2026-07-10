@@ -1620,9 +1620,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     return await confirm('Your progress on this set won\'t be saved.', { title: 'Discard changes?', ok: 'Discard', cancel: 'Keep editing', danger: true });
   };
   const closeChainSheet = () => {
-    if (dropSetIdx != null) { setDropSetIdx(null); setDropDrops([]); setFinisherPartials(0); setFinisherStretch(null); }
+    if (dropSetIdx != null) { setDropSetIdx(null); setDropDrops([]); }
     else if (myoSetIdx != null) { cancelMyo(); return; }
-    else if (avSetIdx != null) { setAvSetIdx(null); setAvDrops([]); setFinisherPartials(0); setFinisherStretch(null); }
+    else if (avSetIdx != null) { setAvSetIdx(null); setAvDrops([]); }
     kbFieldRef.current = null; kbRawRef.current = ''; setKbField(null); setKbRaw('');
   };
   const requestCloseChainSheet = async () => {
@@ -5633,10 +5633,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           // on the same still-unfinished set and picked Myo-Rep instead).
           // Without this, both sub-panels could end up targeting the same
           // row simultaneously.
-          const clearDrop = () => { setDropSetIdx(null); setDropDrops([]); setFinisherPartials(0); setFinisherStretch(null); };
-          const clearMyo = () => { setMyoSetIdx(null); setMyoDrops([]); setMyoTechnique(null); setMyoTarget(null); setFinisherPartials(0); setFinisherStretch(null); };
+          const clearDrop = () => { setDropSetIdx(null); setDropDrops([]); };
+          const clearMyo = () => { setMyoSetIdx(null); setMyoDrops([]); setMyoTechnique(null); setMyoTarget(null); };
           const clearLp = () => { setLpTarget(null); setLpCount(0); };
-          const clearAv = () => { setAvSetIdx(null); setAvDrops([]); setFinisherPartials(0); setFinisherStretch(null); };
+          const clearAv = () => { setAvSetIdx(null); setAvDrops([]); };
           const startDrop = () => {
             const target = currentSetIdx >= 0
               ? currentSetIdx
