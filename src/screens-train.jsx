@@ -1198,6 +1198,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // confirm, bulk check-all) is guarded to redirect or skip this set
     // instead of reaching here bare, but this is the backstop.
     if (lpTarget?.exIdx === exIdx && lpTarget?.setIdx === setIdx && !extraPatch) return;
+    // Weighted stretch is the same deal — only finishWeightedStretch supplies
+    // its extraPatch (technique + stretch); a bare completeSet here would mark
+    // the set done without the stretch, so back it out.
+    if (wsTarget?.exIdx === exIdx && wsTarget?.setIdx === setIdx && !extraPatch) return;
     // Drop-set/myo-rep/AMRAP Variations only ever complete via their own
     // finish*Set function (which builds the whole patch itself and never
     // calls completeSet) — a bare completeSet on their target set would mark
@@ -1307,7 +1311,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     armKbShield();
     recentCompleteRef.current[setIdx] = Date.now();
     lastCompleteRef.current = Date.now();
-    if (extraPatch) { setLpTarget(null); setLpCount(0); }
+    if (extraPatch) { setLpTarget(null); setLpCount(0); setWsTarget(null); setWsStretch(null); }
     _log(`completeSet(${setIdx}) → lastCompleteRef stamped`);
 
     // Build the done patch inside the functional updater so we can read the
@@ -1588,6 +1592,14 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     completeSet(setIdx, false, true, { technique: 'lengthened_partial', drops: { partials: lpCount } });
   };
 
+  // Commits the set plus its weighted stretch (weight + hold) in one update,
+  // exactly like finishLengthenedPartial. The stretch always carries a timeSec
+  // (the stepper floor is 5s), so there is no degenerate "zero" case to warn
+  // about — FINISH is only blocked while the underlying set has no kg/reps.
+  const finishWeightedStretch = (setIdx) => {
+    completeSet(setIdx, false, true, { technique: 'weighted_stretch', drops: { stretch: wsStretch } });
+  };
+
   const finishAv = async (rawDrops) => {
     // Silently drop any incomplete round instead of saving it (see
     // finishDropSet).
@@ -1785,6 +1797,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     if (dropSetIdx === idx) { finishDropSet(dropDropsRef.current); return; }
     if (myoSetIdx === idx) { finishMyoSet(myoDropsRef.current, myoTechnique); return; }
     if (lpTarget?.exIdx === exIdx && lpTarget?.setIdx === idx) { finishLengthenedPartial(idx); return; }
+    if (wsTarget?.exIdx === exIdx && wsTarget?.setIdx === idx) { finishWeightedStretch(idx); return; }
     if (avSetIdx === idx) { finishAv(avDropsRef.current); return; }
     completeSet(idx, false, true);
   };
@@ -2149,6 +2162,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const [myoTarget, setMyoTarget] = useStateT(null);
   const [lpTarget, setLpTarget] = useStateT(null); // { exIdx, setIdx } | null — set is NOT done yet, replaces its checkbox with a stepper + FINISH button
   const [lpCount, setLpCount] = useStateT(0); // in-progress partials count for lpTarget, committed to the set only on Finish
+  const [wsTarget, setWsTarget] = useStateT(null); // { exIdx, setIdx } | null — standalone weighted-stretch, same inline pattern as lpTarget (row keeps its kg/reps, checkbox becomes a stretch editor + FINISH)
+  const [wsStretch, setWsStretch] = useStateT(null); // { kg, timeSec } | null — in-flight stretch (weight + hold) for wsTarget, committed to the set only on Finish
   const [avSetIdx, setAvSetIdx] = useStateT(null);
   const [avDrops, setAvDrops] = useStateT([]); // [{ kg, reps, label }, ...] — AMRAP Variations rounds
   const [avLabelFocusDi, setAvLabelFocusDi] = useStateT(null); // which round's variation-name box is focused (native text input, accent underline)
@@ -2171,13 +2186,14 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // permanently defeating restoration across any navigate-away-and-back.
   const skipFirstClearRef = useRefT(true);
   useEffectT(() => {
-    if (dropSetIdx != null || myoSetIdx != null || lpTarget != null || avSetIdx != null) {
+    if (dropSetIdx != null || myoSetIdx != null || lpTarget != null || wsTarget != null || avSetIdx != null) {
       try {
         localStorage.setItem('logbook-intensity-state', JSON.stringify({
           sessionId, exIdx,
           dropSetIdx, dropDrops,
           myoSetIdx, myoDrops, myoTechnique, myoTarget,
           lpSetIdx: lpTarget?.setIdx ?? null, lpCount,
+          wsSetIdx: wsTarget?.setIdx ?? null, wsStretch,
           avSetIdx, avDrops,
         }));
       } catch {}
@@ -2185,7 +2201,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       localStorage.removeItem('logbook-intensity-state');
     }
     skipFirstClearRef.current = false;
-  }, [dropSetIdx, dropDrops, myoSetIdx, myoDrops, myoTechnique, myoTarget, lpTarget, lpCount, avSetIdx, avDrops, sessionId, exIdx]);
+  }, [dropSetIdx, dropDrops, myoSetIdx, myoDrops, myoTechnique, myoTarget, lpTarget, lpCount, wsTarget, wsStretch, avSetIdx, avDrops, sessionId, exIdx]);
   useEffectT(() => {
     try {
       const raw = localStorage.getItem('logbook-intensity-state');
@@ -2211,6 +2227,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       if (st.lpSetIdx != null && !targetEntry?.sets[st.lpSetIdx]?.done) {
         setLpTarget({ exIdx, setIdx: st.lpSetIdx });
         setLpCount(st.lpCount || 0);
+      }
+      // Weighted stretch resumes the same way — the set only ever goes done via
+      // its FINISH button (commits technique+stretch together), so nothing to
+      // resume once done.
+      if (st.wsSetIdx != null && !targetEntry?.sets[st.wsSetIdx]?.done) {
+        setWsTarget({ exIdx, setIdx: st.wsSetIdx });
+        setWsStretch(st.wsStretch || { kg: null, timeSec: 30 });
       }
       if (st.avSetIdx != null && !targetEntry?.sets[st.avSetIdx]?.done) {
         setAvSetIdx(st.avSetIdx);
@@ -3547,6 +3570,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       _log(`kbConfirm: ${field}→completeSet(${setIdx})`);
       if (dropSetIdx === setIdx || myoSetIdx === setIdx || avSetIdx === setIdx) return;
       if (lpTarget?.exIdx === exIdx && lpTarget?.setIdx === setIdx) return;
+      if (wsTarget?.exIdx === exIdx && wsTarget?.setIdx === setIdx) return;
       completeSet(setIdx, false, true);
     }
   };
@@ -4072,13 +4096,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     const wCount = sets.filter(s => s.warmup).length;
     const curWarmup = wCount > 0 && curIdx >= 0 && !!sets[curIdx]?.warmup;
     if (mesoPartials <= 0 || curIdx < 0 || curWarmup) return;
-    if (dropSetIdx != null || myoSetIdx != null || avSetIdx != null || lpTarget != null) return;
+    if (dropSetIdx != null || myoSetIdx != null || avSetIdx != null || lpTarget != null || wsTarget != null) return;
     const key = exIdx + '_' + curIdx;
     if (mesoLpArmedRef.current.has(key)) return;
     mesoLpArmedRef.current.add(key);
     setLpTarget({ exIdx, setIdx: curIdx });
     setLpCount(mesoPartials);
-  }, [entry, isCardio, exIdx, mesoPartials, dropSetIdx, myoSetIdx, avSetIdx, lpTarget]);
+  }, [entry, isCardio, exIdx, mesoPartials, dropSetIdx, myoSetIdx, avSetIdx, lpTarget, wsTarget]);
 
   if (!entry) {
     if (!session.isBonus) {
@@ -4189,7 +4213,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // bulk-check has no way to supply (drop weights, myo minis, partials
     // count) — leave that one set for the user to finish individually rather
     // than silently marking it done with none of that data recorded.
-    const skipIdx = lpTarget?.exIdx === exIdx ? lpTarget.setIdx : (dropSetIdx ?? myoSetIdx ?? avSetIdx ?? -1);
+    const skipIdx = lpTarget?.exIdx === exIdx ? lpTarget.setIdx : wsTarget?.exIdx === exIdx ? wsTarget.setIdx : (dropSetIdx ?? myoSetIdx ?? avSetIdx ?? -1);
     updateSession(sess => ({
       ...sess,
       entries: sess.entries.map((e, i) => i === exIdx
@@ -4388,10 +4412,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               <Btn style={{ flex: 1 }} onClick={() => {
                 const s = outlierConfirm.setIdx;
                 setOutlierConfirm(null);
-                const lpExtra = (lpTarget?.exIdx === exIdx && lpTarget?.setIdx === s)
+                const finExtra = (lpTarget?.exIdx === exIdx && lpTarget?.setIdx === s)
                   ? { technique: 'lengthened_partial', drops: { partials: lpCount } }
+                  : (wsTarget?.exIdx === exIdx && wsTarget?.setIdx === s)
+                  ? { technique: 'weighted_stretch', drops: { stretch: wsStretch } }
                   : null;
-                completeSet(s, true, true, lpExtra);
+                completeSet(s, true, true, finExtra);
               }}>{(() => {
                 const oc = outlierConfirm;
                 if (oc.kind === 'both') return 'Yes, log it anyway';
@@ -5044,6 +5070,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                     const isDropActive = dropSetIdx === i && !s.done;
                     const isMyoActive = myoSetIdx === i && !s.done;
                     const isLpActive = lpTarget?.exIdx === exIdx && lpTarget?.setIdx === i && !s.done;
+                    const isWsActive = wsTarget?.exIdx === exIdx && wsTarget?.setIdx === i && !s.done;
                     const isAvActive = avSetIdx === i && !s.done;
                     const isIntensityActive = isDropActive || isMyoActive || isAvActive;
                     return (
@@ -5075,7 +5102,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                           {prevSet?.timeSec != null && <span className="micro" style={{ color: UI.inkFaint }}>last {LB.fmtDuration(prevSet.timeSec)}</span>}
                         </div>
                       ) : isCheckbox ? <div /> : (
-                        (s.technique === 'drop' || s.technique === 'myorep' || s.technique === 'myorep_match' || s.technique === 'lengthened_partial' || s.technique === 'amrap_variations') && s.done
+                        (s.technique === 'drop' || s.technique === 'myorep' || s.technique === 'myorep_match' || s.technique === 'lengthened_partial' || s.technique === 'weighted_stretch' || s.technique === 'amrap_variations') && s.done
                           ? <div style={{ display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'flex-start' }}>
                               <span style={{
                                 display: 'inline-block', fontFamily: UI.fontUi, fontSize: 8,
@@ -5140,7 +5167,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                         <KbCell text={kbField?.setIdx === i && kbField?.field === 'reps' ? kbRaw : (s.reps ?? '')} placeholder={repPlaceholder} disabled={s.done || s.skipped} onActivate={() => activateKb(i, 'reps')} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), ...(kbField?.setIdx === i && kbField?.field === 'reps' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }} />
                       ))}
 
-                      {!isIntensityActive && !isLpActive && <button
+                      {!isIntensityActive && !isLpActive && !isWsActive && <button
                         data-complete-btn
                         onPointerDown={e => { _log(`row${i} pointerdown done=${s.done}`); e.stopPropagation(); }}
                         onClick={() => {
@@ -5218,6 +5245,52 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                               background: !missingData && lpCount > 0 ? 'rgba(var(--accent-rgb),0.12)' : 'transparent',
                               border: `1px solid ${!missingData && lpCount > 0 ? 'rgba(var(--accent-rgb),0.5)' : UI.hair}`,
                               borderRadius: 6, color: !missingData && lpCount > 0 ? 'var(--accent)' : UI.inkGhost,
+                              fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.1em',
+                              cursor: missingData ? 'default' : 'pointer',
+                              WebkitTapHighlightColor: 'transparent',
+                            }}>✓ FINISH</button>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                  {wsTarget?.exIdx === exIdx && wsTarget?.setIdx === i && !s.done && (() => {
+                    const missingData = !isNoWeightReps && ((!isBodyweight && s.kg == null) || (!(kbField?.setIdx === i && kbField?.field !== 'kg') && (isUnilateral ? (s.repsL == null || s.repsR == null) : s.reps == null)));
+                    const ws = wsStretch || { kg: null, timeSec: 30 };
+                    const wsStep = { width: 32, height: 32, borderRadius: 4, border: `1px solid ${UI.hairStrong}`, background: 'transparent', color: UI.inkFaint, fontSize: 18, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', WebkitTapHighlightColor: 'transparent' };
+                    return (
+                      <div style={{ marginLeft: 36, paddingLeft: 10, borderLeft: `2px solid rgba(var(--accent-rgb),0.3)` }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 4px 2px' }}>
+                          <span className="micro-gold">WEIGHTED STRETCH</span>
+                          <button onClick={() => { setWsTarget(null); setWsStretch(null); }} style={{ background: 'none', border: 'none', color: UI.inkFaint, fontSize: 10, fontFamily: UI.fontUi, cursor: 'pointer', padding: '2px 4px', letterSpacing: '0.08em' }}>CANCEL</button>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: stretchShowWeight ? 'space-between' : 'flex-end', gap: 12, padding: '4px 4px 10px', flexWrap: 'wrap' }}>
+                          {stretchShowWeight && (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <span className="micro" style={{ color: UI.inkFaint }}>Weight</span>
+                              <button onClick={() => setWsStretch(p => ({ timeSec: 30, ...(p || {}), kg: Math.max(0, Math.round((((p?.kg) ?? 0) - stretchKgStep) * 100) / 100) }))} style={wsStep}>−</button>
+                              <span className="num" style={{ fontSize: 18, minWidth: 46, textAlign: 'center', color: UI.gold }}>{ws.kg != null ? String(ws.kg).replace('.', ',') : 0}<span style={{ fontSize: 10, color: UI.inkFaint }}> {UI.unit()}</span></span>
+                              <button onClick={() => setWsStretch(p => ({ timeSec: 30, ...(p || {}), kg: Math.round((((p?.kg) ?? 0) + stretchKgStep) * 100) / 100 }))} style={wsStep}>+</button>
+                            </div>
+                          )}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <span className="micro" style={{ color: UI.inkFaint }}>Hold</span>
+                            <button onClick={() => setWsStretch(p => ({ kg: null, ...(p || {}), timeSec: Math.max(5, ((p?.timeSec) ?? 30) - 5) }))} style={wsStep}>−</button>
+                            <span className="num" style={{ fontSize: 18, minWidth: 40, textAlign: 'center', color: UI.gold }}>{ws.timeSec}<span style={{ fontSize: 10, color: UI.inkFaint }}>s</span></span>
+                            <button onClick={() => setWsStretch(p => ({ kg: null, ...(p || {}), timeSec: ((p?.timeSec) ?? 30) + 5 }))} style={wsStep}>+</button>
+                          </div>
+                        </div>
+                        <div style={{ padding: '0 4px 10px' }}>
+                          {/* missingData (the underlying set has no kg/reps yet)
+                              is the only block — the stretch itself is always
+                              valid (timeSec floor is 5s), so FINISH never dims
+                              for a "zero" stretch the way lengthened partials does. */}
+                          <button onClick={() => finishWeightedStretch(i)}
+                            disabled={missingData}
+                            style={{
+                              width: '100%', padding: '8px 0',
+                              background: !missingData ? 'rgba(var(--accent-rgb),0.12)' : 'transparent',
+                              border: `1px solid ${!missingData ? 'rgba(var(--accent-rgb),0.5)' : UI.hair}`,
+                              borderRadius: 6, color: !missingData ? 'var(--accent)' : UI.inkGhost,
                               fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.1em',
                               cursor: missingData ? 'default' : 'pointer',
                               WebkitTapHighlightColor: 'transparent',
@@ -5307,6 +5380,14 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                     <div style={{ marginLeft: 36, paddingLeft: 10, paddingBottom: 8 }}>
                       <div style={{ display: 'inline-block', padding: '3px 8px', border: '1px solid var(--accent)', borderRadius: 4, fontFamily: UI.fontUi, fontSize: 11, color: 'var(--accent)', letterSpacing: '0.03em' }}>
                         {s.drops.partials} partial{s.drops.partials === 1 ? '' : 's'}
+                      </div>
+                    </div>
+                  )}
+                  {/* Committed weighted stretch — read-only tag mirroring the lengthened-partial one */}
+                  {s.technique === 'weighted_stretch' && s.done && !s.warmup && s.drops?.stretch && (
+                    <div style={{ marginLeft: 36, paddingLeft: 10, paddingBottom: 8 }}>
+                      <div style={{ display: 'inline-block', padding: '3px 8px', border: '1px solid var(--accent)', borderRadius: 4, fontFamily: UI.fontUi, fontSize: 11, color: 'var(--accent)', letterSpacing: '0.03em' }}>
+                        stretch {s.drops.stretch.kg != null ? String(s.drops.stretch.kg).replace('.', ',') + ' ' + UI.unit() + ' · ' : ''}{s.drops.stretch.timeSec}s
                       </div>
                     </div>
                   )}
@@ -5654,13 +5735,14 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           const clearDrop = () => { setDropSetIdx(null); setDropDrops([]); };
           const clearMyo = () => { setMyoSetIdx(null); setMyoDrops([]); setMyoTechnique(null); setMyoTarget(null); };
           const clearLp = () => { setLpTarget(null); setLpCount(0); };
+          const clearWs = () => { setWsTarget(null); setWsStretch(null); };
           const clearAv = () => { setAvSetIdx(null); setAvDrops([]); };
           const startDrop = () => {
             const target = currentSetIdx >= 0
               ? currentSetIdx
               : entry.sets.reduce((last, s, i) => !s.warmup ? i : last, -1);
             if (target < 0) return;
-            clearMyo(); clearLp(); clearAv();
+            clearMyo(); clearLp(); clearWs(); clearAv();
             const s = entry.sets[target];
             const initDrops = [{ kg: s?.kg ?? null, reps: s?.reps ?? null }];
             setDropDrops(initDrops);
@@ -5674,7 +5756,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               ? currentSetIdx
               : entry.sets.reduce((last, s, i) => !s.warmup ? i : last, -1);
             if (target < 0) return;
-            clearDrop(); clearMyo(); clearLp();
+            clearDrop(); clearMyo(); clearLp(); clearWs();
             const s = entry.sets[target];
             const initDrops = [{ kg: s?.kg ?? null, reps: s?.reps ?? null, label: entry.name }];
             setAvDrops(initDrops);
@@ -5688,7 +5770,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               ? currentSetIdx
               : entry.sets.reduce((last, s, i) => !s.warmup ? i : last, -1);
             if (target < 0) return;
-            clearDrop(); clearLp(); clearAv();
+            clearDrop(); clearLp(); clearWs(); clearAv();
             const s = entry.sets[target];
             const anchor = entry.sets.find(st => st.technique === 'myorep' && st.done && st.drops?.[0]?.reps != null);
             // For match: activation kg locked to the preceding myo set's activation kg
@@ -5758,7 +5840,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   ? currentSetIdx
                   : entry.sets.reduce((last, s, i) => !s.warmup ? i : last, -1);
                 if (target < 0) return;
-                clearDrop(); clearMyo(); clearAv();
+                clearDrop(); clearMyo(); clearWs(); clearAv();
                 setLpTarget({ exIdx, setIdx: target });
                 setLpCount(0);
                 setIntensityOpen(false);
@@ -5767,6 +5849,27 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                 <div>
                   <div style={{ fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, letterSpacing: '0.12em', color: 'var(--accent)' }}>LENGTHENED PARTIALS</div>
                   <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkSoft, marginTop: 2 }}>Full reps, then partials in the stretch</div>
+                </div>
+              </button>
+              {/* Weighted Stretch — a timed loaded hold at the stretch after the
+                  set. Its own weight (the stretch load usually differs from the
+                  working weight) and hold time. Standalone here; also available
+                  as a per-round finisher inside the chain sheets. */}
+              <button onClick={() => {
+                const target = currentSetIdx >= 0
+                  ? currentSetIdx
+                  : entry.sets.reduce((last, s, i) => !s.warmup ? i : last, -1);
+                if (target < 0) return;
+                clearDrop(); clearMyo(); clearLp(); clearAv();
+                const s = entry.sets[target];
+                setWsTarget({ exIdx, setIdx: target });
+                setWsStretch({ kg: stretchShowWeight ? (s?.kg ?? null) : null, timeSec: 30 });
+                setIntensityOpen(false);
+              }} style={btnBase(true)}>
+                <i className="fa-solid fa-weight-hanging" style={{ fontSize: 18, color: 'var(--accent)', width: 20, textAlign: 'center', flexShrink: 0 }} />
+                <div>
+                  <div style={{ fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, letterSpacing: '0.12em', color: 'var(--accent)' }}>WEIGHTED STRETCH</div>
+                  <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkSoft, marginTop: 2 }}>Loaded hold at the stretch after the set</div>
                 </div>
               </button>
               {/* Myo-Rep row: two compact buttons matching DROP style */}
