@@ -231,6 +231,31 @@ async function testAsync(name, fn) {
     assert.strictEqual(rows[1].entry.sets[0].kg, 100);
   });
 
+  // ── techniqueRounds: weighted-stretch finisher extraction ────────────────
+  test('techniqueRounds surfaces a stretch finisher on a drop set last round', () => {
+    const r = LB.techniqueRounds({ technique: 'drop', drops: [{ kg: 100, reps: 10 }, { kg: 80, reps: 8, stretch: { kg: 60, timeSec: 30 } }] });
+    assert.strictEqual(r.badge, 'DROP SET');
+    assert.strictEqual(r.rounds.length, 2);
+    assert.deepStrictEqual(r.stretch, { kg: 60, timeSec: 30 });
+    assert.strictEqual(r.partials, 0);
+  });
+  test('techniqueRounds reads a standalone weighted_stretch', () => {
+    const r = LB.techniqueRounds({ technique: 'weighted_stretch', drops: { stretch: { kg: 40, timeSec: 45 } } });
+    assert.strictEqual(r.kind, 'weighted_stretch');
+    assert.strictEqual(r.badge, 'STRETCH');
+    assert.deepStrictEqual(r.stretch, { kg: 40, timeSec: 45 });
+  });
+  test('techniqueRounds carries a stretch alongside lengthened partials', () => {
+    const r = LB.techniqueRounds({ technique: 'lengthened_partial', drops: { partials: 5, stretch: { kg: 50, timeSec: 20 } } });
+    assert.strictEqual(r.partials, 5);
+    assert.deepStrictEqual(r.stretch, { kg: 50, timeSec: 20 });
+  });
+  test('techniqueRounds stretch is null when absent (backward compatible)', () => {
+    assert.strictEqual(LB.techniqueRounds({ technique: 'drop', drops: [{ kg: 100, reps: 10 }, { kg: 80, reps: 8 }] }).stretch, null);
+    assert.strictEqual(LB.techniqueRounds({ technique: null }).stretch, null);
+    assert.strictEqual(LB.techniqueRounds({ technique: 'lengthened_partial', drops: { partials: 3 } }).stretch, null);
+  });
+
   // ── mergeSessions: windowed cache-first reload merge ─────────────────────
   const now = new Date('2026-06-10T12:00:00Z');
   test('mergeSessions drops sessions the server no longer has (old ones)', () => {

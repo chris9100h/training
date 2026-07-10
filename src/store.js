@@ -4528,22 +4528,33 @@ function supersetLabel(memberCount) {
 //   anyVaried: true if any AMRAP Variations round's label diverges from
 //     exName — callers use this to decide whether to show round labels at all
 function techniqueRounds(st, { exName } = {}) {
-  const empty = { kind: null, badge: null, connector: null, rounds: [], totalReps: null, partials: 0, anyVaried: false };
+  const empty = { kind: null, badge: null, connector: null, rounds: [], totalReps: null, partials: 0, stretch: null, anyVaried: false };
   if (!st || !st.technique) return empty;
+  // A weighted stretch (DC-style timed hold at a set weight) rides along as a
+  // finisher on the LAST round of any technique, just like partials — or a plain
+  // set carrying only a stretch uses technique 'weighted_stretch'. It lives in
+  // drops: the last array round for chain techniques, or the drops OBJECT for the
+  // standalone / lengthened_partial forms. Shape: { kg, timeSec } (kg may be null).
+  const objStretch = (st.drops && !Array.isArray(st.drops)) ? (st.drops.stretch || null) : null;
+  if (st.technique === 'weighted_stretch') {
+    return { ...empty, kind: 'weighted_stretch', badge: 'STRETCH', stretch: objStretch };
+  }
   if (st.technique === 'lengthened_partial') {
-    return { ...empty, kind: 'lengthened_partial', badge: 'PARTIALS', partials: st.drops?.partials || 0 };
+    return { ...empty, kind: 'lengthened_partial', badge: 'PARTIALS', partials: st.drops?.partials || 0, stretch: objStretch };
   }
   const BADGES = { drop: 'DROP SET', myorep: 'MYO-REPS', myorep_match: 'MYO MATCH', amrap_variations: 'AMRAP' };
   if (!BADGES[st.technique]) return empty;
   const drops = (st.drops && st.drops.length > 0) ? st.drops : (st.kg != null ? [{ kg: st.kg, reps: st.reps }] : []);
   const isMyo = st.technique === 'myorep' || st.technique === 'myorep_match';
+  const last = drops[drops.length - 1] || {};
   return {
     kind: st.technique,
     badge: BADGES[st.technique],
     connector: isMyo ? '↺' : '→',
     rounds: drops.map(d => ({ kg: d.kg, reps: d.reps, label: d.label })),
     totalReps: isMyo ? drops.reduce((a, d) => a + (d.reps || 0), 0) : null,
-    partials: drops[drops.length - 1]?.partials || 0,
+    partials: last.partials || 0,
+    stretch: last.stretch || null,
     anyVaried: st.technique === 'amrap_variations' && drops.some(d => d.label && d.label !== exName),
   };
 }
