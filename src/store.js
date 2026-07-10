@@ -2081,16 +2081,25 @@ function lastSessionForExercise(state, exId, dayId = null) {
 // Up to `limit` most-recent ended sessions that logged this exercise, newest first.
 // Deload sessions are excluded so a deliberately light week never seeds the next
 // session's weights or skews progression/regression.
-function recentSessionsForExercise(state, exId, dayId = null, limit = 3) {
+function recentSessionsForExercise(state, exId, dayId = null, limit = 3, occ = 0) {
   const sessions = state.sessions
     .filter(s => s.ended && !s.isDeload && (dayId == null || s.dayId === dayId))
     .slice()
     .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''));
+  const hasData = (e) => (e.sets || []).some(x => x.kg != null || x.reps != null || x.repsL != null || x.repsR != null || x.timeSec != null);
   const out = [];
   for (const s of sessions) {
-    const entry = (s.entries || []).find(e => e.exId === exId &&
-      (e.sets || []).some(x => x.kg != null || x.reps != null || x.repsL != null || x.repsR != null || x.timeSec != null));
-    if (entry) out.push({ session: s, entry });
+    // occ = which occurrence of this exercise within the day (0 = first). When an
+    // exercise appears more than once in a session, each slot only ever compares
+    // against the SAME-numbered occurrence of past sessions, so a heavy first
+    // block and a back-off second block never cross-contaminate (the old code
+    // used .find and handed every occurrence the first match). Counted by
+    // position, not by which entry holds data, so the ordinal lines up with how
+    // callers number the current session's slots; a session whose occ-th
+    // occurrence is missing or empty is skipped for this slot (fail-safe: a
+    // genuinely new slot gets no history rather than a wrong one).
+    const entry = (s.entries || []).filter(e => e.exId === exId)[occ];
+    if (entry && hasData(entry)) out.push({ session: s, entry });
     if (out.length >= limit) break;
   }
   return out;
@@ -2131,8 +2140,8 @@ function bestEntryFromSetLists(perSession) {
 // shape as lastSessionForExercise so buildSeedSets and progressionSuggestion
 // consume it unchanged. Compares reps only at the same weight (a heavier session
 // with fewer reps is real progression, not weakness).
-function bestRecentEntry(state, exId, dayId = null, window = 3) {
-  const recent = recentSessionsForExercise(state, exId, dayId, window);
+function bestRecentEntry(state, exId, dayId = null, window = 3, occ = 0) {
+  const recent = recentSessionsForExercise(state, exId, dayId, window, occ);
   if (!recent.length) return null;
   // Only warm-ups are stripped — warm-ups are always a contiguous prefix, so
   // dropping them still leaves working-set position i aligned across
@@ -3225,7 +3234,7 @@ function progressionCeilingFor(store, base, plannedRepsMax, progressionOffset) {
 // Returns { kg, reps } suggestion when all last sets hit top of rep range, null otherwise.
 // refOverride: a pre-fetched { entry: { sets } } reference (fetchSeedEntries) —
 // used when the exercise's recent history lives outside the boot window.
-function progressionSuggestion(store, exId, dayId, plannedReps, plannedRepsPerSet, refOverride, plannedRepsMax, progressionOffset) {
+function progressionSuggestion(store, exId, dayId, plannedReps, plannedRepsPerSet, refOverride, plannedRepsMax, progressionOffset, occ = 0) {
   if (!progressionEnabled(store, plannedRepsMax, progressionOffset)) return null;
   if (is531MainLift(store, exId, dayId)) return null; // 5/3/1 main lifts climb via the Training Max, not Smart Progression
   const ex = findExercise(store, exId);
@@ -3234,8 +3243,9 @@ function progressionSuggestion(store, exId, dayId, plannedReps, plannedRepsPerSe
   const maxKg = catCfg.maxKg ?? null;
 
   // Anchor on the best recent performance at the current weight, not just the
-  // last session — so a weak week doesn't block an earned weight jump.
-  const ref = refOverride ?? bestRecentEntry(store, exId, dayId);
+  // last session — so a weak week doesn't block an earned weight jump. occ keeps
+  // a repeated exercise's Nth slot anchored on its own history (see bestRecentEntry).
+  const ref = refOverride ?? bestRecentEntry(store, exId, dayId, 3, occ);
   if (!ref) return null;
 
   // Index by true working-set position (warm-ups stripped, nothing else) so
@@ -4518,22 +4528,36 @@ function supersetLabel(memberCount) {
 //   anyVaried: true if any AMRAP Variations round's label diverges from
 //     exName — callers use this to decide whether to show round labels at all
 function techniqueRounds(st, { exName } = {}) {
-  const empty = { kind: null, badge: null, connector: null, rounds: [], totalReps: null, partials: 0, anyVaried: false };
+  const empty = { kind: null, badge: null, connector: null, rounds: [], totalReps: null, partials: 0, stretch: null, anyVaried: false };
   if (!st || !st.technique) return empty;
+  // A weighted stretch (DC-style timed hold at a set weight) rides along as a
+  // finisher on the LAST round of any technique, just like partials — or a plain
+  // set carrying only a stretch uses technique 'weighted_stretch'. It lives in
+  // drops: the last array round for chain techniques, or the drops OBJECT for the
+  // standalone / lengthened_partial forms. Shape: { kg, timeSec } (kg may be null).
+  const objStretch = (st.drops && !Array.isArray(st.drops)) ? (st.drops.stretch || null) : null;
+  if (st.technique === 'weighted_stretch') {
+    return { ...empty, kind: 'weighted_stretch', badge: 'STRETCH', stretch: objStretch };
+  }
   if (st.technique === 'lengthened_partial') {
-    return { ...empty, kind: 'lengthened_partial', badge: 'PARTIALS', partials: st.drops?.partials || 0 };
+    return { ...empty, kind: 'lengthened_partial', badge: 'PARTIALS', partials: st.drops?.partials || 0, stretch: objStretch };
   }
   const BADGES = { drop: 'DROP SET', myorep: 'MYO-REPS', myorep_match: 'MYO MATCH', amrap_variations: 'AMRAP' };
   if (!BADGES[st.technique]) return empty;
   const drops = (st.drops && st.drops.length > 0) ? st.drops : (st.kg != null ? [{ kg: st.kg, reps: st.reps }] : []);
   const isMyo = st.technique === 'myorep' || st.technique === 'myorep_match';
+  const last = drops[drops.length - 1] || {};
   return {
     kind: st.technique,
     badge: BADGES[st.technique],
     connector: isMyo ? '↺' : '→',
-    rounds: drops.map(d => ({ kg: d.kg, reps: d.reps, label: d.label })),
+    // Finishers (partials count, weighted stretch) ride PER ROUND now — any
+    // drop/mini/round can carry its own, not just the last. Top-level
+    // partials/stretch stay as the LAST round's, for older single-finisher callers.
+    rounds: drops.map(d => ({ kg: d.kg, reps: d.reps, label: d.label, partials: d.partials || 0, stretch: d.stretch || null })),
     totalReps: isMyo ? drops.reduce((a, d) => a + (d.reps || 0), 0) : null,
-    partials: drops[drops.length - 1]?.partials || 0,
+    partials: last.partials || 0,
+    stretch: last.stretch || null,
     anyVaried: st.technique === 'amrap_variations' && drops.some(d => d.label && d.label !== exName),
   };
 }

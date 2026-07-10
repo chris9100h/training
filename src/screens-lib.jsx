@@ -2793,7 +2793,10 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
     const sessionBest = sessionBestMap[exId];
     if (sessionBest == null || val !== sessionBest) return false;
     const best = prMap[exId];
-    return best == null || val > best;
+    // No prior history for this exercise at all — nothing to beat, so the
+    // first-ever session with it isn't a PR (matches the two other isPR
+    // implementations in this file, which both gate on pr > 0).
+    return best != null && val > best;
   };
 
   const muscleGroups = [...new Set(
@@ -3118,13 +3121,8 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                                   </span>
                                 </React.Fragment>
                               ))}
-                              {tr.partials > 0 && (
-                                <React.Fragment>
-                                  <span style={{ color: UI.inkGhost, fontSize: 10, fontFamily: UI.fontUi }}>+</span>
-                                  <span style={{ border: `1px solid rgba(var(--accent-rgb),0.35)`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontNum, fontSize: 12, color: UI.inkSoft }}>{tr.partials}</span>
-                                </React.Fragment>
-                              )}
                             </div>
+                            <FinisherTags drops={st.drops} labelFor={(di) => di === 0 ? 'top' : 'drop ' + di} />
                           </div>
                         );
                       }
@@ -3174,20 +3172,14 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                                   </React.Fragment>
                                 ))}
                               </div>
-                              {(tr.totalReps > 0 || tr.partials > 0) && (
+                              {tr.totalReps > 0 && (
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                                  {tr.totalReps > 0 && (
-                                    <div style={{ border: `1px solid var(--accent)`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontUi, fontSize: 11, color: 'var(--accent)', letterSpacing: '0.03em', textAlign: 'center' }}>
-                                      Total {tr.totalReps}
-                                    </div>
-                                  )}
-                                  {tr.partials > 0 && (
-                                    <div style={{ border: `1px solid rgba(var(--accent-rgb),0.35)`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontNum, fontSize: 11, color: UI.inkSoft }}>
-                                      +{tr.partials} partial{tr.partials === 1 ? '' : 's'}
-                                    </div>
-                                  )}
+                                  <div style={{ border: `1px solid var(--accent)`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontUi, fontSize: 11, color: 'var(--accent)', letterSpacing: '0.03em', textAlign: 'center' }}>
+                                    Total {tr.totalReps}
+                                  </div>
                                 </div>
                               )}
+                              <FinisherTags drops={st.drops} labelFor={(di) => di === 0 ? 'act' : 'myo ' + di} />
                             </div>
                           </div>
                         );
@@ -3211,6 +3203,29 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                               </span>
                               {partials > 0 && <span style={{ color: UI.inkGhost, fontSize: 10, fontFamily: UI.fontUi }}>+</span>}
                               {partials > 0 && <span style={{ border: `1px solid rgba(var(--accent-rgb),0.35)`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontNum, fontSize: 12, color: UI.inkSoft }}>{partials}</span>}
+                              <StretchChipLib tr={LB.techniqueRounds(st)} />
+                            </div>
+                          </div>
+                        );
+                      }
+
+                      // Weighted Stretch: badge + main chip + the stretch hold
+                      if (st.technique === 'weighted_stretch' && !isCheckboxOnly) {
+                        const tr = LB.techniqueRounds(st);
+                        const chipColor = highlight ? UI.goldLight : decline ? 'rgba(var(--danger-rgb),0.85)' : UI.ink;
+                        const chipBorder = highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : UI.hairStrong;
+                        const chipBg = highlight ? UI.goldFaint : decline ? 'rgba(var(--danger-rgb),0.08)' : 'transparent';
+                        return (
+                          <div key={j} style={{ width: '100%', marginTop: j > 0 ? 6 : 0, borderLeft: `2px solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.4)' : 'rgba(var(--accent-rgb),0.35)'}`, paddingLeft: 10 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                              <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.85)' : UI.inkFaint, background: highlight ? UI.goldFaint : decline ? 'rgba(var(--danger-rgb),0.08)' : 'rgba(var(--accent-rgb),0.08)', border: `0.5px solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : 'rgba(var(--accent-rgb),0.25)'}`, borderRadius: 4, padding: '2px 6px' }}>STRETCH</span>
+                              {pr && <i className="fa-solid fa-dumbbell" style={{ fontSize: 9, color: UI.gold }} />}
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
+                              <span style={{ background: chipBg, border: `1px solid ${chipBorder}`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontNum, fontSize: 12, color: chipColor }}>
+                                {st.kg ?? '—'}<span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, fontSize: 10 }}>{UI.unit()}</span><span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, margin: '0 1px' }}>×</span>{st.reps ?? '—'}
+                              </span>
+                              <StretchChipLib tr={tr} />
                             </div>
                           </div>
                         );
@@ -3271,13 +3286,8 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                                   </div>
                                 </React.Fragment>
                               ))}
-                              {tr.partials > 0 && (
-                                <React.Fragment>
-                                  <span style={{ color: UI.inkGhost, fontSize: 10, fontFamily: UI.fontUi, alignSelf: 'center' }}>+</span>
-                                  <span style={{ border: `1px solid rgba(var(--accent-rgb),0.35)`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontNum, fontSize: 12, color: UI.inkSoft, alignSelf: 'center' }}>{tr.partials}</span>
-                                </React.Fragment>
-                              )}
                             </div>
+                            <FinisherTags drops={st.drops} labelFor={(di) => 'round ' + (di + 1)} />
                           </div>
                         );
                       }
@@ -3498,6 +3508,52 @@ function SessionEditSheet({ session, duration, exercises, onClose, onSave }) {
   );
 }
 
+// The weighted-stretch holds a set carried, as a compact "20kg·30s / 40s"
+// string: per-round holds on a chain (drop/myo/AMRAP with finishers), or the
+// single object-form stretch on a standalone weighted-stretch or lengthened
+// set. Empty string when the set carried no stretch.
+function stretchText(tr) {
+  const list = (tr.rounds && tr.rounds.length) ? tr.rounds.filter(r => r.stretch).map(r => r.stretch) : (tr.stretch ? [tr.stretch] : []);
+  if (!list.length) return '';
+  return list.map(x => (x.kg != null ? String(x.kg).replace('.', ',') + UI.unit() + '·' : '') + x.timeSec + 's').join(' / ');
+}
+
+// Accent-bordered "stretch 20kg·30s" chip, matching the partials chip style
+// used across the history/compare views. Renders nothing when the set carried
+// no weighted stretch. Used for the object-form techniques (standalone
+// weighted stretch, lengthened partials); chains use FinisherTags below.
+function StretchChipLib({ tr }) {
+  const txt = stretchText(tr);
+  if (!txt) return null;
+  return <span style={{ border: `1px solid rgba(var(--accent-rgb),0.35)`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontNum, fontSize: 12, color: UI.inkSoft, whiteSpace: 'nowrap' }}>stretch {txt}</span>;
+}
+
+// Per-round finisher breakdown for a completed chain set (drop/myo/AMRAP): one
+// tag per round that carried partials and/or a weighted stretch, labelled by
+// round. Mirrors the live training screen's FinisherSummary exactly so history
+// shows EVERY round's finisher, not just the last round's. `drops` is the raw
+// per-round array; named FinisherTags (not FinisherSummary) because classic
+// scripts share one global scope and train.jsx already owns that name.
+function FinisherTags({ drops, labelFor }) {
+  const lines = (drops || []).map((d, di) => {
+    const p = d.partials || 0, st = d.stretch || null;
+    return (p > 0 || st) ? { di, label: labelFor(di), p, st } : null;
+  }).filter(Boolean);
+  if (!lines.length) return null;
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 4 }}>
+      {lines.map(({ di, label, p, st }) => (
+        <span key={di} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '3px 8px', border: '1px solid var(--accent)', borderRadius: 4, fontFamily: UI.fontUi, fontSize: 11, color: 'var(--accent)', letterSpacing: '0.03em' }}>
+          <span style={{ opacity: 0.6, fontSize: 9, textTransform: 'uppercase' }}>{label}</span>
+          {p > 0 && <span>+{p} partial{p === 1 ? '' : 's'}</span>}
+          {p > 0 && st && <span style={{ opacity: 0.4 }}>|</span>}
+          {st && <span>stretch {st.kg != null ? String(st.kg).replace('.', ',') + ' ' + UI.unit() + ' · ' : ''}{st.timeSec}s</span>}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 // ─── SESSION COMPARE ───────────────────────────────────────────────────
 // Set-string formatting for the compact "compared" (right) column — kept
 // as plain text (not chips) since the 100px column has no room for chip
@@ -3507,14 +3563,20 @@ function fmtCompareSet(st) {
   if (st.skipped && !st.done) return 'skipped';
   if (st.timeSec != null) return LB.fmtDuration(st.timeSec);
   const tr = LB.techniqueRounds(st);
+  const strTxt = stretchText(tr);
+  const strSfx = strTxt ? ` +stretch ${strTxt}` : '';
+  if (tr.kind === 'weighted_stretch') {
+    const main = `${st.kg != null ? st.kg + UI.unit() : '—'} × ${st.reps ?? '—'}`;
+    return `${main}${strSfx}`;
+  }
   if (tr.kind === 'lengthened_partial') {
     const main = `${st.kg != null ? st.kg + UI.unit() : '—'} × ${st.reps ?? '—'}`;
-    return tr.partials > 0 ? `${main} +${tr.partials} partials` : main;
+    return (tr.partials > 0 ? `${main} +${tr.partials} partials` : main) + strSfx;
   }
   if (tr.kind) {
     const chain = tr.rounds.map((d, di) => (tr.connector === '↺' && di > 0) ? (d.reps ?? '—') : `${d.kg ?? '—'}${UI.unit()}×${d.reps ?? '—'}`).join(` ${tr.connector} `);
     const suffix = tr.totalReps != null ? ` (${tr.totalReps})` : '';
-    return tr.partials > 0 ? `${chain}${suffix} +${tr.partials} partials` : `${chain}${suffix}`;
+    return (tr.partials > 0 ? `${chain}${suffix} +${tr.partials} partials` : `${chain}${suffix}`) + strSfx;
   }
   // Checkbox / no-numeric completed set: show a tick, not a meaningless '— × —'.
   if (st.done && st.kg == null && st.reps == null && st.repsL == null && st.repsR == null) return '✓';
@@ -3554,6 +3616,23 @@ function TechniqueBlock({ st, highlight = false, decline = false }) {
           </span>
           {tr.partials > 0 && <span style={{ color: UI.inkGhost, fontSize: 10, fontFamily: UI.fontUi }}>+</span>}
           {tr.partials > 0 && <span style={{ border: `1px solid rgba(var(--accent-rgb),0.35)`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontNum, fontSize: 12, color: UI.inkSoft }}>{tr.partials}</span>}
+          <StretchChipLib tr={tr} />
+        </div>
+      </div>
+    );
+  }
+
+  if (tr.kind === 'weighted_stretch') {
+    return (
+      <div style={{ borderLeft: `2px solid ${railColor}`, paddingLeft: 10 }}>
+        <div style={{ marginBottom: 6 }}>
+          <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: badgeColor, background: badgeBg, border: `0.5px solid ${badgeBorder}`, borderRadius: 4, padding: '2px 6px' }}>{tr.badge}</span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
+          <span style={{ background: chipBg, border: `1px solid ${chipBorder}`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontNum, fontSize: 12, color: chipColor }}>
+            {st.kg ?? '—'}<span style={{ color: unitColor, fontSize: 10 }}>{UI.unit()}</span><span style={{ color: unitColor, margin: '0 1px' }}>×</span>{st.reps ?? '—'}
+          </span>
+          <StretchChipLib tr={tr} />
         </div>
       </div>
     );
@@ -3561,6 +3640,11 @@ function TechniqueBlock({ st, highlight = false, decline = false }) {
 
   const isMyo = tr.connector === '↺';
   const drops = tr.rounds;
+  const finLabel = (tr.kind === 'myorep' || tr.kind === 'myorep_match')
+    ? (di) => di === 0 ? 'act' : 'myo ' + di
+    : tr.kind === 'amrap_variations'
+    ? (di) => 'round ' + (di + 1)
+    : (di) => di === 0 ? 'top' : 'drop ' + di;
 
   return (
     <div style={{ borderLeft: `2px solid ${railColor}`, paddingLeft: 10 }}>
@@ -3590,12 +3674,7 @@ function TechniqueBlock({ st, highlight = false, decline = false }) {
             Total {tr.totalReps}
           </div>
         )}
-        {tr.partials > 0 && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            <span style={{ color: UI.inkGhost, fontSize: 10, fontFamily: UI.fontUi }}>+</span>
-            <span style={{ border: `1px solid rgba(var(--accent-rgb),0.35)`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontNum, fontSize: 12, color: UI.inkSoft }}>{tr.partials}</span>
-          </div>
-        )}
+        <FinisherTags drops={st.drops} labelFor={finLabel} />
       </div>
     </div>
   );
@@ -3894,14 +3973,20 @@ function ComparisonScreen({ session, onDismiss, go, userName }) {
             if (s.skipped && !s.done) return 'skipped';
             if (s.timeSec != null) return LB.fmtDuration(s.timeSec);
             const tr = LB.techniqueRounds(s);
+            const strTxt = stretchText(tr);
+            const strSfx = strTxt ? ` +stretch ${strTxt}` : '';
+            if (tr.kind === 'weighted_stretch') {
+              const main = `${s.kg != null ? s.kg + unit : '—'} × ${s.reps ?? '—'}`;
+              return `${main}${strSfx}`;
+            }
             if (tr.kind === 'lengthened_partial') {
               const main = `${s.kg != null ? s.kg + unit : '—'} × ${s.reps ?? '—'}`;
-              return tr.partials > 0 ? `${main} +${tr.partials} partials` : main;
+              return (tr.partials > 0 ? `${main} +${tr.partials} partials` : main) + strSfx;
             }
             if (tr.kind) {
               const chain = tr.rounds.map((d, di) => (tr.connector === '↺' && di > 0) ? (d.reps ?? '—') : `${d.kg ?? '—'}${unit}×${d.reps ?? '—'}`).join(` ${tr.connector} `);
               const suffix = tr.totalReps != null ? ` (${tr.totalReps})` : '';
-              return tr.partials > 0 ? `${chain}${suffix} +${tr.partials} partials` : `${chain}${suffix}`;
+              return (tr.partials > 0 ? `${chain}${suffix} +${tr.partials} partials` : `${chain}${suffix}`) + strSfx;
             }
             const repsStr = (s.repsL != null || s.repsR != null)
               ? `L${s.repsL ?? '?'}/R${s.repsR ?? '?'}`
@@ -4209,13 +4294,8 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
                         <span className="num" style={{ fontSize: 13, color: UI.ink }}>{d.kg ?? '—'}<span style={{ fontSize: 10, color: UI.inkFaint }}>{unit}</span> × {d.reps ?? '—'}</span>
                       </React.Fragment>
                     ))}
-                    {tr.partials > 0 && (
-                      <React.Fragment>
-                        <span style={{ color: UI.inkGhost, fontSize: 10, fontFamily: UI.fontUi }}>+</span>
-                        <span className="num" style={{ fontSize: 13, color: UI.inkSoft }}>{tr.partials}<span style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint, marginLeft: 3 }}>partials</span></span>
-                      </React.Fragment>
-                    )}
                   </div>
+                  <FinisherTags drops={s.drops} labelFor={(di) => di === 0 ? 'top' : 'drop ' + di} />
                 </div>
                 {i < entry.sets.length - 1 && <div className="knurl" />}
                 </React.Fragment>
@@ -4246,13 +4326,8 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
                           </span>
                         </React.Fragment>
                       ))}
-                      {tr.partials > 0 && (
-                        <React.Fragment>
-                          <span style={{ color: UI.inkGhost, fontSize: 10, fontFamily: UI.fontUi }}>+</span>
-                          <span className="num" style={{ fontSize: 13, color: UI.inkSoft }}>{tr.partials}<span style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint, marginLeft: 3 }}>partials</span></span>
-                        </React.Fragment>
-                      )}
                     </div>
+                    <FinisherTags drops={s.drops} labelFor={(di) => di === 0 ? 'act' : 'myo ' + di} />
                   </div>
                   {i < entry.sets.length - 1 && <div className="knurl" />}
                   </React.Fragment>
@@ -4288,13 +4363,8 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
                         </div>
                       </React.Fragment>
                     ))}
-                    {tr.partials > 0 && (
-                      <React.Fragment>
-                        <span style={{ color: UI.inkGhost, fontSize: 10, fontFamily: UI.fontUi, alignSelf: 'center' }}>+</span>
-                        <span className="num" style={{ fontSize: 13, color: UI.inkSoft, alignSelf: 'center' }}>{tr.partials}<span style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint, marginLeft: 3 }}>partials</span></span>
-                      </React.Fragment>
-                    )}
                   </div>
+                  <FinisherTags drops={s.drops} labelFor={(di) => 'round ' + (di + 1)} />
                 </div>
                 {i < entry.sets.length - 1 && <div className="knurl" />}
                 </React.Fragment>
@@ -4319,6 +4389,32 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
                       <span className="num" style={{ fontSize: 13, color: UI.ink }}>{s.kg ?? '—'}<span style={{ fontSize: 10, color: UI.inkFaint }}>{unit}</span> × {s.reps ?? '—'}</span>
                       {partials > 0 && <span style={{ color: UI.inkGhost, fontSize: 10, fontFamily: UI.fontUi }}>+</span>}
                       {partials > 0 && <span className="num" style={{ fontSize: 13, color: UI.inkSoft }}>{partials}<span style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint, marginLeft: 3 }}>partials</span></span>}
+                      {stretchText(tr) && <span style={{ color: UI.inkGhost, fontSize: 10, fontFamily: UI.fontUi }}>+</span>}
+                      {stretchText(tr) && <span className="num" style={{ fontSize: 13, color: UI.inkSoft }}>stretch {stretchText(tr)}</span>}
+                    </div>
+                  </div>
+                  {i < entry.sets.length - 1 && <div className="knurl" />}
+                  </React.Fragment>
+                );
+              }
+
+              // Weighted stretch
+              if (tr.kind === 'weighted_stretch') {
+                return (
+                  <React.Fragment key={i}>
+                  <div style={{ padding: '12px 0', opacity: done ? 1 : 0.35, transition: 'opacity 0.3s' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                      <span className="num" style={{ fontSize: 11, color: done ? UI.gold : UI.inkFaint }}>{i + 1}</span>
+                      <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkFaint, background: 'rgba(var(--accent-rgb),0.08)', border: `0.5px solid rgba(var(--accent-rgb),0.25)`, borderRadius: 4, padding: '2px 6px' }}>STRETCH</span>
+                      <div style={{ marginLeft: 'auto' }}>
+                        {done ? <svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke={UI.gold} strokeWidth="1.8"><path d="M2 6l2.5 2.5L10 3"/></svg>
+                               : <div style={{ width: 13, height: 13, borderRadius: '50%', border: `1px solid ${UI.hair}` }} />}
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
+                      <span className="num" style={{ fontSize: 13, color: UI.ink }}>{s.kg ?? '—'}<span style={{ fontSize: 10, color: UI.inkFaint }}>{unit}</span> × {s.reps ?? '—'}</span>
+                      {stretchText(tr) && <span style={{ color: UI.inkGhost, fontSize: 10, fontFamily: UI.fontUi }}>+</span>}
+                      {stretchText(tr) && <span className="num" style={{ fontSize: 13, color: UI.inkSoft }}>stretch {stretchText(tr)}</span>}
                     </div>
                   </div>
                   {i < entry.sets.length - 1 && <div className="knurl" />}
@@ -4741,7 +4837,7 @@ function ExerciseHistoryScreen({ store, go, exId, dayId, exName, back, userId })
                     }}>
                       {st.timeSec != null ? (
                         LB.fmtDuration(st.timeSec)
-                      ) : tr.kind === 'lengthened_partial' ? (
+                      ) : (tr.kind === 'lengthened_partial' || tr.kind === 'weighted_stretch') ? (
                         <>{st.kg ?? '—'}<span style={{ color: UI.inkFaint, fontSize: 9 }}>{UI.unit()}</span><span style={{ color: UI.inkFaint, margin: '0 1px' }}>×</span>{st.reps ?? '—'}</>
                       ) : tr.kind ? (
                         tr.rounds.map((d, di) => (
@@ -4755,6 +4851,7 @@ function ExerciseHistoryScreen({ store, go, exId, dayId, exName, back, userId })
                         <>{st.kg ?? '—'}<span style={{ color: UI.inkFaint, fontSize: 9 }}>{UI.unit()}</span><span style={{ color: UI.inkFaint, margin: '0 1px' }}>×</span>{isUni ? `L${st.repsL ?? '?'}/R${st.repsR ?? '?'}` : (st.reps ?? '—')}</>
                       )}
                       {tr.partials > 0 && <span style={{ color: UI.inkFaint }}> +{tr.partials}</span>}
+                      {stretchText(tr) && <span style={{ color: UI.inkFaint }}> +stretch {stretchText(tr)}</span>}
                     </span>
                     );
                   })}

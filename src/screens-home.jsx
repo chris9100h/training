@@ -2148,7 +2148,12 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     // once per item below.
     const resolvedMeso = (typeof getMesoState === 'function') ? getMesoState(sch?.id, store.mesoStates) : null;
     const mesoBoosts = resolvedMeso?.weightBoosts ?? null;
+    // occ counter: the Nth appearance of an exercise in the day seeds from the
+    // Nth occurrence of past sessions, so a repeated exercise's slots don't share
+    // one reference (see bestRecentEntry).
+    const occCount = {};
     return (items || []).map(it => {
+      const occ = occCount[it.exId] == null ? (occCount[it.exId] = 0) : (occCount[it.exId] += 1);
       const ex = LB.findExercise(store, it.exId);
       if (ex?.movement_type === 'cardio') {
         return { exId: it.exId, name: ex.name, isCardio: true, plannedSets: 0, plannedReps: null, plannedRepsPerSet: null, sets: [], cardioDone: false, cardioData: null, note: '', supersetGroup: it.supersetGroup || null };
@@ -2177,7 +2182,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       // 0145), so an exercise whose last session left the boot window still
       // seeds its real last duration instead of the default.
       if (LB.exerciseLogMode(ex) === 'time') {
-        const lastTime = seedRefs[it.exId] ?? LB.bestRecentEntry(store, it.exId, dayId);
+        const lastTime = seedRefs[it.exId] ?? LB.bestRecentEntry(store, it.exId, dayId, 3, occ);
         const sets = LB.buildTimeSeedSets(it, lastTime);
         return {
           exId: it.exId, name: ex?.name || '?',
@@ -2186,9 +2191,9 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
           note: '', supersetGroup: it.supersetGroup || null,
         };
       }
-      const last = seedRefs[it.exId] ?? LB.bestRecentEntry(store, it.exId, dayId);
+      const last = seedRefs[it.exId] ?? LB.bestRecentEntry(store, it.exId, dayId, 3, occ);
       const isUnilateral = ex?.unilateral || false;
-      const suggestion = LB.progressionSuggestion(store, it.exId, dayId, it.reps, it.repsPerSet || null, seedRefs[it.exId], it.repsMax || null, it.progressionOffset ?? null);
+      const suggestion = LB.progressionSuggestion(store, it.exId, dayId, it.reps, it.repsPerSet || null, seedRefs[it.exId], it.repsMax || null, it.progressionOffset ?? null, occ);
       const bodyweightKg = ex?.equipment === 'bodyweight' ? LB.latestBodyweight(store) : null;
       const itAdj = (typeof applyMesoSetDeltaFromState === 'function') ? applyMesoSetDeltaFromState(it, dayId, resolvedMeso) : it;
       const weightBoost = mesoBoosts?.[it.exId + '_' + dayId] ?? null;
@@ -2420,18 +2425,20 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     setQuickActionsOpen(false);
     const items = (template.exercises || []).filter(it => LB.findExercise(store, it.exId));
     const seedRefs = await LB.fetchSeedEntries(store, items, null, userId);
+    const occCount = {}; // Nth appearance of an exercise seeds from its Nth past occurrence
     const entries = items.map(it => {
+      const occ = occCount[it.exId] == null ? (occCount[it.exId] = 0) : (occCount[it.exId] += 1);
       const ex = LB.findExercise(store, it.exId);
       if (ex?.movement_type === 'cardio') {
         return { exId: it.exId, name: ex.name, isCardio: true, plannedSets: 0, plannedReps: null, plannedRepsPerSet: null, sets: [], cardioDone: false, cardioData: null, note: '', supersetGroup: it.supersetGroup || null };
       }
       if (LB.exerciseLogMode(ex) === 'time') {
-        const sets = LB.buildTimeSeedSets(it, seedRefs[it.exId] ?? LB.bestRecentEntry(store, it.exId, null));
+        const sets = LB.buildTimeSeedSets(it, seedRefs[it.exId] ?? LB.bestRecentEntry(store, it.exId, null, 3, occ));
         return { exId: it.exId, name: ex?.name || '?', plannedSets: sets.length, plannedReps: null, plannedRepsPerSet: null, sets, note: '', supersetGroup: it.supersetGroup || null };
       }
-      const last = seedRefs[it.exId] ?? LB.bestRecentEntry(store, it.exId, null);
+      const last = seedRefs[it.exId] ?? LB.bestRecentEntry(store, it.exId, null, 3, occ);
       const isUni = ex?.unilateral || false;
-      const suggestion = LB.progressionSuggestion(store, it.exId, null, it.reps, it.repsPerSet, seedRefs[it.exId], it.repsMax || null, it.progressionOffset ?? null);
+      const suggestion = LB.progressionSuggestion(store, it.exId, null, it.reps, it.repsPerSet, seedRefs[it.exId], it.repsMax || null, it.progressionOffset ?? null, occ);
       const bodyweightKg = ex?.equipment === 'bodyweight' ? LB.latestBodyweight(store) : null;
       const seedSets = LB.buildSeedSets(it, last, suggestion, isUni, store, bodyweightKg);
       return { exId: it.exId, name: ex?.name || '?', plannedSets: it.sets, plannedReps: it.reps, plannedRepsPerSet: it.repsPerSet || null, plannedRepsMax: it.repsMax || null, plannedProgressionOffset: it.progressionOffset ?? null, sets: seedSets, note: '', supersetGroup: it.supersetGroup || null };

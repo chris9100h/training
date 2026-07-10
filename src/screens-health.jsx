@@ -28,6 +28,17 @@ function healthWindow(days) {
   return { start: healthShiftISO(end, -(days - 1)), end };
 }
 
+// [start, end] ISO bounds for the Mon-Sun calendar week containing `anchor`.
+// Same formula as HealthDateStrip/computeHealthWeekStats use for the top date
+// strip and "This Week" card, factored out so the 1W charts below can share
+// it instead of quietly using a trailing 7-day window that floats with
+// today's weekday and never lines up with the Monday-anchored week above it.
+function healthMondayWeekBounds(anchor) {
+  const jsDow = new Date(anchor + 'T12:00:00').getDay();
+  const monday = healthShiftISO(anchor, -((jsDow === 0 ? 7 : jsDow) - 1));
+  return { start: monday, end: healthShiftISO(monday, 6) };
+}
+
 const healthNum = v => (v === '' || v == null || isNaN(parseFloat(v))) ? null : parseFloat(String(v).replace(',', '.'));
 const healthInt = v => (v === '' || v == null || isNaN(parseInt(v, 10))) ? null : parseInt(v, 10);
 
@@ -41,8 +52,12 @@ function healthFmtDate(iso, opts = { weekday: 'short', day: 'numeric', month: 's
 // Windowed series builder for the charts — pure, so HealthScreen (dailyLogs)
 // and HealthClientLogs (a coach's client logs) can share it instead of
 // reimplementing the same ~90 lines against differently-named data.
-function healthSeriesFor(logs, days, pick) {
-  const { start, end } = healthWindow(days);
+// `windowOverride` (optional {start,end}) lets a caller replace the default
+// trailing N-day window — used to align the 1W charts to the same
+// Monday-anchored calendar week as the date strip / "This Week" card above
+// them, instead of a rolling window that floats with today's weekday.
+function healthSeriesFor(logs, days, pick, windowOverride) {
+  const { start, end } = windowOverride || healthWindow(days);
   const data = logs.filter(l => l.date >= start && l.date <= end).map(l => ({ date: l.date, ...pick(l) }));
   const dates = data.map(d => d.date);
   let from = dates.length ? dates.reduce((a, b) => a < b ? a : b) : start;
@@ -51,8 +66,8 @@ function healthSeriesFor(logs, days, pick) {
   return { from, to, data };
 }
 
-function healthCardioSeries(cardioLogs, days) {
-  const { start, end } = healthWindow(days);
+function healthCardioSeries(cardioLogs, days, windowOverride) {
+  const { start, end } = windowOverride || healthWindow(days);
   const byDay = {};
   (cardioLogs || []).forEach(l => { if (l.date >= start && l.date <= end) byDay[l.date] = (byDay[l.date] || 0) + (l.durationMinutes || 0); });
   const data = Object.keys(byDay).map(date => ({ date, value: byDay[date] }));
@@ -1592,13 +1607,18 @@ function HealthScreen({ store, setStore, go, userId }) {
   const tfDays = id => (HEALTH_TFS.find(t => t.id === id) || HEALTH_TFS[1]).days;
 
   const windowDays = tfDays(tf);
-  const weightSeries = useMemoH(() => healthSeriesFor(dailyLogs, windowDays, l => ({ value: l.weight })), [dailyLogs, tf]);
-  const stepsSeries = useMemoH(() => healthSeriesFor(dailyLogs, windowDays, l => ({ value: l.steps })), [dailyLogs, tf]);
-  const macroSeries = useMemoH(() => healthSeriesFor(dailyLogs, windowDays, l => ({ protein: l.protein, carbs: l.carbs, fat: l.fat, fiber: l.fiber, calories: l.calories, targetCal: l.targetsSnap?.calories ?? null })), [dailyLogs, tf]);
-  const adhSeries = useMemoH(() => healthSeriesFor(dailyLogs, windowDays, l => ({ value: l.adherence })), [dailyLogs, tf]);
+  // 1W aligns to the same Monday-anchored calendar week as the date strip /
+  // "This Week" card above (re-anchoring to whichever day is selected, same
+  // as that card); 1M/3M stay a rolling trailing window (a calendar-week
+  // boundary wouldn't mean much over a month+ anyway).
+  const weekWindow = tf === '1W' ? healthMondayWeekBounds(selectedDate || today) : null;
+  const weightSeries = useMemoH(() => healthSeriesFor(dailyLogs, windowDays, l => ({ value: l.weight }), weekWindow), [dailyLogs, tf, selectedDate]);
+  const stepsSeries = useMemoH(() => healthSeriesFor(dailyLogs, windowDays, l => ({ value: l.steps }), weekWindow), [dailyLogs, tf, selectedDate]);
+  const macroSeries = useMemoH(() => healthSeriesFor(dailyLogs, windowDays, l => ({ protein: l.protein, carbs: l.carbs, fat: l.fat, fiber: l.fiber, calories: l.calories, targetCal: l.targetsSnap?.calories ?? null }), weekWindow), [dailyLogs, tf, selectedDate]);
+  const adhSeries = useMemoH(() => healthSeriesFor(dailyLogs, windowDays, l => ({ value: l.adherence }), weekWindow), [dailyLogs, tf, selectedDate]);
 
   // Cardio chart series — minutes summed per day from store.cardioLogs.
-  const cardioSeries = useMemoH(() => healthCardioSeries(store.cardioLogs, windowDays), [store.cardioLogs, tf]);
+  const cardioSeries = useMemoH(() => healthCardioSeries(store.cardioLogs, windowDays, weekWindow), [store.cardioLogs, tf, selectedDate]);
 
   // Historical avg macro target for the chart window (from persisted targetsSnap).
   // For 1M/3M this replaces the current training/rest split in the Macro card target row.
@@ -1883,11 +1903,14 @@ function HealthClientLogs({ clientStore }) {
   const tfDays = id => (HEALTH_TFS.find(t => t.id === id) || HEALTH_TFS[1]).days;
   const windowDays = tfDays(tf);
 
-  const weightSeries = useMemoH(() => healthSeriesFor(logs, windowDays, l => ({ value: l.weight })), [logs, tf]);
-  const stepsSeries  = useMemoH(() => healthSeriesFor(logs, windowDays, l => ({ value: l.steps })), [logs, tf]);
-  const macroSeries  = useMemoH(() => healthSeriesFor(logs, windowDays, l => ({ protein: l.protein, carbs: l.carbs, fat: l.fat, fiber: l.fiber, calories: l.calories, targetCal: l.targetsSnap?.calories ?? null })), [logs, tf]);
-  const adhSeries    = useMemoH(() => healthSeriesFor(logs, windowDays, l => ({ value: l.adherence })), [logs, tf]);
-  const cardioSeries = useMemoH(() => healthCardioSeries(cardioLogs, windowDays), [cardioLogs, tf]);
+  // 1W aligns to the same Monday-anchored calendar week as the date strip /
+  // "This Week" card above (see HealthScreen's identical weekWindow for why).
+  const weekWindow = tf === '1W' ? healthMondayWeekBounds(selectedDate) : null;
+  const weightSeries = useMemoH(() => healthSeriesFor(logs, windowDays, l => ({ value: l.weight }), weekWindow), [logs, tf, selectedDate]);
+  const stepsSeries  = useMemoH(() => healthSeriesFor(logs, windowDays, l => ({ value: l.steps }), weekWindow), [logs, tf, selectedDate]);
+  const macroSeries  = useMemoH(() => healthSeriesFor(logs, windowDays, l => ({ protein: l.protein, carbs: l.carbs, fat: l.fat, fiber: l.fiber, calories: l.calories, targetCal: l.targetsSnap?.calories ?? null }), weekWindow), [logs, tf, selectedDate]);
+  const adhSeries    = useMemoH(() => healthSeriesFor(logs, windowDays, l => ({ value: l.adherence }), weekWindow), [logs, tf, selectedDate]);
+  const cardioSeries = useMemoH(() => healthCardioSeries(cardioLogs, windowDays, weekWindow), [cardioLogs, tf, selectedDate]);
 
   const numAvg = series => { const vs = series.data.map(d => d.value).filter(v => v != null); return vs.length ? vs.reduce((s, v) => s + v, 0) / vs.length : null; };
   const weightAvg = useMemoH(() => { const a = numAvg(weightSeries); return a != null ? Math.round(a * 10) / 10 : null; }, [weightSeries]);

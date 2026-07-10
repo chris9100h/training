@@ -749,12 +749,15 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
       {day.items.flatMap((it, k) => {
         const ex = LB.findExercise(store, it.exId);
         const isUni = !!ex?.unilateral;
+        // Nth appearance of this exercise in the day -> its Nth past occurrence,
+        // so a repeated exercise's slots don't share one reference.
+        const occ = day.items.slice(0, k).filter(x => x.exId === it.exId).length;
         // Prefer server-merged history (seedRefs) over the local-only window,
         // same as the real session-start flow, so this preview doesn't
         // disagree with what actually gets seeded on a fresh device/reinstall.
         const seedRef = seedRefs[it.exId];
-        const last = seedRef ?? LB.bestRecentEntry(store, it.exId, day.id);
-        const suggestion = LB.progressionSuggestion(store, it.exId, day.id, it.reps, it.repsPerSet || null, seedRef, it.repsMax || null, it.progressionOffset ?? null);
+        const last = seedRef ?? LB.bestRecentEntry(store, it.exId, day.id, 3, occ);
+        const suggestion = LB.progressionSuggestion(store, it.exId, day.id, it.reps, it.repsPerSet || null, seedRef, it.repsMax || null, it.progressionOffset ?? null, occ);
         // Match the real session-start bodyweight rule (screens-home.jsx), not
         // the stricter shouldPullBodyweight, so preview and session agree.
         const bodyweightKg = (ex?.equipment === 'bodyweight') ? LB.latestBodyweight(store) : null;

@@ -587,16 +587,19 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
                     if (s.skipped && !s.done) return 'skipped';
                     if (s.timeSec != null) return LB.fmtDuration(s.timeSec); // time-based set: one duration, no kg x reps
                     const tr = LB.techniqueRounds(s);
+                    const strList = tr.rounds.length ? tr.rounds.filter(r => r.stretch).map(r => r.stretch) : (tr.stretch ? [tr.stretch] : []);
+                    const strTag = strList.length ? ` +stretch ${strList.map(x => x.timeSec + 's').join('/')}` : '';
+                    const main = `${s.kg ?? '—'}${unit} × ${s.reps ?? s.repsL ?? '—'}`;
+                    if (tr.kind === 'weighted_stretch') return `${main}${strTag}`;
                     if (tr.kind === 'lengthened_partial') {
-                      const main = `${s.kg ?? '—'}${unit} × ${s.reps ?? s.repsL ?? '—'}`;
-                      return tr.partials > 0 ? `${main} +${tr.partials}` : main;
+                      return (tr.partials > 0 ? `${main} +${tr.partials}` : main) + strTag;
                     }
                     if (tr.kind) {
                       const chain = tr.rounds.map((d, di) => (tr.connector === '↺' && di > 0) ? (d.reps ?? '—') : `${d.kg ?? '—'}${unit}×${d.reps ?? '—'}`).join(` ${tr.connector} `);
                       const suffix = tr.totalReps != null ? ` (${tr.totalReps})` : '';
-                      return tr.partials > 0 ? `${chain}${suffix} +${tr.partials}` : `${chain}${suffix}`;
+                      return (tr.partials > 0 ? `${chain}${suffix} +${tr.partials}` : `${chain}${suffix}`) + strTag;
                     }
-                    return `${s.kg ?? '—'}${unit} × ${s.reps ?? s.repsL ?? '—'}`;
+                    return main;
                   };
                   const techniqueLabel = (s) => LB.techniqueRounds(s).badge;
                   return (todaySession.entries || []).map((e, i) => {
@@ -684,10 +687,12 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
               </div>
             ) : (
               <div>
-                {(todayDay?.items || []).filter(i => i.exId).map((item, idx) => {
+                {(todayDay?.items || []).filter(i => i.exId).map((item, idx, arr) => {
                   const ex = (clientStore.exercises || []).find(e => e.id === item.exId);
-                  const last = LB.bestRecentEntry(clientStore, item.exId, todayDay.id);
-                  const suggestion = LB.progressionSuggestion(clientStore, item.exId, todayDay.id, item.reps, item.repsPerSet || null, undefined, item.repsMax || null, item.progressionOffset ?? null);
+                  // Nth appearance of this exercise -> its Nth past occurrence.
+                  const occ = arr.slice(0, idx).filter(x => x.exId === item.exId).length;
+                  const last = LB.bestRecentEntry(clientStore, item.exId, todayDay.id, 3, occ);
+                  const suggestion = LB.progressionSuggestion(clientStore, item.exId, todayDay.id, item.reps, item.repsPerSet || null, undefined, item.repsMax || null, item.progressionOffset ?? null, occ);
                   const bodyweightKg = LB.shouldPullBodyweight(ex) ? LB.latestBodyweight(clientStore) : null;
                   const seeds = LB.buildSeedSets(item, last, suggestion, ex?.unilateral, clientStore, bodyweightKg, clientStore.statusMode === 'deload');
                   // Reps-only / bodyweight / checkbox exercises seed with kg==null
@@ -1512,16 +1517,19 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
               if (s.skipped && !s.done) return 'skipped';
               if (s.timeSec != null) return LB.fmtDuration(s.timeSec); // time-based set: one duration, no kg x reps
               const tr = LB.techniqueRounds(s);
+              const strList = tr.rounds.length ? tr.rounds.filter(r => r.stretch).map(r => r.stretch) : (tr.stretch ? [tr.stretch] : []);
+              const strTag = strList.length ? ` +stretch ${strList.map(x => x.timeSec + 's').join('/')}` : '';
+              const main = `${s.kg ?? '—'}${unit} × ${s.reps ?? s.repsL ?? '—'}`;
+              if (tr.kind === 'weighted_stretch') return `${main}${strTag}`;
               if (tr.kind === 'lengthened_partial') {
-                const main = `${s.kg ?? '—'}${unit} × ${s.reps ?? s.repsL ?? '—'}`;
-                return tr.partials > 0 ? `${main} +${tr.partials}` : main;
+                return (tr.partials > 0 ? `${main} +${tr.partials}` : main) + strTag;
               }
               if (tr.kind) {
                 const chain = tr.rounds.map((d, di) => (tr.connector === '↺' && di > 0) ? (d.reps ?? '—') : `${d.kg ?? '—'}${unit}×${d.reps ?? '—'}`).join(` ${tr.connector} `);
                 const suffix = tr.totalReps != null ? ` (${tr.totalReps})` : '';
-                return tr.partials > 0 ? `${chain}${suffix} +${tr.partials}` : `${chain}${suffix}`;
+                return (tr.partials > 0 ? `${chain}${suffix} +${tr.partials}` : `${chain}${suffix}`) + strTag;
               }
-              return `${s.kg ?? '—'}${unit} × ${s.reps ?? s.repsL ?? '—'}`;
+              return main;
             };
             const techniqueLabel = (s) => LB.techniqueRounds(s).badge;
             // If any set in the row carries a technique badge, every set needs

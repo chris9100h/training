@@ -718,87 +718,83 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     }
   }, [supportSheet]);
 
-  // Load notes + mark read when user opens a ticket thread
+  // Load notes + mark read when user opens a ticket thread, then keep polling
+  // for new ones every 12s while it stays open. Support tickets aren't wired
+  // into the live unreadNotes/Realtime path regular coach chats use (see
+  // app.jsx's subscribeToChanges, which only bumps the unread badge for a
+  // support note instead of pushing it into an open thread) — without this
+  // poll, a reply only ever showed up after closing and reopening the sheet.
+  // `first` gates the loading spinner + support-ticket-list badge clear to
+  // just the initial open, so background refreshes don't flash "Loading…" or
+  // redundantly re-zero an already-cleared unread count.
   useEffectSet(() => {
     if (!supportActiveTicketId) { setSupportActiveNotes([]); return; }
     let mounted = true;
-    setSupportActiveLoading(true);
-    LB.supabase.from('zane_coaching_notes')
-      .select('id, author_id, body, created_at, read_at, attachments')
-      .eq('coaching_id', supportActiveTicketId)
-      .order('created_at', { ascending: true })
-      .then(({ data }) => {
-        if (!mounted) return;
-        setSupportActiveNotes(data || []);
-        setSupportActiveLoading(false);
-        LB.supabase.from('zane_coaching_notes')
-          .update({ read_at: new Date().toISOString() })
-          .eq('coaching_id', supportActiveTicketId)
-          .neq('author_id', userId)
-          .is('read_at', null)
-          .then(({ error }) => { if (error || !mounted) return; setStore(s => {
-            const ticket = (s.supportTickets || []).find(t => t.coachingId === supportActiveTicketId);
-            const delta = ticket ? ticket.unreadCount : 0;
-            return {
-              ...s,
-              supportUnread: Math.max(0, (s.supportUnread || 0) - delta),
-              supportTickets: (s.supportTickets || []).map(t =>
-                t.coachingId === supportActiveTicketId ? { ...t, unreadCount: 0 } : t
-              ),
-            };
-          }); });
-      });
-    // Poll for read_at updates on our own sent messages (seen indicator)
-    const poll = setInterval(() => {
-      if (!mounted) return;
+    let first = true;
+    const load = () => {
+      if (first) setSupportActiveLoading(true);
       LB.supabase.from('zane_coaching_notes')
-        .select('id, read_at')
+        .select('id, author_id, body, created_at, read_at, attachments')
         .eq('coaching_id', supportActiveTicketId)
-        .eq('author_id', userId)
-        .not('read_at', 'is', null)
+        .order('created_at', { ascending: true })
         .then(({ data }) => {
-          if (!mounted || !data) return;
-          setSupportActiveNotes(prev => prev.map(n => {
-            const u = data.find(d => d.id === n.id);
-            return u && !n.read_at ? { ...n, read_at: u.read_at } : n;
-          }));
+          if (!mounted) return;
+          setSupportActiveNotes(data || []);
+          if (first) setSupportActiveLoading(false);
+          LB.supabase.from('zane_coaching_notes')
+            .update({ read_at: new Date().toISOString() })
+            .eq('coaching_id', supportActiveTicketId)
+            .neq('author_id', userId)
+            .is('read_at', null)
+            .then(({ error }) => { if (error || !mounted) return; setStore(s => {
+              const ticket = (s.supportTickets || []).find(t => t.coachingId === supportActiveTicketId);
+              const delta = ticket ? ticket.unreadCount : 0;
+              return {
+                ...s,
+                supportUnread: Math.max(0, (s.supportUnread || 0) - delta),
+                supportTickets: (s.supportTickets || []).map(t =>
+                  t.coachingId === supportActiveTicketId ? { ...t, unreadCount: 0 } : t
+                ),
+              };
+            }); });
+          first = false;
         });
-    }, 12000);
+    };
+    load();
+    const poll = setInterval(load, 12000);
     return () => { mounted = false; clearInterval(poll); };
   }, [supportActiveTicketId]);
 
-  // Load admin ticket notes + mark user messages read
+  // Load admin ticket notes + mark user messages read, then keep polling for
+  // new ones every 12s while the ticket stays open (see the client-side
+  // support effect above for why this can't just ride the Realtime
+  // unreadNotes path coach chats use). `first` gates the loading spinner to
+  // the initial open only.
   useEffectSet(() => {
     if (!supportTicket) { setSupportTicketNotes([]); return; }
     let mounted = true;
-    setSupportTicketLoading(true);
-    LB.supabase.from('zane_coaching_notes')
-      .select('id, author_id, body, created_at, read_at, attachments')
-      .eq('coaching_id', supportTicket.coachingId)
-      .order('created_at', { ascending: true })
-      .then(({ data }) => { if (!mounted) return; setSupportTicketNotes(data || []); setSupportTicketLoading(false); });
-    LB.supabase.from('zane_coaching_notes')
-      .update({ read_at: new Date().toISOString() })
-      .eq('coaching_id', supportTicket.coachingId)
-      .neq('author_id', userId)
-      .is('read_at', null)
-      .then(({ error }) => { if (error || !mounted) return; setSupportInbox(prev => prev.map(t => t.coaching_id === supportTicket.coachingId ? { ...t, unread_count: 0 } : t)); });
-    // Poll for read_at updates on admin's sent messages (seen indicator)
-    const poll = setInterval(() => {
-      if (!mounted) return;
+    let first = true;
+    const load = () => {
+      if (first) setSupportTicketLoading(true);
       LB.supabase.from('zane_coaching_notes')
-        .select('id, read_at')
+        .select('id, author_id, body, created_at, read_at, attachments')
         .eq('coaching_id', supportTicket.coachingId)
-        .eq('author_id', userId)
-        .not('read_at', 'is', null)
+        .order('created_at', { ascending: true })
         .then(({ data }) => {
-          if (!mounted || !data) return;
-          setSupportTicketNotes(prev => prev.map(n => {
-            const u = data.find(d => d.id === n.id);
-            return u && !n.read_at ? { ...n, read_at: u.read_at } : n;
-          }));
+          if (!mounted) return;
+          setSupportTicketNotes(data || []);
+          if (first) setSupportTicketLoading(false);
+          first = false;
         });
-    }, 12000);
+      LB.supabase.from('zane_coaching_notes')
+        .update({ read_at: new Date().toISOString() })
+        .eq('coaching_id', supportTicket.coachingId)
+        .neq('author_id', userId)
+        .is('read_at', null)
+        .then(({ error }) => { if (error || !mounted) return; setSupportInbox(prev => prev.map(t => t.coaching_id === supportTicket.coachingId ? { ...t, unread_count: 0 } : t)); });
+    };
+    load();
+    const poll = setInterval(load, 12000);
     return () => { mounted = false; clearInterval(poll); };
   }, [supportTicket]);
 

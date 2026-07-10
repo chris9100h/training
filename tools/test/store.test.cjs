@@ -187,6 +187,88 @@ async function testAsync(name, fn) {
   test('bestE1rmForExercise excludes the live session and tolerates a missing map', () =>
     assert.strictEqual(LB.bestE1rmForExercise({ sessions: prState.sessions.slice(0, 1) }, 'e1', 'live'), 0));
 
+  // ── repeated-exercise occurrence matching (same exercise twice in a day) ──
+  const dupState = {
+    sessions: [
+      { id: 'p1', ended: '2026-06-08T10:00:00Z', dayId: 'd1', isDeload: false, entries: [
+        { exId: 'e1', sets: [{ kg: 200, reps: 5, done: true }] },   // occurrence 0: heavy
+        { exId: 'e1', sets: [{ kg: 100, reps: 15, done: true }] },  // occurrence 1: back-off
+      ] },
+    ],
+  };
+  test('bestRecentEntry occ=0 reads the first occurrence (heavy)', () =>
+    assert.strictEqual(LB.bestRecentEntry(dupState, 'e1', 'd1', 3, 0).entry.sets[0].kg, 200));
+  test('bestRecentEntry occ=1 reads the second occurrence, not the first', () =>
+    assert.strictEqual(LB.bestRecentEntry(dupState, 'e1', 'd1', 3, 1).entry.sets[0].kg, 100));
+  test('bestRecentEntry defaults to occ=0 (backward compatible)', () =>
+    assert.strictEqual(LB.bestRecentEntry(dupState, 'e1', 'd1').entry.sets[0].kg, 200));
+
+  const singleOccState = {
+    sessions: [
+      { id: 'p2', ended: '2026-06-08T10:00:00Z', dayId: 'd1', isDeload: false, entries: [
+        { exId: 'e1', sets: [{ kg: 150, reps: 8, done: true }] },
+      ] },
+    ],
+  };
+  test('bestRecentEntry occ=1 is fail-safe (null) when past sessions had it once', () =>
+    assert.strictEqual(LB.bestRecentEntry(singleOccState, 'e1', 'd1', 3, 1), null));
+  test('bestRecentEntry occ=0 still works for a normal single-occurrence exercise', () =>
+    assert.strictEqual(LB.bestRecentEntry(singleOccState, 'e1', 'd1', 3, 0).entry.sets[0].kg, 150));
+  test('recentSessionsForExercise occ=1 collects each session\'s second occurrence', () => {
+    const twoSess = { sessions: [
+      { id: 'a', ended: '2026-06-09T10:00:00Z', dayId: 'd1', isDeload: false, entries: [
+        { exId: 'e1', sets: [{ kg: 210, reps: 5, done: true }] },
+        { exId: 'e1', sets: [{ kg: 110, reps: 15, done: true }] },
+      ] },
+      { id: 'b', ended: '2026-06-02T10:00:00Z', dayId: 'd1', isDeload: false, entries: [
+        { exId: 'e1', sets: [{ kg: 200, reps: 5, done: true }] },
+        { exId: 'e1', sets: [{ kg: 100, reps: 15, done: true }] },
+      ] },
+    ] };
+    const rows = LB.recentSessionsForExercise(twoSess, 'e1', 'd1', 3, 1);
+    assert.strictEqual(rows.length, 2);
+    assert.strictEqual(rows[0].entry.sets[0].kg, 110);
+    assert.strictEqual(rows[1].entry.sets[0].kg, 100);
+  });
+
+  // ── techniqueRounds: weighted-stretch finisher extraction ────────────────
+  test('techniqueRounds surfaces a stretch finisher on a drop set last round', () => {
+    const r = LB.techniqueRounds({ technique: 'drop', drops: [{ kg: 100, reps: 10 }, { kg: 80, reps: 8, stretch: { kg: 60, timeSec: 30 } }] });
+    assert.strictEqual(r.badge, 'DROP SET');
+    assert.strictEqual(r.rounds.length, 2);
+    assert.deepStrictEqual(r.stretch, { kg: 60, timeSec: 30 });
+    assert.strictEqual(r.partials, 0);
+  });
+  test('techniqueRounds reads a standalone weighted_stretch', () => {
+    const r = LB.techniqueRounds({ technique: 'weighted_stretch', drops: { stretch: { kg: 40, timeSec: 45 } } });
+    assert.strictEqual(r.kind, 'weighted_stretch');
+    assert.strictEqual(r.badge, 'STRETCH');
+    assert.deepStrictEqual(r.stretch, { kg: 40, timeSec: 45 });
+  });
+  test('techniqueRounds carries a stretch alongside lengthened partials', () => {
+    const r = LB.techniqueRounds({ technique: 'lengthened_partial', drops: { partials: 5, stretch: { kg: 50, timeSec: 20 } } });
+    assert.strictEqual(r.partials, 5);
+    assert.deepStrictEqual(r.stretch, { kg: 50, timeSec: 20 });
+  });
+  test('techniqueRounds exposes finishers per round (not just the last)', () => {
+    const r = LB.techniqueRounds({ technique: 'drop', drops: [
+      { kg: 100, reps: 10, partials: 3 },
+      { kg: 80, reps: 8, stretch: { kg: 60, timeSec: 30 } },
+    ] });
+    assert.strictEqual(r.rounds[0].partials, 3);
+    assert.strictEqual(r.rounds[0].stretch, null);
+    assert.strictEqual(r.rounds[1].partials, 0);
+    assert.deepStrictEqual(r.rounds[1].stretch, { kg: 60, timeSec: 30 });
+    // top-level stays the LAST round's, for older single-finisher callers
+    assert.deepStrictEqual(r.stretch, { kg: 60, timeSec: 30 });
+    assert.strictEqual(r.partials, 0);
+  });
+  test('techniqueRounds stretch is null when absent (backward compatible)', () => {
+    assert.strictEqual(LB.techniqueRounds({ technique: 'drop', drops: [{ kg: 100, reps: 10 }, { kg: 80, reps: 8 }] }).stretch, null);
+    assert.strictEqual(LB.techniqueRounds({ technique: null }).stretch, null);
+    assert.strictEqual(LB.techniqueRounds({ technique: 'lengthened_partial', drops: { partials: 3 } }).stretch, null);
+  });
+
   // ── mergeSessions: windowed cache-first reload merge ─────────────────────
   const now = new Date('2026-06-10T12:00:00Z');
   test('mergeSessions drops sessions the server no longer has (old ones)', () => {
