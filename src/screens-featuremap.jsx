@@ -72,7 +72,8 @@ function fmMerge(catalog, ov) {
       summary: (o && o.summary != null) ? o.summary : c.summary,
       actions: (o && o.actions != null) ? o.actions : c.actions,
       sort: (o && o.sort != null) ? o.sort : idx,
-      hidden: !!(o && o.hidden), edited,
+      hidden: o ? !!o.hidden : !!c.hidden, // override wins; else the catalog's own hidden flag
+      edited,
     });
   }
   for (const id in ov) {
