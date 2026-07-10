@@ -2263,7 +2263,7 @@ BEGIN
   IF auth.email() IS DISTINCT FROM 'office@btc-prime.biz' THEN
     RAISE EXCEPTION 'Unauthorized';
   END IF;
-  DELETE FROM zane_feature_map_published;
+  DELETE FROM zane_feature_map_published WHERE card_id IS NOT NULL;
   INSERT INTO zane_feature_map_published
     (card_id, hidden, is_custom, cat, name, role, summary, actions, sort, created_at, updated_at)
   SELECT card_id, hidden, is_custom, cat, name, role, summary, actions, sort, created_at, now()
@@ -2284,7 +2284,7 @@ BEGIN
   IF auth.email() IS DISTINCT FROM 'office@btc-prime.biz' THEN
     RAISE EXCEPTION 'Unauthorized';
   END IF;
-  DELETE FROM zane_feature_map;
+  DELETE FROM zane_feature_map WHERE card_id IS NOT NULL;
   INSERT INTO zane_feature_map
     (card_id, hidden, is_custom, cat, name, role, summary, actions, sort, created_at, updated_at)
   SELECT card_id, hidden, is_custom, cat, name, role, summary, actions, sort, created_at, now()
