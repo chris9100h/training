@@ -175,7 +175,9 @@ function FeatureMapScreen({ store, go }) {
   const deleteCustom = (card) => { removeOverride(card.id); };
 
   const move = async (card, dir) => {
-    const sibs = grouped.flatMap(g => g.meta.id === card.cat ? g.all : []).slice().sort((a, b) => a.sort - b.sort);
+    // Reorder among the cards actually shown in this category (skip hidden ones,
+    // unless "show hidden" is on), so a move always visibly shifts by one.
+    const sibs = merged.filter(c => c.cat === card.cat && (!c.hidden || showHidden)).sort((a, b) => a.sort - b.sort);
     const idx = sibs.findIndex(c => c.id === card.id);
     const swap = sibs[idx + dir];
     if (!swap) return;
