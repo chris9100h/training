@@ -5974,6 +5974,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   </div>
                 </button>
               )}
+              {/* Chained techniques — multiple rounds back-to-back in the chain
+                  sheet, each round optionally carrying its own finisher. */}
+              <div className="micro" style={{ color: UI.inkFaint, letterSpacing: '0.14em', marginTop: supersetEligible ? 4 : 0 }}>CHAINED TECHNIQUES</div>
               {/* Drop Set */}
               <button onClick={startDrop} style={btnBase(true)}>
                 <i className="fa-solid fa-angles-down" style={{ fontSize: 18, color: 'var(--accent)', width: 20, textAlign: 'center', flexShrink: 0 }} />
@@ -5992,6 +5995,29 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkSoft, marginTop: 2 }}>AMRAP each round, swap the grip — no rest, no mercy</div>
                 </div>
               </button>
+              {/* Myo-Rep row: two compact buttons matching DROP style */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                <button onClick={() => startMyo('myorep')} style={btnBase(true)}>
+                  <i className="fa-solid fa-rotate" style={{ fontSize: 18, color: 'var(--accent)', width: 20, textAlign: 'center', flexShrink: 0 }} />
+                  <div>
+                    <div style={{ fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, letterSpacing: '0.12em', color: 'var(--accent)' }}>MYO REP</div>
+                    <div style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkSoft, marginTop: 2 }}>Activation + minis to failure</div>
+                  </div>
+                </button>
+                <button onClick={() => startMyo('myorep_match')} disabled={!myoMatchTarget} style={btnBase(!!myoMatchTarget)}>
+                  <i className="fa-solid fa-bullseye" style={{ fontSize: 18, color: myoMatchTarget ? 'var(--accent)' : UI.inkFaint, width: 20, textAlign: 'center', flexShrink: 0 }} />
+                  <div>
+                    <div style={{ fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, letterSpacing: '0.12em', color: myoMatchTarget ? 'var(--accent)' : UI.inkFaint }}>MYO MATCH</div>
+                    <div style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkSoft, marginTop: 2 }}>
+                      {myoMatchTarget
+                        ? `Target: ${myoMatchTarget.drops.reduce((s, d) => s + (d.reps || 0), 0)} reps`
+                        : 'Do a Myo Rep set first'}
+                    </div>
+                  </div>
+                </button>
+              </div>
+              {/* Standalone techniques — a single set, no rounds/chain sheet. */}
+              <div className="micro" style={{ color: UI.inkFaint, letterSpacing: '0.14em', marginTop: 4 }}>STANDALONE TECHNIQUES</div>
               {/* Lengthened Partials */}
               <button onClick={() => {
                 const target = currentSetIdx >= 0
@@ -6033,27 +6059,6 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkSoft, marginTop: 2 }}>Hold the loaded stretch for time after your set</div>
                 </div>
               </button>
-              {/* Myo-Rep row: two compact buttons matching DROP style */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                <button onClick={() => startMyo('myorep')} style={btnBase(true)}>
-                  <i className="fa-solid fa-rotate" style={{ fontSize: 18, color: 'var(--accent)', width: 20, textAlign: 'center', flexShrink: 0 }} />
-                  <div>
-                    <div style={{ fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, letterSpacing: '0.12em', color: 'var(--accent)' }}>MYO REP</div>
-                    <div style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkSoft, marginTop: 2 }}>Activation + minis to failure</div>
-                  </div>
-                </button>
-                <button onClick={() => startMyo('myorep_match')} disabled={!myoMatchTarget} style={btnBase(!!myoMatchTarget)}>
-                  <i className="fa-solid fa-bullseye" style={{ fontSize: 18, color: myoMatchTarget ? 'var(--accent)' : UI.inkFaint, width: 20, textAlign: 'center', flexShrink: 0 }} />
-                  <div>
-                    <div style={{ fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, letterSpacing: '0.12em', color: myoMatchTarget ? 'var(--accent)' : UI.inkFaint }}>MYO MATCH</div>
-                    <div style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkSoft, marginTop: 2 }}>
-                      {myoMatchTarget
-                        ? `Target: ${myoMatchTarget.drops.reduce((s, d) => s + (d.reps || 0), 0)} reps`
-                        : 'Do a Myo Rep set first'}
-                    </div>
-                  </div>
-                </button>
-              </div>
             </div>
           );
         })()}
