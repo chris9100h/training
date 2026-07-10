@@ -54,6 +54,27 @@ function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, 
     return () => { on = false; };
   }, [clientId]);
 
+  // The live "TRAINING NOW" banner reads clientStore.inProgress, which is a
+  // one-time snapshot from loadClientStore. Poll the lightweight status endpoint
+  // (as the client roster does) so the banner appears when the client starts a
+  // session and clears when they finish, instead of freezing at entry-time state.
+  useEffectC(() => {
+    if (isSelf) return;
+    let on = true;
+    const poll = () => {
+      LB.loadCoachClientsStatus()
+        .then(rows => {
+          if (!on) return;
+          const mine = (rows || []).find(r => r.clientId === clientId);
+          const live = (mine && mine.inProgressSessionId) || null;
+          setClientStore(s => (s && (s.inProgress || null) !== live) ? { ...s, inProgress: live } : s);
+        })
+        .catch(() => {});
+    };
+    const iv = setInterval(poll, 5000);
+    return () => { on = false; clearInterval(iv); };
+  }, [clientId, isSelf]);
+
   const reloadClient = async () => {
     try {
       const fresh = await LB.loadClientStore(clientId);
@@ -126,14 +147,14 @@ function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, 
               style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px', background: `rgba(var(--accent-rgb), 0.08)`, borderBottom: `0.5px solid rgba(var(--accent-rgb), 0.25)`, cursor: 'pointer' }}
             >
               <div style={{ width: 8, height: 8, borderRadius: 4, background: 'var(--accent)', boxShadow: '0 0 6px rgba(var(--accent-rgb),0.8)', animation: 'pulseDot 1.5s ease-in-out infinite', flexShrink: 0 }} />
-              <span style={{ flex: 1, fontSize: 12, fontFamily: UI.fontUi, color: 'var(--accent)', letterSpacing: '0.08em', fontWeight: 600 }}>TRAINING NOW — TAP TO WATCH</span>
+              <span style={{ flex: 1, fontSize: 12, fontFamily: UI.fontUi, color: 'var(--accent)', letterSpacing: '0.08em', fontWeight: 600 }}>TRAINING NOW · TAP TO WATCH</span>
               <ChevronRight color={'var(--accent)'} />
             </div>
           )}
           {tab === 'overview'   && <ClientOverviewTab clientStore={clientStore} coachingId={coachingId} userId={userId} onSelectSession={openSession} />}
           {tab === 'sessions'   && <ClientSessionsTab clientStore={clientStore} coachingId={coachingId} userId={userId} clientName={clientName} initialSelected={selectedSession} onClearSelected={() => setSelectedSession(null)} />}
           {tab === 'checkins'   && (isSelf
-            ? <ClientCheckInTab coachingId={coachingId} clientId={clientId} userId={userId} store={store} isSelf />
+            ? <ClientCheckInTab coachingId={coachingId} clientId={clientId} userId={userId} store={store} setStore={setStore} isSelf />
             : <ClientCheckInsTab coachingId={coachingId} checkinEnabled={checkinEnabled} onToggle={handleToggleCheckin} toggling={ciToggling} store={store} setStore={setStore} userId={userId} clientUnit={clientStore.settings?.unit} />)}
           {tab === 'setup'      && <ClientSetupTab clientStore={clientStore} setClientStore={setClientStore} clientId={clientId} coachingId={coachingId} userId={userId} go={go} onReload={reloadClient} clientName={clientName} />}
           {tab === 'daily'      && <window.Screens.HealthClientLogs clientStore={clientStore} />}
@@ -333,6 +354,105 @@ function computeWeeklyAdherence(clientStore, weeksBack = 6) {
   }).filter(Boolean);
 }
 
+// ─── Recently-shipped-feature surfacing for the coach's single-client view ────
+// These render program/session context the athlete already sees but the coach
+// dashboard previously dropped: 5/3/1 cycle/TM progress, mesocycle block status,
+// superset grouping, and the per-set rep target. All read-only, all from the
+// client's already-loaded clientStore; nothing here mutates.
+
+// Format a plan item's prescribed target: per-set (12/10/8), range (8-12),
+// single (8), or time-based durations. Returns null when there's nothing to show.
+function fmtRepTarget(item) {
+  if (!item) return null;
+  if (Array.isArray(item.timeSecPerSet) && item.timeSecPerSet.length) {
+    return item.timeSecPerSet.map(t => LB.fmtDuration(t)).join(' / ');
+  }
+  if (item.repsPerSet && item.repsPerSet.length) return item.repsPerSet.join('/');
+  if (item.repsMax != null) return `${item.reps}-${item.repsMax}`;
+  return item.reps != null ? String(item.reps) : null;
+}
+
+// Resolve the prescribed plan item for a logged session entry, from the schedule
+// the session belongs to. The target value reflects the plan's current
+// prescription (plans rarely rewrite historical targets); returns null when the
+// day/item can't be matched, so a wrong target is never shown.
+function planItemForEntry(clientStore, session, exId) {
+  if (!exId || !session) return null;
+  const sch = (clientStore.schedules || []).find(s => s.id === session.scheduleId);
+  if (!sch) return null;
+  const day = (sch.days || []).find(d => d.id === session.dayId);
+  if (!day) return null;
+  return (day.items || []).find(it => it.exId === exId) || null;
+}
+
+// Superset/giant-set annotation for the read-only session views: consecutive
+// entries sharing a supersetGroup get a header on the first member and a left
+// accent rail on every member, so paired work reads differently from straight sets.
+function supersetInfo(entries, i) {
+  const grp = entries[i] && entries[i].supersetGroup;
+  if (!grp) return { member: false, start: false, size: 0 };
+  const start = i === 0 || entries[i - 1].supersetGroup !== grp;
+  const size = entries.filter(e => e.supersetGroup === grp).length;
+  return { member: true, start, size };
+}
+function SupersetHeader({ size }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '10px 14px 2px' }}>
+      <i className="fa-solid fa-link" style={{ fontSize: 9, color: UI.gold }} />
+      <span className="micro" style={{ color: UI.gold, letterSpacing: '0.14em' }}>{LB.supersetLabel(size)}</span>
+    </div>
+  );
+}
+
+// Program status card: 5/3/1 cycle/week + per-lift Training-Max progress, and
+// mesocycle block week / RIR target. Both come straight from the client's
+// schedule + mesoStates already in the coach's clientStore. Renders nothing for
+// a plain plan. mesoCurrentWeek / FiveThreeOneProgress are cross-file globals
+// (screens-train / screens-schedule), guarded like the athlete-side callers.
+function ClientProgramStatus({ sch, clientStore }) {
+  if (!sch) return null;
+  const is531 = LB.is531Plan(sch);
+  const isMeso = !is531 && !!sch.mesocycle_weeks;
+  if (!is531 && !isMeso) return null;
+
+  let mesoBadge = null;
+  if (isMeso) {
+    const m = (clientStore.mesoStates || []).find(x => x.scheduleId === sch.id) || null;
+    const weeks = sch.mesocycle_weeks;
+    const mesoNum = (m?.completions ?? 0) + 1;
+    const label = `MESO${mesoNum > 1 ? ' ' + mesoNum : ''}`;
+    if (clientStore.statusMode === 'deload') {
+      mesoBadge = `${label} · DELOAD`;
+    } else {
+      const week = (m && typeof mesoCurrentWeek === 'function') ? mesoCurrentWeek(m, clientStore) : null;
+      const rir = (week != null && LB.mesoRirEnabled(sch) && typeof LB.mesoRirForWeek === 'function')
+        ? LB.mesoRirForWeek(week, weeks, sch.mesocycle_start_rir ?? 3, sch.mesocycle_end_rir ?? 0)
+        : null;
+      const unit = LB.isWeekdayPlan(sch) ? 'W' : 'C';
+      mesoBadge = week == null
+        ? `${label} · not started`
+        : `${label} · ${unit}${week}/${weeks}${rir != null ? ` · ${rir} RIR` : ''}`;
+    }
+  }
+
+  return (
+    <>
+      <div className="micro" style={{ color: UI.inkFaint, margin: '0 0 8px', paddingLeft: 2 }}>PROGRAM</div>
+      <div style={{ padding: '14px 16px', background: UI.bgInset, borderRadius: 8, border: `0.5px solid ${UI.hair}`, marginBottom: 20 }}>
+        {isMeso && mesoBadge && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <i className="fa-solid fa-layer-group" style={{ fontSize: 12, color: UI.gold }} />
+            <span className="num" style={{ fontSize: 13, color: UI.inkSoft, letterSpacing: '0.04em' }}>{mesoBadge}</span>
+          </div>
+        )}
+        {is531 && typeof FiveThreeOneProgress === 'function' && (
+          <FiveThreeOneProgress sch={sch} store={clientStore} />
+        )}
+      </div>
+    </>
+  );
+}
+
 function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession }) {
   const sessions = clientStore.sessions || [];
   const ended = sessions.filter(s => s.ended).sort((a, b) => (b.ended || '').localeCompare(a.ended || ''));
@@ -450,6 +570,13 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
                   <StatBox label="Sets" value={LB.doneSetCount(todaySession)} />
                   <StatBox label="Duration" value={todaySession.durationMinutes ? `${todaySession.durationMinutes}m` : '—'} />
                 </div>
+                {feelLabel(todaySession.feel) && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: -6, marginBottom: 16 }}>
+                    <span style={{ fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Feel</span>
+                    <span style={{ width: 8, height: 8, borderRadius: '50%', background: feelColor(todaySession.feel), flexShrink: 0 }} />
+                    <span style={{ fontSize: 12, color: feelColor(todaySession.feel), fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.04em' }}>{feelLabel(todaySession.feel)}</span>
+                  </div>
+                )}
                 {(() => {
                   const storeWithoutToday = { ...clientStore, sessions: clientStore.sessions.filter(s => s.ended && s.ended < todaySession.ended) };
                   // Shared with ClientSessionsTab via LB.techniqueRounds — both
@@ -473,6 +600,10 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
                   };
                   const techniqueLabel = (s) => LB.techniqueRounds(s).badge;
                   return (todaySession.entries || []).map((e, i) => {
+                    const entriesArr = todaySession.entries || [];
+                    const ss = supersetInfo(entriesArr, i);
+                    const planItem = planItemForEntry(clientStore, todaySession, e.exId);
+                    const tgtStr = planItem ? fmtRepTarget(planItem) : null;
                     const lastResult = e.exId ? LB.lastSessionForExercise(storeWithoutToday, e.exId, todaySession.dayId) : null;
                     const lastSets = (lastResult?.entry?.sets || []).filter(s => !s.warmup && (s.kg != null || s.reps != null || s.timeSec != null));
                     // If any set in the row carries a technique badge, every set
@@ -496,8 +627,15 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
                     };
                     const amrapLabelStyle = { fontSize: 8, color: UI.inkGhost, maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' };
                     return (
-                      <div key={i} style={{ padding: '10px 0', borderBottom: `0.5px solid ${UI.hair}` }}>
-                        <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600, marginBottom: 6 }}>{e.name}</div>
+                      <React.Fragment key={i}>
+                        {ss.start && <SupersetHeader size={ss.size} />}
+                        <div style={{ padding: '10px 0', borderBottom: `0.5px solid ${UI.hair}`, ...(ss.member ? { borderLeft: `2px solid rgba(var(--accent-rgb),0.35)`, paddingLeft: 12 } : {}) }}>
+                        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8, marginBottom: 6 }}>
+                          <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>{e.name}</div>
+                          {tgtStr && (
+                            <span className="micro" style={{ color: UI.inkGhost, flexShrink: 0, whiteSpace: 'nowrap' }}>PLAN {planItem.sets ? `${planItem.sets}×` : ''}{tgtStr}</span>
+                          )}
+                        </div>
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'flex-start', marginBottom: lastSets.length ? 5 : 0 }}>
                           {workingSets.map((s, j) => {
                             const prev = lastSets[j];
@@ -539,6 +677,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
                           </div>
                         )}
                       </div>
+                      </React.Fragment>
                     );
                   });
                 })()}
@@ -551,19 +690,25 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
                   const suggestion = LB.progressionSuggestion(clientStore, item.exId, todayDay.id, item.reps, item.repsPerSet || null, undefined, item.repsMax || null, item.progressionOffset ?? null);
                   const bodyweightKg = LB.shouldPullBodyweight(ex) ? LB.latestBodyweight(clientStore) : null;
                   const seeds = LB.buildSeedSets(item, last, suggestion, ex?.unilateral, clientStore, bodyweightKg, clientStore.statusMode === 'deload');
-                  const hasWeight = seeds.some(s => s.kg != null || s.timeSec != null);
+                  // Reps-only / bodyweight / checkbox exercises seed with kg==null
+                  // but a real rep prescription; count them as having data so the
+                  // sheet shows the seeds instead of "First time, no weight data".
+                  const hasWeight = seeds.some(s => s.kg != null || s.timeSec != null || s.reps != null || s.repsL != null || s.repsR != null);
                   return (
                     <div key={idx} style={{ padding: '12px 4px', borderBottom: `0.5px solid ${UI.hair}` }}>
                       <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 6 }}>
                         <div style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>{ex?.name || item.exId}</div>
-                        {item.sets && item.reps && (
-                          <span className="micro" style={{ color: UI.inkFaint }}>{item.sets} × {item.repsMax != null ? `${item.reps}-${item.repsMax}` : item.reps}</span>
-                        )}
+                        {(() => {
+                          const tgt = fmtRepTarget(item);
+                          return item.sets && tgt ? (
+                            <span className="micro" style={{ color: UI.inkFaint }}>{item.sets} × {tgt}</span>
+                          ) : null;
+                        })()}
                       </div>
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
                         {hasWeight ? seeds.map((s, j) => (
                           <span key={j} className="num" style={{ fontSize: 12, color: UI.ink, background: UI.bgInset, borderRadius: 4, padding: '3px 8px', border: `0.5px solid ${UI.hairStrong}` }}>
-                            {s.timeSec != null ? LB.fmtDuration(s.timeSec) : <>{s.kg ?? '—'}{unit} × {s.reps ?? s.repsL ?? '—'}</>}
+                            {s.timeSec != null ? LB.fmtDuration(s.timeSec) : <>{s.kg != null ? `${s.kg}${unit}` : '—'} × {s.reps ?? s.repsL ?? '—'}</>}
                           </span>
                         )) : (
                           <span style={{ fontSize: 11, color: UI.inkGhost, fontFamily: UI.fontUi }}>First time, no weight data yet</span>
@@ -621,6 +766,9 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
       ) : (
         <div style={{ padding: '12px 16px', background: UI.bgInset, borderRadius: 8, border: `0.5px solid ${UI.hair}`, marginBottom: 20, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>No active plan</div>
       )}
+
+      {/* Program status (5/3/1 cycle/TM + mesocycle week/RIR) */}
+      {activeSch && <ClientProgramStatus sch={activeSch} clientStore={clientStore} />}
 
       {/* Recent sessions */}
       <div className="micro" style={{ color: UI.inkFaint, margin: '0 0 8px', paddingLeft: 2 }}>
@@ -929,8 +1077,14 @@ function ClientPlanTab({ clientStore, setClientStore, clientId, coachingId, user
   const schedules = (clientStore.schedules || []).filter(s => !s.archived);
   const active = clientStore.activeScheduleId;
   const importRef = useRefC(null);
+  const [confirmEl, confirm] = useConfirm();
 
   const activate = async (scheduleId) => {
+    // Activation is client-facing and irreversible (it posts a "plan changed"
+    // note the client is notified of), so confirm before a mis-tap switches
+    // their program, mirroring the confirmed client-side activation flow.
+    const planName = clientStore.schedules?.find(s => s.id === scheduleId)?.name || scheduleId;
+    if (!await confirm(`Activate "${planName}" for ${name}? They'll be notified of the change.`, { title: 'Activate plan?', ok: 'Activate' })) return;
     try {
       const oldPlanName = clientStore.schedules?.find(s => s.id === clientStore.activeScheduleId)?.name;
       // The update resolves with { error } instead of throwing — check it, or a
@@ -1073,6 +1227,7 @@ function ClientPlanTab({ clientStore, setClientStore, clientId, coachingId, user
           </div>
         </div>
       ))}
+      {confirmEl}
     </div>
   );
 }
@@ -1086,19 +1241,37 @@ function InlineExHistory({ exId, dayId, exName, sessions, exercises, onBack, uni
   const [metric, setMetric] = useStateC('kg');
   const [showCount, setShowCount] = useStateC(20);
 
+  // Sessions outside the boot history window arrive with entries:[] (aggExercises>0).
+  // Unlike ClientSessionsTab this chart never lazy-loaded them, so older history
+  // silently dropped out of the trend line and axis. Fetch the windowed ones for
+  // this day and merge into local state (clientStore is a read-only copy).
+  const [loadedEntries, setLoadedEntries] = useStateC({});
+  useEffectC(() => {
+    const ids = sessions
+      .filter(s => s.dayId === dayId && s.aggExercises > 0 && !(s.entries || []).length && !loadedEntries[s.id])
+      .map(s => s.id);
+    if (!ids.length) return;
+    let on = true;
+    LB.fetchSessionEntries(ids)
+      .then(bySession => { if (on && bySession) setLoadedEntries(prev => ({ ...prev, ...bySession })); })
+      .catch(() => {});
+    return () => { on = false; };
+  }, [sessions, dayId]);
+
   const exSessions = useMemoC(() =>
     sessions
       .filter(s => s.dayId === dayId)
       .map(s => {
-        const entry = (s.entries || []).find(e => e.exId === exId);
+        const entries = (s.entries && s.entries.length) ? s.entries : (loadedEntries[s.id] || []);
+        const entry = entries.find(e => e.exId === exId);
         if (!entry) return null;
         const working = (entry.sets || []).filter(st => !st.warmup && !st.skipped);
-        if (!working.some(st => st.kg != null || st.reps != null || st.timeSec != null)) return null;
+        if (!working.some(st => st.kg != null || st.reps != null || st.repsL != null || st.repsR != null || st.timeSec != null)) return null;
         return { ended: s.ended, sets: working };
       })
       .filter(Boolean)
       .sort((a, b) => a.ended.localeCompare(b.ended)),
-    [sessions, exId, dayId]
+    [sessions, exId, dayId, loadedEntries]
   );
 
   // Time-based / assisted exercise: detected from the data itself (the coach
@@ -1316,7 +1489,18 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
             <StatBox label="Sets" value={LB.doneSetCount(selected)} />
             <StatBox label="Duration" value={selected.durationMinutes ? `${selected.durationMinutes}m` : '—'} />
           </div>
+          {feelLabel(selected.feel) && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: -6, marginBottom: 16 }}>
+              <span style={{ fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Feel</span>
+              <span style={{ width: 8, height: 8, borderRadius: '50%', background: feelColor(selected.feel), flexShrink: 0 }} />
+              <span style={{ fontSize: 12, color: feelColor(selected.feel), fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.04em' }}>{feelLabel(selected.feel)}</span>
+            </div>
+          )}
           {(selected.entries || []).map((e, i) => {
+            const entriesArr = selected.entries || [];
+            const ss = supersetInfo(entriesArr, i);
+            const planItem = planItemForEntry(clientStore, selected, e.exId);
+            const tgtStr = planItem ? fmtRepTarget(planItem) : null;
             const lastResult = e.exId ? LB.lastSessionForExercise(storeWithoutSelected, e.exId, selected.dayId) : null;
             const lastSets = (lastResult?.entry?.sets || []).filter(s => !s.warmup && (s.kg != null || s.reps != null || s.timeSec != null));
             // This compact coach/self-coaching view had no intensity-technique
@@ -1360,13 +1544,20 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
             };
             const amrapLabelStyle = { fontSize: 8, color: UI.inkGhost, maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' };
             return (
-              <div key={i}
-                onClick={() => e.exId && selected.dayId && setHistEx({ exId: e.exId, dayId: selected.dayId, exName: e.name })}
-                style={{ padding: '10px 14px', borderBottom: `0.5px solid ${UI.hair}`, cursor: e.exId ? 'pointer' : 'default', WebkitTapHighlightColor: 'transparent' }}
-              >
-                <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600, marginBottom: 6 }}>
-                  {e.name}{e.exId && <span style={{ fontSize: 11, color: UI.inkFaint, marginLeft: 5 }}>›</span>}
-                </div>
+              <React.Fragment key={i}>
+                {ss.start && <SupersetHeader size={ss.size} />}
+                <div
+                  onClick={() => e.exId && selected.dayId && setHistEx({ exId: e.exId, dayId: selected.dayId, exName: e.name })}
+                  style={{ padding: '10px 14px', borderBottom: `0.5px solid ${UI.hair}`, cursor: e.exId ? 'pointer' : 'default', WebkitTapHighlightColor: 'transparent', ...(ss.member ? { borderLeft: `2px solid rgba(var(--accent-rgb),0.35)`, paddingLeft: 12 } : {}) }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8, marginBottom: 6 }}>
+                    <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>
+                      {e.name}{e.exId && <span style={{ fontSize: 11, color: UI.inkFaint, marginLeft: 5 }}>›</span>}
+                    </div>
+                    {tgtStr && (
+                      <span className="micro" style={{ color: UI.inkGhost, flexShrink: 0, whiteSpace: 'nowrap' }}>PLAN {planItem.sets ? `${planItem.sets}×` : ''}{tgtStr}</span>
+                    )}
+                  </div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'flex-start', marginBottom: lastSets.length ? 5 : 0 }}>
                   {workingSets.map((s, j) => {
                     const prev = lastSets[j];
@@ -1407,7 +1598,8 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
                     <span style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi }}>{fmtDate(lastResult.session.date)}</span>
                   </div>
                 )}
-              </div>
+                </div>
+              </React.Fragment>
             );
           })}
         </div>

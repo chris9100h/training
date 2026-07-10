@@ -477,7 +477,7 @@ CREATE POLICY "coach can delete client sets" ON public.zane_sets FOR DELETE TO p
 
 -- cardio logs
 CREATE POLICY "Users manage own cardio logs" ON public.zane_cardio_logs FOR ALL TO authenticated USING (((select auth.uid()) = user_id)) WITH CHECK (((select auth.uid()) = user_id));
-CREATE POLICY "coaches read client cardio logs" ON public.zane_cardio_logs FOR SELECT TO authenticated USING (EXISTS ( SELECT 1 FROM zane_coaching zc WHERE zc.client_id = zane_cardio_logs.user_id AND zc.coach_id = (select auth.uid()) AND zc.coach_id <> zc.client_id AND zc.status = 'active'));
+CREATE POLICY "coaches read client cardio logs" ON public.zane_cardio_logs FOR SELECT TO authenticated USING (EXISTS ( SELECT 1 FROM zane_coaching zc WHERE zc.client_id = zane_cardio_logs.user_id AND zc.coach_id = (select auth.uid()) AND zc.coach_id <> zc.client_id AND zc.status = 'active' AND zc.id NOT LIKE 'support_%'));
 
 -- daily logs
 CREATE POLICY "Users manage own daily logs" ON public.zane_daily_logs FOR ALL TO authenticated USING (((select auth.uid()) = user_id)) WITH CHECK (((select auth.uid()) = user_id));
@@ -522,15 +522,15 @@ CREATE POLICY "recipient can mark read" ON public.zane_coaching_notes FOR UPDATE
 CREATE POLICY "participants can delete notes" ON public.zane_coaching_notes FOR DELETE TO public USING ((EXISTS ( SELECT 1 FROM zane_coaching c WHERE ((c.id = zane_coaching_notes.coaching_id) AND ((c.coach_id = (select auth.uid())) OR (c.client_id = (select auth.uid())))))));
 
 -- coaching_macros
-CREATE POLICY "Coach can manage macros" ON public.zane_coaching_macros FOR ALL TO public USING ((EXISTS ( SELECT 1 FROM zane_coaching WHERE ((zane_coaching.id = zane_coaching_macros.coaching_id) AND (zane_coaching.coach_id = (select auth.uid()))))));
-CREATE POLICY "Client can read macros" ON public.zane_coaching_macros FOR SELECT TO public USING ((EXISTS ( SELECT 1 FROM zane_coaching WHERE ((zane_coaching.id = zane_coaching_macros.coaching_id) AND (zane_coaching.client_id = (select auth.uid()))))));
+CREATE POLICY "Coach can manage macros" ON public.zane_coaching_macros FOR ALL TO public USING ((EXISTS ( SELECT 1 FROM zane_coaching WHERE ((zane_coaching.id = zane_coaching_macros.coaching_id) AND (zane_coaching.coach_id = (select auth.uid())) AND (zane_coaching.status = 'active'::text) AND (zane_coaching.id !~~ 'support_%'::text)))));
+CREATE POLICY "Client can read macros" ON public.zane_coaching_macros FOR SELECT TO public USING ((EXISTS ( SELECT 1 FROM zane_coaching WHERE ((zane_coaching.id = zane_coaching_macros.coaching_id) AND (zane_coaching.client_id = (select auth.uid())) AND (zane_coaching.status = 'active'::text) AND (zane_coaching.id !~~ 'support_%'::text)))));
 
 -- checkins
 CREATE POLICY "checkins_client" ON public.zane_checkins FOR ALL TO authenticated
   USING ((client_id = (select auth.uid())))
   WITH CHECK (((client_id = (select auth.uid())) AND (EXISTS ( SELECT 1 FROM zane_coaching c WHERE ((c.id = zane_checkins.coaching_id) AND (c.client_id = (select auth.uid())))))));
 CREATE POLICY "checkins_coach_read" ON public.zane_checkins FOR SELECT TO authenticated
-  USING ((EXISTS ( SELECT 1 FROM zane_coaching WHERE ((zane_coaching.id = zane_checkins.coaching_id) AND (zane_coaching.coach_id = (select auth.uid())) AND (zane_coaching.status = 'active'::text)))));
+  USING ((EXISTS ( SELECT 1 FROM zane_coaching WHERE ((zane_coaching.id = zane_checkins.coaching_id) AND (zane_coaching.coach_id = (select auth.uid())) AND (zane_coaching.coach_id <> zane_coaching.client_id) AND (zane_coaching.status = 'active'::text) AND (zane_coaching.id !~~ 'support_%'::text)))));
 
 -- ── Functions (verbatim from the live database) ────────────────────────────────
 
@@ -558,6 +558,7 @@ AS $function$
     where coach_id = auth.uid()
       and client_id = p_client_id
       and status = 'active'
+      and id not like 'support_%'
   )
 $function$;
 
@@ -898,6 +899,7 @@ DECLARE
   v_client_id uuid;
   v_id        text;
   v_existing  text;
+  v_schema    jsonb;
 BEGIN
   v_client_id := find_user_by_email(p_email);
   IF v_client_id IS NULL THEN
@@ -907,18 +909,22 @@ BEGIN
     RETURN 'ERROR:self';
   END IF;
   SELECT id INTO v_existing FROM zane_coaching
-    WHERE coach_id = auth.uid() AND client_id = v_client_id;
+    WHERE coach_id = auth.uid() AND client_id = v_client_id
+      AND id NOT LIKE 'support_%';
   IF FOUND THEN
     RETURN 'ERROR:exists:' || v_existing;
   END IF;
   PERFORM 1 FROM zane_coaching
-    WHERE client_id = v_client_id AND status = 'active';
+    WHERE client_id = v_client_id AND status = 'active'
+      AND coach_id <> client_id AND id NOT LIKE 'support_%';
   IF FOUND THEN
     RETURN 'ERROR:already_coached';
   END IF;
+  SELECT default_checkin_schema INTO v_schema
+    FROM zane_user_settings WHERE user_id = auth.uid();
   v_id := 'cch_' || gen_random_uuid()::text;
-  INSERT INTO zane_coaching (id, coach_id, client_id, status)
-    VALUES (v_id, auth.uid(), v_client_id, 'pending');
+  INSERT INTO zane_coaching (id, coach_id, client_id, status, checkin_schema)
+    VALUES (v_id, auth.uid(), v_client_id, 'pending', v_schema);
   RETURN v_id;
 END
 $function$;
@@ -1026,7 +1032,7 @@ declare
   v_week_start date;
 begin
   v_week_start := current_date
-    - (extract(dow from current_date)::int) * interval '1 day'
+    - (extract(isodow from current_date)::int) * interval '1 day'
     - interval '6 days';
 
   return query
@@ -1041,7 +1047,8 @@ begin
   from zane_coaching c
   where c.coach_id = auth.uid()
     and c.coach_id <> c.client_id
-    and c.status = 'active';
+    and c.status = 'active'
+    and c.id not like 'support_%';
 end;
 $function$;
 
@@ -1352,9 +1359,11 @@ AS $function$
   FROM zane_session_entries e
   JOIN zane_sets st ON st.entry_id = e.id
   JOIN zane_sessions s ON s.id = e.session_id
+  LEFT JOIN zane_exercises ex ON ex.id = e.ex_id AND ex.user_id = e.user_id
   WHERE e.user_id = (SELECT id FROM uid)
     AND e.ex_id IS NOT NULL
     AND s.ended IS NOT NULL
+    AND ex.movement_type IS DISTINCT FROM 'assisted'
     AND NOT st.warmup AND NOT st.skipped AND st.kg IS NOT NULL
     AND COALESCE(
       CASE WHEN st.reps_l IS NOT NULL OR st.reps_r IS NOT NULL
@@ -1515,6 +1524,78 @@ DROP TRIGGER IF EXISTS zane_coaching_guard_update ON public.zane_coaching;
 CREATE TRIGGER zane_coaching_guard_update
   BEFORE UPDATE ON public.zane_coaching
   FOR EACH ROW EXECUTE FUNCTION zane_coaching_guard_update();
+
+-- Migration 0148: the "recipient can mark read" UPDATE policy on
+-- zane_coaching_notes can't be column-restricted by RLS, so a BEFORE UPDATE
+-- trigger enforces that a non-author may only change read_at.
+CREATE OR REPLACE FUNCTION public.zane_coaching_notes_guard_update()
+  RETURNS trigger
+  LANGUAGE plpgsql
+  SECURITY DEFINER
+  SET search_path = public, pg_temp
+AS $function$
+begin
+  if (select auth.uid()) <> old.author_id then
+    if new.id           is distinct from old.id
+       or new.coaching_id  is distinct from old.coaching_id
+       or new.author_id    is distinct from old.author_id
+       or new.type         is distinct from old.type
+       or new.entity_id    is distinct from old.entity_id
+       or new.entity_name  is distinct from old.entity_name
+       or new.body         is distinct from old.body
+       or new.created_at   is distinct from old.created_at
+       or new.thread_id    is distinct from old.thread_id
+       or new.attachments  is distinct from old.attachments
+    then
+      raise exception 'recipient may only update read_at';
+    end if;
+  end if;
+  return new;
+end;
+$function$;
+REVOKE EXECUTE ON FUNCTION public.zane_coaching_notes_guard_update() FROM PUBLIC, anon, authenticated;
+
+DROP TRIGGER IF EXISTS zane_coaching_notes_guard_update ON public.zane_coaching_notes;
+CREATE TRIGGER zane_coaching_notes_guard_update
+  BEFORE UPDATE ON public.zane_coaching_notes
+  FOR EACH ROW EXECUTE FUNCTION zane_coaching_notes_guard_update();
+
+-- Migration 0148: user_id is immutable on coach-writable tables, so a coach
+-- can't re-parent a row from one client to another (coach UPDATE policies have
+-- no OLD-aware WITH CHECK).
+CREATE OR REPLACE FUNCTION public.zane_guard_user_id_immutable()
+  RETURNS trigger
+  LANGUAGE plpgsql
+  SECURITY DEFINER
+  SET search_path = public, pg_temp
+AS $function$
+begin
+  if new.user_id is distinct from old.user_id then
+    raise exception 'user_id is immutable';
+  end if;
+  return new;
+end;
+$function$;
+REVOKE EXECUTE ON FUNCTION public.zane_guard_user_id_immutable() FROM PUBLIC, anon, authenticated;
+
+DROP TRIGGER IF EXISTS zane_guard_user_id ON public.zane_exercises;
+CREATE TRIGGER zane_guard_user_id BEFORE UPDATE ON public.zane_exercises
+  FOR EACH ROW EXECUTE FUNCTION zane_guard_user_id_immutable();
+DROP TRIGGER IF EXISTS zane_guard_user_id ON public.zane_schedules;
+CREATE TRIGGER zane_guard_user_id BEFORE UPDATE ON public.zane_schedules
+  FOR EACH ROW EXECUTE FUNCTION zane_guard_user_id_immutable();
+DROP TRIGGER IF EXISTS zane_guard_user_id ON public.zane_sessions;
+CREATE TRIGGER zane_guard_user_id BEFORE UPDATE ON public.zane_sessions
+  FOR EACH ROW EXECUTE FUNCTION zane_guard_user_id_immutable();
+DROP TRIGGER IF EXISTS zane_guard_user_id ON public.zane_session_entries;
+CREATE TRIGGER zane_guard_user_id BEFORE UPDATE ON public.zane_session_entries
+  FOR EACH ROW EXECUTE FUNCTION zane_guard_user_id_immutable();
+DROP TRIGGER IF EXISTS zane_guard_user_id ON public.zane_sets;
+CREATE TRIGGER zane_guard_user_id BEFORE UPDATE ON public.zane_sets
+  FOR EACH ROW EXECUTE FUNCTION zane_guard_user_id_immutable();
+DROP TRIGGER IF EXISTS zane_guard_user_id ON public.zane_user_settings;
+CREATE TRIGGER zane_guard_user_id BEFORE UPDATE ON public.zane_user_settings
+  FOR EACH ROW EXECUTE FUNCTION zane_guard_user_id_immutable();
 
 -- Migration 0125 grant changes:
 --   REVOKE EXECUTE ON FUNCTION public.find_user_by_email(text) FROM anon, authenticated;
@@ -1708,6 +1789,24 @@ CREATE POLICY "zane_workout_templates_own"
   ON zane_workout_templates FOR ALL
   USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
 
+-- ── Check-in schema templates (migration 0152) ─────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS zane_checkin_schema_templates (
+  id          text        PRIMARY KEY,
+  user_id     uuid        REFERENCES auth.users NOT NULL,
+  name        text        NOT NULL,
+  schema      jsonb       NOT NULL DEFAULT '[]',
+  created_at  timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_zane_checkin_schema_templates_user_id ON public.zane_checkin_schema_templates(user_id);
+
+ALTER TABLE zane_checkin_schema_templates ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "zane_checkin_schema_templates_own"
+  ON zane_checkin_schema_templates FOR ALL
+  USING ((select auth.uid()) = user_id) WITH CHECK ((select auth.uid()) = user_id);
+
 -- ── Schedule backups (migration 0114) ──────────────────────────────────────────
 
 CREATE TABLE zane_schedule_backups (
@@ -1831,7 +1930,7 @@ CREATE POLICY "coaches read client status periods"
   ON zane_status_periods FOR SELECT TO public
   USING (EXISTS ( SELECT 1 FROM zane_coaching zc
     WHERE zc.client_id = zane_status_periods.user_id
-      AND zc.coach_id = (select auth.uid()) AND zc.coach_id <> zc.client_id AND zc.status = 'active'));
+      AND zc.coach_id = (select auth.uid()) AND zc.coach_id <> zc.client_id AND zc.status = 'active' AND zc.id NOT LIKE 'support_%'));
 
 -- ── Glucose logs (migration 0101) ───────────────────────────────────────────────
 -- Multiple readings per day; value always stored in mmol/L (display unit is a
@@ -1859,7 +1958,7 @@ CREATE POLICY "coaches read client glucose logs"
   ON zane_glucose_logs FOR SELECT TO public
   USING (EXISTS ( SELECT 1 FROM zane_coaching zc
     WHERE zc.client_id = zane_glucose_logs.user_id
-      AND zc.coach_id = (select auth.uid()) AND zc.coach_id <> zc.client_id AND zc.status = 'active'));
+      AND zc.coach_id = (select auth.uid()) AND zc.coach_id <> zc.client_id AND zc.status = 'active' AND zc.id NOT LIKE 'support_%'));
 
 -- ── Support tickets (migrations 0085/0086 + archive_support_tickets) ────────────
 -- A support ticket is a zane_coaching row with id LIKE 'support_%' between the

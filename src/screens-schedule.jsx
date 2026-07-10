@@ -613,7 +613,14 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
   const selText   = viewingActiveVersion ? UI.gold : UI.ink;
 
   const activate = async () => {
-    if (!await confirm(`"${sch.name}" will become your active plan and the cycle will reset.`, { title: 'Activate plan?', ok: 'Activate' })) return;
+    // A versioned plan's position comes from its active version's validFrom (via
+    // getCyclePosForDate), so cycleIndex/cycleStartDate don't reset it: don't
+    // promise a reset the plan won't honor.
+    const willReset = !(sch.versions?.length);
+    const msg = willReset
+      ? `"${sch.name}" will become your active plan and the cycle will reset.`
+      : `"${sch.name}" will become your active plan.`;
+    if (!await confirm(msg, { title: 'Activate plan?', ok: 'Activate' })) return;
     setStore(s => ({
       ...s,
       activeScheduleId: sch.id,
@@ -748,7 +755,9 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
         const seedRef = seedRefs[it.exId];
         const last = seedRef ?? LB.bestRecentEntry(store, it.exId, day.id);
         const suggestion = LB.progressionSuggestion(store, it.exId, day.id, it.reps, it.repsPerSet || null, seedRef, it.repsMax || null, it.progressionOffset ?? null);
-        const bodyweightKg = LB.shouldPullBodyweight(ex) ? LB.latestBodyweight(store) : null;
+        // Match the real session-start bodyweight rule (screens-home.jsx), not
+        // the stricter shouldPullBodyweight, so preview and session agree.
+        const bodyweightKg = (ex?.equipment === 'bodyweight') ? LB.latestBodyweight(store) : null;
         const itAdj = (typeof applyMesoSetDeltaFromState === 'function') ? applyMesoSetDeltaFromState(it, day.id, resolvedMeso) : it;
         const weightBoost = mesoBoosts?.[it.exId + '_' + day.id] ?? null;
         let suggestionFinal = suggestion;
@@ -756,7 +765,19 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
           const refSet = (last?.entry?.sets || []).filter(s => !s.warmup && !s.skipped).find(s => s.kg != null);
           if (refSet) suggestionFinal = { kg: Math.round((refSet.kg + weightBoost) * 4) / 4, reps: refSet.reps ?? null };
         }
-        const seedSets = LB.buildSeedSets(itAdj, last, suggestionFinal, isUni, store, bodyweightKg);
+        // 5/3/1 main lift: seed the current week's wave prescription instead of
+        // echoing last-session weights (buildSeedSets is not 5/3/1-aware). Mirrors
+        // the session-start builder in screens-home.jsx.
+        const p531 = LB.is531Plan(sch) ? (sch.program_data || null) : null;
+        const main531 = p531 && p531.mainLifts && p531.mainLifts[it.exId];
+        let seedSets;
+        if (main531 && main531.tm != null) {
+          const wk531 = store.statusMode === 'deload' ? 4 : (LB.current531Week(sch, store.sessions) || 1);
+          seedSets = LB.fiveThreeOneSets(main531.tm, wk531, p531.unit || 'kg')
+            .map(ws => ({ kg: ws.kg, reps: ws.reps, done: false, ...(ws.amrap ? { amrap: true } : {}) }));
+        } else {
+          seedSets = LB.buildSeedSets(itAdj, last, suggestionFinal, isUni, store, bodyweightKg);
+        }
         const nextIt = day.items[k + 1];
         const linkedToNext = it.supersetGroup && it.supersetGroup === nextIt?.supersetGroup;
         const isGiant = it.supersetGroup && day.items.filter(x => x.supersetGroup === it.supersetGroup).length >= 3;
@@ -1314,11 +1335,17 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
   // from and a free weekday slot to place it on (max 7 days).
   const canImportWholeDay = store.schedules.some(s => (s.days || []).some(d => (d.items || []).length > 0)) && draft.days.length < 7;
 
-  const toggleWeekdayEdit = (idx) => {
-    setDraft(d => {
-      if (d.days.some(day => day.weekday === idx)) return { ...d, days: d.days.filter(day => day.weekday !== idx) };
-      return { ...d, days: [...d.days, { id: LB.uid(), name: 'FULL', weekday: idx, items: [] }] };
-    });
+  const toggleWeekdayEdit = async (idx) => {
+    const existing = draft.days.find(day => day.weekday === idx);
+    if (existing) {
+      // Symmetric with cycle-mode removeDay: confirm before dropping a day that
+      // holds exercises, so a tap doesn't silently delete a whole day's config.
+      const n = (existing.items || []).length;
+      if (n > 0 && !await confirm(`Remove "${existing.name}" (${n} exercise${n === 1 ? '' : 's'})?`, { ok: 'Remove', danger: true })) return;
+      setDraft(d => ({ ...d, days: d.days.filter(day => day.weekday !== idx) }));
+    } else {
+      setDraft(d => ({ ...d, days: [...d.days, { id: LB.uid(), name: 'FULL', weekday: idx, items: [] }] }));
+    }
   };
 
   const removeDay = async (idx) => {
@@ -1466,7 +1493,14 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
     go({ name: 'plan' });
   };
 
-  const dirty = JSON.stringify(draft) !== JSON.stringify(original);
+  // When editing an older version, draft.days was seeded from that version's
+  // days (not original.days, which is the newest), so compare against the same
+  // baseline or the screen is spuriously "dirty" on open (mirrors doSaveVersion's
+  // `before`).
+  const dirtyBaseline = (editVerIdx > 0 && original?.versions?.[editVerIdx])
+    ? { ...original, days: original.versions[editVerIdx].days || [] }
+    : original;
+  const dirty = JSON.stringify(draft) !== JSON.stringify(dirtyBaseline);
   const dateInputStyle = {
     background: UI.bgInset, border: 'none',
     borderRadius: 4, padding: '10px 14px', color: UI.ink,
@@ -2337,6 +2371,23 @@ function dayTypeChip(dashed) {
 // multiSelect=true (default): day level shows checkboxes + confirm button,
 //   onCopy(Array<{day, migrateId}>) called with all selected days.
 // multiSelect=false: single-click immediately calls onCopy(day, migrateId).
+// Warn before a day-level import pulls 5/3/1 main lifts into a plan that is not
+// the same 5/3/1 program. A single day carries no program_data, so the Training
+// Max, percentage sets and the AMRAP top set do not travel: the lift silently
+// converts to an ordinary exercise and starts running Smart Progression instead.
+// Returns true to proceed, false to cancel. confirmFn is the caller's styled
+// useConfirm (module-level code would otherwise fall back to native window.confirm,
+// which ignores the title/ok options).
+async function confirm531LiftImport(confirmFn, srcPlan, items, targetIs531) {
+  if (!srcPlan || targetIs531 || !LB.is531Plan(srcPlan)) return true;
+  const hasMain = (items || []).some(it => srcPlan.program_data?.mainLifts?.[it.exId]);
+  if (!hasMain) return true;
+  return await confirmFn(
+    'This day has 5/3/1 main lifts. Imported here they become ordinary exercises: the Training Max, percentage sets and the AMRAP top set do not come along, and Smart Progression takes over instead. Import anyway?',
+    { title: '5/3/1 lifts will convert', ok: 'Import anyway' }
+  );
+}
+
 function DayCopyPicker({ store, schedule, currentDayId, onClose, onCopy, multiSelect = true }) {
   const [selectedPlan, setSelectedPlan] = useStateS(null);
   const [selectedIds, setSelectedIds] = useStateS(new Set());
@@ -2351,7 +2402,7 @@ function DayCopyPicker({ store, schedule, currentDayId, onClose, onCopy, multiSe
   const importTemplate = (t) => {
     const items = normalizeSupersets((t.exercises || [])
       .filter(it => LB.findExercise(store, it.exId))
-      .map(it => ({ exId: it.exId, sets: it.sets || 3, reps: it.reps ?? 8, ...(it.repsPerSet ? { repsPerSet: it.repsPerSet } : {}), ...(it.repsMax != null ? { repsMax: it.repsMax } : {}), ...(it.progressionOffset != null ? { progressionOffset: it.progressionOffset } : {}), ...(Array.isArray(it.timeSecPerSet) ? { timeSecPerSet: it.timeSecPerSet } : {}), ...(it.supersetGroup ? { supersetGroup: it.supersetGroup } : {}) })));
+      .map(it => ({ exId: it.exId, sets: it.sets || 3, ...(it.reps != null ? { reps: it.reps } : {}), ...(it.repsPerSet ? { repsPerSet: it.repsPerSet } : {}), ...(it.repsMax != null ? { repsMax: it.repsMax } : {}), ...(it.progressionOffset != null ? { progressionOffset: it.progressionOffset } : {}), ...(Array.isArray(it.timeSecPerSet) ? { timeSecPerSet: it.timeSecPerSet } : {}), ...(it.supersetGroup ? { supersetGroup: it.supersetGroup } : {}) })));
     const day = { id: LB.uid(), name: t.name, items };
     if (multiSelect) onCopy([{ day, migrateId: undefined }]);
     else onCopy(day, undefined);
@@ -2850,7 +2901,9 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
     setEditQueue({ indices, pos: 0 });
     setEditingItem(indices[0]);
   };
-  const copyItemsFromDay = (sourceDay, migrateId) => {
+  const copyItemsFromDay = async (sourceDay, migrateId) => {
+    const srcPlan = (store.schedules || []).find(s => (s.days || []).some(d => d.id === sourceDay.id));
+    if (!await confirm531LiftImport(confirm, srcPlan, sourceDay.items, LB.is531Plan(schedule))) return;
     // Deep-copy each item and remap superset group ids — a shallow spread
     // would share item objects (and group ids) with the source day.
     const gidMap = {};
@@ -2864,7 +2917,11 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
     });
     // migrateId: preserve the source day's id so historical sessions for that
     // day carry over to this new plan automatically (sessions reference day_id).
-    setDraft(d => ({ ...d, items: copied, ...(migrateId ? { id: migrateId } : {}) }));
+    // Guard against two days in the same plan sharing an id (mirrors the weekday
+    // whole-day import guard): fall back to a fresh id on collision.
+    const collides = migrateId && (schedule?.days || []).some(x => x.id === migrateId && x.id !== day.id);
+    const nextId = collides ? LB.uid() : migrateId;
+    setDraft(d => ({ ...d, items: copied, ...(migrateId ? { id: nextId } : {}) }));
     setCopyingFrom(false);
   };
 
@@ -3264,6 +3321,7 @@ function computePlanSteps({ type, presetKey, customCount, weekdayCount }) {
 function PlanWizard({ store, setStore, go }) {
   const [step, setStep] = useStateS('name');
   const [confirming, setConfirming] = useStateS(false);
+  const [confirm531El, confirm531] = useConfirm();
   const [name, setName] = useStateS('');
   const [type, setType] = useStateS(null);            // 'cycle' | 'weekday' | 'flex'
   const [presetKey, setPresetKey] = useStateS(null);  // SPLIT_PRESETS key | 'custom'
@@ -3299,7 +3357,7 @@ function PlanWizard({ store, setStore, go }) {
     const tplDays = (store.workoutTemplates || []).map(t => ({
       key: 'tpl:' + t.id, name: t.name,
       items: (t.exercises || []).filter(it => LB.findExercise(store, it.exId))
-        .map(it => ({ exId: it.exId, sets: it.sets || 3, reps: it.reps ?? 8, ...(it.repsPerSet ? { repsPerSet: it.repsPerSet } : {}), ...(it.repsMax != null ? { repsMax: it.repsMax } : {}), ...(it.progressionOffset != null ? { progressionOffset: it.progressionOffset } : {}), ...(Array.isArray(it.timeSecPerSet) ? { timeSecPerSet: it.timeSecPerSet } : {}), ...(it.supersetGroup ? { supersetGroup: it.supersetGroup } : {}) })),
+        .map(it => ({ exId: it.exId, sets: it.sets || 3, ...(it.reps != null ? { reps: it.reps } : {}), ...(it.repsPerSet ? { repsPerSet: it.repsPerSet } : {}), ...(it.repsMax != null ? { repsMax: it.repsMax } : {}), ...(it.progressionOffset != null ? { progressionOffset: it.progressionOffset } : {}), ...(Array.isArray(it.timeSecPerSet) ? { timeSecPerSet: it.timeSecPerSet } : {}), ...(it.supersetGroup ? { supersetGroup: it.supersetGroup } : {}) })),
     })).filter(t => t.items.length);
     if (tplDays.length) groups.push({ id: '__tpl', name: 'Templates', days: tplDays });
     return groups;
@@ -3363,12 +3421,14 @@ function PlanWizard({ store, setStore, go }) {
   // each with its exercises. Cycle/flex grow the plan if the import runs past
   // the end; weekday can't grow (its length is the chosen weekday count), so it
   // fills only the remaining slots. Then jump past the filled days.
-  const doImport = () => {
+  const doImport = async () => {
     const chosen = importPlan ? importPlan.days.filter(d => importSel.has(d.key)) : []; // in plan-day order
     if (!chosen.length || dayIdx < 0) return;
     const cap = type === 'weekday' ? Math.max(0, weekdaysSel.length - dayIdx) : chosen.length;
     const use = chosen.slice(0, cap);
     if (!use.length) return;
+    const srcPlan = (store.schedules || []).find(s => s.id === importPlan?.id);
+    if (!await confirm531LiftImport(confirm531, srcPlan, use.flatMap(d => d.items || []), false)) return;
     setCustomDays(d => { const a = d.slice(); use.forEach((src, k) => { a[dayIdx + k] = { name: src.name, items: copyImportItems(src.items) }; }); return a; });
     const nextIdx = dayIdx + use.length;
     let total;
@@ -3673,6 +3733,7 @@ function PlanWizard({ store, setStore, go }) {
   const overlayStyle = vp ? { ...overlayBase, position: 'fixed', left: 0, right: 0, top: vp.top, height: vp.height } : { ...overlayBase, position: 'fixed', inset: 0 };
   return (
     <div style={overlayStyle} onClick={e => { if (e.target === e.currentTarget) requestExit(); }}>
+      {confirm531El}
       <div style={{ position: 'relative', width: '100%', maxWidth: 360, maxHeight: '86vh', overflowY: 'auto', background: UI.bgRaised, border: `1px solid ${UI.hairStrong}`, borderRadius: 8, padding: '20px 20px 22px', display: 'flex', flexDirection: 'column', gap: 18, boxShadow: '0 32px 80px rgba(0,0,0,0.6)', animation: 'fadeUp 0.3s ease' }}>
         {confirming ? (
           <>
@@ -3891,6 +3952,13 @@ function TmField({ value, onChange, step = 2.5, suffix }) {
   const round = (v) => Math.round(v * 1000) / 1000;
   const [raw, setRaw] = useStateS(value == null ? '' : String(value));
   const [focused, setFocused] = useStateS(false);
+  // Keep the field in sync when the TM is set from outside (e.g. the "Set from
+  // history" button). Without this the input keeps showing the old typed value
+  // and the next +/- would write that stale number back, silently discarding
+  // the applied TM.
+  useEffectS(() => {
+    if (!focused) setRaw(value == null ? '' : String(value));
+  }, [value, focused]);
   const push = (s) => {
     if (s !== '' && !/^\d*\.?\d*$/.test(s)) return; // ignore stray non-numeric input
     setRaw(s);
@@ -3899,7 +3967,10 @@ function TmField({ value, onChange, step = 2.5, suffix }) {
     if (isFinite(n)) onChange(n);
   };
   const bump = (delta) => {
-    const next = Math.max(0, round((Number(raw) || 0) + delta));
+    // Derive from the authoritative value prop, not the local raw string, so an
+    // externally-applied value (Set from history) isn't lost on the next nudge.
+    const base = (value != null && isFinite(value)) ? value : (Number(raw) || 0);
+    const next = Math.max(0, round(base + delta));
     setRaw(String(next));
     onChange(next);
   };
@@ -3993,10 +4064,18 @@ function FiveThreeOneSetupScreen({ store, setStore, go, userId }) {
   const addMainLift = (ids) => {
     setAddingMainLift(false);
     const arr = Array.isArray(ids) ? ids : [ids];
-    const isCanonical = (exId) => FTO.lifts.some(l => {
-      const ex = (store.exercises || []).find(e => (e.name || '').toUpperCase() === l.ex.toUpperCase());
-      return ex && ex.id === exId;
-    });
+    const isCanonical = (exId) => {
+      // Match the picked exercise's own name against the canonical lifts too, not
+      // only an already-owned canonical row: if the user doesn't yet own e.g.
+      // Back Squat, the name→exId lookup misses it and the same lift could be
+      // added both canonically and as an "extra", duplicating the main-lift day.
+      const pickedName = (LB.findExercise(store, exId)?.name || '').toUpperCase();
+      return FTO.lifts.some(l => {
+        if (pickedName && pickedName === l.ex.toUpperCase()) return true;
+        const ex = (store.exercises || []).find(e => (e.name || '').toUpperCase() === l.ex.toUpperCase());
+        return ex && ex.id === exId;
+      });
+    };
     setExtraLifts(list => {
       const next = [...list];
       for (const exId of arr) {

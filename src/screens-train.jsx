@@ -409,7 +409,7 @@ function PlateCalcSheet({ open, onClose, initialWeight, availablePlates }) {
                       position: 'absolute',
                       width: hole, height: hole, borderRadius: '50%',
                       background: 'var(--bg)',
-                      boxShadow: '0 0 0 1.5px rgba(255,255,255,0.18)',
+                      boxShadow: '0 0 0 1.5px rgba(var(--knurl-rgb),0.18)',
                     }} />
                   </div>
                   <span style={{ fontFamily: UI.fontNum, fontSize: 12, color: UI.inkSoft, letterSpacing: '0.02em' }}>{p} × {n}</span>
@@ -496,7 +496,11 @@ function CustomKeyboard({ visible, field, onType, onBackspace, onAdjust, onConfi
         <button style={act} onPointerDown={e => { e.preventDefault(); e.stopPropagation(); onAdjust(-1); }}>↓</button>
         {showSign
           ? <button style={{ ...act, fontSize: 18, fontFamily: UI.fontNum }} onPointerDown={e => { e.preventDefault(); e.stopPropagation(); onSign(); }}>±</button>
-          : <button style={act} onPointerDown={e => { e.preventDefault(); e.stopPropagation(); onPlateCalc(); }}><i className="fa-solid fa-dumbbell" style={{ fontSize: 11 }} /></button>}
+          : isKg
+            /* Plate calc only makes sense on a positive barbell load: hide the
+               dumbbell key on reps/time fields and on assisted (negative) loads. */
+            ? <button style={act} onPointerDown={e => { e.preventDefault(); e.stopPropagation(); onPlateCalc(); }}><i className="fa-solid fa-dumbbell" style={{ fontSize: 11 }} /></button>
+            : <div style={{ ...act, background: 'transparent', border: 'none', cursor: 'default' }} />}
         <button style={act} onPointerDown={e => { e.preventDefault(); e.stopPropagation(); onAdjust(1); }}>↑</button>
         <button
           onPointerDown={e => { e.preventDefault(); e.stopPropagation(); if (!confirmDisabled) onConfirm(); }}
@@ -1070,13 +1074,37 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     completeSet(cd.setIdx, true, true, { timeSec: logged });
   };
   useEffectT(() => () => clearTimeout(countdownTimerRef.current), []);
+  // iOS discards a setTimeout pending in a backgrounded WebView, so the countdown
+  // auto-complete would never fire after a background→foreground cycle. Re-arm
+  // from startedAt on resume (or fire immediately if the target already elapsed
+  // while away), mirroring the rest timer.
+  const finishCountdownRef = useRefT(finishCountdown); finishCountdownRef.current = finishCountdown;
+  useEffectT(() => {
+    const onVis = () => {
+      if (document.visibilityState !== 'visible') return;
+      const cd = countdownRef.current;
+      if (!cd) return;
+      clearTimeout(countdownTimerRef.current);
+      const remainMs = cd.startedAt + cd.total * 1000 - Date.now();
+      if (remainMs <= 0) finishCountdownRef.current(true);
+      else countdownTimerRef.current = setTimeout(() => finishCountdownRef.current(true), remainMs);
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => document.removeEventListener('visibilitychange', onVis);
+  }, []);
 
   // NEW BEST decision, shared by completeSet and the technique finishers. For an
   // assisted exercise "best" is the highest (least-negative) load, compared kg
   // to kg with no Epley and no >0 gate (loads are negative). Everything else
   // uses the estimated 1RM, folding in the local + windowed-server best.
-  const isNewBestSet = (kg, reps) => {
+  const isNewBestSet = (kg, reps, timeSec = null) => {
     if (!entry || newBestShownRef.current[entry.exId]) return false;
+    // Time-based exercise: "best" is the longest duration ever logged.
+    if (LB.exerciseLogMode(exercise) === 'time') {
+      if (timeSec == null) return false;
+      const prior = LB.bestTimeForExercise(store, entry.exId, session.id);
+      return prior != null && timeSec > prior;
+    }
     if (LB.isAssisted(exercise)) {
       if (kg == null) return false;
       const prior = LB.bestAssistLoad(store, entry.exId, session.id);
@@ -1168,7 +1196,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
       // Determine violations
       let weightBad = false, weightHigh = false;
-      if (refKg != null && refKg > 0 && loggedKg != null && loggedKg > 0) {
+      // 5/3/1 main lifts swing ~20% week to week by design (65/75/85% waves,
+      // built-in deload), so comparing against last session's load throws false
+      // outlier prompts, so skip them like the progression toast does below.
+      if (!LB.is531MainLift(store, entry.exId, session.dayId) && refKg != null && refKg > 0 && loggedKg != null && loggedKg > 0) {
         const tooLow  = loggedKg < refKg - increment * 5;
         const tooHigh = loggedKg > refKg * 1.5;
         if (tooLow || tooHigh) { weightBad = true; weightHigh = tooHigh; }
@@ -1300,7 +1331,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     } else if (!entry.sets[setIdx]?.warmup && !isDeloadSession) {
       const completed = entry.sets[setIdx];
       const cReps = LB.effReps(completed);
-      const isNewBest = isNewBestSet(completed?.kg ?? null, cReps);
+      // For a countdown-completed time set the actually-logged duration arrives
+      // in extraPatch (entry.sets[setIdx] still holds the pre-patch target), so
+      // an early STOP doesn't over-report against the prior best.
+      const isNewBest = isNewBestSet(completed?.kg ?? null, cReps, extraPatch?.timeSec ?? completed?.timeSec ?? null);
       if (isNewBest) {
         newBestShownRef.current[entry.exId] = true;
         setNewBestSet(true);
@@ -1578,6 +1612,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         // one the user is looking at.
         entries: sess.entries.map((e, i) => {
           if (i !== exIdx && !(group && e.supersetGroup === group)) return e;
+          if (e.isCardio) return e; // cardio carries no working sets to keep in lockstep
           const ex = LB.findExercise(store, e.exId);
           const uni = (ex?.movement_type ?? (ex?.unilateral ? 'unilateral' : 'bilateral')) === 'unilateral';
           const bwKg = LB.shouldPullBodyweight(ex) ? LB.latestBodyweight(store) : null;
@@ -1605,7 +1640,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     const workingSets = entry.sets.map((s, i) => ({ s, i })).filter(({ s }) => !s.warmup);
     if (workingSets.length <= 1) return;
     const group = entry.supersetGroup;
-    const members = group ? session.entries.filter(e => e.supersetGroup === group) : [entry];
+    // Cardio members carry no working sets, so exclude them from the lockstep
+    // count guard (else their 0 working sets would always block a removal).
+    const members = (group ? session.entries.filter(e => e.supersetGroup === group) : [entry]).filter(e => !e.isCardio);
     // Superset/giant-set partners must keep matching working-set counts (see
     // addSet) — refuse if any member is already down to its last working
     // set, rather than let counts diverge.
@@ -1617,6 +1654,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         ...sess,
         entries: sess.entries.map((e, i) => {
           if (i !== exIdx && !(grp && e.supersetGroup === grp)) return e;
+          if (e.isCardio) return e; // cardio carries no working sets
           const eWorkingSets = e.sets.map((s, k) => ({ s, k })).filter(({ s }) => !s.warmup);
           const lastWorking = eWorkingSets[eWorkingSets.length - 1];
           return lastWorking ? { ...e, sets: e.sets.filter((_, k) => k !== lastWorking.k) } : e;
@@ -3481,6 +3519,21 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             if (isNewCardio) {
               return { ...e, exId: newExId, name: newEx?.name || e.name, isCardio: true, plannedSets: 0, sets: [], cardioDone: false, cardioData: null };
             }
+            // Reshape the sets when the swapped-in exercise logs differently
+            // (time vs weight/reps) or flips assisted-ness, so a time/assisted
+            // exercise never inherits the old weight-shaped sets, and vice versa.
+            const oldEx = LB.findExercise(s, e.exId);
+            const modeChanged = LB.exerciseLogMode(oldEx) !== LB.exerciseLogMode(newEx);
+            const assistChanged = (oldEx?.movement_type === 'assisted') !== (newEx?.movement_type === 'assisted');
+            if (modeChanged || assistChanged) {
+              const isUni = newEx?.movement_type === 'unilateral';
+              const bwKg = LB.shouldPullBodyweight(newEx) ? LB.latestBodyweight(s) ?? null : null;
+              const last = LB.bestRecentEntry(s, newExId, session.dayId);
+              const suggestion = LB.progressionSuggestion(s, newExId, session.dayId, null, null, last);
+              const setCount = e.sets?.length || e.plannedSets || 3;
+              const seedSets = LB.buildSeedSets({ exId: newExId, sets: setCount, repsPerSet: null }, last, suggestion, isUni, s, bwKg);
+              return { ...e, exId: newExId, name: newEx?.name || e.name, sets: seedSets };
+            }
             return { ...e, exId: newExId, name: newEx?.name || e.name };
           }),
         }),
@@ -3509,7 +3562,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           const bwKg = LB.shouldPullBodyweight(newEx) ? LB.latestBodyweight(s) ?? null : null;
           const last = LB.bestRecentEntry(s, newExId, session.dayId);
           const suggestion = LB.progressionSuggestion(s, newExId, session.dayId, null, null, last);
-          const seedSets = LB.buildSeedSets({ sets: 3, repsPerSet: null }, last, suggestion, isUni, s, bwKg);
+          const seedSets = LB.buildSeedSets({ exId: newExId, sets: 3, repsPerSet: null }, last, suggestion, isUni, s, bwKg);
           newEntry = { exId: newExId, name: newEx?.name || newExId, plannedSets: 3, plannedReps: null, plannedRepsPerSet: null, sets: seedSets, note: '', supersetGroup: null, addedDuringSession: true };
         }
         return {
@@ -3574,7 +3627,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         const suggestion = LB.progressionSuggestion(s, newExId, session.dayId, null, null, last);
         const mother = targetIdx !== null ? sess.entries[targetIdx] : null;
         const setCount = mother ? (mother.plannedSets ?? mother.sets?.length ?? 3) : 3;
-        const seedSets = LB.buildSeedSets({ sets: setCount, repsPerSet: null }, last, suggestion, isUni, s, bwKg);
+        const seedSets = LB.buildSeedSets({ exId: newExId, sets: setCount, repsPerSet: null }, last, suggestion, isUni, s, bwKg);
         newEntry = { exId: newExId, name: newEx?.name || newExId, plannedSets: setCount, plannedReps: null, plannedRepsPerSet: null, sets: seedSets, note: '', supersetGroup: group, addedDuringSession: true };
       }
       const withNew = [
@@ -5216,7 +5269,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               a time-based exercise has neither field, so the picker is hidden
               there. Assisted works fine (a drop set just adds assistance:
               -30 -> -40 -> -50, same descending direction as dropping weight). */}
-          {!isCardio && !isTime && (
+          {!isCardio && !isTime && !isCheckbox && (
             <button className="intensity-glow" onClick={() => setIntensityOpen(true)} style={{
               width: '100%', marginTop: 6, padding: '8px 0',
               background: 'rgba(var(--accent-rgb),0.08)',
@@ -5375,7 +5428,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         </>) : (<>
           {(() => {
             const pending = entrySets.find(s => !s.done && !s.skipped);
-            const hasVal = pending && (pending.kg != null || pending.reps != null || pending.repsL != null || pending.repsR != null);
+            // Checkbox sets carry no numbers (tick to complete) and time sets log
+            // a duration, so gate the primary CTA on a pending set existing, not
+            // on kg/reps being present, or it stays permanently disabled for them.
+            const hasVal = !!pending && (isCheckbox || pending.timeSec != null || pending.kg != null || pending.reps != null || pending.repsL != null || pending.repsR != null);
             const hasFeedback = mesoFeedbackGroups.length > 0;
             return (
               <Btn onClick={checkSet} disabled={!hasVal} style={{ flex: hasFeedback ? 1 : 2, minHeight: 44, padding: hasFeedback ? '10px 4px' : '10px 16px' }}>
@@ -6130,11 +6186,14 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       <Sheet open={historyOpen} onClose={() => setHistoryOpen(false)} title="History">
         {(() => {
           const rows = historyRows ?? localHistory;
-          // Assisted: "best" is the least-negative load, not an Epley e1RM.
+          // Assisted: "best" is the least-negative load; time-based: the longest
+          // duration; everything else: an Epley e1RM.
           const isAssistedEx = LB.isAssisted(exercise);
-          const pr = !entry ? 0 : isAssistedEx ? LB.bestAssistLoad(store, entry.exId) : LB.bestE1rmForExercise(store, entry.exId);
+          const isTimeEx = LB.exerciseLogMode(exercise) === 'time';
+          const pr = !entry ? 0 : isTimeEx ? LB.bestTimeForExercise(store, entry.exId) : isAssistedEx ? LB.bestAssistLoad(store, entry.exId) : LB.bestE1rmForExercise(store, entry.exId);
           const e1rmForSet = (s) => { const r = LB.effReps(s); return (s.kg != null && r > 0) ? LB.e1rm(s.kg, r) : 0; };
           const bestKgOf = (sets) => { const vals = sets.map(s => s.kg).filter(v => v != null); return vals.length ? Math.max(...vals) : null; };
+          const bestTimeOf = (sets) => { const vals = sets.map(s => s.timeSec).filter(v => v != null); return vals.length ? Math.max(...vals) : null; };
           if (!rows.length) {
             return (
               <div className="micro" style={{ color: UI.inkFaint, textAlign: 'center', padding: '20px 0' }}>
@@ -6151,8 +6210,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               {shown.map((h, hi) => {
                 const working = (h.sets || []).filter(s => !s.warmup && !s.skipped && (s.kg != null || s.reps != null || s.timeSec != null));
                 if (!working.length) return null;
-                const sessionBest = isAssistedEx ? bestKgOf(working) : working.reduce((m, s) => Math.max(m, e1rmForSet(s)), 0);
-                const isPR = isAssistedEx
+                const sessionBest = isTimeEx ? bestTimeOf(working) : isAssistedEx ? bestKgOf(working) : working.reduce((m, s) => Math.max(m, e1rmForSet(s)), 0);
+                const isPR = (isAssistedEx || isTimeEx)
                   ? (pr != null && sessionBest != null && Math.abs(sessionBest - pr) < 0.01)
                   : (pr > 0 && sessionBest > 0 && Math.abs(sessionBest - pr) < 0.01);
                 return (
@@ -6167,7 +6226,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                         </div>
                         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                           {working.map((s, i) => {
-                            const isBest = isAssistedEx
+                            const isBest = isTimeEx
+                              ? (s.timeSec != null && sessionBest != null && Math.abs(s.timeSec - sessionBest) < 0.01)
+                              : isAssistedEx
                               ? (s.kg != null && sessionBest != null && Math.abs(s.kg - sessionBest) < 0.01)
                               : (sessionBest > 0 && Math.abs(e1rmForSet(s) - sessionBest) < 0.01);
                             const repsStr = (s.repsL != null || s.repsR != null) ? `L${s.repsL ?? '?'}/R${s.repsR ?? '?'}` : s.reps;
@@ -6710,7 +6771,15 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       {mesoGainSheetOpen && (
         <Sheet open={mesoGainSheetOpen} onClose={() => {
           setMesoGainSheetOpen(false);
-          go({ name: 'session', sessionId: mesoGainNavRef.current, justFinished: true });
+          // Mirror the "Got it" button: a swipe/backdrop dismiss must still run
+          // the end-of-mesocycle flow (deload / Meso N / deactivate offers),
+          // not skip straight to the session summary.
+          if (mesoJustCompletedRef.current) {
+            mesoJustCompletedRef.current = false;
+            handleMesoComplete();
+          } else {
+            go({ name: 'session', sessionId: mesoGainNavRef.current, justFinished: true });
+          }
         }} title="Next session">
           <div style={{ fontFamily: UI.fontUi, fontSize: 13, color: UI.inkSoft, marginBottom: 20, lineHeight: 1.5 }}>
             Based on your feedback, here's what changes next time:

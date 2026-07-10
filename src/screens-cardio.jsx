@@ -158,7 +158,9 @@ function cpNearestDateForKey(k, todayISO) {
 }
 
 function cpTodayLog(plan, cardioLogs, todayISO) {
-  return (cardioLogs || []).find(l => l.date === todayISO && l.type === plan.activityType) || null;
+  const norm = (s) => (s || '').trim().toLowerCase();
+  const planType = norm(plan.activityType);
+  return (cardioLogs || []).find(l => l.date === todayISO && norm(l.type) === planType) || null;
 }
 
 // ─── CardioPlanDetailSheet ─────────────────────────────────────────────────
@@ -427,7 +429,18 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
       if (step === 3) return goal.type === 'duration' ? !!fitDurMin
                           : goal.type === 'pace'     ? !!(fitDistM && fitDurMin)
                           : !!fitDistM;
-      if (step === 4) return true;
+      if (step === 4) {
+        // Block a dead plan: a due date in the past (or no training day before
+        // it) yields zero generated sessions, which renders as an empty,
+        // targetless plan forever.
+        const gObj  = { type: goal.type, target_distance_m: goalDistM, target_duration_minutes: goalDurMin };
+        const sfObj = {
+          distance_m: fitDistM || Math.round((goalDistM || 5000) * 0.3),
+          duration_minutes: fitDurMin || Math.round((goalDurMin || 30) * 0.3),
+          pace_s_per_km: fitPaceSec,
+        };
+        return cpGenerateWeeks(gObj, sfObj, goalDue, LB.todayISO(), days).length > 0;
+      }
       if (step === 5) return !!planName.trim();
     }
     return true;
@@ -488,17 +501,33 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
     let startDate = editPlan?.planStartDate || null;
 
     if (mode === 'goal') {
-      const gObj  = { type: goal.type, target_distance_m: goalDistM, target_duration_minutes: goalDurMin };
-      const sfObj = {
-        distance_m: fitDistM || Math.round((goalDistM || 5000) * 0.3),
-        duration_minutes: fitDurMin || Math.round((goalDurMin || 30) * 0.3),
-        pace_s_per_km: fitPaceSec,
-      };
-      genWeeks  = cpGenerateWeeks(gObj, sfObj, goalDue, todayISO, days);
-      startFit  = { distance_m: fitDistM, duration_minutes: fitDurMin, pace_s_per_km: fitPaceSec };
-      // genWeeks is anchored at todayISO, so the stored start date must match —
-      // otherwise cpSessionIndex(planStartDate,…) overshoots the fresh weeks array.
-      startDate = todayISO;
+      // Only regenerate (and re-anchor to today) when a goal-affecting field
+      // actually changed. A pure rename or a non-goal tweak must keep the
+      // existing progression, otherwise the plan snaps back to session 1 and
+      // today's target drops to the beginner baseline.
+      const goalChanged = !editPlan
+        || editPlan.mode !== 'goal'
+        || editPlan.goal?.type !== goal.type
+        || (editPlan.goal?.target_distance_m ?? null) !== (goalDistM ?? null)
+        || (editPlan.goal?.target_duration_minutes ?? null) !== (goalDurMin ?? null)
+        || editPlan.goalDueDate !== goalDue
+        || JSON.stringify(editPlan.days) !== JSON.stringify(days)
+        || (editPlan.startFitness?.distance_m ?? null) !== (fitDistM ?? null)
+        || (editPlan.startFitness?.duration_minutes ?? null) !== (fitDurMin ?? null)
+        || (editPlan.startFitness?.pace_s_per_km ?? null) !== (fitPaceSec ?? null);
+      if (goalChanged) {
+        const gObj  = { type: goal.type, target_distance_m: goalDistM, target_duration_minutes: goalDurMin };
+        const sfObj = {
+          distance_m: fitDistM || Math.round((goalDistM || 5000) * 0.3),
+          duration_minutes: fitDurMin || Math.round((goalDurMin || 30) * 0.3),
+          pace_s_per_km: fitPaceSec,
+        };
+        genWeeks  = cpGenerateWeeks(gObj, sfObj, goalDue, todayISO, days);
+        startFit  = { distance_m: fitDistM, duration_minutes: fitDurMin, pace_s_per_km: fitPaceSec };
+        // genWeeks is anchored at todayISO, so the stored start date must match,
+        // otherwise cpSessionIndex(planStartDate,…) overshoots the fresh weeks array.
+        startDate = todayISO;
+      }
     }
 
     const cleanTargets = {};

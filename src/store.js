@@ -428,6 +428,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
     + (backup.cardioLogs?.length ? 1 : 0)
     + (backup.dailyLogs?.length ? 1 : 0)
     + (backup.workoutTemplates?.length ? 1 : 0)
+    + (backup.checkinSchemaTemplates?.length ? 1 : 0)
     + (backup.glucoseLogs?.length ? 1 : 0)
     + (backup.cardioPlans?.length ? 1 : 0)
     + (backup.statusPeriods?.length ? 1 : 0)
@@ -458,6 +459,18 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
       ...s,
       days: remapDays(s.days),
       versions: Array.isArray(s.versions) ? s.versions.map(v => ({ ...v, days: remapDays(v.days) })) : s.versions,
+      // 5/3/1 program_data.mainLifts / tmHistory are keyed BY exId, so they must
+      // be remapped to the fresh ids too or they dangle against the remapped day
+      // items after restore (mirrors the single-plan share path in
+      // screens-schedule.jsx). bumpedCycle is a source-plan guard: drop it so the
+      // restored copy counts cycles from zero.
+      ...(s.program_data && typeof s.program_data === 'object' ? (() => {
+        const pd = { ...s.program_data };
+        if (pd.mainLifts) pd.mainLifts = remapExKeyed(pd.mainLifts);
+        if (pd.tmHistory) pd.tmHistory = remapExKeyed(pd.tmHistory);
+        delete pd.bumpedCycle;
+        return { program_data: pd };
+      })() : {}),
       user_id: userId,
     })))));
     stepsDone++;
@@ -538,6 +551,16 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
       backup.workoutTemplates.map(t => ({
         id: t.id, user_id: userId, name: t.name,
         exercises: (t.exercises || []).map(e => (e.exId != null ? { ...e, exId: remapEx(e.exId) } : e)),
+      }))
+    ));
+    stepsDone++;
+  }
+  if (backup.checkinSchemaTemplates?.length) {
+    prog('Uploading check-in schema templates…');
+    // Field definitions only (label/type/options/…), no exercise ids to remap.
+    await unwrap(_supabase.from('zane_checkin_schema_templates').upsert(
+      backup.checkinSchemaTemplates.map(t => ({
+        id: t.id, user_id: userId, name: t.name, schema: t.schema || [],
       }))
     ));
     stepsDone++;
@@ -775,7 +798,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     isCoachLoad ? null : _supabase.rpc('get_coach_info'),
     isCoachLoad ? null : _supabase.rpc('get_coaching_clients'),
     isCoachLoad ? null : _supabase.from('zane_coaching_notes')
-      .select('id, coaching_id, author_id, type, entity_id, entity_name, body, created_at, thread_id')
+      .select('id, coaching_id, author_id, type, entity_id, entity_name, body, created_at, thread_id, attachments')
       .is('read_at', null)
       .neq('author_id', userId)
       .not('coaching_id', 'like', 'support_%'),
@@ -801,12 +824,16 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     _supabase.from('zane_workout_templates').select('id, name, exercises, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
     // Mesocycle state per plan — replaces localStorage logbook-meso-state (migration 0120)
     _supabase.from('zane_meso_states').select('id, schedule_id, weeks, start_date, start_cycle_index, started_at, deltas, joint_flags, pump_low_counts, weight_boosts, growth_counts, completions, pending_meso2, updated_at').eq('user_id', userId),
+    // Coach's own saved check-in schema templates: irrelevant when loading a
+    // CLIENT's store as a coach, these belong to the acting coach, not the client.
+    isCoachLoad ? null : _supabase.from('zane_checkin_schema_templates').select('id, name, schema, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
   ];
   const [profileRes, exRes, schRes, sessRes, settRes, skipsRes, entriesRes,
          bestsRes, sessionStatsRes,
          coachInfoRes, coachClientsRes, unreadNotesRes, coachingRowRes, selfRowRes,
          cardioLogsRes, cardioPlansRes, dailyLogsRes, statusPeriodsRes,
-         supportTicketsRes, glucoseLogsRes, templatesRes, mesoStatesRes] = await Promise.all(queries);
+         supportTicketsRes, glucoseLogsRes, templatesRes, mesoStatesRes,
+         checkinTemplatesRes] = await Promise.all(queries);
 
   // A failed request (offline, RLS, server error) also yields no data — bail
   // out so the caller can surface an error instead of mistaking this for a
@@ -839,6 +866,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   if (coachInfoRes?.error) throw coachInfoRes.error;
   if (coachClientsRes?.error) throw coachClientsRes.error;
   if (unreadNotesRes?.error) throw unreadNotesRes.error;
+  if (checkinTemplatesRes?.error) throw checkinTemplatesRes.error;
   // coachingRowRes/selfRowRes use maybeSingle() and only drive optional banner
   // UI. There is no DB uniqueness constraint on (client_id, active), so a client
   // with >1 active coach yields a PGRST116 "multiple rows" error — do NOT throw
@@ -990,6 +1018,11 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
       exercises: Array.isArray(t.exercises) ? t.exercises : [],
       createdAt: t.created_at,
     })),
+    checkinSchemaTemplates: (checkinTemplatesRes?.data || []).map(t => ({
+      id: t.id, name: t.name,
+      schema: Array.isArray(t.schema) ? t.schema : [],
+      createdAt: t.created_at,
+    })),
     mesoStates: (mesoStatesRes?.data || []).map(m => ({
       id: m.id, scheduleId: m.schedule_id, weeks: m.weeks,
       startDate: m.start_date, startCycleIndex: m.start_cycle_index ?? 0,
@@ -1080,6 +1113,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         threadId: n.thread_id,
         body: n.body,
         createdAt: n.created_at,
+        attachments: n.attachments || null,
       })),
     },
     supportTickets: (supportTicketsRes?.data || []).map(t => ({
@@ -1399,6 +1433,18 @@ async function syncStore(prev, next, userId) {
     if (removed.length) ops.push(_supabase.from('zane_workout_templates').delete().in('id', removed.map(t => t.id)));
   }
 
+  if (prev.checkinSchemaTemplates !== next.checkinSchemaTemplates) {
+    const upsert = (next.checkinSchemaTemplates || []).filter(t => {
+      const p = (prev.checkinSchemaTemplates || []).find(x => x.id === t.id);
+      return !p || JSON.stringify(p) !== JSON.stringify(t);
+    });
+    const removed = (prev.checkinSchemaTemplates || []).filter(t => !(next.checkinSchemaTemplates || []).find(x => x.id === t.id));
+    if (upsert.length) ops.push(_supabase.from('zane_checkin_schema_templates').upsert(upsert.map(t => ({
+      id: t.id, user_id: userId, name: t.name, schema: t.schema || [],
+    }))));
+    if (removed.length) ops.push(_supabase.from('zane_checkin_schema_templates').delete().in('id', removed.map(t => t.id)));
+  }
+
   if (prev.mesoStates !== next.mesoStates) {
     const upsert = (next.mesoStates || []).filter(m => {
       const p = (prev.mesoStates || []).find(x => x.id === m.id);
@@ -1652,7 +1698,19 @@ function e1rm(kg, reps) {
 // More weight at no worse than -2 reps, or same/more weight at more reps.
 function isImprovement(curr, prev) {
   // done=true wins: if both done+skipped are set, treat as done
-  if (!prev || !curr || !curr.done || curr.kg == null || prev.kg == null) return false;
+  if (!prev || !curr || !curr.done) return false;
+  // Time-based sets carry a duration, not kg x reps: a longer hold beats a
+  // shorter one (planks, dead hangs, wall sits). Both sides must be timed.
+  if (curr.timeSec != null || prev.timeSec != null) {
+    return curr.timeSec != null && prev.timeSec != null && curr.timeSec > prev.timeSec;
+  }
+  // Reps-only exercises (no weight, no duration, e.g. bodyweight push-ups):
+  // more reps than last time beats fewer.
+  if (curr.kg == null && prev.kg == null) {
+    const rC = effReps(curr); const rP = effReps(prev);
+    return rC != null && rP != null && rC > rP;
+  }
+  if (curr.kg == null || prev.kg == null) return false;
   const rA = effReps(curr); const rB = effReps(prev);
   if (rA == null || rB == null) return false;
   return (curr.kg > prev.kg && rA >= rB - 2) || (curr.kg >= prev.kg && rA > rB);
@@ -1661,7 +1719,17 @@ function isDecline(curr, prev) {
   // done=true wins: only treat as skipped when truly skipped (not also done)
   if (!prev || !curr || (curr.skipped && !curr.done)) return false;
   if (prev.skipped && !prev.done) return false; // prev was already skipped, no baseline to decline from
-  if (!curr.done || curr.kg == null || prev.kg == null) return false;
+  if (!curr.done) return false;
+  // Time-based sets: a shorter hold than last time is a decline.
+  if (curr.timeSec != null || prev.timeSec != null) {
+    return curr.timeSec != null && prev.timeSec != null && curr.timeSec < prev.timeSec;
+  }
+  // Reps-only exercises: fewer reps than last time is a decline.
+  if (curr.kg == null && prev.kg == null) {
+    const rC = effReps(curr); const rP = effReps(prev);
+    return rC != null && rP != null && rC < rP;
+  }
+  if (curr.kg == null || prev.kg == null) return false;
   const rA = effReps(curr); const rB = effReps(prev);
   if (rA == null || rB == null) return false;
   return (curr.kg < prev.kg && rA <= rB) || (curr.kg === prev.kg && rA < rB);
@@ -1706,6 +1774,25 @@ function bestAssistLoad(state, exId, excludeSessionId = null, dayId = null) {
       for (const st of (e.sets || [])) {
         if (st.warmup || st.skipped || st.kg == null) continue;
         if (best == null || st.kg > best) best = st.kg;
+      }
+    }
+  }
+  return best;
+}
+
+// The "PR" of a time-based exercise: the longest duration (seconds) logged
+// across ended sessions. Local window only, returns null when there is no
+// history. Mirrors bestAssistLoad's session/set filtering.
+function bestTimeForExercise(state, exId, excludeSessionId = null, dayId = null) {
+  let best = null;
+  for (const s of state.sessions || []) {
+    if (!s.ended || s.isDeload || (excludeSessionId && s.id === excludeSessionId)) continue;
+    if (dayId && s.dayId !== dayId) continue;
+    for (const e of (s.entries || [])) {
+      if (e.exId !== exId) continue;
+      for (const st of (e.sets || [])) {
+        if (st.warmup || st.skipped || st.timeSec == null) continue;
+        if (best == null || st.timeSec > best) best = st.timeSec;
       }
     }
   }
@@ -1782,7 +1869,10 @@ function doneSetCount(session) {
   return (session.entries || []).reduce((c, e) =>
     c + (e.sets || []).filter(st => {
       if (st.warmup || st.skipped) return false;
-      if (ended) return st.timeSec != null || (st.kg != null && (st.reps != null || st.repsL != null || st.repsR != null));
+      // Count any logged evidence for the set's type, not just kg x reps: a
+      // reps-only (bodyweight) or checkbox (mobility) done set has kg == null but
+      // was fully logged, and must still count.
+      if (ended) return st.done || st.timeSec != null || st.kg != null || st.reps != null || st.repsL != null || st.repsR != null;
       return st.done;
     }).length, 0);
 }
@@ -2236,11 +2326,12 @@ function buildPlanSkeleton({ name, type, presetKey, customCount, customDays, wee
         return { id: uid(), name, weekday: i, items };
       });
   } else if (presetKey === 'custom' || !preset) {
-    // Custom: the per-day picks the wizard collected (unpicked → FULL, imported
-    // days carry their exercises); fall back to a plain count of FULL days.
-    const cds = (customDays && customDays.length)
-      ? customDays
-      : Array.from({ length: Math.max(1, Math.round(customCount || 1)) }, () => null);
+    // Custom cycle/flex: the day count is customCount (the wizard sizes the
+    // day-steps by it). Read the per-day picks by index, but never trust
+    // customDays.length: a stale array left over from a weekday-sized pass
+    // before a plan-type switch would otherwise inflate the day count.
+    const n = Math.max(1, Math.round(customCount || (customDays && customDays.length) || 1));
+    const cds = Array.from({ length: n }, (_, i) => (customDays && customDays[i]) || null);
     days = cds.map(cd => ({ id: uid(), name: cdName(cd), items: cdItems(cd) }));
   } else {
     const types = [];
@@ -3195,7 +3286,7 @@ async function reloadCoachingState(userId) {
     _supabase.rpc('get_coach_info'),
     _supabase.rpc('get_coaching_clients'),
     _supabase.from('zane_coaching_notes')
-      .select('id, coaching_id, author_id, type, entity_id, entity_name, body, created_at, thread_id')
+      .select('id, coaching_id, author_id, type, entity_id, entity_name, body, created_at, thread_id, attachments')
       .is('read_at', null)
       .neq('author_id', userId),
     _supabase.from('zane_coaching').select('id, checkin_requested_at, checkin_enabled').eq('client_id', userId).eq('status', 'active').neq('coach_id', userId).maybeSingle(),
@@ -3220,6 +3311,7 @@ async function reloadCoachingState(userId) {
       id: n.id, coachingId: n.coaching_id, authorId: n.author_id,
       type: n.type, entityId: n.entity_id, entityName: n.entity_name,
       threadId: n.thread_id, body: n.body, createdAt: n.created_at,
+      attachments: n.attachments || null,
     })),
   };
 }
@@ -3450,7 +3542,9 @@ async function requestCheckin(coachingId, userId) {
   await addCoachingNote(coachingId, 'general', null, null,
     'Your coach is requesting your weekly check-in. Please fill it in when you get a chance.',
     userId, threadId);
-  await _supabase.from('zane_coaching').update({ checkin_requested_at: new Date().toISOString() }).eq('id', coachingId);
+  // unwrap so a failed update rejects (the client resolves { error } instead of
+  // throwing); callers surface the failure rather than showing a false "Sent".
+  await unwrap(_supabase.from('zane_coaching').update({ checkin_requested_at: new Date().toISOString() }).eq('id', coachingId));
 }
 
 function checkinWeekStart() {
@@ -4503,7 +4597,7 @@ window.LB = {
   loadFromSupabase, syncStore, mergeSessions, withCarriedWindowEntries, historyWindowCutoffISO,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
   uid, todayISO, fmtISO, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, is531MainLift, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, healScheduleWeekdays, buildPlanSkeleton, instantiateProgram, is531Plan, round531, tmFrom531, tmBump531, weeks531, week531, fiveThreeOneSets, build531Plan, add531MainLift, current531Week, current531Cycle, compute531CycleBumps, resolve531CycleEnd, suggest531Tm, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, realignCycleForToday, todayCycleStripIndex,
-  effReps, fmtDuration, e1rm, isImprovement, isDecline, bestE1rmForExercise, bestAssistLoad, totalVolume, entryVolume, doneSetCount, buildSeedSets, buildTimeSeedSets, latestBodyweight, bodyweightForDate, exerciseLogMode, isAssisted, shouldPullBodyweight, systemExerciseToRow, inferCurrentExIdx, calcBlended,
+  effReps, fmtDuration, e1rm, isImprovement, isDecline, bestE1rmForExercise, bestAssistLoad, bestTimeForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, buildTimeSeedSets, latestBodyweight, bodyweightForDate, exerciseLogMode, isAssisted, shouldPullBodyweight, systemExerciseToRow, inferCurrentExIdx, calcBlended,
   refreshExerciseBests, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries,
   computeNextReminderAt,
   cancelPushover, adminSendEmail,

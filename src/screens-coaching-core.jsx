@@ -42,7 +42,7 @@ function CoachSyncErrorPill({ show }) {
         backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
         color: UI.danger, fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.04em',
       }}>
-        Change not saved — keep editing to retry
+        Change not saved, keep editing to retry
       </div>
     </div>
   );
@@ -269,21 +269,27 @@ function ChatThread({ thread, coachingId, userId, otherName, unreadNotes, onBack
       .finally(() => setLoading(false));
   };
 
+  // zane_coaching_notes is in the realtime publication, so a message from the
+  // other party arrives via the unreadNotes prop while this thread is open.
+  // Keying on the thread's unread ids (not just coachingId/thread.id) re-runs
+  // this on a live message so the open thread shows it and marks it read,
+  // instead of the message lingering in the badge until the thread is reopened.
+  const threadUnreadIds = (unreadNotes || []).filter(n => n.threadId === thread.id).map(n => n.id);
+  const threadUnreadKey = threadUnreadIds.join(',');
   useEffectC(() => {
     reload();
-    const unreadIds = (unreadNotes || []).filter(n => n.threadId === thread.id).map(n => n.id);
-    if (unreadIds.length) {
-      LB.markCoachingNotesRead(unreadIds).then(() => {
+    if (threadUnreadIds.length) {
+      LB.markCoachingNotesRead(threadUnreadIds).then(() => {
         if (setStore) setStore(s => ({
           ...s,
           coaching: {
             ...s.coaching,
-            unreadNotes: (s.coaching?.unreadNotes || []).filter(n => !unreadIds.includes(n.id)),
+            unreadNotes: (s.coaching?.unreadNotes || []).filter(n => !threadUnreadIds.includes(n.id)),
           },
         }));
       });
     }
-  }, [coachingId, thread.id]);
+  }, [coachingId, thread.id, threadUnreadKey]);
 
   useEffectC(() => {
     if (notes.length && bottomRef.current) bottomRef.current.scrollIntoView({ behavior: 'auto' });

@@ -29,6 +29,7 @@ const UI = {
   danger:    'var(--danger)',
   ok:        'var(--ok)',
   warn:      'var(--warn)',
+  info:      'var(--info)',
   fontUi:      '"Inter", system-ui, sans-serif',
   fontNum:     '"JetBrains Mono", ui-monospace, monospace',
   fontDisplay: '"Big Shoulders Display", "Arial Narrow", sans-serif',
@@ -1180,7 +1181,10 @@ UI.chartDomain = (dataMin, dataMax, opts) => {
   let bottom;
   if (opts.min != null) bottom = opts.min;
   else if (opts.zeroFloor) bottom = 0;
-  else bottom = Math.max(0, dataMin - pad);
+  // Ground non-negative data at 0, but let negative data (e.g. assisted loads,
+  // stored as negative kg) span below 0 instead of collapsing to a 0..negative
+  // range that inverts the axis.
+  else bottom = dataMin < 0 ? (dataMin - pad) : Math.max(0, dataMin - pad);
   return { min: bottom, max: top, range: (top - bottom) || 1 };
 };
 
