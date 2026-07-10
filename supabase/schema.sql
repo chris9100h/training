@@ -1789,6 +1789,24 @@ CREATE POLICY "zane_workout_templates_own"
   ON zane_workout_templates FOR ALL
   USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
 
+-- ── Check-in schema templates (migration 0152) ─────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS zane_checkin_schema_templates (
+  id          text        PRIMARY KEY,
+  user_id     uuid        REFERENCES auth.users NOT NULL,
+  name        text        NOT NULL,
+  schema      jsonb       NOT NULL DEFAULT '[]',
+  created_at  timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_zane_checkin_schema_templates_user_id ON public.zane_checkin_schema_templates(user_id);
+
+ALTER TABLE zane_checkin_schema_templates ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "zane_checkin_schema_templates_own"
+  ON zane_checkin_schema_templates FOR ALL
+  USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+
 -- ── Schedule backups (migration 0114) ──────────────────────────────────────────
 
 CREATE TABLE zane_schedule_backups (

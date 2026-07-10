@@ -428,6 +428,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
     + (backup.cardioLogs?.length ? 1 : 0)
     + (backup.dailyLogs?.length ? 1 : 0)
     + (backup.workoutTemplates?.length ? 1 : 0)
+    + (backup.checkinSchemaTemplates?.length ? 1 : 0)
     + (backup.glucoseLogs?.length ? 1 : 0)
     + (backup.cardioPlans?.length ? 1 : 0)
     + (backup.statusPeriods?.length ? 1 : 0)
@@ -550,6 +551,16 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
       backup.workoutTemplates.map(t => ({
         id: t.id, user_id: userId, name: t.name,
         exercises: (t.exercises || []).map(e => (e.exId != null ? { ...e, exId: remapEx(e.exId) } : e)),
+      }))
+    ));
+    stepsDone++;
+  }
+  if (backup.checkinSchemaTemplates?.length) {
+    prog('Uploading check-in schema templates…');
+    // Field definitions only (label/type/options/…), no exercise ids to remap.
+    await unwrap(_supabase.from('zane_checkin_schema_templates').upsert(
+      backup.checkinSchemaTemplates.map(t => ({
+        id: t.id, user_id: userId, name: t.name, schema: t.schema || [],
       }))
     ));
     stepsDone++;
@@ -813,12 +824,16 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     _supabase.from('zane_workout_templates').select('id, name, exercises, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
     // Mesocycle state per plan — replaces localStorage logbook-meso-state (migration 0120)
     _supabase.from('zane_meso_states').select('id, schedule_id, weeks, start_date, start_cycle_index, started_at, deltas, joint_flags, pump_low_counts, weight_boosts, growth_counts, completions, pending_meso2, updated_at').eq('user_id', userId),
+    // Coach's own saved check-in schema templates: irrelevant when loading a
+    // CLIENT's store as a coach, these belong to the acting coach, not the client.
+    isCoachLoad ? null : _supabase.from('zane_checkin_schema_templates').select('id, name, schema, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
   ];
   const [profileRes, exRes, schRes, sessRes, settRes, skipsRes, entriesRes,
          bestsRes, sessionStatsRes,
          coachInfoRes, coachClientsRes, unreadNotesRes, coachingRowRes, selfRowRes,
          cardioLogsRes, cardioPlansRes, dailyLogsRes, statusPeriodsRes,
-         supportTicketsRes, glucoseLogsRes, templatesRes, mesoStatesRes] = await Promise.all(queries);
+         supportTicketsRes, glucoseLogsRes, templatesRes, mesoStatesRes,
+         checkinTemplatesRes] = await Promise.all(queries);
 
   // A failed request (offline, RLS, server error) also yields no data — bail
   // out so the caller can surface an error instead of mistaking this for a
@@ -851,6 +866,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   if (coachInfoRes?.error) throw coachInfoRes.error;
   if (coachClientsRes?.error) throw coachClientsRes.error;
   if (unreadNotesRes?.error) throw unreadNotesRes.error;
+  if (checkinTemplatesRes?.error) throw checkinTemplatesRes.error;
   // coachingRowRes/selfRowRes use maybeSingle() and only drive optional banner
   // UI. There is no DB uniqueness constraint on (client_id, active), so a client
   // with >1 active coach yields a PGRST116 "multiple rows" error — do NOT throw
@@ -1000,6 +1016,11 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     workoutTemplates: (templatesRes?.data || []).map(t => ({
       id: t.id, name: t.name,
       exercises: Array.isArray(t.exercises) ? t.exercises : [],
+      createdAt: t.created_at,
+    })),
+    checkinSchemaTemplates: (checkinTemplatesRes?.data || []).map(t => ({
+      id: t.id, name: t.name,
+      schema: Array.isArray(t.schema) ? t.schema : [],
       createdAt: t.created_at,
     })),
     mesoStates: (mesoStatesRes?.data || []).map(m => ({
@@ -1410,6 +1431,18 @@ async function syncStore(prev, next, userId) {
       id: t.id, user_id: userId, name: t.name, exercises: t.exercises || [],
     }))));
     if (removed.length) ops.push(_supabase.from('zane_workout_templates').delete().in('id', removed.map(t => t.id)));
+  }
+
+  if (prev.checkinSchemaTemplates !== next.checkinSchemaTemplates) {
+    const upsert = (next.checkinSchemaTemplates || []).filter(t => {
+      const p = (prev.checkinSchemaTemplates || []).find(x => x.id === t.id);
+      return !p || JSON.stringify(p) !== JSON.stringify(t);
+    });
+    const removed = (prev.checkinSchemaTemplates || []).filter(t => !(next.checkinSchemaTemplates || []).find(x => x.id === t.id));
+    if (upsert.length) ops.push(_supabase.from('zane_checkin_schema_templates').upsert(upsert.map(t => ({
+      id: t.id, user_id: userId, name: t.name, schema: t.schema || [],
+    }))));
+    if (removed.length) ops.push(_supabase.from('zane_checkin_schema_templates').delete().in('id', removed.map(t => t.id)));
   }
 
   if (prev.mesoStates !== next.mesoStates) {

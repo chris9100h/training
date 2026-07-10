@@ -605,7 +605,7 @@ function buildFieldView(fields) {
   return view;
 }
 
-function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClose }) {
+function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClose, templates, onSaveTemplate, onDeleteTemplate }) {
   const [draft, setDraft] = useStateC(() => JSON.parse(JSON.stringify(initial || CHECKIN_DEFAULT_SCHEMA)));
   const [view, setView] = useStateC('list');
   const [editCtx, setEditCtx] = useStateC(null);
@@ -614,6 +614,17 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
   const [saving, setSaving] = useStateC(false);
   const [helpTip, setHelpTip] = useStateC(null);
   const [savePicker, setSavePicker] = useStateC(false);
+  // "All clients" is a destructive, instant overwrite of every active client's
+  // form with no way back. allClientsConfirm switches the savePicker sheet into
+  // a warning step that offers to snapshot the OUTGOING default (`initial`, what
+  // is about to be lost) as a template before proceeding.
+  const [allClientsConfirm, setAllClientsConfirm] = useStateC(false);
+  // Which schema the open name-prompt is about to save: 'current' = the in-progress
+  // draft (from the Templates view), 'previous' = the outgoing default about to be
+  // replaced (from the All-clients confirm step). null = prompt closed.
+  const [namingTemplate, setNamingTemplate] = useStateC(null);
+  const [templateNameDraft, setTemplateNameDraft] = useStateC('');
+  const templateCapReached = (templates || []).length >= 5;
   const previewData = useMemoC(() => generatePreviewData(draft), [draft]);
   const [confirmEl, confirm] = useConfirm();
 
@@ -656,7 +667,7 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
     </div>
   ) : null;
 
-  const backToList = () => { setView('list'); setFieldDraft(null); setSectionDraft(null); setEditCtx(null); setHelpTip(null); };
+  const backToList = () => { setView('list'); setFieldDraft(null); setSectionDraft(null); setEditCtx(null); setHelpTip(null); setNamingTemplate(null); setTemplateNameDraft(''); };
 
   const openEditField = (sIdx, fIdx) => {
     const f = draft[sIdx].fields[fIdx];
@@ -813,6 +824,43 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
     try { await onSaveForAll(draft); }
     catch (e) { alert(e.message); setSaving(false); }
   };
+
+  // Local, synchronous store mutation (mirrors workoutTemplates: no network
+  // round-trip here, syncStore's diff persists it on the next flush), so no
+  // await/try-catch is needed around onSaveTemplate itself.
+  const submitTemplateName = () => {
+    if (!templateNameDraft.trim() || !onSaveTemplate || templateCapReached) return;
+    const wasPrevious = namingTemplate === 'previous';
+    onSaveTemplate(templateNameDraft.trim(), wasPrevious ? initial : draft);
+    setNamingTemplate(null);
+    setTemplateNameDraft('');
+    if (wasPrevious) {
+      setSavePicker(false);
+      setAllClientsConfirm(false);
+      handleSaveForAll();
+    }
+  };
+
+  const renderNamePrompt = () => (
+    <>
+      <div style={{ fontSize: 12, fontWeight: 700, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+        {namingTemplate === 'previous' ? 'Name this template' : 'Save current form as'}
+      </div>
+      <input autoFocus value={templateNameDraft} onChange={e => setTemplateNameDraft(e.target.value)}
+        placeholder="e.g. Cutting phase" maxLength={40}
+        style={{ width: '100%', boxSizing: 'border-box', background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '10px 12px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, outline: 'none' }} />
+      <div style={{ display: 'flex', gap: 8 }}>
+        <button onClick={() => { setNamingTemplate(null); setTemplateNameDraft(''); }}
+          style={{ flex: 1, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '11px', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, color: UI.inkSoft, cursor: 'pointer' }}>
+          Cancel
+        </button>
+        <button onClick={submitTemplateName} disabled={!templateNameDraft.trim()}
+          style={{ flex: 1, background: 'var(--accent)', border: 'none', borderRadius: 6, padding: '11px', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 700, color: '#0a0805', cursor: 'pointer', opacity: templateNameDraft.trim() ? 1 : 0.5 }}>
+          Save
+        </button>
+      </div>
+    </>
+  );
 
   const handleReset = async () => {
     if (await confirm('Reset to the default check-in form? All customizations will be lost.', { ok: 'Reset', danger: true }))
@@ -1175,6 +1223,54 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
     );
   }
 
+  // ── TEMPLATES VIEW ────────────────────────────────────────────────────────
+  if (view === 'templates') {
+    return (
+      <div style={overlayStyle}>
+        <div style={headerStyle}>
+          {backBtn(backToList)}
+          <span style={{ fontSize: 15, fontWeight: 700, fontFamily: UI.fontUi, color: UI.ink, flex: 1 }}>Templates</span>
+          <span style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi }}>{(templates || []).length}/5</span>
+        </div>
+        <div style={{ flex: 1, overflowY: 'auto', WebkitOverflowScrolling: 'touch', padding: '16px 16px 40px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {(templates || []).length === 0 && !namingTemplate && (
+            <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, textAlign: 'center', padding: '24px 0' }}>
+              No saved templates yet. Save your current form to reuse it later or fall back to it.
+            </div>
+          )}
+          {(templates || []).map(t => {
+            const fieldCount = (t.schema || []).reduce((n, sec) => n + (sec.fields || []).length, 0);
+            return (
+              <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 12px', background: UI.bgInset, borderRadius: 6, border: `0.5px solid ${UI.hair}` }}>
+                <button onClick={() => { setDraft(JSON.parse(JSON.stringify(t.schema))); backToList(); }}
+                  style={{ flex: 1, minWidth: 0, background: 'none', border: 'none', textAlign: 'left', cursor: 'pointer', padding: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi }}>{t.name}</div>
+                  <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>
+                    {fieldCount} field{fieldCount !== 1 ? 's' : ''} · {new Date(t.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
+                  </div>
+                </button>
+                <button onClick={async () => { if (await confirm(`Delete template "${t.name}"?`, { title: 'Delete template?', ok: 'Delete', danger: true })) onDeleteTemplate(t.id); }}
+                  style={{ background: 'none', border: 'none', padding: 6, cursor: 'pointer', color: 'rgba(var(--danger-rgb),0.8)', fontSize: 14, flexShrink: 0 }}>
+                  <i className="fa-solid fa-trash" />
+                </button>
+              </div>
+            );
+          })}
+          {namingTemplate === 'current' ? (
+            <div style={{ marginTop: 4, display: 'flex', flexDirection: 'column', gap: 8 }}>{renderNamePrompt()}</div>
+          ) : (
+            <button onClick={() => setNamingTemplate('current')} disabled={templateCapReached}
+              style={{ marginTop: 4, background: 'rgba(var(--accent-rgb),0.08)', border: `0.5px solid rgba(var(--accent-rgb),0.3)`, borderRadius: 6, padding: '11px 14px', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, color: 'var(--accent)', cursor: 'pointer', opacity: templateCapReached ? 0.5 : 1, display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'center' }}>
+              <i className="fa-solid fa-plus" style={{ fontSize: 11 }} />
+              {templateCapReached ? 'Limit reached, delete one to save another' : 'Save current form as template'}
+            </button>
+          )}
+        </div>
+        {confirmEl}
+      </div>
+    );
+  }
+
   // ── ADD DEFAULT FIELDS VIEW ───────────────────────────────────────────────
   if (view === 'add-defaults') {
     const groups = missingDefaultsBySection();
@@ -1230,23 +1326,44 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
   return (
     <div style={overlayStyle}>
       {savePicker && (
-        <div onClick={() => setSavePicker(false)}
+        <div onClick={() => { setSavePicker(false); setAllClientsConfirm(false); setNamingTemplate(null); setTemplateNameDraft(''); }}
           style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 10, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
           <div onClick={e => e.stopPropagation()}
             style={{ background: UI.bg, borderRadius: '8px 8px 0 0', borderTop: `0.5px solid ${UI.hairStrong}`, padding: '20px 16px', paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 20px)', display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 2 }}>Apply changes to</div>
-            <button onClick={() => { setSavePicker(false); handleSaveForAll(); }}
-              style={{ background: 'var(--accent)', border: 'none', borderRadius: 6, padding: '13px 16px', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 700, color: '#0a0805', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left', width: '100%' }}>
-              <i className="fa-solid fa-users" style={{ fontSize: 14, flexShrink: 0 }} />
-              <span style={{ flex: 1 }}>All clients</span>
-              <span style={{ fontSize: 11, fontWeight: 400, opacity: 0.75 }}>New default for everyone</span>
-            </button>
-            <button onClick={() => { setSavePicker(false); handleSave(); }}
-              style={{ background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '13px 16px', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, color: UI.ink, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left', width: '100%' }}>
-              <i className="fa-solid fa-person" style={{ fontSize: 14, flexShrink: 0 }} />
-              <span style={{ flex: 1 }}>This client only</span>
-              <span style={{ fontSize: 11, fontWeight: 400, color: UI.inkSoft }}>Override for this client</span>
-            </button>
+            {!allClientsConfirm ? (
+              <>
+                <div style={{ fontSize: 12, fontWeight: 700, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 2 }}>Apply changes to</div>
+                <button onClick={() => setAllClientsConfirm(true)}
+                  style={{ background: 'var(--accent)', border: 'none', borderRadius: 6, padding: '13px 16px', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 700, color: '#0a0805', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left', width: '100%' }}>
+                  <i className="fa-solid fa-users" style={{ fontSize: 14, flexShrink: 0 }} />
+                  <span style={{ flex: 1 }}>All clients</span>
+                  <span style={{ fontSize: 11, fontWeight: 400, opacity: 0.75 }}>New default for everyone</span>
+                </button>
+                <button onClick={() => { setSavePicker(false); handleSave(); }}
+                  style={{ background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '13px 16px', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, color: UI.ink, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left', width: '100%' }}>
+                  <i className="fa-solid fa-person" style={{ fontSize: 14, flexShrink: 0 }} />
+                  <span style={{ flex: 1 }}>This client only</span>
+                  <span style={{ fontSize: 11, fontWeight: 400, color: UI.inkSoft }}>Override for this client</span>
+                </button>
+              </>
+            ) : namingTemplate ? renderNamePrompt() : (
+              <>
+                <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>
+                  This replaces the check-in form for every client with your current edits. Their previous form won't be kept unless you save it as a template first.
+                </div>
+                {onSaveTemplate && (
+                  <button onClick={() => setNamingTemplate('previous')} disabled={templateCapReached}
+                    style={{ background: 'rgba(var(--accent-rgb),0.1)', border: `0.5px solid rgba(var(--accent-rgb),0.4)`, borderRadius: 6, padding: '13px 16px', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 700, color: 'var(--accent)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left', width: '100%', opacity: templateCapReached ? 0.5 : 1 }}>
+                    <i className="fa-solid fa-bookmark" style={{ fontSize: 13, flexShrink: 0 }} />
+                    <span style={{ flex: 1 }}>{templateCapReached ? 'Template limit reached (5/5)' : 'Save previous form as template, then continue'}</span>
+                  </button>
+                )}
+                <button onClick={() => { setSavePicker(false); setAllClientsConfirm(false); handleSaveForAll(); }}
+                  style={{ background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '13px 16px', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, color: UI.ink, cursor: 'pointer', textAlign: 'left', width: '100%' }}>
+                  Continue without saving
+                </button>
+              </>
+            )}
           </div>
         </div>
       )}
@@ -1259,6 +1376,13 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
           style={{ background: 'none', border: 'none', padding: '4px 8px', cursor: 'pointer', color: UI.inkFaint, fontSize: 14, lineHeight: 1 }} title="Preview">
           <i className="fa-solid fa-eye" />
         </button>
+        {onSaveTemplate && (
+          <button onClick={() => setView('templates')}
+            style={{ background: 'none', border: 'none', padding: '4px 6px', cursor: 'pointer', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11, display: 'flex', alignItems: 'center', gap: 4 }} title="Templates">
+            <i className="fa-solid fa-bookmark" style={{ fontSize: 10 }} />
+            Templates
+          </button>
+        )}
         {hasMissingDefaults && (
           <button onClick={() => setView('add-defaults')}
             style={{ background: 'none', border: 'none', padding: '4px 6px', cursor: 'pointer', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11, display: 'flex', alignItems: 'center', gap: 4 }} title="Add default fields">
@@ -1399,6 +1523,16 @@ function ClientCheckInsTab({ coachingId, checkinEnabled = true, onToggle, toggli
     </div>
   );
 
+  // Local, synchronous store mutations (mirrors workoutTemplates: syncStore's
+  // diff persists them on the next flush, no dedicated RPC/round-trip needed).
+  const saveCheckinTemplate = (name, schemaToSave) => {
+    const tpl = { id: LB.uid(), name, schema: schemaToSave, createdAt: new Date().toISOString() };
+    setStore(s => ({ ...s, checkinSchemaTemplates: [tpl, ...(s.checkinSchemaTemplates || [])] }));
+  };
+  const deleteCheckinTemplate = (id) => {
+    setStore(s => ({ ...s, checkinSchemaTemplates: (s.checkinSchemaTemplates || []).filter(t => t.id !== id) }));
+  };
+
   const builder = builderOpen && (
     <CheckInSchemaBuilder coachingId={coachingId} initial={builderInitial}
       onSave={s => { setSchema(s); setBuilderOpen(false); }}
@@ -1408,7 +1542,10 @@ function ClientCheckInsTab({ coachingId, checkinEnabled = true, onToggle, toggli
         setSchema(s);
         setBuilderOpen(false);
       }}
-      onClose={() => setBuilderOpen(false)} />
+      onClose={() => setBuilderOpen(false)}
+      templates={store.checkinSchemaTemplates}
+      onSaveTemplate={saveCheckinTemplate}
+      onDeleteTemplate={deleteCheckinTemplate} />
   );
 
   if (checkins === null && loadErr) {

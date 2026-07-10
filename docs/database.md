@@ -66,6 +66,12 @@ der Nutzer den Workflow re-runnt (Actions → „DB drift check" → Run workflo
 - `exercises` (jsonb): `[{ exId, name, sets, reps, repsPerSet, repsMax, progressionOffset, supersetGroup }]`, structure only, no logged sets. `repsMax` optional: top of a Range reps target, `reps` holds the floor, mutually exclusive with `repsPerSet`. `progressionOffset` optional: per-exercise Smart Progression override, `0` = off, `N` = on with base+N ceiling, unset = inherits the global setting.
 - Store field: `store.workoutTemplates`. Synced via `syncStore` diff (like `cardioPlans`). Saved from a finished freestyle session, used to start a freestyle session ("From template") or imported into a plan day (Plans|Templates sub-tab in the day import picker). Migration 0107.
 
+### `zane_checkin_schema_templates`
+
+- `id` (text), `user_id` (uuid, the coach), `name` (text), `schema` (jsonb, same shape as `zane_coaching.checkin_schema`), `created_at` (timestamptz)
+- RLS: owner-only (`auth.uid() = user_id`), identical pattern to `zane_workout_templates`. Not loaded on a coach-load of a client's store (`isCoachLoad`): these are the acting coach's own saved schema snapshots, never the viewed client's.
+- Store field: `store.checkinSchemaTemplates`. Synced via `syncStore` diff, no dedicated RPC. Soft-capped at 5 per coach, enforced client-side only (UI hides "Save as template" once 5 exist). Coach-only feature (`CheckInSchemaBuilder` in `screens-coaching-detail.jsx`, wired from `ClientCheckInsTab`); the self-coaching builder instance doesn't pass template props, so it renders without the Templates UI. Exists so a coach can snapshot the outgoing default before overwriting it for "All clients" (previously instant and irreversible), and reuse a saved form across clients. Migration 0152.
+
 ### `zane_schedule_backups`
 
 - `id` (text), `user_id` (uuid), `schedule_id` (text), `schedule_name` (text), `days` (jsonb: same format as `zane_schedules.days`, always a non-empty array), `created_at` (timestamptz)
