@@ -605,7 +605,7 @@ function buildFieldView(fields) {
   return view;
 }
 
-function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClose, templates, onSaveTemplate, onDeleteTemplate }) {
+function CheckInSchemaBuilder({ coachingId, initial, coachDefault, onSave, onSaveForAll, onClose, templates, onSaveTemplate, onDeleteTemplate }) {
   const [draft, setDraft] = useStateC(() => JSON.parse(JSON.stringify(initial || CHECKIN_DEFAULT_SCHEMA)));
   const [view, setView] = useStateC('list');
   const [editCtx, setEditCtx] = useStateC(null);
@@ -831,7 +831,12 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
   const submitTemplateName = () => {
     if (!templateNameDraft.trim() || !onSaveTemplate || templateCapReached) return;
     const wasPrevious = namingTemplate === 'previous';
-    onSaveTemplate(templateNameDraft.trim(), wasPrevious ? initial : draft);
+    // The "previous form" snapshot must be the coach's actual outgoing default
+    // (coachDefault), never `initial`: initial prefers THIS client's own per-row
+    // override when one exists, which would silently mislabel a single client's
+    // one-off schema as "the previous form" while the real shared default that
+    // every other client is about to lose goes unsaved.
+    onSaveTemplate(templateNameDraft.trim(), wasPrevious ? (coachDefault || initial) : draft);
     setNamingTemplate(null);
     setTemplateNameDraft('');
     if (wasPrevious) {
@@ -854,8 +859,8 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
           style={{ flex: 1, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '11px', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, color: UI.inkSoft, cursor: 'pointer' }}>
           Cancel
         </button>
-        <button onClick={submitTemplateName} disabled={!templateNameDraft.trim()}
-          style={{ flex: 1, background: 'var(--accent)', border: 'none', borderRadius: 6, padding: '11px', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 700, color: '#0a0805', cursor: 'pointer', opacity: templateNameDraft.trim() ? 1 : 0.5 }}>
+        <button onClick={submitTemplateName} disabled={!templateNameDraft.trim() || templateCapReached}
+          style={{ flex: 1, background: 'var(--accent)', border: 'none', borderRadius: 6, padding: '11px', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 700, color: '#0a0805', cursor: 'pointer', opacity: (templateNameDraft.trim() && !templateCapReached) ? 1 : 0.5 }}>
           Save
         </button>
       </div>
@@ -1510,6 +1515,14 @@ function ClientCheckInsTab({ coachingId, checkinEnabled = true, onToggle, toggli
   // The builder, in contrast, seeds a fresh/edited schema from the coach's saved
   // default so customizing a not-yet-configured client starts from their template.
   const builderInitial = schema || store?.settings?.defaultCheckinSchema || CHECKIN_DEFAULT_SCHEMA;
+  // The coach's TRUE global default, independent of which client's tab happens to
+  // be open. builderInitial above prefers this client's own per-row override when
+  // one exists, which is right for seeding the editor but wrong for "what is the
+  // All-clients broadcast about to overwrite everywhere": that snapshot must always
+  // be the shared default, or a client with an individual override would have their
+  // one-off schema saved under a misleading "previous form" name while the real
+  // shared default (used by every other client) is silently lost with no template.
+  const coachDefault = store?.settings?.defaultCheckinSchema || CHECKIN_DEFAULT_SCHEMA;
 
   const toggleRow = (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', borderBottom: `0.5px solid ${UI.hair}`, flexShrink: 0 }}>
@@ -1547,7 +1560,7 @@ function ClientCheckInsTab({ coachingId, checkinEnabled = true, onToggle, toggli
   };
 
   const builder = builderOpen && (
-    <CheckInSchemaBuilder coachingId={coachingId} initial={builderInitial}
+    <CheckInSchemaBuilder coachingId={coachingId} initial={builderInitial} coachDefault={coachDefault}
       onSave={s => { setSchema(s); setBuilderOpen(false); }}
       onSaveForAll={async (s) => {
         await LB.saveDefaultCheckinSchema(s, userId);

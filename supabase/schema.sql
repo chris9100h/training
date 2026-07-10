@@ -1805,7 +1805,7 @@ ALTER TABLE zane_checkin_schema_templates ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "zane_checkin_schema_templates_own"
   ON zane_checkin_schema_templates FOR ALL
-  USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+  USING ((select auth.uid()) = user_id) WITH CHECK ((select auth.uid()) = user_id);
 
 -- ── Schedule backups (migration 0114) ──────────────────────────────────────────
 
