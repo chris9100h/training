@@ -1,0 +1,54 @@
+name: Bake feature map
+
+# Housekeeping for the feature map, started manually from the Actions tab.
+# Folds the published DB layer (zane_feature_map_published) back into the code
+# catalog (src/feature-map-db.js), bumps the SW cache, pushes the commit, then
+# clears both DB layers. It refuses to run while there are unpublished changes
+# (draft != published) so no in-progress curation is lost.
+on:
+  workflow_dispatch:
+
+jobs:
+  bake:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      # Babel is what check-syntax uses to transpile the sources like the app does.
+      - run: npm install --no-save --no-package-lock @babel/standalone@7.29.0
+
+      - name: Regenerate catalog from the published layer + bump SW cache
+        env:
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node tools/bake-feature-map.cjs
+
+      # Self-gate: the regenerated catalog must transpile exactly like in the app.
+      - name: Syntax check
+        run: node tools/check-syntax.cjs
+
+      - name: Commit & push if the catalog changed
+        id: commit
+        run: |
+          if git diff --quiet -- src/feature-map-db.js sw.js; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "Nothing to commit (published layer was empty)."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add src/feature-map-db.js sw.js
+          git commit -m "Bake published feature map into the catalog"
+          git push
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      # Only after the code is safely pushed do we empty the DB layers, so a
+      # failed push can never strand the curation.
+      - name: Clear the draft + published layers
+        if: steps.commit.outputs.changed == 'true'
+        env:
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node tools/bake-feature-map.cjs --clear

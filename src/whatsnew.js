@@ -17,6 +17,15 @@
    Entry shape: { id: string, date: string (YYYY-MM-DD), title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.535',
+    date: '2026-07-10',
+    title: 'Meet the Feature Map 🗺️',
+    items: [
+      "🗺️ Say hello to the Feature Map: everything Zane can do, for lifters and coaches, in one searchable spot. Open it from Settings, Feature map. Search for anything (rest timer, macros, check-ins), filter by lifter or coach, and tap a card to see exactly what it covers. Handy for those moments when you cannot remember whether Zane does that one thing (spoiler: it probably does).",
+      "👀 Got a gym buddy still tracking sets in their Notes app? There is now a public, no-login page you can send them: zane-wo.com/features.html. It lays out the whole app at a glance, so it can do the convincing for you. 💪",
+    ],
+  },
+  {
     id: 'v2.533',
     date: '2026-07-10',
     title: 'Coach, Save Your Work',

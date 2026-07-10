@@ -1594,6 +1594,9 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       </div>
       <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 8, padding: '16px 20px', paddingBottom: 'calc(env(safe-area-inset-bottom, 8px) + 16px)', borderTop: `0.5px solid ${UI.hair}`, background: UI.bg }}>
         <Btn kind="ghost" onClick={() => LB.clearCachesAndReload()}>Clear cache &amp; reload</Btn>
+        <Btn kind="ghost" className="intensity-glow" onClick={() => go({ name: 'featuremap' })} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+          Feature map
+        </Btn>
         {isAdmin ? (() => {
           const unseenCount = allUsers.filter(isNewSignup).length;
           const adminUnread = supportInbox.reduce((sum, t) => sum + Number(t.unread_count || 0), 0);
@@ -1605,16 +1608,11 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             </Btn>
           );
         })() : (
-          <Btn kind="ghost" onClick={() => setSupportSheet(true)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+          <Btn onClick={() => setSupportSheet(true)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
             Support Center
             {store.supportUnread > 0 && (
-              <span style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%', background: 'var(--accent)', flexShrink: 0, animation: 'pulseDot 1.5s ease-in-out infinite' }} />
+              <span style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%', background: '#0a0805', flexShrink: 0, animation: 'pulseDot 1.5s ease-in-out infinite' }} />
             )}
-          </Btn>
-        )}
-        {isAdmin && (
-          <Btn kind="ghost" onClick={() => go({ name: 'featuremap' })} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-            Feature map
           </Btn>
         )}
         <Btn kind="ghost" onClick={handleSignOut} style={{ color: UI.danger, borderColor: 'rgba(var(--danger-rgb),0.2)' }}>Sign out</Btn>

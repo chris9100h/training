@@ -102,6 +102,27 @@ Diese Datei enthält die verbindlichen Regeln und den Überblick; sie bewusst sc
   5. **Ton: technisch korrekt, aber light-hearted und etwas witzig.** Lockere Sprache, ein Augenzwinkern, gern ein passendes Emoji oder ein kleiner Vergleich. Die Fakten müssen trotzdem stimmen: nichts versprechen, was das Feature nicht tut, keine impliziten Falschaussagen.
 - `whatsnew.js` ist plain JS (kein JSX): normales `<script>` in `index.html` (nicht über den Precompile-Loader), in `ASSETS` von `sw.js` für Offline gelistet (beides bereits eingerichtet).
 
+## Feature Map
+
+Nutzer-/Coach-orientierte Übersicht aller App-Fähigkeiten. Architektur: **Code-Katalog als Basis** plus zwei DB-Ebenen (Draft + Published). Jeder sieht: Katalog (Basis) + veröffentlichte Overrides.
+
+- **Master-Katalog = `src/feature-map-db.js`** (`window.FEATURE_MAP = { version, categories, cards }`), plain JS. Basis-Ebene und Offline-Fallback. Kategorien in Anzeige-Reihenfolge; Karten-Shape `{ id, cat, role, name, summary, actions: [...], hidden? }`.
+  - `id`: stabiler Slug (z.B. `logging.rest-timer`). **Nie umbenennen oder wiederverwenden**, die Ids keyen die Override-Tabellen.
+  - `role`: `'user' | 'coach' | 'both'`. `cat`: eine Kategorie-`id`.
+  - `version` bei inhaltlichen Änderungen mitziehen (Format wie `'v2 (2026-07-10)'`).
+- **Zwei DB-Ebenen** (beide spaltenidentisch, admin-only RLS, nicht im Backup):
+  - `zane_feature_map` = **Draft**: privater Arbeitsstand des Admins (ausblenden/editieren/hinzufügen/umsortieren als Overrides über dem Katalog, Live-Vorschau).
+  - `zane_feature_map_published` = **Published**: die Ebene, die alle sehen.
+- **Wer rendert was** (beide filtern `hidden: true` **vor** dem Render, kein DOM-Leak):
+  - In-App: `src/screens-featuremap.jsx` (`FeatureMapScreen`, Route `featuremap`, Button im Settings-Footer) für **alle** User. Admin sieht seinen **Draft** (liest Draft + Published direkt für den Diff); normale User sehen **Published** über die RPC `get_public_feature_map`.
+  - Public: `features.html` (Repo-Root, `zane-wo.com/features.html`), **kein Login**. Holt Published per `get_public_feature_map` und legt es über den gebündelten Katalog; Fallback auf den Katalog bei Fehler/offline.
+- **Neues Feature aufnehmen (Code-Weg):** Karte in `src/feature-map-db.js` ergänzen/editieren, deploybar wie normaler Code. Erscheint automatisch für alle (Basis-Ebene). Nur End-User/Coach-relevantes, kein Tech-Jargon.
+- **Kuratieren + veröffentlichen (In-App, der Live-Weg):** Der Admin editiert den Draft in-app. „X unpublished changes" öffnet ein Review-Sheet: einzeln verwerfen, alle verwerfen (`discard_feature_map`, Draft ← Published), oder **Publish** (`publish_feature_map`, Published ← Draft). Publish ist **live für alle ohne Deploy** (Content kommt zur Laufzeit aus der DB), **kein Cache-Bump nötig**.
+- **Baken (Housekeeping, selten):** Die manuelle GitHub-Action `.github/workflows/bake-feature-map.yml` (→ `tools/bake-feature-map.cjs`) faltet die Published-Ebene zurück in `src/feature-map-db.js`, bumpt den SW-Cache, pusht direkt und leert danach beide Tabellen. Läuft **nur bei sauberem Stand** (Draft == Published), sonst Abbruch. Braucht `SUPABASE_SERVICE_ROLE_KEY` (GitHub-Secret). Manuell via Actions-Tab starten, keine Automatik. `feature-map-db.js` ist ab da eine **generierte Datei** (Serializer), Handedits bleiben möglich.
+- **RPCs** (Migration 0156, Grant-Details in `docs/database.md`): `publish_feature_map` / `discard_feature_map` (admin-only) · `get_public_feature_map` (an `anon` **und** `authenticated`, einzige Feature-Map-Funktion mit anon-Zugriff).
+- **Loader/Assets:** `feature-map-db.js` als `<script>` in `index.html`, in `ASSETS` (`sw.js`), in `plainSources` (`tools/check-syntax.cjs`). `screens-featuremap.jsx` in `SOURCES` (index.html) + `ASSETS`. `features.html` bewusst **nicht** in `ASSETS`.
+- **Cache-Bump-Regel:** Reine In-App-Publishes = **kein** Bump (live über DB). Screen-/Katalog-Code-Änderungen = Bump wie überall (nur auf Ansage); den Bake-Bump macht der Workflow selbst.
+
 ## Datenbank (Supabase)
 
 Migrationen liegen in `supabase/migrations/` als nummerierte SQL-Dateien. **Die vollständige Tabellen-/Spalten- und RPC-Referenz steht in `docs/database.md`: vor jeder DB-Arbeit den passenden Abschnitt lesen.**

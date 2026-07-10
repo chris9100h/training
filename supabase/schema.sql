@@ -57,6 +57,25 @@ CREATE TABLE public.zane_feature_map (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
+-- Feature map PUBLISHED mirror. The layer everyone (public page + all logged-in
+-- users) actually renders on top of the code catalog. publish_feature_map()
+-- promotes the draft (zane_feature_map) here; discard_feature_map() resets the
+-- draft back to it. Admin-only direct read (for the unpublished-changes diff);
+-- everyone else reads via get_public_feature_map(). Migration 0156.
+CREATE TABLE public.zane_feature_map_published (
+  card_id text PRIMARY KEY,
+  hidden boolean NOT NULL DEFAULT false,
+  is_custom boolean NOT NULL DEFAULT false,
+  cat text,
+  name text,
+  role text CHECK (role IS NULL OR role IN ('user','coach','both')),
+  summary text,
+  actions jsonb,
+  sort int,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
 CREATE TABLE public.zane_exercises (
   id text NOT NULL,
   user_id uuid NOT NULL,
@@ -440,6 +459,7 @@ CREATE INDEX IF NOT EXISTS idx_zane_skips_user_id              ON public.zane_sk
 ALTER TABLE public.zane_profiles         ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.zane_app_config       ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.zane_feature_map      ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.zane_feature_map_published ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.zane_exercises        ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.zane_schedules        ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.zane_sessions         ENABLE ROW LEVEL SECURITY;
@@ -462,8 +482,10 @@ ALTER TABLE public.zane_checkins         ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "own profile" ON public.zane_profiles FOR ALL TO public USING (((select auth.uid()) = id));
 CREATE POLICY "coach can read client profile" ON public.zane_profiles FOR SELECT TO public USING (zane_is_coach_of(id));
 
--- feature_map: admin-only curation layer (nobody else reads or writes it)
+-- feature_map: admin-only draft/curation layer (nobody else reads or writes it)
 CREATE POLICY "feature_map_admin_all" ON public.zane_feature_map FOR ALL TO authenticated USING ((select auth.email()) = 'office@btc-prime.biz') WITH CHECK ((select auth.email()) = 'office@btc-prime.biz');
+-- feature_map_published: admin-only direct access; everyone else reads via get_public_feature_map()
+CREATE POLICY "feature_map_published_admin_all" ON public.zane_feature_map_published FOR ALL TO authenticated USING ((select auth.email()) = 'office@btc-prime.biz') WITH CHECK ((select auth.email()) = 'office@btc-prime.biz');
 
 -- exercises
 CREATE POLICY "own exercises" ON public.zane_exercises FOR ALL TO public USING (((select auth.uid()) = user_id));
@@ -2228,6 +2250,68 @@ REVOKE EXECUTE ON FUNCTION public.sync_daily_logs_batch(jsonb) FROM PUBLIC, anon
 GRANT EXECUTE ON FUNCTION public.sync_daily_logs_batch(jsonb) TO authenticated;
 REVOKE EXECUTE ON FUNCTION public.sync_meso_states_batch(jsonb) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.sync_meso_states_batch(jsonb) TO authenticated;
+
+-- ── Feature map publish flow (Migration 0156) ──────────────────────────────
+
+CREATE OR REPLACE FUNCTION public.publish_feature_map()
+ RETURNS void
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+BEGIN
+  IF auth.email() IS DISTINCT FROM 'office@btc-prime.biz' THEN
+    RAISE EXCEPTION 'Unauthorized';
+  END IF;
+  DELETE FROM zane_feature_map_published WHERE card_id IS NOT NULL;
+  INSERT INTO zane_feature_map_published
+    (card_id, hidden, is_custom, cat, name, role, summary, actions, sort, created_at, updated_at)
+  SELECT card_id, hidden, is_custom, cat, name, role, summary, actions, sort, created_at, now()
+  FROM zane_feature_map;
+END;
+$function$;
+
+REVOKE EXECUTE ON FUNCTION public.publish_feature_map() FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.publish_feature_map() TO authenticated;
+
+CREATE OR REPLACE FUNCTION public.discard_feature_map()
+ RETURNS void
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+BEGIN
+  IF auth.email() IS DISTINCT FROM 'office@btc-prime.biz' THEN
+    RAISE EXCEPTION 'Unauthorized';
+  END IF;
+  DELETE FROM zane_feature_map WHERE card_id IS NOT NULL;
+  INSERT INTO zane_feature_map
+    (card_id, hidden, is_custom, cat, name, role, summary, actions, sort, created_at, updated_at)
+  SELECT card_id, hidden, is_custom, cat, name, role, summary, actions, sort, created_at, now()
+  FROM zane_feature_map_published;
+END;
+$function$;
+
+REVOKE EXECUTE ON FUNCTION public.discard_feature_map() FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.discard_feature_map() TO authenticated;
+
+-- Login-free read of the published feature map (public page + all users). Hidden
+-- custom cards are withheld; hidden catalog-card flags are returned. anon is
+-- granted execute here by design.
+CREATE OR REPLACE FUNCTION public.get_public_feature_map()
+ RETURNS TABLE (card_id text, hidden boolean, is_custom boolean, cat text, name text, role text, summary text, actions jsonb, sort int)
+ LANGUAGE sql
+ STABLE
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+  SELECT card_id, hidden, is_custom, cat, name, role, summary, actions, sort
+  FROM zane_feature_map_published
+  WHERE NOT (is_custom AND hidden);
+$function$;
+
+REVOKE EXECUTE ON FUNCTION public.get_public_feature_map() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.get_public_feature_map() TO anon, authenticated;
 
 -- ── Ops: schema inventory for the db-drift workflow (Migration 0142) ────────
 
