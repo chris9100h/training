@@ -335,7 +335,7 @@ function FinisherSummary({ drops, labelFor }) {
         <span key={di} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '3px 8px', border: '1px solid var(--accent)', borderRadius: 4, fontFamily: UI.fontUi, fontSize: 11, color: 'var(--accent)', letterSpacing: '0.03em' }}>
           <span style={{ opacity: 0.6, fontSize: 9, textTransform: 'uppercase' }}>{label}</span>
           {p > 0 && <span>+{p} partial{p === 1 ? '' : 's'}</span>}
-          {st && <span><i className="fa-solid fa-arrows-left-right-to-line" style={{ fontSize: 9, marginRight: 4 }} />{st.kg != null ? String(st.kg).replace('.', ',') + ' ' + UI.unit() + ' · ' : ''}{st.timeSec}s</span>}
+          {st && <span>stretch {st.kg != null ? String(st.kg).replace('.', ',') + ' ' + UI.unit() + ' · ' : ''}{st.timeSec}s</span>}
         </span>
       ))}
     </div>
@@ -5245,7 +5245,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                           </div>
                         </div>
                       ))}
-                      <FinisherSummary drops={s.drops} labelFor={(di) => di === 0 ? 'top' : 'drop ' + (di + 1)} />
+                      <FinisherSummary drops={s.drops} labelFor={(di) => di === 0 ? 'top' : 'drop ' + di} />
                     </div>
                   )}
                   {s.technique === 'amrap_variations' && s.done && ((s.drops || []).length > 1 || (s.drops?.[s.drops.length - 1]?.partials || 0) > 0) && (() => {
@@ -5843,7 +5843,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                       fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, color: UI.gold,
                     }}>↓</div>
                     <div className="num" style={{ fontSize: 10, color: UI.inkGhost }}>
-                      {di === 0 ? 'top' : `drop ${di + 1}`}
+                      {di === 0 ? 'top' : `drop ${di}`}
                     </div>
                     <KbCell
                       text={isKgA ? kbRaw : (d.kg != null ? String(d.kg).replace('.', ',') : '')}
