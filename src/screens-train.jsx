@@ -555,7 +555,12 @@ function CustomKeyboard({ visible, field, onType, onBackspace, onAdjust, onConfi
       onTouchStart={e => { e.preventDefault(); e.stopPropagation(); }}
       style={{ position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 95,
       background: 'var(--bg)',
-      padding: `5px 8px calc(env(safe-area-inset-bottom, 0px) + 5px)`,
+      // Bottom row holds the lone "0" key. With only 5px clearance it sat in
+      // iOS's home-indicator swipe strip, so bottom-edge taps on "0" got eaten
+      // by the system (users could type 1-9 fine but not 0 — "only let me type
+      // 13"). Guarantee a real floor of clearance even when the safe-area inset
+      // is 0 (Safari, non-installed), on top of the inset when there is one.
+      padding: `5px 8px calc(max(env(safe-area-inset-bottom, 0px), 14px) + 8px)`,
     }}>
       {/* knurled top edge — same grip-texture seam the rest of the kit uses,
           in place of a flat hairline, so the keypad reads as a distinct
@@ -5958,7 +5963,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                 <i className="fa-solid fa-weight-hanging" style={{ fontSize: 18, color: 'var(--accent)', width: 20, textAlign: 'center', flexShrink: 0 }} />
                 <div>
                   <div style={{ fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, letterSpacing: '0.12em', color: 'var(--accent)' }}>WEIGHTED STRETCH</div>
-                  <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkSoft, marginTop: 2 }}>Loaded hold at the stretch after the set</div>
+                  <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkSoft, marginTop: 2 }}>Hold the loaded stretch for time after your set</div>
                 </div>
               </button>
               {/* Myo-Rep row: two compact buttons matching DROP style */}
