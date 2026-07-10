@@ -909,12 +909,14 @@ BEGIN
     RETURN 'ERROR:self';
   END IF;
   SELECT id INTO v_existing FROM zane_coaching
-    WHERE coach_id = auth.uid() AND client_id = v_client_id;
+    WHERE coach_id = auth.uid() AND client_id = v_client_id
+      AND id NOT LIKE 'support_%';
   IF FOUND THEN
     RETURN 'ERROR:exists:' || v_existing;
   END IF;
   PERFORM 1 FROM zane_coaching
-    WHERE client_id = v_client_id AND status = 'active';
+    WHERE client_id = v_client_id AND status = 'active'
+      AND coach_id <> client_id AND id NOT LIKE 'support_%';
   IF FOUND THEN
     RETURN 'ERROR:already_coached';
   END IF;
