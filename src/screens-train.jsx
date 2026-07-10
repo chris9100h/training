@@ -5887,7 +5887,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           category's techniques with a BACK control. intensityPage always
           resets to root when the sheet closes, so it never reopens mid-drill. */}
       <Sheet open={intensityOpen} onClose={() => { setIntensityOpen(false); setIntensityPage(null); }}
-        title={intensityPage === 'chained' ? 'Chained' : intensityPage === 'standalone' ? 'Standalone' : 'Intensity'}>
+        title={intensityPage === 'chained' ? 'Chained' : intensityPage === 'standalone' ? 'Standalone' : 'Intensity'}
+        accent>
         {(() => {
           // Exactly one intensity technique can be "in flight" at a time —
           // picking one always clears any other left unfinished (e.g. the
