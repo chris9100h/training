@@ -684,10 +684,12 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
               </div>
             ) : (
               <div>
-                {(todayDay?.items || []).filter(i => i.exId).map((item, idx) => {
+                {(todayDay?.items || []).filter(i => i.exId).map((item, idx, arr) => {
                   const ex = (clientStore.exercises || []).find(e => e.id === item.exId);
-                  const last = LB.bestRecentEntry(clientStore, item.exId, todayDay.id);
-                  const suggestion = LB.progressionSuggestion(clientStore, item.exId, todayDay.id, item.reps, item.repsPerSet || null, undefined, item.repsMax || null, item.progressionOffset ?? null);
+                  // Nth appearance of this exercise -> its Nth past occurrence.
+                  const occ = arr.slice(0, idx).filter(x => x.exId === item.exId).length;
+                  const last = LB.bestRecentEntry(clientStore, item.exId, todayDay.id, 3, occ);
+                  const suggestion = LB.progressionSuggestion(clientStore, item.exId, todayDay.id, item.reps, item.repsPerSet || null, undefined, item.repsMax || null, item.progressionOffset ?? null, occ);
                   const bodyweightKg = LB.shouldPullBodyweight(ex) ? LB.latestBodyweight(clientStore) : null;
                   const seeds = LB.buildSeedSets(item, last, suggestion, ex?.unilateral, clientStore, bodyweightKg, clientStore.statusMode === 'deload');
                   // Reps-only / bodyweight / checkbox exercises seed with kg==null

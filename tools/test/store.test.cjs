@@ -187,6 +187,50 @@ async function testAsync(name, fn) {
   test('bestE1rmForExercise excludes the live session and tolerates a missing map', () =>
     assert.strictEqual(LB.bestE1rmForExercise({ sessions: prState.sessions.slice(0, 1) }, 'e1', 'live'), 0));
 
+  // ── repeated-exercise occurrence matching (same exercise twice in a day) ──
+  const dupState = {
+    sessions: [
+      { id: 'p1', ended: '2026-06-08T10:00:00Z', dayId: 'd1', isDeload: false, entries: [
+        { exId: 'e1', sets: [{ kg: 200, reps: 5, done: true }] },   // occurrence 0: heavy
+        { exId: 'e1', sets: [{ kg: 100, reps: 15, done: true }] },  // occurrence 1: back-off
+      ] },
+    ],
+  };
+  test('bestRecentEntry occ=0 reads the first occurrence (heavy)', () =>
+    assert.strictEqual(LB.bestRecentEntry(dupState, 'e1', 'd1', 3, 0).entry.sets[0].kg, 200));
+  test('bestRecentEntry occ=1 reads the second occurrence, not the first', () =>
+    assert.strictEqual(LB.bestRecentEntry(dupState, 'e1', 'd1', 3, 1).entry.sets[0].kg, 100));
+  test('bestRecentEntry defaults to occ=0 (backward compatible)', () =>
+    assert.strictEqual(LB.bestRecentEntry(dupState, 'e1', 'd1').entry.sets[0].kg, 200));
+
+  const singleOccState = {
+    sessions: [
+      { id: 'p2', ended: '2026-06-08T10:00:00Z', dayId: 'd1', isDeload: false, entries: [
+        { exId: 'e1', sets: [{ kg: 150, reps: 8, done: true }] },
+      ] },
+    ],
+  };
+  test('bestRecentEntry occ=1 is fail-safe (null) when past sessions had it once', () =>
+    assert.strictEqual(LB.bestRecentEntry(singleOccState, 'e1', 'd1', 3, 1), null));
+  test('bestRecentEntry occ=0 still works for a normal single-occurrence exercise', () =>
+    assert.strictEqual(LB.bestRecentEntry(singleOccState, 'e1', 'd1', 3, 0).entry.sets[0].kg, 150));
+  test('recentSessionsForExercise occ=1 collects each session\'s second occurrence', () => {
+    const twoSess = { sessions: [
+      { id: 'a', ended: '2026-06-09T10:00:00Z', dayId: 'd1', isDeload: false, entries: [
+        { exId: 'e1', sets: [{ kg: 210, reps: 5, done: true }] },
+        { exId: 'e1', sets: [{ kg: 110, reps: 15, done: true }] },
+      ] },
+      { id: 'b', ended: '2026-06-02T10:00:00Z', dayId: 'd1', isDeload: false, entries: [
+        { exId: 'e1', sets: [{ kg: 200, reps: 5, done: true }] },
+        { exId: 'e1', sets: [{ kg: 100, reps: 15, done: true }] },
+      ] },
+    ] };
+    const rows = LB.recentSessionsForExercise(twoSess, 'e1', 'd1', 3, 1);
+    assert.strictEqual(rows.length, 2);
+    assert.strictEqual(rows[0].entry.sets[0].kg, 110);
+    assert.strictEqual(rows[1].entry.sets[0].kg, 100);
+  });
+
   // ── mergeSessions: windowed cache-first reload merge ─────────────────────
   const now = new Date('2026-06-10T12:00:00Z');
   test('mergeSessions drops sessions the server no longer has (old ones)', () => {

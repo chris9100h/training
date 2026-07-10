@@ -769,7 +769,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // sorts the ENTIRE session history, which previously reran on every 250ms tick.
   // The current (ended:null) session never affects it, so `entry` set logs don't
   // need to invalidate — only a change to past sessions does.
-  const localLast = useMemoT(() => (entry ? LB.bestRecentEntry(store, entry.exId, session.dayId) : null), [store.sessions, entry?.exId, session.dayId]);
+  // occ = which occurrence of this exercise the current slot is (0 = first), so a
+  // twice-in-a-day exercise reads each slot's own history instead of both slots
+  // sharing the first occurrence's "last time".
+  const occ = useMemoT(() => (entry ? session.entries.filter((e, i) => i < exIdx && e.exId === entry.exId).length : 0), [session.entries, exIdx, entry?.exId]);
+  const localLast = useMemoT(() => (entry ? LB.bestRecentEntry(store, entry.exId, session.dayId, 3, occ) : null), [store.sessions, entry?.exId, session.dayId, occ]);
   useEffectT(() => {
     const exId = entry?.exId;
     if (!exId || remoteLast[exId] !== undefined) return;
@@ -1152,7 +1156,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       const prevWorkingSets = (last?.entry?.sets || []).filter(s => !s.warmup);
       const prevSet = wIdx >= 0 ? prevWorkingSets[wIdx] : undefined;
       // Mirror buildSeedSets exactly
-      const suggestion = LB.progressionSuggestion(store, entry.exId, session.dayId, entry.plannedReps, entry.plannedRepsPerSet, last, entry.plannedRepsMax, entry.plannedProgressionOffset ?? null);
+      const suggestion = LB.progressionSuggestion(store, entry.exId, session.dayId, entry.plannedReps, entry.plannedRepsPerSet, last, entry.plannedRepsMax, entry.plannedProgressionOffset ?? null, occ);
       const lastReps = prevSet ? LB.effReps(prevSet) : null;
       const refReps = suggestion
         ? (suggestion.reps ?? null)
