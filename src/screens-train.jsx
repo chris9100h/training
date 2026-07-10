@@ -2154,6 +2154,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const [advanceCycle, setAdvanceCycle] = useStateT(false);
   const [cycleFromPickedDay, setCycleFromPickedDay] = useStateT(false);
   const [intensityOpen, setIntensityOpen] = useStateT(false);
+  const [intensityPage, setIntensityPage] = useStateT(null); // null (root) | 'chained' | 'standalone' — drill-down page within the Intensity sheet, reset to root whenever the sheet closes
   const [dropSetIdx, setDropSetIdx] = useStateT(null);
   const [dropDrops, setDropDrops] = useStateT([]);
   const dropDropsRef = useRefT([]);
@@ -5881,8 +5882,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         </div>
       </Sheet>
 
-      {/* intensity technique picker */}
-      <Sheet open={intensityOpen} onClose={() => setIntensityOpen(false)} title="Intensity">
+      {/* intensity technique picker — two-level: root offers Superset plus
+          the two technique categories, drilling into either shows just that
+          category's techniques with a BACK control. intensityPage always
+          resets to root when the sheet closes, so it never reopens mid-drill. */}
+      <Sheet open={intensityOpen} onClose={() => { setIntensityOpen(false); setIntensityPage(null); }}
+        title={intensityPage === 'chained' ? 'Chained' : intensityPage === 'standalone' ? 'Standalone' : 'Intensity'}>
         {(() => {
           // Exactly one intensity technique can be "in flight" at a time —
           // picking one always clears any other left unfinished (e.g. the
@@ -5895,6 +5900,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           const clearLp = () => { setLpTarget(null); setLpCount(0); setLpStretch(null); };
           const clearWs = () => { setWsTarget(null); setWsStretch(null); };
           const clearAv = () => { setAvSetIdx(null); setAvDrops([]); };
+          const closeIntensity = () => { setIntensityOpen(false); setIntensityPage(null); };
           const startDrop = () => {
             const target = currentSetIdx >= 0
               ? currentSetIdx
@@ -5906,7 +5912,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             setDropDrops(initDrops);
             dropDropsRef.current = initDrops;
             setDropSetIdx(target);
-            setIntensityOpen(false);
+            closeIntensity();
             setTimeout(() => activateDropKb(0, 'kg'), 150);
           };
           const startAv = () => {
@@ -5920,7 +5926,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             setAvDrops(initDrops);
             avDropsRef.current = initDrops;
             setAvSetIdx(target);
-            setIntensityOpen(false);
+            closeIntensity();
             setTimeout(() => activateAvKb(0, 'kg'), 150);
           };
           const startMyo = (technique) => {
@@ -5941,7 +5947,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             if (technique === 'myorep_match') {
               setMyoTarget(anchor ? anchor.drops.reduce((sum, d) => sum + (d.reps || 0), 0) : null);
             }
-            setIntensityOpen(false);
+            closeIntensity();
             // Match: kg is read-only, start straight at reps; Myo: start at kg
             setTimeout(() => activateMyo(0, technique === 'myorep_match' ? 'reps' : 'kg'), 150);
           };
@@ -5955,29 +5961,22 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             opacity: active ? 1 : 0.45,
             WebkitTapHighlightColor: 'transparent',
           });
-          return (
+          const backBtn = (
+            <button onClick={() => setIntensityPage(null)} style={{
+              background: 'none', border: 'none', color: UI.inkFaint,
+              fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700, letterSpacing: '0.1em',
+              cursor: 'pointer', padding: '0 0 4px', display: 'flex', alignItems: 'center', gap: 6,
+              WebkitTapHighlightColor: 'transparent',
+            }}>
+              <i className="fa-solid fa-chevron-left" style={{ fontSize: 10 }} /> BACK
+            </button>
+          );
+
+          // ── Chained techniques — multiple rounds back-to-back in the chain
+          //    sheet, each round optionally carrying its own finisher. ──────
+          if (intensityPage === 'chained') return (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {/* Superset / Giant Set — structural (links this exercise with
-                  another), not a set-completion technique like the three
-                  below, so it's only offered before the whole current group
-                  has started. Listed first: the most recognized technique. */}
-              {supersetEligible && (
-                <button onClick={() => {
-                  setIntensityOpen(false);
-                  if (supersetCandidates.length === 0) setSupersetNewPickerOpen(true);
-                  else setSupersetLinkData({});
-                }} style={btnBase(true)}>
-                  <i className="fa-solid fa-link" style={{ fontSize: 18, color: 'var(--accent)', width: 20, textAlign: 'center', flexShrink: 0 }} />
-                  <div>
-                    <div style={{ fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, letterSpacing: '0.12em', color: 'var(--accent)' }}>{supersetMode === 'giant' ? 'GIANT SET' : 'SUPERSET'}</div>
-                    <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkSoft, marginTop: 2 }}>{supersetMode === 'giant' ? 'Add a third exercise to the rotation, no rest between' : 'Pair with another exercise, no rest between'}</div>
-                  </div>
-                </button>
-              )}
-              {/* Chained techniques — multiple rounds back-to-back in the chain
-                  sheet, each round optionally carrying its own finisher. */}
-              <div className="micro" style={{ color: UI.inkFaint, letterSpacing: '0.14em', marginTop: supersetEligible ? 4 : 0 }}>CHAINED TECHNIQUES</div>
-              {/* Drop Set */}
+              {backBtn}
               <button onClick={startDrop} style={btnBase(true)}>
                 <i className="fa-solid fa-angles-down" style={{ fontSize: 18, color: 'var(--accent)', width: 20, textAlign: 'center', flexShrink: 0 }} />
                 <div>
@@ -6016,9 +6015,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   </div>
                 </button>
               </div>
-              {/* Standalone techniques — a single set, no rounds/chain sheet. */}
-              <div className="micro" style={{ color: UI.inkFaint, letterSpacing: '0.14em', marginTop: 4 }}>STANDALONE TECHNIQUES</div>
-              {/* Lengthened Partials */}
+            </div>
+          );
+
+          // ── Standalone techniques — a single set, no rounds/chain sheet. ──
+          if (intensityPage === 'standalone') return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {backBtn}
               <button onClick={() => {
                 const target = currentSetIdx >= 0
                   ? currentSetIdx
@@ -6028,7 +6031,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                 setLpTarget({ exIdx, setIdx: target });
                 setLpCount(0);
                 setLpStretch(null);
-                setIntensityOpen(false);
+                closeIntensity();
               }} style={btnBase(true)}>
                 <i className="fa-solid fa-arrow-down-long" style={{ fontSize: 18, color: 'var(--accent)', width: 20, textAlign: 'center', flexShrink: 0 }} />
                 <div>
@@ -6049,7 +6052,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                 const s = entry.sets[target];
                 setWsTarget({ exIdx, setIdx: target });
                 setWsStretch({ kg: stretchShowWeight ? (s?.kg ?? null) : null, timeSec: 30 });
-                setIntensityOpen(false);
+                closeIntensity();
                 // Open the custom keypad straight on the first stretch box.
                 setTimeout(() => activateStretchKb('ws', null, stretchShowWeight ? 'kg' : 'sec'), 200);
               }} style={btnBase(true)}>
@@ -6058,6 +6061,45 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   <div style={{ fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, letterSpacing: '0.12em', color: 'var(--accent)' }}>WEIGHTED STRETCH</div>
                   <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkSoft, marginTop: 2 }}>Hold the loaded stretch for time after your set</div>
                 </div>
+              </button>
+            </div>
+          );
+
+          // ── Root: Superset (unchanged) plus the two technique categories. ──
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {/* Superset / Giant Set — structural (links this exercise with
+                  another), not a set-completion technique, so it's only
+                  offered before the whole current group has started. Listed
+                  first: the most recognized technique. */}
+              {supersetEligible && (
+                <button onClick={() => {
+                  closeIntensity();
+                  if (supersetCandidates.length === 0) setSupersetNewPickerOpen(true);
+                  else setSupersetLinkData({});
+                }} style={btnBase(true)}>
+                  <i className="fa-solid fa-link" style={{ fontSize: 18, color: 'var(--accent)', width: 20, textAlign: 'center', flexShrink: 0 }} />
+                  <div>
+                    <div style={{ fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, letterSpacing: '0.12em', color: 'var(--accent)' }}>{supersetMode === 'giant' ? 'GIANT SET' : 'SUPERSET'}</div>
+                    <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkSoft, marginTop: 2 }}>{supersetMode === 'giant' ? 'Add a third exercise to the rotation, no rest between' : 'Pair with another exercise, no rest between'}</div>
+                  </div>
+                </button>
+              )}
+              <button onClick={() => setIntensityPage('chained')} style={btnBase(true)}>
+                <i className="fa-solid fa-layer-group" style={{ fontSize: 18, color: 'var(--accent)', width: 20, textAlign: 'center', flexShrink: 0 }} />
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, letterSpacing: '0.12em', color: 'var(--accent)' }}>CHAINED TECHNIQUES</div>
+                  <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkSoft, marginTop: 2 }}>Drop set, AMRAP variations, myo-reps, myo match</div>
+                </div>
+                <i className="fa-solid fa-chevron-right" style={{ fontSize: 12, color: UI.inkFaint, flexShrink: 0 }} />
+              </button>
+              <button onClick={() => setIntensityPage('standalone')} style={btnBase(true)}>
+                <i className="fa-solid fa-circle-dot" style={{ fontSize: 18, color: 'var(--accent)', width: 20, textAlign: 'center', flexShrink: 0 }} />
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, letterSpacing: '0.12em', color: 'var(--accent)' }}>STANDALONE TECHNIQUES</div>
+                  <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkSoft, marginTop: 2 }}>Lengthened partials, weighted stretch</div>
+                </div>
+                <i className="fa-solid fa-chevron-right" style={{ fontSize: 12, color: UI.inkFaint, flexShrink: 0 }} />
               </button>
             </div>
           );
