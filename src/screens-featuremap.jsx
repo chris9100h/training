@@ -235,34 +235,42 @@ function FeatureMapScreen({ store, go }) {
 }
 
 function FeatureCard({ card, isAdmin, onEdit, onUp, onDown }) {
+  const [open, setOpen] = useStateFM(false);
   const role = FM_ROLES[card.role] || FM_ROLES.user;
   return (
-    <div style={{ position: 'relative', background: UI.bgCard, border: `1px solid ${UI.hair}`, borderRadius: 8, padding: '14px 14px 12px' }}>
-      <div style={{ position: 'absolute', left: 0, top: 14, bottom: 14, width: 3, borderRadius: 999, background: role.color }} />
-      <div style={{ paddingLeft: 10 }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
-          <div style={{ fontFamily: UI.fontDisplay, fontSize: 17, fontWeight: 700, color: UI.ink, lineHeight: 1.05, letterSpacing: '0.01em', textTransform: 'uppercase' }}>{card.name}</div>
-          <span style={{ flexShrink: 0, fontFamily: UI.fontNum, fontSize: 9, letterSpacing: '0.12em', textTransform: 'uppercase', padding: '3px 6px', borderRadius: 4, border: `1px solid ${role.color}`, color: role.color, background: `color-mix(in srgb, ${role.color} 12%, transparent)` }}>{role.label}</span>
+    <div style={{ position: 'relative', background: UI.bgCard, border: `1px solid ${UI.hair}`, borderRadius: 8, overflow: 'hidden' }}>
+      <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 3, background: role.color }} />
+      <button onClick={() => setOpen(o => !o)} aria-expanded={open} style={{
+        width: '100%', display: 'flex', alignItems: 'center', gap: 12,
+        padding: '13px 14px 13px 16px', background: 'transparent', border: 'none',
+        cursor: 'pointer', textAlign: 'left', WebkitTapHighlightColor: 'transparent',
+      }}>
+        <span style={{ flex: 1, minWidth: 0, fontFamily: UI.fontDisplay, fontSize: 17, fontWeight: 700, color: UI.ink, lineHeight: 1.15, letterSpacing: '0.01em', textTransform: 'uppercase' }}>{card.name}</span>
+        <i className="fa-solid fa-chevron-down" style={{ flexShrink: 0, fontSize: 12, color: UI.inkFaint, transition: 'transform 0.2s ease', transform: open ? 'rotate(180deg)' : 'none' }} />
+      </button>
+      {open && (
+        <div style={{ padding: '0 14px 14px 16px' }}>
+          <span style={{ display: 'inline-block', fontFamily: UI.fontNum, fontSize: 9, letterSpacing: '0.12em', textTransform: 'uppercase', padding: '3px 6px', borderRadius: 4, border: `1px solid ${role.color}`, color: role.color, background: `color-mix(in srgb, ${role.color} 12%, transparent)` }}>{role.label}</span>
+          <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5, marginTop: 10 }}>{card.summary}</div>
+          {(card.actions || []).length > 0 && (
+            <ul style={{ listStyle: 'none', margin: '11px 0 0', padding: '10px 0 0', borderTop: `1px dashed ${UI.hair}`, display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {card.actions.map((a, i) => (
+                <li key={i} style={{ position: 'relative', paddingLeft: 16, fontSize: 12.5, color: UI.ink, fontFamily: UI.fontUi, lineHeight: 1.4 }}>
+                  <i className="fa-solid fa-angle-right" style={{ position: 'absolute', left: 0, top: 3, fontSize: 10, color: 'var(--accent)' }} />
+                  {a}
+                </li>
+              ))}
+            </ul>
+          )}
+          {isAdmin && (
+            <div style={{ display: 'flex', gap: 8, marginTop: 12, paddingTop: 10, borderTop: `0.5px solid ${UI.hair}` }}>
+              <button onClick={onEdit} style={fmIconBtn(false)} title="Edit"><i className="fa-solid fa-pen" /></button>
+              <button onClick={onUp} style={fmIconBtn(false)} title="Move up"><i className="fa-solid fa-arrow-up" /></button>
+              <button onClick={onDown} style={fmIconBtn(false)} title="Move down"><i className="fa-solid fa-arrow-down" /></button>
+            </div>
+          )}
         </div>
-        <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5, marginTop: 8 }}>{card.summary}</div>
-        {(card.actions || []).length > 0 && (
-          <ul style={{ listStyle: 'none', margin: '11px 0 0', padding: '10px 0 0', borderTop: `1px dashed ${UI.hair}`, display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {card.actions.map((a, i) => (
-              <li key={i} style={{ position: 'relative', paddingLeft: 16, fontSize: 12.5, color: UI.ink, fontFamily: UI.fontUi, lineHeight: 1.4 }}>
-                <i className="fa-solid fa-angle-right" style={{ position: 'absolute', left: 0, top: 3, fontSize: 10, color: 'var(--accent)' }} />
-                {a}
-              </li>
-            ))}
-          </ul>
-        )}
-        {isAdmin && (
-          <div style={{ display: 'flex', gap: 8, marginTop: 12, paddingTop: 10, borderTop: `0.5px solid ${UI.hair}` }}>
-            <button onClick={onEdit} style={fmIconBtn(false)} title="Edit"><i className="fa-solid fa-pen" /></button>
-            <button onClick={onUp} style={fmIconBtn(false)} title="Move up"><i className="fa-solid fa-arrow-up" /></button>
-            <button onClick={onDown} style={fmIconBtn(false)} title="Move down"><i className="fa-solid fa-arrow-down" /></button>
-          </div>
-        )}
-      </div>
+      )}
     </div>
   );
 }
