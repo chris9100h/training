@@ -102,6 +102,7 @@ function FeatureMapScreen({ store, go }) {
   const [showHidden, setShowHidden] = useStateFM(false);
   const [confirmReset, setConfirmReset] = useStateFM(false);
   const [catFilter, setCatFilter] = useStateFM('all');
+  const [narrow, setNarrow] = useStateFM(typeof window !== 'undefined' ? window.innerWidth < 768 : true);
   const [showTop, setShowTop] = useStateFM(false);
   const topRef = useRefFM(null);
   const scRef = useRefFM(null);
@@ -135,6 +136,12 @@ function FeatureMapScreen({ store, go }) {
     const sc = scRef.current; if (!sc) return;
     if (sc.scrollTo) sc.scrollTo({ top: 0, behavior: 'smooth' }); else sc.scrollTop = 0;
   };
+  // Category filter is a dropdown on narrow screens (the phone frame), chips on wide.
+  useEffectFM(() => {
+    const onR = () => setNarrow(window.innerWidth < 768);
+    window.addEventListener('resize', onR);
+    return () => window.removeEventListener('resize', onR);
+  }, []);
 
   const merged = useMemoFM(() => ov ? fmMerge(catalog, ov) : [], [ov, catalog]);
 
@@ -342,7 +349,13 @@ function FeatureMapScreen({ store, go }) {
             ))}
           </div>
 
-          {catChips.length > 1 && (
+          {catChips.length > 1 && (narrow ? (
+            <select value={catFilter} onChange={e => { setCatFilter(e.target.value); scrollToTop(); }}
+              style={{ width: '100%', padding: '10px 12px', borderRadius: 6, border: `1px solid ${UI.hairStrong}`, background: UI.bgInset, color: UI.ink, fontFamily: UI.fontUi, fontSize: 14, outline: 'none' }}>
+              <option value="all">All categories ({visibleTotal})</option>
+              {catChips.map(c => <option key={c.id} value={c.id}>{c.label} ({c.count})</option>)}
+            </select>
+          ) : (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
               <button onClick={() => { setCatFilter('all'); scrollToTop(); }} style={fmPill(catFilter === 'all')}>All</button>
               {catChips.map(c => (
@@ -351,7 +364,7 @@ function FeatureMapScreen({ store, go }) {
                 </button>
               ))}
             </div>
-          )}
+          ))}
         </div>
 
         {loadErr && (
@@ -488,7 +501,7 @@ function FeatureEditor({ draft, busy, onChange, onClose, onSave, onRevert }) {
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
             {fmCatalog().categories.map(c => (
               <button key={c.id} onClick={() => set({ cat: c.id })} style={{
-                padding: '6px 10px', borderRadius: 999, cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 11,
+                padding: '6px 10px', borderRadius: 4, cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 11,
                 border: `1px solid ${draft.cat === c.id ? 'var(--accent)' : UI.hairStrong}`,
                 background: draft.cat === c.id ? 'rgba(var(--accent-rgb),0.12)' : 'transparent',
                 color: draft.cat === c.id ? 'var(--accent)' : UI.inkSoft,
@@ -564,7 +577,7 @@ function fmIconBtn(accent) {
 }
 function fmPill(active) {
   return {
-    display: 'inline-flex', alignItems: 'center', padding: '5px 10px', borderRadius: 999, cursor: 'pointer',
+    display: 'inline-flex', alignItems: 'center', padding: '5px 10px', borderRadius: 4, cursor: 'pointer',
     border: `1px solid ${active ? 'var(--accent)' : UI.hairStrong}`,
     background: active ? 'rgba(var(--accent-rgb),0.12)' : 'transparent',
     color: active ? 'var(--accent)' : UI.inkSoft, fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600,
