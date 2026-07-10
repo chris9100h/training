@@ -555,12 +555,7 @@ function CustomKeyboard({ visible, field, onType, onBackspace, onAdjust, onConfi
       onTouchStart={e => { e.preventDefault(); e.stopPropagation(); }}
       style={{ position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 95,
       background: 'var(--bg)',
-      // Bottom row holds the lone "0" key. With only 5px clearance it sat in
-      // iOS's home-indicator swipe strip, so bottom-edge taps on "0" got eaten
-      // by the system (users could type 1-9 fine but not 0 — "only let me type
-      // 13"). Guarantee a real floor of clearance even when the safe-area inset
-      // is 0 (Safari, non-installed), on top of the inset when there is one.
-      padding: `5px 8px calc(max(env(safe-area-inset-bottom, 0px), 14px) + 8px)`,
+      padding: `5px 8px calc(env(safe-area-inset-bottom, 0px) + 5px)`,
     }}>
       {/* knurled top edge — same grip-texture seam the rest of the kit uses,
           in place of a flat hairline, so the keypad reads as a distinct
