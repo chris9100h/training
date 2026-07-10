@@ -250,6 +250,19 @@ async function testAsync(name, fn) {
     assert.strictEqual(r.partials, 5);
     assert.deepStrictEqual(r.stretch, { kg: 50, timeSec: 20 });
   });
+  test('techniqueRounds exposes finishers per round (not just the last)', () => {
+    const r = LB.techniqueRounds({ technique: 'drop', drops: [
+      { kg: 100, reps: 10, partials: 3 },
+      { kg: 80, reps: 8, stretch: { kg: 60, timeSec: 30 } },
+    ] });
+    assert.strictEqual(r.rounds[0].partials, 3);
+    assert.strictEqual(r.rounds[0].stretch, null);
+    assert.strictEqual(r.rounds[1].partials, 0);
+    assert.deepStrictEqual(r.rounds[1].stretch, { kg: 60, timeSec: 30 });
+    // top-level stays the LAST round's, for older single-finisher callers
+    assert.deepStrictEqual(r.stretch, { kg: 60, timeSec: 30 });
+    assert.strictEqual(r.partials, 0);
+  });
   test('techniqueRounds stretch is null when absent (backward compatible)', () => {
     assert.strictEqual(LB.techniqueRounds({ technique: 'drop', drops: [{ kg: 100, reps: 10 }, { kg: 80, reps: 8 }] }).stretch, null);
     assert.strictEqual(LB.techniqueRounds({ technique: null }).stretch, null);

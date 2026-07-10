@@ -4551,7 +4551,10 @@ function techniqueRounds(st, { exName } = {}) {
     kind: st.technique,
     badge: BADGES[st.technique],
     connector: isMyo ? '↺' : '→',
-    rounds: drops.map(d => ({ kg: d.kg, reps: d.reps, label: d.label })),
+    // Finishers (partials count, weighted stretch) ride PER ROUND now — any
+    // drop/mini/round can carry its own, not just the last. Top-level
+    // partials/stretch stay as the LAST round's, for older single-finisher callers.
+    rounds: drops.map(d => ({ kg: d.kg, reps: d.reps, label: d.label, partials: d.partials || 0, stretch: d.stretch || null })),
     totalReps: isMyo ? drops.reduce((a, d) => a + (d.reps || 0), 0) : null,
     partials: last.partials || 0,
     stretch: last.stretch || null,
