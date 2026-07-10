@@ -1173,7 +1173,25 @@ function CheckInForm({ coachingId, clientId, userId, weekStart, existing, prefil
 
 // ─── ClientCheckInTab ─────────────────────────────────────────────────────────
 
-function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true, store, isSelf = false }) {
+function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true, store, setStore, isSelf = false }) {
+  // Local, synchronous store mutations (mirrors workoutTemplates and the coach
+  // view's identical handlers: syncStore's diff persists them on the next
+  // flush, no dedicated RPC). Only reachable via the self-coaching builder
+  // below (a real, non-self client never opens CheckInSchemaBuilder here).
+  // existingId overwrites that template's name/schema in place instead of
+  // creating a new one (used by the per-row "Update" action).
+  const saveCheckinTemplate = (name, schemaToSave, existingId = null) => {
+    if (existingId) {
+      setStore(s => ({ ...s, checkinSchemaTemplates: (s.checkinSchemaTemplates || []).map(t =>
+        t.id === existingId ? { ...t, name, schema: schemaToSave, createdAt: new Date().toISOString() } : t) }));
+      return;
+    }
+    const tpl = { id: LB.uid(), name, schema: schemaToSave, createdAt: new Date().toISOString() };
+    setStore(s => ({ ...s, checkinSchemaTemplates: [tpl, ...(s.checkinSchemaTemplates || [])] }));
+  };
+  const deleteCheckinTemplate = (id) => {
+    setStore(s => ({ ...s, checkinSchemaTemplates: (s.checkinSchemaTemplates || []).filter(t => t.id !== id) }));
+  };
   const weekStart = LB.checkinWeekStart();
   // Check-ins cover Mon–Sun. On Sunday the current week isn't over yet — only
   // allow submission from Monday onwards (day 1; Sunday = 0 in JS getDay()).
@@ -1283,7 +1301,10 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
       {builderOpen && isSelf && (
         <CheckInSchemaBuilder coachingId={coachingId} initial={resolvedSchema}
           onSave={s => { setSchema(s); setBuilderOpen(false); }}
-          onClose={() => setBuilderOpen(false)} />
+          onClose={() => setBuilderOpen(false)}
+          templates={store.checkinSchemaTemplates}
+          onSaveTemplate={saveCheckinTemplate}
+          onDeleteTemplate={deleteCheckinTemplate} />
       )}
       <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
       <div style={{ padding: '16px 14px 40px', display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -1530,7 +1551,7 @@ function CoachingTabClientView({ store, setStore, userId, go, hideTopBar = false
       {tab === 'nutrition' && <ClientNutritionReadView coachingId={coaching.id} />}
       {tab === 'checkin' && (
         <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-          <ClientCheckInTab coachingId={coaching.id} clientId={userId} userId={userId} checkinEnabled={coaching.checkinEnabled ?? true} store={store} />
+          <ClientCheckInTab coachingId={coaching.id} clientId={userId} userId={userId} checkinEnabled={coaching.checkinEnabled ?? true} store={store} setStore={setStore} />
         </div>
       )}
     </Screen>

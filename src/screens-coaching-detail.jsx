@@ -1240,6 +1240,7 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
           )}
           {(templates || []).map(t => {
             const fieldCount = (t.schema || []).reduce((n, sec) => n + (sec.fields || []).length, 0);
+            const unchanged = JSON.stringify(draft) === JSON.stringify(t.schema);
             return (
               <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 12px', background: UI.bgInset, borderRadius: 6, border: `0.5px solid ${UI.hair}` }}>
                 <button onClick={() => { setDraft(JSON.parse(JSON.stringify(t.schema))); backToList(); }}
@@ -1248,6 +1249,11 @@ function CheckInSchemaBuilder({ coachingId, initial, onSave, onSaveForAll, onClo
                   <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>
                     {fieldCount} field{fieldCount !== 1 ? 's' : ''} · {new Date(t.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
                   </div>
+                </button>
+                <button onClick={async () => { if (!unchanged && await confirm(`Update template "${t.name}" with your current form? This replaces its saved content.`, { title: 'Update template?', ok: 'Update' })) onSaveTemplate(t.name, draft, t.id); }}
+                  disabled={unchanged} title={unchanged ? 'No changes to update' : `Update "${t.name}" with the current form`}
+                  style={{ background: 'none', border: 'none', padding: 6, cursor: unchanged ? 'default' : 'pointer', color: unchanged ? UI.inkGhost : 'var(--accent)', fontSize: 14, flexShrink: 0, opacity: unchanged ? 0.5 : 1 }}>
+                  <i className="fa-solid fa-arrows-rotate" />
                 </button>
                 <button onClick={async () => { if (await confirm(`Delete template "${t.name}"?`, { title: 'Delete template?', ok: 'Delete', danger: true })) onDeleteTemplate(t.id); }}
                   style={{ background: 'none', border: 'none', padding: 6, cursor: 'pointer', color: 'rgba(var(--danger-rgb),0.8)', fontSize: 14, flexShrink: 0 }}>
@@ -1525,7 +1531,14 @@ function ClientCheckInsTab({ coachingId, checkinEnabled = true, onToggle, toggli
 
   // Local, synchronous store mutations (mirrors workoutTemplates: syncStore's
   // diff persists them on the next flush, no dedicated RPC/round-trip needed).
-  const saveCheckinTemplate = (name, schemaToSave) => {
+  // existingId overwrites that template's name/schema in place instead of
+  // creating a new one (used by the per-row "Update" action).
+  const saveCheckinTemplate = (name, schemaToSave, existingId = null) => {
+    if (existingId) {
+      setStore(s => ({ ...s, checkinSchemaTemplates: (s.checkinSchemaTemplates || []).map(t =>
+        t.id === existingId ? { ...t, name, schema: schemaToSave, createdAt: new Date().toISOString() } : t) }));
+      return;
+    }
     const tpl = { id: LB.uid(), name, schema: schemaToSave, createdAt: new Date().toISOString() };
     setStore(s => ({ ...s, checkinSchemaTemplates: [tpl, ...(s.checkinSchemaTemplates || [])] }));
   };
