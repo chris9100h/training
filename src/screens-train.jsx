@@ -6472,7 +6472,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
       {/* superset-link modal (from Intensity): step 1 existing-vs-new, step 2 pick existing */}
       {supersetLinkData && (
-        <Sheet open={true} onClose={() => setSupersetLinkData(null)} title={supersetMode === 'giant' ? 'Giant Set' : 'Superset'}>
+        <Sheet open={true} onClose={() => setSupersetLinkData(null)} title={supersetMode === 'giant' ? 'Giant Set' : 'Superset'} accent>
           {!supersetLinkData.picking ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
               <div style={{ fontFamily: UI.fontUi, fontSize: 14, color: UI.inkSoft, lineHeight: 1.5 }}>
