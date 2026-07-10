@@ -320,6 +320,28 @@ function Finisher({ partials, onPartials, stretch, onStretch, defaultKg, kgStep,
   );
 }
 
+// Read-only summary of the finishers a completed chain set carried, one tag per
+// round that has any (partials and/or a weighted stretch), labelled by round so
+// per-round finishers are all visible, not just the last one's.
+function FinisherSummary({ drops, labelFor }) {
+  const lines = (drops || []).map((d, di) => {
+    const p = d.partials || 0, st = d.stretch || null;
+    return (p > 0 || st) ? { di, label: labelFor(di), p, st } : null;
+  }).filter(Boolean);
+  if (!lines.length) return null;
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 4 }}>
+      {lines.map(({ di, label, p, st }) => (
+        <span key={di} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '3px 8px', border: '1px solid var(--accent)', borderRadius: 4, fontFamily: UI.fontUi, fontSize: 11, color: 'var(--accent)', letterSpacing: '0.03em' }}>
+          <span style={{ opacity: 0.6, fontSize: 9, textTransform: 'uppercase' }}>{label}</span>
+          {p > 0 && <span>+{p} partial{p === 1 ? '' : 's'}</span>}
+          {st && <span><i className="fa-solid fa-arrows-left-right-to-line" style={{ fontSize: 9, marginRight: 4 }} />{st.kg != null ? String(st.kg).replace('.', ',') + ' ' + UI.unit() + ' · ' : ''}{st.timeSec}s</span>}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 // Drop Set / Myo-Rep(-Match) / AMRAP Variations chains edit inside their own
 // sheet (IntensityChainSheet, see the Sheet rendered near the Intensity
 // picker below) rather than inline in the exercise list. The sheet's header
@@ -5223,11 +5245,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                           </div>
                         </div>
                       ))}
-                      {(() => { const p = s.drops?.[s.drops.length - 1]?.partials || 0; return p > 0 && (
-                        <div style={{ display: 'inline-block', marginTop: 4, padding: '3px 8px', border: '1px solid var(--accent)', borderRadius: 4, fontFamily: UI.fontUi, fontSize: 11, color: 'var(--accent)', letterSpacing: '0.03em' }}>
-                          +{p} partial{p === 1 ? '' : 's'}
-                        </div>
-                      ); })()}
+                      <FinisherSummary drops={s.drops} labelFor={(di) => di === 0 ? 'top' : 'drop ' + (di + 1)} />
                     </div>
                   )}
                   {s.technique === 'amrap_variations' && s.done && ((s.drops || []).length > 1 || (s.drops?.[s.drops.length - 1]?.partials || 0) > 0) && (() => {
@@ -5256,11 +5274,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                           </div>
                         </div>
                       ))}
-                      {(() => { const p = s.drops?.[s.drops.length - 1]?.partials || 0; return p > 0 && (
-                        <div style={{ display: 'inline-block', marginTop: 4, padding: '3px 8px', border: '1px solid var(--accent)', borderRadius: 4, fontFamily: UI.fontUi, fontSize: 11, color: 'var(--accent)', letterSpacing: '0.03em' }}>
-                          +{p} partial{p === 1 ? '' : 's'}
-                        </div>
-                      ); })()}
+                      <FinisherSummary drops={s.drops} labelFor={(di) => 'round ' + (di + 1)} />
                     </div>
                     );
                   })()}
@@ -5285,11 +5299,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                         </div>
                       ))}
                       {(() => { const t = (s.drops || []).reduce((a, d) => a + (d.reps || 0), 0); return t > 0 ? <div style={{ marginTop: 4, padding: '3px 8px', border: '1px solid var(--accent)', borderRadius: 4, fontFamily: UI.fontUi, fontSize: 11, color: 'var(--accent)', letterSpacing: '0.03em', textAlign: 'center' }}>Total {t}</div> : null; })()}
-                      {(() => { const p = s.drops?.[s.drops.length - 1]?.partials || 0; return p > 0 && (
-                        <div style={{ display: 'inline-block', marginTop: 4, marginLeft: 6, padding: '3px 8px', border: '1px solid var(--accent)', borderRadius: 4, fontFamily: UI.fontUi, fontSize: 11, color: 'var(--accent)', letterSpacing: '0.03em' }}>
-                          +{p} partial{p === 1 ? '' : 's'}
-                        </div>
-                      ); })()}
+                      <FinisherSummary drops={s.drops} labelFor={(di) => di === 0 ? 'act' : 'myo ' + di} />
                     </div>
                   )}
                   {/* Committed lengthened-partial count — read-only, like the myo-rep total tag below */}
