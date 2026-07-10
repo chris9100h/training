@@ -112,6 +112,17 @@ Globale Admin-Config (RLS an, nur SECURITY-DEFINER-Funktionen greifen zu). Treib
 - `auto_approve_remaining` (int, nullable): Batch-Budget. Ist Approval aus und das Budget gesetzt, dekrementiert jedes neue Signup es via `signup_consume_budget()` (AFTER-INSERT-Trigger auf `zane_profiles`); bei 0 schaltet der Trigger `signup_requires_approval` wieder an und löscht das Budget.
 - `force_update_nonce` (text, nullable): gesetzt von `admin_force_update()`, pusht das "New version available"-Banner an alle Clients ohne `sw.js`-Cache-Bump. Migration 0131.
 
+### `zane_feature_map`
+
+Admin-Override-Ebene der Feature-Map (Option A). Der **Master-Inhalt** liegt versioniert im Code (`src/feature-map-db.js`, `window.FEATURE_MAP`, Kategorien + Karten mit stabiler `id`); den rendern alle User und die spätere Login-freie Public-Seite. Diese Tabelle hält nur die **Kuratierung des Admins** (ausblenden/editieren/hinzufügen/sortieren), gekeyt auf die Katalog-Karten-`id`, als Live-Vorschau im `FeatureMapScreen` über den Katalog gelegt. Beim Publish wird der kuratierte Stand in den Katalog-Code zurückgebacken. **Nicht** im User-Backup (in `check-backup-coverage.cjs` `EXCLUDED`). Migration 0154 (ursprünglich Content-Tabelle) → 0155 (Reshape zu Overrides).
+
+- `card_id` (text, PK): Katalog-Karten-`id`, oder ein `custom-…`-Slug für admin-hinzugefügte Karten
+- `hidden` (boolean, default false): Karte in der Vorschau/Publikation ausblenden (Soft-Delete)
+- `is_custom` (boolean, default false): true = admin-hinzugefügte Karte (nicht im Katalog)
+- `cat`, `name`, `role` (CHECK null/`user`/`coach`/`both`), `summary`, `actions` (jsonb), `sort` (int): alle **nullable**. Bei Katalog-Karten überschreiben nicht-null Werte den Default (null = erben); bei Custom-Karten der volle Inhalt. `sort` = Reihenfolge innerhalb der Kategorie (null = Katalog-Reihenfolge).
+- `created_at`, `updated_at` (timestamptz, default `now()`)
+- **RLS:** eine Policy `feature_map_admin_all` (`FOR ALL TO authenticated`), nur Admin via `auth.email() = 'office@btc-prime.biz'` liest **und** schreibt. Kein RPC, kein anon/Nicht-Admin-Zugriff: reguläre User und die Public-Seite lesen ausschließlich den Katalog-Code, nie diese Tabelle. Reset = alle Override-Zeilen löschen.
+
 ### `zane_push_subscriptions`
 
 - `id` (text: endpoint URL), `user_id` (uuid), `endpoint` (text), `p256dh` (text: client EC public key, base64url), `auth` (text: auth secret, base64url), `created_at` (timestamptz)

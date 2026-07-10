@@ -98,7 +98,7 @@ function LoginScreen() {
   const [email, setEmail]         = useState('');
   const [password, setPassword]   = useState('');
   const [confirm, setConfirm]     = useState('');
-  const [unit, setUnit]           = useState('kg'); // 'kg' | 'lbs'
+  const [unit, setUnit]           = useState('kg'); // 'kg' | 'lbs' | 'mixed'
   const [loading, setLoading]     = useState(false);
   const [error, setError]         = useState('');
   const [resetSent, setResetSent] = useState(false);
@@ -261,8 +261,8 @@ function LoginScreen() {
             {!isLogin && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <div className="label" style={{ color: UI.inkFaint }}>Units</div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                  {[{ id: 'kg', label: 'Metric', sub: 'kg / km' }, { id: 'lbs', label: 'Imperial', sub: 'lbs / mi' }].map(opt => (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+                  {[{ id: 'kg', label: 'Metric', sub: 'kg / km' }, { id: 'lbs', label: 'Imperial', sub: 'lbs / mi' }, { id: 'mixed', label: 'Mixed', sub: 'kg / mi' }].map(opt => (
                     <button key={opt.id} type="button" onClick={() => setUnit(opt.id)} style={{
                       padding: '10px 0', borderRadius: 4, cursor: 'pointer',
                       background: unit === opt.id ? UI.goldFaint : 'transparent',

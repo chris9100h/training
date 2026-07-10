@@ -44,6 +44,7 @@ const PASSTHROUGH = ['zane_schedules', 'zane_sessions'];
 // Deliberately NOT part of a personal data backup.
 const EXCLUDED = {
   zane_app_config: 'admin/global config',
+  zane_feature_map: 'admin feature-map override layer (master content is in code), not per-user data',
   zane_feature_grants: 'admin-managed grants',
   zane_push_subscriptions: 'device-scoped push state',
   zane_pushover_active: 'integration/device state',

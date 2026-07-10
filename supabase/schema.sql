@@ -38,6 +38,25 @@ CREATE TABLE public.zane_app_config (
   CONSTRAINT zane_app_config_singleton CHECK (id = 1)
 );
 
+-- Feature map ADMIN override layer. Master content lives in the versioned
+-- src/feature-map-db.js catalog; this table holds only the admin's hide / edit /
+-- add / reorder overrides keyed by catalog card id, previewed in the admin
+-- screen and baked into the catalog at publish time. Admin-only (read + write).
+-- Migration 0154 created it as a content table; 0155 reshaped it to overrides.
+CREATE TABLE public.zane_feature_map (
+  card_id text PRIMARY KEY,
+  hidden boolean NOT NULL DEFAULT false,
+  is_custom boolean NOT NULL DEFAULT false,
+  cat text,
+  name text,
+  role text CHECK (role IS NULL OR role IN ('user','coach','both')),
+  summary text,
+  actions jsonb,
+  sort int,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
 CREATE TABLE public.zane_exercises (
   id text NOT NULL,
   user_id uuid NOT NULL,
@@ -420,6 +439,7 @@ CREATE INDEX IF NOT EXISTS idx_zane_skips_user_id              ON public.zane_sk
 
 ALTER TABLE public.zane_profiles         ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.zane_app_config       ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.zane_feature_map      ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.zane_exercises        ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.zane_schedules        ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.zane_sessions         ENABLE ROW LEVEL SECURITY;
@@ -441,6 +461,9 @@ ALTER TABLE public.zane_checkins         ENABLE ROW LEVEL SECURITY;
 -- profiles
 CREATE POLICY "own profile" ON public.zane_profiles FOR ALL TO public USING (((select auth.uid()) = id));
 CREATE POLICY "coach can read client profile" ON public.zane_profiles FOR SELECT TO public USING (zane_is_coach_of(id));
+
+-- feature_map: admin-only curation layer (nobody else reads or writes it)
+CREATE POLICY "feature_map_admin_all" ON public.zane_feature_map FOR ALL TO authenticated USING ((select auth.email()) = 'office@btc-prime.biz') WITH CHECK ((select auth.email()) = 'office@btc-prime.biz');
 
 -- exercises
 CREATE POLICY "own exercises" ON public.zane_exercises FOR ALL TO public USING (((select auth.uid()) = user_id));
