@@ -174,15 +174,46 @@ function FeatureMapScreen({ store, go }) {
   };
   const deleteCustom = (card) => { removeOverride(card.id); };
 
-  const move = async (card, dir) => {
-    // Reorder among the cards actually shown in this category (skip hidden ones,
-    // unless "show hidden" is on), so a move always visibly shifts by one.
-    const sibs = merged.filter(c => c.cat === card.cat && (!c.hidden || showHidden)).sort((a, b) => a.sort - b.sort);
-    const idx = sibs.findIndex(c => c.id === card.id);
-    const swap = sibs[idx + dir];
-    if (!swap) return;
-    await writeOverride(card.id, { sort: swap.sort });
-    await writeOverride(swap.id, { sort: card.sort });
+  // Catalog default index per card id (position within its category). Used to
+  // drop a redundant sort override when a card lands back on its default slot.
+  const catalogIdx = useMemoFM(() => {
+    const m = {}, per = {};
+    for (const c of catalog.cards) { const i = (per[c.cat] = per[c.cat] == null ? 0 : per[c.cat] + 1); m[c.id] = i; }
+    return m;
+  }, [catalog]);
+
+  // Persist a batch of { card_id, sort } order changes in one round-trip.
+  const applyOrder = async (changes) => {
+    const upserts = [], deletes = [], next = { ...ov };
+    for (const { card_id, sort } of changes) {
+      const row = { ...(ov[card_id] || { card_id }), card_id, sort };
+      if (fmTrivial(row)) { deletes.push(card_id); delete next[card_id]; }
+      else { row.updated_at = new Date().toISOString(); const p = {}; FM_OV_COLS.forEach(k => { if (row[k] !== undefined) p[k] = row[k]; }); upserts.push(p); next[card_id] = row; }
+    }
+    setBusy(true);
+    try {
+      if (upserts.length) { const { error } = await LB.supabase.from('zane_feature_map').upsert(upserts, { onConflict: 'card_id' }); if (error) throw error; }
+      if (deletes.length) { const { error } = await LB.supabase.from('zane_feature_map').delete().in('card_id', deletes); if (error) throw error; }
+      setOv(next);
+    } catch (e) { alert('Could not save the new order: ' + (e.message || 'unknown error')); }
+    finally { setBusy(false); }
+  };
+
+  // Drag reorder within one category. from/to are indices into the shown cards
+  // (hidden ones keep their relative order after the visible list).
+  const reorderCategory = async (catId, from, to) => {
+    const vis = merged.filter(c => c.cat === catId && (!c.hidden || showHidden)).sort((a, b) => a.sort - b.sort);
+    if (from < 0 || to < 0 || from >= vis.length || to >= vis.length || from === to) return;
+    const arr = vis.slice(); const [moved] = arr.splice(from, 1); arr.splice(to, 0, moved);
+    const hidden = merged.filter(c => c.cat === catId && c.hidden && !showHidden).sort((a, b) => a.sort - b.sort);
+    const newOrder = [...arr, ...hidden];
+    const changes = [];
+    newOrder.forEach((c, i) => {
+      if (c.sort === i) return; // unchanged
+      const backToDefault = !c.isCustom && catalogIdx[c.id] === i;
+      changes.push({ card_id: c.id, sort: backToDefault ? null : i });
+    });
+    if (changes.length) await applyOrder(changes);
   };
 
   const startNew = (catId) => {
@@ -285,12 +316,17 @@ function FeatureMapScreen({ store, go }) {
                 <span className="num" style={{ fontSize: 13, color: UI.inkFaint }}>{g.all.filter(c => !c.hidden).length}</span>
               </div>
 
-              {g.visible.map(card => (
-                <FeatureCard key={card.id} card={card} isAdmin={isAdmin}
-                  onEdit={() => setEditing({ ...card, actions: (card.actions || []).slice() })}
-                  onUp={() => move(card, -1)} onDown={() => move(card, +1)}
-                  onToggleHide={() => toggleHide(card)} onDelete={() => deleteCustom(card)} />
-              ))}
+              {(() => {
+                const items = g.visible.map(card => (
+                  <FeatureCard key={card.id} card={card} isAdmin={isAdmin}
+                    onEdit={() => setEditing({ ...card, actions: (card.actions || []).slice() })}
+                    onToggleHide={() => toggleHide(card)} onDelete={() => deleteCustom(card)} />
+                ));
+                const listStyle = { display: 'flex', flexDirection: 'column', gap: 12 };
+                return isAdmin
+                  ? <ReorderList onReorder={(f, t) => reorderCategory(g.meta.id, f, t)} style={listStyle}>{items}</ReorderList>
+                  : <div style={listStyle}>{items}</div>;
+              })()}
 
               {isAdmin && (
                 <button onClick={() => startNew(g.meta.id)} style={{
@@ -318,26 +354,29 @@ function FeatureMapScreen({ store, go }) {
   );
 }
 
-function FeatureCard({ card, isAdmin, onEdit, onUp, onDown, onToggleHide, onDelete }) {
+function FeatureCard({ card, isAdmin, onEdit, onToggleHide, onDelete }) {
   const [open, setOpen] = useStateFM(false);
   const role = FM_ROLES[card.role] || FM_ROLES.user;
   const muted = card.hidden;
   return (
-    <div style={{ position: 'relative', background: UI.bgCard, border: `1px solid ${UI.hair}`, borderRadius: 8, overflow: 'hidden', opacity: muted ? 0.55 : 1 }}>
+    <div data-reorder-item="true" style={{ position: 'relative', background: UI.bgCard, border: `1px solid ${UI.hair}`, borderRadius: 8, overflow: 'hidden', opacity: muted ? 0.55 : 1 }}>
       <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 3, background: role.color }} />
-      <button onClick={() => setOpen(o => !o)} aria-expanded={open} style={{
-        width: '100%', display: 'flex', alignItems: 'center', gap: 10,
-        padding: '13px 14px 13px 16px', background: 'transparent', border: 'none',
-        cursor: 'pointer', textAlign: 'left', WebkitTapHighlightColor: 'transparent',
-      }}>
-        <span style={{ flex: 1, minWidth: 0, fontFamily: UI.fontDisplay, fontSize: 17, fontWeight: 700, color: UI.ink, lineHeight: 1.15, letterSpacing: '0.01em', textTransform: 'uppercase' }}>{card.name}</span>
-        {isAdmin && card.hidden && <span style={fmTag(UI.inkFaint)}>Hidden</span>}
-        {isAdmin && card.isCustom && <span style={fmTag('var(--accent)')}>Custom</span>}
-        {isAdmin && !card.isCustom && card.edited && <span style={fmTag('var(--accent)')}>Edited</span>}
-        <i className="fa-solid fa-chevron-down" style={{ flexShrink: 0, fontSize: 12, color: UI.inkFaint, transition: 'transform 0.2s ease', transform: open ? 'rotate(180deg)' : 'none' }} />
-      </button>
+      <div style={{ display: 'flex', alignItems: 'center', paddingLeft: isAdmin ? 6 : 0 }}>
+        {isAdmin && <DragHandle style={{ height: 46 }} />}
+        <button onClick={() => setOpen(o => !o)} aria-expanded={open} style={{
+          flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 10,
+          padding: '13px 14px 13px ' + (isAdmin ? '6px' : '16px'), background: 'transparent', border: 'none',
+          cursor: 'pointer', textAlign: 'left', WebkitTapHighlightColor: 'transparent',
+        }}>
+          <span style={{ flex: 1, minWidth: 0, fontFamily: UI.fontDisplay, fontSize: 17, fontWeight: 700, color: UI.ink, lineHeight: 1.15, letterSpacing: '0.01em', textTransform: 'uppercase' }}>{card.name}</span>
+          {isAdmin && card.hidden && <span style={fmTag(UI.inkFaint)}>Hidden</span>}
+          {isAdmin && card.isCustom && <span style={fmTag('var(--accent)')}>Custom</span>}
+          {isAdmin && !card.isCustom && card.edited && <span style={fmTag('var(--accent)')}>Edited</span>}
+          <i className="fa-solid fa-chevron-down" style={{ flexShrink: 0, fontSize: 12, color: UI.inkFaint, transition: 'transform 0.2s ease', transform: open ? 'rotate(180deg)' : 'none' }} />
+        </button>
+      </div>
       {open && (
-        <div style={{ padding: '0 14px 14px 16px' }}>
+        <div style={{ padding: isAdmin ? '0 14px 14px 34px' : '0 14px 14px 16px' }}>
           <span style={{ display: 'inline-block', fontFamily: UI.fontNum, fontSize: 9, letterSpacing: '0.12em', textTransform: 'uppercase', padding: '3px 6px', borderRadius: 4, border: `1px solid ${role.color}`, color: role.color, background: `color-mix(in srgb, ${role.color} 12%, transparent)` }}>{role.label}</span>
           <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5, marginTop: 10 }}>{card.summary}</div>
           {(card.actions || []).length > 0 && (
@@ -351,13 +390,11 @@ function FeatureCard({ card, isAdmin, onEdit, onUp, onDown, onToggleHide, onDele
             </ul>
           )}
           {isAdmin && (
-            <div style={{ display: 'flex', gap: 8, marginTop: 12, paddingTop: 10, borderTop: `0.5px solid ${UI.hair}`, flexWrap: 'wrap' }}>
-              <button onClick={onEdit} style={fmIconBtn(false)} title="Edit"><i className="fa-solid fa-pen" /></button>
-              <button onClick={onUp} style={fmIconBtn(false)} title="Move up"><i className="fa-solid fa-arrow-up" /></button>
-              <button onClick={onDown} style={fmIconBtn(false)} title="Move down"><i className="fa-solid fa-arrow-down" /></button>
+            <div data-reorder-ignore="true" style={{ display: 'flex', gap: 8, marginTop: 12, paddingTop: 10, borderTop: `0.5px solid ${UI.hair}`, flexWrap: 'wrap' }}>
+              <button onClick={onEdit} style={{ ...fmIconBtn(false), width: 'auto', padding: '0 10px' }} title="Edit"><i className="fa-solid fa-pen" /> <span style={{ fontFamily: UI.fontUi, fontSize: 11, marginLeft: 4 }}>Edit</span></button>
               {card.isCustom
-                ? <button onClick={onDelete} style={{ ...fmIconBtn(false), color: UI.danger }} title="Delete custom card"><i className="fa-solid fa-trash" /></button>
-                : <button onClick={onToggleHide} style={fmIconBtn(false)} title={card.hidden ? 'Unhide' : 'Hide'}><i className={`fa-solid ${card.hidden ? 'fa-eye' : 'fa-eye-slash'}`} /></button>}
+                ? <button onClick={onDelete} style={{ ...fmIconBtn(false), width: 'auto', padding: '0 10px', color: UI.danger }} title="Delete custom card"><i className="fa-solid fa-trash" /> <span style={{ fontFamily: UI.fontUi, fontSize: 11, marginLeft: 4 }}>Delete</span></button>
+                : <button onClick={onToggleHide} style={{ ...fmIconBtn(false), width: 'auto', padding: '0 10px' }} title={card.hidden ? 'Unhide' : 'Hide'}><i className={`fa-solid ${card.hidden ? 'fa-eye' : 'fa-eye-slash'}`} /> <span style={{ fontFamily: UI.fontUi, fontSize: 11, marginLeft: 4 }}>{card.hidden ? 'Unhide' : 'Hide'}</span></button>}
             </div>
           )}
         </div>
