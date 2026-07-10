@@ -260,7 +260,7 @@ function KbCell({ text, placeholder, style, disabled, onActivate }) {
 function FinisherStep({ label, onClick }) {
   return <button onClick={onClick} style={{ width: 28, height: 28, borderRadius: 4, border: `1px solid ${UI.hairStrong}`, background: 'transparent', color: UI.inkFaint, fontSize: 16, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', WebkitTapHighlightColor: 'transparent' }}>{label}</button>;
 }
-function Finisher({ partials, onPartials, stretch, onStretch, defaultKg, showWeight, onActivateStretch, stretchActiveField, kbRaw }) {
+function Finisher({ partials, onPartials, stretch, onStretch, defaultKg, showWeight, onActivateStretch, stretchActiveField, kbRaw, scrollKey }) {
   const [open, setOpen] = useStateT(partials > 0 || !!stretch);
   if (!open) return (
     <button onClick={() => setOpen(true)} style={{
@@ -287,7 +287,7 @@ function Finisher({ partials, onPartials, stretch, onStretch, defaultKg, showWei
       )}
       {/* Weighted-stretch editor: only shown once chosen (stretch != null). */}
       {stretch && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '4px 4px' }}>
+        <div data-stretch-box={scrollKey} style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '4px 4px' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <span className="micro" style={{ color: UI.gold }}>Weighted stretch</span>
             <button onClick={() => onStretch(null)} title="Remove" style={{ background: 'none', border: 'none', color: UI.inkFaint, fontSize: 14, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>✕</button>
@@ -3343,6 +3343,15 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     setKbField({ setIdx: 'stretch', target, dropIdx, field });
     setKbRaw(val);
     setKbFresh(true);
+    // Every other activate* (activateKb, activateDropKb/Myo/Av) scrolls its
+    // row into view once the custom keyboard opens (position:fixed, covers
+    // a large chunk of the screen); this one didn't, so a stretch box tapped
+    // near the bottom could stay hidden behind the keyboard or scroll out of
+    // the picture entirely. data-stretch-box carries a target-scoped key so
+    // this reaches the right box for both the chain-sheet finisher rounds
+    // and the standalone lp/ws editors.
+    const scrollKey = (target === 'ws' || target === 'lp') ? target : `${target}-${dropIdx}`;
+    setTimeout(() => scrollChainRowIntoView('data-stretch-box', scrollKey), 80);
   };
 
   const kbApply = (newRaw, field, setIdx) => {
@@ -5332,7 +5341,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                             custom-keypad layout as the standalone Weighted
                             Stretch editor. */}
                         {lpStretch ? (
-                          <div style={{ padding: '2px 4px 10px' }}>
+                          <div data-stretch-box="lp" style={{ padding: '2px 4px 10px' }}>
                             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
                               <span className="micro" style={{ color: UI.gold }}>Weighted stretch</span>
                               <button onClick={() => { setLpStretch(null); closeLpStretchKb(); }} title="Remove" style={{ background: 'none', border: 'none', color: UI.inkFaint, fontSize: 14, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>✕</button>
@@ -5392,7 +5401,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                     const kgActive = kbField?.setIdx === 'stretch' && kbField?.target === 'ws' && kbField?.field === 'kg';
                     const secActive = kbField?.setIdx === 'stretch' && kbField?.target === 'ws' && kbField?.field === 'sec';
                     return (
-                      <div style={{ background: 'rgba(var(--accent-rgb),0.05)', borderRadius: 6, margin: '2px 0 6px' }}>
+                      <div data-stretch-box="ws" style={{ background: 'rgba(var(--accent-rgb),0.05)', borderRadius: 6, margin: '2px 0 6px' }}>
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 6px 2px' }}>
                           <span className="micro-gold">WEIGHTED STRETCH</span>
                           <button onClick={() => {
@@ -6088,8 +6097,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                 const isKgA = kbField?.setIdx === 'drop' && kbField?.dropIdx === di && kbField?.field === 'kg';
                 const isRepsA = kbField?.setIdx === 'drop' && kbField?.dropIdx === di && kbField?.field === 'reps';
                 return (
-                  <div key={di}>
-                  <div data-drop-row={di} style={{ display: 'grid', gridTemplateColumns: '28px 1fr 72px 56px 28px', gap: 8, alignItems: 'center', padding: '5px 4px' }}>
+                  <div key={di} data-drop-row={di}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '28px 1fr 72px 56px 28px', gap: 8, alignItems: 'center', padding: '5px 4px' }}>
                     <div style={{
                       width: 24, height: 24, borderRadius: 4, flexShrink: 0,
                       background: 'rgba(var(--accent-rgb),0.08)',
@@ -6123,7 +6132,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                         WebkitTapHighlightColor: 'transparent',
                       }}>×</button>
                   </div>
-                  <Finisher partials={d.partials || 0} onPartials={(v) => setDropDrops(prev => prev.map((r, idx) => idx === di ? { ...r, partials: v > 0 ? v : undefined } : r))} stretch={d.stretch || null} onStretch={(v) => setDropDrops(prev => prev.map((r, idx) => idx === di ? { ...r, stretch: v || undefined } : r))} defaultKg={d.kg ?? null} showWeight={stretchShowWeight} onActivateStretch={(f) => activateStretchKb('drop', di, f)} stretchActiveField={kbField?.setIdx === 'stretch' && kbField?.target === 'drop' && kbField?.dropIdx === di ? kbField.field : null} kbRaw={kbRaw} />
+                  <Finisher partials={d.partials || 0} onPartials={(v) => setDropDrops(prev => prev.map((r, idx) => idx === di ? { ...r, partials: v > 0 ? v : undefined } : r))} stretch={d.stretch || null} onStretch={(v) => setDropDrops(prev => prev.map((r, idx) => idx === di ? { ...r, stretch: v || undefined } : r))} defaultKg={d.kg ?? null} showWeight={stretchShowWeight} onActivateStretch={(f) => activateStretchKb('drop', di, f)} stretchActiveField={kbField?.setIdx === 'stretch' && kbField?.target === 'drop' && kbField?.dropIdx === di ? kbField.field : null} kbRaw={kbRaw} scrollKey={`drop-${di}`} />
                   </div>
                 );
               })}
@@ -6224,7 +6233,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                           WebkitTapHighlightColor: 'transparent',
                         }}>×</button>
                     </div>
-                    <Finisher partials={d.partials || 0} onPartials={(v) => setAvDrops(prev => prev.map((r, idx) => idx === di ? { ...r, partials: v > 0 ? v : undefined } : r))} stretch={d.stretch || null} onStretch={(v) => setAvDrops(prev => prev.map((r, idx) => idx === di ? { ...r, stretch: v || undefined } : r))} defaultKg={d.kg ?? null} showWeight={stretchShowWeight} onActivateStretch={(f) => activateStretchKb('av', di, f)} stretchActiveField={kbField?.setIdx === 'stretch' && kbField?.target === 'av' && kbField?.dropIdx === di ? kbField.field : null} kbRaw={kbRaw} />
+                    <Finisher partials={d.partials || 0} onPartials={(v) => setAvDrops(prev => prev.map((r, idx) => idx === di ? { ...r, partials: v > 0 ? v : undefined } : r))} stretch={d.stretch || null} onStretch={(v) => setAvDrops(prev => prev.map((r, idx) => idx === di ? { ...r, stretch: v || undefined } : r))} defaultKg={d.kg ?? null} showWeight={stretchShowWeight} onActivateStretch={(f) => activateStretchKb('av', di, f)} stretchActiveField={kbField?.setIdx === 'stretch' && kbField?.target === 'av' && kbField?.dropIdx === di ? kbField.field : null} kbRaw={kbRaw} scrollKey={`av-${di}`} />
                   </div>
                 );
               })}
@@ -6334,8 +6343,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   const isKgA = kbField?.setIdx === 'myo' && kbField?.dropIdx === di && kbField?.field === 'kg';
                   const isRepsA = kbField?.setIdx === 'myo' && kbField?.dropIdx === di && kbField?.field === 'reps';
                   return (
-                    <div key={di}>
-                    <div data-myo-row={di} style={{ display: 'grid', gridTemplateColumns: '28px 1fr 72px 56px 28px', gap: 8, alignItems: 'center', padding: '5px 4px' }}>
+                    <div key={di} data-myo-row={di}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '28px 1fr 72px 56px 28px', gap: 8, alignItems: 'center', padding: '5px 4px' }}>
                       <div style={{
                         width: 24, height: 24, borderRadius: 4, flexShrink: 0,
                         background: 'rgba(var(--accent-rgb),0.08)',
@@ -6378,7 +6387,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                           }}>×</button>
                       )}
                     </div>
-                    {!isActiv && <Finisher partials={d.partials || 0} onPartials={(v) => setMyoDrops(prev => prev.map((r, idx) => idx === di ? { ...r, partials: v > 0 ? v : undefined } : r))} stretch={d.stretch || null} onStretch={(v) => setMyoDrops(prev => prev.map((r, idx) => idx === di ? { ...r, stretch: v || undefined } : r))} defaultKg={d.kg ?? null} showWeight={stretchShowWeight} onActivateStretch={(f) => activateStretchKb('myo', di, f)} stretchActiveField={kbField?.setIdx === 'stretch' && kbField?.target === 'myo' && kbField?.dropIdx === di ? kbField.field : null} kbRaw={kbRaw} />}
+                    {!isActiv && <Finisher partials={d.partials || 0} onPartials={(v) => setMyoDrops(prev => prev.map((r, idx) => idx === di ? { ...r, partials: v > 0 ? v : undefined } : r))} stretch={d.stretch || null} onStretch={(v) => setMyoDrops(prev => prev.map((r, idx) => idx === di ? { ...r, stretch: v || undefined } : r))} defaultKg={d.kg ?? null} showWeight={stretchShowWeight} onActivateStretch={(f) => activateStretchKb('myo', di, f)} stretchActiveField={kbField?.setIdx === 'stretch' && kbField?.target === 'myo' && kbField?.dropIdx === di ? kbField.field : null} kbRaw={kbRaw} scrollKey={`myo-${di}`} />}
                     </div>
                   );
                 })}
