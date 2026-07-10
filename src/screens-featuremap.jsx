@@ -103,9 +103,9 @@ function FeatureMapScreen({ store, go }) {
   const [confirmReset, setConfirmReset] = useStateFM(false);
   const [catFilter, setCatFilter] = useStateFM('all');
   const [narrow, setNarrow] = useStateFM(typeof window !== 'undefined' ? window.innerWidth < 768 : true);
-  const [showTop, setShowTop] = useStateFM(false);
   const topRef = useRefFM(null);
   const scRef = useRefFM(null);
+  const fabRef = useRefFM(null);
 
   useEffectFM(() => {
     if (!isAdmin) { setOv({}); return; }
@@ -123,11 +123,21 @@ function FeatureMapScreen({ store, go }) {
 
   // Back-to-top: the Screen wrapper is the scroll container (its overflow:auto).
   // Grab it from the top sentinel's parent, watch its scroll, toggle the button.
+  // The button stays mounted and we flip only its opacity imperatively: driving
+  // this through React state would re-render the whole list every time the
+  // scroll crosses the threshold, and that mid-swipe DOM churn stalls iOS
+  // momentum scrolling right around the first category. Opacity on a fixed,
+  // GPU-composited element never touches layout, so the swipe runs to the top.
   useEffectFM(() => {
     const sc = topRef.current && topRef.current.parentElement;
     if (!sc) return;
     scRef.current = sc;
-    const onScroll = () => setShowTop(sc.scrollTop > 500);
+    const onScroll = () => {
+      const fab = fabRef.current; if (!fab) return;
+      const show = sc.scrollTop > 500;
+      fab.style.opacity = show ? '1' : '0';
+      fab.style.pointerEvents = show ? 'auto' : 'none';
+    };
     sc.addEventListener('scroll', onScroll, { passive: true });
     onScroll();
     return () => sc.removeEventListener('scroll', onScroll);
@@ -424,19 +434,18 @@ function FeatureMapScreen({ store, go }) {
           onRevert={(!editing._isNew && !editing.isCustom && editing.edited) ? () => revertEdit(editing.id) : null} />
       )}
 
-      {showTop && (
-        <button onClick={scrollToTop} aria-label="Back to top" title="Back to top" style={{
-          position: 'fixed', zIndex: 60,
-          right: 'max(16px, calc(50vw - 204px))',
-          bottom: 'calc(16px + env(safe-area-inset-bottom, 0px))',
-          width: 46, height: 46, borderRadius: '50%',
-          border: `1px solid ${UI.hairStrong}`, background: UI.bgCard, color: 'var(--accent)',
-          cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
-          boxShadow: '0 8px 24px rgba(0,0,0,0.4)', WebkitTapHighlightColor: 'transparent',
-        }}>
-          <i className="fa-solid fa-chevron-up" />
-        </button>
-      )}
+      <button ref={fabRef} onClick={scrollToTop} aria-label="Back to top" title="Back to top" style={{
+        position: 'fixed', zIndex: 60,
+        right: 'max(16px, calc(50vw - 204px))',
+        bottom: 'calc(16px + env(safe-area-inset-bottom, 0px))',
+        width: 46, height: 46, borderRadius: '50%',
+        border: `1px solid ${UI.hairStrong}`, background: UI.bgCard, color: 'var(--accent)',
+        cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+        boxShadow: '0 8px 24px rgba(0,0,0,0.4)', WebkitTapHighlightColor: 'transparent',
+        opacity: 0, pointerEvents: 'none', transition: 'opacity 0.2s ease',
+      }}>
+        <i className="fa-solid fa-chevron-up" />
+      </button>
     </Screen>
   );
 }
