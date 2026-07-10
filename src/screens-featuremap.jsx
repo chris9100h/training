@@ -1,14 +1,19 @@
-/* Feature Map screen (Option A: versioned catalog + admin overrides).
+/* Feature Map screen (Option A catalog + live publish flow).
 
    The master content lives in the versioned file src/feature-map-db.js
-   (window.FEATURE_MAP). Everyone, and the future public no-login page, renders
-   that catalog. The DB table zane_feature_map is the ADMIN's private curation
-   layer: hide / edit / add / reorder saved as overrides keyed by catalog card
-   id, merged over the catalog as a live preview. "Reset" discards the overrides.
-   The admin's curation is baked back into the catalog file at publish time.
+   (window.FEATURE_MAP). Everyone renders that catalog as the base, then layers
+   the published overrides on top. Two DB layers:
+     - zane_feature_map            = DRAFT: the admin's private working copy
+       (hide / edit / add / reorder), merged over the catalog as a live preview.
+     - zane_feature_map_published  = PUBLISHED: what everyone actually sees.
+   The admin edits the draft, reviews the diff (unpublished changes), and hits
+   Publish (publish_feature_map) to promote draft -> published, live for all with
+   no deploy. "Discard all" (discard_feature_map) resets the draft to published.
 
-   Non-admins render the catalog as-is (no DB read; RLS is admin-only anyway).
-   Entry point stays admin-only until the public release.
+   Viewers (non-admin + the public page) read the published layer through the
+   get_public_feature_map RPC; the admin reads both draft and published directly.
+   Occasionally the published layer is baked back into the catalog file by the
+   bake workflow (tools/bake-feature-map.cjs) as housekeeping.
 
    Shares globals: UI, Screen, TopBar, Sheet, Btn, Field, TextInput, LB, React. */
 
@@ -93,14 +98,15 @@ function FeatureMapScreen({ store, go }) {
   const isAdmin = store?.user?.email === FM_ADMIN_EMAIL;
   const catalog = fmCatalog();
 
-  const [ov, setOv]           = useStateFM(isAdmin ? null : {}); // card_id -> override row; null = loading (admin)
+  const [ov, setOv]           = useStateFM(null); // effective overrides rendered: draft (admin) or published (viewer); null = loading
+  const [pub, setPub]         = useStateFM(null); // published overrides, admin only, for the unpublished-changes diff
   const [loadErr, setLoadErr] = useStateFM('');
   const [query, setQuery]     = useStateFM('');
   const [roleFilter, setRole] = useStateFM('all');
   const [editing, setEditing] = useStateFM(null);
   const [busy, setBusy]       = useStateFM(false);
   const [showHidden, setShowHidden] = useStateFM(false);
-  const [confirmReset, setConfirmReset] = useStateFM(false);
+  const [pubSheet, setPubSheet] = useStateFM(false);
   const [catFilter, setCatFilter] = useStateFM('all');
   const [narrow, setNarrow] = useStateFM(typeof window !== 'undefined' ? window.innerWidth < 768 : true);
   const topRef = useRefFM(null);
@@ -108,15 +114,27 @@ function FeatureMapScreen({ store, go }) {
   const fabRef = useRefFM(null);
 
   useEffectFM(() => {
-    if (!isAdmin) { setOv({}); return; }
     let alive = true;
     (async () => {
-      const { data, error } = await LB.supabase.from('zane_feature_map').select('*');
-      if (!alive) return;
-      if (error) { setLoadErr(error.message || 'Could not load your saved changes.'); setOv({}); return; }
-      const map = {};
-      (data || []).forEach(r => { map[r.card_id] = r; });
-      setOv(map);
+      if (isAdmin) {
+        // Admin edits the draft (what they see) and needs published for the diff.
+        const [d, p] = await Promise.all([
+          LB.supabase.from('zane_feature_map').select('*'),
+          LB.supabase.from('zane_feature_map_published').select('*'),
+        ]);
+        if (!alive) return;
+        if (d.error) { setLoadErr(d.error.message || 'Could not load your changes.'); setOv({}); setPub({}); return; }
+        const dm = {}; (d.data || []).forEach(r => { dm[r.card_id] = r; });
+        const pm = {}; (p.data || []).forEach(r => { pm[r.card_id] = r; });
+        setOv(dm); setPub(pm);
+      } else {
+        // Viewers read the published layer through the login-free RPC.
+        const { data, error } = await LB.supabase.rpc('get_public_feature_map');
+        if (!alive) return;
+        const map = {};
+        if (!error) (data || []).forEach(r => { map[r.card_id] = r; });
+        setOv(map); // fall back to the plain catalog on error (no error shown to viewers)
+      }
     })();
     return () => { alive = false; };
   }, [isAdmin]);
@@ -154,6 +172,41 @@ function FeatureMapScreen({ store, go }) {
   }, []);
 
   const merged = useMemoFM(() => ov ? fmMerge(catalog, ov) : [], [ov, catalog]);
+  const mergedPub = useMemoFM(() => (isAdmin && pub) ? fmMerge(catalog, pub) : [], [isAdmin, pub, catalog]);
+
+  // Unpublished changes: diff the admin's draft against the published layer.
+  // Content edits (name/summary/role/actions/cat/hidden) surface per card;
+  // reordering surfaces once per category (comparing the order of the cards the
+  // two layers share, so adding/removing a card does not read as a reorder too).
+  const changes = useMemoFM(() => {
+    if (!isAdmin || !pub || ov === null) return [];
+    const dById = {}; merged.forEach(c => { dById[c.id] = c; });
+    const pById = {}; mergedPub.forEach(c => { pById[c.id] = c; });
+    const ids = Array.from(new Set([...Object.keys(dById), ...Object.keys(pById)]));
+    const out = [];
+    for (const id of ids) {
+      const d = dById[id], p = pById[id];
+      if (d && !p) { out.push({ kind: 'card', id, name: d.name, cat: d.cat, isNew: true, tags: ['New'] }); continue; }
+      if (!d && p) { out.push({ kind: 'card', id, name: p.name, cat: p.cat, isRemoved: true, tags: ['Removed'] }); continue; }
+      const tags = [];
+      if (d.name !== p.name || d.summary !== p.summary || d.role !== p.role || d.cat !== p.cat
+          || JSON.stringify(d.actions || []) !== JSON.stringify(p.actions || [])) tags.push('Edited');
+      if (!!d.hidden !== !!p.hidden) tags.push(d.hidden ? 'Hidden' : 'Shown');
+      if (tags.length) out.push({ kind: 'card', id, name: d.name, cat: d.cat, tags });
+    }
+    const seq = (list, catId) => list.filter(c => c.cat === catId).slice()
+      .sort((a, b) => (a.sort - b.sort) || a.name.localeCompare(b.name)).map(c => c.id);
+    for (const catId of Array.from(new Set(merged.map(c => c.cat)))) {
+      const dAll = seq(merged, catId), pAll = seq(mergedPub, catId);
+      const common = new Set(dAll.filter(id => pAll.includes(id)));
+      const dSeq = dAll.filter(id => common.has(id)), pSeq = pAll.filter(id => common.has(id));
+      if (dSeq.length > 1 && JSON.stringify(dSeq) !== JSON.stringify(pSeq)) {
+        out.push({ kind: 'reorder', cat: catId, name: fmCatMeta(catId).label, tags: ['Reordered'] });
+      }
+    }
+    return out;
+  }, [isAdmin, pub, ov, merged, mergedPub, catalog]);
+  const unpublishedCount = changes.length;
 
   const grouped = useMemoFM(() => {
     const term = query.trim().toLowerCase();
@@ -181,7 +234,6 @@ function FeatureMapScreen({ store, go }) {
       .filter(c => c.count > 0),
     [catalog, merged]);
 
-  const overrideCount = ov ? Object.keys(ov).length : 0;
   const hiddenCount = merged.filter(c => c.hidden).length;
   const visibleTotal = merged.filter(c => !c.hidden).length;
   const shownCount = grouped.reduce((n, g) => n + g.visible.length, 0);
@@ -285,15 +337,50 @@ function FeatureMapScreen({ store, go }) {
     setEditing({ _isNew: true, isCustom: true, id: 'custom-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6), cat: catId, name: '', role: 'user', summary: '', actions: [''], _sort: maxSort + 1 });
   };
 
-  const resetAll = async () => {
+  // Promote the draft to the published layer: live for everyone, no deploy.
+  const publishNow = async () => {
     setBusy(true);
     try {
-      const { error } = await LB.supabase.from('zane_feature_map').delete().neq('card_id', '__none__');
+      const { error } = await LB.supabase.rpc('publish_feature_map');
       if (error) throw error;
-      setOv({});
-      setConfirmReset(false);
-    } catch (e) { alert('Could not reset: ' + (e.message || 'unknown error')); }
+      setPub({ ...ov }); // published now mirrors the draft -> zero unpublished changes
+      setPubSheet(false);
+    } catch (e) { alert('Could not publish: ' + (e.message || 'unknown error')); }
     finally { setBusy(false); }
+  };
+  // Reset the whole draft back to the published state.
+  const discardAll = async () => {
+    setBusy(true);
+    try {
+      const { error } = await LB.supabase.rpc('discard_feature_map');
+      if (error) throw error;
+      setOv({ ...pub }); // draft resets to published
+      setPubSheet(false);
+    } catch (e) { alert('Could not discard: ' + (e.message || 'unknown error')); }
+    finally { setBusy(false); }
+  };
+  // Revert one card's content + hidden to the published state (keeps its order;
+  // order is discarded separately via the per-category reorder entry).
+  const revertCardToPublished = (id) => {
+    const p = pub[id];
+    return p
+      ? writeOverride(id, { cat: p.cat, name: p.name, role: p.role, summary: p.summary, actions: p.actions, hidden: !!p.hidden, is_custom: !!p.is_custom })
+      : writeOverride(id, { cat: null, name: null, role: null, summary: null, actions: null, hidden: false });
+  };
+  // Revert one category's order to the published order.
+  const discardCategoryOrder = (catId) => {
+    const cards = merged.filter(c => c.cat === catId);
+    return applyOrder(cards.map(c => ({ card_id: c.id, sort: (pub[c.id] && pub[c.id].sort != null) ? pub[c.id].sort : null })));
+  };
+  // Discard a single unpublished change from the review sheet.
+  const discardChange = (ch) => {
+    if (ch.kind === 'reorder') return discardCategoryOrder(ch.cat);
+    if (ch.isNew) return removeOverride(ch.id); // custom card added in draft, not published -> delete
+    if (ch.isRemoved) { // custom card in published, removed in draft -> restore
+      const p = pub[ch.id];
+      return writeOverride(ch.id, { cat: p.cat, name: p.name, role: p.role, summary: p.summary, actions: p.actions, hidden: !!p.hidden, is_custom: true, sort: p.sort });
+    }
+    return revertCardToPublished(ch.id);
   };
 
   const loading = ov === null;
@@ -321,25 +408,22 @@ function FeatureMapScreen({ store, go }) {
 
           {isAdmin && (
             <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
-              <span style={{ fontFamily: UI.fontUi, fontSize: 12, color: overrideCount ? 'var(--accent)' : UI.inkFaint }}>
-                {overrideCount === 0 ? 'No unpublished changes' : `${overrideCount} unpublished change${overrideCount === 1 ? '' : 's'}`}
-              </span>
+              {unpublishedCount === 0 ? (
+                <span style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.inkFaint, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  <i className="fa-solid fa-circle-check" style={{ fontSize: 11, color: 'var(--accent)' }} /> Published, nothing pending
+                </span>
+              ) : (
+                <button onClick={() => setPubSheet(true)} style={{ ...fmPill(true), padding: '6px 12px' }}>
+                  <i className="fa-solid fa-cloud-arrow-up" style={{ fontSize: 11, marginRight: 6 }} />
+                  {unpublishedCount} unpublished change{unpublishedCount === 1 ? '' : 's'} · Review &amp; publish
+                </button>
+              )}
               {hiddenCount > 0 && (
                 <button onClick={() => setShowHidden(v => !v)} style={fmPill(showHidden)}>
                   <i className={`fa-solid ${showHidden ? 'fa-eye' : 'fa-eye-slash'}`} style={{ fontSize: 10, marginRight: 5 }} />
                   {showHidden ? 'Hiding hidden' : `Show hidden (${hiddenCount})`}
                 </button>
               )}
-              {overrideCount > 0 && (confirmReset ? (
-                <span style={{ display: 'inline-flex', gap: 6 }}>
-                  <button onClick={() => setConfirmReset(false)} style={fmPill(false)}>Cancel</button>
-                  <button onClick={resetAll} disabled={busy} style={{ ...fmPill(false), color: UI.danger, borderColor: 'rgba(var(--danger-rgb),0.4)' }}>Reset all to default</button>
-                </span>
-              ) : (
-                <button onClick={() => setConfirmReset(true)} style={{ ...fmPill(false), color: UI.danger, borderColor: 'rgba(var(--danger-rgb),0.3)' }}>
-                  <i className="fa-solid fa-rotate-left" style={{ fontSize: 10, marginRight: 5 }} />Reset
-                </button>
-              ))}
             </div>
           )}
 
@@ -432,6 +516,12 @@ function FeatureMapScreen({ store, go }) {
           onClose={() => setEditing(null)}
           onSave={() => saveEditor(editing)}
           onRevert={(!editing._isNew && !editing.isCustom && editing.edited) ? () => revertEdit(editing.id) : null} />
+      )}
+
+      {isAdmin && pubSheet && (
+        <FeaturePublishSheet changes={changes} busy={busy}
+          onClose={() => setPubSheet(false)}
+          onDiscard={discardChange} onDiscardAll={discardAll} onPublish={publishNow} />
       )}
 
       <button ref={fabRef} onClick={scrollToTop} aria-label="Back to top" title="Back to top" style={{
@@ -567,6 +657,69 @@ function FeatureEditor({ draft, busy, onChange, onClose, onSave, onRevert }) {
           <button onClick={onRevert} style={{ background: 'none', border: 'none', cursor: 'pointer', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 12, letterSpacing: '0.04em', padding: '2px 0', alignSelf: 'center' }}>
             Revert this card to the default text
           </button>
+        )}
+      </div>
+    </Sheet>
+  );
+}
+
+// Review sheet for the admin: lists the unpublished changes (draft vs published),
+// each discardable, plus Discard all and Publish.
+function FeaturePublishSheet({ changes, busy, onClose, onDiscard, onDiscardAll, onPublish }) {
+  const [confirmAll, setConfirmAll] = useStateFM(false);
+  const [confirmPub, setConfirmPub] = useStateFM(false);
+  const tagColor = (t) => (t === 'Removed' || t === 'Hidden') ? UI.danger : (t === 'Reordered') ? '#4aab97' : 'var(--accent)';
+  const n = changes.length;
+  return (
+    <Sheet open={true} onClose={onClose} title={'Review & publish'} accent>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>
+          {n === 0
+            ? 'You are all caught up. Nothing is waiting to be published.'
+            : 'These changes are only visible to you. Publishing makes them live for everyone, in the app and on the public page.'}
+        </div>
+
+        {n > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {changes.map(ch => (
+              <div key={ch.kind === 'reorder' ? 'reorder-' + ch.cat : 'card-' + ch.id}
+                style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', background: UI.bgInset, border: `1px solid ${UI.hair}`, borderRadius: 6 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {ch.kind === 'reorder' ? 'Reordered: ' + ch.name : ch.name}
+                  </div>
+                  <div style={{ display: 'flex', gap: 5, marginTop: 4, flexWrap: 'wrap' }}>
+                    {ch.tags.map(t => <span key={t} style={fmTag(tagColor(t))}>{t}</span>)}
+                  </div>
+                </div>
+                <button onClick={() => onDiscard(ch)} disabled={busy} title="Discard this change"
+                  style={{ ...fmIconBtn(false), width: 'auto', padding: '0 10px', color: UI.inkFaint }}>
+                  <i className="fa-solid fa-rotate-left" /> <span style={{ fontFamily: UI.fontUi, fontSize: 11, marginLeft: 4 }}>Discard</span>
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {n === 0 ? (
+          <Btn kind="ghost" onClick={onClose}>Done</Btn>
+        ) : (
+          <React.Fragment>
+            <Btn onClick={() => (confirmPub ? onPublish() : setConfirmPub(true))} style={{ opacity: busy ? 0.5 : 1, pointerEvents: busy ? 'none' : 'auto' }}>
+              <i className="fa-solid fa-cloud-arrow-up" style={{ marginRight: 8 }} />
+              {busy ? 'Working…' : confirmPub ? `Publish ${n} change${n === 1 ? '' : 's'} now` : 'Publish'}
+            </Btn>
+            {confirmAll ? (
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button onClick={() => setConfirmAll(false)} style={{ ...fmPill(false), flex: 1, justifyContent: 'center', padding: '10px 0' }}>Cancel</button>
+                <button onClick={onDiscardAll} disabled={busy} style={{ ...fmPill(false), flex: 1, justifyContent: 'center', padding: '10px 0', color: UI.danger, borderColor: 'rgba(var(--danger-rgb),0.4)' }}>Discard all changes</button>
+              </div>
+            ) : (
+              <button onClick={() => setConfirmAll(true)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 12, letterSpacing: '0.04em', padding: '2px 0', alignSelf: 'center' }}>
+                Discard all unpublished changes
+              </button>
+            )}
+          </React.Fragment>
         )}
       </div>
     </Sheet>

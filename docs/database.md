@@ -114,14 +114,24 @@ Globale Admin-Config (RLS an, nur SECURITY-DEFINER-Funktionen greifen zu). Treib
 
 ### `zane_feature_map`
 
-Admin-Override-Ebene der Feature-Map (Option A). Der **Master-Inhalt** liegt versioniert im Code (`src/feature-map-db.js`, `window.FEATURE_MAP`, Kategorien + Karten mit stabiler `id`); den rendern alle User und die spätere Login-freie Public-Seite. Diese Tabelle hält nur die **Kuratierung des Admins** (ausblenden/editieren/hinzufügen/sortieren), gekeyt auf die Katalog-Karten-`id`, als Live-Vorschau im `FeatureMapScreen` über den Katalog gelegt. Beim Publish wird der kuratierte Stand in den Katalog-Code zurückgebacken. **Nicht** im User-Backup (in `check-backup-coverage.cjs` `EXCLUDED`). Migration 0154 (ursprünglich Content-Tabelle) → 0155 (Reshape zu Overrides).
+**DRAFT-Ebene** der Feature-Map (Option A + Live-Publish). Der **Master-Inhalt** liegt versioniert im Code (`src/feature-map-db.js`, `window.FEATURE_MAP`, Kategorien + Karten mit stabiler `id`); den rendern alle User und die Public-Seite als Basis. Diese Tabelle ist der **private Entwurf des Admins**: hier landen alle In-App-Änderungen (ausblenden/editieren/hinzufügen/sortieren), gekeyt auf die Katalog-Karten-`id`, als Live-Vorschau im `FeatureMapScreen` über den Katalog gelegt. Beim **Publish** (`publish_feature_map()`) wird dieser Stand in `zane_feature_map_published` gespiegelt; „Discard all" (`discard_feature_map()`) setzt den Entwurf zurück auf den veröffentlichten Stand. **Nicht** im User-Backup (in `check-backup-coverage.cjs` `EXCLUDED`). Migration 0154 (Content) → 0155 (Overrides) → 0156 (Publish-Flow).
 
 - `card_id` (text, PK): Katalog-Karten-`id`, oder ein `custom-…`-Slug für admin-hinzugefügte Karten
 - `hidden` (boolean, default false): Karte in der Vorschau/Publikation ausblenden (Soft-Delete)
 - `is_custom` (boolean, default false): true = admin-hinzugefügte Karte (nicht im Katalog)
 - `cat`, `name`, `role` (CHECK null/`user`/`coach`/`both`), `summary`, `actions` (jsonb), `sort` (int): alle **nullable**. Bei Katalog-Karten überschreiben nicht-null Werte den Default (null = erben); bei Custom-Karten der volle Inhalt. `sort` = Reihenfolge innerhalb der Kategorie (null = Katalog-Reihenfolge).
 - `created_at`, `updated_at` (timestamptz, default `now()`)
-- **RLS:** eine Policy `feature_map_admin_all` (`FOR ALL TO authenticated`), nur Admin via `auth.email() = 'office@btc-prime.biz'` liest **und** schreibt. Kein RPC, kein anon/Nicht-Admin-Zugriff: reguläre User und die Public-Seite lesen ausschließlich den Katalog-Code, nie diese Tabelle. Reset = alle Override-Zeilen löschen.
+- **RLS:** eine Policy `feature_map_admin_all` (`FOR ALL TO authenticated`), nur Admin via `auth.email() = 'office@btc-prime.biz'` liest **und** schreibt.
+
+### `zane_feature_map_published`
+
+**PUBLISHED-Ebene** der Feature-Map: die Ebene, die tatsächlich alle sehen (Public-Seite + alle eingeloggten User rendern Katalog + diese Overrides). Spaltenidentisch zu `zane_feature_map`. Wird nur durch `publish_feature_map()` (Draft → Published) geschrieben und von `discard_feature_map()` (Published → Draft) sowie dem Bake-Workflow gelesen/geleert. **Nicht** im User-Backup (`EXCLUDED`). Migration 0156.
+
+- `card_id` (text, PK), `hidden` (boolean, default false), `is_custom` (boolean, default false)
+- `cat`, `name`, `role` (CHECK null/`user`/`coach`/`both`), `summary`, `actions` (jsonb), `sort` (int): wie bei `zane_feature_map`
+- `created_at`, `updated_at` (timestamptz, default `now()`)
+- **RLS:** eine Policy `feature_map_published_admin_all` (`FOR ALL TO authenticated`), nur Admin liest direkt (für den Unpublished-Diff). Alle anderen lesen über `get_public_feature_map()`.
+- **RPCs:** `publish_feature_map()` (admin, SECURITY DEFINER, atomar Draft → Published) · `discard_feature_map()` (admin, SECURITY DEFINER, Published → Draft) · `get_public_feature_map()` (SECURITY DEFINER, an `anon` **und** `authenticated` gegrantet: Login-freie/Alle-User-Leseansicht; hidden **Custom**-Karten werden zurückgehalten, hidden-Flags auf Katalog-Karten kommen mit). `anon`-Execute ist hier **gewollt** (einzige Feature-Map-Funktion mit anon-Zugriff); `publish_feature_map`/`discard_feature_map` müssen für `anon` `false` sein.
 
 ### `zane_push_subscriptions`
 

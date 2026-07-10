@@ -104,21 +104,24 @@ Diese Datei enthält die verbindlichen Regeln und den Überblick; sie bewusst sc
 
 ## Feature Map
 
-Nutzer-/Coach-orientierte Übersicht aller App-Fähigkeiten. Architektur (Option A): **eine Quelle der Wahrheit im Code**, plus eine reine Admin-Vorschau-Ebene in der DB.
+Nutzer-/Coach-orientierte Übersicht aller App-Fähigkeiten. Architektur: **Code-Katalog als Basis** plus zwei DB-Ebenen (Draft + Published). Jeder sieht: Katalog (Basis) + veröffentlichte Overrides.
 
-- **Master-Katalog = `src/feature-map-db.js`** (`window.FEATURE_MAP = { version, categories, cards }`), plain JS. Das ist die Pflege-Quelle. Kategorien in Anzeige-Reihenfolge; Karten-Shape `{ id, cat, role, name, summary, actions: [...], hidden? }`.
-  - `id`: stabiler Slug (z.B. `logging.rest-timer`). **Nie umbenennen oder wiederverwenden**, die Ids keyen die Override-Tabelle.
+- **Master-Katalog = `src/feature-map-db.js`** (`window.FEATURE_MAP = { version, categories, cards }`), plain JS. Basis-Ebene und Offline-Fallback. Kategorien in Anzeige-Reihenfolge; Karten-Shape `{ id, cat, role, name, summary, actions: [...], hidden? }`.
+  - `id`: stabiler Slug (z.B. `logging.rest-timer`). **Nie umbenennen oder wiederverwenden**, die Ids keyen die Override-Tabellen.
   - `role`: `'user' | 'coach' | 'both'`. `cat`: eine Kategorie-`id`.
   - `version` bei inhaltlichen Änderungen mitziehen (Format wie `'v2 (2026-07-10)'`).
-- **Wer rendert was:**
-  - In-App: `src/screens-featuremap.jsx` (`FeatureMapScreen`, Route `featuremap`, Button im Settings-Footer) für **alle** User. Admin sieht Katalog plus Override-Kuratierung gemergt.
-  - Public: `features.html` (Repo-Root, erreichbar unter `zane-wo.com/features.html`), **kein Login, keine DB**, rendert den Katalog direkt.
-  - Beide filtern Karten mit `hidden: true` **vor** dem Render raus (kein DOM-Leak).
-- **Neues Feature aufnehmen / aktuell halten (der Ablauf):** Karte in `src/feature-map-db.js` ergänzen oder editieren. Nur was End-User/Coach betrifft, kein Tech-Jargon, keine internen Begriffe. Karte ausblenden = `hidden: true` am Katalog-Eintrag (wirkt in-app UND public).
-- **Admin-Override-Ebene = Tabelle `zane_feature_map`** (admin-only RLS). Der Admin kann in-app live kuratieren (ausblenden/editieren/hinzufügen/umsortieren); das landet hier und liegt als Vorschau über dem Katalog. Reine Vorschau, ändert den Katalog-Code nicht. Nicht im Backup.
-- **Publish/Bake:** Ist die Admin-Kuratierung final, den Stand in `src/feature-map-db.js` zurückbacken (Karten/Reihenfolge/`hidden` übernehmen, `version` bumpen) und danach alle Zeilen in `zane_feature_map` löschen (Reset). Danach ist der Katalog wieder alleinige Quelle und die Public-Seite spiegelt ihn.
-- **Loader/Assets (wie bei den anderen plain-JS-Dateien):** `feature-map-db.js` steht als `<script>` in `index.html`, in `ASSETS` (`sw.js`) und in `plainSources` (`tools/check-syntax.cjs`). `screens-featuremap.jsx` steht in `SOURCES` (index.html) und in `ASSETS`. `features.html` ist bewusst **nicht** in `ASSETS` (der Runtime-Fetch cached sie on demand).
-- **Deploy:** Katalog- oder Screen-Änderungen sind Code an gecachten Dateien, also SW-Cache in `sw.js` bumpen (wie überall nur auf ausdrückliche Ansage). Tabellen-/RLS-Details in `docs/database.md` (`zane_feature_map`).
+- **Zwei DB-Ebenen** (beide spaltenidentisch, admin-only RLS, nicht im Backup):
+  - `zane_feature_map` = **Draft**: privater Arbeitsstand des Admins (ausblenden/editieren/hinzufügen/umsortieren als Overrides über dem Katalog, Live-Vorschau).
+  - `zane_feature_map_published` = **Published**: die Ebene, die alle sehen.
+- **Wer rendert was** (beide filtern `hidden: true` **vor** dem Render, kein DOM-Leak):
+  - In-App: `src/screens-featuremap.jsx` (`FeatureMapScreen`, Route `featuremap`, Button im Settings-Footer) für **alle** User. Admin sieht seinen **Draft** (liest Draft + Published direkt für den Diff); normale User sehen **Published** über die RPC `get_public_feature_map`.
+  - Public: `features.html` (Repo-Root, `zane-wo.com/features.html`), **kein Login**. Holt Published per `get_public_feature_map` und legt es über den gebündelten Katalog; Fallback auf den Katalog bei Fehler/offline.
+- **Neues Feature aufnehmen (Code-Weg):** Karte in `src/feature-map-db.js` ergänzen/editieren, deploybar wie normaler Code. Erscheint automatisch für alle (Basis-Ebene). Nur End-User/Coach-relevantes, kein Tech-Jargon.
+- **Kuratieren + veröffentlichen (In-App, der Live-Weg):** Der Admin editiert den Draft in-app. „X unpublished changes" öffnet ein Review-Sheet: einzeln verwerfen, alle verwerfen (`discard_feature_map`, Draft ← Published), oder **Publish** (`publish_feature_map`, Published ← Draft). Publish ist **live für alle ohne Deploy** (Content kommt zur Laufzeit aus der DB), **kein Cache-Bump nötig**.
+- **Baken (Housekeeping, selten):** Die manuelle GitHub-Action `.github/workflows/bake-feature-map.yml` (→ `tools/bake-feature-map.cjs`) faltet die Published-Ebene zurück in `src/feature-map-db.js`, bumpt den SW-Cache, pusht direkt und leert danach beide Tabellen. Läuft **nur bei sauberem Stand** (Draft == Published), sonst Abbruch. Braucht `SUPABASE_SERVICE_ROLE_KEY` (GitHub-Secret). Manuell via Actions-Tab starten, keine Automatik. `feature-map-db.js` ist ab da eine **generierte Datei** (Serializer), Handedits bleiben möglich.
+- **RPCs** (Migration 0156, Grant-Details in `docs/database.md`): `publish_feature_map` / `discard_feature_map` (admin-only) · `get_public_feature_map` (an `anon` **und** `authenticated`, einzige Feature-Map-Funktion mit anon-Zugriff).
+- **Loader/Assets:** `feature-map-db.js` als `<script>` in `index.html`, in `ASSETS` (`sw.js`), in `plainSources` (`tools/check-syntax.cjs`). `screens-featuremap.jsx` in `SOURCES` (index.html) + `ASSETS`. `features.html` bewusst **nicht** in `ASSETS`.
+- **Cache-Bump-Regel:** Reine In-App-Publishes = **kein** Bump (live über DB). Screen-/Katalog-Code-Änderungen = Bump wie überall (nur auf Ansage); den Bake-Bump macht der Workflow selbst.
 
 ## Datenbank (Supabase)
 

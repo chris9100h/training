@@ -180,7 +180,10 @@
 <script src="src/feature-map-db.js"></script>
 <script>
 (function(){
-  var FM = window.FEATURE_MAP || { categories: [], cards: [] };
+  var BASE_FM = window.FEATURE_MAP || { version:'', categories: [], cards: [] };
+  // Public anon key (same one the app ships): read-only, safe to embed.
+  var SUPABASE_URL = 'https://ebbuvdzgstrhrcsbrlez.supabase.co';
+  var SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImViYnV2ZHpnc3RyaHJjc2JybGV6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwMjc4ODAsImV4cCI6MjA5MTYwMzg4MH0.RyTzHiqV1TPSZtM7lgenBJbUCTjj5fCUhoWauifjlIE';
   var CAT_ICONS = {
     start:'<path d="M6 21V4M6 4h11l-2 4 2 4H6"/>',
     settings:'<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9 7 7M17 17l2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1"/>',
@@ -198,44 +201,51 @@
   function esc(s){return String(s).replace(/[&<>"]/g,function(m){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m];});}
   function svg(key){return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">'+(CAT_ICONS[key]||'')+'</svg>';}
 
-  var catalog=document.getElementById('catalog'), catnav=document.getElementById('catnav');
-  var cards=(FM.cards||[]).filter(function(c){return !c.hidden;});
-  var byCat={}; cards.forEach(function(c){(byCat[c.cat]=byCat[c.cat]||[]).push(c);});
-  var CATS_SHOWN=(FM.categories||[]).filter(function(c){return (byCat[c.id]||[]).length;});
-  var activeCat='all';
-
-  (FM.categories||[]).forEach(function(cat){
-    var items=byCat[cat.id]||[]; if(!items.length) return;
-    var sec=document.createElement('section'); sec.className='cat'; sec.id='cat-'+cat.id; sec.dataset.cat=cat.id;
-    sec.innerHTML='<div class="cat-head"><div class="cat-ico">'+svg(cat.id)+'</div>'+
-      '<div><h2 class="cat-title">'+esc(cat.label)+'</h2><p class="cat-blurb">'+esc(cat.blurb||'')+'</p></div>'+
-      '<div class="cat-meta"><div class="c num">'+items.length+'</div><div class="l">features</div></div></div>'+
-      '<div class="grid"></div>';
-    var grid=sec.querySelector('.grid');
-    items.forEach(function(f){
-      var r=ROLE[f.role]||ROLE.user;
-      var card=document.createElement('article'); card.className='card'; card.style.setProperty('--role-color',r.color);
-      card.dataset.role=f.role; card.dataset.text=(f.name+' '+f.summary+' '+(f.actions||[]).join(' ')).toLowerCase();
-      var acts=(f.actions||[]).map(function(x){return '<li>'+esc(x)+'</li>';}).join('');
-      card.innerHTML='<button class="head" aria-expanded="false"><h3>'+esc(f.name)+'</h3>'+
-        '<svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button>'+
-        '<div class="body"><span class="chip">'+r.label+'</span><p class="sum">'+esc(f.summary)+'</p>'+(acts?'<ul class="acts">'+acts+'</ul>':'')+'</div>';
-      var head=card.querySelector('.head');
-      head.addEventListener('click',function(){var o=card.classList.toggle('open');head.setAttribute('aria-expanded',o?'true':'false');});
-      grid.appendChild(card);
+  // Merge the live published overrides over the bundled catalog (mirrors the
+  // app's fmMerge). Returns a catalog-shaped object with cards in effective order.
+  function applyOverrides(base, rows){
+    var ov={}; rows.forEach(function(r){ ov[r.card_id]=r; });
+    var out=[], per={};
+    (base.cards||[]).forEach(function(c){
+      var idx=(per[c.cat]=(per[c.cat]==null?0:per[c.cat]+1));
+      var o=ov[c.id];
+      out.push({
+        id:c.id, cat:(o&&o.cat)||c.cat, role:(o&&o.role)||c.role,
+        name:(o&&o.name!=null)?o.name:c.name,
+        summary:(o&&o.summary!=null)?o.summary:c.summary,
+        actions:(o&&o.actions!=null)?o.actions:c.actions,
+        hidden:o?!!o.hidden:!!c.hidden,
+        _sort:(o&&o.sort!=null)?o.sort:idx
+      });
     });
-    catalog.appendChild(sec);
-  });
+    Object.keys(ov).forEach(function(id){
+      var o=ov[id]; if(!o.is_custom) return;
+      out.push({ id:id, cat:o.cat, role:o.role||'user', name:o.name||'', summary:o.summary||'', actions:o.actions||[], hidden:!!o.hidden, _sort:o.sort!=null?o.sort:9999 });
+    });
+    var byC={}; out.forEach(function(c){ (byC[c.cat]=byC[c.cat]||[]).push(c); });
+    var cards=[];
+    (base.categories||[]).forEach(function(cat){
+      (byC[cat.id]||[]).sort(function(a,b){ return (a._sort-b._sort)||String(a.name).localeCompare(b.name); }).forEach(function(c){ cards.push(c); });
+    });
+    Object.keys(byC).forEach(function(cid){
+      if((base.categories||[]).some(function(x){return x.id===cid;})) return;
+      byC[cid].forEach(function(c){ cards.push(c); });
+    });
+    return { version:base.version, categories:base.categories, cards:cards };
+  }
+  function fetchOverrides(){
+    return fetch(SUPABASE_URL+'/rest/v1/rpc/get_public_feature_map',{
+      method:'POST',
+      headers:{ 'apikey':SUPABASE_ANON, 'Authorization':'Bearer '+SUPABASE_ANON, 'Content-Type':'application/json' },
+      body:'{}'
+    }).then(function(r){ return r.ok?r.json():[]; }).catch(function(){ return []; });
+  }
 
-  // spec plate
-  var total=cards.length, areas=(FM.categories||[]).filter(function(c){return (byCat[c.id]||[]).length;}).length;
-  var fl=cards.filter(function(c){return c.role==='user'||c.role==='both';}).length;
-  var fc=cards.filter(function(c){return c.role==='coach'||c.role==='both';}).length;
-  document.getElementById('plate').innerHTML=[[total,'Features'],[areas,'Areas'],[fl,'For lifters'],[fc,'For coaches']]
-    .map(function(x){return '<div class="cell"><div class="big num">'+x[0]+'</div><div class="cap">'+x[1]+'</div></div>';}).join('');
+  var catalog=document.getElementById('catalog'), catnav=document.getElementById('catnav');
+  var q=document.getElementById('q'), countEl=document.getElementById('count'), emptyEl=document.getElementById('empty');
+  var toTop=document.getElementById('toTop');
+  var byCat={}, CATS_SHOWN=[], total=0, activeCat='all', role='all';
 
-  // filter
-  var q=document.getElementById('q'), countEl=document.getElementById('count'), emptyEl=document.getElementById('empty'), role='all';
   function apply(){
     var term=q.value.trim().toLowerCase(), shown=0;
     document.querySelectorAll('.cat').forEach(function(sec){
@@ -273,25 +283,68 @@
     CATS_SHOWN.forEach(function(c){ chips.appendChild(mk(c.id,c.label,(byCat[c.id]||[]).length)); });
     catnav.appendChild(chips);
   }
-  buildNav();
+
+  // (Re)build the catalog DOM from a catalog object. Safe to call more than once.
+  function render(FM){
+    catalog.innerHTML='';
+    var cards=(FM.cards||[]).filter(function(c){return !c.hidden;});
+    byCat={}; cards.forEach(function(c){(byCat[c.cat]=byCat[c.cat]||[]).push(c);});
+    CATS_SHOWN=(FM.categories||[]).filter(function(c){return (byCat[c.id]||[]).length;});
+    total=cards.length;
+
+    (FM.categories||[]).forEach(function(cat){
+      var items=byCat[cat.id]||[]; if(!items.length) return;
+      var sec=document.createElement('section'); sec.className='cat'; sec.id='cat-'+cat.id; sec.dataset.cat=cat.id;
+      sec.innerHTML='<div class="cat-head"><div class="cat-ico">'+svg(cat.id)+'</div>'+
+        '<div><h2 class="cat-title">'+esc(cat.label)+'</h2><p class="cat-blurb">'+esc(cat.blurb||'')+'</p></div>'+
+        '<div class="cat-meta"><div class="c num">'+items.length+'</div><div class="l">features</div></div></div>'+
+        '<div class="grid"></div>';
+      var grid=sec.querySelector('.grid');
+      items.forEach(function(f){
+        var r=ROLE[f.role]||ROLE.user;
+        var card=document.createElement('article'); card.className='card'; card.style.setProperty('--role-color',r.color);
+        card.dataset.role=f.role; card.dataset.text=(f.name+' '+f.summary+' '+(f.actions||[]).join(' ')).toLowerCase();
+        var acts=(f.actions||[]).map(function(x){return '<li>'+esc(x)+'</li>';}).join('');
+        card.innerHTML='<button class="head" aria-expanded="false"><h3>'+esc(f.name)+'</h3>'+
+          '<svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button>'+
+          '<div class="body"><span class="chip">'+r.label+'</span><p class="sum">'+esc(f.summary)+'</p>'+(acts?'<ul class="acts">'+acts+'</ul>':'')+'</div>';
+        var head=card.querySelector('.head');
+        head.addEventListener('click',function(){var o=card.classList.toggle('open');head.setAttribute('aria-expanded',o?'true':'false');});
+        grid.appendChild(card);
+      });
+      catalog.appendChild(sec);
+    });
+
+    var areas=CATS_SHOWN.length;
+    var fl=cards.filter(function(c){return c.role==='user'||c.role==='both';}).length;
+    var fc=cards.filter(function(c){return c.role==='coach'||c.role==='both';}).length;
+    document.getElementById('plate').innerHTML=[[total,'Features'],[areas,'Areas'],[fl,'For lifters'],[fc,'For coaches']]
+      .map(function(x){return '<div class="cell"><div class="big num">'+x[0]+'</div><div class="cap">'+x[1]+'</div></div>';}).join('');
+
+    if(activeCat!=='all' && !CATS_SHOWN.some(function(c){return c.id===activeCat;})) activeCat='all';
+    buildNav();
+    apply();
+
+    var stamp='Updated '+(FM.version||'');
+    document.getElementById('stampTop').textContent=stamp;
+    document.getElementById('stampFoot').textContent=stamp;
+  }
+
+  // one-time listeners (survive re-renders)
   q.addEventListener('input',apply);
   document.querySelectorAll('.seg button').forEach(function(b){b.addEventListener('click',function(){role=b.dataset.role;document.querySelectorAll('.seg button').forEach(function(x){x.setAttribute('aria-pressed',x===b?'true':'false');});apply();});});
-  apply();
-
-  // stamps + theme
-  var stamp='Updated '+(FM.version||'');
-  document.getElementById('stampTop').textContent=stamp;
-  document.getElementById('stampFoot').textContent=stamp;
   document.getElementById('themeBtn').addEventListener('click',function(){
     var cur=document.documentElement.getAttribute('data-theme');
     var dark=cur?cur==='dark':matchMedia('(prefers-color-scheme: dark)').matches;
     document.documentElement.setAttribute('data-theme',dark?'light':'dark');
   });
-
-  // back to top
-  var toTop=document.getElementById('toTop');
   window.addEventListener('scroll',function(){ toTop.classList.toggle('show', window.scrollY>500); },{passive:true});
   toTop.addEventListener('click',function(){ window.scrollTo({top:0,behavior:'smooth'}); });
+
+  // Render the bundled catalog instantly, then overlay the live published
+  // curation once it arrives. Any error leaves the bundled catalog in place.
+  render(BASE_FM);
+  fetchOverrides().then(function(rows){ if(rows && rows.length) render(applyOverrides(BASE_FM, rows)); });
 })();
 </script>
 </body>
