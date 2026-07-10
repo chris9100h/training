@@ -3543,6 +3543,7 @@ function FinisherTags({ drops, labelFor }) {
         <span key={di} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '3px 8px', border: '1px solid var(--accent)', borderRadius: 4, fontFamily: UI.fontUi, fontSize: 11, color: 'var(--accent)', letterSpacing: '0.03em' }}>
           <span style={{ opacity: 0.6, fontSize: 9, textTransform: 'uppercase' }}>{label}</span>
           {p > 0 && <span>+{p} partial{p === 1 ? '' : 's'}</span>}
+          {p > 0 && st && <span style={{ opacity: 0.4 }}>|</span>}
           {st && <span>stretch {st.kg != null ? String(st.kg).replace('.', ',') + ' ' + UI.unit() + ' · ' : ''}{st.timeSec}s</span>}
         </span>
       ))}
