@@ -6802,7 +6802,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         onConfirm={kbConfirm}
         confirmDisabled={
           ((kbField?.setIdx === 'drop' || kbField?.setIdx === 'myo' || kbField?.setIdx === 'av') && kbField?.field === 'reps') ||
-          (lpTarget?.exIdx === exIdx && lpTarget?.setIdx === kbField?.setIdx && (kbField?.field === 'reps' || kbField?.field === 'repsR'))
+          (lpTarget?.exIdx === exIdx && lpTarget?.setIdx === kbField?.setIdx && (kbField?.field === 'reps' || kbField?.field === 'repsR')) ||
+          (kbField?.setIdx === 'stretch' && kbField?.field === 'sec')
         }
         onDismiss={() => { kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false; setKbField(null); setKbRaw(''); setKbFresh(false); armKbShield(); }}
         onPlateCalc={() => setPlateCalcOpen(true)}
