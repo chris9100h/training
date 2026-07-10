@@ -39,6 +39,7 @@ Diese Datei enthält die verbindlichen Regeln und den Überblick; sie bewusst sc
   - `src/supabase.js`: Supabase JS Client (vendored)
   - `src/whatsnew.js`: Changelog-Historie (`window.WHATS_NEW`, siehe „What's New / Changelog"); plain JS, normales `<script>`
   - `src/exercise-db.js`: read-only System-Übungskatalog `window.SYSTEM_EXERCISES`; plain JS, normales `<script>`, in `ASSETS`. Merkregel: Pläne/Sessions halten **nie** `sys_`-Ids, beim Übernehmen/Picken entsteht immer eine editierbare User-Kopie in `store.exercises` (Details: `docs/internals.md`).
+  - `src/feature-map-db.js`: versionierter Master-Katalog der Feature-Map `window.FEATURE_MAP` (Kategorien + Karten mit stabiler `id`); plain JS, normales `<script>`, in `ASSETS`. Das ist die Pflege-Quelle zum Aktuell-Halten: neue Features hier als Karte ergänzen/editieren. `src/screens-featuremap.jsx` (`FeatureMapScreen`) rendert ihn und legt die Admin-Kuratierung aus `zane_feature_map` als Vorschau darüber; die Public-Seite rendert ihn direkt (kein Login, keine DB).
   - `supabase/`: Migrationen, Edge Functions, Schema
 
 ## Screens & Navigation
@@ -129,7 +130,7 @@ Migrationen liegen in `supabase/migrations/` als nummerierte SQL-Dateien. **Die 
 - `zane_coaching` (+ `_threads`, `_notes`, `_macros`) und `zane_checkins`: Coaching; Sonderfälle Support-Tickets (id-Präfix `support_`) und Self-Coaching (`self_`) · `zane_checkin_schema_templates`: bis zu 5 gespeicherte Check-in-Schema-Vorlagen je Coach
 - `zane_user_settings`: eine Zeile je User, alle Settings
 - `zane_profiles`, `zane_app_config`, `zane_feature_grants`, `zane_push_subscriptions`, `zane_pushover_active`: Accounts, Admin-Config, Grants, Push
-- `zane_feature_map`: admin-kuratierter In-App-Feature-Katalog (`FeatureMapScreen`), welt-lesbar, Writes nur Admin; nicht im Backup
+- `zane_feature_map`: Admin-Override-Ebene der Feature-Map (`FeatureMapScreen`); Master-Inhalt liegt versioniert in `src/feature-map-db.js` (`window.FEATURE_MAP`), diese Tabelle hält nur Admin-Kuratierung (hide/edit/add/sort), admin-only RLS; nicht im Backup
 
 **Wichtige RPCs/Functions** (alle Signaturen in `docs/database.md`):
 - `sync_sets_batch` / `sync_daily_logs_batch` / `sync_meso_states_batch`: Batch-Upserts mit `updated_at`-Staleness-Guard (Multi-Device-Schutz)

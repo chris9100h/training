@@ -114,16 +114,14 @@ Globale Admin-Config (RLS an, nur SECURITY-DEFINER-Funktionen greifen zu). Treib
 
 ### `zane_feature_map`
 
-Admin-kuratierter In-App-Feature-Katalog ("was kann die App"), gerendert im `FeatureMapScreen` (`src/screens-featuremap.jsx`). Eine Zeile pro Karte. **Nicht** im User-Backup (globale Admin-Content-Tabelle, in `check-backup-coverage.cjs` `EXCLUDED`). Migration 0154.
+Admin-Override-Ebene der Feature-Map (Option A). Der **Master-Inhalt** liegt versioniert im Code (`src/feature-map-db.js`, `window.FEATURE_MAP`, Kategorien + Karten mit stabiler `id`); den rendern alle User und die spätere Login-freie Public-Seite. Diese Tabelle hält nur die **Kuratierung des Admins** (ausblenden/editieren/hinzufügen/sortieren), gekeyt auf die Katalog-Karten-`id`, als Live-Vorschau im `FeatureMapScreen` über den Katalog gelegt. Beim Publish wird der kuratierte Stand in den Katalog-Code zurückgebacken. **Nicht** im User-Backup (in `check-backup-coverage.cjs` `EXCLUDED`). Migration 0154 (ursprünglich Content-Tabelle) → 0155 (Reshape zu Overrides).
 
-- `id` (uuid, default `gen_random_uuid()`)
-- `cat` (text): Kategorie-Id (Anzeige-Reihenfolge/Meta in `FM_CATEGORIES` im Screen, nicht in der DB)
-- `name` (text), `summary` (text, default `''`)
-- `role` (text, default `'user'`, CHECK `user`/`coach`/`both`): für wen die Karte gilt
-- `actions` (jsonb, default `'[]'`): Liste kurzer Aktions-Strings
-- `sort` (int, default 0): Reihenfolge innerhalb der Kategorie
-- `created_at`, `updated_at` (timestamptz, default `now()`; `updated_at` wird vom Screen beim Update mitgeschrieben)
-- **RLS:** SELECT für alle `authenticated` (`feature_map_read`), INSERT/UPDATE/DELETE nur Admin via `auth.email() = 'office@btc-prime.biz'`. Kein RPC: der Admin-Screen macht direkte authentifizierte Writes, die RLS begrenzt. Einstieg vorerst nur im Admin-Bereich der Settings; Daten sind bereits welt-lesbar, ein späteres Öffnen für alle User braucht keine Schema-Änderung.
+- `card_id` (text, PK): Katalog-Karten-`id`, oder ein `custom-…`-Slug für admin-hinzugefügte Karten
+- `hidden` (boolean, default false): Karte in der Vorschau/Publikation ausblenden (Soft-Delete)
+- `is_custom` (boolean, default false): true = admin-hinzugefügte Karte (nicht im Katalog)
+- `cat`, `name`, `role` (CHECK null/`user`/`coach`/`both`), `summary`, `actions` (jsonb), `sort` (int): alle **nullable**. Bei Katalog-Karten überschreiben nicht-null Werte den Default (null = erben); bei Custom-Karten der volle Inhalt. `sort` = Reihenfolge innerhalb der Kategorie (null = Katalog-Reihenfolge).
+- `created_at`, `updated_at` (timestamptz, default `now()`)
+- **RLS:** eine Policy `feature_map_admin_all` (`FOR ALL TO authenticated`), nur Admin via `auth.email() = 'office@btc-prime.biz'` liest **und** schreibt. Kein RPC, kein anon/Nicht-Admin-Zugriff: reguläre User und die Public-Seite lesen ausschließlich den Katalog-Code, nie diese Tabelle. Reset = alle Override-Zeilen löschen.
 
 ### `zane_push_subscriptions`
 

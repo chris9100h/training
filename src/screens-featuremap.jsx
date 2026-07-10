@@ -1,32 +1,22 @@
-/* Feature Map screen — an admin-curated catalog of what the app can do, shown
-   inside the app. Admin-only entry point for now (Settings), but the data is
-   world-readable so it can be opened to all users later with no code change.
+/* Feature Map screen (Option A: versioned catalog + admin overrides).
 
-   Data lives in zane_feature_map (one row per card). Reads are plain selects;
-   the admin does authenticated INSERT/UPDATE/DELETE that RLS restricts to the
-   admin email. Non-admins get a read-only view (no edit controls; RLS blocks
-   writes anyway). Shares globals: UI, Screen, TopBar, Sheet, Btn, LB, React. */
+   The master content lives in the versioned file src/feature-map-db.js
+   (window.FEATURE_MAP). Everyone, and the future public no-login page, renders
+   that catalog. The DB table zane_feature_map is the ADMIN's private curation
+   layer: hide / edit / add / reorder saved as overrides keyed by catalog card
+   id, merged over the catalog as a live preview. "Reset" discards the overrides.
+   The admin's curation is baked back into the catalog file at publish time.
+
+   Non-admins render the catalog as-is (no DB read; RLS is admin-only anyway).
+   Entry point stays admin-only until the public release.
+
+   Shares globals: UI, Screen, TopBar, Sheet, Btn, Field, TextInput, LB, React. */
 
 const { useState: useStateFM, useEffect: useEffectFM, useMemo: useMemoFM } = React;
 
 const FM_ADMIN_EMAIL = 'office@btc-prime.biz';
-
-// Display order + metadata for the categories. Card rows reference a category
-// by its id in the `cat` column; a card whose cat is not listed here still
-// shows under a fallback "Other" group so nothing is ever hidden by mistake.
-const FM_CATEGORIES = [
-  { id: 'start',       label: 'Getting started',        icon: 'fa-flag-checkered', blurb: 'Create your account and get set up.' },
-  { id: 'home',        label: 'Home & dashboard',       icon: 'fa-house',          blurb: 'What you see every time you open the app.' },
-  { id: 'plans',       label: 'Training plans',         icon: 'fa-calendar-days',  blurb: 'Build the split you run week to week.' },
-  { id: 'logging',     label: 'Logging a workout',      icon: 'fa-dumbbell',       blurb: 'Run and record the session itself.' },
-  { id: 'library',     label: 'Exercise library',       icon: 'fa-list',           blurb: 'Your catalog of movements.' },
-  { id: 'progress',    label: 'Progress & records',     icon: 'fa-chart-line',     blurb: 'See how the numbers are moving.' },
-  { id: 'health',      label: 'Health & nutrition',     icon: 'fa-heart-pulse',    blurb: 'Track the stuff around training.' },
-  { id: 'cardio',      label: 'Cardio',                 icon: 'fa-person-running', blurb: 'Plan and log conditioning work.' },
-  { id: 'coachClient', label: 'Coaching (as a lifter)', icon: 'fa-user',           blurb: 'Work with a coach inside the app.' },
-  { id: 'coachCoach',  label: 'Coaching (as a coach)',  icon: 'fa-user-tie',       blurb: 'Tools for running your roster.' },
-  { id: 'settings',    label: 'Personalize & data',     icon: 'fa-gear',           blurb: 'Make it yours and keep it safe.' },
-];
+// DB columns of an override row (kept in sync with migration 0155).
+const FM_OV_COLS = ['card_id', 'hidden', 'is_custom', 'cat', 'name', 'role', 'summary', 'actions', 'sort', 'created_at', 'updated_at'];
 
 const FM_ROLES = {
   user:  { label: 'Lifter', color: 'var(--accent)' },
@@ -35,133 +25,226 @@ const FM_ROLES = {
 };
 const FM_ROLE_ORDER = ['user', 'coach', 'both'];
 
+function fmCatalog() { return window.FEATURE_MAP || { categories: [], cards: [] }; }
 function fmCatMeta(id) {
-  return FM_CATEGORIES.find(c => c.id === id) || { id, label: 'Other', icon: 'fa-cube', blurb: '' };
+  return fmCatalog().categories.find(c => c.id === id) || { id, label: 'Other', icon: 'fa-cube', blurb: '' };
+}
+function fmSlug(s) {
+  return String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').replace(/-+/g, '-');
+}
+// An override row that carries no content, no hide and no order is pointless: drop it.
+function fmTrivial(r) {
+  return !r.is_custom && !r.hidden && r.sort == null &&
+    r.cat == null && r.name == null && r.role == null && r.summary == null && r.actions == null;
+}
+function fmCleanActions(a) { return (a || []).map(x => (x || '').trim()).filter(Boolean); }
+
+// Merge the catalog with the admin overrides into the effective, ordered list.
+function fmMerge(catalog, ov) {
+  const perCat = {};
+  const out = [];
+  for (const c of catalog.cards) {
+    const idx = (perCat[c.cat] = (perCat[c.cat] == null ? 0 : perCat[c.cat] + 1));
+    const o = ov[c.id];
+    const edited = !!(o && (o.name != null || o.summary != null || o.role != null || o.actions != null || o.cat != null));
+    out.push({
+      id: c.id, isCustom: false,
+      cat: (o && o.cat) || c.cat,
+      name: (o && o.name != null) ? o.name : c.name,
+      role: (o && o.role) || c.role,
+      summary: (o && o.summary != null) ? o.summary : c.summary,
+      actions: (o && o.actions != null) ? o.actions : c.actions,
+      sort: (o && o.sort != null) ? o.sort : idx,
+      hidden: !!(o && o.hidden), edited,
+    });
+  }
+  for (const id in ov) {
+    const o = ov[id];
+    if (!o.is_custom) continue;
+    out.push({
+      id, isCustom: true,
+      cat: o.cat, name: o.name || '', role: o.role || 'user',
+      summary: o.summary || '', actions: o.actions || [],
+      sort: o.sort != null ? o.sort : 9999, hidden: !!o.hidden, edited: true,
+    });
+  }
+  return out;
 }
 
 function FeatureMapScreen({ store, go }) {
   const isAdmin = store?.user?.email === FM_ADMIN_EMAIL;
+  const catalog = fmCatalog();
 
-  const [rows, setRows]       = useStateFM(null);   // null = loading
+  const [ov, setOv]           = useStateFM(isAdmin ? null : {}); // card_id -> override row; null = loading (admin)
   const [loadErr, setLoadErr] = useStateFM('');
   const [query, setQuery]     = useStateFM('');
-  const [roleFilter, setRole] = useStateFM('all');  // all | user | coach
-  const [editing, setEditing] = useStateFM(null);   // card draft (with _isNew) or null
+  const [roleFilter, setRole] = useStateFM('all');
+  const [editing, setEditing] = useStateFM(null);
   const [busy, setBusy]       = useStateFM(false);
+  const [showHidden, setShowHidden] = useStateFM(false);
+  const [confirmReset, setConfirmReset] = useStateFM(false);
 
   useEffectFM(() => {
+    if (!isAdmin) { setOv({}); return; }
     let alive = true;
     (async () => {
-      const { data, error } = await LB.supabase
-        .from('zane_feature_map')
-        .select('*')
-        .order('cat', { ascending: true })
-        .order('sort', { ascending: true });
+      const { data, error } = await LB.supabase.from('zane_feature_map').select('*');
       if (!alive) return;
-      if (error) { setLoadErr(error.message || 'Could not load the feature map.'); setRows([]); return; }
-      setRows(data || []);
+      if (error) { setLoadErr(error.message || 'Could not load your saved changes.'); setOv({}); return; }
+      const map = {};
+      (data || []).forEach(r => { map[r.card_id] = r; });
+      setOv(map);
     })();
     return () => { alive = false; };
-  }, []);
+  }, [isAdmin]);
 
-  // Group + filter for rendering. Keep category order from FM_CATEGORIES, then
-  // any unknown categories after, so a stray cat never disappears.
+  const merged = useMemoFM(() => ov ? fmMerge(catalog, ov) : [], [ov, catalog]);
+
   const grouped = useMemoFM(() => {
-    if (!rows) return [];
     const term = query.trim().toLowerCase();
     const match = (c) => {
       if (roleFilter === 'user'  && !(c.role === 'user'  || c.role === 'both')) return false;
       if (roleFilter === 'coach' && !(c.role === 'coach' || c.role === 'both')) return false;
       if (!term) return true;
-      const hay = (c.name + ' ' + c.summary + ' ' + (c.actions || []).join(' ')).toLowerCase();
-      return hay.includes(term);
+      return (c.name + ' ' + c.summary + ' ' + (c.actions || []).join(' ')).toLowerCase().includes(term);
     };
     const byCat = {};
-    rows.forEach(c => { (byCat[c.cat] = byCat[c.cat] || []).push(c); });
-    const knownIds = FM_CATEGORIES.map(c => c.id);
+    merged.forEach(c => { (byCat[c.cat] = byCat[c.cat] || []).push(c); });
+    const knownIds = catalog.categories.map(c => c.id);
     const order = [...knownIds, ...Object.keys(byCat).filter(id => !knownIds.includes(id))];
     return order.map(id => {
       const all = (byCat[id] || []).slice().sort((a, b) => (a.sort - b.sort) || a.name.localeCompare(b.name));
-      return { meta: fmCatMeta(id), all, shown: all.filter(match) };
+      // viewers never see hidden cards; admin sees them only when "show hidden" is on
+      const visible = all.filter(c => (!c.hidden || (isAdmin && showHidden)) && match(c));
+      return { meta: fmCatMeta(id), all, visible };
     });
-  }, [rows, query, roleFilter]);
+  }, [merged, query, roleFilter, isAdmin, showHidden, catalog]);
 
-  const total = rows ? rows.length : 0;
-  const shownCount = grouped.reduce((n, g) => n + g.shown.length, 0);
+  const overrideCount = ov ? Object.keys(ov).length : 0;
+  const hiddenCount = merged.filter(c => c.hidden).length;
+  const visibleTotal = merged.filter(c => !c.hidden).length;
+  const shownCount = grouped.reduce((n, g) => n + g.visible.length, 0);
 
-  // ── writes ────────────────────────────────────────────────────────────────
-  const persistSave = async (draft) => {
+  // ── writes (admin) ─────────────────────────────────────────────────────────
+  const writeOverride = async (card_id, patch) => {
+    const existing = ov[card_id] || { card_id };
+    const row = { ...existing, ...patch, card_id };
+    if (fmTrivial(row)) return removeOverride(card_id);
+    row.updated_at = new Date().toISOString();
+    const payload = {}; FM_OV_COLS.forEach(k => { if (row[k] !== undefined) payload[k] = row[k]; });
     setBusy(true);
     try {
-      if (draft._isNew) {
-        const maxSort = rows.filter(r => r.cat === draft.cat).reduce((m, r) => Math.max(m, r.sort), -1);
-        const payload = { cat: draft.cat, name: draft.name.trim(), role: draft.role, summary: draft.summary.trim(), actions: cleanActions(draft.actions), sort: maxSort + 1 };
-        const { data, error } = await LB.supabase.from('zane_feature_map').insert(payload).select().single();
-        if (error) throw error;
-        setRows(rs => [...rs, data]);
-      } else {
-        const patch = { cat: draft.cat, name: draft.name.trim(), role: draft.role, summary: draft.summary.trim(), actions: cleanActions(draft.actions), updated_at: new Date().toISOString() };
-        const { error } = await LB.supabase.from('zane_feature_map').update(patch).eq('id', draft.id);
-        if (error) throw error;
-        setRows(rs => rs.map(r => r.id === draft.id ? { ...r, ...patch } : r));
-      }
-      setEditing(null);
-    } catch (e) {
-      alert('Could not save this card: ' + (e.message || 'unknown error'));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const persistDelete = async (id) => {
-    setBusy(true);
-    try {
-      const { error } = await LB.supabase.from('zane_feature_map').delete().eq('id', id);
+      const { error } = await LB.supabase.from('zane_feature_map').upsert(payload, { onConflict: 'card_id' });
       if (error) throw error;
-      setRows(rs => rs.filter(r => r.id !== id));
-      setEditing(null);
-    } catch (e) {
-      alert('Could not delete this card: ' + (e.message || 'unknown error'));
-    } finally {
-      setBusy(false);
+      setOv(m => ({ ...m, [card_id]: row }));
+      return true;
+    } catch (e) { alert('Could not save: ' + (e.message || 'unknown error')); return false; }
+    finally { setBusy(false); }
+  };
+  const removeOverride = async (card_id) => {
+    if (!ov[card_id]) { setOv(m => { const n = { ...m }; delete n[card_id]; return n; }); return true; }
+    setBusy(true);
+    try {
+      const { error } = await LB.supabase.from('zane_feature_map').delete().eq('card_id', card_id);
+      if (error) throw error;
+      setOv(m => { const n = { ...m }; delete n[card_id]; return n; });
+      return true;
+    } catch (e) { alert('Could not save: ' + (e.message || 'unknown error')); return false; }
+    finally { setBusy(false); }
+  };
+
+  const saveEditor = async (draft) => {
+    const content = { cat: draft.cat, name: draft.name.trim(), role: draft.role, summary: draft.summary.trim(), actions: fmCleanActions(draft.actions) };
+    let okp;
+    if (draft.isCustom) {
+      okp = await writeOverride(draft.id, { ...content, is_custom: true, sort: draft._sort });
+    } else {
+      okp = await writeOverride(draft.id, content); // edit a catalog card (preserves hidden/sort)
     }
+    if (okp) setEditing(null);
+  };
+  const revertEdit = async (card_id) => {
+    const ok = await writeOverride(card_id, { cat: null, name: null, role: null, summary: null, actions: null });
+    if (ok) setEditing(null);
   };
 
-  // Swap sort with the previous/next card in the same category and persist both.
+  const toggleHide = (card) => {
+    if (card.isCustom) return; // custom cards are deleted, not hidden
+    writeOverride(card.id, { hidden: !card.hidden });
+  };
+  const deleteCustom = (card) => { removeOverride(card.id); };
+
   const move = async (card, dir) => {
-    const siblings = rows.filter(r => r.cat === card.cat).sort((a, b) => a.sort - b.sort);
-    const idx = siblings.findIndex(r => r.id === card.id);
-    const swap = siblings[idx + dir];
+    const sibs = grouped.flatMap(g => g.meta.id === card.cat ? g.all : []).slice().sort((a, b) => a.sort - b.sort);
+    const idx = sibs.findIndex(c => c.id === card.id);
+    const swap = sibs[idx + dir];
     if (!swap) return;
-    const a = { id: card.id, sort: swap.sort };
-    const b = { id: swap.id, sort: card.sort };
-    setRows(rs => rs.map(r => r.id === a.id ? { ...r, sort: a.sort } : r.id === b.id ? { ...r, sort: b.sort } : r));
-    const r1 = await LB.supabase.from('zane_feature_map').update({ sort: a.sort }).eq('id', a.id);
-    const r2 = await LB.supabase.from('zane_feature_map').update({ sort: b.sort }).eq('id', b.id);
-    if (r1.error || r2.error) alert('Could not reorder, please reload.');
+    await writeOverride(card.id, { sort: swap.sort });
+    await writeOverride(swap.id, { sort: card.sort });
   };
 
-  const startNew = (catId) => setEditing({ _isNew: true, cat: catId, name: '', role: 'user', summary: '', actions: [''] });
+  const startNew = (catId) => {
+    const maxSort = merged.filter(c => c.cat === catId).reduce((m, c) => Math.max(m, c.sort), -1);
+    setEditing({ _isNew: true, isCustom: true, id: 'custom-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6), cat: catId, name: '', role: 'user', summary: '', actions: [''], _sort: maxSort + 1 });
+  };
+
+  const resetAll = async () => {
+    setBusy(true);
+    try {
+      const { error } = await LB.supabase.from('zane_feature_map').delete().neq('card_id', '__none__');
+      if (error) throw error;
+      setOv({});
+      setConfirmReset(false);
+    } catch (e) { alert('Could not reset: ' + (e.message || 'unknown error')); }
+    finally { setBusy(false); }
+  };
+
+  const loading = ov === null;
 
   return (
     <Screen>
       <TopBar
         title="Feature map"
-        sub={isAdmin ? 'Admin' : 'What the app can do'}
+        sub={isAdmin ? 'Admin preview' : 'What the app can do'}
         onBack={() => go({ name: 'settings' })}
         right={isAdmin ? (
-          <button onClick={() => startNew(FM_CATEGORIES[0].id)} title="Add a card" style={fmIconBtn(true)}>
+          <button onClick={() => startNew(catalog.categories[0]?.id || 'start')} title="Add a card" style={fmIconBtn(true)}>
             <i className="fa-solid fa-plus" />
           </button>
         ) : null}
       />
 
-      <div style={{ padding: '10px 22px 40px', display: 'flex', flexDirection: 'column', gap: 18 }}>
-        {/* summary + controls */}
+      <div style={{ padding: '10px 22px 40px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+        {/* summary + admin status */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <div className="micro" style={{ color: UI.inkFaint }}>
-            {rows == null ? 'Loading…' : `${shownCount === total ? total : shownCount + ' / ' + total} card${total === 1 ? '' : 's'} · ${grouped.filter(g => g.all.length).length} areas`}
+            {loading ? 'Loading…' : `${shownCount === visibleTotal ? visibleTotal : shownCount + ' / ' + visibleTotal} card${visibleTotal === 1 ? '' : 's'} · ${grouped.filter(g => g.all.length).length} areas`}
           </div>
+
+          {isAdmin && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontFamily: UI.fontUi, fontSize: 12, color: overrideCount ? 'var(--accent)' : UI.inkFaint }}>
+                {overrideCount === 0 ? 'No unpublished changes' : `${overrideCount} unpublished change${overrideCount === 1 ? '' : 's'}`}
+              </span>
+              {hiddenCount > 0 && (
+                <button onClick={() => setShowHidden(v => !v)} style={fmPill(showHidden)}>
+                  <i className={`fa-solid ${showHidden ? 'fa-eye' : 'fa-eye-slash'}`} style={{ fontSize: 10, marginRight: 5 }} />
+                  {showHidden ? 'Hiding hidden' : `Show hidden (${hiddenCount})`}
+                </button>
+              )}
+              {overrideCount > 0 && (confirmReset ? (
+                <span style={{ display: 'inline-flex', gap: 6 }}>
+                  <button onClick={() => setConfirmReset(false)} style={fmPill(false)}>Cancel</button>
+                  <button onClick={resetAll} disabled={busy} style={{ ...fmPill(false), color: UI.danger, borderColor: 'rgba(var(--danger-rgb),0.4)' }}>Reset all to default</button>
+                </span>
+              ) : (
+                <button onClick={() => setConfirmReset(true)} style={{ ...fmPill(false), color: UI.danger, borderColor: 'rgba(var(--danger-rgb),0.3)' }}>
+                  <i className="fa-solid fa-rotate-left" style={{ fontSize: 10, marginRight: 5 }} />Reset
+                </button>
+              ))}
+            </div>
+          )}
+
           <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
             <i className="fa-solid fa-magnifying-glass" style={{ position: 'absolute', left: 12, fontSize: 12, color: UI.inkFaint, pointerEvents: 'none' }} />
             <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search features"
@@ -183,11 +266,9 @@ function FeatureMapScreen({ store, go }) {
           <div style={{ fontSize: 13, color: UI.danger, fontFamily: UI.fontUi, padding: '10px 14px', background: 'rgba(var(--danger-rgb),0.06)', border: `1px solid rgba(var(--danger-rgb),0.25)`, borderRadius: 6 }}>{loadErr}</div>
         )}
 
-        {rows != null && grouped.map(g => {
-          // Show a section when it has cards under the current filter. When not
-          // filtering, admins also see empty categories so they can add to any.
+        {!loading && grouped.map(g => {
           const filtering = query.trim() !== '' || roleFilter !== 'all';
-          const showSection = g.shown.length > 0 || (isAdmin && !filtering);
+          const showSection = g.visible.length > 0 || (isAdmin && !filtering);
           if (!showSection) return null;
           return (
             <section key={g.meta.id} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -199,13 +280,14 @@ function FeatureMapScreen({ store, go }) {
                   <div style={{ fontFamily: UI.fontDisplay, fontSize: 20, fontWeight: 700, color: UI.ink, lineHeight: 1, letterSpacing: '0.02em', textTransform: 'uppercase' }}>{g.meta.label}</div>
                   <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 3 }}>{g.meta.blurb}</div>
                 </div>
-                <span className="num" style={{ fontSize: 13, color: UI.inkFaint }}>{g.all.length}</span>
+                <span className="num" style={{ fontSize: 13, color: UI.inkFaint }}>{g.all.filter(c => !c.hidden).length}</span>
               </div>
 
-              {g.shown.map(card => (
+              {g.visible.map(card => (
                 <FeatureCard key={card.id} card={card} isAdmin={isAdmin}
                   onEdit={() => setEditing({ ...card, actions: (card.actions || []).slice() })}
-                  onUp={() => move(card, -1)} onDown={() => move(card, +1)} />
+                  onUp={() => move(card, -1)} onDown={() => move(card, +1)}
+                  onToggleHide={() => toggleHide(card)} onDelete={() => deleteCustom(card)} />
               ))}
 
               {isAdmin && (
@@ -227,25 +309,29 @@ function FeatureMapScreen({ store, go }) {
         <FeatureEditor draft={editing} busy={busy}
           onChange={setEditing}
           onClose={() => setEditing(null)}
-          onSave={() => persistSave(editing)}
-          onDelete={editing._isNew ? null : () => persistDelete(editing.id)} />
+          onSave={() => saveEditor(editing)}
+          onRevert={(!editing._isNew && !editing.isCustom && editing.edited) ? () => revertEdit(editing.id) : null} />
       )}
     </Screen>
   );
 }
 
-function FeatureCard({ card, isAdmin, onEdit, onUp, onDown }) {
+function FeatureCard({ card, isAdmin, onEdit, onUp, onDown, onToggleHide, onDelete }) {
   const [open, setOpen] = useStateFM(false);
   const role = FM_ROLES[card.role] || FM_ROLES.user;
+  const muted = card.hidden;
   return (
-    <div style={{ position: 'relative', background: UI.bgCard, border: `1px solid ${UI.hair}`, borderRadius: 8, overflow: 'hidden' }}>
+    <div style={{ position: 'relative', background: UI.bgCard, border: `1px solid ${UI.hair}`, borderRadius: 8, overflow: 'hidden', opacity: muted ? 0.55 : 1 }}>
       <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 3, background: role.color }} />
       <button onClick={() => setOpen(o => !o)} aria-expanded={open} style={{
-        width: '100%', display: 'flex', alignItems: 'center', gap: 12,
+        width: '100%', display: 'flex', alignItems: 'center', gap: 10,
         padding: '13px 14px 13px 16px', background: 'transparent', border: 'none',
         cursor: 'pointer', textAlign: 'left', WebkitTapHighlightColor: 'transparent',
       }}>
         <span style={{ flex: 1, minWidth: 0, fontFamily: UI.fontDisplay, fontSize: 17, fontWeight: 700, color: UI.ink, lineHeight: 1.15, letterSpacing: '0.01em', textTransform: 'uppercase' }}>{card.name}</span>
+        {isAdmin && card.hidden && <span style={fmTag(UI.inkFaint)}>Hidden</span>}
+        {isAdmin && card.isCustom && <span style={fmTag('var(--accent)')}>Custom</span>}
+        {isAdmin && !card.isCustom && card.edited && <span style={fmTag('var(--accent)')}>Edited</span>}
         <i className="fa-solid fa-chevron-down" style={{ flexShrink: 0, fontSize: 12, color: UI.inkFaint, transition: 'transform 0.2s ease', transform: open ? 'rotate(180deg)' : 'none' }} />
       </button>
       {open && (
@@ -263,10 +349,13 @@ function FeatureCard({ card, isAdmin, onEdit, onUp, onDown }) {
             </ul>
           )}
           {isAdmin && (
-            <div style={{ display: 'flex', gap: 8, marginTop: 12, paddingTop: 10, borderTop: `0.5px solid ${UI.hair}` }}>
+            <div style={{ display: 'flex', gap: 8, marginTop: 12, paddingTop: 10, borderTop: `0.5px solid ${UI.hair}`, flexWrap: 'wrap' }}>
               <button onClick={onEdit} style={fmIconBtn(false)} title="Edit"><i className="fa-solid fa-pen" /></button>
               <button onClick={onUp} style={fmIconBtn(false)} title="Move up"><i className="fa-solid fa-arrow-up" /></button>
               <button onClick={onDown} style={fmIconBtn(false)} title="Move down"><i className="fa-solid fa-arrow-down" /></button>
+              {card.isCustom
+                ? <button onClick={onDelete} style={{ ...fmIconBtn(false), color: UI.danger }} title="Delete custom card"><i className="fa-solid fa-trash" /></button>
+                : <button onClick={onToggleHide} style={fmIconBtn(false)} title={card.hidden ? 'Unhide' : 'Hide'}><i className={`fa-solid ${card.hidden ? 'fa-eye' : 'fa-eye-slash'}`} /></button>}
             </div>
           )}
         </div>
@@ -275,20 +364,16 @@ function FeatureCard({ card, isAdmin, onEdit, onUp, onDown }) {
   );
 }
 
-function FeatureEditor({ draft, busy, onChange, onClose, onSave, onDelete }) {
-  const [confirmDel, setConfirmDel] = useStateFM(false);
+function FeatureEditor({ draft, busy, onChange, onClose, onSave, onRevert }) {
   const set = (patch) => onChange({ ...draft, ...patch });
   const setAction = (i, val) => set({ actions: draft.actions.map((a, j) => j === i ? val : a) });
-  const addAction = () => set({ actions: [...draft.actions, ''] });
-  const removeAction = (i) => set({ actions: draft.actions.filter((_, j) => j !== i) });
   const canSave = draft.name.trim().length > 0 && draft.cat && !busy;
-
   return (
     <Sheet open={true} onClose={onClose} title={draft._isNew ? 'New card' : 'Edit card'} accent>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
         <Field label="Category">
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-            {FM_CATEGORIES.map(c => (
+            {fmCatalog().categories.map(c => (
               <button key={c.id} onClick={() => set({ cat: c.id })} style={{
                 padding: '6px 10px', borderRadius: 999, cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 11,
                 border: `1px solid ${draft.cat === c.id ? 'var(--accent)' : UI.hairStrong}`,
@@ -306,8 +391,7 @@ function FeatureEditor({ draft, busy, onChange, onClose, onSave, onDelete }) {
         <Field label="Who it is for">
           <div style={{ display: 'flex', gap: 8 }}>
             {FM_ROLE_ORDER.map(r => {
-              const sel = draft.role === r;
-              const col = FM_ROLES[r].color;
+              const sel = draft.role === r; const col = FM_ROLES[r].color;
               return (
                 <button key={r} onClick={() => set({ role: r })} style={{
                   flex: 1, padding: '9px 0', borderRadius: 4, cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600,
@@ -331,10 +415,10 @@ function FeatureEditor({ draft, busy, onChange, onClose, onSave, onDelete }) {
               <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                 <input value={a} onChange={e => setAction(i, e.target.value)} placeholder={`Action ${i + 1}`}
                   style={{ flex: 1, padding: '8px 10px', borderRadius: 4, border: `1px solid ${UI.hairStrong}`, background: UI.bgInset, color: UI.ink, fontFamily: UI.fontUi, fontSize: 13, outline: 'none' }} />
-                <button onClick={() => removeAction(i)} title="Remove" style={{ ...fmIconBtn(false), color: UI.danger }}><i className="fa-solid fa-xmark" /></button>
+                <button onClick={() => set({ actions: draft.actions.filter((_, j) => j !== i) })} title="Remove" style={{ ...fmIconBtn(false), color: UI.danger }}><i className="fa-solid fa-xmark" /></button>
               </div>
             ))}
-            <button onClick={addAction} style={{ alignSelf: 'flex-start', display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, padding: '2px 0' }}>
+            <button onClick={() => set({ actions: [...draft.actions, ''] })} style={{ alignSelf: 'flex-start', display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, padding: '2px 0' }}>
               <i className="fa-solid fa-plus" style={{ fontSize: 11 }} /> Add action
             </button>
           </div>
@@ -344,24 +428,16 @@ function FeatureEditor({ draft, busy, onChange, onClose, onSave, onDelete }) {
           {busy ? 'Saving…' : (draft._isNew ? 'Add card' : 'Save changes')}
         </Btn>
 
-        {onDelete && (
-          confirmDel ? (
-            <div style={{ display: 'flex', gap: 8 }}>
-              <Btn kind="ghost" onClick={() => setConfirmDel(false)} style={{ flex: 1 }}>Cancel</Btn>
-              <Btn kind="ghost" onClick={onDelete} style={{ flex: 1, color: UI.danger, borderColor: 'rgba(var(--danger-rgb),0.3)' }}>Delete card</Btn>
-            </div>
-          ) : (
-            <button onClick={() => setConfirmDel(true)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: UI.danger, fontFamily: UI.fontUi, fontSize: 12, letterSpacing: '0.04em', padding: '2px 0', alignSelf: 'center' }}>
-              Delete this card
-            </button>
-          )
+        {onRevert && (
+          <button onClick={onRevert} style={{ background: 'none', border: 'none', cursor: 'pointer', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 12, letterSpacing: '0.04em', padding: '2px 0', alignSelf: 'center' }}>
+            Revert this card to the default text
+          </button>
         )}
       </div>
     </Sheet>
   );
 }
 
-// small square icon button used for admin card controls + header add
 function fmIconBtn(accent) {
   return {
     width: 30, height: 30, borderRadius: 4, flexShrink: 0,
@@ -373,9 +449,17 @@ function fmIconBtn(accent) {
     WebkitTapHighlightColor: 'transparent',
   };
 }
-
-function cleanActions(actions) {
-  return (actions || []).map(a => (a || '').trim()).filter(Boolean);
+function fmPill(active) {
+  return {
+    display: 'inline-flex', alignItems: 'center', padding: '5px 10px', borderRadius: 999, cursor: 'pointer',
+    border: `1px solid ${active ? 'var(--accent)' : UI.hairStrong}`,
+    background: active ? 'rgba(var(--accent-rgb),0.12)' : 'transparent',
+    color: active ? 'var(--accent)' : UI.inkSoft, fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600,
+    WebkitTapHighlightColor: 'transparent',
+  };
+}
+function fmTag(color) {
+  return { flexShrink: 0, fontFamily: UI.fontNum, fontSize: 8, letterSpacing: '0.12em', textTransform: 'uppercase', padding: '2px 5px', borderRadius: 4, border: `1px solid ${color}`, color, whiteSpace: 'nowrap' };
 }
 
 Object.assign(window.Screens, { FeatureMapScreen });
