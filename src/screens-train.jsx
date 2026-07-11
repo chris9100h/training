@@ -2324,6 +2324,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // while it is still exactly this untouched auto-seed; any manual partials
   // edit anywhere on the chain means the user has taken over.
   const mesoChainSeedRef = useRefT(0);
+  // Which (exIdx_setIdx) sets a plan-prescribed intensity technique has already
+  // auto-armed, so a client who cancels it on a set isn't re-nagged by the
+  // re-firing effect (same once-per-set guard as mesoLpArmedRef).
+  const plannedTechArmedRef = useRefT(new Set());
   // Persist intensity state so a background/resume on iOS doesn't wipe mid-set
   // progress. This effect runs before the restore effect below on every fresh
   // mount (declaration order), so on mount state is still all-null — without
@@ -4312,13 +4316,72 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     return { totalSetsDone, expectedSec };
   }, [avgStats, session.entries, session.startedAt]);
 
-  // Beyond-failure meso: auto-arm the Lengthened Partials stepper (pre-filled to
-  // the prescribed count) on the current plain working set, so the partials are
-  // visible up front instead of silently attached on check-off. Armed once per
-  // set (mesoLpArmedRef) so cancelling on a set doesn't re-nag. Chain techniques
-  // (Drop/Myo/AMRAP Variations) get the same prescribed count pre-seeded their
-  // own way, on the first round at startDrop/startMyo/startAv (mesoChainSeedRef),
-  // so the guard below only needs to skip while one of those is already open.
+  // Auto-arm a plan-prescribed intensity technique on a target set, passively
+  // (no keyboard pop): the sheet or inline editor appears pre-seeded from the
+  // set's kg/reps and the client fills it in or cancels. A parametrised,
+  // top-level sibling of the in-render start* helpers (which target the current
+  // set and open the keyboard), kept separate so the live-picker flow stays
+  // untouched. Clears any other in-flight technique inline (the render-scope
+  // clear* helpers aren't reachable here) and sets mesoChainSeedRef so a
+  // beyond-failure meso prescription still pre-seeds partials into it.
+  const armPlannedTechnique = (technique, targetIdx) => {
+    const s = entry?.sets?.[targetIdx];
+    if (!s) return;
+    setDropSetIdx(null); setDropDrops([]);
+    setMyoSetIdx(null); setMyoDrops([]); setMyoTechnique(null); setMyoTarget(null);
+    setAvSetIdx(null); setAvDrops([]);
+    setLpTarget(null); setLpCount(0); setLpStretch(null);
+    setWsTarget(null); setWsStretch(null);
+    mesoChainSeedRef.current = 0;
+    if (technique === 'lengthened_partial') {
+      setLpTarget({ exIdx, setIdx: targetIdx });
+      setLpCount(mesoPartials > 0 ? mesoPartials : 0);
+      return;
+    }
+    if (technique === 'weighted_stretch') {
+      setWsTarget({ exIdx, setIdx: targetIdx });
+      setWsStretch({ kg: null, timeSec: 30 });
+      return;
+    }
+    if (technique === 'drop') {
+      const initDrops = [{ kg: s.kg ?? null, reps: s.reps ?? null }];
+      if (mesoPartials > 0) initDrops[0].partials = mesoPartials;
+      mesoChainSeedRef.current = mesoPartials;
+      setDropDrops(initDrops); dropDropsRef.current = initDrops;
+      setDropSetIdx(targetIdx);
+      return;
+    }
+    if (technique === 'amrap_variations') {
+      const initDrops = [{ kg: s.kg ?? null, reps: s.reps ?? null, label: entry.name }];
+      if (mesoPartials > 0) initDrops[0].partials = mesoPartials;
+      mesoChainSeedRef.current = mesoPartials;
+      setAvDrops(initDrops); avDropsRef.current = initDrops;
+      setAvSetIdx(targetIdx);
+      return;
+    }
+    if (technique === 'myorep' || technique === 'myorep_match') {
+      const anchor = entry.sets.find(st => st.technique === 'myorep' && st.done && st.drops?.[0]?.reps != null);
+      // Myo-Rep Match needs a preceding myo set to anchor to; fall back to plain
+      // Myo-Reps when none exists (planned-technique fallback).
+      const effTech = (technique === 'myorep_match' && !anchor) ? 'myorep' : technique;
+      const initKg = effTech === 'myorep_match' ? (anchor?.drops?.[0]?.kg ?? s.kg ?? null) : (s.kg ?? null);
+      const initDrops = [{ kg: initKg, reps: s.reps ?? null }];
+      mesoChainSeedRef.current = mesoPartials;
+      setMyoDrops(initDrops); myoDropsRef.current = initDrops;
+      setMyoSetIdx(targetIdx);
+      setMyoTechnique(effTech);
+      if (effTech === 'myorep_match') setMyoTarget(anchor ? anchor.drops.reduce((sum, d) => sum + (d.reps || 0), 0) : null);
+      return;
+    }
+  };
+
+  // Auto-arm intensity techniques on the current working set. A plan-prescribed
+  // technique (coach/plan) takes priority over the beyond-failure meso LP
+  // auto-arm on its target sets (scope 'all' = every working set, 'last' = only
+  // the last); the meso LP arm still fires on any set the plan didn't claim.
+  // Both arm once per set (plannedTechArmedRef / mesoLpArmedRef) so cancelling
+  // on a set doesn't re-nag. A meso prescription still pre-seeds partials into a
+  // planned chain via armPlannedTechnique's mesoChainSeedRef.
   // MUST sit above the `if (!entry)` early return (empty freestyle/bonus
   // session): a hook after that return changes the hook count when the first
   // exercise is added (entry null → set), which is React error #310. Derives
@@ -4327,11 +4390,27 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     if (!entry || isCardio) return;
     const sets = entry.sets || [];
     const curIdx = sets.findIndex(s => !s.done);
+    if (curIdx < 0) return;
     const wCount = sets.filter(s => s.warmup).length;
-    const curWarmup = wCount > 0 && curIdx >= 0 && !!sets[curIdx]?.warmup;
-    if (mesoPartials <= 0 || curIdx < 0 || curWarmup) return;
+    const curWarmup = wCount > 0 && !!sets[curIdx]?.warmup;
+    if (curWarmup) return;
     if (dropSetIdx != null || myoSetIdx != null || avSetIdx != null || lpTarget != null || wsTarget != null) return;
     const key = exIdx + '_' + curIdx;
+
+    const plan = entry.plannedTechnique;
+    if (plan) {
+      const workingIdxs = sets.map((st, i) => (!st.warmup ? i : -1)).filter(i => i >= 0);
+      const isTargetSet = entry.plannedTechniqueScope === 'all' || curIdx === workingIdxs[workingIdxs.length - 1];
+      if (isTargetSet) {
+        if (!plannedTechArmedRef.current.has(key)) {
+          plannedTechArmedRef.current.add(key);
+          armPlannedTechnique(plan, curIdx);
+        }
+        return; // the plan owns this set (armed now or already dismissed): don't also fire meso LP
+      }
+    }
+
+    if (mesoPartials <= 0) return;
     if (mesoLpArmedRef.current.has(key)) return;
     mesoLpArmedRef.current.add(key);
     setLpTarget({ exIdx, setIdx: curIdx });
