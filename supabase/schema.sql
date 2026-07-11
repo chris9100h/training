@@ -140,7 +140,9 @@ CREATE TABLE public.zane_session_entries (
   superset_group text,
   planned_reps_per_set integer[],
   planned_reps_max integer,
-  planned_progression_offset integer
+  planned_progression_offset integer,
+  planned_technique text,
+  planned_technique_scope text
 );
 
 CREATE TABLE public.zane_sets (
@@ -1209,6 +1211,8 @@ AS $function$
       'plannedRepsPerSet', e.planned_reps_per_set,
       'plannedRepsMax', e.planned_reps_max,
       'plannedProgressionOffset', e.planned_progression_offset,
+      'plannedTechnique', e.planned_technique,
+      'plannedTechniqueScope', e.planned_technique_scope,
       'note', e.note,
       'supersetGroup', e.superset_group,
       'category', ex.category,
