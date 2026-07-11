@@ -16,12 +16,14 @@ window.TOURS = {
       target: null,
       title: 'Welcome to ZANE',
       body: "Let's take a quick look around, two minutes and you'll know how to build your first training plan.",
+      visual: 'welcome',
     },
     {
       route: 'home',
       target: 'tab-plan',
       title: 'The Plan tab',
       body: 'Your training hub. Plans, training days, exercises, and your exercise library, all in one place.',
+      visual: 'planTab',
       placement: 'top',
     },
     {
@@ -29,12 +31,14 @@ window.TOURS = {
       target: 'plan-new-btn',
       title: 'Create a plan',
       body: 'A plan is a collection of training days. Each day gets its own exercises. Tap + to get started.',
+      visual: 'planCreate',
       placement: 'bottom',
     },
     {
       target: null,
       title: 'A guided setup',
       body: 'Tap + and you choose how to start: a ready-made Program, a Template split, or Custom for the guided build. Custom walks you through it: name your plan, pick how it moves (Cycle, Weekdays, or Flexible), choose a training split, and optionally run it as a mesocycle. It lays out the days, then you fill in the exercises.',
+      visual: 'planWizard',
     },
     {
       target: null,
@@ -89,6 +93,7 @@ window.TOURS = {
       target: 'tab-hist',
       title: 'Your training history',
       body: 'Every session is automatically logged here: sets, reps, volume, and personal records over time.',
+      visual: 'planHistory',
       placement: 'top',
     },
     {
@@ -104,6 +109,7 @@ window.TOURS.doWorkout = [
     target: null,
     title: 'Workout Tour',
     body: "Let's walk through a complete training session, from the first warmup set to the well-done screen.",
+    visual: 'workoutIntro',
   },
   {
     target: null,
@@ -258,6 +264,7 @@ window.TOURS.healthTab = [
     target: null,
     title: 'Health Tab Tour',
     body: "Let's walk through the Health tab, your daily log for weight, nutrition, steps, and cardio.",
+    visual: 'healthIntro',
   },
   {
     target: null,
@@ -270,6 +277,7 @@ window.TOURS.healthTab = [
     target: 'tab-health',
     title: 'The Health tab',
     body: 'Once enabled, the Health tab appears in the bottom nav. Tap it to open your daily log and charts.',
+    visual: 'healthOverview',
     placement: 'top',
   },
   {
@@ -277,6 +285,7 @@ window.TOURS.healthTab = [
     target: 'health-log-btn',
     title: 'Log your day',
     body: 'Tap LOG to open the daily entry sheet. Record weight, steps, calories, macros, and water for any day.',
+    visual: 'healthLogDay',
     placement: 'bottom',
   },
   {
@@ -289,6 +298,7 @@ window.TOURS.healthTab = [
     target: 'health-card-macros',
     title: 'Macros & Targets',
     body: 'Set your daily macro targets (protein / carbs / fat) and the app tracks your adherence automatically. Tap SET or EDIT in the Macros card to configure your goals.',
+    visual: 'healthMacros',
     placement: 'bottom',
   },
   {
@@ -435,6 +445,7 @@ window.TOURS.coaching = [
     target: null,
     title: 'Coaching Tour',
     body: "Coaching links a coach and a client inside the app, shared training data, weekly check-ins, macro targets, and a private message thread. Let's walk through both sides.",
+    visual: 'coachingIntro',
   },
   {
     target: null,
@@ -1282,27 +1293,19 @@ function TourVisualHealthEnable() {
 
 function TourVisualHealthCardio() {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-      <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, padding: '0 2px' }}>Home screen — bottom of the page</div>
-      <div style={{
-        width: '100%', padding: '11px 16px',
-        background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)',
-        border: '1px solid rgba(var(--accent-rgb),0.6)',
-        borderRadius: 8,
-        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-      }}>
-        <i className="fa-solid fa-person-running" style={{ fontSize: 13, color: 'rgba(10,8,5,0.6)' }} />
-        <span style={{ fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, letterSpacing: '0.18em', color: 'rgba(10,8,5,0.75)' }}>CARDIO</span>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, padding: '0 2px' }}>Home: swipe down for Quick Actions</div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', background: 'rgba(var(--accent-rgb),0.08)', border: '1px solid rgba(var(--accent-rgb),0.3)', borderRadius: 6 }}>
+        <i className="fa-solid fa-person-running" style={{ fontSize: 13, color: 'var(--accent)', width: 16, textAlign: 'center' }} />
+        <span style={{ flex: 1, fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, color: 'var(--accent)' }}>Cardio</span>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
       </div>
       <div style={{ background: UI.bgCard, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, overflow: 'hidden' }}>
         {[
           { icon: 'fa-stopwatch', label: 'Start live', accent: true },
           { icon: 'fa-pen', label: 'Log manually', accent: false },
         ].map((item, i) => (
-          <div key={i} style={{
-            display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px',
-            borderBottom: i === 0 ? `0.5px solid ${UI.hair}` : 'none',
-          }}>
+          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderBottom: i === 0 ? `0.5px solid ${UI.hair}` : 'none' }}>
             <i className={`fa-solid ${item.icon}`} style={{ fontSize: 12, color: item.accent ? 'var(--accent)' : UI.inkFaint, width: 14, textAlign: 'center' }} />
             <span style={{ fontSize: 12, fontFamily: UI.fontUi, color: item.accent ? 'var(--accent)' : UI.inkSoft }}>{item.label}</span>
           </div>
@@ -2132,7 +2135,240 @@ function TourVisualPwaAndroidInstall() {
   );
 }
 
+// ── Mockups for the intro and former-spotlight card-deck steps ──
+function tourNavBar(active) {
+  const tabs = [
+    { key: 'home', icon: 'fa-house', label: 'Home' },
+    { key: 'plan', icon: 'fa-calendar-days', label: 'Plan' },
+    { key: 'train', icon: 'fa-dumbbell', label: 'Train' },
+    { key: 'hist', icon: 'fa-clock-rotate-left', label: 'History' },
+    { key: 'settings', icon: 'fa-gear', label: 'Settings' },
+  ];
+  return (
+    <div style={{ display: 'flex', background: UI.bgCard, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, overflow: 'hidden' }}>
+      {tabs.map((t, i) => {
+        const on = t.key === active;
+        return (
+          <div key={t.key} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, padding: '8px 0', borderLeft: i ? `0.5px solid ${UI.hair}` : 'none', background: on ? 'rgba(var(--accent-rgb),0.10)' : 'transparent' }}>
+            <i className={'fa-solid ' + t.icon} style={{ fontSize: 13, color: on ? 'var(--accent)' : UI.inkFaint }} />
+            <span style={{ fontSize: 8, fontFamily: UI.fontUi, letterSpacing: '0.06em', color: on ? 'var(--accent)' : UI.inkGhost }}>{t.label}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+function TourVisualPlanTab() { return tourNavBar('plan'); }
+
+function TourVisualWelcome() {
+  const rows = [
+    { icon: 'fa-calendar-days', label: 'Build a plan' },
+    { icon: 'fa-dumbbell', label: 'Train with guidance' },
+    { icon: 'fa-chart-line', label: 'Track every session' },
+  ];
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12, alignItems: 'center', padding: '4px 0' }}>
+      <div style={{ fontFamily: UI.fontDisplay, fontSize: 34, fontWeight: 700, letterSpacing: '0.18em', color: UI.ink }}>ZANE</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, width: '100%' }}>
+        {rows.map(r => (
+          <div key={r.label} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 4 }}>
+            <i className={'fa-solid ' + r.icon} style={{ fontSize: 12, color: 'var(--accent)', width: 16, textAlign: 'center' }} />
+            <span style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.inkSoft, fontWeight: 500 }}>{r.label}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function TourVisualPlanCreate() {
+  const opts = [
+    { label: 'Programs', sub: 'Ready-made', icon: 'fa-layer-group', on: false },
+    { label: 'Templates', sub: 'Pick a split', icon: 'fa-table-cells-large', on: false },
+    { label: 'Custom', sub: 'Guided build', icon: 'fa-wand-magic-sparkles', on: true },
+  ];
+  return (
+    <div style={{ background: UI.bgCard, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, overflow: 'hidden' }}>
+      <div style={{ padding: '7px 12px', borderBottom: `0.5px solid ${UI.hair}` }}>
+        <span style={{ fontSize: 9, fontFamily: UI.fontUi, letterSpacing: '0.14em', color: UI.inkFaint }}>NEW PLAN</span>
+      </div>
+      {opts.map((o, i) => (
+        <div key={o.label} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', borderBottom: i < 2 ? `0.5px solid ${UI.hair}` : 'none', background: o.on ? 'rgba(var(--accent-rgb),0.08)' : 'transparent' }}>
+          <i className={'fa-solid ' + o.icon} style={{ fontSize: 13, width: 16, textAlign: 'center', color: o.on ? 'var(--accent)' : UI.inkFaint }} />
+          <span style={{ flex: 1, fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, color: o.on ? 'var(--accent)' : UI.inkSoft }}>{o.label}</span>
+          <span style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkGhost }}>{o.sub}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function TourVisualPlanWizard() {
+  const steps = ['Name your plan', 'Cycle, Weekdays, Flexible', 'Choose a split', 'Mesocycle (optional)'];
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 4, padding: '4px 0' }}>
+      {steps.map((label, i) => {
+        const on = i === 0;
+        return (
+          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px' }}>
+            <div style={{ width: 18, height: 18, borderRadius: '50%', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: on ? 'var(--accent)' : 'transparent', border: on ? 'none' : `1.5px solid ${UI.hairStrong}` }}>
+              <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, color: on ? '#0a0805' : UI.inkGhost }}>{i + 1}</span>
+            </div>
+            <span style={{ fontFamily: UI.fontUi, fontSize: 11.5, fontWeight: on ? 600 : 500, color: on ? UI.ink : UI.inkFaint }}>{label}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function TourVisualPlanHistory() {
+  const rows = [
+    { day: 'PUSH DAY', date: 'Today', vol: '4,240', pr: true },
+    { day: 'LEG DAY', date: '2d ago', vol: '6,010', pr: false },
+    { day: 'PULL DAY', date: '4d ago', vol: '3,880', pr: false },
+  ];
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+      {rows.map((r, i) => (
+        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 4 }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, color: UI.inkSoft, letterSpacing: '0.06em' }}>{r.day}</div>
+            <div style={{ fontFamily: UI.fontUi, fontSize: 9, color: UI.inkGhost, marginTop: 1 }}>{r.date}</div>
+          </div>
+          {r.pr && <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.08em', color: 'var(--accent)', background: 'rgba(var(--accent-rgb),0.12)', border: '0.5px solid rgba(var(--accent-rgb),0.3)', borderRadius: 4, padding: '2px 5px' }}>PR</span>}
+          <span className="num" style={{ fontSize: 13, color: UI.ink }}>{r.vol}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function TourVisualWorkoutIntro() {
+  const sets = [{ s: 1, done: true }, { s: 2, done: true }, { s: 3, done: false }];
+  return (
+    <div style={{ background: UI.bgCard, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, overflow: 'hidden' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 12px', borderBottom: `0.5px solid ${UI.hair}` }}>
+        <i className="fa-solid fa-dumbbell" style={{ fontSize: 12, color: 'var(--accent)' }} />
+        <span style={{ fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.08em', color: UI.inkSoft }}>BENCH PRESS</span>
+        <span style={{ marginLeft: 'auto', fontFamily: UI.fontUi, fontSize: 9, color: UI.inkGhost }}>3 x 8</span>
+      </div>
+      {sets.map(r => (
+        <div key={r.s} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderBottom: r.s < 3 ? `0.5px solid ${UI.hair}` : 'none' }}>
+          <span style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkGhost, width: 12 }}>{r.s}</span>
+          <span className="num" style={{ fontSize: 13, color: UI.ink }}>60<span style={{ fontSize: 9, color: UI.inkGhost }}> kg</span></span>
+          <span className="num" style={{ fontSize: 13, color: UI.ink }}>8<span style={{ fontSize: 9, color: UI.inkGhost }}> reps</span></span>
+          <div style={{ marginLeft: 'auto', width: 18, height: 18, borderRadius: 4, border: `1.5px solid ${r.done ? 'var(--accent)' : UI.hairStrong}`, background: r.done ? 'var(--accent)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            {r.done && <i className="fa-solid fa-check" style={{ fontSize: 9, color: '#0a0805' }} />}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function TourVisualHealthIntro() {
+  return (
+    <div style={{ display: 'flex', gap: 8 }}>
+      <div style={{ flex: 1, background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 6, padding: '10px 12px' }}>
+        <div style={{ fontFamily: UI.fontUi, fontSize: 9, letterSpacing: '0.1em', color: UI.inkFaint }}>WEIGHT</div>
+        <div className="num" style={{ fontSize: 18, color: UI.ink, marginTop: 2 }}>82.4<span style={{ fontSize: 10, color: UI.inkGhost }}> kg</span></div>
+        <svg width="100%" height="20" viewBox="0 0 80 20" preserveAspectRatio="none" style={{ marginTop: 4, display: 'block' }}><polyline points="0,15 20,12 40,13 60,8 80,6" fill="none" stroke="var(--accent)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+      </div>
+      <div style={{ flex: 1, background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 6, padding: '10px 12px' }}>
+        <div style={{ fontFamily: UI.fontUi, fontSize: 9, letterSpacing: '0.1em', color: UI.inkFaint }}>ADHERENCE</div>
+        <div className="num" style={{ fontSize: 18, color: UI.ink, marginTop: 2 }}>86<span style={{ fontSize: 10, color: UI.inkGhost }}> %</span></div>
+        <div style={{ display: 'flex', gap: 3, marginTop: 8 }}>
+          {[0.9, 0.7, 0.8].map((w, i) => <div key={i} style={{ flex: 1, height: 4, borderRadius: 999, background: UI.hairStrong, overflow: 'hidden' }}><div style={{ height: '100%', width: (w * 100) + '%', background: 'var(--accent)' }} /></div>)}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TourVisualHealthOverview() {
+  const cards = [
+    { icon: 'fa-weight-scale', label: 'Weight' },
+    { icon: 'fa-utensils', label: 'Macros' },
+    { icon: 'fa-shoe-prints', label: 'Steps' },
+    { icon: 'fa-droplet', label: 'Water' },
+  ];
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+      {cards.map(c => (
+        <div key={c.label} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 4 }}>
+          <i className={'fa-solid ' + c.icon} style={{ fontSize: 12, color: 'var(--accent)', width: 16, textAlign: 'center' }} />
+          <span style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkSoft, fontWeight: 500 }}>{c.label}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function TourVisualHealthLogDay() {
+  const rows = [['Weight', '82.4', 'kg'], ['Steps', '8,210', ''], ['Water', '2.4', 'L']];
+  return (
+    <div style={{ background: UI.bgCard, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, overflow: 'hidden' }}>
+      <div style={{ padding: '7px 12px', borderBottom: `0.5px solid ${UI.hair}` }}>
+        <span style={{ fontSize: 9, fontFamily: UI.fontUi, letterSpacing: '0.14em', color: UI.inkFaint }}>TODAY</span>
+      </div>
+      {rows.map((r, i) => (
+        <div key={r[0]} style={{ display: 'flex', alignItems: 'center', padding: '8px 12px', borderBottom: i < rows.length - 1 ? `0.5px solid ${UI.hair}` : 'none' }}>
+          <span style={{ flex: 1, fontFamily: UI.fontUi, fontSize: 12, color: UI.inkSoft }}>{r[0]}</span>
+          <span className="num" style={{ fontSize: 14, color: UI.ink }}>{r[1]}</span>
+          {r[2] && <span style={{ fontSize: 9, color: UI.inkGhost, marginLeft: 3 }}>{r[2]}</span>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function TourVisualHealthMacros() {
+  const macros = [{ l: 'Protein', w: 0.92, v: '184 / 200' }, { l: 'Carbs', w: 0.70, v: '210 / 300' }, { l: 'Fat', w: 0.80, v: '56 / 70' }];
+  return (
+    <div style={{ background: UI.bgCard, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 9 }}>
+      <div style={{ display: 'flex', alignItems: 'center' }}>
+        <span style={{ flex: 1, fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.08em', color: UI.inkSoft }}>MACROS</span>
+        <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.1em', color: 'var(--accent)', border: '0.5px solid rgba(var(--accent-rgb),0.4)', borderRadius: 4, padding: '2px 7px' }}>EDIT</span>
+      </div>
+      {macros.map(m => (
+        <div key={m.l}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
+            <span style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint }}>{m.l}</span>
+            <span className="num" style={{ fontSize: 10, color: UI.inkSoft }}>{m.v}</span>
+          </div>
+          <div style={{ height: 4, borderRadius: 999, background: UI.hairStrong, overflow: 'hidden' }}><div style={{ height: '100%', width: (m.w * 100) + '%', background: 'var(--accent)' }} /></div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function TourVisualCoachingIntro() {
+  const people = [{ i: 'fa-user-tie', l: 'COACH' }, null, { i: 'fa-user', l: 'CLIENT' }];
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 16, padding: '8px 0' }}>
+      {people.map((p, idx) => p ? (
+        <div key={idx} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
+          <div style={{ width: 46, height: 46, borderRadius: '50%', background: UI.bgInset, border: '1px solid rgba(var(--accent-rgb),0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <i className={'fa-solid ' + p.i} style={{ fontSize: 18, color: 'var(--accent)' }} />
+          </div>
+          <span style={{ fontFamily: UI.fontUi, fontSize: 9, letterSpacing: '0.12em', color: UI.inkFaint }}>{p.l}</span>
+        </div>
+      ) : (
+        <div key={idx} style={{ display: 'flex', gap: 4 }}>
+          {[0, 1, 2].map(j => <div key={j} style={{ width: 5, height: 5, borderRadius: '50%', background: 'rgba(var(--accent-rgb),0.5)' }} />)}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 const TOUR_VISUALS = {
+  welcome: TourVisualWelcome, planTab: TourVisualPlanTab, planCreate: TourVisualPlanCreate,
+  planWizard: TourVisualPlanWizard, planHistory: TourVisualPlanHistory, workoutIntro: TourVisualWorkoutIntro,
+  healthIntro: TourVisualHealthIntro, healthOverview: TourVisualHealthOverview, healthLogDay: TourVisualHealthLogDay,
+  healthMacros: TourVisualHealthMacros, coachingIntro: TourVisualCoachingIntro,
   days: TourVisualDays, exercises: TourVisualExercises, drag: TourVisualDrag,
   planLibrary: TourVisualPlanLibrary, planTemplates: TourVisualPlanTemplates,
   planFlexMeso: TourVisualPlanFlexMeso, planVersions: TourVisualPlanVersions,
