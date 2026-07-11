@@ -15,13 +15,13 @@ window.TOURS = {
     {
       target: null,
       title: 'Welcome to ZANE',
-      body: "Let's take a quick look around — two minutes and you'll know how to build your first training plan.",
+      body: "Let's take a quick look around, two minutes and you'll know how to build your first training plan.",
     },
     {
       route: 'home',
       target: 'tab-plan',
       title: 'The Plan tab',
-      body: 'Your training hub. Plans, training days, exercises, and your exercise library — all in one place.',
+      body: 'Your training hub. Plans, training days, exercises, and your exercise library, all in one place.',
       placement: 'top',
     },
     {
@@ -34,24 +34,24 @@ window.TOURS = {
     {
       target: null,
       title: 'A guided setup',
-      body: 'Tap + and a quick walkthrough builds your plan with you: name it, pick how it moves (Cycle, Weekdays, or Flexible), choose a training split, and optionally run it as a mesocycle. It lays out the days, then you fill in the exercises.',
+      body: 'Tap + and you choose how to start: a ready-made Program, a Template split, or Custom for the guided build. Custom walks you through it: name your plan, pick how it moves (Cycle, Weekdays, or Flexible), choose a training split, and optionally run it as a mesocycle. It lays out the days, then you fill in the exercises.',
     },
     {
       target: null,
       title: 'Add training days',
-      body: 'After creating your plan, use "+ Day" to add training days. Name each one — PUSH, PULL, UPPER, or A / B / C.',
+      body: 'After creating your plan, use "+ Add day" to add training days. Name each one: PUSH, PULL, UPPER, or A / B / C.',
       visual: 'days',
     },
     {
       target: null,
       title: 'Fill each day with exercises',
-      body: 'Tap a day to open it, then add exercises. Search your exercise library, create a new one, or pick from recents. Set planned sets and reps for each.',
+      body: 'Tap a day to open it, then add exercises. Search your library, create a new one, or pull from the built-in exercise database. For each exercise set planned sets and reps. You can also pin an intensity technique per set (Drop Set, Myo-Reps, AMRAP and more) and it arms itself automatically when you train that day.',
       visual: 'exercises',
     },
     {
       target: null,
       title: 'The Exercise Library',
-      body: "Every exercise lives here — search, filter by muscle, equipment or rest size, and a Recent tab for what you've logged lately. Tap Select to multi-select a batch: bulk-edit them one after another, or delete several at once. Each exercise has muscle group, size, equipment, movement type and rep-target fields, plus an optional YouTube link that shows as a form-check button during training.",
+      body: "Every exercise lives here: search, filter by muscle, equipment or rest size, and a Recent tab for what you've logged lately. Tap Select to multi-select a batch: bulk-edit them one after another, or delete several at once. Each exercise has muscle group, size, equipment, movement type fields, plus a logging mode and an optional YouTube link that shows as a form-check button during training.",
       visual: 'planLibrary',
     },
     {
@@ -63,13 +63,13 @@ window.TOURS = {
     {
       target: null,
       title: 'Workout Templates',
-      body: 'Finish a freestyle session and you can save it as a template — every exercise and rep scheme included. Reuse it later from Quick Actions → Workout → Freestyle → From template, or pull it straight into a plan day: open the day\'s import picker and switch to the Templates tab.',
+      body: 'Finish a freestyle session and you can save it as a template, every exercise and rep scheme included. Reuse it later from Quick Actions → Workout → Freestyle → From template, or pull it straight into a plan day: open the day\'s import picker and switch to the Templates tab.',
       visual: 'planTemplates',
     },
     {
       target: null,
       title: 'Flexible & Mesocycle Plans',
-      body: 'In a plan\'s Options, "Flexible schedule" drops fixed days entirely — your next workout just waits until you log it, with an optional weekly-sessions goal for adherence tracking. "Mesocycle" turns on a 4–8 week block with RIR targets and the in-session check-ins from the workout tour — auto-regulating your sets as the block progresses.',
+      body: 'In a plan\'s Options, "Flexible schedule" drops fixed days entirely: your next workout just waits until you log it, with an optional weekly-sessions goal for adherence tracking. "Mesocycle" turns on a 4-8 week block with RIR targets and the in-session check-ins from the workout tour, auto-regulating your sets as the block progresses.',
       visual: 'planFlexMeso',
     },
     {
@@ -81,14 +81,14 @@ window.TOURS = {
     {
       target: null,
       title: 'Plan Backups',
-      body: 'Every time your training days change, a snapshot is saved automatically. Tap Backups in the plan viewer to preview or restore an older day layout — pick the date it should take effect from, done.',
+      body: 'Every time your training days change, a snapshot is saved automatically. Tap Backups in the plan viewer to preview or restore an older day layout, pick the date it should take effect from, done.',
       visual: 'planBackups',
     },
     {
       route: 'home',
       target: 'tab-hist',
       title: 'Your training history',
-      body: 'Every session is automatically logged here — sets, reps, volume, and personal records over time.',
+      body: 'Every session is automatically logged here: sets, reps, volume, and personal records over time.',
       placement: 'top',
     },
     {
@@ -103,7 +103,7 @@ window.TOURS.doWorkout = [
   {
     target: null,
     title: 'Workout Tour',
-    body: "Let's walk through a complete training session — from the first warmup set to the well-done screen.",
+    body: "Let's walk through a complete training session, from the first warmup set to the well-done screen.",
   },
   {
     target: null,
@@ -114,13 +114,13 @@ window.TOURS.doWorkout = [
   {
     target: null,
     title: 'The Training Screen',
-    body: 'After the warmup you land here. Exercise chips run across the top — tap any to jump to it. Below is the exercise card with your set rows: set number, last-time reference, weight, reps, done button, and a − to remove that set.',
+    body: 'After the warmup you land here. Exercise chips run across the top. Tap any to jump to it. Below is the exercise card with your set rows: set number, last-time reference, weight, reps, done button, and a − to remove that set.',
     visual: 'trainOverview',
   },
   {
     target: null,
     title: 'Logging a Set',
-    body: 'Tap a set row to activate it — the weight field gets a highlighted underline in your accent color. Enter weight, tap the reps field, enter reps. The keyboard auto-advances between fields and can confirm the set in one tap.',
+    body: 'Tap a set row to activate it: the weight field gets a highlighted underline in your accent color. Enter weight, tap the reps field, enter reps. The keyboard auto-advances between fields and can confirm the set in one tap.',
     visual: 'trainLogSet',
   },
   {
@@ -132,25 +132,25 @@ window.TOURS.doWorkout = [
   {
     target: null,
     title: 'Plate Calculator',
-    body: 'Opens from the dumbbell key on the keyboard. Shows which plates to load on each side of the bar as colored circles — calculated from your available equipment.',
+    body: 'Opens from the dumbbell key on the keyboard. Shows which plates to load on each side of the bar as colored circles, calculated from your available equipment.',
     visual: 'trainPlates',
   },
   {
     target: null,
     title: 'Add & Remove Sets',
-    body: 'The + button below the sets adds a new set (duplicating the last one). Each set row has a − button on the right — tap it to remove that set.',
+    body: 'The + button below the sets adds a new set (duplicating the last one). Each set row has a − button on the right, tap it to remove that set.',
     visual: 'trainSets',
   },
   {
     target: null,
     title: 'Intensity Techniques',
-    body: "Tap INTENSITY above the sets to go beyond a plain working set. Drop Set descends the weight and keeps the reps coming. Lengthened Partials adds partial reps in the stretch after your full reps. Myo Rep (and Myo Match, once you've done one) chains activation sets with mini bursts to failure. You can also pair two exercises into a Superset — or three into a Giant Set — with no rest between them.",
+    body: "Tap INTENSITY below the sets to go beyond a plain working set. Drop Set descends the weight and keeps the reps coming. Myo Reps (and Myo Rep Match after one) chain activation sets with mini bursts to failure. AMRAP Variations run repeated all-out rounds, optionally switching the movement each round. Lengthened Partials add partial reps in the stretch, and Weighted Stretch holds a loaded stretch. You can also pair two exercises into a Superset, or three into a Giant Set, with no rest between them.",
     visual: 'trainIntensity',
   },
   {
     target: null,
     title: 'Exercise Notes',
-    body: 'The Note button sits to the right of the + button, below the sets. Tap it to add a session note or a permanent exercise note — cues, tempo, substitutions. The note is shown every time you train that exercise.',
+    body: 'The Note button sits to the right of the + button, below the sets. Tap it to add a session note or a permanent exercise note, cues, tempo, substitutions. The note is shown every time you train that exercise.',
     visual: 'trainNotes',
   },
   {
@@ -168,25 +168,25 @@ window.TOURS.doWorkout = [
   {
     target: null,
     title: 'Mesocycle Check-ins',
-    body: "Running a mesocycle (turn it on in a plan's Options)? A short check-in can pop up after a muscle group's sets — soreness carryover, joint discomfort, and how the pump and workload felt. Your honest answers quietly adjust next session's sets, and repeated joint pain or a weak pump on an exercise flags it as a swap candidate.",
+    body: "Running a mesocycle (turn it on in a plan's Options)? A short check-in can pop up after a muscle group's sets, soreness carryover, joint discomfort, and how the pump and workload felt. Your honest answers quietly adjust next session's sets, and repeated joint pain or a weak pump on an exercise flags it as a swap candidate.",
     visual: 'trainMeso',
   },
   {
     target: null,
     title: 'Finish Your Workout',
-    body: "Once you reach the last exercise, a 'Finish →' button appears in the footer. Tap it to end the session — you'll see a summary of sets, volume, and duration.",
+    body: "Once you reach the last exercise, a 'Finish →' button appears in the footer. Tap it to end the session, you'll see a summary of sets, volume, and duration.",
     visual: 'trainEnd',
   },
   {
     target: null,
     title: 'Rate Your Session',
-    body: 'Pick how the workout felt — Easy to Max Effort. This data powers your training load overview and helps identify fatigue patterns over time.',
+    body: 'Pick how the workout felt, from Easy to Max. This data powers your training load overview and helps identify fatigue patterns over time.',
     visual: 'trainFeel',
   },
   {
     target: null,
     title: 'Save as a Template',
-    body: 'Finished a freestyle session? A "Save as template" button appears right on the well-done screen. Name it and every exercise, set and rep scheme is saved — start from it again later via Quick Actions → Workout → Freestyle → From template, or import it straight into a plan day.',
+    body: 'Finished a freestyle session? A "Save as template" button appears right on the well-done screen. Name it and every exercise, set and rep scheme is saved, start from it again later via Quick Actions → Workout → Freestyle → From template, or import it straight into a plan day.',
     visual: 'trainSaveTemplate',
   },
   {
@@ -201,7 +201,7 @@ window.TOURS.quickActions = [
   {
     target: null,
     title: 'Quick Actions',
-    body: "One gesture, every shortcut. Swipe down anywhere on the Home screen to log today's data, start a workout, catch up on a missed day, log cardio, or message your coach — without digging through tabs.",
+    body: "One gesture, every shortcut. Swipe down anywhere on the Home screen to log today's data, start a workout, catch up on a missed day, log cardio, or message your coach, without digging through tabs.",
     visual: 'quickActionsSwipe',
   },
   {
@@ -213,31 +213,31 @@ window.TOURS.quickActions = [
   {
     target: null,
     title: 'Daily Log',
-    body: "Always there. Opens today's health entry straight away — body weight, macros, water and steps — no need to go through the Health tab first.",
+    body: "Always there. Opens today's health entry straight away, body weight, macros, water and steps, no need to go through the Health tab first.",
     visual: 'quickActionsDailyLog',
   },
   {
     target: null,
     title: 'Workout',
-    body: '"From plan" lets you pick any day from your schedule, not just today\'s — you decide at the end whether it replaces the scheduled day or just counts as a bonus session. "Freestyle" opens a blank session, or one seeded from a saved template.',
+    body: '"From plan" lets you pick any day from your schedule, not just today\'s, you decide at the end whether it replaces the scheduled day or just counts as a bonus session. "Freestyle" opens a blank session, or one seeded from a saved template.',
     visual: 'quickActionsWorkout',
   },
   {
     target: null,
     title: 'Backlog Session',
-    body: "Shows up only when a day from your plan went unlogged. One tap logs it retroactively, dated back to when it should've happened — pick which one if there's more than one.",
+    body: "Shows up only when a day from your plan went unlogged. One tap logs it retroactively, dated back to when it should've happened, pick which one if there's more than one.",
     visual: 'quickActionsBacklog',
   },
   {
     target: null,
     title: 'Cardio',
-    body: 'Always there. Start a live cardio timer or log a past session manually — running, cycling, rowing, whatever you tracked.',
+    body: 'Always there. Start a live cardio timer or log a past session manually, running, cycling, rowing, whatever you tracked.',
     visual: 'quickActionsCardio',
   },
   {
     target: null,
     title: 'Check-in',
-    body: "Shows up only while a weekly check-in is due — as a coaching client, self-coaching, or both. One tap drops you straight into the form.",
+    body: "Shows up only while a weekly check-in is due, as a coaching client, self-coaching, or both. One tap drops you straight into the form.",
     visual: 'quickActionsCheckin',
   },
   {
@@ -257,12 +257,12 @@ window.TOURS.healthTab = [
   {
     target: null,
     title: 'Health Tab Tour',
-    body: "Let's walk through the Health tab — your daily log for weight, nutrition, steps, and cardio.",
+    body: "Let's walk through the Health tab, your daily log for weight, nutrition, steps, and cardio.",
   },
   {
     target: null,
     title: 'Enable the Health tab',
-    body: 'The Health tab is hidden by default. Go to Settings → Health and toggle "Show Health tab" to pin it to the bottom navigation.',
+    body: 'The Health tab is hidden by default. Go to Settings → Health and turn on the "Health tab" toggle to pin it to the bottom navigation.',
     visual: 'healthEnable',
   },
   {
@@ -282,7 +282,7 @@ window.TOURS.healthTab = [
   {
     target: null,
     title: 'Daily Log Sheet',
-    body: 'Fill in what you tracked today — body weight, step count, water intake, and your macros. Missed a day? Navigate to any past date and log it retroactively.',
+    body: 'Fill in what you tracked today, body weight, step count, water intake, and your macros. Missed a day? Navigate to any past date and log it retroactively.',
     visual: 'healthLog',
   },
   {
@@ -294,19 +294,19 @@ window.TOURS.healthTab = [
   {
     target: null,
     title: 'Cardio Logging',
-    body: "Log cardio from the Home screen — tap the golden CARDIO button at the bottom. Start a live timer or log manually. The Health tab shows your cardio minutes as a chart. Want a structured plan that ramps toward a goal instead? See the Cardio Plans tour in Settings → How to…",
+    body: "Log cardio from the Home screen: swipe down for Quick Actions and tap Cardio. Start a live timer or log a past session manually. The Health tab shows your cardio minutes as a chart. Want a structured plan that ramps toward a goal instead? See the Cardio Plans tour in Settings → How to…",
     visual: 'healthCardio',
   },
   {
     target: null,
     title: 'Week & Long-term View',
-    body: 'The Week card at the top summarises the current period — training sessions done, macro adherence, and cardio minutes. Switch to 1M or 3M for a longer-range overview.',
+    body: 'The Week card at the top summarises the current period: training sessions done, macro adherence, and cardio minutes. Switch to 1M or 3M for a longer-range overview.',
     visual: 'healthWeek',
   },
   {
     target: null,
     title: "You're all set!",
-    body: 'Start logging daily and let the charts fill in over time. Even partial data — just weight or steps — is useful. Find the Health tab again in the bottom nav.',
+    body: 'Start logging daily and let the charts fill in over time. Even partial data, just weight or steps, is useful. Find the Health tab again in the bottom nav.',
   },
 ];
 
@@ -314,37 +314,37 @@ window.TOURS.cardioPlans = [
   {
     target: null,
     title: 'Cardio Plans',
-    body: "Beyond logging a session, you can build a structured cardio plan — fixed weekly targets, or a progressive plan that ramps you toward a goal by a due date. Create one from the Cardio tab.",
+    body: "Beyond logging a session, you can build a structured cardio plan, fixed weekly targets, or a progressive plan that ramps you toward a goal by a due date. Create one from the Cardio tab.",
     visual: 'cardioIntro',
   },
   {
     target: null,
     title: 'Choose Your Activity',
-    body: 'Pick from Running, Walking, Cycling, Swimming, Rowing, Elliptical, Hiking — or Custom for anything else you log. Then choose the plan type: Manual (fixed weekly targets you set) or Goal (the app builds a progression for you).',
+    body: 'Pick from Running, Walking, Cycling, Swimming, Rowing, Elliptical, Hiking, or Custom for anything else you log. Then choose the plan type: Manual (fixed weekly targets you set) or Goal (the app builds a progression for you).',
     visual: 'cardioActivity',
   },
   {
     target: null,
     title: 'Manual Plan',
-    body: 'Tap the days you train, then set targets — the same distance or duration every day, or different per day. Prefer to just show up with no numbers attached? Turn targets off entirely.',
+    body: 'Tap the days you train, then set targets, the same distance or duration every day, or different per day. Prefer to just show up with no numbers attached? Turn targets off entirely.',
     visual: 'cardioManual',
   },
   {
     target: null,
     title: 'Goal Plan',
-    body: "Pick a goal type — Distance, Distance + Pace, or Duration — set your target and a due date, and the days you'll train. Then tell it your current fitness: how far or how long you can comfortably go right now.",
+    body: "Pick a goal type, Distance, Distance + Pace, or Duration, set your target and a due date, and the days you'll train. Then tell it your current fitness: how far or how long you can comfortably go right now.",
     visual: 'cardioGoal',
   },
   {
     target: null,
     title: 'Progressive Plan Preview',
-    body: "The plan ramps session by session toward your goal — capped at a sustainable ~10% increase per week — with every 4th week a lighter recovery week. If the math shows you won't reach the goal by your due date, you'll get a warning to extend the timeline.",
+    body: "The plan ramps session by session toward your goal, capped at a sustainable ~10% increase per week, with every 4th week a lighter recovery week. If the math shows you won't reach the goal by your due date, you'll get a warning to extend the timeline.",
     visual: 'cardioPreview',
   },
   {
     target: null,
     title: 'One Active Plan',
-    body: "Only one plan is active at a time — it's the one shown on the Home screen widget and pre-fills your cardio logs. Activate or deactivate any plan from its detail sheet; a new plan auto-activates if nothing else is running.",
+    body: "Only one plan is active at a time, it's the one shown on the Home screen widget and pre-fills your cardio logs. Activate or deactivate any plan from its detail sheet; a new plan auto-activates if nothing else is running.",
     visual: 'cardioActivate',
   },
   {
@@ -358,31 +358,31 @@ window.TOURS.statusModes = [
   {
     target: null,
     title: 'Deload, Sick & Vacation',
-    body: "Life doesn't always follow the plan. Three modes let the app know when you're taking it easier — without losing your progress or skewing your stats.",
+    body: "Life doesn't always follow the plan. Three modes let the app know when you're taking it easier, without losing your progress or skewing your stats.",
     visual: 'statusIntro',
   },
   {
     target: null,
     title: 'Deload Week',
-    body: '"Start deload week" sits on your active plan card. It trains your normal plan at ~50% load for one cycle — weights pre-fill light and a DELOAD · 50% badge shows during training. It excludes itself from progression, so the week after picks up right where you left off.',
+    body: '"Start deload week" sits on your active plan card. It trains your normal plan at ~50% load for one cycle, weights pre-fill light and a DELOAD · 50% badge shows during training. It excludes itself from progression, so the week after picks up right where you left off.',
     visual: 'statusDeload',
   },
   {
     target: null,
     title: 'The Deload Prompt',
-    body: "Two things can offer you one. Finish the last week of a mesocycle and \"Mesocycle complete!\" pops up right on the session-end screen, offering a deload before Meso 2 starts. Independent of that, roughly every 8 training cycles without one, a general nudge asks if you're due a break. Accept either, or dismiss and keep training — you'll be asked again next time.",
+    body: "Two things can offer you one. Finish the last week of a mesocycle and \"Mesocycle complete!\" pops up right on the session-end screen, offering a deload before Meso 2 starts. Independent of that, roughly every 8 training cycles without one, a general nudge asks if you're due a break. Accept either, or dismiss and keep training. You'll be asked again next time.",
     visual: 'statusNudge',
   },
   {
     target: null,
     title: 'Sick & Vacation',
-    body: "For time off training entirely, mark it right on the day: Health tab → tap a day → Edit Day → the Sick / Normal / Vacation toggle up top. Unlike deload, these don't touch your weights — they just keep sick/vacation days out of your training-adherence score. Review or edit past periods any time in Settings → Health → Sick & Vacation periods.",
+    body: "For time off training entirely, mark it right on the day: Health tab → tap a day → Edit Day → the Sick / Normal / Vacation toggle up top. Unlike deload, these don't touch your weights, they just keep sick/vacation days out of your training-adherence score. Review or edit past periods any time in Settings → Health → Sick & Vacation periods.",
     visual: 'statusSickVacation',
   },
   {
     target: null,
     title: "You're all set!",
-    body: 'Use these whenever training takes a back seat — your stats and progression stay honest either way. Find this tour again in Settings → How to…',
+    body: 'Use these whenever training takes a back seat, your stats and progression stay honest either way. Find this tour again in Settings → How to…',
   },
 ];
 
@@ -390,19 +390,19 @@ window.TOURS.customize = [
   {
     target: null,
     title: 'Customize ZANE',
-    body: "A quick pass through the settings worth knowing about — the ones that change how the app looks, and the ones that change how it trains you.",
+    body: "A quick pass through the settings worth knowing about, the ones that change how the app looks, and the ones that change how it trains you.",
     visual: 'customIntro',
   },
   {
     target: null,
     title: 'Appearance',
-    body: 'Pick an accent color and a theme — Dark, OLED Black, or a light cream. Your unit preference (kg/lbs) lives here too — it only relabels displayed weights, your logged numbers never get converted.',
+    body: 'Pick an accent color and a theme: Dark, OLED black, or a light cream. Your unit preference (Metric, Imperial, or Mixed) lives here too. It only relabels displayed weights, your logged numbers never get converted.',
     visual: 'customAppearance',
   },
   {
     target: null,
     title: 'Rest Timers',
-    body: 'Set default rest durations by exercise size — Big compounds, Medium, and Small isolation moves each get their own timer. Tag an exercise with a size in the library and the right rest applies automatically.',
+    body: 'Set default rest durations by exercise size, Big compounds, Medium, and Small isolation moves each get their own timer. Tag an exercise with a size in the library and the right rest applies automatically.',
     visual: 'customRest',
   },
   {
@@ -414,19 +414,19 @@ window.TOURS.customize = [
   {
     target: null,
     title: 'Smart Progression',
-    body: 'Turn this on and the app bumps your weight automatically once every set clears a rep threshold above target — e.g. target 8 reps, range top +4, weight goes up once all sets hit 12. Different from Mesocycle: this is the everyday auto-progression, Mesocycle is the structured multi-week block with RIR targets.',
+    body: 'Turn this on and the app bumps your weight automatically once every set clears a rep threshold above target, e.g. target 8 reps, range top +4, weight goes up once all sets hit 12. Different from Mesocycle: this is the everyday auto-progression, Mesocycle is the structured multi-week block with RIR targets.',
     visual: 'customProgression',
   },
   {
     target: null,
     title: 'Paceguard',
-    body: 'Want tempo control on your reps? Paceguard beeps out the eccentric (down) and concentric (up) phase of each rep at durations you set — useful for slowing down and controlling form.',
+    body: 'Want tempo control on your reps? Paceguard beeps out the eccentric (down) and concentric (up) phase of each rep at durations you set, useful for slowing down and controlling form.',
     visual: 'customPaceguard',
   },
   {
     target: null,
     title: "You're all set!",
-    body: 'Small settings, real difference — worth a look once, then forget about them. Find this tour again in Settings → How to…',
+    body: 'Small settings, real difference, worth a look once, then forget about them. Find this tour again in Settings → How to…',
   },
 ];
 
@@ -434,7 +434,7 @@ window.TOURS.coaching = [
   {
     target: null,
     title: 'Coaching Tour',
-    body: "Coaching links a coach and a client inside the app — shared training data, weekly check-ins, macro targets, and a private message thread. Let's walk through both sides.",
+    body: "Coaching links a coach and a client inside the app, shared training data, weekly check-ins, macro targets, and a private message thread. Let's walk through both sides.",
   },
   {
     target: null,
@@ -451,31 +451,31 @@ window.TOURS.coaching = [
   {
     target: null,
     title: 'As a client: accept an invite',
-    body: "When a coach invites you, this request pops up next time you open the app. Accept and your coach can see your training, sessions and plans — and adjust them for you. Decline and nothing is shared.",
+    body: "When a coach invites you, this request pops up next time you open the app. Accept and your coach can see your training, sessions and plans, and adjust them for you. Decline and nothing is shared.",
     visual: 'coachInviteAccept',
   },
   {
     target: null,
     title: 'Your weekly check-in',
-    body: "Each week you fill in a short check-in — body weight, recovery markers like sleep and hunger, and how training went. If you use the Health tab, your daily logs prefill most of it automatically.",
+    body: "Each week you fill in a short check-in, body weight, recovery markers like sleep and hunger, and how training went. If you use the Health tab, your daily logs prefill most of it automatically.",
     visual: 'coachCheckin',
   },
   {
     target: null,
     title: 'Macros from your coach',
-    body: 'Your coach can set daily macro targets — separate numbers for training and rest days. They appear in your Coaching tab and feed straight into the Health tab adherence tracking.',
+    body: 'Your coach can set daily macro targets, separate numbers for training and rest days. They appear in your Coaching tab and feed straight into the Health tab adherence tracking.',
     visual: 'coachMacros',
   },
   {
     target: null,
     title: 'Notes & messaging',
-    body: 'Every coaching relationship has a private thread. Coach and client leave notes on sessions, plans, or just talk — questions, cues, weekly feedback. Unread notes ping you on the home screen.',
+    body: 'Every coaching relationship has a private thread. Coach and client leave notes on sessions, plans, or just talk: questions, cues, weekly feedback. Unread messages light up a badge on the Coaching tab (and on the client\'s card), so nothing slips by.',
     visual: 'coachNotes',
   },
   {
     target: null,
     title: 'As a coach: invite a client',
-    body: 'Open the Coaching tab and tap the add-person icon. Enter the email of someone who already has an account — they get the invite the next time they open the app.',
+    body: 'Open the Coaching tab and tap the add-person icon. Enter the email of someone who already has an account, they get the invite the next time they open the app.',
     visual: 'coachInvite',
   },
   {
@@ -487,60 +487,65 @@ window.TOURS.coaching = [
   {
     target: null,
     title: 'Review check-ins & trends',
-    body: "Inside a client, their check-in history becomes trend charts — weight, recovery markers, performance week over week. Spot a bad sleep streak or a stalling weight at a glance.",
+    body: "Inside a client, their check-in history becomes trend charts, weight, recovery markers, performance week over week. Spot a bad sleep streak or a stalling weight at a glance.",
     visual: 'coachTrends',
   },
   {
     target: null,
     title: 'Customize the check-in form',
-    body: "The check-in form isn't fixed. Per client you can add, remove, or reorder fields in the schema builder — drop in a custom scale, a number, or a note field for exactly what you want to track.",
+    body: "The check-in form isn't fixed. Per client you can add, remove, or reorder fields in the schema builder: drop in a custom scale, a number, or a note field for exactly what you want to track. Save a form you like as a template (up to 5) and reuse it for any client.",
     visual: 'coachSchema',
   },
   {
     target: null,
     title: 'Be your own coach',
-    body: 'No coach? Flip on "Be your own coach" in Settings → Coaching. You get the whole coach dashboard — trends, macros, check-ins and notes — pointed at your own training. Great for self-guided periodization.',
+    body: 'No coach? Flip on "Be your own coach" in Settings → Coaching. You get the whole coach dashboard, trends, macros, check-ins and notes, pointed at your own training. Great for self-guided periodization.',
     visual: 'coachSelf',
   },
   {
     target: null,
     title: "You're all set!",
-    body: 'Coach others, get coached, or run it solo — all from one tab. Find this tour again any time in Settings → How to…',
+    body: 'Coach others, get coached, or run it solo, all from one tab. Find this tour again any time in Settings → How to…',
   },
 ];
 
 window.TOURS.installPwaIos = [
   {
     target: null,
-    title: 'Install on iPhone — Step 1',
-    body: 'Open Zane in Safari — the default iOS browser. Chrome and Firefox cannot install apps on iPhone.',
+    title: 'Install on iPhone, Step 1',
+    body: 'Open Zane in Safari, the default iOS browser. Chrome and Firefox cannot install apps on iPhone.',
     visual: 'pwaIosSafari',
   },
   {
     target: null,
     title: 'Tap the Share button',
-    body: 'Tap the Share button — the square with an arrow pointing up. Depending on your iOS version, it sits in the bottom toolbar or in a sub menu in the address bar area.',
+    body: 'Tap the Share button, the square with an arrow pointing up. Depending on your iOS version, it sits in the bottom toolbar or in a sub menu in the address bar area.',
     visual: 'pwaIosShare',
   },
   {
     target: null,
     title: 'Tap "Add to Home Screen"',
-    body: 'Scroll through the share sheet and tap "Add to Home Screen". If you don\'t see it, scroll the bottom row of app icons.',
+    body: 'Scroll through the share sheet and tap "Add to Home Screen". If you don\'t see it, scroll further down the list of actions.',
     visual: 'pwaIosAddToHome',
   },
   {
     target: null,
     title: 'Tap "Add"',
-    body: 'Confirm the name and tap "Add" in the top-right corner. Zane appears on your home screen instantly — no App Store needed.',
+    body: 'Confirm the name and tap "Add" in the top-right corner. Zane appears on your home screen instantly, no App Store needed.',
     visual: 'pwaIosAdd',
+  },
+  {
+    target: null,
+    title: "You're all set!",
+    body: 'Open Zane from your home screen and it runs like a native app: fullscreen, its own icon, offline-ready. Find this tour again in Settings → How to…',
   },
 ];
 
 window.TOURS.installPwaAndroid = [
   {
     target: null,
-    title: 'Install on Android — Step 1',
-    body: 'Open Zane in Chrome — the default Android browser. Chrome gives the best installation experience.',
+    title: 'Install on Android, Step 1',
+    body: 'Open Zane in Chrome, the default Android browser. Chrome gives the best installation experience.',
     visual: 'pwaAndroidChrome',
   },
   {
@@ -558,8 +563,13 @@ window.TOURS.installPwaAndroid = [
   {
     target: null,
     title: 'Tap "Install"',
-    body: 'A dialog appears with the Zane icon and name. Tap "Install" — done. Zane opens like a native app from now on.',
+    body: 'A dialog appears with the Zane icon and name. Tap "Install", done. Zane opens like a native app from now on.',
     visual: 'pwaAndroidInstall',
+  },
+  {
+    target: null,
+    title: "You're all set!",
+    body: 'Open Zane from your home screen and it runs like a native app: fullscreen, its own icon, offline-ready. Find this tour again in Settings → How to…',
   },
 ];
 
@@ -1257,7 +1267,7 @@ function TourVisualHealthEnable() {
           <span style={{ fontSize: 9, fontFamily: UI.fontUi, letterSpacing: '0.12em', color: UI.inkFaint }}>SETTINGS → HEALTH</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', padding: '12px 14px', gap: 10 }}>
-          <span style={{ flex: 1, fontSize: 13, fontFamily: UI.fontUi, color: UI.ink }}>Show Health tab</span>
+          <span style={{ flex: 1, fontSize: 13, fontFamily: UI.fontUi, color: UI.ink }}>Health tab</span>
           <div style={{ width: 44, height: 26, borderRadius: 13, background: 'var(--accent)', position: 'relative', flexShrink: 0 }}>
             <div style={{ position: 'absolute', right: 3, top: 3, width: 20, height: 20, borderRadius: '50%', background: '#0a0805' }} />
           </div>
