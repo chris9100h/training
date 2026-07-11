@@ -2287,7 +2287,10 @@ function TourCrashCard({ onClose }) {
 function TourCompleteScreen({ title, onDone }) {
   const doneRef = useRefOB(onDone);
   doneRef.current = onDone;
-  const close = () => { try { doneRef.current && doneRef.current(); } catch (_) {} };
+  // Fire onDone at most once, even under wild tapping (tap-anywhere plus the
+  // timer could otherwise call it repeatedly, each a store write and sync).
+  const firedRef = useRefOB(false);
+  const close = () => { if (firedRef.current) return; firedRef.current = true; try { doneRef.current && doneRef.current(); } catch (_) {} };
   useEffectOB(() => {
     const t = setTimeout(close, 3000);
     return () => clearTimeout(t);
@@ -2329,7 +2332,8 @@ function TourCompleteScreen({ title, onDone }) {
 function TourExitButton({ onDone }) {
   const doneRef = useRefOB(onDone);
   doneRef.current = onDone;
-  const close = (e) => { if (e) { e.preventDefault(); e.stopPropagation(); } try { doneRef.current && doneRef.current(); } catch (_) {} };
+  const firedRef = useRefOB(false);
+  const close = (e) => { if (e) { e.preventDefault(); e.stopPropagation(); } if (firedRef.current) return; firedRef.current = true; try { doneRef.current && doneRef.current(); } catch (_) {} };
   return (
     <button onPointerDown={close} aria-label="Exit tour" style={{
       position: 'fixed', zIndex: 10002,
@@ -2360,69 +2364,73 @@ function OnboardingTourInner({ tourKey, onDone }) {
   const step = steps[stepIdx];
   const isLast = stepIdx === steps.length - 1;
 
-  const advance = () => { if (isLast) { onDone(); } else { setStepIdx(i => i + 1); } };
-  const goBack = () => { if (stepIdx > 0) setStepIdx(i => i - 1); };
+  // Clamp so wild rapid taps can never push stepIdx past the final step. Taps
+  // batched into a single React flush call this functional updater N times;
+  // without the clamp that overshoots to an undefined step, renders null, and
+  // strands the tour (onDone never fires, the deck never closes). Verified in a
+  // jsdom harness: 20 taps in one flush land on the last step with the clamp and
+  // overshoot to null without it.
+  const advance = () => { if (isLast) { onDone(); } else { setStepIdx(i => Math.min(i + 1, steps.length - 1)); } };
+  const goBack = () => { setStepIdx(i => Math.max(0, i - 1)); };
 
   if (!step) return null;
 
   // Final step: the shared auto-dismissing celebration (3s timer + tap-anywhere).
   if (isLast) return <TourCompleteScreen title={step.title} onDone={onDone} />;
 
-  // Every other step is a self-contained fullscreen card: progress, title, body,
-  // the optional illustration, and a bottom button row. No live spotlight, no
-  // navigation, no DOM measuring, no rAF retries, so there is nothing left that
-  // can loop or trap. A guide is now just "card in, card out" plus the exit
-  // hatch. Handlers fire on onPointerDown (onClick is dead on some devices,
-  // proven this session), and the row is inline, never a nested component, so a
-  // re-render can never remount it and drop a tap that straddles the remount.
+  // Every other step is a self-contained card floating on a dimmed backdrop:
+  // progress bar, title, body, the optional illustration, and a button row. No
+  // live spotlight, no navigation, no DOM measuring, no rAF loops, nothing that
+  // can loop or trap. Handlers fire on onPointerDown (onClick is dead on some
+  // devices) and the row is inline, never a nested component, so a re-render
+  // can never remount it and drop a straddling tap.
   const tap = (fn) => (e) => { e.preventDefault(); e.stopPropagation(); fn(); };
   const VisualComp = step.visual ? TOUR_VISUALS[step.visual] : null;
+  const pct = Math.round(((stepIdx + 1) / steps.length) * 100);
+  const lastCard = stepIdx === steps.length - 2;
   return (
     <div style={{
-      position: 'fixed', top: 'env(safe-area-inset-top, 0px)', left: 0, right: 0, bottom: 0, zIndex: 10000,
-      background: 'var(--bg)',
-      display: 'flex', flexDirection: 'column',
+      position: 'fixed', inset: 0, zIndex: 10000, background: 'rgba(0,0,0,0.82)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      padding: 'calc(env(safe-area-inset-top, 0px) + 20px) 20px calc(env(safe-area-inset-bottom, 0px) + 20px)',
     }}>
       <div style={{
-        flex: '1 1 auto', minHeight: 0, overflowY: 'auto',
-        padding: '30px 26px 18px',
-        display: 'flex', flexDirection: 'column', gap: 16,
+        width: '100%', maxWidth: 360, maxHeight: '100%',
+        background: UI.bgRaised, border: `1px solid ${UI.hairStrong}`, borderRadius: 8,
+        boxShadow: '0 24px 64px rgba(0,0,0,0.55), 0 0 0 0.5px rgba(var(--accent-rgb),0.12)',
+        display: 'flex', flexDirection: 'column', overflow: 'hidden', animation: 'fadeUp 0.25s ease',
       }}>
-        <div className="micro-gold">{stepIdx + 1} / {steps.length}</div>
-        <div style={{ fontFamily: UI.fontDisplay, fontSize: 30, color: UI.ink, fontWeight: 400, lineHeight: 1.08 }}>
-          {step.title}
-        </div>
-        <div style={{ fontSize: 14, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.6, whiteSpace: 'pre-line' }}>
-          {step.body}
-        </div>
-        {VisualComp && (
-          <div style={{ marginTop: 4 }}>
-            <TourBoundary fallback={null}><VisualComp /></TourBoundary>
+        <div style={{ flex: '1 1 auto', minHeight: 0, overflowY: 'auto', padding: '22px 22px 8px', display: 'flex', flexDirection: 'column', gap: 13 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ flex: 1, height: 3, background: UI.hairStrong, borderRadius: 999, overflow: 'hidden' }}>
+              <div style={{ height: '100%', width: pct + '%', background: 'var(--accent)', borderRadius: 999, transition: 'width 0.25s ease' }} />
+            </div>
+            <div className="micro-gold" style={{ flexShrink: 0 }}>{stepIdx + 1} / {steps.length}</div>
           </div>
-        )}
-      </div>
-      <div style={{
-        flexShrink: 0,
-        padding: '14px 26px calc(env(safe-area-inset-bottom, 0px) + 20px)',
-        borderTop: `0.5px solid ${UI.hair}`,
-        background: UI.bgRaised,
-      }}>
-        <div style={{ display: 'flex', gap: 8 }}>
+          <div className="display" style={{ fontSize: 26, color: UI.ink, lineHeight: 1.1 }}>{step.title}</div>
+          <div style={{ fontSize: 14, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.55, whiteSpace: 'pre-line' }}>{step.body}</div>
+          {VisualComp && (
+            <div style={{ marginTop: 4 }}>
+              <TourBoundary fallback={null}><VisualComp /></TourBoundary>
+            </div>
+          )}
+        </div>
+        <div style={{ flexShrink: 0, padding: '12px 22px 16px', borderTop: `0.5px solid ${UI.hair}`, display: 'flex', gap: 8 }}>
           {stepIdx > 0 && (
             <button onPointerDown={tap(goBack)} aria-label="Back" style={{
-              flex: '0 0 auto', padding: '11px 15px', borderRadius: 6,
+              flex: '0 0 auto', padding: '11px 16px', borderRadius: 6,
               border: `1px solid ${UI.hairStrong}`, cursor: 'pointer', background: 'transparent',
               color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 14, fontWeight: 600,
               WebkitTapHighlightColor: 'transparent', touchAction: 'manipulation',
             }}>←</button>
           )}
           <button onPointerDown={tap(advance)} style={{
-            flex: 2, padding: '11px 0', borderRadius: 6, border: 'none', cursor: 'pointer',
+            flex: 1, padding: '11px 0', borderRadius: 6, border: 'none', cursor: 'pointer',
             background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)',
-            boxShadow: `0 6px 20px rgba(var(--accent-rgb),0.4)`,
+            boxShadow: '0 6px 18px rgba(var(--accent-rgb),0.38)',
             color: '#0a0805', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 700, letterSpacing: '0.08em',
             WebkitTapHighlightColor: 'transparent', touchAction: 'manipulation',
-          }}>NEXT →</button>
+          }}>{lastCard ? 'FINISH →' : 'NEXT →'}</button>
         </div>
       </div>
     </div>
