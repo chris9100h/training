@@ -5289,9 +5289,18 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   {s.done && isSetPR(s) && (
                     <div aria-hidden="true" style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', overflow: 'hidden' }}>
                       {/* Same rotated display-it watermark family as the MESOCYCLE/5-3-1
-                          plan-row stamps and the RIR hero-card stamp, just scaled down
-                          for this much shorter row, at the same -22deg angle. */}
-                      <span className="display-it" style={{ fontSize: 14, fontWeight: 900, letterSpacing: '0.08em', color: UI.gold, opacity: 0.16, transform: 'rotate(-22deg)', whiteSpace: 'nowrap', userSelect: 'none' }}>PERSONAL RECORD</span>
+                          plan-row stamps and the RIR hero-card stamp, scaled down for this
+                          row. Corner brackets mirror BracketFrame (ui.jsx) at a smaller
+                          size, rotating together with the text as one rigid unit (same
+                          technique as the RIR gloss line) so it reads as a single stamp
+                          pressed at an angle, not a frame floating separately from text. */}
+                      <div style={{ position: 'relative', padding: '6px 14px', transform: 'rotate(-22deg)' }}>
+                        <div style={{ position: 'absolute', top: 0, left: 0, width: 8, height: 8, borderTop: `2px solid ${UI.gold}`, borderLeft: `2px solid ${UI.gold}`, opacity: 0.16 }} />
+                        <div style={{ position: 'absolute', top: 0, right: 0, width: 8, height: 8, borderTop: `2px solid ${UI.gold}`, borderRight: `2px solid ${UI.gold}`, opacity: 0.16 }} />
+                        <div style={{ position: 'absolute', bottom: 0, left: 0, width: 8, height: 8, borderBottom: `2px solid ${UI.gold}`, borderLeft: `2px solid ${UI.gold}`, opacity: 0.16 }} />
+                        <div style={{ position: 'absolute', bottom: 0, right: 0, width: 8, height: 8, borderBottom: `2px solid ${UI.gold}`, borderRight: `2px solid ${UI.gold}`, opacity: 0.16 }} />
+                        <span className="display-it" style={{ fontSize: 14, fontWeight: 900, letterSpacing: '0.08em', color: UI.gold, opacity: 0.16, whiteSpace: 'nowrap', userSelect: 'none', display: 'block' }}>PERSONAL RECORD</span>
+                      </div>
                     </div>
                   )}
                   {amrapArmed && (
