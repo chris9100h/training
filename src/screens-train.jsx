@@ -1502,11 +1502,27 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     return withPartials.length === 1 && withPartials[0].partials === seedVal;
   };
 
-  // See mesoChainSeedRef above. If the seed is still untouched, relocate it
-  // to the true last round; otherwise (no round carries it anymore, more
-  // than one round has a partials value, or the seeded round's value was
-  // edited away) the user has taken partials over themselves, so their rows
-  // pass through unchanged. Matched by value, not by index, since
+  // Reactively floats an untouched meso pre-seed onto a newly appended round
+  // (ADD DROP / ADD ROUND / Myo's 2nd+ mini via appendMyoRound), so the sheet
+  // always shows the prescription on the round being filled in right now
+  // instead of leaving it stuck on an earlier round until Finish silently
+  // relocates it (audit: users found the "doesn't visibly move" behavior
+  // confusing even though the committed data was already correct). A pure
+  // array transform, not itself a setState call, so callers can wrap it in
+  // their own functional updater.
+  const floatSeedOnto = (prevArr, row) => {
+    if (!seedIsUntouched(prevArr)) return [...prevArr, row];
+    const seedVal = mesoChainSeedRef.current;
+    return [...prevArr.map(d => d.partials === seedVal ? { ...d, partials: undefined } : d), { ...row, partials: seedVal }];
+  };
+
+  // See mesoChainSeedRef above. Safety net for Finish: with floatSeedOnto
+  // already keeping the seed on the newest round as it's added, this is
+  // normally a no-op by the time Finish runs. If the seed is still untouched,
+  // relocate it to the true last round; otherwise (no round carries it
+  // anymore, more than one round has a partials value, or the seeded round's
+  // value was edited away) the user has taken partials over themselves, so
+  // their rows pass through unchanged. Matched by value, not by index, since
   // rawDrops.filter() below drops incomplete rows and does not preserve
   // original positions.
   const applyMesoChainSeed = (drops) => {
@@ -1587,13 +1603,18 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // beyond-failure meso prescription is still pending, seed it there — the
   // activation round never renders a Finisher (see isActiv below), so the
   // pre-seed can't live there like it does for Drop/AMRAP; this is the
-  // earliest round that can actually show it.
+  // earliest round that can actually show it. Any later mini reuses
+  // floatSeedOnto like Drop/AMRAP, so the seed keeps following the newest
+  // round instead of sitting on the first mini until Finish.
   const appendMyoRound = (kg) => {
     setMyoDrops(prev => {
-      const seedVal = prev.length === 1 ? mesoChainSeedRef.current : 0;
       const row = { kg, reps: null };
-      if (seedVal > 0) row.partials = seedVal;
-      return [...prev, row];
+      if (prev.length === 1) {
+        const seedVal = mesoChainSeedRef.current;
+        if (seedVal > 0) row.partials = seedVal;
+        return [...prev, row];
+      }
+      return floatSeedOnto(prev, row);
     });
   };
 
@@ -6293,7 +6314,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                 <div style={{ flexShrink: 0, display: 'flex', gap: 8, padding: '4px 4px 10px' }}>
                   <button onClick={() => {
                     const newIdx = dropDropsRef.current.length;
-                    setDropDrops(prev => [...prev, { kg: null, reps: null }]);
+                    setDropDrops(prev => floatSeedOnto(prev, { kg: null, reps: null }));
                     setTimeout(() => activateDropKb(newIdx, 'kg'), 80);
                   }} style={{
                     flex: 1, padding: '8px 0', background: 'transparent',
@@ -6395,7 +6416,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   <button onClick={() => {
                     const newIdx = avDropsRef.current.length;
                     const prevKg = avDropsRef.current[avDropsRef.current.length - 1]?.kg ?? null;
-                    setAvDrops(prev => [...prev, { kg: prevKg, reps: null, label: entry.name }]);
+                    setAvDrops(prev => floatSeedOnto(prev, { kg: prevKg, reps: null, label: entry.name }));
                     setTimeout(() => activateAvKb(newIdx, 'kg'), 80);
                   }} style={{
                     flex: 1, padding: '8px 0', background: 'transparent',
