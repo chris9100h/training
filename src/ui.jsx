@@ -1144,6 +1144,27 @@ function TextInput({ value, onChange, placeholder, type = 'text', autoFocus, rev
 // Kept in sync with store.settings.unit by app.jsx on every render.
 UI.unit = () => (typeof window !== 'undefined' && window.__UNIT) || 'kg';
 
+// Water/hydration is stored canonically in ml. Imperial (lbs) users see US
+// fluid ounces (1 fl oz = 29.5735 ml); metric (kg) and mixed (kg/mi, the UK
+// profile) stay ml/L — the UK measures water in ml, not oz, and UK vs US fl oz
+// even differ. UI.unit() is the VIEWER's unit, so a coach reviewing a client's
+// hydration sees it in the coach's own unit, no client-unit plumbing needed.
+UI.FLOZ_ML = 29.5735;
+UI.waterInFloz = () => UI.unit() === 'lbs';
+UI.mlToFloz = (ml) => ml / UI.FLOZ_ML;
+UI.flozToMl = (oz) => oz * UI.FLOZ_ML;
+// Label for the raw water-entry field (whole units the user types).
+UI.waterEntryUnit = () => UI.waterInFloz() ? 'fl oz' : 'ml';
+// Stored ml -> the integer entry value shown in the field, in the viewer's unit.
+UI.waterToEntry = (ml) => UI.waterInFloz() ? Math.round(UI.mlToFloz(ml)) : Math.round(ml);
+// Integer entry value (viewer's unit) -> canonical ml for storage.
+UI.waterEntryToMl = (v) => UI.waterInFloz() ? Math.round(UI.flozToMl(v)) : Math.round(v);
+// Quick-add increments in the viewer's unit (a glass / a bottle vs 250/500 ml).
+UI.waterQuickAdds = () => UI.waterInFloz() ? [8, 16] : [250, 500];
+// Summary tile display: imperial shows whole fl oz, else litres (1 decimal).
+UI.waterSummaryUnit = () => UI.waterInFloz() ? 'fl oz' : 'L';
+UI.waterSummaryValue = (ml) => UI.waterInFloz() ? Math.round(UI.mlToFloz(ml)) : Math.round(ml / 100) / 10;
+
 // True when the app runs inside a third-party app's in-app browser (X,
 // Instagram, Facebook, TikTok, ...) rather than a real browser. Those WKWebView
 // or custom-tab environments frequently block cross-origin fetches to Supabase
