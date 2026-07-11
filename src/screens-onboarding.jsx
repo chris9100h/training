@@ -2306,10 +2306,38 @@ function TourCompleteScreen({ title, onDone }) {
   );
 }
 
+// Always-present escape hatch for the whole tour. Rendered OUTSIDE the error
+// boundary and above every step (spotlight, fullscreen, celebration, or even a
+// crashed step), so there is one identical, reliable way out on every screen of
+// every guide. Uses onPointerDown (onClick is dead on some devices, the same
+// reason the step buttons use it) at the highest z-index, so no single step's
+// own buttons or layout can ever trap the user. This is what guarantees a guide
+// can never hang: independent of the step, the exit is always one tap away.
+function TourExitButton({ onDone }) {
+  const doneRef = useRefOB(onDone);
+  doneRef.current = onDone;
+  const close = (e) => { if (e) { e.preventDefault(); e.stopPropagation(); } try { doneRef.current && doneRef.current(); } catch (_) {} };
+  return (
+    <button onPointerDown={close} aria-label="Exit tour" style={{
+      position: 'fixed', zIndex: 10002,
+      top: 'calc(env(safe-area-inset-top, 0px) + 10px)', right: 12,
+      width: 34, height: 34, borderRadius: '50%',
+      border: '1px solid rgba(255,255,255,0.35)', background: 'rgba(0,0,0,0.55)',
+      color: '#fff', fontFamily: UI.fontUi, fontSize: 15, fontWeight: 700, lineHeight: 1,
+      cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+      WebkitTapHighlightColor: 'transparent', touchAction: 'manipulation',
+    }}>✕</button>
+  );
+}
+
 function OnboardingTour(props) {
   return (
-    <TourBoundary fallback={<TourCrashCard onClose={props.onDone} />}>      <OnboardingTourInner {...props} />
-    </TourBoundary>
+    <>
+      <TourBoundary fallback={<TourCrashCard onClose={props.onDone} />}>
+        <OnboardingTourInner {...props} />
+      </TourBoundary>
+      <TourExitButton onDone={props.onDone} />
+    </>
   );
 }
 
