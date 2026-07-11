@@ -122,6 +122,7 @@ Nutzer-/Coach-orientierte Übersicht aller App-Fähigkeiten. Architektur: **Code
 - **RPCs** (Migration 0156, Grant-Details in `docs/database.md`): `publish_feature_map` / `discard_feature_map` (admin-only) · `get_public_feature_map` (an `anon` **und** `authenticated`, einzige Feature-Map-Funktion mit anon-Zugriff).
 - **Loader/Assets:** `feature-map-db.js` als `<script>` in `index.html`, in `ASSETS` (`sw.js`), in `plainSources` (`tools/check-syntax.cjs`). `screens-featuremap.jsx` in `SOURCES` (index.html) + `ASSETS`. `features.html` bewusst **nicht** in `ASSETS`.
 - **Cache-Bump-Regel:** Reine In-App-Publishes = **kein** Bump (live über DB). Screen-/Katalog-Code-Änderungen = Bump wie überall (nur auf Ansage); den Bake-Bump macht der Workflow selbst.
+- **`features.html`-Cache-Buster:** Die Public-Seite liegt außerhalb des Service Workers und hat keine SW-Cache-Version, die ein Refetch erzwingt. Sie lädt den Katalog per `<script src="src/feature-map-db.js?v=X">`. Bei jeder Katalog-Änderung (also immer wenn der SW-Cache gebumpt wird) diesen `?v=` im Gleichschritt mit der SW-Cache-Version hochziehen, sonst serviert der Browser der Public-Seite trotz frischem Deploy die alte `feature-map-db.js` weiter (die App merkt es nicht, weil ihr SW-Cache-Bump den Katalog ohnehin neu holt).
 
 ## Datenbank (Supabase)
 
