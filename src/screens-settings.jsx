@@ -722,7 +722,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
   // for new ones every 12s while it stays open. Support tickets aren't wired
   // into the live unreadNotes/Realtime path regular coach chats use (see
   // app.jsx's subscribeToChanges, which only bumps the unread badge for a
-  // support note instead of pushing it into an open thread) — without this
+  // support note instead of pushing it into an open thread), without this
   // poll, a reply only ever showed up after closing and reopening the sheet.
   // `first` gates the loading spinner + support-ticket-list badge clear to
   // just the initial open, so background refreshes don't flash "Loading…" or

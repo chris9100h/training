@@ -2799,7 +2799,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
     const sessionBest = sessionBestMap[exId];
     if (sessionBest == null || val !== sessionBest) return false;
     const best = prMap[exId];
-    // No prior history for this exercise at all — nothing to beat, so the
+    // No prior history for this exercise at all, nothing to beat, so the
     // first-ever session with it isn't a PR (matches the two other isPR
     // implementations in this file, which both gate on pr > 0).
     return best != null && val > best;

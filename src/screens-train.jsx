@@ -1201,7 +1201,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // confirm, bulk check-all) is guarded to redirect or skip this set
     // instead of reaching here bare, but this is the backstop.
     if (lpTarget?.exIdx === exIdx && lpTarget?.setIdx === setIdx && !extraPatch) return;
-    // Weighted stretch is the same deal — only finishWeightedStretch supplies
+    // Weighted stretch is the same deal: only finishWeightedStretch supplies
     // its extraPatch (technique + stretch); a bare completeSet here would mark
     // the set done without the stretch, so back it out.
     if (wsTarget?.exIdx === exIdx && wsTarget?.setIdx === setIdx && !extraPatch) return;
@@ -2166,7 +2166,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const [advanceCycle, setAdvanceCycle] = useStateT(false);
   const [cycleFromPickedDay, setCycleFromPickedDay] = useStateT(false);
   const [intensityOpen, setIntensityOpen] = useStateT(false);
-  const [intensityPage, setIntensityPage] = useStateT(null); // null (root) | 'chained' | 'standalone' — drill-down page within the Intensity sheet, reset to root whenever the sheet closes
+  const [intensityPage, setIntensityPage] = useStateT(null); // null (root) | 'chained' | 'standalone': drill-down page within the Intensity sheet, reset to root whenever the sheet closes
   const [dropSetIdx, setDropSetIdx] = useStateT(null);
   const [dropDrops, setDropDrops] = useStateT([]);
   const dropDropsRef = useRefT([]);
@@ -2179,11 +2179,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const [myoTarget, setMyoTarget] = useStateT(null);
   const [lpTarget, setLpTarget] = useStateT(null); // { exIdx, setIdx } | null — set is NOT done yet, replaces its checkbox with a stepper + FINISH button
   const [lpCount, setLpCount] = useStateT(0); // in-progress partials count for lpTarget, committed to the set only on Finish
-  const [lpStretch, setLpStretch] = useStateT(null); // { kg, timeSec } | null — optional weighted-stretch finisher on top of the partials (squeeze out partials, then hold once the weight won't move), committed to drops.stretch alongside drops.partials on Finish
+  const [lpStretch, setLpStretch] = useStateT(null); // { kg, timeSec } | null: optional weighted-stretch finisher on top of the partials (squeeze out partials, then hold once the weight won't move), committed to drops.stretch alongside drops.partials on Finish
   const lpStretchRef = useRefT(null);
   lpStretchRef.current = lpStretch;
-  const [wsTarget, setWsTarget] = useStateT(null); // { exIdx, setIdx } | null — standalone weighted-stretch, same inline pattern as lpTarget (row keeps its kg/reps, checkbox becomes a stretch editor + FINISH)
-  const [wsStretch, setWsStretch] = useStateT(null); // { kg, timeSec } | null — in-flight stretch (weight + hold) for wsTarget, committed to the set only on Finish
+  const [wsTarget, setWsTarget] = useStateT(null); // { exIdx, setIdx } | null: standalone weighted-stretch, same inline pattern as lpTarget (row keeps its kg/reps, checkbox becomes a stretch editor + FINISH)
+  const [wsStretch, setWsStretch] = useStateT(null); // { kg, timeSec } | null: in-flight stretch (weight + hold) for wsTarget, committed to the set only on Finish
   const wsStretchRef = useRefT(null); // mirror for the custom keypad handlers (they read refs, not stale closures)
   wsStretchRef.current = wsStretch;
   const [avSetIdx, setAvSetIdx] = useStateT(null);
@@ -2193,7 +2193,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   avDropsRef.current = avDrops;
   // Intensity-technique finishers (partials count, weighted stretch) now live
   // PER ROUND on the drops rows (dropDrops/myoDrops/avDrops), edited via the
-  // per-round Finisher control and persisted/restored with those arrays — there
+  // per-round Finisher control and persisted/restored with those arrays. There
   // is no shared finisher state to thread, reset or resume separately.
   // Which (exIdx_setIdx) working sets the beyond-failure meso auto-armed the
   // Lengthened Partials stepper on, so it arms each set exactly once — a user
@@ -2251,7 +2251,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         setLpCount(st.lpCount || 0);
         setLpStretch(st.lpStretch || null);
       }
-      // Weighted stretch resumes the same way — the set only ever goes done via
+      // Weighted stretch resumes the same way: the set only ever goes done via
       // its FINISH button (commits technique+stretch together), so nothing to
       // resume once done.
       if (st.wsSetIdx != null && !targetEntry?.sets[st.wsSetIdx]?.done) {
@@ -3327,7 +3327,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
   // Weighted-stretch fields (standalone set, lengthened partials, OR a
   // per-round chain finisher) run through the same custom keypad as
-  // everything else — never a native <input>, so iOS never opens its own
+  // everything else, never a native <input>, so iOS never opens its own
   // keyboard here. One shared namespace keyed by `target`: 'ws' edits the
   // standalone wsStretch, 'lp' edits lpStretch (the optional finisher on top
   // of lengthened partials), 'drop'/'myo'/'av' edit the stretch nested on
@@ -5454,7 +5454,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                         </div>
                         <div style={{ padding: '0 6px 8px' }}>
                           {/* missingData (the underlying set has no kg/reps yet) is
-                              the only block — the stretch always carries a hold, so
+                              the only block: the stretch always carries a hold, so
                               FINISH never dims for a "zero" stretch like partials do. */}
                           <button onClick={() => finishWeightedStretch(i)}
                             disabled={missingData}
@@ -5548,7 +5548,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                     </div>
                   )}
                   {/* Committed lengthened-partial count (+ its optional weighted-stretch
-                      finisher) — read-only, like the myo-rep total tag below */}
+                      finisher), read-only, like the myo-rep total tag below */}
                   {s.technique === 'lengthened_partial' && s.done && !s.warmup && (s.drops?.partials || 0) > 0 && (
                     <div style={{ marginLeft: 36, paddingLeft: 10, paddingBottom: 8 }}>
                       <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '3px 8px', border: '1px solid var(--accent)', borderRadius: 4, fontFamily: UI.fontUi, fontSize: 11, color: 'var(--accent)', letterSpacing: '0.03em' }}>
@@ -5558,7 +5558,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                       </div>
                     </div>
                   )}
-                  {/* Committed weighted stretch — read-only tag mirroring the lengthened-partial one */}
+                  {/* Committed weighted stretch, read-only tag mirroring the lengthened-partial one */}
                   {s.technique === 'weighted_stretch' && s.done && !s.warmup && s.drops?.stretch && (
                     <div style={{ marginLeft: 36, paddingLeft: 10, paddingBottom: 8 }}>
                       <div style={{ display: 'inline-block', padding: '3px 8px', border: '1px solid var(--accent)', borderRadius: 4, fontFamily: UI.fontUi, fontSize: 11, color: 'var(--accent)', letterSpacing: '0.03em' }}>
@@ -5898,7 +5898,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         </div>
       </Sheet>
 
-      {/* intensity technique picker — two-level: root offers Superset plus
+      {/* intensity technique picker, two-level: root offers Superset plus
           the two technique categories, drilling into either shows just that
           category's techniques with a BACK control. intensityPage always
           resets to root when the sheet closes, so it never reopens mid-drill. */}
@@ -5989,7 +5989,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             </button>
           );
 
-          // ── Chained techniques — multiple rounds back-to-back in the chain
+          // ── Chained techniques: multiple rounds back-to-back in the chain
           //    sheet, each round optionally carrying its own finisher. ──────
           if (intensityPage === 'chained') return (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -6035,7 +6035,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             </div>
           );
 
-          // ── Standalone techniques — a single set, no rounds/chain sheet. ──
+          // ── Standalone techniques: a single set, no rounds/chain sheet. ──
           if (intensityPage === 'standalone') return (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {backBtn}
@@ -6056,7 +6056,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkSoft, marginTop: 2 }}>Full reps, then partials in the stretch</div>
                 </div>
               </button>
-              {/* Weighted Stretch — a timed loaded hold at the stretch after the
+              {/* Weighted Stretch: a timed loaded hold at the stretch after the
                   set. Its own weight (the stretch load usually differs from the
                   working weight) and hold time. Standalone here; also available
                   as a per-round finisher inside the chain sheets. */}
@@ -6085,7 +6085,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           // ── Root: Superset (unchanged) plus the two technique categories. ──
           return (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {/* Superset / Giant Set — structural (links this exercise with
+              {/* Superset / Giant Set: structural (links this exercise with
                   another), not a set-completion technique, so it's only
                   offered before the whole current group has started. Listed
                   first: the most recognized technique. */}

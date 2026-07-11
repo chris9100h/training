@@ -53,7 +53,7 @@ function healthFmtDate(iso, opts = { weekday: 'short', day: 'numeric', month: 's
 // and HealthClientLogs (a coach's client logs) can share it instead of
 // reimplementing the same ~90 lines against differently-named data.
 // `windowOverride` (optional {start,end}) lets a caller replace the default
-// trailing N-day window — used to align the 1W charts to the same
+// trailing N-day window, used to align the 1W charts to the same
 // Monday-anchored calendar week as the date strip / "This Week" card above
 // them, instead of a rolling window that floats with today's weekday.
 function healthSeriesFor(logs, days, pick, windowOverride) {
