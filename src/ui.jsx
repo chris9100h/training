@@ -648,6 +648,7 @@ function Sheet({ open, onClose, title, titleColor, children, keyboardHeight = 0,
     if (!open) return;
     const vv = window.visualViewport;
     if (!vv) return;
+    let prevKb = 0, scrollTimer = null;
     const update = () => {
       // Only treat the innerHeight↔visualViewport gap as keyboard height while a
       // field is actually focused. Otherwise a persistent iOS viewport offset
@@ -655,13 +656,30 @@ function Sheet({ open, onClose, title, titleColor, children, keyboardHeight = 0,
       // gap below the sheet.
       const ae = document.activeElement;
       const typing = ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable);
-      setKbHeight(typing ? Math.max(0, window.innerHeight - vv.height - vv.offsetTop) : 0);
+      const kb = typing ? Math.max(0, window.innerHeight - vv.height - vv.offsetTop) : 0;
+      setKbHeight(kb);
       setVvHeight(vv.height);
+      // When the native keyboard opens, the panel shrinks around it but nothing
+      // re-scrolls the focused field, so a native <input> low in the panel (e.g.
+      // the AMRAP variation-name box on round 2+) ends up hidden behind the
+      // keyboard. Pull it back into view once the viewport settles, and only on
+      // the open transition (kb grows) so manual scrolling afterwards is left
+      // alone — a plain vv 'scroll' keeps kb steady and never triggers this.
+      if (typing && kb > prevKb + 8) {
+        clearTimeout(scrollTimer);
+        scrollTimer = setTimeout(() => {
+          const el = document.activeElement;
+          if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) {
+            el.scrollIntoView({ block: 'nearest', behavior: 'auto' });
+          }
+        }, 120);
+      }
+      prevKb = kb;
     };
     vv.addEventListener('resize', update);
     vv.addEventListener('scroll', update);
     update();
-    return () => { vv.removeEventListener('resize', update); vv.removeEventListener('scroll', update); };
+    return () => { vv.removeEventListener('resize', update); vv.removeEventListener('scroll', update); clearTimeout(scrollTimer); };
   }, [open]);
 
   if (!open) return null;
