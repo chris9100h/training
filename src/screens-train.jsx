@@ -5291,7 +5291,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                       {/* Same rotated display-it watermark family as the MESOCYCLE/5-3-1
                           plan-row stamps and the RIR hero-card stamp, just scaled down
                           for this much shorter row, at the same -22deg angle. */}
-                      <span className="display-it" style={{ fontSize: 22, fontWeight: 900, letterSpacing: '0.14em', color: UI.gold, opacity: 0.14, transform: 'rotate(-22deg)', whiteSpace: 'nowrap', userSelect: 'none' }}>PR</span>
+                      <span className="display-it" style={{ fontSize: 14, fontWeight: 900, letterSpacing: '0.08em', color: UI.gold, opacity: 0.16, transform: 'rotate(-22deg)', whiteSpace: 'nowrap', userSelect: 'none' }}>PERSONAL RECORD</span>
                     </div>
                   )}
                   {amrapArmed && (
