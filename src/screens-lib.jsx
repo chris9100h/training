@@ -2710,6 +2710,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
         repsMax: e.plannedRepsMax ?? null,
         progressionOffset: e.plannedProgressionOffset ?? null,
         supersetGroup: e.supersetGroup ?? null,
+        ...(Array.isArray(e.plannedTechniques) && e.plannedTechniques.some(Boolean) ? { plannedTechniques: e.plannedTechniques } : {}),
         ...(times.some(t => t != null) ? { timeSecPerSet: times } : {}),
       };
     });
