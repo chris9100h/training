@@ -17,6 +17,16 @@
    Entry shape: { id: string, date: string (YYYY-MM-DD), title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.544',
+    date: '2026-07-11',
+    title: 'Intensity, Booked in Advance',
+    items: [
+      "🔥 Plan intensity techniques right into your workout, set by set. Building a plan? Every exercise now lets you assign a technique to each individual set: a drop set on set one, myo-reps on set two, a myo-rep match on set three, whatever fits. Six to pick from (drop sets, myo-reps, myo-rep match, AMRAP variations, lengthened partials, weighted stretch). Tap a set, choose its technique, done. A little flame marks every exercise you have loaded up, so it's clear at a glance which movements have something extra baked in.",
+      "🎯 Coaches, this one is for the clients who never reach for a technique on their own. Prescribe it in the plan and it stops being optional: when they hit that set during training, the technique pops open on its own, ready to go. No reminders, no \"did you actually do your drop set?\" texts.",
+      "🏅 Beat a record? Now it gets stamped. Scroll back to any set where you broke your best and you'll find a faint PERSONAL RECORD stamp pressed across it at an angle, old-school approval-stamp style. Purely for the bragging rights, and they're well earned.",
+    ],
+  },
+  {
     id: 'v2.540',
     date: '2026-07-10',
     title: 'Stretch, But Make It Heavy',
