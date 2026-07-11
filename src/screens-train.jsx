@@ -5294,7 +5294,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                           size, rotating together with the text as one rigid unit (same
                           technique as the RIR gloss line) so it reads as a single stamp
                           pressed at an angle, not a frame floating separately from text. */}
-                      <div className="pr-stamp-glow" style={{ position: 'relative', padding: '6px 14px', transform: 'rotate(-22deg)', borderRadius: 6 }}>
+                      <div style={{ position: 'relative', padding: '6px 14px', transform: 'rotate(-22deg)' }}>
                         <div style={{ position: 'absolute', top: 0, left: 0, width: 8, height: 8, borderTop: `2px solid ${UI.gold}`, borderLeft: `2px solid ${UI.gold}`, opacity: 0.16 }} />
                         <div style={{ position: 'absolute', top: 0, right: 0, width: 8, height: 8, borderTop: `2px solid ${UI.gold}`, borderRight: `2px solid ${UI.gold}`, opacity: 0.16 }} />
                         <div style={{ position: 'absolute', bottom: 0, left: 0, width: 8, height: 8, borderBottom: `2px solid ${UI.gold}`, borderLeft: `2px solid ${UI.gold}`, opacity: 0.16 }} />
