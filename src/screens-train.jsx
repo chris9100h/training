@@ -1324,6 +1324,18 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       const currSet = sess.entries[exIdx]?.sets[setIdx];
       if (!currSet) return sess;
       const patch = { done: true, ...extraPatch };
+      // A weighted stretch always needs a positive hold. The editor shows 30s as
+      // the default even before the field is touched, but the state can carry
+      // timeSec null (e.g. only the weight was entered), which would persist and
+      // render as "nulls"/"s". Normalise the stretch on the single path every
+      // technique commits through: object shape (weighted_stretch, lengthened
+      // partial) and per-round array shape (drop, myo, amrap variations).
+      if (patch.drops) {
+        const fixStretch = (st) => st ? { ...st, timeSec: (st.timeSec != null && st.timeSec > 0) ? st.timeSec : 30 } : st;
+        patch.drops = Array.isArray(patch.drops)
+          ? patch.drops.map(r => (r && r.stretch) ? { ...r, stretch: fixStretch(r.stretch) } : r)
+          : (patch.drops.stretch ? { ...patch.drops, stretch: fixStretch(patch.drops.stretch) } : patch.drops);
+      }
       if (kb && kb.setIdx === setIdx && kb.field !== 'kg') {
         const fromRef = parseInt(rawRef, 10);
         const fromSess = currSet[kb.field] || 0;
@@ -1597,9 +1609,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   };
 
   // Commits the set plus its weighted stretch (weight + hold) in one update,
-  // exactly like finishLengthenedPartial. The stretch always carries a timeSec
-  // (the stepper floor is 5s), so there is no degenerate "zero" case to warn
-  // about — FINISH is only blocked while the underlying set has no kg/reps.
+  // exactly like finishLengthenedPartial. completeSet normalises the hold to the
+  // editor's 30s default if it was left empty, so no degenerate "zero" stretch
+  // is stored. FINISH is only blocked while the underlying set has no kg/reps.
   const finishWeightedStretch = (setIdx) => {
     completeSet(setIdx, false, true, { technique: 'weighted_stretch', drops: { stretch: wsStretch } });
   };
@@ -3486,7 +3498,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         setStretchVal(target, dropIdx, { kg: next });
       } else {
         const cur = parseInt(kbRawRef.current, 10) || 0;
-        const next = Math.max(0, cur + dir * 5); // seconds step by 5, like time exercises
+        const next = Math.max(5, cur + dir * 5); // seconds step by 5, floor 5 like time exercises
         kbRawRef.current = String(next); setKbRaw(String(next));
         setStretchVal(target, dropIdx, { timeSec: next });
       }
@@ -4177,8 +4189,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // Beyond-failure meso: auto-arm the Lengthened Partials stepper (pre-filled to
   // the prescribed count) on the current plain working set, so the partials are
   // visible up front instead of silently attached on check-off. Armed once per
-  // set (mesoLpArmedRef) so cancelling on a set doesn't re-nag. Chains carry
-  // their own partials via the finisher seed, so skip while one is in flight.
+  // set (mesoLpArmedRef) so cancelling on a set doesn't re-nag. Only the
+  // standalone Lengthened Partials set is auto-prefilled here; on a chain the
+  // user adds the prescribed partials per round. The guard below skips this
+  // while any other technique editor is already in flight.
   // MUST sit above the `if (!entry)` early return (empty freestyle/bonus
   // session): a hook after that return changes the hook count when the first
   // exercise is added (entry null → set), which is React error #310. Derives
