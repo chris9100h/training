@@ -1,13 +1,15 @@
-/* Onboarding — welcome prompt & guided spotlight tour */
+/* Onboarding: welcome prompt and guided card-deck tours */
 
 const { useState: useStateOB, useEffect: useEffectOB, useRef: useRefOB } = React;
 
 // ─── Tour data registry ──────────────────────────────────────────────
-// Each step: { route?, target?, title, body, visual?, placement? }
-// route    — navigate to this route before showing the step (optional)
-// target   — data-tour="..." attribute on the DOM element to spotlight (optional)
-// visual   — key into TOUR_VISUALS for an inline illustration (optional)
-// placement— 'top' | 'bottom' | auto (default)
+// Every step renders as a self-contained fullscreen card. Fields:
+//   title    headline
+//   body     description (supports newlines via \n)
+//   visual   key into TOUR_VISUALS for an inline illustration (optional)
+// The last step of a tour shows the celebration screen. Any route/target/
+// placement left on older steps are legacy no-ops: the card deck never
+// navigates or spotlights live DOM, so they are simply ignored.
 window.TOURS = {
   createPlan: [
     {
@@ -2229,10 +2231,11 @@ class TourBoundary extends React.Component {
 function TourCrashCard({ onClose }) {
   // This fallback shows only when a step crashed, so it is the least-exercised
   // path in the tour, yet its lone Close button used a plain onClick. That event
-  // is dead on some devices (see the renderBtnRow note below), with no timer or
-  // tap-anywhere behind it, so the user was trapped with no escape but killing
-  // the app. Mirror TourCompleteScreen's guarantees: close on tap-anywhere, on
-  // an onPointerDown button, and on a last-resort timer, so it can never hang.
+  // is dead on some devices (which is why every button here fires on
+  // onPointerDown), with no timer or tap-anywhere behind it, so the user was
+  // trapped with no escape but killing the app. Mirror TourCompleteScreen's
+  // guarantees: close on tap-anywhere, on an onPointerDown button, and on a
+  // last-resort timer, so it can never hang.
   const doneRef = useRefOB(onClose);
   doneRef.current = onClose;
   const close = () => { try { doneRef.current && doneRef.current(); } catch (_) {} };
@@ -2341,260 +2344,78 @@ function OnboardingTour(props) {
   );
 }
 
-function OnboardingTourInner({ tourKey, go, route, onDone }) {
+function OnboardingTourInner({ tourKey, onDone }) {
   const steps = (window.TOURS || {})[tourKey] || [];
   const [stepIdx, setStepIdx] = useStateOB(0);
-  // undefined = searching, null = no target (centered modal), DOMRect = found
-  const [targetRect, setTargetRect] = useStateOB(undefined);
-  const retryRef = useRefOB(null);
-
   const step = steps[stepIdx];
   const isLast = stepIdx === steps.length - 1;
 
-  useEffectOB(() => {
-    clearTimeout(retryRef.current);
-    if (!step) return;
-
-    // Navigate if needed — wait for next effect run with updated route
-    if (step.route && route.name !== step.route) {
-      go({ name: step.route });
-      setTargetRect(undefined);
-      return;
-    }
-
-    // No spotlight target → centered modal
-    if (!step.target) {
-      setTargetRect(null);
-      return;
-    }
-
-    // Find target in DOM with retries (allows for screen transitions).
-    // `cancelled` + `cancelAnimationFrame` prevent a stale rAF callback from
-    // firing after this effect re-runs (e.g. when the user advances to the next
-    // step), which would overwrite the fresh targetRect with the old element's
-    // rect and lock the tour in spotlight mode with no working buttons.
-    setTargetRect(undefined);
-    let cancelled = false;
-    let rafId = null;
-    let attempts = 0;
-    let scrolled = false;
-    const tryFind = () => {
-      if (cancelled) return;
-      const el = document.querySelector(`[data-tour="${step.target}"]`);
-      if (el) {
-        const r = el.getBoundingClientRect();
-        if (r.width > 0 && r.height > 0) {
-          // Pull the target into a comfortable band once, so both the spotlight
-          // and its tooltip fit on screen — cards low on the Health screen would
-          // otherwise sit half behind the nav bar. Fixed nav tabs don't scroll,
-          // which is fine (their rect stays put).
-          const vh = window.innerHeight;
-          if (!scrolled && (r.top < 96 || r.bottom > vh - 200)) {
-            scrolled = true;
-            el.scrollIntoView({ block: 'center' });
-            retryRef.current = setTimeout(tryFind, 140);
-            return;
-          }
-          setTargetRect(r);
-          return;
-        }
-      }
-      attempts++;
-      if (attempts < 30) { retryRef.current = setTimeout(tryFind, 80); }
-      else { setTargetRect(null); }
-    };
-    rafId = requestAnimationFrame(tryFind);
-
-    return () => {
-      cancelled = true;
-      cancelAnimationFrame(rafId);
-      clearTimeout(retryRef.current);
-    };
-  }, [stepIdx, route.name]);
-
-  const advance = () => {
-    if (isLast) { onDone(); } else { setStepIdx(i => i + 1); }
-  };
+  const advance = () => { if (isLast) { onDone(); } else { setStepIdx(i => i + 1); } };
   const goBack = () => { if (stepIdx > 0) setStepIdx(i => i - 1); };
 
   if (!step) return null;
 
-  // Final step → flashy auto-dismissing celebration instead of a normal modal
-  // with an exit button. It closes on a 3s timer and on tap-anywhere, so the
-  // tour always ends without depending on a single button working.
+  // Final step: the shared auto-dismissing celebration (3s timer + tap-anywhere).
   if (isLast) return <TourCompleteScreen title={step.title} onDone={onDone} />;
 
-  // Shared button row. IMPORTANT: this is a render *helper* called as a plain
-  // function — never render it as <BtnRow/>. A component defined inside render
-  // gets a new identity every render, so React would unmount/remount the button
-  // subtree on each parent re-render (store sync, sync-status, realtime, …). A
-  // tap whose pointerdown→click straddles such a remount is silently dropped —
-  // that was the "visible buttons don't respond, must kill the app" bug.
-  // Handlers fire on onPointerDown — NOT onClick. Proven this session: on this
-  // device a plain onClick button (the plate-calculator key) was completely dead
-  // while onPointerDown worked. The in-app keyboard uses the same pattern. Each
-  // button has exactly one handler, so there is no double-fire.
+  // Every other step is a self-contained fullscreen card: progress, title, body,
+  // the optional illustration, and a bottom button row. No live spotlight, no
+  // navigation, no DOM measuring, no rAF retries, so there is nothing left that
+  // can loop or trap. A guide is now just "card in, card out" plus the exit
+  // hatch. Handlers fire on onPointerDown (onClick is dead on some devices,
+  // proven this session), and the row is inline, never a nested component, so a
+  // re-render can never remount it and drop a tap that straddles the remount.
   const tap = (fn) => (e) => { e.preventDefault(); e.stopPropagation(); fn(); };
-  const renderBtnRow = (compact) => (
-    <div style={{ display: 'flex', gap: 8, marginTop: compact ? 0 : 4 }}>
-      {stepIdx > 0 && (
-        <button onPointerDown={tap(goBack)} style={{
-          flex: '0 0 auto', padding: compact ? '9px 13px' : '11px 15px', borderRadius: compact ? 4 : 6,
-          border: `1px solid ${UI.hairStrong}`, cursor: 'pointer',
-          background: 'transparent',
-          color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: compact ? 12 : 14, fontWeight: 600,
-          WebkitTapHighlightColor: 'transparent', touchAction: 'manipulation',
-        }} aria-label="Back">←</button>
-      )}
-      <button onPointerDown={tap(advance)} style={{
-        flex: 2, padding: compact ? '9px 0' : '11px 0', borderRadius: compact ? 4 : 6,
-        border: 'none', cursor: 'pointer',
-        background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)',
-        boxShadow: `0 ${compact ? 4 : 6}px ${compact ? 14 : 20}px rgba(var(--accent-rgb),0.4)`,
-        color: '#0a0805', fontFamily: UI.fontUi, fontSize: compact ? 11 : 13, fontWeight: 700,
-        letterSpacing: '0.08em', WebkitTapHighlightColor: 'transparent', touchAction: 'manipulation',
-      }}>{isLast ? 'DONE' : 'NEXT →'}</button>
-    </div>
-  );
-
   const VisualComp = step.visual ? TOUR_VISUALS[step.visual] : null;
-
-  // ── Centered (no target / fallback) → FULLSCREEN layout ──
-  // These steps have no on-screen spotlight, so we use the whole screen instead
-  // of a floating card: content scrolls in the middle, and the buttons are
-  // pinned to the very bottom EDGE of the viewport — the most reliable place to
-  // tap. No backdrop-filter, no card, no nested overlays.
-  if (!step.target || targetRect === null) {
-    return (
-      <div style={{
-        position: 'fixed', top: 'env(safe-area-inset-top, 0px)', left: 0, right: 0, bottom: 0, zIndex: 10000,
-        background: 'var(--bg)',
-        display: 'flex', flexDirection: 'column',
-      }}>
-        {/* Scrollable content */}
-        <div style={{
-          flex: '1 1 auto', minHeight: 0, overflowY: 'auto',
-          padding: '30px 26px 18px',
-          display: 'flex', flexDirection: 'column', gap: 16,
-        }}>
-          <div className="micro-gold">{stepIdx + 1} / {steps.length}</div>
-          <div style={{ fontFamily: UI.fontDisplay, fontSize: 30, color: UI.ink, fontWeight: 400, lineHeight: 1.08 }}>
-            {step.title}
-          </div>
-          <div style={{ fontSize: 14, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.6, whiteSpace: 'pre-line' }}>
-            {step.body}
-          </div>
-          {VisualComp && (
-            <div style={{ marginTop: 4 }}>
-              <TourBoundary fallback={null}><VisualComp /></TourBoundary>
-            </div>
-          )}
-        </div>
-        {/* Buttons pinned to the bottom edge of the screen */}
-        <div style={{
-          flexShrink: 0,
-          padding: '14px 26px calc(env(safe-area-inset-bottom, 0px) + 20px)',
-          borderTop: `0.5px solid ${UI.hair}`,
-          background: UI.bgRaised,
-        }}>
-          {renderBtnRow(false)}
-        </div>
-      </div>
-    );
-  }
-
-  // ── Brief loading state while navigating / searching ──
-  if (targetRect === undefined) {
-    return (
-      <div style={{
-        position: 'fixed', top: 'env(safe-area-inset-top, 0px)', left: 0, right: 0, bottom: 0, zIndex: 10000,
-        background: 'rgba(0,0,0,0.35)',
-      }} />
-    );
-  }
-
-  // ── Spotlight mode ──
-  const PAD = 10;
-  const sx = Math.round(targetRect.left - PAD);
-  const sy = Math.round(targetRect.top - PAD);
-  const sw = Math.round(targetRect.width + PAD * 2);
-  const sh = Math.round(targetRect.height + PAD * 2);
-
-  const vw = window.innerWidth;
-  const vh = window.innerHeight;
-  const TW = Math.min(300, vw - 32);
-  const TOOLTIP_H = 178;
-  const TIP_GAP = 14;
-
-  // Tooltip X: center over spotlight, clamped to viewport
-  // Exception: if spotlight is on the far left (sidebar), place tooltip to the right
-  const nearLeft = sx + sw < vw * 0.3;
-  let tipX, tipY;
-
-  if (nearLeft) {
-    tipX = Math.min(sx + sw + TIP_GAP, vw - TW - 8);
-    tipY = Math.max(8, Math.min(sy + sh / 2 - TOOLTIP_H / 2, vh - TOOLTIP_H - 16));
-  } else {
-    tipX = Math.max(16, Math.min(sx + sw / 2 - TW / 2, vw - TW - 16));
-    const canBelow = sy + sh + TIP_GAP + TOOLTIP_H < vh - 16;
-    const forceTop = step.placement === 'top' || (!canBelow && sy > TOOLTIP_H + TIP_GAP + 8);
-    if (forceTop) {
-      tipY = Math.max(8, sy - TIP_GAP - TOOLTIP_H);
-    } else {
-      tipY = sy + sh + TIP_GAP;
-      if (tipY + TOOLTIP_H > vh - 8) tipY = Math.max(8, vh - TOOLTIP_H - 8);
-    }
-  }
-
   return (
-    <>
-      {/* Full-screen intercept layer — blocks all taps reaching the app underneath */}
-      <div style={{ position: 'fixed', inset: 0, zIndex: 9995 }} />
-
-      {/* Dark overlay via box-shadow (spotlight "hole") */}
+    <div style={{
+      position: 'fixed', top: 'env(safe-area-inset-top, 0px)', left: 0, right: 0, bottom: 0, zIndex: 10000,
+      background: 'var(--bg)',
+      display: 'flex', flexDirection: 'column',
+    }}>
       <div style={{
-        position: 'fixed',
-        left: sx, top: sy, width: sw, height: sh,
-        borderRadius: 8,
-        boxShadow: '0 0 0 9999px rgba(0,0,0,0.78)',
-        zIndex: 9996,
-        pointerEvents: 'none',
-      }} />
-
-      {/* Pulsing accent ring */}
-      <div style={{
-        position: 'fixed',
-        left: sx, top: sy, width: sw, height: sh,
-        borderRadius: 8,
-        border: '2px solid var(--accent)',
-        animation: 'tourRingPulse 1.8s ease-in-out infinite',
-        zIndex: 9997,
-        pointerEvents: 'none',
-      }} />
-
-      {/* Tooltip card */}
-      <div style={{
-        position: 'fixed',
-        left: tipX, top: tipY, width: TW,
-        background: UI.bgRaised,
-        border: `1px solid ${UI.goldSoft}`,
-        borderRadius: 6,
-        padding: '16px 18px',
-        display: 'flex', flexDirection: 'column', gap: 10,
-        boxShadow: '0 16px 48px rgba(0,0,0,0.6), 0 0 0 0.5px rgba(var(--accent-rgb),0.15)',
-        zIndex: 9998,
-        animation: 'fadeUp 0.2s ease',
+        flex: '1 1 auto', minHeight: 0, overflowY: 'auto',
+        padding: '30px 26px 18px',
+        display: 'flex', flexDirection: 'column', gap: 16,
       }}>
         <div className="micro-gold">{stepIdx + 1} / {steps.length}</div>
-        <div style={{ fontFamily: UI.fontDisplay, fontSize: 22, color: UI.ink, fontWeight: 400, lineHeight: 1.1 }}>
+        <div style={{ fontFamily: UI.fontDisplay, fontSize: 30, color: UI.ink, fontWeight: 400, lineHeight: 1.08 }}>
           {step.title}
         </div>
-        <div style={{ fontSize: 12.5, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.55, whiteSpace: 'pre-line' }}>
+        <div style={{ fontSize: 14, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.6, whiteSpace: 'pre-line' }}>
           {step.body}
         </div>
-        {renderBtnRow(true)}
+        {VisualComp && (
+          <div style={{ marginTop: 4 }}>
+            <TourBoundary fallback={null}><VisualComp /></TourBoundary>
+          </div>
+        )}
       </div>
-    </>
+      <div style={{
+        flexShrink: 0,
+        padding: '14px 26px calc(env(safe-area-inset-bottom, 0px) + 20px)',
+        borderTop: `0.5px solid ${UI.hair}`,
+        background: UI.bgRaised,
+      }}>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {stepIdx > 0 && (
+            <button onPointerDown={tap(goBack)} aria-label="Back" style={{
+              flex: '0 0 auto', padding: '11px 15px', borderRadius: 6,
+              border: `1px solid ${UI.hairStrong}`, cursor: 'pointer', background: 'transparent',
+              color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 14, fontWeight: 600,
+              WebkitTapHighlightColor: 'transparent', touchAction: 'manipulation',
+            }}>←</button>
+          )}
+          <button onPointerDown={tap(advance)} style={{
+            flex: 2, padding: '11px 0', borderRadius: 6, border: 'none', cursor: 'pointer',
+            background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)',
+            boxShadow: `0 6px 20px rgba(var(--accent-rgb),0.4)`,
+            color: '#0a0805', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 700, letterSpacing: '0.08em',
+            WebkitTapHighlightColor: 'transparent', touchAction: 'manipulation',
+          }}>NEXT →</button>
+        </div>
+      </div>
+    </div>
   );
 }
 
