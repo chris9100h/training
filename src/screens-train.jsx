@@ -877,6 +877,38 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   }, [entry?.exId]);
   const last = localLast ?? (entry ? remoteLast[entry.exId] : null) ?? null;
 
+  // PR stamp: same three-way value dispatch as isNewBestSet below (time /
+  // assisted / e1RM), reusing bestE1rmForExercise/bestTimeForExercise/
+  // bestAssistLoad as the historical (pre-session) best: no new PR-comparison
+  // math. Unlike isNewBestSet (a one-shot flash gate, max once per exercise
+  // per session) this recomputes on every render, so the stamp always lands
+  // on the session's actual best set for this exercise, even if a later set
+  // breaks the record again. Spans every entry of this exercise in today's
+  // session (not just this one), since the same exercise can appear twice in
+  // a day (heavy block + back-off) and they share one PR pool.
+  const isAssistedEx = LB.isAssisted(exercise);
+  const prValOf = (st) => {
+    // warmup/skipped excluded to match bestE1rmForExercise's own pool exactly:
+    // this session's side and the historical side must share one scale.
+    if (!st.done || st.warmup || st.skipped) return null;
+    if (isTime) return st.timeSec ?? null;
+    if (isAssistedEx) return st.kg != null ? st.kg : null;
+    const reps = LB.effReps(st);
+    return (st.kg != null && reps > 0) ? LB.e1rm(st.kg, reps) : null;
+  };
+  const sessionBestPrVal = entry
+    ? session.entries.filter(e => e.exId === entry.exId).reduce((m, e) =>
+        e.sets.reduce((m2, st) => { const v = prValOf(st); return (v != null && v > m2) ? v : m2; }, m), -Infinity)
+    : -Infinity;
+  const historicalBestPrVal = !entry ? null
+    : isTime ? LB.bestTimeForExercise(store, entry.exId, session.id)
+    : isAssistedEx ? LB.bestAssistLoad(store, entry.exId, session.id)
+    : LB.bestE1rmForExercise(store, entry.exId, session.id);
+  const isSetPR = (st) => {
+    const val = prValOf(st);
+    return val != null && val === sessionBestPrVal && historicalBestPrVal != null && historicalBestPrVal > 0 && val > historicalBestPrVal;
+  };
+
   // Cross-day history for the tapped exercise name. The in-training "last time"
   // above is day-slot specific (bestRecentEntry / fetchExerciseHistory both key
   // on session.dayId), so an exercise pushed harder on another day reads as
@@ -5254,6 +5286,14 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                     </>
                   )}
                   <div style={{ position: 'relative' }}>
+                  {s.done && isSetPR(s) && (
+                    <div aria-hidden="true" style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', overflow: 'hidden' }}>
+                      {/* Same rotated display-it watermark family as the MESOCYCLE/5-3-1
+                          plan-row stamps and the RIR hero-card stamp, just scaled down
+                          for this much shorter row, at the same -22deg angle. */}
+                      <span className="display-it" style={{ fontSize: 22, fontWeight: 900, letterSpacing: '0.14em', color: UI.gold, opacity: 0.14, transform: 'rotate(-22deg)', whiteSpace: 'nowrap', userSelect: 'none' }}>PR</span>
+                    </div>
+                  )}
                   {amrapArmed && (
                     <div aria-hidden="true" style={{
                       // Fill the money zone with fire and let it breathe out softly on
