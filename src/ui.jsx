@@ -648,6 +648,7 @@ function Sheet({ open, onClose, title, titleColor, children, keyboardHeight = 0,
     if (!open) return;
     const vv = window.visualViewport;
     if (!vv) return;
+    let prevKb = 0, scrollTimer = null;
     const update = () => {
       // Only treat the innerHeight↔visualViewport gap as keyboard height while a
       // field is actually focused. Otherwise a persistent iOS viewport offset
@@ -655,13 +656,30 @@ function Sheet({ open, onClose, title, titleColor, children, keyboardHeight = 0,
       // gap below the sheet.
       const ae = document.activeElement;
       const typing = ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable);
-      setKbHeight(typing ? Math.max(0, window.innerHeight - vv.height - vv.offsetTop) : 0);
+      const kb = typing ? Math.max(0, window.innerHeight - vv.height - vv.offsetTop) : 0;
+      setKbHeight(kb);
       setVvHeight(vv.height);
+      // When the native keyboard opens, the panel shrinks around it but nothing
+      // re-scrolls the focused field, so a native <input> low in the panel (e.g.
+      // the AMRAP variation-name box on round 2+) ends up hidden behind the
+      // keyboard. Pull it back into view once the viewport settles, and only on
+      // the open transition (kb grows) so manual scrolling afterwards is left
+      // alone — a plain vv 'scroll' keeps kb steady and never triggers this.
+      if (typing && kb > prevKb + 8) {
+        clearTimeout(scrollTimer);
+        scrollTimer = setTimeout(() => {
+          const el = document.activeElement;
+          if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) {
+            el.scrollIntoView({ block: 'nearest', behavior: 'auto' });
+          }
+        }, 120);
+      }
+      prevKb = kb;
     };
     vv.addEventListener('resize', update);
     vv.addEventListener('scroll', update);
     update();
-    return () => { vv.removeEventListener('resize', update); vv.removeEventListener('scroll', update); };
+    return () => { vv.removeEventListener('resize', update); vv.removeEventListener('scroll', update); clearTimeout(scrollTimer); };
   }, [open]);
 
   if (!open) return null;
@@ -1125,6 +1143,27 @@ function TextInput({ value, onChange, placeholder, type = 'text', autoFocus, rev
 // the same regardless of unit (lbs users enter lbs directly, no conversion).
 // Kept in sync with store.settings.unit by app.jsx on every render.
 UI.unit = () => (typeof window !== 'undefined' && window.__UNIT) || 'kg';
+
+// Water/hydration is stored canonically in ml. Imperial (lbs) users see US
+// fluid ounces (1 fl oz = 29.5735 ml); metric (kg) and mixed (kg/mi, the UK
+// profile) stay ml/L — the UK measures water in ml, not oz, and UK vs US fl oz
+// even differ. UI.unit() is the VIEWER's unit, so a coach reviewing a client's
+// hydration sees it in the coach's own unit, no client-unit plumbing needed.
+UI.FLOZ_ML = 29.5735;
+UI.waterInFloz = () => UI.unit() === 'lbs';
+UI.mlToFloz = (ml) => ml / UI.FLOZ_ML;
+UI.flozToMl = (oz) => oz * UI.FLOZ_ML;
+// Label for the raw water-entry field (whole units the user types).
+UI.waterEntryUnit = () => UI.waterInFloz() ? 'fl oz' : 'ml';
+// Stored ml -> the integer entry value shown in the field, in the viewer's unit.
+UI.waterToEntry = (ml) => UI.waterInFloz() ? Math.round(UI.mlToFloz(ml)) : Math.round(ml);
+// Integer entry value (viewer's unit) -> canonical ml for storage.
+UI.waterEntryToMl = (v) => UI.waterInFloz() ? Math.round(UI.flozToMl(v)) : Math.round(v);
+// Quick-add increments in the viewer's unit (a glass / a bottle vs 250/500 ml).
+UI.waterQuickAdds = () => UI.waterInFloz() ? [8, 16] : [250, 500];
+// Summary tile display: imperial shows whole fl oz, else litres (1 decimal).
+UI.waterSummaryUnit = () => UI.waterInFloz() ? 'fl oz' : 'L';
+UI.waterSummaryValue = (ml) => UI.waterInFloz() ? Math.round(UI.mlToFloz(ml)) : Math.round(ml / 100) / 10;
 
 // True when the app runs inside a third-party app's in-app browser (X,
 // Instagram, Facebook, TikTok, ...) rather than a real browser. Those WKWebView

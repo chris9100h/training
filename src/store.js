@@ -3625,7 +3625,7 @@ async function submitCheckin(coachingId, clientId, responses, userId, weekStartA
     const fmtVal = (f, v) => {
       if (f.unit === 'weight') return `${v} ${wUnit}`;
       if (f._distanceField) return `${(v / 1000).toFixed(1)} km`;
-      if (f.key === 'hydration_ml') return `${(v / 1000).toFixed(1)} L/day`;
+      if (f.key === 'hydration_ml') return wUnit === 'lbs' ? `${Math.round(v / 29.5735)} fl oz/day` : `${(v / 1000).toFixed(1)} L/day`;
       if (f.key === 'steps') return Number(v).toLocaleString();
       if (f.type === 'percent') return `${v}%`;
       if (f.type === 'choice') { const o = (f.options || []).find(o => String(o.value) === String(v)); return o ? o.label : String(v); }

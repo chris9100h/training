@@ -17,6 +17,16 @@
    Entry shape: { id: string, date: string (YYYY-MM-DD), title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.547',
+    date: '2026-07-11',
+    title: 'Water, By the Ounce',
+    items: [
+      "🥤 Set your units to Imperial? Water now logs in fluid ounces, not millilitres. Quick-add a glass or a bottle (+8 / +16 fl oz), and your daily summary shows fl oz too. No more mental millilitre math before your morning coffee.",
+      "🇬🇧 Metric and Mixed stay on ml and litres. The UK measures water in millilitres, not ounces, and we are not here to start that fight. Your existing entries simply re-label themselves on screen, nothing was converted, moved, or lost.",
+      "😅 A quick apology to everyone on Imperial: fluid ounces never crossed the metric mind here. In our defence, life in base-10 is very comfortable, and we got a little cozy. Sorted now, sorry it took a while.",
+    ],
+  },
+  {
     id: 'v2.544',
     date: '2026-07-11',
     title: 'Intensity, Booked in Advance',

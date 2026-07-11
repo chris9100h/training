@@ -517,7 +517,7 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
       fat: existing.fat != null ? String(existing.fat) : '',
       fiber: existing.fiber != null ? String(existing.fiber) : '',
       calories: (existing.calories != null && existing.calories !== existingAutoCals) ? String(existing.calories) : '',
-      water: existing.waterMl != null ? String(existing.waterMl) : '',
+      water: existing.waterMl != null ? String(UI.waterToEntry(existing.waterMl)) : '',
       note: existing.note || '',
       offPlanNote: existing.offPlanNote || '',
     } : empty;
@@ -584,7 +584,7 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
       weight: healthNum(form.weight),
       steps: healthInt(form.steps),
       calories, protein, carbs, fat, fiber,
-      waterMl: healthInt(form.water),
+      waterMl: healthInt(form.water) != null ? UI.waterEntryToMl(healthInt(form.water)) : null,
       note: form.note.trim() || null,
       adherence, targetsSnap,
       offPlanNote: form.offPlanNote.trim() || null,
@@ -725,12 +725,12 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
 
       <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>HYDRATION</div>
       <div style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'flex-end' }}>
-        {numField('water', 'Water', 'ml')}
-        {[250, 500].map(ml => (
-          <button key={ml} onClick={() => set('water', String((healthInt(form.water) || 0) + ml))} style={{
+        {numField('water', 'Water', UI.waterEntryUnit())}
+        {UI.waterQuickAdds().map(inc => (
+          <button key={inc} onClick={() => set('water', String((healthInt(form.water) || 0) + inc))} style={{
             padding: '10px 12px', borderRadius: 4, border: `0.5px solid ${UI.hairStrong}`, background: UI.bgInset,
             color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap', WebkitTapHighlightColor: 'transparent',
-          }}>+{ml}</button>
+          }}>+{inc}</button>
         ))}
       </div>
 
@@ -1002,7 +1002,7 @@ function HealthMetricsCard({ log, dateLabel, isToday, onJumpToday, dragHandle, t
         {stat('Weight', log?.weight != null ? log.weight : null, wUnit)}
         {stat('Steps', log?.steps != null ? log.steps.toLocaleString() : null)}
         {stat('Calories', log?.calories != null ? log.calories : null)}
-        {stat('Water', log?.waterMl != null ? (Math.round(log.waterMl / 100) / 10) : null, 'L')}
+        {stat('Water', log?.waterMl != null ? UI.waterSummaryValue(log.waterMl) : null, UI.waterSummaryUnit())}
       </div>
       <div style={{ display: 'flex', gap: 12 }}>
         {stat('Protein', log?.protein != null ? log.protein : null, 'g')}
@@ -1141,7 +1141,7 @@ function HealthWeekCard({ stats, dragHandle, targets, tf, setTf, weightUnit }) {
           ? cell('Steps (sum)', stepsSum != null ? r(stepsSum).toLocaleString() : null)
           : cell('Steps (avg)', steps != null ? r(steps).toLocaleString() : null)}
         {cell(cardioSessions ? `Cardio (${cardioSessions}×)` : 'Cardio', cardioMinutes ? cardioMinutes : null, 'min')}
-        {cell('Water', water != null ? (Math.round(water / 100) / 10) : null, 'L')}
+        {cell('Water', water != null ? UI.waterSummaryValue(water) : null, UI.waterSummaryUnit())}
         {cell('Calories', r(calories))}
         {cell('Protein', r(protein), 'g')}
         {cell('Carbs', r(carbs), 'g')}
@@ -2198,7 +2198,7 @@ function ExportSheet({ open, onClose, store }) {
               ${stat(`Weight (${unit})`, l.weight)}
               ${stat('Steps', l.steps != null ? l.steps.toLocaleString() : null)}
               ${stat('Cardio', cardioMin || null, 'min')}
-              ${stat('Water', l.waterMl != null ? (Math.round(l.waterMl / 100) / 10).toFixed(1) : null, 'L')}
+              ${stat('Water', l.waterMl != null ? (UI.waterInFloz() ? String(UI.waterSummaryValue(l.waterMl)) : (Math.round(l.waterMl / 100) / 10).toFixed(1)) : null, UI.waterSummaryUnit())}
               ${stat('Calories', l.calories, 'kcal')}
               ${stat('Protein', l.protein, 'g')}
               ${stat('Carbs', l.carbs, 'g')}
