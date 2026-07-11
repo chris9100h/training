@@ -1549,7 +1549,7 @@ function ClientCheckInsTab({ coachingId, checkinEnabled = true, onToggle, toggli
   const saveCheckinTemplate = (name, schemaToSave, existingId = null) => {
     if (existingId) {
       setStore(s => ({ ...s, checkinSchemaTemplates: (s.checkinSchemaTemplates || []).map(t =>
-        t.id === existingId ? { ...t, name, schema: schemaToSave, createdAt: new Date().toISOString() } : t) }));
+        t.id === existingId ? { ...t, name, schema: schemaToSave } : t) }));
       return;
     }
     const tpl = { id: LB.uid(), name, schema: schemaToSave, createdAt: new Date().toISOString() };
