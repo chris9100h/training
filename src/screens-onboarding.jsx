@@ -2227,8 +2227,21 @@ class TourBoundary extends React.Component {
 }
 
 function TourCrashCard({ onClose }) {
+  // This fallback shows only when a step crashed, so it is the least-exercised
+  // path in the tour, yet its lone Close button used a plain onClick. That event
+  // is dead on some devices (see the renderBtnRow note below), with no timer or
+  // tap-anywhere behind it, so the user was trapped with no escape but killing
+  // the app. Mirror TourCompleteScreen's guarantees: close on tap-anywhere, on
+  // an onPointerDown button, and on a last-resort timer, so it can never hang.
+  const doneRef = useRefOB(onClose);
+  doneRef.current = onClose;
+  const close = () => { try { doneRef.current && doneRef.current(); } catch (_) {} };
+  useEffectOB(() => {
+    const t = setTimeout(close, 6000);
+    return () => clearTimeout(t);
+  }, []);
   return (
-    <div style={{
+    <div onPointerDown={close} style={{
       position: 'fixed', inset: 0, zIndex: 10000,
       background: 'rgba(0,0,0,0.85)',
       display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
@@ -2240,9 +2253,9 @@ function TourCrashCard({ onClose }) {
       }}>
         <div style={{ fontFamily: UI.fontDisplay, fontSize: 22, color: UI.ink, fontWeight: 400 }}>Tour interrupted</div>
         <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>
-          Something went wrong showing this step. You can close the tour and keep using the app.
+          Something went wrong showing this step. Tap anywhere to close the tour and keep using the app.
         </div>
-        <button onClick={onClose} style={{
+        <button onPointerDown={close} style={{
           padding: '13px 0', borderRadius: 6, border: 'none', cursor: 'pointer',
           background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)',
           color: '#0a0805', fontFamily: UI.fontUi, fontSize: 14, fontWeight: 700, letterSpacing: '0.06em',
