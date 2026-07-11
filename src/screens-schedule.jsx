@@ -2636,7 +2636,12 @@ function ExerciseItemEditor({ item, exName, isCheckboxOnly, queuePos, queueTotal
   });
   const [activeTechSet, setActiveTechSet] = useStateS(null);
   const supportsTechnique = !isCheckboxOnly && LB.exerciseLogMode(exercise) !== 'time' && exercise?.movement_type !== 'cardio';
-  const setTechForSet = (idx, techId) => setPlannedTechniques(prev => prev.map((t, i) => i === idx ? techId : t));
+  const setTechForSet = (idx, techId) => setPlannedTechniques(prev => {
+    const next = prev.map((t, i) => i === idx ? techId : t);
+    // Drop any now-orphaned Myo-Rep Match (a match with no earlier Myo-Reps set
+    // to anchor to), so changing an earlier set can't leave a dangling match.
+    return next.map((t, i) => (t === 'myorep_match' && !next.slice(0, i).some(x => x === 'myorep')) ? null : t);
+  });
 
   const switchMode = (m) => {
     if (m === 'variable' && mode !== 'variable') {
@@ -2859,9 +2864,17 @@ function ExerciseItemEditor({ item, exName, isCheckboxOnly, queuePos, queueTotal
               <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>Technique for set {activeTechSet + 1}</div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                 <button style={chipStyle(!plannedTechniques[activeTechSet])} onClick={() => setTechForSet(activeTechSet, null)}>None</button>
-                {LB.PLANNABLE_TECHNIQUES.map(t => (
-                  <button key={t.id} style={chipStyle(plannedTechniques[activeTechSet] === t.id)} onClick={() => setTechForSet(activeTechSet, t.id)}>{t.label}</button>
-                ))}
+                {LB.PLANNABLE_TECHNIQUES.map(t => {
+                  // Myo-Rep Match needs an earlier Myo-Reps set on this exercise
+                  // to match against; disable it until one is planned before this
+                  // set (live it would just fall back to plain Myo-Reps anyway).
+                  const disabled = t.id === 'myorep_match' && !plannedTechniques.slice(0, activeTechSet).some(x => x === 'myorep');
+                  return (
+                    <button key={t.id} disabled={disabled} onClick={() => setTechForSet(activeTechSet, t.id)}
+                      title={disabled ? 'Needs an earlier Myo-Reps set to match' : undefined}
+                      style={{ ...chipStyle(plannedTechniques[activeTechSet] === t.id), ...(disabled ? { opacity: 0.3, cursor: 'default' } : {}) }}>{t.label}</button>
+                  );
+                })}
               </div>
             </div>
           )}
