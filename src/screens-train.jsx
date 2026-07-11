@@ -5,6 +5,19 @@
 
 const { useState: useStateT, useEffect: useEffectT, useRef: useRefT, useMemo: useMemoT, useLayoutEffect: useLayoutEffectT } = React;
 
+// Anchor a Myo-Rep Match to the nearest completed Myo-Reps set before `idx`
+// (walking backwards), not the first one in the entry. A single Myo can anchor
+// a run of Matches, and two separate Myo groups each anchor their own Match, so
+// the second group's Match must not reach back to the first group's Myo.
+function nearestDoneMyoBefore(sets, idx) {
+  if (!Array.isArray(sets)) return null;
+  for (let i = Math.min(idx - 1, sets.length - 1); i >= 0; i--) {
+    const st = sets[i];
+    if (st && st.technique === 'myorep' && st.done && st.drops?.[0]?.reps != null) return st;
+  }
+  return null;
+}
+
 
 // ─── Mesocycle helpers ─────────────────────────────────────────────────────────
 const MESO_KEY = 'logbook-meso-state';
@@ -4360,7 +4373,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       return;
     }
     if (technique === 'myorep' || technique === 'myorep_match') {
-      const anchor = entry.sets.find(st => st.technique === 'myorep' && st.done && st.drops?.[0]?.reps != null);
+      const anchor = nearestDoneMyoBefore(entry.sets, targetIdx);
       // Myo-Rep Match needs a preceding myo set to anchor to; fall back to plain
       // Myo-Reps when none exists (planned-technique fallback).
       const effTech = (technique === 'myorep_match' && !anchor) ? 'myorep' : technique;
@@ -6180,7 +6193,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             if (target < 0) return;
             clearDrop(); clearLp(); clearWs(); clearAv();
             const s = entry.sets[target];
-            const anchor = entry.sets.find(st => st.technique === 'myorep' && st.done && st.drops?.[0]?.reps != null);
+            const anchor = nearestDoneMyoBefore(entry.sets, target);
             // For match: activation kg locked to the preceding myo set's activation kg
             const initKg = technique === 'myorep_match' ? (anchor?.drops?.[0]?.kg ?? s?.kg ?? null) : (s?.kg ?? null);
             const initDrops = [{ kg: initKg, reps: s?.reps ?? null }];
@@ -6200,7 +6213,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             // Match: kg is read-only, start straight at reps; Myo: start at kg
             setTimeout(() => activateMyo(0, technique === 'myorep_match' ? 'reps' : 'kg'), 150);
           };
-          const myoMatchTarget = entry.sets.find(st => st.technique === 'myorep' && st.done && st.drops?.[0]?.reps != null);
+          const myoMatchAnchorIdx = currentSetIdx >= 0 ? currentSetIdx : entry.sets.reduce((last, s, i) => !s.warmup ? i : last, -1);
+          const myoMatchTarget = nearestDoneMyoBefore(entry.sets, myoMatchAnchorIdx);
           const btnBase = (active) => ({
             width: '100%', textAlign: 'left', cursor: active ? 'pointer' : 'default',
             background: active ? 'rgba(var(--accent-rgb),0.07)' : UI.bgInset,

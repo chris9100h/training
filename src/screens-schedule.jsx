@@ -2638,9 +2638,16 @@ function ExerciseItemEditor({ item, exName, isCheckboxOnly, queuePos, queueTotal
   const supportsTechnique = !isCheckboxOnly && LB.exerciseLogMode(exercise) !== 'time' && exercise?.movement_type !== 'cardio';
   const setTechForSet = (idx, techId) => setPlannedTechniques(prev => {
     const next = prev.map((t, i) => i === idx ? techId : t);
-    // A Myo-Rep Match always pairs with a Myo-Reps set directly before it, so
-    // drop any match whose immediately preceding set is no longer Myo-Reps.
-    return next.map((t, i) => (t === 'myorep_match' && next[i - 1] !== 'myorep') ? null : t);
+    // A Myo-Rep Match must sit directly after a Myo-Reps set or another Match,
+    // so a single Myo anchors a run of Matches. Walk left to right checking the
+    // already-cleaned predecessor, which also unwinds an orphaned Match chain
+    // (e.g. Drop, Match, Match collapses both trailing Matches to none).
+    const cleaned = [];
+    for (let i = 0; i < next.length; i++) {
+      const prevTech = cleaned[i - 1];
+      cleaned[i] = (next[i] === 'myorep_match' && prevTech !== 'myorep' && prevTech !== 'myorep_match') ? null : next[i];
+    }
+    return cleaned;
   });
 
   const switchMode = (m) => {
@@ -2865,13 +2872,15 @@ function ExerciseItemEditor({ item, exName, isCheckboxOnly, queuePos, queueTotal
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                 <button style={chipStyle(!plannedTechniques[activeTechSet])} onClick={() => setTechForSet(activeTechSet, null)}>None</button>
                 {LB.PLANNABLE_TECHNIQUES.map(t => {
-                  // Myo-Rep Match always pairs with a Myo-Reps set on the set
-                  // directly before it, so it's only selectable when the previous
-                  // set is Myo-Reps (live it falls back to plain Myo-Reps anyway).
-                  const disabled = t.id === 'myorep_match' && plannedTechniques[activeTechSet - 1] !== 'myorep';
+                  // Myo-Rep Match pairs with a Myo-Reps set (or another Match) on
+                  // the set directly before it, so a Myo anchors a run of Matches.
+                  // Only selectable when the previous set is Myo-Reps or a Match
+                  // (live it falls back to plain Myo-Reps if the anchor is gone).
+                  const prevTech = plannedTechniques[activeTechSet - 1];
+                  const disabled = t.id === 'myorep_match' && prevTech !== 'myorep' && prevTech !== 'myorep_match';
                   return (
                     <button key={t.id} disabled={disabled} onClick={() => setTechForSet(activeTechSet, t.id)}
-                      title={disabled ? 'Needs the previous set to be Myo-Reps' : undefined}
+                      title={disabled ? 'Needs the previous set to be Myo-Reps or a Match' : undefined}
                       style={{ ...chipStyle(plannedTechniques[activeTechSet] === t.id), ...(disabled ? { opacity: 0.3, cursor: 'default' } : {}) }}>{t.label}</button>
                   );
                 })}
