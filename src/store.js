@@ -749,6 +749,8 @@ function mapEntryRows(entryRows) {
     plannedRepsPerSet: e.planned_reps_per_set || null,
     plannedRepsMax: e.planned_reps_max ?? null,
     plannedProgressionOffset: e.planned_progression_offset ?? null,
+    plannedTechnique: e.planned_technique ?? null,
+    plannedTechniqueScope: e.planned_technique_scope ?? null,
     note: e.note || '',
     supersetGroup: e.superset_group || null,
     sets: (e.sets || [])
@@ -1229,6 +1231,8 @@ async function _syncEntryRelational(sessions, userId, prevSessions, onStep) {
         planned_reps_per_set: e.plannedRepsPerSet || null,
         planned_reps_max: e.plannedRepsMax || null,
         planned_progression_offset: e.plannedProgressionOffset ?? null,
+        planned_technique: e.plannedTechnique ?? null,
+        planned_technique_scope: e.plannedTechniqueScope ?? null,
         note: e.note || '',
         superset_group: e.supersetGroup || null,
       });
