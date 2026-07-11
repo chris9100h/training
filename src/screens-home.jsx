@@ -2208,8 +2208,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
         plannedSets: itAdj.sets, plannedReps: it.reps, plannedRepsPerSet: it.repsPerSet || null,
         plannedRepsMax: it.repsMax || null,
         plannedProgressionOffset: it.progressionOffset ?? null,
-        plannedTechnique: it.plannedTechnique ?? null,
-        plannedTechniqueScope: it.plannedTechniqueScope ?? null,
+        plannedTechniques: it.plannedTechniques ?? null,
         sets: seedSets, note: '',
         supersetGroup: it.supersetGroup || null,
       };

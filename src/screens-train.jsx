@@ -4375,13 +4375,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     }
   };
 
-  // Auto-arm intensity techniques on the current working set. A plan-prescribed
-  // technique (coach/plan) takes priority over the beyond-failure meso LP
-  // auto-arm on its target sets (scope 'all' = every working set, 'last' = only
-  // the last); the meso LP arm still fires on any set the plan didn't claim.
-  // Both arm once per set (plannedTechArmedRef / mesoLpArmedRef) so cancelling
-  // on a set doesn't re-nag. A meso prescription still pre-seeds partials into a
-  // planned chain via armPlannedTechnique's mesoChainSeedRef.
+  // Auto-arm intensity techniques on the current working set. A per-set planned
+  // technique (coach/plan, plannedTechniques[workingIdx]) takes priority over
+  // the beyond-failure meso LP auto-arm; the meso LP arm still fires on any set
+  // that has no planned technique. Both arm once per set (plannedTechArmedRef /
+  // mesoLpArmedRef) so cancelling on a set doesn't re-nag. A meso prescription
+  // still pre-seeds partials into a planned chain via armPlannedTechnique's
+  // mesoChainSeedRef.
   // MUST sit above the `if (!entry)` early return (empty freestyle/bonus
   // session): a hook after that return changes the hook count when the first
   // exercise is added (entry null → set), which is React error #310. Derives
@@ -4397,16 +4397,19 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     if (dropSetIdx != null || myoSetIdx != null || avSetIdx != null || lpTarget != null || wsTarget != null) return;
     const key = exIdx + '_' + curIdx;
 
-    const plan = entry.plannedTechnique;
-    if (plan) {
-      const workingIdxs = sets.map((st, i) => (!st.warmup ? i : -1)).filter(i => i >= 0);
-      const isTargetSet = entry.plannedTechniqueScope === 'all' || curIdx === workingIdxs[workingIdxs.length - 1];
-      if (isTargetSet) {
+    // Per-set planned technique: the current set's working-set index (warmups
+    // excluded) maps to plannedTechniques[workingIdx]. A set that has one arms
+    // it and never falls through to the meso LP arm below.
+    const techs = entry.plannedTechniques;
+    if (Array.isArray(techs)) {
+      const workingIdx = sets.slice(0, curIdx + 1).filter(st => !st.warmup).length - 1;
+      const plan = techs[workingIdx] || null;
+      if (plan) {
         if (!plannedTechArmedRef.current.has(key)) {
           plannedTechArmedRef.current.add(key);
           armPlannedTechnique(plan, curIdx);
         }
-        return; // the plan owns this set (armed now or already dismissed): don't also fire meso LP
+        return; // this set owns a planned technique (armed now or dismissed): don't also fire meso LP
       }
     }
 

@@ -1237,8 +1237,8 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
                                     {it.progressionOffset != null && it.progressionOffset > 0 && (
                                       <i className="fa-solid fa-bolt" title={`Smart Progression: +${it.progressionOffset}`} style={{ fontSize: 9, opacity: 0.85 }} />
                                     )}
-                                    {it.plannedTechnique && (
-                                      <i className="fa-solid fa-fire" title={LB.plannedTechniqueLabel(it.plannedTechnique)} style={{ fontSize: 9, opacity: 0.85, color: UI.gold }} />
+                                    {Array.isArray(it.plannedTechniques) && it.plannedTechniques.some(Boolean) && (
+                                      <i className="fa-solid fa-fire" title="Planned intensity techniques" style={{ fontSize: 9, opacity: 0.85, color: UI.gold }} />
                                     )}
                                   </span>
                                 </div>
@@ -2408,7 +2408,7 @@ function DayCopyPicker({ store, schedule, currentDayId, onClose, onCopy, multiSe
   const importTemplate = (t) => {
     const items = normalizeSupersets((t.exercises || [])
       .filter(it => LB.findExercise(store, it.exId))
-      .map(it => ({ exId: it.exId, sets: it.sets || 3, ...(it.reps != null ? { reps: it.reps } : {}), ...(it.repsPerSet ? { repsPerSet: it.repsPerSet } : {}), ...(it.repsMax != null ? { repsMax: it.repsMax } : {}), ...(it.progressionOffset != null ? { progressionOffset: it.progressionOffset } : {}), ...(it.plannedTechnique ? { plannedTechnique: it.plannedTechnique, plannedTechniqueScope: it.plannedTechniqueScope || 'last' } : {}), ...(Array.isArray(it.timeSecPerSet) ? { timeSecPerSet: it.timeSecPerSet } : {}), ...(it.supersetGroup ? { supersetGroup: it.supersetGroup } : {}) })));
+      .map(it => ({ exId: it.exId, sets: it.sets || 3, ...(it.reps != null ? { reps: it.reps } : {}), ...(it.repsPerSet ? { repsPerSet: it.repsPerSet } : {}), ...(it.repsMax != null ? { repsMax: it.repsMax } : {}), ...(it.progressionOffset != null ? { progressionOffset: it.progressionOffset } : {}), ...(Array.isArray(it.plannedTechniques) && it.plannedTechniques.some(Boolean) ? { plannedTechniques: it.plannedTechniques } : {}), ...(Array.isArray(it.timeSecPerSet) ? { timeSecPerSet: it.timeSecPerSet } : {}), ...(it.supersetGroup ? { supersetGroup: it.supersetGroup } : {}) })));
     const day = { id: LB.uid(), name: t.name, items };
     if (multiSelect) onCopy([{ day, migrateId: undefined }]);
     else onCopy(day, undefined);
@@ -2626,9 +2626,17 @@ function ExerciseItemEditor({ item, exName, isCheckboxOnly, queuePos, queueTotal
   // Scope 'last' = only the last working set (default), 'all' = every working
   // set. Hidden for checkbox/time/cardio exercises (no intensity flow there),
   // mirroring the live INTENSITY button's own gate.
-  const [plannedTechnique, setPlannedTechnique] = useStateS(item.plannedTechnique ?? null);
-  const [plannedTechScope, setPlannedTechScope] = useStateS(item.plannedTechniqueScope || 'last');
+  // Per-set planned techniques: one slot per set (null = none), padded and
+  // truncated to the current set count as it changes (like repsPerSet).
+  // activeTechSet is which set's technique picker is currently expanded.
+  const [plannedTechniques, setPlannedTechniques] = useStateS(() => {
+    const arr = (Array.isArray(item.plannedTechniques) ? item.plannedTechniques : []).slice(0, item.sets);
+    while (arr.length < item.sets) arr.push(null);
+    return arr;
+  });
+  const [activeTechSet, setActiveTechSet] = useStateS(null);
   const supportsTechnique = !isCheckboxOnly && LB.exerciseLogMode(exercise) !== 'time' && exercise?.movement_type !== 'cardio';
+  const setTechForSet = (idx, techId) => setPlannedTechniques(prev => prev.map((t, i) => i === idx ? techId : t));
 
   const switchMode = (m) => {
     if (m === 'variable' && mode !== 'variable') {
@@ -2653,6 +2661,8 @@ function ExerciseItemEditor({ item, exName, isCheckboxOnly, queuePos, queueTotal
         return next.slice(0, n);
       });
     }
+    setPlannedTechniques(prev => { const next = prev.slice(0, n); while (next.length < n) next.push(null); return next; });
+    setActiveTechSet(a => (a != null && a >= n) ? null : a);
   };
 
   const handleMinChange = (v) => {
@@ -2666,11 +2676,10 @@ function ExerciseItemEditor({ item, exName, isCheckboxOnly, queuePos, queueTotal
     if (item.exId && trimmedExNote !== (exercise?.note || '')) {
       setStore(s => ({ ...s, exercises: s.exercises.map(e => e.id === item.exId ? { ...e, note: trimmedExNote } : e) }));
     }
-    // Carry a technique only for exercises that support one, and only when set;
-    // otherwise write nulls so clearing it on an existing item actually sticks.
-    const tech = (supportsTechnique && plannedTechnique)
-      ? { plannedTechnique, plannedTechniqueScope: plannedTechScope }
-      : { plannedTechnique: null, plannedTechniqueScope: null };
+    // Per-set techniques, sliced to the set count; null when this exercise
+    // can't take one or no set has one (so clearing sticks on an edit).
+    const techs = plannedTechniques.slice(0, sets);
+    const tech = { plannedTechniques: (supportsTechnique && techs.some(Boolean)) ? techs : null };
     if (isCheckboxOnly) {
       onSave({ sets, reps: 0, repsPerSet: undefined, repsMax: undefined, progressionOffset: progOverride, ...tech });
       return;
@@ -2823,23 +2832,38 @@ function ExerciseItemEditor({ item, exName, isCheckboxOnly, queuePos, queueTotal
 
       {supportsTechnique && (
         <div style={{ marginBottom: 24 }}>
-          <div className="label" style={{ marginBottom: 10 }}>Intensity technique</div>
+          <div className="label" style={{ marginBottom: 10 }}>Intensity technique (per set)</div>
+          {/* One chip per set showing its technique (or "none"); tap a set chip
+              to expand the technique picker for that set below. */}
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-            <button style={chipStyle(!plannedTechnique)} onClick={() => setPlannedTechnique(null)}>None</button>
-            {LB.PLANNABLE_TECHNIQUES.map(t => (
-              <button key={t.id} style={chipStyle(plannedTechnique === t.id)} onClick={() => setPlannedTechnique(t.id)}>{t.label}</button>
-            ))}
+            {Array.from({ length: sets }, (_, i) => {
+              const tech = plannedTechniques[i] || null;
+              const active = activeTechSet === i;
+              return (
+                <button key={i} onClick={() => setActiveTechSet(active ? null : i)} style={{
+                  display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, minWidth: 52,
+                  padding: '6px 10px', borderRadius: 4, cursor: 'pointer',
+                  border: `1px solid ${active ? UI.gold : tech ? UI.goldSoft : UI.hairStrong}`,
+                  background: (active || tech) ? UI.goldFaint : 'transparent',
+                  color: tech ? UI.gold : UI.inkFaint,
+                  fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, WebkitTapHighlightColor: 'transparent',
+                }}>
+                  <span>Set {i + 1}</span>
+                  <span className="micro" style={{ color: tech ? UI.gold : UI.inkGhost, letterSpacing: '0.06em' }}>{tech ? LB.plannedTechniqueShort(tech) : 'none'}</span>
+                </button>
+              );
+            })}
           </div>
-          {plannedTechnique && (
-            <>
-              <div style={{ display: 'flex', gap: 8, marginTop: 12, marginBottom: 10 }}>
-                <button style={toggleStyle(plannedTechScope === 'last')} onClick={() => setPlannedTechScope('last')}>Last set</button>
-                <button style={toggleStyle(plannedTechScope === 'all')} onClick={() => setPlannedTechScope('all')}>All sets</button>
+          {activeTechSet != null && activeTechSet < sets && (
+            <div style={{ marginTop: 12 }}>
+              <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>Technique for set {activeTechSet + 1}</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                <button style={chipStyle(!plannedTechniques[activeTechSet])} onClick={() => setTechForSet(activeTechSet, null)}>None</button>
+                {LB.PLANNABLE_TECHNIQUES.map(t => (
+                  <button key={t.id} style={chipStyle(plannedTechniques[activeTechSet] === t.id)} onClick={() => setTechForSet(activeTechSet, t.id)}>{t.label}</button>
+                ))}
               </div>
-              <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.4 }}>
-                {`${LB.plannedTechniqueLabel(plannedTechnique)} opens automatically ${plannedTechScope === 'last' ? 'on the last working set' : 'on every working set'} when this exercise is trained.`}
-              </div>
-            </>
+            </div>
           )}
         </div>
       )}
@@ -3096,8 +3120,8 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
                     {it.progressionOffset != null && it.progressionOffset > 0 && (
                       <i className="fa-solid fa-bolt" title={`Smart Progression: +${it.progressionOffset}`} style={{ fontSize: 9, opacity: 0.85 }} />
                     )}
-                    {it.plannedTechnique && (
-                      <i className="fa-solid fa-fire" title={LB.plannedTechniqueLabel(it.plannedTechnique)} style={{ fontSize: 9, opacity: 0.85, color: UI.gold }} />
+                    {Array.isArray(it.plannedTechniques) && it.plannedTechniques.some(Boolean) && (
+                      <i className="fa-solid fa-fire" title="Planned intensity techniques" style={{ fontSize: 9, opacity: 0.85, color: UI.gold }} />
                     )}
                     <i className="fa fa-pencil" style={{ fontSize: 9, opacity: 0.7 }} />
                   </div>
@@ -3410,7 +3434,7 @@ function PlanWizard({ store, setStore, go }) {
     const tplDays = (store.workoutTemplates || []).map(t => ({
       key: 'tpl:' + t.id, name: t.name,
       items: (t.exercises || []).filter(it => LB.findExercise(store, it.exId))
-        .map(it => ({ exId: it.exId, sets: it.sets || 3, ...(it.reps != null ? { reps: it.reps } : {}), ...(it.repsPerSet ? { repsPerSet: it.repsPerSet } : {}), ...(it.repsMax != null ? { repsMax: it.repsMax } : {}), ...(it.progressionOffset != null ? { progressionOffset: it.progressionOffset } : {}), ...(it.plannedTechnique ? { plannedTechnique: it.plannedTechnique, plannedTechniqueScope: it.plannedTechniqueScope || 'last' } : {}), ...(Array.isArray(it.timeSecPerSet) ? { timeSecPerSet: it.timeSecPerSet } : {}), ...(it.supersetGroup ? { supersetGroup: it.supersetGroup } : {}) })),
+        .map(it => ({ exId: it.exId, sets: it.sets || 3, ...(it.reps != null ? { reps: it.reps } : {}), ...(it.repsPerSet ? { repsPerSet: it.repsPerSet } : {}), ...(it.repsMax != null ? { repsMax: it.repsMax } : {}), ...(it.progressionOffset != null ? { progressionOffset: it.progressionOffset } : {}), ...(Array.isArray(it.plannedTechniques) && it.plannedTechniques.some(Boolean) ? { plannedTechniques: it.plannedTechniques } : {}), ...(Array.isArray(it.timeSecPerSet) ? { timeSecPerSet: it.timeSecPerSet } : {}), ...(it.supersetGroup ? { supersetGroup: it.supersetGroup } : {}) })),
     })).filter(t => t.items.length);
     if (tplDays.length) groups.push({ id: '__tpl', name: 'Templates', days: tplDays });
     return groups;
