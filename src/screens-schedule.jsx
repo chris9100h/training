@@ -2622,33 +2622,31 @@ function ExerciseItemEditor({ item, exName, isCheckboxOnly, queuePos, queueTotal
   // across Uniform/Per Set switches. null = inherit the global setting,
   // 0 = explicitly off, N = explicitly on with a +N reps ceiling.
   const [progOverride, setProgOverride] = useStateS(item.progressionOffset ?? null);
-  // Planned intensity technique: null = none, else a PLANNABLE_TECHNIQUES id.
-  // Scope 'last' = only the last working set (default), 'all' = every working
-  // set. Hidden for checkbox/time/cardio exercises (no intensity flow there),
-  // mirroring the live INTENSITY button's own gate.
   // Per-set planned techniques: one slot per set (null = none), padded and
   // truncated to the current set count as it changes (like repsPerSet).
   // activeTechSet is which set's technique picker is currently expanded.
+  // A Myo-Rep Match must sit directly after a Myo-Reps set or another Match, so
+  // a single Myo anchors a run of Matches. Walk left to right against the
+  // already-cleaned predecessor, unwinding any orphaned Match (from an imported
+  // plan, external data, or a set-count change) to none. Runs on load and save,
+  // not just setTechForSet, so foreign data self-heals instead of persisting.
+  const cleanMatchChain = (arr) => {
+    const cleaned = [];
+    for (let i = 0; i < arr.length; i++) {
+      const prevTech = cleaned[i - 1];
+      cleaned[i] = (arr[i] === 'myorep_match' && prevTech !== 'myorep' && prevTech !== 'myorep_match') ? null : arr[i];
+    }
+    return cleaned;
+  };
   const [plannedTechniques, setPlannedTechniques] = useStateS(() => {
     const arr = (Array.isArray(item.plannedTechniques) ? item.plannedTechniques : []).slice(0, item.sets);
     while (arr.length < item.sets) arr.push(null);
-    return arr;
+    return cleanMatchChain(arr);
   });
   const [activeTechSet, setActiveTechSet] = useStateS(null);
   const supportsTechnique = !isCheckboxOnly && LB.exerciseLogMode(exercise) !== 'time' && exercise?.movement_type !== 'cardio';
-  const setTechForSet = (idx, techId) => setPlannedTechniques(prev => {
-    const next = prev.map((t, i) => i === idx ? techId : t);
-    // A Myo-Rep Match must sit directly after a Myo-Reps set or another Match,
-    // so a single Myo anchors a run of Matches. Walk left to right checking the
-    // already-cleaned predecessor, which also unwinds an orphaned Match chain
-    // (e.g. Drop, Match, Match collapses both trailing Matches to none).
-    const cleaned = [];
-    for (let i = 0; i < next.length; i++) {
-      const prevTech = cleaned[i - 1];
-      cleaned[i] = (next[i] === 'myorep_match' && prevTech !== 'myorep' && prevTech !== 'myorep_match') ? null : next[i];
-    }
-    return cleaned;
-  });
+  const setTechForSet = (idx, techId) => setPlannedTechniques(prev =>
+    cleanMatchChain(prev.map((t, i) => i === idx ? techId : t)));
 
   const switchMode = (m) => {
     if (m === 'variable' && mode !== 'variable') {
@@ -2690,7 +2688,7 @@ function ExerciseItemEditor({ item, exName, isCheckboxOnly, queuePos, queueTotal
     }
     // Per-set techniques, sliced to the set count; null when this exercise
     // can't take one or no set has one (so clearing sticks on an edit).
-    const techs = plannedTechniques.slice(0, sets);
+    const techs = cleanMatchChain(plannedTechniques.slice(0, sets));
     const tech = { plannedTechniques: (supportsTechnique && techs.some(Boolean)) ? techs : null };
     if (isCheckboxOnly) {
       onSave({ sets, reps: 0, repsPerSet: undefined, repsMax: undefined, progressionOffset: progOverride, ...tech });

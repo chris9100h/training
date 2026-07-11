@@ -890,38 +890,6 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   }, [entry?.exId]);
   const last = localLast ?? (entry ? remoteLast[entry.exId] : null) ?? null;
 
-  // PR stamp: same three-way value dispatch as isNewBestSet below (time /
-  // assisted / e1RM), reusing bestE1rmForExercise/bestTimeForExercise/
-  // bestAssistLoad as the historical (pre-session) best: no new PR-comparison
-  // math. Unlike isNewBestSet (a one-shot flash gate, max once per exercise
-  // per session) this recomputes on every render, so the stamp always lands
-  // on the session's actual best set for this exercise, even if a later set
-  // breaks the record again. Spans every entry of this exercise in today's
-  // session (not just this one), since the same exercise can appear twice in
-  // a day (heavy block + back-off) and they share one PR pool.
-  const isAssistedEx = LB.isAssisted(exercise);
-  const prValOf = (st) => {
-    // warmup/skipped excluded to match bestE1rmForExercise's own pool exactly:
-    // this session's side and the historical side must share one scale.
-    if (!st.done || st.warmup || st.skipped) return null;
-    if (isTime) return st.timeSec ?? null;
-    if (isAssistedEx) return st.kg != null ? st.kg : null;
-    const reps = LB.effReps(st);
-    return (st.kg != null && reps > 0) ? LB.e1rm(st.kg, reps) : null;
-  };
-  const sessionBestPrVal = entry
-    ? session.entries.filter(e => e.exId === entry.exId).reduce((m, e) =>
-        e.sets.reduce((m2, st) => { const v = prValOf(st); return (v != null && v > m2) ? v : m2; }, m), -Infinity)
-    : -Infinity;
-  const historicalBestPrVal = !entry ? null
-    : isTime ? LB.bestTimeForExercise(store, entry.exId, session.id)
-    : isAssistedEx ? LB.bestAssistLoad(store, entry.exId, session.id)
-    : LB.bestE1rmForExercise(store, entry.exId, session.id);
-  const isSetPR = (st) => {
-    const val = prValOf(st);
-    return val != null && val === sessionBestPrVal && historicalBestPrVal != null && historicalBestPrVal > 0 && val > historicalBestPrVal;
-  };
-
   // Cross-day history for the tapped exercise name. The in-training "last time"
   // above is day-slot specific (bestRecentEntry / fetchExerciseHistory both key
   // on session.dayId), so an exercise pushed harder on another day reads as
@@ -976,6 +944,49 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const isTime = logMode === 'time';           // countdown + duration, no weight
   const isNoWeightReps = isCheckbox || isRepsOnly || isTime; // "no weight column" — keeps all existing kg/header/hero gates
   const isBodyweight = !isCardio && exercise?.equipment === 'bodyweight';
+
+  // PR stamp: same three-way value dispatch as isNewBestSet below (time /
+  // assisted / e1RM), reusing bestE1rmForExercise/bestTimeForExercise/
+  // bestAssistLoad as the historical (pre-session) best: no new PR-comparison
+  // math. Unlike isNewBestSet (a one-shot flash gate, max once per exercise
+  // per session) this recomputes on every render, so the stamp always lands
+  // on the session's actual best set for this exercise, even if a later set
+  // breaks the record again. Spans every entry of this exercise in today's
+  // session (not just this one), since the same exercise can appear twice in
+  // a day (heavy block + back-off) and they share one PR pool. Sits below the
+  // logMode/isTime derivation on purpose: reading isTime above it downlevels to
+  // undefined (const TDZ folded to var by the loader), which killed the time
+  // branch and would ReferenceError if the transpile target ever kept const.
+  const isAssistedEx = LB.isAssisted(exercise);
+  const prValOf = (st) => {
+    // warmup/skipped excluded to match bestE1rmForExercise's own pool exactly:
+    // this session's side and the historical side must share one scale.
+    if (!st.done || st.warmup || st.skipped) return null;
+    if (isTime) return st.timeSec ?? null;
+    if (isAssistedEx) return st.kg != null ? st.kg : null;
+    const reps = LB.effReps(st);
+    return (st.kg != null && reps > 0) ? LB.e1rm(st.kg, reps) : null;
+  };
+  const sessionBestPrVal = entry
+    ? session.entries.filter(e => e.exId === entry.exId).reduce((m, e) =>
+        e.sets.reduce((m2, st) => { const v = prValOf(st); return (v != null && v > m2) ? v : m2; }, m), -Infinity)
+    : -Infinity;
+  const historicalBestPrVal = !entry ? null
+    : isTime ? LB.bestTimeForExercise(store, entry.exId, session.id)
+    : isAssistedEx ? LB.bestAssistLoad(store, entry.exId, session.id)
+    : Math.max(LB.bestE1rmForExercise(store, entry.exId, session.id), remoteBestE1rmRef.current[entry.exId] || 0);
+  const isSetPR = (st) => {
+    const val = prValOf(st);
+    if (val == null || val !== sessionBestPrVal || historicalBestPrVal == null) return false;
+    // e1RM seeds 0 when there is no history (assisted/time return null instead),
+    // so only the e1RM branch needs the >0 floor; assisted loads are negative
+    // and a valid PR, so gating them on >0 would suppress the stamp entirely.
+    if (!isTime && !isAssistedEx && historicalBestPrVal <= 0) return false;
+    return val > historicalBestPrVal;
+  };
+  // On a tie (two sets share the record-breaking value) only the first is
+  // stamped, so the row shows one PERSONAL RECORD watermark, not several.
+  const firstPrSetIdx = entry ? entry.sets.findIndex(st => isSetPR(st)) : -1;
   // Weighted-stretch finisher: whether the stretch carries a weight at all
   // (bodyweight / no-weight exercises just hold at bodyweight). The keypad's
   // own kbAdjust reads the equipment increment directly for the +/- keys.
@@ -1239,6 +1250,19 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     return cE1rm > 0 && priorBest > 0 && cE1rm > priorBest;
   };
 
+  // A weighted stretch always needs a positive hold. The editor shows 30s by
+  // default, but the state can carry timeSec null (only the weight touched, or
+  // the hold field cleared), which would persist and render as "nulls"/"s".
+  // Normalise any stretch to the 30s default. Handles both shapes: the object
+  // shape completeSet commits (weighted_stretch, lengthened partial) and the
+  // per-round array shape the chain finishers commit (drop, myo, amrap).
+  const normalizeStretchHold = (st) => st ? { ...st, timeSec: (st.timeSec != null && st.timeSec > 0) ? st.timeSec : 30 } : st;
+  const normalizeDropStretch = (drops) => {
+    if (!drops) return drops;
+    return Array.isArray(drops)
+      ? drops.map(r => (r && r.stretch) ? { ...r, stretch: normalizeStretchHold(r.stretch) } : r)
+      : (drops.stretch ? { ...drops, stretch: normalizeStretchHold(drops.stretch) } : drops);
+  };
   const completeSet = (setIdx, bypassOutlierCheck = false, advanceFocus = false, extraPatch = null) => {
     // Lengthened partials only ever completes via finishLengthenedPartial,
     // which supplies extraPatch with the chosen partials count — every other
@@ -1369,18 +1393,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       const currSet = sess.entries[exIdx]?.sets[setIdx];
       if (!currSet) return sess;
       const patch = { done: true, ...extraPatch };
-      // A weighted stretch always needs a positive hold. The editor shows 30s as
-      // the default even before the field is touched, but the state can carry
-      // timeSec null (e.g. only the weight was entered), which would persist and
-      // render as "nulls"/"s". Normalise the stretch on the single path every
-      // technique commits through: object shape (weighted_stretch, lengthened
-      // partial) and per-round array shape (drop, myo, amrap variations).
-      if (patch.drops) {
-        const fixStretch = (st) => st ? { ...st, timeSec: (st.timeSec != null && st.timeSec > 0) ? st.timeSec : 30 } : st;
-        patch.drops = Array.isArray(patch.drops)
-          ? patch.drops.map(r => (r && r.stretch) ? { ...r, stretch: fixStretch(r.stretch) } : r)
-          : (patch.drops.stretch ? { ...patch.drops, stretch: fixStretch(patch.drops.stretch) } : patch.drops);
-      }
+      if (patch.drops) patch.drops = normalizeDropStretch(patch.drops);
       if (kb && kb.setIdx === setIdx && kb.field !== 'kg') {
         const fromRef = parseInt(rawRef, 10);
         const fromSess = currSet[kb.field] || 0;
@@ -1535,11 +1548,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   };
 
   // True when the array's only nonzero partials value is still exactly the
-  // untouched meso pre-seed on a single round (mesoChainSeedRef) — i.e. the
+  // untouched meso pre-seed on a single round (mesoChainSeedRef), i.e. the
   // auto-seed alone, not a real user edit. Used both to relocate the seed at
   // Finish (applyMesoChainSeed) and to keep an unopened seed from tripping
   // the discard-changes dirty check (activeChainDirty) below. Ignores
-  // stretch on purpose — that's a separate, always-real signal of user work.
+  // stretch on purpose: that's a separate, always-real signal of user work.
   const seedIsUntouched = (arr) => {
     const seedVal = mesoChainSeedRef.current;
     if (!seedVal) return false;
@@ -1564,21 +1577,22 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // See mesoChainSeedRef above. Safety net for Finish: with floatSeedOnto
   // already keeping the seed on the newest round as it's added, this is
   // normally a no-op by the time Finish runs. If the seed is still untouched,
-  // relocate it to the true last round; otherwise (no round carries it
+  // relocate it to the true last surviving round; otherwise (no round carries it
   // anymore, more than one round has a partials value, or the seeded round's
   // value was edited away) the user has taken partials over themselves, so
-  // their rows pass through unchanged. Matched by value, not by index, since
-  // rawDrops.filter() below drops incomplete rows and does not preserve
+  // their rows pass through unchanged. The untouched check runs on rawDrops (the
+  // pre-filter rows), because floatSeedOnto may have parked the seed on an
+  // appended round that was left empty and just got dropped by the Finish
+  // filter; without this the prescription would silently vanish from the saved
+  // set. Matched by value, not by index, since the filter does not preserve
   // original positions.
-  const applyMesoChainSeed = (drops) => {
-    if (drops.length < 2 || !seedIsUntouched(drops)) return drops;
+  const applyMesoChainSeed = (drops, rawDrops = drops) => {
     const seedVal = mesoChainSeedRef.current;
-    const seededIdx = drops.findIndex(d => d.partials === seedVal);
+    if (drops.length < 2 || !seedVal || !seedIsUntouched(rawDrops)) return drops;
     const lastIdx = drops.length - 1;
-    if (seededIdx === lastIdx) return drops;
     return drops.map((d, i) => {
-      if (i === seededIdx) return { ...d, partials: undefined };
       if (i === lastIdx) return { ...d, partials: seedVal };
+      if (d.partials === seedVal) return { ...d, partials: undefined };
       return d;
     });
   };
@@ -1601,7 +1615,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // Optional finishers (partials, weighted stretch) already live on the
     // drops rows; applyMesoChainSeed only relocates an untouched meso
     // pre-seed onto the now-final round, everything else passes through.
-    const finalDrops = applyMesoChainSeed(drops);
+    const finalDrops = normalizeDropStretch(applyMesoChainSeed(drops, rawDrops));
     const first = finalDrops[0];
     updateSession(sess => ({
       ...sess,
@@ -1645,7 +1659,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // Appends a new myo mini-round (top level: called from both the keypad's
   // auto-add-first-mini flow and the "ADD MYO" button in the render below).
   // If this is the very first mini after the activation round and a
-  // beyond-failure meso prescription is still pending, seed it there — the
+  // beyond-failure meso prescription is still pending, seed it there, the
   // activation round never renders a Finisher (see isActiv below), so the
   // pre-seed can't live there like it does for Drop/AMRAP; this is the
   // earliest round that can actually show it. Any later mini reuses
@@ -1679,7 +1693,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // Optional finishers (partials, weighted stretch) already live on the
     // drops rows; applyMesoChainSeed only relocates an untouched meso
     // pre-seed onto the now-final round, everything else passes through.
-    const finalDrops = applyMesoChainSeed(drops);
+    const finalDrops = normalizeDropStretch(applyMesoChainSeed(drops, rawDrops));
     const first = finalDrops[0];
     updateSession(sess => ({
       ...sess,
@@ -1749,7 +1763,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // Optional finishers (partials, weighted stretch) already live on the
     // drops rows; applyMesoChainSeed only relocates an untouched meso
     // pre-seed onto the now-final round, everything else passes through.
-    const finalDrops = applyMesoChainSeed(drops);
+    const finalDrops = normalizeDropStretch(applyMesoChainSeed(drops, rawDrops));
     const first = finalDrops[0];
     updateSession(sess => ({
       ...sess,
@@ -1791,7 +1805,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // A round's partials value doesn't count as "real" work while it's still
     // exactly the untouched beyond-failure meso pre-seed (audit finding: this
     // used to pop the discard-changes warning on every meso set the user
-    // hadn't touched at all yet) — a stretch anywhere is always real, though.
+    // hadn't touched at all yet): a stretch anywhere is always real, though.
     const hasFin = (arr) => arr.some(d => d.stretch) || (arr.some(d => (d.partials || 0) > 0) && !seedIsUntouched(arr));
     if (dropSetIdx != null) return dropDrops.length > 1 || hasFin(dropDrops);
     if (myoSetIdx != null) return myoDrops.length > 1 || hasFin(myoDrops);
@@ -2332,8 +2346,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // onto the chain's first round at start (see startDrop/startMyo/startAv) so
   // it's visible immediately instead of silently attached on Finish. At
   // Finish, applyMesoChainSeed (near finishDropSet) moves it onto whichever
-  // round is actually last by then — mirroring how the pre-rework shared
-  // finisherPartials state always applied to "whatever's last" — but only
+  // round is actually last by then, mirroring how the pre-rework shared
+  // finisherPartials state always applied to "whatever's last", but only
   // while it is still exactly this untouched auto-seed; any manual partials
   // edit anywhere on the chain means the user has taken over.
   const mesoChainSeedRef = useRefT(0);
@@ -4402,7 +4416,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   useEffectT(() => {
     if (!entry || isCardio) return;
     const sets = entry.sets || [];
-    const curIdx = sets.findIndex(s => !s.done);
+    const curIdx = sets.findIndex(s => !s.done && !s.skipped);
     if (curIdx < 0) return;
     const wCount = sets.filter(s => s.warmup).length;
     const curWarmup = wCount > 0 && !!sets[curIdx]?.warmup;
@@ -4412,8 +4426,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
     // Per-set planned technique: the current set's working-set index (warmups
     // excluded) maps to plannedTechniques[workingIdx]. A set that has one arms
-    // it and never falls through to the meso LP arm below.
-    const techs = entry.plannedTechniques;
+    // it and never falls through to the meso LP arm below. Gate on the same
+    // technique support the plan editor uses (no checkbox/time exercise), so a
+    // mid-session swap onto an incompatible log mode never arms a stale plan.
+    const techs = (!isCheckbox && !isTime) ? entry.plannedTechniques : null;
     if (Array.isArray(techs)) {
       const workingIdx = sets.slice(0, curIdx + 1).filter(st => !st.warmup).length - 1;
       const plan = techs[workingIdx] || null;
@@ -5381,7 +5397,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                     </>
                   )}
                   <div style={{ position: 'relative' }}>
-                  {s.done && isSetPR(s) && (
+                  {i === firstPrSetIdx && (
                     <div aria-hidden="true" style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', overflow: 'hidden' }}>
                       {/* Same rotated display-it watermark family as the MESOCYCLE/5-3-1
                           plan-row stamps and the RIR hero-card stamp, scaled down for this
@@ -6199,7 +6215,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             const initDrops = [{ kg: initKg, reps: s?.reps ?? null }];
             // Myo's activation round never renders a Finisher (see isActiv
             // below), so the pre-seed can't live there like it does for
-            // Drop/AMRAP — appendMyoRound plants it on the first real mini
+            // Drop/AMRAP, appendMyoRound plants it on the first real mini
             // instead, as soon as one exists.
             mesoChainSeedRef.current = mesoPartials;
             setMyoDrops(initDrops);
