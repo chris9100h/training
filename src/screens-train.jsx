@@ -6497,9 +6497,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   <div key={di} data-av-row={di} style={{ padding: '6px 4px', borderBottom: di < avDrops.length - 1 ? `0.5px solid ${UI.hair}` : 'none' }}>
                     <input
                       type="text"
+                      enterKeyHint="done"
                       value={d.label ?? ''}
                       onFocus={e => { e.target.select(); setAvLabelFocusDi(di); }}
                       onBlur={() => setAvLabelFocusDi(cur => cur === di ? null : cur)}
+                      onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.blur(); } }}
                       onChange={e => { const val = e.target.value; setAvDrops(prev => prev.map((dd, idx) => idx === di ? { ...dd, label: val } : dd)); }}
                       placeholder={entry.name}
                       style={{
