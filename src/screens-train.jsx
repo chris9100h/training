@@ -5,6 +5,19 @@
 
 const { useState: useStateT, useEffect: useEffectT, useRef: useRefT, useMemo: useMemoT, useLayoutEffect: useLayoutEffectT } = React;
 
+// Anchor a Myo-Rep Match to the nearest completed Myo-Reps set before `idx`
+// (walking backwards), not the first one in the entry. A single Myo can anchor
+// a run of Matches, and two separate Myo groups each anchor their own Match, so
+// the second group's Match must not reach back to the first group's Myo.
+function nearestDoneMyoBefore(sets, idx) {
+  if (!Array.isArray(sets)) return null;
+  for (let i = Math.min(idx - 1, sets.length - 1); i >= 0; i--) {
+    const st = sets[i];
+    if (st && st.technique === 'myorep' && st.done && st.drops?.[0]?.reps != null) return st;
+  }
+  return null;
+}
+
 
 // ─── Mesocycle helpers ─────────────────────────────────────────────────────────
 const MESO_KEY = 'logbook-meso-state';
@@ -877,6 +890,38 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   }, [entry?.exId]);
   const last = localLast ?? (entry ? remoteLast[entry.exId] : null) ?? null;
 
+  // PR stamp: same three-way value dispatch as isNewBestSet below (time /
+  // assisted / e1RM), reusing bestE1rmForExercise/bestTimeForExercise/
+  // bestAssistLoad as the historical (pre-session) best: no new PR-comparison
+  // math. Unlike isNewBestSet (a one-shot flash gate, max once per exercise
+  // per session) this recomputes on every render, so the stamp always lands
+  // on the session's actual best set for this exercise, even if a later set
+  // breaks the record again. Spans every entry of this exercise in today's
+  // session (not just this one), since the same exercise can appear twice in
+  // a day (heavy block + back-off) and they share one PR pool.
+  const isAssistedEx = LB.isAssisted(exercise);
+  const prValOf = (st) => {
+    // warmup/skipped excluded to match bestE1rmForExercise's own pool exactly:
+    // this session's side and the historical side must share one scale.
+    if (!st.done || st.warmup || st.skipped) return null;
+    if (isTime) return st.timeSec ?? null;
+    if (isAssistedEx) return st.kg != null ? st.kg : null;
+    const reps = LB.effReps(st);
+    return (st.kg != null && reps > 0) ? LB.e1rm(st.kg, reps) : null;
+  };
+  const sessionBestPrVal = entry
+    ? session.entries.filter(e => e.exId === entry.exId).reduce((m, e) =>
+        e.sets.reduce((m2, st) => { const v = prValOf(st); return (v != null && v > m2) ? v : m2; }, m), -Infinity)
+    : -Infinity;
+  const historicalBestPrVal = !entry ? null
+    : isTime ? LB.bestTimeForExercise(store, entry.exId, session.id)
+    : isAssistedEx ? LB.bestAssistLoad(store, entry.exId, session.id)
+    : LB.bestE1rmForExercise(store, entry.exId, session.id);
+  const isSetPR = (st) => {
+    const val = prValOf(st);
+    return val != null && val === sessionBestPrVal && historicalBestPrVal != null && historicalBestPrVal > 0 && val > historicalBestPrVal;
+  };
+
   // Cross-day history for the tapped exercise name. The in-training "last time"
   // above is day-slot specific (bestRecentEntry / fetchExerciseHistory both key
   // on session.dayId), so an exercise pushed harder on another day reads as
@@ -1201,7 +1246,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // confirm, bulk check-all) is guarded to redirect or skip this set
     // instead of reaching here bare, but this is the backstop.
     if (lpTarget?.exIdx === exIdx && lpTarget?.setIdx === setIdx && !extraPatch) return;
-    // Weighted stretch is the same deal — only finishWeightedStretch supplies
+    // Weighted stretch is the same deal: only finishWeightedStretch supplies
     // its extraPatch (technique + stretch); a bare completeSet here would mark
     // the set done without the stretch, so back it out.
     if (wsTarget?.exIdx === exIdx && wsTarget?.setIdx === setIdx && !extraPatch) return;
@@ -1324,6 +1369,18 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       const currSet = sess.entries[exIdx]?.sets[setIdx];
       if (!currSet) return sess;
       const patch = { done: true, ...extraPatch };
+      // A weighted stretch always needs a positive hold. The editor shows 30s as
+      // the default even before the field is touched, but the state can carry
+      // timeSec null (e.g. only the weight was entered), which would persist and
+      // render as "nulls"/"s". Normalise the stretch on the single path every
+      // technique commits through: object shape (weighted_stretch, lengthened
+      // partial) and per-round array shape (drop, myo, amrap variations).
+      if (patch.drops) {
+        const fixStretch = (st) => st ? { ...st, timeSec: (st.timeSec != null && st.timeSec > 0) ? st.timeSec : 30 } : st;
+        patch.drops = Array.isArray(patch.drops)
+          ? patch.drops.map(r => (r && r.stretch) ? { ...r, stretch: fixStretch(r.stretch) } : r)
+          : (patch.drops.stretch ? { ...patch.drops, stretch: fixStretch(patch.drops.stretch) } : patch.drops);
+      }
       if (kb && kb.setIdx === setIdx && kb.field !== 'kg') {
         const fromRef = parseInt(rawRef, 10);
         const fromSess = currSet[kb.field] || 0;
@@ -1477,6 +1534,55 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     return overlayHoldMs;
   };
 
+  // True when the array's only nonzero partials value is still exactly the
+  // untouched meso pre-seed on a single round (mesoChainSeedRef) — i.e. the
+  // auto-seed alone, not a real user edit. Used both to relocate the seed at
+  // Finish (applyMesoChainSeed) and to keep an unopened seed from tripping
+  // the discard-changes dirty check (activeChainDirty) below. Ignores
+  // stretch on purpose — that's a separate, always-real signal of user work.
+  const seedIsUntouched = (arr) => {
+    const seedVal = mesoChainSeedRef.current;
+    if (!seedVal) return false;
+    const withPartials = arr.filter(d => (d.partials || 0) > 0);
+    return withPartials.length === 1 && withPartials[0].partials === seedVal;
+  };
+
+  // Reactively floats an untouched meso pre-seed onto a newly appended round
+  // (ADD DROP / ADD ROUND / Myo's 2nd+ mini via appendMyoRound), so the sheet
+  // always shows the prescription on the round being filled in right now
+  // instead of leaving it stuck on an earlier round until Finish silently
+  // relocates it (audit: users found the "doesn't visibly move" behavior
+  // confusing even though the committed data was already correct). A pure
+  // array transform, not itself a setState call, so callers can wrap it in
+  // their own functional updater.
+  const floatSeedOnto = (prevArr, row) => {
+    if (!seedIsUntouched(prevArr)) return [...prevArr, row];
+    const seedVal = mesoChainSeedRef.current;
+    return [...prevArr.map(d => d.partials === seedVal ? { ...d, partials: undefined } : d), { ...row, partials: seedVal }];
+  };
+
+  // See mesoChainSeedRef above. Safety net for Finish: with floatSeedOnto
+  // already keeping the seed on the newest round as it's added, this is
+  // normally a no-op by the time Finish runs. If the seed is still untouched,
+  // relocate it to the true last round; otherwise (no round carries it
+  // anymore, more than one round has a partials value, or the seeded round's
+  // value was edited away) the user has taken partials over themselves, so
+  // their rows pass through unchanged. Matched by value, not by index, since
+  // rawDrops.filter() below drops incomplete rows and does not preserve
+  // original positions.
+  const applyMesoChainSeed = (drops) => {
+    if (drops.length < 2 || !seedIsUntouched(drops)) return drops;
+    const seedVal = mesoChainSeedRef.current;
+    const seededIdx = drops.findIndex(d => d.partials === seedVal);
+    const lastIdx = drops.length - 1;
+    if (seededIdx === lastIdx) return drops;
+    return drops.map((d, i) => {
+      if (i === seededIdx) return { ...d, partials: undefined };
+      if (i === lastIdx) return { ...d, partials: seedVal };
+      return d;
+    });
+  };
+
   const finishDropSet = async (rawDrops) => {
     // Silently drop any incomplete row (missing reps, or missing kg unless
     // no-weight-reps/bodyweight) instead of saving it — e.g. an ADD DROP
@@ -1492,8 +1598,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       await confirm("You did a Drop Set... without a drop? Bold strategy. Add one, or just log this as a normal set.", { title: 'No Drop, No Drop Set', ok: 'Got it', cancel: null });
       return;
     }
-    // Optional finishers: partials and/or a weighted stretch on the last drop.
-    const finalDrops = drops; // per-round finishers already live on the drops rows
+    // Optional finishers (partials, weighted stretch) already live on the
+    // drops rows; applyMesoChainSeed only relocates an untouched meso
+    // pre-seed onto the now-final round, everything else passes through.
+    const finalDrops = applyMesoChainSeed(drops);
     const first = finalDrops[0];
     updateSession(sess => ({
       ...sess,
@@ -1530,8 +1638,29 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   };
 
   const cancelMyo = () => {
-    setMyoSetIdx(null); setMyoDrops([]); setMyoTechnique(null); setMyoTarget(null);    kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false;
+    setMyoSetIdx(null); setMyoDrops([]); setMyoTechnique(null); setMyoTarget(null); mesoChainSeedRef.current = 0;    kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false;
     setKbField(null); setKbRaw(''); setKbFresh(false);
+  };
+
+  // Appends a new myo mini-round (top level: called from both the keypad's
+  // auto-add-first-mini flow and the "ADD MYO" button in the render below).
+  // If this is the very first mini after the activation round and a
+  // beyond-failure meso prescription is still pending, seed it there — the
+  // activation round never renders a Finisher (see isActiv below), so the
+  // pre-seed can't live there like it does for Drop/AMRAP; this is the
+  // earliest round that can actually show it. Any later mini reuses
+  // floatSeedOnto like Drop/AMRAP, so the seed keeps following the newest
+  // round instead of sitting on the first mini until Finish.
+  const appendMyoRound = (kg) => {
+    setMyoDrops(prev => {
+      const row = { kg, reps: null };
+      if (prev.length === 1) {
+        const seedVal = mesoChainSeedRef.current;
+        if (seedVal > 0) row.partials = seedVal;
+        return [...prev, row];
+      }
+      return floatSeedOnto(prev, row);
+    });
   };
 
   const finishMyoSet = async (rawDrops, technique) => {
@@ -1547,8 +1676,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       await confirm(`${label} without any myo sets? That's just a regular set. Add one, or just log it normally.`, { title: 'No Myo, No Myo-Reps', ok: 'Got it', cancel: null });
       return;
     }
-    // Optional finishers: partials and/or a weighted stretch on the last mini.
-    const finalDrops = drops; // per-round finishers already live on the drops rows
+    // Optional finishers (partials, weighted stretch) already live on the
+    // drops rows; applyMesoChainSeed only relocates an untouched meso
+    // pre-seed onto the now-final round, everything else passes through.
+    const finalDrops = applyMesoChainSeed(drops);
     const first = finalDrops[0];
     updateSession(sess => ({
       ...sess,
@@ -1597,9 +1728,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   };
 
   // Commits the set plus its weighted stretch (weight + hold) in one update,
-  // exactly like finishLengthenedPartial. The stretch always carries a timeSec
-  // (the stepper floor is 5s), so there is no degenerate "zero" case to warn
-  // about — FINISH is only blocked while the underlying set has no kg/reps.
+  // exactly like finishLengthenedPartial. completeSet normalises the hold to the
+  // editor's 30s default if it was left empty, so no degenerate "zero" stretch
+  // is stored. FINISH is only blocked while the underlying set has no kg/reps.
   const finishWeightedStretch = (setIdx) => {
     completeSet(setIdx, false, true, { technique: 'weighted_stretch', drops: { stretch: wsStretch } });
   };
@@ -1615,8 +1746,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       await confirm("AMRAP Variations with just one round? That's just an AMRAP. Add a variation, or log it as one.", { title: 'No Variation, No Variations', ok: 'Got it', cancel: null });
       return;
     }
-    // Optional finishers: partials and/or a weighted stretch on the last round.
-    const finalDrops = drops; // per-round finishers already live on the drops rows
+    // Optional finishers (partials, weighted stretch) already live on the
+    // drops rows; applyMesoChainSeed only relocates an untouched meso
+    // pre-seed onto the now-final round, everything else passes through.
+    const finalDrops = applyMesoChainSeed(drops);
     const first = finalDrops[0];
     updateSession(sess => ({
       ...sess,
@@ -1655,7 +1788,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // (those are only written by finishDropSet/finishMyoSet/finishAv), so that
   // alone is always a lossless cancel.
   const activeChainDirty = () => {
-    const hasFin = (arr) => arr.some(d => (d.partials || 0) > 0 || d.stretch);
+    // A round's partials value doesn't count as "real" work while it's still
+    // exactly the untouched beyond-failure meso pre-seed (audit finding: this
+    // used to pop the discard-changes warning on every meso set the user
+    // hadn't touched at all yet) — a stretch anywhere is always real, though.
+    const hasFin = (arr) => arr.some(d => d.stretch) || (arr.some(d => (d.partials || 0) > 0) && !seedIsUntouched(arr));
     if (dropSetIdx != null) return dropDrops.length > 1 || hasFin(dropDrops);
     if (myoSetIdx != null) return myoDrops.length > 1 || hasFin(myoDrops);
     if (avSetIdx != null) return avDrops.length > 1 || hasFin(avDrops);
@@ -1666,9 +1803,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     return await confirm('Your progress on this set won\'t be saved.', { title: 'Discard changes?', ok: 'Discard', cancel: 'Keep editing', danger: true });
   };
   const closeChainSheet = () => {
-    if (dropSetIdx != null) { setDropSetIdx(null); setDropDrops([]); }
+    if (dropSetIdx != null) { setDropSetIdx(null); setDropDrops([]); mesoChainSeedRef.current = 0; }
     else if (myoSetIdx != null) { cancelMyo(); return; }
-    else if (avSetIdx != null) { setAvSetIdx(null); setAvDrops([]); }
+    else if (avSetIdx != null) { setAvSetIdx(null); setAvDrops([]); mesoChainSeedRef.current = 0; }
     kbFieldRef.current = null; kbRawRef.current = ''; setKbField(null); setKbRaw('');
   };
   const requestCloseChainSheet = async () => {
@@ -2154,7 +2291,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const [advanceCycle, setAdvanceCycle] = useStateT(false);
   const [cycleFromPickedDay, setCycleFromPickedDay] = useStateT(false);
   const [intensityOpen, setIntensityOpen] = useStateT(false);
-  const [intensityPage, setIntensityPage] = useStateT(null); // null (root) | 'chained' | 'standalone' — drill-down page within the Intensity sheet, reset to root whenever the sheet closes
+  const [intensityPage, setIntensityPage] = useStateT(null); // null (root) | 'chained' | 'standalone': drill-down page within the Intensity sheet, reset to root whenever the sheet closes
   const [dropSetIdx, setDropSetIdx] = useStateT(null);
   const [dropDrops, setDropDrops] = useStateT([]);
   const dropDropsRef = useRefT([]);
@@ -2167,11 +2304,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const [myoTarget, setMyoTarget] = useStateT(null);
   const [lpTarget, setLpTarget] = useStateT(null); // { exIdx, setIdx } | null — set is NOT done yet, replaces its checkbox with a stepper + FINISH button
   const [lpCount, setLpCount] = useStateT(0); // in-progress partials count for lpTarget, committed to the set only on Finish
-  const [lpStretch, setLpStretch] = useStateT(null); // { kg, timeSec } | null — optional weighted-stretch finisher on top of the partials (squeeze out partials, then hold once the weight won't move), committed to drops.stretch alongside drops.partials on Finish
+  const [lpStretch, setLpStretch] = useStateT(null); // { kg, timeSec } | null: optional weighted-stretch finisher on top of the partials (squeeze out partials, then hold once the weight won't move), committed to drops.stretch alongside drops.partials on Finish
   const lpStretchRef = useRefT(null);
   lpStretchRef.current = lpStretch;
-  const [wsTarget, setWsTarget] = useStateT(null); // { exIdx, setIdx } | null — standalone weighted-stretch, same inline pattern as lpTarget (row keeps its kg/reps, checkbox becomes a stretch editor + FINISH)
-  const [wsStretch, setWsStretch] = useStateT(null); // { kg, timeSec } | null — in-flight stretch (weight + hold) for wsTarget, committed to the set only on Finish
+  const [wsTarget, setWsTarget] = useStateT(null); // { exIdx, setIdx } | null: standalone weighted-stretch, same inline pattern as lpTarget (row keeps its kg/reps, checkbox becomes a stretch editor + FINISH)
+  const [wsStretch, setWsStretch] = useStateT(null); // { kg, timeSec } | null: in-flight stretch (weight + hold) for wsTarget, committed to the set only on Finish
   const wsStretchRef = useRefT(null); // mirror for the custom keypad handlers (they read refs, not stale closures)
   wsStretchRef.current = wsStretch;
   const [avSetIdx, setAvSetIdx] = useStateT(null);
@@ -2179,15 +2316,31 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const [avLabelFocusDi, setAvLabelFocusDi] = useStateT(null); // which round's variation-name box is focused (native text input, accent underline)
   const avDropsRef = useRefT([]);
   avDropsRef.current = avDrops;
-  // Intensity-technique finishers (partials count, weighted stretch) now live
-  // PER ROUND on the drops rows (dropDrops/myoDrops/avDrops), edited via the
-  // per-round Finisher control and persisted/restored with those arrays — there
-  // is no shared finisher state to thread, reset or resume separately.
+  // Intensity-technique finishers (partials count, weighted stretch) live PER
+  // ROUND on the drops rows (dropDrops/myoDrops/avDrops), edited via the
+  // per-round Finisher control and persisted/restored with those arrays. The
+  // one exception is mesoChainSeedRef just below: a beyond-failure meso
+  // pre-seed that needs to float to the true last round at Finish, not
+  // persisted (a hard remount just stops it floating further; the value
+  // itself survives fine since it already lives in the restored drops row).
   // Which (exIdx_setIdx) working sets the beyond-failure meso auto-armed the
   // Lengthened Partials stepper on, so it arms each set exactly once — a user
   // who cancels the auto-prescribed partials on a set isn't re-nagged by a
   // re-firing effect.
   const mesoLpArmedRef = useRefT(new Set());
+  // Beyond-failure meso, chain techniques: the prescribed count is pre-seeded
+  // onto the chain's first round at start (see startDrop/startMyo/startAv) so
+  // it's visible immediately instead of silently attached on Finish. At
+  // Finish, applyMesoChainSeed (near finishDropSet) moves it onto whichever
+  // round is actually last by then — mirroring how the pre-rework shared
+  // finisherPartials state always applied to "whatever's last" — but only
+  // while it is still exactly this untouched auto-seed; any manual partials
+  // edit anywhere on the chain means the user has taken over.
+  const mesoChainSeedRef = useRefT(0);
+  // Which (exIdx_setIdx) sets a plan-prescribed intensity technique has already
+  // auto-armed, so a client who cancels it on a set isn't re-nagged by the
+  // re-firing effect (same once-per-set guard as mesoLpArmedRef).
+  const plannedTechArmedRef = useRefT(new Set());
   // Persist intensity state so a background/resume on iOS doesn't wipe mid-set
   // progress. This effect runs before the restore effect below on every fresh
   // mount (declaration order), so on mount state is still all-null — without
@@ -2239,7 +2392,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         setLpCount(st.lpCount || 0);
         setLpStretch(st.lpStretch || null);
       }
-      // Weighted stretch resumes the same way — the set only ever goes done via
+      // Weighted stretch resumes the same way: the set only ever goes done via
       // its FINISH button (commits technique+stretch together), so nothing to
       // resume once done.
       if (st.wsSetIdx != null && !targetEntry?.sets[st.wsSetIdx]?.done) {
@@ -3315,7 +3468,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
   // Weighted-stretch fields (standalone set, lengthened partials, OR a
   // per-round chain finisher) run through the same custom keypad as
-  // everything else — never a native <input>, so iOS never opens its own
+  // everything else, never a native <input>, so iOS never opens its own
   // keyboard here. One shared namespace keyed by `target`: 'ws' edits the
   // standalone wsStretch, 'lp' edits lpStretch (the optional finisher on top
   // of lengthened partials), 'drop'/'myo'/'av' edit the stretch nested on
@@ -3486,7 +3639,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         setStretchVal(target, dropIdx, { kg: next });
       } else {
         const cur = parseInt(kbRawRef.current, 10) || 0;
-        const next = Math.max(0, cur + dir * 5); // seconds step by 5, like time exercises
+        const next = Math.max(5, cur + dir * 5); // seconds step by 5, floor 5 like time exercises
         kbRawRef.current = String(next); setKbRaw(String(next));
         setStretchVal(target, dropIdx, { timeSec: next });
       }
@@ -3625,7 +3778,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           // Activation reps confirmed → auto-add first mini
           const activKg = myoDropsRef.current[0]?.kg ?? null;
           const newIdx = myoDropsRef.current.length;
-          setMyoDrops(prev => [...prev, { kg: activKg, reps: null }]);
+          appendMyoRound(activKg);
           setTimeout(() => activateMyo(newIdx, 'reps'), 80);
         } else {
           kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false;
@@ -3709,8 +3862,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             if (modeChanged || assistChanged) {
               const isUni = newEx?.movement_type === 'unilateral';
               const bwKg = LB.shouldPullBodyweight(newEx) ? LB.latestBodyweight(s) ?? null : null;
-              const last = LB.bestRecentEntry(s, newExId, session.dayId);
-              const suggestion = LB.progressionSuggestion(s, newExId, session.dayId, null, null, last);
+              const swapOcc = x.entries.slice(0, i).filter(en => en.exId === newExId).length;
+              const last = LB.bestRecentEntry(s, newExId, session.dayId, 3, swapOcc);
+              const suggestion = LB.progressionSuggestion(s, newExId, session.dayId, null, null, last, null, null, swapOcc);
               const setCount = e.sets?.length || e.plannedSets || 3;
               const seedSets = LB.buildSeedSets({ exId: newExId, sets: setCount, repsPerSet: null }, last, suggestion, isUni, s, bwKg);
               return { ...e, exId: newExId, name: newEx?.name || e.name, sets: seedSets };
@@ -3804,8 +3958,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       } else {
         const isUni = newEx?.movement_type === 'unilateral';
         const bwKg = LB.shouldPullBodyweight(newEx) ? LB.latestBodyweight(s) ?? null : null;
-        const last = LB.bestRecentEntry(s, newExId, session.dayId);
-        const suggestion = LB.progressionSuggestion(s, newExId, session.dayId, null, null, last);
+        const insertOcc = sess.entries.slice(0, insertIdx).filter(en => en.exId === newExId).length;
+        const last = LB.bestRecentEntry(s, newExId, session.dayId, 3, insertOcc);
+        const suggestion = LB.progressionSuggestion(s, newExId, session.dayId, null, null, last, null, null, insertOcc);
         const mother = targetIdx !== null ? sess.entries[targetIdx] : null;
         const setCount = mother ? (mother.plannedSets ?? mother.sets?.length ?? 3) : 3;
         const seedSets = LB.buildSeedSets({ exId: newExId, sets: setCount, repsPerSet: null }, last, suggestion, isUni, s, bwKg);
@@ -4174,11 +4329,72 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     return { totalSetsDone, expectedSec };
   }, [avgStats, session.entries, session.startedAt]);
 
-  // Beyond-failure meso: auto-arm the Lengthened Partials stepper (pre-filled to
-  // the prescribed count) on the current plain working set, so the partials are
-  // visible up front instead of silently attached on check-off. Armed once per
-  // set (mesoLpArmedRef) so cancelling on a set doesn't re-nag. Chains carry
-  // their own partials via the finisher seed, so skip while one is in flight.
+  // Auto-arm a plan-prescribed intensity technique on a target set, passively
+  // (no keyboard pop): the sheet or inline editor appears pre-seeded from the
+  // set's kg/reps and the client fills it in or cancels. A parametrised,
+  // top-level sibling of the in-render start* helpers (which target the current
+  // set and open the keyboard), kept separate so the live-picker flow stays
+  // untouched. Clears any other in-flight technique inline (the render-scope
+  // clear* helpers aren't reachable here) and sets mesoChainSeedRef so a
+  // beyond-failure meso prescription still pre-seeds partials into it.
+  const armPlannedTechnique = (technique, targetIdx) => {
+    const s = entry?.sets?.[targetIdx];
+    if (!s) return;
+    setDropSetIdx(null); setDropDrops([]);
+    setMyoSetIdx(null); setMyoDrops([]); setMyoTechnique(null); setMyoTarget(null);
+    setAvSetIdx(null); setAvDrops([]);
+    setLpTarget(null); setLpCount(0); setLpStretch(null);
+    setWsTarget(null); setWsStretch(null);
+    mesoChainSeedRef.current = 0;
+    if (technique === 'lengthened_partial') {
+      setLpTarget({ exIdx, setIdx: targetIdx });
+      setLpCount(mesoPartials > 0 ? mesoPartials : 0);
+      return;
+    }
+    if (technique === 'weighted_stretch') {
+      setWsTarget({ exIdx, setIdx: targetIdx });
+      setWsStretch({ kg: null, timeSec: 30 });
+      return;
+    }
+    if (technique === 'drop') {
+      const initDrops = [{ kg: s.kg ?? null, reps: s.reps ?? null }];
+      if (mesoPartials > 0) initDrops[0].partials = mesoPartials;
+      mesoChainSeedRef.current = mesoPartials;
+      setDropDrops(initDrops); dropDropsRef.current = initDrops;
+      setDropSetIdx(targetIdx);
+      return;
+    }
+    if (technique === 'amrap_variations') {
+      const initDrops = [{ kg: s.kg ?? null, reps: s.reps ?? null, label: entry.name }];
+      if (mesoPartials > 0) initDrops[0].partials = mesoPartials;
+      mesoChainSeedRef.current = mesoPartials;
+      setAvDrops(initDrops); avDropsRef.current = initDrops;
+      setAvSetIdx(targetIdx);
+      return;
+    }
+    if (technique === 'myorep' || technique === 'myorep_match') {
+      const anchor = nearestDoneMyoBefore(entry.sets, targetIdx);
+      // Myo-Rep Match needs a preceding myo set to anchor to; fall back to plain
+      // Myo-Reps when none exists (planned-technique fallback).
+      const effTech = (technique === 'myorep_match' && !anchor) ? 'myorep' : technique;
+      const initKg = effTech === 'myorep_match' ? (anchor?.drops?.[0]?.kg ?? s.kg ?? null) : (s.kg ?? null);
+      const initDrops = [{ kg: initKg, reps: s.reps ?? null }];
+      mesoChainSeedRef.current = mesoPartials;
+      setMyoDrops(initDrops); myoDropsRef.current = initDrops;
+      setMyoSetIdx(targetIdx);
+      setMyoTechnique(effTech);
+      if (effTech === 'myorep_match') setMyoTarget(anchor ? anchor.drops.reduce((sum, d) => sum + (d.reps || 0), 0) : null);
+      return;
+    }
+  };
+
+  // Auto-arm intensity techniques on the current working set. A per-set planned
+  // technique (coach/plan, plannedTechniques[workingIdx]) takes priority over
+  // the beyond-failure meso LP auto-arm; the meso LP arm still fires on any set
+  // that has no planned technique. Both arm once per set (plannedTechArmedRef /
+  // mesoLpArmedRef) so cancelling on a set doesn't re-nag. A meso prescription
+  // still pre-seeds partials into a planned chain via armPlannedTechnique's
+  // mesoChainSeedRef.
   // MUST sit above the `if (!entry)` early return (empty freestyle/bonus
   // session): a hook after that return changes the hook count when the first
   // exercise is added (entry null → set), which is React error #310. Derives
@@ -4187,11 +4403,30 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     if (!entry || isCardio) return;
     const sets = entry.sets || [];
     const curIdx = sets.findIndex(s => !s.done);
+    if (curIdx < 0) return;
     const wCount = sets.filter(s => s.warmup).length;
-    const curWarmup = wCount > 0 && curIdx >= 0 && !!sets[curIdx]?.warmup;
-    if (mesoPartials <= 0 || curIdx < 0 || curWarmup) return;
+    const curWarmup = wCount > 0 && !!sets[curIdx]?.warmup;
+    if (curWarmup) return;
     if (dropSetIdx != null || myoSetIdx != null || avSetIdx != null || lpTarget != null || wsTarget != null) return;
     const key = exIdx + '_' + curIdx;
+
+    // Per-set planned technique: the current set's working-set index (warmups
+    // excluded) maps to plannedTechniques[workingIdx]. A set that has one arms
+    // it and never falls through to the meso LP arm below.
+    const techs = entry.plannedTechniques;
+    if (Array.isArray(techs)) {
+      const workingIdx = sets.slice(0, curIdx + 1).filter(st => !st.warmup).length - 1;
+      const plan = techs[workingIdx] || null;
+      if (plan) {
+        if (!plannedTechArmedRef.current.has(key)) {
+          plannedTechArmedRef.current.add(key);
+          armPlannedTechnique(plan, curIdx);
+        }
+        return; // this set owns a planned technique (armed now or dismissed): don't also fire meso LP
+      }
+    }
+
+    if (mesoPartials <= 0) return;
     if (mesoLpArmedRef.current.has(key)) return;
     mesoLpArmedRef.current.add(key);
     setLpTarget({ exIdx, setIdx: curIdx });
@@ -5146,6 +5381,23 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                     </>
                   )}
                   <div style={{ position: 'relative' }}>
+                  {s.done && isSetPR(s) && (
+                    <div aria-hidden="true" style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', overflow: 'hidden' }}>
+                      {/* Same rotated display-it watermark family as the MESOCYCLE/5-3-1
+                          plan-row stamps and the RIR hero-card stamp, scaled down for this
+                          row. Corner brackets mirror BracketFrame (ui.jsx) at a smaller
+                          size, rotating together with the text as one rigid unit (same
+                          technique as the RIR gloss line) so it reads as a single stamp
+                          pressed at an angle, not a frame floating separately from text. */}
+                      <div style={{ position: 'relative', padding: '6px 14px', transform: 'rotate(-22deg)' }}>
+                        <div style={{ position: 'absolute', top: 0, left: 0, width: 8, height: 8, borderTop: `2px solid ${UI.gold}`, borderLeft: `2px solid ${UI.gold}`, opacity: 0.16 }} />
+                        <div style={{ position: 'absolute', top: 0, right: 0, width: 8, height: 8, borderTop: `2px solid ${UI.gold}`, borderRight: `2px solid ${UI.gold}`, opacity: 0.16 }} />
+                        <div style={{ position: 'absolute', bottom: 0, left: 0, width: 8, height: 8, borderBottom: `2px solid ${UI.gold}`, borderLeft: `2px solid ${UI.gold}`, opacity: 0.16 }} />
+                        <div style={{ position: 'absolute', bottom: 0, right: 0, width: 8, height: 8, borderBottom: `2px solid ${UI.gold}`, borderRight: `2px solid ${UI.gold}`, opacity: 0.16 }} />
+                        <span className="display-it" style={{ fontSize: 14, fontWeight: 900, letterSpacing: '0.08em', color: UI.gold, opacity: 0.16, whiteSpace: 'nowrap', userSelect: 'none', display: 'block' }}>PERSONAL RECORD</span>
+                      </div>
+                    </div>
+                  )}
                   {amrapArmed && (
                     <div aria-hidden="true" style={{
                       // Fill the money zone with fire and let it breathe out softly on
@@ -5438,7 +5690,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                         </div>
                         <div style={{ padding: '0 6px 8px' }}>
                           {/* missingData (the underlying set has no kg/reps yet) is
-                              the only block — the stretch always carries a hold, so
+                              the only block: the stretch always carries a hold, so
                               FINISH never dims for a "zero" stretch like partials do. */}
                           <button onClick={() => finishWeightedStretch(i)}
                             disabled={missingData}
@@ -5532,7 +5784,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                     </div>
                   )}
                   {/* Committed lengthened-partial count (+ its optional weighted-stretch
-                      finisher) — read-only, like the myo-rep total tag below */}
+                      finisher), read-only, like the myo-rep total tag below */}
                   {s.technique === 'lengthened_partial' && s.done && !s.warmup && (s.drops?.partials || 0) > 0 && (
                     <div style={{ marginLeft: 36, paddingLeft: 10, paddingBottom: 8 }}>
                       <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '3px 8px', border: '1px solid var(--accent)', borderRadius: 4, fontFamily: UI.fontUi, fontSize: 11, color: 'var(--accent)', letterSpacing: '0.03em' }}>
@@ -5542,7 +5794,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                       </div>
                     </div>
                   )}
-                  {/* Committed weighted stretch — read-only tag mirroring the lengthened-partial one */}
+                  {/* Committed weighted stretch, read-only tag mirroring the lengthened-partial one */}
                   {s.technique === 'weighted_stretch' && s.done && !s.warmup && s.drops?.stretch && (
                     <div style={{ marginLeft: 36, paddingLeft: 10, paddingBottom: 8 }}>
                       <div style={{ display: 'inline-block', padding: '3px 8px', border: '1px solid var(--accent)', borderRadius: 4, fontFamily: UI.fontUi, fontSize: 11, color: 'var(--accent)', letterSpacing: '0.03em' }}>
@@ -5882,7 +6134,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         </div>
       </Sheet>
 
-      {/* intensity technique picker — two-level: root offers Superset plus
+      {/* intensity technique picker, two-level: root offers Superset plus
           the two technique categories, drilling into either shows just that
           category's techniques with a BACK control. intensityPage always
           resets to root when the sheet closes, so it never reopens mid-drill. */}
@@ -5896,11 +6148,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           // on the same still-unfinished set and picked Myo-Rep instead).
           // Without this, both sub-panels could end up targeting the same
           // row simultaneously.
-          const clearDrop = () => { setDropSetIdx(null); setDropDrops([]); };
-          const clearMyo = () => { setMyoSetIdx(null); setMyoDrops([]); setMyoTechnique(null); setMyoTarget(null); };
+          const clearDrop = () => { setDropSetIdx(null); setDropDrops([]); mesoChainSeedRef.current = 0; };
+          const clearMyo = () => { setMyoSetIdx(null); setMyoDrops([]); setMyoTechnique(null); setMyoTarget(null); mesoChainSeedRef.current = 0; };
           const clearLp = () => { setLpTarget(null); setLpCount(0); setLpStretch(null); };
           const clearWs = () => { setWsTarget(null); setWsStretch(null); };
-          const clearAv = () => { setAvSetIdx(null); setAvDrops([]); };
+          const clearAv = () => { setAvSetIdx(null); setAvDrops([]); mesoChainSeedRef.current = 0; };
           const closeIntensity = () => { setIntensityOpen(false); setIntensityPage(null); };
           const startDrop = () => {
             const target = currentSetIdx >= 0
@@ -5910,6 +6162,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             clearMyo(); clearLp(); clearWs(); clearAv();
             const s = entry.sets[target];
             const initDrops = [{ kg: s?.kg ?? null, reps: s?.reps ?? null }];
+            if (mesoPartials > 0) initDrops[0].partials = mesoPartials; // beyond-failure meso: pre-seed prescribed partials
+            mesoChainSeedRef.current = mesoPartials;
             setDropDrops(initDrops);
             dropDropsRef.current = initDrops;
             setDropSetIdx(target);
@@ -5924,6 +6178,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             clearDrop(); clearMyo(); clearLp(); clearWs();
             const s = entry.sets[target];
             const initDrops = [{ kg: s?.kg ?? null, reps: s?.reps ?? null, label: entry.name }];
+            if (mesoPartials > 0) initDrops[0].partials = mesoPartials; // beyond-failure meso: pre-seed prescribed partials
+            mesoChainSeedRef.current = mesoPartials;
             setAvDrops(initDrops);
             avDropsRef.current = initDrops;
             setAvSetIdx(target);
@@ -5937,10 +6193,15 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             if (target < 0) return;
             clearDrop(); clearLp(); clearWs(); clearAv();
             const s = entry.sets[target];
-            const anchor = entry.sets.find(st => st.technique === 'myorep' && st.done && st.drops?.[0]?.reps != null);
+            const anchor = nearestDoneMyoBefore(entry.sets, target);
             // For match: activation kg locked to the preceding myo set's activation kg
             const initKg = technique === 'myorep_match' ? (anchor?.drops?.[0]?.kg ?? s?.kg ?? null) : (s?.kg ?? null);
             const initDrops = [{ kg: initKg, reps: s?.reps ?? null }];
+            // Myo's activation round never renders a Finisher (see isActiv
+            // below), so the pre-seed can't live there like it does for
+            // Drop/AMRAP — appendMyoRound plants it on the first real mini
+            // instead, as soon as one exists.
+            mesoChainSeedRef.current = mesoPartials;
             setMyoDrops(initDrops);
             myoDropsRef.current = initDrops;
             setMyoSetIdx(target);
@@ -5952,7 +6213,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             // Match: kg is read-only, start straight at reps; Myo: start at kg
             setTimeout(() => activateMyo(0, technique === 'myorep_match' ? 'reps' : 'kg'), 150);
           };
-          const myoMatchTarget = entry.sets.find(st => st.technique === 'myorep' && st.done && st.drops?.[0]?.reps != null);
+          const myoMatchAnchorIdx = currentSetIdx >= 0 ? currentSetIdx : entry.sets.reduce((last, s, i) => !s.warmup ? i : last, -1);
+          const myoMatchTarget = nearestDoneMyoBefore(entry.sets, myoMatchAnchorIdx);
           const btnBase = (active) => ({
             width: '100%', textAlign: 'left', cursor: active ? 'pointer' : 'default',
             background: active ? 'rgba(var(--accent-rgb),0.07)' : UI.bgInset,
@@ -5973,7 +6235,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             </button>
           );
 
-          // ── Chained techniques — multiple rounds back-to-back in the chain
+          // ── Chained techniques: multiple rounds back-to-back in the chain
           //    sheet, each round optionally carrying its own finisher. ──────
           if (intensityPage === 'chained') return (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -6019,7 +6281,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             </div>
           );
 
-          // ── Standalone techniques — a single set, no rounds/chain sheet. ──
+          // ── Standalone techniques: a single set, no rounds/chain sheet. ──
           if (intensityPage === 'standalone') return (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {backBtn}
@@ -6040,7 +6302,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkSoft, marginTop: 2 }}>Full reps, then partials in the stretch</div>
                 </div>
               </button>
-              {/* Weighted Stretch — a timed loaded hold at the stretch after the
+              {/* Weighted Stretch: a timed loaded hold at the stretch after the
                   set. Its own weight (the stretch load usually differs from the
                   working weight) and hold time. Standalone here; also available
                   as a per-round finisher inside the chain sheets. */}
@@ -6069,7 +6331,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           // ── Root: Superset (unchanged) plus the two technique categories. ──
           return (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {/* Superset / Giant Set — structural (links this exercise with
+              {/* Superset / Giant Set: structural (links this exercise with
                   another), not a set-completion technique, so it's only
                   offered before the whole current group has started. Listed
                   first: the most recognized technique. */}
@@ -6197,7 +6459,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                 <div style={{ flexShrink: 0, display: 'flex', gap: 8, padding: '4px 4px 10px' }}>
                   <button onClick={() => {
                     const newIdx = dropDropsRef.current.length;
-                    setDropDrops(prev => [...prev, { kg: null, reps: null }]);
+                    setDropDrops(prev => floatSeedOnto(prev, { kg: null, reps: null }));
                     setTimeout(() => activateDropKb(newIdx, 'kg'), 80);
                   }} style={{
                     flex: 1, padding: '8px 0', background: 'transparent',
@@ -6299,7 +6561,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   <button onClick={() => {
                     const newIdx = avDropsRef.current.length;
                     const prevKg = avDropsRef.current[avDropsRef.current.length - 1]?.kg ?? null;
-                    setAvDrops(prev => [...prev, { kg: prevKg, reps: null, label: entry.name }]);
+                    setAvDrops(prev => floatSeedOnto(prev, { kg: prevKg, reps: null, label: entry.name }));
                     setTimeout(() => activateAvKb(newIdx, 'kg'), 80);
                   }} style={{
                     flex: 1, padding: '8px 0', background: 'transparent',
@@ -6445,7 +6707,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   <button onClick={() => {
                     const newIdx = myoDropsRef.current.length;
                     const activKg = myoDropsRef.current[0]?.kg ?? null;
-                    setMyoDrops(prev => [...prev, { kg: activKg, reps: null }]);
+                    appendMyoRound(activKg);
                     setTimeout(() => activateMyo(newIdx, 'reps'), 80);
                   }} style={{
                     flex: 1, padding: '8px 0', background: 'transparent',

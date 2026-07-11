@@ -704,6 +704,12 @@ function App() {
             const serverTplIds = new Set((fresh.workoutTemplates || []).map(t => t.id));
             const baseTplIds = base ? new Set((base.workoutTemplates || []).map(t => t.id)) : null;
             const localOnlyTemplates = (cur.workoutTemplates || []).filter(x => !serverTplIds.has(x.id) && !baseTplIds?.has(x.id));
+            // Same guard for check-in schema templates (audit M1): without it a
+            // template saved offline before the first sync completed was dropped
+            // on the next boot merge, and a locally-deleted one was resurrected.
+            const serverCheckinTplIds = new Set((fresh.checkinSchemaTemplates || []).map(t => t.id));
+            const baseCheckinTplIds = base ? new Set((base.checkinSchemaTemplates || []).map(t => t.id)) : null;
+            const localOnlyCheckinTemplates = (cur.checkinSchemaTemplates || []).filter(x => !serverCheckinTplIds.has(x.id) && !baseCheckinTplIds?.has(x.id));
             const serverCardioPlanIds = new Set((fresh.cardioPlans || []).map(p => p.id));
             const baseCardioPlanIds = base ? new Set((base.cardioPlans || []).map(p => p.id)) : null;
             const localOnlyCardioPlans = (cur.cardioPlans || []).filter(x => !serverCardioPlanIds.has(x.id) && !baseCardioPlanIds?.has(x.id));
@@ -721,6 +727,8 @@ function App() {
             const delCardioIds = baseCardioIds ? new Set([...baseCardioIds].filter(id => !curCardioIdSet.has(id))) : null;
             const curTplIdSet = new Set((cur.workoutTemplates || []).map(t => t.id));
             const delTplIds = baseTplIds ? new Set([...baseTplIds].filter(id => !curTplIdSet.has(id))) : null;
+            const curCheckinTplIdSet = new Set((cur.checkinSchemaTemplates || []).map(t => t.id));
+            const delCheckinTplIds = baseCheckinTplIds ? new Set([...baseCheckinTplIds].filter(id => !curCheckinTplIdSet.has(id))) : null;
             const curCardioPlanIdSet = new Set((cur.cardioPlans || []).map(p => p.id));
             const delCardioPlanIds = baseCardioPlanIds ? new Set([...baseCardioPlanIds].filter(id => !curCardioPlanIdSet.has(id))) : null;
             // Meso states are a mutable per-plan row (not an append/delete list),
@@ -774,6 +782,7 @@ function App() {
               dailyLogs: [...localOnlyDailyLogs, ...mergeById(fresh.dailyLogs, cur.dailyLogs, base?.dailyLogs, delDailyIds)],
               cardioLogs: [...localOnlyCardioLogs, ...mergeById(fresh.cardioLogs, cur.cardioLogs, base?.cardioLogs, delCardioIds)],
               workoutTemplates: [...localOnlyTemplates, ...(fresh.workoutTemplates || []).filter(t => !delTplIds?.has(t.id))],
+              checkinSchemaTemplates: [...localOnlyCheckinTemplates, ...(fresh.checkinSchemaTemplates || []).filter(t => !delCheckinTplIds?.has(t.id))],
               cardioPlans: [...localOnlyCardioPlans, ...(fresh.cardioPlans || []).filter(p => !delCardioPlanIds?.has(p.id))],
               mesoStates,
             };

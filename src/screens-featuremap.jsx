@@ -20,10 +20,13 @@
 const { useState: useStateFM, useEffect: useEffectFM, useMemo: useMemoFM, useRef: useRefFM } = React;
 
 const FM_ADMIN_EMAIL = 'office@btc-prime.biz';
+// Coach accent tint (deliberately distinct from the app accent). Single source
+// so it is not hardcoded at each use site.
+const FM_COACH_TINT = '#4aab97';
 
 const FM_ROLES = {
   user:  { label: 'Lifter', color: 'var(--accent)' },
-  coach: { label: 'Coach',  color: '#4aab97' },
+  coach: { label: 'Coach',  color: FM_COACH_TINT },
   both:  { label: 'Both',   color: 'var(--accent)' },
 };
 const FM_ROLE_ORDER = ['user', 'coach', 'both'];
@@ -270,7 +273,7 @@ function FeatureMapScreen({ store, go }) {
     const content = { cat: draft.cat, name: draft.name.trim(), role: draft.role, summary: draft.summary.trim(), actions: fmCleanActions(draft.actions) };
     let okp;
     if (draft.isCustom) {
-      okp = await writeOverride(draft.id, { ...content, is_custom: true, sort: draft._sort });
+      okp = await writeOverride(draft.id, { ...content, is_custom: true, sort: draft._sort != null ? draft._sort : draft.sort });
     } else {
       okp = await writeOverride(draft.id, content); // edit a catalog card (preserves hidden/sort)
     }
@@ -313,9 +316,11 @@ function FeatureMapScreen({ store, go }) {
   };
 
   // Drag reorder within one category. from/to are indices into the shown cards
-  // (hidden ones keep their relative order after the visible list).
-  const reorderCategory = async (catId, from, to) => {
-    const vis = merged.filter(c => c.cat === catId && (!c.hidden || showHidden)).sort((a, b) => a.sort - b.sort);
+  // (hidden ones keep their relative order after the visible list). visList is
+  // the exact rendered list (g.visible), so the indices line up even when a
+  // search or role filter is active (audit M3); fall back to the full list.
+  const reorderCategory = async (catId, from, to, visList) => {
+    const vis = visList || merged.filter(c => c.cat === catId && (!c.hidden || showHidden)).sort((a, b) => a.sort - b.sort);
     if (from < 0 || to < 0 || from >= vis.length || to >= vis.length || from === to) return;
     // Reuse the existing sort "slots" (ascending) and re-assign them to the new
     // order. Only cards in the moved range change; hidden cards keep their sort,
@@ -436,7 +441,7 @@ function FeatureMapScreen({ store, go }) {
             {[{ id: 'all', label: 'All' }, { id: 'user', label: 'Lifters' }, { id: 'coach', label: 'Coaches' }].map((t, i) => (
               <button key={t.id} onClick={() => setRole(t.id)} style={{
                 padding: '7px 14px', border: 'none', borderLeft: i ? `1px solid ${UI.hair}` : 'none', cursor: 'pointer',
-                background: roleFilter === t.id ? (t.id === 'coach' ? '#4aab97' : UI.gold) : 'transparent',
+                background: roleFilter === t.id ? (t.id === 'coach' ? FM_COACH_TINT : UI.gold) : 'transparent',
                 color: roleFilter === t.id ? '#0a0805' : UI.inkSoft,
                 fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
               }}>{t.label}</button>
@@ -491,7 +496,7 @@ function FeatureMapScreen({ store, go }) {
                 ));
                 const listStyle = { display: 'flex', flexDirection: 'column', gap: 12 };
                 return isAdmin
-                  ? <ReorderList onReorder={(f, t) => reorderCategory(g.meta.id, f, t)} style={listStyle}>{items}</ReorderList>
+                  ? <ReorderList onReorder={(f, t) => reorderCategory(g.meta.id, f, t, g.visible)} style={listStyle}>{items}</ReorderList>
                   : <div style={listStyle}>{items}</div>;
               })()}
 
@@ -668,7 +673,7 @@ function FeatureEditor({ draft, busy, onChange, onClose, onSave, onRevert }) {
 function FeaturePublishSheet({ changes, busy, onClose, onDiscard, onDiscardAll, onPublish }) {
   const [confirmAll, setConfirmAll] = useStateFM(false);
   const [confirmPub, setConfirmPub] = useStateFM(false);
-  const tagColor = (t) => (t === 'Removed' || t === 'Hidden') ? UI.danger : (t === 'Reordered') ? '#4aab97' : 'var(--accent)';
+  const tagColor = (t) => (t === 'Removed' || t === 'Hidden') ? UI.danger : (t === 'Reordered') ? FM_COACH_TINT : 'var(--accent)';
   const n = changes.length;
   return (
     <Sheet open={true} onClose={onClose} title={'Review & publish'} accent>

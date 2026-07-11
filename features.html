@@ -290,7 +290,11 @@
     var cards=(FM.cards||[]).filter(function(c){return !c.hidden;});
     byCat={}; cards.forEach(function(c){(byCat[c.cat]=byCat[c.cat]||[]).push(c);});
     CATS_SHOWN=(FM.categories||[]).filter(function(c){return (byCat[c.id]||[]).length;});
-    total=cards.length;
+    // Only count cards that land in a rendered category. An orphan card whose
+    // cat is not in FM.categories is never shown, so keep it out of the totals.
+    var catIds={}; (FM.categories||[]).forEach(function(c){catIds[c.id]=1;});
+    var shownCards=cards.filter(function(c){return catIds[c.cat];});
+    total=shownCards.length;
 
     (FM.categories||[]).forEach(function(cat){
       var items=byCat[cat.id]||[]; if(!items.length) return;
@@ -316,8 +320,8 @@
     });
 
     var areas=CATS_SHOWN.length;
-    var fl=cards.filter(function(c){return c.role==='user'||c.role==='both';}).length;
-    var fc=cards.filter(function(c){return c.role==='coach'||c.role==='both';}).length;
+    var fl=shownCards.filter(function(c){return c.role==='user'||c.role==='both';}).length;
+    var fc=shownCards.filter(function(c){return c.role==='coach'||c.role==='both';}).length;
     document.getElementById('plate').innerHTML=[[total,'Features'],[areas,'Areas'],[fl,'For lifters'],[fc,'For coaches']]
       .map(function(x){return '<div class="cell"><div class="big num">'+x[0]+'</div><div class="cap">'+x[1]+'</div></div>';}).join('');
 

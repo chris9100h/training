@@ -749,6 +749,7 @@ function mapEntryRows(entryRows) {
     plannedRepsPerSet: e.planned_reps_per_set || null,
     plannedRepsMax: e.planned_reps_max ?? null,
     plannedProgressionOffset: e.planned_progression_offset ?? null,
+    plannedTechniques: e.planned_techniques ?? null,
     note: e.note || '',
     supersetGroup: e.superset_group || null,
     sets: (e.sets || [])
@@ -1229,6 +1230,7 @@ async function _syncEntryRelational(sessions, userId, prevSessions, onStep) {
         planned_reps_per_set: e.plannedRepsPerSet || null,
         planned_reps_max: e.plannedRepsMax || null,
         planned_progression_offset: e.plannedProgressionOffset ?? null,
+        planned_techniques: e.plannedTechniques ?? null,
         note: e.note || '',
         superset_group: e.supersetGroup || null,
       });
@@ -2074,8 +2076,8 @@ function buildSeedSets(it, last, suggestion, isUni, store, bodyweightKg = null, 
   });
 }
 
-function lastSessionForExercise(state, exId, dayId = null) {
-  return recentSessionsForExercise(state, exId, dayId, 1)[0] ?? null;
+function lastSessionForExercise(state, exId, dayId = null, occ = 0) {
+  return recentSessionsForExercise(state, exId, dayId, 1, occ)[0] ?? null;
 }
 
 // Up to `limit` most-recent ended sessions that logged this exercise, newest first.
@@ -4611,8 +4613,30 @@ async function clearCachesAndReload() {
   window.location.href = window.location.pathname + '?_v=' + Date.now() + window.location.hash;
 }
 
+// Intensity techniques a coach/user can attach to a planned exercise (array
+// order = display order in the plan editor). Values match zane_sets.technique
+// so the live training screen can arm them directly. Myo-Rep Match falls back
+// to plain Myo-Reps live when no preceding myo set exists to anchor to.
+const PLANNABLE_TECHNIQUES = [
+  { id: 'drop', label: 'Drop Set', short: 'DROP' },
+  { id: 'myorep', label: 'Myo-Reps', short: 'MYO' },
+  { id: 'myorep_match', label: 'Myo-Rep Match', short: 'MATCH' },
+  { id: 'amrap_variations', label: 'AMRAP Variations', short: 'AMRAP' },
+  { id: 'lengthened_partial', label: 'Lengthened Partials', short: 'LP' },
+  { id: 'weighted_stretch', label: 'Weighted Stretch', short: 'STRETCH' },
+];
+function plannedTechniqueLabel(t) {
+  const found = PLANNABLE_TECHNIQUES.find(x => x.id === t);
+  return found ? found.label : null;
+}
+function plannedTechniqueShort(t) {
+  const found = PLANNABLE_TECHNIQUES.find(x => x.id === t);
+  return found ? found.short : null;
+}
+
 window.LB = {
   supabase: _supabase,
+  PLANNABLE_TECHNIQUES, plannedTechniqueLabel, plannedTechniqueShort,
   clearPrecompileCaches, clearCachesAndReload,
   SUPABASE_URL, SUPABASE_ANON_KEY, PUSHOVER_URL, WEB_PUSH_URL, fnFetch,
   subscribeWebPush, unsubscribeWebPush, getWebPushSubscription,

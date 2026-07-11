@@ -1000,6 +1000,7 @@ function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = ''
   const pickLogMode = (m) => { setLogModeTouched(true); setLogMode(m); };
   const [equipment, setEquipment] = useStateL(seed ? (seed.equipment || 'no_equipment') : null);
   const [note, setNote] = useStateL('');
+  const [youtubeUrl, setYoutubeUrl] = useStateL(''); // no seed field for this — a catalog entry never carries one
   const [showSizeInfo, setShowSizeInfo] = useStateL(false);
   const [showBodyweightHint, setShowBodyweightHint] = useStateL(false);
   // Fresh exercise → the wizard runs the full flow from the name step. A catalog
@@ -1033,7 +1034,7 @@ function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = ''
   const save = () => {
     if (!name.trim()) return;
     const effLogMode = loggingPickerVisible(equipment, movementType) ? logMode : 'weight';
-    const ex = { id: LB.uid(), name: name.trim(), tags: selectedTags, category: category || null, unilateral: movementType === 'unilateral', movement_type: movementType, no_weight_reps: effLogMode !== 'weight', log_mode: effLogMode, pull_bodyweight: (equipment === 'bodyweight' && effLogMode === 'weight' ? pullBodyweight : false), equipment: equipment || null, note: note.trim(), progression_reps: null };
+    const ex = { id: LB.uid(), name: name.trim(), tags: selectedTags, category: category || null, unilateral: movementType === 'unilateral', movement_type: movementType, no_weight_reps: effLogMode !== 'weight', log_mode: effLogMode, pull_bodyweight: (equipment === 'bodyweight' && effLogMode === 'weight' ? pullBodyweight : false), equipment: equipment || null, note: note.trim(), youtube_url: sanitizeYoutubeUrl(youtubeUrl), progression_reps: null };
     setStore(s => ({ ...s, exercises: [...s.exercises, ex] }));
     onCreated?.(ex.id);
     onClose();
@@ -1042,7 +1043,7 @@ function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = ''
   // starts unset now (equipment/movement null), so "dirty" = the user picked anything.
   const isDirty = () =>
     name.trim() !== initialName.trim() || selectedTags.length > 0 || category != null ||
-    movementType != null || logModeTouched || equipment != null || note.trim() !== '';
+    movementType != null || logModeTouched || equipment != null || note.trim() !== '' || youtubeUrl.trim() !== '';
   const requestClose = async () => {
     if (isDirty() && !await confirm('Your new exercise will be discarded.', { title: 'Leave without saving?', ok: 'Discard', cancel: 'Keep editing', danger: true })) return;
     onClose();
@@ -1114,6 +1115,9 @@ function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = ''
           pullBodyweight={pullBodyweight} onPullBodyweight={setPullBodyweight}
           hasLoggedWeight={LB.latestBodyweight(store) != null}
         />
+        <Field label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><i className="fa-brands fa-youtube" style={{ color: '#FF0000', fontSize: 12 }} />Form video</span>}>
+          <TextInput value={youtubeUrl} onChange={setYoutubeUrl} placeholder="YouTube link (optional)" />
+        </Field>
         <Field label="Note (optional)">
           <textarea value={note} onChange={e => setNote(e.target.value)}
             placeholder="e.g. Cable pos 4, neutral grip, slow eccentric"
@@ -2706,6 +2710,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
         repsMax: e.plannedRepsMax ?? null,
         progressionOffset: e.plannedProgressionOffset ?? null,
         supersetGroup: e.supersetGroup ?? null,
+        ...(Array.isArray(e.plannedTechniques) && e.plannedTechniques.some(Boolean) ? { plannedTechniques: e.plannedTechniques } : {}),
         ...(times.some(t => t != null) ? { timeSecPerSet: times } : {}),
       };
     });
@@ -2731,12 +2736,18 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
   // excludes deload from lastSessionForExercise/recentSessionsForExercise;
   // this mirrors that exclusion for the same reason.
   const prevEntryMap = {};
-  s.entries.forEach(e => {
+  const prevOccSeen = {};
+  s.entries.forEach((e, idx) => {
+    // The Nth occurrence of an exercise in the day compares against the SAME Nth
+    // occurrence of past sessions (audit L3, matching the seed path). Keyed by
+    // entry index so a twice-in-a-day exercise's second slot reads its own prev
+    // instead of sharing the first slot's.
+    const occ = (prevOccSeen[e.exId] = (prevOccSeen[e.exId] == null ? 0 : prevOccSeen[e.exId] + 1));
     const prev = store.sessions
       .filter(x => x.ended && x.id !== s.id && x.ended < s.ended && x.dayId === s.dayId && !x.isDeload)
       .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''))
-      .find(x => x.entries.some(en => en.exId === e.exId && en.sets.some(st => st.kg != null || st.reps != null)));
-    prevEntryMap[e.exId] = prev?.entries.find(en => en.exId === e.exId) ?? null;
+      .find(x => x.entries.filter(en => en.exId === e.exId)[occ]?.sets?.some(st => st.kg != null || st.reps != null));
+    prevEntryMap[idx] = prev ? (prev.entries.filter(en => en.exId === e.exId)[occ] ?? null) : null;
   });
 
   const prevSameDay = store.sessions
@@ -2793,7 +2804,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
     const sessionBest = sessionBestMap[exId];
     if (sessionBest == null || val !== sessionBest) return false;
     const best = prMap[exId];
-    // No prior history for this exercise at all — nothing to beat, so the
+    // No prior history for this exercise at all, nothing to beat, so the
     // first-ever session with it isn't a PR (matches the two other isPR
     // implementations in this file, which both gate on pr > 0).
     return best != null && val > best;
@@ -3005,7 +3016,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
 
               const showWarmup = store.settings?.showWarmupInSummary ?? true;
               const renderEntry = (e, i) => {
-                const prev = prevEntryMap[e.exId];
+                const prev = prevEntryMap[i];
                 const exObj = store.exercises.find(ex => ex.id === e.exId);
                 const exName = exObj?.name ?? e.name;
 

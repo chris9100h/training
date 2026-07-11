@@ -2208,6 +2208,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
         plannedSets: itAdj.sets, plannedReps: it.reps, plannedRepsPerSet: it.repsPerSet || null,
         plannedRepsMax: it.repsMax || null,
         plannedProgressionOffset: it.progressionOffset ?? null,
+        plannedTechniques: it.plannedTechniques ?? null,
         sets: seedSets, note: '',
         supersetGroup: it.supersetGroup || null,
       };
@@ -2441,7 +2442,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       const suggestion = LB.progressionSuggestion(store, it.exId, null, it.reps, it.repsPerSet, seedRefs[it.exId], it.repsMax || null, it.progressionOffset ?? null, occ);
       const bodyweightKg = ex?.equipment === 'bodyweight' ? LB.latestBodyweight(store) : null;
       const seedSets = LB.buildSeedSets(it, last, suggestion, isUni, store, bodyweightKg);
-      return { exId: it.exId, name: ex?.name || '?', plannedSets: it.sets, plannedReps: it.reps, plannedRepsPerSet: it.repsPerSet || null, plannedRepsMax: it.repsMax || null, plannedProgressionOffset: it.progressionOffset ?? null, sets: seedSets, note: '', supersetGroup: it.supersetGroup || null };
+      return { exId: it.exId, name: ex?.name || '?', plannedSets: it.sets, plannedReps: it.reps, plannedRepsPerSet: it.repsPerSet || null, plannedRepsMax: it.repsMax || null, plannedProgressionOffset: it.progressionOffset ?? null, plannedTechniques: it.plannedTechniques ?? null, sets: seedSets, note: '', supersetGroup: it.supersetGroup || null };
     });
     const session = {
       id: LB.uid(), scheduleId: null, dayId: null, dayName: 'Freestyle',

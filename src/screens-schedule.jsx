@@ -1237,6 +1237,9 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
                                     {it.progressionOffset != null && it.progressionOffset > 0 && (
                                       <i className="fa-solid fa-bolt" title={`Smart Progression: +${it.progressionOffset}`} style={{ fontSize: 9, opacity: 0.85 }} />
                                     )}
+                                    {Array.isArray(it.plannedTechniques) && it.plannedTechniques.some(Boolean) && (
+                                      <i className="fa-solid fa-fire" title="Planned intensity techniques" style={{ fontSize: 9, opacity: 0.85, color: UI.gold }} />
+                                    )}
                                   </span>
                                 </div>
                               );
@@ -2405,7 +2408,7 @@ function DayCopyPicker({ store, schedule, currentDayId, onClose, onCopy, multiSe
   const importTemplate = (t) => {
     const items = normalizeSupersets((t.exercises || [])
       .filter(it => LB.findExercise(store, it.exId))
-      .map(it => ({ exId: it.exId, sets: it.sets || 3, ...(it.reps != null ? { reps: it.reps } : {}), ...(it.repsPerSet ? { repsPerSet: it.repsPerSet } : {}), ...(it.repsMax != null ? { repsMax: it.repsMax } : {}), ...(it.progressionOffset != null ? { progressionOffset: it.progressionOffset } : {}), ...(Array.isArray(it.timeSecPerSet) ? { timeSecPerSet: it.timeSecPerSet } : {}), ...(it.supersetGroup ? { supersetGroup: it.supersetGroup } : {}) })));
+      .map(it => ({ exId: it.exId, sets: it.sets || 3, ...(it.reps != null ? { reps: it.reps } : {}), ...(it.repsPerSet ? { repsPerSet: it.repsPerSet } : {}), ...(it.repsMax != null ? { repsMax: it.repsMax } : {}), ...(it.progressionOffset != null ? { progressionOffset: it.progressionOffset } : {}), ...(Array.isArray(it.plannedTechniques) && it.plannedTechniques.some(Boolean) ? { plannedTechniques: it.plannedTechniques } : {}), ...(Array.isArray(it.timeSecPerSet) ? { timeSecPerSet: it.timeSecPerSet } : {}), ...(it.supersetGroup ? { supersetGroup: it.supersetGroup } : {}) })));
     const day = { id: LB.uid(), name: t.name, items };
     if (multiSelect) onCopy([{ day, migrateId: undefined }]);
     else onCopy(day, undefined);
@@ -2619,6 +2622,33 @@ function ExerciseItemEditor({ item, exName, isCheckboxOnly, queuePos, queueTotal
   // across Uniform/Per Set switches. null = inherit the global setting,
   // 0 = explicitly off, N = explicitly on with a +N reps ceiling.
   const [progOverride, setProgOverride] = useStateS(item.progressionOffset ?? null);
+  // Planned intensity technique: null = none, else a PLANNABLE_TECHNIQUES id.
+  // Scope 'last' = only the last working set (default), 'all' = every working
+  // set. Hidden for checkbox/time/cardio exercises (no intensity flow there),
+  // mirroring the live INTENSITY button's own gate.
+  // Per-set planned techniques: one slot per set (null = none), padded and
+  // truncated to the current set count as it changes (like repsPerSet).
+  // activeTechSet is which set's technique picker is currently expanded.
+  const [plannedTechniques, setPlannedTechniques] = useStateS(() => {
+    const arr = (Array.isArray(item.plannedTechniques) ? item.plannedTechniques : []).slice(0, item.sets);
+    while (arr.length < item.sets) arr.push(null);
+    return arr;
+  });
+  const [activeTechSet, setActiveTechSet] = useStateS(null);
+  const supportsTechnique = !isCheckboxOnly && LB.exerciseLogMode(exercise) !== 'time' && exercise?.movement_type !== 'cardio';
+  const setTechForSet = (idx, techId) => setPlannedTechniques(prev => {
+    const next = prev.map((t, i) => i === idx ? techId : t);
+    // A Myo-Rep Match must sit directly after a Myo-Reps set or another Match,
+    // so a single Myo anchors a run of Matches. Walk left to right checking the
+    // already-cleaned predecessor, which also unwinds an orphaned Match chain
+    // (e.g. Drop, Match, Match collapses both trailing Matches to none).
+    const cleaned = [];
+    for (let i = 0; i < next.length; i++) {
+      const prevTech = cleaned[i - 1];
+      cleaned[i] = (next[i] === 'myorep_match' && prevTech !== 'myorep' && prevTech !== 'myorep_match') ? null : next[i];
+    }
+    return cleaned;
+  });
 
   const switchMode = (m) => {
     if (m === 'variable' && mode !== 'variable') {
@@ -2643,6 +2673,8 @@ function ExerciseItemEditor({ item, exName, isCheckboxOnly, queuePos, queueTotal
         return next.slice(0, n);
       });
     }
+    setPlannedTechniques(prev => { const next = prev.slice(0, n); while (next.length < n) next.push(null); return next; });
+    setActiveTechSet(a => (a != null && a >= n) ? null : a);
   };
 
   const handleMinChange = (v) => {
@@ -2656,16 +2688,20 @@ function ExerciseItemEditor({ item, exName, isCheckboxOnly, queuePos, queueTotal
     if (item.exId && trimmedExNote !== (exercise?.note || '')) {
       setStore(s => ({ ...s, exercises: s.exercises.map(e => e.id === item.exId ? { ...e, note: trimmedExNote } : e) }));
     }
+    // Per-set techniques, sliced to the set count; null when this exercise
+    // can't take one or no set has one (so clearing sticks on an edit).
+    const techs = plannedTechniques.slice(0, sets);
+    const tech = { plannedTechniques: (supportsTechnique && techs.some(Boolean)) ? techs : null };
     if (isCheckboxOnly) {
-      onSave({ sets, reps: 0, repsPerSet: undefined, repsMax: undefined, progressionOffset: progOverride });
+      onSave({ sets, reps: 0, repsPerSet: undefined, repsMax: undefined, progressionOffset: progOverride, ...tech });
       return;
     }
     if (mode === 'variable') {
-      onSave({ sets, reps: repsPerSet[0] ?? uniformReps, repsPerSet, repsMax: undefined, progressionOffset: progOverride });
+      onSave({ sets, reps: repsPerSet[0] ?? uniformReps, repsPerSet, repsMax: undefined, progressionOffset: progOverride, ...tech });
     } else if (mode === 'range') {
-      onSave({ sets, reps: uniformReps, repsPerSet: undefined, repsMax: rangeMax, progressionOffset: progOverride });
+      onSave({ sets, reps: uniformReps, repsPerSet: undefined, repsMax: rangeMax, progressionOffset: progOverride, ...tech });
     } else {
-      onSave({ sets, reps: uniformReps, repsPerSet: undefined, repsMax: undefined, progressionOffset: progOverride });
+      onSave({ sets, reps: uniformReps, repsPerSet: undefined, repsMax: undefined, progressionOffset: progOverride, ...tech });
     }
   };
 
@@ -2676,6 +2712,15 @@ function ExerciseItemEditor({ item, exName, isCheckboxOnly, queuePos, queueTotal
     color: active ? UI.gold : UI.inkFaint,
     fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600,
     letterSpacing: '0.1em', textTransform: 'uppercase',
+    WebkitTapHighlightColor: 'transparent',
+  });
+  // Wrapping chip variant of toggleStyle for the (up to 7) technique options.
+  const chipStyle = (active) => ({
+    padding: '7px 12px', borderRadius: 4, cursor: 'pointer',
+    border: `1px solid ${active ? UI.gold : UI.hairStrong}`,
+    background: active ? UI.goldFaint : 'transparent',
+    color: active ? UI.gold : UI.inkFaint,
+    fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600,
     WebkitTapHighlightColor: 'transparent',
   });
 
@@ -2796,6 +2841,54 @@ function ExerciseItemEditor({ item, exName, isCheckboxOnly, queuePos, queueTotal
           </div>
         );
       })()}
+
+      {supportsTechnique && (
+        <div style={{ marginBottom: 24 }}>
+          <div className="label" style={{ marginBottom: 10 }}>Intensity technique (per set)</div>
+          {/* One chip per set showing its technique (or "none"); tap a set chip
+              to expand the technique picker for that set below. */}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            {Array.from({ length: sets }, (_, i) => {
+              const tech = plannedTechniques[i] || null;
+              const active = activeTechSet === i;
+              return (
+                <button key={i} onClick={() => setActiveTechSet(active ? null : i)} style={{
+                  display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, minWidth: 52,
+                  padding: '6px 10px', borderRadius: 4, cursor: 'pointer',
+                  border: `1px solid ${active ? UI.gold : tech ? UI.goldSoft : UI.hairStrong}`,
+                  background: (active || tech) ? UI.goldFaint : 'transparent',
+                  color: tech ? UI.gold : UI.inkFaint,
+                  fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, WebkitTapHighlightColor: 'transparent',
+                }}>
+                  <span>Set {i + 1}</span>
+                  <span className="micro" style={{ color: tech ? UI.gold : UI.inkGhost, letterSpacing: '0.06em' }}>{tech ? LB.plannedTechniqueShort(tech) : 'none'}</span>
+                </button>
+              );
+            })}
+          </div>
+          {activeTechSet != null && activeTechSet < sets && (
+            <div style={{ marginTop: 12 }}>
+              <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>Technique for set {activeTechSet + 1}</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                <button style={chipStyle(!plannedTechniques[activeTechSet])} onClick={() => setTechForSet(activeTechSet, null)}>None</button>
+                {LB.PLANNABLE_TECHNIQUES.map(t => {
+                  // Myo-Rep Match pairs with a Myo-Reps set (or another Match) on
+                  // the set directly before it, so a Myo anchors a run of Matches.
+                  // Only selectable when the previous set is Myo-Reps or a Match
+                  // (live it falls back to plain Myo-Reps if the anchor is gone).
+                  const prevTech = plannedTechniques[activeTechSet - 1];
+                  const disabled = t.id === 'myorep_match' && prevTech !== 'myorep' && prevTech !== 'myorep_match';
+                  return (
+                    <button key={t.id} disabled={disabled} onClick={() => setTechForSet(activeTechSet, t.id)}
+                      title={disabled ? 'Needs the previous set to be Myo-Reps or a Match' : undefined}
+                      style={{ ...chipStyle(plannedTechniques[activeTechSet] === t.id), ...(disabled ? { opacity: 0.3, cursor: 'default' } : {}) }}>{t.label}</button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       <Field label="Exercise note (optional)">
         <TextInput value={exNote} onChange={setExNote} placeholder="e.g. cable pos 4, slow eccentric…" />
@@ -3048,6 +3141,9 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
                     )}
                     {it.progressionOffset != null && it.progressionOffset > 0 && (
                       <i className="fa-solid fa-bolt" title={`Smart Progression: +${it.progressionOffset}`} style={{ fontSize: 9, opacity: 0.85 }} />
+                    )}
+                    {Array.isArray(it.plannedTechniques) && it.plannedTechniques.some(Boolean) && (
+                      <i className="fa-solid fa-fire" title="Planned intensity techniques" style={{ fontSize: 9, opacity: 0.85, color: UI.gold }} />
                     )}
                     <i className="fa fa-pencil" style={{ fontSize: 9, opacity: 0.7 }} />
                   </div>
@@ -3360,7 +3456,7 @@ function PlanWizard({ store, setStore, go }) {
     const tplDays = (store.workoutTemplates || []).map(t => ({
       key: 'tpl:' + t.id, name: t.name,
       items: (t.exercises || []).filter(it => LB.findExercise(store, it.exId))
-        .map(it => ({ exId: it.exId, sets: it.sets || 3, ...(it.reps != null ? { reps: it.reps } : {}), ...(it.repsPerSet ? { repsPerSet: it.repsPerSet } : {}), ...(it.repsMax != null ? { repsMax: it.repsMax } : {}), ...(it.progressionOffset != null ? { progressionOffset: it.progressionOffset } : {}), ...(Array.isArray(it.timeSecPerSet) ? { timeSecPerSet: it.timeSecPerSet } : {}), ...(it.supersetGroup ? { supersetGroup: it.supersetGroup } : {}) })),
+        .map(it => ({ exId: it.exId, sets: it.sets || 3, ...(it.reps != null ? { reps: it.reps } : {}), ...(it.repsPerSet ? { repsPerSet: it.repsPerSet } : {}), ...(it.repsMax != null ? { repsMax: it.repsMax } : {}), ...(it.progressionOffset != null ? { progressionOffset: it.progressionOffset } : {}), ...(Array.isArray(it.plannedTechniques) && it.plannedTechniques.some(Boolean) ? { plannedTechniques: it.plannedTechniques } : {}), ...(Array.isArray(it.timeSecPerSet) ? { timeSecPerSet: it.timeSecPerSet } : {}), ...(it.supersetGroup ? { supersetGroup: it.supersetGroup } : {}) })),
     })).filter(t => t.items.length);
     if (tplDays.length) groups.push({ id: '__tpl', name: 'Templates', days: tplDays });
     return groups;

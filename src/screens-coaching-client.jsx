@@ -607,7 +607,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
                     const ss = supersetInfo(entriesArr, i);
                     const planItem = planItemForEntry(clientStore, todaySession, e.exId);
                     const tgtStr = planItem ? fmtRepTarget(planItem) : null;
-                    const lastResult = e.exId ? LB.lastSessionForExercise(storeWithoutToday, e.exId, todaySession.dayId) : null;
+                    const lastResult = e.exId ? LB.lastSessionForExercise(storeWithoutToday, e.exId, todaySession.dayId, entriesArr.slice(0, i).filter(x => x.exId === e.exId).length) : null;
                     const lastSets = (lastResult?.entry?.sets || []).filter(s => !s.warmup && (s.kg != null || s.reps != null || s.timeSec != null));
                     // If any set in the row carries a technique badge, every set
                     // needs equal reserved space above its chip — otherwise a
@@ -636,7 +636,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
                         <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8, marginBottom: 6 }}>
                           <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>{e.name}</div>
                           {tgtStr && (
-                            <span className="micro" style={{ color: UI.inkGhost, flexShrink: 0, whiteSpace: 'nowrap' }}>PLAN {planItem.sets ? `${planItem.sets}×` : ''}{tgtStr}</span>
+                            <span className="micro" style={{ color: UI.inkGhost, flexShrink: 0, whiteSpace: 'nowrap' }}>PLAN {planItem.sets ? `${planItem.sets}×` : ''}{tgtStr}{Array.isArray(planItem.plannedTechniques) && planItem.plannedTechniques.some(Boolean) && (<i className="fa-solid fa-fire" title="Planned intensity techniques" style={{ fontSize: 9, opacity: 0.85, color: UI.gold, marginLeft: 4 }} />)}</span>
                           )}
                         </div>
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'flex-start', marginBottom: lastSets.length ? 5 : 0 }}>
@@ -1506,7 +1506,7 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
             const ss = supersetInfo(entriesArr, i);
             const planItem = planItemForEntry(clientStore, selected, e.exId);
             const tgtStr = planItem ? fmtRepTarget(planItem) : null;
-            const lastResult = e.exId ? LB.lastSessionForExercise(storeWithoutSelected, e.exId, selected.dayId) : null;
+            const lastResult = e.exId ? LB.lastSessionForExercise(storeWithoutSelected, e.exId, selected.dayId, entriesArr.slice(0, i).filter(x => x.exId === e.exId).length) : null;
             const lastSets = (lastResult?.entry?.sets || []).filter(s => !s.warmup && (s.kg != null || s.reps != null || s.timeSec != null));
             // This compact coach/self-coaching view had no intensity-technique
             // awareness at all — a drop-set/myo-rep/lengthened-partial set just
@@ -1563,7 +1563,7 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
                       {e.name}{e.exId && <span style={{ fontSize: 11, color: UI.inkFaint, marginLeft: 5 }}>›</span>}
                     </div>
                     {tgtStr && (
-                      <span className="micro" style={{ color: UI.inkGhost, flexShrink: 0, whiteSpace: 'nowrap' }}>PLAN {planItem.sets ? `${planItem.sets}×` : ''}{tgtStr}</span>
+                      <span className="micro" style={{ color: UI.inkGhost, flexShrink: 0, whiteSpace: 'nowrap' }}>PLAN {planItem.sets ? `${planItem.sets}×` : ''}{tgtStr}{Array.isArray(planItem.plannedTechniques) && planItem.plannedTechniques.some(Boolean) && (<i className="fa-solid fa-fire" title="Planned intensity techniques" style={{ fontSize: 9, opacity: 0.85, color: UI.gold, marginLeft: 4 }} />)}</span>
                     )}
                   </div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'flex-start', marginBottom: lastSets.length ? 5 : 0 }}>
