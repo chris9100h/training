@@ -4615,8 +4615,26 @@ async function clearCachesAndReload() {
   window.location.href = window.location.pathname + '?_v=' + Date.now() + window.location.hash;
 }
 
+// Intensity techniques a coach/user can attach to a planned exercise (array
+// order = display order in the plan editor). Values match zane_sets.technique
+// so the live training screen can arm them directly. Myo-Rep Match falls back
+// to plain Myo-Reps live when no preceding myo set exists to anchor to.
+const PLANNABLE_TECHNIQUES = [
+  { id: 'drop', label: 'Drop Set' },
+  { id: 'myorep', label: 'Myo-Reps' },
+  { id: 'myorep_match', label: 'Myo-Rep Match' },
+  { id: 'amrap_variations', label: 'AMRAP Variations' },
+  { id: 'lengthened_partial', label: 'Lengthened Partials' },
+  { id: 'weighted_stretch', label: 'Weighted Stretch' },
+];
+function plannedTechniqueLabel(t) {
+  const found = PLANNABLE_TECHNIQUES.find(x => x.id === t);
+  return found ? found.label : null;
+}
+
 window.LB = {
   supabase: _supabase,
+  PLANNABLE_TECHNIQUES, plannedTechniqueLabel,
   clearPrecompileCaches, clearCachesAndReload,
   SUPABASE_URL, SUPABASE_ANON_KEY, PUSHOVER_URL, WEB_PUSH_URL, fnFetch,
   subscribeWebPush, unsubscribeWebPush, getWebPushSubscription,
