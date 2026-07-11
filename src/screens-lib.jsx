@@ -2731,12 +2731,18 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
   // excludes deload from lastSessionForExercise/recentSessionsForExercise;
   // this mirrors that exclusion for the same reason.
   const prevEntryMap = {};
-  s.entries.forEach(e => {
+  const prevOccSeen = {};
+  s.entries.forEach((e, idx) => {
+    // The Nth occurrence of an exercise in the day compares against the SAME Nth
+    // occurrence of past sessions (audit L3, matching the seed path). Keyed by
+    // entry index so a twice-in-a-day exercise's second slot reads its own prev
+    // instead of sharing the first slot's.
+    const occ = (prevOccSeen[e.exId] = (prevOccSeen[e.exId] == null ? 0 : prevOccSeen[e.exId] + 1));
     const prev = store.sessions
       .filter(x => x.ended && x.id !== s.id && x.ended < s.ended && x.dayId === s.dayId && !x.isDeload)
       .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''))
-      .find(x => x.entries.some(en => en.exId === e.exId && en.sets.some(st => st.kg != null || st.reps != null)));
-    prevEntryMap[e.exId] = prev?.entries.find(en => en.exId === e.exId) ?? null;
+      .find(x => x.entries.filter(en => en.exId === e.exId)[occ]?.sets?.some(st => st.kg != null || st.reps != null));
+    prevEntryMap[idx] = prev ? (prev.entries.filter(en => en.exId === e.exId)[occ] ?? null) : null;
   });
 
   const prevSameDay = store.sessions
@@ -3005,7 +3011,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
 
               const showWarmup = store.settings?.showWarmupInSummary ?? true;
               const renderEntry = (e, i) => {
-                const prev = prevEntryMap[e.exId];
+                const prev = prevEntryMap[i];
                 const exObj = store.exercises.find(ex => ex.id === e.exId);
                 const exName = exObj?.name ?? e.name;
 

@@ -3721,8 +3721,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             if (modeChanged || assistChanged) {
               const isUni = newEx?.movement_type === 'unilateral';
               const bwKg = LB.shouldPullBodyweight(newEx) ? LB.latestBodyweight(s) ?? null : null;
-              const last = LB.bestRecentEntry(s, newExId, session.dayId);
-              const suggestion = LB.progressionSuggestion(s, newExId, session.dayId, null, null, last);
+              const swapOcc = x.entries.slice(0, i).filter(en => en.exId === newExId).length;
+              const last = LB.bestRecentEntry(s, newExId, session.dayId, 3, swapOcc);
+              const suggestion = LB.progressionSuggestion(s, newExId, session.dayId, null, null, last, null, null, swapOcc);
               const setCount = e.sets?.length || e.plannedSets || 3;
               const seedSets = LB.buildSeedSets({ exId: newExId, sets: setCount, repsPerSet: null }, last, suggestion, isUni, s, bwKg);
               return { ...e, exId: newExId, name: newEx?.name || e.name, sets: seedSets };
@@ -3816,8 +3817,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       } else {
         const isUni = newEx?.movement_type === 'unilateral';
         const bwKg = LB.shouldPullBodyweight(newEx) ? LB.latestBodyweight(s) ?? null : null;
-        const last = LB.bestRecentEntry(s, newExId, session.dayId);
-        const suggestion = LB.progressionSuggestion(s, newExId, session.dayId, null, null, last);
+        const insertOcc = sess.entries.slice(0, insertIdx).filter(en => en.exId === newExId).length;
+        const last = LB.bestRecentEntry(s, newExId, session.dayId, 3, insertOcc);
+        const suggestion = LB.progressionSuggestion(s, newExId, session.dayId, null, null, last, null, null, insertOcc);
         const mother = targetIdx !== null ? sess.entries[targetIdx] : null;
         const setCount = mother ? (mother.plannedSets ?? mother.sets?.length ?? 3) : 3;
         const seedSets = LB.buildSeedSets({ exId: newExId, sets: setCount, repsPerSet: null }, last, suggestion, isUni, s, bwKg);

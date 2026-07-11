@@ -2074,8 +2074,8 @@ function buildSeedSets(it, last, suggestion, isUni, store, bodyweightKg = null, 
   });
 }
 
-function lastSessionForExercise(state, exId, dayId = null) {
-  return recentSessionsForExercise(state, exId, dayId, 1)[0] ?? null;
+function lastSessionForExercise(state, exId, dayId = null, occ = 0) {
+  return recentSessionsForExercise(state, exId, dayId, 1, occ)[0] ?? null;
 }
 
 // Up to `limit` most-recent ended sessions that logged this exercise, newest first.
