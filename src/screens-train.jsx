@@ -1489,6 +1489,39 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     return overlayHoldMs;
   };
 
+  // True when the array's only nonzero partials value is still exactly the
+  // untouched meso pre-seed on a single round (mesoChainSeedRef) — i.e. the
+  // auto-seed alone, not a real user edit. Used both to relocate the seed at
+  // Finish (applyMesoChainSeed) and to keep an unopened seed from tripping
+  // the discard-changes dirty check (activeChainDirty) below. Ignores
+  // stretch on purpose — that's a separate, always-real signal of user work.
+  const seedIsUntouched = (arr) => {
+    const seedVal = mesoChainSeedRef.current;
+    if (!seedVal) return false;
+    const withPartials = arr.filter(d => (d.partials || 0) > 0);
+    return withPartials.length === 1 && withPartials[0].partials === seedVal;
+  };
+
+  // See mesoChainSeedRef above. If the seed is still untouched, relocate it
+  // to the true last round; otherwise (no round carries it anymore, more
+  // than one round has a partials value, or the seeded round's value was
+  // edited away) the user has taken partials over themselves, so their rows
+  // pass through unchanged. Matched by value, not by index, since
+  // rawDrops.filter() below drops incomplete rows and does not preserve
+  // original positions.
+  const applyMesoChainSeed = (drops) => {
+    if (drops.length < 2 || !seedIsUntouched(drops)) return drops;
+    const seedVal = mesoChainSeedRef.current;
+    const seededIdx = drops.findIndex(d => d.partials === seedVal);
+    const lastIdx = drops.length - 1;
+    if (seededIdx === lastIdx) return drops;
+    return drops.map((d, i) => {
+      if (i === seededIdx) return { ...d, partials: undefined };
+      if (i === lastIdx) return { ...d, partials: seedVal };
+      return d;
+    });
+  };
+
   const finishDropSet = async (rawDrops) => {
     // Silently drop any incomplete row (missing reps, or missing kg unless
     // no-weight-reps/bodyweight) instead of saving it — e.g. an ADD DROP
@@ -1504,8 +1537,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       await confirm("You did a Drop Set... without a drop? Bold strategy. Add one, or just log this as a normal set.", { title: 'No Drop, No Drop Set', ok: 'Got it', cancel: null });
       return;
     }
-    // Optional finishers: partials and/or a weighted stretch on the last drop.
-    const finalDrops = drops; // per-round finishers already live on the drops rows
+    // Optional finishers (partials, weighted stretch) already live on the
+    // drops rows; applyMesoChainSeed only relocates an untouched meso
+    // pre-seed onto the now-final round, everything else passes through.
+    const finalDrops = applyMesoChainSeed(drops);
     const first = finalDrops[0];
     updateSession(sess => ({
       ...sess,
@@ -1542,8 +1577,24 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   };
 
   const cancelMyo = () => {
-    setMyoSetIdx(null); setMyoDrops([]); setMyoTechnique(null); setMyoTarget(null);    kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false;
+    setMyoSetIdx(null); setMyoDrops([]); setMyoTechnique(null); setMyoTarget(null); mesoChainSeedRef.current = 0;    kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false;
     setKbField(null); setKbRaw(''); setKbFresh(false);
+  };
+
+  // Appends a new myo mini-round (top level: called from both the keypad's
+  // auto-add-first-mini flow and the "ADD MYO" button in the render below).
+  // If this is the very first mini after the activation round and a
+  // beyond-failure meso prescription is still pending, seed it there — the
+  // activation round never renders a Finisher (see isActiv below), so the
+  // pre-seed can't live there like it does for Drop/AMRAP; this is the
+  // earliest round that can actually show it.
+  const appendMyoRound = (kg) => {
+    setMyoDrops(prev => {
+      const seedVal = prev.length === 1 ? mesoChainSeedRef.current : 0;
+      const row = { kg, reps: null };
+      if (seedVal > 0) row.partials = seedVal;
+      return [...prev, row];
+    });
   };
 
   const finishMyoSet = async (rawDrops, technique) => {
@@ -1559,8 +1610,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       await confirm(`${label} without any myo sets? That's just a regular set. Add one, or just log it normally.`, { title: 'No Myo, No Myo-Reps', ok: 'Got it', cancel: null });
       return;
     }
-    // Optional finishers: partials and/or a weighted stretch on the last mini.
-    const finalDrops = drops; // per-round finishers already live on the drops rows
+    // Optional finishers (partials, weighted stretch) already live on the
+    // drops rows; applyMesoChainSeed only relocates an untouched meso
+    // pre-seed onto the now-final round, everything else passes through.
+    const finalDrops = applyMesoChainSeed(drops);
     const first = finalDrops[0];
     updateSession(sess => ({
       ...sess,
@@ -1627,8 +1680,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       await confirm("AMRAP Variations with just one round? That's just an AMRAP. Add a variation, or log it as one.", { title: 'No Variation, No Variations', ok: 'Got it', cancel: null });
       return;
     }
-    // Optional finishers: partials and/or a weighted stretch on the last round.
-    const finalDrops = drops; // per-round finishers already live on the drops rows
+    // Optional finishers (partials, weighted stretch) already live on the
+    // drops rows; applyMesoChainSeed only relocates an untouched meso
+    // pre-seed onto the now-final round, everything else passes through.
+    const finalDrops = applyMesoChainSeed(drops);
     const first = finalDrops[0];
     updateSession(sess => ({
       ...sess,
@@ -1667,7 +1722,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // (those are only written by finishDropSet/finishMyoSet/finishAv), so that
   // alone is always a lossless cancel.
   const activeChainDirty = () => {
-    const hasFin = (arr) => arr.some(d => (d.partials || 0) > 0 || d.stretch);
+    // A round's partials value doesn't count as "real" work while it's still
+    // exactly the untouched beyond-failure meso pre-seed (audit finding: this
+    // used to pop the discard-changes warning on every meso set the user
+    // hadn't touched at all yet) — a stretch anywhere is always real, though.
+    const hasFin = (arr) => arr.some(d => d.stretch) || (arr.some(d => (d.partials || 0) > 0) && !seedIsUntouched(arr));
     if (dropSetIdx != null) return dropDrops.length > 1 || hasFin(dropDrops);
     if (myoSetIdx != null) return myoDrops.length > 1 || hasFin(myoDrops);
     if (avSetIdx != null) return avDrops.length > 1 || hasFin(avDrops);
@@ -1678,9 +1737,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     return await confirm('Your progress on this set won\'t be saved.', { title: 'Discard changes?', ok: 'Discard', cancel: 'Keep editing', danger: true });
   };
   const closeChainSheet = () => {
-    if (dropSetIdx != null) { setDropSetIdx(null); setDropDrops([]); }
+    if (dropSetIdx != null) { setDropSetIdx(null); setDropDrops([]); mesoChainSeedRef.current = 0; }
     else if (myoSetIdx != null) { cancelMyo(); return; }
-    else if (avSetIdx != null) { setAvSetIdx(null); setAvDrops([]); }
+    else if (avSetIdx != null) { setAvSetIdx(null); setAvDrops([]); mesoChainSeedRef.current = 0; }
     kbFieldRef.current = null; kbRawRef.current = ''; setKbField(null); setKbRaw('');
   };
   const requestCloseChainSheet = async () => {
@@ -2191,15 +2250,27 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const [avLabelFocusDi, setAvLabelFocusDi] = useStateT(null); // which round's variation-name box is focused (native text input, accent underline)
   const avDropsRef = useRefT([]);
   avDropsRef.current = avDrops;
-  // Intensity-technique finishers (partials count, weighted stretch) now live
-  // PER ROUND on the drops rows (dropDrops/myoDrops/avDrops), edited via the
-  // per-round Finisher control and persisted/restored with those arrays. There
-  // is no shared finisher state to thread, reset or resume separately.
+  // Intensity-technique finishers (partials count, weighted stretch) live PER
+  // ROUND on the drops rows (dropDrops/myoDrops/avDrops), edited via the
+  // per-round Finisher control and persisted/restored with those arrays. The
+  // one exception is mesoChainSeedRef just below: a beyond-failure meso
+  // pre-seed that needs to float to the true last round at Finish, not
+  // persisted (a hard remount just stops it floating further; the value
+  // itself survives fine since it already lives in the restored drops row).
   // Which (exIdx_setIdx) working sets the beyond-failure meso auto-armed the
   // Lengthened Partials stepper on, so it arms each set exactly once — a user
   // who cancels the auto-prescribed partials on a set isn't re-nagged by a
   // re-firing effect.
   const mesoLpArmedRef = useRefT(new Set());
+  // Beyond-failure meso, chain techniques: the prescribed count is pre-seeded
+  // onto the chain's first round at start (see startDrop/startMyo/startAv) so
+  // it's visible immediately instead of silently attached on Finish. At
+  // Finish, applyMesoChainSeed (near finishDropSet) moves it onto whichever
+  // round is actually last by then — mirroring how the pre-rework shared
+  // finisherPartials state always applied to "whatever's last" — but only
+  // while it is still exactly this untouched auto-seed; any manual partials
+  // edit anywhere on the chain means the user has taken over.
+  const mesoChainSeedRef = useRefT(0);
   // Persist intensity state so a background/resume on iOS doesn't wipe mid-set
   // progress. This effect runs before the restore effect below on every fresh
   // mount (declaration order), so on mount state is still all-null — without
@@ -3637,7 +3708,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           // Activation reps confirmed → auto-add first mini
           const activKg = myoDropsRef.current[0]?.kg ?? null;
           const newIdx = myoDropsRef.current.length;
-          setMyoDrops(prev => [...prev, { kg: activKg, reps: null }]);
+          appendMyoRound(activKg);
           setTimeout(() => activateMyo(newIdx, 'reps'), 80);
         } else {
           kbFieldRef.current = null; kbRawRef.current = ''; kbFreshRef.current = false;
@@ -4191,10 +4262,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // Beyond-failure meso: auto-arm the Lengthened Partials stepper (pre-filled to
   // the prescribed count) on the current plain working set, so the partials are
   // visible up front instead of silently attached on check-off. Armed once per
-  // set (mesoLpArmedRef) so cancelling on a set doesn't re-nag. Only the
-  // standalone Lengthened Partials set is auto-prefilled here; on a chain the
-  // user adds the prescribed partials per round. The guard below skips this
-  // while any other technique editor is already in flight.
+  // set (mesoLpArmedRef) so cancelling on a set doesn't re-nag. Chain techniques
+  // (Drop/Myo/AMRAP Variations) get the same prescribed count pre-seeded their
+  // own way, on the first round at startDrop/startMyo/startAv (mesoChainSeedRef),
+  // so the guard below only needs to skip while one of those is already open.
   // MUST sit above the `if (!entry)` early return (empty freestyle/bonus
   // session): a hook after that return changes the hook count when the first
   // exercise is added (entry null → set), which is React error #310. Derives
@@ -5912,11 +5983,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           // on the same still-unfinished set and picked Myo-Rep instead).
           // Without this, both sub-panels could end up targeting the same
           // row simultaneously.
-          const clearDrop = () => { setDropSetIdx(null); setDropDrops([]); };
-          const clearMyo = () => { setMyoSetIdx(null); setMyoDrops([]); setMyoTechnique(null); setMyoTarget(null); };
+          const clearDrop = () => { setDropSetIdx(null); setDropDrops([]); mesoChainSeedRef.current = 0; };
+          const clearMyo = () => { setMyoSetIdx(null); setMyoDrops([]); setMyoTechnique(null); setMyoTarget(null); mesoChainSeedRef.current = 0; };
           const clearLp = () => { setLpTarget(null); setLpCount(0); setLpStretch(null); };
           const clearWs = () => { setWsTarget(null); setWsStretch(null); };
-          const clearAv = () => { setAvSetIdx(null); setAvDrops([]); };
+          const clearAv = () => { setAvSetIdx(null); setAvDrops([]); mesoChainSeedRef.current = 0; };
           const closeIntensity = () => { setIntensityOpen(false); setIntensityPage(null); };
           const startDrop = () => {
             const target = currentSetIdx >= 0
@@ -5926,6 +5997,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             clearMyo(); clearLp(); clearWs(); clearAv();
             const s = entry.sets[target];
             const initDrops = [{ kg: s?.kg ?? null, reps: s?.reps ?? null }];
+            if (mesoPartials > 0) initDrops[0].partials = mesoPartials; // beyond-failure meso: pre-seed prescribed partials
+            mesoChainSeedRef.current = mesoPartials;
             setDropDrops(initDrops);
             dropDropsRef.current = initDrops;
             setDropSetIdx(target);
@@ -5940,6 +6013,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             clearDrop(); clearMyo(); clearLp(); clearWs();
             const s = entry.sets[target];
             const initDrops = [{ kg: s?.kg ?? null, reps: s?.reps ?? null, label: entry.name }];
+            if (mesoPartials > 0) initDrops[0].partials = mesoPartials; // beyond-failure meso: pre-seed prescribed partials
+            mesoChainSeedRef.current = mesoPartials;
             setAvDrops(initDrops);
             avDropsRef.current = initDrops;
             setAvSetIdx(target);
@@ -5957,6 +6032,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             // For match: activation kg locked to the preceding myo set's activation kg
             const initKg = technique === 'myorep_match' ? (anchor?.drops?.[0]?.kg ?? s?.kg ?? null) : (s?.kg ?? null);
             const initDrops = [{ kg: initKg, reps: s?.reps ?? null }];
+            // Myo's activation round never renders a Finisher (see isActiv
+            // below), so the pre-seed can't live there like it does for
+            // Drop/AMRAP — appendMyoRound plants it on the first real mini
+            // instead, as soon as one exists.
+            mesoChainSeedRef.current = mesoPartials;
             setMyoDrops(initDrops);
             myoDropsRef.current = initDrops;
             setMyoSetIdx(target);
@@ -6461,7 +6541,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   <button onClick={() => {
                     const newIdx = myoDropsRef.current.length;
                     const activKg = myoDropsRef.current[0]?.kg ?? null;
-                    setMyoDrops(prev => [...prev, { kg: activKg, reps: null }]);
+                    appendMyoRound(activKg);
                     setTimeout(() => activateMyo(newIdx, 'reps'), 80);
                   }} style={{
                     flex: 1, padding: '8px 0', background: 'transparent',
