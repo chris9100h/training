@@ -121,7 +121,7 @@ function checkinFieldValue(field, v, { distUnit, weightUnit, chart = false } = {
   if (field.key === 'steps') return chart ? `${Math.round(v / 1000)}k` : Number(v).toLocaleString();
   if (field.key === 'days_trained') return `${v}d`;
   if (field.key === 'cardio_minutes') return `${v} min`;
-  if (field.key === 'hydration_ml') return `${(v / 1000).toFixed(1)} L / day`;
+  if (field.key === 'hydration_ml') return (weightUnit || UI.unit()) === 'lbs' ? `${Math.round(UI.mlToFloz(v))} fl oz / day` : `${(v / 1000).toFixed(1)} L / day`;
   if (field._distanceField) return LB.fmtDistance(v, distUnit, 1);
   if (field.type === 'pace') {
     if (!chart) return String(v);

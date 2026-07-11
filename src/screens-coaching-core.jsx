@@ -109,7 +109,7 @@ const CHECKIN_DEFAULT_SCHEMA = [
     id: 'nutrition', label: 'Nutrition',
     fields: [
       { key: 'off_plan_days', label: 'Off-plan days', type: 'integer', width: 'half', required: false, direction: null },
-      { key: 'hydration_ml', label: 'Avg hydration / day (ml)', type: 'integer', width: 'half', required: false, direction: 'higher_better', icon: 'fa-droplet' },
+      { key: 'hydration_ml', label: 'Avg hydration / day', type: 'integer', width: 'half', required: false, direction: 'higher_better', icon: 'fa-droplet' },
       { key: 'calories_avg', label: 'Avg calories / day', type: 'integer', width: 'half', required: false, direction: null, icon: 'fa-fire' },
       { key: 'protein_avg', label: 'Avg protein / day (g)', type: 'integer', width: 'half', required: false, direction: 'higher_better', icon: 'fa-drumstick-bite' },
       { key: 'carbs_avg', label: 'Avg carbs / day (g)', type: 'integer', width: 'half', required: false, direction: null, icon: 'fa-wheat-awn' },
