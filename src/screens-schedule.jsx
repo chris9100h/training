@@ -957,6 +957,36 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
     );
   })();
 
+  // An earlier editing session (possibly another device) autosaved unsaved
+  // changes to this plan. Plan-view renders the committed plan, not the draft, so
+  // without this banner that work would be invisible until you happen to tap
+  // Edit. Resume opens the editor (the draft is restored there); Discard drops it.
+  const pendingDraft = fromPlan && !preview && store.planDrafts?.[sch.id] ? store.planDrafts[sch.id] : null;
+  const discardPendingDraft = async () => {
+    if (!await confirm('Drop the unsaved edits from your last session on this plan? This keeps the plan as it is now.', { title: 'Discard unsaved edits?', ok: 'Discard', danger: true })) return;
+    setStore(s => {
+      if (!s.planDrafts || !(sch.id in s.planDrafts)) return s;
+      const rest = { ...s.planDrafts };
+      delete rest[sch.id];
+      return { ...s, planDrafts: rest };
+    });
+  };
+  const resumeBanner = pendingDraft ? (
+    <div style={{
+      margin: '10px 14px 0', padding: '10px 12px', display: 'flex', alignItems: 'center', gap: 10,
+      background: UI.goldFaint, border: `1px solid rgba(var(--accent-rgb), 0.35)`, borderRadius: 6,
+    }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div className="micro-gold">Unsaved edits</div>
+        <div style={{ color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 12, marginTop: 2 }}>
+          You have changes to this plan from an earlier session that weren't saved.
+        </div>
+      </div>
+      <Btn onClick={() => go({ name: 'schedule-edit', scheduleId: sch.id })} style={{ minHeight: 36, padding: '0 14px', whiteSpace: 'nowrap' }}>Resume</Btn>
+      <Btn kind="ghost" onClick={discardPendingDraft} style={{ minHeight: 36, padding: '0 12px', whiteSpace: 'nowrap' }}>Discard</Btn>
+    </div>
+  ) : null;
+
   return (
     <Screen scroll={false}>
       {confirmEl}
@@ -977,6 +1007,8 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
           }}>Edit</button>
         ) : null}
       />
+
+      {resumeBanner}
 
       {versionBar}
 
@@ -1324,23 +1356,43 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
     }
     return clone;
   });
+  // Live in-progress state of the day currently open in DayEditor, reported up
+  // via onDraftChange as { id, day }. DayEditor keeps its edits local until its
+  // own Save, so without this overlay exercises added to a day would not reach
+  // the autosave snapshot until that Save. Null when no day is open / it's clean.
+  const [openDay, setOpenDay] = useStateS(null);
   // Multi-device autosave: debounce-persist the in-progress draft into
   // store.planDrafts (→ zane_plan_drafts) ~1s after edits settle, so switching
-  // devices mid-edit never loses work. Only the primary edit flow autosaves; the
-  // baseline for "dirty" there is `original` (mirrors dirtyBaseline for
-  // editVerIdx <= 0). Cleared on Save / Discard / Delete / Archive below.
+  // devices mid-edit never loses work. The snapshot folds in the open day's live
+  // items (openDay) so a day being edited is captured before it's Saved back to
+  // the plan. Only the primary edit flow autosaves; its "dirty" baseline is
+  // `original` (mirrors dirtyBaseline for editVerIdx <= 0). Cleared on
+  // Save / Discard / Delete / Archive below.
   React.useEffect(() => {
     if (!draft || editVerIdx > 0) return;
-    if (JSON.stringify(draft) === JSON.stringify(original)) return; // clean → nothing to persist
+    const snapshot = (openDay && openDay.id)
+      ? { ...draft, days: (draft.days || []).map(d => d.id === openDay.id ? openDay.day : d) }
+      : draft;
+    if (JSON.stringify(snapshot) === JSON.stringify(original)) {
+      // Back to pristine (e.g. a day's edits were discarded): drop any stale
+      // autosave so it can't resurrect discarded work on the next boot.
+      setStore(s => {
+        if (!s.planDrafts || !(scheduleId in s.planDrafts)) return s;
+        const rest = { ...s.planDrafts };
+        delete rest[scheduleId];
+        return { ...s, planDrafts: rest };
+      });
+      return;
+    }
     const t = setTimeout(() => {
       setStore(s => {
         const cur = s.planDrafts?.[scheduleId];
-        if (cur && JSON.stringify(cur.draft) === JSON.stringify(draft)) return s; // unchanged → skip redundant write
-        return { ...s, planDrafts: { ...(s.planDrafts || {}), [scheduleId]: { draft, updatedAt: new Date().toISOString() } } };
+        if (cur && JSON.stringify(cur.draft) === JSON.stringify(snapshot)) return s; // unchanged → skip redundant write
+        return { ...s, planDrafts: { ...(s.planDrafts || {}), [scheduleId]: { draft: snapshot, updatedAt: new Date().toISOString() } } };
       });
     }, 1000);
     return () => clearTimeout(t);
-  }, [draft, editVerIdx, scheduleId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [draft, openDay, editVerIdx, scheduleId]); // eslint-disable-line react-hooks/exhaustive-deps
   // Drop the autosaved draft once the edit session resolves (committed or
   // abandoned). Gated to the primary flow so saving/discarding an OLDER version
   // never wipes a separate newest-version draft; delete forces through because a
@@ -1878,7 +1930,8 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
           store={store} setStore={setStore}
           day={draft.days.find(d => d.id === editingDay)}
           schedule={draft}
-          onClose={() => setEditingDay(null)}
+          onDraftChange={setOpenDay}
+          onClose={() => { setOpenDay(null); setEditingDay(null); }}
           onSave={(updated) => {
             // Match by editingDay (the id the day currently has in the plan),
             // NOT updated.id: copyItemsFromDay swaps the day's id to the source
@@ -1886,6 +1939,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
             // day's session history over). updated.id then no longer matches any
             // existing day, so matching on it silently dropped the whole import
             // — the exercises appeared in the editor but never saved.
+            setOpenDay(null);
             setDraft(d => ({ ...d, days: d.days.map(x => x.id === editingDay ? updated : x) }));
             setEditingDay(null);
           }}
@@ -3030,7 +3084,7 @@ function normalizeSupersets(items) {
   });
 }
 
-function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
+function DayEditor({ store, setStore, day, schedule, onClose, onSave, onDraftChange }) {
   const [draft, setDraft] = useStateS(day);
   const [addingEx, setAddingEx] = useStateS(false);
   const [copyingFrom, setCopyingFrom] = useStateS(false);
@@ -3039,6 +3093,15 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
   const [pickingType, setPickingType] = useStateS(false);
   const [confirmEl, confirm] = useConfirm();
   const initialDay = React.useRef(JSON.stringify(day));
+  // Report in-progress edits up (debounced) so the plan editor can fold this day
+  // into its multi-device autosave snapshot before the day is Saved back. Keyed
+  // by the day's opening id (matches the parent's editingDay-based merge).
+  const initialDayId = React.useRef(day?.id);
+  React.useEffect(() => {
+    if (!onDraftChange) return;
+    const t = setTimeout(() => onDraftChange({ id: initialDayId.current, day: draft }), 400);
+    return () => clearTimeout(t);
+  }, [draft]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const reorderItems = (from, to) => {
     if (from === to) return;
