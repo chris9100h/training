@@ -873,7 +873,12 @@ function useConfirm() {
   const confirm = (message, { title = 'Confirm?', ok = 'OK', cancel = 'Cancel', danger = false, preventBackdropClose = false, requireText = null } = {}) =>
     new Promise(resolve => { setTyped(''); setState({ message, title, ok, cancel, danger, preventBackdropClose, requireText, resolve }); });
   const close = (result) => { state?.resolve(result); setState(null); setTyped(''); };
-  const okLocked = !!state?.requireText && typed.trim().toLowerCase() !== state.requireText.toLowerCase();
+  // Normalize the phrase before comparing so a type-to-confirm gate can't be
+  // defeated by iOS smart punctuation (curly vs straight apostrophe) or a
+  // dropped apostrophe. Without this a phrase like "yes i'm sure" could lock the
+  // user out on mobile. Strips straight and curly apostrophes on both sides.
+  const normConfirmText = (s) => (s || '').trim().toLowerCase().replace(/[‘’ʼ']/g, '');
+  const okLocked = !!state?.requireText && normConfirmText(typed) !== normConfirmText(state.requireText);
   // Portal into document.body so the confirm sheet always sits above any other
   // Sheet (both zIndex: 100) regardless of where confirmEl is placed in the tree.
   const el = state && ReactDOM.createPortal(

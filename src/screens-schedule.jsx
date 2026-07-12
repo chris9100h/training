@@ -1356,6 +1356,15 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
     }
     return clone;
   });
+  // Did this session pick up a persisted autosave draft (via the Resume button
+  // or a silent multi-device restore)? Captured once at mount. If so, backing
+  // out discards work that was saved in an earlier session, so that path gets a
+  // stronger, type-to-confirm gate instead of the plain "unsaved changes" note.
+  const resumedRef = React.useRef(null);
+  if (resumedRef.current === null) {
+    resumedRef.current = editVerIdx <= 0 && !!(store.planDrafts && store.planDrafts[scheduleId] && store.planDrafts[scheduleId].draft);
+  }
+  const wasResumed = resumedRef.current;
   // Live in-progress state of the day currently open in DayEditor, reported up
   // via onDraftChange as { id, day }. DayEditor keeps its edits local until its
   // own Save, so without this overlay exercises added to a day would not reach
@@ -1694,7 +1703,15 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
           ? `V${original.versions.length - editVerIdx} · from ${new Date(versionFrom + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
           : null}
         onBack={async () => {
-          if (dirty && !await confirm('Unsaved changes will be lost.', { title: 'Discard changes?', ok: 'Discard', danger: true })) return;
+          if (dirty) {
+            const confirmed = wasResumed
+              ? await confirm(
+                  "This throws away the autosaved edits you resumed for this plan, and it can't be undone. The last saved version of the plan stays as it is.",
+                  { title: 'Discard autosave?', ok: 'Discard autosave', danger: true, requireText: "yes i'm sure" }
+                )
+              : await confirm('Unsaved changes will be lost.', { title: 'Discard changes?', ok: 'Discard', danger: true });
+            if (!confirmed) return;
+          }
           clearDraft();
           go({ name: 'plan-view', scheduleId: draft.id, fromPlan: true });
         }}
