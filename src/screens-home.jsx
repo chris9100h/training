@@ -2214,11 +2214,9 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       // from a prior "Volume + Load" run without wiping the mesoState.
       const itAdj = (typeof applyMesoSetDeltaFromState === 'function' && !LB.autoregLoadOnly(sch)) ? applyMesoSetDeltaFromState(it, dayId, resolvedMeso) : it;
       const weightBoost = mesoBoosts?.[it.exId + '_' + dayId] ?? null;
-      let suggestionFinal = suggestion;
-      if (weightBoost != null && !suggestionFinal && last) {
-        const refSet = (last?.entry?.sets || []).filter(s => !s.warmup && !s.skipped).find(s => s.kg != null);
-        if (refSet) suggestionFinal = { kg: Math.round((refSet.kg + weightBoost) * 4) / 4, reps: refSet.reps ?? null };
-      }
+      // On an autoregulating plan the feedback engine owns the weight: apply an
+      // earned boost, but a withheld one vetoes Smart Progression (see helper).
+      const suggestionFinal = LB.resolveMesoSeedSuggestion(suggestion, weightBoost, last, LB.mesoActive(sch));
       const seedSets = LB.buildSeedSets(itAdj, last, suggestionFinal, isUnilateral, store, bodyweightKg);
       return {
         exId: it.exId, name: ex?.name || '?',

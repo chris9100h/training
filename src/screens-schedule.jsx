@@ -792,11 +792,10 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
         // seeding in screens-home.jsx so this preview agrees with it).
         const itAdj = (typeof applyMesoSetDeltaFromState === 'function' && !LB.autoregLoadOnly(sch)) ? applyMesoSetDeltaFromState(it, day.id, resolvedMeso) : it;
         const weightBoost = mesoBoosts?.[it.exId + '_' + day.id] ?? null;
-        let suggestionFinal = suggestion;
-        if (weightBoost != null && !suggestionFinal && last) {
-          const refSet = (last?.entry?.sets || []).filter(s => !s.warmup && !s.skipped).find(s => s.kg != null);
-          if (refSet) suggestionFinal = { kg: Math.round((refSet.kg + weightBoost) * 4) / 4, reps: refSet.reps ?? null };
-        }
+        // Mirror the real session-start (screens-home.jsx): on an autoregulating
+        // plan the feedback engine owns the weight, so an earned boost applies
+        // and a withheld one vetoes Smart Progression (see LB.resolveMesoSeedSuggestion).
+        const suggestionFinal = LB.resolveMesoSeedSuggestion(suggestion, weightBoost, last, LB.mesoActive(sch));
         // 5/3/1 main lift: seed the current week's wave prescription instead of
         // echoing last-session weights (buildSeedSets is not 5/3/1-aware). Mirrors
         // the session-start builder in screens-home.jsx.

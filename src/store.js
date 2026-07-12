@@ -4430,6 +4430,30 @@ function reearnMesoWeightBoosts(prevBoosts, sessionKeys, earnedBoosts) {
   return { ...next, ...(earnedBoosts || {}) };
 }
 
+// Reconcile the Smart-Progression suggestion with the meso weight boost when
+// seeding an exercise. On an autoregulating plan the feedback engine is the
+// sole authority over next-session weight:
+//   • boost earned   → apply it on top of the last weight when Smart Progression
+//     is silent; when SP also fired they are the same increment, so keep SP.
+//   • boost withheld (a joint/pump/volume gate failed last session, or a muscle
+//     was still sore on a load-only plan) → veto SP so the weight HOLDS instead
+//     of climbing past the feedback. This is what makes the gating actually
+//     control weight; without it Smart Progression would bump regardless.
+// Off a meso plan (mesoActive false) the suggestion is returned untouched, so
+// normal Smart Progression is unaffected. Pure/testable; `last` is a
+// { entry: { sets } } reference.
+function resolveMesoSeedSuggestion(suggestion, weightBoost, last, mesoActive) {
+  if (weightBoost != null) {
+    if (!suggestion && last) {
+      const refSet = (last?.entry?.sets || []).filter(s => !s.warmup && !s.skipped).find(s => s.kg != null);
+      if (refSet) return { kg: Math.round((refSet.kg + weightBoost) * 4) / 4, reps: refSet.reps ?? null };
+    }
+    return suggestion;
+  }
+  if (mesoActive && suggestion) return null; // feedback withheld the boost → veto the Smart Progression bump
+  return suggestion;
+}
+
 // Counts calendar days within [mesoStartISO, todayISO] that must NOT advance a
 // date-based/weekday mesocycle's week counter (see mesoCurrentWeek). The meso
 // week represents accumulated training fatigue, so pure recovery time can't
@@ -4708,5 +4732,5 @@ window.LB = {
   cardioDistUnit, setCardioDistUnit, distToM, mToDisplay, fmtDistance, fmtPace, fmtSpeed, MI_TO_M, recentCardioTypes,
   isLoggedTrainingDay, plannedTrainingDay, isTrainingDayForDate, dayTargetFromMacros, macroAdherence, effectiveMacroTargets, dailyLogAdherence, dailyLogsWeekPrefill, weekPerformanceSignal,
   refreshHealthLogs,
-  pickGrowthRecipient, retractGrowthGrant, pickDeclineRecipient, reearnMesoWeightBoosts, mesoPausedDays, mesoRirForWeek,
+  pickGrowthRecipient, retractGrowthGrant, pickDeclineRecipient, reearnMesoWeightBoosts, resolveMesoSeedSuggestion, mesoPausedDays, mesoRirForWeek,
 };

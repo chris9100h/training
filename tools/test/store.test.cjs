@@ -731,6 +731,32 @@ async function testAsync(name, fn) {
     assert.strictEqual(JSON.stringify(LB.reearnMesoWeightBoosts(undefined, undefined, undefined)), '{}');
   });
 
+  // ── resolveMesoSeedSuggestion (feedback owns weight on a meso plan) ──
+  const seedLast = { entry: { sets: [{ kg: 100, reps: 8 }] } };
+  test('resolveMesoSeedSuggestion: earned boost with no Smart Progression applies the boost', () => {
+    const out = LB.resolveMesoSeedSuggestion(null, 2.5, seedLast, true);
+    assert.strictEqual(out.kg, 102.5);
+    assert.strictEqual(out.reps, 8);
+  });
+  test('resolveMesoSeedSuggestion: earned boost keeps the Smart Progression suggestion when it fired (same increment)', () => {
+    const sp = { kg: 105, reps: 5 };
+    assert.strictEqual(LB.resolveMesoSeedSuggestion(sp, 2.5, seedLast, true), sp);
+  });
+  test('resolveMesoSeedSuggestion: withheld boost VETOES Smart Progression on a meso plan (weight holds)', () => {
+    const sp = { kg: 102.5, reps: 8 };
+    assert.strictEqual(LB.resolveMesoSeedSuggestion(sp, null, seedLast, true), null);
+  });
+  test('resolveMesoSeedSuggestion: off a meso plan Smart Progression is untouched', () => {
+    const sp = { kg: 102.5, reps: 8 };
+    assert.strictEqual(LB.resolveMesoSeedSuggestion(sp, null, seedLast, false), sp);
+  });
+  test('resolveMesoSeedSuggestion: no boost and no Smart Progression is a no-op', () => {
+    assert.strictEqual(LB.resolveMesoSeedSuggestion(null, null, seedLast, true), null);
+  });
+  test('resolveMesoSeedSuggestion: earned boost but no reference set falls back to the suggestion', () => {
+    assert.strictEqual(LB.resolveMesoSeedSuggestion(null, 2.5, null, true), null);
+  });
+
   // ── mesoPausedDays (recovery time must not fast-forward the meso week) ──
   test('mesoPausedDays: deload days in the window are all excluded', () => {
     // 5-day deload Jan 10–14 inside a meso running Jan 1 → Jan 20.
