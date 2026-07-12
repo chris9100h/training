@@ -88,7 +88,11 @@ function CoachingTabScreen({ store, setStore, userId, go, initialClientTab }) {
 
   const views = [];
   if (isSelf)   views.push({ id: 'self',    label: 'Myself',     icon: 'fa-chart-line' });
-  if (isCoach)  views.push({ id: 'clients', label: 'My Clients', icon: 'fa-users' });
+  // A self-coach can invite real clients too, but the invite lives in the
+  // clients view. Gating that view on isCoach (>=1 active client) created a
+  // catch-22: no invite button until you already had a client. Show the clients
+  // view for self-coaches as well so the invite is reachable from the start.
+  if (isCoach || isSelf) views.push({ id: 'clients', label: 'My Clients', icon: 'fa-users' });
   if (isClient) views.push({ id: 'coach',   label: 'My Coach',   icon: 'fa-person-chalkboard' });
 
   // No active role → default to the coach view (empty client list + invite).
