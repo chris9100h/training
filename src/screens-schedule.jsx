@@ -2219,6 +2219,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
                   const er = draft.mesocycle_end_rir ?? 0;
                   return (
                     <div style={{ marginBottom: 4 }}>
+                      <div className="micro" style={{ color: UI.gold, margin: '2px 0 10px' }}>MESOCYCLE LENGTH</div>
                       <Stepper value={draft.mesocycle_weeks} step={1} min={4} max={8}
                         suffix=" weeks"
                         onChange={v => setDraft(d => ({ ...d, mesocycle_weeks: Math.min(8, Math.max(4, Math.round(v))) }))} />
