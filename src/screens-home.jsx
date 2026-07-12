@@ -1860,7 +1860,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
         setStore(s => ({
           ...s,
           schedules: s.schedules.map(sc =>
-            sc.id === scheduleId ? { ...sc, mesocycle_weeks: null } : sc
+            sc.id === scheduleId ? { ...sc, mesocycle_weeks: null, mesocycle_autoregulate: false, mesocycle_autoregulate_mode: null } : sc
           ),
           mesoStates: (s.mesoStates || []).map(m =>
             m.scheduleId === scheduleId ? { ...m, pendingMeso2: false, updatedAt: new Date().toISOString() } : m
@@ -1871,7 +1871,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
           ...s,
           activeScheduleId: null,
           schedules: s.schedules.map(sc =>
-            sc.id === scheduleId ? { ...sc, mesocycle_weeks: null } : sc
+            sc.id === scheduleId ? { ...sc, mesocycle_weeks: null, mesocycle_autoregulate: false, mesocycle_autoregulate_mode: null } : sc
           ),
           mesoStates: (s.mesoStates || []).map(m =>
             m.scheduleId === scheduleId ? { ...m, pendingMeso2: false, updatedAt: new Date().toISOString() } : m
@@ -2192,7 +2192,12 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       // seeds its real last duration instead of the default.
       if (LB.exerciseLogMode(ex) === 'time') {
         const lastTime = seedRefs[it.exId] ?? LB.bestRecentEntry(store, it.exId, dayId, 3, occ);
-        const sets = LB.buildTimeSeedSets(it, lastTime);
+        // Apply the meso volume set-delta here too (same load-only guard as the
+        // weight path below), so a time exercise's set count autoregulates and
+        // the real session matches the plan-viewer preview (which routes time
+        // items through buildSeedSets -> buildTimeSeedSets WITH the delta).
+        const itAdjTime = (typeof applyMesoSetDeltaFromState === 'function' && !LB.autoregLoadOnly(sch)) ? applyMesoSetDeltaFromState(it, dayId, resolvedMeso) : it;
+        const sets = LB.buildTimeSeedSets(itAdjTime, lastTime);
         return {
           exId: it.exId, name: ex?.name || '?',
           plannedSets: sets.length, plannedReps: null, plannedRepsPerSet: null,

@@ -1505,6 +1505,27 @@ async function testAsync(name, fn) {
     assert.strictEqual(res.bumped.length + res.held.length + res.reset.length, 0);
   });
 
+  test('compute531CycleBumps reads the AMRAP-flagged set, not a low-rep Joker appended after it', () => {
+    const mkSch = () => ({ id: 'p', program_type: '531', days: [{}],
+      program_data: { unit: 'kg', includeDeload: false,
+        mainLifts: { sq: { tm: 100, kind: 'squat', stall: 0 } },
+        tmHistory: { sq: [{ cycle: 0, tm: 100, reason: 'start' }] } } });
+    // Ramp sets + the flagged AMRAP top set (hits its min) + a heavier Joker
+    // single appended AFTER it. Positionally the Joker is last; the fix must read
+    // the amrap-flagged set, else weeks 1-2 (min 5/3) read the reps=1 Joker as a
+    // miss and the TM wrongly holds.
+    const mkSess = (i, topReps) => ({ id: 'sq_' + i, ended: '2026-02-' + String(i + 1).padStart(2, '0') + 'T10:00:00', scheduleId: 'p',
+      entries: [{ exId: 'sq', sets: [
+        { kg: 60, reps: 5 }, { kg: 70, reps: 4 },
+        { kg: 80, reps: topReps, amrap: true },
+        { kg: 92.5, reps: 1 },
+      ] }] });
+    const cyc = [mkSess(0, 5), mkSess(1, 3), mkSess(2, 1)];
+    const r = LB.compute531CycleBumps(mkSch(), cyc, 0);
+    assert.strictEqual(r.sq.bumped, true);
+    assert.strictEqual(r.sq.newTm, 105);
+  });
+
   test('suggest531Tm: fair TM from an AMRAP-implied 1RM, flags when it beats the current TM', () => {
     // 102 x 12 -> est 1RM 142.8 -> fair TM 90% = 128.52 -> round 127.5, above 120 + 2.5
     let s = LB.suggest531Tm(LB.e1rm(102, 12), 120, 'bench', 'kg');

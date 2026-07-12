@@ -684,12 +684,22 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
   // Directly change the validFrom of the selected past version.
   const doEditStartDate = (newDate) => {
     if (!newDate || !selectedVersion) return;
+    // Reject a date that collides with a DIFFERENT version: dedupeVersionsByDate
+    // is first-wins keyed on validFrom, so it would silently drop the edited
+    // version (irreversible history loss) instead of moving it.
+    if ((sch.versions || []).some(v => v.validFrom !== selectedVersion.validFrom && v.validFrom === newDate)) {
+      alert('Another version of this plan already starts on that date. Pick a different date.');
+      return;
+    }
     const newVersions = LB.dedupeVersionsByDate(
       (sch.versions || []).map(v => v.validFrom === selectedVersion.validFrom ? { ...v, validFrom: newDate } : v)
     );
     setStore(s => ({
       ...s,
-      schedules: s.schedules.map(x => x.id === sch.id ? { ...x, versions: newVersions } : x),
+      // Resync days to the newest version, mirroring doReactivate/doRestoreBackup:
+      // editing a date can change which version is newest, and sch.days must stay
+      // equal to versions[0].days.
+      schedules: s.schedules.map(x => x.id === sch.id ? { ...x, days: newVersions[0].days, versions: newVersions } : x),
     }));
     setEditingStartDate(false);
     setEditStartDateVal('');
@@ -762,6 +772,10 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
       {day.items.flatMap((it, k) => {
         const ex = LB.findExercise(store, it.exId);
         const isUni = !!ex?.unilateral;
+        // A cardio movement seeds an isCardio entry (no sets, a cardio widget) in
+        // the real session; show it as CARDIO here instead of empty weight/rep
+        // rows so the preview agrees with what actually starts.
+        const isCardioItem = ex?.movement_type === 'cardio';
         // Nth appearance of this exercise in the day -> its Nth past occurrence,
         // so a repeated exercise's slots don't share one reference.
         const occ = day.items.slice(0, k).filter(x => x.exId === it.exId).length;
@@ -810,7 +824,9 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
                 {isUni && <span className="micro" style={{ marginLeft: 6, color: UI.inkFaint }}>UNI</span>}
               </span>
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3, flexShrink: 0 }}>
-                {preview ? (
+                {isCardioItem ? (
+                  <span className="micro" style={{ color: UI.inkFaint, letterSpacing: '0.12em' }}>CARDIO</span>
+                ) : preview ? (
                   <span className="num" style={{ fontSize: 13, color: UI.inkSoft }}>
                     {it.sets} × {(it.repsPerSet && it.repsPerSet.length) ? it.repsPerSet.join('/') : (it.repsMax != null ? `${it.reps}-${it.repsMax}` : it.reps)}
                   </span>
@@ -1561,7 +1577,15 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
     const turningOn = !isFlex;
     setDraft(d => {
       const next = { ...d, is_flex: turningOn };
-      if (!turningOn) {
+      if (turningOn) {
+        // Flex plans have no rest days (buildPlanSkeleton emits none, the picker
+        // hides REST). A cycle plan converted to flex still ends each block with
+        // REST; keeping those slots makes the rotation present a rest day as
+        // "today". Strip them and set the weekly goal to the training-day count.
+        const trainingDays = (d.days || []).filter(day => day.name !== 'REST');
+        next.days = trainingDays;
+        next.sessions_per_week = trainingDays.length || null;
+      } else {
         next.sessions_per_week = null;
       }
       return next;
@@ -3733,7 +3757,10 @@ function PlanWizard({ store, setStore, go }) {
     // Overview of the days chosen so far, so a long Custom cycle/flex plan doesn't
     // lose the thread: every day with its picked type (— if still open), the day
     // being edited highlighted. Scrolls internally if the plan is very long.
-    const dayN = type === 'weekday' ? sortedWeekdays.length : customDays.length;
+    // Size the overview from the same source of truth as computePlanSteps and
+    // buildPlanSkeleton (customCount), not customDays.length, which a prior
+    // weekday pass can leave inflated after switching back to cycle/flex.
+    const dayN = type === 'weekday' ? sortedWeekdays.length : Math.max(1, Math.round(customCount || 1));
     const dayShort = (i) => (type === 'weekday' && sortedWeekdays[i] != null) ? WEEKDAYS[sortedWeekdays[i]] : `D${i + 1}`;
     const overview = dayN > 1 ? (
       <div style={{ padding: '9px 10px', borderRadius: 6, background: UI.bgInset, border: `1px solid ${UI.hairStrong}` }}>
@@ -3793,7 +3820,21 @@ function PlanWizard({ store, setStore, go }) {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
         {WEEKDAYS.map((w, i) => {
           const on = weekdaysSel.includes(i);
-          return <button key={w} onClick={() => setWeekdaysSel(on ? weekdaysSel.filter(x => x !== i) : [...weekdaysSel, i])}
+          // customDays is positional over the SORTED weekdays, so add/removing a
+          // weekday must splice its per-day type at the same sorted position, or
+          // the surviving day types shift onto the wrong weekdays.
+          const toggleWeekday = () => {
+            if (on) {
+              const pos = weekdaysSel.slice().sort((a, b) => a - b).indexOf(i);
+              setWeekdaysSel(weekdaysSel.filter(x => x !== i));
+              if (pos >= 0) setCustomDays(d => { const a = d.slice(); a.splice(pos, 1); return a; });
+            } else {
+              const pos = [...weekdaysSel, i].sort((a, b) => a - b).indexOf(i);
+              setWeekdaysSel([...weekdaysSel, i]);
+              setCustomDays(d => { const a = d.slice(); a.splice(pos, 0, null); return a; });
+            }
+          };
+          return <button key={w} onClick={toggleWeekday}
             style={{ padding: '12px 6px', borderRadius: 6, cursor: 'pointer', textAlign: 'center', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600,
               background: on ? 'rgba(var(--accent-rgb),0.12)' : UI.bgInset, color: on ? 'var(--accent)' : UI.inkFaint,
               border: `1px solid ${on ? 'var(--accent)' : UI.hairStrong}`, WebkitTapHighlightColor: 'transparent' }}>{w}</button>;

@@ -1545,14 +1545,9 @@ async function syncStore(prev, next, userId) {
     prev.settings?.swVersion              !== next.settings?.swVersion;
 
   if (settingsChanged) {
-    ops.push(_supabase.from('zane_user_settings').upsert({
+    const settingsRow = {
       user_id: userId,
-      active_schedule_id: next.activeScheduleId ?? null,
       active_cardio_plan_id: next.activeCardioPlanId ?? null,
-      cycle_index: next.cycleIndex ?? 0,
-      cycle_start_date: next.cycleStartDate ?? null,
-      week_plan_start_date: next.weekPlanStartDate ?? null,
-      last_advanced_date: next.lastAdvancedDate ?? null,
       unit: next.settings?.unit ?? null,
       rest_default: next.settings?.restDefault || 120,
       rest_big:     next.settings?.restBig     || 180,
@@ -1591,7 +1586,20 @@ async function syncStore(prev, next, userId) {
       status_mode_since: next.statusModeSince ?? null,
       deload_prompt_dismissed_at: next.deloadPromptDismissedAt ?? null,
       sw_version: next.settings?.swVersion ?? null,
-    }));
+    };
+    // Plan-position / active-plan fields are action-advanced and prone to a
+    // multi-device clobber: on a whole-row upsert a device syncing an unrelated
+    // setting change (e.g. dark mode) would write its own possibly-stale
+    // position over a newer server value (last-write-wins). Include them ONLY
+    // when THIS device changed them (prev is the sync base, so prev !== next
+    // means "changed here"); an omitted column is left untouched on the existing
+    // row by the PostgREST merge upsert.
+    if (prev.activeScheduleId  !== next.activeScheduleId)  settingsRow.active_schedule_id  = next.activeScheduleId ?? null;
+    if (prev.cycleIndex        !== next.cycleIndex)        settingsRow.cycle_index         = next.cycleIndex ?? 0;
+    if (prev.cycleStartDate    !== next.cycleStartDate)    settingsRow.cycle_start_date     = next.cycleStartDate ?? null;
+    if (prev.weekPlanStartDate !== next.weekPlanStartDate) settingsRow.week_plan_start_date = next.weekPlanStartDate ?? null;
+    if (prev.lastAdvancedDate  !== next.lastAdvancedDate)  settingsRow.last_advanced_date   = next.lastAdvancedDate ?? null;
+    ops.push(_supabase.from('zane_user_settings').upsert(settingsRow));
   }
 
   // unwrap() turns a failed write (network/RLS/constraint) into a thrown
@@ -2645,7 +2653,11 @@ function compute531CycleBumps(sch, sessions, cycleIdx) {
     const mainEntry = (s.entries || []).find(e => mainLifts[e.exId]);
     if (!mainEntry) return;
     const working = (mainEntry.sets || []).filter(st => !st.warmup && !st.skipped);
-    const amrap = working[working.length - 1];
+    // The AMRAP is the set carrying the seeded amrap flag, not necessarily the
+    // positionally last set: Joker/First-Set-Last variations append sets after
+    // the top set. Fall back to the last working set for older logged sessions
+    // that predate the flag. Matches the seeding contract and the live 5/3/1 UI.
+    const amrap = working.find(st => st.amrap) || working[working.length - 1];
     const reps = amrap ? effReps(amrap) : null;
     if (reps == null) return;
     (perLift[mainEntry.exId] = perLift[mainEntry.exId] || []).push(reps >= min);

@@ -1141,26 +1141,44 @@ function ClientPlanTab({ clientStore, setClientStore, clientId, coachingId, user
           } else {
             const newId = LB.uid();
             idMap[ex.id] = newId;
-            newExercises.push({ id: newId, name: ex.name, tags: ex.tags || [], note: ex.note || '', category: ex.category || null, unilateral: ex.unilateral || false, equipment: ex.equipment || null, progression_reps: ex.progression_reps || null });
+            // Carry the behavior flags so imported time/cardio/bodyweight
+            // exercises keep their logging mode (mirrors the own-side import).
+            newExercises.push({ id: newId, name: ex.name, tags: ex.tags || [], note: ex.note || '', category: ex.category || null, unilateral: ex.unilateral || false, equipment: ex.equipment || null, progression_reps: ex.progression_reps || null, movement_type: ex.movement_type || null, log_mode: ex.log_mode || null, no_weight_reps: ex.no_weight_reps || false, pull_bodyweight: ex.pull_bodyweight || false });
           }
         });
+        const remapDays = (days) => (days || []).map(d => ({
+          ...d,
+          id: LB.uid(),
+          items: (d.items || []).map(it => ({ ...it, exId: idMap[it.exId] || it.exId })),
+        }));
         const sch = {
           ...data.schedule,
           id: LB.uid(),
           archived: false,
-          days: (data.schedule.days || []).map(d => ({
-            ...d,
-            id: LB.uid(),
-            items: (d.items || []).map(it => ({ ...it, exId: idMap[it.exId] || it.exId })),
-          })),
+          days: remapDays(data.schedule.days),
+          versions: (data.schedule.versions || []).map(v => ({ ...v, days: remapDays(v.days) })),
         };
+        // Remap 5/3/1 program_data (keyed by exId) and reset the cycle-bump gate,
+        // exactly like the own-side import.
+        if (sch.program_data && typeof sch.program_data === 'object') {
+          const remapKeys = (obj) => { const out = {}; for (const k of Object.keys(obj || {})) out[idMap[k] || k] = obj[k]; return out; };
+          const pd = { ...sch.program_data };
+          if (pd.mainLifts) pd.mainLifts = remapKeys(pd.mainLifts);
+          if (pd.tmHistory) pd.tmHistory = remapKeys(pd.tmHistory);
+          delete pd.bumpedCycle;
+          sch.program_data = pd;
+        }
         if (newExercises.length) {
           const { error: exErr } = await LB.supabase.from('zane_exercises').insert(newExercises.map(ex => ({ ...ex, user_id: clientId })));
           if (exErr) { alert(`Import failed: ${exErr.message}`); return; }
         }
-        // If this insert fails the new exercises above are left orphaned, but
-        // surfacing the error beats silently showing a plan that wasn't saved.
-        const { error: schErr } = await LB.supabase.from('zane_schedules').insert({ id: sch.id, user_id: clientId, name: sch.name, days: sch.days, archived: false });
+        // Insert the FULL schedule (mesocycle_*, program_*, is_flex,
+        // sessions_per_week, versions), minus the local-only `mode` field, so the
+        // DB row matches the in-memory plan instead of collapsing to a bare day
+        // list on the next reload. If this insert fails the new exercises above
+        // are left orphaned, but surfacing the error beats a silent partial save.
+        const { mode: _localMode, ...schRow } = sch;
+        const { error: schErr } = await LB.supabase.from('zane_schedules').insert({ ...schRow, user_id: clientId });
         if (schErr) { alert(`Import failed: ${schErr.message}`); return; }
         setClientStore(s => ({
           ...s,
