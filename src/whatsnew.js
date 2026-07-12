@@ -17,6 +17,16 @@
    Entry shape: { id: string, date: string (YYYY-MM-DD), title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.566',
+    date: '2026-07-12',
+    title: 'Never Lose a Plan Edit Again',
+    items: [
+      "💾 Editing a plan now saves itself as you go, no button required. Get pulled away, close the app, or switch from your phone to your laptop mid-edit? Doesn't matter, your changes are already tucked away safely.",
+      "🔄 Open a plan with edits waiting from an earlier session and you'll see a clear \"Unsaved edits\" banner right there. Tap Resume to jump back in exactly where you left off, on any device.",
+      "🛡️ Since this now genuinely protects real work, tossing it out takes an actual decision: discarding a resumed autosave asks you to type a quick confirmation first. No more losing progress with one careless tap.",
+    ],
+  },
+  {
     id: 'v2.559',
     date: '2026-07-12',
     title: 'Autoregulation, Now Standalone',
