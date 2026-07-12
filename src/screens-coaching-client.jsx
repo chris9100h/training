@@ -156,7 +156,7 @@ function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, 
           {tab === 'checkins'   && (isSelf
             ? <ClientCheckInTab coachingId={coachingId} clientId={clientId} userId={userId} store={store} setStore={setStore} isSelf />
             : <ClientCheckInsTab coachingId={coachingId} checkinEnabled={checkinEnabled} onToggle={handleToggleCheckin} toggling={ciToggling} store={store} setStore={setStore} userId={userId} clientUnit={clientStore.settings?.unit} />)}
-          {tab === 'setup'      && <ClientSetupTab clientStore={clientStore} setClientStore={setClientStore} clientId={clientId} coachingId={coachingId} userId={userId} go={go} onReload={reloadClient} clientName={clientName} />}
+          {tab === 'setup'      && <ClientSetupTab store={store} setStore={setStore} clientStore={clientStore} setClientStore={setClientStore} clientId={clientId} coachingId={coachingId} userId={userId} go={go} onReload={reloadClient} clientName={clientName} />}
           {tab === 'daily'      && <window.Screens.HealthClientLogs clientStore={clientStore} />}
           {tab === 'notes'      && <ClientNotesTab coachingId={coachingId} userId={userId} clientName={clientName} store={store} setStore={setStore} />}
         </div>
@@ -1078,11 +1078,27 @@ function ClientSetupTab(props) {
 
 // ─── Tab: Plan ────────────────────────────────────────────────────────────────
 
-function ClientPlanTab({ clientStore, setClientStore, clientId, coachingId, userId, go, onReload, clientName }) {
+function ClientPlanTab({ store, setStore, clientStore, setClientStore, clientId, coachingId, userId, go, onReload, clientName }) {
   const schedules = (clientStore.schedules || []).filter(s => !s.archived);
   const active = clientStore.activeScheduleId;
   const importRef = useRefC(null);
   const [confirmEl, confirm] = useConfirm();
+
+  // Multi-device autosave (screens-schedule.jsx's ScheduleEditScreen) stores a
+  // coach's in-progress edit of a client's plan under the COACH's own account
+  // (store.planDrafts), not the client's, so it never touches the client's data
+  // and stays invisible to them. Tapping EDIT already resumes it silently; this
+  // surfaces it here too, since otherwise a coach browsing this list would have
+  // no way to know a draft is waiting without opening the editor first.
+  const discardPendingDraft = async (scheduleId) => {
+    if (!await confirm('Drop the unsaved edits from your last session on this plan? This keeps the plan as it is now.', { title: 'Discard unsaved edits?', ok: 'Discard', danger: true })) return;
+    setStore(s => {
+      if (!s.planDrafts || !(scheduleId in s.planDrafts)) return s;
+      const rest = { ...s.planDrafts };
+      delete rest[scheduleId];
+      return { ...s, planDrafts: rest };
+    });
+  };
 
   const activate = async (scheduleId) => {
     // Activation is client-facing and irreversible (it posts a "plan changed"
@@ -1255,6 +1271,28 @@ function ClientPlanTab({ clientStore, setClientStore, clientId, coachingId, user
               </button>
             </div>
           </div>
+          {store.planDrafts?.[sch.id] && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 16px 10px', borderTop: `0.5px solid rgba(var(--accent-rgb),0.2)`, background: UI.goldFaint }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div className="micro-gold">Unsaved edits</div>
+                <div style={{ color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 11, marginTop: 1 }}>
+                  You have changes to this plan waiting from an earlier session.
+                </div>
+              </div>
+              <button
+                onClick={() => go({ name: 'coaching-edit-plan', coachingId, clientId, scheduleId: sch.id, clientName: name })}
+                style={{ background: 'transparent', border: `0.5px solid rgba(var(--accent-rgb),0.5)`, borderRadius: 6, padding: '5px 10px', cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 10, color: 'var(--accent)', letterSpacing: '0.08em', whiteSpace: 'nowrap' }}
+              >
+                RESUME
+              </button>
+              <button
+                onClick={() => discardPendingDraft(sch.id)}
+                style={{ background: 'transparent', border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '5px 10px', cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 10, color: UI.inkSoft, letterSpacing: '0.08em', whiteSpace: 'nowrap' }}
+              >
+                DISCARD
+              </button>
+            </div>
+          )}
         </div>
       ))}
       {confirmEl}
