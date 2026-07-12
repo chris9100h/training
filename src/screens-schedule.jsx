@@ -184,6 +184,7 @@ function PlanScreen({ store, setStore, go, userId, openNewPlan }) {
           return 0;
         }).map(s => {
           const isActive = s.id === store.activeScheduleId;
+          const todayDayId = isActive ? (LB.todaysDay(store)?.day?.id ?? null) : null;
           const mesoSt = s.mesocycle_weeks ? (store.mesoStates || []).find(m => m.scheduleId === s.id) : null;
           const mesoCompletions = mesoSt?.completions ?? 0;
           const mesoPending = mesoSt?.startDate && new Date(mesoSt.startDate + 'T12:00:00') > new Date();
@@ -241,9 +242,12 @@ function PlanScreen({ store, setStore, go, userId, openNewPlan }) {
                 {planDescriptor(s)}
               </div>
               <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                {s.days.map((d) => (
-                  <Pill key={d.id} gold={!!d.items.length}>{d.name}</Pill>
-                ))}
+                {s.days.map((d) => {
+                  const isToday = d.id === todayDayId;
+                  return (
+                    <Pill key={d.id} gold={!!d.items.length} className={isToday ? 'intensity-glow' : undefined} style={isToday ? { borderColor: 'var(--accent)' } : undefined}>{d.name}</Pill>
+                  );
+                })}
               </div>
               <button onClick={toggleDeload} style={{
                   width: '100%', marginTop: 12, padding: '10px 12px', borderRadius: 6, cursor: 'pointer',
