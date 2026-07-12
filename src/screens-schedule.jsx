@@ -196,6 +196,10 @@ function PlanScreen({ store, setStore, go, userId, openNewPlan }) {
           const wk531 = is531 ? (LB.current531Week(s, store.sessions) || 1) : 0;
           const deload531 = is531 && (wk531 === 4 || (isActive && store.statusMode === 'deload'));
           const label531 = deload531 ? `C${cyc531} · DELOAD` : `C${cyc531} · W${wk531}`;
+          // How many times through the rotation, for the active flex plan only
+          // (cycleIndex tracks the active plan; advances on a session OR a skip).
+          const flexRotation = (isActive && LB.isFlexPlan(s) && s.days.length > 0)
+            ? Math.floor((store.cycleIndex || 0) / s.days.length) + 1 : 0;
           return isActive ? (
             <BracketFrame key={s.id} gold onClick={() => go({ name: 'plan-view', scheduleId: s.id, fromPlan: true })} style={{ cursor: 'pointer', overflow: 'hidden' }}>
               {s.mesocycle_weeks && (
@@ -233,6 +237,11 @@ function PlanScreen({ store, setStore, go, userId, openNewPlan }) {
                   {verCount >= 2 && (
                     <span style={{ fontFamily: UI.fontNum, fontSize: 10, fontWeight: 700, color: UI.gold, background: UI.goldFaint, border: `1px solid ${UI.goldSoft}`, borderRadius: 4, padding: '2px 6px', letterSpacing: '0.05em' }}>
                       V{verCount}
+                    </span>
+                  )}
+                  {flexRotation > 0 && (
+                    <span style={{ fontFamily: UI.fontNum, fontSize: 10, fontWeight: 700, color: UI.gold, background: 'rgba(var(--accent-rgb),0.15)', border: `1px solid ${UI.goldSoft}`, borderRadius: 4, padding: '2px 6px', letterSpacing: '0.05em' }}>
+                      ROT {flexRotation}
                     </span>
                   )}
                   <Pill gold>active</Pill>

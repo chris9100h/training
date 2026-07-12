@@ -1388,7 +1388,11 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       return dl531 ? `CYCLE ${c531} · DELOAD` : `CYCLE ${c531} · WEEK ${w531}`;
     }
     if (store.statusMode === 'deload' && weekOffset === 0) return 'DELOAD';
-    if (isFlex) return 'FLEXIBLE';
+    // Flex has no calendar week; the meaningful counter is how many times you've
+    // been through the rotation (position, advances on a session OR a skip).
+    // weekOffset lets the strip page back to earlier passes, so mirror the cycle
+    // plans' `currentCycleNum + weekOffset` and floor at rotation 1.
+    if (isFlex) return `FLEXIBLE · ROTATION ${Math.max(1, currentCycleNum + weekOffset + 1)}`;
     if (weekdayMode) {
       if (store.weekPlanStartDate) {
         const monday = new Date(); monday.setHours(12, 0, 0, 0);
