@@ -962,8 +962,14 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
   // without this banner that work would be invisible until you happen to tap
   // Edit. Resume opens the editor (the draft is restored there); Discard drops it.
   const pendingDraft = fromPlan && !preview && store.planDrafts?.[sch.id] ? store.planDrafts[sch.id] : null;
+  // Same type-to-confirm gate as backing out of a resumed draft from inside the
+  // editor (ScheduleEditScreen's onBack): this is real, saved work, so a single
+  // careless tap must never be enough to throw it away.
   const discardPendingDraft = async () => {
-    if (!await confirm('Drop the unsaved edits from your last session on this plan? This keeps the plan as it is now.', { title: 'Discard unsaved edits?', ok: 'Discard', danger: true })) return;
+    if (!await confirm(
+      "This throws away the autosaved edits from your last session on this plan, and it can't be undone. The last saved version of the plan stays as it is.",
+      { title: 'Discard autosave?', ok: 'Discard autosave', danger: true, requireText: "yes i'm sure" }
+    )) return;
     setStore(s => {
       if (!s.planDrafts || !(sch.id in s.planDrafts)) return s;
       const rest = { ...s.planDrafts };

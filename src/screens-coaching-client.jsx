@@ -1090,8 +1090,15 @@ function ClientPlanTab({ store, setStore, clientStore, setClientStore, clientId,
   // and stays invisible to them. Tapping EDIT already resumes it silently; this
   // surfaces it here too, since otherwise a coach browsing this list would have
   // no way to know a draft is waiting without opening the editor first.
+  // Same type-to-confirm gate as every other place a resumed draft can be
+  // thrown away (the self-edit resume banner, and backing out of the editor
+  // after a resume): this is real, saved work, so a single careless tap must
+  // never be enough to discard it.
   const discardPendingDraft = async (scheduleId) => {
-    if (!await confirm('Drop the unsaved edits from your last session on this plan? This keeps the plan as it is now.', { title: 'Discard unsaved edits?', ok: 'Discard', danger: true })) return;
+    if (!await confirm(
+      "This throws away your autosaved edits from an earlier session on this plan, and it can't be undone. The last saved version of the plan stays as it is.",
+      { title: 'Discard autosave?', ok: 'Discard autosave', danger: true, requireText: "yes i'm sure" }
+    )) return;
     setStore(s => {
       if (!s.planDrafts || !(scheduleId in s.planDrafts)) return s;
       const rest = { ...s.planDrafts };
