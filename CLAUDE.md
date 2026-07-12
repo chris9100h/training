@@ -147,6 +147,7 @@ Migrationen liegen in `supabase/migrations/` als nummerierte SQL-Dateien. **Die 
 - `zane_sessions` + `zane_session_entries` + `zane_sets`: Trainingshistorie (relational; `sessions.entries`-JSONB ist Legacy und wird nicht mehr geschrieben)
 - `zane_meso_states`: Meso-Autoregulation, eine Zeile je (User, Plan)
 - `zane_workout_templates`: Workout-Vorlagen · `zane_schedule_backups`: Auto-Snapshots der Plan-Tage
+- `zane_plan_drafts`: In-Progress-Draft des Plan-Editors für Multi-Device-Autosave (eine Zeile je User+Plan, bewusst entkoppelt von `zane_schedules`, LWW über `updated_at`, bei Save/Discard gelöscht, nicht im Backup)
 - `zane_skips`: übersprungene Trainingstage · `zane_status_periods`: Sick/Vacation/Deload-Historie
 - `zane_daily_logs`: Health-Tageslog (UNIQUE user_id+date, Sync via RPC) · `zane_glucose_logs`, `zane_cardio_logs`, `zane_cardio_plans`: Health/Cardio
 - `zane_coaching` (+ `_threads`, `_notes`, `_macros`) und `zane_checkins`: Coaching; Sonderfälle Support-Tickets (id-Präfix `support_`) und Self-Coaching (`self_`) · `zane_checkin_schema_templates`: bis zu 5 gespeicherte Check-in-Schema-Vorlagen je Coach

@@ -50,6 +50,7 @@ const EXCLUDED = {
   zane_push_subscriptions: 'device-scoped push state',
   zane_pushover_active: 'integration/device state',
   zane_schedule_backups: 'auto plan-day snapshots, regenerated on edit',
+  zane_plan_drafts: 'transient in-progress plan-editor draft, deleted on save/discard (not backup data)',
   zane_coaching: 'coaching relationships reference other users (export archive only)',
   zane_coaching_threads: 'coaching (export archive only)',
   zane_coaching_notes: 'coaching (export archive only)',

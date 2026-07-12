@@ -1875,6 +1875,27 @@ CREATE POLICY "own backups"
   ON zane_schedule_backups FOR ALL
   USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
 
+-- ── Plan edit drafts — multi-device autosave (migration 0162) ────────────────
+-- In-progress plan-editor draft, synced across devices, decoupled from the
+-- committed plan (zane_schedules) so an autosave can never touch days/versions.
+-- One draft per (user, plan); transient, deleted on Save/Discard; not in backup.
+
+CREATE TABLE zane_plan_drafts (
+  user_id     uuid        REFERENCES auth.users ON DELETE CASCADE NOT NULL,
+  schedule_id text        NOT NULL,
+  draft       jsonb       NOT NULL,
+  updated_at  timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, schedule_id)
+);
+
+ALTER TABLE zane_plan_drafts ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "plan drafts owner"
+  ON zane_plan_drafts FOR ALL TO authenticated
+  USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON zane_plan_drafts TO authenticated;
+
 -- ── Mesocycle states (migration 0120) ───────────────────────────────────────
 
 CREATE TABLE zane_meso_states (

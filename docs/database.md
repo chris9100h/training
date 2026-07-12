@@ -77,6 +77,11 @@ der Nutzer den Workflow re-runnt (Actions → „DB drift check" → Run workflo
 - `id` (text), `user_id` (uuid), `schedule_id` (text), `schedule_name` (text), `days` (jsonb: same format as `zane_schedules.days`, always a non-empty array), `created_at` (timestamptz)
 - Automatic snapshots of a schedule's `days`, written fire-and-forget from `syncStore` whenever `days` changes to a valid non-empty array. Never written if `days` is empty or malformed (guards against backing up broken state). Used by the "Backups" button in the plan viewer to restore a previous day layout. Initial snapshot of all valid plans inserted via Migration 0114.
 
+### `zane_plan_drafts`
+
+- `user_id` (uuid), `schedule_id` (text), `draft` (jsonb: the in-progress editor draft, same shape as the schedule object being edited), `updated_at` (timestamptz); PRIMARY KEY `(user_id, schedule_id)`. Migration 0162.
+- Multi-device autosave for the plan editor. `ScheduleEditScreen` holds edits in a local `draft` that only reaches `zane_schedules` on an explicit Save, so until then an app kill / closed tab / device switch loses the work. This table holds that draft, synced across devices, **deliberately decoupled** from the committed plan: a debounced autosave writes only this small row (never the large `zane_schedules` row), so it can never touch `days`/`versions`, and it stays out of the `zane_schedules` boot-merge entirely. Owner-only RLS (`to authenticated`), last-write-wins over `updated_at`. One draft per (user, plan); the row is **deleted** the moment the editor Saves (commits to `zane_schedules`) or Discards. Transient in-progress state, **not** in user backups (`EXCLUDED` in `check-backup-coverage.cjs`). No FK to `zane_schedules` (the two stay independent); the app deletes a plan's draft row when the plan itself is deleted.
+
 ### `zane_meso_states`
 
 One row per (user, plan). Store field: `store.mesoStates`. Migration 0120.
