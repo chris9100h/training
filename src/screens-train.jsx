@@ -2678,7 +2678,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // for the recap (weight boosts, handled separately in computeMesoGains,
     // still accrue). All three feedback questions funnel through here, so this
     // one guard freezes the whole set-delta system for the last week.
-    if (mesoLastWeek) return;
+    // A Load-only autoregulate plan freezes it the same way, every session:
+    // it tunes weight only, so set counts stay at the plan's authored value,
+    // while the joint/pump/volume answers still gate the weight boosts.
+    if (mesoLastWeek || LB.autoregLoadOnly(mesoSch)) return;
     const prevContrib = record.contrib || {};
     const keys = new Set([...Object.keys(prevContrib), ...Object.keys(newContrib)]);
     const deltaPatch = {};
@@ -2927,10 +2930,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // Skip the whole growth/decline rotation in the final week — commitContrib
     // is frozen there, so bumping growthCounts would only drift the counter
     // (harmless since it resets at Meso 2, but pointless) with no delta to show
-    // for it.
+    // for it. A Load-only plan freezes set deltas every session for the same
+    // reason, so its rotation is pointless too.
     const prevGrantedTo = Object.keys(record.contrib || {}).find(k => record.contrib[k] === 1) ?? null;
     let recipientKey = null;
-    if (mesoLastWeek) {
+    if (mesoLastWeek || LB.autoregLoadOnly(mesoSch)) {
       // frozen: no rotation, no grant
     } else if (volume === 'not_enough') {
       recipientKey = LB.pickGrowthRecipient(keys, mesoState.growthCounts, prevGrantedTo).recipientKey;
@@ -3146,6 +3150,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     if (mesoWeek == null) return; // pending period — meso not yet started
     if (mesoWeek === 1) return; // week 1: no previous meso session to be sore from
     if (mesoLastWeek) return; // final week: set deltas frozen, and soreness only drives deltas
+    if (LB.autoregLoadOnly(mesoSch)) return; // load-only: soreness only drives set deltas, which are frozen
     const ex = entry ? store.exercises?.find(e => e.id === entry.exId) : null;
     const pm = primaryMuscleForExercise(ex);
     if (!pm || askedSorenessRef.current.has(pm)) return;

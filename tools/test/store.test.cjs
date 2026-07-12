@@ -1194,6 +1194,29 @@ async function testAsync(name, fn) {
     assert.strictEqual(both.mesocycle_autoregulate, true);
   });
 
+  test('buildPlanSkeleton: mesocycleAutoregulateMode load is persisted, both/undefined omitted', () => {
+    const load = LB.buildPlanSkeleton({ name: 'L', type: 'cycle', presetKey: 'ppl3', mesocycleAutoregulate: true, mesocycleAutoregulateMode: 'load' });
+    assert.strictEqual(load.mesocycle_autoregulate_mode, 'load');
+    // Default 'both' leaves the column unset (DB/app default handles it).
+    const both = LB.buildPlanSkeleton({ name: 'B', type: 'cycle', presetKey: 'ppl3', mesocycleAutoregulate: true, mesocycleAutoregulateMode: 'both' });
+    assert.strictEqual('mesocycle_autoregulate_mode' in both, false);
+    // Mode is ignored without autoregulate on (mutually only meaningful together).
+    const noAuto = LB.buildPlanSkeleton({ name: 'N', type: 'cycle', presetKey: 'ppl3', mesocycleAutoregulateMode: 'load' });
+    assert.strictEqual('mesocycle_autoregulate_mode' in noAuto, false);
+  });
+
+  test('autoregLoadOnly: only true for an unbounded autoregulate plan set to load', () => {
+    assert.strictEqual(LB.autoregLoadOnly({ mesocycle_autoregulate: true, mesocycle_autoregulate_mode: 'load' }), true);
+    // Default / both regulates both halves.
+    assert.strictEqual(LB.autoregLoadOnly({ mesocycle_autoregulate: true }), false);
+    assert.strictEqual(LB.autoregLoadOnly({ mesocycle_autoregulate: true, mesocycle_autoregulate_mode: 'both' }), false);
+    // A bounded mesocycle always regulates both, even with a stray 'load'.
+    assert.strictEqual(LB.autoregLoadOnly({ mesocycle_weeks: 6, mesocycle_autoregulate_mode: 'load' }), false);
+    // Off entirely.
+    assert.strictEqual(LB.autoregLoadOnly({ mesocycle_autoregulate_mode: 'load' }), false);
+    assert.strictEqual(LB.autoregLoadOnly({}), false);
+  });
+
   // ── healScheduleWeekdays (self-heal legacy weekday plans) ───────────────────
   test('healScheduleWeekdays: weekday plan with no weekdays gets Mon-first slots, order kept', () => {
     const sch = { id: 'p1', mode: 'weekday', days: [

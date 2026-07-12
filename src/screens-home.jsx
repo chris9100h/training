@@ -2200,7 +2200,10 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       const isUnilateral = ex?.unilateral || false;
       const suggestion = LB.progressionSuggestion(store, it.exId, dayId, it.reps, it.repsPerSet || null, seedRefs[it.exId], it.repsMax || null, it.progressionOffset ?? null, occ);
       const bodyweightKg = ex?.equipment === 'bodyweight' ? LB.latestBodyweight(store) : null;
-      const itAdj = (typeof applyMesoSetDeltaFromState === 'function') ? applyMesoSetDeltaFromState(it, dayId, resolvedMeso) : it;
+      // Load-only autoregulate plans never apply set deltas (weight is tuned,
+      // set count stays authored) — this also neutralizes any deltas left over
+      // from a prior "Volume + Load" run without wiping the mesoState.
+      const itAdj = (typeof applyMesoSetDeltaFromState === 'function' && !LB.autoregLoadOnly(sch)) ? applyMesoSetDeltaFromState(it, dayId, resolvedMeso) : it;
       const weightBoost = mesoBoosts?.[it.exId + '_' + dayId] ?? null;
       let suggestionFinal = suggestion;
       if (weightBoost != null && !suggestionFinal && last) {

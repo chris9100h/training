@@ -775,7 +775,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   const queries = [
     _supabase.from('zane_profiles').select('id, name, approved').eq('id', userId).maybeSingle(),
     _supabase.from('zane_exercises').select('id, name, tags, note, category, unilateral, equipment, progression_reps, movement_type, no_weight_reps, log_mode, pull_bodyweight, youtube_url').eq('user_id', userId),
-    _supabase.from('zane_schedules').select('id, name, days, archived, versions, is_flex, sessions_per_week, mesocycle_weeks, mesocycle_start_rir, mesocycle_end_rir, mesocycle_rir_enabled, mesocycle_autoregulate, program_type, program_data').eq('user_id', userId),
+    _supabase.from('zane_schedules').select('id, name, days, archived, versions, is_flex, sessions_per_week, mesocycle_weeks, mesocycle_start_rir, mesocycle_end_rir, mesocycle_rir_enabled, mesocycle_autoregulate, mesocycle_autoregulate_mode, program_type, program_data').eq('user_id', userId),
     // Session METADATA stays complete (cheap; streaks/calendar need the full
     // date list) — the legacy entries JSONB is no longer selected.
     _supabase.from('zane_sessions').select('id, schedule_id, day_id, day_name, date, started_at, ended, duration_minutes, feel, is_bonus, is_freestyle, is_deload')
@@ -2319,7 +2319,10 @@ function splitDayCount(presetKey) {
 //     count and no RIR taper at all. Mutually exclusive with mesoWeeks in the
 //     UI (the wizard/editor only ever set one), but harmless if both were ever
 //     true — LB.mesoActive is an OR, mesoWeeks still wins for bounded-only UI.
-function buildPlanSkeleton({ name, type, presetKey, customCount, customDays, weekdays, mesoWeeks, mesoStartRir, mesoEndRir, mesoRirEnabled, mesocycleAutoregulate } = {}) {
+//   mesocycleAutoregulateMode : 'load' → an autoregulate plan tunes weight only
+//     (sets stay fixed). Default (undefined/'both') tunes both; only persisted
+//     when 'load'. Only meaningful together with mesocycleAutoregulate.
+function buildPlanSkeleton({ name, type, presetKey, customCount, customDays, weekdays, mesoWeeks, mesoStartRir, mesoEndRir, mesoRirEnabled, mesocycleAutoregulate, mesocycleAutoregulateMode } = {}) {
   const preset = SPLIT_PRESETS[presetKey];
   // A customDays entry is a type string, or { name, items } (a day imported with
   // its exercises), or null (unpicked → FULL).
@@ -2373,7 +2376,11 @@ function buildPlanSkeleton({ name, type, presetKey, customCount, customDays, wee
   }
   // Outside the mesoWeeks block on purpose: an autoregulate-only plan has no
   // bounded week count by definition.
-  if (mesocycleAutoregulate) sch.mesocycle_autoregulate = true;
+  if (mesocycleAutoregulate) {
+    sch.mesocycle_autoregulate = true;
+    // Only persist the non-default 'load'; 'both'/undefined leaves it unset.
+    if (mesocycleAutoregulateMode === 'load') sch.mesocycle_autoregulate_mode = 'load';
+  }
   return sch;
 }
 
@@ -2723,6 +2730,17 @@ function mesoRirEnabled(sch) {
 // mesoState.weeks != null directly, not on this.
 function mesoActive(sch) {
   return !!(sch?.mesocycle_weeks || sch?.mesocycle_autoregulate);
+}
+
+// True when a plan is an UNBOUNDED autoregulate plan set to tune weight only
+// (sets stay at their authored count). Deliberately also checks it's autoregulate
+// AND not a bounded block: the mode column only applies to unbounded autoregulate
+// plans (a bounded mesocycle always regulates both), so a stray 'load' on a meso
+// plan is ignored. Default (null/'both') = regulate both, so this is false.
+function autoregLoadOnly(sch) {
+  return sch?.mesocycle_autoregulate === true
+    && !sch?.mesocycle_weeks
+    && sch?.mesocycle_autoregulate_mode === 'load';
 }
 
 // Tongue-in-cheek note for a training-frequency / cycle-length number. Shared by
@@ -4660,7 +4678,7 @@ window.LB = {
   signIn, signUp, signOut, signInWithPasskey, registerPasskey, listPasskeys, deletePasskey, resetPassword, deleteAllData, exportBackup, backupToBlob, readBackupText, importFromBackup, validateBackup,
   loadFromSupabase, syncStore, mergeSessions, withCarriedWindowEntries, historyWindowCutoffISO,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
-  uid, todayISO, fmtISO, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, is531MainLift, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, healScheduleWeekdays, buildPlanSkeleton, instantiateProgram, is531Plan, round531, tmFrom531, tmBump531, weeks531, week531, fiveThreeOneSets, build531Plan, add531MainLift, current531Week, current531Cycle, compute531CycleBumps, resolve531CycleEnd, suggest531Tm, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, mesoActive, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, realignCycleForToday, todayCycleStripIndex,
+  uid, todayISO, fmtISO, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, is531MainLift, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, healScheduleWeekdays, buildPlanSkeleton, instantiateProgram, is531Plan, round531, tmFrom531, tmBump531, weeks531, week531, fiveThreeOneSets, build531Plan, add531MainLift, current531Week, current531Cycle, compute531CycleBumps, resolve531CycleEnd, suggest531Tm, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, mesoActive, autoregLoadOnly, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, realignCycleForToday, todayCycleStripIndex,
   effReps, fmtDuration, e1rm, isImprovement, isDecline, bestE1rmForExercise, bestAssistLoad, bestTimeForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, buildTimeSeedSets, latestBodyweight, bodyweightForDate, exerciseLogMode, isAssisted, shouldPullBodyweight, systemExerciseToRow, inferCurrentExIdx, calcBlended,
   refreshExerciseBests, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries,
   computeNextReminderAt,

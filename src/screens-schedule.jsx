@@ -659,7 +659,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
     // its taper config, and a 5/3/1 plan its entire program (program_type +
     // program_data: TMs, wave seeding, progress history).
     const scheduleOut = { name: sch.name, days: versionDays };
-    for (const k of ['mode', 'is_flex', 'sessions_per_week', 'mesocycle_weeks', 'mesocycle_start_rir', 'mesocycle_end_rir', 'mesocycle_rir_enabled', 'mesocycle_autoregulate', 'program_type', 'program_data']) {
+    for (const k of ['mode', 'is_flex', 'sessions_per_week', 'mesocycle_weeks', 'mesocycle_start_rir', 'mesocycle_end_rir', 'mesocycle_rir_enabled', 'mesocycle_autoregulate', 'mesocycle_autoregulate_mode', 'program_type', 'program_data']) {
       if (sch[k] != null) scheduleOut[k] = sch[k];
     }
     const payload = { type: 'zane-plan', version: 1, schedule: scheduleOut, exercises };
@@ -765,7 +765,9 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
         // Match the real session-start bodyweight rule (screens-home.jsx), not
         // the stricter shouldPullBodyweight, so preview and session agree.
         const bodyweightKg = (ex?.equipment === 'bodyweight') ? LB.latestBodyweight(store) : null;
-        const itAdj = (typeof applyMesoSetDeltaFromState === 'function') ? applyMesoSetDeltaFromState(it, day.id, resolvedMeso) : it;
+        // Load-only autoregulate plans never apply set deltas (mirrors the real
+        // seeding in screens-home.jsx so this preview agrees with it).
+        const itAdj = (typeof applyMesoSetDeltaFromState === 'function' && !LB.autoregLoadOnly(sch)) ? applyMesoSetDeltaFromState(it, day.id, resolvedMeso) : it;
         const weightBoost = mesoBoosts?.[it.exId + '_' + day.id] ?? null;
         let suggestionFinal = suggestion;
         if (weightBoost != null && !suggestionFinal && last) {
@@ -2119,7 +2121,14 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
             const toggleAuto = () => setDraft(d => autoOn
               ? { ...d, mesocycle_weeks: null, mesocycle_autoregulate: false }
               : { ...d, mesocycle_autoregulate: true });
-            const toggleMeso = () => setDraft(d => ({ ...d, mesocycle_weeks: d.mesocycle_weeks != null ? null : 6 }));
+            // Turning the block OFF must keep the master on (drop to unbounded
+            // autoregulate), not switch everything off. Set mesocycle_autoregulate
+            // explicitly here: a pre-built/meso plan is only "active" via
+            // mesocycle_weeks and never carries the flag, so without this the block
+            // would collapse the whole section when its weeks go null.
+            const toggleMeso = () => setDraft(d => d.mesocycle_weeks != null
+              ? { ...d, mesocycle_weeks: null, mesocycle_autoregulate: true }
+              : { ...d, mesocycle_weeks: 6 });
             return (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -2225,11 +2234,32 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
                           )}
                         </div>
                       );
-                    })() : (
-                      <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 8, lineHeight: 1.5 }}>
-                        Off · runs indefinitely, no fixed end, no RIR ramp.
-                      </div>
-                    )}
+                    })() : (() => {
+                      const loadOnly = draft.mesocycle_autoregulate_mode === 'load';
+                      return (
+                        <div style={{ marginTop: 10 }}>
+                          <div style={{ display: 'flex', gap: 8 }}>
+                            {[{ key: 'both', label: 'Volume + Load' }, { key: 'load', label: 'Load only' }].map(o => {
+                              const on = (o.key === 'load') === loadOnly;
+                              return (
+                                <button key={o.key} onClick={() => setDraft(d => ({ ...d, mesocycle_autoregulate_mode: o.key === 'load' ? 'load' : null }))} style={{
+                                  flex: 1, padding: '9px 8px', borderRadius: 6, cursor: 'pointer',
+                                  fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, textAlign: 'center',
+                                  background: on ? 'rgba(var(--accent-rgb),0.12)' : UI.bgInset,
+                                  color: on ? 'var(--accent)' : UI.inkFaint,
+                                  border: `1px solid ${on ? 'var(--accent)' : UI.hairStrong}`, WebkitTapHighlightColor: 'transparent',
+                                }}>{o.label}</button>
+                              );
+                            })}
+                          </div>
+                          <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 8, lineHeight: 1.5 }}>
+                            {loadOnly
+                              ? 'Weight auto-tunes from your feedback; set counts stay as written. No fixed end, no RIR ramp.'
+                              : 'Sets and weight auto-tune from your feedback. No fixed end, no RIR ramp.'}
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </div>
                 )}
               </div>
@@ -2242,7 +2272,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
 
       <Sheet open={mesoInfoOpen} onClose={() => setMesoInfoOpen(false)} title="Auto-regulate">
         <div style={{ fontSize: 13, color: UI.inkSoft, lineHeight: 1.6, display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <p style={{ margin: 0 }}>This engine auto-tunes your sets and weight from the feedback you give during training. Turned on by itself, it runs <strong style={{ color: UI.ink }}>indefinitely</strong> on a normal plan: no fixed end, no RIR ramp, just sets and weight adjusting session to session. Add a <strong style={{ color: UI.ink }}>fixed-length block</strong> on top for a structured mesocycle, described below.</p>
+          <p style={{ margin: 0 }}>This engine auto-tunes your sets and weight from the feedback you give during training. Turned on by itself, it runs <strong style={{ color: UI.ink }}>indefinitely</strong> on a normal plan: no fixed end, no RIR ramp, just sets and weight adjusting session to session. Prefer to keep your set counts fixed? Pick <strong style={{ color: UI.ink }}>Load only</strong> and just the weight climbs. Add a <strong style={{ color: UI.ink }}>fixed-length block</strong> on top for a structured mesocycle, described below.</p>
           <p style={{ margin: 0 }}>A <strong style={{ color: UI.ink }}>mesocycle</strong> is that structured training block (4–8 weeks) where effort progressively increases each week, measured by <strong style={{ color: UI.ink }}>Reps in Reserve (RIR)</strong> — how many reps you could still do before failure.</p>
           <p style={{ margin: 0 }}>By default week 1 starts easy (3 RIR) and ramps up to all-out effort (0 RIR) by the final week, then you deload. You can adjust both endpoints — and even set the peak <em>past</em> failure (negative RIR), which auto-adds that many lengthened partials to every set. That last one's for very advanced lifters. 🔥</p>
           <div style={{ background: UI.bgInset, borderRadius: 6, padding: '12px 14px', border: `1px solid ${UI.hairStrong}` }}>
@@ -3462,6 +3492,7 @@ function PlanWizard({ store, setStore, go }) {
   const [dayFlash, setDayFlash] = useStateS(false); // brief checkmark when a day type is picked
   const [weekdaysSel, setWeekdaysSel] = useStateS([]); // weekday indices 0..6
   const [planMode, setPlanMode] = useStateS('standard'); // 'standard' | 'autoregulate' | 'meso'
+  const [autoregMode, setAutoregMode] = useStateS('both'); // 'both' | 'load' — what the autoregulate plan tunes
   const [mesoWeeks, setMesoWeeks] = useStateS(6);
   const [mesoStartRir, setMesoStartRir] = useStateS(3);
   const [mesoEndRir, setMesoEndRir] = useStateS(0);
@@ -3577,6 +3608,7 @@ function PlanWizard({ store, setStore, go }) {
       mesoEndRir: planMode === 'meso' ? mesoEndRir : null,
       mesoRirEnabled: planMode === 'meso' ? mesoRirOn : undefined,
       mesocycleAutoregulate: planMode === 'autoregulate' ? true : undefined,
+      mesocycleAutoregulateMode: planMode === 'autoregulate' ? autoregMode : undefined,
     });
     setStore(s => ({ ...s, schedules: [...s.schedules, sch] }));
     go({ name: 'schedule-edit', scheduleId: sch.id });
@@ -3771,6 +3803,29 @@ function PlanWizard({ store, setStore, go }) {
       {optRow({ key: 'standard', icon: 'fa-infinity', label: 'Standard plan', sub: 'Open-ended. Train it as long as you like.', active: planMode === 'standard', onClick: () => setPlanMode('standard') })}
       {optRow({ key: 'autoregulate', icon: 'fa-sliders', label: 'Autoregulate volume and load', sub: 'Open-ended. Sets and weights auto-tune from your session feedback, no fixed end, no RIR ramp.', active: planMode === 'autoregulate', onClick: () => setPlanMode('autoregulate') })}
       {optRow({ key: 'meso', icon: 'fa-chart-line', label: 'Mesocycle', sub: 'A fixed block with an intensity ramp and a deload at the end.', active: planMode === 'meso', onClick: () => setPlanMode('meso') })}
+      {planMode === 'autoregulate' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 6 }}>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {[{ key: 'both', label: 'Volume + Load' }, { key: 'load', label: 'Load only' }].map(o => {
+              const on = autoregMode === o.key;
+              return (
+                <button key={o.key} onClick={() => setAutoregMode(o.key)} style={{
+                  flex: 1, padding: '10px 8px', borderRadius: 6, cursor: 'pointer',
+                  fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, textAlign: 'center',
+                  background: on ? 'rgba(var(--accent-rgb),0.12)' : UI.bgInset,
+                  color: on ? 'var(--accent)' : UI.inkFaint,
+                  border: `1px solid ${on ? 'var(--accent)' : UI.hairStrong}`, WebkitTapHighlightColor: 'transparent',
+                }}>{o.label}</button>
+              );
+            })}
+          </div>
+          <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, textAlign: 'center', lineHeight: 1.5 }}>
+            {autoregMode === 'load'
+              ? 'Weight auto-tunes from your feedback; set counts stay as written.'
+              : 'Both set counts and weight auto-tune from your feedback.'}
+          </div>
+        </div>
+      )}
       {planMode === 'meso' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 6 }}>
           <div style={{ textAlign: 'center' }}>

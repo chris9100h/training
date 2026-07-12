@@ -107,6 +107,7 @@ CREATE TABLE public.zane_schedules (
   mesocycle_end_rir integer,
   mesocycle_rir_enabled boolean NOT NULL DEFAULT true,
   mesocycle_autoregulate boolean NOT NULL DEFAULT false,
+  mesocycle_autoregulate_mode text,
   program_type text,
   program_data jsonb
 );
