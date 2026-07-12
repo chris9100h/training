@@ -1906,6 +1906,7 @@ function CoachPlanEditorScreen({ store, setStore, go, userId, coachingId, client
         go={coachGo}
         userId={clientId}
         scheduleId={scheduleId}
+        asCoach
       />
       <CoachSyncErrorPill show={syncErr} />
     </>

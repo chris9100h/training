@@ -1333,7 +1333,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
 }
 
 // ─── Edit screen — rename, manage pattern ─
-function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFrom }) {
+function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFrom, asCoach = false }) {
   const [confirmEl, confirm] = useConfirm();
   const original = store.schedules.find(s => s.id === scheduleId);
   // Which version is being edited (identified by validFrom). -1 = unversioned
@@ -1347,8 +1347,10 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
     // Resume a multi-device autosaved draft for the primary edit flow: pick up
     // exactly where the last device left off, even if Save was never pressed.
     // Version-specific edits (editVerIdx > 0) never autosave, so they always
-    // start from that version's committed days.
-    const saved = editVerIdx <= 0 ? store.planDrafts?.[scheduleId]?.draft : null;
+    // start from that version's committed days. Coach-editing-a-client's-plan
+    // (asCoach) never has a draft to resume: loadClientStore skips the
+    // zane_plan_drafts query entirely, so store.planDrafts is always {} there.
+    const saved = (editVerIdx <= 0 && !asCoach) ? store.planDrafts?.[scheduleId]?.draft : null;
     if (saved) return JSON.parse(JSON.stringify(saved));
     const clone = JSON.parse(JSON.stringify(original));
     if (editVerIdx > 0 && original.versions[editVerIdx]) {
@@ -1362,7 +1364,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
   // stronger, type-to-confirm gate instead of the plain "unsaved changes" note.
   const resumedRef = React.useRef(null);
   if (resumedRef.current === null) {
-    resumedRef.current = editVerIdx <= 0 && !!(store.planDrafts && store.planDrafts[scheduleId] && store.planDrafts[scheduleId].draft);
+    resumedRef.current = editVerIdx <= 0 && !asCoach && !!(store.planDrafts && store.planDrafts[scheduleId] && store.planDrafts[scheduleId].draft);
   }
   const wasResumed = resumedRef.current;
   // Live in-progress state of the day currently open in DayEditor, reported up
@@ -1377,8 +1379,18 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
   // the plan. Only the primary edit flow autosaves; its "dirty" baseline is
   // `original` (mirrors dirtyBaseline for editVerIdx <= 0). Cleared on
   // Save / Discard / Delete / Archive below.
+  //
+  // Disabled entirely when a coach is editing a client's plan (asCoach): the
+  // write path (syncStore's zane_plan_drafts upsert) always writes
+  // user_id: <the store's userId>, which here is the CLIENT's id, while the
+  // authenticated caller (auth.uid()) is the COACH. The table's RLS policy
+  // only allows auth.uid() = user_id, so every autosave write would be
+  // rejected and surface as a persistent, misleading sync-error pill while the
+  // coach is actively building the plan. Coach-side cross-device continuity
+  // for this flow is a separate, not-yet-built feature (it would need drafts
+  // keyed by the coach's own id, not the client's).
   React.useEffect(() => {
-    if (!draft || editVerIdx > 0) return;
+    if (!draft || editVerIdx > 0 || asCoach) return;
     const snapshot = (openDay && openDay.id)
       ? { ...draft, days: (draft.days || []).map(d => d.id === openDay.id ? openDay.day : d) }
       : draft;
@@ -1407,6 +1419,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
   // never wipes a separate newest-version draft; delete forces through because a
   // removed plan must not leave an orphan draft row.
   const clearDraft = (force) => {
+    if (asCoach) return; // never wrote one (see the autosave effect above), nothing to clear
     if (editVerIdx > 0 && !force) return;
     setStore(s => {
       if (!s.planDrafts || !(scheduleId in s.planDrafts)) return s;
