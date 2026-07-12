@@ -2941,22 +2941,17 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       namesByKey[key] = session.entries.find(e => e.exId === exId)?.name || '';
     });
 
-    // Growth rotation for "not_enough": whichever exercise still below its
-    // own per-exercise ceiling (base+4, enforced separately by
-    // applyMesoSetDeltaFromState) has the fewest growth grants so far this
-    // meso wins (ties toward the main lift) — see LB.pickGrowthRecipient for
-    // the full rule, including how a mid-meso exercise swap-in is seeded so
-    // it can't cut ahead of an established lift. With only one exercise this
-    // still always picks it — same outcome as before this feature existed —
-    // except growth now correctly stops once that exercise hits its own
-    // ceiling instead of letting the underlying counter climb unboundedly
-    // past it forever (harmless before since only the clamped value was ever
-    // applied, but this also means a later shrink is no longer silently
-    // swallowed once the counter has drifted arbitrarily far past the cap).
+    // Growth rotation for "not_enough": whichever exercise has the fewest
+    // growth grants so far this meso wins (ties toward the main lift) — see
+    // LB.pickGrowthRecipient for the full rule, including how a mid-meso
+    // exercise swap-in is seeded at the group max so it can't cut ahead of an
+    // established lift. With only one exercise it always picks it. Growth has
+    // no upper cap: a lifter who keeps reporting "not enough" keeps getting
+    // more sets, and an over-grown exercise self-corrects via the decline
+    // signals ("pushed"/"too much"/"still sore") rather than a hard limit;
+    // applyMesoSetDeltaFromState only floors the applied result at 1 set.
     // growthCounts is kept separate from deltas specifically so an unrelated
-    // shrink (soreness/joint) never distorts turn fairness; it is not frozen
-    // by "too_much" shrinking deltas back down — that exercise simply becomes
-    // eligible again once its delta drops back under the ceiling.
+    // shrink (soreness/joint) never distorts turn fairness.
     // LB.pickGrowthRecipient is called twice on purpose: once here (using
     // `mesoState`) to decide `recipientKey` for the newContrib built below,
     // and again inside the saveMesoState updater (using the fresh `m`
