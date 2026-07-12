@@ -2143,158 +2143,134 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
             // the block lengths don't even line up (a meso is 4 weeks minimum,
             // a 5/3/1 block is 3 or 4). Hide the whole section for 5/3/1.
             if (LB.is531Plan(draft)) return null;
-            const autoOn = LB.mesoActive(draft);
             const hasMeso = draft.mesocycle_weeks != null;
-            // Master toggle: off clears both fields (a clean reset); on defaults
-            // to unbounded autoregulate-only. The nested "fixed-length block"
-            // toggle below independently adds/removes mesocycle_weeks on top —
-            // turning it back off drops to unbounded again without needing to
-            // re-flip this master switch, since mesocycle_autoregulate stays
-            // true the whole time the master is on.
-            const toggleAuto = () => setDraft(d => autoOn
-              ? { ...d, mesocycle_weeks: null, mesocycle_autoregulate: false }
-              : { ...d, mesocycle_autoregulate: true });
-            // Turning the block OFF must keep the master on (drop to unbounded
-            // autoregulate), not switch everything off. Set mesocycle_autoregulate
-            // explicitly here: a pre-built/meso plan is only "active" via
-            // mesocycle_weeks and never carries the flag, so without this the block
-            // would collapse the whole section when its weeks go null.
-            const toggleMeso = () => setDraft(d => d.mesocycle_weeks != null
-              ? { ...d, mesocycle_weeks: null, mesocycle_autoregulate: true }
-              : { ...d, mesocycle_weeks: 6 });
+            const isAuto = !!draft.mesocycle_autoregulate && !hasMeso;
+            // Two mutually exclusive modes shown as peer toggles: a plan is either
+            // open-ended autoregulating, or a fixed-length mesocycle, or neither.
+            // Flipping one on clears the other; both off is a plain plan. (A
+            // mesocycle runs the same feedback engine, just bounded with an RIR
+            // taper and a deload, so the two can never be on at once.)
+            const toggleAuto = () => setDraft(d => isAuto
+              ? { ...d, mesocycle_autoregulate: false }
+              : { ...d, mesocycle_autoregulate: true, mesocycle_weeks: null });
+            const toggleMeso = () => setDraft(d => (d.mesocycle_weeks != null)
+              ? { ...d, mesocycle_weeks: null }
+              : { ...d, mesocycle_weeks: 6, mesocycle_autoregulate: false });
+            const toggleUI = (on, onClick) => (
+              <button onClick={onClick} style={{ flexShrink: 0, background: 'none', border: 'none', padding: 0, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+                <div style={{ width: 44, height: 26, borderRadius: 13, position: 'relative', background: on ? UI.gold : UI.hairStrong, border: `0.5px solid ${on ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong}`, transition: 'background 0.15s' }}>
+                  <div style={{ position: 'absolute', top: 3, left: on ? 21 : 3, width: 20, height: 20, borderRadius: '50%', background: on ? '#0a0805' : '#fff', transition: 'left 0.15s' }} />
+                </div>
+              </button>
+            );
+            const modePill = (on, onClick, title, desc) => (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, width: '100%', background: UI.bgInset, border: `1px solid ${on ? UI.goldSoft : UI.hairStrong}`, borderRadius: 4, padding: '10px 12px' }}>
+                {toggleUI(on, onClick)}
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.ink, fontWeight: 600 }}>{title}</div>
+                  <div style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint, marginTop: 2, lineHeight: 1.4 }}>{desc}</div>
+                </div>
+              </div>
+            );
             return (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span className="label" style={{ flex: 1 }}>Auto-regulate</span>
+                  <span className="label" style={{ flex: 1 }}>Progression</span>
                   <button onClick={() => setMesoInfoOpen(true)} style={{
                     background: 'transparent', border: `1px solid ${UI.hairStrong}`, borderRadius: '50%',
                     width: 22, height: 22, cursor: 'pointer', color: UI.inkFaint, fontFamily: UI.fontUi,
                     fontSize: 11, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0,
                   }}>ⓘ</button>
                 </div>
-                <div style={{
-                  display: 'flex', alignItems: 'center', gap: 12, width: '100%',
-                  background: UI.bgInset, border: `1px solid ${autoOn ? UI.goldSoft : UI.hairStrong}`,
-                  borderRadius: 4, padding: '10px 12px',
-                }}>
-                  <button onClick={toggleAuto} style={{ flexShrink: 0, background: 'none', border: 'none', padding: 0, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
-                    <div style={{ width: 44, height: 26, borderRadius: 13, position: 'relative', background: autoOn ? UI.gold : UI.hairStrong, border: `0.5px solid ${autoOn ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong}`, transition: 'background 0.15s' }}>
-                      <div style={{ position: 'absolute', top: 3, left: autoOn ? 21 : 3, width: 20, height: 20, borderRadius: '50%', background: autoOn ? '#0a0805' : '#fff', transition: 'left 0.15s' }} />
+
+                {modePill(isAuto, toggleAuto, 'Autoregulate', 'Sets and weight auto-tune from your session feedback. Open-ended, no deload.')}
+                {isAuto && (() => {
+                  const loadOnly = draft.mesocycle_autoregulate_mode === 'load';
+                  return (
+                    <div style={{ marginBottom: 4 }}>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        {[{ key: 'both', label: 'Volume + Load' }, { key: 'load', label: 'Load only' }].map(o => {
+                          const on = (o.key === 'load') === loadOnly;
+                          return (
+                            <button key={o.key} onClick={() => setDraft(d => ({ ...d, mesocycle_autoregulate_mode: o.key === 'load' ? 'load' : null }))} style={{
+                              flex: 1, padding: '9px 8px', borderRadius: 6, cursor: 'pointer',
+                              fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, textAlign: 'center',
+                              background: on ? 'rgba(var(--accent-rgb),0.12)' : UI.bgInset,
+                              color: on ? 'var(--accent)' : UI.inkFaint,
+                              border: `1px solid ${on ? 'var(--accent)' : UI.hairStrong}`, WebkitTapHighlightColor: 'transparent',
+                            }}>{o.label}</button>
+                          );
+                        })}
+                      </div>
+                      <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 8, lineHeight: 1.5 }}>
+                        {loadOnly
+                          ? 'Weight auto-tunes from your feedback; set counts stay as written.'
+                          : 'Sets and weight both auto-tune from your feedback.'}
+                      </div>
                     </div>
-                  </button>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.ink, fontWeight: 600 }}>
-                      {hasMeso ? `${draft.mesocycle_weeks}-week mesocycle` : autoOn ? 'Autoregulating' : 'Off'}
-                    </div>
-                    <div style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint, marginTop: 2, lineHeight: 1.4 }}>
-                      {hasMeso ? 'Auto-regulation feedback + a deload at the end.' : autoOn ? 'Sets and weight auto-tune from your session feedback, no fixed end.' : 'Enable to auto-tune sets and weight from your training feedback.'}
-                    </div>
-                  </div>
-                </div>
-                {autoOn && (
-                  <div style={{ marginTop: 2 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                      <span className="micro" style={{ color: hasMeso ? UI.gold : UI.inkFaint, flex: 1 }}>FIXED-LENGTH BLOCK</span>
-                      <button onClick={toggleMeso} style={{ flexShrink: 0, background: 'none', border: 'none', padding: 0, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
-                        <div style={{ width: 44, height: 26, borderRadius: 13, position: 'relative', background: hasMeso ? UI.gold : UI.hairStrong, border: `0.5px solid ${hasMeso ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong}`, transition: 'background 0.15s' }}>
-                          <div style={{ position: 'absolute', top: 3, left: hasMeso ? 21 : 3, width: 20, height: 20, borderRadius: '50%', background: hasMeso ? '#0a0805' : '#fff', transition: 'left 0.15s' }} />
+                  );
+                })()}
+
+                {modePill(hasMeso, toggleMeso, 'Mesocycle', 'A fixed 4-8 week block that ramps effort each week, then deloads.')}
+                {hasMeso && (() => {
+                  const mesoCompletions = store.mesoStates?.find(m => m.scheduleId === draft.id)?.completions ?? 0;
+                  const rirOn = LB.mesoRirEnabled(draft);
+                  const sr = draft.mesocycle_start_rir ?? 3;
+                  const er = draft.mesocycle_end_rir ?? 0;
+                  return (
+                    <div style={{ marginBottom: 4 }}>
+                      <Stepper value={draft.mesocycle_weeks} step={1} min={4} max={8}
+                        suffix=" weeks"
+                        onChange={v => setDraft(d => ({ ...d, mesocycle_weeks: Math.min(8, Math.max(4, Math.round(v))) }))} />
+                      <div style={{ marginTop: 14 }}>
+                        <div className="knurl" style={{ marginBottom: 12 }} />
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                          <span className="micro" style={{ color: rirOn ? UI.gold : UI.inkFaint, flex: 1 }}>RIR TAPER</span>
+                          {toggleUI(rirOn, () => setDraft(d => ({ ...d, mesocycle_rir_enabled: !LB.mesoRirEnabled(d) })))}
                         </div>
-                      </button>
-                    </div>
-                    {hasMeso ? (() => {
-                      const mesoCompletions = store.mesoStates?.find(m => m.scheduleId === draft.id)?.completions ?? 0;
-                      return (
-                        <div style={{ marginTop: 12 }}>
-                          <Stepper value={draft.mesocycle_weeks} step={1} min={4} max={8}
-                            suffix=" weeks"
-                            onChange={v => setDraft(d => ({ ...d, mesocycle_weeks: Math.min(8, Math.max(4, Math.round(v))) }))} />
-                          {(() => {
-                            const rirOn = LB.mesoRirEnabled(draft);
-                            const sr = draft.mesocycle_start_rir ?? 3;
-                            const er = draft.mesocycle_end_rir ?? 0;
-                            return (
-                              <div style={{ marginTop: 14 }}>
-                                <div className="knurl" style={{ marginBottom: 12 }} />
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                                  <span className="micro" style={{ color: rirOn ? UI.gold : UI.inkFaint, flex: 1 }}>RIR TAPER</span>
-                                  <button onClick={() => setDraft(d => ({ ...d, mesocycle_rir_enabled: !LB.mesoRirEnabled(d) }))} style={{ flexShrink: 0, background: 'none', border: 'none', padding: 0, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
-                                    <div style={{ width: 44, height: 26, borderRadius: 13, position: 'relative', background: rirOn ? UI.gold : UI.hairStrong, border: `0.5px solid ${rirOn ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong}`, transition: 'background 0.15s' }}>
-                                      <div style={{ position: 'absolute', top: 3, left: rirOn ? 21 : 3, width: 20, height: 20, borderRadius: '50%', background: rirOn ? '#0a0805' : '#fff', transition: 'left 0.15s' }} />
-                                    </div>
-                                  </button>
-                                </div>
-                                {rirOn ? (
-                                  <>
-                                    <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
-                                      <div style={{ flex: 1, textAlign: 'center' }}>
-                                        <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>START RIR</div>
-                                        <Stepper value={sr} step={1} min={0} suffix=" RIR"
-                                          onChange={v => setDraft(d => ({ ...d, mesocycle_start_rir: Math.min(3, Math.max(0, Math.round(v))) }))} />
-                                      </div>
-                                      <div style={{ flex: 1, textAlign: 'center' }}>
-                                        <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>END RIR</div>
-                                        <Stepper value={er} step={1} min={-3} suffix=" RIR"
-                                          onChange={v => setDraft(d => ({ ...d, mesocycle_end_rir: Math.min(0, Math.max(-3, Math.round(v))) }))} />
-                                      </div>
-                                    </div>
-                                    <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 10, textAlign: 'center', lineHeight: 1.5 }}>
-                                      {LB.mesoTaperPreview(draft.mesocycle_weeks, sr, er)}
-                                    </div>
-                                  </>
-                                ) : (
-                                  <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 8, lineHeight: 1.5 }}>
-                                    Off · runs on volume + load progression, then a deload.
-                                  </div>
-                                )}
+                        {rirOn ? (
+                          <>
+                            <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
+                              <div style={{ flex: 1, textAlign: 'center' }}>
+                                <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>START RIR</div>
+                                <Stepper value={sr} step={1} min={0} suffix=" RIR"
+                                  onChange={v => setDraft(d => ({ ...d, mesocycle_start_rir: Math.min(3, Math.max(0, Math.round(v))) }))} />
                               </div>
-                            );
-                          })()}
-                          {mesoCompletions > 0 && (
-                            <button onClick={() => setStore(s => ({
-                              ...s,
-                              mesoStates: (s.mesoStates || []).map(m =>
-                                m.scheduleId === draft.id ? { ...m, completions: 0, updatedAt: new Date().toISOString() } : m
-                              ),
-                            }))} style={{
-                              marginTop: 10, width: '100%', background: 'transparent',
-                              border: `1px solid ${UI.hairStrong}`, borderRadius: 4,
-                              padding: '7px 12px', cursor: 'pointer', fontFamily: UI.fontUi,
-                              fontSize: 11, color: UI.inkSoft, textAlign: 'center',
-                              WebkitTapHighlightColor: 'transparent',
-                            }}>
-                              Reset meso history ({mesoCompletions}× completed)
-                            </button>
-                          )}
-                        </div>
-                      );
-                    })() : (() => {
-                      const loadOnly = draft.mesocycle_autoregulate_mode === 'load';
-                      return (
-                        <div style={{ marginTop: 10 }}>
-                          <div style={{ display: 'flex', gap: 8 }}>
-                            {[{ key: 'both', label: 'Volume + Load' }, { key: 'load', label: 'Load only' }].map(o => {
-                              const on = (o.key === 'load') === loadOnly;
-                              return (
-                                <button key={o.key} onClick={() => setDraft(d => ({ ...d, mesocycle_autoregulate_mode: o.key === 'load' ? 'load' : null }))} style={{
-                                  flex: 1, padding: '9px 8px', borderRadius: 6, cursor: 'pointer',
-                                  fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, textAlign: 'center',
-                                  background: on ? 'rgba(var(--accent-rgb),0.12)' : UI.bgInset,
-                                  color: on ? 'var(--accent)' : UI.inkFaint,
-                                  border: `1px solid ${on ? 'var(--accent)' : UI.hairStrong}`, WebkitTapHighlightColor: 'transparent',
-                                }}>{o.label}</button>
-                              );
-                            })}
-                          </div>
+                              <div style={{ flex: 1, textAlign: 'center' }}>
+                                <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>END RIR</div>
+                                <Stepper value={er} step={1} min={-3} suffix=" RIR"
+                                  onChange={v => setDraft(d => ({ ...d, mesocycle_end_rir: Math.min(0, Math.max(-3, Math.round(v))) }))} />
+                              </div>
+                            </div>
+                            <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 10, textAlign: 'center', lineHeight: 1.5 }}>
+                              {LB.mesoTaperPreview(draft.mesocycle_weeks, sr, er)}
+                            </div>
+                          </>
+                        ) : (
                           <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 8, lineHeight: 1.5 }}>
-                            {loadOnly
-                              ? 'Weight auto-tunes from your feedback; set counts stay as written. No fixed end, no RIR ramp.'
-                              : 'Sets and weight auto-tune from your feedback. No fixed end, no RIR ramp.'}
+                            Off · runs on volume + load progression, then a deload.
                           </div>
-                        </div>
-                      );
-                    })()}
-                  </div>
-                )}
+                        )}
+                      </div>
+                      {mesoCompletions > 0 && (
+                        <button onClick={() => setStore(s => ({
+                          ...s,
+                          mesoStates: (s.mesoStates || []).map(m =>
+                            m.scheduleId === draft.id ? { ...m, completions: 0, updatedAt: new Date().toISOString() } : m
+                          ),
+                        }))} style={{
+                          marginTop: 10, width: '100%', background: 'transparent',
+                          border: `1px solid ${UI.hairStrong}`, borderRadius: 4,
+                          padding: '7px 12px', cursor: 'pointer', fontFamily: UI.fontUi,
+                          fontSize: 11, color: UI.inkSoft, textAlign: 'center',
+                          WebkitTapHighlightColor: 'transparent',
+                        }}>
+                          Reset meso history ({mesoCompletions}× completed)
+                        </button>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
             );
           })()}
@@ -2303,10 +2279,11 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
         </div>
       </Sheet>
 
-      <Sheet open={mesoInfoOpen} onClose={() => setMesoInfoOpen(false)} title="Auto-regulate">
+      <Sheet open={mesoInfoOpen} onClose={() => setMesoInfoOpen(false)} title="Progression">
         <div style={{ fontSize: 13, color: UI.inkSoft, lineHeight: 1.6, display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <p style={{ margin: 0 }}>This engine auto-tunes your sets and weight from the feedback you give during training. Turned on by itself, it runs <strong style={{ color: UI.ink }}>indefinitely</strong> on a normal plan: no fixed end, no RIR ramp, just sets and weight adjusting session to session. Prefer to keep your set counts fixed? Pick <strong style={{ color: UI.ink }}>Load only</strong> and just the weight climbs, held back only when you report a muscle is still sore. Add a <strong style={{ color: UI.ink }}>fixed-length block</strong> on top for a structured mesocycle, described below.</p>
-          <p style={{ margin: 0 }}>A <strong style={{ color: UI.ink }}>mesocycle</strong> is that structured training block (4–8 weeks) where effort progressively increases each week, measured by <strong style={{ color: UI.ink }}>Reps in Reserve (RIR)</strong> — how many reps you could still do before failure.</p>
+          <p style={{ margin: 0 }}>Both modes auto-tune your sets and weight from the feedback you give during training. They just differ in shape, and only one can be on at a time.</p>
+          <p style={{ margin: 0 }}><strong style={{ color: UI.ink }}>Autoregulate</strong> runs indefinitely: no fixed end, no RIR ramp, just sets and weight adjusting session to session. Prefer to keep your set counts fixed? Switch it to <strong style={{ color: UI.ink }}>Load only</strong> and just the weight climbs, held back when you report a muscle is still sore.</p>
+          <p style={{ margin: 0 }}>A <strong style={{ color: UI.ink }}>mesocycle</strong> is a structured block (4 to 8 weeks) where effort progressively increases each week, measured by <strong style={{ color: UI.ink }}>Reps in Reserve (RIR)</strong>, how many reps you could still do before failure. It ends in a deload.</p>
           <p style={{ margin: 0 }}>By default week 1 starts easy (3 RIR) and ramps up to all-out effort (0 RIR) by the final week, then you deload. You can adjust both endpoints — and even set the peak <em>past</em> failure (negative RIR), which auto-adds that many lengthened partials to every set. That last one's for very advanced lifters. 🔥</p>
           <div style={{ background: UI.bgInset, borderRadius: 6, padding: '12px 14px', border: `1px solid ${UI.hairStrong}` }}>
             <div className="label" style={{ marginBottom: 10 }}>What Zane asks during training</div>
