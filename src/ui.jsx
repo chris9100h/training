@@ -527,6 +527,11 @@ const btnPrimary = {
   letterSpacing: '0.12em', textTransform: 'uppercase',
   cursor: 'pointer',
   boxShadow: '0 6px 20px rgba(var(--accent-rgb),0.30)',
+  // Kill the native iOS/Safari button chrome, otherwise a transparent-background
+  // button renders as a light rounded pill with dark system text (ignoring our
+  // color/border). Harmless on primary (it has a solid background) but required
+  // for ghost below; kept on both so every Btn renders identically everywhere.
+  WebkitAppearance: 'none', appearance: 'none',
   WebkitTapHighlightColor: 'transparent',
 };
 
@@ -539,6 +544,9 @@ const btnGhost = {
   fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600,
   letterSpacing: '0.10em', textTransform: 'uppercase',
   cursor: 'pointer',
+  // See btnPrimary: without this a transparent ghost button shows iOS's native
+  // light pill chrome instead of our styling.
+  WebkitAppearance: 'none', appearance: 'none',
   WebkitTapHighlightColor: 'transparent',
 };
 

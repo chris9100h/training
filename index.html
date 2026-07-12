@@ -113,7 +113,11 @@
     -webkit-text-fill-color: var(--ink) !important;
     transition: background-color 5000s ease-in-out 0s;
   }
-  button { font: inherit; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+  /* appearance:none kills iOS/Safari native button chrome. Without it a button
+     with a transparent/undefined background renders as a light native pill with
+     system font+color, ignoring our text-transform, letter-spacing, color and
+     border. App buttons are all fully custom-styled, so reset it globally. */
+  button { font: inherit; -webkit-appearance: none; appearance: none; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
   a { -webkit-tap-highlight-color: transparent; }
   ::-webkit-scrollbar { width: 0; height: 0; }
 
