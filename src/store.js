@@ -775,7 +775,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   const queries = [
     _supabase.from('zane_profiles').select('id, name, approved').eq('id', userId).maybeSingle(),
     _supabase.from('zane_exercises').select('id, name, tags, note, category, unilateral, equipment, progression_reps, movement_type, no_weight_reps, log_mode, pull_bodyweight, youtube_url').eq('user_id', userId),
-    _supabase.from('zane_schedules').select('id, name, days, archived, versions, is_flex, sessions_per_week, mesocycle_weeks, mesocycle_start_rir, mesocycle_end_rir, mesocycle_rir_enabled, program_type, program_data').eq('user_id', userId),
+    _supabase.from('zane_schedules').select('id, name, days, archived, versions, is_flex, sessions_per_week, mesocycle_weeks, mesocycle_start_rir, mesocycle_end_rir, mesocycle_rir_enabled, mesocycle_autoregulate, program_type, program_data').eq('user_id', userId),
     // Session METADATA stays complete (cheap; streaks/calendar need the full
     // date list) — the legacy entries JSONB is no longer selected.
     _supabase.from('zane_sessions').select('id, schedule_id, day_id, day_name, date, started_at, ended, duration_minutes, feel, is_bonus, is_freestyle, is_deload')
@@ -2315,7 +2315,11 @@ function splitDayCount(presetKey) {
 //   mesoWeeks   : truthy → run as a mesocycle of that many weeks
 //   mesoStartRir/mesoEndRir : optional RIR taper endpoints (else app fallbacks 3/0)
 //   mesoRirEnabled : false → RIR taper off (volume + load progression + deload only)
-function buildPlanSkeleton({ name, type, presetKey, customCount, customDays, weekdays, mesoWeeks, mesoStartRir, mesoEndRir, mesoRirEnabled } = {}) {
+//   mesocycleAutoregulate : true → same autoregulation engine, no bounded week
+//     count and no RIR taper at all. Mutually exclusive with mesoWeeks in the
+//     UI (the wizard/editor only ever set one), but harmless if both were ever
+//     true — LB.mesoActive is an OR, mesoWeeks still wins for bounded-only UI.
+function buildPlanSkeleton({ name, type, presetKey, customCount, customDays, weekdays, mesoWeeks, mesoStartRir, mesoEndRir, mesoRirEnabled, mesocycleAutoregulate } = {}) {
   const preset = SPLIT_PRESETS[presetKey];
   // A customDays entry is a type string, or { name, items } (a day imported with
   // its exercises), or null (unpicked → FULL).
@@ -2367,6 +2371,9 @@ function buildPlanSkeleton({ name, type, presetKey, customCount, customDays, wee
     // default and reads as enabled everywhere.
     if (mesoRirEnabled === false) sch.mesocycle_rir_enabled = false;
   }
+  // Outside the mesoWeeks block on purpose: an autoregulate-only plan has no
+  // bounded week count by definition.
+  if (mesocycleAutoregulate) sch.mesocycle_autoregulate = true;
   return sch;
 }
 
@@ -2706,6 +2713,16 @@ function suggest531Tm(est1rm, currentTm, kind, unit) {
 // progression + deload alone).
 function mesoRirEnabled(sch) {
   return sch?.mesocycle_rir_enabled !== false;
+}
+
+// Whether the mesocycle autoregulation engine (feedback-driven volume/load
+// tuning) is on at all, bounded block or not. mesocycle_weeks alone still
+// means "and it's ALSO a bounded block with a week count" — callers that need
+// that specifically (RIR eligibility, the completion/deload-offer flow, the
+// generic auto-deload-nudge suppression) stay keyed on mesocycle_weeks /
+// mesoState.weeks != null directly, not on this.
+function mesoActive(sch) {
+  return !!(sch?.mesocycle_weeks || sch?.mesocycle_autoregulate);
 }
 
 // Tongue-in-cheek note for a training-frequency / cycle-length number. Shared by
@@ -4282,43 +4299,36 @@ async function refreshHealthLogs(userId) {
   };
 }
 
-// Must match applyMesoSetDeltaFromState's base+4 clamp (screens-train.jsx) —
-// an exercise at or past this many accumulated "not enough" sets can't
-// usefully receive another growth grant, since applying it would be entirely
-// swallowed by that clamp.
-const MESO_GROWTH_CEILING_DELTA = 4;
-
 // Picks which exId_dayId key (if any) wins a "not_enough" volume-feedback
 // growth turn for a muscle group's exercises this session, and returns the
 // growthCounts map updated to reflect that decision. Pure and side-effect
-// free — call it fresh (with the latest deltas/growthCounts) both to decide
-// the recipient and, separately, inside the actual saveMesoState write, so a
+// free — call it fresh (with the latest growthCounts) both to decide the
+// recipient and, separately, inside the actual saveMesoState write, so a
 // rare double-invocation of the caller can never silently lose a grant by
 // writing a value computed from stale state.
 //
 // - keys: exId_dayId keys of the muscle group's exercises this session, in
 //   day order (keys[0] = the muscle group's main/first lift).
-// - deltas / growthCounts: the meso state's full current maps (not just this
+// - growthCounts: the meso state's full current rotation map (not just this
 //   group) — read-only, never mutated.
 // - prevGrantedTo: the key this same answer-record previously granted this
 //   session (or null for a fresh answer). Its earlier +1 is arithmetically
-//   un-done first (on both deltas, for eligibility, and growthCounts) so
-//   editing an already-answered question within the same session never
-//   double-counts — see commitContrib's identical idempotent-diff intent for
-//   `deltas` itself.
-// - Whichever exercise still below `ceiling` has the fewest growth grants so
-//   far wins (ties toward keys[0], i.e. the main lift); a key never seen in
-//   growthCounts before (a mid-meso exercise swap-in) is seeded at the
-//   group's current running max — computed BEFORE undoing prevGrantedTo, so
-//   undoing our own prior grant can't transiently understate the group's
-//   true established max — so it can't cut ahead of an established lift.
-// - Returns { recipientKey, growthCounts } — recipientKey is null if every
-//   exercise in the group is already at its own ceiling.
-function pickGrowthRecipient(keys, deltas, growthCounts, prevGrantedTo, ceiling = MESO_GROWTH_CEILING_DELTA) {
-  const deltaFor = (k) => {
-    const raw = (deltas || {})[k] || 0;
-    return k === prevGrantedTo ? raw - 1 : raw;
-  };
+//   un-done first so editing an already-answered question within the same
+//   session never double-counts — see commitContrib's identical idempotent-
+//   diff intent for `deltas`.
+// - No ceiling: growth is never capped by how much an exercise has already
+//   grown. A lifter who keeps saying "not enough" keeps getting more; an
+//   over-grown exercise self-corrects via the decline signal
+//   (pickDeclineRecipient) instead of a hard limit. Whichever exercise in the
+//   group has the fewest growth grants so far always wins (ties toward
+//   keys[0], i.e. the main lift); a key never seen in growthCounts before (a
+//   mid-meso exercise swap-in) is seeded at the group's current running max —
+//   computed BEFORE undoing prevGrantedTo, so undoing our own prior grant
+//   can't transiently understate the group's true established max — so it
+//   can't cut ahead of an established lift.
+// - Returns { recipientKey, growthCounts } — recipientKey is null only if
+//   keys is empty.
+function pickGrowthRecipient(keys, growthCounts, prevGrantedTo) {
   const gc = { ...(growthCounts || {}) };
   const knownVals = keys.map(k => gc[k]).filter(v => v != null);
   const groupMax = knownVals.length ? Math.max(...knownVals) : 0;
@@ -4326,10 +4336,9 @@ function pickGrowthRecipient(keys, deltas, growthCounts, prevGrantedTo, ceiling 
     gc[prevGrantedTo] = Math.max(0, gc[prevGrantedTo] - 1);
   }
   keys.forEach(k => { if (gc[k] == null) gc[k] = groupMax; });
-  const eligible = keys.filter(k => deltaFor(k) < ceiling);
   let recipientKey = null;
-  if (eligible.length) {
-    recipientKey = eligible.reduce((best, k) => (gc[k] < gc[best] ? k : best), eligible[0]);
+  if (keys.length) {
+    recipientKey = keys.reduce((best, k) => (gc[k] < gc[best] ? k : best), keys[0]);
     gc[recipientKey] += 1;
   }
   return { recipientKey, growthCounts: gc };
@@ -4651,7 +4660,7 @@ window.LB = {
   signIn, signUp, signOut, signInWithPasskey, registerPasskey, listPasskeys, deletePasskey, resetPassword, deleteAllData, exportBackup, backupToBlob, readBackupText, importFromBackup, validateBackup,
   loadFromSupabase, syncStore, mergeSessions, withCarriedWindowEntries, historyWindowCutoffISO,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
-  uid, todayISO, fmtISO, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, is531MainLift, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, healScheduleWeekdays, buildPlanSkeleton, instantiateProgram, is531Plan, round531, tmFrom531, tmBump531, weeks531, week531, fiveThreeOneSets, build531Plan, add531MainLift, current531Week, current531Cycle, compute531CycleBumps, resolve531CycleEnd, suggest531Tm, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, realignCycleForToday, todayCycleStripIndex,
+  uid, todayISO, fmtISO, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, is531MainLift, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, healScheduleWeekdays, buildPlanSkeleton, instantiateProgram, is531Plan, round531, tmFrom531, tmBump531, weeks531, week531, fiveThreeOneSets, build531Plan, add531MainLift, current531Week, current531Cycle, compute531CycleBumps, resolve531CycleEnd, suggest531Tm, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, mesoActive, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, realignCycleForToday, todayCycleStripIndex,
   effReps, fmtDuration, e1rm, isImprovement, isDecline, bestE1rmForExercise, bestAssistLoad, bestTimeForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, buildTimeSeedSets, latestBodyweight, bodyweightForDate, exerciseLogMode, isAssisted, shouldPullBodyweight, systemExerciseToRow, inferCurrentExIdx, calcBlended,
   refreshExerciseBests, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries,
   computeNextReminderAt,
@@ -4669,5 +4678,5 @@ window.LB = {
   cardioDistUnit, setCardioDistUnit, distToM, mToDisplay, fmtDistance, fmtPace, fmtSpeed, MI_TO_M, recentCardioTypes,
   isLoggedTrainingDay, plannedTrainingDay, isTrainingDayForDate, dayTargetFromMacros, macroAdherence, effectiveMacroTargets, dailyLogAdherence, dailyLogsWeekPrefill, weekPerformanceSignal,
   refreshHealthLogs,
-  pickGrowthRecipient, retractGrowthGrant, pickDeclineRecipient, reearnMesoWeightBoosts, mesoPausedDays, mesoRirForWeek, MESO_GROWTH_CEILING_DELTA,
+  pickGrowthRecipient, retractGrowthGrant, pickDeclineRecipient, reearnMesoWeightBoosts, mesoPausedDays, mesoRirForWeek,
 };

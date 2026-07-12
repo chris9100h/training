@@ -1657,7 +1657,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
   // session opens. The useEffectT in screens-train still handles the live
   // training case and re-creates if the week count changes.
   useEffect(() => {
-    if (!sch?.mesocycle_weeks || !sch?.id || !userId) return;
+    if (!LB.mesoActive(sch) || !sch?.id || !userId) return;
     const schId = sch.id;
     // Recompute everything from the freshest store snapshot (`s`, inside the
     // functional setStore updater) instead of the `sch`/`store` closed over
@@ -1668,13 +1668,18 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     // drops the cycleOffset and computes "today" instead of the true next D1.
     setStore(s => {
       const freshSch = s.schedules.find(x => x.id === schId);
-      if (!freshSch?.mesocycle_weeks) return s;
+      if (!LB.mesoActive(freshSch)) return s;
       const existing = (s.mesoStates || []).find(m => m.scheduleId === schId);
+      // Unbounded (autoregulate-only) plans have no mesocycle_weeks — normalize
+      // through ?? null so this matches a persisted mesoState's null weeks (else
+      // undefined === null is false and this guard would wipe+recreate the meso
+      // on every run; mirrors the identical fix in screens-train.jsx).
+      const targetWeeks = freshSch.mesocycle_weeks ?? null;
       // Keep existing meso only if weeks match the current config — mirrors the
       // recreate guard in screens-train.jsx's session auto-start effect, so a
-      // changed week count always starts fresh regardless of which effect runs
-      // first.
-      if (existing && existing.weeks === freshSch.mesocycle_weeks) return s;
+      // changed week count (or bounded ↔ unbounded) always starts fresh
+      // regardless of which effect runs first.
+      if (existing && existing.weeks === targetWeeks) return s;
       const _daysLen = freshSch.days.length || 1;
       const _isWeekday = LB.isWeekdayPlan(freshSch);
       const _isFlex = LB.isFlexPlan(freshSch);
@@ -1693,7 +1698,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       const newMeso = {
         id: userId + '_' + schId,
         scheduleId: schId,
-        weeks: freshSch.mesocycle_weeks,
+        weeks: targetWeeks,
         startDate: alignedStartDate,
         startCycleIndex: alignedStartIdx,
         startedAt: new Date().toISOString(), // block-start anchor (flex week count); persisted since Migration 0138
@@ -1704,7 +1709,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       const others = (s.mesoStates || []).filter(m => m.scheduleId !== schId);
       return { ...s, mesoStates: [...others, newMeso] };
     });
-  }, [sch?.id, sch?.mesocycle_weeks, store?.mesoStates, userId]); // eslint-disable-line
+  }, [sch?.id, sch?.mesocycle_weeks, sch?.mesocycle_autoregulate, store?.mesoStates, userId]); // eslint-disable-line
 
   // Auto-end a deload once it has run its course (one cycle / week elapsed, or
   // the flex session goal of deload sessions logged). Runs on mount and when the

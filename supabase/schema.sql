@@ -106,6 +106,7 @@ CREATE TABLE public.zane_schedules (
   mesocycle_start_rir integer,
   mesocycle_end_rir integer,
   mesocycle_rir_enabled boolean NOT NULL DEFAULT true,
+  mesocycle_autoregulate boolean NOT NULL DEFAULT false,
   program_type text,
   program_data jsonb
 );
@@ -1879,7 +1880,7 @@ CREATE TABLE zane_meso_states (
   id                 text        PRIMARY KEY,
   user_id            uuid        NOT NULL REFERENCES auth.users ON DELETE CASCADE,
   schedule_id        text        NOT NULL,
-  weeks              int         NOT NULL,
+  weeks              int,  -- null = autoregulate-only, no fixed block length (Migration 0160)
   start_date         text        NOT NULL,
   start_cycle_index  int         NOT NULL DEFAULT 0,
   started_at         timestamptz,  -- exact block-start anchor for the flex week counter (Migration 0138)

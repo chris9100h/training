@@ -139,7 +139,8 @@ function mesoCurrentWeek(mesoState, store) {
       (startedTs != null ? new Date(s.ended).getTime() > startedTs : (s.date || '') >= mesoState.startDate)
     ).length;
     const rotations = Math.floor(trainedCount / sch.days.length);
-    return Math.min(Math.max(1, rotations + 1), mesoState.weeks);
+    const week = Math.max(1, rotations + 1);
+    return mesoState.weeks != null ? Math.min(week, mesoState.weeks) : week;
   }
   // Weekday and date-based cycle plans: date arithmetic.
   // Cycle plans: one meso "week" = one full rotation (daysLen days).
@@ -160,24 +161,26 @@ function mesoCurrentWeek(mesoState, store) {
   const paused = LB.mesoPausedDays(store?.statusPeriods, trainedDates, mesoState.startDate, LB.fmtISO(today));
   const days = Math.max(0, rawDays - paused);
   const cycleLen = (sch && !LB.isWeekdayPlan(sch) && sch.days?.length > 0) ? sch.days.length : 7;
-  return Math.min(Math.max(1, Math.floor(days / cycleLen) + 1), mesoState.weeks);
+  const week = Math.max(1, Math.floor(days / cycleLen) + 1);
+  return mesoState.weeks != null ? Math.min(week, mesoState.weeks) : week;
 }
 // mesoRirForWeek lives in store.js (LB.mesoRirForWeek) so it's unit-testable —
 // linear RIR taper from startRir (week 1) to endRir (final week), endRir may be
 // negative (beyond failure → auto lengthened partials, see mesoPartials).
 // Apply an already-resolved meso state's set-delta to a plan item before
-// building seed sets. Returns a shallow copy with adjusted .sets, clamped to
-// [1, baseline+4] so repeated "not enough volume" answers across a mesocycle
-// can't balloon a lift's set count without bound; no-ops if no meso or no
-// delta. Split out from applyMesoSetDelta so callers resolving meso state for
-// every item in a plan (session start, plan viewer) can call getMesoState
-// once instead of once per item (each call touches localStorage).
+// building seed sets. Returns a shallow copy with adjusted .sets, floored at 1
+// (can't cut below one set) but otherwise uncapped — repeated "not enough
+// volume" answers keep growing a lift indefinitely, and an over-grown lift
+// self-corrects via the decline signal instead of a hard ceiling; no-ops if
+// no meso or no delta. Split out from applyMesoSetDelta so callers resolving
+// meso state for every item in a plan (session start, plan viewer) can call
+// getMesoState once instead of once per item (each call touches localStorage).
 function applyMesoSetDeltaFromState(it, dayId, mesoState) {
   if (!dayId || !mesoState) return it;
   const delta = (mesoState.deltas || {})[it.exId + '_' + dayId];
   if (!delta) return it;
   const base = it.sets || 1;
-  return { ...it, sets: Math.min(base + LB.MESO_GROWTH_CEILING_DELTA, Math.max(1, base + delta)) };
+  return { ...it, sets: Math.max(1, base + delta) };
 }
 function applyMesoSetDelta(it, dayId, scheduleId, mesoStates) {
   if (!dayId || !scheduleId) return it;
@@ -765,10 +768,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const _sch = store.schedules?.find(s => s.id === session.scheduleId);
   const isWeekdayMode = _sch ? LB.isWeekdayPlan(_sch) : false;
 
-  // Auto-start a mesocycle when the session's plan has mesocycle_weeks set
-  // and there's no active meso for this plan yet.
+  // Auto-start a mesocycle when the session's plan has autoregulation active
+  // (a bounded mesocycle_weeks block, or the unbounded mesocycle_autoregulate
+  // flag) and there's no active meso for this plan yet.
   useEffectT(() => {
-    if (!_sch?.mesocycle_weeks || !session.scheduleId) return;
+    if (!LB.mesoActive(_sch) || !session.scheduleId) return;
     const schId = session.scheduleId;
     // Compute the new meso object PURELY (outside setStore) so it's guaranteed
     // available for the localStorage / component-state writes below — a
@@ -776,11 +780,17 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // an outer variable by the time we read it. The effect runs once on mount,
     // so the `store` closure is the freshest snapshot we need.
     const freshSch = store.schedules.find(x => x.id === schId);
-    if (!freshSch?.mesocycle_weeks) return;
+    if (!LB.mesoActive(freshSch)) return;
     const existing = getMesoState(schId, store.mesoStates);
+    // Unbounded (autoregulate-only) plans have no mesocycle_weeks — normalize
+    // through ?? null so this matches a persisted mesoState's null weeks. Without
+    // it, freshSch.mesocycle_weeks is `undefined` while a loaded existing.weeks is
+    // `null`, and undefined === null is false, so this guard would never match
+    // and would wipe+recreate the meso (losing all deltas/history) on every run.
+    const targetWeeks = freshSch.mesocycle_weeks ?? null;
     // Keep existing meso only if weeks match the current config.
-    // A mismatch (changed week count) always starts fresh.
-    if (existing && existing.weeks === freshSch.mesocycle_weeks) return;
+    // A mismatch (changed week count, or bounded ↔ unbounded) always starts fresh.
+    if (existing && existing.weeks === targetWeeks) return;
     // Align meso start to a clean boundary so week 1 is always a full rotation/week.
     // Weekday: next Monday (or today). Flex: next D1 via cycleIndex. Cycle: next D1 via date.
     const _isWeekday = LB.isWeekdayPlan(freshSch);
@@ -803,7 +813,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     const newMeso = {
       id: userId + '_' + schId,
       scheduleId: schId,
-      weeks: freshSch.mesocycle_weeks,
+      weeks: targetWeeks,
       startDate: alignedStartDate,
       startCycleIndex: alignedStartIdx,
       deltas: {},
@@ -2760,8 +2770,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     const prevGrantedTo = Object.keys(record.contrib || {}).find(k => record.contrib[k] === 1) ?? null;
     let recipientKey = null;
     if (adds && keys.length) {
-      recipientKey = LB.pickGrowthRecipient(keys, mesoState.deltas, mesoState.growthCounts, prevGrantedTo).recipientKey;
-      saveMesoState(m => ({ ...m, growthCounts: LB.pickGrowthRecipient(keys, m.deltas, m.growthCounts, prevGrantedTo).growthCounts }));
+      recipientKey = LB.pickGrowthRecipient(keys, mesoState.growthCounts, prevGrantedTo).recipientKey;
+      saveMesoState(m => ({ ...m, growthCounts: LB.pickGrowthRecipient(keys, m.growthCounts, prevGrantedTo).growthCounts }));
     } else if (prevGrantedTo) {
       // Edited away from an adding answer this session → undo the prior grant.
       saveMesoState(m => ({ ...m, growthCounts: LB.retractGrowthGrant(m.growthCounts, prevGrantedTo) }));
@@ -2923,8 +2933,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     if (mesoLastWeek) {
       // frozen: no rotation, no grant
     } else if (volume === 'not_enough') {
-      recipientKey = LB.pickGrowthRecipient(keys, mesoState.deltas, mesoState.growthCounts, prevGrantedTo).recipientKey;
-      saveMesoState(m => ({ ...m, growthCounts: LB.pickGrowthRecipient(keys, m.deltas, m.growthCounts, prevGrantedTo).growthCounts }));
+      recipientKey = LB.pickGrowthRecipient(keys, mesoState.growthCounts, prevGrantedTo).recipientKey;
+      saveMesoState(m => ({ ...m, growthCounts: LB.pickGrowthRecipient(keys, m.growthCounts, prevGrantedTo).growthCounts }));
     } else if (prevGrantedTo) {
       // Answer changed away from not_enough this session — undo the previous grant.
       saveMesoState(m => ({ ...m, growthCounts: LB.retractGrowthGrant(m.growthCounts, prevGrantedTo) }));
@@ -4865,7 +4875,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           {(store.statusMode === 'deload' || session.isDeload) && (
             <span style={{ fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.12em', color: 'var(--accent)', background: 'rgba(var(--accent-rgb),0.12)', border: `0.5px solid ${UI.goldSoft}`, borderRadius: 4, padding: '1px 6px' }}>DELOAD · 50%</span>
           )}
-          {mesoState && mesoWeek != null && (
+          {mesoState && mesoWeek != null && mesoState.weeks != null && (
             <span style={{ fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkSoft, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '1px 6px' }}>
               {isWeekdayMode ? 'W' : 'C'}{mesoWeek}/{mesoState.weeks}
             </span>

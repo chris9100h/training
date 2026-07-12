@@ -591,39 +591,41 @@ async function testAsync(name, fn) {
 
   // ── pickGrowthRecipient / retractGrowthGrant (meso volume growth rotation) ──
   test('pickGrowthRecipient: single exercise always wins, matching pre-rotation main-lift-only behavior', () => {
-    const r = LB.pickGrowthRecipient(['a_d1'], {}, {}, null);
+    const r = LB.pickGrowthRecipient(['a_d1'], {}, null);
     assert.strictEqual(r.recipientKey, 'a_d1');
     assert.strictEqual(r.growthCounts.a_d1, 1);
   });
 
-  test('pickGrowthRecipient: single exercise stops granting once at its own ceiling', () => {
-    const r = LB.pickGrowthRecipient(['a_d1'], { a_d1: 4 }, { a_d1: 7 }, null);
-    assert.strictEqual(r.recipientKey, null);
-    // growthCounts is left untouched when nobody is eligible
-    assert.strictEqual(r.growthCounts.a_d1, 7);
+  test('pickGrowthRecipient: no ceiling — a single exercise keeps winning no matter how many grants it already has', () => {
+    const r = LB.pickGrowthRecipient(['a_d1'], { a_d1: 7 }, null);
+    assert.strictEqual(r.recipientKey, 'a_d1');
+    assert.strictEqual(r.growthCounts.a_d1, 8);
   });
 
   test('pickGrowthRecipient: fewest grants wins, ties toward the main (first) exercise', () => {
     // Tied at 0 → main (a_d1) wins.
-    const r1 = LB.pickGrowthRecipient(['a_d1', 'b_d1'], {}, {}, null);
+    const r1 = LB.pickGrowthRecipient(['a_d1', 'b_d1'], {}, null);
     assert.strictEqual(r1.recipientKey, 'a_d1');
     // b already has fewer grants → b wins even though a is main.
-    const r2 = LB.pickGrowthRecipient(['a_d1', 'b_d1'], {}, { a_d1: 2, b_d1: 1 }, null);
+    const r2 = LB.pickGrowthRecipient(['a_d1', 'b_d1'], { a_d1: 2, b_d1: 1 }, null);
     assert.strictEqual(r2.recipientKey, 'b_d1');
     assert.strictEqual(r2.growthCounts.b_d1, 2);
     assert.strictEqual(r2.growthCounts.a_d1, 2);
   });
 
-  test('pickGrowthRecipient: only exercises below the ceiling are eligible, even if they have fewer grants', () => {
-    // b has fewer grants (0) but is already at its delta ceiling — a (delta 2) wins instead.
-    const r = LB.pickGrowthRecipient(['a_d1', 'b_d1'], { a_d1: 2, b_d1: 4 }, { a_d1: 3, b_d1: 0 }, null);
+  test('pickGrowthRecipient: no ceiling — fewest grants still wins even against a much larger gap', () => {
+    // b has 20 prior grants, a has 3 — no ceiling excludes b from eligibility
+    // anymore, but a still wins purely because it has fewer grants so far.
+    const r = LB.pickGrowthRecipient(['a_d1', 'b_d1'], { a_d1: 3, b_d1: 20 }, null);
     assert.strictEqual(r.recipientKey, 'a_d1');
+    assert.strictEqual(r.growthCounts.a_d1, 4);
+    assert.strictEqual(r.growthCounts.b_d1, 20);
   });
 
   test('pickGrowthRecipient: a never-before-seen exercise is seeded at the group max, not 0, so it cannot cut ahead', () => {
     // a=3, b=1 already established; c is new (absent from growthCounts).
     // groupMax=3 → c seeds to 3, so b (still at 1) correctly wins, not c.
-    const r = LB.pickGrowthRecipient(['a_d1', 'b_d1', 'c_d1'], {}, { a_d1: 3, b_d1: 1 }, null);
+    const r = LB.pickGrowthRecipient(['a_d1', 'b_d1', 'c_d1'], { a_d1: 3, b_d1: 1 }, null);
     assert.strictEqual(r.recipientKey, 'b_d1');
     assert.strictEqual(r.growthCounts.c_d1, 3);
   });
@@ -632,16 +634,16 @@ async function testAsync(name, fn) {
     // a is the sole holder of the group max (5) AND is this record's own
     // previous grant recipient; c is new. Undoing a's prior grant must not
     // transiently lower what c gets seeded at.
-    const r = LB.pickGrowthRecipient(['a_d1', 'c_d1'], { a_d1: 0, c_d1: 0 }, { a_d1: 5 }, 'a_d1');
+    const r = LB.pickGrowthRecipient(['a_d1', 'c_d1'], { a_d1: 5 }, 'a_d1');
     assert.strictEqual(r.growthCounts.c_d1, 5);
   });
 
   test('pickGrowthRecipient: editing an already-answered "not enough" this session undoes the prior grant before re-deciding', () => {
-    const first = LB.pickGrowthRecipient(['a_d1', 'b_d1'], {}, {}, null);
+    const first = LB.pickGrowthRecipient(['a_d1', 'b_d1'], {}, null);
     assert.strictEqual(first.recipientKey, 'a_d1');
     // Re-answering the same question this session (prevGrantedTo = a_d1):
     // a's grant is undone first, so it ties with b at 0 again and wins back.
-    const again = LB.pickGrowthRecipient(['a_d1', 'b_d1'], {}, first.growthCounts, 'a_d1');
+    const again = LB.pickGrowthRecipient(['a_d1', 'b_d1'], first.growthCounts, 'a_d1');
     assert.strictEqual(again.recipientKey, 'a_d1');
     assert.strictEqual(again.growthCounts.a_d1, 1);
     assert.strictEqual(again.growthCounts.b_d1, 0);
@@ -658,9 +660,9 @@ async function testAsync(name, fn) {
     // growthCounts pool. Soreness is asked first: it grants to the main lift and
     // bumps the pool. The volume grant, fed that updated pool, must then rotate
     // to the OTHER exercise instead of piling a second +1 onto the main lift.
-    const soreness = LB.pickGrowthRecipient(['a_d1', 'b_d1'], {}, {}, null);
+    const soreness = LB.pickGrowthRecipient(['a_d1', 'b_d1'], {}, null);
     assert.strictEqual(soreness.recipientKey, 'a_d1');
-    const volume = LB.pickGrowthRecipient(['a_d1', 'b_d1'], {}, soreness.growthCounts, null);
+    const volume = LB.pickGrowthRecipient(['a_d1', 'b_d1'], soreness.growthCounts, null);
     assert.strictEqual(volume.recipientKey, 'b_d1');
     assert.strictEqual(volume.growthCounts.a_d1, 1);
     assert.strictEqual(volume.growthCounts.b_d1, 1);
@@ -1165,6 +1167,31 @@ async function testAsync(name, fn) {
     // Non-meso plan never carries the flag.
     const plain = LB.buildPlanSkeleton({ name: 'P', type: 'cycle', presetKey: 'ppl3', mesoRirEnabled: false });
     assert.strictEqual('mesocycle_rir_enabled' in plain, false);
+  });
+
+  test('mesoActive: on when either mesocycle_weeks or mesocycle_autoregulate is set', () => {
+    assert.strictEqual(LB.mesoActive({}), false);
+    assert.strictEqual(LB.mesoActive(undefined), false);
+    assert.strictEqual(LB.mesoActive({ mesocycle_weeks: null, mesocycle_autoregulate: false }), false);
+    assert.strictEqual(LB.mesoActive({ mesocycle_weeks: 6 }), true);
+    assert.strictEqual(LB.mesoActive({ mesocycle_autoregulate: true }), true);
+    assert.strictEqual(LB.mesoActive({ mesocycle_weeks: 6, mesocycle_autoregulate: true }), true);
+  });
+
+  test('buildPlanSkeleton: mesocycleAutoregulate true is persisted outside the bounded-block config, otherwise omitted', () => {
+    const auto = LB.buildPlanSkeleton({ name: 'A', type: 'cycle', presetKey: 'ppl3', mesocycleAutoregulate: true });
+    assert.strictEqual(auto.mesocycle_autoregulate, true);
+    assert.strictEqual(auto.mesocycle_weeks, undefined);
+    assert.strictEqual(LB.mesoActive(auto), true);
+    // Default (falsy/omitted) never carries the flag.
+    const plain = LB.buildPlanSkeleton({ name: 'P', type: 'cycle', presetKey: 'ppl3' });
+    assert.strictEqual('mesocycle_autoregulate' in plain, false);
+    // Harmless alongside a bounded meso too (mesoActive is an OR, mesocycle_weeks
+    // still wins for bounded-only logic) — confirms it isn't nested inside/gated
+    // by the mesoWeeks block.
+    const both = LB.buildPlanSkeleton({ name: 'B', type: 'cycle', presetKey: 'ppl3', mesoWeeks: 6, mesocycleAutoregulate: true });
+    assert.strictEqual(both.mesocycle_weeks, 6);
+    assert.strictEqual(both.mesocycle_autoregulate, true);
   });
 
   // ── healScheduleWeekdays (self-heal legacy weekday plans) ───────────────────
