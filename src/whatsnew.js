@@ -17,6 +17,17 @@
    Entry shape: { id: string, date: string (YYYY-MM-DD), title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.559',
+    date: '2026-07-12',
+    title: 'Autoregulation, Now Standalone',
+    items: [
+      "🎛️ Autoregulation no longer needs a mesocycle. You can turn it on for any plan and run it open-ended: your set counts and weights adjust from the feedback you give after each session, with no fixed block, end date, or RIR countdown. Choose it in the plan wizard, or turn it on in a plan's options.",
+      "🧱 New Load-only mode. It keeps your set counts where they are and autoregulates only the weight. If a muscle is still sore, it holds the weight instead of adding load, so progression follows your recovery.",
+      "🔁 Flex plans now show a rotation count on the home strip and the plan card, so you can see how many times you've been through your rotation. Skipped days count too.",
+      "📍 Today is now highlighted on your active plan card, so the current day is easy to spot at a glance.",
+    ],
+  },
+  {
     id: 'v2.547',
     date: '2026-07-11',
     title: 'Water, By the Ounce',
