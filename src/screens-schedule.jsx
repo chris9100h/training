@@ -1312,12 +1312,48 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
     : -1;
   const [draft, setDraft] = useStateS(() => {
     if (!original) return null;
+    // Resume a multi-device autosaved draft for the primary edit flow: pick up
+    // exactly where the last device left off, even if Save was never pressed.
+    // Version-specific edits (editVerIdx > 0) never autosave, so they always
+    // start from that version's committed days.
+    const saved = editVerIdx <= 0 ? store.planDrafts?.[scheduleId]?.draft : null;
+    if (saved) return JSON.parse(JSON.stringify(saved));
     const clone = JSON.parse(JSON.stringify(original));
     if (editVerIdx > 0 && original.versions[editVerIdx]) {
       clone.days = JSON.parse(JSON.stringify(original.versions[editVerIdx].days || []));
     }
     return clone;
   });
+  // Multi-device autosave: debounce-persist the in-progress draft into
+  // store.planDrafts (→ zane_plan_drafts) ~1s after edits settle, so switching
+  // devices mid-edit never loses work. Only the primary edit flow autosaves; the
+  // baseline for "dirty" there is `original` (mirrors dirtyBaseline for
+  // editVerIdx <= 0). Cleared on Save / Discard / Delete / Archive below.
+  React.useEffect(() => {
+    if (!draft || editVerIdx > 0) return;
+    if (JSON.stringify(draft) === JSON.stringify(original)) return; // clean → nothing to persist
+    const t = setTimeout(() => {
+      setStore(s => {
+        const cur = s.planDrafts?.[scheduleId];
+        if (cur && JSON.stringify(cur.draft) === JSON.stringify(draft)) return s; // unchanged → skip redundant write
+        return { ...s, planDrafts: { ...(s.planDrafts || {}), [scheduleId]: { draft, updatedAt: new Date().toISOString() } } };
+      });
+    }, 1000);
+    return () => clearTimeout(t);
+  }, [draft, editVerIdx, scheduleId]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Drop the autosaved draft once the edit session resolves (committed or
+  // abandoned). Gated to the primary flow so saving/discarding an OLDER version
+  // never wipes a separate newest-version draft; delete forces through because a
+  // removed plan must not leave an orphan draft row.
+  const clearDraft = (force) => {
+    if (editVerIdx > 0 && !force) return;
+    setStore(s => {
+      if (!s.planDrafts || !(scheduleId in s.planDrafts)) return s;
+      const rest = { ...s.planDrafts };
+      delete rest[scheduleId];
+      return { ...s, planDrafts: rest };
+    });
+  };
   const [pickingType, setPickingType] = useStateS(false);
   const [applyFromSheet, setApplyFromSheet] = useStateS(false);
   const [applyFromDate, setApplyFromDate] = useStateS('');
@@ -1464,6 +1500,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
         }
       } catch (e) { console.error('Failed to send plan change note', e); }
     }
+    clearDraft();
     go({ name: 'plan-view', scheduleId: draft.id, fromPlan: true });
   };
 
@@ -1488,6 +1525,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
         }
       } catch (e) { console.error('Failed to send plan change note', e); }
     }
+    clearDraft();
     go({ name: 'plan-view', scheduleId: draft.id, fromPlan: true });
   };
 
@@ -1515,6 +1553,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
       schedules: s.schedules.filter(x => x.id !== draft.id),
       activeScheduleId: s.activeScheduleId === draft.id ? null : s.activeScheduleId,
     }));
+    clearDraft(true);
     go({ name: 'plan' });
   };
   const toggleArchive = async () => {
@@ -1527,6 +1566,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
       schedules: s.schedules.map(x => x.id === draft.id ? { ...x, archived: willArchive } : x),
       activeScheduleId: (willArchive && s.activeScheduleId === draft.id) ? null : s.activeScheduleId,
     }));
+    clearDraft();
     go({ name: 'plan' });
   };
 
@@ -1603,6 +1643,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
           : null}
         onBack={async () => {
           if (dirty && !await confirm('Unsaved changes will be lost.', { title: 'Discard changes?', ok: 'Discard', danger: true })) return;
+          clearDraft();
           go({ name: 'plan-view', scheduleId: draft.id, fromPlan: true });
         }}
         right={

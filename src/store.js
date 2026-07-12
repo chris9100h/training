@@ -828,13 +828,15 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     // Coach's own saved check-in schema templates: irrelevant when loading a
     // CLIENT's store as a coach, these belong to the acting coach, not the client.
     isCoachLoad ? null : _supabase.from('zane_checkin_schema_templates').select('id, name, schema, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
+    // Plan-editor drafts (migration 0162): in-progress autosave, own store only.
+    isCoachLoad ? null : _supabase.from('zane_plan_drafts').select('schedule_id, draft, updated_at').eq('user_id', userId),
   ];
   const [profileRes, exRes, schRes, sessRes, settRes, skipsRes, entriesRes,
          bestsRes, sessionStatsRes,
          coachInfoRes, coachClientsRes, unreadNotesRes, coachingRowRes, selfRowRes,
          cardioLogsRes, cardioPlansRes, dailyLogsRes, statusPeriodsRes,
          supportTicketsRes, glucoseLogsRes, templatesRes, mesoStatesRes,
-         checkinTemplatesRes] = await Promise.all(queries);
+         checkinTemplatesRes, planDraftsRes] = await Promise.all(queries);
 
   // A failed request (offline, RLS, server error) also yields no data — bail
   // out so the caller can surface an error instead of mistaking this for a
@@ -1034,6 +1036,10 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
       completions: m.completions ?? 0, pendingMeso2: m.pending_meso2 ?? false,
       updatedAt: m.updated_at ?? null,
     })),
+    // Plan-editor drafts keyed by schedule id (migration 0162). Null on coach
+    // loads / a load error → {} (harmless: the boot merge then keeps any local
+    // draft, so a hiccup never drops in-progress work).
+    planDrafts: Object.fromEntries((planDraftsRes?.data || []).map(r => [r.schedule_id, { draft: r.draft, updatedAt: r.updated_at }])),
     // All-time best e1RM per exercise (server aggregate, cached in the store —
     // and via the local cache also offline). bestE1rmForExercise combines this
     // with the windowed sessions, so PR detection stays exact mid-session.
@@ -1468,6 +1474,25 @@ async function syncStore(prev, next, userId) {
       updated_at: m.updatedAt ?? new Date().toISOString(),
     })) }));
     if (removed.length) ops.push(_supabase.from('zane_meso_states').delete().in('id', removed.map(m => m.id)));
+  }
+
+  // Plan-editor drafts (map schedule_id -> { draft, updatedAt }). Upsert the
+  // changed ones, delete the removed ones (the editor removes a draft on Save
+  // or Discard). Plain last-write-wins on the (user_id, schedule_id) PK: a stale
+  // write self-heals because the boot merge (mergePlanDrafts) keeps the newer
+  // updatedAt and whichever device holds it re-pushes on its next sync.
+  if (prev.planDrafts !== next.planDrafts) {
+    const prevD = prev.planDrafts || {};
+    const nextD = next.planDrafts || {};
+    const upsert = Object.entries(nextD).filter(([sid, d]) => {
+      const p = prevD[sid];
+      return !p || JSON.stringify(p) !== JSON.stringify(d);
+    });
+    const removed = Object.keys(prevD).filter(sid => !(sid in nextD));
+    if (upsert.length) ops.push(_supabase.from('zane_plan_drafts').upsert(upsert.map(([sid, d]) => ({
+      user_id: userId, schedule_id: sid, draft: d.draft, updated_at: d.updatedAt ?? new Date().toISOString(),
+    }))));
+    if (removed.length) ops.push(_supabase.from('zane_plan_drafts').delete().eq('user_id', userId).in('schedule_id', removed));
   }
 
   if (prev.dailyLogs !== next.dailyLogs) {
@@ -4543,6 +4568,34 @@ function mergeCollectionById(freshRows, curRows, baseRows, delIds) {
   });
 }
 
+// Boot-merge for the plan-editor draft map (scheduleId -> { draft, updatedAt }),
+// kept separate from the schedule merge so a draft can never touch a committed
+// plan:
+//   • both sides  → newer updatedAt wins (last-write-wins);
+//   • server-only → keep it (another device's draft), UNLESS this device deleted
+//     it (in base, gone from cur): then it was Saved/Discarded here, don't resurrect;
+//   • local-only  → keep it (an unsynced draft), UNLESS it was synced before and
+//     is now gone from the server (in base, gone from fresh), Saved/Discarded on
+//     another device, drop it.
+// baseDrafts = the last-synced map (null on a legacy cache → keep both sides).
+function mergePlanDrafts(freshDrafts, curDrafts, baseDrafts) {
+  const f = freshDrafts || {}, c = curDrafts || {}, b = baseDrafts || null;
+  const out = {};
+  for (const sid of new Set([...Object.keys(f), ...Object.keys(c)])) {
+    const fd = f[sid], cd = c[sid];
+    if (fd && cd) {
+      const fT = fd.updatedAt ? new Date(fd.updatedAt).getTime() : 0;
+      const cT = cd.updatedAt ? new Date(cd.updatedAt).getTime() : 0;
+      out[sid] = cT >= fT ? cd : fd;
+    } else if (!fd) {
+      if (!(b && sid in b)) out[sid] = cd; // gone from server: keep only a never-synced local draft
+    } else {
+      if (!(b && sid in b)) out[sid] = fd; // server-only: keep unless deleted here
+    }
+  }
+  return out;
+}
+
 // Calories from macros: P×4 + C×4 + F×9. With fiber given (net-carb mode),
 // carbs contribute max(0, C − fiber)×4 — clamped so it matches the displayed
 // net-carb value when fiber exceeds carbs. Returns null when no macro is set.
@@ -4724,7 +4777,7 @@ window.LB = {
   startDeload, endDeload, deloadElapsed, deloadDaysRemaining, deloadPlanDays,
   loadClientStore, loadCoachClientsStatus, reloadCoachingState, enableSelfCoaching, inviteClient, respondToCoachingInvite, endCoaching,
   addCoachingNote, markCoachingNotesRead, loadCoachingNotes, loadCoachingThreads, createCoachingThread, deleteCoachingThread, getOrCreateCoachingThread, uploadChatImage,
-  unreadCoachingNotes, isNoteFromClient, techniqueRounds, groupBySuperset, supersetLabel, timeAgo, dayLabel, cyclePosFromStartDate, mergeCollectionById, caloriesFromMacros, detectCacheVersion,
+  unreadCoachingNotes, isNoteFromClient, techniqueRounds, groupBySuperset, supersetLabel, timeAgo, dayLabel, cyclePosFromStartDate, mergeCollectionById, mergePlanDrafts, caloriesFromMacros, detectCacheVersion,
   loadCoachingMacros, addCoachingMacros,
   diffSchedule,
   checkinWeekStart, submitCheckin, loadCheckins, deleteCheckin, loadCoachCheckinStatus, requestCheckin, setCheckinEnabled, loadCheckinSchema, saveCheckinSchema, saveDefaultCheckinSchema,

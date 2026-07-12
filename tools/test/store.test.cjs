@@ -1801,6 +1801,54 @@ async function testAsync(name, fn) {
     assert.strictEqual(seeds.some(s => 'kg' in s), false, 'no weight fields on time seeds');
   });
 
+  // ── mergePlanDrafts: multi-device plan-editor draft merge ────────────────
+  // Map merge keyed by scheduleId, entries { draft, updatedAt }. Base = the
+  // last-synced map; membership in base distinguishes "deleted since sync" from
+  // "never synced".
+  const pd = (u, tag) => ({ draft: { id: 's', tag: tag ?? u }, updatedAt: u });
+  test('mergePlanDrafts: both sides present → newer updatedAt wins', () => {
+    const fresh = { s: pd('2026-07-12T10:00:00Z', 'server') };
+    const cur = { s: pd('2026-07-12T11:00:00Z', 'local') };
+    assert.strictEqual(LB.mergePlanDrafts(fresh, cur, {}).s.draft.tag, 'local');
+    // and the reverse: server newer wins
+    const fresh2 = { s: pd('2026-07-12T12:00:00Z', 'server') };
+    assert.strictEqual(LB.mergePlanDrafts(fresh2, cur, {}).s.draft.tag, 'server');
+  });
+  test('mergePlanDrafts: equal timestamps → local wins (tie goes to this device)', () => {
+    const t = '2026-07-12T10:00:00Z';
+    const out = LB.mergePlanDrafts({ s: pd(t, 'server') }, { s: pd(t, 'local') }, {});
+    assert.strictEqual(out.s.draft.tag, 'local');
+  });
+  test('mergePlanDrafts: server-only draft not in base → kept (another device started it)', () => {
+    const out = LB.mergePlanDrafts({ s: pd('2026-07-12T10:00:00Z') }, {}, {});
+    assert.ok(out.s, 'a genuinely new server-side draft is adopted');
+  });
+  test('mergePlanDrafts: server-only draft that was in base → dropped (Saved/Discarded here)', () => {
+    const base = { s: pd('2026-07-12T09:00:00Z') };
+    const out = LB.mergePlanDrafts({ s: pd('2026-07-12T09:00:00Z') }, {}, base);
+    assert.strictEqual('s' in out, false, 'deleting locally must not be resurrected from the stale server row');
+  });
+  test('mergePlanDrafts: local-only draft not in base → kept (never-synced work)', () => {
+    const out = LB.mergePlanDrafts({}, { s: pd('2026-07-12T10:00:00Z') }, {});
+    assert.ok(out.s, 'an offline/unsynced local draft survives the merge');
+  });
+  test('mergePlanDrafts: local-only draft that was in base → dropped (Saved/Discarded elsewhere)', () => {
+    const base = { s: pd('2026-07-12T09:00:00Z') };
+    const out = LB.mergePlanDrafts({}, { s: pd('2026-07-12T09:00:00Z') }, base);
+    assert.strictEqual('s' in out, false, 'a draft another device resolved must not linger locally');
+  });
+  test('mergePlanDrafts: null base (legacy cache) → keep both one-sided drafts', () => {
+    const out = LB.mergePlanDrafts({ a: pd('2026-07-12T10:00:00Z') }, { b: pd('2026-07-12T10:00:00Z') }, null);
+    assert.ok(out.a && out.b, 'without a base we cannot tell delete from never-synced, so keep both');
+  });
+  test('mergePlanDrafts: empty / undefined inputs → empty map', () => {
+    // Object.keys, not deepStrictEqual: the returned object lives in the vm
+    // realm, so its prototype differs from this file's and deepStrictEqual
+    // rejects two structurally-equal {} across realms.
+    assert.strictEqual(Object.keys(LB.mergePlanDrafts(undefined, undefined, undefined)).length, 0);
+    assert.strictEqual(Object.keys(LB.mergePlanDrafts(null, null, null)).length, 0);
+  });
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();

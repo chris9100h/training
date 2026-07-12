@@ -759,6 +759,10 @@ function App() {
             // re-synced back as the old value. Conservative: no base membership
             // or local == base → server wins (mirrors the mesoStates merge).
             const mergeById = LB.mergeCollectionById;
+            // Plan-editor drafts: their own last-write-wins map merge, fully
+            // isolated from the schedule merge so an autosaved draft can never
+            // touch a committed plan (and a schedule merge quirk can't drop it).
+            const planDrafts = LB.mergePlanDrafts(fresh.planDrafts, cur.planDrafts, base?.planDrafts);
             // Scalar state: the local cache is authoritative — it always holds
             // the most recent state on this device, including unsynced offline
             // edits. For items with IDs we use an ID-based merge instead.
@@ -785,6 +789,7 @@ function App() {
               checkinSchemaTemplates: [...localOnlyCheckinTemplates, ...(fresh.checkinSchemaTemplates || []).filter(t => !delCheckinTplIds?.has(t.id))],
               cardioPlans: [...localOnlyCardioPlans, ...(fresh.cardioPlans || []).filter(p => !delCardioPlanIds?.has(p.id))],
               mesoStates,
+              planDrafts,
             };
           }
           if (!fresh.user.approved) { setPhase('pending'); return; }
