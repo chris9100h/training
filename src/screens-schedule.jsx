@@ -1333,7 +1333,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
 }
 
 // ─── Edit screen — rename, manage pattern ─
-function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFrom, asCoach = false }) {
+function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFrom, draftStore = store, setDraftStore = setStore }) {
   const [confirmEl, confirm] = useConfirm();
   const original = store.schedules.find(s => s.id === scheduleId);
   // Which version is being edited (identified by validFrom). -1 = unversioned
@@ -1347,10 +1347,12 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
     // Resume a multi-device autosaved draft for the primary edit flow: pick up
     // exactly where the last device left off, even if Save was never pressed.
     // Version-specific edits (editVerIdx > 0) never autosave, so they always
-    // start from that version's committed days. Coach-editing-a-client's-plan
-    // (asCoach) never has a draft to resume: loadClientStore skips the
-    // zane_plan_drafts query entirely, so store.planDrafts is always {} there.
-    const saved = (editVerIdx <= 0 && !asCoach) ? store.planDrafts?.[scheduleId]?.draft : null;
+    // start from that version's committed days. Drafts live in draftStore, not
+    // store: editing your own plan, they're the same object; a coach editing a
+    // client's plan (CoachPlanEditorScreen passes the coach's own store as
+    // draftStore) resumes the COACH's own prior session on this schedule,
+    // never anything read from or written to the client's account.
+    const saved = editVerIdx <= 0 ? draftStore.planDrafts?.[scheduleId]?.draft : null;
     if (saved) return JSON.parse(JSON.stringify(saved));
     const clone = JSON.parse(JSON.stringify(original));
     if (editVerIdx > 0 && original.versions[editVerIdx]) {
@@ -1364,7 +1366,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
   // stronger, type-to-confirm gate instead of the plain "unsaved changes" note.
   const resumedRef = React.useRef(null);
   if (resumedRef.current === null) {
-    resumedRef.current = editVerIdx <= 0 && !asCoach && !!(store.planDrafts && store.planDrafts[scheduleId] && store.planDrafts[scheduleId].draft);
+    resumedRef.current = editVerIdx <= 0 && !!(draftStore.planDrafts && draftStore.planDrafts[scheduleId] && draftStore.planDrafts[scheduleId].draft);
   }
   const wasResumed = resumedRef.current;
   // Live in-progress state of the day currently open in DayEditor, reported up
@@ -1373,31 +1375,31 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
   // the autosave snapshot until that Save. Null when no day is open / it's clean.
   const [openDay, setOpenDay] = useStateS(null);
   // Multi-device autosave: debounce-persist the in-progress draft into
-  // store.planDrafts (→ zane_plan_drafts) ~1s after edits settle, so switching
-  // devices mid-edit never loses work. The snapshot folds in the open day's live
-  // items (openDay) so a day being edited is captured before it's Saved back to
-  // the plan. Only the primary edit flow autosaves; its "dirty" baseline is
-  // `original` (mirrors dirtyBaseline for editVerIdx <= 0). Cleared on
-  // Save / Discard / Delete / Archive below.
+  // draftStore.planDrafts (→ zane_plan_drafts) ~1s after edits settle, so
+  // switching devices mid-edit never loses work. The snapshot folds in the open
+  // day's live items (openDay) so a day being edited is captured before it's
+  // Saved back to the plan. Only the primary edit flow autosaves; its "dirty"
+  // baseline is `original` (mirrors dirtyBaseline for editVerIdx <= 0). Cleared
+  // on Save / Discard / Delete / Archive below.
   //
-  // Disabled entirely when a coach is editing a client's plan (asCoach): the
-  // write path (syncStore's zane_plan_drafts upsert) always writes
-  // user_id: <the store's userId>, which here is the CLIENT's id, while the
-  // authenticated caller (auth.uid()) is the COACH. The table's RLS policy
-  // only allows auth.uid() = user_id, so every autosave write would be
-  // rejected and surface as a persistent, misleading sync-error pill while the
-  // coach is actively building the plan. Coach-side cross-device continuity
-  // for this flow is a separate, not-yet-built feature (it would need drafts
-  // keyed by the coach's own id, not the client's).
+  // Writing through setDraftStore (not setStore) matters when a coach is
+  // editing a client's plan: setStore there is the CLIENT's store, synced under
+  // the client's own id, while the authenticated caller (auth.uid()) is the
+  // COACH. zane_plan_drafts' RLS only allows auth.uid() = user_id, so a draft
+  // written via setStore in that case would always be rejected. Routing through
+  // setDraftStore (the ACTING user's own store, coach or self) keeps every
+  // draft's user_id equal to whoever is really authenticated, which RLS always
+  // allows, and gives a coach genuine cross-device continuity while building a
+  // client's plan, entirely private to the coach's own account.
   React.useEffect(() => {
-    if (!draft || editVerIdx > 0 || asCoach) return;
+    if (!draft || editVerIdx > 0) return;
     const snapshot = (openDay && openDay.id)
       ? { ...draft, days: (draft.days || []).map(d => d.id === openDay.id ? openDay.day : d) }
       : draft;
     if (JSON.stringify(snapshot) === JSON.stringify(original)) {
       // Back to pristine (e.g. a day's edits were discarded): drop any stale
       // autosave so it can't resurrect discarded work on the next boot.
-      setStore(s => {
+      setDraftStore(s => {
         if (!s.planDrafts || !(scheduleId in s.planDrafts)) return s;
         const rest = { ...s.planDrafts };
         delete rest[scheduleId];
@@ -1406,7 +1408,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
       return;
     }
     const t = setTimeout(() => {
-      setStore(s => {
+      setDraftStore(s => {
         const cur = s.planDrafts?.[scheduleId];
         if (cur && JSON.stringify(cur.draft) === JSON.stringify(snapshot)) return s; // unchanged → skip redundant write
         return { ...s, planDrafts: { ...(s.planDrafts || {}), [scheduleId]: { draft: snapshot, updatedAt: new Date().toISOString() } } };
@@ -1419,9 +1421,8 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
   // never wipes a separate newest-version draft; delete forces through because a
   // removed plan must not leave an orphan draft row.
   const clearDraft = (force) => {
-    if (asCoach) return; // never wrote one (see the autosave effect above), nothing to clear
     if (editVerIdx > 0 && !force) return;
-    setStore(s => {
+    setDraftStore(s => {
       if (!s.planDrafts || !(scheduleId in s.planDrafts)) return s;
       const rest = { ...s.planDrafts };
       delete rest[scheduleId];
