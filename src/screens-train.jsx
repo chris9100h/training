@@ -2657,6 +2657,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const mesoJointFineRef = useRefT(new Set());    // exIds where joint was 'fine'
   const mesoPumpOkRef = useRefT(new Set());        // muscles where pump was moderate/amazing
   const mesoVolumeOkRef = useRefT(new Set());      // muscles where volume was just_right/not_enough
+  // Load-only plans: muscles answered 'still sore' this session. There sets are
+  // frozen, so soreness instead HOLDS the weight (a recovery-based load brake) —
+  // this set blocks the boost for those muscles. Modeled as "block on sore" (not
+  // "require ok") so a muscle whose soreness question wasn't asked (week 1, or a
+  // mid-session reload that clears it) still earns its boost, never a false hold.
+  const mesoSoreBlockRef = useRefT(new Set());
   const mesoSessionSetGainsRef = useRefT(mesoAskedInitRef.current.gains); // key → { exId, name, delta } for set changes this session
   // Which question type currently "owns" the negative set-delta slot for a
   // key (exId_dayId) this session — key -> 'soreness'|'joint'|'volume'. Two
@@ -2748,6 +2754,17 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       }
     }
     record.answer = answer;
+    // Load-only: soreness doesn't touch set counts (those are frozen) — it
+    // holds the weight instead. Record/clear the block for this muscle and
+    // stop; the growth/decline/commitContrib set-delta machinery below is a
+    // no-op here anyway (commitContrib freezes on load-only).
+    if (LB.autoregLoadOnly(mesoSch)) {
+      if (answer === 'still_sore') mesoSoreBlockRef.current.add(muscle);
+      else mesoSoreBlockRef.current.delete(muscle);
+      mesoAnswersRef.current.soreness[muscle] = record;
+      persistMesoAsked();
+      return;
+    }
     const namesByKey = {};
     const keys = [];
     record.targets.forEach(t => { namesByKey[t.key] = t.name; keys.push(t.key); });
@@ -3089,6 +3106,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       if (!mesoJointFineRef.current.has(exId)) continue;
       if (muscle && !mesoPumpOkRef.current.has(muscle)) continue;
       if (muscle && !mesoVolumeOkRef.current.has(muscle)) continue;
+      // Load-only: still-sore holds the weight for that muscle this session.
+      if (LB.autoregLoadOnly(mesoSch) && muscle && mesoSoreBlockRef.current.has(muscle)) continue;
 
       const workingSets = e.sets.filter(s => !s.warmup && !s.skipped);
       if (!workingSets.length) continue;
@@ -3150,7 +3169,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     if (mesoWeek == null) return; // pending period — meso not yet started
     if (mesoWeek === 1) return; // week 1: no previous meso session to be sore from
     if (mesoLastWeek) return; // final week: set deltas frozen, and soreness only drives deltas
-    if (LB.autoregLoadOnly(mesoSch)) return; // load-only: soreness only drives set deltas, which are frozen
+    // Load-only keeps asking soreness: there it holds the weight (recovery brake)
+    // instead of adjusting sets — see handleSorenessAnswer / computeMesoGains.
     const ex = entry ? store.exercises?.find(e => e.id === entry.exId) : null;
     const pm = primaryMuscleForExercise(ex);
     if (!pm || askedSorenessRef.current.has(pm)) return;
