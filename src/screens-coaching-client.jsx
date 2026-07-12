@@ -1177,7 +1177,14 @@ function ClientPlanTab({ clientStore, setClientStore, clientId, coachingId, user
         // DB row matches the in-memory plan instead of collapsing to a bare day
         // list on the next reload. If this insert fails the new exercises above
         // are left orphaned, but surfacing the error beats a silent partial save.
-        const { mode: _localMode, ...schRow } = sch;
+        // Build the insert row without object-rest (`const {mode, ...schRow}`):
+        // Babel compiles object-rest to a per-file `_excluded` array whose global
+        // name collides across all classic scripts in the shared precompile scope,
+        // and a stray one here corrupted the Btn component's prop filtering
+        // app-wide (see the Btn note in ui.jsx). A shallow copy + delete is
+        // equivalent and generates no `_excluded`.
+        const schRow = { ...sch };
+        delete schRow.mode;
         const { error: schErr } = await LB.supabase.from('zane_schedules').insert({ ...schRow, user_id: clientId });
         if (schErr) { alert(`Import failed: ${schErr.message}`); return; }
         setClientStore(s => ({
