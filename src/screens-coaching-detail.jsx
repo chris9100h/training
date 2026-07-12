@@ -1816,16 +1816,29 @@ function useCoachClientSync(clientId, scheduleId) {
     let on = true;
     setClientStoreRaw(null);
     setLoadError(null);
-    LB.loadClientStore(clientId).then(data => {
-      if (!on) return;
-      setClientStoreRaw(data);
-      prevClientStore.current = data;
-      latestClientStore.current = data;
-      if (scheduleId) {
-        const sch = data.schedules?.find(s => s.id === scheduleId);
-        initialSchedule.current = sch ? JSON.parse(JSON.stringify(sch)) : null;
-      }
-    }).catch(e => { if (on) setLoadError(e.message); });
+    // A schedule the caller wants to open may have been created moments ago by
+    // a sibling screen (the coach's new-plan wizard writes it via an unawaited
+    // setStore/syncStore, then navigates here immediately). This fresh fetch
+    // can race that write and land before it is actually queryable. Retry
+    // briefly instead of handing the caller a store that looks like the plan
+    // never existed (ScheduleEditScreen then renders nothing at all for it).
+    const load = (retriesLeft) => {
+      LB.loadClientStore(clientId).then(data => {
+        if (!on) return;
+        if (scheduleId && retriesLeft > 0 && !data.schedules?.some(s => s.id === scheduleId)) {
+          setTimeout(() => { if (on) load(retriesLeft - 1); }, 500);
+          return;
+        }
+        setClientStoreRaw(data);
+        prevClientStore.current = data;
+        latestClientStore.current = data;
+        if (scheduleId) {
+          const sch = data.schedules?.find(s => s.id === scheduleId);
+          initialSchedule.current = sch ? JSON.parse(JSON.stringify(sch)) : null;
+        }
+      }).catch(e => { if (on) setLoadError(e.message); });
+    };
+    load(3);
     return () => { on = false; };
   }, [clientId]);
 
@@ -1849,12 +1862,14 @@ function useCoachClientSync(clientId, scheduleId) {
 
 // Loading/error placeholder shown by both plan-editor wrapper screens while
 // the client's store is being fetched (or failed to load).
-function CoachClientLoadGate({ clientName, coachingId, clientId, go, loadError }) {
+function CoachClientLoadGate({ clientName, coachingId, clientId, go, loadError, message }) {
   return (
     <Screen>
       <TopBar title={clientName} sub={<span className="micro" style={{ color: 'var(--accent)' }}>COACHING</span>} onBack={() => go({ name: 'coaching-client', coachingId, clientId, clientName, initialTab: 'plan' })} />
       {loadError ? (
         <div style={{ padding: 32, textAlign: 'center', color: 'rgba(var(--danger-rgb),0.8)', fontFamily: UI.fontUi, fontSize: 13 }}>Failed to load client data: {loadError}</div>
+      ) : message ? (
+        <div style={{ padding: 32, textAlign: 'center', color: 'rgba(var(--danger-rgb),0.8)', fontFamily: UI.fontUi, fontSize: 13 }}>{message}</div>
       ) : (
         <div style={{ padding: 32, textAlign: 'center', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>Loading…</div>
       )}
@@ -1896,6 +1911,12 @@ function CoachPlanEditorScreen({ store, setStore, go, userId, coachingId, client
 
   if (loadError || !clientStore) {
     return <CoachClientLoadGate clientName={clientName} coachingId={coachingId} clientId={clientId} go={go} loadError={loadError} />;
+  }
+  // Reachable only if the retry above still could not find the schedule (e.g.
+  // it was deleted moments after creation): a clear message instead of
+  // ScheduleEditScreen silently rendering nothing for a missing plan.
+  if (!clientStore.schedules?.some(s => s.id === scheduleId)) {
+    return <CoachClientLoadGate clientName={clientName} coachingId={coachingId} clientId={clientId} go={go} message="This plan could not be found." />;
   }
 
   return (
