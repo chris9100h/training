@@ -852,6 +852,9 @@ function toResponse(field, raw, distUnit) {
     if (isNaN(n) || n <= 0) return null;
     return LB.distToM(raw, distUnit);
   }
+  // Hydration is entered in the viewer's water unit (fl oz for lbs, else ml)
+  // and stored canonically in ml, like distance stores meters.
+  if (field.key === 'hydration_ml') { const n = parseInt(raw, 10); return isNaN(n) ? null : UI.waterEntryToMl(n); }
   if (field.type === 'integer' || field.type === 'percent') { const n = parseInt(raw, 10); return isNaN(n) ? null : n; }
   if (field.type === 'decimal') { const n = parseFloat(String(raw).replace(',', '.')); return isNaN(n) ? null : n; }
   return raw; // text, stepper, choice
@@ -864,6 +867,8 @@ function initFormState(sections, responses, distUnit) {
     const v = responses?.[field.key];
     if (field._distanceField) {
       form[field.key] = v != null ? LB.mToDisplay(v, distUnit) : '';
+    } else if (field.key === 'hydration_ml') {
+      form[field.key] = v != null ? String(UI.waterToEntry(v)) : '';
     } else if (field.type === 'text') {
       form[field.key] = v != null ? String(v) : '';
     } else if (field.type === 'stepper' || field.type === 'choice') {
@@ -881,7 +886,9 @@ function initFormState(sections, responses, distUnit) {
 
 function FieldWidget({ field, value, onChange, distUnit, setDistUnit, inputStyle }) {
   const req = field.required ? ' *' : '';
-  const lbl = (field.unit === 'weight'
+  const lbl = (field.key === 'hydration_ml'
+    ? `${field.label} (${UI.waterEntryUnit()})`
+    : field.unit === 'weight'
     ? `${field.label} (${UI.unit()})`
     : field.unit === 'pace'
       ? `${field.label} (min${UI.unit() === 'lbs' ? '/mi' : '/km'})`
@@ -1083,7 +1090,7 @@ function CheckInForm({ coachingId, clientId, userId, weekStart, existing, prefil
     // Daily-log prefill: keys map 1:1 to form field keys (weight_today, steps,
     // protein_avg, macro_adherence, …). Only apply keys the schema actually has.
     if (dailyPrefill) {
-      allFields.forEach(f => { if (dailyPrefill[f.key] != null) base[f.key] = String(dailyPrefill[f.key]); });
+      allFields.forEach(f => { if (dailyPrefill[f.key] != null) base[f.key] = f.key === 'hydration_ml' ? String(UI.waterToEntry(dailyPrefill[f.key])) : String(dailyPrefill[f.key]); });
     }
     // Performance-vs-last-week is derived from logged sessions (the same source
     // the live preview uses), not from daily/cardio logs — apply it on top.

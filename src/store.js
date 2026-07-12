@@ -3376,6 +3376,11 @@ function diffSchedule(before, after, exercises) {
     const r = rps && rps.length > 1 ? `[${rps.join(',')}]` : (item.plannedReps ?? null);
     return r != null ? `${s}×${r}` : `${s} sets`;
   };
+  const fmtTechs = (item) => {
+    const t = item.plannedTechniques;
+    if (!Array.isArray(t) || !t.some(Boolean)) return null;
+    return t.map((x, i) => x ? `S${i + 1} ${plannedTechniqueShort(x)}` : null).filter(Boolean).join(', ');
+  };
   const exAdded = [], exRemoved = [], exChanged = [];
   for (const afterDay of shared) {
     const beforeDay = beforeById[afterDay.id];
@@ -3390,8 +3395,10 @@ function diffSchedule(before, after, exercises) {
       const setsChanged = (bi.plannedSets ?? null) !== (ai.plannedSets ?? null);
       const repsChanged = JSON.stringify(bi.plannedRepsPerSet ?? null) !== JSON.stringify(ai.plannedRepsPerSet ?? null)
         || (bi.plannedReps ?? null) !== (ai.plannedReps ?? null);
-      if (setsChanged || repsChanged) {
-        exChanged.push(`${exName(ai.exId)} (${afterDay.name}): ${fmtSetsReps(bi)} → ${fmtSetsReps(ai)}`);
+      const techChanged = JSON.stringify(bi.plannedTechniques ?? null) !== JSON.stringify(ai.plannedTechniques ?? null);
+      if (setsChanged || repsChanged || techChanged) {
+        const techPart = techChanged ? ` · ${fmtTechs(ai) || 'techniques cleared'}` : '';
+        exChanged.push(`${exName(ai.exId)} (${afterDay.name}): ${fmtSetsReps(bi)} → ${fmtSetsReps(ai)}${techPart}`);
       }
     });
   }

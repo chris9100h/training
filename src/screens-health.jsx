@@ -1001,8 +1001,8 @@ function HealthMetricsCard({ log, dateLabel, isToday, onJumpToday, dragHandle, t
       <div style={{ display: 'flex', gap: 12, marginBottom: 14 }}>
         {stat('Weight', log?.weight != null ? log.weight : null, wUnit)}
         {stat('Steps', log?.steps != null ? log.steps.toLocaleString() : null)}
-        {stat('Calories', log?.calories != null ? log.calories : null)}
         {stat('Water', log?.waterMl != null ? UI.waterSummaryValue(log.waterMl) : null, UI.waterSummaryUnit())}
+        {stat('Calories', log?.calories != null ? log.calories : null)}
       </div>
       <div style={{ display: 'flex', gap: 12 }}>
         {stat('Protein', log?.protein != null ? log.protein : null, 'g')}

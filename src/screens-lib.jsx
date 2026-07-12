@@ -1000,7 +1000,7 @@ function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = ''
   const pickLogMode = (m) => { setLogModeTouched(true); setLogMode(m); };
   const [equipment, setEquipment] = useStateL(seed ? (seed.equipment || 'no_equipment') : null);
   const [note, setNote] = useStateL('');
-  const [youtubeUrl, setYoutubeUrl] = useStateL(''); // no seed field for this — a catalog entry never carries one
+  const [youtubeUrl, setYoutubeUrl] = useStateL(''); // no seed field for this: a catalog entry never carries one
   const [showSizeInfo, setShowSizeInfo] = useStateL(false);
   const [showBodyweightHint, setShowBodyweightHint] = useStateL(false);
   // Fresh exercise → the wizard runs the full flow from the name step. A catalog

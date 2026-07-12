@@ -664,7 +664,7 @@ function Sheet({ open, onClose, title, titleColor, children, keyboardHeight = 0,
       // the AMRAP variation-name box on round 2+) ends up hidden behind the
       // keyboard. Pull it back into view once the viewport settles, and only on
       // the open transition (kb grows) so manual scrolling afterwards is left
-      // alone — a plain vv 'scroll' keeps kb steady and never triggers this.
+      // alone: a plain vv 'scroll' keeps kb steady and never triggers this.
       if (typing && kb > prevKb + 8) {
         clearTimeout(scrollTimer);
         scrollTimer = setTimeout(() => {
@@ -1146,7 +1146,7 @@ UI.unit = () => (typeof window !== 'undefined' && window.__UNIT) || 'kg';
 
 // Water/hydration is stored canonically in ml. Imperial (lbs) users see US
 // fluid ounces (1 fl oz = 29.5735 ml); metric (kg) and mixed (kg/mi, the UK
-// profile) stay ml/L — the UK measures water in ml, not oz, and UK vs US fl oz
+// profile) stay ml/L: the UK measures water in ml, not oz, and UK vs US fl oz
 // even differ. UI.unit() is the VIEWER's unit, so a coach reviewing a client's
 // hydration sees it in the coach's own unit, no client-unit plumbing needed.
 UI.FLOZ_ML = 29.5735;

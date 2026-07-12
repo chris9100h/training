@@ -27,3 +27,7 @@ jobs:
       # Runs export→import in a sandbox and verifies a backup round-trips every
       # schema column, so export/import can't silently drift from the DB.
       - run: node tools/check-backup-coverage.cjs
+      # The public features.html sits outside the service worker; verify its
+      # ?v= cache-buster tracks the sw.js CACHE version so branch/prod deploys
+      # never serve it a stale feature-map catalog.
+      - run: node tools/check-cache-version.cjs

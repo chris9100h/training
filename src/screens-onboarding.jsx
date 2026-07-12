@@ -1,25 +1,29 @@
-/* Onboarding — welcome prompt & guided spotlight tour */
+/* Onboarding: welcome prompt and guided card-deck tours */
 
 const { useState: useStateOB, useEffect: useEffectOB, useRef: useRefOB } = React;
 
 // ─── Tour data registry ──────────────────────────────────────────────
-// Each step: { route?, target?, title, body, visual?, placement? }
-// route    — navigate to this route before showing the step (optional)
-// target   — data-tour="..." attribute on the DOM element to spotlight (optional)
-// visual   — key into TOUR_VISUALS for an inline illustration (optional)
-// placement— 'top' | 'bottom' | auto (default)
+// Every step renders as a self-contained fullscreen card. Fields:
+//   title    headline
+//   body     description (supports newlines via \n)
+//   visual   key into TOUR_VISUALS for an inline illustration (optional)
+// The last step of a tour shows the celebration screen. Any route/target/
+// placement left on older steps are legacy no-ops: the card deck never
+// navigates or spotlights live DOM, so they are simply ignored.
 window.TOURS = {
   createPlan: [
     {
       target: null,
       title: 'Welcome to ZANE',
-      body: "Let's take a quick look around — two minutes and you'll know how to build your first training plan.",
+      body: "Let's take a quick look around, two minutes and you'll know how to build your first training plan.",
+      visual: 'welcome',
     },
     {
       route: 'home',
       target: 'tab-plan',
       title: 'The Plan tab',
-      body: 'Your training hub. Plans, training days, exercises, and your exercise library — all in one place.',
+      body: 'Your training hub. Plans, training days, exercises, and your exercise library, all in one place.',
+      visual: 'planTab',
       placement: 'top',
     },
     {
@@ -27,29 +31,31 @@ window.TOURS = {
       target: 'plan-new-btn',
       title: 'Create a plan',
       body: 'A plan is a collection of training days. Each day gets its own exercises. Tap + to get started.',
+      visual: 'planCreate',
       placement: 'bottom',
     },
     {
       target: null,
       title: 'A guided setup',
-      body: 'Tap + and a quick walkthrough builds your plan with you: name it, pick how it moves (Cycle, Weekdays, or Flexible), choose a training split, and optionally run it as a mesocycle. It lays out the days, then you fill in the exercises.',
+      body: 'Tap + and you choose how to start: a ready-made Program, a Template split, or Custom for the guided build. Custom walks you through it: name your plan, pick how it moves (Cycle, Weekdays, or Flexible), choose a training split, and optionally run it as a mesocycle. It lays out the days, then you fill in the exercises.',
+      visual: 'planWizard',
     },
     {
       target: null,
       title: 'Add training days',
-      body: 'After creating your plan, use "+ Day" to add training days. Name each one — PUSH, PULL, UPPER, or A / B / C.',
+      body: 'After creating your plan, use "+ Add day" to add training days. Name each one: PUSH, PULL, UPPER, or A / B / C.',
       visual: 'days',
     },
     {
       target: null,
       title: 'Fill each day with exercises',
-      body: 'Tap a day to open it, then add exercises. Search your exercise library, create a new one, or pick from recents. Set planned sets and reps for each.',
+      body: 'Tap a day to open it, then add exercises. Search your library, create a new one, or pull from the built-in exercise database. For each exercise set planned sets and reps. You can also pin an intensity technique per set (Drop Set, Myo-Reps, AMRAP and more) and it arms itself automatically when you train that day.',
       visual: 'exercises',
     },
     {
       target: null,
       title: 'The Exercise Library',
-      body: "Every exercise lives here — search, filter by muscle, equipment or rest size, and a Recent tab for what you've logged lately. Tap Select to multi-select a batch: bulk-edit them one after another, or delete several at once. Each exercise has muscle group, size, equipment, movement type and rep-target fields, plus an optional YouTube link that shows as a form-check button during training.",
+      body: "Every exercise lives here: search, filter by muscle, equipment or rest size, and a Recent tab for what you've logged lately. Tap Select to multi-select a batch: bulk-edit them one after another, or delete several at once. Each exercise has muscle group, size, equipment, movement type fields, plus a logging mode and an optional YouTube link that shows as a form-check button during training.",
       visual: 'planLibrary',
     },
     {
@@ -61,13 +67,13 @@ window.TOURS = {
     {
       target: null,
       title: 'Workout Templates',
-      body: 'Finish a freestyle session and you can save it as a template — every exercise and rep scheme included. Reuse it later from Quick Actions → Workout → Freestyle → From template, or pull it straight into a plan day: open the day\'s import picker and switch to the Templates tab.',
+      body: 'Finish a freestyle session and you can save it as a template, every exercise and rep scheme included. Reuse it later from Quick Actions → Workout → Freestyle → From template, or pull it straight into a plan day: open the day\'s import picker and switch to the Templates tab.',
       visual: 'planTemplates',
     },
     {
       target: null,
       title: 'Flexible & Mesocycle Plans',
-      body: 'In a plan\'s Options, "Flexible schedule" drops fixed days entirely — your next workout just waits until you log it, with an optional weekly-sessions goal for adherence tracking. "Mesocycle" turns on a 4–8 week block with RIR targets and the in-session check-ins from the workout tour — auto-regulating your sets as the block progresses.',
+      body: 'In a plan\'s Options, "Flexible schedule" drops fixed days entirely: your next workout just waits until you log it, with an optional weekly-sessions goal for adherence tracking. "Mesocycle" turns on a 4-8 week block with RIR targets and the in-session check-ins from the workout tour, auto-regulating your sets as the block progresses.',
       visual: 'planFlexMeso',
     },
     {
@@ -79,14 +85,15 @@ window.TOURS = {
     {
       target: null,
       title: 'Plan Backups',
-      body: 'Every time your training days change, a snapshot is saved automatically. Tap Backups in the plan viewer to preview or restore an older day layout — pick the date it should take effect from, done.',
+      body: 'Every time your training days change, a snapshot is saved automatically. Tap Backups in the plan viewer to preview or restore an older day layout, pick the date it should take effect from, done.',
       visual: 'planBackups',
     },
     {
       route: 'home',
       target: 'tab-hist',
       title: 'Your training history',
-      body: 'Every session is automatically logged here — sets, reps, volume, and personal records over time.',
+      body: 'Every session is automatically logged here: sets, reps, volume, and personal records over time.',
+      visual: 'planHistory',
       placement: 'top',
     },
     {
@@ -101,7 +108,8 @@ window.TOURS.doWorkout = [
   {
     target: null,
     title: 'Workout Tour',
-    body: "Let's walk through a complete training session — from the first warmup set to the well-done screen.",
+    body: "Let's walk through a complete training session, from the first warmup set to the well-done screen.",
+    visual: 'workoutIntro',
   },
   {
     target: null,
@@ -112,13 +120,13 @@ window.TOURS.doWorkout = [
   {
     target: null,
     title: 'The Training Screen',
-    body: 'After the warmup you land here. Exercise chips run across the top — tap any to jump to it. Below is the exercise card with your set rows: set number, last-time reference, weight, reps, done button, and a − to remove that set.',
+    body: 'After the warmup you land here. Exercise chips run across the top. Tap any to jump to it. Below is the exercise card with your set rows: set number, last-time reference, weight, reps, done button, and a − to remove that set.',
     visual: 'trainOverview',
   },
   {
     target: null,
     title: 'Logging a Set',
-    body: 'Tap a set row to activate it — the weight field gets a highlighted underline in your accent color. Enter weight, tap the reps field, enter reps. The keyboard auto-advances between fields and can confirm the set in one tap.',
+    body: 'Tap a set row to activate it: the weight field gets a highlighted underline in your accent color. Enter weight, tap the reps field, enter reps. The keyboard auto-advances between fields and can confirm the set in one tap.',
     visual: 'trainLogSet',
   },
   {
@@ -130,25 +138,25 @@ window.TOURS.doWorkout = [
   {
     target: null,
     title: 'Plate Calculator',
-    body: 'Opens from the dumbbell key on the keyboard. Shows which plates to load on each side of the bar as colored circles — calculated from your available equipment.',
+    body: 'Opens from the dumbbell key on the keyboard. Shows which plates to load on each side of the bar as colored circles, calculated from your available equipment.',
     visual: 'trainPlates',
   },
   {
     target: null,
     title: 'Add & Remove Sets',
-    body: 'The + button below the sets adds a new set (duplicating the last one). Each set row has a − button on the right — tap it to remove that set.',
+    body: 'The + button below the sets adds a new set (duplicating the last one). Each set row has a − button on the right, tap it to remove that set.',
     visual: 'trainSets',
   },
   {
     target: null,
     title: 'Intensity Techniques',
-    body: "Tap INTENSITY above the sets to go beyond a plain working set. Drop Set descends the weight and keeps the reps coming. Lengthened Partials adds partial reps in the stretch after your full reps. Myo Rep (and Myo Match, once you've done one) chains activation sets with mini bursts to failure. You can also pair two exercises into a Superset — or three into a Giant Set — with no rest between them.",
+    body: "Tap INTENSITY below the sets to go beyond a plain working set. Drop Set descends the weight and keeps the reps coming. Myo Reps (and Myo Rep Match after one) chain activation sets with mini bursts to failure. AMRAP Variations run repeated all-out rounds, optionally switching the movement each round. Lengthened Partials add partial reps in the stretch, and Weighted Stretch holds a loaded stretch. You can also pair two exercises into a Superset, or three into a Giant Set, with no rest between them.",
     visual: 'trainIntensity',
   },
   {
     target: null,
     title: 'Exercise Notes',
-    body: 'The Note button sits to the right of the + button, below the sets. Tap it to add a session note or a permanent exercise note — cues, tempo, substitutions. The note is shown every time you train that exercise.',
+    body: 'The Note button sits to the right of the + button, below the sets. Tap it to add a session note or a permanent exercise note, cues, tempo, substitutions. The note is shown every time you train that exercise.',
     visual: 'trainNotes',
   },
   {
@@ -166,25 +174,25 @@ window.TOURS.doWorkout = [
   {
     target: null,
     title: 'Mesocycle Check-ins',
-    body: "Running a mesocycle (turn it on in a plan's Options)? A short check-in can pop up after a muscle group's sets — soreness carryover, joint discomfort, and how the pump and workload felt. Your honest answers quietly adjust next session's sets, and repeated joint pain or a weak pump on an exercise flags it as a swap candidate.",
+    body: "Running a mesocycle (turn it on in a plan's Options)? A short check-in can pop up after a muscle group's sets, soreness carryover, joint discomfort, and how the pump and workload felt. Your honest answers quietly adjust next session's sets, and repeated joint pain or a weak pump on an exercise flags it as a swap candidate.",
     visual: 'trainMeso',
   },
   {
     target: null,
     title: 'Finish Your Workout',
-    body: "Once you reach the last exercise, a 'Finish →' button appears in the footer. Tap it to end the session — you'll see a summary of sets, volume, and duration.",
+    body: "Once you reach the last exercise, a 'Finish →' button appears in the footer. Tap it to end the session, you'll see a summary of sets, volume, and duration.",
     visual: 'trainEnd',
   },
   {
     target: null,
     title: 'Rate Your Session',
-    body: 'Pick how the workout felt — Easy to Max Effort. This data powers your training load overview and helps identify fatigue patterns over time.',
+    body: 'Pick how the workout felt, from Easy to Max. This data powers your training load overview and helps identify fatigue patterns over time.',
     visual: 'trainFeel',
   },
   {
     target: null,
     title: 'Save as a Template',
-    body: 'Finished a freestyle session? A "Save as template" button appears right on the well-done screen. Name it and every exercise, set and rep scheme is saved — start from it again later via Quick Actions → Workout → Freestyle → From template, or import it straight into a plan day.',
+    body: 'Finished a freestyle session? A "Save as template" button appears right on the well-done screen. Name it and every exercise, set and rep scheme is saved, start from it again later via Quick Actions → Workout → Freestyle → From template, or import it straight into a plan day.',
     visual: 'trainSaveTemplate',
   },
   {
@@ -199,7 +207,7 @@ window.TOURS.quickActions = [
   {
     target: null,
     title: 'Quick Actions',
-    body: "One gesture, every shortcut. Swipe down anywhere on the Home screen to log today's data, start a workout, catch up on a missed day, log cardio, or message your coach — without digging through tabs.",
+    body: "One gesture, every shortcut. Swipe down anywhere on the Home screen to log today's data, start a workout, catch up on a missed day, log cardio, or message your coach, without digging through tabs.",
     visual: 'quickActionsSwipe',
   },
   {
@@ -211,31 +219,31 @@ window.TOURS.quickActions = [
   {
     target: null,
     title: 'Daily Log',
-    body: "Always there. Opens today's health entry straight away — body weight, macros, water and steps — no need to go through the Health tab first.",
+    body: "Always there. Opens today's health entry straight away, body weight, macros, water and steps, no need to go through the Health tab first.",
     visual: 'quickActionsDailyLog',
   },
   {
     target: null,
     title: 'Workout',
-    body: '"From plan" lets you pick any day from your schedule, not just today\'s — you decide at the end whether it replaces the scheduled day or just counts as a bonus session. "Freestyle" opens a blank session, or one seeded from a saved template.',
+    body: '"From plan" lets you pick any day from your schedule, not just today\'s, you decide at the end whether it replaces the scheduled day or just counts as a bonus session. "Freestyle" opens a blank session, or one seeded from a saved template.',
     visual: 'quickActionsWorkout',
   },
   {
     target: null,
     title: 'Backlog Session',
-    body: "Shows up only when a day from your plan went unlogged. One tap logs it retroactively, dated back to when it should've happened — pick which one if there's more than one.",
+    body: "Shows up only when a day from your plan went unlogged. One tap logs it retroactively, dated back to when it should've happened, pick which one if there's more than one.",
     visual: 'quickActionsBacklog',
   },
   {
     target: null,
     title: 'Cardio',
-    body: 'Always there. Start a live cardio timer or log a past session manually — running, cycling, rowing, whatever you tracked.',
+    body: 'Always there. Start a live cardio timer or log a past session manually, running, cycling, rowing, whatever you tracked.',
     visual: 'quickActionsCardio',
   },
   {
     target: null,
     title: 'Check-in',
-    body: "Shows up only while a weekly check-in is due — as a coaching client, self-coaching, or both. One tap drops you straight into the form.",
+    body: "Shows up only while a weekly check-in is due, as a coaching client, self-coaching, or both. One tap drops you straight into the form.",
     visual: 'quickActionsCheckin',
   },
   {
@@ -255,12 +263,13 @@ window.TOURS.healthTab = [
   {
     target: null,
     title: 'Health Tab Tour',
-    body: "Let's walk through the Health tab — your daily log for weight, nutrition, steps, and cardio.",
+    body: "Let's walk through the Health tab, your daily log for weight, nutrition, steps, and cardio.",
+    visual: 'healthIntro',
   },
   {
     target: null,
     title: 'Enable the Health tab',
-    body: 'The Health tab is hidden by default. Go to Settings → Health and toggle "Show Health tab" to pin it to the bottom navigation.',
+    body: 'The Health tab is hidden by default. Go to Settings → Health and turn on the "Health tab" toggle to pin it to the bottom navigation.',
     visual: 'healthEnable',
   },
   {
@@ -268,6 +277,7 @@ window.TOURS.healthTab = [
     target: 'tab-health',
     title: 'The Health tab',
     body: 'Once enabled, the Health tab appears in the bottom nav. Tap it to open your daily log and charts.',
+    visual: 'healthOverview',
     placement: 'top',
   },
   {
@@ -275,36 +285,38 @@ window.TOURS.healthTab = [
     target: 'health-log-btn',
     title: 'Log your day',
     body: 'Tap LOG to open the daily entry sheet. Record weight, steps, calories, macros, and water for any day.',
+    visual: 'healthLogDay',
     placement: 'bottom',
   },
   {
     target: null,
     title: 'Daily Log Sheet',
-    body: 'Fill in what you tracked today — body weight, step count, water intake, and your macros. Missed a day? Navigate to any past date and log it retroactively.',
+    body: 'Fill in what you tracked today, body weight, step count, water intake, and your macros. Missed a day? Navigate to any past date and log it retroactively.',
     visual: 'healthLog',
   },
   {
     target: 'health-card-macros',
     title: 'Macros & Targets',
     body: 'Set your daily macro targets (protein / carbs / fat) and the app tracks your adherence automatically. Tap SET or EDIT in the Macros card to configure your goals.',
+    visual: 'healthMacros',
     placement: 'bottom',
   },
   {
     target: null,
     title: 'Cardio Logging',
-    body: "Log cardio from the Home screen — tap the golden CARDIO button at the bottom. Start a live timer or log manually. The Health tab shows your cardio minutes as a chart. Want a structured plan that ramps toward a goal instead? See the Cardio Plans tour in Settings → How to…",
+    body: "Log cardio from the Home screen: swipe down for Quick Actions and tap Cardio. Start a live timer or log a past session manually. The Health tab shows your cardio minutes as a chart. Want a structured plan that ramps toward a goal instead? See the Cardio Plans tour in Settings → How to…",
     visual: 'healthCardio',
   },
   {
     target: null,
     title: 'Week & Long-term View',
-    body: 'The Week card at the top summarises the current period — training sessions done, macro adherence, and cardio minutes. Switch to 1M or 3M for a longer-range overview.',
+    body: 'The Week card at the top summarises the current period: training sessions done, macro adherence, and cardio minutes. Switch to 1M or 3M for a longer-range overview.',
     visual: 'healthWeek',
   },
   {
     target: null,
     title: "You're all set!",
-    body: 'Start logging daily and let the charts fill in over time. Even partial data — just weight or steps — is useful. Find the Health tab again in the bottom nav.',
+    body: 'Start logging daily and let the charts fill in over time. Even partial data, just weight or steps, is useful. Find the Health tab again in the bottom nav.',
   },
 ];
 
@@ -312,37 +324,37 @@ window.TOURS.cardioPlans = [
   {
     target: null,
     title: 'Cardio Plans',
-    body: "Beyond logging a session, you can build a structured cardio plan — fixed weekly targets, or a progressive plan that ramps you toward a goal by a due date. Create one from the Cardio tab.",
+    body: "Beyond logging a session, you can build a structured cardio plan, fixed weekly targets, or a progressive plan that ramps you toward a goal by a due date. Create one from the Cardio tab.",
     visual: 'cardioIntro',
   },
   {
     target: null,
     title: 'Choose Your Activity',
-    body: 'Pick from Running, Walking, Cycling, Swimming, Rowing, Elliptical, Hiking — or Custom for anything else you log. Then choose the plan type: Manual (fixed weekly targets you set) or Goal (the app builds a progression for you).',
+    body: 'Pick from Running, Walking, Cycling, Swimming, Rowing, Elliptical, Hiking, or Custom for anything else you log. Then choose the plan type: Manual (fixed weekly targets you set) or Goal (the app builds a progression for you).',
     visual: 'cardioActivity',
   },
   {
     target: null,
     title: 'Manual Plan',
-    body: 'Tap the days you train, then set targets — the same distance or duration every day, or different per day. Prefer to just show up with no numbers attached? Turn targets off entirely.',
+    body: 'Tap the days you train, then set targets, the same distance or duration every day, or different per day. Prefer to just show up with no numbers attached? Turn targets off entirely.',
     visual: 'cardioManual',
   },
   {
     target: null,
     title: 'Goal Plan',
-    body: "Pick a goal type — Distance, Distance + Pace, or Duration — set your target and a due date, and the days you'll train. Then tell it your current fitness: how far or how long you can comfortably go right now.",
+    body: "Pick a goal type, Distance, Distance + Pace, or Duration, set your target and a due date, and the days you'll train. Then tell it your current fitness: how far or how long you can comfortably go right now.",
     visual: 'cardioGoal',
   },
   {
     target: null,
     title: 'Progressive Plan Preview',
-    body: "The plan ramps session by session toward your goal — capped at a sustainable ~10% increase per week — with every 4th week a lighter recovery week. If the math shows you won't reach the goal by your due date, you'll get a warning to extend the timeline.",
+    body: "The plan ramps session by session toward your goal, capped at a sustainable ~10% increase per week, with every 4th week a lighter recovery week. If the math shows you won't reach the goal by your due date, you'll get a warning to extend the timeline.",
     visual: 'cardioPreview',
   },
   {
     target: null,
     title: 'One Active Plan',
-    body: "Only one plan is active at a time — it's the one shown on the Home screen widget and pre-fills your cardio logs. Activate or deactivate any plan from its detail sheet; a new plan auto-activates if nothing else is running.",
+    body: "Only one plan is active at a time, it's the one shown on the Home screen widget and pre-fills your cardio logs. Activate or deactivate any plan from its detail sheet; a new plan auto-activates if nothing else is running.",
     visual: 'cardioActivate',
   },
   {
@@ -356,31 +368,31 @@ window.TOURS.statusModes = [
   {
     target: null,
     title: 'Deload, Sick & Vacation',
-    body: "Life doesn't always follow the plan. Three modes let the app know when you're taking it easier — without losing your progress or skewing your stats.",
+    body: "Life doesn't always follow the plan. Three modes let the app know when you're taking it easier, without losing your progress or skewing your stats.",
     visual: 'statusIntro',
   },
   {
     target: null,
     title: 'Deload Week',
-    body: '"Start deload week" sits on your active plan card. It trains your normal plan at ~50% load for one cycle — weights pre-fill light and a DELOAD · 50% badge shows during training. It excludes itself from progression, so the week after picks up right where you left off.',
+    body: '"Start deload week" sits on your active plan card. It trains your normal plan at ~50% load for one cycle, weights pre-fill light and a DELOAD · 50% badge shows during training. It excludes itself from progression, so the week after picks up right where you left off.',
     visual: 'statusDeload',
   },
   {
     target: null,
     title: 'The Deload Prompt',
-    body: "Two things can offer you one. Finish the last week of a mesocycle and \"Mesocycle complete!\" pops up right on the session-end screen, offering a deload before Meso 2 starts. Independent of that, roughly every 8 training cycles without one, a general nudge asks if you're due a break. Accept either, or dismiss and keep training — you'll be asked again next time.",
+    body: "Two things can offer you one. Finish the last week of a mesocycle and \"Mesocycle complete!\" pops up right on the session-end screen, offering a deload before Meso 2 starts. Independent of that, roughly every 8 training cycles without one, a general nudge asks if you're due a break. Accept either, or dismiss and keep training. You'll be asked again next time.",
     visual: 'statusNudge',
   },
   {
     target: null,
     title: 'Sick & Vacation',
-    body: "For time off training entirely, mark it right on the day: Health tab → tap a day → Edit Day → the Sick / Normal / Vacation toggle up top. Unlike deload, these don't touch your weights — they just keep sick/vacation days out of your training-adherence score. Review or edit past periods any time in Settings → Health → Sick & Vacation periods.",
+    body: "For time off training entirely, mark it right on the day: Health tab → tap a day → Edit Day → the Sick / Normal / Vacation toggle up top. Unlike deload, these don't touch your weights, they just keep sick/vacation days out of your training-adherence score. Review or edit past periods any time in Settings → Health → Sick & Vacation periods.",
     visual: 'statusSickVacation',
   },
   {
     target: null,
     title: "You're all set!",
-    body: 'Use these whenever training takes a back seat — your stats and progression stay honest either way. Find this tour again in Settings → How to…',
+    body: 'Use these whenever training takes a back seat, your stats and progression stay honest either way. Find this tour again in Settings → How to…',
   },
 ];
 
@@ -388,19 +400,19 @@ window.TOURS.customize = [
   {
     target: null,
     title: 'Customize ZANE',
-    body: "A quick pass through the settings worth knowing about — the ones that change how the app looks, and the ones that change how it trains you.",
+    body: "A quick pass through the settings worth knowing about, the ones that change how the app looks, and the ones that change how it trains you.",
     visual: 'customIntro',
   },
   {
     target: null,
     title: 'Appearance',
-    body: 'Pick an accent color and a theme — Dark, OLED Black, or a light cream. Your unit preference (kg/lbs) lives here too — it only relabels displayed weights, your logged numbers never get converted.',
+    body: 'Pick an accent color and a theme: Dark, OLED black, or a light cream. Your unit preference (Metric, Imperial, or Mixed) lives here too. It only relabels displayed weights, your logged numbers never get converted.',
     visual: 'customAppearance',
   },
   {
     target: null,
     title: 'Rest Timers',
-    body: 'Set default rest durations by exercise size — Big compounds, Medium, and Small isolation moves each get their own timer. Tag an exercise with a size in the library and the right rest applies automatically.',
+    body: 'Set default rest durations by exercise size, Big compounds, Medium, and Small isolation moves each get their own timer. Tag an exercise with a size in the library and the right rest applies automatically.',
     visual: 'customRest',
   },
   {
@@ -412,19 +424,19 @@ window.TOURS.customize = [
   {
     target: null,
     title: 'Smart Progression',
-    body: 'Turn this on and the app bumps your weight automatically once every set clears a rep threshold above target — e.g. target 8 reps, range top +4, weight goes up once all sets hit 12. Different from Mesocycle: this is the everyday auto-progression, Mesocycle is the structured multi-week block with RIR targets.',
+    body: 'Turn this on and the app bumps your weight automatically once every set clears a rep threshold above target, e.g. target 8 reps, range top +4, weight goes up once all sets hit 12. Different from Mesocycle: this is the everyday auto-progression, Mesocycle is the structured multi-week block with RIR targets.',
     visual: 'customProgression',
   },
   {
     target: null,
     title: 'Paceguard',
-    body: 'Want tempo control on your reps? Paceguard beeps out the eccentric (down) and concentric (up) phase of each rep at durations you set — useful for slowing down and controlling form.',
+    body: 'Want tempo control on your reps? Paceguard beeps out the eccentric (down) and concentric (up) phase of each rep at durations you set, useful for slowing down and controlling form.',
     visual: 'customPaceguard',
   },
   {
     target: null,
     title: "You're all set!",
-    body: 'Small settings, real difference — worth a look once, then forget about them. Find this tour again in Settings → How to…',
+    body: 'Small settings, real difference, worth a look once, then forget about them. Find this tour again in Settings → How to…',
   },
 ];
 
@@ -432,7 +444,8 @@ window.TOURS.coaching = [
   {
     target: null,
     title: 'Coaching Tour',
-    body: "Coaching links a coach and a client inside the app — shared training data, weekly check-ins, macro targets, and a private message thread. Let's walk through both sides.",
+    body: "Coaching links a coach and a client inside the app, shared training data, weekly check-ins, macro targets, and a private message thread. Let's walk through both sides.",
+    visual: 'coachingIntro',
   },
   {
     target: null,
@@ -449,31 +462,31 @@ window.TOURS.coaching = [
   {
     target: null,
     title: 'As a client: accept an invite',
-    body: "When a coach invites you, this request pops up next time you open the app. Accept and your coach can see your training, sessions and plans — and adjust them for you. Decline and nothing is shared.",
+    body: "When a coach invites you, this request pops up next time you open the app. Accept and your coach can see your training, sessions and plans, and adjust them for you. Decline and nothing is shared.",
     visual: 'coachInviteAccept',
   },
   {
     target: null,
     title: 'Your weekly check-in',
-    body: "Each week you fill in a short check-in — body weight, recovery markers like sleep and hunger, and how training went. If you use the Health tab, your daily logs prefill most of it automatically.",
+    body: "Each week you fill in a short check-in, body weight, recovery markers like sleep and hunger, and how training went. If you use the Health tab, your daily logs prefill most of it automatically.",
     visual: 'coachCheckin',
   },
   {
     target: null,
     title: 'Macros from your coach',
-    body: 'Your coach can set daily macro targets — separate numbers for training and rest days. They appear in your Coaching tab and feed straight into the Health tab adherence tracking.',
+    body: 'Your coach can set daily macro targets, separate numbers for training and rest days. They appear in your Coaching tab and feed straight into the Health tab adherence tracking.',
     visual: 'coachMacros',
   },
   {
     target: null,
     title: 'Notes & messaging',
-    body: 'Every coaching relationship has a private thread. Coach and client leave notes on sessions, plans, or just talk — questions, cues, weekly feedback. Unread notes ping you on the home screen.',
+    body: 'Every coaching relationship has a private thread. Coach and client leave notes on sessions, plans, or just talk: questions, cues, weekly feedback. Unread messages light up a badge on the Coaching tab (and on the client\'s card), so nothing slips by.',
     visual: 'coachNotes',
   },
   {
     target: null,
     title: 'As a coach: invite a client',
-    body: 'Open the Coaching tab and tap the add-person icon. Enter the email of someone who already has an account — they get the invite the next time they open the app.',
+    body: 'Open the Coaching tab and tap the add-person icon. Enter the email of someone who already has an account, they get the invite the next time they open the app.',
     visual: 'coachInvite',
   },
   {
@@ -485,60 +498,65 @@ window.TOURS.coaching = [
   {
     target: null,
     title: 'Review check-ins & trends',
-    body: "Inside a client, their check-in history becomes trend charts — weight, recovery markers, performance week over week. Spot a bad sleep streak or a stalling weight at a glance.",
+    body: "Inside a client, their check-in history becomes trend charts, weight, recovery markers, performance week over week. Spot a bad sleep streak or a stalling weight at a glance.",
     visual: 'coachTrends',
   },
   {
     target: null,
     title: 'Customize the check-in form',
-    body: "The check-in form isn't fixed. Per client you can add, remove, or reorder fields in the schema builder — drop in a custom scale, a number, or a note field for exactly what you want to track.",
+    body: "The check-in form isn't fixed. Per client you can add, remove, or reorder fields in the schema builder: drop in a custom scale, a number, or a note field for exactly what you want to track. Save a form you like as a template (up to 5) and reuse it for any client.",
     visual: 'coachSchema',
   },
   {
     target: null,
     title: 'Be your own coach',
-    body: 'No coach? Flip on "Be your own coach" in Settings → Coaching. You get the whole coach dashboard — trends, macros, check-ins and notes — pointed at your own training. Great for self-guided periodization.',
+    body: 'No coach? Flip on "Be your own coach" in Settings → Coaching. You get the whole coach dashboard, trends, macros, check-ins and notes, pointed at your own training. Great for self-guided periodization.',
     visual: 'coachSelf',
   },
   {
     target: null,
     title: "You're all set!",
-    body: 'Coach others, get coached, or run it solo — all from one tab. Find this tour again any time in Settings → How to…',
+    body: 'Coach others, get coached, or run it solo, all from one tab. Find this tour again any time in Settings → How to…',
   },
 ];
 
 window.TOURS.installPwaIos = [
   {
     target: null,
-    title: 'Install on iPhone — Step 1',
-    body: 'Open Zane in Safari — the default iOS browser. Chrome and Firefox cannot install apps on iPhone.',
+    title: 'Install on iPhone, Step 1',
+    body: 'Open Zane in Safari, the default iOS browser. Chrome and Firefox cannot install apps on iPhone.',
     visual: 'pwaIosSafari',
   },
   {
     target: null,
     title: 'Tap the Share button',
-    body: 'Tap the Share button — the square with an arrow pointing up. Depending on your iOS version, it sits in the bottom toolbar or in a sub menu in the address bar area.',
+    body: 'Tap the Share button, the square with an arrow pointing up. Depending on your iOS version, it sits in the bottom toolbar or in a sub menu in the address bar area.',
     visual: 'pwaIosShare',
   },
   {
     target: null,
     title: 'Tap "Add to Home Screen"',
-    body: 'Scroll through the share sheet and tap "Add to Home Screen". If you don\'t see it, scroll the bottom row of app icons.',
+    body: 'Scroll through the share sheet and tap "Add to Home Screen". If you don\'t see it, scroll further down the list of actions.',
     visual: 'pwaIosAddToHome',
   },
   {
     target: null,
     title: 'Tap "Add"',
-    body: 'Confirm the name and tap "Add" in the top-right corner. Zane appears on your home screen instantly — no App Store needed.',
+    body: 'Confirm the name and tap "Add" in the top-right corner. Zane appears on your home screen instantly, no App Store needed.',
     visual: 'pwaIosAdd',
+  },
+  {
+    target: null,
+    title: "You're all set!",
+    body: 'Open Zane from your home screen and it runs like a native app: fullscreen, its own icon, offline-ready. Find this tour again in Settings → How to…',
   },
 ];
 
 window.TOURS.installPwaAndroid = [
   {
     target: null,
-    title: 'Install on Android — Step 1',
-    body: 'Open Zane in Chrome — the default Android browser. Chrome gives the best installation experience.',
+    title: 'Install on Android, Step 1',
+    body: 'Open Zane in Chrome, the default Android browser. Chrome gives the best installation experience.',
     visual: 'pwaAndroidChrome',
   },
   {
@@ -556,8 +574,13 @@ window.TOURS.installPwaAndroid = [
   {
     target: null,
     title: 'Tap "Install"',
-    body: 'A dialog appears with the Zane icon and name. Tap "Install" — done. Zane opens like a native app from now on.',
+    body: 'A dialog appears with the Zane icon and name. Tap "Install", done. Zane opens like a native app from now on.',
     visual: 'pwaAndroidInstall',
+  },
+  {
+    target: null,
+    title: "You're all set!",
+    body: 'Open Zane from your home screen and it runs like a native app: fullscreen, its own icon, offline-ready. Find this tour again in Settings → How to…',
   },
 ];
 
@@ -1255,7 +1278,7 @@ function TourVisualHealthEnable() {
           <span style={{ fontSize: 9, fontFamily: UI.fontUi, letterSpacing: '0.12em', color: UI.inkFaint }}>SETTINGS → HEALTH</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', padding: '12px 14px', gap: 10 }}>
-          <span style={{ flex: 1, fontSize: 13, fontFamily: UI.fontUi, color: UI.ink }}>Show Health tab</span>
+          <span style={{ flex: 1, fontSize: 13, fontFamily: UI.fontUi, color: UI.ink }}>Health tab</span>
           <div style={{ width: 44, height: 26, borderRadius: 13, background: 'var(--accent)', position: 'relative', flexShrink: 0 }}>
             <div style={{ position: 'absolute', right: 3, top: 3, width: 20, height: 20, borderRadius: '50%', background: '#0a0805' }} />
           </div>
@@ -1270,27 +1293,19 @@ function TourVisualHealthEnable() {
 
 function TourVisualHealthCardio() {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-      <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, padding: '0 2px' }}>Home screen — bottom of the page</div>
-      <div style={{
-        width: '100%', padding: '11px 16px',
-        background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)',
-        border: '1px solid rgba(var(--accent-rgb),0.6)',
-        borderRadius: 8,
-        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-      }}>
-        <i className="fa-solid fa-person-running" style={{ fontSize: 13, color: 'rgba(10,8,5,0.6)' }} />
-        <span style={{ fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, letterSpacing: '0.18em', color: 'rgba(10,8,5,0.75)' }}>CARDIO</span>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, padding: '0 2px' }}>Home: swipe down for Quick Actions</div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', background: 'rgba(var(--accent-rgb),0.08)', border: '1px solid rgba(var(--accent-rgb),0.3)', borderRadius: 6 }}>
+        <i className="fa-solid fa-person-running" style={{ fontSize: 13, color: 'var(--accent)', width: 16, textAlign: 'center' }} />
+        <span style={{ flex: 1, fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, color: 'var(--accent)' }}>Cardio</span>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
       </div>
       <div style={{ background: UI.bgCard, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, overflow: 'hidden' }}>
         {[
           { icon: 'fa-stopwatch', label: 'Start live', accent: true },
           { icon: 'fa-pen', label: 'Log manually', accent: false },
         ].map((item, i) => (
-          <div key={i} style={{
-            display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px',
-            borderBottom: i === 0 ? `0.5px solid ${UI.hair}` : 'none',
-          }}>
+          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderBottom: i === 0 ? `0.5px solid ${UI.hair}` : 'none' }}>
             <i className={`fa-solid ${item.icon}`} style={{ fontSize: 12, color: item.accent ? 'var(--accent)' : UI.inkFaint, width: 14, textAlign: 'center' }} />
             <span style={{ fontSize: 12, fontFamily: UI.fontUi, color: item.accent ? 'var(--accent)' : UI.inkSoft }}>{item.label}</span>
           </div>
@@ -2120,7 +2135,240 @@ function TourVisualPwaAndroidInstall() {
   );
 }
 
+// ── Mockups for the intro and former-spotlight card-deck steps ──
+function tourNavBar(active) {
+  const tabs = [
+    { key: 'home', icon: 'fa-house', label: 'Home' },
+    { key: 'plan', icon: 'fa-calendar-days', label: 'Plan' },
+    { key: 'train', icon: 'fa-dumbbell', label: 'Train' },
+    { key: 'hist', icon: 'fa-clock-rotate-left', label: 'History' },
+    { key: 'settings', icon: 'fa-gear', label: 'Settings' },
+  ];
+  return (
+    <div style={{ display: 'flex', background: UI.bgCard, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, overflow: 'hidden' }}>
+      {tabs.map((t, i) => {
+        const on = t.key === active;
+        return (
+          <div key={t.key} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, padding: '8px 0', borderLeft: i ? `0.5px solid ${UI.hair}` : 'none', background: on ? 'rgba(var(--accent-rgb),0.10)' : 'transparent' }}>
+            <i className={'fa-solid ' + t.icon} style={{ fontSize: 13, color: on ? 'var(--accent)' : UI.inkFaint }} />
+            <span style={{ fontSize: 8, fontFamily: UI.fontUi, letterSpacing: '0.06em', color: on ? 'var(--accent)' : UI.inkGhost }}>{t.label}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+function TourVisualPlanTab() { return tourNavBar('plan'); }
+
+function TourVisualWelcome() {
+  const rows = [
+    { icon: 'fa-calendar-days', label: 'Build a plan' },
+    { icon: 'fa-dumbbell', label: 'Train with guidance' },
+    { icon: 'fa-chart-line', label: 'Track every session' },
+  ];
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12, alignItems: 'center', padding: '4px 0' }}>
+      <div style={{ fontFamily: UI.fontDisplay, fontSize: 34, fontWeight: 700, letterSpacing: '0.18em', color: UI.ink }}>ZANE</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, width: '100%' }}>
+        {rows.map(r => (
+          <div key={r.label} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 4 }}>
+            <i className={'fa-solid ' + r.icon} style={{ fontSize: 12, color: 'var(--accent)', width: 16, textAlign: 'center' }} />
+            <span style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.inkSoft, fontWeight: 500 }}>{r.label}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function TourVisualPlanCreate() {
+  const opts = [
+    { label: 'Programs', sub: 'Ready-made', icon: 'fa-layer-group', on: false },
+    { label: 'Templates', sub: 'Pick a split', icon: 'fa-table-cells-large', on: false },
+    { label: 'Custom', sub: 'Guided build', icon: 'fa-wand-magic-sparkles', on: true },
+  ];
+  return (
+    <div style={{ background: UI.bgCard, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, overflow: 'hidden' }}>
+      <div style={{ padding: '7px 12px', borderBottom: `0.5px solid ${UI.hair}` }}>
+        <span style={{ fontSize: 9, fontFamily: UI.fontUi, letterSpacing: '0.14em', color: UI.inkFaint }}>NEW PLAN</span>
+      </div>
+      {opts.map((o, i) => (
+        <div key={o.label} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', borderBottom: i < 2 ? `0.5px solid ${UI.hair}` : 'none', background: o.on ? 'rgba(var(--accent-rgb),0.08)' : 'transparent' }}>
+          <i className={'fa-solid ' + o.icon} style={{ fontSize: 13, width: 16, textAlign: 'center', color: o.on ? 'var(--accent)' : UI.inkFaint }} />
+          <span style={{ flex: 1, fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, color: o.on ? 'var(--accent)' : UI.inkSoft }}>{o.label}</span>
+          <span style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkGhost }}>{o.sub}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function TourVisualPlanWizard() {
+  const steps = ['Name your plan', 'Cycle, Weekdays, Flexible', 'Choose a split', 'Mesocycle (optional)'];
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 4, padding: '4px 0' }}>
+      {steps.map((label, i) => {
+        const on = i === 0;
+        return (
+          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px' }}>
+            <div style={{ width: 18, height: 18, borderRadius: '50%', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: on ? 'var(--accent)' : 'transparent', border: on ? 'none' : `1.5px solid ${UI.hairStrong}` }}>
+              <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, color: on ? '#0a0805' : UI.inkGhost }}>{i + 1}</span>
+            </div>
+            <span style={{ fontFamily: UI.fontUi, fontSize: 11.5, fontWeight: on ? 600 : 500, color: on ? UI.ink : UI.inkFaint }}>{label}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function TourVisualPlanHistory() {
+  const rows = [
+    { day: 'PUSH DAY', date: 'Today', vol: '4,240', pr: true },
+    { day: 'LEG DAY', date: '2d ago', vol: '6,010', pr: false },
+    { day: 'PULL DAY', date: '4d ago', vol: '3,880', pr: false },
+  ];
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+      {rows.map((r, i) => (
+        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 4 }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, color: UI.inkSoft, letterSpacing: '0.06em' }}>{r.day}</div>
+            <div style={{ fontFamily: UI.fontUi, fontSize: 9, color: UI.inkGhost, marginTop: 1 }}>{r.date}</div>
+          </div>
+          {r.pr && <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.08em', color: 'var(--accent)', background: 'rgba(var(--accent-rgb),0.12)', border: '0.5px solid rgba(var(--accent-rgb),0.3)', borderRadius: 4, padding: '2px 5px' }}>PR</span>}
+          <span className="num" style={{ fontSize: 13, color: UI.ink }}>{r.vol}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function TourVisualWorkoutIntro() {
+  const sets = [{ s: 1, done: true }, { s: 2, done: true }, { s: 3, done: false }];
+  return (
+    <div style={{ background: UI.bgCard, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, overflow: 'hidden' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 12px', borderBottom: `0.5px solid ${UI.hair}` }}>
+        <i className="fa-solid fa-dumbbell" style={{ fontSize: 12, color: 'var(--accent)' }} />
+        <span style={{ fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.08em', color: UI.inkSoft }}>BENCH PRESS</span>
+        <span style={{ marginLeft: 'auto', fontFamily: UI.fontUi, fontSize: 9, color: UI.inkGhost }}>3 x 8</span>
+      </div>
+      {sets.map(r => (
+        <div key={r.s} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderBottom: r.s < 3 ? `0.5px solid ${UI.hair}` : 'none' }}>
+          <span style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkGhost, width: 12 }}>{r.s}</span>
+          <span className="num" style={{ fontSize: 13, color: UI.ink }}>60<span style={{ fontSize: 9, color: UI.inkGhost }}> kg</span></span>
+          <span className="num" style={{ fontSize: 13, color: UI.ink }}>8<span style={{ fontSize: 9, color: UI.inkGhost }}> reps</span></span>
+          <div style={{ marginLeft: 'auto', width: 18, height: 18, borderRadius: 4, border: `1.5px solid ${r.done ? 'var(--accent)' : UI.hairStrong}`, background: r.done ? 'var(--accent)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            {r.done && <i className="fa-solid fa-check" style={{ fontSize: 9, color: '#0a0805' }} />}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function TourVisualHealthIntro() {
+  return (
+    <div style={{ display: 'flex', gap: 8 }}>
+      <div style={{ flex: 1, background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 6, padding: '10px 12px' }}>
+        <div style={{ fontFamily: UI.fontUi, fontSize: 9, letterSpacing: '0.1em', color: UI.inkFaint }}>WEIGHT</div>
+        <div className="num" style={{ fontSize: 18, color: UI.ink, marginTop: 2 }}>82.4<span style={{ fontSize: 10, color: UI.inkGhost }}> kg</span></div>
+        <svg width="100%" height="20" viewBox="0 0 80 20" preserveAspectRatio="none" style={{ marginTop: 4, display: 'block' }}><polyline points="0,15 20,12 40,13 60,8 80,6" fill="none" stroke="var(--accent)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+      </div>
+      <div style={{ flex: 1, background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 6, padding: '10px 12px' }}>
+        <div style={{ fontFamily: UI.fontUi, fontSize: 9, letterSpacing: '0.1em', color: UI.inkFaint }}>ADHERENCE</div>
+        <div className="num" style={{ fontSize: 18, color: UI.ink, marginTop: 2 }}>86<span style={{ fontSize: 10, color: UI.inkGhost }}> %</span></div>
+        <div style={{ display: 'flex', gap: 3, marginTop: 8 }}>
+          {[0.9, 0.7, 0.8].map((w, i) => <div key={i} style={{ flex: 1, height: 4, borderRadius: 999, background: UI.hairStrong, overflow: 'hidden' }}><div style={{ height: '100%', width: (w * 100) + '%', background: 'var(--accent)' }} /></div>)}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TourVisualHealthOverview() {
+  const cards = [
+    { icon: 'fa-weight-scale', label: 'Weight' },
+    { icon: 'fa-utensils', label: 'Macros' },
+    { icon: 'fa-shoe-prints', label: 'Steps' },
+    { icon: 'fa-droplet', label: 'Water' },
+  ];
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+      {cards.map(c => (
+        <div key={c.label} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 4 }}>
+          <i className={'fa-solid ' + c.icon} style={{ fontSize: 12, color: 'var(--accent)', width: 16, textAlign: 'center' }} />
+          <span style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkSoft, fontWeight: 500 }}>{c.label}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function TourVisualHealthLogDay() {
+  const rows = [['Weight', '82.4', 'kg'], ['Steps', '8,210', ''], ['Water', '2.4', 'L']];
+  return (
+    <div style={{ background: UI.bgCard, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, overflow: 'hidden' }}>
+      <div style={{ padding: '7px 12px', borderBottom: `0.5px solid ${UI.hair}` }}>
+        <span style={{ fontSize: 9, fontFamily: UI.fontUi, letterSpacing: '0.14em', color: UI.inkFaint }}>TODAY</span>
+      </div>
+      {rows.map((r, i) => (
+        <div key={r[0]} style={{ display: 'flex', alignItems: 'center', padding: '8px 12px', borderBottom: i < rows.length - 1 ? `0.5px solid ${UI.hair}` : 'none' }}>
+          <span style={{ flex: 1, fontFamily: UI.fontUi, fontSize: 12, color: UI.inkSoft }}>{r[0]}</span>
+          <span className="num" style={{ fontSize: 14, color: UI.ink }}>{r[1]}</span>
+          {r[2] && <span style={{ fontSize: 9, color: UI.inkGhost, marginLeft: 3 }}>{r[2]}</span>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function TourVisualHealthMacros() {
+  const macros = [{ l: 'Protein', w: 0.92, v: '184 / 200' }, { l: 'Carbs', w: 0.70, v: '210 / 300' }, { l: 'Fat', w: 0.80, v: '56 / 70' }];
+  return (
+    <div style={{ background: UI.bgCard, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 9 }}>
+      <div style={{ display: 'flex', alignItems: 'center' }}>
+        <span style={{ flex: 1, fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.08em', color: UI.inkSoft }}>MACROS</span>
+        <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.1em', color: 'var(--accent)', border: '0.5px solid rgba(var(--accent-rgb),0.4)', borderRadius: 4, padding: '2px 7px' }}>EDIT</span>
+      </div>
+      {macros.map(m => (
+        <div key={m.l}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
+            <span style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint }}>{m.l}</span>
+            <span className="num" style={{ fontSize: 10, color: UI.inkSoft }}>{m.v}</span>
+          </div>
+          <div style={{ height: 4, borderRadius: 999, background: UI.hairStrong, overflow: 'hidden' }}><div style={{ height: '100%', width: (m.w * 100) + '%', background: 'var(--accent)' }} /></div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function TourVisualCoachingIntro() {
+  const people = [{ i: 'fa-user-tie', l: 'COACH' }, null, { i: 'fa-user', l: 'CLIENT' }];
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 16, padding: '8px 0' }}>
+      {people.map((p, idx) => p ? (
+        <div key={idx} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
+          <div style={{ width: 46, height: 46, borderRadius: '50%', background: UI.bgInset, border: '1px solid rgba(var(--accent-rgb),0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <i className={'fa-solid ' + p.i} style={{ fontSize: 18, color: 'var(--accent)' }} />
+          </div>
+          <span style={{ fontFamily: UI.fontUi, fontSize: 9, letterSpacing: '0.12em', color: UI.inkFaint }}>{p.l}</span>
+        </div>
+      ) : (
+        <div key={idx} style={{ display: 'flex', gap: 4 }}>
+          {[0, 1, 2].map(j => <div key={j} style={{ width: 5, height: 5, borderRadius: '50%', background: 'rgba(var(--accent-rgb),0.5)' }} />)}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 const TOUR_VISUALS = {
+  welcome: TourVisualWelcome, planTab: TourVisualPlanTab, planCreate: TourVisualPlanCreate,
+  planWizard: TourVisualPlanWizard, planHistory: TourVisualPlanHistory, workoutIntro: TourVisualWorkoutIntro,
+  healthIntro: TourVisualHealthIntro, healthOverview: TourVisualHealthOverview, healthLogDay: TourVisualHealthLogDay,
+  healthMacros: TourVisualHealthMacros, coachingIntro: TourVisualCoachingIntro,
   days: TourVisualDays, exercises: TourVisualExercises, drag: TourVisualDrag,
   planLibrary: TourVisualPlanLibrary, planTemplates: TourVisualPlanTemplates,
   planFlexMeso: TourVisualPlanFlexMeso, planVersions: TourVisualPlanVersions,
@@ -2227,8 +2475,22 @@ class TourBoundary extends React.Component {
 }
 
 function TourCrashCard({ onClose }) {
+  // This fallback shows only when a step crashed, so it is the least-exercised
+  // path in the tour, yet its lone Close button used a plain onClick. That event
+  // is dead on some devices (which is why every button here fires on
+  // onPointerDown), with no timer or tap-anywhere behind it, so the user was
+  // trapped with no escape but killing the app. Mirror TourCompleteScreen's
+  // guarantees: close on tap-anywhere, on an onPointerDown button, and on a
+  // last-resort timer, so it can never hang.
+  const doneRef = useRefOB(onClose);
+  doneRef.current = onClose;
+  const close = () => { try { doneRef.current && doneRef.current(); } catch (_) {} };
+  useEffectOB(() => {
+    const t = setTimeout(close, 6000);
+    return () => clearTimeout(t);
+  }, []);
   return (
-    <div style={{
+    <div onPointerDown={close} style={{
       position: 'fixed', inset: 0, zIndex: 10000,
       background: 'rgba(0,0,0,0.85)',
       display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
@@ -2240,9 +2502,9 @@ function TourCrashCard({ onClose }) {
       }}>
         <div style={{ fontFamily: UI.fontDisplay, fontSize: 22, color: UI.ink, fontWeight: 400 }}>Tour interrupted</div>
         <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>
-          Something went wrong showing this step. You can close the tour and keep using the app.
+          Something went wrong showing this step. Tap anywhere to close the tour and keep using the app.
         </div>
-        <button onClick={onClose} style={{
+        <button onPointerDown={close} style={{
           padding: '13px 0', borderRadius: 6, border: 'none', cursor: 'pointer',
           background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)',
           color: '#0a0805', fontFamily: UI.fontUi, fontSize: 14, fontWeight: 700, letterSpacing: '0.06em',
@@ -2261,7 +2523,10 @@ function TourCrashCard({ onClose }) {
 function TourCompleteScreen({ title, onDone }) {
   const doneRef = useRefOB(onDone);
   doneRef.current = onDone;
-  const close = () => { try { doneRef.current && doneRef.current(); } catch (_) {} };
+  // Fire onDone at most once, even under wild tapping (tap-anywhere plus the
+  // timer could otherwise call it repeatedly, each a store write and sync).
+  const firedRef = useRefOB(false);
+  const close = () => { if (firedRef.current) return; firedRef.current = true; try { doneRef.current && doneRef.current(); } catch (_) {} };
   useEffectOB(() => {
     const t = setTimeout(close, 3000);
     return () => clearTimeout(t);
@@ -2293,267 +2558,118 @@ function TourCompleteScreen({ title, onDone }) {
   );
 }
 
-function OnboardingTour(props) {
+// Always-present escape hatch for the whole tour. Rendered OUTSIDE the error
+// boundary and above every step (spotlight, fullscreen, celebration, or even a
+// crashed step), so there is one identical, reliable way out on every screen of
+// every guide. Uses onPointerDown (onClick is dead on some devices, the same
+// reason the step buttons use it) at the highest z-index, so no single step's
+// own buttons or layout can ever trap the user. This is what guarantees a guide
+// can never hang: independent of the step, the exit is always one tap away.
+function TourExitButton({ onDone }) {
+  const doneRef = useRefOB(onDone);
+  doneRef.current = onDone;
+  const firedRef = useRefOB(false);
+  const close = (e) => { if (e) { e.preventDefault(); e.stopPropagation(); } if (firedRef.current) return; firedRef.current = true; try { doneRef.current && doneRef.current(); } catch (_) {} };
   return (
-    <TourBoundary fallback={<TourCrashCard onClose={props.onDone} />}>      <OnboardingTourInner {...props} />
-    </TourBoundary>
+    <button onPointerDown={close} aria-label="Exit tour" style={{
+      position: 'fixed', zIndex: 10002,
+      top: 'calc(env(safe-area-inset-top, 0px) + 10px)', right: 12,
+      width: 34, height: 34, borderRadius: '50%',
+      border: '1px solid rgba(255,255,255,0.35)', background: 'rgba(0,0,0,0.55)',
+      color: '#fff', fontFamily: UI.fontUi, fontSize: 15, fontWeight: 700, lineHeight: 1,
+      cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+      WebkitTapHighlightColor: 'transparent', touchAction: 'manipulation',
+    }}>✕</button>
   );
 }
 
-function OnboardingTourInner({ tourKey, go, route, onDone }) {
+function OnboardingTour(props) {
+  return (
+    <>
+      <TourBoundary fallback={<TourCrashCard onClose={props.onDone} />}>
+        <OnboardingTourInner {...props} />
+      </TourBoundary>
+      <TourExitButton onDone={props.onDone} />
+    </>
+  );
+}
+
+function OnboardingTourInner({ tourKey, onDone }) {
   const steps = (window.TOURS || {})[tourKey] || [];
   const [stepIdx, setStepIdx] = useStateOB(0);
-  // undefined = searching, null = no target (centered modal), DOMRect = found
-  const [targetRect, setTargetRect] = useStateOB(undefined);
-  const retryRef = useRefOB(null);
-
   const step = steps[stepIdx];
   const isLast = stepIdx === steps.length - 1;
 
-  useEffectOB(() => {
-    clearTimeout(retryRef.current);
-    if (!step) return;
-
-    // Navigate if needed — wait for next effect run with updated route
-    if (step.route && route.name !== step.route) {
-      go({ name: step.route });
-      setTargetRect(undefined);
-      return;
-    }
-
-    // No spotlight target → centered modal
-    if (!step.target) {
-      setTargetRect(null);
-      return;
-    }
-
-    // Find target in DOM with retries (allows for screen transitions).
-    // `cancelled` + `cancelAnimationFrame` prevent a stale rAF callback from
-    // firing after this effect re-runs (e.g. when the user advances to the next
-    // step), which would overwrite the fresh targetRect with the old element's
-    // rect and lock the tour in spotlight mode with no working buttons.
-    setTargetRect(undefined);
-    let cancelled = false;
-    let rafId = null;
-    let attempts = 0;
-    let scrolled = false;
-    const tryFind = () => {
-      if (cancelled) return;
-      const el = document.querySelector(`[data-tour="${step.target}"]`);
-      if (el) {
-        const r = el.getBoundingClientRect();
-        if (r.width > 0 && r.height > 0) {
-          // Pull the target into a comfortable band once, so both the spotlight
-          // and its tooltip fit on screen — cards low on the Health screen would
-          // otherwise sit half behind the nav bar. Fixed nav tabs don't scroll,
-          // which is fine (their rect stays put).
-          const vh = window.innerHeight;
-          if (!scrolled && (r.top < 96 || r.bottom > vh - 200)) {
-            scrolled = true;
-            el.scrollIntoView({ block: 'center' });
-            retryRef.current = setTimeout(tryFind, 140);
-            return;
-          }
-          setTargetRect(r);
-          return;
-        }
-      }
-      attempts++;
-      if (attempts < 30) { retryRef.current = setTimeout(tryFind, 80); }
-      else { setTargetRect(null); }
-    };
-    rafId = requestAnimationFrame(tryFind);
-
-    return () => {
-      cancelled = true;
-      cancelAnimationFrame(rafId);
-      clearTimeout(retryRef.current);
-    };
-  }, [stepIdx, route.name]);
-
-  const advance = () => {
-    if (isLast) { onDone(); } else { setStepIdx(i => i + 1); }
-  };
-  const goBack = () => { if (stepIdx > 0) setStepIdx(i => i - 1); };
+  // Clamp so wild rapid taps can never push stepIdx past the final step. Taps
+  // batched into a single React flush call this functional updater N times;
+  // without the clamp that overshoots to an undefined step, renders null, and
+  // strands the tour (onDone never fires, the deck never closes). Verified in a
+  // jsdom harness: 20 taps in one flush land on the last step with the clamp and
+  // overshoot to null without it.
+  const advance = () => { if (isLast) { onDone(); } else { setStepIdx(i => Math.min(i + 1, steps.length - 1)); } };
+  const goBack = () => { setStepIdx(i => Math.max(0, i - 1)); };
 
   if (!step) return null;
 
-  // Final step → flashy auto-dismissing celebration instead of a normal modal
-  // with an exit button. It closes on a 3s timer and on tap-anywhere, so the
-  // tour always ends without depending on a single button working.
+  // Final step: the shared auto-dismissing celebration (3s timer + tap-anywhere).
   if (isLast) return <TourCompleteScreen title={step.title} onDone={onDone} />;
 
-  // Shared button row. IMPORTANT: this is a render *helper* called as a plain
-  // function — never render it as <BtnRow/>. A component defined inside render
-  // gets a new identity every render, so React would unmount/remount the button
-  // subtree on each parent re-render (store sync, sync-status, realtime, …). A
-  // tap whose pointerdown→click straddles such a remount is silently dropped —
-  // that was the "visible buttons don't respond, must kill the app" bug.
-  // Handlers fire on onPointerDown — NOT onClick. Proven this session: on this
-  // device a plain onClick button (the plate-calculator key) was completely dead
-  // while onPointerDown worked. The in-app keyboard uses the same pattern. Each
-  // button has exactly one handler, so there is no double-fire.
+  // Every other step is a self-contained card floating on a dimmed backdrop:
+  // progress bar, title, body, the optional illustration, and a button row. No
+  // live spotlight, no navigation, no DOM measuring, no rAF loops, nothing that
+  // can loop or trap. Handlers fire on onPointerDown (onClick is dead on some
+  // devices) and the row is inline, never a nested component, so a re-render
+  // can never remount it and drop a straddling tap.
   const tap = (fn) => (e) => { e.preventDefault(); e.stopPropagation(); fn(); };
-  const renderBtnRow = (compact) => (
-    <div style={{ display: 'flex', gap: 8, marginTop: compact ? 0 : 4 }}>
-      {stepIdx > 0 && (
-        <button onPointerDown={tap(goBack)} style={{
-          flex: '0 0 auto', padding: compact ? '9px 13px' : '11px 15px', borderRadius: compact ? 4 : 6,
-          border: `1px solid ${UI.hairStrong}`, cursor: 'pointer',
-          background: 'transparent',
-          color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: compact ? 12 : 14, fontWeight: 600,
-          WebkitTapHighlightColor: 'transparent', touchAction: 'manipulation',
-        }} aria-label="Back">←</button>
-      )}
-      <button onPointerDown={tap(advance)} style={{
-        flex: 2, padding: compact ? '9px 0' : '11px 0', borderRadius: compact ? 4 : 6,
-        border: 'none', cursor: 'pointer',
-        background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)',
-        boxShadow: `0 ${compact ? 4 : 6}px ${compact ? 14 : 20}px rgba(var(--accent-rgb),0.4)`,
-        color: '#0a0805', fontFamily: UI.fontUi, fontSize: compact ? 11 : 13, fontWeight: 700,
-        letterSpacing: '0.08em', WebkitTapHighlightColor: 'transparent', touchAction: 'manipulation',
-      }}>{isLast ? 'DONE' : 'NEXT →'}</button>
-    </div>
-  );
-
   const VisualComp = step.visual ? TOUR_VISUALS[step.visual] : null;
-
-  // ── Centered (no target / fallback) → FULLSCREEN layout ──
-  // These steps have no on-screen spotlight, so we use the whole screen instead
-  // of a floating card: content scrolls in the middle, and the buttons are
-  // pinned to the very bottom EDGE of the viewport — the most reliable place to
-  // tap. No backdrop-filter, no card, no nested overlays.
-  if (!step.target || targetRect === null) {
-    return (
+  const pct = Math.round(((stepIdx + 1) / steps.length) * 100);
+  const lastCard = stepIdx === steps.length - 2;
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 10000, background: 'rgba(0,0,0,0.82)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      padding: 'calc(env(safe-area-inset-top, 0px) + 20px) 20px calc(env(safe-area-inset-bottom, 0px) + 20px)',
+    }}>
       <div style={{
-        position: 'fixed', top: 'env(safe-area-inset-top, 0px)', left: 0, right: 0, bottom: 0, zIndex: 10000,
-        background: 'var(--bg)',
-        display: 'flex', flexDirection: 'column',
+        width: '100%', maxWidth: 360, maxHeight: '100%',
+        background: UI.bgRaised, border: `1px solid ${UI.hairStrong}`, borderRadius: 8,
+        boxShadow: '0 24px 64px rgba(0,0,0,0.55), 0 0 0 0.5px rgba(var(--accent-rgb),0.12)',
+        display: 'flex', flexDirection: 'column', overflow: 'hidden', animation: 'fadeUp 0.25s ease',
       }}>
-        {/* Scrollable content */}
-        <div style={{
-          flex: '1 1 auto', minHeight: 0, overflowY: 'auto',
-          padding: '30px 26px 18px',
-          display: 'flex', flexDirection: 'column', gap: 16,
-        }}>
-          <div className="micro-gold">{stepIdx + 1} / {steps.length}</div>
-          <div style={{ fontFamily: UI.fontDisplay, fontSize: 30, color: UI.ink, fontWeight: 400, lineHeight: 1.08 }}>
-            {step.title}
+        <div style={{ flex: '1 1 auto', minHeight: 0, overflowY: 'auto', padding: '22px 22px 8px', display: 'flex', flexDirection: 'column', gap: 13 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ flex: 1, height: 3, background: UI.hairStrong, borderRadius: 999, overflow: 'hidden' }}>
+              <div style={{ height: '100%', width: pct + '%', background: 'var(--accent)', borderRadius: 999, transition: 'width 0.25s ease' }} />
+            </div>
+            <div className="micro-gold" style={{ flexShrink: 0 }}>{stepIdx + 1} / {steps.length}</div>
           </div>
-          <div style={{ fontSize: 14, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.6, whiteSpace: 'pre-line' }}>
-            {step.body}
-          </div>
+          <div className="display" style={{ fontSize: 26, color: UI.ink, lineHeight: 1.1 }}>{step.title}</div>
+          <div style={{ fontSize: 14, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.55, whiteSpace: 'pre-line' }}>{step.body}</div>
           {VisualComp && (
             <div style={{ marginTop: 4 }}>
               <TourBoundary fallback={null}><VisualComp /></TourBoundary>
             </div>
           )}
         </div>
-        {/* Buttons pinned to the bottom edge of the screen */}
-        <div style={{
-          flexShrink: 0,
-          padding: '14px 26px calc(env(safe-area-inset-bottom, 0px) + 20px)',
-          borderTop: `0.5px solid ${UI.hair}`,
-          background: UI.bgRaised,
-        }}>
-          {renderBtnRow(false)}
+        <div style={{ flexShrink: 0, padding: '12px 22px 16px', borderTop: `0.5px solid ${UI.hair}`, display: 'flex', gap: 8 }}>
+          {stepIdx > 0 && (
+            <button onPointerDown={tap(goBack)} aria-label="Back" style={{
+              flex: '0 0 auto', padding: '11px 16px', borderRadius: 6,
+              border: `1px solid ${UI.hairStrong}`, cursor: 'pointer', background: 'transparent',
+              color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 14, fontWeight: 600,
+              WebkitTapHighlightColor: 'transparent', touchAction: 'manipulation',
+            }}>←</button>
+          )}
+          <button onPointerDown={tap(advance)} style={{
+            flex: 1, padding: '11px 0', borderRadius: 6, border: 'none', cursor: 'pointer',
+            background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)',
+            boxShadow: '0 6px 18px rgba(var(--accent-rgb),0.38)',
+            color: '#0a0805', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 700, letterSpacing: '0.08em',
+            WebkitTapHighlightColor: 'transparent', touchAction: 'manipulation',
+          }}>{lastCard ? 'FINISH →' : 'NEXT →'}</button>
         </div>
       </div>
-    );
-  }
-
-  // ── Brief loading state while navigating / searching ──
-  if (targetRect === undefined) {
-    return (
-      <div style={{
-        position: 'fixed', top: 'env(safe-area-inset-top, 0px)', left: 0, right: 0, bottom: 0, zIndex: 10000,
-        background: 'rgba(0,0,0,0.35)',
-      }} />
-    );
-  }
-
-  // ── Spotlight mode ──
-  const PAD = 10;
-  const sx = Math.round(targetRect.left - PAD);
-  const sy = Math.round(targetRect.top - PAD);
-  const sw = Math.round(targetRect.width + PAD * 2);
-  const sh = Math.round(targetRect.height + PAD * 2);
-
-  const vw = window.innerWidth;
-  const vh = window.innerHeight;
-  const TW = Math.min(300, vw - 32);
-  const TOOLTIP_H = 178;
-  const TIP_GAP = 14;
-
-  // Tooltip X: center over spotlight, clamped to viewport
-  // Exception: if spotlight is on the far left (sidebar), place tooltip to the right
-  const nearLeft = sx + sw < vw * 0.3;
-  let tipX, tipY;
-
-  if (nearLeft) {
-    tipX = Math.min(sx + sw + TIP_GAP, vw - TW - 8);
-    tipY = Math.max(8, Math.min(sy + sh / 2 - TOOLTIP_H / 2, vh - TOOLTIP_H - 16));
-  } else {
-    tipX = Math.max(16, Math.min(sx + sw / 2 - TW / 2, vw - TW - 16));
-    const canBelow = sy + sh + TIP_GAP + TOOLTIP_H < vh - 16;
-    const forceTop = step.placement === 'top' || (!canBelow && sy > TOOLTIP_H + TIP_GAP + 8);
-    if (forceTop) {
-      tipY = Math.max(8, sy - TIP_GAP - TOOLTIP_H);
-    } else {
-      tipY = sy + sh + TIP_GAP;
-      if (tipY + TOOLTIP_H > vh - 8) tipY = Math.max(8, vh - TOOLTIP_H - 8);
-    }
-  }
-
-  return (
-    <>
-      {/* Full-screen intercept layer — blocks all taps reaching the app underneath */}
-      <div style={{ position: 'fixed', inset: 0, zIndex: 9995 }} />
-
-      {/* Dark overlay via box-shadow (spotlight "hole") */}
-      <div style={{
-        position: 'fixed',
-        left: sx, top: sy, width: sw, height: sh,
-        borderRadius: 8,
-        boxShadow: '0 0 0 9999px rgba(0,0,0,0.78)',
-        zIndex: 9996,
-        pointerEvents: 'none',
-      }} />
-
-      {/* Pulsing accent ring */}
-      <div style={{
-        position: 'fixed',
-        left: sx, top: sy, width: sw, height: sh,
-        borderRadius: 8,
-        border: '2px solid var(--accent)',
-        animation: 'tourRingPulse 1.8s ease-in-out infinite',
-        zIndex: 9997,
-        pointerEvents: 'none',
-      }} />
-
-      {/* Tooltip card */}
-      <div style={{
-        position: 'fixed',
-        left: tipX, top: tipY, width: TW,
-        background: UI.bgRaised,
-        border: `1px solid ${UI.goldSoft}`,
-        borderRadius: 6,
-        padding: '16px 18px',
-        display: 'flex', flexDirection: 'column', gap: 10,
-        boxShadow: '0 16px 48px rgba(0,0,0,0.6), 0 0 0 0.5px rgba(var(--accent-rgb),0.15)',
-        zIndex: 9998,
-        animation: 'fadeUp 0.2s ease',
-      }}>
-        <div className="micro-gold">{stepIdx + 1} / {steps.length}</div>
-        <div style={{ fontFamily: UI.fontDisplay, fontSize: 22, color: UI.ink, fontWeight: 400, lineHeight: 1.1 }}>
-          {step.title}
-        </div>
-        <div style={{ fontSize: 12.5, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.55, whiteSpace: 'pre-line' }}>
-          {step.body}
-        </div>
-        {renderBtnRow(true)}
-      </div>
-    </>
+    </div>
   );
 }
 
