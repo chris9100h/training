@@ -1488,8 +1488,15 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     if (progressionResult) {
       overlayHoldMs = PROGRESSION_NAV_DELAY_MS; // swap mid-overlay; the show/hide timers below keep their own 800ms + 4000ms
       setTimeout(() => {
-        setProgressionUnlocked(progressionResult);
-        setTimeout(() => setProgressionUnlocked(null), 4000);
+        // If this same last-set-done also opened a meso feedback sheet
+        // (joint/pump/volume), don't slam the overlay on top of it — stash it;
+        // the flush effect shows it once every sheet is answered.
+        if (anyMesoSheetOpenRef.current) {
+          pendingProgressionRef.current = progressionResult;
+        } else {
+          setProgressionUnlocked(progressionResult);
+          setTimeout(() => setProgressionUnlocked(null), 4000);
+        }
       }, 800);
     } else if (!entry.sets[setIdx]?.warmup && !isDeloadSession) {
       const completed = entry.sets[setIdx];
@@ -2300,6 +2307,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const newBestShownRef = useRefT({}); // exId → true once a NEW BEST flashed (max once per exercise per session)
   const [cardioPR, setCardioPR] = useStateT(null);
   const [progressionUnlocked, setProgressionUnlocked] = useStateT(null);
+  // The "Progression unlocked" overlay and the meso feedback sheets both fire
+  // off the same last-working-set-done event, so they'd otherwise stack. When a
+  // feedback sheet is open we stash the overlay here and show it once every
+  // sheet is answered (see the flush effect near the meso sheet state), so it's
+  // always sequential: questions first, then the celebration.
+  const pendingProgressionRef = useRefT(null);
+  const anyMesoSheetOpenRef = useRefT(false); // latest "a meso sheet is open", for completeSet's deferred-show timer
   const [screenFlash, setScreenFlash] = useStateT(false);
   const [restModalOpen, setRestModalOpen] = useStateT(() => {
     const rs = session.restStart ?? null;
@@ -2622,6 +2636,19 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const [mesoVolumeExIds, setMesoVolumeExIds] = useStateT([]); // exId+dayId pairs for delta
   const [mesoPumpAnswer, setMesoPumpAnswer] = useStateT(null);
   const [mesoVolumeAnswer, setMesoVolumeAnswer] = useStateT(null);
+  // Keep the "a meso feedback sheet is open" ref fresh each render (completeSet's
+  // deferred-show timer reads it), and once all three sheets are closed, flush a
+  // stashed "Progression unlocked" overlay — so the celebration lands AFTER the
+  // questions instead of covering them.
+  anyMesoSheetOpenRef.current = mesoSorenessOpen || mesoJointOpen || mesoVolumeOpen;
+  useEffectT(() => {
+    if (!mesoSorenessOpen && !mesoJointOpen && !mesoVolumeOpen && pendingProgressionRef.current) {
+      const result = pendingProgressionRef.current;
+      pendingProgressionRef.current = null;
+      setProgressionUnlocked(result);
+      setTimeout(() => setProgressionUnlocked(null), 4000);
+    }
+  }, [mesoSorenessOpen, mesoJointOpen, mesoVolumeOpen]);
   // Soreness/joint use a select-then-confirm step (like volume already did)
   // so a single mistap only highlights an option instead of committing it.
   const [mesoSorenessSel, setMesoSorenessSel] = useStateT(null);
