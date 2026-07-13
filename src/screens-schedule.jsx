@@ -639,6 +639,38 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
     if (it.repsMax != null) return `${it.reps}-${it.repsMax}`;
     return it.reps || '';
   };
+  // Per-set intensity techniques (Drop Set, Myo-Reps, ...), planned in the day
+  // editor's "Intensity technique (per set)" picker. A poster meant to stand on
+  // its own away from the app should spell out which set gets what, not just
+  // flag that something's there: full labels via LB.plannedTechniqueLabel
+  // (the same lookup the picker chips themselves use), not the short codes.
+  const posterTechniquesLabel = (it) => {
+    if (!Array.isArray(it.plannedTechniques)) return '';
+    return it.plannedTechniques
+      .map((t, i) => t ? `Set ${i + 1}: ${LB.plannedTechniqueLabel(t)}` : null)
+      .filter(Boolean)
+      .join(' · ');
+  };
+  // One exercise row (Exercise+technique / Sets / Reps / Notes), shared by both
+  // standalone items and superset/giant-set members below so the two paths
+  // can't drift into two different-looking rows.
+  const renderPosterItemRow = (it, ii) => {
+    const ex = LB.findExercise(store, it.exId);
+    const techLabel = posterTechniquesLabel(it);
+    return (
+      <div key={it.exId + '-' + ii} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '6px 2px', borderRadius: 4, background: ii % 2 ? 'var(--surface-tint-sm)' : 'transparent' }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.ink, lineHeight: 1.35, overflowWrap: 'break-word' }}>{ex?.name || ''}</div>
+          {techLabel && (
+            <div style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.gold, lineHeight: 1.35, marginTop: 2, overflowWrap: 'break-word' }}>{techLabel}</div>
+          )}
+        </div>
+        <div className="num" style={{ width: 34, fontSize: 12, color: UI.inkSoft, textAlign: 'center' }}>{it.sets}</div>
+        <div className="num" style={{ width: 68, fontSize: 12, color: UI.ink, textAlign: 'center' }}>{posterRepsLabel(it)}</div>
+        <div style={{ flex: 1, fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, lineHeight: 1.35, overflowWrap: 'break-word' }}>{ex?.note || ''}</div>
+      </div>
+    );
+  };
   // Screenshot watermark: same full-page centered background treatment as
   // SessionCompareScreen's camera export (screens-lib.jsx), not
   // SessionDetailScreen's foreground corner mark: a multi-section poster
@@ -1133,17 +1165,18 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
                         <div style={{ width: 68, textAlign: 'center' }}>Reps</div>
                         <div style={{ flex: 1 }}>Notes</div>
                       </div>
-                      {d.items.map((it, ii) => {
-                        const ex = LB.findExercise(store, it.exId);
-                        return (
-                          <div key={it.exId + '-' + ii} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '6px 2px', borderRadius: 4, background: ii % 2 ? 'var(--surface-tint-sm)' : 'transparent' }}>
-                            <div style={{ flex: 1, fontFamily: UI.fontUi, fontSize: 12, color: UI.ink, lineHeight: 1.35, overflowWrap: 'break-word' }}>{ex?.name || ''}</div>
-                            <div className="num" style={{ width: 34, fontSize: 12, color: UI.inkSoft, textAlign: 'center' }}>{it.sets}</div>
-                            <div className="num" style={{ width: 68, fontSize: 12, color: UI.ink, textAlign: 'center' }}>{posterRepsLabel(it)}</div>
-                            <div style={{ flex: 1, fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, lineHeight: 1.35, overflowWrap: 'break-word' }}>{ex?.note || ''}</div>
-                          </div>
-                        );
-                      })}
+                      {LB.groupBySuperset(d.items).map((g, gi) => g.type === 'standalone' ? (
+                        renderPosterItemRow(g.entry, g.idx)
+                      ) : (
+                        // Superset / giant-set: same left-accent-border + gold
+                        // label treatment as the session-share screenshot's own
+                        // superset grouping (screens-lib.jsx), so a plan poster
+                        // and a session poster read the same way.
+                        <div key={'grp-' + gi} style={{ borderLeft: `2px solid ${UI.goldSoft}`, paddingLeft: 10, marginBottom: 2 }}>
+                          <div className="micro" style={{ color: UI.gold, letterSpacing: '0.12em', margin: '4px 0 2px' }}>{LB.supersetLabel(g.members.length)}</div>
+                          {g.members.map(({ entry: it, idx: ii }) => renderPosterItemRow(it, ii))}
+                        </div>
+                      ))}
                     </div>
                   );
                 })}
