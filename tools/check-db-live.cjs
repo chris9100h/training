@@ -102,6 +102,10 @@ const docSections = new Map();
 // the same database are reported as info only.
 const EXPECTED_REALTIME = new Set(['zane_coaching', 'zane_coaching_notes']);
 
+// Functions where anon EXECUTE is intentional (documented in docs/database.md,
+// "Grant-Fallen"). Every other function must have anon_exec === false.
+const EXPECTED_ANON_EXEC = new Set(['get_public_feature_map']);
+
 // ── Config ───────────────────────────────────────────────────────────────────
 
 function fromStoreJs(re, label) {
@@ -240,9 +244,19 @@ async function inventoryMode(invFile) {
     }
   }
 
+  const seenAnonExec = new Set();
   for (const fn of inv.functions || []) {
     if (fn.anon_exec) {
-      errors.push(`inventory: has_function_privilege('anon', '${fn.sig || fn.f}') = true (expected: false for every function)`);
+      if (EXPECTED_ANON_EXEC.has(fn.f)) {
+        seenAnonExec.add(fn.f);
+      } else {
+        errors.push(`inventory: has_function_privilege('anon', '${fn.sig || fn.f}') = true (expected: false for every function)`);
+      }
+    }
+  }
+  for (const f of [...EXPECTED_ANON_EXEC].sort()) {
+    if (!seenAnonExec.has(f)) {
+      errors.push(`inventory: expected anon EXECUTE on ${f}() is missing (see docs/database.md, "Grant-Fallen")`);
     }
   }
 
