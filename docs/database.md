@@ -40,8 +40,12 @@ der Nutzer den Workflow re-runnt (Actions → „DB drift check" → Run workflo
     ausgeführt (Nutzer bitten, sie auszuführen) oder live wurde etwas
     entfernt. Erst klären, dann Repo oder DB angleichen; nie stillschweigend
     aus der Doku löschen.
-  - *`anon_exec = true`:* Grant-Falle (siehe unten), REVOKE-Migration nach dem
-    Muster von 0141 nachschieben.
+  - *`anon_exec = true`:* zuerst `EXPECTED_ANON_EXEC` in `tools/check-db-live.cjs`
+    prüfen, dort stehen bewusste Ausnahmen (aktuell nur `get_public_feature_map`,
+    siehe „Grant-Fallen" unten). Ist die Funktion dort nicht gelistet, ist es eine
+    echte Grant-Falle: REVOKE-Migration nach dem Muster von 0141 nachschieben.
+    Fehlt umgekehrt der Grant für eine gelistete Ausnahme, ist der Live-Grant
+    kaputt (Migration erneut prüfen), nicht die Doku.
   - *Unerwartete App-Tabelle in der Realtime-Publikation:* Wenn gewollt, die
     Realtime-Doku (hier + CLAUDE.md) **und** `EXPECTED_REALTIME` in
     `tools/check-db-live.cjs` nachziehen; sonst Publikation bereinigen lassen.
@@ -369,7 +373,7 @@ Serverseitige History-Aggregate (Migrationen 0059/0060, SECURITY INVOKER, option
 
 **Falle 2 (Default Privileges, Migration 0132):** Zusätzlich zur PUBLIC-Vererbung existierte auf diesem Projekt eine `ALTER DEFAULT PRIVILEGES`-Regel (Rolle `postgres`, Schema `public`), die `anon` bei **jeder neu erstellten** Funktion automatisch einen direkten `EXECUTE`-Grant gab. Das ist ein expliziter Grant an `anon` selbst, kein geerbter über PUBLIC, und wird von `REVOKE ... FROM PUBLIC` **nicht** mitentfernt. Entdeckt an den beiden Migration-0131-Funktionen, die trotz korrektem `REVOKE FROM PUBLIC` weiterhin von `anon` ausführbar waren (verifiziert mit `has_function_privilege('anon', ...)`), während alle vorher existierenden Funktionen korrekt gesperrt waren. Migration 0132 hat die Default-Privileges-Regel für die Rolle `postgres` entfernt (Root Cause, schützt alle künftigen Funktionen) und zusätzlich explizit `REVOKE EXECUTE ... FROM anon` auf die beiden betroffenen Funktionen gesetzt. (Die gleiche Default-Privileges-Regel existiert auch für die Rolle `supabase_admin`, die vom Projekt aber nicht änderbar ist: „permission denied to change default privileges"; der tatsächlich genutzte Migrationspfad läuft nachweislich als `postgres` und ist gefixt.)
 
-**Kontrolle nach jeder neuen Funktion (DEFINER wie INVOKER):** `SELECT has_function_privilege('anon', 'public.<fn>(...)', 'execute');` muss `false` ergeben.
+**Kontrolle nach jeder neuen Funktion (DEFINER wie INVOKER):** `SELECT has_function_privilege('anon', 'public.<fn>(...)', 'execute');` muss `false` ergeben, außer für die bewusste Ausnahme `get_public_feature_map` (siehe Feature Map oben; login-freie Public-Seite braucht anon-Zugriff). Der wöchentliche Live-Check (`tools/check-db-live.cjs`) kennt diese Ausnahme über `EXPECTED_ANON_EXEC` und prüft sie in beide Richtungen (fehlt der Grant dort, schlägt der Check ebenfalls fehl).
 
 **Nachtrag (Live-Audit Juli 2026, Migration 0141):** Das 0132-Audit hatte nur die SECURITY-DEFINER-Funktionen geprüft. Sieben ältere SECURITY-INVOKER-RPCs aus der Zeit vor 0132 (`get_exercise_best_e1rm`, `get_exercise_history`, `get_user_volume_stats`, `get_session_stats`, `sync_sets_batch`, `sync_daily_logs_batch`, `sync_meso_states_batch`) trugen live noch direkte anon-EXECUTE-Grants aus der alten Default-Privileges-Regel. Risiko gering (INVOKER + RLS: `auth.uid()` ist für anon NULL, Reads leer, Writes scheitern an `user_id`), aber die App ruft sie nie vor dem Login auf; Migration 0141 entzieht PUBLIC- und anon-Grants und behält `authenticated`.
 
