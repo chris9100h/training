@@ -651,29 +651,23 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
       .filter(Boolean)
       .join(' · ');
   };
-  // One exercise row (Exercise+technique with Sets/Reps beside it on top,
-  // Notes as a full-width line below), shared by both standalone items and
-  // superset/giant-set members below so the two paths can't drift into two
-  // different-looking rows. Notes sits below rather than in its own column
-  // so a long wrapped note only adds height to itself: it can no longer make
-  // Exercise/Sets/Reps sit atop visible dead space that reads as a gap when
-  // the row happens to land right before or after a superset group.
+  // One exercise row (Exercise+technique / Sets / Reps / Notes), shared by both
+  // standalone items and superset/giant-set members below so the two paths
+  // can't drift into two different-looking rows.
   const renderPosterItemRow = (it, ii) => {
     const ex = LB.findExercise(store, it.exId);
     const techLabel = posterTechniquesLabel(it);
     return (
-      <div key={it.exId + '-' + ii} style={{ padding: '6px 2px', borderRadius: 4, background: ii % 2 ? 'var(--surface-tint-sm)' : 'transparent' }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-          <div style={{ flex: 1, minWidth: 0, fontFamily: UI.fontUi, fontSize: 12, color: UI.ink, lineHeight: 1.35, overflowWrap: 'break-word' }}>{ex?.name || ''}</div>
-          <div className="num" style={{ width: 34, fontSize: 12, color: UI.inkSoft, textAlign: 'center' }}>{it.sets}</div>
-          <div className="num" style={{ width: 68, fontSize: 12, color: UI.ink, textAlign: 'center' }}>{posterRepsLabel(it)}</div>
+      <div key={it.exId + '-' + ii} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '6px 2px', borderRadius: 4, background: ii % 2 ? 'var(--surface-tint-sm)' : 'transparent' }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.ink, lineHeight: 1.35, overflowWrap: 'break-word' }}>{ex?.name || ''}</div>
+          {techLabel && (
+            <div style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.gold, lineHeight: 1.35, marginTop: 2, overflowWrap: 'break-word' }}>{techLabel}</div>
+          )}
         </div>
-        {techLabel && (
-          <div style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.gold, lineHeight: 1.35, marginTop: 2, overflowWrap: 'break-word' }}>{techLabel}</div>
-        )}
-        {ex?.note && (
-          <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, lineHeight: 1.35, marginTop: 2, overflowWrap: 'break-word' }}>{ex.note}</div>
-        )}
+        <div className="num" style={{ width: 34, fontSize: 12, color: UI.inkSoft, textAlign: 'center' }}>{it.sets}</div>
+        <div className="num" style={{ width: 68, fontSize: 12, color: UI.ink, textAlign: 'center' }}>{posterRepsLabel(it)}</div>
+        <div style={{ flex: 1, fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, lineHeight: 1.35, overflowWrap: 'break-word' }}>{ex?.note || ''}</div>
       </div>
     );
   };
@@ -1169,6 +1163,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
                         <div style={{ flex: 1 }}>Exercise</div>
                         <div style={{ width: 34, textAlign: 'center' }}>Sets</div>
                         <div style={{ width: 68, textAlign: 'center' }}>Reps</div>
+                        <div style={{ flex: 1 }}>Notes</div>
                       </div>
                       {LB.groupBySuperset(d.items).map((g, gi) => g.type === 'standalone' ? (
                         renderPosterItemRow(g.entry, g.idx)
