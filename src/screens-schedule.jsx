@@ -654,11 +654,11 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
   // One exercise row (Exercise+technique / Sets / Reps / Notes), shared by both
   // standalone items and superset/giant-set members below so the two paths
   // can't drift into two different-looking rows.
-  const renderPosterItemRow = (it, ii, noStripe) => {
+  const renderPosterItemRow = (it, ii) => {
     const ex = LB.findExercise(store, it.exId);
     const techLabel = posterTechniquesLabel(it);
     return (
-      <div key={it.exId + '-' + ii} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '6px 2px', borderRadius: 4, background: (!noStripe && ii % 2) ? 'var(--surface-tint-sm)' : 'transparent' }}>
+      <div key={it.exId + '-' + ii} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '6px 2px', borderRadius: 4, background: ii % 2 ? 'var(--surface-tint-sm)' : 'transparent' }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.ink, lineHeight: 1.35, overflowWrap: 'break-word' }}>{ex?.name || ''}</div>
           {techLabel && (
@@ -1171,18 +1171,15 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
                         // Superset / giant-set: same left-accent-border + gold
                         // label treatment as the session-share screenshot's own
                         // superset grouping (screens-lib.jsx), so a plan poster
-                        // and a session poster read the same way. marginBottom
-                        // matches the ~10px gap the label's own marginTop already
-                        // produces above (that top margin collapses through this
-                        // wrapper since it has no top padding/border of its own,
-                        // there's no equivalent escape route on the bottom edge,
-                        // so it needs an explicit value instead). No zebra stripe
-                        // on members: the border+label already mark the group, a
-                        // tinted row ending right at that boundary read as the
-                        // group clinging to whatever followed it.
-                        <div key={'grp-' + gi} style={{ borderLeft: `2px solid ${UI.goldSoft}`, paddingLeft: 10, marginBottom: 10 }}>
-                          <div className="micro" style={{ color: UI.gold, letterSpacing: '0.12em', margin: '4px 0 2px' }}>{LB.supersetLabel(g.members.length)}</div>
-                          {g.members.map(({ entry: it, idx: ii }) => renderPosterItemRow(it, ii, true))}
+                        // and a session poster read the same way. No margin on
+                        // the wrapper or the label: the label uses the same
+                        // padding: '6px 2px'-style top/bottom spacing every
+                        // other row already uses for its own gap, so the group
+                        // sits flush with its neighbors exactly like a plain
+                        // row would, no special-cased spacing.
+                        <div key={'grp-' + gi} style={{ borderLeft: `2px solid ${UI.goldSoft}`, paddingLeft: 10 }}>
+                          <div className="micro" style={{ color: UI.gold, letterSpacing: '0.12em', padding: '6px 2px 2px' }}>{LB.supersetLabel(g.members.length)}</div>
+                          {g.members.map(({ entry: it, idx: ii }) => renderPosterItemRow(it, ii))}
                         </div>
                       ))}
                     </div>
