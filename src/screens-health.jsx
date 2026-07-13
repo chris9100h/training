@@ -264,9 +264,11 @@ function ChartHover({ W, H, points, children, mode = 'x', markerColor = 'var(--a
     }
     setActive(best);
   };
-  // Mouse fires move on hover; touch fires move only while pressed (and down on
-  // tap), so one handler covers both. No pointer capture: touchAction 'pan-y'
-  // keeps vertical list-scrolling with the browser while we get horizontal drags.
+  // Activate on pointer MOVE only: mouse hover fires move continuously, a touch
+  // scrub fires move while the finger drags. Deliberately not on pointerdown, so
+  // a tap never flashes the box and starting a vertical scroll on a chart never
+  // flickers one. No pointer capture: touchAction 'pan-y' lets the browser keep
+  // vertical list-scrolling while we get horizontal drags.
   const onPoint = e => pick(e.clientX, e.clientY);
   const clear = () => setActive(null);
 
@@ -282,9 +284,9 @@ function ChartHover({ W, H, points, children, mode = 'x', markerColor = 'var(--a
   const ty = below ? '10px' : 'calc(-100% - 10px)';
 
   return (
-    <div ref={wrapRef}
+    <div ref={wrapRef} data-reorder-ignore="true"
       style={{ position: 'relative', touchAction: 'pan-y', cursor: points.length ? 'crosshair' : 'default' }}
-      onPointerDown={onPoint} onPointerMove={onPoint} onPointerUp={clear} onPointerLeave={clear} onPointerCancel={clear}>
+      onPointerMove={onPoint} onPointerUp={clear} onPointerLeave={clear} onPointerCancel={clear}>
       {children}
       {p && (
         <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
@@ -449,7 +451,9 @@ function HealthMacroChart({ series, from, to }) {
     rows: [
       { value: `${Math.round(calOf(p))} kcal` },
       { label: 'P', value: `${p.protein ?? 0}g`, color: MACRO_COLORS.protein },
-      { label: 'C', value: `${p.carbs ?? 0}g`, color: MACRO_COLORS.carbs },
+      // Net carbs (fiber-reduced), matching the drawn segment + the kcal above;
+      // for total-carb days fiber is null so this equals the logged carbs.
+      { label: 'C', value: `${Math.max(0, (p.carbs ?? 0) - (p.fiber ?? 0))}g`, color: MACRO_COLORS.carbs },
       { label: 'F', value: `${p.fat ?? 0}g`, color: MACRO_COLORS.fat },
     ],
   }));
