@@ -156,7 +156,7 @@ function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, 
           {tab === 'checkins'   && (isSelf
             ? <ClientCheckInTab coachingId={coachingId} clientId={clientId} userId={userId} store={store} setStore={setStore} isSelf />
             : <ClientCheckInsTab coachingId={coachingId} checkinEnabled={checkinEnabled} onToggle={handleToggleCheckin} toggling={ciToggling} store={store} setStore={setStore} userId={userId} clientUnit={clientStore.settings?.unit} />)}
-          {tab === 'setup'      && <ClientSetupTab clientStore={clientStore} setClientStore={setClientStore} clientId={clientId} coachingId={coachingId} userId={userId} go={go} onReload={reloadClient} clientName={clientName} />}
+          {tab === 'setup'      && <ClientSetupTab store={store} setStore={setStore} clientStore={clientStore} setClientStore={setClientStore} clientId={clientId} coachingId={coachingId} userId={userId} go={go} onReload={reloadClient} clientName={clientName} />}
           {tab === 'daily'      && <window.Screens.HealthClientLogs clientStore={clientStore} />}
           {tab === 'notes'      && <ClientNotesTab coachingId={coachingId} userId={userId} clientName={clientName} store={store} setStore={setStore} />}
         </div>
@@ -1078,11 +1078,34 @@ function ClientSetupTab(props) {
 
 // ─── Tab: Plan ────────────────────────────────────────────────────────────────
 
-function ClientPlanTab({ clientStore, setClientStore, clientId, coachingId, userId, go, onReload, clientName }) {
+function ClientPlanTab({ store, setStore, clientStore, setClientStore, clientId, coachingId, userId, go, onReload, clientName }) {
   const schedules = (clientStore.schedules || []).filter(s => !s.archived);
   const active = clientStore.activeScheduleId;
   const importRef = useRefC(null);
   const [confirmEl, confirm] = useConfirm();
+
+  // Multi-device autosave (screens-schedule.jsx's ScheduleEditScreen) stores a
+  // coach's in-progress edit of a client's plan under the COACH's own account
+  // (store.planDrafts), not the client's, so it never touches the client's data
+  // and stays invisible to them. Tapping EDIT already resumes it silently; this
+  // surfaces it here too, since otherwise a coach browsing this list would have
+  // no way to know a draft is waiting without opening the editor first.
+  // Same type-to-confirm gate as every other place a resumed draft can be
+  // thrown away (the self-edit resume banner, and backing out of the editor
+  // after a resume): this is real, saved work, so a single careless tap must
+  // never be enough to discard it.
+  const discardPendingDraft = async (scheduleId) => {
+    if (!await confirm(
+      "This throws away your autosaved edits from an earlier session on this plan, and it can't be undone. The last saved version of the plan stays as it is.",
+      { title: 'Discard autosave?', ok: 'Discard autosave', danger: true, requireText: "yes i'm sure" }
+    )) return;
+    setStore(s => {
+      if (!s.planDrafts || !(scheduleId in s.planDrafts)) return s;
+      const rest = { ...s.planDrafts };
+      delete rest[scheduleId];
+      return { ...s, planDrafts: rest };
+    });
+  };
 
   const activate = async (scheduleId) => {
     // Activation is client-facing and irreversible (it posts a "plan changed"
@@ -1141,26 +1164,51 @@ function ClientPlanTab({ clientStore, setClientStore, clientId, coachingId, user
           } else {
             const newId = LB.uid();
             idMap[ex.id] = newId;
-            newExercises.push({ id: newId, name: ex.name, tags: ex.tags || [], note: ex.note || '', category: ex.category || null, unilateral: ex.unilateral || false, equipment: ex.equipment || null, progression_reps: ex.progression_reps || null });
+            // Carry the behavior flags so imported time/cardio/bodyweight
+            // exercises keep their logging mode (mirrors the own-side import).
+            newExercises.push({ id: newId, name: ex.name, tags: ex.tags || [], note: ex.note || '', category: ex.category || null, unilateral: ex.unilateral || false, equipment: ex.equipment || null, progression_reps: ex.progression_reps || null, movement_type: ex.movement_type || null, log_mode: ex.log_mode || null, no_weight_reps: ex.no_weight_reps || false, pull_bodyweight: ex.pull_bodyweight || false });
           }
         });
+        const remapDays = (days) => (days || []).map(d => ({
+          ...d,
+          id: LB.uid(),
+          items: (d.items || []).map(it => ({ ...it, exId: idMap[it.exId] || it.exId })),
+        }));
         const sch = {
           ...data.schedule,
           id: LB.uid(),
           archived: false,
-          days: (data.schedule.days || []).map(d => ({
-            ...d,
-            id: LB.uid(),
-            items: (d.items || []).map(it => ({ ...it, exId: idMap[it.exId] || it.exId })),
-          })),
+          days: remapDays(data.schedule.days),
+          versions: (data.schedule.versions || []).map(v => ({ ...v, days: remapDays(v.days) })),
         };
+        // Remap 5/3/1 program_data (keyed by exId) and reset the cycle-bump gate,
+        // exactly like the own-side import.
+        if (sch.program_data && typeof sch.program_data === 'object') {
+          const remapKeys = (obj) => { const out = {}; for (const k of Object.keys(obj || {})) out[idMap[k] || k] = obj[k]; return out; };
+          const pd = { ...sch.program_data };
+          if (pd.mainLifts) pd.mainLifts = remapKeys(pd.mainLifts);
+          if (pd.tmHistory) pd.tmHistory = remapKeys(pd.tmHistory);
+          delete pd.bumpedCycle;
+          sch.program_data = pd;
+        }
         if (newExercises.length) {
           const { error: exErr } = await LB.supabase.from('zane_exercises').insert(newExercises.map(ex => ({ ...ex, user_id: clientId })));
           if (exErr) { alert(`Import failed: ${exErr.message}`); return; }
         }
-        // If this insert fails the new exercises above are left orphaned, but
-        // surfacing the error beats silently showing a plan that wasn't saved.
-        const { error: schErr } = await LB.supabase.from('zane_schedules').insert({ id: sch.id, user_id: clientId, name: sch.name, days: sch.days, archived: false });
+        // Insert the FULL schedule (mesocycle_*, program_*, is_flex,
+        // sessions_per_week, versions), minus the local-only `mode` field, so the
+        // DB row matches the in-memory plan instead of collapsing to a bare day
+        // list on the next reload. If this insert fails the new exercises above
+        // are left orphaned, but surfacing the error beats a silent partial save.
+        // Build the insert row without object-rest (`const {mode, ...schRow}`):
+        // Babel compiles object-rest to a per-file `_excluded` array whose global
+        // name collides across all classic scripts in the shared precompile scope,
+        // and a stray one here corrupted the Btn component's prop filtering
+        // app-wide (see the Btn note in ui.jsx). A shallow copy + delete is
+        // equivalent and generates no `_excluded`.
+        const schRow = { ...sch };
+        delete schRow.mode;
+        const { error: schErr } = await LB.supabase.from('zane_schedules').insert({ ...schRow, user_id: clientId });
         if (schErr) { alert(`Import failed: ${schErr.message}`); return; }
         setClientStore(s => ({
           ...s,
@@ -1230,6 +1278,28 @@ function ClientPlanTab({ clientStore, setClientStore, clientId, coachingId, user
               </button>
             </div>
           </div>
+          {store.planDrafts?.[sch.id] && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 16px 10px', borderTop: `0.5px solid rgba(var(--accent-rgb),0.2)`, background: UI.goldFaint }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div className="micro-gold">Unsaved edits</div>
+                <div style={{ color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 11, marginTop: 1 }}>
+                  You have changes to this plan waiting from an earlier session.
+                </div>
+              </div>
+              <button
+                onClick={() => go({ name: 'coaching-edit-plan', coachingId, clientId, scheduleId: sch.id, clientName: name })}
+                style={{ background: 'transparent', border: `0.5px solid rgba(var(--accent-rgb),0.5)`, borderRadius: 6, padding: '5px 10px', cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 10, color: 'var(--accent)', letterSpacing: '0.08em', whiteSpace: 'nowrap' }}
+              >
+                RESUME
+              </button>
+              <button
+                onClick={() => discardPendingDraft(sch.id)}
+                style={{ background: 'transparent', border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '5px 10px', cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 10, color: UI.inkSoft, letterSpacing: '0.08em', whiteSpace: 'nowrap' }}
+              >
+                DISCARD
+              </button>
+            </div>
+          )}
         </div>
       ))}
       {confirmEl}

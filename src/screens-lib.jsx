@@ -638,7 +638,7 @@ function GoldSectionLabel({ children, style }) {
 // shortens knurl dividers and shrinks chip rows that overlap the corner
 // avatar; SessionCompareScreen's watermark is a centered full-page background
 // so dividers there always draw full width.
-async function captureNodeAsPng(node, { filename, dodgeAvatar = false, setCapturing } = {}) {
+async function captureNodeAsPng(node, { filename, dodgeAvatar = false, setCapturing, fitWidth = false } = {}) {
   if (!node) return;
   // html2canvas is loaded on demand (not at boot) — fetch it on first use.
   const html2canvas = await window.__ensureHtml2Canvas?.().catch(() => null);
@@ -703,6 +703,12 @@ async function captureNodeAsPng(node, { filename, dodgeAvatar = false, setCaptur
       backgroundColor: getComputedStyle(document.documentElement).getPropertyValue('--bg').trim() || '#1a1820',
       scale: 2, useCORS: true, logging: false,
       height: node.scrollHeight, windowHeight: node.scrollHeight,
+      // fitWidth: capture the node's own full width rather than whatever's
+      // currently scrolled into view. Only needed by content intentionally
+      // wider than the viewport (the plan poster); every other caller's
+      // content is never wider than its own viewport, so this is opt-in
+      // rather than applied unconditionally to node.scrollWidth for everyone.
+      ...(fitWidth ? { width: node.scrollWidth, windowWidth: node.scrollWidth } : {}),
     });
     canvas.toBlob(async (blob) => {
       const file = new File([blob], filename, { type: 'image/png' });

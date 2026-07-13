@@ -544,13 +544,21 @@ const btnGhost = {
 
 function Btn({ children, kind = 'primary', style = {}, ...rest }) {
   const base = kind === 'primary' ? btnPrimary : btnGhost;
-  return <button style={{ ...base, ...style }} {...rest}>{children}</button>;
+  // {...rest} must come BEFORE style so the merged base+style always wins. The
+  // precompile loader runs every file as a classic script in one shared global
+  // scope, and Babel emits a per-file `_excluded` array for each object-rest
+  // (`...rest`) that all collide on the same global name (last-loaded wins). If
+  // another file's `_excluded` (e.g. one that doesn't list "style") overwrites
+  // this component's, `style` leaks into `rest`; spreading rest last would then
+  // let the raw style prop clobber our base styling. Ordering rest first makes
+  // Btn immune regardless of which `_excluded` wins.
+  return <button {...rest} style={{ ...base, ...style }}>{children}</button>;
 }
 
 // ─── Card ───────────────────────────────────────────────────────────
 function Card({ children, accent = false, style = {}, ...rest }) {
   return (
-    <div style={{
+    <div {...rest} style={{
       background: accent
         ? `rgba(var(--accent-rgb),0.06)`
         : 'var(--surface-tint)',
@@ -558,7 +566,7 @@ function Card({ children, accent = false, style = {}, ...rest }) {
       borderRadius: 6,
       padding: 16,
       ...style,
-    }} {...rest}>{children}</div>
+    }}>{children}</div>
   );
 }
 
@@ -609,7 +617,7 @@ function Stepper({ value, onChange, step = 2.5, min = 0, suffix, big = false }) 
 // ─── Pill ───────────────────────────────────────────────────────────
 function Pill({ children, gold = false, style = {}, ...rest }) {
   return (
-    <span style={{
+    <span {...rest} style={{
       display: 'inline-flex', alignItems: 'center',
       padding: '3px 8px', borderRadius: 4,
       fontSize: 9, letterSpacing: '0.14em',
@@ -618,7 +626,7 @@ function Pill({ children, gold = false, style = {}, ...rest }) {
       color: gold ? UI.gold : UI.inkSoft,
       border: `1px solid ${gold ? UI.goldSoft : UI.hairStrong}`,
       ...style,
-    }} {...rest}>{children}</span>
+    }}>{children}</span>
   );
 }
 
@@ -865,7 +873,12 @@ function useConfirm() {
   const confirm = (message, { title = 'Confirm?', ok = 'OK', cancel = 'Cancel', danger = false, preventBackdropClose = false, requireText = null } = {}) =>
     new Promise(resolve => { setTyped(''); setState({ message, title, ok, cancel, danger, preventBackdropClose, requireText, resolve }); });
   const close = (result) => { state?.resolve(result); setState(null); setTyped(''); };
-  const okLocked = !!state?.requireText && typed.trim().toLowerCase() !== state.requireText.toLowerCase();
+  // Normalize the phrase before comparing so a type-to-confirm gate can't be
+  // defeated by iOS smart punctuation (curly vs straight apostrophe) or a
+  // dropped apostrophe. Without this a phrase like "yes i'm sure" could lock the
+  // user out on mobile. Strips straight and curly apostrophes on both sides.
+  const normConfirmText = (s) => (s || '').trim().toLowerCase().replace(/[‘’ʼ']/g, '');
+  const okLocked = !!state?.requireText && normConfirmText(typed) !== normConfirmText(state.requireText);
   // Portal into document.body so the confirm sheet always sits above any other
   // Sheet (both zIndex: 100) regardless of where confirmEl is placed in the tree.
   const el = state && ReactDOM.createPortal(
@@ -918,7 +931,7 @@ function BracketFrame({ children, gold = false, style = {}, padding = 22, ...res
     if (pos === 'br') return <div style={{ ...s, bottom: 0, right: 0, borderBottom: `${thick} solid ${c}`, borderRight: `${thick} solid ${c}` }} />;
   };
   return (
-    <div style={{ position: 'relative', padding, ...style }} {...rest}>
+    <div {...rest} style={{ position: 'relative', padding, ...style }}>
       <Corner pos="tl" /><Corner pos="tr" /><Corner pos="bl" /><Corner pos="br" />
       {children}
     </div>

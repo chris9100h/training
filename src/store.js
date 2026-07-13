@@ -775,7 +775,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   const queries = [
     _supabase.from('zane_profiles').select('id, name, approved').eq('id', userId).maybeSingle(),
     _supabase.from('zane_exercises').select('id, name, tags, note, category, unilateral, equipment, progression_reps, movement_type, no_weight_reps, log_mode, pull_bodyweight, youtube_url').eq('user_id', userId),
-    _supabase.from('zane_schedules').select('id, name, days, archived, versions, is_flex, sessions_per_week, mesocycle_weeks, mesocycle_start_rir, mesocycle_end_rir, mesocycle_rir_enabled, program_type, program_data').eq('user_id', userId),
+    _supabase.from('zane_schedules').select('id, name, days, archived, versions, is_flex, sessions_per_week, mesocycle_weeks, mesocycle_start_rir, mesocycle_end_rir, mesocycle_rir_enabled, mesocycle_autoregulate, mesocycle_autoregulate_mode, program_type, program_data').eq('user_id', userId),
     // Session METADATA stays complete (cheap; streaks/calendar need the full
     // date list) — the legacy entries JSONB is no longer selected.
     _supabase.from('zane_sessions').select('id, schedule_id, day_id, day_name, date, started_at, ended, duration_minutes, feel, is_bonus, is_freestyle, is_deload')
@@ -828,13 +828,15 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     // Coach's own saved check-in schema templates: irrelevant when loading a
     // CLIENT's store as a coach, these belong to the acting coach, not the client.
     isCoachLoad ? null : _supabase.from('zane_checkin_schema_templates').select('id, name, schema, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
+    // Plan-editor drafts (migration 0162): in-progress autosave, own store only.
+    isCoachLoad ? null : _supabase.from('zane_plan_drafts').select('schedule_id, draft, updated_at').eq('user_id', userId),
   ];
   const [profileRes, exRes, schRes, sessRes, settRes, skipsRes, entriesRes,
          bestsRes, sessionStatsRes,
          coachInfoRes, coachClientsRes, unreadNotesRes, coachingRowRes, selfRowRes,
          cardioLogsRes, cardioPlansRes, dailyLogsRes, statusPeriodsRes,
          supportTicketsRes, glucoseLogsRes, templatesRes, mesoStatesRes,
-         checkinTemplatesRes] = await Promise.all(queries);
+         checkinTemplatesRes, planDraftsRes] = await Promise.all(queries);
 
   // A failed request (offline, RLS, server error) also yields no data — bail
   // out so the caller can surface an error instead of mistaking this for a
@@ -1034,6 +1036,10 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
       completions: m.completions ?? 0, pendingMeso2: m.pending_meso2 ?? false,
       updatedAt: m.updated_at ?? null,
     })),
+    // Plan-editor drafts keyed by schedule id (migration 0162). Null on coach
+    // loads / a load error → {} (harmless: the boot merge then keeps any local
+    // draft, so a hiccup never drops in-progress work).
+    planDrafts: Object.fromEntries((planDraftsRes?.data || []).map(r => [r.schedule_id, { draft: r.draft, updatedAt: r.updated_at }])),
     // All-time best e1RM per exercise (server aggregate, cached in the store —
     // and via the local cache also offline). bestE1rmForExercise combines this
     // with the windowed sessions, so PR detection stays exact mid-session.
@@ -1470,6 +1476,25 @@ async function syncStore(prev, next, userId) {
     if (removed.length) ops.push(_supabase.from('zane_meso_states').delete().in('id', removed.map(m => m.id)));
   }
 
+  // Plan-editor drafts (map schedule_id -> { draft, updatedAt }). Upsert the
+  // changed ones, delete the removed ones (the editor removes a draft on Save
+  // or Discard). Plain last-write-wins on the (user_id, schedule_id) PK: a stale
+  // write self-heals because the boot merge (mergePlanDrafts) keeps the newer
+  // updatedAt and whichever device holds it re-pushes on its next sync.
+  if (prev.planDrafts !== next.planDrafts) {
+    const prevD = prev.planDrafts || {};
+    const nextD = next.planDrafts || {};
+    const upsert = Object.entries(nextD).filter(([sid, d]) => {
+      const p = prevD[sid];
+      return !p || JSON.stringify(p) !== JSON.stringify(d);
+    });
+    const removed = Object.keys(prevD).filter(sid => !(sid in nextD));
+    if (upsert.length) ops.push(_supabase.from('zane_plan_drafts').upsert(upsert.map(([sid, d]) => ({
+      user_id: userId, schedule_id: sid, draft: d.draft, updated_at: d.updatedAt ?? new Date().toISOString(),
+    }))));
+    if (removed.length) ops.push(_supabase.from('zane_plan_drafts').delete().eq('user_id', userId).in('schedule_id', removed));
+  }
+
   if (prev.dailyLogs !== next.dailyLogs) {
     const upsert = (next.dailyLogs || []).filter(l => {
       const p = (prev.dailyLogs || []).find(x => x.id === l.id);
@@ -1545,14 +1570,9 @@ async function syncStore(prev, next, userId) {
     prev.settings?.swVersion              !== next.settings?.swVersion;
 
   if (settingsChanged) {
-    ops.push(_supabase.from('zane_user_settings').upsert({
+    const settingsRow = {
       user_id: userId,
-      active_schedule_id: next.activeScheduleId ?? null,
       active_cardio_plan_id: next.activeCardioPlanId ?? null,
-      cycle_index: next.cycleIndex ?? 0,
-      cycle_start_date: next.cycleStartDate ?? null,
-      week_plan_start_date: next.weekPlanStartDate ?? null,
-      last_advanced_date: next.lastAdvancedDate ?? null,
       unit: next.settings?.unit ?? null,
       rest_default: next.settings?.restDefault || 120,
       rest_big:     next.settings?.restBig     || 180,
@@ -1591,7 +1611,20 @@ async function syncStore(prev, next, userId) {
       status_mode_since: next.statusModeSince ?? null,
       deload_prompt_dismissed_at: next.deloadPromptDismissedAt ?? null,
       sw_version: next.settings?.swVersion ?? null,
-    }));
+    };
+    // Plan-position / active-plan fields are action-advanced and prone to a
+    // multi-device clobber: on a whole-row upsert a device syncing an unrelated
+    // setting change (e.g. dark mode) would write its own possibly-stale
+    // position over a newer server value (last-write-wins). Include them ONLY
+    // when THIS device changed them (prev is the sync base, so prev !== next
+    // means "changed here"); an omitted column is left untouched on the existing
+    // row by the PostgREST merge upsert.
+    if (prev.activeScheduleId  !== next.activeScheduleId)  settingsRow.active_schedule_id  = next.activeScheduleId ?? null;
+    if (prev.cycleIndex        !== next.cycleIndex)        settingsRow.cycle_index         = next.cycleIndex ?? 0;
+    if (prev.cycleStartDate    !== next.cycleStartDate)    settingsRow.cycle_start_date     = next.cycleStartDate ?? null;
+    if (prev.weekPlanStartDate !== next.weekPlanStartDate) settingsRow.week_plan_start_date = next.weekPlanStartDate ?? null;
+    if (prev.lastAdvancedDate  !== next.lastAdvancedDate)  settingsRow.last_advanced_date   = next.lastAdvancedDate ?? null;
+    ops.push(_supabase.from('zane_user_settings').upsert(settingsRow));
   }
 
   // unwrap() turns a failed write (network/RLS/constraint) into a thrown
@@ -2315,7 +2348,14 @@ function splitDayCount(presetKey) {
 //   mesoWeeks   : truthy → run as a mesocycle of that many weeks
 //   mesoStartRir/mesoEndRir : optional RIR taper endpoints (else app fallbacks 3/0)
 //   mesoRirEnabled : false → RIR taper off (volume + load progression + deload only)
-function buildPlanSkeleton({ name, type, presetKey, customCount, customDays, weekdays, mesoWeeks, mesoStartRir, mesoEndRir, mesoRirEnabled } = {}) {
+//   mesocycleAutoregulate : true → same autoregulation engine, no bounded week
+//     count and no RIR taper at all. Mutually exclusive with mesoWeeks in the
+//     UI (the wizard/editor only ever set one), but harmless if both were ever
+//     true — LB.mesoActive is an OR, mesoWeeks still wins for bounded-only UI.
+//   mesocycleAutoregulateMode : 'load' → an autoregulate plan tunes weight only
+//     (sets stay fixed). Default (undefined/'both') tunes both; only persisted
+//     when 'load'. Only meaningful together with mesocycleAutoregulate.
+function buildPlanSkeleton({ name, type, presetKey, customCount, customDays, weekdays, mesoWeeks, mesoStartRir, mesoEndRir, mesoRirEnabled, mesocycleAutoregulate, mesocycleAutoregulateMode } = {}) {
   const preset = SPLIT_PRESETS[presetKey];
   // A customDays entry is a type string, or { name, items } (a day imported with
   // its exercises), or null (unpicked → FULL).
@@ -2366,6 +2406,13 @@ function buildPlanSkeleton({ name, type, presetKey, customCount, customDays, wee
     // Only persist the explicit "off" — default (undefined/true) leaves the DB
     // default and reads as enabled everywhere.
     if (mesoRirEnabled === false) sch.mesocycle_rir_enabled = false;
+  }
+  // Outside the mesoWeeks block on purpose: an autoregulate-only plan has no
+  // bounded week count by definition.
+  if (mesocycleAutoregulate) {
+    sch.mesocycle_autoregulate = true;
+    // Only persist the non-default 'load'; 'both'/undefined leaves it unset.
+    if (mesocycleAutoregulateMode === 'load') sch.mesocycle_autoregulate_mode = 'load';
   }
   return sch;
 }
@@ -2631,7 +2678,11 @@ function compute531CycleBumps(sch, sessions, cycleIdx) {
     const mainEntry = (s.entries || []).find(e => mainLifts[e.exId]);
     if (!mainEntry) return;
     const working = (mainEntry.sets || []).filter(st => !st.warmup && !st.skipped);
-    const amrap = working[working.length - 1];
+    // The AMRAP is the set carrying the seeded amrap flag, not necessarily the
+    // positionally last set: Joker/First-Set-Last variations append sets after
+    // the top set. Fall back to the last working set for older logged sessions
+    // that predate the flag. Matches the seeding contract and the live 5/3/1 UI.
+    const amrap = working.find(st => st.amrap) || working[working.length - 1];
     const reps = amrap ? effReps(amrap) : null;
     if (reps == null) return;
     (perLift[mainEntry.exId] = perLift[mainEntry.exId] || []).push(reps >= min);
@@ -2706,6 +2757,27 @@ function suggest531Tm(est1rm, currentTm, kind, unit) {
 // progression + deload alone).
 function mesoRirEnabled(sch) {
   return sch?.mesocycle_rir_enabled !== false;
+}
+
+// Whether the mesocycle autoregulation engine (feedback-driven volume/load
+// tuning) is on at all, bounded block or not. mesocycle_weeks alone still
+// means "and it's ALSO a bounded block with a week count" — callers that need
+// that specifically (RIR eligibility, the completion/deload-offer flow, the
+// generic auto-deload-nudge suppression) stay keyed on mesocycle_weeks /
+// mesoState.weeks != null directly, not on this.
+function mesoActive(sch) {
+  return !!(sch?.mesocycle_weeks || sch?.mesocycle_autoregulate);
+}
+
+// True when a plan is an UNBOUNDED autoregulate plan set to tune weight only
+// (sets stay at their authored count). Deliberately also checks it's autoregulate
+// AND not a bounded block: the mode column only applies to unbounded autoregulate
+// plans (a bounded mesocycle always regulates both), so a stray 'load' on a meso
+// plan is ignored. Default (null/'both') = regulate both, so this is false.
+function autoregLoadOnly(sch) {
+  return sch?.mesocycle_autoregulate === true
+    && !sch?.mesocycle_weeks
+    && sch?.mesocycle_autoregulate_mode === 'load';
 }
 
 // Tongue-in-cheek note for a training-frequency / cycle-length number. Shared by
@@ -4282,43 +4354,36 @@ async function refreshHealthLogs(userId) {
   };
 }
 
-// Must match applyMesoSetDeltaFromState's base+4 clamp (screens-train.jsx) —
-// an exercise at or past this many accumulated "not enough" sets can't
-// usefully receive another growth grant, since applying it would be entirely
-// swallowed by that clamp.
-const MESO_GROWTH_CEILING_DELTA = 4;
-
 // Picks which exId_dayId key (if any) wins a "not_enough" volume-feedback
 // growth turn for a muscle group's exercises this session, and returns the
 // growthCounts map updated to reflect that decision. Pure and side-effect
-// free — call it fresh (with the latest deltas/growthCounts) both to decide
-// the recipient and, separately, inside the actual saveMesoState write, so a
+// free — call it fresh (with the latest growthCounts) both to decide the
+// recipient and, separately, inside the actual saveMesoState write, so a
 // rare double-invocation of the caller can never silently lose a grant by
 // writing a value computed from stale state.
 //
 // - keys: exId_dayId keys of the muscle group's exercises this session, in
 //   day order (keys[0] = the muscle group's main/first lift).
-// - deltas / growthCounts: the meso state's full current maps (not just this
+// - growthCounts: the meso state's full current rotation map (not just this
 //   group) — read-only, never mutated.
 // - prevGrantedTo: the key this same answer-record previously granted this
 //   session (or null for a fresh answer). Its earlier +1 is arithmetically
-//   un-done first (on both deltas, for eligibility, and growthCounts) so
-//   editing an already-answered question within the same session never
-//   double-counts — see commitContrib's identical idempotent-diff intent for
-//   `deltas` itself.
-// - Whichever exercise still below `ceiling` has the fewest growth grants so
-//   far wins (ties toward keys[0], i.e. the main lift); a key never seen in
-//   growthCounts before (a mid-meso exercise swap-in) is seeded at the
-//   group's current running max — computed BEFORE undoing prevGrantedTo, so
-//   undoing our own prior grant can't transiently understate the group's
-//   true established max — so it can't cut ahead of an established lift.
-// - Returns { recipientKey, growthCounts } — recipientKey is null if every
-//   exercise in the group is already at its own ceiling.
-function pickGrowthRecipient(keys, deltas, growthCounts, prevGrantedTo, ceiling = MESO_GROWTH_CEILING_DELTA) {
-  const deltaFor = (k) => {
-    const raw = (deltas || {})[k] || 0;
-    return k === prevGrantedTo ? raw - 1 : raw;
-  };
+//   un-done first so editing an already-answered question within the same
+//   session never double-counts — see commitContrib's identical idempotent-
+//   diff intent for `deltas`.
+// - No ceiling: growth is never capped by how much an exercise has already
+//   grown. A lifter who keeps saying "not enough" keeps getting more; an
+//   over-grown exercise self-corrects via the decline signal
+//   (pickDeclineRecipient) instead of a hard limit. Whichever exercise in the
+//   group has the fewest growth grants so far always wins (ties toward
+//   keys[0], i.e. the main lift); a key never seen in growthCounts before (a
+//   mid-meso exercise swap-in) is seeded at the group's current running max —
+//   computed BEFORE undoing prevGrantedTo, so undoing our own prior grant
+//   can't transiently understate the group's true established max — so it
+//   can't cut ahead of an established lift.
+// - Returns { recipientKey, growthCounts } — recipientKey is null only if
+//   keys is empty.
+function pickGrowthRecipient(keys, growthCounts, prevGrantedTo) {
   const gc = { ...(growthCounts || {}) };
   const knownVals = keys.map(k => gc[k]).filter(v => v != null);
   const groupMax = knownVals.length ? Math.max(...knownVals) : 0;
@@ -4326,10 +4391,9 @@ function pickGrowthRecipient(keys, deltas, growthCounts, prevGrantedTo, ceiling 
     gc[prevGrantedTo] = Math.max(0, gc[prevGrantedTo] - 1);
   }
   keys.forEach(k => { if (gc[k] == null) gc[k] = groupMax; });
-  const eligible = keys.filter(k => deltaFor(k) < ceiling);
   let recipientKey = null;
-  if (eligible.length) {
-    recipientKey = eligible.reduce((best, k) => (gc[k] < gc[best] ? k : best), eligible[0]);
+  if (keys.length) {
+    recipientKey = keys.reduce((best, k) => (gc[k] < gc[best] ? k : best), keys[0]);
     gc[recipientKey] += 1;
   }
   return { recipientKey, growthCounts: gc };
@@ -4389,6 +4453,30 @@ function reearnMesoWeightBoosts(prevBoosts, sessionKeys, earnedBoosts) {
   const next = { ...(prevBoosts || {}) };
   for (const k of (sessionKeys || [])) delete next[k];
   return { ...next, ...(earnedBoosts || {}) };
+}
+
+// Reconcile the Smart-Progression suggestion with the meso weight boost when
+// seeding an exercise. On an autoregulating plan the feedback engine is the
+// sole authority over next-session weight:
+//   • boost earned   → apply it on top of the last weight when Smart Progression
+//     is silent; when SP also fired they are the same increment, so keep SP.
+//   • boost withheld (a joint/pump/volume gate failed last session, or a muscle
+//     was still sore on a load-only plan) → veto SP so the weight HOLDS instead
+//     of climbing past the feedback. This is what makes the gating actually
+//     control weight; without it Smart Progression would bump regardless.
+// Off a meso plan (mesoActive false) the suggestion is returned untouched, so
+// normal Smart Progression is unaffected. Pure/testable; `last` is a
+// { entry: { sets } } reference.
+function resolveMesoSeedSuggestion(suggestion, weightBoost, last, mesoActive) {
+  if (weightBoost != null) {
+    if (!suggestion && last) {
+      const refSet = (last?.entry?.sets || []).filter(s => !s.warmup && !s.skipped).find(s => s.kg != null);
+      if (refSet) return { kg: Math.round((refSet.kg + weightBoost) * 4) / 4, reps: refSet.reps ?? null };
+    }
+    return suggestion;
+  }
+  if (mesoActive && suggestion) return null; // feedback withheld the boost → veto the Smart Progression bump
+  return suggestion;
 }
 
 // Counts calendar days within [mesoStartISO, todayISO] that must NOT advance a
@@ -4478,6 +4566,34 @@ function mergeCollectionById(freshRows, curRows, baseRows, delIds) {
     if (c && b && JSON.stringify(c) !== JSON.stringify(b)) return c;
     return r;
   });
+}
+
+// Boot-merge for the plan-editor draft map (scheduleId -> { draft, updatedAt }),
+// kept separate from the schedule merge so a draft can never touch a committed
+// plan:
+//   • both sides  → newer updatedAt wins (last-write-wins);
+//   • server-only → keep it (another device's draft), UNLESS this device deleted
+//     it (in base, gone from cur): then it was Saved/Discarded here, don't resurrect;
+//   • local-only  → keep it (an unsynced draft), UNLESS it was synced before and
+//     is now gone from the server (in base, gone from fresh), Saved/Discarded on
+//     another device, drop it.
+// baseDrafts = the last-synced map (null on a legacy cache → keep both sides).
+function mergePlanDrafts(freshDrafts, curDrafts, baseDrafts) {
+  const f = freshDrafts || {}, c = curDrafts || {}, b = baseDrafts || null;
+  const out = {};
+  for (const sid of new Set([...Object.keys(f), ...Object.keys(c)])) {
+    const fd = f[sid], cd = c[sid];
+    if (fd && cd) {
+      const fT = fd.updatedAt ? new Date(fd.updatedAt).getTime() : 0;
+      const cT = cd.updatedAt ? new Date(cd.updatedAt).getTime() : 0;
+      out[sid] = cT >= fT ? cd : fd;
+    } else if (!fd) {
+      if (!(b && sid in b)) out[sid] = cd; // gone from server: keep only a never-synced local draft
+    } else {
+      if (!(b && sid in b)) out[sid] = fd; // server-only: keep unless deleted here
+    }
+  }
+  return out;
 }
 
 // Calories from macros: P×4 + C×4 + F×9. With fiber given (net-carb mode),
@@ -4651,7 +4767,7 @@ window.LB = {
   signIn, signUp, signOut, signInWithPasskey, registerPasskey, listPasskeys, deletePasskey, resetPassword, deleteAllData, exportBackup, backupToBlob, readBackupText, importFromBackup, validateBackup,
   loadFromSupabase, syncStore, mergeSessions, withCarriedWindowEntries, historyWindowCutoffISO,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
-  uid, todayISO, fmtISO, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, is531MainLift, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, healScheduleWeekdays, buildPlanSkeleton, instantiateProgram, is531Plan, round531, tmFrom531, tmBump531, weeks531, week531, fiveThreeOneSets, build531Plan, add531MainLift, current531Week, current531Cycle, compute531CycleBumps, resolve531CycleEnd, suggest531Tm, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, realignCycleForToday, todayCycleStripIndex,
+  uid, todayISO, fmtISO, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, is531MainLift, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, healScheduleWeekdays, buildPlanSkeleton, instantiateProgram, is531Plan, round531, tmFrom531, tmBump531, weeks531, week531, fiveThreeOneSets, build531Plan, add531MainLift, current531Week, current531Cycle, compute531CycleBumps, resolve531CycleEnd, suggest531Tm, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, mesoActive, autoregLoadOnly, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, realignCycleForToday, todayCycleStripIndex,
   effReps, fmtDuration, e1rm, isImprovement, isDecline, bestE1rmForExercise, bestAssistLoad, bestTimeForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, buildTimeSeedSets, latestBodyweight, bodyweightForDate, exerciseLogMode, isAssisted, shouldPullBodyweight, systemExerciseToRow, inferCurrentExIdx, calcBlended,
   refreshExerciseBests, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries,
   computeNextReminderAt,
@@ -4661,7 +4777,7 @@ window.LB = {
   startDeload, endDeload, deloadElapsed, deloadDaysRemaining, deloadPlanDays,
   loadClientStore, loadCoachClientsStatus, reloadCoachingState, enableSelfCoaching, inviteClient, respondToCoachingInvite, endCoaching,
   addCoachingNote, markCoachingNotesRead, loadCoachingNotes, loadCoachingThreads, createCoachingThread, deleteCoachingThread, getOrCreateCoachingThread, uploadChatImage,
-  unreadCoachingNotes, isNoteFromClient, techniqueRounds, groupBySuperset, supersetLabel, timeAgo, dayLabel, cyclePosFromStartDate, mergeCollectionById, caloriesFromMacros, detectCacheVersion,
+  unreadCoachingNotes, isNoteFromClient, techniqueRounds, groupBySuperset, supersetLabel, timeAgo, dayLabel, cyclePosFromStartDate, mergeCollectionById, mergePlanDrafts, caloriesFromMacros, detectCacheVersion,
   loadCoachingMacros, addCoachingMacros,
   diffSchedule,
   checkinWeekStart, submitCheckin, loadCheckins, deleteCheckin, loadCoachCheckinStatus, requestCheckin, setCheckinEnabled, loadCheckinSchema, saveCheckinSchema, saveDefaultCheckinSchema,
@@ -4669,5 +4785,5 @@ window.LB = {
   cardioDistUnit, setCardioDistUnit, distToM, mToDisplay, fmtDistance, fmtPace, fmtSpeed, MI_TO_M, recentCardioTypes,
   isLoggedTrainingDay, plannedTrainingDay, isTrainingDayForDate, dayTargetFromMacros, macroAdherence, effectiveMacroTargets, dailyLogAdherence, dailyLogsWeekPrefill, weekPerformanceSignal,
   refreshHealthLogs,
-  pickGrowthRecipient, retractGrowthGrant, pickDeclineRecipient, reearnMesoWeightBoosts, mesoPausedDays, mesoRirForWeek, MESO_GROWTH_CEILING_DELTA,
+  pickGrowthRecipient, retractGrowthGrant, pickDeclineRecipient, reearnMesoWeightBoosts, resolveMesoSeedSuggestion, mesoPausedDays, mesoRirForWeek,
 };

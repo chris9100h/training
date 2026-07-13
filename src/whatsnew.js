@@ -17,6 +17,37 @@
    Entry shape: { id: string, date: string (YYYY-MM-DD), title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.579',
+    date: '2026-07-13',
+    title: 'Your Plan, Picture-Perfect',
+    items: [
+      "📸 Your plan can now pose for a picture. Open any plan and tap the new camera icon next to Edit: every training day, exercise, set and rep gets laid out into one clean overview image, ready to save or share. Handy for printing, sending to a training partner, or just admiring your own handiwork.",
+      "📏 Built wide on purpose. It's a proper overview sheet, wider than your screen by design, so scroll or pinch to zoom through it like a real document instead of a cramped phone screenshot.",
+      "🎨 Matches your setup automatically. Whatever theme and accent color you've got dialed in, the image uses it too. No generic template, it actually looks like your app.",
+    ],
+  },
+  {
+    id: 'v2.566',
+    date: '2026-07-12',
+    title: 'Never Lose a Plan Edit Again',
+    items: [
+      "💾 Editing a plan now saves itself as you go, no button required. Get pulled away, close the app, or switch from your phone to your laptop mid-edit? Doesn't matter, your changes are already tucked away safely.",
+      "🔄 Open a plan with edits waiting from an earlier session and you'll see a clear \"Unsaved edits\" banner right there. Tap Resume to jump back in exactly where you left off, on any device.",
+      "🛡️ Since this now genuinely protects real work, tossing it out takes an actual decision: discarding a resumed autosave asks you to type a quick confirmation first. No more losing progress with one careless tap.",
+    ],
+  },
+  {
+    id: 'v2.559',
+    date: '2026-07-12',
+    title: 'Autoregulation, Now Standalone',
+    items: [
+      "🎛️ Autoregulation no longer needs a mesocycle. You can turn it on for any plan and run it open-ended: your set counts and weights adjust from the feedback you give after each session, with no fixed block, end date, or RIR countdown. Choose it in the plan wizard, or turn it on in a plan's options.",
+      "🧱 New Load-only mode. It keeps your set counts where they are and autoregulates only the weight. If a muscle is still sore, it holds the weight instead of adding load, so progression follows your recovery.",
+      "🔁 Flex plans now show a rotation count on the home strip and the plan card, so you can see how many times you've been through your rotation. Skipped days count too.",
+      "📍 Today is now highlighted on your active plan card, so the current day is easy to spot at a glance.",
+    ],
+  },
+  {
     id: 'v2.547',
     date: '2026-07-11',
     title: 'Water, By the Ounce',

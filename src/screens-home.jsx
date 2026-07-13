@@ -1388,7 +1388,11 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       return dl531 ? `CYCLE ${c531} · DELOAD` : `CYCLE ${c531} · WEEK ${w531}`;
     }
     if (store.statusMode === 'deload' && weekOffset === 0) return 'DELOAD';
-    if (isFlex) return 'FLEXIBLE';
+    // Flex has no calendar week; the meaningful counter is how many times you've
+    // been through the rotation (position, advances on a session OR a skip).
+    // weekOffset lets the strip page back to earlier passes, so mirror the cycle
+    // plans' `currentCycleNum + weekOffset` and floor at rotation 1.
+    if (isFlex) return `FLEXIBLE · ROTATION ${Math.max(1, currentCycleNum + weekOffset + 1)}`;
     if (weekdayMode) {
       if (store.weekPlanStartDate) {
         const monday = new Date(); monday.setHours(12, 0, 0, 0);
@@ -1657,7 +1661,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
   // session opens. The useEffectT in screens-train still handles the live
   // training case and re-creates if the week count changes.
   useEffect(() => {
-    if (!sch?.mesocycle_weeks || !sch?.id || !userId) return;
+    if (!LB.mesoActive(sch) || !sch?.id || !userId) return;
     const schId = sch.id;
     // Recompute everything from the freshest store snapshot (`s`, inside the
     // functional setStore updater) instead of the `sch`/`store` closed over
@@ -1668,13 +1672,18 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     // drops the cycleOffset and computes "today" instead of the true next D1.
     setStore(s => {
       const freshSch = s.schedules.find(x => x.id === schId);
-      if (!freshSch?.mesocycle_weeks) return s;
+      if (!LB.mesoActive(freshSch)) return s;
       const existing = (s.mesoStates || []).find(m => m.scheduleId === schId);
+      // Unbounded (autoregulate-only) plans have no mesocycle_weeks — normalize
+      // through ?? null so this matches a persisted mesoState's null weeks (else
+      // undefined === null is false and this guard would wipe+recreate the meso
+      // on every run; mirrors the identical fix in screens-train.jsx).
+      const targetWeeks = freshSch.mesocycle_weeks ?? null;
       // Keep existing meso only if weeks match the current config — mirrors the
       // recreate guard in screens-train.jsx's session auto-start effect, so a
-      // changed week count always starts fresh regardless of which effect runs
-      // first.
-      if (existing && existing.weeks === freshSch.mesocycle_weeks) return s;
+      // changed week count (or bounded ↔ unbounded) always starts fresh
+      // regardless of which effect runs first.
+      if (existing && existing.weeks === targetWeeks) return s;
       const _daysLen = freshSch.days.length || 1;
       const _isWeekday = LB.isWeekdayPlan(freshSch);
       const _isFlex = LB.isFlexPlan(freshSch);
@@ -1693,7 +1702,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       const newMeso = {
         id: userId + '_' + schId,
         scheduleId: schId,
-        weeks: freshSch.mesocycle_weeks,
+        weeks: targetWeeks,
         startDate: alignedStartDate,
         startCycleIndex: alignedStartIdx,
         startedAt: new Date().toISOString(), // block-start anchor (flex week count); persisted since Migration 0138
@@ -1704,7 +1713,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       const others = (s.mesoStates || []).filter(m => m.scheduleId !== schId);
       return { ...s, mesoStates: [...others, newMeso] };
     });
-  }, [sch?.id, sch?.mesocycle_weeks, store?.mesoStates, userId]); // eslint-disable-line
+  }, [sch?.id, sch?.mesocycle_weeks, sch?.mesocycle_autoregulate, store?.mesoStates, userId]); // eslint-disable-line
 
   // Auto-end a deload once it has run its course (one cycle / week elapsed, or
   // the flex session goal of deload sessions logged). Runs on mount and when the
@@ -1851,7 +1860,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
         setStore(s => ({
           ...s,
           schedules: s.schedules.map(sc =>
-            sc.id === scheduleId ? { ...sc, mesocycle_weeks: null } : sc
+            sc.id === scheduleId ? { ...sc, mesocycle_weeks: null, mesocycle_autoregulate: false, mesocycle_autoregulate_mode: null } : sc
           ),
           mesoStates: (s.mesoStates || []).map(m =>
             m.scheduleId === scheduleId ? { ...m, pendingMeso2: false, updatedAt: new Date().toISOString() } : m
@@ -1862,7 +1871,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
           ...s,
           activeScheduleId: null,
           schedules: s.schedules.map(sc =>
-            sc.id === scheduleId ? { ...sc, mesocycle_weeks: null } : sc
+            sc.id === scheduleId ? { ...sc, mesocycle_weeks: null, mesocycle_autoregulate: false, mesocycle_autoregulate_mode: null } : sc
           ),
           mesoStates: (s.mesoStates || []).map(m =>
             m.scheduleId === scheduleId ? { ...m, pendingMeso2: false, updatedAt: new Date().toISOString() } : m
@@ -2183,7 +2192,12 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       // seeds its real last duration instead of the default.
       if (LB.exerciseLogMode(ex) === 'time') {
         const lastTime = seedRefs[it.exId] ?? LB.bestRecentEntry(store, it.exId, dayId, 3, occ);
-        const sets = LB.buildTimeSeedSets(it, lastTime);
+        // Apply the meso volume set-delta here too (same load-only guard as the
+        // weight path below), so a time exercise's set count autoregulates and
+        // the real session matches the plan-viewer preview (which routes time
+        // items through buildSeedSets -> buildTimeSeedSets WITH the delta).
+        const itAdjTime = (typeof applyMesoSetDeltaFromState === 'function' && !LB.autoregLoadOnly(sch)) ? applyMesoSetDeltaFromState(it, dayId, resolvedMeso) : it;
+        const sets = LB.buildTimeSeedSets(itAdjTime, lastTime);
         return {
           exId: it.exId, name: ex?.name || '?',
           plannedSets: sets.length, plannedReps: null, plannedRepsPerSet: null,
@@ -2195,13 +2209,14 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       const isUnilateral = ex?.unilateral || false;
       const suggestion = LB.progressionSuggestion(store, it.exId, dayId, it.reps, it.repsPerSet || null, seedRefs[it.exId], it.repsMax || null, it.progressionOffset ?? null, occ);
       const bodyweightKg = ex?.equipment === 'bodyweight' ? LB.latestBodyweight(store) : null;
-      const itAdj = (typeof applyMesoSetDeltaFromState === 'function') ? applyMesoSetDeltaFromState(it, dayId, resolvedMeso) : it;
+      // Load-only autoregulate plans never apply set deltas (weight is tuned,
+      // set count stays authored) — this also neutralizes any deltas left over
+      // from a prior "Volume + Load" run without wiping the mesoState.
+      const itAdj = (typeof applyMesoSetDeltaFromState === 'function' && !LB.autoregLoadOnly(sch)) ? applyMesoSetDeltaFromState(it, dayId, resolvedMeso) : it;
       const weightBoost = mesoBoosts?.[it.exId + '_' + dayId] ?? null;
-      let suggestionFinal = suggestion;
-      if (weightBoost != null && !suggestionFinal && last) {
-        const refSet = (last?.entry?.sets || []).filter(s => !s.warmup && !s.skipped).find(s => s.kg != null);
-        if (refSet) suggestionFinal = { kg: Math.round((refSet.kg + weightBoost) * 4) / 4, reps: refSet.reps ?? null };
-      }
+      // On an autoregulating plan the feedback engine owns the weight: apply an
+      // earned boost, but a withheld one vetoes Smart Progression (see helper).
+      const suggestionFinal = LB.resolveMesoSeedSuggestion(suggestion, weightBoost, last, LB.mesoActive(sch));
       const seedSets = LB.buildSeedSets(itAdj, last, suggestionFinal, isUnilateral, store, bodyweightKg);
       return {
         exId: it.exId, name: ex?.name || '?',

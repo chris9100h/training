@@ -138,8 +138,18 @@ function mesoCurrentWeek(mesoState, store) {
       s.ended && !s.isDeload && s.scheduleId === mesoState.scheduleId &&
       (startedTs != null ? new Date(s.ended).getTime() > startedTs : (s.date || '') >= mesoState.startDate)
     ).length;
-    const rotations = Math.floor(trainedCount / sch.days.length);
-    return Math.min(Math.max(1, rotations + 1), mesoState.weeks);
+    // Two independent inflation sources cancel by taking the min. The trained
+    // count over-counts sessions logged during the PENDING gap (a meso enabled
+    // mid-rotation has startedAt=creation but startCycleIndex aligned to a
+    // future D1, so gap sessions have ended > startedTs yet predate the block).
+    // The position count (currentIdx - startIdx) instead over-counts skips after
+    // activation. min() strips whichever source inflated; only a rare mix of
+    // both (gap sessions AND a later full skipped rotation) can still round up
+    // by one week.
+    const trainedRotations = Math.floor(trainedCount / sch.days.length);
+    const positionRotations = Math.floor((currentIdx - startIdx) / sch.days.length);
+    const week = Math.max(1, Math.min(trainedRotations, positionRotations) + 1);
+    return mesoState.weeks != null ? Math.min(week, mesoState.weeks) : week;
   }
   // Weekday and date-based cycle plans: date arithmetic.
   // Cycle plans: one meso "week" = one full rotation (daysLen days).
@@ -160,24 +170,26 @@ function mesoCurrentWeek(mesoState, store) {
   const paused = LB.mesoPausedDays(store?.statusPeriods, trainedDates, mesoState.startDate, LB.fmtISO(today));
   const days = Math.max(0, rawDays - paused);
   const cycleLen = (sch && !LB.isWeekdayPlan(sch) && sch.days?.length > 0) ? sch.days.length : 7;
-  return Math.min(Math.max(1, Math.floor(days / cycleLen) + 1), mesoState.weeks);
+  const week = Math.max(1, Math.floor(days / cycleLen) + 1);
+  return mesoState.weeks != null ? Math.min(week, mesoState.weeks) : week;
 }
 // mesoRirForWeek lives in store.js (LB.mesoRirForWeek) so it's unit-testable —
 // linear RIR taper from startRir (week 1) to endRir (final week), endRir may be
 // negative (beyond failure → auto lengthened partials, see mesoPartials).
 // Apply an already-resolved meso state's set-delta to a plan item before
-// building seed sets. Returns a shallow copy with adjusted .sets, clamped to
-// [1, baseline+4] so repeated "not enough volume" answers across a mesocycle
-// can't balloon a lift's set count without bound; no-ops if no meso or no
-// delta. Split out from applyMesoSetDelta so callers resolving meso state for
-// every item in a plan (session start, plan viewer) can call getMesoState
-// once instead of once per item (each call touches localStorage).
+// building seed sets. Returns a shallow copy with adjusted .sets, floored at 1
+// (can't cut below one set) but otherwise uncapped — repeated "not enough
+// volume" answers keep growing a lift indefinitely, and an over-grown lift
+// self-corrects via the decline signal instead of a hard ceiling; no-ops if
+// no meso or no delta. Split out from applyMesoSetDelta so callers resolving
+// meso state for every item in a plan (session start, plan viewer) can call
+// getMesoState once instead of once per item (each call touches localStorage).
 function applyMesoSetDeltaFromState(it, dayId, mesoState) {
   if (!dayId || !mesoState) return it;
   const delta = (mesoState.deltas || {})[it.exId + '_' + dayId];
   if (!delta) return it;
   const base = it.sets || 1;
-  return { ...it, sets: Math.min(base + LB.MESO_GROWTH_CEILING_DELTA, Math.max(1, base + delta)) };
+  return { ...it, sets: Math.max(1, base + delta) };
 }
 function applyMesoSetDelta(it, dayId, scheduleId, mesoStates) {
   if (!dayId || !scheduleId) return it;
@@ -765,10 +777,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const _sch = store.schedules?.find(s => s.id === session.scheduleId);
   const isWeekdayMode = _sch ? LB.isWeekdayPlan(_sch) : false;
 
-  // Auto-start a mesocycle when the session's plan has mesocycle_weeks set
-  // and there's no active meso for this plan yet.
+  // Auto-start a mesocycle when the session's plan has autoregulation active
+  // (a bounded mesocycle_weeks block, or the unbounded mesocycle_autoregulate
+  // flag) and there's no active meso for this plan yet.
   useEffectT(() => {
-    if (!_sch?.mesocycle_weeks || !session.scheduleId) return;
+    if (!LB.mesoActive(_sch) || !session.scheduleId) return;
     const schId = session.scheduleId;
     // Compute the new meso object PURELY (outside setStore) so it's guaranteed
     // available for the localStorage / component-state writes below — a
@@ -776,11 +789,17 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // an outer variable by the time we read it. The effect runs once on mount,
     // so the `store` closure is the freshest snapshot we need.
     const freshSch = store.schedules.find(x => x.id === schId);
-    if (!freshSch?.mesocycle_weeks) return;
+    if (!LB.mesoActive(freshSch)) return;
     const existing = getMesoState(schId, store.mesoStates);
+    // Unbounded (autoregulate-only) plans have no mesocycle_weeks — normalize
+    // through ?? null so this matches a persisted mesoState's null weeks. Without
+    // it, freshSch.mesocycle_weeks is `undefined` while a loaded existing.weeks is
+    // `null`, and undefined === null is false, so this guard would never match
+    // and would wipe+recreate the meso (losing all deltas/history) on every run.
+    const targetWeeks = freshSch.mesocycle_weeks ?? null;
     // Keep existing meso only if weeks match the current config.
-    // A mismatch (changed week count) always starts fresh.
-    if (existing && existing.weeks === freshSch.mesocycle_weeks) return;
+    // A mismatch (changed week count, or bounded ↔ unbounded) always starts fresh.
+    if (existing && existing.weeks === targetWeeks) return;
     // Align meso start to a clean boundary so week 1 is always a full rotation/week.
     // Weekday: next Monday (or today). Flex: next D1 via cycleIndex. Cycle: next D1 via date.
     const _isWeekday = LB.isWeekdayPlan(freshSch);
@@ -803,7 +822,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     const newMeso = {
       id: userId + '_' + schId,
       scheduleId: schId,
-      weeks: freshSch.mesocycle_weeks,
+      weeks: targetWeeks,
       startDate: alignedStartDate,
       startCycleIndex: alignedStartIdx,
       deltas: {},
@@ -1478,8 +1497,15 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     if (progressionResult) {
       overlayHoldMs = PROGRESSION_NAV_DELAY_MS; // swap mid-overlay; the show/hide timers below keep their own 800ms + 4000ms
       setTimeout(() => {
-        setProgressionUnlocked(progressionResult);
-        setTimeout(() => setProgressionUnlocked(null), 4000);
+        // If this same last-set-done also opened a meso feedback sheet
+        // (joint/pump/volume), don't slam the overlay on top of it — stash it;
+        // the flush effect shows it once every sheet is answered.
+        if (anyMesoSheetOpenRef.current) {
+          pendingProgressionRef.current = progressionResult;
+        } else {
+          setProgressionUnlocked(progressionResult);
+          setTimeout(() => setProgressionUnlocked(null), 4000);
+        }
       }, 800);
     } else if (!entry.sets[setIdx]?.warmup && !isDeloadSession) {
       const completed = entry.sets[setIdx];
@@ -2141,7 +2167,15 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         schedules: schedulesUpdate,
         inProgress: null,
         ...(shouldAdvance && !isWeekdayMode && !activeIsWeekday && !flexBlocks && {
-          cycleIndex: pickedDayIdx >= 0 ? pickedDayIdx + 1 : s.cycleIndex + 1,
+          // Flex encodes rotation*len + position in cycleIndex; preserve the
+          // rotation base so "continue from {day}" only moves the next-up
+          // pointer and doesn't reset the ROTATION counter (which also re-pends
+          // an active flex meso whose startCycleIndex is a past rotation).
+          cycleIndex: pickedDayIdx >= 0
+            ? (LB.isFlexPlan(activeSch)
+                ? Math.floor((s.cycleIndex || 0) / (activeSch.days.length || 1)) * (activeSch.days.length || 1) + pickedDayIdx + 1
+                : pickedDayIdx + 1)
+            : s.cycleIndex + 1,
         }),
         lastAdvancedDate: LB.todayISO(),
         ...(newCardioLogs.length ? { cardioLogs: [...(s.cardioLogs || []), ...newCardioLogs] } : {}),
@@ -2290,6 +2324,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const newBestShownRef = useRefT({}); // exId → true once a NEW BEST flashed (max once per exercise per session)
   const [cardioPR, setCardioPR] = useStateT(null);
   const [progressionUnlocked, setProgressionUnlocked] = useStateT(null);
+  // The "Progression unlocked" overlay and the meso feedback sheets both fire
+  // off the same last-working-set-done event, so they'd otherwise stack. When a
+  // feedback sheet is open we stash the overlay here and show it once every
+  // sheet is answered (see the flush effect near the meso sheet state), so it's
+  // always sequential: questions first, then the celebration.
+  const pendingProgressionRef = useRefT(null);
+  const anyMesoSheetOpenRef = useRefT(false); // latest "a meso sheet is open", for completeSet's deferred-show timer
   const [screenFlash, setScreenFlash] = useStateT(false);
   const [restModalOpen, setRestModalOpen] = useStateT(() => {
     const rs = session.restStart ?? null;
@@ -2542,8 +2583,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const continueAsCycle = (scheduleId) => {
     setStore(s => ({
       ...s,
+      // Drop to a plain cycle: clear BOTH meso flags. A meso built via the
+      // editor carries mesocycle_autoregulate=true, so nulling only weeks would
+      // leave mesoActive true and auto-recreate an unbounded meso.
       schedules: s.schedules.map(sc =>
-        sc.id === scheduleId ? { ...sc, mesocycle_weeks: null } : sc
+        sc.id === scheduleId ? { ...sc, mesocycle_weeks: null, mesocycle_autoregulate: false, mesocycle_autoregulate_mode: null } : sc
       ),
       mesoStates: (s.mesoStates || []).map(m =>
         m.scheduleId === scheduleId ? { ...m, pendingMeso2: false, updatedAt: new Date().toISOString() } : m
@@ -2555,8 +2599,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     setStore(s => ({
       ...s,
       activeScheduleId: null,
+      // Same clear as continueAsCycle so a later reactivation doesn't resurrect
+      // an unbounded meso from a lingering autoregulate flag.
       schedules: s.schedules.map(sc =>
-        sc.id === scheduleId ? { ...sc, mesocycle_weeks: null } : sc
+        sc.id === scheduleId ? { ...sc, mesocycle_weeks: null, mesocycle_autoregulate: false, mesocycle_autoregulate_mode: null } : sc
       ),
       mesoStates: (s.mesoStates || []).map(m =>
         m.scheduleId === scheduleId ? { ...m, pendingMeso2: false, updatedAt: new Date().toISOString() } : m
@@ -2612,6 +2658,19 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const [mesoVolumeExIds, setMesoVolumeExIds] = useStateT([]); // exId+dayId pairs for delta
   const [mesoPumpAnswer, setMesoPumpAnswer] = useStateT(null);
   const [mesoVolumeAnswer, setMesoVolumeAnswer] = useStateT(null);
+  // Keep the "a meso feedback sheet is open" ref fresh each render (completeSet's
+  // deferred-show timer reads it), and once all three sheets are closed, flush a
+  // stashed "Progression unlocked" overlay — so the celebration lands AFTER the
+  // questions instead of covering them.
+  anyMesoSheetOpenRef.current = mesoSorenessOpen || mesoJointOpen || mesoVolumeOpen;
+  useEffectT(() => {
+    if (!mesoSorenessOpen && !mesoJointOpen && !mesoVolumeOpen && pendingProgressionRef.current) {
+      const result = pendingProgressionRef.current;
+      pendingProgressionRef.current = null;
+      setProgressionUnlocked(result);
+      setTimeout(() => setProgressionUnlocked(null), 4000);
+    }
+  }, [mesoSorenessOpen, mesoJointOpen, mesoVolumeOpen]);
   // Soreness/joint use a select-then-confirm step (like volume already did)
   // so a single mistap only highlights an option instead of committing it.
   const [mesoSorenessSel, setMesoSorenessSel] = useStateT(null);
@@ -2644,9 +2703,35 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     negOwner: mesoNegativeDeltaKeysRef.current,
   });
   // Per-session quality tracking for weight progression
-  const mesoJointFineRef = useRefT(new Set());    // exIds where joint was 'fine'
-  const mesoPumpOkRef = useRefT(new Set());        // muscles where pump was moderate/amazing
-  const mesoVolumeOkRef = useRefT(new Set());      // muscles where volume was just_right/not_enough
+  // The four weight-boost gating sets. Like the set-delta bookkeeping, they must
+  // survive a mid-session reload: rebuild them from the persisted per-question
+  // answers (mesoAnswersRef) so a remount doesn't drop earned boosts (the three
+  // require-ok sets) or a still-sore hold (the block set). Recomputed once.
+  const mesoBoostSetsInitRef = useRefT(null);
+  if (mesoBoostSetsInitRef.current === null) {
+    const a = mesoAskedInitRef.current.answers || {};
+    const jointFine = new Set();
+    for (const [exId, rec] of Object.entries(a.joint || {})) { if (rec && rec.answer === 'none') jointFine.add(exId); }
+    const pumpOk = new Set(), volumeOk = new Set();
+    for (const rec of Object.values(a.volume || {})) {
+      if (!rec || !rec.muscle) continue;
+      if (rec.pump === 'moderate' || rec.pump === 'amazing') pumpOk.add(rec.muscle);
+      if (rec.volume === 'just_right' || rec.volume === 'not_enough') volumeOk.add(rec.muscle);
+    }
+    const soreBlock = new Set();
+    for (const rec of Object.values(a.soreness || {})) { if (rec && rec.answer === 'still_sore' && rec.muscle) soreBlock.add(rec.muscle); }
+    mesoBoostSetsInitRef.current = { jointFine, pumpOk, volumeOk, soreBlock };
+  }
+  const mesoJointFineRef = useRefT(mesoBoostSetsInitRef.current.jointFine);    // exIds where joint was 'fine'
+  const mesoPumpOkRef = useRefT(mesoBoostSetsInitRef.current.pumpOk);          // muscles where pump was moderate/amazing
+  const mesoVolumeOkRef = useRefT(mesoBoostSetsInitRef.current.volumeOk);      // muscles where volume was just_right/not_enough
+  // Load-only plans: muscles answered 'still sore' this session. There sets are
+  // frozen, so soreness instead HOLDS the weight (a recovery-based load brake) —
+  // this set blocks the boost for those muscles. Modeled as "block on sore" (not
+  // "require ok") so a muscle whose soreness question was never asked (week 1)
+  // still earns its boost, never a false hold. Rehydrated above so a reload keeps
+  // any already-recorded hold.
+  const mesoSoreBlockRef = useRefT(mesoBoostSetsInitRef.current.soreBlock);
   const mesoSessionSetGainsRef = useRefT(mesoAskedInitRef.current.gains); // key → { exId, name, delta } for set changes this session
   // Which question type currently "owns" the negative set-delta slot for a
   // key (exId_dayId) this session — key -> 'soreness'|'joint'|'volume'. Two
@@ -2668,7 +2753,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // for the recap (weight boosts, handled separately in computeMesoGains,
     // still accrue). All three feedback questions funnel through here, so this
     // one guard freezes the whole set-delta system for the last week.
-    if (mesoLastWeek) return;
+    // A Load-only autoregulate plan freezes it the same way, every session:
+    // it tunes weight only, so set counts stay at the plan's authored value,
+    // while the joint/pump/volume answers still gate the weight boosts.
+    if (mesoLastWeek || LB.autoregLoadOnly(mesoSch)) return;
     const prevContrib = record.contrib || {};
     const keys = new Set([...Object.keys(prevContrib), ...Object.keys(newContrib)]);
     const deltaPatch = {};
@@ -2735,6 +2823,17 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       }
     }
     record.answer = answer;
+    // Load-only: soreness doesn't touch set counts (those are frozen) — it
+    // holds the weight instead. Record/clear the block for this muscle and
+    // stop; the growth/decline/commitContrib set-delta machinery below is a
+    // no-op here anyway (commitContrib freezes on load-only).
+    if (LB.autoregLoadOnly(mesoSch)) {
+      if (answer === 'still_sore') mesoSoreBlockRef.current.add(muscle);
+      else mesoSoreBlockRef.current.delete(muscle);
+      mesoAnswersRef.current.soreness[muscle] = record;
+      persistMesoAsked();
+      return;
+    }
     const namesByKey = {};
     const keys = [];
     record.targets.forEach(t => { namesByKey[t.key] = t.name; keys.push(t.key); });
@@ -2760,8 +2859,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     const prevGrantedTo = Object.keys(record.contrib || {}).find(k => record.contrib[k] === 1) ?? null;
     let recipientKey = null;
     if (adds && keys.length) {
-      recipientKey = LB.pickGrowthRecipient(keys, mesoState.deltas, mesoState.growthCounts, prevGrantedTo).recipientKey;
-      saveMesoState(m => ({ ...m, growthCounts: LB.pickGrowthRecipient(keys, m.deltas, m.growthCounts, prevGrantedTo).growthCounts }));
+      recipientKey = LB.pickGrowthRecipient(keys, mesoState.growthCounts, prevGrantedTo).recipientKey;
+      saveMesoState(m => ({ ...m, growthCounts: LB.pickGrowthRecipient(keys, m.growthCounts, prevGrantedTo).growthCounts }));
     } else if (prevGrantedTo) {
       // Edited away from an adding answer this session → undo the prior grant.
       saveMesoState(m => ({ ...m, growthCounts: LB.retractGrowthGrant(m.growthCounts, prevGrantedTo) }));
@@ -2884,22 +2983,17 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       namesByKey[key] = session.entries.find(e => e.exId === exId)?.name || '';
     });
 
-    // Growth rotation for "not_enough": whichever exercise still below its
-    // own per-exercise ceiling (base+4, enforced separately by
-    // applyMesoSetDeltaFromState) has the fewest growth grants so far this
-    // meso wins (ties toward the main lift) — see LB.pickGrowthRecipient for
-    // the full rule, including how a mid-meso exercise swap-in is seeded so
-    // it can't cut ahead of an established lift. With only one exercise this
-    // still always picks it — same outcome as before this feature existed —
-    // except growth now correctly stops once that exercise hits its own
-    // ceiling instead of letting the underlying counter climb unboundedly
-    // past it forever (harmless before since only the clamped value was ever
-    // applied, but this also means a later shrink is no longer silently
-    // swallowed once the counter has drifted arbitrarily far past the cap).
+    // Growth rotation for "not_enough": whichever exercise has the fewest
+    // growth grants so far this meso wins (ties toward the main lift) — see
+    // LB.pickGrowthRecipient for the full rule, including how a mid-meso
+    // exercise swap-in is seeded at the group max so it can't cut ahead of an
+    // established lift. With only one exercise it always picks it. Growth has
+    // no upper cap: a lifter who keeps reporting "not enough" keeps getting
+    // more sets, and an over-grown exercise self-corrects via the decline
+    // signals ("pushed"/"too much"/"still sore") rather than a hard limit;
+    // applyMesoSetDeltaFromState only floors the applied result at 1 set.
     // growthCounts is kept separate from deltas specifically so an unrelated
-    // shrink (soreness/joint) never distorts turn fairness; it is not frozen
-    // by "too_much" shrinking deltas back down — that exercise simply becomes
-    // eligible again once its delta drops back under the ceiling.
+    // shrink (soreness/joint) never distorts turn fairness.
     // LB.pickGrowthRecipient is called twice on purpose: once here (using
     // `mesoState`) to decide `recipientKey` for the newContrib built below,
     // and again inside the saveMesoState updater (using the fresh `m`
@@ -2917,14 +3011,15 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // Skip the whole growth/decline rotation in the final week — commitContrib
     // is frozen there, so bumping growthCounts would only drift the counter
     // (harmless since it resets at Meso 2, but pointless) with no delta to show
-    // for it.
+    // for it. A Load-only plan freezes set deltas every session for the same
+    // reason, so its rotation is pointless too.
     const prevGrantedTo = Object.keys(record.contrib || {}).find(k => record.contrib[k] === 1) ?? null;
     let recipientKey = null;
-    if (mesoLastWeek) {
+    if (mesoLastWeek || LB.autoregLoadOnly(mesoSch)) {
       // frozen: no rotation, no grant
     } else if (volume === 'not_enough') {
-      recipientKey = LB.pickGrowthRecipient(keys, mesoState.deltas, mesoState.growthCounts, prevGrantedTo).recipientKey;
-      saveMesoState(m => ({ ...m, growthCounts: LB.pickGrowthRecipient(keys, m.deltas, m.growthCounts, prevGrantedTo).growthCounts }));
+      recipientKey = LB.pickGrowthRecipient(keys, mesoState.growthCounts, prevGrantedTo).recipientKey;
+      saveMesoState(m => ({ ...m, growthCounts: LB.pickGrowthRecipient(keys, m.growthCounts, prevGrantedTo).growthCounts }));
     } else if (prevGrantedTo) {
       // Answer changed away from not_enough this session — undo the previous grant.
       saveMesoState(m => ({ ...m, growthCounts: LB.retractGrowthGrant(m.growthCounts, prevGrantedTo) }));
@@ -3075,6 +3170,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       if (!mesoJointFineRef.current.has(exId)) continue;
       if (muscle && !mesoPumpOkRef.current.has(muscle)) continue;
       if (muscle && !mesoVolumeOkRef.current.has(muscle)) continue;
+      // Load-only: still-sore holds the weight for that muscle this session.
+      if (LB.autoregLoadOnly(mesoSch) && muscle && mesoSoreBlockRef.current.has(muscle)) continue;
 
       const workingSets = e.sets.filter(s => !s.warmup && !s.skipped);
       if (!workingSets.length) continue;
@@ -3136,6 +3233,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     if (mesoWeek == null) return; // pending period — meso not yet started
     if (mesoWeek === 1) return; // week 1: no previous meso session to be sore from
     if (mesoLastWeek) return; // final week: set deltas frozen, and soreness only drives deltas
+    // Load-only keeps asking soreness: there it holds the weight (recovery brake)
+    // instead of adjusting sets — see handleSorenessAnswer / computeMesoGains.
     const ex = entry ? store.exercises?.find(e => e.id === entry.exId) : null;
     const pm = primaryMuscleForExercise(ex);
     if (!pm || askedSorenessRef.current.has(pm)) return;
@@ -3173,7 +3272,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     setMesoJointSel(null);
     mesoEditingRef.current.joint = null;
     setMesoJointOpen(true);
-  }, [exIdx, entry?.sets?.map(s => s.done ? 1 : 0).join(','), !!mesoState]);
+    // Encode done AND skipped: finishing an exercise by SKIPPING its last open
+    // set (skipped, not done) must still re-run this effect. Keying only on
+    // `done` left the signature unchanged on a skip, so the joint/pump/volume
+    // sheet never fired and its boost gates / volume feedback were skipped.
+  }, [exIdx, entry?.sets?.map(s => s.done ? 1 : s.skipped ? 2 : 0).join(','), !!mesoState]);
 
   const tempoTimerRef = useRefT(null);
   const audioCtxRef = useRefT(null);
@@ -4865,7 +4968,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           {(store.statusMode === 'deload' || session.isDeload) && (
             <span style={{ fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.12em', color: 'var(--accent)', background: 'rgba(var(--accent-rgb),0.12)', border: `0.5px solid ${UI.goldSoft}`, borderRadius: 4, padding: '1px 6px' }}>DELOAD · 50%</span>
           )}
-          {mesoState && mesoWeek != null && (
+          {mesoState && mesoWeek != null && mesoState.weeks != null && (
             <span style={{ fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkSoft, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '1px 6px' }}>
               {isWeekdayMode ? 'W' : 'C'}{mesoWeek}/{mesoState.weeks}
             </span>

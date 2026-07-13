@@ -184,6 +184,7 @@ function PlanScreen({ store, setStore, go, userId, openNewPlan }) {
           return 0;
         }).map(s => {
           const isActive = s.id === store.activeScheduleId;
+          const todayDayId = isActive ? (LB.todaysDay(store)?.day?.id ?? null) : null;
           const mesoSt = s.mesocycle_weeks ? (store.mesoStates || []).find(m => m.scheduleId === s.id) : null;
           const mesoCompletions = mesoSt?.completions ?? 0;
           const mesoPending = mesoSt?.startDate && new Date(mesoSt.startDate + 'T12:00:00') > new Date();
@@ -195,6 +196,10 @@ function PlanScreen({ store, setStore, go, userId, openNewPlan }) {
           const wk531 = is531 ? (LB.current531Week(s, store.sessions) || 1) : 0;
           const deload531 = is531 && (wk531 === 4 || (isActive && store.statusMode === 'deload'));
           const label531 = deload531 ? `C${cyc531} · DELOAD` : `C${cyc531} · W${wk531}`;
+          // How many times through the rotation, for the active flex plan only
+          // (cycleIndex tracks the active plan; advances on a session OR a skip).
+          const flexRotation = (isActive && LB.isFlexPlan(s) && s.days.length > 0)
+            ? Math.floor((store.cycleIndex || 0) / s.days.length) + 1 : 0;
           return isActive ? (
             <BracketFrame key={s.id} gold onClick={() => go({ name: 'plan-view', scheduleId: s.id, fromPlan: true })} style={{ cursor: 'pointer', overflow: 'hidden' }}>
               {s.mesocycle_weeks && (
@@ -234,6 +239,11 @@ function PlanScreen({ store, setStore, go, userId, openNewPlan }) {
                       V{verCount}
                     </span>
                   )}
+                  {flexRotation > 0 && (
+                    <span style={{ fontFamily: UI.fontNum, fontSize: 10, fontWeight: 700, color: UI.gold, background: 'rgba(var(--accent-rgb),0.15)', border: `1px solid ${UI.goldSoft}`, borderRadius: 4, padding: '2px 6px', letterSpacing: '0.05em' }}>
+                      ROT {flexRotation}
+                    </span>
+                  )}
                   <Pill gold>active</Pill>
                 </div>
               </div>
@@ -241,9 +251,12 @@ function PlanScreen({ store, setStore, go, userId, openNewPlan }) {
                 {planDescriptor(s)}
               </div>
               <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                {s.days.map((d) => (
-                  <Pill key={d.id} gold={!!d.items.length}>{d.name}</Pill>
-                ))}
+                {s.days.map((d) => {
+                  const isToday = d.id === todayDayId;
+                  return (
+                    <Pill key={d.id} gold={!!d.items.length} className={isToday ? 'intensity-glow' : undefined} style={isToday ? { borderColor: 'var(--accent)' } : undefined}>{d.name}</Pill>
+                  );
+                })}
               </div>
               <button onClick={toggleDeload} style={{
                   width: '100%', marginTop: 12, padding: '10px 12px', borderRadius: 6, cursor: 'pointer',
@@ -570,6 +583,14 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
   // hook order must stay constant across renders of this long-lived instance.
   const isPad = useIsPadS();
   const [confirmEl, confirm] = useConfirm();
+  // Plan-as-image export: a dedicated "poster" tree (all training days
+  // stacked, unlike the interactive one-day-at-a-time view below) is mounted
+  // only while capturing, then rasterized via the same html2canvas flow the
+  // session-share camera button uses (captureNodeAsPng, defined in
+  // screens-lib.jsx, loaded after this file). Safe to reference here since
+  // it's only called from a click handler / JSX render, both well after boot.
+  const [capturing, setCapturing] = useStateS(false);
+  const captureRef = React.useRef(null);
 
   if (!sch) {
     return (
@@ -606,6 +627,81 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
   const isTodaySel = day.id === todayDayId;
   const dayLabel = isWeekday ? weekdayFullLabel(day.weekday, dayIdx) : `Day ${dayIdx + 1}`;
   const trainingDayCount = displayDays.filter(d => d.items.length).length;
+
+  // Poster export: every training day at once (rest days carry nothing worth
+  // printing), in display order. Reps rendering mirrors the interactive
+  // viewer's own logic exactly (screens-schedule.jsx, the per-set weight/reps
+  // row below): repsPerSet joined by "/", else a repsMax range, else the plain
+  // reps number, else blank (checkbox-mode items store reps: 0).
+  const posterDays = displayDays.filter(d => d.items.length > 0);
+  const posterRepsLabel = (it) => {
+    if (it.repsPerSet && it.repsPerSet.length) return it.repsPerSet.join('/');
+    if (it.repsMax != null) return `${it.reps}-${it.repsMax}`;
+    return it.reps || '';
+  };
+  // Per-set intensity techniques (Drop Set, Myo-Reps, ...), planned in the day
+  // editor's "Intensity technique (per set)" picker. A poster meant to stand on
+  // its own away from the app should spell out which set gets what, not just
+  // flag that something's there: full labels via LB.plannedTechniqueLabel
+  // (the same lookup the picker chips themselves use), not the short codes.
+  const posterTechniquesLabel = (it) => {
+    if (!Array.isArray(it.plannedTechniques)) return '';
+    return it.plannedTechniques
+      .map((t, i) => t ? `Set ${i + 1}: ${LB.plannedTechniqueLabel(t)}` : null)
+      .filter(Boolean)
+      .join(' · ');
+  };
+  // One exercise row (Exercise+technique / Sets / Reps / Notes), shared by both
+  // standalone items and superset/giant-set members below so the two paths
+  // can't drift into two different-looking rows. `indent`, set only for
+  // superset/giant-set members, nudges the exercise text a bit clear of the
+  // group's accent bar via `transform`, never `padding`/`margin`: a padding
+  // nudge on this flex:1 item still leaked ~5px into the Sets column (a
+  // flex-basis/border-box interaction), while transform is a paint-only
+  // shift the flex layout never sees, so Sets/Reps/Notes can't be affected.
+  const renderPosterItemRow = (it, ii, indent) => {
+    const ex = LB.findExercise(store, it.exId);
+    const techLabel = posterTechniquesLabel(it);
+    return (
+      <div key={it.exId + '-' + ii} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 2px', borderRadius: 4, background: ii % 2 ? 'var(--surface-tint-sm)' : 'transparent' }}>
+        <div style={{ flex: 1, minWidth: 0, transform: indent ? 'translateX(10px)' : 'none' }}>
+          <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.ink, lineHeight: 1.35, overflowWrap: 'break-word' }}>{ex?.name || ''}</div>
+          {techLabel && (
+            <div style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.gold, lineHeight: 1.35, marginTop: 2, overflowWrap: 'break-word' }}>{techLabel}</div>
+          )}
+        </div>
+        <div className="num" style={{ width: 34, fontSize: 12, color: UI.inkSoft, textAlign: 'center' }}>{it.sets}</div>
+        <div className="num" style={{ width: 68, fontSize: 12, color: UI.ink, textAlign: 'center' }}>{posterRepsLabel(it)}</div>
+        <div style={{ flex: 1, fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, lineHeight: 1.35, overflowWrap: 'break-word' }}>{ex?.note || ''}</div>
+      </div>
+    );
+  };
+  // Screenshot watermark: same full-page centered background treatment as
+  // SessionCompareScreen's camera export (screens-lib.jsx), not
+  // SessionDetailScreen's foreground corner mark: a multi-section poster
+  // reads cleaner with one faint centered mark than a corner logo competing
+  // with the last day card. VIPs get their own background image instead of
+  // the default ZANE mark. No dodgeAvatar needed: unlike a corner mark, a
+  // centered background never collides with the knurl dividers.
+  // Bumped noticeably past SessionCompareScreen's own opacity (0.04/0.14):
+  // that screen's watermark sits behind mostly plain background, but this
+  // poster's day cards used to be fully opaque, so the mark was only ever
+  // visible in the thin gaps between them. The cards below are now a
+  // translucent surface tint instead of a solid fill for the same reason.
+  const _shotLogo = store.settings?.vipBackground || 'icons/zane-logo.png';
+  const _shotIsCustom = _shotLogo !== 'icons/zane-logo.png';
+  const _shotIsLight = (store.settings?.darkMode ?? 'dark') === 'light';
+  const _shotDefaultStyle = { width: '75%', maxWidth: 620, opacity: _shotIsLight ? 0.10 : 0.06, filter: _shotIsLight ? 'grayscale(1)' : 'grayscale(1) brightness(3)', objectFit: 'contain' };
+  const _shotCustomStyle = { width: '80%', maxWidth: 680, opacity: 0.13, objectFit: 'contain' };
+  const takeScreenshot = () => captureNodeAsPng(captureRef.current, {
+    filename: `${sch.name.replace(/[^a-z0-9]/gi, '-').toLowerCase()}-plan.png`,
+    setCapturing,
+    // The poster is intentionally wider than a phone viewport (fixed width,
+    // horizontally scrollable below). Without this, html2canvas only
+    // captures whatever width fits the current window instead of the full,
+    // wider poster.
+    fitWidth: true,
+  });
   // In a non-active version no day is live, so the selected (viewed) day gets a
   // neutral highlight rather than the gold "today/active" accent.
   const selBorder = viewingActiveVersion ? UI.gold : UI.inkFaint;
@@ -655,7 +751,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
     // its taper config, and a 5/3/1 plan its entire program (program_type +
     // program_data: TMs, wave seeding, progress history).
     const scheduleOut = { name: sch.name, days: versionDays };
-    for (const k of ['mode', 'is_flex', 'sessions_per_week', 'mesocycle_weeks', 'mesocycle_start_rir', 'mesocycle_end_rir', 'mesocycle_rir_enabled', 'program_type', 'program_data']) {
+    for (const k of ['mode', 'is_flex', 'sessions_per_week', 'mesocycle_weeks', 'mesocycle_start_rir', 'mesocycle_end_rir', 'mesocycle_rir_enabled', 'mesocycle_autoregulate', 'mesocycle_autoregulate_mode', 'program_type', 'program_data']) {
       if (sch[k] != null) scheduleOut[k] = sch[k];
     }
     const payload = { type: 'zane-plan', version: 1, schedule: scheduleOut, exercises };
@@ -671,12 +767,22 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
   // Directly change the validFrom of the selected past version.
   const doEditStartDate = (newDate) => {
     if (!newDate || !selectedVersion) return;
+    // Reject a date that collides with a DIFFERENT version: dedupeVersionsByDate
+    // is first-wins keyed on validFrom, so it would silently drop the edited
+    // version (irreversible history loss) instead of moving it.
+    if ((sch.versions || []).some(v => v.validFrom !== selectedVersion.validFrom && v.validFrom === newDate)) {
+      alert('Another version of this plan already starts on that date. Pick a different date.');
+      return;
+    }
     const newVersions = LB.dedupeVersionsByDate(
       (sch.versions || []).map(v => v.validFrom === selectedVersion.validFrom ? { ...v, validFrom: newDate } : v)
     );
     setStore(s => ({
       ...s,
-      schedules: s.schedules.map(x => x.id === sch.id ? { ...x, versions: newVersions } : x),
+      // Resync days to the newest version, mirroring doReactivate/doRestoreBackup:
+      // editing a date can change which version is newest, and sch.days must stay
+      // equal to versions[0].days.
+      schedules: s.schedules.map(x => x.id === sch.id ? { ...x, days: newVersions[0].days, versions: newVersions } : x),
     }));
     setEditingStartDate(false);
     setEditStartDateVal('');
@@ -749,6 +855,10 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
       {day.items.flatMap((it, k) => {
         const ex = LB.findExercise(store, it.exId);
         const isUni = !!ex?.unilateral;
+        // A cardio movement seeds an isCardio entry (no sets, a cardio widget) in
+        // the real session; show it as CARDIO here instead of empty weight/rep
+        // rows so the preview agrees with what actually starts.
+        const isCardioItem = ex?.movement_type === 'cardio';
         // Nth appearance of this exercise in the day -> its Nth past occurrence,
         // so a repeated exercise's slots don't share one reference.
         const occ = day.items.slice(0, k).filter(x => x.exId === it.exId).length;
@@ -761,13 +871,14 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
         // Match the real session-start bodyweight rule (screens-home.jsx), not
         // the stricter shouldPullBodyweight, so preview and session agree.
         const bodyweightKg = (ex?.equipment === 'bodyweight') ? LB.latestBodyweight(store) : null;
-        const itAdj = (typeof applyMesoSetDeltaFromState === 'function') ? applyMesoSetDeltaFromState(it, day.id, resolvedMeso) : it;
+        // Load-only autoregulate plans never apply set deltas (mirrors the real
+        // seeding in screens-home.jsx so this preview agrees with it).
+        const itAdj = (typeof applyMesoSetDeltaFromState === 'function' && !LB.autoregLoadOnly(sch)) ? applyMesoSetDeltaFromState(it, day.id, resolvedMeso) : it;
         const weightBoost = mesoBoosts?.[it.exId + '_' + day.id] ?? null;
-        let suggestionFinal = suggestion;
-        if (weightBoost != null && !suggestionFinal && last) {
-          const refSet = (last?.entry?.sets || []).filter(s => !s.warmup && !s.skipped).find(s => s.kg != null);
-          if (refSet) suggestionFinal = { kg: Math.round((refSet.kg + weightBoost) * 4) / 4, reps: refSet.reps ?? null };
-        }
+        // Mirror the real session-start (screens-home.jsx): on an autoregulating
+        // plan the feedback engine owns the weight, so an earned boost applies
+        // and a withheld one vetoes Smart Progression (see LB.resolveMesoSeedSuggestion).
+        const suggestionFinal = LB.resolveMesoSeedSuggestion(suggestion, weightBoost, last, LB.mesoActive(sch));
         // 5/3/1 main lift: seed the current week's wave prescription instead of
         // echoing last-session weights (buildSeedSets is not 5/3/1-aware). Mirrors
         // the session-start builder in screens-home.jsx.
@@ -795,7 +906,9 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
                 {isUni && <span className="micro" style={{ marginLeft: 6, color: UI.inkFaint }}>UNI</span>}
               </span>
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3, flexShrink: 0 }}>
-                {preview ? (
+                {isCardioItem ? (
+                  <span className="micro" style={{ color: UI.inkFaint, letterSpacing: '0.12em' }}>CARDIO</span>
+                ) : preview ? (
                   <span className="num" style={{ fontSize: 13, color: UI.inkSoft }}>
                     {it.sets} × {(it.repsPerSet && it.repsPerSet.length) ? it.repsPerSet.join('/') : (it.repsMax != null ? `${it.reps}-${it.repsMax}` : it.reps)}
                   </span>
@@ -927,6 +1040,42 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
     );
   })();
 
+  // An earlier editing session (possibly another device) autosaved unsaved
+  // changes to this plan. Plan-view renders the committed plan, not the draft, so
+  // without this banner that work would be invisible until you happen to tap
+  // Edit. Resume opens the editor (the draft is restored there); Discard drops it.
+  const pendingDraft = fromPlan && !preview && store.planDrafts?.[sch.id] ? store.planDrafts[sch.id] : null;
+  // Same type-to-confirm gate as backing out of a resumed draft from inside the
+  // editor (ScheduleEditScreen's onBack): this is real, saved work, so a single
+  // careless tap must never be enough to throw it away.
+  const discardPendingDraft = async () => {
+    if (!await confirm(
+      "This throws away the autosaved edits from your last session on this plan, and it can't be undone. The last saved version of the plan stays as it is.",
+      { title: 'Discard autosave?', ok: 'Discard autosave', danger: true, requireText: "yes i'm sure" }
+    )) return;
+    setStore(s => {
+      if (!s.planDrafts || !(sch.id in s.planDrafts)) return s;
+      const rest = { ...s.planDrafts };
+      delete rest[sch.id];
+      return { ...s, planDrafts: rest };
+    });
+  };
+  const resumeBanner = pendingDraft ? (
+    <div style={{
+      margin: '10px 14px 0', padding: '10px 12px', display: 'flex', alignItems: 'center', gap: 10,
+      background: UI.goldFaint, border: `1px solid rgba(var(--accent-rgb), 0.35)`, borderRadius: 6,
+    }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div className="micro-gold">Unsaved edits</div>
+        <div style={{ color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 12, marginTop: 2 }}>
+          You have changes to this plan from an earlier session that weren't saved.
+        </div>
+      </div>
+      <Btn onClick={() => go({ name: 'schedule-edit', scheduleId: sch.id })} style={{ minHeight: 36, padding: '0 14px', whiteSpace: 'nowrap' }}>Resume</Btn>
+      <Btn kind="ghost" onClick={discardPendingDraft} style={{ minHeight: 36, padding: '0 12px', whiteSpace: 'nowrap' }}>Discard</Btn>
+    </div>
+  ) : null;
+
   return (
     <Screen scroll={false}>
       {confirmEl}
@@ -940,13 +1089,120 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
         })()}
         onBack={onBack || (() => go({ name: fromPlan ? 'plan' : 'home' }))}
         right={fromPlan ? (
-          <button onClick={() => go({ name: 'schedule-edit', scheduleId: sch.id, versionFrom: selectedVersion?.validFrom })} style={{
-            background: 'transparent', border: `1px solid ${UI.hairStrong}`,
-            borderRadius: 4, padding: '5px 12px', cursor: 'pointer',
-            color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase',
-          }}>Edit</button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={takeScreenshot} disabled={capturing} style={{
+              background: 'transparent', border: `1px solid ${UI.hairStrong}`,
+              borderRadius: 4, padding: '5px 10px', cursor: capturing ? 'default' : 'pointer',
+              color: capturing ? UI.inkGhost : UI.inkSoft, lineHeight: 1,
+              WebkitTapHighlightColor: 'transparent',
+            }}>
+              {capturing ? <span style={{ fontFamily: UI.fontUi, fontSize: 10 }}>…</span> : <i className="fa-solid fa-camera" style={{ fontSize: 11 }} />}
+            </button>
+            <button onClick={() => go({ name: 'schedule-edit', scheduleId: sch.id, versionFrom: selectedVersion?.validFrom })} style={{
+              background: 'transparent', border: `1px solid ${UI.hairStrong}`,
+              borderRadius: 4, padding: '5px 12px', cursor: 'pointer',
+              color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase',
+            }}>Edit</button>
+          </div>
         ) : null}
       />
+
+      {resumeBanner}
+
+      {/* Plan poster: every training day at once (the interactive view above
+          shows one day at a time, so this is a separate tree, not a
+          "screenshot mode" toggle on the existing one). Always mounted, only
+          ever hidden via display:none, never conditionally rendered on
+          `capturing` itself: captureNodeAsPng only flips capturing to true
+          AFTER checking captureRef.current is non-null, so if this tree were
+          gated on `capturing` the ref would still be null at that exact
+          check and every capture attempt would silently no-op (the ref can
+          never come into existence in time to satisfy the check that would
+          create it). A dedicated full-screen scroll container, isolated from
+          the rest of this screen's layout, is also what captureNodeAsPng
+          expects: it expands captureRef's own parentElement around the
+          capture, and this way that parent is exactly and only this overlay,
+          nothing else on the screen. A fixed (not max-) width below makes the
+          poster intentionally wider than a phone viewport: this is an
+          overview sheet people expect to scroll/zoom through, not a
+          phone-portrait layout, so `overflow` covers both axes, not just
+          vertical, to make that width reachable by hand while previewing. */}
+      <div style={{ position: 'fixed', inset: 0, zIndex: 500, background: UI.bg, overflow: 'auto', display: capturing ? 'block' : 'none' }}>
+          <div ref={captureRef} style={{ padding: '26px 28px 32px', width: 960, margin: '0 auto', position: 'relative' }}>
+
+            {/* Screenshot background watermark: centered, faint, full poster
+                (SessionCompareScreen's own recipe). Needs its own stacking
+                context below the real content, which is why the content is
+                wrapped in a sibling zIndex:1 div right after this one. */}
+            <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', zIndex: 0, overflow: 'hidden' }}>
+              <img src={_shotLogo} data-shot-avatar="1" style={_shotIsCustom ? _shotCustomStyle : _shotDefaultStyle} />
+            </div>
+
+            <div style={{ position: 'relative', zIndex: 1 }}>
+              <div style={{ height: '0.5px', background: UI.gold, marginBottom: 16 }} />
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                <div style={{ minWidth: 0 }}>
+                  <div className="display" style={{ fontSize: 28, color: UI.gold, lineHeight: 1.1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{sch.name}</div>
+                  <div className="micro" style={{ color: UI.inkFaint, marginTop: 4 }}>
+                    {isFlex
+                      ? `Flexible · ${trainingDayCount} ${trainingDayCount === 1 ? 'workout' : 'workouts'}${sch.sessions_per_week ? ` · ${sch.sessions_per_week}×/week` : ''}`
+                      : isWeekday
+                        ? displayDays.map((d, i) => weekdayShortLabel(d.weekday, i)).join(' · ')
+                        : `${displayDays.length}-day cycle · ${trainingDayCount} ${trainingDayCount === 1 ? 'workout' : 'workouts'}`}
+                  </div>
+                </div>
+                <div className="micro-gold" style={{ letterSpacing: '0.18em', marginTop: 2, flexShrink: 0, marginLeft: 12, whiteSpace: 'nowrap' }}>ZANE</div>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginTop: 20 }}>
+                {posterDays.map(d => {
+                  const posIdx = displayDays.findIndex(x => x.id === d.id);
+                  return (
+                    <div key={d.id} style={{ background: 'var(--surface-tint-lg)', border: `1px solid ${UI.hairStrong}`, borderRadius: 8, padding: '14px 16px 6px', overflow: 'hidden' }}>
+                      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 8 }}>
+                        <div className="display" style={{ fontSize: 18, color: UI.ink }}>{d.name}</div>
+                        <div className="micro" style={{ color: UI.inkFaint }}>{isWeekday ? weekdayShortLabel(d.weekday, posIdx).toUpperCase() : `DAY ${posIdx + 1}`}</div>
+                      </div>
+                      <KnurlCanvas style={{ marginBottom: 8 }} />
+                      <div style={{ display: 'flex', gap: 8, padding: '0 2px 6px', fontFamily: UI.fontUi, fontSize: 9, letterSpacing: '0.1em', textTransform: 'uppercase', color: UI.inkFaint }}>
+                        <div style={{ flex: 1 }}>Exercise</div>
+                        <div style={{ width: 34, textAlign: 'center' }}>Sets</div>
+                        <div style={{ width: 68, textAlign: 'center' }}>Reps</div>
+                        <div style={{ flex: 1 }}>Notes</div>
+                      </div>
+                      {LB.groupBySuperset(d.items).map((g, gi) => g.type === 'standalone' ? (
+                        renderPosterItemRow(g.entry, g.idx)
+                      ) : (
+                        // Superset / giant-set: same left-accent-bar + gold
+                        // label treatment as the session-share screenshot's own
+                        // superset grouping (screens-lib.jsx), so a plan poster
+                        // and a session poster read the same way. The bar is
+                        // absolutely positioned (not a border+padding on the
+                        // wrapper), so it can't inset anything: the label gets
+                        // its clearance from the bar via its own padding-left,
+                        // and member rows via renderPosterItemRow's `indent`
+                        // (a transform, not a padding/margin), so Sets/Reps/
+                        // Notes stay pinned to the same columns as the header
+                        // and every standalone row, only the exercise text and
+                        // label visually clear the bar. No vertical margin on
+                        // the wrapper or the label: the label uses the same
+                        // padding: '6px 2px'-style top/bottom spacing every
+                        // other row already uses for its own gap, so the group
+                        // sits flush with its neighbors exactly like a plain
+                        // row would, no special-cased spacing.
+                        <div key={'grp-' + gi} style={{ position: 'relative' }}>
+                          <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 2, background: UI.goldSoft }} />
+                          <div className="micro" style={{ color: UI.gold, letterSpacing: '0.12em', padding: '6px 2px 2px 12px' }}>{LB.supersetLabel(g.members.length)}</div>
+                          {g.members.map(({ entry: it, idx: ii }) => renderPosterItemRow(it, ii, true))}
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
 
       {versionBar}
 
@@ -1271,7 +1527,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
 }
 
 // ─── Edit screen — rename, manage pattern ─
-function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFrom }) {
+function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFrom, draftStore = store, setDraftStore = setStore }) {
   const [confirmEl, confirm] = useConfirm();
   const original = store.schedules.find(s => s.id === scheduleId);
   // Which version is being edited (identified by validFrom). -1 = unversioned
@@ -1282,12 +1538,91 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
     : -1;
   const [draft, setDraft] = useStateS(() => {
     if (!original) return null;
+    // Resume a multi-device autosaved draft for the primary edit flow: pick up
+    // exactly where the last device left off, even if Save was never pressed.
+    // Version-specific edits (editVerIdx > 0) never autosave, so they always
+    // start from that version's committed days. Drafts live in draftStore, not
+    // store: editing your own plan, they're the same object; a coach editing a
+    // client's plan (CoachPlanEditorScreen passes the coach's own store as
+    // draftStore) resumes the COACH's own prior session on this schedule,
+    // never anything read from or written to the client's account.
+    const saved = editVerIdx <= 0 ? draftStore.planDrafts?.[scheduleId]?.draft : null;
+    if (saved) return JSON.parse(JSON.stringify(saved));
     const clone = JSON.parse(JSON.stringify(original));
     if (editVerIdx > 0 && original.versions[editVerIdx]) {
       clone.days = JSON.parse(JSON.stringify(original.versions[editVerIdx].days || []));
     }
     return clone;
   });
+  // Did this session pick up a persisted autosave draft (via the Resume button
+  // or a silent multi-device restore)? Captured once at mount. If so, backing
+  // out discards work that was saved in an earlier session, so that path gets a
+  // stronger, type-to-confirm gate instead of the plain "unsaved changes" note.
+  const resumedRef = React.useRef(null);
+  if (resumedRef.current === null) {
+    resumedRef.current = editVerIdx <= 0 && !!(draftStore.planDrafts && draftStore.planDrafts[scheduleId] && draftStore.planDrafts[scheduleId].draft);
+  }
+  const wasResumed = resumedRef.current;
+  // Live in-progress state of the day currently open in DayEditor, reported up
+  // via onDraftChange as { id, day }. DayEditor keeps its edits local until its
+  // own Save, so without this overlay exercises added to a day would not reach
+  // the autosave snapshot until that Save. Null when no day is open / it's clean.
+  const [openDay, setOpenDay] = useStateS(null);
+  // Multi-device autosave: debounce-persist the in-progress draft into
+  // draftStore.planDrafts (→ zane_plan_drafts) ~1s after edits settle, so
+  // switching devices mid-edit never loses work. The snapshot folds in the open
+  // day's live items (openDay) so a day being edited is captured before it's
+  // Saved back to the plan. Only the primary edit flow autosaves; its "dirty"
+  // baseline is `original` (mirrors dirtyBaseline for editVerIdx <= 0). Cleared
+  // on Save / Discard / Delete / Archive below.
+  //
+  // Writing through setDraftStore (not setStore) matters when a coach is
+  // editing a client's plan: setStore there is the CLIENT's store, synced under
+  // the client's own id, while the authenticated caller (auth.uid()) is the
+  // COACH. zane_plan_drafts' RLS only allows auth.uid() = user_id, so a draft
+  // written via setStore in that case would always be rejected. Routing through
+  // setDraftStore (the ACTING user's own store, coach or self) keeps every
+  // draft's user_id equal to whoever is really authenticated, which RLS always
+  // allows, and gives a coach genuine cross-device continuity while building a
+  // client's plan, entirely private to the coach's own account.
+  React.useEffect(() => {
+    if (!draft || editVerIdx > 0) return;
+    const snapshot = (openDay && openDay.id)
+      ? { ...draft, days: (draft.days || []).map(d => d.id === openDay.id ? openDay.day : d) }
+      : draft;
+    if (JSON.stringify(snapshot) === JSON.stringify(original)) {
+      // Back to pristine (e.g. a day's edits were discarded): drop any stale
+      // autosave so it can't resurrect discarded work on the next boot.
+      setDraftStore(s => {
+        if (!s.planDrafts || !(scheduleId in s.planDrafts)) return s;
+        const rest = { ...s.planDrafts };
+        delete rest[scheduleId];
+        return { ...s, planDrafts: rest };
+      });
+      return;
+    }
+    const t = setTimeout(() => {
+      setDraftStore(s => {
+        const cur = s.planDrafts?.[scheduleId];
+        if (cur && JSON.stringify(cur.draft) === JSON.stringify(snapshot)) return s; // unchanged → skip redundant write
+        return { ...s, planDrafts: { ...(s.planDrafts || {}), [scheduleId]: { draft: snapshot, updatedAt: new Date().toISOString() } } };
+      });
+    }, 1000);
+    return () => clearTimeout(t);
+  }, [draft, openDay, editVerIdx, scheduleId]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Drop the autosaved draft once the edit session resolves (committed or
+  // abandoned). Gated to the primary flow so saving/discarding an OLDER version
+  // never wipes a separate newest-version draft; delete forces through because a
+  // removed plan must not leave an orphan draft row.
+  const clearDraft = (force) => {
+    if (editVerIdx > 0 && !force) return;
+    setDraftStore(s => {
+      if (!s.planDrafts || !(scheduleId in s.planDrafts)) return s;
+      const rest = { ...s.planDrafts };
+      delete rest[scheduleId];
+      return { ...s, planDrafts: rest };
+    });
+  };
   const [pickingType, setPickingType] = useStateS(false);
   const [applyFromSheet, setApplyFromSheet] = useStateS(false);
   const [applyFromDate, setApplyFromDate] = useStateS('');
@@ -1403,9 +1738,10 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
       setStore(s => ({ ...s, schedules: s.schedules.map(x => x.id === savedDraft.id ? savedDraft : x) }));
     }
 
-    // If mesocycle_weeks changed (activated, deactivated, or weeks count changed),
-    // clear any stored meso state for this plan — it belongs to the old config.
-    if (original.mesocycle_weeks !== draft.mesocycle_weeks) {
+    // If mesocycle_weeks or mesocycle_autoregulate changed (activated, deactivated,
+    // weeks count changed, or the unbounded flag flipped), clear any stored meso
+    // state for this plan — it belongs to the old config.
+    if (original.mesocycle_weeks !== draft.mesocycle_weeks || original.mesocycle_autoregulate !== draft.mesocycle_autoregulate) {
       // Clear localStorage cache (new per-plan key + legacy single key)
       try { localStorage.removeItem('logbook-meso-state-' + draft.id); } catch {}
       try { localStorage.removeItem('logbook-meso-state'); } catch {}
@@ -1433,6 +1769,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
         }
       } catch (e) { console.error('Failed to send plan change note', e); }
     }
+    clearDraft();
     go({ name: 'plan-view', scheduleId: draft.id, fromPlan: true });
   };
 
@@ -1457,6 +1794,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
         }
       } catch (e) { console.error('Failed to send plan change note', e); }
     }
+    clearDraft();
     go({ name: 'plan-view', scheduleId: draft.id, fromPlan: true });
   };
 
@@ -1484,6 +1822,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
       schedules: s.schedules.filter(x => x.id !== draft.id),
       activeScheduleId: s.activeScheduleId === draft.id ? null : s.activeScheduleId,
     }));
+    clearDraft(true);
     go({ name: 'plan' });
   };
   const toggleArchive = async () => {
@@ -1496,6 +1835,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
       schedules: s.schedules.map(x => x.id === draft.id ? { ...x, archived: willArchive } : x),
       activeScheduleId: (willArchive && s.activeScheduleId === draft.id) ? null : s.activeScheduleId,
     }));
+    clearDraft();
     go({ name: 'plan' });
   };
 
@@ -1545,7 +1885,15 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
     const turningOn = !isFlex;
     setDraft(d => {
       const next = { ...d, is_flex: turningOn };
-      if (!turningOn) {
+      if (turningOn) {
+        // Flex plans have no rest days (buildPlanSkeleton emits none, the picker
+        // hides REST). A cycle plan converted to flex still ends each block with
+        // REST; keeping those slots makes the rotation present a rest day as
+        // "today". Strip them and set the weekly goal to the training-day count.
+        const trainingDays = (d.days || []).filter(day => day.name !== 'REST');
+        next.days = trainingDays;
+        next.sessions_per_week = trainingDays.length || null;
+      } else {
         next.sessions_per_week = null;
       }
       return next;
@@ -1563,7 +1911,16 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
           ? `V${original.versions.length - editVerIdx} · from ${new Date(versionFrom + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
           : null}
         onBack={async () => {
-          if (dirty && !await confirm('Unsaved changes will be lost.', { title: 'Discard changes?', ok: 'Discard', danger: true })) return;
+          if (dirty) {
+            const confirmed = wasResumed
+              ? await confirm(
+                  "This throws away the autosaved edits you resumed for this plan, and it can't be undone. The last saved version of the plan stays as it is.",
+                  { title: 'Discard autosave?', ok: 'Discard autosave', danger: true, requireText: "yes i'm sure" }
+                )
+              : await confirm('Unsaved changes will be lost.', { title: 'Discard changes?', ok: 'Discard', danger: true });
+            if (!confirmed) return;
+          }
+          clearDraft();
           go({ name: 'plan-view', scheduleId: draft.id, fromPlan: true });
         }}
         right={
@@ -1613,6 +1970,8 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
           if (hasMeso) {
             parts.push(`${draft.mesocycle_weeks}wk meso`);
             parts.push(rirOn ? `${sr}→${er} RIR${er < 0 ? ' 🔥' : ''}` : 'no RIR');
+          } else if (draft.mesocycle_autoregulate) {
+            parts.push('Autoregulate · no fixed end');
           }
           const summary = parts.join(' · ');
           return (
@@ -1796,7 +2155,8 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
           store={store} setStore={setStore}
           day={draft.days.find(d => d.id === editingDay)}
           schedule={draft}
-          onClose={() => setEditingDay(null)}
+          onDraftChange={setOpenDay}
+          onClose={() => { setOpenDay(null); setEditingDay(null); }}
           onSave={(updated) => {
             // Match by editingDay (the id the day currently has in the plan),
             // NOT updated.id: copyItemsFromDay swaps the day's id to the source
@@ -1804,6 +2164,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
             // day's session history over). updated.id then no longer matches any
             // existing day, so matching on it silently dropped the whole import
             // — the exercises appeared in the editor but never saved.
+            setOpenDay(null);
             setDraft(d => ({ ...d, days: d.days.map(x => x.id === editingDay ? updated : x) }));
             setEditingDay(null);
           }}
@@ -2097,89 +2458,120 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
 
           {(() => {
             // A 5/3/1 plan runs its own periodization (TM waves + automatic
-            // per-cycle progression), so a mesocycle on top is meaningless: the
-            // block lengths don't even line up (a meso is 4 weeks minimum, a
-            // 5/3/1 block is 3 or 4). Hide the whole toggle for 5/3/1.
+            // per-cycle progression), so autoregulation on top is meaningless:
+            // the block lengths don't even line up (a meso is 4 weeks minimum,
+            // a 5/3/1 block is 3 or 4). Hide the whole section for 5/3/1.
             if (LB.is531Plan(draft)) return null;
             const hasMeso = draft.mesocycle_weeks != null;
-            const toggleMeso = () => setDraft(d => ({ ...d, mesocycle_weeks: d.mesocycle_weeks != null ? null : 6 }));
+            const isAuto = !!draft.mesocycle_autoregulate && !hasMeso;
+            // Two mutually exclusive modes shown as peer toggles: a plan is either
+            // open-ended autoregulating, or a fixed-length mesocycle, or neither.
+            // Flipping one on clears the other; both off is a plain plan. (A
+            // mesocycle runs the same feedback engine, just bounded with an RIR
+            // taper and a deload, so the two can never be on at once.)
+            const toggleAuto = () => setDraft(d => isAuto
+              ? { ...d, mesocycle_autoregulate: false }
+              : { ...d, mesocycle_autoregulate: true, mesocycle_weeks: null });
+            const toggleMeso = () => setDraft(d => (d.mesocycle_weeks != null)
+              ? { ...d, mesocycle_weeks: null }
+              : { ...d, mesocycle_weeks: 6, mesocycle_autoregulate: false });
+            const toggleUI = (on, onClick) => (
+              <button onClick={onClick} style={{ flexShrink: 0, background: 'none', border: 'none', padding: 0, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+                <div style={{ width: 44, height: 26, borderRadius: 13, position: 'relative', background: on ? UI.gold : UI.hairStrong, border: `0.5px solid ${on ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong}`, transition: 'background 0.15s' }}>
+                  <div style={{ position: 'absolute', top: 3, left: on ? 21 : 3, width: 20, height: 20, borderRadius: '50%', background: on ? '#0a0805' : '#fff', transition: 'left 0.15s' }} />
+                </div>
+              </button>
+            );
+            const modePill = (on, onClick, title, desc) => (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, width: '100%', background: UI.bgInset, border: `1px solid ${on ? UI.goldSoft : UI.hairStrong}`, borderRadius: 4, padding: '10px 12px' }}>
+                {toggleUI(on, onClick)}
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.ink, fontWeight: 600 }}>{title}</div>
+                  <div style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint, marginTop: 2, lineHeight: 1.4 }}>{desc}</div>
+                </div>
+              </div>
+            );
             return (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span className="label" style={{ flex: 1 }}>Mesocycle</span>
+                  <span className="label" style={{ flex: 1 }}>Progression</span>
                   <button onClick={() => setMesoInfoOpen(true)} style={{
                     background: 'transparent', border: `1px solid ${UI.hairStrong}`, borderRadius: '50%',
                     width: 22, height: 22, cursor: 'pointer', color: UI.inkFaint, fontFamily: UI.fontUi,
                     fontSize: 11, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0,
                   }}>ⓘ</button>
                 </div>
-                <div style={{
-                  display: 'flex', alignItems: 'center', gap: 12, width: '100%',
-                  background: UI.bgInset, border: `1px solid ${hasMeso ? UI.goldSoft : UI.hairStrong}`,
-                  borderRadius: 4, padding: '10px 12px',
-                }}>
-                  <button onClick={toggleMeso} style={{ flexShrink: 0, background: 'none', border: 'none', padding: 0, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
-                    <div style={{ width: 44, height: 26, borderRadius: 13, position: 'relative', background: hasMeso ? UI.gold : UI.hairStrong, border: `0.5px solid ${hasMeso ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong}`, transition: 'background 0.15s' }}>
-                      <div style={{ position: 'absolute', top: 3, left: hasMeso ? 21 : 3, width: 20, height: 20, borderRadius: '50%', background: hasMeso ? '#0a0805' : '#fff', transition: 'left 0.15s' }} />
+
+                {modePill(isAuto, toggleAuto, 'Autoregulate', 'Sets and weight auto-tune from your session feedback. Open-ended, no deload.')}
+                {isAuto && (() => {
+                  const loadOnly = draft.mesocycle_autoregulate_mode === 'load';
+                  return (
+                    <div style={{ marginBottom: 4 }}>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        {[{ key: 'both', label: 'Volume + Load' }, { key: 'load', label: 'Load only' }].map(o => {
+                          const on = (o.key === 'load') === loadOnly;
+                          return (
+                            <button key={o.key} onClick={() => setDraft(d => ({ ...d, mesocycle_autoregulate_mode: o.key === 'load' ? 'load' : null }))} style={{
+                              flex: 1, padding: '9px 8px', borderRadius: 6, cursor: 'pointer',
+                              fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, textAlign: 'center',
+                              background: on ? 'rgba(var(--accent-rgb),0.12)' : UI.bgInset,
+                              color: on ? 'var(--accent)' : UI.inkFaint,
+                              border: `1px solid ${on ? 'var(--accent)' : UI.hairStrong}`, WebkitTapHighlightColor: 'transparent',
+                            }}>{o.label}</button>
+                          );
+                        })}
+                      </div>
+                      <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 8, lineHeight: 1.5 }}>
+                        {loadOnly
+                          ? 'Weight auto-tunes from your feedback; set counts stay as written.'
+                          : 'Sets and weight both auto-tune from your feedback.'}
+                      </div>
                     </div>
-                  </button>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.ink, fontWeight: 600 }}>
-                      {hasMeso ? `${draft.mesocycle_weeks}-week mesocycle` : 'No mesocycle'}
-                    </div>
-                    <div style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint, marginTop: 2, lineHeight: 1.4 }}>
-                      {hasMeso ? 'Auto-regulation feedback + a deload at the end.' : 'Enable for a structured, progressive training block.'}
-                    </div>
-                  </div>
-                </div>
+                  );
+                })()}
+
+                {modePill(hasMeso, toggleMeso, 'Mesocycle', 'A fixed 4-8 week block that ramps effort each week, then deloads.')}
                 {hasMeso && (() => {
                   const mesoCompletions = store.mesoStates?.find(m => m.scheduleId === draft.id)?.completions ?? 0;
+                  const rirOn = LB.mesoRirEnabled(draft);
+                  const sr = draft.mesocycle_start_rir ?? 3;
+                  const er = draft.mesocycle_end_rir ?? 0;
                   return (
-                    <div style={{ marginTop: 2 }}>
+                    <div style={{ marginBottom: 4 }}>
+                      <div className="micro" style={{ color: UI.gold, margin: '2px 0 10px' }}>MESOCYCLE LENGTH</div>
                       <Stepper value={draft.mesocycle_weeks} step={1} min={4} max={8}
                         suffix=" weeks"
                         onChange={v => setDraft(d => ({ ...d, mesocycle_weeks: Math.min(8, Math.max(4, Math.round(v))) }))} />
-                      {(() => {
-                        const rirOn = LB.mesoRirEnabled(draft);
-                        const sr = draft.mesocycle_start_rir ?? 3;
-                        const er = draft.mesocycle_end_rir ?? 0;
-                        return (
-                          <div style={{ marginTop: 14 }}>
-                            <div className="knurl" style={{ marginBottom: 12 }} />
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                              <span className="micro" style={{ color: rirOn ? UI.gold : UI.inkFaint, flex: 1 }}>RIR TAPER</span>
-                              <button onClick={() => setDraft(d => ({ ...d, mesocycle_rir_enabled: !LB.mesoRirEnabled(d) }))} style={{ flexShrink: 0, background: 'none', border: 'none', padding: 0, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
-                                <div style={{ width: 44, height: 26, borderRadius: 13, position: 'relative', background: rirOn ? UI.gold : UI.hairStrong, border: `0.5px solid ${rirOn ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong}`, transition: 'background 0.15s' }}>
-                                  <div style={{ position: 'absolute', top: 3, left: rirOn ? 21 : 3, width: 20, height: 20, borderRadius: '50%', background: rirOn ? '#0a0805' : '#fff', transition: 'left 0.15s' }} />
-                                </div>
-                              </button>
-                            </div>
-                            {rirOn ? (
-                              <>
-                                <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
-                                  <div style={{ flex: 1, textAlign: 'center' }}>
-                                    <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>START RIR</div>
-                                    <Stepper value={sr} step={1} min={0} suffix=" RIR"
-                                      onChange={v => setDraft(d => ({ ...d, mesocycle_start_rir: Math.min(3, Math.max(0, Math.round(v))) }))} />
-                                  </div>
-                                  <div style={{ flex: 1, textAlign: 'center' }}>
-                                    <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>END RIR</div>
-                                    <Stepper value={er} step={1} min={-3} suffix=" RIR"
-                                      onChange={v => setDraft(d => ({ ...d, mesocycle_end_rir: Math.min(0, Math.max(-3, Math.round(v))) }))} />
-                                  </div>
-                                </div>
-                                <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 10, textAlign: 'center', lineHeight: 1.5 }}>
-                                  {LB.mesoTaperPreview(draft.mesocycle_weeks, sr, er)}
-                                </div>
-                              </>
-                            ) : (
-                              <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 8, lineHeight: 1.5 }}>
-                                Off · runs on volume + load progression, then a deload.
+                      <div style={{ marginTop: 14 }}>
+                        <div className="knurl" style={{ marginBottom: 12 }} />
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                          <span className="micro" style={{ color: rirOn ? UI.gold : UI.inkFaint, flex: 1 }}>RIR TAPER</span>
+                          {toggleUI(rirOn, () => setDraft(d => ({ ...d, mesocycle_rir_enabled: !LB.mesoRirEnabled(d) })))}
+                        </div>
+                        {rirOn ? (
+                          <>
+                            <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
+                              <div style={{ flex: 1, textAlign: 'center' }}>
+                                <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>START RIR</div>
+                                <Stepper value={sr} step={1} min={0} suffix=" RIR"
+                                  onChange={v => setDraft(d => ({ ...d, mesocycle_start_rir: Math.min(3, Math.max(0, Math.round(v))) }))} />
                               </div>
-                            )}
+                              <div style={{ flex: 1, textAlign: 'center' }}>
+                                <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>END RIR</div>
+                                <Stepper value={er} step={1} min={-3} suffix=" RIR"
+                                  onChange={v => setDraft(d => ({ ...d, mesocycle_end_rir: Math.min(0, Math.max(-3, Math.round(v))) }))} />
+                              </div>
+                            </div>
+                            <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 10, textAlign: 'center', lineHeight: 1.5 }}>
+                              {LB.mesoTaperPreview(draft.mesocycle_weeks, sr, er)}
+                            </div>
+                          </>
+                        ) : (
+                          <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 8, lineHeight: 1.5 }}>
+                            Off · runs on volume + load progression, then a deload.
                           </div>
-                        );
-                      })()}
+                        )}
+                      </div>
                       {mesoCompletions > 0 && (
                         <button onClick={() => setStore(s => ({
                           ...s,
@@ -2207,9 +2599,11 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
         </div>
       </Sheet>
 
-      <Sheet open={mesoInfoOpen} onClose={() => setMesoInfoOpen(false)} title="Mesocycle">
+      <Sheet open={mesoInfoOpen} onClose={() => setMesoInfoOpen(false)} title="Progression">
         <div style={{ fontSize: 13, color: UI.inkSoft, lineHeight: 1.6, display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <p style={{ margin: 0 }}>A <strong style={{ color: UI.ink }}>mesocycle</strong> is a structured training block (4–8 weeks) where effort progressively increases each week, measured by <strong style={{ color: UI.ink }}>Reps in Reserve (RIR)</strong> — how many reps you could still do before failure.</p>
+          <p style={{ margin: 0 }}>Both modes auto-tune your sets and weight from the feedback you give during training. They just differ in shape, and only one can be on at a time.</p>
+          <p style={{ margin: 0 }}><strong style={{ color: UI.ink }}>Autoregulate</strong> runs indefinitely: no fixed end, no RIR ramp, just sets and weight adjusting session to session. Prefer to keep your set counts fixed? Switch it to <strong style={{ color: UI.ink }}>Load only</strong> and just the weight climbs, held back when you report a muscle is still sore.</p>
+          <p style={{ margin: 0 }}>A <strong style={{ color: UI.ink }}>mesocycle</strong> is a structured block (4 to 8 weeks) where effort progressively increases each week, measured by <strong style={{ color: UI.ink }}>Reps in Reserve (RIR)</strong>, how many reps you could still do before failure. It ends in a deload.</p>
           <p style={{ margin: 0 }}>By default week 1 starts easy (3 RIR) and ramps up to all-out effort (0 RIR) by the final week, then you deload. You can adjust both endpoints — and even set the peak <em>past</em> failure (negative RIR), which auto-adds that many lengthened partials to every set. That last one's for very advanced lifters. 🔥</p>
           <div style={{ background: UI.bgInset, borderRadius: 6, padding: '12px 14px', border: `1px solid ${UI.hairStrong}` }}>
             <div className="label" style={{ marginBottom: 10 }}>What Zane asks during training</div>
@@ -2915,7 +3309,7 @@ function normalizeSupersets(items) {
   });
 }
 
-function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
+function DayEditor({ store, setStore, day, schedule, onClose, onSave, onDraftChange }) {
   const [draft, setDraft] = useStateS(day);
   const [addingEx, setAddingEx] = useStateS(false);
   const [copyingFrom, setCopyingFrom] = useStateS(false);
@@ -2924,6 +3318,15 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave }) {
   const [pickingType, setPickingType] = useStateS(false);
   const [confirmEl, confirm] = useConfirm();
   const initialDay = React.useRef(JSON.stringify(day));
+  // Report in-progress edits up (debounced) so the plan editor can fold this day
+  // into its multi-device autosave snapshot before the day is Saved back. Keyed
+  // by the day's opening id (matches the parent's editingDay-based merge).
+  const initialDayId = React.useRef(day?.id);
+  React.useEffect(() => {
+    if (!onDraftChange) return;
+    const t = setTimeout(() => onDraftChange({ id: initialDayId.current, day: draft }), 400);
+    return () => clearTimeout(t);
+  }, [draft]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const reorderItems = (from, to) => {
     if (from === to) return;
@@ -3387,13 +3790,13 @@ function ExercisePicker({ store, setStore, onClose, onPick, singleSelect = false
 // then hands off to the editor. The shell is duplicated from ExerciseWizard
 // (screens-lib.jsx) on purpose, so the shipped exercise wizard stays untouched
 // and this one can grow its own stepper/reveal steps.
-const PLAN_TITLES = { name: 'Name your plan', type: 'Plan type', split: 'Training split', weekdays: 'Training days', meso: 'Mesocycle' };
+const PLAN_TITLES = { name: 'Name your plan', type: 'Plan type', split: 'Training split', weekdays: 'Training days', meso: 'Progression' };
 const PLAN_INTRO = {
   name: 'Give your plan a name. It shows up in your planner and history, and you can rename it any time.',
   type: 'How should your plan move forward? This decides when the next day comes up.',
   split: "Pick a split and we'll lay out the days for you. You can rename, reorder, or add days next.",
   weekdays: 'Which days of the week do you train? Tap all that apply.',
-  meso: 'A mesocycle runs a fixed number of weeks with a planned intensity ramp (RIR), then a deload. Leave it off for a normal, open-ended plan.',
+  meso: 'How should sets and weights progress? Pick one below.',
 };
 // Ordered wizard steps for the current picks. Split applies to every type
 // (weekday maps its rotation onto the chosen days too); the weekday-picker step
@@ -3427,7 +3830,8 @@ function PlanWizard({ store, setStore, go }) {
   const setCustomN = (n) => { const c = Math.max(1, Math.round(n)); setCustomCount(c); setCustomDays(d => { const a = d.slice(0, c); while (a.length < c) a.push(null); return a; }); };
   const [dayFlash, setDayFlash] = useStateS(false); // brief checkmark when a day type is picked
   const [weekdaysSel, setWeekdaysSel] = useStateS([]); // weekday indices 0..6
-  const [mesoOn, setMesoOn] = useStateS(false);
+  const [planMode, setPlanMode] = useStateS('standard'); // 'standard' | 'autoregulate' | 'meso'
+  const [autoregMode, setAutoregMode] = useStateS('both'); // 'both' | 'load' — what the autoregulate plan tunes
   const [mesoWeeks, setMesoWeeks] = useStateS(6);
   const [mesoStartRir, setMesoStartRir] = useStateS(3);
   const [mesoEndRir, setMesoEndRir] = useStateS(0);
@@ -3481,7 +3885,7 @@ function PlanWizard({ store, setStore, go }) {
     return () => { v.removeEventListener('resize', on); v.removeEventListener('scroll', on); };
   }, []);
 
-  const isDirty = () => !!name.trim() || type !== null || presetKey !== null || weekdaysSel.length > 0 || mesoOn;
+  const isDirty = () => !!name.trim() || type !== null || presetKey !== null || weekdaysSel.length > 0 || planMode !== 'standard';
   const exit = () => go({ name: 'plan' });
   const stepArgs = { type, presetKey, customCount, weekdayCount: weekdaysSel.length };
   const applicable = computePlanSteps(stepArgs);
@@ -3538,10 +3942,12 @@ function PlanWizard({ store, setStore, go }) {
   const create = () => {
     const sch = LB.buildPlanSkeleton({
       name, type: type || 'cycle', presetKey, customCount, customDays, weekdays: weekdaysSel,
-      mesoWeeks: mesoOn ? mesoWeeks : null,
-      mesoStartRir: mesoOn ? mesoStartRir : null,
-      mesoEndRir: mesoOn ? mesoEndRir : null,
-      mesoRirEnabled: mesoOn ? mesoRirOn : undefined,
+      mesoWeeks: planMode === 'meso' ? mesoWeeks : null,
+      mesoStartRir: planMode === 'meso' ? mesoStartRir : null,
+      mesoEndRir: planMode === 'meso' ? mesoEndRir : null,
+      mesoRirEnabled: planMode === 'meso' ? mesoRirOn : undefined,
+      mesocycleAutoregulate: planMode === 'autoregulate' ? true : undefined,
+      mesocycleAutoregulateMode: planMode === 'autoregulate' ? autoregMode : undefined,
     });
     setStore(s => ({ ...s, schedules: [...s.schedules, sch] }));
     go({ name: 'schedule-edit', scheduleId: sch.id });
@@ -3657,7 +4063,10 @@ function PlanWizard({ store, setStore, go }) {
     // Overview of the days chosen so far, so a long Custom cycle/flex plan doesn't
     // lose the thread: every day with its picked type (— if still open), the day
     // being edited highlighted. Scrolls internally if the plan is very long.
-    const dayN = type === 'weekday' ? sortedWeekdays.length : customDays.length;
+    // Size the overview from the same source of truth as computePlanSteps and
+    // buildPlanSkeleton (customCount), not customDays.length, which a prior
+    // weekday pass can leave inflated after switching back to cycle/flex.
+    const dayN = type === 'weekday' ? sortedWeekdays.length : Math.max(1, Math.round(customCount || 1));
     const dayShort = (i) => (type === 'weekday' && sortedWeekdays[i] != null) ? WEEKDAYS[sortedWeekdays[i]] : `D${i + 1}`;
     const overview = dayN > 1 ? (
       <div style={{ padding: '9px 10px', borderRadius: 6, background: UI.bgInset, border: `1px solid ${UI.hairStrong}` }}>
@@ -3717,7 +4126,21 @@ function PlanWizard({ store, setStore, go }) {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
         {WEEKDAYS.map((w, i) => {
           const on = weekdaysSel.includes(i);
-          return <button key={w} onClick={() => setWeekdaysSel(on ? weekdaysSel.filter(x => x !== i) : [...weekdaysSel, i])}
+          // customDays is positional over the SORTED weekdays, so add/removing a
+          // weekday must splice its per-day type at the same sorted position, or
+          // the surviving day types shift onto the wrong weekdays.
+          const toggleWeekday = () => {
+            if (on) {
+              const pos = weekdaysSel.slice().sort((a, b) => a - b).indexOf(i);
+              setWeekdaysSel(weekdaysSel.filter(x => x !== i));
+              if (pos >= 0) setCustomDays(d => { const a = d.slice(); a.splice(pos, 1); return a; });
+            } else {
+              const pos = [...weekdaysSel, i].sort((a, b) => a - b).indexOf(i);
+              setWeekdaysSel([...weekdaysSel, i]);
+              setCustomDays(d => { const a = d.slice(); a.splice(pos, 0, null); return a; });
+            }
+          };
+          return <button key={w} onClick={toggleWeekday}
             style={{ padding: '12px 6px', borderRadius: 6, cursor: 'pointer', textAlign: 'center', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600,
               background: on ? 'rgba(var(--accent-rgb),0.12)' : UI.bgInset, color: on ? 'var(--accent)' : UI.inkFaint,
               border: `1px solid ${on ? 'var(--accent)' : UI.hairStrong}`, WebkitTapHighlightColor: 'transparent' }}>{w}</button>;
@@ -3733,9 +4156,33 @@ function PlanWizard({ store, setStore, go }) {
     </div>;
   } else if (step === 'meso') {
     body = <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      {optRow({ key: 'standard', icon: 'fa-infinity', label: 'Standard plan', sub: 'Open-ended. Train it as long as you like.', active: !mesoOn, onClick: () => setMesoOn(false) })}
-      {optRow({ key: 'meso', icon: 'fa-chart-line', label: 'Mesocycle', sub: 'A fixed block with an intensity ramp and a deload at the end.', active: mesoOn, onClick: () => setMesoOn(true) })}
-      {mesoOn && (
+      {optRow({ key: 'standard', icon: 'fa-infinity', label: 'Standard plan', sub: 'Open-ended. Train it as long as you like.', active: planMode === 'standard', onClick: () => setPlanMode('standard') })}
+      {optRow({ key: 'autoregulate', icon: 'fa-sliders', label: 'Autoregulate volume and load', sub: 'Open-ended. Sets and weights auto-tune from your session feedback, no fixed end, no RIR ramp.', active: planMode === 'autoregulate', onClick: () => setPlanMode('autoregulate') })}
+      {optRow({ key: 'meso', icon: 'fa-chart-line', label: 'Mesocycle', sub: 'A fixed block with an intensity ramp and a deload at the end.', active: planMode === 'meso', onClick: () => setPlanMode('meso') })}
+      {planMode === 'autoregulate' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 6 }}>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {[{ key: 'both', label: 'Volume + Load' }, { key: 'load', label: 'Load only' }].map(o => {
+              const on = autoregMode === o.key;
+              return (
+                <button key={o.key} onClick={() => setAutoregMode(o.key)} style={{
+                  flex: 1, padding: '10px 8px', borderRadius: 6, cursor: 'pointer',
+                  fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, textAlign: 'center',
+                  background: on ? 'rgba(var(--accent-rgb),0.12)' : UI.bgInset,
+                  color: on ? 'var(--accent)' : UI.inkFaint,
+                  border: `1px solid ${on ? 'var(--accent)' : UI.hairStrong}`, WebkitTapHighlightColor: 'transparent',
+                }}>{o.label}</button>
+              );
+            })}
+          </div>
+          <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, textAlign: 'center', lineHeight: 1.5 }}>
+            {autoregMode === 'load'
+              ? 'Weight auto-tunes from your feedback; set counts stay as written.'
+              : 'Both set counts and weight auto-tune from your feedback.'}
+          </div>
+        </div>
+      )}
+      {planMode === 'meso' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 6 }}>
           <div style={{ textAlign: 'center' }}>
             <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>Weeks</div>

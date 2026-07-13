@@ -591,39 +591,41 @@ async function testAsync(name, fn) {
 
   // ── pickGrowthRecipient / retractGrowthGrant (meso volume growth rotation) ──
   test('pickGrowthRecipient: single exercise always wins, matching pre-rotation main-lift-only behavior', () => {
-    const r = LB.pickGrowthRecipient(['a_d1'], {}, {}, null);
+    const r = LB.pickGrowthRecipient(['a_d1'], {}, null);
     assert.strictEqual(r.recipientKey, 'a_d1');
     assert.strictEqual(r.growthCounts.a_d1, 1);
   });
 
-  test('pickGrowthRecipient: single exercise stops granting once at its own ceiling', () => {
-    const r = LB.pickGrowthRecipient(['a_d1'], { a_d1: 4 }, { a_d1: 7 }, null);
-    assert.strictEqual(r.recipientKey, null);
-    // growthCounts is left untouched when nobody is eligible
-    assert.strictEqual(r.growthCounts.a_d1, 7);
+  test('pickGrowthRecipient: no ceiling — a single exercise keeps winning no matter how many grants it already has', () => {
+    const r = LB.pickGrowthRecipient(['a_d1'], { a_d1: 7 }, null);
+    assert.strictEqual(r.recipientKey, 'a_d1');
+    assert.strictEqual(r.growthCounts.a_d1, 8);
   });
 
   test('pickGrowthRecipient: fewest grants wins, ties toward the main (first) exercise', () => {
     // Tied at 0 → main (a_d1) wins.
-    const r1 = LB.pickGrowthRecipient(['a_d1', 'b_d1'], {}, {}, null);
+    const r1 = LB.pickGrowthRecipient(['a_d1', 'b_d1'], {}, null);
     assert.strictEqual(r1.recipientKey, 'a_d1');
     // b already has fewer grants → b wins even though a is main.
-    const r2 = LB.pickGrowthRecipient(['a_d1', 'b_d1'], {}, { a_d1: 2, b_d1: 1 }, null);
+    const r2 = LB.pickGrowthRecipient(['a_d1', 'b_d1'], { a_d1: 2, b_d1: 1 }, null);
     assert.strictEqual(r2.recipientKey, 'b_d1');
     assert.strictEqual(r2.growthCounts.b_d1, 2);
     assert.strictEqual(r2.growthCounts.a_d1, 2);
   });
 
-  test('pickGrowthRecipient: only exercises below the ceiling are eligible, even if they have fewer grants', () => {
-    // b has fewer grants (0) but is already at its delta ceiling — a (delta 2) wins instead.
-    const r = LB.pickGrowthRecipient(['a_d1', 'b_d1'], { a_d1: 2, b_d1: 4 }, { a_d1: 3, b_d1: 0 }, null);
+  test('pickGrowthRecipient: no ceiling — fewest grants still wins even against a much larger gap', () => {
+    // b has 20 prior grants, a has 3 — no ceiling excludes b from eligibility
+    // anymore, but a still wins purely because it has fewer grants so far.
+    const r = LB.pickGrowthRecipient(['a_d1', 'b_d1'], { a_d1: 3, b_d1: 20 }, null);
     assert.strictEqual(r.recipientKey, 'a_d1');
+    assert.strictEqual(r.growthCounts.a_d1, 4);
+    assert.strictEqual(r.growthCounts.b_d1, 20);
   });
 
   test('pickGrowthRecipient: a never-before-seen exercise is seeded at the group max, not 0, so it cannot cut ahead', () => {
     // a=3, b=1 already established; c is new (absent from growthCounts).
     // groupMax=3 → c seeds to 3, so b (still at 1) correctly wins, not c.
-    const r = LB.pickGrowthRecipient(['a_d1', 'b_d1', 'c_d1'], {}, { a_d1: 3, b_d1: 1 }, null);
+    const r = LB.pickGrowthRecipient(['a_d1', 'b_d1', 'c_d1'], { a_d1: 3, b_d1: 1 }, null);
     assert.strictEqual(r.recipientKey, 'b_d1');
     assert.strictEqual(r.growthCounts.c_d1, 3);
   });
@@ -632,16 +634,16 @@ async function testAsync(name, fn) {
     // a is the sole holder of the group max (5) AND is this record's own
     // previous grant recipient; c is new. Undoing a's prior grant must not
     // transiently lower what c gets seeded at.
-    const r = LB.pickGrowthRecipient(['a_d1', 'c_d1'], { a_d1: 0, c_d1: 0 }, { a_d1: 5 }, 'a_d1');
+    const r = LB.pickGrowthRecipient(['a_d1', 'c_d1'], { a_d1: 5 }, 'a_d1');
     assert.strictEqual(r.growthCounts.c_d1, 5);
   });
 
   test('pickGrowthRecipient: editing an already-answered "not enough" this session undoes the prior grant before re-deciding', () => {
-    const first = LB.pickGrowthRecipient(['a_d1', 'b_d1'], {}, {}, null);
+    const first = LB.pickGrowthRecipient(['a_d1', 'b_d1'], {}, null);
     assert.strictEqual(first.recipientKey, 'a_d1');
     // Re-answering the same question this session (prevGrantedTo = a_d1):
     // a's grant is undone first, so it ties with b at 0 again and wins back.
-    const again = LB.pickGrowthRecipient(['a_d1', 'b_d1'], {}, first.growthCounts, 'a_d1');
+    const again = LB.pickGrowthRecipient(['a_d1', 'b_d1'], first.growthCounts, 'a_d1');
     assert.strictEqual(again.recipientKey, 'a_d1');
     assert.strictEqual(again.growthCounts.a_d1, 1);
     assert.strictEqual(again.growthCounts.b_d1, 0);
@@ -658,9 +660,9 @@ async function testAsync(name, fn) {
     // growthCounts pool. Soreness is asked first: it grants to the main lift and
     // bumps the pool. The volume grant, fed that updated pool, must then rotate
     // to the OTHER exercise instead of piling a second +1 onto the main lift.
-    const soreness = LB.pickGrowthRecipient(['a_d1', 'b_d1'], {}, {}, null);
+    const soreness = LB.pickGrowthRecipient(['a_d1', 'b_d1'], {}, null);
     assert.strictEqual(soreness.recipientKey, 'a_d1');
-    const volume = LB.pickGrowthRecipient(['a_d1', 'b_d1'], {}, soreness.growthCounts, null);
+    const volume = LB.pickGrowthRecipient(['a_d1', 'b_d1'], soreness.growthCounts, null);
     assert.strictEqual(volume.recipientKey, 'b_d1');
     assert.strictEqual(volume.growthCounts.a_d1, 1);
     assert.strictEqual(volume.growthCounts.b_d1, 1);
@@ -727,6 +729,32 @@ async function testAsync(name, fn) {
   test('reearnMesoWeightBoosts: null/empty inputs are safe', () => {
     assert.strictEqual(JSON.stringify(LB.reearnMesoWeightBoosts(null, [], null)), '{}');
     assert.strictEqual(JSON.stringify(LB.reearnMesoWeightBoosts(undefined, undefined, undefined)), '{}');
+  });
+
+  // ── resolveMesoSeedSuggestion (feedback owns weight on a meso plan) ──
+  const seedLast = { entry: { sets: [{ kg: 100, reps: 8 }] } };
+  test('resolveMesoSeedSuggestion: earned boost with no Smart Progression applies the boost', () => {
+    const out = LB.resolveMesoSeedSuggestion(null, 2.5, seedLast, true);
+    assert.strictEqual(out.kg, 102.5);
+    assert.strictEqual(out.reps, 8);
+  });
+  test('resolveMesoSeedSuggestion: earned boost keeps the Smart Progression suggestion when it fired (same increment)', () => {
+    const sp = { kg: 105, reps: 5 };
+    assert.strictEqual(LB.resolveMesoSeedSuggestion(sp, 2.5, seedLast, true), sp);
+  });
+  test('resolveMesoSeedSuggestion: withheld boost VETOES Smart Progression on a meso plan (weight holds)', () => {
+    const sp = { kg: 102.5, reps: 8 };
+    assert.strictEqual(LB.resolveMesoSeedSuggestion(sp, null, seedLast, true), null);
+  });
+  test('resolveMesoSeedSuggestion: off a meso plan Smart Progression is untouched', () => {
+    const sp = { kg: 102.5, reps: 8 };
+    assert.strictEqual(LB.resolveMesoSeedSuggestion(sp, null, seedLast, false), sp);
+  });
+  test('resolveMesoSeedSuggestion: no boost and no Smart Progression is a no-op', () => {
+    assert.strictEqual(LB.resolveMesoSeedSuggestion(null, null, seedLast, true), null);
+  });
+  test('resolveMesoSeedSuggestion: earned boost but no reference set falls back to the suggestion', () => {
+    assert.strictEqual(LB.resolveMesoSeedSuggestion(null, 2.5, null, true), null);
   });
 
   // ── mesoPausedDays (recovery time must not fast-forward the meso week) ──
@@ -1167,6 +1195,54 @@ async function testAsync(name, fn) {
     assert.strictEqual('mesocycle_rir_enabled' in plain, false);
   });
 
+  test('mesoActive: on when either mesocycle_weeks or mesocycle_autoregulate is set', () => {
+    assert.strictEqual(LB.mesoActive({}), false);
+    assert.strictEqual(LB.mesoActive(undefined), false);
+    assert.strictEqual(LB.mesoActive({ mesocycle_weeks: null, mesocycle_autoregulate: false }), false);
+    assert.strictEqual(LB.mesoActive({ mesocycle_weeks: 6 }), true);
+    assert.strictEqual(LB.mesoActive({ mesocycle_autoregulate: true }), true);
+    assert.strictEqual(LB.mesoActive({ mesocycle_weeks: 6, mesocycle_autoregulate: true }), true);
+  });
+
+  test('buildPlanSkeleton: mesocycleAutoregulate true is persisted outside the bounded-block config, otherwise omitted', () => {
+    const auto = LB.buildPlanSkeleton({ name: 'A', type: 'cycle', presetKey: 'ppl3', mesocycleAutoregulate: true });
+    assert.strictEqual(auto.mesocycle_autoregulate, true);
+    assert.strictEqual(auto.mesocycle_weeks, undefined);
+    assert.strictEqual(LB.mesoActive(auto), true);
+    // Default (falsy/omitted) never carries the flag.
+    const plain = LB.buildPlanSkeleton({ name: 'P', type: 'cycle', presetKey: 'ppl3' });
+    assert.strictEqual('mesocycle_autoregulate' in plain, false);
+    // Harmless alongside a bounded meso too (mesoActive is an OR, mesocycle_weeks
+    // still wins for bounded-only logic) — confirms it isn't nested inside/gated
+    // by the mesoWeeks block.
+    const both = LB.buildPlanSkeleton({ name: 'B', type: 'cycle', presetKey: 'ppl3', mesoWeeks: 6, mesocycleAutoregulate: true });
+    assert.strictEqual(both.mesocycle_weeks, 6);
+    assert.strictEqual(both.mesocycle_autoregulate, true);
+  });
+
+  test('buildPlanSkeleton: mesocycleAutoregulateMode load is persisted, both/undefined omitted', () => {
+    const load = LB.buildPlanSkeleton({ name: 'L', type: 'cycle', presetKey: 'ppl3', mesocycleAutoregulate: true, mesocycleAutoregulateMode: 'load' });
+    assert.strictEqual(load.mesocycle_autoregulate_mode, 'load');
+    // Default 'both' leaves the column unset (DB/app default handles it).
+    const both = LB.buildPlanSkeleton({ name: 'B', type: 'cycle', presetKey: 'ppl3', mesocycleAutoregulate: true, mesocycleAutoregulateMode: 'both' });
+    assert.strictEqual('mesocycle_autoregulate_mode' in both, false);
+    // Mode is ignored without autoregulate on (mutually only meaningful together).
+    const noAuto = LB.buildPlanSkeleton({ name: 'N', type: 'cycle', presetKey: 'ppl3', mesocycleAutoregulateMode: 'load' });
+    assert.strictEqual('mesocycle_autoregulate_mode' in noAuto, false);
+  });
+
+  test('autoregLoadOnly: only true for an unbounded autoregulate plan set to load', () => {
+    assert.strictEqual(LB.autoregLoadOnly({ mesocycle_autoregulate: true, mesocycle_autoregulate_mode: 'load' }), true);
+    // Default / both regulates both halves.
+    assert.strictEqual(LB.autoregLoadOnly({ mesocycle_autoregulate: true }), false);
+    assert.strictEqual(LB.autoregLoadOnly({ mesocycle_autoregulate: true, mesocycle_autoregulate_mode: 'both' }), false);
+    // A bounded mesocycle always regulates both, even with a stray 'load'.
+    assert.strictEqual(LB.autoregLoadOnly({ mesocycle_weeks: 6, mesocycle_autoregulate_mode: 'load' }), false);
+    // Off entirely.
+    assert.strictEqual(LB.autoregLoadOnly({ mesocycle_autoregulate_mode: 'load' }), false);
+    assert.strictEqual(LB.autoregLoadOnly({}), false);
+  });
+
   // ── healScheduleWeekdays (self-heal legacy weekday plans) ───────────────────
   test('healScheduleWeekdays: weekday plan with no weekdays gets Mon-first slots, order kept', () => {
     const sch = { id: 'p1', mode: 'weekday', days: [
@@ -1455,6 +1531,27 @@ async function testAsync(name, fn) {
     assert.strictEqual(res.bumped.length + res.held.length + res.reset.length, 0);
   });
 
+  test('compute531CycleBumps reads the AMRAP-flagged set, not a low-rep Joker appended after it', () => {
+    const mkSch = () => ({ id: 'p', program_type: '531', days: [{}],
+      program_data: { unit: 'kg', includeDeload: false,
+        mainLifts: { sq: { tm: 100, kind: 'squat', stall: 0 } },
+        tmHistory: { sq: [{ cycle: 0, tm: 100, reason: 'start' }] } } });
+    // Ramp sets + the flagged AMRAP top set (hits its min) + a heavier Joker
+    // single appended AFTER it. Positionally the Joker is last; the fix must read
+    // the amrap-flagged set, else weeks 1-2 (min 5/3) read the reps=1 Joker as a
+    // miss and the TM wrongly holds.
+    const mkSess = (i, topReps) => ({ id: 'sq_' + i, ended: '2026-02-' + String(i + 1).padStart(2, '0') + 'T10:00:00', scheduleId: 'p',
+      entries: [{ exId: 'sq', sets: [
+        { kg: 60, reps: 5 }, { kg: 70, reps: 4 },
+        { kg: 80, reps: topReps, amrap: true },
+        { kg: 92.5, reps: 1 },
+      ] }] });
+    const cyc = [mkSess(0, 5), mkSess(1, 3), mkSess(2, 1)];
+    const r = LB.compute531CycleBumps(mkSch(), cyc, 0);
+    assert.strictEqual(r.sq.bumped, true);
+    assert.strictEqual(r.sq.newTm, 105);
+  });
+
   test('suggest531Tm: fair TM from an AMRAP-implied 1RM, flags when it beats the current TM', () => {
     // 102 x 12 -> est 1RM 142.8 -> fair TM 90% = 128.52 -> round 127.5, above 120 + 2.5
     let s = LB.suggest531Tm(LB.e1rm(102, 12), 120, 'bench', 'kg');
@@ -1702,6 +1799,54 @@ async function testAsync(name, fn) {
     const seeds = LB.buildSeedSets({ exId: 'jr', sets: 2 }, last, null, false, store, null);
     assert.strictEqual(seeds.map(s => s.timeSec).join(','), '90,30', 'swap seeds durations, not kg/reps');
     assert.strictEqual(seeds.some(s => 'kg' in s), false, 'no weight fields on time seeds');
+  });
+
+  // ── mergePlanDrafts: multi-device plan-editor draft merge ────────────────
+  // Map merge keyed by scheduleId, entries { draft, updatedAt }. Base = the
+  // last-synced map; membership in base distinguishes "deleted since sync" from
+  // "never synced".
+  const pd = (u, tag) => ({ draft: { id: 's', tag: tag ?? u }, updatedAt: u });
+  test('mergePlanDrafts: both sides present → newer updatedAt wins', () => {
+    const fresh = { s: pd('2026-07-12T10:00:00Z', 'server') };
+    const cur = { s: pd('2026-07-12T11:00:00Z', 'local') };
+    assert.strictEqual(LB.mergePlanDrafts(fresh, cur, {}).s.draft.tag, 'local');
+    // and the reverse: server newer wins
+    const fresh2 = { s: pd('2026-07-12T12:00:00Z', 'server') };
+    assert.strictEqual(LB.mergePlanDrafts(fresh2, cur, {}).s.draft.tag, 'server');
+  });
+  test('mergePlanDrafts: equal timestamps → local wins (tie goes to this device)', () => {
+    const t = '2026-07-12T10:00:00Z';
+    const out = LB.mergePlanDrafts({ s: pd(t, 'server') }, { s: pd(t, 'local') }, {});
+    assert.strictEqual(out.s.draft.tag, 'local');
+  });
+  test('mergePlanDrafts: server-only draft not in base → kept (another device started it)', () => {
+    const out = LB.mergePlanDrafts({ s: pd('2026-07-12T10:00:00Z') }, {}, {});
+    assert.ok(out.s, 'a genuinely new server-side draft is adopted');
+  });
+  test('mergePlanDrafts: server-only draft that was in base → dropped (Saved/Discarded here)', () => {
+    const base = { s: pd('2026-07-12T09:00:00Z') };
+    const out = LB.mergePlanDrafts({ s: pd('2026-07-12T09:00:00Z') }, {}, base);
+    assert.strictEqual('s' in out, false, 'deleting locally must not be resurrected from the stale server row');
+  });
+  test('mergePlanDrafts: local-only draft not in base → kept (never-synced work)', () => {
+    const out = LB.mergePlanDrafts({}, { s: pd('2026-07-12T10:00:00Z') }, {});
+    assert.ok(out.s, 'an offline/unsynced local draft survives the merge');
+  });
+  test('mergePlanDrafts: local-only draft that was in base → dropped (Saved/Discarded elsewhere)', () => {
+    const base = { s: pd('2026-07-12T09:00:00Z') };
+    const out = LB.mergePlanDrafts({}, { s: pd('2026-07-12T09:00:00Z') }, base);
+    assert.strictEqual('s' in out, false, 'a draft another device resolved must not linger locally');
+  });
+  test('mergePlanDrafts: null base (legacy cache) → keep both one-sided drafts', () => {
+    const out = LB.mergePlanDrafts({ a: pd('2026-07-12T10:00:00Z') }, { b: pd('2026-07-12T10:00:00Z') }, null);
+    assert.ok(out.a && out.b, 'without a base we cannot tell delete from never-synced, so keep both');
+  });
+  test('mergePlanDrafts: empty / undefined inputs → empty map', () => {
+    // Object.keys, not deepStrictEqual: the returned object lives in the vm
+    // realm, so its prototype differs from this file's and deepStrictEqual
+    // rejects two structurally-equal {} across realms.
+    assert.strictEqual(Object.keys(LB.mergePlanDrafts(undefined, undefined, undefined)).length, 0);
+    assert.strictEqual(Object.keys(LB.mergePlanDrafts(null, null, null)).length, 0);
   });
 
   console.log(`\n${pass} passed, ${fail} failed`);
