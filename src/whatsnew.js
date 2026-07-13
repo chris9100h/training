@@ -17,6 +17,16 @@
    Entry shape: { id: string, date: string (YYYY-MM-DD), title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.586',
+    date: '2026-07-13',
+    title: 'See Every Point, Not Just the Line',
+    items: [
+      "📍 Tap or hover any chart, get the exact story. Every graph on the Health tab (weight, steps, macros, cardio, adherence, glucose) now shows you the date and value behind each point. No more squinting at the line trying to guess which day was which.",
+      "🖱️ Works everywhere. Mouse users get a hover tooltip, on your phone just touch and drag across the chart to scrub through your data point by point.",
+      "🎯 A little marker locks onto the exact spot you're looking at, so you always know precisely what you're reading.",
+    ],
+  },
+  {
     id: 'v2.579',
     date: '2026-07-13',
     title: 'Your Plan, Picture-Perfect',
