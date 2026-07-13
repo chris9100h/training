@@ -583,6 +583,14 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
   // hook order must stay constant across renders of this long-lived instance.
   const isPad = useIsPadS();
   const [confirmEl, confirm] = useConfirm();
+  // Plan-as-image export: a dedicated "poster" tree (all training days
+  // stacked, unlike the interactive one-day-at-a-time view below) is mounted
+  // only while capturing, then rasterized via the same html2canvas flow the
+  // session-share camera button uses (captureNodeAsPng, defined in
+  // screens-lib.jsx, loaded after this file). Safe to reference here since
+  // it's only called from a click handler / JSX render, both well after boot.
+  const [capturing, setCapturing] = useStateS(false);
+  const captureRef = React.useRef(null);
 
   if (!sch) {
     return (
@@ -619,6 +627,28 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
   const isTodaySel = day.id === todayDayId;
   const dayLabel = isWeekday ? weekdayFullLabel(day.weekday, dayIdx) : `Day ${dayIdx + 1}`;
   const trainingDayCount = displayDays.filter(d => d.items.length).length;
+
+  // Poster export: every training day at once (rest days carry nothing worth
+  // printing), in display order. Reps rendering mirrors the interactive
+  // viewer's own logic exactly (screens-schedule.jsx, the per-set weight/reps
+  // row below): repsPerSet joined by "/", else a repsMax range, else the plain
+  // reps number, else blank (checkbox-mode items store reps: 0).
+  const posterDays = displayDays.filter(d => d.items.length > 0);
+  const posterRepsLabel = (it) => {
+    if (it.repsPerSet && it.repsPerSet.length) return it.repsPerSet.join('/');
+    if (it.repsMax != null) return `${it.reps}-${it.repsMax}`;
+    return it.reps || '';
+  };
+  // Screenshot watermark: same VIP-aware corner mark as SessionDetailScreen's
+  // camera export (screens-lib.jsx). VIPs get their own background image
+  // instead of the default ZANE mark, and only the default mark is mirrored.
+  const _shotLogo = store.settings?.vipBackground || 'icons/zane-logo-2.png';
+  const _shotIsCustom = _shotLogo !== 'icons/zane-logo-2.png';
+  const takeScreenshot = () => captureNodeAsPng(captureRef.current, {
+    filename: `${sch.name.replace(/[^a-z0-9]/gi, '-').toLowerCase()}-plan.png`,
+    dodgeAvatar: true,
+    setCapturing,
+  });
   // In a non-active version no day is live, so the selected (viewed) day gets a
   // neutral highlight rather than the gold "today/active" accent.
   const selBorder = viewingActiveVersion ? UI.gold : UI.inkFaint;
@@ -1006,15 +1036,87 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
         })()}
         onBack={onBack || (() => go({ name: fromPlan ? 'plan' : 'home' }))}
         right={fromPlan ? (
-          <button onClick={() => go({ name: 'schedule-edit', scheduleId: sch.id, versionFrom: selectedVersion?.validFrom })} style={{
-            background: 'transparent', border: `1px solid ${UI.hairStrong}`,
-            borderRadius: 4, padding: '5px 12px', cursor: 'pointer',
-            color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase',
-          }}>Edit</button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={takeScreenshot} disabled={capturing} style={{
+              background: 'transparent', border: `1px solid ${UI.hairStrong}`,
+              borderRadius: 4, padding: '5px 10px', cursor: capturing ? 'default' : 'pointer',
+              color: capturing ? UI.inkGhost : UI.inkSoft, lineHeight: 1,
+              WebkitTapHighlightColor: 'transparent',
+            }}>
+              {capturing ? <span style={{ fontFamily: UI.fontUi, fontSize: 10 }}>…</span> : <i className="fa-solid fa-camera" style={{ fontSize: 11 }} />}
+            </button>
+            <button onClick={() => go({ name: 'schedule-edit', scheduleId: sch.id, versionFrom: selectedVersion?.validFrom })} style={{
+              background: 'transparent', border: `1px solid ${UI.hairStrong}`,
+              borderRadius: 4, padding: '5px 12px', cursor: 'pointer',
+              color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase',
+            }}>Edit</button>
+          </div>
         ) : null}
       />
 
       {resumeBanner}
+
+      {/* Plan poster: every training day at once, mounted only while capturing
+          (the interactive view above shows one day at a time, so this is a
+          separate tree, not a "screenshot mode" toggle on the existing one).
+          A dedicated full-screen scroll container, isolated from the rest of
+          this screen's layout, is what captureNodeAsPng expects: it expands
+          captureRef's own parentElement around the capture, and this way that
+          parent is exactly and only this overlay, nothing else on the screen. */}
+      {capturing && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 500, background: UI.bg, overflowY: 'auto' }}>
+          <div ref={captureRef} style={{ padding: '22px 20px 76px', maxWidth: 480, margin: '0 auto', position: 'relative' }}>
+            <div style={{ height: '0.5px', background: UI.gold, marginBottom: 16 }} />
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+              <div style={{ minWidth: 0 }}>
+                <div className="display" style={{ fontSize: 28, color: UI.gold, lineHeight: 1.1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{sch.name}</div>
+                <div className="micro" style={{ color: UI.inkFaint, marginTop: 4 }}>
+                  {isFlex
+                    ? `Flexible · ${trainingDayCount} ${trainingDayCount === 1 ? 'workout' : 'workouts'}${sch.sessions_per_week ? ` · ${sch.sessions_per_week}×/week` : ''}`
+                    : isWeekday
+                      ? displayDays.map((d, i) => weekdayShortLabel(d.weekday, i)).join(' · ')
+                      : `${displayDays.length}-day cycle · ${trainingDayCount} ${trainingDayCount === 1 ? 'workout' : 'workouts'}`}
+                </div>
+              </div>
+              <div className="micro-gold" style={{ letterSpacing: '0.18em', marginTop: 2, flexShrink: 0, marginLeft: 12, whiteSpace: 'nowrap' }}>ZANE</div>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginTop: 20 }}>
+              {posterDays.map(d => {
+                const posIdx = displayDays.findIndex(x => x.id === d.id);
+                return (
+                  <div key={d.id} style={{ background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 8, padding: '14px 16px 6px', overflow: 'hidden' }}>
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 8 }}>
+                      <div className="display" style={{ fontSize: 18, color: UI.ink }}>{d.name}</div>
+                      <div className="micro" style={{ color: UI.inkFaint }}>{isWeekday ? weekdayShortLabel(d.weekday, posIdx).toUpperCase() : `DAY ${posIdx + 1}`}</div>
+                    </div>
+                    <KnurlCanvas style={{ marginBottom: 8 }} />
+                    <div style={{ display: 'flex', gap: 8, padding: '0 2px 6px', fontFamily: UI.fontUi, fontSize: 9, letterSpacing: '0.1em', textTransform: 'uppercase', color: UI.inkFaint }}>
+                      <div style={{ flex: 1 }}>Exercise</div>
+                      <div style={{ width: 34, textAlign: 'center' }}>Sets</div>
+                      <div style={{ width: 68, textAlign: 'center' }}>Reps</div>
+                      <div style={{ flex: 1 }}>Notes</div>
+                    </div>
+                    {d.items.map((it, ii) => {
+                      const ex = LB.findExercise(store, it.exId);
+                      return (
+                        <div key={it.exId + '-' + ii} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 2px', borderRadius: 4, background: ii % 2 ? 'var(--surface-tint-sm)' : 'transparent' }}>
+                          <div style={{ flex: 1, fontFamily: UI.fontUi, fontSize: 12, color: UI.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ex?.name || ''}</div>
+                          <div className="num" style={{ width: 34, fontSize: 12, color: UI.inkSoft, textAlign: 'center' }}>{it.sets}</div>
+                          <div className="num" style={{ width: 68, fontSize: 12, color: UI.ink, textAlign: 'center' }}>{posterRepsLabel(it)}</div>
+                          <div style={{ flex: 1, fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ex?.note || ''}</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })}
+            </div>
+
+            <img src={_shotLogo} data-shot-avatar="1" style={{ position: 'absolute', bottom: 12, right: 16, width: 80, opacity: 0.5, transform: _shotIsCustom ? 'none' : 'scaleX(-1)' }} />
+          </div>
+        </div>
+      )}
 
       {versionBar}
 
