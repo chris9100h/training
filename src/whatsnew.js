@@ -17,6 +17,16 @@
    Entry shape: { id: string, date: string (YYYY-MM-DD), title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.579',
+    date: '2026-07-13',
+    title: 'Your Plan, Picture-Perfect',
+    items: [
+      "📸 Your plan can now pose for a picture. Open any plan and tap the new camera icon next to Edit: every training day, exercise, set and rep gets laid out into one clean overview image, ready to save or share. Handy for printing, sending to a training partner, or just admiring your own handiwork.",
+      "📏 Built wide on purpose. It's a proper overview sheet, wider than your screen by design, so scroll or pinch to zoom through it like a real document instead of a cramped phone screenshot.",
+      "🎨 Matches your setup automatically. Whatever theme and accent color you've got dialed in, the image uses it too. No generic template, it actually looks like your app.",
+    ],
+  },
+  {
     id: 'v2.566',
     date: '2026-07-12',
     title: 'Never Lose a Plan Edit Again',
