@@ -653,7 +653,11 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
   };
   // One exercise row (Exercise+technique / Sets / Reps / Notes), shared by both
   // standalone items and superset/giant-set members below so the two paths
-  // can't drift into two different-looking rows.
+  // can't drift into two different-looking rows. Never inset for group
+  // membership: Sets/Reps/Notes must stay pinned to the exact same columns
+  // as every other row and the header, no exceptions (an earlier attempt to
+  // nudge just the Exercise text via padding still leaked ~5px into the
+  // Sets column, a flex-basis/border-box interaction, not a fixed offset).
   const renderPosterItemRow = (it, ii) => {
     const ex = LB.findExercise(store, it.exId);
     const techLabel = posterTechniquesLabel(it);
@@ -1168,16 +1172,22 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
                       {LB.groupBySuperset(d.items).map((g, gi) => g.type === 'standalone' ? (
                         renderPosterItemRow(g.entry, g.idx)
                       ) : (
-                        // Superset / giant-set: same left-accent-border + gold
+                        // Superset / giant-set: same left-accent-bar + gold
                         // label treatment as the session-share screenshot's own
                         // superset grouping (screens-lib.jsx), so a plan poster
-                        // and a session poster read the same way. No margin on
-                        // the wrapper or the label: the label uses the same
+                        // and a session poster read the same way. The bar is
+                        // absolutely positioned (not a border+padding on the
+                        // wrapper) so it doesn't inset the label or member rows
+                        // below: everything stays flush with the same columns
+                        // standalone rows and the header use, the bar is purely
+                        // a decorative marker, not a layout offset. No margin
+                        // on the wrapper or the label: the label uses the same
                         // padding: '6px 2px'-style top/bottom spacing every
                         // other row already uses for its own gap, so the group
                         // sits flush with its neighbors exactly like a plain
                         // row would, no special-cased spacing.
-                        <div key={'grp-' + gi} style={{ borderLeft: `2px solid ${UI.goldSoft}`, paddingLeft: 10 }}>
+                        <div key={'grp-' + gi} style={{ position: 'relative' }}>
+                          <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 2, background: UI.goldSoft }} />
                           <div className="micro" style={{ color: UI.gold, letterSpacing: '0.12em', padding: '6px 2px 2px' }}>{LB.supersetLabel(g.members.length)}</div>
                           {g.members.map(({ entry: it, idx: ii }) => renderPosterItemRow(it, ii))}
                         </div>
