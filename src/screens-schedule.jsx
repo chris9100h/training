@@ -658,7 +658,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
     const ex = LB.findExercise(store, it.exId);
     const techLabel = posterTechniquesLabel(it);
     return (
-      <div key={it.exId + '-' + ii} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '6px 2px', borderRadius: 4, background: ii % 2 ? 'var(--surface-tint-sm)' : 'transparent' }}>
+      <div key={it.exId + '-' + ii} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 2px', borderRadius: 4, background: ii % 2 ? 'var(--surface-tint-sm)' : 'transparent' }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.ink, lineHeight: 1.35, overflowWrap: 'break-word' }}>{ex?.name || ''}</div>
           {techLabel && (
