@@ -646,11 +646,16 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
   // with the last day card. VIPs get their own background image instead of
   // the default ZANE mark. No dodgeAvatar needed: unlike a corner mark, a
   // centered background never collides with the knurl dividers.
+  // Bumped noticeably past SessionCompareScreen's own opacity (0.04/0.14):
+  // that screen's watermark sits behind mostly plain background, but this
+  // poster's day cards used to be fully opaque, so the mark was only ever
+  // visible in the thin gaps between them. The cards below are now a
+  // translucent surface tint instead of a solid fill for the same reason.
   const _shotLogo = store.settings?.vipBackground || 'icons/zane-logo.png';
   const _shotIsCustom = _shotLogo !== 'icons/zane-logo.png';
   const _shotIsLight = (store.settings?.darkMode ?? 'dark') === 'light';
-  const _shotDefaultStyle = { width: '85%', maxWidth: 320, opacity: _shotIsLight ? 0.14 : 0.04, filter: _shotIsLight ? 'grayscale(1)' : 'grayscale(1) brightness(3)', objectFit: 'contain' };
-  const _shotCustomStyle = { width: '92%', maxWidth: 360, opacity: 0.16, objectFit: 'contain' };
+  const _shotDefaultStyle = { width: '75%', maxWidth: 620, opacity: _shotIsLight ? 0.22 : 0.12, filter: _shotIsLight ? 'grayscale(1)' : 'grayscale(1) brightness(3)', objectFit: 'contain' };
+  const _shotCustomStyle = { width: '80%', maxWidth: 680, opacity: 0.28, objectFit: 'contain' };
   const takeScreenshot = () => captureNodeAsPng(captureRef.current, {
     filename: `${sch.name.replace(/[^a-z0-9]/gi, '-').toLowerCase()}-plan.png`,
     setCapturing,
@@ -1077,7 +1082,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
           capture, and this way that parent is exactly and only this overlay,
           nothing else on the screen. */}
       <div style={{ position: 'fixed', inset: 0, zIndex: 500, background: UI.bg, overflowY: 'auto', display: capturing ? 'block' : 'none' }}>
-          <div ref={captureRef} style={{ padding: '22px 20px 28px', maxWidth: 480, margin: '0 auto', position: 'relative' }}>
+          <div ref={captureRef} style={{ padding: '26px 28px 32px', maxWidth: 960, margin: '0 auto', position: 'relative' }}>
 
             {/* Screenshot background watermark: centered, faint, full poster
                 (SessionCompareScreen's own recipe). Needs its own stacking
@@ -1107,7 +1112,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
                 {posterDays.map(d => {
                   const posIdx = displayDays.findIndex(x => x.id === d.id);
                   return (
-                    <div key={d.id} style={{ background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 8, padding: '14px 16px 6px', overflow: 'hidden' }}>
+                    <div key={d.id} style={{ background: 'var(--surface-tint-lg)', border: `1px solid ${UI.hairStrong}`, borderRadius: 8, padding: '14px 16px 6px', overflow: 'hidden' }}>
                       <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 8 }}>
                         <div className="display" style={{ fontSize: 18, color: UI.ink }}>{d.name}</div>
                         <div className="micro" style={{ color: UI.inkFaint }}>{isWeekday ? weekdayShortLabel(d.weekday, posIdx).toUpperCase() : `DAY ${posIdx + 1}`}</div>
