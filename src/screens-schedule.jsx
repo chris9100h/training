@@ -1056,15 +1056,21 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
 
       {resumeBanner}
 
-      {/* Plan poster: every training day at once, mounted only while capturing
-          (the interactive view above shows one day at a time, so this is a
-          separate tree, not a "screenshot mode" toggle on the existing one).
-          A dedicated full-screen scroll container, isolated from the rest of
-          this screen's layout, is what captureNodeAsPng expects: it expands
-          captureRef's own parentElement around the capture, and this way that
-          parent is exactly and only this overlay, nothing else on the screen. */}
-      {capturing && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 500, background: UI.bg, overflowY: 'auto' }}>
+      {/* Plan poster: every training day at once (the interactive view above
+          shows one day at a time, so this is a separate tree, not a
+          "screenshot mode" toggle on the existing one). Always mounted, only
+          ever hidden via display:none, never conditionally rendered on
+          `capturing` itself: captureNodeAsPng only flips capturing to true
+          AFTER checking captureRef.current is non-null, so if this tree were
+          gated on `capturing` the ref would still be null at that exact
+          check and every capture attempt would silently no-op (the ref can
+          never come into existence in time to satisfy the check that would
+          create it). A dedicated full-screen scroll container, isolated from
+          the rest of this screen's layout, is also what captureNodeAsPng
+          expects: it expands captureRef's own parentElement around the
+          capture, and this way that parent is exactly and only this overlay,
+          nothing else on the screen. */}
+      <div style={{ position: 'fixed', inset: 0, zIndex: 500, background: UI.bg, overflowY: 'auto', display: capturing ? 'block' : 'none' }}>
           <div ref={captureRef} style={{ padding: '22px 20px 76px', maxWidth: 480, margin: '0 auto', position: 'relative' }}>
             <div style={{ height: '0.5px', background: UI.gold, marginBottom: 16 }} />
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -1116,7 +1122,6 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
             <img src={_shotLogo} data-shot-avatar="1" style={{ position: 'absolute', bottom: 12, right: 16, width: 80, opacity: 0.5, transform: _shotIsCustom ? 'none' : 'scaleX(-1)' }} />
           </div>
         </div>
-      )}
 
       {versionBar}
 
