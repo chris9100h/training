@@ -639,14 +639,20 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
     if (it.repsMax != null) return `${it.reps}-${it.repsMax}`;
     return it.reps || '';
   };
-  // Screenshot watermark: same VIP-aware corner mark as SessionDetailScreen's
-  // camera export (screens-lib.jsx). VIPs get their own background image
-  // instead of the default ZANE mark, and only the default mark is mirrored.
-  const _shotLogo = store.settings?.vipBackground || 'icons/zane-logo-2.png';
-  const _shotIsCustom = _shotLogo !== 'icons/zane-logo-2.png';
+  // Screenshot watermark: same full-page centered background treatment as
+  // SessionCompareScreen's camera export (screens-lib.jsx), not
+  // SessionDetailScreen's foreground corner mark: a multi-section poster
+  // reads cleaner with one faint centered mark than a corner logo competing
+  // with the last day card. VIPs get their own background image instead of
+  // the default ZANE mark. No dodgeAvatar needed: unlike a corner mark, a
+  // centered background never collides with the knurl dividers.
+  const _shotLogo = store.settings?.vipBackground || 'icons/zane-logo.png';
+  const _shotIsCustom = _shotLogo !== 'icons/zane-logo.png';
+  const _shotIsLight = (store.settings?.darkMode ?? 'dark') === 'light';
+  const _shotDefaultStyle = { width: '85%', maxWidth: 320, opacity: _shotIsLight ? 0.14 : 0.04, filter: _shotIsLight ? 'grayscale(1)' : 'grayscale(1) brightness(3)', objectFit: 'contain' };
+  const _shotCustomStyle = { width: '92%', maxWidth: 360, opacity: 0.16, objectFit: 'contain' };
   const takeScreenshot = () => captureNodeAsPng(captureRef.current, {
     filename: `${sch.name.replace(/[^a-z0-9]/gi, '-').toLowerCase()}-plan.png`,
-    dodgeAvatar: true,
     setCapturing,
   });
   // In a non-active version no day is live, so the selected (viewed) day gets a
@@ -1071,55 +1077,64 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
           capture, and this way that parent is exactly and only this overlay,
           nothing else on the screen. */}
       <div style={{ position: 'fixed', inset: 0, zIndex: 500, background: UI.bg, overflowY: 'auto', display: capturing ? 'block' : 'none' }}>
-          <div ref={captureRef} style={{ padding: '22px 20px 76px', maxWidth: 480, margin: '0 auto', position: 'relative' }}>
-            <div style={{ height: '0.5px', background: UI.gold, marginBottom: 16 }} />
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-              <div style={{ minWidth: 0 }}>
-                <div className="display" style={{ fontSize: 28, color: UI.gold, lineHeight: 1.1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{sch.name}</div>
-                <div className="micro" style={{ color: UI.inkFaint, marginTop: 4 }}>
-                  {isFlex
-                    ? `Flexible · ${trainingDayCount} ${trainingDayCount === 1 ? 'workout' : 'workouts'}${sch.sessions_per_week ? ` · ${sch.sessions_per_week}×/week` : ''}`
-                    : isWeekday
-                      ? displayDays.map((d, i) => weekdayShortLabel(d.weekday, i)).join(' · ')
-                      : `${displayDays.length}-day cycle · ${trainingDayCount} ${trainingDayCount === 1 ? 'workout' : 'workouts'}`}
-                </div>
-              </div>
-              <div className="micro-gold" style={{ letterSpacing: '0.18em', marginTop: 2, flexShrink: 0, marginLeft: 12, whiteSpace: 'nowrap' }}>ZANE</div>
+          <div ref={captureRef} style={{ padding: '22px 20px 28px', maxWidth: 480, margin: '0 auto', position: 'relative' }}>
+
+            {/* Screenshot background watermark: centered, faint, full poster
+                (SessionCompareScreen's own recipe). Needs its own stacking
+                context below the real content, which is why the content is
+                wrapped in a sibling zIndex:1 div right after this one. */}
+            <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', zIndex: 0, overflow: 'hidden' }}>
+              <img src={_shotLogo} data-shot-avatar="1" style={_shotIsCustom ? _shotCustomStyle : _shotDefaultStyle} />
             </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginTop: 20 }}>
-              {posterDays.map(d => {
-                const posIdx = displayDays.findIndex(x => x.id === d.id);
-                return (
-                  <div key={d.id} style={{ background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 8, padding: '14px 16px 6px', overflow: 'hidden' }}>
-                    <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 8 }}>
-                      <div className="display" style={{ fontSize: 18, color: UI.ink }}>{d.name}</div>
-                      <div className="micro" style={{ color: UI.inkFaint }}>{isWeekday ? weekdayShortLabel(d.weekday, posIdx).toUpperCase() : `DAY ${posIdx + 1}`}</div>
-                    </div>
-                    <KnurlCanvas style={{ marginBottom: 8 }} />
-                    <div style={{ display: 'flex', gap: 8, padding: '0 2px 6px', fontFamily: UI.fontUi, fontSize: 9, letterSpacing: '0.1em', textTransform: 'uppercase', color: UI.inkFaint }}>
-                      <div style={{ flex: 1 }}>Exercise</div>
-                      <div style={{ width: 34, textAlign: 'center' }}>Sets</div>
-                      <div style={{ width: 68, textAlign: 'center' }}>Reps</div>
-                      <div style={{ flex: 1 }}>Notes</div>
-                    </div>
-                    {d.items.map((it, ii) => {
-                      const ex = LB.findExercise(store, it.exId);
-                      return (
-                        <div key={it.exId + '-' + ii} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 2px', borderRadius: 4, background: ii % 2 ? 'var(--surface-tint-sm)' : 'transparent' }}>
-                          <div style={{ flex: 1, fontFamily: UI.fontUi, fontSize: 12, color: UI.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ex?.name || ''}</div>
-                          <div className="num" style={{ width: 34, fontSize: 12, color: UI.inkSoft, textAlign: 'center' }}>{it.sets}</div>
-                          <div className="num" style={{ width: 68, fontSize: 12, color: UI.ink, textAlign: 'center' }}>{posterRepsLabel(it)}</div>
-                          <div style={{ flex: 1, fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ex?.note || ''}</div>
-                        </div>
-                      );
-                    })}
+            <div style={{ position: 'relative', zIndex: 1 }}>
+              <div style={{ height: '0.5px', background: UI.gold, marginBottom: 16 }} />
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                <div style={{ minWidth: 0 }}>
+                  <div className="display" style={{ fontSize: 28, color: UI.gold, lineHeight: 1.1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{sch.name}</div>
+                  <div className="micro" style={{ color: UI.inkFaint, marginTop: 4 }}>
+                    {isFlex
+                      ? `Flexible · ${trainingDayCount} ${trainingDayCount === 1 ? 'workout' : 'workouts'}${sch.sessions_per_week ? ` · ${sch.sessions_per_week}×/week` : ''}`
+                      : isWeekday
+                        ? displayDays.map((d, i) => weekdayShortLabel(d.weekday, i)).join(' · ')
+                        : `${displayDays.length}-day cycle · ${trainingDayCount} ${trainingDayCount === 1 ? 'workout' : 'workouts'}`}
                   </div>
-                );
-              })}
-            </div>
+                </div>
+                <div className="micro-gold" style={{ letterSpacing: '0.18em', marginTop: 2, flexShrink: 0, marginLeft: 12, whiteSpace: 'nowrap' }}>ZANE</div>
+              </div>
 
-            <img src={_shotLogo} data-shot-avatar="1" style={{ position: 'absolute', bottom: 12, right: 16, width: 80, opacity: 0.5, transform: _shotIsCustom ? 'none' : 'scaleX(-1)' }} />
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginTop: 20 }}>
+                {posterDays.map(d => {
+                  const posIdx = displayDays.findIndex(x => x.id === d.id);
+                  return (
+                    <div key={d.id} style={{ background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 8, padding: '14px 16px 6px', overflow: 'hidden' }}>
+                      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 8 }}>
+                        <div className="display" style={{ fontSize: 18, color: UI.ink }}>{d.name}</div>
+                        <div className="micro" style={{ color: UI.inkFaint }}>{isWeekday ? weekdayShortLabel(d.weekday, posIdx).toUpperCase() : `DAY ${posIdx + 1}`}</div>
+                      </div>
+                      <KnurlCanvas style={{ marginBottom: 8 }} />
+                      <div style={{ display: 'flex', gap: 8, padding: '0 2px 6px', fontFamily: UI.fontUi, fontSize: 9, letterSpacing: '0.1em', textTransform: 'uppercase', color: UI.inkFaint }}>
+                        <div style={{ flex: 1 }}>Exercise</div>
+                        <div style={{ width: 34, textAlign: 'center' }}>Sets</div>
+                        <div style={{ width: 68, textAlign: 'center' }}>Reps</div>
+                        <div style={{ flex: 1 }}>Notes</div>
+                      </div>
+                      {d.items.map((it, ii) => {
+                        const ex = LB.findExercise(store, it.exId);
+                        return (
+                          <div key={it.exId + '-' + ii} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '6px 2px', borderRadius: 4, background: ii % 2 ? 'var(--surface-tint-sm)' : 'transparent' }}>
+                            <div style={{ flex: 1, fontFamily: UI.fontUi, fontSize: 12, color: UI.ink, lineHeight: 1.35, overflowWrap: 'break-word' }}>{ex?.name || ''}</div>
+                            <div className="num" style={{ width: 34, fontSize: 12, color: UI.inkSoft, textAlign: 'center' }}>{it.sets}</div>
+                            <div className="num" style={{ width: 68, fontSize: 12, color: UI.ink, textAlign: 'center' }}>{posterRepsLabel(it)}</div>
+                            <div style={{ flex: 1, fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, lineHeight: 1.35, overflowWrap: 'break-word' }}>{ex?.note || ''}</div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
           </div>
         </div>
 
