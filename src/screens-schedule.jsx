@@ -654,8 +654,8 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
   const _shotLogo = store.settings?.vipBackground || 'icons/zane-logo.png';
   const _shotIsCustom = _shotLogo !== 'icons/zane-logo.png';
   const _shotIsLight = (store.settings?.darkMode ?? 'dark') === 'light';
-  const _shotDefaultStyle = { width: '75%', maxWidth: 620, opacity: _shotIsLight ? 0.22 : 0.12, filter: _shotIsLight ? 'grayscale(1)' : 'grayscale(1) brightness(3)', objectFit: 'contain' };
-  const _shotCustomStyle = { width: '80%', maxWidth: 680, opacity: 0.28, objectFit: 'contain' };
+  const _shotDefaultStyle = { width: '75%', maxWidth: 620, opacity: _shotIsLight ? 0.16 : 0.09, filter: _shotIsLight ? 'grayscale(1)' : 'grayscale(1) brightness(3)', objectFit: 'contain' };
+  const _shotCustomStyle = { width: '80%', maxWidth: 680, opacity: 0.20, objectFit: 'contain' };
   const takeScreenshot = () => captureNodeAsPng(captureRef.current, {
     filename: `${sch.name.replace(/[^a-z0-9]/gi, '-').toLowerCase()}-plan.png`,
     setCapturing,
