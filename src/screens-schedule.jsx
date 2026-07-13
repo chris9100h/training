@@ -659,6 +659,11 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
   const takeScreenshot = () => captureNodeAsPng(captureRef.current, {
     filename: `${sch.name.replace(/[^a-z0-9]/gi, '-').toLowerCase()}-plan.png`,
     setCapturing,
+    // The poster is intentionally wider than a phone viewport (fixed width,
+    // horizontally scrollable below). Without this, html2canvas only
+    // captures whatever width fits the current window instead of the full,
+    // wider poster.
+    fitWidth: true,
   });
   // In a non-active version no day is live, so the selected (viewed) day gets a
   // neutral highlight rather than the gold "today/active" accent.
@@ -1080,9 +1085,13 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
           the rest of this screen's layout, is also what captureNodeAsPng
           expects: it expands captureRef's own parentElement around the
           capture, and this way that parent is exactly and only this overlay,
-          nothing else on the screen. */}
-      <div style={{ position: 'fixed', inset: 0, zIndex: 500, background: UI.bg, overflowY: 'auto', display: capturing ? 'block' : 'none' }}>
-          <div ref={captureRef} style={{ padding: '26px 28px 32px', maxWidth: 960, margin: '0 auto', position: 'relative' }}>
+          nothing else on the screen. A fixed (not max-) width below makes the
+          poster intentionally wider than a phone viewport: this is an
+          overview sheet people expect to scroll/zoom through, not a
+          phone-portrait layout, so `overflow` covers both axes, not just
+          vertical, to make that width reachable by hand while previewing. */}
+      <div style={{ position: 'fixed', inset: 0, zIndex: 500, background: UI.bg, overflow: 'auto', display: capturing ? 'block' : 'none' }}>
+          <div ref={captureRef} style={{ padding: '26px 28px 32px', width: 960, margin: '0 auto', position: 'relative' }}>
 
             {/* Screenshot background watermark: centered, faint, full poster
                 (SessionCompareScreen's own recipe). Needs its own stacking
