@@ -653,17 +653,18 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
   };
   // One exercise row (Exercise+technique / Sets / Reps / Notes), shared by both
   // standalone items and superset/giant-set members below so the two paths
-  // can't drift into two different-looking rows. Never inset for group
-  // membership: Sets/Reps/Notes must stay pinned to the exact same columns
-  // as every other row and the header, no exceptions (an earlier attempt to
-  // nudge just the Exercise text via padding still leaked ~5px into the
-  // Sets column, a flex-basis/border-box interaction, not a fixed offset).
-  const renderPosterItemRow = (it, ii) => {
+  // can't drift into two different-looking rows. `indent`, set only for
+  // superset/giant-set members, nudges the exercise text a bit clear of the
+  // group's accent bar via `transform`, never `padding`/`margin`: a padding
+  // nudge on this flex:1 item still leaked ~5px into the Sets column (a
+  // flex-basis/border-box interaction), while transform is a paint-only
+  // shift the flex layout never sees, so Sets/Reps/Notes can't be affected.
+  const renderPosterItemRow = (it, ii, indent) => {
     const ex = LB.findExercise(store, it.exId);
     const techLabel = posterTechniquesLabel(it);
     return (
       <div key={it.exId + '-' + ii} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 2px', borderRadius: 4, background: ii % 2 ? 'var(--surface-tint-sm)' : 'transparent' }}>
-        <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ flex: 1, minWidth: 0, transform: indent ? 'translateX(10px)' : 'none' }}>
           <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.ink, lineHeight: 1.35, overflowWrap: 'break-word' }}>{ex?.name || ''}</div>
           {techLabel && (
             <div style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.gold, lineHeight: 1.35, marginTop: 2, overflowWrap: 'break-word' }}>{techLabel}</div>
@@ -1177,19 +1178,22 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
                         // superset grouping (screens-lib.jsx), so a plan poster
                         // and a session poster read the same way. The bar is
                         // absolutely positioned (not a border+padding on the
-                        // wrapper) so it doesn't inset the label or member rows
-                        // below: everything stays flush with the same columns
-                        // standalone rows and the header use, the bar is purely
-                        // a decorative marker, not a layout offset. No margin
-                        // on the wrapper or the label: the label uses the same
+                        // wrapper), so it can't inset anything: the label gets
+                        // its clearance from the bar via its own padding-left,
+                        // and member rows via renderPosterItemRow's `indent`
+                        // (a transform, not a padding/margin), so Sets/Reps/
+                        // Notes stay pinned to the same columns as the header
+                        // and every standalone row, only the exercise text and
+                        // label visually clear the bar. No vertical margin on
+                        // the wrapper or the label: the label uses the same
                         // padding: '6px 2px'-style top/bottom spacing every
                         // other row already uses for its own gap, so the group
                         // sits flush with its neighbors exactly like a plain
                         // row would, no special-cased spacing.
                         <div key={'grp-' + gi} style={{ position: 'relative' }}>
                           <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 2, background: UI.goldSoft }} />
-                          <div className="micro" style={{ color: UI.gold, letterSpacing: '0.12em', padding: '6px 2px 2px' }}>{LB.supersetLabel(g.members.length)}</div>
-                          {g.members.map(({ entry: it, idx: ii }) => renderPosterItemRow(it, ii))}
+                          <div className="micro" style={{ color: UI.gold, letterSpacing: '0.12em', padding: '6px 2px 2px 12px' }}>{LB.supersetLabel(g.members.length)}</div>
+                          {g.members.map(({ entry: it, idx: ii }) => renderPosterItemRow(it, ii, true))}
                         </div>
                       ))}
                     </div>
