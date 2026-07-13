@@ -867,8 +867,13 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
 // ─── Macro target editor ────────────────────────────────────────────────────────
 
 function MacroTargetSheet({ open, onClose, store, setStore, coachingMacros }) {
-  const effective = LB.effectiveMacroTargets(store.settings?.macroTargets, coachingMacros);
-  const prefilledFromCoach = !store.settings?.macroTargets && !!effective;
+  // This sheet edits the user's PERSONAL targets, so prefill from their own
+  // targets first; fall back to the coach macros only as a convenience when they
+  // have none of their own. (effectiveMacroTargets is coach-first for the health
+  // display, which is the opposite priority and would show coach values here.)
+  const personalTargets = store.settings?.macroTargets;
+  const coachHasMacros = LB.hasMacroTargets(coachingMacros);
+  const prefillSource = LB.hasMacroTargets(personalTargets) ? personalTargets : coachingMacros;
   const empty = { proteinTraining: '', carbsTraining: '', fatTraining: '', proteinRest: '', carbsRest: '', fatRest: '' };
   const [form, setForm] = useStateH(empty);
   const [confirmEl, confirm] = useConfirm();
@@ -876,7 +881,7 @@ function MacroTargetSheet({ open, onClose, store, setStore, coachingMacros }) {
 
   useEffectH(() => {
     if (!open) return;
-    const m = effective || {};
+    const m = prefillSource || {};
     const next = {
       proteinTraining: m.proteinTraining != null ? String(m.proteinTraining) : '',
       carbsTraining: m.carbsTraining != null ? String(m.carbsTraining) : '',
@@ -927,9 +932,9 @@ function MacroTargetSheet({ open, onClose, store, setStore, coachingMacros }) {
 
   return (
     <Sheet open={open} onClose={requestClose} title="Macro Targets">
-      {prefilledFromCoach && (
+      {coachHasMacros && (
         <div style={{ fontSize: 11, color: 'var(--accent)', fontFamily: UI.fontUi, padding: '6px 10px', background: `rgba(var(--accent-rgb),0.08)`, borderRadius: 6, border: `0.5px solid rgba(var(--accent-rgb),0.2)`, marginBottom: 14 }}>
-          Prefilled from your coach — edit to set your own.
+          Your coaching macros are active and take priority. These personal targets apply only if the coaching macros are removed.
         </div>
       )}
       {section('Training', 'TRAINING DAY', calsTraining)}
@@ -1541,7 +1546,10 @@ function HealthScreen({ store, setStore, go, userId }) {
   }, [activeClientCoachingId]);
 
   const targets = LB.effectiveMacroTargets(store.settings?.macroTargets, coachingMacros);
-  const fromCoach = !store.settings?.macroTargets && !!targets;
+  // Coach macros always win when present (see effectiveMacroTargets), so the
+  // shown targets are the coach's exactly when coach macros exist.
+  const coachHasMacros = LB.hasMacroTargets(coachingMacros);
+  const fromCoach = coachHasMacros;
   const dailyLogs = store.dailyLogs || [];
   const selectedLog = dailyLogs.find(l => l.date === selectedDate) || null;
 
@@ -1732,6 +1740,11 @@ function HealthScreen({ store, setStore, go, userId }) {
       ) : (
         <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 4 }}>
           Set protein / carbs / fat goals to track macro adherence.
+        </div>
+      )}
+      {coachHasMacros && (
+        <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1.4, marginTop: 8, paddingTop: 8, borderTop: `0.5px solid ${UI.hair}` }}>
+          These come from your coaching plan and take priority. Personal targets you set apply only without coaching macros.
         </div>
       )}
     </div>

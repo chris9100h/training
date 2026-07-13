@@ -478,12 +478,24 @@ async function testAsync(name, fn) {
     assert.strictEqual(LB.macroAdherence({ protein: 200, carbs: 250, fat: 70 }, null), null);
   });
 
-  test('effectiveMacroTargets prefers personal, falls back to coaching, else null', () => {
+  test('effectiveMacroTargets: coach macros always win, personal is the fallback', () => {
     const personal = { proteinTraining: 210 };
-    assert.strictEqual(LB.effectiveMacroTargets(personal, MACROS), personal);
+    // Coach macros take priority whenever present (real coach or self-coaching).
+    assert.strictEqual(LB.effectiveMacroTargets(personal, MACROS), MACROS);
     assert.strictEqual(LB.effectiveMacroTargets(null, MACROS), MACROS);
     assert.strictEqual(LB.effectiveMacroTargets({}, MACROS), MACROS);
+    // No coach macros → personal targets are used as the fallback.
+    assert.strictEqual(LB.effectiveMacroTargets(personal, null), personal);
+    assert.strictEqual(LB.effectiveMacroTargets(personal, {}), personal);
     assert.strictEqual(LB.effectiveMacroTargets(null, null), null);
+  });
+
+  test('hasMacroTargets: true only when a macro (not just calories) is set', () => {
+    assert.strictEqual(LB.hasMacroTargets(null), false);
+    assert.strictEqual(LB.hasMacroTargets({}), false);
+    assert.strictEqual(LB.hasMacroTargets({ caloriesTraining: 2000, caloriesRest: 1800 }), false);
+    assert.strictEqual(LB.hasMacroTargets({ proteinRest: 150 }), true);
+    assert.strictEqual(LB.hasMacroTargets({ carbsTraining: 300 }), true);
   });
 
   test('dailyLogAdherence snapshots target + dayType, null when targets missing', () => {
