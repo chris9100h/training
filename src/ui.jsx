@@ -1240,6 +1240,29 @@ UI.chartDomain = (dataMin, dataMax, opts) => {
   return { min: bottom, max: top, range: (top - bottom) || 1 };
 };
 
+// Same padded domain as chartDomain, but snapped to a clean grid in units of
+// `step` (5 lb / 2.5 kg for a weight axis): every gridline is a whole
+// multiple of `step`, so the axis always reads 90/95/100/105 instead of
+// wherever the padded data happened to start (91/96/101). The per-gridline
+// increment is `step` times the smallest value off a 1-2-5 ladder that keeps
+// the count near 4 (every other health chart's fixed gridline count) — a
+// plain "always exactly `step` apart" would work for a normal few-lb swing
+// but explode into a dozen+ cramped lines for a wide (e.g. bulk/cut, "all
+// time") range; escalating to 2×/5×/10×step etc. keeps it readable while
+// every label stays a clean multiple of the base unit.
+UI.niceStepDomain = (dataMin, dataMax, step, opts) => {
+  const dom = UI.chartDomain(dataMin, dataMax, opts);
+  const LADDER = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000];
+  const target = (dom.max - dom.min) / 3 || step;
+  const mult = LADDER.find(m => m * step >= target) || LADDER[LADDER.length - 1];
+  const inc = mult * step;
+  let min = Math.floor(dom.min / inc) * inc;
+  let max = Math.ceil(dom.max / inc) * inc;
+  while (Math.round((max - min) / inc) < 3) { min -= inc; max += inc; }
+  const n = Math.round((max - min) / inc);
+  return { min, max, range: max - min, gridVals: Array.from({ length: n + 1 }, (_, i) => min + inc * i) };
+};
+
 // ─── Drag-to-reorder ────────────────────────────────────────────────
 // Pointer-based reordering for vertical lists, tuned to feel like the
 // fddb_dash drag: long-press to pick up on touch, a small move-threshold

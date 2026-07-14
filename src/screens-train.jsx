@@ -683,32 +683,43 @@ function RestGauge({ restStart, restDef, variant }) {
   useEffectT(() => { const t = setInterval(() => tick(n => n + 1), 250); return () => clearInterval(t); }, []);
   const active = restStart != null && restDef != null;
   const el = active ? Math.floor((Date.now() - restStart) / 1000) : 0;
-  const remaining = active ? Math.max(0, restDef - el) : null;
+  // No longer clamped at 0 — once the rest period elapses this goes negative,
+  // turning the countdown into an overrun count-up so the user can see
+  // exactly how long they've gone past their rest, not just "0:00" forever.
+  const remaining = active ? restDef - el : null;
+  const overrun = remaining != null && remaining < 0;
   const pct = active ? Math.max(0, Math.min(100, (el / restDef) * 100)) : 0;
-  const mmss = remaining != null ? `${Math.floor(remaining / 60)}:${(remaining % 60).toString().padStart(2, '0')}` : '—';
+  const absRemaining = remaining != null ? Math.abs(remaining) : null;
+  const mmss = absRemaining != null
+    ? `${overrun ? '+' : ''}${Math.floor(absRemaining / 60)}:${(absRemaining % 60).toString().padStart(2, '0')}`
+    : '—';
+  // done stays the single zero-crossing tick (drives the one-time "GO" pulse,
+  // matching fireRestDone's one-time beep/flash) — overrun is its own,
+  // steady state after that, not a repeating alarm.
   const done = remaining === 0;
+  const gaugeColor = overrun ? UI.danger : UI.gold;
   if (variant === 'header') {
     return (<>
-      <span className="num" style={{ color: UI.gold, fontSize: 14, letterSpacing: '0.14em', fontWeight: 500, animation: 'timerPulse 1.6s ease-in-out infinite' }}>{mmss}</span>
+      <span className="num" style={{ color: gaugeColor, fontSize: 14, letterSpacing: '0.14em', fontWeight: 500, animation: 'timerPulse 1.6s ease-in-out infinite' }}>{mmss}</span>
       <div style={{ width: 44, height: 2, background: UI.hair, borderRadius: 4, overflow: 'hidden' }}>
-        <div style={{ height: '100%', width: `${pct}%`, background: UI.gold, transition: 'width 0.25s linear' }} />
+        <div style={{ height: '100%', width: `${pct}%`, background: gaugeColor, transition: 'width 0.25s linear' }} />
       </div>
     </>);
   }
   if (variant === 'modal') {
     return (<>
-      <div className="num" style={{ fontSize: 72, fontWeight: 300, letterSpacing: '-0.02em', lineHeight: 1, color: UI.gold, animation: done ? 'timerPulse 0.8s ease-in-out infinite' : 'none', cursor: done ? 'pointer' : 'default' }}>{mmss}</div>
+      <div className="num" style={{ fontSize: 72, fontWeight: 300, letterSpacing: '-0.02em', lineHeight: 1, color: gaugeColor, animation: done ? 'timerPulse 0.8s ease-in-out infinite' : 'none', cursor: done ? 'pointer' : 'default' }}>{mmss}</div>
       {done && <div style={{ marginTop: 10, fontSize: 11, letterSpacing: '0.18em', color: UI.gold, fontFamily: UI.fontUi, fontWeight: 600 }}>GO</div>}
       <div style={{ height: 2, background: UI.hair, borderRadius: 4, overflow: 'hidden', marginTop: 18, width: 200 }}>
-        <div style={{ height: '100%', width: `${pct}%`, background: UI.gold, transition: 'width 0.25s linear' }} />
+        <div style={{ height: '100%', width: `${pct}%`, background: gaugeColor, transition: 'width 0.25s linear' }} />
       </div>
     </>);
   }
   // warmup overlay
   return (<>
-    <div className="num" style={{ fontSize: 88, fontWeight: 300, letterSpacing: '-0.03em', lineHeight: 1, color: UI.gold, textShadow: '0 0 40px rgba(var(--accent-rgb),0.55), 0 0 80px rgba(var(--accent-rgb),0.25)', animation: 'timerPulse 1.6s ease-in-out infinite' }}>{mmss}</div>
+    <div className="num" style={{ fontSize: 88, fontWeight: 300, letterSpacing: '-0.03em', lineHeight: 1, color: gaugeColor, textShadow: overrun ? '0 0 40px rgba(var(--danger-rgb),0.55), 0 0 80px rgba(var(--danger-rgb),0.25)' : '0 0 40px rgba(var(--accent-rgb),0.55), 0 0 80px rgba(var(--accent-rgb),0.25)', animation: 'timerPulse 1.6s ease-in-out infinite' }}>{mmss}</div>
     <div style={{ height: 2, background: UI.hair, borderRadius: 4, overflow: 'hidden', marginTop: 22, width: 180 }}>
-      <div style={{ height: '100%', width: `${pct}%`, background: UI.gold, transition: 'width 0.25s linear' }} />
+      <div style={{ height: '100%', width: `${pct}%`, background: gaugeColor, transition: 'width 0.25s linear' }} />
     </div>
   </>);
 }

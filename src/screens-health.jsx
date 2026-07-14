@@ -341,18 +341,22 @@ function HealthChartCard({ title, icon, tf, setTf, headline, sub, dragHandle, ch
 }
 
 // Line chart over a date window. series = [{ date, value }] (present days only).
-function HealthLineChart({ series, from, to, format, color = 'var(--accent)', yMin, yMax }) {
+function HealthLineChart({ series, from, to, format, color = 'var(--accent)', yMin, yMax, step }) {
   const pts = (series || []).filter(p => p.value != null).sort((a, b) => a.date.localeCompare(b.date));
   if (!pts.length) return <HealthChartEmpty />;
   const W = 320, padL = 38, padR = 12, padTop = 10, padBottom = 20, plotH = 96;
   const H = padTop + plotH + padBottom, plotW = W - padL - padR;
   const vals = pts.map(p => p.value);
-  const dom = UI.chartDomain(Math.min(...vals), Math.max(...vals), { min: yMin, max: yMax });
+  const dom = step
+    ? UI.niceStepDomain(Math.min(...vals), Math.max(...vals), step, { min: yMin, max: yMax })
+    : UI.chartDomain(Math.min(...vals), Math.max(...vals), { min: yMin, max: yMax });
   const totalDays = Math.max(1, healthDayDiff(from, to));
   const xOf = d => padL + (totalDays ? healthDayDiff(from, d) / totalDays : 0.5) * plotW;
   const yOf = v => padTop + (1 - (v - dom.min) / dom.range) * plotH;
-  const dec = dom.range >= 4 ? 0 : 1;
-  const gridVals = Array.from({ length: 4 }, (_, i) => dom.min + (dom.range / 3) * i);
+  // A fractional step (2.5 kg) needs 1 decimal to show the .5; a whole step
+  // (5 lb) never produces one, so it can stay the old range-based heuristic.
+  const dec = step ? (Number.isInteger(step) ? 0 : 1) : (dom.range >= 4 ? 0 : 1);
+  const gridVals = dom.gridVals || Array.from({ length: 4 }, (_, i) => dom.min + (dom.range / 3) * i);
   const line = pts.map(p => `${xOf(p.date).toFixed(1)},${yOf(p.value).toFixed(1)}`).join(' ');
   const base = (padTop + plotH).toFixed(1);
   const hoverPoints = pts.map(p => ({ x: xOf(p.date), y: yOf(p.value), date: p.date, rows: [{ value: format(p.value) }] }));
@@ -1880,7 +1884,7 @@ function HealthScreen({ store, setStore, go, userId }) {
     weight: (
       <HealthChartCard title="Weight" icon="fa-weight-scale" tf={tf} setTf={setTf} dragHandle={handle}
         headline={weightAvg != null ? `${weightAvg}${UI.unit()}` : null} sub={weightAvg != null ? 'avg' : null}>
-        <HealthLineChart series={weightSeries.data} from={weightSeries.from} to={weightSeries.to} format={v => `${v}`} />
+        <HealthLineChart series={weightSeries.data} from={weightSeries.from} to={weightSeries.to} format={v => `${v}`} step={UI.unit() === 'lbs' ? 5 : 2.5} />
       </HealthChartCard>
     ),
     steps: (
@@ -2089,7 +2093,7 @@ function HealthClientLogs({ clientStore }) {
     weight: (
       <HealthChartCard title="Weight" icon="fa-weight-scale" tf={tf} setTf={setTf} dragHandle={handle}
         headline={weightAvg != null ? `${weightAvg}${clientUnit}` : null} sub={weightAvg != null ? 'avg' : null}>
-        <HealthLineChart series={weightSeries.data} from={weightSeries.from} to={weightSeries.to} format={v => `${v}`} />
+        <HealthLineChart series={weightSeries.data} from={weightSeries.from} to={weightSeries.to} format={v => `${v}`} step={UI.unit() === 'lbs' ? 5 : 2.5} />
       </HealthChartCard>
     ),
     steps: (

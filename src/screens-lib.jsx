@@ -3376,6 +3376,161 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
   );
 }
 
+// ─── Technique-aware set editing (History → workout → Edit) ────────────
+// Historical companion to the live training screen's technique picker/chain
+// sheets (screens-train.jsx): same data model — LB.techniqueRounds, and the
+// technique/drops shapes documented in docs/database.md ("drops[0] mirrors
+// the top-level kg/reps... only the first drop counts toward volume and
+// doneSetCount") — but edits an already-logged, static session instead of
+// live input state, so none of the live screen's custom-keypad/rest-timer/
+// auto-arm machinery applies; this is plain-input editing throughout.
+const CHAIN_TECH_KINDS = ['drop', 'myorep', 'myorep_match', 'amrap_variations'];
+const STANDALONE_TECH_KINDS = ['lengthened_partial', 'weighted_stretch'];
+const techRoundLabel = (kind, di) =>
+  (kind === 'myorep' || kind === 'myorep_match') ? (di === 0 ? 'Activation' : `Myo ${di}`)
+  : kind === 'amrap_variations' ? `Round ${di + 1}`
+  : (di === 0 ? 'Top' : `Drop ${di}`);
+
+function TechniqueChipRow({ current, onSelect }) {
+  const chips = [{ id: null, short: 'NONE' }, ...LB.PLANNABLE_TECHNIQUES];
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 8 }}>
+      {chips.map(c => {
+        const active = (current || null) === c.id;
+        return (
+          <button key={c.id ?? 'none'} onClick={() => onSelect(c.id)} style={{
+            background: active ? UI.goldFaint : 'transparent',
+            border: `1px solid ${active ? UI.goldSoft : UI.hairStrong}`,
+            borderRadius: 4, padding: '3px 8px', cursor: 'pointer',
+            fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.08em',
+            color: active ? UI.gold : UI.inkFaint, WebkitTapHighlightColor: 'transparent',
+          }}>{c.short}</button>
+        );
+      })}
+    </div>
+  );
+}
+
+// A +/- stepper, shared by the two "partials" counters below.
+function PartialsStepper({ value, onChange }) {
+  const btnStyle = { width: 22, height: 22, borderRadius: 4, border: `1px solid ${UI.hairStrong}`, background: 'transparent', color: UI.inkSoft, cursor: 'pointer', fontSize: 13, lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', WebkitTapHighlightColor: 'transparent' };
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+      <button onClick={() => onChange(Math.max(0, value - 1))} style={btnStyle}>−</button>
+      <span className="num" style={{ width: 18, textAlign: 'center', fontSize: 12, color: UI.ink }}>{value}</span>
+      <button onClick={() => onChange(value + 1)} style={btnStyle}>+</button>
+    </div>
+  );
+}
+
+// A weighted-stretch kg/timeSec pair, shared by chain-round finishers and the
+// two standalone techniques.
+function StretchFields({ stretch, onChange }) {
+  const numStyle = { width: 52, background: UI.bgRaised, border: `1px solid ${UI.hairStrong}`, borderRadius: 4, color: UI.ink, padding: '7px 6px', textAlign: 'center', fontFamily: UI.fontNum, fontSize: 13, outline: 'none' };
+  return (<>
+    <input type="text" inputMode="decimal" value={stretch?.kg ?? ''} placeholder="kg" onFocus={e => e.target.select()}
+      onChange={ev => onChange({ kg: ev.target.value === '' ? null : +ev.target.value, timeSec: stretch?.timeSec ?? 30 })}
+      style={numStyle} />
+    <input type="text" inputMode="numeric" value={stretch?.timeSec ?? ''} placeholder="sec" onFocus={e => e.target.select()}
+      onChange={ev => onChange({ kg: stretch?.kg ?? null, timeSec: ev.target.value === '' ? null : +ev.target.value })}
+      style={numStyle} />
+  </>);
+}
+
+// One round of a chain technique (drop/myo/myo-match/AMRAP): kg × reps (+ a
+// variation-name field for AMRAP, myo rounds after the activation reuse the
+// activation kg so no kg field), plus a collapsible partials/stretch
+// finisher — same per-round data Finisher/FinisherStep author live, just
+// against plain inputs instead of the custom keypad.
+function RoundEditRow({ round, di, kind, onChange, onRemove, canRemove }) {
+  const [finisherOpen, setFinisherOpen] = useStateL(!!(round.partials || round.stretch));
+  const isMyo = kind === 'myorep' || kind === 'myorep_match';
+  const showKg = !(isMyo && di > 0);
+  const numStyle = { width: 56, background: UI.bgRaised, border: `1px solid ${UI.hairStrong}`, borderRadius: 4, color: UI.ink, padding: '7px 6px', textAlign: 'center', fontFamily: UI.fontNum, fontSize: 13, outline: 'none', flexShrink: 0 };
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+        <span className="micro" style={{ width: 60, flexShrink: 0, color: UI.inkFaint }}>{techRoundLabel(kind, di)}</span>
+        {kind === 'amrap_variations' && (
+          <input type="text" value={round.label ?? ''} placeholder="Variation" onFocus={e => e.target.select()}
+            onChange={ev => onChange({ label: ev.target.value })}
+            style={{ flex: 1, minWidth: 70, background: UI.bgRaised, border: `1px solid ${UI.hairStrong}`, borderRadius: 4, color: UI.ink, padding: '7px 8px', fontFamily: UI.fontUi, fontSize: 12, outline: 'none' }} />
+        )}
+        {showKg && (
+          <input type="text" inputMode="decimal" value={round.kg ?? ''} placeholder="—" onFocus={e => e.target.select()}
+            onChange={ev => onChange({ kg: ev.target.value === '' ? null : +ev.target.value })} style={numStyle} />
+        )}
+        {showKg && <span className="num" style={{ color: UI.inkFaint, fontSize: 10 }}>{UI.unit()}</span>}
+        <span style={{ color: UI.hair, fontSize: 13, fontFamily: UI.fontDisplay, fontStyle: 'italic' }}>×</span>
+        <input type="text" inputMode="numeric" value={round.reps ?? ''} placeholder="—" onFocus={e => e.target.select()}
+          onChange={ev => onChange({ reps: ev.target.value === '' ? null : +ev.target.value })} style={numStyle} />
+        <span className="num" style={{ color: UI.inkFaint, fontSize: 10 }}>reps</span>
+        <button onClick={() => setFinisherOpen(o => !o)} title="Partials / stretch finisher" style={{
+          marginLeft: 'auto', flexShrink: 0, background: 'transparent', border: 'none', cursor: 'pointer',
+          color: finisherOpen || round.partials || round.stretch ? UI.gold : UI.inkFaint, fontSize: 13, padding: '4px 6px',
+        }}><i className="fa-solid fa-bolt" /></button>
+        {canRemove && (
+          <button onClick={onRemove} title="Remove round" style={{ flexShrink: 0, background: 'transparent', border: 'none', cursor: 'pointer', color: 'rgba(var(--danger-rgb),0.7)', fontSize: 12, padding: '4px 4px' }}>
+            <i className="fa-solid fa-xmark" />
+          </button>
+        )}
+      </div>
+      {finisherOpen && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingLeft: 66, flexWrap: 'wrap' }}>
+          <span className="micro" style={{ color: UI.inkFaint }}>Partials</span>
+          <PartialsStepper value={round.partials || 0} onChange={v => onChange({ partials: v })} />
+          <span className="micro" style={{ color: UI.inkFaint, marginLeft: 6 }}>Stretch</span>
+          <StretchFields stretch={round.stretch} onChange={v => onChange({ stretch: v })} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Full rounds list for a chain technique, with add/remove and a running
+// total-reps chip for myo variants (mirrors TechniqueBlock's read display).
+function ChainRoundsEditor({ st, kind, onUpdateRound, onAddRound, onRemoveRound }) {
+  const drops = Array.isArray(st.drops) ? st.drops : [];
+  const isMyo = kind === 'myorep' || kind === 'myorep_match';
+  const totalReps = isMyo ? drops.reduce((a, d) => a + (d.reps || 0), 0) : 0;
+  return (
+    <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 10, borderLeft: `2px solid rgba(var(--accent-rgb),0.35)`, paddingLeft: 10 }}>
+      {drops.map((d, di) => (
+        <RoundEditRow key={di} round={d} di={di} kind={kind}
+          onChange={patch => onUpdateRound(di, patch)}
+          onRemove={() => onRemoveRound(di)}
+          canRemove={drops.length > 1} />
+      ))}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <button onClick={onAddRound} style={{
+          background: 'transparent', border: `1px dashed ${UI.goldSoft}`, borderRadius: 4,
+          padding: '5px 10px', cursor: 'pointer', color: UI.gold, fontFamily: UI.fontUi, fontSize: 11,
+          WebkitTapHighlightColor: 'transparent',
+        }}>+ Add round</button>
+        {totalReps > 0 && (
+          <span style={{ border: `1px solid var(--accent)`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontUi, fontSize: 11, color: 'var(--accent)' }}>Total {totalReps}</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Lengthened Partials / Weighted Stretch: no rounds, just the finisher
+// fields on top of the set's own (unmirrored) kg/reps row above.
+function StandaloneTechEditor({ st, kind, onPatch }) {
+  const drops = (st.drops && !Array.isArray(st.drops)) ? st.drops : {};
+  return (
+    <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', borderLeft: `2px solid rgba(var(--accent-rgb),0.35)`, paddingLeft: 10 }}>
+      {kind === 'lengthened_partial' && (<>
+        <span className="micro" style={{ color: UI.inkFaint }}>Partials</span>
+        <PartialsStepper value={drops.partials || 0} onChange={v => onPatch({ partials: v })} />
+      </>)}
+      <span className="micro" style={{ color: UI.inkFaint, marginLeft: kind === 'lengthened_partial' ? 6 : 0 }}>Stretch</span>
+      <StretchFields stretch={drops.stretch} onChange={v => onPatch({ stretch: v })} />
+    </div>
+  );
+}
+
 function SessionEditSheet({ session, duration, exercises, onClose, onSave }) {
   const [draftDate, setDraftDate] = useStateL(session.date ? session.date.slice(0, 10) : '');
   const [draftDuration, setDraftDuration] = useStateL(duration != null ? String(Math.round(duration / 5) * 5) : '0');
@@ -3396,10 +3551,80 @@ function SessionEditSheet({ session, duration, exercises, onClose, onSave }) {
     ));
   };
 
+  // Reopening/clearing a technique set for plain editing must drop technique
+  // + drops too — mirrors the live training screen's own reopen behavior
+  // (screens-train.jsx updateSet: unchecking a done technique set wipes
+  // both). Skipping used to leave a stale `drops` behind here.
   const skipSet = (eIdx, sIdx, skip) => {
     setDraftEntries(entries => entries.map((e, i) =>
-      i !== eIdx ? e : { ...e, sets: e.sets.map((st, k) => k !== sIdx ? st : { ...st, skipped: skip, done: false, kg: null, reps: null, repsL: null, repsR: null }) }
+      i !== eIdx ? e : { ...e, sets: e.sets.map((st, k) => k !== sIdx ? st : {
+        ...st, skipped: skip, done: false, kg: null, reps: null, repsL: null, repsR: null,
+        ...(skip ? { technique: null, drops: null } : {}),
+      }) }
     ));
+  };
+
+  // techId=null clears back to a plain set. Chain techniques keep `drops` as
+  // an ARRAY with round 0 mirrored onto the set's own kg/reps (progression /
+  // volume / PR code only ever reads the top-level fields — see
+  // docs/database.md's zane_sets.drops note); standalone techniques keep
+  // `drops` as a plain OBJECT and leave the set's own kg/reps untouched.
+  const setTechnique = (eIdx, sIdx, techId, exName) => {
+    setDraftEntries(entries => entries.map((e, i) => i !== eIdx ? e : {
+      ...e, sets: e.sets.map((st, k) => {
+        if (k !== sIdx) return st;
+        if (!techId) return { ...st, technique: null, drops: null };
+        if (CHAIN_TECH_KINDS.includes(techId)) {
+          const priorDrops = Array.isArray(st.drops) && st.drops.length ? st.drops : null;
+          const seedRound = () => ({ kg: st.kg, reps: st.reps, ...(techId === 'amrap_variations' ? { label: exName || '' } : {}) });
+          const drops = priorDrops || [seedRound(), seedRound()];
+          return { ...st, technique: techId, drops, kg: drops[0].kg, reps: drops[0].reps };
+        }
+        const prior = (st.drops && !Array.isArray(st.drops)) ? st.drops : {};
+        const drops = techId === 'lengthened_partial'
+          ? { partials: prior.partials || 0, ...(prior.stretch ? { stretch: prior.stretch } : {}) }
+          : { stretch: prior.stretch || { kg: null, timeSec: 30 } };
+        return { ...st, technique: techId, drops };
+      }),
+    }));
+  };
+
+  const updateRound = (eIdx, sIdx, roundIdx, patch) => {
+    setDraftEntries(entries => entries.map((e, i) => i !== eIdx ? e : {
+      ...e, sets: e.sets.map((st, k) => {
+        if (k !== sIdx) return st;
+        const drops = (st.drops || []).map((d, di) => di !== roundIdx ? d : { ...d, ...patch });
+        return { ...st, drops, ...(roundIdx === 0 ? { kg: drops[0].kg, reps: drops[0].reps } : {}) };
+      }),
+    }));
+  };
+
+  const addRound = (eIdx, sIdx, exName) => {
+    setDraftEntries(entries => entries.map((e, i) => i !== eIdx ? e : {
+      ...e, sets: e.sets.map((st, k) => {
+        if (k !== sIdx) return st;
+        const drops = st.drops || [];
+        const last = drops[drops.length - 1] || { kg: st.kg, reps: st.reps };
+        const newRound = { kg: last.kg, reps: last.reps, ...(st.technique === 'amrap_variations' ? { label: exName || '' } : {}) };
+        return { ...st, drops: [...drops, newRound] };
+      }),
+    }));
+  };
+
+  const removeRound = (eIdx, sIdx, roundIdx) => {
+    setDraftEntries(entries => entries.map((e, i) => i !== eIdx ? e : {
+      ...e, sets: e.sets.map((st, k) => {
+        if (k !== sIdx || !st.drops || st.drops.length <= 1) return st;
+        const drops = st.drops.filter((_, di) => di !== roundIdx);
+        return { ...st, drops, kg: drops[0].kg, reps: drops[0].reps };
+      }),
+    }));
+  };
+
+  const patchStandalone = (eIdx, sIdx, patch) => {
+    setDraftEntries(entries => entries.map((e, i) => i !== eIdx ? e : {
+      ...e, sets: e.sets.map((st, k) => k !== sIdx ? st : { ...st, drops: { ...(st.drops && !Array.isArray(st.drops) ? st.drops : {}), ...patch } }),
+    }));
   };
 
   const save = () => {
@@ -3456,58 +3681,88 @@ function SessionEditSheet({ session, duration, exercises, onClose, onSave }) {
         <div className="knurl" style={{ marginBottom: 16 }} />
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           {draftEntries.map((e, eIdx) => {
-            const isUnilateral = !!(exercises?.find(ex => ex.id === e.exId)?.unilateral)
-              || e.sets.some(st => st.repsL != null || st.repsR != null);
+            const ex = exercises?.find(x => x.id === e.exId);
+            const exName = ex?.name ?? e.name;
+            const isUnilateral = !!ex?.unilateral || e.sets.some(st => st.repsL != null || st.repsR != null);
+            // Techniques only ever apply to logged weight/reps sets — never
+            // warmups, unilateral (drop/myo/AMRAP have no repsL/repsR
+            // support anywhere in the app), or checkbox/time-mode exercises,
+            // matching the live training screen's own arming rules.
+            const logMode = LB.exerciseLogMode(ex);
+            const techEligible = !isUnilateral && logMode !== 'checkbox' && logMode !== 'time';
             return (
               <div key={eIdx}>
-                <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>{(exercises?.find(ex => ex.id === e.exId)?.name ?? e.name).toUpperCase()}</div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>{exName.toUpperCase()}</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   {e.sets.map((st, sIdx) => {
                     const isEmpty = st.kg == null && st.reps == null && st.repsL == null && st.repsR == null;
+                    const isChain = CHAIN_TECH_KINDS.includes(st.technique);
+                    const isStandalone = STANDALONE_TECH_KINDS.includes(st.technique);
+                    const rowEligible = techEligible && !st.warmup && !st.skipped;
                     return (
-                      <div key={sIdx} style={{ display: 'flex', alignItems: 'center', gap: 8, background: UI.bgInset, borderRadius: 4, padding: '8px 12px', opacity: st.skipped ? 0.5 : 1, border: `1px solid ${UI.hair}` }}>
-                        <span className="num" style={{ width: 20, fontSize: 11, color: UI.inkFaint, flexShrink: 0 }}>{sIdx + 1}</span>
-                        {st.skipped ? (
-                          <>
-                            <span className="num" style={{ flex: 1, fontSize: 12, color: UI.inkFaint }}>skipped</span>
-                            <button onClick={() => skipSet(eIdx, sIdx, false)} style={{ background: 'rgba(var(--accent-rgb),0.15)', border: `0.5px solid rgba(var(--accent-rgb),0.4)`, borderRadius: 6, padding: '3px 8px', color: 'var(--accent)', fontSize: 11, cursor: 'pointer', fontFamily: UI.fontUi, flexShrink: 0 }}>Undo</button>
-                          </>
-                        ) : (
-                          <>
-                            <input type="text" inputMode="decimal" step="0.5" value={st.kg ?? ''}
-                              placeholder="—" onFocus={e => e.target.select()}
-                              onChange={ev => updateSet(eIdx, sIdx, { kg: ev.target.value === '' ? null : +ev.target.value })}
-                              style={numInputStyle} />
-                            <span className="num" style={{ color: UI.inkFaint, fontSize: 11 }}>{UI.unit()}</span>
-                            <span style={{ color: UI.hair, fontSize: 14, margin: '0 2px', fontFamily: UI.fontDisplay, fontStyle: 'italic' }}>×</span>
-                            {isUnilateral ? (
-                              <>
-                                <input type="text" inputMode="numeric" value={st.repsL ?? ''}
-                                  placeholder="—" onFocus={e => e.target.select()}
-                                  onChange={ev => updateSet(eIdx, sIdx, { repsL: ev.target.value === '' ? null : +ev.target.value })}
-                                  style={numInputStyle} />
-                                <span className="num" style={{ color: UI.inkFaint, fontSize: 11 }}>L</span>
-                                <input type="text" inputMode="numeric" value={st.repsR ?? ''}
-                                  placeholder="—" onFocus={e => e.target.select()}
-                                  onChange={ev => updateSet(eIdx, sIdx, { repsR: ev.target.value === '' ? null : +ev.target.value })}
-                                  style={numInputStyle} />
-                                <span className="num" style={{ color: UI.inkFaint, fontSize: 11 }}>R</span>
-                              </>
-                            ) : (
-                              <>
-                                <input type="text" inputMode="numeric" value={st.reps ?? ''}
-                                  placeholder="—" onFocus={e => e.target.select()}
-                                  onChange={ev => updateSet(eIdx, sIdx, { reps: ev.target.value === '' ? null : +ev.target.value })}
-                                  style={numInputStyle} />
-                                <span className="num" style={{ color: UI.inkFaint, fontSize: 11 }}>reps</span>
-                              </>
-                            )}
-                            {isEmpty && (
-                              <button onClick={() => skipSet(eIdx, sIdx, true)} style={{ background: 'rgba(var(--accent-rgb),0.15)', border: `0.5px solid rgba(var(--accent-rgb),0.4)`, borderRadius: 6, padding: '3px 8px', color: 'var(--accent)', fontSize: 11, cursor: 'pointer', fontFamily: UI.fontUi, flexShrink: 0 }}>Skip</button>
-                            )}
-                          </>
+                      <Frame key={sIdx} accent={!!st.technique} padding={10} style={{ opacity: st.skipped ? 0.5 : 1 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <span className="num" style={{ width: 20, fontSize: 11, color: UI.inkFaint, flexShrink: 0 }}>{sIdx + 1}</span>
+                          {st.skipped ? (
+                            <>
+                              <span className="num" style={{ flex: 1, fontSize: 12, color: UI.inkFaint }}>skipped</span>
+                              <button onClick={() => skipSet(eIdx, sIdx, false)} style={{ background: 'rgba(var(--accent-rgb),0.15)', border: `0.5px solid rgba(var(--accent-rgb),0.4)`, borderRadius: 6, padding: '3px 8px', color: 'var(--accent)', fontSize: 11, cursor: 'pointer', fontFamily: UI.fontUi, flexShrink: 0 }}>Undo</button>
+                            </>
+                          ) : isChain ? (
+                            // Round 0 (mirrored onto st.kg/reps) is edited via
+                            // the rounds list below, not a flat row here —
+                            // showing both would just be two inputs for the
+                            // same number.
+                            <span className="micro" style={{ color: UI.inkFaint }}>{LB.plannedTechniqueLabel(st.technique)}</span>
+                          ) : (
+                            <>
+                              <input type="text" inputMode="decimal" step="0.5" value={st.kg ?? ''}
+                                placeholder="—" onFocus={e => e.target.select()}
+                                onChange={ev => updateSet(eIdx, sIdx, { kg: ev.target.value === '' ? null : +ev.target.value })}
+                                style={numInputStyle} />
+                              <span className="num" style={{ color: UI.inkFaint, fontSize: 11 }}>{UI.unit()}</span>
+                              <span style={{ color: UI.hair, fontSize: 14, margin: '0 2px', fontFamily: UI.fontDisplay, fontStyle: 'italic' }}>×</span>
+                              {isUnilateral ? (
+                                <>
+                                  <input type="text" inputMode="numeric" value={st.repsL ?? ''}
+                                    placeholder="—" onFocus={e => e.target.select()}
+                                    onChange={ev => updateSet(eIdx, sIdx, { repsL: ev.target.value === '' ? null : +ev.target.value })}
+                                    style={numInputStyle} />
+                                  <span className="num" style={{ color: UI.inkFaint, fontSize: 11 }}>L</span>
+                                  <input type="text" inputMode="numeric" value={st.repsR ?? ''}
+                                    placeholder="—" onFocus={e => e.target.select()}
+                                    onChange={ev => updateSet(eIdx, sIdx, { repsR: ev.target.value === '' ? null : +ev.target.value })}
+                                    style={numInputStyle} />
+                                  <span className="num" style={{ color: UI.inkFaint, fontSize: 11 }}>R</span>
+                                </>
+                              ) : (
+                                <>
+                                  <input type="text" inputMode="numeric" value={st.reps ?? ''}
+                                    placeholder="—" onFocus={e => e.target.select()}
+                                    onChange={ev => updateSet(eIdx, sIdx, { reps: ev.target.value === '' ? null : +ev.target.value })}
+                                    style={numInputStyle} />
+                                  <span className="num" style={{ color: UI.inkFaint, fontSize: 11 }}>reps</span>
+                                </>
+                              )}
+                              {isEmpty && (
+                                <button onClick={() => skipSet(eIdx, sIdx, true)} style={{ background: 'rgba(var(--accent-rgb),0.15)', border: `0.5px solid rgba(var(--accent-rgb),0.4)`, borderRadius: 6, padding: '3px 8px', color: 'var(--accent)', fontSize: 11, cursor: 'pointer', fontFamily: UI.fontUi, flexShrink: 0 }}>Skip</button>
+                              )}
+                            </>
+                          )}
+                        </div>
+                        {rowEligible && (
+                          <TechniqueChipRow current={st.technique} onSelect={id => setTechnique(eIdx, sIdx, id, exName)} />
                         )}
-                      </div>
+                        {rowEligible && isChain && (
+                          <ChainRoundsEditor st={st} kind={st.technique}
+                            onUpdateRound={(di, patch) => updateRound(eIdx, sIdx, di, patch)}
+                            onAddRound={() => addRound(eIdx, sIdx, exName)}
+                            onRemoveRound={di => removeRound(eIdx, sIdx, di)} />
+                        )}
+                        {rowEligible && isStandalone && (
+                          <StandaloneTechEditor st={st} kind={st.technique} onPatch={patch => patchStandalone(eIdx, sIdx, patch)} />
+                        )}
+                      </Frame>
                     );
                   })}
                 </div>

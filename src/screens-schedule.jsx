@@ -512,6 +512,10 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
   const [pendingBackup, setPendingBackup] = useStateS(null);
   const [previewBackup, setPreviewBackup] = useStateS(null);
   const [previewDayIdx, setPreviewDayIdx] = useStateS(0);
+  const [pushOpen, setPushOpen] = useStateS(false);      // client picker
+  const [pushTarget, setPushTarget] = useStateS(null);   // chosen client → activate-now-or-later prompt
+  const [pushBusy, setPushBusy] = useStateS(false);
+  const [pushError, setPushError] = useStateS('');
 
   const openBackupSheet = async () => {
     setBackupSheet(true);
@@ -782,6 +786,68 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
 
+  // Push a fresh copy of this plan into a client's own account, remapping
+  // exercise ids the exact same way PlanScreen's JSON import does (dedupe by
+  // name against the CLIENT's library, copy the rest) — just applied
+  // in-memory against a freshly fetched client store instead of round-
+  // tripping through a file. Drops versions (a coach's version history is
+  // tied to their own timeline, meaningless for a client starting fresh) and
+  // strips 531 bumpedCycle, same as duplicate() does for an in-account copy.
+  const pushToClient = async (client, activateNow) => {
+    setPushBusy(true);
+    setPushError('');
+    try {
+      const clientData = await LB.loadClientStore(client.clientId);
+      const copy = JSON.parse(JSON.stringify(sch));
+      copy.archived = false;
+      delete copy.versions;
+      if (copy.program_data) delete copy.program_data.bumpedCycle;
+      const exIds = new Set();
+      copy.days.forEach(d => (d.items || []).forEach(it => { if (it.exId) exIds.add(it.exId); }));
+      const idMap = {};
+      const newExercises = [];
+      store.exercises.filter(ex => exIds.has(ex.id)).forEach(ex => {
+        const existing = clientData.exercises.find(x => x.name.trim().toLowerCase() === ex.name.trim().toLowerCase());
+        if (existing) { idMap[ex.id] = existing.id; return; }
+        const newId = LB.uid();
+        idMap[ex.id] = newId;
+        newExercises.push({ id: newId, name: ex.name, tags: ex.tags || [], note: ex.note || '', category: ex.category || null, unilateral: ex.unilateral || false, equipment: ex.equipment || null, progression_reps: ex.progression_reps || null, movement_type: ex.movement_type || null, log_mode: ex.log_mode || null, no_weight_reps: ex.no_weight_reps || false, pull_bodyweight: ex.pull_bodyweight || false });
+      });
+      copy.id = LB.uid();
+      copy.days = copy.days.map(d => ({ ...d, id: LB.uid(), items: (d.items || []).map(it => ({ ...it, exId: idMap[it.exId] || it.exId })) }));
+      if (copy.program_data && typeof copy.program_data === 'object') {
+        const remapKeys = (obj) => { const out = {}; for (const k of Object.keys(obj || {})) out[idMap[k] || k] = obj[k]; return out; };
+        if (copy.program_data.mainLifts) copy.program_data.mainLifts = remapKeys(copy.program_data.mainLifts);
+        if (copy.program_data.tmHistory) copy.program_data.tmHistory = remapKeys(copy.program_data.tmHistory);
+      }
+      const isWd = LB.isWeekdayPlan(copy), isFx = LB.isFlexPlan(copy);
+      const nextClientData = {
+        ...clientData,
+        exercises: [...clientData.exercises, ...newExercises],
+        schedules: [...clientData.schedules, copy],
+        ...(activateNow ? {
+          activeScheduleId: copy.id,
+          cycleIndex: 0,
+          cycleStartDate: (isWd || isFx) ? null : LB.todayISO(),
+          weekPlanStartDate: isWd ? LB.todayISO() : null,
+        } : {}),
+      };
+      await LB.syncStore(clientData, nextClientData, client.clientId);
+      const threadId = await LB.getOrCreateCoachingThread(client.id, `New plan: ${copy.name}`, userId);
+      const body = activateNow
+        ? `Pushed a new plan: ${copy.name}\n\nIt's now your active plan.`
+        : `Pushed a new plan: ${copy.name}\n\nIt's in your plan list but not active yet — let's talk it through before you switch to it.`;
+      await LB.addCoachingNote(client.id, 'plan', copy.id, copy.name, body, userId, threadId);
+      setPushTarget(null);
+      setPushOpen(false);
+      alert(`Pushed "${copy.name}" to ${client.clientName}${activateNow ? ' and activated it' : ''}.`);
+    } catch (e) {
+      setPushError(e.message || 'Push failed.');
+    } finally {
+      setPushBusy(false);
+    }
+  };
+
   // Directly change the validFrom of the selected past version.
   const doEditStartDate = (newDate) => {
     if (!newDate || !selectedVersion) return;
@@ -841,6 +907,9 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
         <Btn kind="ghost" onClick={exportPlan} style={{ flex: 1, fontSize: 12 }}>Export</Btn>
         <Btn kind="ghost" onClick={openBackupSheet} style={{ flex: 1, fontSize: 12 }}>Backups</Btn>
       </div>
+      {(store.coaching?.asCoach || []).some(c => c.status === 'active') && (
+        <Btn kind="ghost" onClick={() => setPushOpen(true)} style={{ fontSize: 12 }}>Push to client</Btn>
+      )}
     </div>
   );
 
@@ -1335,6 +1404,47 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
               Apply
             </Btn>
           </div>
+        </MiniSheet>
+      )}
+
+      {pushOpen && (
+        <MiniSheet onClose={() => { if (!pushBusy) { setPushOpen(false); setPushError(''); } }}>
+          <div className="label" style={{ color: UI.inkFaint, marginBottom: 4 }}>PUSH TO CLIENT</div>
+          <div className="micro" style={{ color: UI.inkFaint, marginBottom: 16, lineHeight: 1.5, letterSpacing: '0.06em', textTransform: 'none' }}>
+            Copies this plan into a client's account. You'll pick whether it activates right away.
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {(store.coaching?.asCoach || []).filter(c => c.status === 'active').map(c => (
+              <button key={c.id} onClick={() => setPushTarget(c)} disabled={pushBusy} style={{
+                width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                padding: '12px 14px', background: UI.bgInset, border: `0.5px solid ${UI.hair}`,
+                borderRadius: 6, cursor: pushBusy ? 'default' : 'pointer', opacity: pushBusy ? 0.6 : 1,
+                WebkitTapHighlightColor: 'transparent',
+              }}>
+                <span style={{ fontSize: 14, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi }}>{c.clientName}</span>
+                <ChevronRight />
+              </button>
+            ))}
+          </div>
+          {pushError && <div style={{ marginTop: 10, fontSize: 12, color: 'rgba(var(--danger-rgb),0.85)' }}>{pushError}</div>}
+        </MiniSheet>
+      )}
+
+      {pushTarget && (
+        <MiniSheet zIndex={400} onClose={() => { if (!pushBusy) setPushTarget(null); }}>
+          <div className="label" style={{ color: UI.inkFaint, marginBottom: 4 }}>{pushTarget.clientName.toUpperCase()}</div>
+          <div className="micro" style={{ color: UI.inkFaint, marginBottom: 18, lineHeight: 1.5, letterSpacing: '0.06em', textTransform: 'none' }}>
+            Activate "{sch.name}" for them right away, or just add it to their plan list and talk it through first?
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <Btn onClick={() => pushToClient(pushTarget, true)} disabled={pushBusy}>
+              {pushBusy ? 'Pushing…' : 'Push & activate now'}
+            </Btn>
+            <Btn kind="ghost" onClick={() => pushToClient(pushTarget, false)} disabled={pushBusy}>
+              {pushBusy ? 'Pushing…' : 'Add only — talk to them first'}
+            </Btn>
+          </div>
+          {pushError && <div style={{ marginTop: 10, fontSize: 12, color: 'rgba(var(--danger-rgb),0.85)' }}>{pushError}</div>}
         </MiniSheet>
       )}
 
