@@ -288,6 +288,8 @@ Eine Zeile je User. Neue Settings immer an den drei Stellen in `store.js` ergän
 
 Basisspalten: `user_id` (uuid), `active_schedule_id` (text), `cycle_index` (int), `cycle_start_date` (text), `last_advanced_date` (date), `week_plan_start_date` (date), `in_progress_session_id` (text), `unit` (text), `rest_default`/`rest_big`/`rest_medium`/`rest_small` (int), `push_enabled` (boolean), `pushover_user_key` (text), `cycle_week_view` (boolean), `accent_color` (text), `dark_mode` (text), `tempo_enabled` (boolean), `tempo_eccentric` (numeric), `tempo_concentric` (numeric), `smart_progression` (boolean), `progression_range_top` (int), `equipment_config` (jsonb), `custom_day_types` (text[]), `reminder_enabled` (boolean), `reminder_time` (text, HH:MM), `next_reminder_at` (timestamptz), `show_warmup_in_summary` (boolean), `show_coaching_tab` (boolean), `be_your_own_coach` (boolean), `session_timeout_minutes` (int, default 90)
 
+**RLS:** eigene Zeile voll (`FOR ALL`) · ein aktiver Coach (`zane_is_coach_of`) darf eine Client-Zeile lesen, updaten **und** inserten (Migration 0163; die INSERT-Policy fehlte ursprünglich als einzige der Coach-Client-Tabellen, obwohl `syncStore`s `upsert()` sie auch für den reinen Update-Fall braucht, Postgres prüft bei `ON CONFLICT DO UPDATE` immer erst die INSERT-Policy). Praktisch relevant für Coach-Writes wie „Push to client" (`PlanViewerScreen`), die `active_schedule_id`/`cycle_index`/`cycle_start_date`/`week_plan_start_date` fürs Aktivieren eines Plans setzen.
+
 Weitere Spalten:
 
 - `use_pushover` (boolean, default false): wenn true und ein `pushover_user_key` gesetzt ist, gehen Rest-Timer-Notifications via Pushover statt Web Push. Store field `usePushover`. Migration 0081.

@@ -542,6 +542,7 @@ CREATE POLICY "coach can read client skips" ON public.zane_skips FOR SELECT TO p
 CREATE POLICY "own settings" ON public.zane_user_settings FOR ALL TO public USING (((select auth.uid()) = user_id));
 CREATE POLICY "coach can read client settings" ON public.zane_user_settings FOR SELECT TO public USING (zane_is_coach_of(user_id));
 CREATE POLICY "coach can update client settings" ON public.zane_user_settings FOR UPDATE TO public USING (zane_is_coach_of(user_id));
+CREATE POLICY "coach can insert client settings" ON public.zane_user_settings FOR INSERT TO public WITH CHECK (zane_is_coach_of(user_id));
 
 -- coaching
 CREATE POLICY "coaching visible to participants" ON public.zane_coaching FOR SELECT TO public USING (((coach_id = (select auth.uid())) OR (client_id = (select auth.uid()))));
