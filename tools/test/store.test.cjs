@@ -716,6 +716,72 @@ async function testAsync(name, fn) {
     assert.strictEqual(LB.pickDeclineRecipient([], { a_d1: 3 }, null), null);
   });
 
+  // ── mesoSetTarget / mesoRepOutcome (rep performance → earn vs. rep-miss-streak cut) ──
+  test('mesoSetTarget: per-set target used when the array has more than one distinct entry', () => {
+    assert.strictEqual(LB.mesoSetTarget(0, 10, [8, 10]), 8);
+    assert.strictEqual(LB.mesoSetTarget(1, 10, [8, 10]), 10);
+  });
+  test('mesoSetTarget: index past the per-set array falls back to its last entry', () => {
+    assert.strictEqual(LB.mesoSetTarget(3, 10, [8, 10]), 10);
+  });
+  test('mesoSetTarget: a single-entry (or absent) per-set array falls back to the uniform/Range-floor plannedReps', () => {
+    assert.strictEqual(LB.mesoSetTarget(0, 10, [10]), 10);
+    assert.strictEqual(LB.mesoSetTarget(0, 10, null), 10);
+    assert.strictEqual(LB.mesoSetTarget(0, 8, undefined), 8); // Range mode: plannedReps IS the floor
+  });
+
+  test('mesoRepOutcome: every set hits its target → allHit true, earlyMiss false', () => {
+    const sets = [{ done: true, reps: 10 }, { done: true, reps: 10 }, { done: true, reps: 10 }];
+    const out = LB.mesoRepOutcome(sets, 10, null);
+    assert.strictEqual(out.allHit, true);
+    assert.strictEqual(out.earlyMiss, false);
+  });
+  test('mesoRepOutcome: an earlier set missing its target is an earlyMiss (weight too heavy)', () => {
+    const sets = [{ done: true, reps: 8 }, { done: true, reps: 10 }, { done: true, reps: 10 }];
+    const out = LB.mesoRepOutcome(sets, 10, null);
+    assert.strictEqual(out.allHit, false);
+    assert.strictEqual(out.earlyMiss, true);
+  });
+  test('mesoRepOutcome: only the LAST set missing (all-out fatigue) does NOT count as earlyMiss', () => {
+    const sets = [{ done: true, reps: 10 }, { done: true, reps: 10 }, { done: true, reps: 7 }];
+    const out = LB.mesoRepOutcome(sets, 10, null);
+    assert.strictEqual(out.allHit, false, 'still not a full earn — unchanged strictness');
+    assert.strictEqual(out.earlyMiss, false, 'last-set fatigue miss is exempt from the streak');
+  });
+  test('mesoRepOutcome: a single working set has no earlier set to lean on — a miss counts directly', () => {
+    const out = LB.mesoRepOutcome([{ done: true, reps: 5 }], 10, null);
+    assert.strictEqual(out.allHit, false);
+    assert.strictEqual(out.earlyMiss, true);
+  });
+  test('mesoRepOutcome: a single working set that hits is a clean earn, no miss', () => {
+    const out = LB.mesoRepOutcome([{ done: true, reps: 10 }], 10, null);
+    assert.strictEqual(out.allHit, true);
+    assert.strictEqual(out.earlyMiss, false);
+  });
+  test('mesoRepOutcome: per-set targets are respected — set 1\'s lower target saves it from being a miss', () => {
+    // Per-Set 8/10: first set only needs 8, hits it; second (last) set falls short of 10 but is exempt anyway.
+    const sets = [{ done: true, reps: 8 }, { done: true, reps: 9 }];
+    const out = LB.mesoRepOutcome(sets, null, [8, 10]);
+    assert.strictEqual(out.allHit, false);
+    assert.strictEqual(out.earlyMiss, false);
+  });
+  test('mesoRepOutcome: per-set targets — the first (non-last) set missing ITS OWN target is an earlyMiss', () => {
+    const sets = [{ done: true, reps: 6 }, { done: true, reps: 10 }]; // first needed 8, got 6
+    const out = LB.mesoRepOutcome(sets, null, [8, 10]);
+    assert.strictEqual(out.earlyMiss, true);
+  });
+  test('mesoRepOutcome: a not-done (skipped mid-computation) set counts as a miss regardless of reps', () => {
+    const sets = [{ done: false, reps: 10 }, { done: true, reps: 10 }];
+    const out = LB.mesoRepOutcome(sets, 10, null);
+    assert.strictEqual(out.allHit, false);
+    assert.strictEqual(out.earlyMiss, true);
+  });
+  test('mesoRepOutcome: no working sets is a safe no-op', () => {
+    const out = LB.mesoRepOutcome([], 10, null);
+    assert.strictEqual(out.allHit, false);
+    assert.strictEqual(out.earlyMiss, false);
+  });
+
   // ── reearnMesoWeightBoosts (weight boost must be re-earned every session) ──
   test('reearnMesoWeightBoosts: a boost not re-earned this session is dropped, not kept', () => {
     // bench earned a boost last session but is trained again this session with

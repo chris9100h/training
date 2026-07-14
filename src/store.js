@@ -604,8 +604,8 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
     prog('Uploading mesocycle states…');
     // id is deterministic (userId + '_' + scheduleId) — regenerate for this user.
     // schedule_id is preserved (schedules keep their ids), but the exId-keyed maps
-    // (deltas/weightBoosts: exId_dayId; jointFlags/pumpLowCounts: exId) must be
-    // remapped onto the fresh exercise ids or they dangle.
+    // (deltas/weightBoosts/repMissCounts: exId_dayId; jointFlags/pumpLowCounts: exId)
+    // must be remapped onto the fresh exercise ids or they dangle.
     await unwrap(_supabase.from('zane_meso_states').upsert(
       backup.mesoStates.map(m => ({
         id: userId + '_' + m.scheduleId, user_id: userId, schedule_id: m.scheduleId,
@@ -613,7 +613,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
         start_cycle_index: m.startCycleIndex ?? 0, started_at: m.startedAt ?? null,
         deltas: remapExDayKeyed(m.deltas), weight_boosts: remapExDayKeyed(m.weightBoosts),
         joint_flags: remapExKeyed(m.jointFlags), pump_low_counts: remapExKeyed(m.pumpLowCounts),
-        growth_counts: remapExDayKeyed(m.growthCounts),
+        growth_counts: remapExDayKeyed(m.growthCounts), rep_miss_counts: remapExDayKeyed(m.repMissCounts),
         completions: m.completions ?? 0, pending_meso2: m.pendingMeso2 ?? false,
       }))
     ));
@@ -824,7 +824,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     // Reusable workout templates (migration 0107)
     _supabase.from('zane_workout_templates').select('id, name, exercises, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
     // Mesocycle state per plan — replaces localStorage logbook-meso-state (migration 0120)
-    _supabase.from('zane_meso_states').select('id, schedule_id, weeks, start_date, start_cycle_index, started_at, deltas, joint_flags, pump_low_counts, weight_boosts, growth_counts, completions, pending_meso2, updated_at').eq('user_id', userId),
+    _supabase.from('zane_meso_states').select('id, schedule_id, weeks, start_date, start_cycle_index, started_at, deltas, joint_flags, pump_low_counts, weight_boosts, growth_counts, rep_miss_counts, completions, pending_meso2, updated_at').eq('user_id', userId),
     // Coach's own saved check-in schema templates: irrelevant when loading a
     // CLIENT's store as a coach, these belong to the acting coach, not the client.
     isCoachLoad ? null : _supabase.from('zane_checkin_schema_templates').select('id, name, schema, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
@@ -1032,7 +1032,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
       startedAt: m.started_at ?? null,
       deltas: m.deltas ?? {}, jointFlags: m.joint_flags ?? {},
       pumpLowCounts: m.pump_low_counts ?? {}, weightBoosts: m.weight_boosts ?? {},
-      growthCounts: m.growth_counts ?? {},
+      growthCounts: m.growth_counts ?? {}, repMissCounts: m.rep_miss_counts ?? {},
       completions: m.completions ?? 0, pendingMeso2: m.pending_meso2 ?? false,
       updatedAt: m.updated_at ?? null,
     })),
@@ -1469,7 +1469,7 @@ async function syncStore(prev, next, userId) {
       started_at: m.startedAt ?? null,
       deltas: m.deltas ?? {}, joint_flags: m.jointFlags ?? {},
       pump_low_counts: m.pumpLowCounts ?? {}, weight_boosts: m.weightBoosts ?? {},
-      growth_counts: m.growthCounts ?? {},
+      growth_counts: m.growthCounts ?? {}, rep_miss_counts: m.repMissCounts ?? {},
       completions: m.completions ?? 0, pending_meso2: m.pendingMeso2 ?? false,
       updated_at: m.updatedAt ?? new Date().toISOString(),
     })) }));
@@ -4447,6 +4447,49 @@ function pickDeclineRecipient(keys, deltas, prevContrib) {
   return keys.reduce((best, k) => (eff(k) > eff(best) ? k : best), keys[0]);
 }
 
+// Resolve a working set's own rep target for meso rep-outcome checks: its
+// per-set target if the item uses Per-Set, else the exercise's uniform
+// target — which, for a Range-mode exercise, IS plannedReps (the floor);
+// plannedRepsMax only marks the ceiling that EARNS extra Smart Progression
+// (see progressionSuggestion), not what counts as "hit" here.
+function mesoSetTarget(i, plannedReps, plannedRepsPerSet) {
+  const perSet = plannedRepsPerSet && plannedRepsPerSet.length > 1
+    ? (plannedRepsPerSet[i] ?? plannedRepsPerSet[plannedRepsPerSet.length - 1])
+    : null;
+  return perSet ?? plannedReps;
+}
+
+// Rep-target outcome for one exercise's working sets this session — the
+// objective counterpart to the subjective soreness/joint/volume feedback,
+// feeding both the weight-boost EARN gate and the rep-miss-streak CUT
+// trigger (computeMesoGains, screens-train.jsx):
+//   • allHit    — every working set reached its own target (via
+//     mesoSetTarget). Unchanged, strict AND — this gates earning a boost.
+//   • earlyMiss — any working set BEFORE the last one missed its target. The
+//     exercise's own last set is deliberately exempt: an all-out final set
+//     failing from accumulated fatigue doesn't mean the weight itself is too
+//     heavy, an earlier set failing does. A single-working-set exercise has
+//     no earlier set to lean on, so it counts directly. This is what feeds
+//     rep_miss_counts toward a cut — a looser bar than allHit on purpose, so
+//     a legitimately hard-fought last rep never nudges the streak.
+// `sets` is an array of { done, skipped, warmup, reps/kg/timeSec... } — pass
+// already-filtered working sets (no warmups/skips). Pure/testable.
+function mesoRepOutcome(workingSets, plannedReps, plannedRepsPerSet) {
+  if (!workingSets || !workingSets.length) return { allHit: false, earlyMiss: false };
+  const setHit = (s, i) => {
+    if (!s.done) return false;
+    const target = mesoSetTarget(i, plannedReps, plannedRepsPerSet);
+    if (target == null) return true;
+    const reps = effReps(s);
+    return reps != null && reps >= target;
+  };
+  const allHit = workingSets.every(setHit);
+  const earlyMiss = workingSets.length > 1
+    ? workingSets.slice(0, -1).some((s, i) => !setHit(s, i))
+    : !setHit(workingSets[0], 0);
+  return { allHit, earlyMiss };
+}
+
 // A mesocycle weight boost (exId_dayId → kg increment applied to the next
 // session's seed) must be RE-EARNED every session — min reps hit + joint fine
 // + pump ok + volume ok, all re-confirmed. Given the exId_dayId keys of the
@@ -4470,6 +4513,10 @@ function reearnMesoWeightBoosts(prevBoosts, sessionKeys, earnedBoosts) {
 // sole authority over next-session weight:
 //   • boost earned   → apply it on top of the last weight when Smart Progression
 //     is silent; when SP also fired they are the same increment, so keep SP.
+//   • boost negative (two rep-target misses in a row, see rep_miss_counts) →
+//     same "apply on top of last weight" path, just downward. SP is always
+//     silent here too — a session missing its own floor target also misses
+//     SP's stricter ceiling target, so there's nothing to reconcile against.
 //   • boost withheld (a joint/pump/volume gate failed last session, or a muscle
 //     was still sore on a load-only plan) → veto SP so the weight HOLDS instead
 //     of climbing past the feedback. This is what makes the gating actually
@@ -4796,4 +4843,5 @@ window.LB = {
   isLoggedTrainingDay, plannedTrainingDay, isTrainingDayForDate, dayTargetFromMacros, macroAdherence, hasMacroTargets, effectiveMacroTargets, dailyLogAdherence, dailyLogsWeekPrefill, weekPerformanceSignal,
   refreshHealthLogs,
   pickGrowthRecipient, retractGrowthGrant, pickDeclineRecipient, reearnMesoWeightBoosts, resolveMesoSeedSuggestion, mesoPausedDays, mesoRirForWeek,
+  mesoSetTarget, mesoRepOutcome,
 };

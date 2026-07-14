@@ -3163,6 +3163,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     if (!mesoState) return [];
     const unit = store.settings?.unit || 'kg';
     const weightBoostMap = {};
+    const repMissCounts = { ...(mesoState.repMissCounts || {}) };
     const gainMap = {}; // key → { name, setDelta, weightDelta }
 
     // Set changes recorded during feedback (positive = gain, negative = reduction)
@@ -3171,44 +3172,65 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       gainMap[key].setDelta += (delta ?? 1);
     }
 
-    // Weight boosts: joint fine + pump ok + volume ok + all reps hit
+    // Weight boosts (earn) + rep-miss streak (cut) — both driven purely by
+    // rep performance, independently of the joint/pump/volume feedback below
+    // (which only gates the EARN side, unchanged). Computed unconditionally,
+    // same as before this streak existed — a deload session's own feedback
+    // Sets are always empty (no questions asked), so the EARN side already
+    // self-excludes; PERSISTING either side is what's actually gated for
+    // deload, below, matching the pre-existing weightBoosts pattern.
     for (const e of session.entries) {
       if (e.isCardio) continue;
       const exId = e.exId;
       const ex = store.exercises?.find(x => x.id === exId);
       const muscle = primaryMuscleForExercise(ex);
+      const key = exId + '_' + session.dayId;
 
+      const workingSets = e.sets.filter(s => !s.warmup && !s.skipped);
+      if (!workingSets.length) continue;
+      // allHit gates the earn side (strict, unchanged); earlyMiss (a looser
+      // bar — the last working set is exempt) feeds the miss-streak cut below.
+      // See LB.mesoRepOutcome for the exact per-set/range-aware rules.
+      const { allHit, earlyMiss } = LB.mesoRepOutcome(workingSets, e.plannedReps ?? null, e.plannedRepsPerSet);
+
+      const catCfg = ex?.equipment ? (store.settings?.equipmentConfig?.[ex.equipment] ?? {}) : {};
+      const increment = catCfg.increment ?? (unit === 'lbs' ? 5 : 2.5);
+
+      if (earlyMiss) {
+        const n = (repMissCounts[key] || 0) + 1;
+        if (n >= 2) {
+          // Two misses in a row: the weight itself is too heavy for this rep
+          // target. Cut it back one increment for next session and re-arm.
+          weightBoostMap[key] = -increment;
+          if (!gainMap[key]) gainMap[key] = { name: e.name, setDelta: 0, weightDelta: 0 };
+          gainMap[key].weightDelta = -increment;
+          repMissCounts[key] = 0;
+        } else {
+          repMissCounts[key] = n;
+        }
+      } else {
+        repMissCounts[key] = 0;
+      }
+
+      if (!allHit) continue;
       if (!mesoJointFineRef.current.has(exId)) continue;
       if (muscle && !mesoPumpOkRef.current.has(muscle)) continue;
       if (muscle && !mesoVolumeOkRef.current.has(muscle)) continue;
       // Load-only: still-sore holds the weight for that muscle this session.
       if (LB.autoregLoadOnly(mesoSch) && muscle && mesoSoreBlockRef.current.has(muscle)) continue;
 
-      const workingSets = e.sets.filter(s => !s.warmup && !s.skipped);
-      if (!workingSets.length) continue;
-      const plannedReps = e.plannedReps ?? null;
-      const allHit = workingSets.every(s => {
-        if (!s.done) return false;
-        if (plannedReps == null) return true;
-        const reps = LB.effReps(s);
-        return reps != null && reps >= plannedReps;
-      });
-      if (!allHit) continue;
-
-      const catCfg = ex?.equipment ? (store.settings?.equipmentConfig?.[ex.equipment] ?? {}) : {};
-      const increment = catCfg.increment ?? (unit === 'lbs' ? 5 : 2.5);
-      const key = exId + '_' + session.dayId;
       weightBoostMap[key] = increment;
       if (!gainMap[key]) gainMap[key] = { name: e.name, setDelta: 0, weightDelta: 0 };
       gainMap[key].weightDelta = increment;
     }
 
     // Weight boosts must be re-earned every session (min reps + joint fine +
-    // pump ok + volume ok, all re-confirmed this session). Replace this
-    // session's exercise keys wholesale — earned ones set, un-earned ones
-    // dropped — leaving other training days' boosts untouched. A deload
-    // session collects no feedback, so it must NOT wipe boosts earned before
-    // it: skip the recompute entirely and leave the map as-is.
+    // pump ok + volume ok, all re-confirmed this session) — or, on the other
+    // side, cut by the rep-miss streak above. Replace this session's exercise
+    // keys wholesale — earned/cut ones set, everything else dropped — leaving
+    // other training days' boosts untouched. A deload session collects no
+    // feedback, so it must NOT wipe boosts earned before it: skip the
+    // recompute entirely and leave the map (and the miss streak) as-is.
     // mesoState here is the React state — already contains all feedback deltas from this session.
     const newWeightBoosts = isMesoDeloadSession
       ? (mesoState.weightBoosts || {})
@@ -3217,7 +3239,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           session.entries.filter(e => !e.isCardio).map(e => e.exId + '_' + session.dayId),
           weightBoostMap,
         );
-    const withBoosts = { ...mesoState, weightBoosts: newWeightBoosts };
+    const withBoosts = {
+      ...mesoState,
+      weightBoosts: newWeightBoosts,
+      repMissCounts: isMesoDeloadSession ? (mesoState.repMissCounts || {}) : repMissCounts,
+    };
     // If the last meso week just finished: bump completions + set pendingMeso2 so the
     // home screen can offer Meso 2 after a deload (or immediately). isComplete is
     // true for EVERY session of the final week, and this runs per session-end, so
@@ -7561,8 +7587,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                     {item.setDelta > 0 ? '+' : ''}{item.setDelta} set
                   </span>
                 )}
-                {item.weightDelta > 0 && (
-                  <span style={{ fontFamily: UI.fontNum, fontSize: 12, color: 'var(--accent)', fontWeight: 700 }}>+{item.weightDelta} {UI.unit()}</span>
+                {item.weightDelta !== 0 && (
+                  <span style={{ fontFamily: UI.fontNum, fontSize: 12, fontWeight: 700, color: item.weightDelta > 0 ? 'var(--accent)' : 'rgba(var(--danger-rgb),0.9)' }}>
+                    {item.weightDelta > 0 ? '+' : ''}{item.weightDelta} {UI.unit()}
+                  </span>
                 )}
               </div>
             </div>
