@@ -763,6 +763,20 @@ function App() {
             // isolated from the schedule merge so an autosaved draft can never
             // touch a committed plan (and a schedule merge quirk can't drop it).
             const planDrafts = LB.mergePlanDrafts(fresh.planDrafts, cur.planDrafts, base?.planDrafts);
+            // Plan-position fields get the SAME unsynced-edit test as the
+            // ID-keyed collections below, not a blind "cur always wins": unlike
+            // darkMode/accentColor/etc, these can be changed by someone OTHER
+            // than this device (a coach pushing + activating a plan writes them
+            // directly via syncStore from their own session). Blindly trusting
+            // cur here silently reverted a coach's just-pushed activation the
+            // next time this device booted — cur still held the pre-push
+            // (usually null) value, and the very next flush then re-synced that
+            // stale value back over the coach's write. Keep cur only if it
+            // differs from the persisted base (this device changed it and
+            // hasn't synced yet); otherwise trust fresh (the server, possibly
+            // changed elsewhere). No base (legacy cache) → keep cur, matching
+            // every other no-base fallback in this merge.
+            const planPosLocalWins = (field) => (!base || cur[field] !== base[field]) ? cur[field] : fresh[field];
             // Scalar state: the local cache is authoritative — it always holds
             // the most recent state on this device, including unsynced offline
             // edits. For items with IDs we use an ID-based merge instead.
@@ -773,10 +787,10 @@ function App() {
               // / not chosen) must win so the picker re-fires, since the cache
               // still holds the old kg/lbs value.
               settings: { ...fresh.settings, ...cur.settings, ...(fresh.settings.unit == null ? { unit: null } : {}) },
-              activeScheduleId: cur.activeScheduleId,
-              cycleIndex: cur.cycleIndex,
-              cycleStartDate: cur.cycleStartDate,
-              lastAdvancedDate: cur.lastAdvancedDate,
+              activeScheduleId: planPosLocalWins('activeScheduleId'),
+              cycleIndex: planPosLocalWins('cycleIndex'),
+              cycleStartDate: planPosLocalWins('cycleStartDate'),
+              lastAdvancedDate: planPosLocalWins('lastAdvancedDate'),
               user: cur.user?.name ? { ...fresh.user, name: cur.user.name } : fresh.user,
               inProgress: activeExists ? inProgressId : null,
               sessions,
