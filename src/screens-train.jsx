@@ -3995,33 +3995,39 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   };
 
   const doAdd = (ids) => {
-    const newExId = Array.isArray(ids) ? ids[0] : ids;
+    const idList = Array.isArray(ids) ? ids : [ids];
+    const newExId = idList[0];
     const jump = addAndJumpRef.current;
     setAddOpen(false);
     if (session.entries.length === 0) {
-      // First exercise in an empty session — skip the superset prompt and insert directly.
+      // First exercise(s) in an empty session — skip the superset prompt and
+      // insert directly. Unlike every other picker in this file, the one for
+      // an empty session allows multi-select (its "Add N exercises →" button),
+      // so idList can hold more than one id here: build one standalone entry
+      // per id, in picked order, instead of dropping every id but the first.
       let isNewCardio = false;
       setStore(s => {
         const sess = s.sessions.find(x => x.id === session.id);
         if (!sess) return s;
-        const newEx = LB.findExercise(s, newExId);
-        isNewCardio = newEx?.movement_type === 'cardio';
-        let newEntry;
-        if (isNewCardio) {
-          newEntry = { exId: newExId, name: newEx?.name || newExId, isCardio: true, plannedSets: 0, plannedReps: null, plannedRepsPerSet: null, sets: [], cardioDone: false, cardioData: null, note: '', supersetGroup: null, addedDuringSession: true };
-        } else {
+        const newEntries = idList.map(id => {
+          const newEx = LB.findExercise(s, id);
+          const isCardio = newEx?.movement_type === 'cardio';
+          if (id === newExId) isNewCardio = isCardio;
+          if (isCardio) {
+            return { exId: id, name: newEx?.name || id, isCardio: true, plannedSets: 0, plannedReps: null, plannedRepsPerSet: null, sets: [], cardioDone: false, cardioData: null, note: '', supersetGroup: null, addedDuringSession: true };
+          }
           const isUni = newEx?.movement_type === 'unilateral';
           const bwKg = LB.shouldPullBodyweight(newEx) ? LB.latestBodyweight(s) ?? null : null;
-          const last = LB.bestRecentEntry(s, newExId, session.dayId);
-          const suggestion = LB.progressionSuggestion(s, newExId, session.dayId, null, null, last);
-          const seedSets = LB.buildSeedSets({ exId: newExId, sets: 3, repsPerSet: null }, last, suggestion, isUni, s, bwKg);
-          newEntry = { exId: newExId, name: newEx?.name || newExId, plannedSets: 3, plannedReps: null, plannedRepsPerSet: null, sets: seedSets, note: '', supersetGroup: null, addedDuringSession: true };
-        }
+          const last = LB.bestRecentEntry(s, id, session.dayId);
+          const suggestion = LB.progressionSuggestion(s, id, session.dayId, null, null, last);
+          const seedSets = LB.buildSeedSets({ exId: id, sets: 3, repsPerSet: null }, last, suggestion, isUni, s, bwKg);
+          return { exId: id, name: newEx?.name || id, plannedSets: 3, plannedReps: null, plannedRepsPerSet: null, sets: seedSets, note: '', supersetGroup: null, addedDuringSession: true };
+        });
         return {
           ...s,
           sessions: s.sessions.map(x => x.id !== session.id ? x : {
             ...x,
-            entries: [newEntry],
+            entries: newEntries,
             currentExIdx: 0,
           }),
         };
