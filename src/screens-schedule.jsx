@@ -800,6 +800,11 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
     try {
       const clientData = await LB.loadClientStore(client.clientId);
       const copy = JSON.parse(JSON.stringify(sch));
+      // sch.days is always the NEWEST version — if the coach is browsing an
+      // older/scheduled version via the version switcher, versionDays (what's
+      // actually on screen) can differ. Push what's shown, not silently
+      // whatever happens to be newest.
+      copy.days = JSON.parse(JSON.stringify(versionDays));
       copy.archived = false;
       delete copy.versions;
       if (copy.program_data) delete copy.program_data.bumpedCycle;
@@ -1411,9 +1416,16 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
       {pushOpen && (
         <MiniSheet onClose={() => { if (!pushBusy) { setPushOpen(false); setPushError(''); } }}>
           <div className="label" style={{ color: UI.inkFaint, marginBottom: 4 }}>PUSH TO CLIENT</div>
-          <div className="micro" style={{ color: UI.inkFaint, marginBottom: 16, lineHeight: 1.5, letterSpacing: '0.06em', textTransform: 'none' }}>
+          <div className="micro" style={{ color: UI.inkFaint, marginBottom: versions && !viewingActiveVersion ? 8 : 16, lineHeight: 1.5, letterSpacing: '0.06em', textTransform: 'none' }}>
             Copies this plan into a client's account. You'll pick whether it activates right away.
           </div>
+          {versions && !viewingActiveVersion && (
+            <div style={{ marginBottom: 16, padding: '8px 10px', borderRadius: 4, border: `0.5px solid rgba(var(--danger-rgb),0.35)`, background: 'rgba(var(--danger-rgb),0.08)' }}>
+              <span style={{ fontSize: 11, color: 'rgba(var(--danger-rgb),0.9)', fontFamily: UI.fontUi, lineHeight: 1.4 }}>
+                You're viewing {selectedVersion.validFrom > today ? 'a scheduled version' : 'a past version'} (from {fmtVDate(selectedVersion.validFrom)}), not the active one. That's what gets pushed.
+              </span>
+            </div>
+          )}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {(store.coaching?.asCoach || []).filter(c => c.status === 'active').map(c => (
               <button key={c.id} onClick={() => setPushTarget(c)} disabled={pushBusy} style={{
