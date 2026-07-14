@@ -516,6 +516,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
   const [pushTarget, setPushTarget] = useStateS(null);   // chosen client → activate-now-or-later prompt
   const [pushBusy, setPushBusy] = useStateS(false);
   const [pushError, setPushError] = useStateS('');
+  const [pushSuccess, setPushSuccess] = useStateS(null); // { clientName, planName, activated } → in-app confirmation
 
   const openBackupSheet = async () => {
     setBackupSheet(true);
@@ -840,7 +841,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
       await LB.addCoachingNote(client.id, 'plan', copy.id, copy.name, body, userId, threadId);
       setPushTarget(null);
       setPushOpen(false);
-      alert(`Pushed "${copy.name}" to ${client.clientName}${activateNow ? ' and activated it' : ''}.`);
+      setPushSuccess({ clientName: client.clientName, planName: copy.name, activated: activateNow });
     } catch (e) {
       setPushError(e.message || 'Push failed.');
     } finally {
@@ -1445,6 +1446,23 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
             </Btn>
           </div>
           {pushError && <div style={{ marginTop: 10, fontSize: 12, color: 'rgba(var(--danger-rgb),0.85)' }}>{pushError}</div>}
+        </MiniSheet>
+      )}
+
+      {pushSuccess && (
+        <MiniSheet zIndex={400} onClose={() => setPushSuccess(null)}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 18 }}>
+            <div style={{ width: 32, height: 32, borderRadius: 4, background: UI.goldFaint, border: `1px solid ${UI.goldSoft}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke={UI.gold} strokeWidth="1.5"><path d="M2 6l2.5 2.5L10 3"/></svg>
+            </div>
+            <div>
+              <div className="label" style={{ color: UI.gold, marginBottom: 2 }}>PUSHED</div>
+              <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.4 }}>
+                "{pushSuccess.planName}" is in {pushSuccess.clientName}'s account{pushSuccess.activated ? ' and active now.' : ', not activated yet.'}
+              </div>
+            </div>
+          </div>
+          <Btn onClick={() => setPushSuccess(null)} style={{ width: '100%' }}>Done</Btn>
         </MiniSheet>
       )}
 
