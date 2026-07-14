@@ -2798,7 +2798,33 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                 </span>
               );
             })() : (
-              <span style={{ fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, letterSpacing: '0.08em', color: UI.inkSoft, textTransform: 'uppercase' }}>{periodLabel}</span>
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, justifyContent: 'center', flexWrap: 'wrap' }}>
+                <span style={{ fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, letterSpacing: '0.08em', color: UI.inkSoft, textTransform: 'uppercase' }}>{periodLabel}</span>
+                {sch.mesocycle_autoregulate && (() => {
+                  // Autoregulate-only plans keep their normal cycle label above and
+                  // get a small AUTO badge alongside it: "starts DD.MM" while the
+                  // meso is still pending its aligned start, then AUTO (or AUTO ·
+                  // LOAD in load-only mode) once it's running. Mirrors the bounded
+                  // meso badge's pending/active split, minus the week counter.
+                  const m = (typeof getMesoState === 'function') ? getMesoState(sch.id, store.mesoStates) : null;
+                  const week = (m && typeof mesoCurrentWeek === 'function') ? mesoCurrentWeek(m, store) : null;
+                  if (week == null) {
+                    const startLabel = m?.startDate
+                      ? (() => { const d = new Date(m.startDate + 'T12:00:00'); return `${d.getDate().toString().padStart(2,'0')}.${(d.getMonth()+1).toString().padStart(2,'0')}`; })()
+                      : 'D1';
+                    return (
+                      <span style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase', color: UI.inkFaint, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '2px 8px' }}>
+                        AUTO · starts {startLabel}
+                      </span>
+                    );
+                  }
+                  return (
+                    <span style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase', color: UI.gold, background: 'rgba(var(--accent-rgb),0.1)', border: `0.5px solid rgba(var(--accent-rgb),0.4)`, borderRadius: 4, padding: '2px 8px' }}>
+                      {LB.autoregLoadOnly(sch) ? 'AUTO · LOAD' : 'AUTO'}
+                    </span>
+                  );
+                })()}
+              </div>
             )}
           </div>
           {!isFlex && (

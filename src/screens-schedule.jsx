@@ -185,9 +185,14 @@ function PlanScreen({ store, setStore, go, userId, openNewPlan }) {
         }).map(s => {
           const isActive = s.id === store.activeScheduleId;
           const todayDayId = isActive ? (LB.todaysDay(store)?.day?.id ?? null) : null;
-          const mesoSt = s.mesocycle_weeks ? (store.mesoStates || []).find(m => m.scheduleId === s.id) : null;
+          const mesoSt = (s.mesocycle_weeks || s.mesocycle_autoregulate) ? (store.mesoStates || []).find(m => m.scheduleId === s.id) : null;
           const mesoCompletions = mesoSt?.completions ?? 0;
           const mesoPending = mesoSt?.startDate && new Date(mesoSt.startDate + 'T12:00:00') > new Date();
+          // Autoregulate-only badge: pending until the meso's aligned start (flex
+          // plans start on a rotation boundary, so prefer the cycle-aware week over
+          // the date-only mesoPending), then a running AUTO / AUTO · LOAD tag.
+          const autoWeek = (mesoSt && s.mesocycle_autoregulate && typeof mesoCurrentWeek === 'function') ? mesoCurrentWeek(mesoSt, store) : null;
+          const autoPending = s.mesocycle_autoregulate && autoWeek == null;
           // Current plan revision (newest version = highest number, like the editor's
           // version bar). Only shown once a plan has actually been re-versioned (≥2).
           const verCount = s.versions?.length || 0;
@@ -224,11 +229,24 @@ function PlanScreen({ store, setStore, go, userId, openNewPlan }) {
                       </span>
                     );
                   })()}
-                  {!mesoPending && mesoCompletions > 0 && (
+                  {s.mesocycle_weeks && !mesoPending && mesoCompletions > 0 && (
                     <span style={{ fontFamily: UI.fontNum, fontSize: 10, fontWeight: 700, color: UI.gold, background: 'rgba(var(--accent-rgb),0.15)', borderRadius: 4, padding: '2px 6px', letterSpacing: '0.05em' }}>
                       MESO {mesoCompletions + 1}
                     </span>
                   )}
+                  {s.mesocycle_autoregulate && (autoPending && mesoSt?.startDate ? (() => {
+                    const d = new Date(mesoSt.startDate + 'T12:00:00');
+                    const startLabel = `${d.getDate().toString().padStart(2,'0')}.${(d.getMonth()+1).toString().padStart(2,'0')}`;
+                    return (
+                      <span style={{ fontFamily: UI.fontNum, fontSize: 10, fontWeight: 700, color: UI.inkFaint, background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 4, padding: '2px 6px', letterSpacing: '0.05em' }}>
+                        AUTO · starts {startLabel}
+                      </span>
+                    );
+                  })() : (
+                    <span style={{ fontFamily: UI.fontNum, fontSize: 10, fontWeight: 700, color: UI.gold, background: 'rgba(var(--accent-rgb),0.15)', borderRadius: 4, padding: '2px 6px', letterSpacing: '0.05em' }}>
+                      {LB.autoregLoadOnly(s) ? 'AUTO · LOAD' : 'AUTO'}
+                    </span>
+                  ))}
                   {is531 && (
                     <span style={{ fontFamily: UI.fontNum, fontSize: 10, fontWeight: 700, color: UI.gold, background: 'rgba(var(--accent-rgb),0.15)', border: `1px solid ${UI.goldSoft}`, borderRadius: 4, padding: '2px 6px', letterSpacing: '0.05em' }}>
                       {label531}

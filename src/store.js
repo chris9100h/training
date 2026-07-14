@@ -4064,15 +4064,25 @@ function macroAdherence(actual, target) {
   return Math.round(weighted * 100);
 }
 
-// Effective macro targets for the user's OWN health screen: their personal
-// targets if set, otherwise the coach-assigned macros (so a coached user gets
-// adherence out of the box; a standalone user sets their own). Both share the
-// {proteinTraining, carbsTraining, …} shape.
+// True when a macro-target object carries at least one macro (protein/carbs/fat,
+// training or rest). Calories alone don't count as "set" (they're derived).
+function hasMacroTargets(m) {
+  return !!(m && (m.proteinTraining != null || m.carbsTraining != null || m.fatTraining != null ||
+    m.proteinRest != null || m.carbsRest != null || m.fatRest != null));
+}
+
+// Effective macro targets for the user's OWN health screen. Coach-assigned
+// macros (a real coach OR self-coaching) ALWAYS take priority; personal targets
+// act only as a fallback when no coach macros exist. This is deliberate: a
+// self-coached user editing their macros in the coaching Nutrition setup expects
+// those to drive the health tab, and a real client shouldn't silently diverge
+// from the coach. The health macro card shows a disclaimer whenever coach macros
+// are set, so an edit to personal targets that appears to do nothing is
+// explained rather than silent. Both share the {proteinTraining, carbsTraining,
+// …} shape.
 function effectiveMacroTargets(personal, coachingMacros) {
-  const has = m => m && (m.proteinTraining != null || m.carbsTraining != null || m.fatTraining != null ||
-    m.proteinRest != null || m.carbsRest != null || m.fatRest != null);
-  if (has(personal)) return personal;
-  if (has(coachingMacros)) return coachingMacros;
+  if (hasMacroTargets(coachingMacros)) return coachingMacros;
+  if (hasMacroTargets(personal)) return personal;
   return null;
 }
 
@@ -4783,7 +4793,7 @@ window.LB = {
   checkinWeekStart, submitCheckin, loadCheckins, deleteCheckin, loadCoachCheckinStatus, requestCheckin, setCheckinEnabled, loadCheckinSchema, saveCheckinSchema, saveDefaultCheckinSchema,
   cardioWeekPrefill, detectCardioPRs,
   cardioDistUnit, setCardioDistUnit, distToM, mToDisplay, fmtDistance, fmtPace, fmtSpeed, MI_TO_M, recentCardioTypes,
-  isLoggedTrainingDay, plannedTrainingDay, isTrainingDayForDate, dayTargetFromMacros, macroAdherence, effectiveMacroTargets, dailyLogAdherence, dailyLogsWeekPrefill, weekPerformanceSignal,
+  isLoggedTrainingDay, plannedTrainingDay, isTrainingDayForDate, dayTargetFromMacros, macroAdherence, hasMacroTargets, effectiveMacroTargets, dailyLogAdherence, dailyLogsWeekPrefill, weekPerformanceSignal,
   refreshHealthLogs,
   pickGrowthRecipient, retractGrowthGrant, pickDeclineRecipient, reearnMesoWeightBoosts, resolveMesoSeedSuggestion, mesoPausedDays, mesoRirForWeek,
 };

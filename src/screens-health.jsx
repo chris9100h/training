@@ -187,9 +187,20 @@ function GlucoseScatterChart({ readings, from, to, unit }) {
   const dec = dom.range >= (unit === 'mgdl' ? 40 : 2) ? 0 : 1;
   const gridVals = Array.from({ length: 4 }, (_, i) => dom.min + (dom.range / 3) * i);
   const CTX_COLORS = { fasted: 'var(--accent)', fed: '#4a9fe0', other: UI.inkSoft };
+  const CTX_LABELS = { fasted: 'Fasted', fed: 'Fed', other: 'Other' };
+  const unitLabel = glucoseUnitLabel(unit);
   const fedY = yOf(refFed).toFixed(1);
+  const hoverPoints = pts.map(p => {
+    const disp = glucoseDisplay(p.valueMmol, unit);
+    return {
+      x: xOf(p.date), y: yOf(disp), date: p.date, color: CTX_COLORS[p.context] || UI.inkSoft,
+      rows: [{ value: `${disp} ${unitLabel}`, color: CTX_COLORS[p.context] || UI.inkSoft }],
+      sub: [CTX_LABELS[p.context] || p.context, p.time].filter(Boolean).join(' · '),
+    };
+  });
 
   return (
+    <ChartHover W={W} H={H} points={hoverPoints} mode="xy">
     <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display: 'block', overflow: 'visible' }}>
       {/* fasted reference band */}
       <rect x={padL} y={yOf(refHigh).toFixed(1)} width={plotW} height={(yOf(refLow) - yOf(refHigh)).toFixed(1)}
@@ -209,6 +220,7 @@ function GlucoseScatterChart({ readings, from, to, unit }) {
           fill={CTX_COLORS[p.context] || UI.inkSoft} opacity={0.85} />;
       })}
     </svg>
+    </ChartHover>
   );
 }
 
@@ -218,6 +230,80 @@ function HealthChartEmpty({ label }) {
   return (
     <div style={{ height: 96, display: 'flex', alignItems: 'center', justifyContent: 'center', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11 }}>
       {label || 'No data in this range yet'}
+    </div>
+  );
+}
+
+// Shared hover / touch-scrub tooltip for the health time-series charts. Each
+// chart passes its plotted points in viewBox units (x, y) plus an ISO date and
+// value rows; this wraps the SVG, follows the pointer (mouse hover or a touch
+// drag), highlights the nearest point and floats a date + value box next to it.
+// Every health chart uses the same `0 0 W H` viewBox scaled to the container
+// width, so pointer→viewBox is one uniform scale (rect.width / W). It is a
+// purely presentational overlay that renders nothing until the pointer is over a
+// point, so screenshots / exports (no active pointer) stay clean.
+//   points: [{ x, y, date:'YYYY-MM-DD', rows:[{label?, value, color?}], sub? }]
+//   mode:   'x' (nearest by column, for lines/bars) | 'xy' (2D, for scatter)
+const CHART_PLOT_TOP = 10, CHART_PLOT_H = 96; // padTop / plotH, shared by every chart
+function ChartHover({ W, H, points, children, mode = 'x', markerColor = 'var(--accent)' }) {
+  const wrapRef = useRefH(null);
+  const [active, setActive] = useStateH(null);
+
+  const pick = (clientX, clientY) => {
+    const el = wrapRef.current;
+    if (!el || !points.length) return;
+    const rect = el.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+    const vbX = ((clientX - rect.left) / rect.width) * W;
+    const vbY = ((clientY - rect.top) / rect.height) * H;
+    let best = 0, bestD = Infinity;
+    for (let i = 0; i < points.length; i++) {
+      const dx = points[i].x - vbX, dy = points[i].y - vbY;
+      const d = mode === 'xy' ? dx * dx + dy * dy : Math.abs(dx);
+      if (d < bestD) { bestD = d; best = i; }
+    }
+    setActive(best);
+  };
+  // Activate on pointer MOVE only: mouse hover fires move continuously, a touch
+  // scrub fires move while the finger drags. Deliberately not on pointerdown, so
+  // a tap never flashes the box and starting a vertical scroll on a chart never
+  // flickers one. No pointer capture: touchAction 'pan-y' lets the browser keep
+  // vertical list-scrolling while we get horizontal drags.
+  const onPoint = e => pick(e.clientX, e.clientY);
+  const clear = () => setActive(null);
+
+  // Guard the index: a time-frame switch can shrink `points` while a stale
+  // `active` still points past the new end.
+  const p = (active != null && points[active]) ? points[active] : null;
+  const leftPct = p ? (p.x / W) * 100 : 0;
+  const topPct = p ? (p.y / H) * 100 : 0;
+  // Flip the box below a near-top point, and anchor it by horizontal thirds so
+  // it never runs off either edge of the card.
+  const below = p ? p.y < H * 0.42 : false;
+  const tx = p ? (p.x < W * 0.28 ? '4px' : p.x > W * 0.72 ? 'calc(-100% - 4px)' : '-50%') : '-50%';
+  const ty = below ? '10px' : 'calc(-100% - 10px)';
+
+  return (
+    <div ref={wrapRef} data-reorder-ignore="true"
+      style={{ position: 'relative', touchAction: 'pan-y', cursor: points.length ? 'crosshair' : 'default' }}
+      onPointerMove={onPoint} onPointerUp={clear} onPointerLeave={clear} onPointerCancel={clear}>
+      {children}
+      {p && (
+        <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
+          <div style={{ position: 'absolute', left: leftPct + '%', top: (CHART_PLOT_TOP / H) * 100 + '%', height: (CHART_PLOT_H / H) * 100 + '%', width: 1, background: UI.hairStrong, transform: 'translateX(-0.5px)' }} />
+          <div style={{ position: 'absolute', left: leftPct + '%', top: topPct + '%', width: 8, height: 8, borderRadius: '50%', background: p.color || markerColor, border: `2px solid ${UI.bgRaised}`, boxShadow: `0 0 0 1.5px ${p.color || markerColor}`, transform: 'translate(-50%, -50%)' }} />
+          <div style={{ position: 'absolute', left: leftPct + '%', top: topPct + '%', transform: `translate(${tx}, ${ty})`, background: UI.bgRaised, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '5px 8px', boxShadow: '0 4px 14px rgba(0,0,0,0.45)', whiteSpace: 'nowrap', zIndex: 5 }}>
+            <div className="micro" style={{ color: UI.inkFaint, marginBottom: 2 }}>{healthFmtDate(p.date)}</div>
+            {p.rows.map((r, i) => (
+              <div key={i} style={{ display: 'flex', alignItems: 'baseline', gap: 6, fontFamily: UI.fontNum, fontSize: 12, lineHeight: 1.35 }}>
+                {r.label != null && <span style={{ fontSize: 9, color: r.color || UI.inkFaint, fontFamily: UI.fontUi, minWidth: 12 }}>{r.label}</span>}
+                <span style={{ color: r.color || UI.ink }}>{r.value}</span>
+              </div>
+            ))}
+            {p.sub && <div style={{ fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>{p.sub}</div>}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -269,8 +355,10 @@ function HealthLineChart({ series, from, to, format, color = 'var(--accent)', yM
   const gridVals = Array.from({ length: 4 }, (_, i) => dom.min + (dom.range / 3) * i);
   const line = pts.map(p => `${xOf(p.date).toFixed(1)},${yOf(p.value).toFixed(1)}`).join(' ');
   const base = (padTop + plotH).toFixed(1);
+  const hoverPoints = pts.map(p => ({ x: xOf(p.date), y: yOf(p.value), date: p.date, rows: [{ value: format(p.value) }] }));
 
   return (
+    <ChartHover W={W} H={H} points={hoverPoints} markerColor={color}>
     <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display: 'block', overflow: 'visible' }}>
       {gridVals.map((v, i) => (
         <g key={i}>
@@ -289,6 +377,7 @@ function HealthLineChart({ series, from, to, format, color = 'var(--accent)', yM
         <circle key={i} cx={xOf(p.date).toFixed(1)} cy={yOf(p.value).toFixed(1)} r={i === pts.length - 1 ? 3 : 2} fill={color} />
       ))}
     </svg>
+    </ChartHover>
   );
 }
 
@@ -308,8 +397,10 @@ function HealthBarChart({ series, from, to, format, target }) {
   const xOf = d => padL + inset + (totalDays ? healthDayDiff(from, d) / totalDays : 0.5) * (plotW - 2 * inset);
   const yOf = v => padTop + (1 - (v - dom.min) / dom.range) * plotH;
   const gridVals = Array.from({ length: 4 }, (_, i) => dom.min + (dom.range / 3) * i);
+  const hoverPoints = pts.map(p => ({ x: xOf(p.date), y: yOf(p.value), date: p.date, rows: [{ value: format(p.value) }] }));
 
   return (
+    <ChartHover W={W} H={H} points={hoverPoints}>
     <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display: 'block', overflow: 'visible' }}>
       {gridVals.map((v, i) => (
         <g key={i}>
@@ -330,6 +421,7 @@ function HealthBarChart({ series, from, to, format, target }) {
           fill={above ? 'var(--accent)' : `rgba(var(--accent-rgb),0.35)`} />;
       })}
     </svg>
+    </ChartHover>
   );
 }
 
@@ -354,8 +446,20 @@ function HealthMacroChart({ series, from, to }) {
   const xOf = d => padL + inset + (totalDays ? healthDayDiff(from, d) / totalDays : 0.5) * (plotW - 2 * inset);
   const yOf = v => padTop + (1 - (v - dom.min) / dom.range) * plotH;
   const gridVals = Array.from({ length: 4 }, (_, i) => dom.min + (dom.range / 3) * i);
+  const hoverPoints = pts.map(p => ({
+    x: xOf(p.date), y: yOf(calOf(p)), date: p.date,
+    rows: [
+      { value: `${Math.round(calOf(p))} kcal` },
+      { label: 'P', value: `${p.protein ?? 0}g`, color: MACRO_COLORS.protein },
+      // Net carbs (fiber-reduced), matching the drawn segment + the kcal above;
+      // for total-carb days fiber is null so this equals the logged carbs.
+      { label: 'C', value: `${Math.max(0, (p.carbs ?? 0) - (p.fiber ?? 0))}g`, color: MACRO_COLORS.carbs },
+      { label: 'F', value: `${p.fat ?? 0}g`, color: MACRO_COLORS.fat },
+    ],
+  }));
 
   return (
+    <ChartHover W={W} H={H} points={hoverPoints}>
     <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display: 'block', overflow: 'visible' }}>
       {gridVals.map((v, i) => (
         <g key={i}>
@@ -383,6 +487,7 @@ function HealthMacroChart({ series, from, to }) {
         return <g key={i}>{rects}{tick}</g>;
       })}
     </svg>
+    </ChartHover>
   );
 }
 
@@ -867,8 +972,13 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
 // ─── Macro target editor ────────────────────────────────────────────────────────
 
 function MacroTargetSheet({ open, onClose, store, setStore, coachingMacros }) {
-  const effective = LB.effectiveMacroTargets(store.settings?.macroTargets, coachingMacros);
-  const prefilledFromCoach = !store.settings?.macroTargets && !!effective;
+  // This sheet edits the user's PERSONAL targets, so prefill from their own
+  // targets first; fall back to the coach macros only as a convenience when they
+  // have none of their own. (effectiveMacroTargets is coach-first for the health
+  // display, which is the opposite priority and would show coach values here.)
+  const personalTargets = store.settings?.macroTargets;
+  const coachHasMacros = LB.hasMacroTargets(coachingMacros);
+  const prefillSource = LB.hasMacroTargets(personalTargets) ? personalTargets : coachingMacros;
   const empty = { proteinTraining: '', carbsTraining: '', fatTraining: '', proteinRest: '', carbsRest: '', fatRest: '' };
   const [form, setForm] = useStateH(empty);
   const [confirmEl, confirm] = useConfirm();
@@ -876,7 +986,7 @@ function MacroTargetSheet({ open, onClose, store, setStore, coachingMacros }) {
 
   useEffectH(() => {
     if (!open) return;
-    const m = effective || {};
+    const m = prefillSource || {};
     const next = {
       proteinTraining: m.proteinTraining != null ? String(m.proteinTraining) : '',
       carbsTraining: m.carbsTraining != null ? String(m.carbsTraining) : '',
@@ -927,9 +1037,9 @@ function MacroTargetSheet({ open, onClose, store, setStore, coachingMacros }) {
 
   return (
     <Sheet open={open} onClose={requestClose} title="Macro Targets">
-      {prefilledFromCoach && (
+      {coachHasMacros && (
         <div style={{ fontSize: 11, color: 'var(--accent)', fontFamily: UI.fontUi, padding: '6px 10px', background: `rgba(var(--accent-rgb),0.08)`, borderRadius: 6, border: `0.5px solid rgba(var(--accent-rgb),0.2)`, marginBottom: 14 }}>
-          Prefilled from your coach — edit to set your own.
+          Your coaching macros are active and take priority. These personal targets apply only if the coaching macros are removed.
         </div>
       )}
       {section('Training', 'TRAINING DAY', calsTraining)}
@@ -1541,7 +1651,10 @@ function HealthScreen({ store, setStore, go, userId }) {
   }, [activeClientCoachingId]);
 
   const targets = LB.effectiveMacroTargets(store.settings?.macroTargets, coachingMacros);
-  const fromCoach = !store.settings?.macroTargets && !!targets;
+  // Coach macros always win when present (see effectiveMacroTargets), so the
+  // shown targets are the coach's exactly when coach macros exist.
+  const coachHasMacros = LB.hasMacroTargets(coachingMacros);
+  const fromCoach = coachHasMacros;
   const dailyLogs = store.dailyLogs || [];
   const selectedLog = dailyLogs.find(l => l.date === selectedDate) || null;
 
@@ -1732,6 +1845,11 @@ function HealthScreen({ store, setStore, go, userId }) {
       ) : (
         <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 4 }}>
           Set protein / carbs / fat goals to track macro adherence.
+        </div>
+      )}
+      {coachHasMacros && (
+        <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1.4, marginTop: 8, paddingTop: 8, borderTop: `0.5px solid ${UI.hair}` }}>
+          These come from your coaching plan and take priority. Personal targets you set apply only without coaching macros.
         </div>
       )}
     </div>
