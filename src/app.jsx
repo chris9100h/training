@@ -769,14 +769,21 @@ function App() {
             // than this device (a coach pushing + activating a plan writes them
             // directly via syncStore from their own session). Blindly trusting
             // cur here silently reverted a coach's just-pushed activation the
-            // next time this device booted — cur still held the pre-push
+            // next time this device booted, cur still held the pre-push
             // (usually null) value, and the very next flush then re-synced that
             // stale value back over the coach's write. Keep cur only if it
             // differs from the persisted base (this device changed it and
             // hasn't synced yet); otherwise trust fresh (the server, possibly
             // changed elsewhere). No base (legacy cache) → keep cur, matching
             // every other no-base fallback in this merge.
-            const planPosLocalWins = (field) => (!base || cur[field] !== base[field]) ? cur[field] : fresh[field];
+            // These four fields are one coupled unit: a coach's activation writes a
+            // new activeScheduleId AND resets cycleIndex/dates together. Resolving
+            // them per-field could splice a new plan id onto a stale cycle index, so
+            // decide the whole tuple at once: keep this device's values only if it
+            // changed ANY of them since base (an unsynced local edit); otherwise take
+            // the server's whole tuple.
+            const PLAN_POS_FIELDS = ['activeScheduleId', 'cycleIndex', 'cycleStartDate', 'lastAdvancedDate'];
+            const planPosSrc = (!base || PLAN_POS_FIELDS.some(f => cur[f] !== base[f])) ? cur : fresh;
             // Scalar state: the local cache is authoritative — it always holds
             // the most recent state on this device, including unsynced offline
             // edits. For items with IDs we use an ID-based merge instead.
@@ -787,10 +794,10 @@ function App() {
               // / not chosen) must win so the picker re-fires, since the cache
               // still holds the old kg/lbs value.
               settings: { ...fresh.settings, ...cur.settings, ...(fresh.settings.unit == null ? { unit: null } : {}) },
-              activeScheduleId: planPosLocalWins('activeScheduleId'),
-              cycleIndex: planPosLocalWins('cycleIndex'),
-              cycleStartDate: planPosLocalWins('cycleStartDate'),
-              lastAdvancedDate: planPosLocalWins('lastAdvancedDate'),
+              activeScheduleId: planPosSrc.activeScheduleId,
+              cycleIndex: planPosSrc.cycleIndex,
+              cycleStartDate: planPosSrc.cycleStartDate,
+              lastAdvancedDate: planPosSrc.lastAdvancedDate,
               user: cur.user?.name ? { ...fresh.user, name: cur.user.name } : fresh.user,
               inProgress: activeExists ? inProgressId : null,
               sessions,

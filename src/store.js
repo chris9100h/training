@@ -4449,7 +4449,7 @@ function pickDeclineRecipient(keys, deltas, prevContrib) {
 
 // Resolve a working set's own rep target for meso rep-outcome checks: its
 // per-set target if the item uses Per-Set, else the exercise's uniform
-// target — which, for a Range-mode exercise, IS plannedReps (the floor);
+// target, which, for a Range-mode exercise, IS plannedReps (the floor);
 // plannedRepsMax only marks the ceiling that EARNS extra Smart Progression
 // (see progressionSuggestion), not what counts as "hit" here.
 function mesoSetTarget(i, plannedReps, plannedRepsPerSet) {
@@ -4459,20 +4459,20 @@ function mesoSetTarget(i, plannedReps, plannedRepsPerSet) {
   return perSet ?? plannedReps;
 }
 
-// Rep-target outcome for one exercise's working sets this session — the
+// Rep-target outcome for one exercise's working sets this session, the
 // objective counterpart to the subjective soreness/joint/volume feedback,
 // feeding both the weight-boost EARN gate and the rep-miss-streak CUT
 // trigger (computeMesoGains, screens-train.jsx):
-//   • allHit    — every working set reached its own target (via
-//     mesoSetTarget). Unchanged, strict AND — this gates earning a boost.
-//   • earlyMiss — any working set BEFORE the last one missed its target. The
+//   • allHit   , every working set reached its own target (via
+//     mesoSetTarget). Unchanged, strict AND, this gates earning a boost.
+//   • earlyMiss, any working set BEFORE the last one missed its target. The
 //     exercise's own last set is deliberately exempt: an all-out final set
 //     failing from accumulated fatigue doesn't mean the weight itself is too
 //     heavy, an earlier set failing does. A single-working-set exercise has
 //     no earlier set to lean on, so it counts directly. This is what feeds
-//     rep_miss_counts toward a cut — a looser bar than allHit on purpose, so
+//     rep_miss_counts toward a cut, a looser bar than allHit on purpose, so
 //     a legitimately hard-fought last rep never nudges the streak.
-// `sets` is an array of { done, skipped, warmup, reps/kg/timeSec... } — pass
+// `sets` is an array of { done, skipped, warmup, reps/kg/timeSec... }, pass
 // already-filtered working sets (no warmups/skips). Pure/testable.
 function mesoRepOutcome(workingSets, plannedReps, plannedRepsPerSet) {
   if (!workingSets || !workingSets.length) return { allHit: false, earlyMiss: false };
@@ -4514,9 +4514,12 @@ function reearnMesoWeightBoosts(prevBoosts, sessionKeys, earnedBoosts) {
 //   • boost earned   → apply it on top of the last weight when Smart Progression
 //     is silent; when SP also fired they are the same increment, so keep SP.
 //   • boost negative (two rep-target misses in a row, see rep_miss_counts) →
-//     same "apply on top of last weight" path, just downward. SP is always
-//     silent here too — a session missing its own floor target also misses
-//     SP's stricter ceiling target, so there's nothing to reconcile against.
+//     same "apply on top of last weight" path, just downward, and authoritative:
+//     a session missing its own floor target also misses SP's stricter ceiling
+//     target, so SP is silent here in practice. We still apply the cut even if a
+//     suggestion is somehow present, so the cut can never be swallowed by an
+//     up-suggestion if the two engines ever disagree. The result is floored at 0
+//     so a cut can never drive a light exercise's seed to zero or negative.
 //   • boost withheld (a joint/pump/volume gate failed last session, or a muscle
 //     was still sore on a load-only plan) → veto SP so the weight HOLDS instead
 //     of climbing past the feedback. This is what makes the gating actually
@@ -4526,9 +4529,10 @@ function reearnMesoWeightBoosts(prevBoosts, sessionKeys, earnedBoosts) {
 // { entry: { sets } } reference.
 function resolveMesoSeedSuggestion(suggestion, weightBoost, last, mesoActive) {
   if (weightBoost != null) {
-    if (!suggestion && last) {
+    const cutWins = weightBoost < 0; // a rep-miss cut is authoritative, never let an up-suggestion swallow it
+    if ((cutWins || !suggestion) && last) {
       const refSet = (last?.entry?.sets || []).filter(s => !s.warmup && !s.skipped).find(s => s.kg != null);
-      if (refSet) return { kg: Math.round((refSet.kg + weightBoost) * 4) / 4, reps: refSet.reps ?? null };
+      if (refSet) return { kg: Math.max(0, Math.round((refSet.kg + weightBoost) * 4) / 4), reps: refSet.reps ?? null };
     }
     return suggestion;
   }

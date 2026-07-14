@@ -745,10 +745,10 @@ async function testAsync(name, fn) {
   test('mesoRepOutcome: only the LAST set missing (all-out fatigue) does NOT count as earlyMiss', () => {
     const sets = [{ done: true, reps: 10 }, { done: true, reps: 10 }, { done: true, reps: 7 }];
     const out = LB.mesoRepOutcome(sets, 10, null);
-    assert.strictEqual(out.allHit, false, 'still not a full earn — unchanged strictness');
+    assert.strictEqual(out.allHit, false, 'still not a full earn, unchanged strictness');
     assert.strictEqual(out.earlyMiss, false, 'last-set fatigue miss is exempt from the streak');
   });
-  test('mesoRepOutcome: a single working set has no earlier set to lean on — a miss counts directly', () => {
+  test('mesoRepOutcome: a single working set has no earlier set to lean on, a miss counts directly', () => {
     const out = LB.mesoRepOutcome([{ done: true, reps: 5 }], 10, null);
     assert.strictEqual(out.allHit, false);
     assert.strictEqual(out.earlyMiss, true);
@@ -758,14 +758,14 @@ async function testAsync(name, fn) {
     assert.strictEqual(out.allHit, true);
     assert.strictEqual(out.earlyMiss, false);
   });
-  test('mesoRepOutcome: per-set targets are respected — set 1\'s lower target saves it from being a miss', () => {
+  test('mesoRepOutcome: per-set targets are respected, set 1\'s lower target saves it from being a miss', () => {
     // Per-Set 8/10: first set only needs 8, hits it; second (last) set falls short of 10 but is exempt anyway.
     const sets = [{ done: true, reps: 8 }, { done: true, reps: 9 }];
     const out = LB.mesoRepOutcome(sets, null, [8, 10]);
     assert.strictEqual(out.allHit, false);
     assert.strictEqual(out.earlyMiss, false);
   });
-  test('mesoRepOutcome: per-set targets — the first (non-last) set missing ITS OWN target is an earlyMiss', () => {
+  test('mesoRepOutcome: per-set targets, the first (non-last) set missing ITS OWN target is an earlyMiss', () => {
     const sets = [{ done: true, reps: 6 }, { done: true, reps: 10 }]; // first needed 8, got 6
     const out = LB.mesoRepOutcome(sets, null, [8, 10]);
     assert.strictEqual(out.earlyMiss, true);
@@ -833,6 +833,18 @@ async function testAsync(name, fn) {
   });
   test('resolveMesoSeedSuggestion: earned boost but no reference set falls back to the suggestion', () => {
     assert.strictEqual(LB.resolveMesoSeedSuggestion(null, 2.5, null, true), null);
+  });
+  test('resolveMesoSeedSuggestion: rep-miss cut applies downward when Smart Progression is silent', () => {
+    const out = LB.resolveMesoSeedSuggestion(null, -2.5, seedLast, true);
+    assert.strictEqual(out.kg, 97.5);
+  });
+  test('resolveMesoSeedSuggestion: rep-miss cut is authoritative and beats an up-suggestion', () => {
+    const out = LB.resolveMesoSeedSuggestion({ kg: 105, reps: 5 }, -2.5, seedLast, true);
+    assert.strictEqual(out.kg, 97.5); // cut wins, not the 105 suggestion
+  });
+  test('resolveMesoSeedSuggestion: a cut can never drive the seed below zero', () => {
+    const lightLast = { entry: { sets: [{ kg: 2.5, reps: 10 }] } };
+    assert.strictEqual(LB.resolveMesoSeedSuggestion(null, -2.5, lightLast, true).kg, 0);
   });
 
   // ── mesoPausedDays (recovery time must not fast-forward the meso week) ──

@@ -1113,22 +1113,25 @@ function PullHintChevron({ pullDelta, onOpen }) {
 }
 
 // ─── HOME ─────────────────────────────────────────────────────────────
-// Read-only preview of a workout's exercise list before starting it — mirrors
+// Read-only preview of a workout's exercise list before starting it, mirrors
 // PlanViewerScreen's day view (name + planned sets × reps, same superset
 // grouping) so picking a template or bonus day isn't a blind jump into the
 // session. Shared by the "from template" and "from plan" pickers below since
 // both hand it the same item shape (exId/sets/reps/repsPerSet/repsMax/supersetGroup).
-function WorkoutPreviewSheet({ open, onClose, store, title, items, onStart }) {
+function WorkoutPreviewSheet({ open, onClose, store, title, items, onStart, busy }) {
   const list = items || [];
   const totalSets = list.reduce((a, it) => a + (it.sets || 0), 0);
-  const repsLabel = (it) => (it.repsPerSet && it.repsPerSet.length) ? it.repsPerSet.join('/')
-    : (it.repsMax != null ? `${it.reps}-${it.repsMax}` : it.reps);
+  // Meta line per row: cardio and time-based items carry no reps, so fall back to
+  // a meaningful label instead of rendering a blank "3 × ".
+  const metaLabel = (it, ex) => {
+    if (ex?.movement_type === 'cardio') return 'Cardio';
+    if (ex && LB.exerciseLogMode(ex) === 'time') return `${it.sets || 1} × time`;
+    const reps = (it.repsPerSet && it.repsPerSet.length) ? it.repsPerSet.join('/')
+      : (it.repsMax != null ? `${it.reps}-${it.repsMax}` : it.reps);
+    return (reps != null && reps !== '') ? `${it.sets} × ${reps}` : `${it.sets} sets`;
+  };
   return (
-    <Sheet open={open} onClose={onClose}>
-      <div className="micro-gold" style={{ marginBottom: 4 }}>PREVIEW</div>
-      <div className="display" style={{ fontSize: 26, color: UI.ink, lineHeight: 1.05, letterSpacing: '-0.01em', marginBottom: 18, wordBreak: 'break-word' }}>
-        {title}
-      </div>
+    <Sheet open={open} onClose={onClose} title={title} titleColor="var(--accent)">
       <div style={{ display: 'flex', alignItems: 'stretch', gap: 20, marginBottom: 18, justifyContent: 'center' }}>
         <SubDial size={72} label="EXERCISES" value={list.length} />
         <div style={{ width: 1, background: UI.hairStrong, alignSelf: 'stretch' }} />
@@ -1146,14 +1149,14 @@ function WorkoutPreviewSheet({ open, onClose, store, title, items, onStart }) {
             return (
               <React.Fragment key={i}>
                 {isFirstOfGroup && (
-                  <div className="micro" style={{ color: UI.gold, letterSpacing: '0.12em', marginTop: i ? 6 : 0 }}>
+                  <div className="micro-gold" style={{ letterSpacing: '0.12em', marginTop: i ? 6 : 0 }}>
                     {list.filter(x => x.supersetGroup === it.supersetGroup).length >= 3 ? 'GIANT SET' : 'SUPERSET'}
                   </div>
                 )}
                 <Frame style={{ padding: '12px 16px', borderColor: it.supersetGroup ? UI.goldSoft : UI.hairStrong }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
                     <span style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ex?.name || '—'}</span>
-                    <span className="num" style={{ fontSize: 13, color: UI.inkSoft, flexShrink: 0 }}>{it.sets} × {repsLabel(it)}</span>
+                    <span className="num" style={{ fontSize: 13, color: UI.inkSoft, flexShrink: 0 }}>{metaLabel(it, ex)}</span>
                   </div>
                 </Frame>
               </React.Fragment>
@@ -1161,7 +1164,7 @@ function WorkoutPreviewSheet({ open, onClose, store, title, items, onStart }) {
           })}
         </div>
       )}
-      <Btn onClick={onStart} disabled={list.length === 0} style={{ width: '100%' }}>Start workout</Btn>
+      <Btn onClick={onStart} disabled={list.length === 0 || busy} style={{ width: '100%' }}>{busy ? 'Starting…' : 'Start workout'}</Btn>
     </Sheet>
   );
 }
@@ -1248,6 +1251,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
   const [freestyleSubOpen, setFreestyleSubOpen] = useState(false);
   const [templatePreview, setTemplatePreview] = useState(null); // workoutTemplates row being previewed before start
   const [dayPreview, setDayPreview] = useState(null); // plan day being previewed before a bonus-session start
+  const [previewBusy, setPreviewBusy] = useState(false); // async seed fetch in flight after tapping Start in a preview
   const [checkinPickerOpen, setCheckinPickerOpen] = useState(false);
   const [pullDelta, setPullDelta] = useState(0);
   const [coachingSchema, setCoachingSchema] = useState(null);
@@ -2530,7 +2534,10 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     setBonusDayPickerOpen(false);
     setWorkoutSubOpen(false);
     setQuickActionsOpen(false);
-    const entries = await buildSessionEntries(day.items, day.id);
+    // Drop exercises whose library entry is gone, so the started bonus session
+    // matches the preview (which filters them out) instead of carrying phantoms.
+    const items = (day.items || []).filter(it => LB.findExercise(store, it.exId));
+    const entries = await buildSessionEntries(items, day.id);
     // Treat as normal (cycle advances) only when this is today's scheduled day
     // AND it hasn't been trained yet today. If already done, it's always bonus.
     const todayStr = LB.todayISO();
@@ -2539,7 +2546,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       s => s.ended && s.dayId === day.id && s.date?.slice(0, 10) === todayStr
     );
     const extra = (!isTodaysDay || alreadyDoneToday) ? { isBonus: true } : {};
-    const firstEx = LB.findExercise(store, day.items?.[0]?.exId);
+    const firstEx = LB.findExercise(store, items[0]?.exId);
     loggingRef.current = false;
     if (firstEx?.equipment === 'bodyweight' || firstEx?.movement_type === 'cardio' || LB.exerciseLogMode(firstEx) === 'time' || LB.isAssisted(firstEx)) {
       const session = {
@@ -2811,10 +2818,10 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                   if (week == null) {
                     const startLabel = m?.startDate
                       ? (() => { const d = new Date(m.startDate + 'T12:00:00'); return `${d.getDate().toString().padStart(2,'0')}.${(d.getMonth()+1).toString().padStart(2,'0')}`; })()
-                      : 'D1';
+                      : null;
                     return (
                       <span style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase', color: UI.inkFaint, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '2px 8px' }}>
-                        AUTO · starts {startLabel}
+                        {startLabel ? `AUTO · starts ${startLabel}` : 'AUTO · pending'}
                       </span>
                     );
                   }
@@ -3491,25 +3498,27 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
         </div>
       </Sheet>
 
-      {/* Preview before starting from a template — full exercise list, so
+      {/* Preview before starting from a template, full exercise list, so
           picking among many templates isn't a guess from the name alone. */}
       <WorkoutPreviewSheet
         open={!!templatePreview}
-        onClose={() => setTemplatePreview(null)}
+        onClose={() => { setTemplatePreview(null); setFreestyleSubOpen(true); }}
         store={store}
         title={templatePreview?.name || ''}
         items={(templatePreview?.exercises || []).filter(it => LB.findExercise(store, it.exId))}
-        onStart={() => { const t = templatePreview; setTemplatePreview(null); startFreestyleFromTemplate(t); }}
+        busy={previewBusy}
+        onStart={async () => { if (loggingRef.current) return; setPreviewBusy(true); await startFreestyleFromTemplate(templatePreview); setPreviewBusy(false); }}
       />
 
       {/* Same preview, for a bonus day picked from the active plan. */}
       <WorkoutPreviewSheet
         open={!!dayPreview}
-        onClose={() => setDayPreview(null)}
+        onClose={() => { setDayPreview(null); setBonusDayPickerOpen(true); }}
         store={store}
         title={dayPreview?.name || ''}
-        items={dayPreview?.items || []}
-        onStart={() => { const d = dayPreview; setDayPreview(null); startBonusSession(d); }}
+        items={(dayPreview?.items || []).filter(it => LB.findExercise(store, it.exId))}
+        busy={previewBusy}
+        onStart={async () => { if (loggingRef.current) return; setPreviewBusy(true); const d = dayPreview; setDayPreview(null); await startBonusSession(d); setPreviewBusy(false); }}
       />
 
       {/* Return-from-break realign: pick which day to resume the rotation on */}

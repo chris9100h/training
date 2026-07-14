@@ -639,10 +639,10 @@ function GoldSectionLabel({ children, style }) {
 // avatar; SessionCompareScreen's watermark is a centered full-page background
 // so dividers there always draw full width.
 async function captureNodeAsPng(node, { filename, dodgeAvatar = false, setCapturing, fitWidth = false } = {}) {
-  if (!node) return;
+  if (!node) return { ok: false, reason: 'no-node' };
   // html2canvas is loaded on demand (not at boot) — fetch it on first use.
   const html2canvas = await window.__ensureHtml2Canvas?.().catch(() => null);
-  if (!html2canvas) return;
+  if (!html2canvas) return { ok: false, reason: 'unavailable' };
   setCapturing?.(true);
   // Temporarily expand scroll parent so html2canvas captures full content
   const scrollParent = node.parentElement;
@@ -710,20 +710,29 @@ async function captureNodeAsPng(node, { filename, dodgeAvatar = false, setCaptur
       // rather than applied unconditionally to node.scrollWidth for everyone.
       ...(fitWidth ? { width: node.scrollWidth, windowWidth: node.scrollWidth } : {}),
     });
-    canvas.toBlob(async (blob) => {
-      const file = new File([blob], filename, { type: 'image/png' });
-      const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-      if (isMobile && navigator.share && navigator.canShare?.({ files: [file] })) {
-        try { await navigator.share({ files: [file] }); } catch (_) {}
-      } else {
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url; a.download = filename;
-        document.body.appendChild(a); a.click();
-        document.body.removeChild(a);
-        setTimeout(() => URL.revokeObjectURL(url), 1000);
-      }
-    }, 'image/png');
+    // Report the outcome so callers can confirm success or surface a failure,
+    // instead of the export silently doing nothing.
+    return await new Promise(resolve => {
+      canvas.toBlob(async (blob) => {
+        if (!blob) { resolve({ ok: false, reason: 'encode' }); return; }
+        const file = new File([blob], filename, { type: 'image/png' });
+        const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+        if (isMobile && navigator.share && navigator.canShare?.({ files: [file] })) {
+          try { await navigator.share({ files: [file] }); resolve({ ok: true, shared: true }); }
+          catch (_) { resolve({ ok: true, shared: false }); }
+        } else {
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url; a.download = filename;
+          document.body.appendChild(a); a.click();
+          document.body.removeChild(a);
+          setTimeout(() => URL.revokeObjectURL(url), 1000);
+          resolve({ ok: true, saved: true });
+        }
+      }, 'image/png');
+    });
+  } catch (e) {
+    return { ok: false, reason: 'render' };
   } finally {
     scrollParent.style.overflow = saved.overflow;
     scrollParent.style.height = saved.height;
@@ -3378,10 +3387,10 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
 
 // ─── Technique-aware set editing (History → workout → Edit) ────────────
 // Historical companion to the live training screen's technique picker/chain
-// sheets (screens-train.jsx): same data model — LB.techniqueRounds, and the
+// sheets (screens-train.jsx): same data model, LB.techniqueRounds, and the
 // technique/drops shapes documented in docs/database.md ("drops[0] mirrors
 // the top-level kg/reps... only the first drop counts toward volume and
-// doneSetCount") — but edits an already-logged, static session instead of
+// doneSetCount"), but edits an already-logged, static session instead of
 // live input state, so none of the live screen's custom-keypad/rest-timer/
 // auto-arm machinery applies; this is plain-input editing throughout.
 const CHAIN_TECH_KINDS = ['drop', 'myorep', 'myorep_match', 'amrap_variations'];
@@ -3428,7 +3437,7 @@ function PartialsStepper({ value, onChange }) {
 function StretchFields({ stretch, onChange }) {
   const numStyle = { width: 52, background: UI.bgRaised, border: `1px solid ${UI.hairStrong}`, borderRadius: 4, color: UI.ink, padding: '7px 6px', textAlign: 'center', fontFamily: UI.fontNum, fontSize: 13, outline: 'none' };
   return (<>
-    <input type="text" inputMode="decimal" value={stretch?.kg ?? ''} placeholder="kg" onFocus={e => e.target.select()}
+    <input type="text" inputMode="decimal" value={stretch?.kg ?? ''} placeholder={UI.unit()} onFocus={e => e.target.select()}
       onChange={ev => onChange({ kg: ev.target.value === '' ? null : +ev.target.value, timeSec: stretch?.timeSec ?? 30 })}
       style={numStyle} />
     <input type="text" inputMode="numeric" value={stretch?.timeSec ?? ''} placeholder="sec" onFocus={e => e.target.select()}
@@ -3440,7 +3449,7 @@ function StretchFields({ stretch, onChange }) {
 // One round of a chain technique (drop/myo/myo-match/AMRAP): kg × reps (+ a
 // variation-name field for AMRAP, myo rounds after the activation reuse the
 // activation kg so no kg field), plus a collapsible partials/stretch
-// finisher — same per-round data Finisher/FinisherStep author live, just
+// finisher, same per-round data Finisher/FinisherStep author live, just
 // against plain inputs instead of the custom keypad.
 function RoundEditRow({ round, di, kind, onChange, onRemove, canRemove }) {
   const [finisherOpen, setFinisherOpen] = useStateL(!!(round.partials || round.stretch));
@@ -3553,7 +3562,7 @@ function SessionEditSheet({ session, duration, exercises, onClose, onSave }) {
   };
 
   // Reopening/clearing a technique set for plain editing must drop technique
-  // + drops too — mirrors the live training screen's own reopen behavior
+  // + drops too, mirrors the live training screen's own reopen behavior
   // (screens-train.jsx updateSet: unchecking a done technique set wipes
   // both). Skipping used to leave a stale `drops` behind here.
   const skipSet = (eIdx, sIdx, skip) => {
@@ -3567,7 +3576,7 @@ function SessionEditSheet({ session, duration, exercises, onClose, onSave }) {
 
   // techId=null clears back to a plain set. Chain techniques keep `drops` as
   // an ARRAY with round 0 mirrored onto the set's own kg/reps (progression /
-  // volume / PR code only ever reads the top-level fields — see
+  // volume / PR code only ever reads the top-level fields, see
   // docs/database.md's zane_sets.drops note); standalone techniques keep
   // `drops` as a plain OBJECT and leave the set's own kg/reps untouched.
   const setTechnique = (eIdx, sIdx, techId, exName) => {
@@ -3685,7 +3694,7 @@ function SessionEditSheet({ session, duration, exercises, onClose, onSave }) {
             const ex = exercises?.find(x => x.id === e.exId);
             const exName = ex?.name ?? e.name;
             const isUnilateral = !!ex?.unilateral || e.sets.some(st => st.repsL != null || st.repsR != null);
-            // Techniques only ever apply to logged weight/reps sets — never
+            // Techniques only ever apply to logged weight/reps sets, never
             // warmups, unilateral (drop/myo/AMRAP have no repsL/repsR
             // support anywhere in the app), or checkbox/time-mode exercises,
             // matching the live training screen's own arming rules.
@@ -3693,7 +3702,7 @@ function SessionEditSheet({ session, duration, exercises, onClose, onSave }) {
             const techEligible = !isUnilateral && logMode !== 'checkbox' && logMode !== 'time';
             const warmupOpen = !!openWarmups[eIdx];
             // Split by warmup while keeping each set's real index (sIdx) into
-            // e.sets — every mutation fn below is keyed on that index, not on
+            // e.sets, every mutation fn below is keyed on that index, not on
             // position within either rendered group.
             const warmupSets = e.sets.map((st, sIdx) => ({ st, sIdx })).filter(x => x.st.warmup);
             const workingSets = e.sets.map((st, sIdx) => ({ st, sIdx })).filter(x => !x.st.warmup);

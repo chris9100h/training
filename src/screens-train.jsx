@@ -683,7 +683,7 @@ function RestGauge({ restStart, restDef, variant }) {
   useEffectT(() => { const t = setInterval(() => tick(n => n + 1), 250); return () => clearInterval(t); }, []);
   const active = restStart != null && restDef != null;
   const el = active ? Math.floor((Date.now() - restStart) / 1000) : 0;
-  // No longer clamped at 0 — once the rest period elapses this goes negative,
+  // No longer clamped at 0, once the rest period elapses this goes negative,
   // turning the countdown into an overrun count-up so the user can see
   // exactly how long they've gone past their rest, not just "0:00" forever.
   const remaining = active ? restDef - el : null;
@@ -694,7 +694,7 @@ function RestGauge({ restStart, restDef, variant }) {
     ? `${overrun ? '+' : ''}${Math.floor(absRemaining / 60)}:${(absRemaining % 60).toString().padStart(2, '0')}`
     : '—';
   // done stays the single zero-crossing tick (drives the one-time "GO" pulse,
-  // matching fireRestDone's one-time beep/flash) — overrun is its own,
+  // matching fireRestDone's one-time beep/flash), overrun is its own,
   // steady state after that, not a repeating alarm.
   const done = remaining === 0;
   const gaugeColor = overrun ? UI.danger : UI.gold;
@@ -708,8 +708,8 @@ function RestGauge({ restStart, restDef, variant }) {
   }
   if (variant === 'modal') {
     return (<>
-      <div className="num" style={{ fontSize: 72, fontWeight: 300, letterSpacing: '-0.02em', lineHeight: 1, color: gaugeColor, animation: done ? 'timerPulse 0.8s ease-in-out infinite' : 'none', cursor: done ? 'pointer' : 'default' }}>{mmss}</div>
-      {done && <div style={{ marginTop: 10, fontSize: 11, letterSpacing: '0.18em', color: UI.gold, fontFamily: UI.fontUi, fontWeight: 600 }}>GO</div>}
+      <div className="num" style={{ fontSize: 72, fontWeight: 300, letterSpacing: '-0.02em', lineHeight: 1, color: gaugeColor, animation: done ? 'timerPulse 0.8s ease-in-out infinite' : 'none', cursor: (done || overrun) ? 'pointer' : 'default' }}>{mmss}</div>
+      {(done || overrun) && <div style={{ marginTop: 10, fontSize: 11, letterSpacing: '0.18em', color: UI.gold, fontFamily: UI.fontUi, fontWeight: 600 }}>{done ? 'GO' : 'TAP TO CONTINUE'}</div>}
       <div style={{ height: 2, background: UI.hair, borderRadius: 4, overflow: 'hidden', marginTop: 18, width: 200 }}>
         <div style={{ height: '100%', width: `${pct}%`, background: gaugeColor, transition: 'width 0.25s linear' }} />
       </div>
@@ -3172,13 +3172,18 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       gainMap[key].setDelta += (delta ?? 1);
     }
 
-    // Weight boosts (earn) + rep-miss streak (cut) — both driven purely by
+    // Weight boosts (earn) + rep-miss streak (cut), both driven purely by
     // rep performance, independently of the joint/pump/volume feedback below
     // (which only gates the EARN side, unchanged). Computed unconditionally,
-    // same as before this streak existed — a deload session's own feedback
+    // same as before this streak existed, a deload session's own feedback
     // Sets are always empty (no questions asked), so the EARN side already
     // self-excludes; PERSISTING either side is what's actually gated for
     // deload, below, matching the pre-existing weightBoosts pattern.
+    // The rep-miss streak must advance at most once per exercise-key per session:
+    // a day that programs the same exercise twice (repeat lift, or a superset
+    // reusing it) shares one key and would otherwise double-count into an instant
+    // cut instead of two consecutive sessions.
+    const streakSeen = new Set();
     for (const e of session.entries) {
       if (e.isCardio) continue;
       const exId = e.exId;
@@ -3188,28 +3193,36 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
       const workingSets = e.sets.filter(s => !s.warmup && !s.skipped);
       if (!workingSets.length) continue;
+      // An exercise with no confirmed working set was not actually attempted
+      // (finish() seals it skipped): it is neither a hit nor a rep miss.
+      // computeMesoGains runs on the pre-seal session, so guard here to match the
+      // seal, otherwise an untouched exercise would count as an early rep miss.
+      if (!workingSets.some(s => s.done)) continue;
       // allHit gates the earn side (strict, unchanged); earlyMiss (a looser
-      // bar — the last working set is exempt) feeds the miss-streak cut below.
+      // bar, the last working set is exempt) feeds the miss-streak cut below.
       // See LB.mesoRepOutcome for the exact per-set/range-aware rules.
       const { allHit, earlyMiss } = LB.mesoRepOutcome(workingSets, e.plannedReps ?? null, e.plannedRepsPerSet);
 
       const catCfg = ex?.equipment ? (store.settings?.equipmentConfig?.[ex.equipment] ?? {}) : {};
       const increment = catCfg.increment ?? (unit === 'lbs' ? 5 : 2.5);
 
-      if (earlyMiss) {
-        const n = (repMissCounts[key] || 0) + 1;
-        if (n >= 2) {
-          // Two misses in a row: the weight itself is too heavy for this rep
-          // target. Cut it back one increment for next session and re-arm.
-          weightBoostMap[key] = -increment;
-          if (!gainMap[key]) gainMap[key] = { name: e.name, setDelta: 0, weightDelta: 0 };
-          gainMap[key].weightDelta = -increment;
-          repMissCounts[key] = 0;
+      if (!streakSeen.has(key)) {
+        streakSeen.add(key);
+        if (earlyMiss) {
+          const n = (repMissCounts[key] || 0) + 1;
+          if (n >= 2) {
+            // Two misses in a row: the weight itself is too heavy for this rep
+            // target. Cut it back one increment for next session and re-arm.
+            weightBoostMap[key] = -increment;
+            if (!gainMap[key]) gainMap[key] = { name: e.name, setDelta: 0, weightDelta: 0 };
+            gainMap[key].weightDelta = -increment;
+            repMissCounts[key] = 0;
+          } else {
+            repMissCounts[key] = n;
+          }
         } else {
-          repMissCounts[key] = n;
+          repMissCounts[key] = 0;
         }
-      } else {
-        repMissCounts[key] = 0;
       }
 
       if (!allHit) continue;
@@ -3225,9 +3238,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     }
 
     // Weight boosts must be re-earned every session (min reps + joint fine +
-    // pump ok + volume ok, all re-confirmed this session) — or, on the other
+    // pump ok + volume ok, all re-confirmed this session), or, on the other
     // side, cut by the rep-miss streak above. Replace this session's exercise
-    // keys wholesale — earned/cut ones set, everything else dropped — leaving
+    // keys wholesale, earned/cut ones set, everything else dropped, leaving
     // other training days' boosts untouched. A deload session collects no
     // feedback, so it must NOT wipe boosts earned before it: skip the
     // recompute entirely and leave the map (and the miss streak) as-is.
@@ -4037,7 +4050,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     const jump = addAndJumpRef.current;
     setAddOpen(false);
     if (session.entries.length === 0) {
-      // First exercise(s) in an empty session — skip the superset prompt and
+      // First exercise(s) in an empty session, skip the superset prompt and
       // insert directly. Unlike every other picker in this file, the one for
       // an empty session allows multi-select (its "Add N exercises →" button),
       // so idList can hold more than one id here: build one standalone entry
@@ -4074,8 +4087,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         const ff = firstFieldForExercise(LB.findExercise(store, newExId));
         if (ff) setTimeout(() => activateKb(0, ff), 200);
       }
+    } else if (idList.length > 1) {
+      // Mid-session multi-select: several exercises picked at once go in solo,
+      // in picked order, no superset prompt (which only fits a single new pick).
+      if (jump) addAndJumpRef.current = false;
+      addSoloExercises(idList, jump);
     } else if (addSupersetCandidates.length === 0) {
-      // Nothing eligible to pair with — skip the superset prompt entirely
+      // Nothing eligible to pair with, skip the superset prompt entirely
       // rather than show an empty picker.
       if (jump) addAndJumpRef.current = false;
       linkNewExercise(null, newExId, jump);
@@ -4151,6 +4169,38 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       const ff = newEx?.movement_type !== 'cardio' ? firstFieldForExercise(newEx) : null;
       if (ff) setTimeout(() => activateKb(0, ff), 200);
     }
+  };
+
+  // Mid-session multi-select: insert each picked id as a standalone entry right
+  // after the current one, in picked order. The superset prompt only makes sense
+  // for a single new exercise, so multi picks always go in solo.
+  const addSoloExercises = (idList, jump) => {
+    setStore(s => {
+      const sess = s.sessions.find(x => x.id === session.id);
+      if (!sess) return s;
+      const currentIdx = sess.currentExIdx || 0;
+      let entries = sess.entries.slice();
+      let insertAt = currentIdx + 1;
+      idList.forEach(id => {
+        const newEx = LB.findExercise(s, id);
+        let newEntry;
+        if (newEx?.movement_type === 'cardio') {
+          newEntry = { exId: id, name: newEx?.name || id, isCardio: true, plannedSets: 0, plannedReps: null, plannedRepsPerSet: null, sets: [], cardioDone: false, cardioData: null, note: '', supersetGroup: null, addedDuringSession: true };
+        } else {
+          const isUni = newEx?.movement_type === 'unilateral';
+          const bwKg = LB.shouldPullBodyweight(newEx) ? LB.latestBodyweight(s) ?? null : null;
+          const insertOcc = entries.slice(0, insertAt).filter(en => en.exId === id).length;
+          const last = LB.bestRecentEntry(s, id, session.dayId, 3, insertOcc);
+          const suggestion = LB.progressionSuggestion(s, id, session.dayId, null, null, last, null, null, insertOcc);
+          const seedSets = LB.buildSeedSets({ exId: id, sets: 3, repsPerSet: null }, last, suggestion, isUni, s, bwKg);
+          newEntry = { exId: id, name: newEx?.name || id, plannedSets: 3, plannedReps: null, plannedRepsPerSet: null, sets: seedSets, note: '', supersetGroup: null, addedDuringSession: true };
+        }
+        entries = [...entries.slice(0, insertAt), newEntry, ...entries.slice(insertAt)];
+        insertAt += 1;
+      });
+      const newCurrentIdx = jump ? currentIdx + 1 : currentIdx;
+      return { ...s, sessions: s.sessions.map(x => x.id !== session.id ? x : { ...x, entries, currentExIdx: newCurrentIdx }) };
+    });
   };
 
   // Called from the superset modal opened by the "Add exercise" button.
@@ -4947,8 +4997,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               : <SessionClock startedAt={session.startedAt} style={{ color: UI.gold, fontSize: 14, letterSpacing: '0.16em', fontWeight: 500 }} />
             }
           </div>
-          {/* rest countdown — only when active */}
-          {restStart && !restExpired && (<>
+          {/* rest countdown, stays through overrun so the red count-up (how far
+              past rest) shows in the header too, matching the modal and overlay */}
+          {restStart && (<>
             <div style={{ width: 0.5, height: 14, background: UI.hairStrong, flexShrink: 0 }} />
             <button onClick={() => setRestModalOpen(true)} style={{
               flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4,
@@ -7101,7 +7152,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       {swapOpen && <window.Screens.ExercisePicker store={store} setStore={setStore} onClose={() => setSwapOpen(false)} onPick={doSwap} singleSelect />}
 
       {/* exercise add picker */}
-      {addOpen && <window.Screens.ExercisePicker store={store} setStore={setStore} onClose={() => setAddOpen(false)} onPick={doAdd} singleSelect />}
+      {addOpen && <window.Screens.ExercisePicker store={store} setStore={setStore} onClose={() => setAddOpen(false)} onPick={doAdd} />}
 
       {/* superset modal — step 1: ask yes/no; step 2: pick exercise to link */}
       {addSupersetData && (
@@ -7149,23 +7200,27 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               color: UI.inkSoft, borderRadius: 6, cursor: 'pointer',
               fontSize: 11, letterSpacing: '0.12em', textTransform: 'uppercase', fontFamily: UI.fontUi, fontWeight: 500,
             }}>Skip</button>
-            {/* persistRestStart always (re)schedules a push for the adjusted
-                finish time, clamped to now if that time is already past —
-                once overrun, either button would just re-fire the "rest
-                done" push instantly. Adjusting a rest that's already over
-                doesn't mean anything anyway, so disable both instead. */}
-            <button disabled={restExpired} onClick={() => persistRestStart(restStart - 30000, activeRestDef)} style={{
-              flex: 1, padding: '12px 0', background: 'transparent', border: `1px solid ${UI.hairStrong}`,
-              color: restExpired ? UI.inkGhost : UI.inkSoft, borderRadius: 6, cursor: restExpired ? 'default' : 'pointer',
-              opacity: restExpired ? 0.4 : 1,
-              fontSize: 11, letterSpacing: '0.12em', textTransform: 'uppercase', fontFamily: UI.fontUi, fontWeight: 500,
-            }}>−30s</button>
-            <button disabled={restExpired} onClick={() => persistRestStart(restStart + 30000, activeRestDef)} style={{
-              flex: 1, padding: '12px 0', background: 'transparent', border: `1px solid ${UI.hairStrong}`,
-              color: restExpired ? UI.inkGhost : UI.inkSoft, borderRadius: 6, cursor: restExpired ? 'default' : 'pointer',
-              opacity: restExpired ? 0.4 : 1,
-              fontSize: 11, letterSpacing: '0.12em', textTransform: 'uppercase', fontFamily: UI.fontUi, fontWeight: 500,
-            }}>+30s</button>
+            {/* Adjusting a rest that is already over is meaningless (persistRestStart
+                clamps to now and would just re-fire the "rest done" push), so once
+                overrun we drop the +/-30s buttons entirely and say so plainly rather
+                than leaving two greyed, unexplained controls. */}
+            {restExpired ? (
+              <div style={{
+                flex: 2, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 11, letterSpacing: '0.12em', textTransform: 'uppercase', fontFamily: UI.fontUi, fontWeight: 500, color: UI.inkGhost,
+              }}>Rest is over</div>
+            ) : (<>
+              <button onClick={() => persistRestStart(restStart - 30000, activeRestDef)} style={{
+                flex: 1, padding: '12px 0', background: 'transparent', border: `1px solid ${UI.hairStrong}`,
+                color: UI.inkSoft, borderRadius: 6, cursor: 'pointer',
+                fontSize: 11, letterSpacing: '0.12em', textTransform: 'uppercase', fontFamily: UI.fontUi, fontWeight: 500,
+              }}>−30s</button>
+              <button onClick={() => persistRestStart(restStart + 30000, activeRestDef)} style={{
+                flex: 1, padding: '12px 0', background: 'transparent', border: `1px solid ${UI.hairStrong}`,
+                color: UI.inkSoft, borderRadius: 6, cursor: 'pointer',
+                fontSize: 11, letterSpacing: '0.12em', textTransform: 'uppercase', fontFamily: UI.fontUi, fontWeight: 500,
+              }}>+30s</button>
+            </>)}
           </div>
         </div>
       </Sheet>
@@ -7502,7 +7557,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           exercise's Joint check, Pump & Volume) to actually revise. Opened
           from the small square button in the footer nav (see "Footer nav"
           below). */}
-      <Sheet open={mesoRecapOpen} onClose={() => setMesoRecapOpen(false)} title="Session feedback" titleColor="var(--accent)">
+      <Sheet open={mesoRecapOpen} onClose={() => setMesoRecapOpen(false)} title="Session review" titleColor="var(--accent)">
         <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: 1.5 }}>
           Tap a muscle group to review and change its feedback — everything stays editable until you finish the session.
         </div>
@@ -7542,7 +7597,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           </button>
         );
         return (
-          <Sheet open={!!mesoRecapDetailMuscle} onClose={() => setMesoRecapDetailMuscle(null)} title={mesoRecapDetailMuscle ? `${mesoRecapDetailMuscle} feedback` : 'Feedback'} titleColor="var(--accent)">
+          <Sheet open={!!mesoRecapDetailMuscle} onClose={() => setMesoRecapDetailMuscle(null)} title={mesoRecapDetailMuscle ? `${mesoRecapDetailMuscle} review` : 'Review'} titleColor="var(--accent)">
             {!!detailGroup?.jointRows.length && (<>
               <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>JOINT FEEDBACK</div>
               <div className="knurl" style={{ marginBottom: 10 }} />
@@ -7580,7 +7635,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               padding: '10px 0',
               borderBottom: i < mesoGainItems.length - 1 ? `1px solid ${UI.hair}` : 'none',
             }}>
-              <span style={{ fontFamily: UI.fontUi, fontSize: 14, fontWeight: 600, color: UI.ink }}>{item.name}</span>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+                <span style={{ fontFamily: UI.fontUi, fontSize: 14, fontWeight: 600, color: UI.ink }}>{item.name}</span>
+                {item.weightDelta < 0 && (
+                  <span style={{ fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.06em', textTransform: 'uppercase', color: UI.inkGhost }}>Reps missed, easing load</span>
+                )}
+              </div>
               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                 {item.setDelta !== 0 && (
                   <span style={{ fontFamily: UI.fontNum, fontSize: 12, fontWeight: 700, color: item.setDelta > 0 ? 'var(--accent)' : 'rgba(var(--danger-rgb),0.9)' }}>

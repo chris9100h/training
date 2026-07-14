@@ -244,6 +244,11 @@ async function inventoryMode(invFile) {
     }
   }
 
+  // EXPECTED_ANON_EXEC keys on the bare function NAME, not the signature. That is
+  // safe only because get_public_feature_map is the single intended anon-exec
+  // function; if a future overload shares the name it would be blanket-allowed, so
+  // if more anon-exec functions ever appear, switch this to signature-scoped keys.
+  const allFnNames = new Set((inv.functions || []).map((fn) => fn.f));
   const seenAnonExec = new Set();
   for (const fn of inv.functions || []) {
     if (fn.anon_exec) {
@@ -256,7 +261,14 @@ async function inventoryMode(invFile) {
   }
   for (const f of [...EXPECTED_ANON_EXEC].sort()) {
     if (!seenAnonExec.has(f)) {
-      errors.push(`inventory: expected anon EXECUTE on ${f}() is missing (see docs/database.md, "Grant-Fallen")`);
+      // Separate "the grant went missing" from "the function itself is gone": the
+      // second is an existence problem, not a Grant-Fallen regression, and the
+      // fix is completely different.
+      if (!allFnNames.has(f)) {
+        errors.push(`inventory: expected anon-exec function ${f}() is absent from the live function inventory (dropped or renamed?)`);
+      } else {
+        errors.push(`inventory: expected anon EXECUTE on ${f}() is missing (see docs/database.md, "Grant-Fallen")`);
+      }
     }
   }
 

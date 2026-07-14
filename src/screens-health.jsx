@@ -288,6 +288,11 @@ function ChartHover({ W, H, points, children, mode = 'x', markerColor = 'var(--a
       style={{ position: 'relative', touchAction: 'pan-y', cursor: points.length ? 'crosshair' : 'default' }}
       onPointerMove={onPoint} onPointerUp={clear} onPointerLeave={clear} onPointerCancel={clear}>
       {children}
+      {!p && points.length > 0 && (
+        <div style={{ position: 'absolute', top: 2, right: 4, pointerEvents: 'none' }}>
+          <span className="micro" style={{ color: UI.inkGhost, letterSpacing: '0.08em' }}>Drag to inspect</span>
+        </div>
+      )}
       {p && (
         <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
           <div style={{ position: 'absolute', left: leftPct + '%', top: (CHART_PLOT_TOP / H) * 100 + '%', height: (CHART_PLOT_H / H) * 100 + '%', width: 1, background: UI.hairStrong, transform: 'translateX(-0.5px)' }} />
@@ -1659,6 +1664,10 @@ function HealthScreen({ store, setStore, go, userId }) {
   // shown targets are the coach's exactly when coach macros exist.
   const coachHasMacros = LB.hasMacroTargets(coachingMacros);
   const fromCoach = coachHasMacros;
+  // The macros load from asClient (a real external coach) if there is one, else
+  // from asSelf (self-coaching). Softening the label/disclaimer for the self case
+  // avoids telling a solo user their own macros come "FROM COACH".
+  const selfCoachedMacros = fromCoach && !store.coaching?.asClient?.id;
   const dailyLogs = store.dailyLogs || [];
   const selectedLog = dailyLogs.find(l => l.date === selectedDate) || null;
 
@@ -1814,7 +1823,7 @@ function HealthScreen({ store, setStore, go, userId }) {
   );
   const targetLabel = macroTargetAvg
     ? `AVG TARGET · ${tf === '1M' ? 'LAST 30 DAYS' : 'LAST 3 MONTHS'}`
-    : `DAILY TARGETS${fromCoach ? ' · FROM COACH' : ''}`;
+    : `DAILY TARGETS${fromCoach ? (selfCoachedMacros ? ' · FROM YOUR PLAN' : ' · FROM COACH') : ''}`;
   const targetRow = (
     <div style={{ background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 6, padding: '8px 12px', marginBottom: 12 }}>
       <div style={{ display: 'flex', alignItems: 'center', marginBottom: effectiveTargets ? 2 : 0 }}>
@@ -1852,8 +1861,10 @@ function HealthScreen({ store, setStore, go, userId }) {
         </div>
       )}
       {coachHasMacros && (
-        <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1.4, marginTop: 8, paddingTop: 8, borderTop: `0.5px solid ${UI.hair}` }}>
-          These come from your coaching plan and take priority. Personal targets you set apply only without coaching macros.
+        <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1.4, marginTop: 8, paddingTop: 8, borderTop: `0.5px solid ${UI.hair}` }}>
+          {selfCoachedMacros
+            ? 'These come from your active plan and take priority. Personal targets you set apply only without them.'
+            : 'These come from your coaching plan and take priority. Personal targets you set apply only without coaching macros.'}
         </div>
       )}
     </div>
@@ -1884,7 +1895,7 @@ function HealthScreen({ store, setStore, go, userId }) {
     weight: (
       <HealthChartCard title="Weight" icon="fa-weight-scale" tf={tf} setTf={setTf} dragHandle={handle}
         headline={weightAvg != null ? `${weightAvg}${UI.unit()}` : null} sub={weightAvg != null ? 'avg' : null}>
-        <HealthLineChart series={weightSeries.data} from={weightSeries.from} to={weightSeries.to} format={v => `${v}`} step={UI.unit() === 'lbs' ? 5 : 2.5} />
+        <HealthLineChart series={weightSeries.data} from={weightSeries.from} to={weightSeries.to} format={v => `${v}${UI.unit()}`} step={UI.unit() === 'lbs' ? 5 : 2.5} />
       </HealthChartCard>
     ),
     steps: (
@@ -2093,7 +2104,7 @@ function HealthClientLogs({ clientStore }) {
     weight: (
       <HealthChartCard title="Weight" icon="fa-weight-scale" tf={tf} setTf={setTf} dragHandle={handle}
         headline={weightAvg != null ? `${weightAvg}${clientUnit}` : null} sub={weightAvg != null ? 'avg' : null}>
-        <HealthLineChart series={weightSeries.data} from={weightSeries.from} to={weightSeries.to} format={v => `${v}`} step={UI.unit() === 'lbs' ? 5 : 2.5} />
+        <HealthLineChart series={weightSeries.data} from={weightSeries.from} to={weightSeries.to} format={v => `${v}${clientUnit}`} step={clientUnit === 'lbs' ? 5 : 2.5} />
       </HealthChartCard>
     ),
     steps: (

@@ -21,7 +21,7 @@ window.WHATS_NEW = [
     date: '2026-07-14',
     title: 'The Big Tidy-Up',
     items: [
-      "✏️ Fix any set in your history, techniques and all. The session editor got a full rebuild: Drop Sets, Myo-Reps, Myo-Rep Match, AMRAP Variations and Lengthened Partials are now all fully editable after the fact, not just weight and reps. Forgot to log your drop set chain properly? Go back and fix it, round by round.",
+      "✏️ Fix any set in your history, techniques and all. The session editor got a full rebuild: Drop Sets, Myo-Reps, Myo-Rep Match, AMRAP Variations, Lengthened Partials and Weighted Stretch are now all fully editable after the fact, not just weight and reps. Forgot to log your drop set chain properly? Go back and fix it, round by round.",
       "⏱️ Rest timer stopped panicking at zero. It used to freeze the moment your rest hit 0:00. Now it just keeps counting, past zero and into the red, with a single beep to let you know time's up. No more staring at a stuck clock while you finish your conversation.",
       "🎛️ Fewer buttons, same power. The plan screen's action buttons got tidied up: Duplicate, Export and Backups now live behind one Manage button instead of cluttering the screen. Coaches get the same treatment for their own actions, tucked behind a Coach button.",
       "📤 Coaches: push a plan straight to a client, no export/import dance. Open any of your plans, hit Push to client, pick who gets it, and decide whether it goes live immediately or just lands in their list to talk through first.",

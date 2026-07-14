@@ -1086,6 +1086,7 @@ function ClientPlanTab({ store, setStore, clientStore, setClientStore, clientId,
   const [importChoiceOpen, setImportChoiceOpen] = useStateC(false);
   const [ownPlanPickerOpen, setOwnPlanPickerOpen] = useStateC(false);
   const [ownImportBusy, setOwnImportBusy] = useStateC(false);
+  const [ownImportingId, setOwnImportingId] = useStateC(null); // which plan row is mid-import
 
   // Multi-device autosave (screens-schedule.jsx's ScheduleEditScreen) stores a
   // coach's in-progress edit of a client's plan under the COACH's own account
@@ -1169,7 +1170,7 @@ function ClientPlanTab({ store, setStore, clientStore, setClientStore, clientId,
             idMap[ex.id] = newId;
             // Carry the behavior flags so imported time/cardio/bodyweight
             // exercises keep their logging mode (mirrors the own-side import).
-            newExercises.push({ id: newId, name: ex.name, tags: ex.tags || [], note: ex.note || '', category: ex.category || null, unilateral: ex.unilateral || false, equipment: ex.equipment || null, progression_reps: ex.progression_reps || null, movement_type: ex.movement_type || null, log_mode: ex.log_mode || null, no_weight_reps: ex.no_weight_reps || false, pull_bodyweight: ex.pull_bodyweight || false });
+            newExercises.push({ id: newId, name: ex.name, tags: ex.tags || [], note: ex.note || '', category: ex.category || null, unilateral: ex.unilateral || false, equipment: ex.equipment || null, progression_reps: ex.progression_reps || null, movement_type: ex.movement_type || null, log_mode: ex.log_mode || null, no_weight_reps: ex.no_weight_reps || false, pull_bodyweight: ex.pull_bodyweight || false, youtube_url: ex.youtube_url || null });
           }
         });
         const remapDays = (days) => (days || []).map(d => ({
@@ -1226,11 +1227,13 @@ function ClientPlanTab({ store, setStore, clientStore, setClientStore, clientId,
   // Same copy-and-remap as importPlan (dedupe exercises by name against the
   // CLIENT's library, fresh ids, versions dropped, 531 bumpedCycle stripped),
   // just sourced straight from the coach's own plan library instead of a
-  // parsed JSON file — no dedicated activate-now prompt, this row-level
+  // parsed JSON file, no dedicated activate-now prompt, this row-level
   // ACTIVATE button below already covers that, same as NEW PLAN and the JSON
   // import above (both just add; activation is always a separate step here).
   const importFromOwnPlan = async (sourceSch) => {
     setOwnImportBusy(true);
+    setOwnImportingId(sourceSch.id);
+    let copyName = '';
     try {
       const copy = JSON.parse(JSON.stringify(sourceSch));
       copy.id = LB.uid();
@@ -1240,6 +1243,7 @@ function ClientPlanTab({ store, setStore, clientStore, setClientStore, clientId,
       copy.is_template = false;
       delete copy.versions;
       if (copy.program_data) delete copy.program_data.bumpedCycle;
+      copyName = copy.name || '';
       const exIds = new Set();
       (copy.days || []).forEach(d => (d.items || []).forEach(it => { if (it.exId) exIds.add(it.exId); }));
       const idMap = {};
@@ -1249,7 +1253,7 @@ function ClientPlanTab({ store, setStore, clientStore, setClientStore, clientId,
         if (existing) { idMap[ex.id] = existing.id; return; }
         const newId = LB.uid();
         idMap[ex.id] = newId;
-        newExercises.push({ id: newId, name: ex.name, tags: ex.tags || [], note: ex.note || '', category: ex.category || null, unilateral: ex.unilateral || false, equipment: ex.equipment || null, progression_reps: ex.progression_reps || null, movement_type: ex.movement_type || null, log_mode: ex.log_mode || null, no_weight_reps: ex.no_weight_reps || false, pull_bodyweight: ex.pull_bodyweight || false });
+        newExercises.push({ id: newId, name: ex.name, tags: ex.tags || [], note: ex.note || '', category: ex.category || null, unilateral: ex.unilateral || false, equipment: ex.equipment || null, progression_reps: ex.progression_reps || null, movement_type: ex.movement_type || null, log_mode: ex.log_mode || null, no_weight_reps: ex.no_weight_reps || false, pull_bodyweight: ex.pull_bodyweight || false, youtube_url: ex.youtube_url || null });
       });
       copy.days = (copy.days || []).map(d => ({ ...d, id: LB.uid(), items: (d.items || []).map(it => ({ ...it, exId: idMap[it.exId] || it.exId })) }));
       if (copy.program_data && typeof copy.program_data === 'object') {
@@ -1259,20 +1263,23 @@ function ClientPlanTab({ store, setStore, clientStore, setClientStore, clientId,
       }
       if (newExercises.length) {
         const { error: exErr } = await LB.supabase.from('zane_exercises').insert(newExercises.map(ex => ({ ...ex, user_id: clientId })));
-        if (exErr) { alert(`Import failed: ${exErr.message}`); return; }
+        if (exErr) { await confirm(`Could not import "${copyName}". ${exErr.message || ''}`.trim(), { title: 'Import failed', ok: 'OK', cancel: null }); return; }
+        // Reflect the inserted exercises locally right away, so a later schedule
+        // failure plus a retry dedupes against them instead of inserting a second set.
+        setClientStore(s => ({ ...s, exercises: [...(s.exercises || []), ...newExercises] }));
       }
       const schRow = { ...copy };
       delete schRow.mode;
       const { error: schErr } = await LB.supabase.from('zane_schedules').insert({ ...schRow, user_id: clientId });
-      if (schErr) { alert(`Import failed: ${schErr.message}`); return; }
-      setClientStore(s => ({
-        ...s,
-        exercises: [...(s.exercises || []), ...newExercises],
-        schedules: [...(s.schedules || []), copy],
-      }));
+      if (schErr) { await confirm(`Could not import "${copyName}". ${schErr.message || ''}`.trim(), { title: 'Import failed', ok: 'OK', cancel: null }); return; }
+      setClientStore(s => ({ ...s, schedules: [...(s.schedules || []), copy] }));
       setOwnPlanPickerOpen(false);
+      await confirm(`Added "${copyName}" to ${clientName}'s plans.`, { title: 'Imported', ok: 'OK', cancel: null });
+    } catch (e) {
+      await confirm(`Could not import${copyName ? ` "${copyName}"` : ''}. ${e?.message || 'Please try again.'}`.trim(), { title: 'Import failed', ok: 'OK', cancel: null });
     } finally {
       setOwnImportBusy(false);
+      setOwnImportingId(null);
     }
   };
 
@@ -1310,7 +1317,7 @@ function ClientPlanTab({ store, setStore, clientStore, setClientStore, clientId,
             <i className="fa-solid fa-file-import" style={{ fontSize: 14, color: UI.inkSoft, width: 18, textAlign: 'center' }} />
             <div style={{ flex: 1, textAlign: 'left' }}>
               <div style={{ fontSize: 14, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi }}>JSON file</div>
-              <div style={{ fontSize: 12, color: UI.inkSoft, marginTop: 2, fontFamily: UI.fontUi }}>Import a plan exported from any account</div>
+              <div style={{ fontSize: 12, color: UI.inkFaint, marginTop: 2, fontFamily: UI.fontUi }}>Import a plan exported from any account</div>
             </div>
             <ChevronRight />
           </button>
@@ -1321,14 +1328,14 @@ function ClientPlanTab({ store, setStore, clientStore, setClientStore, clientId,
             <i className="fa-solid fa-clone" style={{ fontSize: 14, color: UI.inkSoft, width: 18, textAlign: 'center' }} />
             <div style={{ flex: 1, textAlign: 'left' }}>
               <div style={{ fontSize: 14, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi }}>From my own plans</div>
-              <div style={{ fontSize: 12, color: UI.inkSoft, marginTop: 2, fontFamily: UI.fontUi }}>Copy one of your plans straight into {name}'s account</div>
+              <div style={{ fontSize: 12, color: UI.inkFaint, marginTop: 2, fontFamily: UI.fontUi }}>Copy one of your plans straight into {name}'s account</div>
             </div>
             <ChevronRight />
           </button>
         </div>
       </Sheet>
 
-      {/* Own-plan picker — step 2 of "From my own plans" */}
+      {/* Own-plan picker, step 2 of "From my own plans" */}
       <Sheet open={ownPlanPickerOpen} onClose={() => { if (!ownImportBusy) setOwnPlanPickerOpen(false); }} title="Pick a plan" titleColor="var(--accent)">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {(store.schedules || []).filter(s => !s.archived).length === 0 ? (
@@ -1342,7 +1349,7 @@ function ClientPlanTab({ store, setStore, clientStore, setClientStore, clientId,
             }}>
               <div style={{ textAlign: 'left' }}>
                 <div style={{ fontSize: 14, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi }}>{s.name}</div>
-                <div style={{ fontSize: 12, color: UI.inkFaint, marginTop: 2, fontFamily: UI.fontUi }}>{(s.days || []).filter(d => (d.items || []).length > 0).length} training days</div>
+                <div style={{ fontSize: 12, color: ownImportingId === s.id ? 'var(--accent)' : UI.inkFaint, marginTop: 2, fontFamily: UI.fontUi }}>{ownImportingId === s.id ? 'Importing…' : `${(s.days || []).filter(d => (d.items || []).length > 0).length} training days`}</div>
               </div>
               <ChevronRight />
             </button>
@@ -1361,7 +1368,7 @@ function ClientPlanTab({ store, setStore, clientStore, setClientStore, clientId,
             <div style={{ flex: 1 }}>
               <div style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>{sch.name}</div>
               <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi }}>
-                {(sch.days || []).filter(d => d.items?.length > 0).length} workout days
+                {(sch.days || []).filter(d => d.items?.length > 0).length} training days
               </div>
             </div>
             <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>

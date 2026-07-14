@@ -20,12 +20,17 @@ const STANDARD_DAY_TYPES = ['PUSH','PULL','LEGS','UPPER','LOWER','FULL','ARMS','
 // settings/detail panels). These stack on top of each other (versions →
 // backups → preview → date-pickers), so `dim` lets an inner sheet skip its
 // own backdrop when a parent sheet underneath is already dimming the page.
-function MiniSheet({ zIndex = 300, dim = true, onClose, style, children }) {
+function MiniSheet({ zIndex = 300, dim = true, onClose, style, title, titleColor, children }) {
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', background: dim ? 'rgba(0,0,0,0.5)' : 'transparent' }}
       onClick={onClose}>
       <div style={{ background: UI.bg, borderRadius: '8px 8px 0 0', borderTop: `0.5px solid ${UI.hairStrong}`, padding: '22px 22px calc(22px + env(safe-area-inset-bottom, 0px))', ...style }}
         onClick={e => e.stopPropagation()}>
+        {/* Same 28px title block the Sheet primitive renders (ui.jsx), so a MiniSheet
+            heading stays locked to the canonical title spec instead of being hand-copied. */}
+        {title && (
+          <div style={{ fontFamily: UI.fontDisplay, fontSize: 28, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: titleColor || UI.ink, marginBottom: 16 }}>{title}</div>
+        )}
         {children}
       </div>
     </div>
@@ -192,18 +197,16 @@ function PlanScreen({ store, setStore, go, userId, openNewPlan }) {
                   { id: 'templates', label: 'Client Templates' },
                 ]}
                 active={planSubTab}
-                onChange={setPlanSubTab}
+                onChange={id => { setPlanSubTab(id); setPlanSearch(''); }}
                 style={{ padding: 0 }}
               />
             )}
-            {showPlanSearch && (
-              <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-                <i className="fa-solid fa-magnifying-glass" style={{ position: 'absolute', left: 12, fontSize: 12, color: UI.inkFaint, pointerEvents: 'none' }} />
-                <input value={planSearch} onChange={e => setPlanSearch(e.target.value)}
-                  placeholder={isCoach ? (planSubTab === 'templates' ? 'Search client templates' : 'Search my plans') : 'Search plans'}
-                  style={{ width: '100%', padding: '9px 12px 9px 32px', borderRadius: 6, border: `1px solid ${UI.hairStrong}`, background: UI.bgInset, color: UI.ink, fontFamily: UI.fontUi, fontSize: 14, outline: 'none' }} />
-              </div>
-            )}
+            <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+              <i className="fa-solid fa-magnifying-glass" style={{ position: 'absolute', left: 12, fontSize: 12, color: UI.inkFaint, pointerEvents: 'none' }} />
+              <input value={planSearch} onChange={e => setPlanSearch(e.target.value)}
+                placeholder={isCoach ? (planSubTab === 'templates' ? 'Search client templates' : 'Search my plans') : 'Search plans'}
+                style={{ width: '100%', padding: '9px 12px 9px 32px', borderRadius: 4, border: `1px solid ${UI.hairStrong}`, background: UI.bgInset, color: UI.ink, fontFamily: UI.fontUi, fontSize: 14, outline: 'none' }} />
+            </div>
           </div>
         )}
         {store.schedules.length === 0 && (
@@ -212,9 +215,9 @@ function PlanScreen({ store, setStore, go, userId, openNewPlan }) {
             action={<Btn data-tour="plan-new-btn" onClick={() => setNewPlanPicker(true)}>Create plan</Btn>}
             icon={ICON_CALENDAR} />
         )}
-        {store.schedules.length > 0 && store.schedules.filter(s => !s.archived && inPlanBucket(s) && matchesPlanSearch(s)).length === 0 && (
+        {store.schedules.length > 0 && store.schedules.filter(s => inPlanBucket(s) && matchesPlanSearch(s)).length === 0 && (
           <Empty title={planSearch.trim() ? 'No matches' : (planSubTab === 'templates' ? 'No client templates yet' : 'No plans here')}
-            sub={planSearch.trim() ? 'Try a different search.' : (planSubTab === 'templates' ? 'Mark a plan as a client template from its actions.' : 'All your plans are marked as client templates.')}
+            sub={planSearch.trim() ? 'Try a different search.' : (!isCoach ? 'All your plans are archived.' : (planSubTab === 'templates' ? 'Mark a plan as a client template from its actions.' : 'All your plans are marked as client templates.'))}
             icon={ICON_CALENDAR} />
         )}
         {[...store.schedules.filter(s => !s.archived && inPlanBucket(s) && matchesPlanSearch(s))].sort((a, b) => {
@@ -273,7 +276,7 @@ function PlanScreen({ store, setStore, go, userId, openNewPlan }) {
                       MESO {mesoCompletions + 1}
                     </span>
                   )}
-                  {s.mesocycle_autoregulate && (autoPending && mesoSt?.startDate ? (() => {
+                  {s.mesocycle_autoregulate && (autoPending && mesoSt?.startDate && new Date(mesoSt.startDate + 'T12:00:00') > new Date() ? (() => {
                     const d = new Date(mesoSt.startDate + 'T12:00:00');
                     const startLabel = `${d.getDate().toString().padStart(2,'0')}.${(d.getMonth()+1).toString().padStart(2,'0')}`;
                     return (
@@ -757,15 +760,27 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
   const _shotIsLight = (store.settings?.darkMode ?? 'dark') === 'light';
   const _shotDefaultStyle = { width: '75%', maxWidth: 620, opacity: _shotIsLight ? 0.10 : 0.06, filter: _shotIsLight ? 'grayscale(1)' : 'grayscale(1) brightness(3)', objectFit: 'contain' };
   const _shotCustomStyle = { width: '80%', maxWidth: 680, opacity: 0.13, objectFit: 'contain' };
-  const takeScreenshot = () => captureNodeAsPng(captureRef.current, {
-    filename: `${sch.name.replace(/[^a-z0-9]/gi, '-').toLowerCase()}-plan.png`,
-    setCapturing,
-    // The poster is intentionally wider than a phone viewport (fixed width,
-    // horizontally scrollable below). Without this, html2canvas only
-    // captures whatever width fits the current window instead of the full,
-    // wider poster.
-    fitWidth: true,
-  });
+  const takeScreenshot = async () => {
+    const res = await captureNodeAsPng(captureRef.current, {
+      filename: `${sch.name.replace(/[^a-z0-9]/gi, '-').toLowerCase()}-plan.png`,
+      setCapturing,
+      // The poster is intentionally wider than a phone viewport (fixed width,
+      // horizontally scrollable below). Without this, html2canvas only
+      // captures whatever width fits the current window instead of the full,
+      // wider poster.
+      fitWidth: true,
+    });
+    // Surface the outcome: a failed html2canvas load used to no-op silently, and
+    // the desktop download had no confirmation (the mobile share sheet is its own).
+    if (!res?.ok) {
+      await confirm(res?.reason === 'unavailable'
+        ? 'Could not build the image. Check your connection and try again.'
+        : 'Could not build the image. Please try again.',
+        { title: 'Export failed', ok: 'OK', cancel: null });
+    } else if (res.saved) {
+      await confirm('Plan image saved to your files.', { title: 'Saved', ok: 'OK', cancel: null });
+    }
+  };
   // In a non-active version no day is live, so the selected (viewed) day gets a
   // neutral highlight rather than the gold "today/active" accent.
   const selBorder = viewingActiveVersion ? UI.gold : UI.inkFaint;
@@ -808,11 +823,15 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
 
   // Moves a plan between the coach's "My Plans" and "Client Templates"
   // buckets in PlanScreen. Pure flag flip, no data migration.
-  const toggleTemplate = () => {
+  const toggleTemplate = async () => {
+    const nowTemplate = !sch.is_template; // state after the flip
     setStore(s => ({
       ...s,
       schedules: s.schedules.map(x => x.id === sch.id ? { ...x, is_template: !x.is_template } : x),
     }));
+    // The plan leaves this screen's bucket with no other visible change, so confirm
+    // the move explicitly instead of flipping a hidden flag silently.
+    await confirm(nowTemplate ? 'Moved to Client Templates.' : 'Moved to My Plans.', { title: nowTemplate ? 'Client template' : 'My plans', ok: 'OK', cancel: null });
   };
 
   const exportPlan = () => {
@@ -839,7 +858,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
 
   // Push a fresh copy of this plan into a client's own account, remapping
   // exercise ids the exact same way PlanScreen's JSON import does (dedupe by
-  // name against the CLIENT's library, copy the rest) — just applied
+  // name against the CLIENT's library, copy the rest), just applied
   // in-memory against a freshly fetched client store instead of round-
   // tripping through a file. Drops versions (a coach's version history is
   // tied to their own timeline, meaningless for a client starting fresh) and
@@ -850,7 +869,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
     try {
       const clientData = await LB.loadClientStore(client.clientId);
       let copy = JSON.parse(JSON.stringify(sch));
-      // sch.days is always the NEWEST version — if the coach is browsing an
+      // sch.days is always the NEWEST version, if the coach is browsing an
       // older/scheduled version via the version switcher, versionDays (what's
       // actually on screen) can differ. Push what's shown, not silently
       // whatever happens to be newest.
@@ -864,7 +883,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
       copy.is_template = false;
       delete copy.versions;
       if (copy.program_data) delete copy.program_data.bumpedCycle;
-      // versions[] never carry their own mode — only sch.days does — so a
+      // versions[] never carry their own mode, only sch.days does, so a
       // version predating a cycle<->weekday switch can come out of the
       // version switcher with weekday data that no longer matches copy.mode
       // (top-level, always current). Left alone, an "activate now" push of
@@ -880,7 +899,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
         if (existing) { idMap[ex.id] = existing.id; return; }
         const newId = LB.uid();
         idMap[ex.id] = newId;
-        newExercises.push({ id: newId, name: ex.name, tags: ex.tags || [], note: ex.note || '', category: ex.category || null, unilateral: ex.unilateral || false, equipment: ex.equipment || null, progression_reps: ex.progression_reps || null, movement_type: ex.movement_type || null, log_mode: ex.log_mode || null, no_weight_reps: ex.no_weight_reps || false, pull_bodyweight: ex.pull_bodyweight || false });
+        newExercises.push({ id: newId, name: ex.name, tags: ex.tags || [], note: ex.note || '', category: ex.category || null, unilateral: ex.unilateral || false, equipment: ex.equipment || null, progression_reps: ex.progression_reps || null, movement_type: ex.movement_type || null, log_mode: ex.log_mode || null, no_weight_reps: ex.no_weight_reps || false, pull_bodyweight: ex.pull_bodyweight || false, youtube_url: ex.youtube_url || null });
       });
       copy.id = LB.uid();
       copy.days = copy.days.map(d => ({ ...d, id: LB.uid(), items: (d.items || []).map(it => ({ ...it, exId: idMap[it.exId] || it.exId })) }));
@@ -890,26 +909,43 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
         if (copy.program_data.tmHistory) copy.program_data.tmHistory = remapKeys(copy.program_data.tmHistory);
       }
       const isWd = LB.isWeekdayPlan(copy), isFx = LB.isFlexPlan(copy);
-      const nextClientData = {
+      // Write the plan (and its new exercises) first, then the active-plan pointer
+      // as a second ordered write, so the pointer can never reference a schedule
+      // that failed to write. This path bypasses app.jsx's flushSync retry, so
+      // write ordering is the only safety net.
+      const withPlan = {
         ...clientData,
         exercises: [...clientData.exercises, ...newExercises],
         schedules: [...clientData.schedules, copy],
-        ...(activateNow ? {
+      };
+      await LB.syncStore(clientData, withPlan, client.clientId);
+      if (activateNow) {
+        const activated = {
+          ...withPlan,
           activeScheduleId: copy.id,
           cycleIndex: 0,
           cycleStartDate: (isWd || isFx) ? null : LB.todayISO(),
           weekPlanStartDate: isWd ? LB.todayISO() : null,
-        } : {}),
-      };
-      await LB.syncStore(clientData, nextClientData, client.clientId);
-      const threadId = await LB.getOrCreateCoachingThread(client.id, `New plan: ${copy.name}`, userId);
-      const body = activateNow
-        ? `Pushed a new plan: ${copy.name}\n\nIt's now your active plan.`
-        : `Pushed a new plan: ${copy.name}\n\nIt's in your plan list but not active yet — let's talk it through before you switch to it.`;
-      await LB.addCoachingNote(client.id, 'plan', copy.id, copy.name, body, userId, threadId);
+        };
+        await LB.syncStore(withPlan, activated, client.clientId);
+      }
+      // The plan is committed now: treat THIS as the point of success and close the
+      // flow immediately, so a later note/thread failure can never re-open the push
+      // and let a retry duplicate the plan into the client's account.
       setPushTarget(null);
       setPushOpen(false);
       setPushSuccess({ clientName: client.clientName, planName: copy.name, activated: activateNow });
+      // The coaching note is best-effort: a failure here must not surface as a push
+      // failure, since the plan already landed.
+      try {
+        const threadId = await LB.getOrCreateCoachingThread(client.id, `New plan: ${copy.name}`, userId);
+        const body = activateNow
+          ? `Pushed a new plan: ${copy.name}\n\nIt's now your active plan.`
+          : `Pushed a new plan: ${copy.name}\n\nIt's in your plan list but not active yet, let's talk it through before you switch to it.`;
+        await LB.addCoachingNote(client.id, 'plan', copy.id, copy.name, body, userId, threadId);
+      } catch (noteErr) {
+        console.warn('Plan pushed, but the coaching note could not be posted:', noteErr);
+      }
     } catch (e) {
       setPushError(e.message || 'Push failed.');
     } finally {
@@ -1246,10 +1282,11 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
         onBack={onBack || (() => go({ name: fromPlan ? 'plan' : 'home' }))}
         right={fromPlan ? (
           <div style={{ display: 'flex', gap: 8 }}>
-            <button onClick={takeScreenshot} disabled={capturing} style={{
+            <button onClick={takeScreenshot} disabled={capturing || trainingDayCount === 0}
+              aria-label="Share plan as image" title={trainingDayCount === 0 ? 'Add a training day first' : 'Share plan as image'} style={{
               background: 'transparent', border: `1px solid ${UI.hairStrong}`,
-              borderRadius: 4, padding: '5px 10px', cursor: capturing ? 'default' : 'pointer',
-              color: capturing ? UI.inkGhost : UI.inkSoft, lineHeight: 1,
+              borderRadius: 4, padding: '5px 10px', cursor: (capturing || trainingDayCount === 0) ? 'default' : 'pointer',
+              color: (capturing || trainingDayCount === 0) ? UI.inkGhost : UI.inkSoft, lineHeight: 1,
               WebkitTapHighlightColor: 'transparent',
             }}>
               {capturing ? <span style={{ fontFamily: UI.fontUi, fontSize: 10 }}>…</span> : <i className="fa-solid fa-camera" style={{ fontSize: 11 }} />}
@@ -1455,8 +1492,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
       </Sheet>
 
       {manageOpen && (
-        <MiniSheet onClose={() => setManageOpen(false)}>
-          <div style={{ fontFamily: UI.fontDisplay, fontSize: 28, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: UI.gold, marginBottom: 16 }}>Manage Plan</div>
+        <MiniSheet onClose={() => setManageOpen(false)} title="Manage Plan" titleColor={UI.gold}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             <Btn onClick={() => { setManageOpen(false); duplicate(); }} style={{ fontSize: 12 }}>Duplicate</Btn>
             <Btn kind="ghost" onClick={() => { setManageOpen(false); exportPlan(); }} style={{ fontSize: 12 }}>Export</Btn>
@@ -1466,8 +1502,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
       )}
 
       {coachOpen && (
-        <MiniSheet onClose={() => setCoachOpen(false)}>
-          <div style={{ fontFamily: UI.fontDisplay, fontSize: 28, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: UI.gold, marginBottom: 16 }}>Coach</div>
+        <MiniSheet onClose={() => setCoachOpen(false)} title="Coaching" titleColor={UI.gold}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             <Btn onClick={() => { setCoachOpen(false); setPushOpen(true); }} style={{ fontSize: 12 }}>Push to client</Btn>
             <Btn kind="ghost" onClick={() => { setCoachOpen(false); toggleTemplate(); }} style={{ fontSize: 12 }}>
@@ -1514,7 +1549,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
           )}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {(store.coaching?.asCoach || []).filter(c => c.status === 'active').map(c => (
-              <button key={c.id} onClick={() => setPushTarget(c)} disabled={pushBusy} style={{
+              <button key={c.id} onClick={() => { setPushError(''); setPushTarget(c); }} disabled={pushBusy} style={{
                 width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                 padding: '12px 14px', background: UI.bgInset, border: `0.5px solid ${UI.hair}`,
                 borderRadius: 6, cursor: pushBusy ? 'default' : 'pointer', opacity: pushBusy ? 0.6 : 1,
@@ -1530,7 +1565,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
       )}
 
       {pushTarget && (
-        <MiniSheet zIndex={400} onClose={() => { if (!pushBusy) setPushTarget(null); }}>
+        <MiniSheet zIndex={400} onClose={() => { if (!pushBusy) { setPushTarget(null); setPushError(''); } }}>
           <div className="label" style={{ color: UI.inkFaint, marginBottom: 4 }}>{pushTarget.clientName.toUpperCase()}</div>
           <div className="micro" style={{ color: UI.inkFaint, marginBottom: 18, lineHeight: 1.5, letterSpacing: '0.06em', textTransform: 'none' }}>
             Activate "{sch.name}" for them right away, or just add it to their plan list and talk it through first?
@@ -1540,8 +1575,11 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
               {pushBusy ? 'Pushing…' : 'Push & activate now'}
             </Btn>
             <Btn kind="ghost" onClick={() => pushToClient(pushTarget, false)} disabled={pushBusy}>
-              {pushBusy ? 'Pushing…' : 'Add only — talk to them first'}
+              {pushBusy ? 'Pushing…' : 'Add only, talk to them first'}
             </Btn>
+          </div>
+          <div className="micro" style={{ color: 'rgba(var(--danger-rgb),0.8)', marginTop: 10, lineHeight: 1.4, letterSpacing: '0.04em', textTransform: 'none' }}>
+            Activating replaces whatever plan they are currently on and starts a fresh cycle.
           </div>
           {pushError && <div style={{ marginTop: 10, fontSize: 12, color: 'rgba(var(--danger-rgb),0.85)' }}>{pushError}</div>}
         </MiniSheet>

@@ -1245,7 +1245,7 @@ UI.chartDomain = (dataMin, dataMax, opts) => {
 // multiple of `step`, so the axis always reads 90/95/100/105 instead of
 // wherever the padded data happened to start (91/96/101). The per-gridline
 // increment is `step` times the smallest value off a 1-2-5 ladder that keeps
-// the count near 4 (every other health chart's fixed gridline count) — a
+// the count near 4 (every other health chart's fixed gridline count), a
 // plain "always exactly `step` apart" would work for a normal few-lb swing
 // but explode into a dozen+ cramped lines for a wide (e.g. bulk/cut, "all
 // time") range; escalating to 2×/5×/10×step etc. keeps it readable while
