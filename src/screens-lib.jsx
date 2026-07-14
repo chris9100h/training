@@ -3586,9 +3586,14 @@ function SessionEditSheet({ session, duration, exercises, onClose, onSave }) {
         if (!techId) return { ...st, technique: null, drops: null };
         if (CHAIN_TECH_KINDS.includes(techId)) {
           const priorDrops = Array.isArray(st.drops) && st.drops.length ? st.drops : null;
-          const seedRound = () => ({ kg: st.kg, reps: st.reps, ...(techId === 'amrap_variations' ? { label: exName || '' } : {}) });
+          // Technique rounds carry a single rep count. On a unilateral set the rep
+          // data moves into the rounds (kg x reps), so seed from the set's effective
+          // reps (min of L/R) and clear repsL/repsR, matching the shape the live
+          // logger writes for a technique'd unilateral set.
+          const seedReps = st.reps ?? ((st.repsL != null || st.repsR != null) ? Math.min(st.repsL ?? st.repsR ?? 0, st.repsR ?? st.repsL ?? 0) : null);
+          const seedRound = () => ({ kg: st.kg, reps: seedReps, ...(techId === 'amrap_variations' ? { label: exName || '' } : {}) });
           const drops = priorDrops || [seedRound(), seedRound()];
-          return { ...st, technique: techId, drops, kg: drops[0].kg, reps: drops[0].reps };
+          return { ...st, technique: techId, drops, kg: drops[0].kg, reps: drops[0].reps, repsL: null, repsR: null };
         }
         const prior = (st.drops && !Array.isArray(st.drops)) ? st.drops : {};
         const drops = techId === 'lengthened_partial'
@@ -3694,12 +3699,14 @@ function SessionEditSheet({ session, duration, exercises, onClose, onSave }) {
             const ex = exercises?.find(x => x.id === e.exId);
             const exName = ex?.name ?? e.name;
             const isUnilateral = !!ex?.unilateral || e.sets.some(st => st.repsL != null || st.repsR != null);
-            // Techniques only ever apply to logged weight/reps sets, never
-            // warmups, unilateral (drop/myo/AMRAP have no repsL/repsR
-            // support anywhere in the app), or checkbox/time-mode exercises,
-            // matching the live training screen's own arming rules.
+            // Techniques apply to any logged weight/reps set, never warmups or
+            // checkbox/time-mode exercises. Unilateral is fine too: the live
+            // training screen allows it (its Intensity button only excludes
+            // cardio/time/checkbox), and technique rounds carry a single rep count
+            // each, so a chain technique on a unilateral set logs its rounds as
+            // kg x reps and clears repsL/repsR when it arms (see setTechnique).
             const logMode = LB.exerciseLogMode(ex);
-            const techEligible = !isUnilateral && logMode !== 'checkbox' && logMode !== 'time';
+            const techEligible = logMode !== 'checkbox' && logMode !== 'time';
             const warmupOpen = !!openWarmups[eIdx];
             // Split by warmup while keeping each set's real index (sIdx) into
             // e.sets, every mutation fn below is keyed on that index, not on
