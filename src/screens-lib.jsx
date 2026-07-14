@@ -3690,19 +3690,42 @@ function SessionEditSheet({ session, duration, exercises, onClose, onSave }) {
             // matching the live training screen's own arming rules.
             const logMode = LB.exerciseLogMode(ex);
             const techEligible = !isUnilateral && logMode !== 'checkbox' && logMode !== 'time';
+            // One card per exercise (all its sets stacked inside), zebra-toned
+            // against its neighbors so a long session visually separates into
+            // exercises at a glance instead of reading as one flat set list.
+            const zebraBg = eIdx % 2 === 0 ? UI.bgInset : UI.bg;
             return (
-              <div key={eIdx}>
-                <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>{exName.toUpperCase()}</div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div key={eIdx} style={{
+                background: zebraBg, borderRadius: 8, overflow: 'hidden',
+                border: `1px solid ${UI.hairStrong}`, borderLeft: `3px solid rgba(var(--accent-rgb),0.5)`,
+              }}>
+                <div className="micro-gold" style={{ padding: '12px 14px 8px' }}>{exName.toUpperCase()}</div>
+                <div style={{ display: 'flex', flexDirection: 'column' }}>
                   {e.sets.map((st, sIdx) => {
                     const isEmpty = st.kg == null && st.reps == null && st.repsL == null && st.repsR == null;
                     const isChain = CHAIN_TECH_KINDS.includes(st.technique);
                     const isStandalone = STANDALONE_TECH_KINDS.includes(st.technique);
                     const rowEligible = techEligible && !st.warmup && !st.skipped;
+                    const warmupNum = st.warmup ? e.sets.slice(0, sIdx + 1).filter(x => x.warmup).length : 0;
+                    const workingNum = !st.warmup ? e.sets.slice(0, sIdx + 1).filter(x => !x.warmup).length : 0;
                     return (
-                      <Frame key={sIdx} accent={!!st.technique} padding={10} style={{ opacity: st.skipped ? 0.5 : 1 }}>
+                      <div key={sIdx} style={{
+                        padding: '10px 14px',
+                        borderTop: sIdx > 0 ? `0.5px solid ${UI.hair}` : 'none',
+                        background: st.technique ? 'rgba(var(--accent-rgb),0.06)' : 'transparent',
+                        opacity: st.skipped ? 0.5 : st.warmup ? 0.7 : 1,
+                      }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <span className="num" style={{ width: 20, fontSize: 11, color: UI.inkFaint, flexShrink: 0 }}>{sIdx + 1}</span>
+                          <div style={{
+                            width: 24, height: 24, borderRadius: 4, flexShrink: 0,
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            border: `1px solid ${st.warmup ? UI.hair : UI.hairStrong}`,
+                            fontFamily: UI.fontNum, fontSize: st.warmup ? 8 : 11, fontWeight: 500,
+                            color: st.warmup ? UI.inkGhost : UI.inkFaint,
+                          }}>{st.warmup ? `W${warmupNum}` : workingNum}</div>
+                          {st.warmup && (
+                            <span className="micro" style={{ color: UI.inkGhost, flexShrink: 0 }}>WARMUP</span>
+                          )}
                           {st.skipped ? (
                             <>
                               <span className="num" style={{ flex: 1, fontSize: 12, color: UI.inkFaint }}>skipped</span>
@@ -3762,7 +3785,7 @@ function SessionEditSheet({ session, duration, exercises, onClose, onSave }) {
                         {rowEligible && isStandalone && (
                           <StandaloneTechEditor st={st} kind={st.technique} onPatch={patch => patchStandalone(eIdx, sIdx, patch)} />
                         )}
-                      </Frame>
+                      </div>
                     );
                   })}
                 </div>
