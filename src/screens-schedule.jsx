@@ -799,7 +799,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
     setPushError('');
     try {
       const clientData = await LB.loadClientStore(client.clientId);
-      const copy = JSON.parse(JSON.stringify(sch));
+      let copy = JSON.parse(JSON.stringify(sch));
       // sch.days is always the NEWEST version — if the coach is browsing an
       // older/scheduled version via the version switcher, versionDays (what's
       // actually on screen) can differ. Push what's shown, not silently
@@ -808,6 +808,13 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
       copy.archived = false;
       delete copy.versions;
       if (copy.program_data) delete copy.program_data.bumpedCycle;
+      // versions[] never carry their own mode — only sch.days does — so a
+      // version predating a cycle<->weekday switch can come out of the
+      // version switcher with weekday data that no longer matches copy.mode
+      // (top-level, always current). Left alone, an "activate now" push of
+      // that version resolves to zero days for every weekday client-side.
+      // Same self-heal loadFromSupabase runs on every schedule row it loads.
+      copy = LB.healScheduleWeekdays(copy);
       const exIds = new Set();
       copy.days.forEach(d => (d.items || []).forEach(it => { if (it.exId) exIds.add(it.exId); }));
       const idMap = {};
