@@ -464,7 +464,7 @@ function LibraryScreen({ store, setStore, go, userId }) {
       {dbSeed && <ExerciseCreator seed={dbSeed} onClose={() => setDbSeed(null)} store={store} setStore={setStore} onCreated={() => setAddedSysIds(prev => new Set(prev).add(dbSeed.id))} />}
 
       {filtersOpen && (
-        <Sheet open={true} onClose={() => setFiltersOpen(false)} title="Filter">
+        <Sheet open={true} onClose={() => setFiltersOpen(false)} title="Filter" titleColor="var(--accent)">
           <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
             <div>
               <GoldSectionLabel style={{ color: UI.gold }}>MUSCLE GROUP</GoldSectionLabel>
@@ -2529,7 +2529,7 @@ function HistoryScreen({ store, setStore, go, userId, initialTab }) {
         const selWrap = { position: 'relative' };
         const selChevron = { position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', fontSize: 10, color: UI.inkFaint };
         return (
-          <Sheet open={true} onClose={() => setFiltersOpen(false)} title="Filter">
+          <Sheet open={true} onClose={() => setFiltersOpen(false)} title="Filter" titleColor="var(--accent)">
             <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
               <div>
                 <GoldSectionLabel style={{ color: UI.gold }}>PLAN</GoldSectionLabel>

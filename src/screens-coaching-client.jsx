@@ -1301,7 +1301,7 @@ function ClientPlanTab({ store, setStore, clientStore, setClientStore, clientId,
 
       {/* Import source picker: a JSON file, or straight from the coach's own
           plan library (skips the export/re-import round trip). */}
-      <Sheet open={importChoiceOpen} onClose={() => setImportChoiceOpen(false)} title="Import plan">
+      <Sheet open={importChoiceOpen} onClose={() => setImportChoiceOpen(false)} title="Import plan" titleColor="var(--accent)">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <button
             onClick={() => { setImportChoiceOpen(false); importRef.current?.click(); }}
@@ -1329,7 +1329,7 @@ function ClientPlanTab({ store, setStore, clientStore, setClientStore, clientId,
       </Sheet>
 
       {/* Own-plan picker — step 2 of "From my own plans" */}
-      <Sheet open={ownPlanPickerOpen} onClose={() => { if (!ownImportBusy) setOwnPlanPickerOpen(false); }} title="Pick a plan">
+      <Sheet open={ownPlanPickerOpen} onClose={() => { if (!ownImportBusy) setOwnPlanPickerOpen(false); }} title="Pick a plan" titleColor="var(--accent)">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {(store.schedules || []).filter(s => !s.archived).length === 0 ? (
             <div style={{ color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13, padding: '12px 14px' }}>You have no plans of your own yet.</div>

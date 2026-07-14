@@ -3368,7 +3368,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
           go({ name: 'coaching', initialClientTab: 'checkin' });
         const btnStyle = { width: '100%', display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 6, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' };
         return (
-          <Sheet open={checkinPickerOpen} onClose={() => setCheckinPickerOpen(false)} title="Which check-in?">
+          <Sheet open={checkinPickerOpen} onClose={() => setCheckinPickerOpen(false)} title="Which check-in?" titleColor="var(--accent)">
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {asClient?.status === 'active' && (
                 <button onClick={() => { setCheckinPickerOpen(false); navCheckinCoach(); }} style={btnStyle}>
@@ -3396,7 +3396,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       })()}
 
       {/* Workout sub-picker: From plan | Freestyle */}
-      <Sheet open={workoutSubOpen} onClose={() => setWorkoutSubOpen(false)} title="Start workout">
+      <Sheet open={workoutSubOpen} onClose={() => setWorkoutSubOpen(false)} title="Start workout" titleColor="var(--accent)">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {sch && (
             <button onClick={() => { setWorkoutSubOpen(false); setBonusDayPickerOpen(true); }} style={{
@@ -3426,7 +3426,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       </Sheet>
 
       {/* Freestyle sub-picker: Empty | From template */}
-      <Sheet open={freestyleSubOpen} onClose={() => setFreestyleSubOpen(false)} title="Freestyle">
+      <Sheet open={freestyleSubOpen} onClose={() => setFreestyleSubOpen(false)} title="Freestyle" titleColor="var(--accent)">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <button onClick={startFreestyleSession} style={{
             width: '100%', display: 'flex', alignItems: 'center', gap: 12,
@@ -3473,7 +3473,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       </Sheet>
 
       {/* Bonus day picker — training days from the active schedule */}
-      <Sheet open={bonusDayPickerOpen} onClose={() => setBonusDayPickerOpen(false)} title="Pick a day">
+      <Sheet open={bonusDayPickerOpen} onClose={() => setBonusDayPickerOpen(false)} title="Pick a day" titleColor="var(--accent)">
         <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5, marginBottom: 14 }}>
           You choose at the end whether this replaces a scheduled day or counts as extra.
         </div>
@@ -3538,7 +3538,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       </Sheet>
 
       {/* Backlog day picker when multiple missed sessions */}
-      <Sheet open={backlogPickerOpen} onClose={() => setBacklogPickerOpen(false)} title="Which session?">
+      <Sheet open={backlogPickerOpen} onClose={() => setBacklogPickerOpen(false)} title="Which session?" titleColor="var(--accent)">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {allMissedDays.map(m => (
             <button key={m.dateKey} onClick={() => startBacklogSession(m)} style={{

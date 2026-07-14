@@ -6251,7 +6251,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       </Sheet>
 
       {/* note type picker */}
-      <Sheet open={notePicker} onClose={() => setNotePicker(false)} title="Which note?">
+      <Sheet open={notePicker} onClose={() => setNotePicker(false)} title="Which note?" titleColor="var(--accent)">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           <button onClick={() => { setNotePicker(false); setSessionNoteOpen(true); }} style={{
             background: UI.bgInset, border: `1px solid ${UI.hair}`, borderRadius: 6,
@@ -6276,7 +6276,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           resets to root when the sheet closes, so it never reopens mid-drill. */}
       <Sheet open={intensityOpen} onClose={() => { setIntensityOpen(false); setIntensityPage(null); }}
         title={intensityPage === 'chained' ? 'Chained' : intensityPage === 'standalone' ? 'Standalone' : 'Intensity'}
-        accent>
+        titleColor="var(--accent)" accent>
         {(() => {
           // Exactly one intensity technique can be "in flight" at a time —
           // picking one always clears any other left unfinished (e.g. the
@@ -6872,7 +6872,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
       {/* superset-link modal (from Intensity): step 1 existing-vs-new, step 2 pick existing */}
       {supersetLinkData && (
-        <Sheet open={true} onClose={() => setSupersetLinkData(null)} title={supersetMode === 'giant' ? 'Giant Set' : 'Superset'} accent>
+        <Sheet open={true} onClose={() => setSupersetLinkData(null)} title={supersetMode === 'giant' ? 'Giant Set' : 'Superset'} titleColor="var(--accent)" accent>
           {!supersetLinkData.picking ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
               <div style={{ fontFamily: UI.fontUi, fontSize: 14, color: UI.inkSoft, lineHeight: 1.5 }}>
@@ -7079,7 +7079,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
       {/* superset modal — step 1: ask yes/no; step 2: pick exercise to link */}
       {addSupersetData && (
-        <Sheet open={true} onClose={() => confirmAdd(null)} title="Add exercise">
+        <Sheet open={true} onClose={() => confirmAdd(null)} title="Add exercise" titleColor="var(--accent)">
           {!addSupersetData.picking ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
               <div style={{ fontFamily: UI.fontUi, fontSize: 14, color: UI.inkSoft, lineHeight: 1.5 }}>
@@ -7476,7 +7476,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           exercise's Joint check, Pump & Volume) to actually revise. Opened
           from the small square button in the footer nav (see "Footer nav"
           below). */}
-      <Sheet open={mesoRecapOpen} onClose={() => setMesoRecapOpen(false)} title="Session feedback">
+      <Sheet open={mesoRecapOpen} onClose={() => setMesoRecapOpen(false)} title="Session feedback" titleColor="var(--accent)">
         <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: 1.5 }}>
           Tap a muscle group to review and change its feedback — everything stays editable until you finish the session.
         </div>
@@ -7516,7 +7516,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           </button>
         );
         return (
-          <Sheet open={!!mesoRecapDetailMuscle} onClose={() => setMesoRecapDetailMuscle(null)} title={mesoRecapDetailMuscle ? `${mesoRecapDetailMuscle} feedback` : 'Feedback'}>
+          <Sheet open={!!mesoRecapDetailMuscle} onClose={() => setMesoRecapDetailMuscle(null)} title={mesoRecapDetailMuscle ? `${mesoRecapDetailMuscle} feedback` : 'Feedback'} titleColor="var(--accent)">
             {!!detailGroup?.jointRows.length && (<>
               <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>JOINT FEEDBACK</div>
               <div className="knurl" style={{ marginBottom: 10 }} />

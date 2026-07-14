@@ -2568,7 +2568,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
           normal day-type flow) or becomes a Wendler main lift (its own day that
           waves and bumps a Training Max). Non-531 plans skip this and go
           straight to the day-type picker. */}
-      <Sheet open={addDayChoice} onClose={() => setAddDayChoice(false)} title="Add day">
+      <Sheet open={addDayChoice} onClose={() => setAddDayChoice(false)} title="Add day" titleColor="var(--accent)">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.6 }}>
             How should this day progress?
@@ -2631,7 +2631,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
         })()}
       </Sheet>
 
-      <Sheet open={modifiersOpen} onClose={() => setModifiersOpen(false)} title="Options">
+      <Sheet open={modifiersOpen} onClose={() => setModifiersOpen(false)} title="Options" titleColor="var(--accent)">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
 
           {!isWeekday && (
@@ -2906,7 +2906,7 @@ function DayTypePicker({ store, setStore, title, onClose, onPick, onImport, hide
   };
 
   return (
-    <Sheet open={true} onClose={onClose} title={title}>
+    <Sheet open={true} onClose={onClose} title={title} titleColor="var(--accent)">
       <span className="label">Standard</span>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, margin: '8px 0 18px' }}>
         {STANDARD_DAY_TYPES.filter(t => !(hideRest && t === 'REST')).map(t => (
@@ -3073,7 +3073,7 @@ function DayCopyPicker({ store, schedule, currentDayId, onClose, onCopy, multiSe
 
   if (!selectedPlan) {
     return (
-      <Sheet open={true} onClose={onClose} title="Import exercises from">
+      <Sheet open={true} onClose={onClose} title="Import exercises from" titleColor="var(--accent)">
         {templates.length > 0 && (
           <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
             {[['plans', 'Plans'], ['templates', 'Templates']].map(([key, label]) => (
