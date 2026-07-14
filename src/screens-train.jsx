@@ -7123,14 +7123,21 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               color: UI.inkSoft, borderRadius: 6, cursor: 'pointer',
               fontSize: 11, letterSpacing: '0.12em', textTransform: 'uppercase', fontFamily: UI.fontUi, fontWeight: 500,
             }}>Skip</button>
-            <button onClick={() => persistRestStart(restStart - 30000, activeRestDef)} style={{
+            {/* persistRestStart always (re)schedules a push for the adjusted
+                finish time, clamped to now if that time is already past —
+                once overrun, either button would just re-fire the "rest
+                done" push instantly. Adjusting a rest that's already over
+                doesn't mean anything anyway, so disable both instead. */}
+            <button disabled={restExpired} onClick={() => persistRestStart(restStart - 30000, activeRestDef)} style={{
               flex: 1, padding: '12px 0', background: 'transparent', border: `1px solid ${UI.hairStrong}`,
-              color: UI.inkSoft, borderRadius: 6, cursor: 'pointer',
+              color: restExpired ? UI.inkGhost : UI.inkSoft, borderRadius: 6, cursor: restExpired ? 'default' : 'pointer',
+              opacity: restExpired ? 0.4 : 1,
               fontSize: 11, letterSpacing: '0.12em', textTransform: 'uppercase', fontFamily: UI.fontUi, fontWeight: 500,
             }}>−30s</button>
-            <button onClick={() => persistRestStart(restStart + 30000, activeRestDef)} style={{
+            <button disabled={restExpired} onClick={() => persistRestStart(restStart + 30000, activeRestDef)} style={{
               flex: 1, padding: '12px 0', background: 'transparent', border: `1px solid ${UI.hairStrong}`,
-              color: UI.inkSoft, borderRadius: 6, cursor: 'pointer',
+              color: restExpired ? UI.inkGhost : UI.inkSoft, borderRadius: 6, cursor: restExpired ? 'default' : 'pointer',
+              opacity: restExpired ? 0.4 : 1,
               fontSize: 11, letterSpacing: '0.12em', textTransform: 'uppercase', fontFamily: UI.fontUi, fontWeight: 500,
             }}>+30s</button>
           </div>
