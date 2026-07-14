@@ -71,6 +71,9 @@ function PlanScreen({ store, setStore, go, userId, openNewPlan }) {
   const [planSearch, setPlanSearch] = useStateS('');
   const inPlanBucket = s => !isCoach || (planSubTab === 'templates' ? !!s.is_template : !s.is_template);
   const matchesPlanSearch = s => !planSearch.trim() || s.name.toLowerCase().includes(planSearch.trim().toLowerCase());
+  // A non-coach user's list has no sub-tabs to split it up, so only bother
+  // with a search box once they actually have enough plans for it to help.
+  const showPlanSearch = isCoach || store.schedules.filter(s => !s.archived).length > 3;
   // Home's "Create plan" CTA (no-plan state) routes here with openNewPlan so it
   // opens the same Templates/Custom fork the + button does, instead of jumping
   // straight into the wizard.
@@ -180,23 +183,27 @@ function PlanScreen({ store, setStore, go, userId, openNewPlan }) {
         onChange={id => { if (id === 'lib') go({ name: 'lib' }); else if (id === 'cardio') go({ name: 'cardio-plans' }); }}
       />
       <div style={{ padding: '14px 22px 18px', display: 'flex', flexDirection: 'column', gap: 12 }}>
-        {isCoach && (
+        {showPlanSearch && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <SubTabBar
-              tabs={[
-                { id: 'mine', label: 'My Plans' },
-                { id: 'templates', label: 'Client Templates' },
-              ]}
-              active={planSubTab}
-              onChange={setPlanSubTab}
-              style={{ padding: 0 }}
-            />
-            <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-              <i className="fa-solid fa-magnifying-glass" style={{ position: 'absolute', left: 12, fontSize: 12, color: UI.inkFaint, pointerEvents: 'none' }} />
-              <input value={planSearch} onChange={e => setPlanSearch(e.target.value)}
-                placeholder={planSubTab === 'templates' ? 'Search client templates' : 'Search my plans'}
-                style={{ width: '100%', padding: '9px 12px 9px 32px', borderRadius: 6, border: `1px solid ${UI.hairStrong}`, background: UI.bgInset, color: UI.ink, fontFamily: UI.fontUi, fontSize: 14, outline: 'none' }} />
-            </div>
+            {isCoach && (
+              <SubTabBar
+                tabs={[
+                  { id: 'mine', label: 'My Plans' },
+                  { id: 'templates', label: 'Client Templates' },
+                ]}
+                active={planSubTab}
+                onChange={setPlanSubTab}
+                style={{ padding: 0 }}
+              />
+            )}
+            {showPlanSearch && (
+              <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                <i className="fa-solid fa-magnifying-glass" style={{ position: 'absolute', left: 12, fontSize: 12, color: UI.inkFaint, pointerEvents: 'none' }} />
+                <input value={planSearch} onChange={e => setPlanSearch(e.target.value)}
+                  placeholder={isCoach ? (planSubTab === 'templates' ? 'Search client templates' : 'Search my plans') : 'Search plans'}
+                  style={{ width: '100%', padding: '9px 12px 9px 32px', borderRadius: 6, border: `1px solid ${UI.hairStrong}`, background: UI.bgInset, color: UI.ink, fontFamily: UI.fontUi, fontSize: 14, outline: 'none' }} />
+              </div>
+            )}
           </div>
         )}
         {store.schedules.length === 0 && (
