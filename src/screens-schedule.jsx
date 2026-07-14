@@ -953,15 +953,6 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
 
   const isCoachViewer = (store.coaching?.asCoach || []).some(c => c.status === 'active');
 
-  // Row-button style for the Manage/Coach menu sheets — matches the client
-  // picker rows in the Push to client sheet below.
-  const menuRowStyle = {
-    width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-    padding: '12px 14px', background: UI.bgInset, border: `0.5px solid ${UI.hair}`,
-    borderRadius: 6, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
-  };
-  const menuRowLabelStyle = { fontSize: 14, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi };
-
   const planActions = fromPlan && (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%' }}>
       {!isActivePlan && <Btn kind="ghost" onClick={activate} style={{ fontSize: 12 }}>Activate</Btn>}
@@ -1458,42 +1449,21 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
 
       {manageOpen && (
         <MiniSheet onClose={() => setManageOpen(false)}>
-          <div className="label" style={{ color: UI.inkFaint, marginBottom: 4 }}>MANAGE PLAN</div>
-          <div className="micro" style={{ color: UI.inkFaint, marginBottom: 16, lineHeight: 1.5, letterSpacing: '0.06em', textTransform: 'none' }}>
-            Duplicate, export, or browse automatic backups of this plan.
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <button onClick={() => { setManageOpen(false); duplicate(); }} style={menuRowStyle}>
-              <span style={menuRowLabelStyle}>Duplicate</span>
-              <ChevronRight />
-            </button>
-            <button onClick={() => { setManageOpen(false); exportPlan(); }} style={menuRowStyle}>
-              <span style={menuRowLabelStyle}>Export</span>
-              <ChevronRight />
-            </button>
-            <button onClick={() => { setManageOpen(false); openBackupSheet(); }} style={menuRowStyle}>
-              <span style={menuRowLabelStyle}>Backups</span>
-              <ChevronRight />
-            </button>
+          <div className="label" style={{ color: UI.inkFaint, marginBottom: 8 }}>MANAGE PLAN</div>
+          <div>
+            <NavRow label="Duplicate" first onTap={() => { setManageOpen(false); duplicate(); }} />
+            <NavRow label="Export" onTap={() => { setManageOpen(false); exportPlan(); }} />
+            <NavRow label="Backups" onTap={() => { setManageOpen(false); openBackupSheet(); }} />
           </div>
         </MiniSheet>
       )}
 
       {coachOpen && (
         <MiniSheet onClose={() => setCoachOpen(false)}>
-          <div className="label" style={{ color: UI.inkFaint, marginBottom: 4 }}>COACH</div>
-          <div className="micro" style={{ color: UI.inkFaint, marginBottom: 16, lineHeight: 1.5, letterSpacing: '0.06em', textTransform: 'none' }}>
-            Push this plan to a client, or move it between My Plans and Client Templates.
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <button onClick={() => { setCoachOpen(false); setPushOpen(true); }} style={menuRowStyle}>
-              <span style={menuRowLabelStyle}>Push to client</span>
-              <ChevronRight />
-            </button>
-            <button onClick={() => { setCoachOpen(false); toggleTemplate(); }} style={menuRowStyle}>
-              <span style={menuRowLabelStyle}>{sch.is_template ? 'Move to My Plans' : 'Mark as client template'}</span>
-              <ChevronRight />
-            </button>
+          <div className="label" style={{ color: UI.inkFaint, marginBottom: 8 }}>COACH</div>
+          <div>
+            <NavRow label="Push to client" first onTap={() => { setCoachOpen(false); setPushOpen(true); }} />
+            <NavRow label={sch.is_template ? 'Move to My Plans' : 'Mark as client template'} onTap={() => { setCoachOpen(false); toggleTemplate(); }} />
           </div>
         </MiniSheet>
       )}
