@@ -1449,7 +1449,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
 
       {manageOpen && (
         <MiniSheet onClose={() => setManageOpen(false)}>
-          <div className="display" style={{ fontSize: 20, color: UI.gold, marginBottom: 14 }}>Manage Plan</div>
+          <div style={{ fontFamily: UI.fontDisplay, fontSize: 28, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: UI.gold, marginBottom: 16 }}>Manage Plan</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             <Btn onClick={() => { setManageOpen(false); duplicate(); }} style={{ fontSize: 12 }}>Duplicate</Btn>
             <Btn kind="ghost" onClick={() => { setManageOpen(false); exportPlan(); }} style={{ fontSize: 12 }}>Export</Btn>
@@ -1460,7 +1460,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
 
       {coachOpen && (
         <MiniSheet onClose={() => setCoachOpen(false)}>
-          <div className="display" style={{ fontSize: 20, color: UI.gold, marginBottom: 14 }}>Coach</div>
+          <div style={{ fontFamily: UI.fontDisplay, fontSize: 28, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: UI.gold, marginBottom: 16 }}>Coach</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             <Btn onClick={() => { setCoachOpen(false); setPushOpen(true); }} style={{ fontSize: 12 }}>Push to client</Btn>
             <Btn kind="ghost" onClick={() => { setCoachOpen(false); toggleTemplate(); }} style={{ fontSize: 12 }}>
