@@ -1235,6 +1235,9 @@ function ClientPlanTab({ store, setStore, clientStore, setClientStore, clientId,
       const copy = JSON.parse(JSON.stringify(sourceSch));
       copy.id = LB.uid();
       copy.archived = false;
+      // My Plans / Client Templates is a bucket on the coach's own Plan tab;
+      // meaningless once the plan lands in the client's account.
+      copy.is_template = false;
       delete copy.versions;
       if (copy.program_data) delete copy.program_data.bumpedCycle;
       const exIds = new Set();

@@ -109,7 +109,8 @@ CREATE TABLE public.zane_schedules (
   mesocycle_autoregulate boolean NOT NULL DEFAULT false,
   mesocycle_autoregulate_mode text,
   program_type text,
-  program_data jsonb
+  program_data jsonb,
+  is_template boolean NOT NULL DEFAULT false
 );
 
 CREATE TABLE public.zane_sessions (

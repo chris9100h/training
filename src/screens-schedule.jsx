@@ -63,6 +63,14 @@ function PlanScreen({ store, setStore, go, userId, openNewPlan }) {
   const [newPlanPicker, setNewPlanPicker] = useStateS(false);
   const [confirmEl, confirm] = useConfirm();
   const importRef = React.useRef(null);
+  // Coaches split their own Plan tab into "My Plans" (their own training) vs
+  // "Client Templates" (plans built to push out) so it doesn't turn into one
+  // giant list once a coach has pushed dozens of plans to clients.
+  const isCoach = (store.coaching?.asCoach || []).some(c => c.status === 'active');
+  const [planSubTab, setPlanSubTab] = useStateS('mine');
+  const [planSearch, setPlanSearch] = useStateS('');
+  const inPlanBucket = s => !isCoach || (planSubTab === 'templates' ? !!s.is_template : !s.is_template);
+  const matchesPlanSearch = s => !planSearch.trim() || s.name.toLowerCase().includes(planSearch.trim().toLowerCase());
   // Home's "Create plan" CTA (no-plan state) routes here with openNewPlan so it
   // opens the same Templates/Custom fork the + button does, instead of jumping
   // straight into the wizard.
@@ -172,13 +180,37 @@ function PlanScreen({ store, setStore, go, userId, openNewPlan }) {
         onChange={id => { if (id === 'lib') go({ name: 'lib' }); else if (id === 'cardio') go({ name: 'cardio-plans' }); }}
       />
       <div style={{ padding: '14px 22px 18px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {isCoach && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <SubTabBar
+              tabs={[
+                { id: 'mine', label: 'My Plans' },
+                { id: 'templates', label: 'Client Templates' },
+              ]}
+              active={planSubTab}
+              onChange={setPlanSubTab}
+              style={{ padding: 0 }}
+            />
+            <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+              <i className="fa-solid fa-magnifying-glass" style={{ position: 'absolute', left: 12, fontSize: 12, color: UI.inkFaint, pointerEvents: 'none' }} />
+              <input value={planSearch} onChange={e => setPlanSearch(e.target.value)}
+                placeholder={planSubTab === 'templates' ? 'Search client templates' : 'Search my plans'}
+                style={{ width: '100%', padding: '9px 12px 9px 32px', borderRadius: 6, border: `1px solid ${UI.hairStrong}`, background: UI.bgInset, color: UI.ink, fontFamily: UI.fontUi, fontSize: 14, outline: 'none' }} />
+            </div>
+          </div>
+        )}
         {store.schedules.length === 0 && (
           <Empty title="No plans yet"
             sub="Create a training plan to start sessions."
             action={<Btn data-tour="plan-new-btn" onClick={() => setNewPlanPicker(true)}>Create plan</Btn>}
             icon={ICON_CALENDAR} />
         )}
-        {[...store.schedules.filter(s => !s.archived)].sort((a, b) => {
+        {store.schedules.length > 0 && store.schedules.filter(s => !s.archived && inPlanBucket(s) && matchesPlanSearch(s)).length === 0 && (
+          <Empty title={planSearch.trim() ? 'No matches' : (planSubTab === 'templates' ? 'No client templates yet' : 'No plans here')}
+            sub={planSearch.trim() ? 'Try a different search.' : (planSubTab === 'templates' ? 'Mark a plan as a client template from its actions.' : 'All your plans are marked as client templates.')}
+            icon={ICON_CALENDAR} />
+        )}
+        {[...store.schedules.filter(s => !s.archived && inPlanBucket(s) && matchesPlanSearch(s))].sort((a, b) => {
           if (a.id === store.activeScheduleId) return -1;
           if (b.id === store.activeScheduleId) return 1;
           return 0;
@@ -324,7 +356,7 @@ function PlanScreen({ store, setStore, go, userId, openNewPlan }) {
           );
         })}
         {(() => {
-          const archived = store.schedules.filter(s => s.archived);
+          const archived = store.schedules.filter(s => s.archived && inPlanBucket(s) && matchesPlanSearch(s));
           if (!archived.length) return null;
           return (
             <>
@@ -765,6 +797,15 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
     go({ name: 'plan-view', scheduleId: copy.id, fromPlan: true });
   };
 
+  // Moves a plan between the coach's "My Plans" and "Client Templates"
+  // buckets in PlanScreen. Pure flag flip, no data migration.
+  const toggleTemplate = () => {
+    setStore(s => ({
+      ...s,
+      schedules: s.schedules.map(x => x.id === sch.id ? { ...x, is_template: !x.is_template } : x),
+    }));
+  };
+
   const exportPlan = () => {
     const exIds = new Set();
     versionDays.forEach(d => d.items.forEach(it => { if (it.exId) exIds.add(it.exId); }));
@@ -806,6 +847,12 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
       // whatever happens to be newest.
       copy.days = JSON.parse(JSON.stringify(versionDays));
       copy.archived = false;
+      // My Plans / Client Templates is a bucket on the COACH's own Plan tab —
+      // meaningless once the plan lands in the client's account, and the
+      // client isn't a coach so it would never surface there anyway. Reset it
+      // so a pushed "client template" doesn't carry the flag along for no
+      // reason.
+      copy.is_template = false;
       delete copy.versions;
       if (copy.program_data) delete copy.program_data.bumpedCycle;
       // versions[] never carry their own mode — only sch.days does — so a
@@ -902,6 +949,8 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
     setVerIdx(newIdx >= 0 ? newIdx : 0);
   };
 
+  const isCoachViewer = (store.coaching?.asCoach || []).some(c => c.status === 'active');
+
   const planActions = fromPlan && (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%' }}>
       {!isActivePlan && <Btn kind="ghost" onClick={activate} style={{ fontSize: 12 }}>Activate</Btn>}
@@ -920,8 +969,13 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
         <Btn kind="ghost" onClick={exportPlan} style={{ flex: 1, fontSize: 12 }}>Export</Btn>
         <Btn kind="ghost" onClick={openBackupSheet} style={{ flex: 1, fontSize: 12 }}>Backups</Btn>
       </div>
-      {(store.coaching?.asCoach || []).some(c => c.status === 'active') && (
+      {isCoachViewer && (
         <Btn kind="ghost" onClick={() => setPushOpen(true)} style={{ fontSize: 12 }}>Push to client</Btn>
+      )}
+      {isCoachViewer && (
+        <Btn kind="ghost" onClick={toggleTemplate} style={{ fontSize: 12 }}>
+          {sch.is_template ? 'Move to My Plans' : 'Mark as client template'}
+        </Btn>
       )}
     </div>
   );
