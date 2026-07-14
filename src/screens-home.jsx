@@ -1113,6 +1113,59 @@ function PullHintChevron({ pullDelta, onOpen }) {
 }
 
 // ─── HOME ─────────────────────────────────────────────────────────────
+// Read-only preview of a workout's exercise list before starting it — mirrors
+// PlanViewerScreen's day view (name + planned sets × reps, same superset
+// grouping) so picking a template or bonus day isn't a blind jump into the
+// session. Shared by the "from template" and "from plan" pickers below since
+// both hand it the same item shape (exId/sets/reps/repsPerSet/repsMax/supersetGroup).
+function WorkoutPreviewSheet({ open, onClose, store, title, items, onStart }) {
+  const list = items || [];
+  const totalSets = list.reduce((a, it) => a + (it.sets || 0), 0);
+  const repsLabel = (it) => (it.repsPerSet && it.repsPerSet.length) ? it.repsPerSet.join('/')
+    : (it.repsMax != null ? `${it.reps}-${it.repsMax}` : it.reps);
+  return (
+    <Sheet open={open} onClose={onClose}>
+      <div className="micro-gold" style={{ marginBottom: 4 }}>PREVIEW</div>
+      <div className="display" style={{ fontSize: 26, color: UI.ink, lineHeight: 1.05, letterSpacing: '-0.01em', marginBottom: 18, wordBreak: 'break-word' }}>
+        {title}
+      </div>
+      <div style={{ display: 'flex', alignItems: 'stretch', gap: 20, marginBottom: 18, justifyContent: 'center' }}>
+        <SubDial size={72} label="EXERCISES" value={list.length} />
+        <div style={{ width: 1, background: UI.hairStrong, alignSelf: 'stretch' }} />
+        <SubDial size={72} label="SETS" value={totalSets} />
+      </div>
+      {list.length === 0 ? (
+        <BracketFrame style={{ textAlign: 'center', padding: 24, marginBottom: 18 }}>
+          <div style={{ fontSize: 13, color: UI.inkFaint }}>No exercises in this one.</div>
+        </BracketFrame>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: '42vh', overflowY: 'auto', marginBottom: 18, paddingRight: 2 }}>
+          {list.map((it, i) => {
+            const ex = LB.findExercise(store, it.exId);
+            const isFirstOfGroup = it.supersetGroup && list[i - 1]?.supersetGroup !== it.supersetGroup;
+            return (
+              <React.Fragment key={i}>
+                {isFirstOfGroup && (
+                  <div className="micro" style={{ color: UI.gold, letterSpacing: '0.12em', marginTop: i ? 6 : 0 }}>
+                    {list.filter(x => x.supersetGroup === it.supersetGroup).length >= 3 ? 'GIANT SET' : 'SUPERSET'}
+                  </div>
+                )}
+                <Frame style={{ padding: '12px 16px', borderColor: it.supersetGroup ? UI.goldSoft : UI.hairStrong }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+                    <span style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ex?.name || '—'}</span>
+                    <span className="num" style={{ fontSize: 13, color: UI.inkSoft, flexShrink: 0 }}>{it.sets} × {repsLabel(it)}</span>
+                  </div>
+                </Frame>
+              </React.Fragment>
+            );
+          })}
+        </div>
+      )}
+      <Btn onClick={onStart} disabled={list.length === 0} style={{ width: '100%' }}>Start workout</Btn>
+    </Sheet>
+  );
+}
+
 function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRetrySync }) {
   const [confirmEl, confirm] = useConfirm();
   const trainBg = store.settings?.vipBackground || 'icons/zane-logo.png';
@@ -1193,6 +1246,8 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
   const [bonusDayPickerOpen, setBonusDayPickerOpen] = useState(false);
   const [realignSheet, setRealignSheet] = useState(null); // { scr, days } — "resume plan on which day?" after ending a break
   const [freestyleSubOpen, setFreestyleSubOpen] = useState(false);
+  const [templatePreview, setTemplatePreview] = useState(null); // workoutTemplates row being previewed before start
+  const [dayPreview, setDayPreview] = useState(null); // plan day being previewed before a bonus-session start
   const [checkinPickerOpen, setCheckinPickerOpen] = useState(false);
   const [pullDelta, setPullDelta] = useState(0);
   const [coachingSchema, setCoachingSchema] = useState(null);
@@ -3366,7 +3421,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                   display: 'flex', alignItems: 'stretch', gap: 0,
                   background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 6, overflow: 'hidden',
                 }}>
-                  <button onClick={() => startFreestyleFromTemplate(t)} style={{
+                  <button onClick={() => { setFreestyleSubOpen(false); setTemplatePreview(t); }} style={{
                     flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
                     padding: '12px 14px', background: 'transparent', border: 'none',
                     cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
@@ -3398,7 +3453,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {(sch?.days || []).filter(d => d.items?.length > 0).map(d => (
-            <button key={d.id} onClick={() => startBonusSession(d)} style={{
+            <button key={d.id} onClick={() => { setBonusDayPickerOpen(false); setDayPreview(d); }} style={{
               width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
               padding: '12px 14px', background: UI.bgInset, border: `0.5px solid ${UI.hair}`,
               borderRadius: 6, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
@@ -3409,6 +3464,27 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
           ))}
         </div>
       </Sheet>
+
+      {/* Preview before starting from a template — full exercise list, so
+          picking among many templates isn't a guess from the name alone. */}
+      <WorkoutPreviewSheet
+        open={!!templatePreview}
+        onClose={() => setTemplatePreview(null)}
+        store={store}
+        title={templatePreview?.name || ''}
+        items={(templatePreview?.exercises || []).filter(it => LB.findExercise(store, it.exId))}
+        onStart={() => { const t = templatePreview; setTemplatePreview(null); startFreestyleFromTemplate(t); }}
+      />
+
+      {/* Same preview, for a bonus day picked from the active plan. */}
+      <WorkoutPreviewSheet
+        open={!!dayPreview}
+        onClose={() => setDayPreview(null)}
+        store={store}
+        title={dayPreview?.name || ''}
+        items={dayPreview?.items || []}
+        onStart={() => { const d = dayPreview; setDayPreview(null); startBonusSession(d); }}
+      />
 
       {/* Return-from-break realign: pick which day to resume the rotation on */}
       <Sheet open={!!realignSheet} onClose={() => setRealignSheet(null)} title="Welcome back! 👋" titleColor="var(--accent)">
