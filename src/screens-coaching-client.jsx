@@ -1083,6 +1083,9 @@ function ClientPlanTab({ store, setStore, clientStore, setClientStore, clientId,
   const active = clientStore.activeScheduleId;
   const importRef = useRefC(null);
   const [confirmEl, confirm] = useConfirm();
+  const [importChoiceOpen, setImportChoiceOpen] = useStateC(false);
+  const [ownPlanPickerOpen, setOwnPlanPickerOpen] = useStateC(false);
+  const [ownImportBusy, setOwnImportBusy] = useStateC(false);
 
   // Multi-device autosave (screens-schedule.jsx's ScheduleEditScreen) stores a
   // coach's in-progress edit of a client's plan under the COACH's own account
@@ -1220,6 +1223,56 @@ function ClientPlanTab({ store, setStore, clientStore, setClientStore, clientId,
     reader.readAsText(file);
   };
 
+  // Same copy-and-remap as importPlan (dedupe exercises by name against the
+  // CLIENT's library, fresh ids, versions dropped, 531 bumpedCycle stripped),
+  // just sourced straight from the coach's own plan library instead of a
+  // parsed JSON file — no dedicated activate-now prompt, this row-level
+  // ACTIVATE button below already covers that, same as NEW PLAN and the JSON
+  // import above (both just add; activation is always a separate step here).
+  const importFromOwnPlan = async (sourceSch) => {
+    setOwnImportBusy(true);
+    try {
+      const copy = JSON.parse(JSON.stringify(sourceSch));
+      copy.id = LB.uid();
+      copy.archived = false;
+      delete copy.versions;
+      if (copy.program_data) delete copy.program_data.bumpedCycle;
+      const exIds = new Set();
+      (copy.days || []).forEach(d => (d.items || []).forEach(it => { if (it.exId) exIds.add(it.exId); }));
+      const idMap = {};
+      const newExercises = [];
+      (store.exercises || []).filter(ex => exIds.has(ex.id)).forEach(ex => {
+        const existing = (clientStore.exercises || []).find(x => x.name.trim().toLowerCase() === ex.name.trim().toLowerCase());
+        if (existing) { idMap[ex.id] = existing.id; return; }
+        const newId = LB.uid();
+        idMap[ex.id] = newId;
+        newExercises.push({ id: newId, name: ex.name, tags: ex.tags || [], note: ex.note || '', category: ex.category || null, unilateral: ex.unilateral || false, equipment: ex.equipment || null, progression_reps: ex.progression_reps || null, movement_type: ex.movement_type || null, log_mode: ex.log_mode || null, no_weight_reps: ex.no_weight_reps || false, pull_bodyweight: ex.pull_bodyweight || false });
+      });
+      copy.days = (copy.days || []).map(d => ({ ...d, id: LB.uid(), items: (d.items || []).map(it => ({ ...it, exId: idMap[it.exId] || it.exId })) }));
+      if (copy.program_data && typeof copy.program_data === 'object') {
+        const remapKeys = (obj) => { const out = {}; for (const k of Object.keys(obj || {})) out[idMap[k] || k] = obj[k]; return out; };
+        if (copy.program_data.mainLifts) copy.program_data.mainLifts = remapKeys(copy.program_data.mainLifts);
+        if (copy.program_data.tmHistory) copy.program_data.tmHistory = remapKeys(copy.program_data.tmHistory);
+      }
+      if (newExercises.length) {
+        const { error: exErr } = await LB.supabase.from('zane_exercises').insert(newExercises.map(ex => ({ ...ex, user_id: clientId })));
+        if (exErr) { alert(`Import failed: ${exErr.message}`); return; }
+      }
+      const schRow = { ...copy };
+      delete schRow.mode;
+      const { error: schErr } = await LB.supabase.from('zane_schedules').insert({ ...schRow, user_id: clientId });
+      if (schErr) { alert(`Import failed: ${schErr.message}`); return; }
+      setClientStore(s => ({
+        ...s,
+        exercises: [...(s.exercises || []), ...newExercises],
+        schedules: [...(s.schedules || []), copy],
+      }));
+      setOwnPlanPickerOpen(false);
+    } finally {
+      setOwnImportBusy(false);
+    }
+  };
+
   const name = clientName || clientStore.user?.name || '?';
 
   return (
@@ -1235,13 +1288,64 @@ function ClientPlanTab({ store, setStore, clientStore, setClientStore, clientId,
         </button>
         <input ref={importRef} type="file" accept=".json" style={{ display: 'none' }} onChange={importPlan} />
         <button
-          onClick={() => importRef.current?.click()}
+          onClick={() => setImportChoiceOpen(true)}
           style={{ padding: '7px 14px', borderRadius: 6, border: `0.5px solid ${UI.hairStrong}`, background: 'transparent', color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
         >
           <i className="fa-solid fa-file-import" style={{ fontSize: 9 }} />
           IMPORT
         </button>
       </div>
+
+      {/* Import source picker: a JSON file, or straight from the coach's own
+          plan library (skips the export/re-import round trip). */}
+      <Sheet open={importChoiceOpen} onClose={() => setImportChoiceOpen(false)} title="Import plan">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <button
+            onClick={() => { setImportChoiceOpen(false); importRef.current?.click(); }}
+            style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 6, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}
+          >
+            <i className="fa-solid fa-file-import" style={{ fontSize: 14, color: UI.inkSoft, width: 18, textAlign: 'center' }} />
+            <div style={{ flex: 1, textAlign: 'left' }}>
+              <div style={{ fontSize: 14, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi }}>JSON file</div>
+              <div style={{ fontSize: 12, color: UI.inkSoft, marginTop: 2, fontFamily: UI.fontUi }}>Import a plan exported from any account</div>
+            </div>
+            <ChevronRight />
+          </button>
+          <button
+            onClick={() => { setImportChoiceOpen(false); setOwnPlanPickerOpen(true); }}
+            style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 6, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}
+          >
+            <i className="fa-solid fa-clone" style={{ fontSize: 14, color: UI.inkSoft, width: 18, textAlign: 'center' }} />
+            <div style={{ flex: 1, textAlign: 'left' }}>
+              <div style={{ fontSize: 14, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi }}>From my own plans</div>
+              <div style={{ fontSize: 12, color: UI.inkSoft, marginTop: 2, fontFamily: UI.fontUi }}>Copy one of your plans straight into {name}'s account</div>
+            </div>
+            <ChevronRight />
+          </button>
+        </div>
+      </Sheet>
+
+      {/* Own-plan picker — step 2 of "From my own plans" */}
+      <Sheet open={ownPlanPickerOpen} onClose={() => { if (!ownImportBusy) setOwnPlanPickerOpen(false); }} title="Pick a plan">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {(store.schedules || []).filter(s => !s.archived).length === 0 ? (
+            <div style={{ color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13, padding: '12px 14px' }}>You have no plans of your own yet.</div>
+          ) : (store.schedules || []).filter(s => !s.archived).map(s => (
+            <button key={s.id} onClick={() => importFromOwnPlan(s)} disabled={ownImportBusy} style={{
+              width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              padding: '12px 14px', background: UI.bgInset, border: `0.5px solid ${UI.hair}`,
+              borderRadius: 6, cursor: ownImportBusy ? 'default' : 'pointer', opacity: ownImportBusy ? 0.6 : 1,
+              WebkitTapHighlightColor: 'transparent',
+            }}>
+              <div style={{ textAlign: 'left' }}>
+                <div style={{ fontSize: 14, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi }}>{s.name}</div>
+                <div style={{ fontSize: 12, color: UI.inkFaint, marginTop: 2, fontFamily: UI.fontUi }}>{(s.days || []).filter(d => (d.items || []).length > 0).length} training days</div>
+              </div>
+              <ChevronRight />
+            </button>
+          ))}
+        </div>
+      </Sheet>
 
       {schedules.length === 0 ? (
         <div style={{ color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13, padding: '12px 14px' }}>No plans yet.</div>
