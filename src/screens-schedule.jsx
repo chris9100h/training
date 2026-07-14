@@ -549,6 +549,8 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
   const [pushBusy, setPushBusy] = useStateS(false);
   const [pushError, setPushError] = useStateS('');
   const [pushSuccess, setPushSuccess] = useStateS(null); // { clientName, planName, activated } → in-app confirmation
+  const [manageOpen, setManageOpen] = useStateS(false);  // Duplicate/Export/Backups menu
+  const [coachOpen, setCoachOpen] = useStateS(false);    // Push to client/Mark as client template menu
 
   const openBackupSheet = async () => {
     setBackupSheet(true);
@@ -965,18 +967,11 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
         </div>
       )}
       <div style={{ display: 'flex', gap: 8 }}>
-        <Btn kind="ghost" onClick={duplicate} style={{ flex: 1, fontSize: 12 }}>Duplicate</Btn>
-        <Btn kind="ghost" onClick={exportPlan} style={{ flex: 1, fontSize: 12 }}>Export</Btn>
-        <Btn kind="ghost" onClick={openBackupSheet} style={{ flex: 1, fontSize: 12 }}>Backups</Btn>
+        <Btn kind="ghost" onClick={() => setManageOpen(true)} style={{ flex: 1, fontSize: 12 }}>Manage</Btn>
+        {isCoachViewer && (
+          <Btn kind="ghost" onClick={() => setCoachOpen(true)} style={{ flex: 1, fontSize: 12 }}>Coach</Btn>
+        )}
       </div>
-      {isCoachViewer && (
-        <Btn kind="ghost" onClick={() => setPushOpen(true)} style={{ fontSize: 12 }}>Push to client</Btn>
-      )}
-      {isCoachViewer && (
-        <Btn kind="ghost" onClick={toggleTemplate} style={{ fontSize: 12 }}>
-          {sch.is_template ? 'Move to My Plans' : 'Mark as client template'}
-        </Btn>
-      )}
     </div>
   );
 
@@ -1451,6 +1446,29 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
       <Sheet open={progress531Open} onClose={() => setProgress531Open(false)} title="5/3/1 Progress">
         <FiveThreeOneProgress sch={sch} store={store} />
       </Sheet>
+
+      {manageOpen && (
+        <MiniSheet onClose={() => setManageOpen(false)}>
+          <div className="label" style={{ color: UI.inkFaint, marginBottom: 12 }}>MANAGE PLAN</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <Btn kind="ghost" onClick={() => { setManageOpen(false); duplicate(); }} style={{ fontSize: 12 }}>Duplicate</Btn>
+            <Btn kind="ghost" onClick={() => { setManageOpen(false); exportPlan(); }} style={{ fontSize: 12 }}>Export</Btn>
+            <Btn kind="ghost" onClick={() => { setManageOpen(false); openBackupSheet(); }} style={{ fontSize: 12 }}>Backups</Btn>
+          </div>
+        </MiniSheet>
+      )}
+
+      {coachOpen && (
+        <MiniSheet onClose={() => setCoachOpen(false)}>
+          <div className="label" style={{ color: UI.inkFaint, marginBottom: 12 }}>COACH</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <Btn kind="ghost" onClick={() => { setCoachOpen(false); setPushOpen(true); }} style={{ fontSize: 12 }}>Push to client</Btn>
+            <Btn kind="ghost" onClick={() => { setCoachOpen(false); toggleTemplate(); }} style={{ fontSize: 12 }}>
+              {sch.is_template ? 'Move to My Plans' : 'Mark as client template'}
+            </Btn>
+          </div>
+        </MiniSheet>
+      )}
 
       {reactivateSheet && (
         <MiniSheet onClose={() => setReactivateSheet(false)}>
