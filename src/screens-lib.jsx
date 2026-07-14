@@ -3535,6 +3535,7 @@ function SessionEditSheet({ session, duration, exercises, onClose, onSave }) {
   const [draftDate, setDraftDate] = useStateL(session.date ? session.date.slice(0, 10) : '');
   const [draftDuration, setDraftDuration] = useStateL(duration != null ? String(Math.round(duration / 5) * 5) : '0');
   const [draftEntries, setDraftEntries] = useStateL(() => JSON.parse(JSON.stringify(session.entries)));
+  const [openWarmups, setOpenWarmups] = useStateL({}); // eIdx -> bool, collapsed by default
   const [confirmEl, confirm] = useConfirm();
   const origDate = session.date ? session.date.slice(0, 10) : '';
   const origDuration = duration != null ? String(Math.round(duration / 5) * 5) : '0';
@@ -3690,104 +3691,136 @@ function SessionEditSheet({ session, duration, exercises, onClose, onSave }) {
             // matching the live training screen's own arming rules.
             const logMode = LB.exerciseLogMode(ex);
             const techEligible = !isUnilateral && logMode !== 'checkbox' && logMode !== 'time';
-            // One card per exercise (all its sets stacked inside), zebra-toned
-            // against its neighbors so a long session visually separates into
-            // exercises at a glance instead of reading as one flat set list.
-            const zebraBg = eIdx % 2 === 0 ? UI.bgInset : UI.bg;
+            const warmupOpen = !!openWarmups[eIdx];
+            // Split by warmup while keeping each set's real index (sIdx) into
+            // e.sets — every mutation fn below is keyed on that index, not on
+            // position within either rendered group.
+            const warmupSets = e.sets.map((st, sIdx) => ({ st, sIdx })).filter(x => x.st.warmup);
+            const workingSets = e.sets.map((st, sIdx) => ({ st, sIdx })).filter(x => !x.st.warmup);
+
+            const renderSetRow = (st, sIdx) => {
+              const isEmpty = st.kg == null && st.reps == null && st.repsL == null && st.repsR == null;
+              const isChain = CHAIN_TECH_KINDS.includes(st.technique);
+              const isStandalone = STANDALONE_TECH_KINDS.includes(st.technique);
+              const rowEligible = techEligible && !st.warmup && !st.skipped;
+              const warmupNum = st.warmup ? e.sets.slice(0, sIdx + 1).filter(x => x.warmup).length : 0;
+              const workingNum = !st.warmup ? e.sets.slice(0, sIdx + 1).filter(x => !x.warmup).length : 0;
+              return (
+                <div style={{
+                  padding: '10px 16px',
+                  background: st.technique ? 'rgba(var(--accent-rgb),0.06)' : 'transparent',
+                  opacity: st.skipped ? 0.5 : st.warmup ? 0.7 : 1,
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <div style={{
+                      width: 24, height: 24, borderRadius: 4, flexShrink: 0,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      border: `1px solid ${st.warmup ? UI.hair : UI.hairStrong}`,
+                      fontFamily: UI.fontNum, fontSize: st.warmup ? 8 : 11, fontWeight: 500,
+                      color: st.warmup ? UI.inkGhost : UI.inkFaint,
+                    }}>{st.warmup ? `W${warmupNum}` : workingNum}</div>
+                    {st.skipped ? (
+                      <>
+                        <span className="num" style={{ flex: 1, fontSize: 12, color: UI.inkFaint }}>skipped</span>
+                        <button onClick={() => skipSet(eIdx, sIdx, false)} style={{ background: 'rgba(var(--accent-rgb),0.15)', border: `0.5px solid rgba(var(--accent-rgb),0.4)`, borderRadius: 6, padding: '3px 8px', color: 'var(--accent)', fontSize: 11, cursor: 'pointer', fontFamily: UI.fontUi, flexShrink: 0 }}>Undo</button>
+                      </>
+                    ) : isChain ? (
+                      // Round 0 (mirrored onto st.kg/reps) is edited via
+                      // the rounds list below, not a flat row here —
+                      // showing both would just be two inputs for the
+                      // same number.
+                      <span className="micro" style={{ color: UI.inkFaint }}>{LB.plannedTechniqueLabel(st.technique)}</span>
+                    ) : (
+                      <>
+                        <input type="text" inputMode="decimal" step="0.5" value={st.kg ?? ''}
+                          placeholder="—" onFocus={e => e.target.select()}
+                          onChange={ev => updateSet(eIdx, sIdx, { kg: ev.target.value === '' ? null : +ev.target.value })}
+                          style={numInputStyle} />
+                        <span className="num" style={{ color: UI.inkFaint, fontSize: 11 }}>{UI.unit()}</span>
+                        <span style={{ color: UI.hair, fontSize: 14, margin: '0 2px', fontFamily: UI.fontDisplay, fontStyle: 'italic' }}>×</span>
+                        {isUnilateral ? (
+                          <>
+                            <input type="text" inputMode="numeric" value={st.repsL ?? ''}
+                              placeholder="—" onFocus={e => e.target.select()}
+                              onChange={ev => updateSet(eIdx, sIdx, { repsL: ev.target.value === '' ? null : +ev.target.value })}
+                              style={numInputStyle} />
+                            <span className="num" style={{ color: UI.inkFaint, fontSize: 11 }}>L</span>
+                            <input type="text" inputMode="numeric" value={st.repsR ?? ''}
+                              placeholder="—" onFocus={e => e.target.select()}
+                              onChange={ev => updateSet(eIdx, sIdx, { repsR: ev.target.value === '' ? null : +ev.target.value })}
+                              style={numInputStyle} />
+                            <span className="num" style={{ color: UI.inkFaint, fontSize: 11 }}>R</span>
+                          </>
+                        ) : (
+                          <>
+                            <input type="text" inputMode="numeric" value={st.reps ?? ''}
+                              placeholder="—" onFocus={e => e.target.select()}
+                              onChange={ev => updateSet(eIdx, sIdx, { reps: ev.target.value === '' ? null : +ev.target.value })}
+                              style={numInputStyle} />
+                            <span className="num" style={{ color: UI.inkFaint, fontSize: 11 }}>reps</span>
+                          </>
+                        )}
+                        {isEmpty && (
+                          <button onClick={() => skipSet(eIdx, sIdx, true)} style={{ background: 'rgba(var(--accent-rgb),0.15)', border: `0.5px solid rgba(var(--accent-rgb),0.4)`, borderRadius: 6, padding: '3px 8px', color: 'var(--accent)', fontSize: 11, cursor: 'pointer', fontFamily: UI.fontUi, flexShrink: 0 }}>Skip</button>
+                        )}
+                      </>
+                    )}
+                  </div>
+                  {rowEligible && (
+                    <TechniqueChipRow current={st.technique} onSelect={id => setTechnique(eIdx, sIdx, id, exName)} />
+                  )}
+                  {rowEligible && isChain && (
+                    <ChainRoundsEditor st={st} kind={st.technique}
+                      onUpdateRound={(di, patch) => updateRound(eIdx, sIdx, di, patch)}
+                      onAddRound={() => addRound(eIdx, sIdx, exName)}
+                      onRemoveRound={di => removeRound(eIdx, sIdx, di)} />
+                  )}
+                  {rowEligible && isStandalone && (
+                    <StandaloneTechEditor st={st} kind={st.technique} onPatch={patch => patchStandalone(eIdx, sIdx, patch)} />
+                  )}
+                </div>
+              );
+            };
+
             return (
-              <div key={eIdx} style={{
-                background: zebraBg, borderRadius: 8, overflow: 'hidden',
-                border: `1px solid ${UI.hairStrong}`, borderLeft: `3px solid rgba(var(--accent-rgb),0.5)`,
-              }}>
-                <div className="micro-gold" style={{ padding: '12px 14px 8px' }}>{exName.toUpperCase()}</div>
-                <div style={{ display: 'flex', flexDirection: 'column' }}>
-                  {e.sets.map((st, sIdx) => {
-                    const isEmpty = st.kg == null && st.reps == null && st.repsL == null && st.repsR == null;
-                    const isChain = CHAIN_TECH_KINDS.includes(st.technique);
-                    const isStandalone = STANDALONE_TECH_KINDS.includes(st.technique);
-                    const rowEligible = techEligible && !st.warmup && !st.skipped;
-                    const warmupNum = st.warmup ? e.sets.slice(0, sIdx + 1).filter(x => x.warmup).length : 0;
-                    const workingNum = !st.warmup ? e.sets.slice(0, sIdx + 1).filter(x => !x.warmup).length : 0;
-                    return (
-                      <div key={sIdx} style={{
-                        padding: '10px 14px',
-                        borderTop: sIdx > 0 ? `0.5px solid ${UI.hair}` : 'none',
-                        background: st.technique ? 'rgba(var(--accent-rgb),0.06)' : 'transparent',
-                        opacity: st.skipped ? 0.5 : st.warmup ? 0.7 : 1,
-                      }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <div style={{
-                            width: 24, height: 24, borderRadius: 4, flexShrink: 0,
-                            display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            border: `1px solid ${st.warmup ? UI.hair : UI.hairStrong}`,
-                            fontFamily: UI.fontNum, fontSize: st.warmup ? 8 : 11, fontWeight: 500,
-                            color: st.warmup ? UI.inkGhost : UI.inkFaint,
-                          }}>{st.warmup ? `W${warmupNum}` : workingNum}</div>
-                          {st.warmup && (
-                            <span className="micro" style={{ color: UI.inkGhost, flexShrink: 0 }}>WARMUP</span>
-                          )}
-                          {st.skipped ? (
-                            <>
-                              <span className="num" style={{ flex: 1, fontSize: 12, color: UI.inkFaint }}>skipped</span>
-                              <button onClick={() => skipSet(eIdx, sIdx, false)} style={{ background: 'rgba(var(--accent-rgb),0.15)', border: `0.5px solid rgba(var(--accent-rgb),0.4)`, borderRadius: 6, padding: '3px 8px', color: 'var(--accent)', fontSize: 11, cursor: 'pointer', fontFamily: UI.fontUi, flexShrink: 0 }}>Undo</button>
-                            </>
-                          ) : isChain ? (
-                            // Round 0 (mirrored onto st.kg/reps) is edited via
-                            // the rounds list below, not a flat row here —
-                            // showing both would just be two inputs for the
-                            // same number.
-                            <span className="micro" style={{ color: UI.inkFaint }}>{LB.plannedTechniqueLabel(st.technique)}</span>
-                          ) : (
-                            <>
-                              <input type="text" inputMode="decimal" step="0.5" value={st.kg ?? ''}
-                                placeholder="—" onFocus={e => e.target.select()}
-                                onChange={ev => updateSet(eIdx, sIdx, { kg: ev.target.value === '' ? null : +ev.target.value })}
-                                style={numInputStyle} />
-                              <span className="num" style={{ color: UI.inkFaint, fontSize: 11 }}>{UI.unit()}</span>
-                              <span style={{ color: UI.hair, fontSize: 14, margin: '0 2px', fontFamily: UI.fontDisplay, fontStyle: 'italic' }}>×</span>
-                              {isUnilateral ? (
-                                <>
-                                  <input type="text" inputMode="numeric" value={st.repsL ?? ''}
-                                    placeholder="—" onFocus={e => e.target.select()}
-                                    onChange={ev => updateSet(eIdx, sIdx, { repsL: ev.target.value === '' ? null : +ev.target.value })}
-                                    style={numInputStyle} />
-                                  <span className="num" style={{ color: UI.inkFaint, fontSize: 11 }}>L</span>
-                                  <input type="text" inputMode="numeric" value={st.repsR ?? ''}
-                                    placeholder="—" onFocus={e => e.target.select()}
-                                    onChange={ev => updateSet(eIdx, sIdx, { repsR: ev.target.value === '' ? null : +ev.target.value })}
-                                    style={numInputStyle} />
-                                  <span className="num" style={{ color: UI.inkFaint, fontSize: 11 }}>R</span>
-                                </>
-                              ) : (
-                                <>
-                                  <input type="text" inputMode="numeric" value={st.reps ?? ''}
-                                    placeholder="—" onFocus={e => e.target.select()}
-                                    onChange={ev => updateSet(eIdx, sIdx, { reps: ev.target.value === '' ? null : +ev.target.value })}
-                                    style={numInputStyle} />
-                                  <span className="num" style={{ color: UI.inkFaint, fontSize: 11 }}>reps</span>
-                                </>
-                              )}
-                              {isEmpty && (
-                                <button onClick={() => skipSet(eIdx, sIdx, true)} style={{ background: 'rgba(var(--accent-rgb),0.15)', border: `0.5px solid rgba(var(--accent-rgb),0.4)`, borderRadius: 6, padding: '3px 8px', color: 'var(--accent)', fontSize: 11, cursor: 'pointer', fontFamily: UI.fontUi, flexShrink: 0 }}>Skip</button>
-                              )}
-                            </>
-                          )}
-                        </div>
-                        {rowEligible && (
-                          <TechniqueChipRow current={st.technique} onSelect={id => setTechnique(eIdx, sIdx, id, exName)} />
-                        )}
-                        {rowEligible && isChain && (
-                          <ChainRoundsEditor st={st} kind={st.technique}
-                            onUpdateRound={(di, patch) => updateRound(eIdx, sIdx, di, patch)}
-                            onAddRound={() => addRound(eIdx, sIdx, exName)}
-                            onRemoveRound={di => removeRound(eIdx, sIdx, di)} />
-                        )}
-                        {rowEligible && isStandalone && (
-                          <StandaloneTechEditor st={st} kind={st.technique} onPatch={patch => patchStandalone(eIdx, sIdx, patch)} />
-                        )}
+              <div key={eIdx} style={{ position: 'relative', background: UI.bgInset, borderRadius: 8, overflow: 'hidden', border: `1px solid ${UI.hairStrong}` }}>
+                <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 3, background: 'var(--accent)' }} />
+                <div style={{ padding: '14px 16px 12px 18px', fontFamily: UI.fontDisplay, fontSize: 18, fontWeight: 700, letterSpacing: '0.01em', textTransform: 'uppercase', color: UI.ink, lineHeight: 1.15 }}>
+                  {exName}
+                </div>
+
+                {warmupSets.length > 0 && (
+                  <>
+                    <div className="knurl" />
+                    <button onClick={() => setOpenWarmups(s => ({ ...s, [eIdx]: !s[eIdx] }))} aria-expanded={warmupOpen} style={{
+                      width: '100%', display: 'flex', alignItems: 'center', gap: 8,
+                      padding: '9px 16px 9px 18px', background: 'transparent', border: 'none', cursor: 'pointer',
+                      WebkitTapHighlightColor: 'transparent',
+                    }}>
+                      <span className="micro" style={{ flex: 1, textAlign: 'left', color: UI.inkFaint, marginBottom: 0 }}>WARMUP · {warmupSets.length}</span>
+                      <i className="fa-solid fa-chevron-down" style={{ fontSize: 10, color: UI.inkFaint, transition: 'transform 0.2s ease', transform: warmupOpen ? 'rotate(180deg)' : 'none' }} />
+                    </button>
+                    {warmupOpen && (
+                      <div>
+                        {warmupSets.map(({ st, sIdx }, i) => (
+                          <React.Fragment key={sIdx}>
+                            {i > 0 && <div className="knurl" />}
+                            {renderSetRow(st, sIdx)}
+                          </React.Fragment>
+                        ))}
                       </div>
-                    );
-                  })}
+                    )}
+                    <div className="knurl" />
+                  </>
+                )}
+
+                <div>
+                  {workingSets.map(({ st, sIdx }, i) => (
+                    <React.Fragment key={sIdx}>
+                      {i > 0 && <div className="knurl" />}
+                      {renderSetRow(st, sIdx)}
+                    </React.Fragment>
+                  ))}
                 </div>
               </div>
             );
