@@ -1449,21 +1449,23 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
 
       {manageOpen && (
         <MiniSheet onClose={() => setManageOpen(false)}>
-          <div className="label" style={{ color: UI.inkFaint, marginBottom: 8 }}>MANAGE PLAN</div>
-          <div>
-            <NavRow label="Duplicate" first onTap={() => { setManageOpen(false); duplicate(); }} />
-            <NavRow label="Export" onTap={() => { setManageOpen(false); exportPlan(); }} />
-            <NavRow label="Backups" onTap={() => { setManageOpen(false); openBackupSheet(); }} />
+          <div className="display" style={{ fontSize: 20, color: UI.gold, marginBottom: 14 }}>Manage Plan</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <Btn onClick={() => { setManageOpen(false); duplicate(); }} style={{ fontSize: 12 }}>Duplicate</Btn>
+            <Btn kind="ghost" onClick={() => { setManageOpen(false); exportPlan(); }} style={{ fontSize: 12 }}>Export</Btn>
+            <Btn kind="ghost" onClick={() => { setManageOpen(false); openBackupSheet(); }} style={{ fontSize: 12 }}>Backups</Btn>
           </div>
         </MiniSheet>
       )}
 
       {coachOpen && (
         <MiniSheet onClose={() => setCoachOpen(false)}>
-          <div className="label" style={{ color: UI.inkFaint, marginBottom: 8 }}>COACH</div>
-          <div>
-            <NavRow label="Push to client" first onTap={() => { setCoachOpen(false); setPushOpen(true); }} />
-            <NavRow label={sch.is_template ? 'Move to My Plans' : 'Mark as client template'} onTap={() => { setCoachOpen(false); toggleTemplate(); }} />
+          <div className="display" style={{ fontSize: 20, color: UI.gold, marginBottom: 14 }}>Coach</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <Btn onClick={() => { setCoachOpen(false); setPushOpen(true); }} style={{ fontSize: 12 }}>Push to client</Btn>
+            <Btn kind="ghost" onClick={() => { setCoachOpen(false); toggleTemplate(); }} style={{ fontSize: 12 }}>
+              {sch.is_template ? 'Move to My Plans' : 'Mark as client template'}
+            </Btn>
           </div>
         </MiniSheet>
       )}
