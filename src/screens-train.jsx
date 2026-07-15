@@ -3281,13 +3281,25 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   useEffectT(() => {
     if (!mesoState || !entry || isCardio || isMesoDeloadSession) return;
     if (mesoWeek == null) return; // pending period — meso not yet started
-    if (mesoWeek === 1) return; // week 1: no previous meso session to be sore from
     if (mesoLastWeek) return; // final week: set deltas frozen, and soreness only drives deltas
     // Load-only keeps asking soreness: there it holds the weight (recovery brake)
     // instead of adjusting sets — see handleSorenessAnswer / computeMesoGains.
     const ex = entry ? store.exercises?.find(e => e.id === entry.exId) : null;
     const pm = primaryMuscleForExercise(ex);
     if (!pm || askedSorenessRef.current.has(pm)) return;
+    // Week 1 normally has no previous meso session to be sore from, so it stays
+    // silent. But when autoregulation is switched on mid-plan (e.g. cycle 10 of a
+    // long-running plan), week 1 sits on top of real prior training, so ask
+    // soreness if THIS muscle was trained before the block began. A genuinely
+    // fresh plan has no such history and stays silent as before.
+    if (mesoWeek === 1) {
+      const startTs = mesoState.startedAt ? new Date(mesoState.startedAt).getTime()
+        : (mesoState.startDate ? LB.parseDate(mesoState.startDate).getTime() : null);
+      const soreRef = LB.mesoMuscleTrainedBeforeStart(
+        store.sessions, mesoState.scheduleId, startTs, pm,
+        exId => primaryMuscleForExercise(store.exercises?.find(x => x.id === exId)));
+      if (!soreRef) return;
+    }
     const isFirst = !session.entries.slice(0, exIdx).some(e => {
       const ex2 = store.exercises?.find(x => x.id === e.exId);
       return primaryMuscleForExercise(ex2) === pm;

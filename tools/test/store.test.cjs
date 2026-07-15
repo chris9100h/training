@@ -847,6 +847,30 @@ async function testAsync(name, fn) {
     assert.strictEqual(LB.resolveMesoSeedSuggestion(null, -2.5, lightLast, true).kg, 0);
   });
 
+  // ── mesoMuscleTrainedBeforeStart (week-1 soreness on a mid-plan activation) ──
+  const muscleOf = (id) => ({ leg1: 'quads', leg2: 'quads', back1: 'back' }[id] ?? null);
+  const sess = (o) => ({ ended: '2026-01-05T10:00:00Z', isDeload: false, scheduleId: 'plan1', entries: [{ exId: 'leg1' }], ...o });
+  const BLOCK_START = new Date('2026-01-10T00:00:00Z').getTime();
+  test('mesoMuscleTrainedBeforeStart: a fresh plan (no sessions) stays silent', () => {
+    assert.strictEqual(LB.mesoMuscleTrainedBeforeStart([], 'plan1', BLOCK_START, 'quads', muscleOf), false);
+  });
+  test('mesoMuscleTrainedBeforeStart: the muscle trained before the block start counts', () => {
+    assert.strictEqual(LB.mesoMuscleTrainedBeforeStart([sess({})], 'plan1', BLOCK_START, 'quads', muscleOf), true);
+  });
+  test('mesoMuscleTrainedBeforeStart: a session AFTER the start does not count', () => {
+    assert.strictEqual(LB.mesoMuscleTrainedBeforeStart([sess({ ended: '2026-01-12T10:00:00Z' })], 'plan1', BLOCK_START, 'quads', muscleOf), false);
+  });
+  test('mesoMuscleTrainedBeforeStart: a different muscle does not count', () => {
+    assert.strictEqual(LB.mesoMuscleTrainedBeforeStart([sess({ entries: [{ exId: 'back1' }] })], 'plan1', BLOCK_START, 'quads', muscleOf), false);
+  });
+  test('mesoMuscleTrainedBeforeStart: deload and other-plan sessions are ignored', () => {
+    assert.strictEqual(LB.mesoMuscleTrainedBeforeStart([sess({ isDeload: true })], 'plan1', BLOCK_START, 'quads', muscleOf), false);
+    assert.strictEqual(LB.mesoMuscleTrainedBeforeStart([sess({ scheduleId: 'other' })], 'plan1', BLOCK_START, 'quads', muscleOf), false);
+  });
+  test('mesoMuscleTrainedBeforeStart: a windowed session with no entries cannot match', () => {
+    assert.strictEqual(LB.mesoMuscleTrainedBeforeStart([sess({ entries: [] })], 'plan1', BLOCK_START, 'quads', muscleOf), false);
+  });
+
   // ── mesoPausedDays (recovery time must not fast-forward the meso week) ──
   test('mesoPausedDays: deload days in the window are all excluded', () => {
     // 5-day deload Jan 10–14 inside a meso running Jan 1 → Jan 20.

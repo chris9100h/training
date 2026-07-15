@@ -4581,6 +4581,28 @@ function mesoRirForWeek(week, weeks, startRir = 3, endRir = 0) {
   return Math.round(startRir - (week - 1) * (startRir - endRir) / (weeks - 1));
 }
 
+// Whether an ended, non-deload session of this plan trained `muscle` before the
+// meso block started (startTs = the block's startedAt, or startDate for older
+// mesos). Week 1 of a genuinely fresh plan has nothing to be sore from, but when
+// autoregulation is switched on mid-plan the block's week 1 sits on top of real
+// prior training, so the muscle CAN be sore and the soreness question is worth
+// asking. Only sessions we still hold set-level entries for can match (windowed
+// old sessions carry no entries and are not a realistic soreness reference
+// anyway). `muscleOfExId` maps an exId to its primary muscle, kept out here so
+// this stays pure/testable (the caller passes primaryMuscleForExercise).
+function mesoMuscleTrainedBeforeStart(sessions, scheduleId, startTs, muscle, muscleOfExId) {
+  if (!muscle || !scheduleId || startTs == null || typeof muscleOfExId !== 'function') return false;
+  for (const s of (sessions || [])) {
+    if (!s || !s.ended || s.isDeload || s.scheduleId !== scheduleId) continue;
+    if (!(new Date(s.ended).getTime() < startTs)) continue;
+    for (const e of (s.entries || [])) {
+      if (!e || e.isCardio) continue;
+      if (muscleOfExId(e.exId) === muscle) return true;
+    }
+  }
+  return false;
+}
+
 // "5m ago"/"3h ago"/"2d ago" from an ISO timestamp. capDays, if given, rolls
 // over to a short locale date past that many days instead of counting
 // indefinitely (screens-settings.jsx's sign-up feed wants that; the
@@ -4846,6 +4868,6 @@ window.LB = {
   cardioDistUnit, setCardioDistUnit, distToM, mToDisplay, fmtDistance, fmtPace, fmtSpeed, MI_TO_M, recentCardioTypes,
   isLoggedTrainingDay, plannedTrainingDay, isTrainingDayForDate, dayTargetFromMacros, macroAdherence, hasMacroTargets, effectiveMacroTargets, dailyLogAdherence, dailyLogsWeekPrefill, weekPerformanceSignal,
   refreshHealthLogs,
-  pickGrowthRecipient, retractGrowthGrant, pickDeclineRecipient, reearnMesoWeightBoosts, resolveMesoSeedSuggestion, mesoPausedDays, mesoRirForWeek,
+  pickGrowthRecipient, retractGrowthGrant, pickDeclineRecipient, reearnMesoWeightBoosts, resolveMesoSeedSuggestion, mesoPausedDays, mesoRirForWeek, mesoMuscleTrainedBeforeStart,
   mesoSetTarget, mesoRepOutcome,
 };
