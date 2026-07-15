@@ -1529,16 +1529,17 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       // only once it clears. Fixes "soreness of the next muscle jumped ahead of
       // the progression notice for the exercise you just finished".
       progressionPendingRef.current = true;
-      const showCelebration = () => {
-        setProgressionUnlocked(progressionResult);
-        setTimeout(() => { progressionPendingRef.current = false; setProgressionUnlocked(null); }, 4000);
-      };
       // In a meso block the joint/pump sheet for THIS exercise opens on this very
       // set-completion (see the joint trigger below). Show the overlay in the
       // same tick so it covers that sheet the moment it mounts (z-160 over the
-      // z-100 sheet), instead of letting the question flash up first and getting
-      // slammed over 800ms later. A solo (non-meso) bump keeps the dramatic beat.
+      // z-100 sheet), and render it opaque from the first frame (coverNow →
+      // celebrationHold, no fade-in) so the question never ghosts through.
+      // A solo (non-meso) bump keeps the dramatic 800ms beat and fade-in.
       const mesoActive = !!mesoState && !isMesoDeloadSession && mesoWeek != null;
+      const showCelebration = () => {
+        setProgressionUnlocked({ ...progressionResult, coverNow: mesoActive });
+        setTimeout(() => { progressionPendingRef.current = false; setProgressionUnlocked(null); }, 4000);
+      };
       if (mesoActive) showCelebration();
       else setTimeout(showCelebration, 800);
     } else if (!entry.sets[setIdx]?.warmup && !isDeloadSession) {
@@ -5084,7 +5085,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         <div onClick={() => { progressionPendingRef.current = false; setProgressionUnlocked(null); }} style={{
           position: 'fixed', top: 'env(safe-area-inset-top, 0px)', left: 0, right: 0, bottom: 0, zIndex: 160,
           background: 'var(--bg-body)',
-          animation: 'improvedFade 4s ease forwards',
+          animation: (progressionUnlocked.coverNow ? 'celebrationHold' : 'improvedFade') + ' 4s ease forwards',
           display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
           gap: 8,
         }}>
