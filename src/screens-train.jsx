@@ -3121,7 +3121,16 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const SORENESS_LABELS = { never: 'Never sore', healed_long: 'Healed a while ago', healed_just: 'Healed just in time', still_sore: 'Still sore', very_sore: 'Very sore' };
   const JOINT_LABELS = { none: 'None', noticeable: 'Noticeable', sharp: 'Sharp pain' };
   const PUMP_LABELS = { low: 'Low', moderate: 'Moderate', amazing: 'Amazing' };
-  const VOLUME_LABELS = { not_enough: 'Not enough', just_right: 'Just right', pushed: 'Pushed my limits', too_much: 'Too much' };
+  // Load-only autoregulate plans don't adjust volume, so the "volume" answer's
+  // only remaining effect is gating the weight bump (see handleVolumeAnswer /
+  // computeMesoGains). Relabel the SAME answers/column as a weight-feel question
+  // there, so what the lifter is asked matches what actually happens: too light /
+  // just right lets the weight climb, hard / too heavy holds it. Same storage,
+  // same calculation, only the strings change.
+  const weightFeelMode = LB.autoregLoadOnly(mesoSch);
+  const VOLUME_LABELS = weightFeelMode
+    ? { not_enough: 'Too light', just_right: 'Just right', pushed: 'Hard', too_much: 'Too heavy' }
+    : { not_enough: 'Not enough', just_right: 'Just right', pushed: 'Pushed my limits', too_much: 'Too much' };
   // Every answered question this session, grouped by muscle in workout order
   // (the order questions are actually asked within a muscle group: Soreness
   // first, then each exercise's Joint check, then Pump & Volume last) — for
@@ -3157,7 +3166,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         generalRows.push({ key: 'soreness-' + muscle, title: 'Soreness', sub: SORENESS_LABELS[sRec.answer] || sRec.answer, onEdit: () => openSorenessEdit(muscle) });
       }
       if (vRec?.pump != null && vRec?.volume != null) {
-        generalRows.push({ key: 'volume-' + muscle, title: 'Pump & Volume', sub: `${PUMP_LABELS[vRec.pump] || vRec.pump} pump · ${VOLUME_LABELS[vRec.volume] || vRec.volume}`, onEdit: () => openVolumeEdit(muscle) });
+        generalRows.push({ key: 'volume-' + muscle, title: weightFeelMode ? 'Pump & Weight' : 'Pump & Volume', sub: `${PUMP_LABELS[vRec.pump] || vRec.pump} pump · ${VOLUME_LABELS[vRec.volume] || vRec.volume}`, onEdit: () => openVolumeEdit(muscle) });
       }
       if (jointRows.length || generalRows.length) groups.push({ muscle, jointRows, generalRows });
     });
@@ -7544,11 +7553,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             </button>
           ))}
         </div>
-        <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Volume</div>
-        <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.inkSoft, marginBottom: 14, lineHeight: 1.5 }}>Overall, how did the {mesoVolumeMusc ? mesoVolumeMusc.toLowerCase() + ' ' : ''}workload sit with you today?</div>
+        <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4, letterSpacing: '0.06em', textTransform: 'uppercase' }}>{weightFeelMode ? 'Weight' : 'Volume'}</div>
+        <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.inkSoft, marginBottom: 14, lineHeight: 1.5 }}>{weightFeelMode
+          ? `How did the weight feel on your ${mesoVolumeMusc ? mesoVolumeMusc.toLowerCase() + ' ' : ''}sets today?`
+          : `Overall, how did the ${mesoVolumeMusc ? mesoVolumeMusc.toLowerCase() + ' ' : ''}workload sit with you today?`}</div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 20 }}>
           {['not_enough', 'just_right', 'pushed', 'too_much'].map(key => {
-            const label = key === 'not_enough' ? 'Not enough' : key === 'just_right' ? 'Just right' : key === 'pushed' ? 'Pushed my limits' : 'Too much';
+            const label = VOLUME_LABELS[key];
             const sel = mesoVolumeAnswer === key;
             return (
               <button key={key} onClick={() => setMesoVolumeAnswer(key)} style={{
