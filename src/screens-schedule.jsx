@@ -4517,7 +4517,11 @@ function PlanWizard({ store, setStore, go }) {
           )}
         </div>
       )}
-      <button onClick={() => setWizInfoOpen(true)} style={{ alignSelf: 'center', marginTop: 2, background: 'transparent', border: 'none', color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 12.5, cursor: 'pointer', padding: '6px 8px', WebkitTapHighlightColor: 'transparent' }}>How autoregulation works</button>
+      {planMode !== 'standard' && (
+        <button onClick={() => setWizInfoOpen(true)} style={{ alignSelf: 'center', marginTop: 2, background: 'transparent', border: 'none', color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 12.5, cursor: 'pointer', padding: '6px 8px', WebkitTapHighlightColor: 'transparent' }}>
+          {planMode === 'meso' ? 'How a Mesocycle works' : 'How autoregulation works'}
+        </button>
+      )}
     </div>;
   }
 
