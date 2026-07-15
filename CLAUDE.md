@@ -124,6 +124,13 @@ Nutzer-/Coach-orientierte Übersicht aller App-Fähigkeiten. Architektur: **Code
 - **Cache-Bump-Regel:** Reine In-App-Publishes = **kein** Bump (live über DB). Screen-/Katalog-Code-Änderungen = Bump wie überall (nur auf Ansage); den Bake-Bump macht der Workflow selbst.
 - **`features.html`-Cache-Buster:** Die Public-Seite liegt außerhalb des Service Workers und hat keine SW-Cache-Version, die ein Refetch erzwingt. Sie lädt den Katalog per `<script src="src/feature-map-db.js?v=X">`. Bei jeder Katalog-Änderung (also immer wenn der SW-Cache gebumpt wird) diesen `?v=` im Gleichschritt mit der SW-Cache-Version hochziehen, sonst serviert der Browser der Public-Seite trotz frischem Deploy die alte `feature-map-db.js` weiter (die App merkt es nicht, weil ihr SW-Cache-Bump den Katalog ohnehin neu holt).
 
+## Public-Seiten (außerhalb des Service Workers)
+
+Standalone-HTML im Repo-Root, kein Login, kein Loader, **nicht** in `sw.js`-`ASSETS`. Jede hat einen eigenen `?v=`-Cache-Buster, der bei jedem Deploy **im Gleichschritt mit der SW-Cache-Version** hochgezogen werden muss (gleiche Begründung wie beim `features.html`-Buster oben):
+
+- **`features.html`** (`zane-wo.com/features.html`): Feature-Map-Übersicht. Lädt `src/feature-map-db.js?v=X` (Content zusätzlich live aus der DB per `get_public_feature_map`).
+- **`autoreg.html`** (`zane-wo.com/autoreg.html`): Autoregulation-/Mesocycle-Guide, Startseite = 3 Mode-Cards, Auswahl reshaped die Seite. Lädt `src/autoreg-guide-page.js?v=X`. Diese JS-Datei ist der Content+Render der Public-Seite (spiegelt `src/screens-autoreg-guide.jsx` inhaltlich), wird **nur** von `autoreg.html` genutzt (die App hat den JSX-Screen), daher nicht in `ASSETS`/Loader. Bei inhaltlichen Guide-Änderungen also beide Stellen (JSX-Screen **und** `autoreg-guide-page.js`) nachziehen.
+
 ## Datenbank (Supabase)
 
 Migrationen liegen in `supabase/migrations/` als nummerierte SQL-Dateien. **Die vollständige Tabellen-/Spalten- und RPC-Referenz steht in `docs/database.md`: vor jeder DB-Arbeit den passenden Abschnitt lesen.**
