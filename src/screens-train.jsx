@@ -2478,6 +2478,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const [exNoteVal, setExNoteVal] = useStateT('');
   const [planDiffOpen, setPlanDiffOpen] = useStateT(false);
   const [planDiff, setPlanDiff] = useStateT([]);
+  // After "Update plan", walk each newly-added rep-based exercise through the plan
+  // editor so it lands in the plan WITH a rep target instead of a blank one. The
+  // queue holds the session entries to configure; the ref collects each editor's
+  // saved patch, keyed by exId, for applyPlanAndFinish to fold in.
+  const [repTargetQueue, setRepTargetQueue] = useStateT([]);
+  const [repTargetIdx, setRepTargetIdx] = useStateT(0);
+  const addedRepPatchesRef = useRefT({});
   const [swapOpen, setSwapOpen] = useStateT(false);
   const [addOpen, setAddOpen] = useStateT(() => !!(session.isFreestyle && session.entries.length === 0));
   const [addSupersetData, setAddSupersetData] = useStateT(null); // { newIdx } | null
@@ -4523,7 +4530,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       }
       // 4. Insert ad-hoc exercises (process in session order so chained insertions work)
       for (const diff of planDiff.filter(d => d.type === 'added')) {
-        const newItem = { exId: diff.exId, sets: diff.sets, reps: null, repsPerSet: null, supersetGroup: diff.supersetGroup };
+        // Rep target picked in the wizard (startRepTargetWizardOrApply); cardio /
+        // checkbox / time adds have none and fall back to a blank target.
+        const patch = addedRepPatchesRef.current?.[diff.exId] || null;
+        const newItem = patch
+          ? { exId: diff.exId, sets: patch.sets ?? diff.sets, reps: patch.reps ?? null, repsPerSet: patch.repsPerSet ?? null, repsMax: patch.repsMax ?? null, progressionOffset: patch.progressionOffset ?? null, plannedTechniques: patch.plannedTechniques ?? null, supersetGroup: diff.supersetGroup }
+          : { exId: diff.exId, sets: diff.sets, reps: null, repsPerSet: null, supersetGroup: diff.supersetGroup };
         const afterIdx = diff.insertAfterExId
           ? newItems.findIndex(it => it.exId === diff.insertAfterExId)
           : -1;
@@ -4549,6 +4561,62 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     }
     finish(pendingFeel);
     setPendingFeel(null);
+  };
+
+  // Prefill for the plan editor of a newly-added exercise, built from what was
+  // just logged: same reps across the working sets -> Uniform, varied -> Per Set
+  // with the exact per-set reps. The user can switch to any model in the editor.
+  const buildRepPrefill = (entry) => {
+    const working = (entry.sets || []).filter(s => !s.warmup && !s.skipped);
+    const repsOf = (s) => (s.repsL != null || s.repsR != null)
+      ? Math.min(s.repsL ?? s.repsR ?? 0, s.repsR ?? s.repsL ?? 0)
+      : s.reps;
+    const logged = working.map(repsOf);
+    const setCount = working.length || entry.plannedSets || 3;
+    const allValid = working.length > 0 && logged.every(r => r != null && r > 0);
+    if (allValid && !logged.every(r => r === logged[0])) {
+      return { exId: entry.exId, sets: setCount, reps: logged[0], repsPerSet: logged };
+    }
+    const firstValid = logged.find(r => r != null && r > 0);
+    return { exId: entry.exId, sets: setCount, reps: firstValid ?? 8 };
+  };
+  // The untouched prefill as a patch: used when the editor is dismissed without
+  // saving, so a skipped exercise still lands with a sensible target, never blank.
+  const prefillPatch = (item) => ({ sets: item.sets, reps: item.reps, repsPerSet: item.repsPerSet, repsMax: item.repsMax });
+
+  // Advance the rep-target wizard: store this exercise's target, then move to the
+  // next added exercise, or apply the plan once every one has a target.
+  const advanceRepWizard = (patch) => {
+    const entry = repTargetQueue[repTargetIdx];
+    if (entry && patch) addedRepPatchesRef.current[entry.exId] = patch;
+    const nextIdx = repTargetIdx + 1;
+    if (nextIdx >= repTargetQueue.length) {
+      setRepTargetQueue([]);
+      setRepTargetIdx(0);
+      applyPlanAndFinish();
+    } else {
+      setRepTargetIdx(nextIdx);
+    }
+  };
+
+  // From the plan-diff prompt: gather rep targets for newly-added rep-based
+  // exercises first (so they don't land in the plan blank), then apply. Cardio and
+  // checkbox/time adds carry no rep target, so with none of those it applies straight.
+  const startRepTargetWizardOrApply = () => {
+    addedRepPatchesRef.current = {};
+    const seen = new Set();
+    const queue = [];
+    for (const e of session.entries) {
+      if (!e.addedDuringSession || e.isCardio || seen.has(e.exId)) continue;
+      if (!planDiff.some(d => d.type === 'added' && d.exId === e.exId)) continue;
+      const m = LB.exerciseLogMode(store.exercises?.find(x => x.id === e.exId));
+      if (m === 'checkbox' || m === 'time') continue;
+      seen.add(e.exId);
+      queue.push(e);
+    }
+    if (!queue.length) { applyPlanAndFinish(); return; }
+    setRepTargetQueue(queue);
+    setRepTargetIdx(0);
   };
 
   // Pace-bar base: the parts that DON'T depend on `now`. The 250 ms `now` tick
@@ -7174,9 +7242,31 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <Btn kind="ghost" onClick={() => { setPlanDiffOpen(false); finish(pendingFeel); setPendingFeel(null); }} style={{ flex: 1 }}>Leave plan</Btn>
-          <Btn onClick={() => { setPlanDiffOpen(false); applyPlanAndFinish(); }} style={{ flex: 2 }}>Update plan</Btn>
+          <Btn onClick={() => { setPlanDiffOpen(false); startRepTargetWizardOrApply(); }} style={{ flex: 2 }}>Update plan</Btn>
         </div>
       </Sheet>
+
+      {/* Rep-target wizard: newly-added exercises get the full plan editor (pre-filled
+          from what was just logged) so they land in the plan WITH a rep target. */}
+      {repTargetQueue.length > 0 && repTargetIdx < repTargetQueue.length && window.Screens?.ExerciseItemEditor && (() => {
+        const entry = repTargetQueue[repTargetIdx];
+        const item = buildRepPrefill(entry);
+        const ex = store.exercises?.find(x => x.id === entry.exId);
+        return (
+          <window.Screens.ExerciseItemEditor
+            key={entry.exId + '-' + repTargetIdx}
+            item={item}
+            exName={ex?.name || entry.name}
+            isCheckboxOnly={false}
+            queuePos={repTargetIdx + 1}
+            queueTotal={repTargetQueue.length}
+            store={store}
+            setStore={setStore}
+            onClose={() => advanceRepWizard(prefillPatch(item))}
+            onSave={(patch) => advanceRepWizard(patch)}
+          />
+        );
+      })()}
 
       {/* exercise swap picker */}
       {swapOpen && <window.Screens.ExercisePicker store={store} setStore={setStore} onClose={() => setSwapOpen(false)} onPick={doSwap} singleSelect />}

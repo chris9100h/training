@@ -5053,4 +5053,4 @@ function FiveThreeOneSetupScreen({ store, setStore, go, userId }) {
   );
 }
 
-Object.assign(window.Screens, { PlanScreen, PlanViewerScreen, ScheduleEditScreen, ScheduleNewScreen, StructuredProgramsScreen, ProgramTemplatesScreen, ProgramPreviewScreen, FiveThreeOneSetupScreen, ExercisePicker, DayTypePicker });
+Object.assign(window.Screens, { PlanScreen, PlanViewerScreen, ScheduleEditScreen, ScheduleNewScreen, StructuredProgramsScreen, ProgramTemplatesScreen, ProgramPreviewScreen, FiveThreeOneSetupScreen, ExercisePicker, DayTypePicker, ExerciseItemEditor });

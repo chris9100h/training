@@ -17,6 +17,17 @@
    Entry shape: { id: string, date: string (YYYY-MM-DD), title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.589',
+    date: '2026-07-15',
+    title: 'Dialed In',
+    items: [
+      "🏋️ Intensity techniques now work on single-side exercises too. Drop Sets, Myo-Reps and the rest are finally available on your single-arm and single-leg work in the session editor, no more odd one out.",
+      "🎯 Add an exercise on the fly, keep it for good. When you add an exercise mid-workout and update your plan, it now asks for the rep target (uniform, per-set or a range), pre-filled with the reps you just hit, so it lands in your plan ready to go instead of blank.",
+      "🎛️ Auto plans got smarter mid-plan. Switch autoregulation on partway through a plan and it now knows you have already been training: the right questions from session one, and your weights can move straight away instead of sitting frozen for a week. In weight-only mode it now asks how the weight felt rather than about volume, since on those plans the load is the whole point.",
+      "🐛 Cursors that wandered off, back in place. The text cursor that liked to hover in the wrong spot in note and text fields now sits where you are actually typing, plus a stack of smaller fixes and polish across the app.",
+    ],
+  },
+  {
     id: 'v2.588',
     date: '2026-07-14',
     title: 'The Big Tidy-Up',
