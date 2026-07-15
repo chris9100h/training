@@ -2671,6 +2671,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
   const [editing, setEditing] = useStateL(false);
   const [capturing, setCapturing] = useStateL(false);
   const [feelOpen, setFeelOpen] = useStateL(false);
+  const [recapOpen, setRecapOpen] = useStateL(false);
   const [tplFormOpen, setTplFormOpen] = useStateL(false);
   const [tplName, setTplName] = useStateL('');
   const [tplSaved, setTplSaved] = useStateL(false);
@@ -3001,6 +3002,71 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
           <Btn kind="ghost" onClick={() => go({ name: 'compare', sessionId: s.id, back: { name: 'session', sessionId: s.id, back } })} style={{ width: '100%', marginTop: -8 }}>
             <i className="fa-solid fa-code-compare" style={{ marginRight: 8 }} /> Compare to another session
           </Btn>
+        )}
+
+        {/* Autoregulation / mesocycle feedback recap: durable, read straight
+            off the session's meso_recap (written at finish). Shows the feedback
+            the lifter gave and the weight/set bumps or cuts it earned, so an
+            auto / auto-load-only / meso session stays traceable after the fact. */}
+        {!capturing && s.mesoRecap && (
+          <div style={{ marginTop: -8 }}>
+            <Btn kind="ghost" onClick={() => setRecapOpen(o => !o)} style={{ width: '100%' }}>
+              <i className="fa-solid fa-clipboard-list" style={{ marginRight: 8 }} /> Feedback recap
+              <i className={`fa-solid fa-chevron-${recapOpen ? 'up' : 'down'}`} style={{ marginLeft: 8, fontSize: 10 }} />
+            </Btn>
+            {recapOpen && (
+              <Card style={{ marginTop: 8 }}>
+                <div className="micro-gold" style={{ marginBottom: 12 }}>
+                  {s.mesoRecap.loadOnly ? 'Autoregulation · load only'
+                    : s.mesoRecap.meso ? `Mesocycle${s.mesoRecap.week ? ` · Week ${s.mesoRecap.week}` : ''}`
+                    : 'Autoregulation'}
+                </div>
+
+                {s.mesoRecap.groups?.length > 0 && (<>
+                  <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8, letterSpacing: '0.12em' }}>FEEDBACK GIVEN</div>
+                  {s.mesoRecap.groups.map((g, gi) => (
+                    <div key={gi} style={{ marginBottom: gi < s.mesoRecap.groups.length - 1 ? 14 : 4 }}>
+                      <div style={{ fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, color: UI.inkSoft, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>{g.muscle}</div>
+                      {[...(g.general || []), ...(g.joint || [])].map((r, ri) => (
+                        <div key={ri} style={{ display: 'flex', justifyContent: 'space-between', gap: 10, padding: '4px 0' }}>
+                          <span style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.inkFaint, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.title}</span>
+                          <span style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.ink, textAlign: 'right', flexShrink: 0 }}>{r.sub}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ))}
+                </>)}
+
+                <div className="micro" style={{ color: UI.inkFaint, margin: `${s.mesoRecap.groups?.length ? 16 : 0}px 0 8px`, letterSpacing: '0.12em' }}>CHANGES EARNED</div>
+                {s.mesoRecap.gains?.length > 0 ? s.mesoRecap.gains.map((item, i) => (
+                  <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: i < s.mesoRecap.gains.length - 1 ? `1px solid ${UI.hair}` : 'none' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+                      <span style={{ fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, color: UI.ink, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.name}</span>
+                      {item.weightDelta < 0 && (
+                        <span style={{ fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.06em', textTransform: 'uppercase', color: UI.inkGhost }}>Reps missed, easing load</span>
+                      )}
+                    </div>
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0 }}>
+                      {item.setDelta !== 0 && (
+                        <span style={{ fontFamily: UI.fontNum, fontSize: 12, fontWeight: 700, color: item.setDelta > 0 ? 'var(--accent)' : 'rgba(var(--danger-rgb),0.9)' }}>
+                          {item.setDelta > 0 ? '+' : ''}{item.setDelta} set
+                        </span>
+                      )}
+                      {item.weightDelta !== 0 && (
+                        <span style={{ fontFamily: UI.fontNum, fontSize: 12, fontWeight: 700, color: item.weightDelta > 0 ? 'var(--accent)' : 'rgba(var(--danger-rgb),0.9)' }}>
+                          {item.weightDelta > 0 ? '+' : ''}{item.weightDelta} {s.mesoRecap.unit || UI.unit()}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )) : (
+                  <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.inkFaint, padding: '4px 0' }}>
+                    No weight or set changes earned this session.
+                  </div>
+                )}
+              </Card>
+            )}
+          </div>
         )}
 
         {/* Exercise entries */}

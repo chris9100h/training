@@ -127,7 +127,8 @@ CREATE TABLE public.zane_sessions (
   feel text,
   is_bonus boolean NOT NULL DEFAULT false,
   is_freestyle boolean NOT NULL DEFAULT false,
-  is_deload boolean NOT NULL DEFAULT false
+  is_deload boolean NOT NULL DEFAULT false,
+  meso_recap jsonb
 );
 
 CREATE TABLE public.zane_session_entries (

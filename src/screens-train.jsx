@@ -2208,6 +2208,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       // via the gain sheet's onClose) whose mesoState freshness differs.
       if (isComplete) mesoNextNumRef.current = (mesoState.completions ?? 0) + 2;
       const gains = computeMesoGains(isComplete); // also flushes final meso state to store
+      // Persist a durable recap (feedback given + bumps/cuts earned) onto the
+      // session so the detail screen can show it later; survives across devices.
+      const recap = buildMesoRecap(gains);
+      if (recap) updateSession(sess => ({ ...sess, mesoRecap: recap }));
       if (gains.length > 0) {
         mesoGainNavRef.current = session.id;
         setMesoGainItems(gains);
@@ -3178,6 +3182,34 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       if (jointRows.length || generalRows.length) groups.push({ muscle, jointRows, generalRows });
     });
     return groups;
+  };
+
+  // Serializable snapshot of this session's meso feedback + earned bumps/cuts,
+  // written onto the session (meso_recap column) at finish so the session detail
+  // screen can show it durably on any device. The live mesoRecapGroups rows and
+  // mesoGainItems state only existed in localStorage / React state and vanished
+  // once the session was left. Reuses the exact same label logic (drops the
+  // onEdit closures, which aren't serializable and only matter mid-session).
+  const buildMesoRecap = (gains) => {
+    if (!mesoState) return null;
+    const groups = mesoRecapGroups().map(g => ({
+      muscle: g.muscle,
+      general: g.generalRows.map(r => ({ title: r.title, sub: r.sub })),
+      joint: g.jointRows.map(r => ({ title: r.title, sub: r.sub })),
+    })).filter(g => g.general.length || g.joint.length);
+    const gainRows = (gains || []).map(g => ({
+      name: g.name, weightDelta: g.weightDelta || 0, setDelta: g.setDelta || 0,
+    })).filter(g => g.weightDelta || g.setDelta);
+    // Nothing to remember: no feedback answered and no bump/cut earned.
+    if (!groups.length && !gainRows.length) return null;
+    return {
+      loadOnly: !!weightFeelMode,
+      meso: mesoState.weeks != null,
+      week: mesoWeek ?? null,
+      unit: store.settings?.unit || 'kg',
+      groups,
+      gains: gainRows,
+    };
   };
 
   // Compute per-exercise weight boosts earned this session and return gain items for
