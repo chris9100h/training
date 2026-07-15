@@ -4585,6 +4585,233 @@ function revertMesoSessionBoosts(mesoState, deletedSession, remainingSessions) {
   return { ...mesoState, weightBoosts: wb, repMissCounts: rmc };
 }
 
+// ── Post-hoc meso feedback editing ────────────────────────────────────────────
+// Correcting a feedback answer AFTER a session finished (SessionDetailScreen).
+// The live handlers (handleSoreness/Joint/VolumeAnswer + commitContrib in
+// screens-train.jsx) already support editing an answer mid-session by DIFFING
+// the new contribution against the record's stored one; these helpers reproduce
+// exactly that diff purely, so a post-hoc edit is identical to having answered
+// differently in the first place. Only valid for the top-of-stack session (see
+// isMesoSessionEditable), which is what makes the incremental diff exact.
+
+// Rebuild the four weight-boost gate Sets from the per-question answer records,
+// mirroring the mesoBoostSetsInitRef rehydration (screens-train.jsx). Pure.
+function mesoGateSetsFromAnswers(answers, loadOnly) {
+  const a = answers || {};
+  const jointFine = new Set();
+  for (const [exId, rec] of Object.entries(a.joint || {})) if (rec && rec.answer === 'none') jointFine.add(exId);
+  const pumpOk = new Set(), volumeOk = new Set();
+  for (const rec of Object.values(a.volume || {})) {
+    if (!rec || !rec.muscle) continue;
+    if (rec.pump === 'moderate' || rec.pump === 'amazing') pumpOk.add(rec.muscle);
+    if (volumeAnswerAllowsBump(rec.volume, loadOnly)) volumeOk.add(rec.muscle);
+  }
+  const soreBlock = new Set();
+  for (const rec of Object.values(a.soreness || {})) if (rec && rec.answer === 'still_sore' && rec.muscle) soreBlock.add(rec.muscle);
+  return { jointFine, pumpOk, volumeOk, soreBlock };
+}
+
+// Can this finished session's feedback be safely edited? Only the single
+// most-recent non-deload session of its PLAN in the current block. Any later
+// session on the plan may have advanced the muscle-shared rotation/accumulator
+// levers (deltas / growthCounts / pumpLowCounts), which an edit of an older
+// session can no longer reconcile. Also requires the durable raw records
+// (sessions finished before the feature shipped lack them) and blocks while a
+// session for the plan is in progress (it would flush over the edit). Pure.
+function isMesoSessionEditable(session, allSessions, mesoState) {
+  if (!session || !mesoState || !session.ended || session.isDeload) return false;
+  if (!session.mesoRecap || !session.mesoRecap.raw || !session.mesoRecap.raw.answers) return false;
+  if (mesoState.startedAt && (session.ended || '') < mesoState.startedAt) return false;
+  const sid = session.scheduleId;
+  const laterExists = (allSessions || []).some(x =>
+    x && x.ended && !x.isDeload && x.id !== session.id && x.scheduleId === sid && (x.ended || '') > (session.ended || ''));
+  if (laterExists) return false;
+  const liveForPlan = (allSessions || []).some(x => x && !x.ended && x.scheduleId === sid);
+  if (liveForPlan) return false;
+  return true;
+}
+
+// Pure mirror of commitContrib (screens-train.jsx) minus the display ledger:
+// diff `newContrib` against `prevContrib` into `deltas`, honoring the negative-
+// slot ownership in `negOwner` (a second question type never stacks a second -1
+// on the same key). Both `deltas` and `negOwner` are mutated in place. `frozen`
+// (final week / load-only) freezes the whole set-delta system: no delta, contrib
+// left as-is. Returns the record's new contrib.
+function _commitContribInto(deltas, negOwner, prevContrib, questionType, newContrib, frozen) {
+  if (frozen) return prevContrib || {};
+  const keys = new Set([...Object.keys(prevContrib || {}), ...Object.keys(newContrib || {})]);
+  const finalContrib = {};
+  keys.forEach(key => {
+    let want = newContrib[key] || 0;
+    if (want < 0) {
+      const owner = negOwner[key];
+      if (owner && owner !== questionType) want = 0; // another question owns this key's negative slot
+      else negOwner[key] = questionType;
+    }
+    if (want >= 0 && negOwner[key] === questionType) delete negOwner[key];
+    const diff = want - ((prevContrib || {})[key] || 0);
+    if (diff !== 0) deltas[key] = (deltas[key] || 0) + diff;
+    finalContrib[key] = want;
+  });
+  return finalContrib;
+}
+
+// Apply ONE corrected feedback answer to a finished (top-of-stack) session's meso
+// state, mirroring the live edit path of each answer handler. `edit` is
+// { type:'soreness'|'joint'|'volume', subject: muscle|exId, answer, pump, volume }.
+// `raw` is the durable session.mesoRecap.raw ({ answers, negOwner, frozen, dayId }).
+// `ctx` = { dayId, loadOnly }. Touches deltas/growthCounts/pumpLowCounts/jointFlags
+// + the answer record + negOwner; weight boosts are re-earned separately
+// (reearnMesoBoostsFromAnswers) since they also need the objective rep outcome.
+// Pure: returns { mesoState, raw }.
+function applyMesoFeedbackEdit(mesoState, raw, edit, ctx) {
+  const dayId = ctx.dayId;
+  const loadOnly = !!ctx.loadOnly;
+  const frozen = !!(raw && raw.frozen);
+  const deltas = { ...(mesoState.deltas || {}) };
+  let growthCounts = { ...(mesoState.growthCounts || {}) };
+  const pumpLowCounts = { ...(mesoState.pumpLowCounts || {}) };
+  const jointFlags = { ...(mesoState.jointFlags || {}) };
+  const answers = {
+    soreness: { ...((raw.answers && raw.answers.soreness) || {}) },
+    joint: { ...((raw.answers && raw.answers.joint) || {}) },
+    volume: { ...((raw.answers && raw.answers.volume) || {}) },
+  };
+  const negOwner = { ...(raw.negOwner || {}) };
+
+  if (edit.type === 'soreness') {
+    const muscle = edit.subject;
+    const rec = { ...(answers.soreness[muscle] || { muscle }) };
+    rec.answer = edit.answer;
+    // Load-only: soreness only holds the weight (soreBlock gate, rebuilt in the
+    // re-earn), never touches set deltas. Mirrors the handler's early return.
+    if (!loadOnly) {
+      const keys = (rec.targets || []).map(t => t.key);
+      const adds = edit.answer === 'never' || edit.answer === 'healed_long';
+      const prevGrantedTo = Object.keys(rec.contrib || {}).find(k => rec.contrib[k] === 1) ?? null;
+      let recipientKey = null;
+      if (adds && keys.length) {
+        const g = pickGrowthRecipient(keys, growthCounts, prevGrantedTo);
+        recipientKey = g.recipientKey; growthCounts = g.growthCounts;
+      } else if (prevGrantedTo) {
+        growthCounts = retractGrowthGrant(growthCounts, prevGrantedTo);
+      }
+      const declineKey = edit.answer === 'still_sore' ? pickDeclineRecipient(keys, deltas, rec.contrib) : null;
+      const newContrib = {};
+      (rec.targets || []).forEach(t => {
+        let want = 0;
+        if (t.key === recipientKey) want = 1;
+        else if (t.key === declineKey) want = -1;
+        newContrib[t.key] = want;
+      });
+      rec.contrib = _commitContribInto(deltas, negOwner, rec.contrib || {}, 'soreness', newContrib, frozen);
+    }
+    answers.soreness[muscle] = rec;
+  } else if (edit.type === 'joint') {
+    const exId = edit.subject;
+    const rec = { ...(answers.joint[exId] || { exId }) };
+    rec.answer = edit.answer;
+    // jointFlags is a persistent "causes joint pain" marker; restore-from-baseline
+    // is handled implicitly because flagNow OR-s the (immutable) baseline.
+    const flagNow = !!rec.flagBaseline || edit.answer === 'sharp';
+    jointFlags[exId] = flagNow;
+    const key = exId + '_' + dayId;
+    const newContrib = { [key]: (edit.answer === 'noticeable' || edit.answer === 'sharp') ? -1 : 0 };
+    rec.contrib = _commitContribInto(deltas, negOwner, rec.contrib || {}, 'joint', newContrib, frozen);
+    answers.joint[exId] = rec;
+  } else if (edit.type === 'volume') {
+    const muscle = edit.subject;
+    const rec = { ...(answers.volume[muscle] || { muscle }) };
+    const oldPumpLowApplied = !!rec.pumpLowApplied;
+    rec.pump = edit.pump; rec.volume = edit.volume;
+    const exIds = rec.exIds || [];
+    const keys = exIds.map(exId => exId + '_' + dayId);
+    const mainExId = exIds[0];
+    const prevGrantedTo = Object.keys(rec.contrib || {}).find(k => rec.contrib[k] === 1) ?? null;
+    let recipientKey = null;
+    if (frozen) {
+      // frozen: no rotation, no grant (mirrors the volume handler's guard)
+    } else if (edit.volume === 'not_enough') {
+      const g = pickGrowthRecipient(keys, growthCounts, prevGrantedTo);
+      recipientKey = g.recipientKey; growthCounts = g.growthCounts;
+    } else if (prevGrantedTo) {
+      growthCounts = retractGrowthGrant(growthCounts, prevGrantedTo);
+    }
+    const declineKey = edit.volume === 'pushed' ? pickDeclineRecipient(keys, deltas, rec.contrib) : null;
+    const newContrib = {};
+    keys.forEach(key => {
+      let want = 0;
+      if (edit.volume === 'too_much') want = -1;
+      else if (key === recipientKey) want = 1;
+      else if (key === declineKey) want = -1;
+      newContrib[key] = want;
+    });
+    rec.contrib = _commitContribInto(deltas, negOwner, rec.contrib || {}, 'volume', newContrib, frozen);
+    const pumpLowApplied = edit.pump === 'low' && edit.volume === 'just_right';
+    const pumpLowDiff = (pumpLowApplied ? 1 : 0) - (oldPumpLowApplied ? 1 : 0);
+    rec.pumpLowApplied = pumpLowApplied;
+    if (pumpLowDiff !== 0 && mainExId) {
+      pumpLowCounts[mainExId] = Math.max(0, (pumpLowCounts[mainExId] || 0) + pumpLowDiff);
+    }
+    answers.volume[muscle] = rec;
+  }
+
+  return {
+    mesoState: { ...mesoState, deltas, growthCounts, pumpLowCounts, jointFlags },
+    raw: { ...raw, answers, negOwner },
+  };
+}
+
+// Re-earn this session's weight boosts from the (edited) feedback answers,
+// mirroring computeMesoGains' EARN gate: allHit AND jointFine AND pumpOk AND
+// volumeOk AND (load-only) not-still-sore. A rep-miss CUT (a negative existing
+// boost) is rep-driven, not feedback-driven, so it is preserved untouched.
+// earnInputs = this session's exercises [{ exId, key, muscle, allHit, increment }].
+// Pure: returns new mesoState.
+function reearnMesoBoostsFromAnswers(mesoState, answers, earnInputs, loadOnly) {
+  const gates = mesoGateSetsFromAnswers(answers, loadOnly);
+  const wb = mesoState.weightBoosts || {};
+  const earned = {};
+  const sessionKeys = [];
+  for (const e of (earnInputs || [])) {
+    sessionKeys.push(e.key);
+    const existing = wb[e.key];
+    if (existing != null && existing < 0) { earned[e.key] = existing; continue; } // preserve rep-miss cut
+    if (!e.allHit) continue;
+    if (!gates.jointFine.has(e.exId)) continue;
+    if (e.muscle && !gates.pumpOk.has(e.muscle)) continue;
+    if (e.muscle && !gates.volumeOk.has(e.muscle)) continue;
+    if (loadOnly && e.muscle && gates.soreBlock.has(e.muscle)) continue;
+    earned[e.key] = e.increment;
+  }
+  return { ...mesoState, weightBoosts: reearnMesoWeightBoosts(wb, sessionKeys, earned) };
+}
+
+// Recompute the recap "changes earned" rows (name + weightDelta + setDelta per
+// exercise) from the edited answers and the freshly re-earned weightBoosts, so
+// the durable recap display matches the new state. Mirrors computeMesoGains'
+// gainMap: set deltas come from every record's contrib (soreness targets can key
+// a prior day), weight deltas from this session's boosts. Pure.
+function mesoRecapGainsFromEdit(answers, weightBoosts, earnInputs, dayId) {
+  const setDeltaByKey = {}, nameByKey = {};
+  const addContrib = (contrib) => { for (const [k, v] of Object.entries(contrib || {})) setDeltaByKey[k] = (setDeltaByKey[k] || 0) + (v || 0); };
+  for (const rec of Object.values((answers && answers.soreness) || {})) { (rec.targets || []).forEach(t => { if (t && t.key) nameByKey[t.key] = t.name; }); addContrib(rec.contrib); }
+  for (const [exId, rec] of Object.entries((answers && answers.joint) || {})) { nameByKey[exId + '_' + dayId] = rec.exName; addContrib(rec.contrib); }
+  for (const rec of Object.values((answers && answers.volume) || {})) addContrib(rec.contrib);
+  for (const e of (earnInputs || [])) if (e.name) nameByKey[e.key] = nameByKey[e.key] || e.name;
+  const wb = weightBoosts || {};
+  const weightByKey = {};
+  for (const e of (earnInputs || [])) weightByKey[e.key] = wb[e.key] || 0;
+  const keys = new Set([...Object.keys(setDeltaByKey), ...Object.keys(weightByKey)]);
+  const gains = [];
+  keys.forEach(k => {
+    const setDelta = setDeltaByKey[k] || 0;
+    const weightDelta = weightByKey[k] || 0;
+    if (setDelta || weightDelta) gains.push({ name: nameByKey[k] || '?', weightDelta, setDelta });
+  });
+  return gains;
+}
+
 // Reconcile the Smart-Progression suggestion with the meso weight boost when
 // seeding an exercise. On an autoregulating plan the feedback engine is the
 // sole authority over next-session weight:
@@ -4967,5 +5194,6 @@ window.LB = {
   isLoggedTrainingDay, plannedTrainingDay, isTrainingDayForDate, dayTargetFromMacros, macroAdherence, hasMacroTargets, effectiveMacroTargets, dailyLogAdherence, dailyLogsWeekPrefill, weekPerformanceSignal,
   refreshHealthLogs,
   pickGrowthRecipient, retractGrowthGrant, pickDeclineRecipient, reearnMesoWeightBoosts, revertMesoSessionBoosts, resolveMesoSeedSuggestion, mesoPausedDays, mesoRirForWeek, mesoMuscleTrainedBeforeStart, volumeAnswerAllowsBump,
+  mesoGateSetsFromAnswers, isMesoSessionEditable, applyMesoFeedbackEdit, reearnMesoBoostsFromAnswers, mesoRecapGainsFromEdit,
   mesoSetTarget, mesoEarnTarget, mesoRepOutcome,
 };

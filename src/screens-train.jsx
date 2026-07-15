@@ -3202,13 +3202,29 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     })).filter(g => g.weightDelta || g.setDelta);
     // Nothing to remember: no feedback answered and no bump/cut earned.
     if (!groups.length && !gainRows.length) return null;
+    // `raw` is the durable copy of the raw per-question answer records (answer
+    // codes, per-key contrib, resolved soreness targets, joint flagBaseline,
+    // pumpLowApplied) plus the negative-slot ownership and the freeze context.
+    // These only ever lived in device localStorage (loadMesoAskedSets) and were
+    // wiped at finish, so post-hoc feedback editing had no source. Snapshotting
+    // them here (from the still-populated in-memory refs, not localStorage) makes
+    // the last session's feedback correctable later via LB.replayMesoSession.
+    // JSON-cloned so a later store mutation can't alias into these records.
+    const raw = (groups.length && mesoAnswersRef.current?.answers) ? {
+      answers: JSON.parse(JSON.stringify(mesoAnswersRef.current.answers)),
+      negOwner: { ...(mesoNegativeDeltaKeysRef.current || {}) },
+      frozen: !!(mesoLastWeek || weightFeelMode),
+      dayId: session.dayId ?? null,
+    } : null;
     return {
       loadOnly: !!weightFeelMode,
       meso: mesoState.weeks != null,
       week: mesoWeek ?? null,
+      weeks: mesoState.weeks ?? null,
       unit: store.settings?.unit || 'kg',
       groups,
       gains: gainRows,
+      ...(raw ? { raw } : {}),
     };
   };
 

@@ -891,6 +891,133 @@ async function testAsync(name, fn) {
     assert.ok(!('tri_d1' in out.weightBoosts));
   });
 
+  // ── isMesoSessionEditable (only the plan's most-recent session, with raw) ──
+  {
+    const meso = { scheduleId: 'p1', startedAt: '2026-07-01T00:00:00Z' };
+    const withRaw = (over) => ({ id: 'S', scheduleId: 'p1', ended: '2026-07-15T10:00:00Z',
+      mesoRecap: { raw: { answers: {} } }, ...over });
+    test('isMesoSessionEditable: most-recent session of the plan with raw → true', () => {
+      const s = withRaw();
+      assert.strictEqual(LB.isMesoSessionEditable(s, [s], meso), true);
+    });
+    test('isMesoSessionEditable: a later session on the same plan → false', () => {
+      const s = withRaw();
+      const later = { id: 'L', scheduleId: 'p1', ended: '2026-07-16T10:00:00Z' };
+      assert.strictEqual(LB.isMesoSessionEditable(s, [s, later], meso), false);
+    });
+    test('isMesoSessionEditable: a later session on a DIFFERENT plan does not lock it', () => {
+      const s = withRaw();
+      const otherPlan = { id: 'O', scheduleId: 'p2', ended: '2026-07-20T10:00:00Z' };
+      assert.strictEqual(LB.isMesoSessionEditable(s, [s, otherPlan], meso), true);
+    });
+    test('isMesoSessionEditable: deload / no-raw / prior-block / live-session → false', () => {
+      assert.strictEqual(LB.isMesoSessionEditable(withRaw({ isDeload: true }), [], meso), false);
+      assert.strictEqual(LB.isMesoSessionEditable({ id: 'S', scheduleId: 'p1', ended: '2026-07-15T10:00:00Z' }, [], meso), false);
+      assert.strictEqual(LB.isMesoSessionEditable(withRaw({ ended: '2026-06-01T00:00:00Z' }), [], meso), false); // before startedAt
+      const s = withRaw();
+      const live = { id: 'IP', scheduleId: 'p1', ended: null };
+      assert.strictEqual(LB.isMesoSessionEditable(s, [s, live], meso), false);
+    });
+  }
+
+  // ── applyMesoFeedbackEdit (post-hoc feedback correction, mirrors the handlers) ──
+  test('applyMesoFeedbackEdit: no-op edit (same answer) leaves state byte-identical', () => {
+    const ms = { deltas: { e1_d0: -1 }, growthCounts: {}, pumpLowCounts: {}, jointFlags: {} };
+    const raw = { answers: { soreness: { chest: { muscle: 'chest', targets: [{ exId: 'e1', name: 'Bench', key: 'e1_d0' }], answer: 'still_sore', contrib: { e1_d0: -1 } } }, joint: {}, volume: {} }, negOwner: { e1_d0: 'soreness' }, frozen: false, dayId: 'd0' };
+    const out = LB.applyMesoFeedbackEdit(ms, raw, { type: 'soreness', subject: 'chest', answer: 'still_sore' }, { dayId: 'd0', loadOnly: false });
+    assert.strictEqual(JSON.stringify(out.mesoState.deltas), JSON.stringify({ e1_d0: -1 }));
+    assert.strictEqual(JSON.stringify(out.mesoState.growthCounts), '{}');
+    assert.strictEqual(JSON.stringify(out.raw.negOwner), JSON.stringify({ e1_d0: 'soreness' }));
+  });
+  test('applyMesoFeedbackEdit: soreness still_sore → never flips a -1 decline into a +1 growth grant', () => {
+    const ms = { deltas: { e1_d0: -1 }, growthCounts: {}, pumpLowCounts: {}, jointFlags: {} };
+    const raw = { answers: { soreness: { chest: { muscle: 'chest', targets: [{ exId: 'e1', name: 'Bench', key: 'e1_d0' }], answer: 'still_sore', contrib: { e1_d0: -1 } } }, joint: {}, volume: {} }, negOwner: { e1_d0: 'soreness' }, frozen: false, dayId: 'd0' };
+    const out = LB.applyMesoFeedbackEdit(ms, raw, { type: 'soreness', subject: 'chest', answer: 'never' }, { dayId: 'd0', loadOnly: false });
+    assert.strictEqual(out.mesoState.deltas.e1_d0, 1);      // -1 -> +1 (diff +2 applied)
+    assert.strictEqual(out.mesoState.growthCounts.e1_d0, 1); // growth granted
+    assert.ok(!('e1_d0' in out.raw.negOwner), 'negative slot released');
+  });
+  test('applyMesoFeedbackEdit: joint sharp → none clears the -1 and keeps a baseline flag', () => {
+    const ms = { deltas: { e1_d1: -1 }, growthCounts: {}, pumpLowCounts: {}, jointFlags: { e1: true } };
+    const raw = { answers: { soreness: {}, joint: { e1: { exId: 'e1', muscle: 'chest', exName: 'Bench', flagBaseline: true, answer: 'sharp', contrib: { e1_d1: -1 } } }, volume: {} }, negOwner: { e1_d1: 'joint' }, frozen: false, dayId: 'd1' };
+    const out = LB.applyMesoFeedbackEdit(ms, raw, { type: 'joint', subject: 'e1', answer: 'none' }, { dayId: 'd1', loadOnly: false });
+    assert.strictEqual(out.mesoState.deltas.e1_d1, 0);       // -1 undone
+    assert.strictEqual(out.mesoState.jointFlags.e1, true);   // baseline flag NOT erased
+  });
+  test('applyMesoFeedbackEdit: joint none → sharp sets the flag and a -1', () => {
+    const ms = { deltas: {}, growthCounts: {}, pumpLowCounts: {}, jointFlags: {} };
+    const raw = { answers: { soreness: {}, joint: { e1: { exId: 'e1', muscle: 'chest', exName: 'Bench', flagBaseline: false, answer: 'none', contrib: { e1_d1: 0 } } }, volume: {} }, negOwner: {}, frozen: false, dayId: 'd1' };
+    const out = LB.applyMesoFeedbackEdit(ms, raw, { type: 'joint', subject: 'e1', answer: 'sharp' }, { dayId: 'd1', loadOnly: false });
+    assert.strictEqual(out.mesoState.deltas.e1_d1, -1);
+    assert.strictEqual(out.mesoState.jointFlags.e1, true);
+    assert.strictEqual(out.raw.negOwner.e1_d1, 'joint');
+  });
+  test('applyMesoFeedbackEdit: volume too_much → just_right removes the -1s', () => {
+    const ms = { deltas: { e1_d1: -1, e2_d1: -1 }, growthCounts: {}, pumpLowCounts: {}, jointFlags: {} };
+    const raw = { answers: { soreness: {}, joint: {}, volume: { chest: { muscle: 'chest', exIds: ['e1', 'e2'], pump: 'moderate', volume: 'too_much', contrib: { e1_d1: -1, e2_d1: -1 } } } }, negOwner: { e1_d1: 'volume', e2_d1: 'volume' }, frozen: false, dayId: 'd1' };
+    const out = LB.applyMesoFeedbackEdit(ms, raw, { type: 'volume', subject: 'chest', answer: null, pump: 'moderate', volume: 'just_right' }, { dayId: 'd1', loadOnly: false });
+    assert.strictEqual(out.mesoState.deltas.e1_d1, 0);
+    assert.strictEqual(out.mesoState.deltas.e2_d1, 0);
+  });
+  test('applyMesoFeedbackEdit: pumpLowApplied tracked as a diff (low+just_right → +1, changed away → -1)', () => {
+    const ms = { deltas: {}, growthCounts: {}, pumpLowCounts: {}, jointFlags: {} };
+    const raw = { answers: { soreness: {}, joint: {}, volume: { chest: { muscle: 'chest', exIds: ['e1'], pump: 'moderate', volume: 'just_right', contrib: { e1_d1: 0 }, pumpLowApplied: false } } }, negOwner: {}, frozen: false, dayId: 'd1' };
+    const on = LB.applyMesoFeedbackEdit(ms, raw, { type: 'volume', subject: 'chest', pump: 'low', volume: 'just_right' }, { dayId: 'd1', loadOnly: false });
+    assert.strictEqual(on.mesoState.pumpLowCounts.e1, 1);
+    // now change away from low → decrement back
+    const off = LB.applyMesoFeedbackEdit(on.mesoState, on.raw, { type: 'volume', subject: 'chest', pump: 'amazing', volume: 'just_right' }, { dayId: 'd1', loadOnly: false });
+    assert.strictEqual(off.mesoState.pumpLowCounts.e1, 0);
+  });
+  test('applyMesoFeedbackEdit: negOwner stops a second question stacking a -1 on the same key', () => {
+    const ms = { deltas: { e1_d1: -1 }, growthCounts: {}, pumpLowCounts: {}, jointFlags: {} };
+    const raw = { answers: { soreness: {}, joint: {}, volume: { chest: { muscle: 'chest', exIds: ['e1'], pump: 'moderate', volume: 'just_right', contrib: {} } } }, negOwner: { e1_d1: 'joint' }, frozen: false, dayId: 'd1' };
+    const out = LB.applyMesoFeedbackEdit(ms, raw, { type: 'volume', subject: 'chest', pump: 'moderate', volume: 'too_much' }, { dayId: 'd1', loadOnly: false });
+    assert.strictEqual(out.mesoState.deltas.e1_d1, -1); // volume's -1 suppressed (joint owns the slot)
+  });
+  test('applyMesoFeedbackEdit: load-only soreness never touches deltas', () => {
+    const ms = { deltas: {}, growthCounts: {}, pumpLowCounts: {}, jointFlags: {} };
+    const raw = { answers: { soreness: { chest: { muscle: 'chest', targets: [{ exId: 'e1', name: 'Bench', key: 'e1_d0' }], answer: 'still_sore', contrib: {} } }, joint: {}, volume: {} }, negOwner: {}, frozen: false, dayId: 'd0' };
+    const out = LB.applyMesoFeedbackEdit(ms, raw, { type: 'soreness', subject: 'chest', answer: 'never' }, { dayId: 'd0', loadOnly: true });
+    assert.strictEqual(JSON.stringify(out.mesoState.deltas), '{}');
+    assert.strictEqual(out.raw.answers.soreness.chest.answer, 'never');
+  });
+  test('applyMesoFeedbackEdit: frozen (final week) volume edit moves pumpLowCounts but never deltas', () => {
+    const ms = { deltas: {}, growthCounts: {}, pumpLowCounts: {}, jointFlags: {} };
+    const raw = { answers: { soreness: {}, joint: {}, volume: { chest: { muscle: 'chest', exIds: ['e1'], pump: 'moderate', volume: 'just_right', contrib: {}, pumpLowApplied: false } } }, negOwner: {}, frozen: true, dayId: 'd1' };
+    const out = LB.applyMesoFeedbackEdit(ms, raw, { type: 'volume', subject: 'chest', pump: 'low', volume: 'just_right' }, { dayId: 'd1', loadOnly: false });
+    assert.strictEqual(JSON.stringify(out.mesoState.deltas), '{}');
+    assert.strictEqual(out.mesoState.pumpLowCounts.e1, 1);
+  });
+
+  // ── reearnMesoBoostsFromAnswers (weight re-earn from edited gates) ──
+  const earnInputs = [{ exId: 'e1', key: 'e1_d1', muscle: 'chest', allHit: true, increment: 2.5 }];
+  const passAnswers = { joint: { e1: { answer: 'none' } }, volume: { chest: { muscle: 'chest', pump: 'amazing', volume: 'just_right' } }, soreness: {} };
+  test('reearnMesoBoostsFromAnswers: all gates pass + allHit → boost earned', () => {
+    const out = LB.reearnMesoBoostsFromAnswers({ weightBoosts: {} }, passAnswers, earnInputs, false);
+    assert.strictEqual(out.weightBoosts.e1_d1, 2.5);
+  });
+  test('reearnMesoBoostsFromAnswers: a failing gate (volume too_much) drops the boost', () => {
+    const ans = { joint: { e1: { answer: 'none' } }, volume: { chest: { muscle: 'chest', pump: 'amazing', volume: 'too_much' } }, soreness: {} };
+    const out = LB.reearnMesoBoostsFromAnswers({ weightBoosts: { e1_d1: 2.5 } }, ans, earnInputs, false);
+    assert.ok(!('e1_d1' in out.weightBoosts));
+  });
+  test('reearnMesoBoostsFromAnswers: a rep-miss cut (negative) is preserved, feedback cannot erase it', () => {
+    const missInputs = [{ exId: 'e1', key: 'e1_d1', muscle: 'chest', allHit: false, increment: 2.5 }];
+    const out = LB.reearnMesoBoostsFromAnswers({ weightBoosts: { e1_d1: -2.5 } }, passAnswers, missInputs, false);
+    assert.strictEqual(out.weightBoosts.e1_d1, -2.5);
+  });
+  test('reearnMesoBoostsFromAnswers: load-only still-sore muscle blocks the boost', () => {
+    const ans = { joint: { e1: { answer: 'none' } }, volume: { chest: { muscle: 'chest', pump: 'amazing', volume: 'just_right' } }, soreness: { chest: { muscle: 'chest', answer: 'still_sore' } } };
+    const out = LB.reearnMesoBoostsFromAnswers({ weightBoosts: {} }, ans, earnInputs, true);
+    assert.ok(!('e1_d1' in out.weightBoosts));
+  });
+
+  test('mesoRecapGainsFromEdit: combines set deltas and weight deltas per exercise', () => {
+    const answers = { soreness: {}, joint: {}, volume: { chest: { muscle: 'chest', exIds: ['e1'], contrib: { e1_d1: 1 } } } };
+    const gains = LB.mesoRecapGainsFromEdit(answers, { e1_d1: 2.5 }, [{ exId: 'e1', key: 'e1_d1', name: 'Bench' }], 'd1');
+    assert.strictEqual(JSON.stringify(gains), JSON.stringify([{ name: 'Bench', weightDelta: 2.5, setDelta: 1 }]));
+  });
+
   // ── resolveMesoSeedSuggestion (feedback owns weight on a meso plan) ──
   const seedLast = { entry: { sets: [{ kg: 100, reps: 8 }] } };
   test('resolveMesoSeedSuggestion: earned boost with no Smart Progression applies the boost', () => {
