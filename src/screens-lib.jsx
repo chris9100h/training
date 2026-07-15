@@ -23,6 +23,34 @@ function sanitizeYoutubeUrl(raw) {
   return ok.includes(u.hostname.toLowerCase()) ? u.href : null;
 }
 
+// Post-hoc meso feedback editing (SessionDetailScreen) renders its own pickers
+// so the live in-session sheets in screens-train.jsx stay untouched. These
+// option lists + label maps MIRROR the live ones there (Soreness / Joint /
+// Pump+Volume sheets and SORENESS_LABELS/JOINT_LABELS/PUMP_LABELS/VOLUME_LABELS):
+// keep them in sync by hand if the live options or labels change.
+const MESO_SORENESS_OPTS = [
+  { key: 'never', label: 'Never sore', sub: 'No soreness from previous sessions' },
+  { key: 'healed_long', label: 'Healed a while ago', sub: 'Fully recovered well before this session' },
+  { key: 'healed_just', label: 'Healed just in time', sub: 'Recovered right around this session' },
+  { key: 'still_sore', label: 'Still sore', sub: 'Still feeling last session in this muscle' },
+];
+const MESO_JOINT_OPTS = [
+  { key: 'none', label: 'None', sub: 'All good, joints felt fine' },
+  { key: 'noticeable', label: 'Noticeable', sub: 'Some discomfort but manageable' },
+  { key: 'sharp', label: 'Sharp pain', sub: 'Clear pain, this exercise gets flagged' },
+];
+const MESO_PUMP_OPTS = [
+  { key: 'low', label: 'Low', sub: 'Barely felt it' },
+  { key: 'moderate', label: 'Moderate', sub: 'Decent pump' },
+  { key: 'amazing', label: 'Amazing', sub: 'Skin-splitting' },
+];
+const MESO_SORENESS_LBL = { never: 'Never sore', healed_long: 'Healed a while ago', healed_just: 'Healed just in time', still_sore: 'Still sore', very_sore: 'Very sore' };
+const MESO_JOINT_LBL = { none: 'None', noticeable: 'Noticeable', sharp: 'Sharp pain' };
+const MESO_PUMP_LBL = { low: 'Low', moderate: 'Moderate', amazing: 'Amazing' };
+const mesoVolumeLbl = (loadOnly) => loadOnly
+  ? { not_enough: 'Too light', just_right: 'Just right', pushed: 'Hard', too_much: 'Too heavy' }
+  : { not_enough: 'Not enough', just_right: 'Just right', pushed: 'Pushed my limits', too_much: 'Too much' };
+
 // ─── LIBRARY ──────────────────────────────────────────────────────────
 function LibraryScreen({ store, setStore, go, userId }) {
   const [confirmEl, confirm] = useConfirm();
@@ -2672,6 +2700,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
   const [capturing, setCapturing] = useStateL(false);
   const [feelOpen, setFeelOpen] = useStateL(false);
   const [recapOpen, setRecapOpen] = useStateL(false);
+  const [fbEdit, setFbEdit] = useStateL(null); // open meso-feedback edit picker: { type, subject, name, sel, pump, volume }
   const [tplFormOpen, setTplFormOpen] = useStateL(false);
   const [tplName, setTplName] = useStateL('');
   const [tplSaved, setTplSaved] = useStateL(false);
@@ -2760,6 +2789,113 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
       ...(stampedMeso ? { mesoStates: (st.mesoStates || []).map(m => m.id === meso.id ? stampedMeso : m) } : {}),
     }));
     go({ name: 'hist' });
+  };
+
+  // ── Post-hoc meso feedback editing ──
+  // The meso state for this session's plan (DB-synced copy; no live session can
+  // be open when a session is editable, so the localStorage cache and this agree).
+  const sessionMeso = s.scheduleId ? (store.mesoStates || []).find(m => m.scheduleId === s.scheduleId) : null;
+  const fbRaw = s.mesoRecap && s.mesoRecap.raw ? s.mesoRecap.raw : null;
+  const fbEditable = LB.isMesoSessionEditable(s, store.sessions, sessionMeso);
+  const fbLoadOnly = !!(s.mesoRecap && s.mesoRecap.loadOnly);
+  // Feedback rows built from the durable raw answers (so each row carries its own
+  // type + subject/exId to edit), grouped by muscle in this session's workout
+  // order. Only used for the editable card; the read-only card keeps the stored
+  // display strings. primaryMuscleForExercise is a screens-train.jsx global.
+  const fbEditRows = () => {
+    if (!fbRaw || !fbRaw.answers) return [];
+    const a = fbRaw.answers;
+    const muscleOf = (exId) => (typeof primaryMuscleForExercise === 'function'
+      ? primaryMuscleForExercise(store.exercises?.find(x => x.id === exId)) : null);
+    const order = [], seen = new Set();
+    (s.entries || []).forEach(e => {
+      if (e.isCardio) return;
+      const pm = muscleOf(e.exId);
+      if (pm && !seen.has(pm)) { seen.add(pm); order.push(pm); }
+    });
+    const volLbl = mesoVolumeLbl(fbLoadOnly);
+    const groups = [];
+    order.forEach(muscle => {
+      const rows = [];
+      const sRec = a.soreness && a.soreness[muscle];
+      if (sRec && sRec.answer != null) rows.push({ type: 'soreness', subject: muscle, name: 'Soreness', sub: MESO_SORENESS_LBL[sRec.answer] || sRec.answer, sel: sRec.answer });
+      (s.entries || []).forEach(e => {
+        if (e.isCardio || muscleOf(e.exId) !== muscle) return;
+        const jRec = a.joint && a.joint[e.exId];
+        if (!jRec || jRec.answer == null) return;
+        rows.push({ type: 'joint', subject: e.exId, name: jRec.exName || e.name, sub: MESO_JOINT_LBL[jRec.answer] || jRec.answer, sel: jRec.answer });
+      });
+      const vRec = a.volume && a.volume[muscle];
+      if (vRec && vRec.pump != null && vRec.volume != null) rows.push({ type: 'volume', subject: muscle, name: fbLoadOnly ? 'Pump & Weight' : 'Pump & Volume', sub: `${MESO_PUMP_LBL[vRec.pump] || vRec.pump} pump · ${volLbl[vRec.volume] || vRec.volume}`, pump: vRec.pump, volume: vRec.volume });
+      if (rows.length) groups.push({ muscle, rows });
+    });
+    return groups;
+  };
+  // Objective per-exercise earn inputs (exId, key, muscle, allHit, increment) for
+  // this session, mirroring computeMesoGains' earn loop, so a feedback edit can
+  // re-earn weight boosts. Rep-miss cuts are preserved inside the pure helper.
+  const fbEarnInputs = () => {
+    const unit = store.settings?.unit || 'kg';
+    const out = [];
+    (s.entries || []).forEach(e => {
+      if (e.isCardio || !e.exId) return;
+      const ex = store.exercises?.find(x => x.id === e.exId);
+      const muscle = typeof primaryMuscleForExercise === 'function' ? primaryMuscleForExercise(ex) : null;
+      const workingSets = (e.sets || []).filter(st => !st.warmup && !st.skipped);
+      const allHit = workingSets.some(st => st.done)
+        && LB.mesoRepOutcome(workingSets, e.plannedReps ?? null, e.plannedRepsPerSet, e.plannedRepsMax ?? null).allHit;
+      const catCfg = ex?.equipment ? (store.settings?.equipmentConfig?.[ex.equipment] ?? {}) : {};
+      const increment = catCfg.increment ?? (unit === 'lbs' ? 5 : 2.5);
+      out.push({ exId: e.exId, key: e.exId + '_' + s.dayId, muscle, allHit, increment, name: e.name });
+    });
+    return out;
+  };
+  // Rebuild the display groups (read-only shape { muscle, general[], joint[] }) so
+  // the stored recap matches the edited answers on the next render / boot.
+  const fbGroupsForStore = (answers) => {
+    const muscleOf = (exId) => (typeof primaryMuscleForExercise === 'function'
+      ? primaryMuscleForExercise(store.exercises?.find(x => x.id === exId)) : null);
+    const order = [], seen = new Set();
+    (s.entries || []).forEach(e => { if (e.isCardio) return; const pm = muscleOf(e.exId); if (pm && !seen.has(pm)) { seen.add(pm); order.push(pm); } });
+    const volLbl = mesoVolumeLbl(fbLoadOnly);
+    const groups = [];
+    order.forEach(muscle => {
+      const general = [], joint = [];
+      const sRec = answers.soreness && answers.soreness[muscle];
+      if (sRec && sRec.answer != null) general.push({ title: 'Soreness', sub: MESO_SORENESS_LBL[sRec.answer] || sRec.answer });
+      const vRec = answers.volume && answers.volume[muscle];
+      if (vRec && vRec.pump != null && vRec.volume != null) general.push({ title: fbLoadOnly ? 'Pump & Weight' : 'Pump & Volume', sub: `${MESO_PUMP_LBL[vRec.pump] || vRec.pump} pump · ${volLbl[vRec.volume] || vRec.volume}` });
+      (s.entries || []).forEach(e => {
+        if (e.isCardio || muscleOf(e.exId) !== muscle) return;
+        const jRec = answers.joint && answers.joint[e.exId];
+        if (!jRec || jRec.answer == null) return;
+        joint.push({ title: jRec.exName || e.name, sub: MESO_JOINT_LBL[jRec.answer] || jRec.answer });
+      });
+      if (general.length || joint.length) groups.push({ muscle, general, joint });
+    });
+    return groups;
+  };
+  const saveFeedbackEdit = (edit) => {
+    if (!sessionMeso || !fbRaw) { setFbEdit(null); return; }
+    const ctx = { dayId: s.dayId, loadOnly: fbLoadOnly };
+    const r1 = LB.applyMesoFeedbackEdit(sessionMeso, fbRaw, edit, ctx);
+    const earnInputs = fbEarnInputs();
+    const newMeso = LB.reearnMesoBoostsFromAnswers(r1.mesoState, r1.raw.answers, earnInputs, fbLoadOnly);
+    const gains = LB.mesoRecapGainsFromEdit(r1.raw.answers, newMeso.weightBoosts, earnInputs, s.dayId);
+    const groups = fbGroupsForStore(r1.raw.answers);
+    const stampedMeso = { ...newMeso, updatedAt: new Date().toISOString() };
+    const newRecap = { ...s.mesoRecap, groups, gains, raw: r1.raw };
+    // Move the store copy and the per-plan localStorage cache together (fresh
+    // updatedAt) so getMesoState never masks the edit with a stale cache.
+    if (typeof MESO_KEY === 'string') {
+      try { localStorage.setItem(MESO_KEY + '-' + s.scheduleId, JSON.stringify(stampedMeso)); } catch {}
+    }
+    setStore(st => ({
+      ...st,
+      mesoStates: (st.mesoStates || []).map(m => m.id === sessionMeso.id ? stampedMeso : m),
+      sessions: st.sessions.map(x => x.id === sessionId ? { ...x, mesoRecap: newRecap } : x),
+    }));
+    setFbEdit(null);
   };
 
   // Deload sessions are deliberately light — comparing against one as "last
@@ -3038,20 +3174,54 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                     : 'Autoregulation'}
                 </div>
 
-                {s.mesoRecap.groups?.length > 0 && (<>
-                  <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8, letterSpacing: '0.12em' }}>FEEDBACK GIVEN</div>
-                  {s.mesoRecap.groups.map((g, gi) => (
-                    <div key={gi} style={{ marginBottom: gi < s.mesoRecap.groups.length - 1 ? 14 : 4 }}>
-                      <div style={{ fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, color: UI.inkSoft, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>{g.muscle}</div>
-                      {[...(g.general || []), ...(g.joint || [])].map((r, ri) => (
-                        <div key={ri} style={{ display: 'flex', justifyContent: 'space-between', gap: 10, padding: '4px 0' }}>
-                          <span style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.inkFaint, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.title}</span>
-                          <span style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.ink, textAlign: 'right', flexShrink: 0 }}>{r.sub}</span>
+                {(() => {
+                  const editGroups = fbEditable ? fbEditRows() : null;
+                  if (editGroups && editGroups.length) {
+                    return (<>
+                      <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8, letterSpacing: '0.12em' }}>FEEDBACK GIVEN <span style={{ color: 'var(--accent)' }}>· tap to fix</span></div>
+                      {editGroups.map((g, gi) => (
+                        <div key={gi} style={{ marginBottom: gi < editGroups.length - 1 ? 14 : 4 }}>
+                          <div style={{ fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, color: UI.inkSoft, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>{g.muscle}</div>
+                          {g.rows.map((r, ri) => (
+                            <button key={ri} onClick={() => setFbEdit({ type: r.type, subject: r.subject, name: r.name, sel: r.sel ?? null, pump: r.pump ?? null, volume: r.volume ?? null })} style={{
+                              width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10,
+                              padding: '6px 0', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left',
+                              WebkitTapHighlightColor: 'transparent',
+                            }}>
+                              <span style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.inkFaint, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.name}</span>
+                              <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                                <span style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.ink, textAlign: 'right' }}>{r.sub}</span>
+                                <i className="fa-solid fa-pen" style={{ fontSize: 9, color: 'var(--accent)' }} />
+                              </span>
+                            </button>
+                          ))}
                         </div>
                       ))}
-                    </div>
-                  ))}
-                </>)}
+                    </>);
+                  }
+                  if (s.mesoRecap.groups?.length > 0) {
+                    return (<>
+                      <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8, letterSpacing: '0.12em' }}>FEEDBACK GIVEN</div>
+                      {s.mesoRecap.groups.map((g, gi) => (
+                        <div key={gi} style={{ marginBottom: gi < s.mesoRecap.groups.length - 1 ? 14 : 4 }}>
+                          <div style={{ fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, color: UI.inkSoft, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>{g.muscle}</div>
+                          {[...(g.general || []), ...(g.joint || [])].map((r, ri) => (
+                            <div key={ri} style={{ display: 'flex', justifyContent: 'space-between', gap: 10, padding: '4px 0' }}>
+                              <span style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.inkFaint, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.title}</span>
+                              <span style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.ink, textAlign: 'right', flexShrink: 0 }}>{r.sub}</span>
+                            </div>
+                          ))}
+                        </div>
+                      ))}
+                      {fbRaw && !fbEditable && (
+                        <div style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkGhost, marginTop: 8, lineHeight: 1.4 }}>
+                          Feedback locked. A newer session on this plan has already advanced autoregulation.
+                        </div>
+                      )}
+                    </>);
+                  }
+                  return null;
+                })()}
 
                 <div className="micro" style={{ color: UI.inkFaint, margin: `${s.mesoRecap.groups?.length ? 16 : 0}px 0 8px`, letterSpacing: '0.12em' }}>CHANGES EARNED</div>
                 {s.mesoRecap.gains?.length > 0 ? s.mesoRecap.gains.map((item, i) => (
@@ -3083,6 +3253,85 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
               </Card>
             )}
           </div>
+        )}
+
+        {/* Meso feedback edit picker (post-hoc correction of the last session) */}
+        {fbEdit && (
+          <Sheet open={!!fbEdit} onClose={() => setFbEdit(null)}
+            title={fbEdit.type === 'joint' ? 'Joint check' : fbEdit.type === 'volume' ? (fbEdit.name || 'Feedback') : 'Soreness check'}
+            titleColor="var(--accent)">
+            {fbEdit.type === 'soreness' && (<>
+              <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: 1.5 }}>
+                Soreness carryover from your last <strong style={{ color: UI.ink }}>{fbEdit.subject}</strong> workout?
+              </div>
+              {MESO_SORENESS_OPTS.map(opt => {
+                const sel = fbEdit.sel === opt.key;
+                return (
+                  <button key={opt.key} onClick={() => setFbEdit(e => ({ ...e, sel: opt.key }))} style={{
+                    width: '100%', marginBottom: 8, padding: '12px 14px',
+                    background: sel ? 'rgba(var(--accent-rgb),0.12)' : UI.bgInset,
+                    border: `1px solid ${sel ? 'var(--accent)' : UI.hairStrong}`, borderRadius: 6, cursor: 'pointer', textAlign: 'left', WebkitTapHighlightColor: 'transparent',
+                  }}>
+                    <div style={{ fontFamily: UI.fontUi, fontSize: 13, color: sel ? 'var(--accent)' : UI.ink, fontWeight: 600 }}>{opt.label}</div>
+                    <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 2 }}>{opt.sub}</div>
+                  </button>
+                );
+              })}
+              <Btn disabled={!fbEdit.sel} onClick={() => saveFeedbackEdit({ type: 'soreness', subject: fbEdit.subject, answer: fbEdit.sel })} style={{ width: '100%', marginTop: 12 }}>Save changes</Btn>
+            </>)}
+            {fbEdit.type === 'joint' && (<>
+              <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: 1.5 }}>
+                Joint discomfort during <strong style={{ color: UI.ink }}>{fbEdit.name}</strong>?
+              </div>
+              {MESO_JOINT_OPTS.map(opt => {
+                const sel = fbEdit.sel === opt.key;
+                const danger = opt.key === 'sharp';
+                return (
+                  <button key={opt.key} onClick={() => setFbEdit(e => ({ ...e, sel: opt.key }))} style={{
+                    width: '100%', marginBottom: 8, padding: '12px 14px',
+                    background: sel ? (danger ? 'rgba(var(--danger-rgb),0.12)' : 'rgba(var(--accent-rgb),0.12)') : UI.bgInset,
+                    border: `1px solid ${sel ? (danger ? 'rgba(var(--danger-rgb),0.6)' : 'var(--accent)') : (danger ? 'rgba(var(--danger-rgb),0.4)' : UI.hairStrong)}`, borderRadius: 6, cursor: 'pointer', textAlign: 'left', WebkitTapHighlightColor: 'transparent',
+                  }}>
+                    <div style={{ fontFamily: UI.fontUi, fontSize: 13, color: danger ? UI.danger : (sel ? 'var(--accent)' : UI.ink), fontWeight: 600 }}>{opt.label}</div>
+                    <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 2 }}>{opt.sub}</div>
+                  </button>
+                );
+              })}
+              <Btn disabled={!fbEdit.sel} onClick={() => saveFeedbackEdit({ type: 'joint', subject: fbEdit.subject, answer: fbEdit.sel })} style={{ width: '100%', marginTop: 12 }}>Save changes</Btn>
+            </>)}
+            {fbEdit.type === 'volume' && (<>
+              <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 12, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Pump</div>
+              <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
+                {MESO_PUMP_OPTS.map(opt => {
+                  const sel = fbEdit.pump === opt.key;
+                  return (
+                    <button key={opt.key} onClick={() => setFbEdit(e => ({ ...e, pump: opt.key }))} style={{
+                      flex: 1, padding: '10px 8px', background: sel ? 'rgba(var(--accent-rgb),0.12)' : UI.bgInset,
+                      border: `1px solid ${sel ? 'var(--accent)' : UI.hairStrong}`, borderRadius: 6, cursor: 'pointer', textAlign: 'center', WebkitTapHighlightColor: 'transparent',
+                    }}>
+                      <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: sel ? 'var(--accent)' : UI.ink, fontWeight: 600 }}>{opt.label}</div>
+                      <div style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint, marginTop: 2 }}>{opt.sub}</div>
+                    </button>
+                  );
+                })}
+              </div>
+              <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 8, letterSpacing: '0.06em', textTransform: 'uppercase' }}>{fbLoadOnly ? 'Weight' : 'Volume'}</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 20 }}>
+                {['not_enough', 'just_right', 'pushed', 'too_much'].map(key => {
+                  const sel = fbEdit.volume === key;
+                  return (
+                    <button key={key} onClick={() => setFbEdit(e => ({ ...e, volume: key }))} style={{
+                      width: '100%', padding: '10px 14px', background: sel ? 'rgba(var(--accent-rgb),0.12)' : UI.bgInset,
+                      border: `1px solid ${sel ? 'var(--accent)' : UI.hairStrong}`, borderRadius: 6, cursor: 'pointer', textAlign: 'left', WebkitTapHighlightColor: 'transparent',
+                    }}>
+                      <div style={{ fontFamily: UI.fontUi, fontSize: 13, color: sel ? 'var(--accent)' : UI.ink, fontWeight: 600 }}>{mesoVolumeLbl(fbLoadOnly)[key]}</div>
+                    </button>
+                  );
+                })}
+              </div>
+              <Btn disabled={!fbEdit.pump || !fbEdit.volume} onClick={() => saveFeedbackEdit({ type: 'volume', subject: fbEdit.subject, pump: fbEdit.pump, volume: fbEdit.volume })} style={{ width: '100%' }}>Save changes</Btn>
+            </>)}
+          </Sheet>
         )}
 
         {/* Exercise entries */}
