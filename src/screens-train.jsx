@@ -2734,7 +2734,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     for (const rec of Object.values(a.volume || {})) {
       if (!rec || !rec.muscle) continue;
       if (rec.pump === 'moderate' || rec.pump === 'amazing') pumpOk.add(rec.muscle);
-      if (rec.volume === 'just_right' || rec.volume === 'not_enough') volumeOk.add(rec.muscle);
+      if (LB.volumeAnswerAllowsBump(rec.volume, LB.autoregLoadOnly(mesoSch))) volumeOk.add(rec.muscle);
     }
     const soreBlock = new Set();
     for (const rec of Object.values(a.soreness || {})) { if (rec && rec.answer === 'still_sore' && rec.muscle) soreBlock.add(rec.muscle); }
@@ -2980,7 +2980,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     if (!mesoState || !mesoVolumeExIds.length) return;
     const muscle = mesoVolumeMusc;
     if (pump === 'moderate' || pump === 'amazing') mesoPumpOkRef.current.add(muscle); else mesoPumpOkRef.current.delete(muscle);
-    if (volume === 'just_right' || volume === 'not_enough') mesoVolumeOkRef.current.add(muscle); else mesoVolumeOkRef.current.delete(muscle);
+    if (LB.volumeAnswerAllowsBump(volume, LB.autoregLoadOnly(mesoSch))) mesoVolumeOkRef.current.add(muscle); else mesoVolumeOkRef.current.delete(muscle);
 
     const record = mesoAnswersRef.current.volume[muscle] || { muscle, exIds: mesoVolumeExIds };
     record.pump = pump;

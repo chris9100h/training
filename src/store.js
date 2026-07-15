@@ -4607,6 +4607,17 @@ function mesoMuscleTrainedBeforeStart(sessions, scheduleId, startTs, muscle, mus
   return false;
 }
 
+// Whether a pump/volume answer permits the weight bump. Load-only autoregulate
+// plans use the weight-feel framing, where "Hard" (pushed) still earns the bump:
+// training should be hard, and it self-corrects (a too-heavy weight either
+// eventually misses reps for a cut, or the lifter gets stronger and it drops back
+// to Hard). Only "Too heavy" (too_much) holds there. Set-adjusting plans keep the
+// stricter volume rule (just_right / not_enough only). Pure/testable.
+function volumeAnswerAllowsBump(volume, loadOnly) {
+  if (volume === 'just_right' || volume === 'not_enough') return true;
+  return !!loadOnly && volume === 'pushed';
+}
+
 // "5m ago"/"3h ago"/"2d ago" from an ISO timestamp. capDays, if given, rolls
 // over to a short locale date past that many days instead of counting
 // indefinitely (screens-settings.jsx's sign-up feed wants that; the
@@ -4872,6 +4883,6 @@ window.LB = {
   cardioDistUnit, setCardioDistUnit, distToM, mToDisplay, fmtDistance, fmtPace, fmtSpeed, MI_TO_M, recentCardioTypes,
   isLoggedTrainingDay, plannedTrainingDay, isTrainingDayForDate, dayTargetFromMacros, macroAdherence, hasMacroTargets, effectiveMacroTargets, dailyLogAdherence, dailyLogsWeekPrefill, weekPerformanceSignal,
   refreshHealthLogs,
-  pickGrowthRecipient, retractGrowthGrant, pickDeclineRecipient, reearnMesoWeightBoosts, resolveMesoSeedSuggestion, mesoPausedDays, mesoRirForWeek, mesoMuscleTrainedBeforeStart,
+  pickGrowthRecipient, retractGrowthGrant, pickDeclineRecipient, reearnMesoWeightBoosts, resolveMesoSeedSuggestion, mesoPausedDays, mesoRirForWeek, mesoMuscleTrainedBeforeStart, volumeAnswerAllowsBump,
   mesoSetTarget, mesoRepOutcome,
 };

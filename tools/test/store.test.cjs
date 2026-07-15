@@ -875,6 +875,20 @@ async function testAsync(name, fn) {
     assert.strictEqual(LB.mesoMuscleTrainedBeforeStart([sess({ entries: [] })], 'plan1', BLOCK_START, 'quads', muscleOf), false);
   });
 
+  // ── volumeAnswerAllowsBump (load-only weight-feel: "Hard" still earns the bump) ──
+  test('volumeAnswerAllowsBump: just_right / not_enough always allow the bump', () => {
+    assert.strictEqual(LB.volumeAnswerAllowsBump('just_right', false), true);
+    assert.strictEqual(LB.volumeAnswerAllowsBump('not_enough', true), true);
+  });
+  test('volumeAnswerAllowsBump: "pushed" (Hard) allows the bump only in load-only mode', () => {
+    assert.strictEqual(LB.volumeAnswerAllowsBump('pushed', true), true);
+    assert.strictEqual(LB.volumeAnswerAllowsBump('pushed', false), false);
+  });
+  test('volumeAnswerAllowsBump: "too_much" (Too heavy) always holds', () => {
+    assert.strictEqual(LB.volumeAnswerAllowsBump('too_much', true), false);
+    assert.strictEqual(LB.volumeAnswerAllowsBump('too_much', false), false);
+  });
+
   // ── mesoPausedDays (recovery time must not fast-forward the meso week) ──
   test('mesoPausedDays: deload days in the window are all excluded', () => {
     // 5-day deload Jan 10–14 inside a meso running Jan 1 → Jan 20.
