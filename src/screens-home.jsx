@@ -2282,7 +2282,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       const weightBoost = mesoBoosts?.[it.exId + '_' + dayId] ?? null;
       // On an autoregulating plan the feedback engine owns the weight: apply an
       // earned boost, but a withheld one vetoes Smart Progression (see helper).
-      const suggestionFinal = LB.resolveMesoSeedSuggestion(suggestion, weightBoost, last, LB.mesoActive(sch), mesoNoPriorFeedback);
+      const suggestionFinal = LB.resolveMesoSeedSuggestion(suggestion, weightBoost, last, LB.mesoActive(sch), mesoNoPriorFeedback, (it.repsPerSet?.[0] ?? it.reps ?? null));
       const seedSets = LB.buildSeedSets(itAdj, last, suggestionFinal, isUnilateral, store, bodyweightKg);
       return {
         exId: it.exId, name: ex?.name || '?',

@@ -782,6 +782,49 @@ async function testAsync(name, fn) {
     assert.strictEqual(out.earlyMiss, false);
   });
 
+  // ── mesoEarnTarget (range double-progression EARN ladder) ──
+  test('mesoEarnTarget: multi-set range, first set targets the top, last the floor', () => {
+    assert.strictEqual(LB.mesoEarnTarget(0, 2, 8, null, 12), 12); // first → rangeMax
+    assert.strictEqual(LB.mesoEarnTarget(1, 2, 8, null, 12), 8);  // last  → rangeMin
+  });
+  test('mesoEarnTarget: three sets interpolate to the midpoint in between', () => {
+    assert.strictEqual(LB.mesoEarnTarget(0, 3, 8, null, 12), 12);
+    assert.strictEqual(LB.mesoEarnTarget(1, 3, 8, null, 12), 10); // middle → rangeMid
+    assert.strictEqual(LB.mesoEarnTarget(2, 3, 8, null, 12), 8);
+  });
+  test('mesoEarnTarget: a single working set targets the range midpoint', () => {
+    assert.strictEqual(LB.mesoEarnTarget(0, 1, 8, null, 12), 10); // 8-12 → 10
+  });
+  test('mesoEarnTarget: no range (uniform) returns plannedReps unchanged', () => {
+    assert.strictEqual(LB.mesoEarnTarget(0, 3, 10, null, null), 10);
+    assert.strictEqual(LB.mesoEarnTarget(2, 3, 10, null, null), 10);
+  });
+  test('mesoEarnTarget: per-set targets win over the range ladder', () => {
+    assert.strictEqual(LB.mesoEarnTarget(0, 2, 8, [6, 9], 12), 6);
+    assert.strictEqual(LB.mesoEarnTarget(1, 2, 8, [6, 9], 12), 9);
+  });
+
+  // ── mesoRepOutcome, Range double progression: boost only earned at the top ──
+  test('mesoRepOutcome (range 8-12): first tops out, last holds the floor → earn', () => {
+    const out = LB.mesoRepOutcome([{ done: true, reps: 12 }, { done: true, reps: 8 }], 8, null, 12);
+    assert.strictEqual(out.allHit, true);
+    assert.strictEqual(out.earlyMiss, false);
+  });
+  test('mesoRepOutcome (range 8-12): first set below the top → no earn, but not a miss (weight holds)', () => {
+    const out = LB.mesoRepOutcome([{ done: true, reps: 11 }, { done: true, reps: 8 }], 8, null, 12);
+    assert.strictEqual(out.allHit, false);    // 11 < rangeMax → boost not earned
+    assert.strictEqual(out.earlyMiss, false); // 11 >= floor 8 → weight not too heavy
+  });
+  test('mesoRepOutcome (range 8-12): an early set below the floor is still a miss (weight too heavy)', () => {
+    const out = LB.mesoRepOutcome([{ done: true, reps: 7 }, { done: true, reps: 8 }], 8, null, 12);
+    assert.strictEqual(out.allHit, false);
+    assert.strictEqual(out.earlyMiss, true);  // 7 < floor 8
+  });
+  test('mesoRepOutcome (range, single set): earns only at the midpoint, not the floor', () => {
+    assert.strictEqual(LB.mesoRepOutcome([{ done: true, reps: 9 }], 8, null, 12).allHit, false); // 9 < mid 10
+    assert.strictEqual(LB.mesoRepOutcome([{ done: true, reps: 10 }], 8, null, 12).allHit, true);
+  });
+
   // ── reearnMesoWeightBoosts (weight boost must be re-earned every session) ──
   test('reearnMesoWeightBoosts: a boost not re-earned this session is dropped, not kept', () => {
     // bench earned a boost last session but is trained again this session with
@@ -849,6 +892,24 @@ async function testAsync(name, fn) {
   test('resolveMesoSeedSuggestion: a cut can never drive the seed below zero', () => {
     const lightLast = { entry: { sets: [{ kg: 2.5, reps: 10 }] } };
     assert.strictEqual(LB.resolveMesoSeedSuggestion(null, -2.5, lightLast, true).kg, 0);
+  });
+  test('resolveMesoSeedSuggestion: a bump resets the seeded reps to the range floor (double progression)', () => {
+    // last session hit 12 (top of an 8-12 range) at 100 kg and earned a boost;
+    // next seed climbs the weight AND drops reps back to the floor (8), not 12.
+    const topLast = { entry: { sets: [{ kg: 100, reps: 12 }] } };
+    const out = LB.resolveMesoSeedSuggestion(null, 2.5, topLast, true, false, 8);
+    assert.strictEqual(out.kg, 102.5);
+    assert.strictEqual(out.reps, 8); // reset to rangeMin, not carried at 12
+  });
+  test('resolveMesoSeedSuggestion: a cut also reseeds reps at the floor', () => {
+    const missLast = { entry: { sets: [{ kg: 100, reps: 6 }] } };
+    const out = LB.resolveMesoSeedSuggestion(null, -2.5, missLast, true, false, 8);
+    assert.strictEqual(out.kg, 97.5);
+    assert.strictEqual(out.reps, 8);
+  });
+  test('resolveMesoSeedSuggestion: no repFloor passed keeps last reps (backward compatible)', () => {
+    const out = LB.resolveMesoSeedSuggestion(null, 2.5, seedLast, true);
+    assert.strictEqual(out.reps, 8); // seedLast reps == 8, unchanged
   });
 
   // ── mesoMuscleTrainedBeforeStart (week-1 soreness on a mid-plan activation) ──

@@ -1076,7 +1076,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
         // Mirror the real session-start (screens-home.jsx): on an autoregulating
         // plan the feedback engine owns the weight, so an earned boost applies
         // and a withheld one vetoes Smart Progression (see LB.resolveMesoSeedSuggestion).
-        const suggestionFinal = LB.resolveMesoSeedSuggestion(suggestion, weightBoost, last, LB.mesoActive(sch), mesoNoPriorFeedback);
+        const suggestionFinal = LB.resolveMesoSeedSuggestion(suggestion, weightBoost, last, LB.mesoActive(sch), mesoNoPriorFeedback, (it.repsPerSet?.[0] ?? it.reps ?? null));
         // 5/3/1 main lift: seed the current week's wave prescription instead of
         // echoing last-session weights (buildSeedSets is not 5/3/1-aware). Mirrors
         // the session-start builder in screens-home.jsx.

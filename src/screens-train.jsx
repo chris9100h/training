@@ -3256,7 +3256,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       // allHit gates the earn side (strict, unchanged); earlyMiss (a looser
       // bar, the last working set is exempt) feeds the miss-streak cut below.
       // See LB.mesoRepOutcome for the exact per-set/range-aware rules.
-      const { allHit, earlyMiss } = LB.mesoRepOutcome(workingSets, e.plannedReps ?? null, e.plannedRepsPerSet);
+      const { allHit, earlyMiss } = LB.mesoRepOutcome(workingSets, e.plannedReps ?? null, e.plannedRepsPerSet, e.plannedRepsMax ?? null);
 
       const catCfg = ex?.equipment ? (store.settings?.equipmentConfig?.[ex.equipment] ?? {}) : {};
       const increment = catCfg.increment ?? (unit === 'lbs' ? 5 : 2.5);

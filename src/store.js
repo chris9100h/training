@@ -4461,13 +4461,39 @@ function mesoSetTarget(i, plannedReps, plannedRepsPerSet) {
   return perSet ?? plannedReps;
 }
 
+// EARN-side rep target for one working-set position under double progression.
+// Only a Range item (plannedRepsMax present and above the floor, and not a
+// per-set scheme) uses the staggered ladder that makes a weight boost a genuine
+// top-of-range achievement instead of a per-session creep:
+//   • multiple sets: the first (freshest) set must reach rangeMax, the last only
+//     rangeMin, with the sets in between linearly interpolated down the range.
+//   • a single working set: the range midpoint (e.g. 10 on 8-12), since one set
+//     can't demonstrate the top-then-hold pattern.
+// Per-set schemes keep their explicitly authored per-set target; a plain uniform
+// target (no range) returns plannedReps unchanged. This is the EARN gate only:
+// the rep-miss/cut side stays on mesoSetTarget (the range FLOOR), so "too heavy
+// to even hold the bottom" is what eases the load. Pure/testable.
+function mesoEarnTarget(i, nSets, plannedReps, plannedRepsPerSet, plannedRepsMax) {
+  const perSet = plannedRepsPerSet && plannedRepsPerSet.length > 1
+    ? (plannedRepsPerSet[i] ?? plannedRepsPerSet[plannedRepsPerSet.length - 1])
+    : null;
+  if (perSet != null) return perSet;
+  if (plannedRepsMax != null && plannedReps != null && plannedRepsMax > plannedReps) {
+    if (nSets <= 1) return Math.round((plannedReps + plannedRepsMax) / 2);
+    return Math.round(plannedRepsMax - (plannedRepsMax - plannedReps) * i / (nSets - 1));
+  }
+  return plannedReps;
+}
+
 // Rep-target outcome for one exercise's working sets this session, the
 // objective counterpart to the subjective soreness/joint/volume feedback,
 // feeding both the weight-boost EARN gate and the rep-miss-streak CUT
 // trigger (computeMesoGains, screens-train.jsx):
-//   • allHit   , every working set reached its own target (via
-//     mesoSetTarget). Unchanged, strict AND, this gates earning a boost.
-//   • earlyMiss, any working set BEFORE the last one missed its target. The
+//   • allHit   , every working set reached its own EARN target (via
+//     mesoEarnTarget: the range-staggered ladder for Range items, the plain
+//     per-set/uniform target otherwise). Strict AND, this gates earning a boost,
+//     so on a range the boost is only granted once the TOP of the range is hit.
+//   • earlyMiss, any working set BEFORE the last one missed its FLOOR target. The
 //     exercise's own last set is deliberately exempt: an all-out final set
 //     failing from accumulated fatigue doesn't mean the weight itself is too
 //     heavy, an earlier set failing does. A single-working-set exercise has
@@ -4476,19 +4502,32 @@ function mesoSetTarget(i, plannedReps, plannedRepsPerSet) {
 //     a legitimately hard-fought last rep never nudges the streak.
 // `sets` is an array of { done, skipped, warmup, reps/kg/timeSec... }, pass
 // already-filtered working sets (no warmups/skips). Pure/testable.
-function mesoRepOutcome(workingSets, plannedReps, plannedRepsPerSet) {
+function mesoRepOutcome(workingSets, plannedReps, plannedRepsPerSet, plannedRepsMax = null) {
   if (!workingSets || !workingSets.length) return { allHit: false, earlyMiss: false };
-  const setHit = (s, i) => {
+  const n = workingSets.length;
+  // EARN gate: every set clears its range-staggered earn target (top-of-range
+  // for the first set down to the floor for the last). On a non-range item the
+  // ladder collapses to the plain target, so this matches the old behavior.
+  const earnHit = (s, i) => {
+    if (!s.done) return false;
+    const target = mesoEarnTarget(i, n, plannedReps, plannedRepsPerSet, plannedRepsMax);
+    if (target == null) return true;
+    const reps = effReps(s);
+    return reps != null && reps >= target;
+  };
+  // MISS gate: an EARLY set that can't even hold the range FLOOR (mesoSetTarget)
+  // means the weight is too heavy, feeding the rep-miss streak / cut, unchanged.
+  const missHit = (s, i) => {
     if (!s.done) return false;
     const target = mesoSetTarget(i, plannedReps, plannedRepsPerSet);
     if (target == null) return true;
     const reps = effReps(s);
     return reps != null && reps >= target;
   };
-  const allHit = workingSets.every(setHit);
-  const earlyMiss = workingSets.length > 1
-    ? workingSets.slice(0, -1).some((s, i) => !setHit(s, i))
-    : !setHit(workingSets[0], 0);
+  const allHit = workingSets.every(earnHit);
+  const earlyMiss = n > 1
+    ? workingSets.slice(0, -1).some((s, i) => !missHit(s, i))
+    : !missHit(workingSets[0], 0);
   return { allHit, earlyMiss };
 }
 
@@ -4533,12 +4572,18 @@ function reearnMesoWeightBoosts(prevBoosts, sessionKeys, earnedBoosts) {
 // Off a meso plan (mesoActive false) the suggestion is returned untouched, so
 // normal Smart Progression is unaffected. Pure/testable; `last` is a
 // { entry: { sets } } reference.
-function resolveMesoSeedSuggestion(suggestion, weightBoost, last, mesoActive, noPriorFeedback = false) {
+function resolveMesoSeedSuggestion(suggestion, weightBoost, last, mesoActive, noPriorFeedback = false, repFloor = null) {
   if (weightBoost != null) {
     const cutWins = weightBoost < 0; // a rep-miss cut is authoritative, never let an up-suggestion swallow it
     if ((cutWins || !suggestion) && last) {
       const refSet = (last?.entry?.sets || []).filter(s => !s.warmup && !s.skipped).find(s => s.kg != null);
-      if (refSet) return { kg: Math.max(0, Math.round((refSet.kg + weightBoost) * 4) / 4), reps: refSet.reps ?? null };
+      // A weight change (bump or cut) restarts double progression: seed the reps
+      // at the range floor (repFloor) so the lifter climbs the range again at the
+      // new load instead of carrying last session's high reps onto a heavier bar.
+      // When Smart Progression itself fired it already reset to the floor; this is
+      // the meso-only branch (SP silent) that previously kept the actual reps.
+      // repFloor null (no range/floor context passed) → keep last reps, as before.
+      if (refSet) return { kg: Math.max(0, Math.round((refSet.kg + weightBoost) * 4) / 4), reps: repFloor ?? refSet.reps ?? null };
     }
     return suggestion;
   }
@@ -4886,5 +4931,5 @@ window.LB = {
   isLoggedTrainingDay, plannedTrainingDay, isTrainingDayForDate, dayTargetFromMacros, macroAdherence, hasMacroTargets, effectiveMacroTargets, dailyLogAdherence, dailyLogsWeekPrefill, weekPerformanceSignal,
   refreshHealthLogs,
   pickGrowthRecipient, retractGrowthGrant, pickDeclineRecipient, reearnMesoWeightBoosts, resolveMesoSeedSuggestion, mesoPausedDays, mesoRirForWeek, mesoMuscleTrainedBeforeStart, volumeAnswerAllowsBump,
-  mesoSetTarget, mesoRepOutcome,
+  mesoSetTarget, mesoEarnTarget, mesoRepOutcome,
 };
