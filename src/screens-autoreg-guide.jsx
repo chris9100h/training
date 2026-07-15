@@ -13,7 +13,7 @@
    window.Screens; route 'autoreg-guide' in app.jsx; optional `mode` prop
    preselects a mode (deep-linked from the plan editor). */
 
-const { useState: useStateAG, useRef: useRefAG } = React;
+const { useState: useStateAG, useRef: useRefAG, useEffect: useEffectAG } = React;
 
 // Low-opacity tint of any CSS color, for chip/panel fills that must read on
 // both the dark and light themes (color-mix keeps it theme-aware).
@@ -140,6 +140,20 @@ function agSignals(mode) {
 function AutoregGuideScreen({ store, go, mode: modeProp, back }) {
   const [mode, setMode] = useStateAG(AG_MODES.indexOf(modeProp) >= 0 ? modeProp : 'A');
   const topRef = useRefAG(null);
+  // "Back to top" affordance. The Screen scrolls in its own container (topRef's
+  // parent), not the window, so the listener and the scroll target are that.
+  const [showTop, setShowTop] = useStateAG(false);
+  useEffectAG(() => {
+    const sc = topRef.current && topRef.current.parentElement;
+    if (!sc) return;
+    const onScroll = () => setShowTop(sc.scrollTop > 480);
+    sc.addEventListener('scroll', onScroll, { passive: true });
+    return () => sc.removeEventListener('scroll', onScroll);
+  }, []);
+  const scrollToTop = () => {
+    const sc = topRef.current && topRef.current.parentElement;
+    if (sc) sc.scrollTo({ top: 0, behavior: 'smooth' });
+  };
   const M = mode;
   const isC = M === 'C', isB = M === 'B', isA = M === 'A';
   const backTo = () => go(back && back.name ? back : { name: 'settings' });
@@ -532,6 +546,17 @@ function AutoregGuideScreen({ store, go, mode: modeProp, back }) {
 
         </div>
       </div>
+
+      <button onClick={scrollToTop} aria-label="Back to top" title="Back to top" style={{
+        position: 'fixed', right: 16, bottom: 'calc(env(safe-area-inset-bottom, 10px) + 18px)', zIndex: 40,
+        width: 44, height: 44, borderRadius: '50%', border: `0.5px solid ${UI.hairStrong}`,
+        background: UI.bgRaised, color: UI.gold, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+        boxShadow: '0 8px 22px -8px rgba(0,0,0,0.65)', display: 'grid', placeItems: 'center',
+        opacity: showTop ? 1 : 0, transform: showTop ? 'translateY(0)' : 'translateY(8px)',
+        pointerEvents: showTop ? 'auto' : 'none', transition: 'opacity .2s ease, transform .2s ease',
+      }}>
+        <i className="fa-solid fa-arrow-up" style={{ fontSize: 15 }} />
+      </button>
     </Screen>
   );
 }
