@@ -3215,10 +3215,11 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
           const modeLabel = s.mesoRecap.loadOnly ? 'Autoregulation · load only'
             : s.mesoRecap.meso ? `Mesocycle${s.mesoRecap.week ? ` · Week ${s.mesoRecap.week}` : ''}`
             : 'Autoregulation';
-          const secHead = label => (
+          const secHead = (label, count) => (
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '4px 0 12px' }}>
               <span className="micro" style={{ color: UI.inkFaint, letterSpacing: '0.14em' }}>{label}</span>
               <span style={{ flex: 1, height: 1, background: UI.hair }} />
+              {count != null && <span style={{ fontFamily: UI.fontNum, fontSize: 11, fontWeight: 700, color: 'var(--accent)' }}>{count}</span>}
             </div>
           );
           const fbRow = (r, key) => {
@@ -3283,22 +3284,32 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                 )}
               </>)}
 
-              <div style={{ marginTop: groups.length ? 18 : 2 }}>{secHead('Changes earned')}</div>
-              {gains.length > 0 ? gains.map((item, i) => (
-                <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, padding: '9px 0', borderBottom: i < gains.length - 1 ? `1px solid ${UI.hair}` : 'none' }}>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
-                    <span style={{ fontFamily: UI.fontUi, fontSize: 13.5, fontWeight: 600, color: UI.ink, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.name}</span>
-                    {item.weightDelta < 0 && (
-                      <span style={{ fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.06em', textTransform: 'uppercase', color: UI.inkGhost }}>Reps missed, easing load</span>
-                    )}
-                  </div>
-                  <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0 }}>
-                    {item.setDelta !== 0 && <span style={deltaChip(item.setDelta > 0)}>{item.setDelta > 0 ? '+' : ''}{item.setDelta} set</span>}
-                    {item.weightDelta !== 0 && <span style={deltaChip(item.weightDelta > 0)}>{item.weightDelta > 0 ? '+' : ''}{item.weightDelta} {s.mesoRecap.unit || UI.unit()}</span>}
-                  </div>
+              <div style={{ marginTop: groups.length ? 18 : 2 }}>{secHead('Changes earned', gains.length || null)}</div>
+              {gains.length > 0 ? (
+                <div style={{ background: 'rgba(var(--knurl-rgb),0.025)', border: `1px solid ${UI.hair}`, borderRadius: 8, padding: '5px 14px' }}>
+                  {gains.map((item, i) => {
+                    const up = (item.weightDelta || 0) !== 0 ? item.weightDelta > 0 : item.setDelta > 0;
+                    return (
+                      <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, padding: '10px 0', borderBottom: i < gains.length - 1 ? `1px solid ${UI.hair}` : 'none' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 9, minWidth: 0 }}>
+                          <span style={{ width: 6, height: 6, borderRadius: '50%', background: up ? 'var(--accent)' : 'rgba(var(--danger-rgb),0.9)', flexShrink: 0 }} />
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+                            <span style={{ fontFamily: UI.fontUi, fontSize: 13.5, fontWeight: 600, color: UI.ink, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.name}</span>
+                            {item.weightDelta < 0 && (
+                              <span style={{ fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.06em', textTransform: 'uppercase', color: UI.inkGhost }}>Reps missed, easing load</span>
+                            )}
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0 }}>
+                          {item.setDelta !== 0 && <span style={deltaChip(item.setDelta > 0)}>{item.setDelta > 0 ? '+' : ''}{item.setDelta} set</span>}
+                          {item.weightDelta !== 0 && <span style={deltaChip(item.weightDelta > 0)}>{item.weightDelta > 0 ? '+' : ''}{item.weightDelta} {s.mesoRecap.unit || UI.unit()}</span>}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
-              )) : (
-                <div style={{ fontFamily: UI.fontUi, fontSize: 12.5, color: UI.inkFaint, padding: '4px 0' }}>
+              ) : (
+                <div style={{ background: 'rgba(var(--knurl-rgb),0.025)', border: `1px solid ${UI.hair}`, borderRadius: 8, padding: '14px', textAlign: 'center', fontFamily: UI.fontUi, fontSize: 12.5, color: UI.inkFaint }}>
                   No weight or set changes earned this session.
                 </div>
               )}
