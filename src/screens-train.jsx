@@ -1522,17 +1522,25 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // on to.)
     let overlayHoldMs = 0;
     if (progressionResult) {
-      overlayHoldMs = PROGRESSION_NAV_DELAY_MS; // swap mid-overlay; the show/hide timers below keep their own 800ms + 4000ms
-      // Celebration goes FIRST. Flag it now (synchronously) so the meso feedback
-      // triggers that also fire off this last-set-done (next muscle's soreness,
-      // this exercise's joint/pump) hold behind the overlay and only open once
-      // it clears. Fixes "soreness of the next muscle jumped ahead of the
-      // progression notice for the exercise you just finished".
+      overlayHoldMs = PROGRESSION_NAV_DELAY_MS; // swap mid-overlay; the show/hide timers below keep their own show + 4000ms
+      // Celebration goes FIRST. Flag it now (synchronously) so the recovery
+      // prompts that also fire off this last-set-done (next muscle's soreness,
+      // any pinned note on the next exercise) hold behind the overlay and open
+      // only once it clears. Fixes "soreness of the next muscle jumped ahead of
+      // the progression notice for the exercise you just finished".
       progressionPendingRef.current = true;
-      setTimeout(() => {
+      const showCelebration = () => {
         setProgressionUnlocked(progressionResult);
         setTimeout(() => { progressionPendingRef.current = false; setProgressionUnlocked(null); }, 4000);
-      }, 800);
+      };
+      // In a meso block the joint/pump sheet for THIS exercise opens on this very
+      // set-completion (see the joint trigger below). Show the overlay in the
+      // same tick so it covers that sheet the moment it mounts (z-160 over the
+      // z-100 sheet), instead of letting the question flash up first and getting
+      // slammed over 800ms later. A solo (non-meso) bump keeps the dramatic beat.
+      const mesoActive = !!mesoState && !isMesoDeloadSession && mesoWeek != null;
+      if (mesoActive) showCelebration();
+      else setTimeout(showCelebration, 800);
     } else if (!entry.sets[setIdx]?.warmup && !isDeloadSession) {
       const completed = entry.sets[setIdx];
       const cReps = LB.effReps(completed);
