@@ -227,15 +227,18 @@ function AutoregGuideScreen({ store, go, mode: modeProp, back }) {
               ))}
             </div>
             <AGKick>Signal map: which dial each answer moves</AGKick>
-            <div style={{ marginTop: 10, border: `0.5px solid ${UI.hair}`, borderRadius: 8, overflow: 'hidden', display: 'grid', gridTemplateColumns: '1.5fr .9fr .9fr', gap: 1, background: UI.hair }}>
-              {['Signal you give', 'Sets dial', 'Weight dial'].map(h => (
-                <div key={h} style={{ fontFamily: UI.fontNum, fontSize: 9.5, letterSpacing: '.1em', textTransform: 'uppercase', color: UI.inkFaint, padding: '9px 12px', background: UI.bgInset }}>{h}</div>
+            <div style={{ marginTop: 10, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: 8 }}>
+              {agSignals(M).map((row, i) => (
+                <div key={i} style={{ background: UI.bgRaised, border: `0.5px solid ${UI.hair}`, borderRadius: 8, padding: '12px 13px' }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: UI.ink, marginBottom: 10 }}>{row.sig}</div>
+                  {[['Sets', row.sets], ['Weight', row.wt]].map(([lab, el]) => (
+                    <div key={lab} style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: lab === 'Weight' ? 7 : 0 }}>
+                      <span style={{ fontFamily: UI.fontNum, fontSize: 9, letterSpacing: '.1em', textTransform: 'uppercase', color: UI.inkFaint, width: 46, flexShrink: 0 }}>{lab}</span>
+                      {el}
+                    </div>
+                  ))}
+                </div>
               ))}
-              {agSignals(M).map((row, i) => [
-                <div key={'s' + i} style={{ padding: '10px 12px', background: UI.bgRaised, fontSize: 12.5, color: UI.ink, fontWeight: 600 }}>{row.sig}</div>,
-                <div key={'a' + i} style={{ padding: '10px 12px', background: UI.bgRaised, display: 'flex', alignItems: 'center' }}>{row.sets}</div>,
-                <div key={'b' + i} style={{ padding: '10px 12px', background: UI.bgRaised, display: 'flex', alignItems: 'center' }}>{row.wt}</div>,
-              ])}
             </div>
             {isB && <div style={{ fontSize: 12.5, color: UI.inkSoft, marginTop: 12 }}>In Load only the sets column is inert: every set answer is frozen, so the questions exist purely to gate the weight. Soreness is repurposed as a recovery brake that holds the weight instead of cutting a set.</div>}
           </Section>
