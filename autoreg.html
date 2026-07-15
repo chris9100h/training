@@ -317,9 +317,9 @@
     out+=panel('2','Joint check','per exercise<br>after last set', jn);
     /* pump + volume */
     var pv='<div class="kick">Pump</div>';
+    pv+=opt('Low', dir('block','bump')+dir('flag','swap'), 'Barely felt it. Blocks the bump. Low pump on 3 sessions (with workload "just right") suggests swapping the exercise, not adding sets.');
     pv+=opt('Moderate', dir('hold','gate green'), 'Decent stimulus. Weight can climb.');
     pv+=opt('Amazing', dir('hold','gate green'), 'Great stimulus.');
-    pv+=opt('Low', dir('block','bump')+dir('flag','swap'), 'Barely felt it. Blocks the bump. Low pump on 3 sessions (with workload "just right") suggests swapping the exercise, not adding sets.');
     pv+='<div style="margin-top:14px"><div class="kick">'+(isB?'Weight (how it felt)':'Volume (workload)')+'</div></div>';
     pv+=opt(isB?'Too light':'Not enough', isB?dir('up','earns bump'):dir('up','+1 set'), isB?'Weight can climb.':'Too little. +1 set to the least-grown exercise, gate stays green.');
     pv+=opt('Just right', dir('hold','hold'), 'On point, gate green.');

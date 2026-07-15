@@ -302,9 +302,9 @@ function AutoregGuideScreen({ store, go, mode: modeProp, back }) {
               {/* pump + volume */}
               <AGPanel idx="3" title={isB ? 'Pump & Weight' : 'Pump & Volume'} when={<>per muscle<br />after last exercise</>}>
                 <AGKick>Pump</AGKick>
+                <AGOpt chip="Low" dirs={<><AGDir kind="block">bump</AGDir><AGDir kind="flag">swap</AGDir></>}>Barely felt it. Blocks the bump. Low pump on 3 sessions (with workload "just right") suggests swapping the exercise, not adding sets.</AGOpt>
                 <AGOpt chip="Moderate" dirs={<AGDir kind="hold">gate green</AGDir>}>Decent stimulus. Weight can climb.</AGOpt>
                 <AGOpt chip="Amazing" dirs={<AGDir kind="hold">gate green</AGDir>}>Great stimulus.</AGOpt>
-                <AGOpt chip="Low" dirs={<><AGDir kind="block">bump</AGDir><AGDir kind="flag">swap</AGDir></>}>Barely felt it. Blocks the bump. Low pump on 3 sessions (with workload "just right") suggests swapping the exercise, not adding sets.</AGOpt>
                 <div style={{ marginTop: 14 }}><AGKick>{isB ? 'Weight (how it felt)' : 'Volume (workload)'}</AGKick></div>
                 <AGOpt chip={isB ? 'Too light' : 'Not enough'} dirs={isB ? <AGDir kind="up">earns bump</AGDir> : <AGDir kind="up">+1 set</AGDir>}>
                   {isB ? 'Weight can climb.' : 'Too little. +1 set to the least-grown exercise, gate stays green.'}
