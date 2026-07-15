@@ -3195,98 +3195,116 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
             auto / auto-load-only / meso session stays traceable after the fact. */}
         {!capturing && s.mesoRecap && (
           <div style={{ marginTop: -8 }}>
-            <Btn kind="ghost" onClick={() => setRecapOpen(o => !o)} style={{ width: '100%' }}>
+            <Btn kind="ghost" onClick={() => setRecapOpen(true)} style={{ width: '100%' }}>
               <i className="fa-solid fa-clipboard-list" style={{ marginRight: 8 }} /> Feedback recap
-              <i className={`fa-solid fa-chevron-${recapOpen ? 'up' : 'down'}`} style={{ marginLeft: 8, fontSize: 10 }} />
+              <i className="fa-solid fa-chevron-right" style={{ marginLeft: 8, fontSize: 10 }} />
             </Btn>
-            {recapOpen && (
-              <Card style={{ marginTop: 8 }}>
-                <div className="micro-gold" style={{ marginBottom: 12 }}>
-                  {s.mesoRecap.loadOnly ? 'Autoregulation · load only'
-                    : s.mesoRecap.meso ? `Mesocycle${s.mesoRecap.week ? ` · Week ${s.mesoRecap.week}` : ''}`
-                    : 'Autoregulation'}
-                </div>
-
-                {(() => {
-                  const editGroups = fbEditable ? fbEditRows() : null;
-                  if (editGroups && editGroups.length) {
-                    return (<>
-                      <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8, letterSpacing: '0.12em' }}>FEEDBACK GIVEN <span style={{ color: 'var(--accent)' }}>· tap to fix</span></div>
-                      {editGroups.map((g, gi) => (
-                        <div key={gi} style={{ marginBottom: gi < editGroups.length - 1 ? 14 : 4 }}>
-                          <div style={{ fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, color: UI.inkSoft, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>{g.muscle}</div>
-                          {g.rows.map((r, ri) => (
-                            <button key={ri} onClick={() => setFbEdit({ type: r.type, subject: r.subject, name: r.name, sel: r.sel ?? null, pump: r.pump ?? null, volume: r.volume ?? null })} style={{
-                              width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10,
-                              padding: '6px 0', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left',
-                              WebkitTapHighlightColor: 'transparent',
-                            }}>
-                              <span style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.inkFaint, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.name}</span>
-                              <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-                                <span style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.ink, textAlign: 'right' }}>{r.sub}</span>
-                                <i className="fa-solid fa-pen" style={{ fontSize: 9, color: 'var(--accent)' }} />
-                              </span>
-                            </button>
-                          ))}
-                        </div>
-                      ))}
-                    </>);
-                  }
-                  if (s.mesoRecap.groups?.length > 0) {
-                    return (<>
-                      <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8, letterSpacing: '0.12em' }}>FEEDBACK GIVEN</div>
-                      {s.mesoRecap.groups.map((g, gi) => (
-                        <div key={gi} style={{ marginBottom: gi < s.mesoRecap.groups.length - 1 ? 14 : 4 }}>
-                          <div style={{ fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, color: UI.inkSoft, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>{g.muscle}</div>
-                          {[...(g.general || []), ...(g.joint || [])].map((r, ri) => (
-                            <div key={ri} style={{ display: 'flex', justifyContent: 'space-between', gap: 10, padding: '4px 0' }}>
-                              <span style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.inkFaint, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.title}</span>
-                              <span style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.ink, textAlign: 'right', flexShrink: 0 }}>{r.sub}</span>
-                            </div>
-                          ))}
-                        </div>
-                      ))}
-                      {fbRaw && !fbEditable && (
-                        <div style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkGhost, marginTop: 8, lineHeight: 1.4 }}>
-                          Feedback locked. A newer session on this plan has already advanced autoregulation.
-                        </div>
-                      )}
-                    </>);
-                  }
-                  return null;
-                })()}
-
-                <div className="micro" style={{ color: UI.inkFaint, margin: `${s.mesoRecap.groups?.length ? 16 : 0}px 0 8px`, letterSpacing: '0.12em' }}>CHANGES EARNED</div>
-                {s.mesoRecap.gains?.length > 0 ? s.mesoRecap.gains.map((item, i) => (
-                  <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: i < s.mesoRecap.gains.length - 1 ? `1px solid ${UI.hair}` : 'none' }}>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
-                      <span style={{ fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, color: UI.ink, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.name}</span>
-                      {item.weightDelta < 0 && (
-                        <span style={{ fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.06em', textTransform: 'uppercase', color: UI.inkGhost }}>Reps missed, easing load</span>
-                      )}
-                    </div>
-                    <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0 }}>
-                      {item.setDelta !== 0 && (
-                        <span style={{ fontFamily: UI.fontNum, fontSize: 12, fontWeight: 700, color: item.setDelta > 0 ? 'var(--accent)' : 'rgba(var(--danger-rgb),0.9)' }}>
-                          {item.setDelta > 0 ? '+' : ''}{item.setDelta} set
-                        </span>
-                      )}
-                      {item.weightDelta !== 0 && (
-                        <span style={{ fontFamily: UI.fontNum, fontSize: 12, fontWeight: 700, color: item.weightDelta > 0 ? 'var(--accent)' : 'rgba(var(--danger-rgb),0.9)' }}>
-                          {item.weightDelta > 0 ? '+' : ''}{item.weightDelta} {s.mesoRecap.unit || UI.unit()}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                )) : (
-                  <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.inkFaint, padding: '4px 0' }}>
-                    No weight or set changes earned this session.
-                  </div>
-                )}
-              </Card>
-            )}
           </div>
         )}
+
+        {/* Feedback recap, as a bottom sheet. Structured per muscle group like the
+            in-session review: General feedback (Soreness, Pump) and Joint feedback
+            (per exercise) split with knurled dividers, then the changes it earned.
+            On the latest still-editable session every answer is a tap-to-fix row. */}
+        {!capturing && s.mesoRecap && recapOpen && (() => {
+          const editGroups = fbEditable ? fbEditRows() : null;
+          const useEdit = !!(editGroups && editGroups.length);
+          const groups = useEdit
+            ? editGroups.map(g => ({ muscle: g.muscle, general: g.rows.filter(r => r.type !== 'joint'), joint: g.rows.filter(r => r.type === 'joint') }))
+            : (s.mesoRecap.groups || []).map(g => ({ muscle: g.muscle, general: (g.general || []).map(r => ({ name: r.title, sub: r.sub })), joint: (g.joint || []).map(r => ({ name: r.title, sub: r.sub })) }));
+          const modeLabel = s.mesoRecap.loadOnly ? 'Autoregulation · load only'
+            : s.mesoRecap.meso ? `Mesocycle${s.mesoRecap.week ? ` · Week ${s.mesoRecap.week}` : ''}`
+            : 'Autoregulation';
+          const secHead = label => (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '4px 0 12px' }}>
+              <span className="micro" style={{ color: UI.inkFaint, letterSpacing: '0.14em' }}>{label}</span>
+              <span style={{ flex: 1, height: 1, background: UI.hair }} />
+            </div>
+          );
+          const fbRow = (r, key) => {
+            const label = <span style={{ fontFamily: UI.fontUi, fontSize: 12.5, color: UI.inkFaint, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.name}</span>;
+            if (useEdit) {
+              return (
+                <button key={key} onClick={() => setFbEdit({ type: r.type, subject: r.subject, name: r.name, sel: r.sel ?? null, pump: r.pump ?? null, volume: r.volume ?? null })} style={{
+                  width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10,
+                  padding: '7px 0', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left', WebkitTapHighlightColor: 'transparent',
+                }}>
+                  {label}
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                    <span style={{ fontFamily: UI.fontUi, fontSize: 12.5, color: UI.ink, textAlign: 'right' }}>{r.sub}</span>
+                    <i className="fa-solid fa-pen" style={{ fontSize: 9, color: 'var(--accent)' }} />
+                  </span>
+                </button>
+              );
+            }
+            return (
+              <div key={key} style={{ display: 'flex', justifyContent: 'space-between', gap: 10, padding: '6px 0', alignItems: 'baseline' }}>
+                {label}
+                <span style={{ fontFamily: UI.fontUi, fontSize: 12.5, color: UI.ink, textAlign: 'right', flexShrink: 0 }}>{r.sub}</span>
+              </div>
+            );
+          };
+          const deltaChip = pos => ({
+            fontFamily: UI.fontNum, fontSize: 12, fontWeight: 700,
+            color: pos ? 'var(--accent)' : 'rgba(var(--danger-rgb),0.9)',
+            background: pos ? 'rgba(var(--accent-rgb),0.10)' : 'rgba(var(--danger-rgb),0.10)',
+            border: `1px solid ${pos ? 'rgba(var(--accent-rgb),0.28)' : 'rgba(var(--danger-rgb),0.28)'}`,
+            borderRadius: 4, padding: '3px 8px', whiteSpace: 'nowrap',
+          });
+          const gains = s.mesoRecap.gains || [];
+          return (
+            <Sheet open={recapOpen} onClose={() => setRecapOpen(false)} title="Feedback recap">
+              <div className="micro-gold" style={{ marginTop: -6, marginBottom: 16 }}>{modeLabel}</div>
+
+              {groups.length > 0 && (<>
+                {secHead(useEdit ? 'Feedback given · tap to fix' : 'Feedback given')}
+                {groups.map((g, gi) => (
+                  <div key={gi} style={{ background: 'rgba(var(--knurl-rgb),0.025)', border: `1px solid ${UI.hair}`, borderRadius: 8, padding: '13px 14px 10px', marginBottom: 10 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                      <span style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--accent)', flexShrink: 0 }} />
+                      <span style={{ fontFamily: UI.fontDisplay, fontSize: 19, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: UI.ink, lineHeight: 1 }}>{g.muscle}</span>
+                    </div>
+                    {g.general.length > 0 && (<>
+                      <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>General feedback</div>
+                      <div className="knurl" style={{ marginBottom: 4 }} />
+                      {g.general.map((r, ri) => fbRow(r, 'g' + ri))}
+                    </>)}
+                    {g.joint.length > 0 && (<>
+                      <div className="micro" style={{ color: UI.inkFaint, marginTop: g.general.length ? 14 : 0, marginBottom: 6 }}>Joint feedback</div>
+                      <div className="knurl" style={{ marginBottom: 4 }} />
+                      {g.joint.map((r, ri) => fbRow(r, 'j' + ri))}
+                    </>)}
+                  </div>
+                ))}
+                {fbRaw && !fbEditable && (
+                  <div style={{ fontFamily: UI.fontUi, fontSize: 10.5, color: UI.inkGhost, margin: '2px 0 4px', lineHeight: 1.4 }}>
+                    Feedback locked. A newer session on this plan has already advanced autoregulation.
+                  </div>
+                )}
+              </>)}
+
+              <div style={{ marginTop: groups.length ? 18 : 2 }}>{secHead('Changes earned')}</div>
+              {gains.length > 0 ? gains.map((item, i) => (
+                <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, padding: '9px 0', borderBottom: i < gains.length - 1 ? `1px solid ${UI.hair}` : 'none' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+                    <span style={{ fontFamily: UI.fontUi, fontSize: 13.5, fontWeight: 600, color: UI.ink, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.name}</span>
+                    {item.weightDelta < 0 && (
+                      <span style={{ fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.06em', textTransform: 'uppercase', color: UI.inkGhost }}>Reps missed, easing load</span>
+                    )}
+                  </div>
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0 }}>
+                    {item.setDelta !== 0 && <span style={deltaChip(item.setDelta > 0)}>{item.setDelta > 0 ? '+' : ''}{item.setDelta} set</span>}
+                    {item.weightDelta !== 0 && <span style={deltaChip(item.weightDelta > 0)}>{item.weightDelta > 0 ? '+' : ''}{item.weightDelta} {s.mesoRecap.unit || UI.unit()}</span>}
+                  </div>
+                </div>
+              )) : (
+                <div style={{ fontFamily: UI.fontUi, fontSize: 12.5, color: UI.inkFaint, padding: '4px 0' }}>
+                  No weight or set changes earned this session.
+                </div>
+              )}
+            </Sheet>
+          );
+        })()}
 
         {/* Meso feedback edit picker (post-hoc correction of the last session) */}
         {fbEdit && (
