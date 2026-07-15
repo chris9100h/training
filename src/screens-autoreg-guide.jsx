@@ -79,15 +79,17 @@ function AGPanel({ idx, title, when, children }) {
   );
 }
 
-// One answer row inside a panel: [chip] [dir pills + text].
+// One answer row inside a panel. Stacked so every row aligns left regardless of
+// chip width: [chip] [dir pills] on the first line, the explanation on its own
+// full-width line below. Avoids the per-row column drift of a 2-column grid.
 function AGOpt({ chip, dirs, children }) {
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '10px 12px', padding: '11px 0', borderTop: `0.5px solid ${UI.hair}`, alignItems: 'start' }}>
-      <div><AGChip>{chip}</AGChip></div>
-      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
+    <div style={{ padding: '12px 0', borderTop: `0.5px solid ${UI.hair}` }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+        <AGChip>{chip}</AGChip>
         {dirs}
-        <span style={{ fontSize: 13, color: UI.inkSoft }}>{children}</span>
       </div>
+      <div style={{ fontSize: 13, color: UI.inkSoft, lineHeight: 1.5 }}>{children}</div>
     </div>
   );
 }
