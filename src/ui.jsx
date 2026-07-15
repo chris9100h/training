@@ -649,7 +649,7 @@ function Toggle({ on, onToggle }) {
 // edge plus an ambient glow — reserved for sheets that represent something
 // deliberately intense (currently just the Drop Set/Myo-Reps/AMRAP
 // Variations chain sheet), not a general-purpose "make it gold" switch.
-function Sheet({ open, onClose, title, titleColor, children, keyboardHeight = 0, accent = false }) {
+function Sheet({ open, onClose, title, titleColor, children, keyboardHeight = 0, accent = false, center = false }) {
   const [kbHeight, setKbHeight] = React.useState(0);
   const [vvHeight, setVvHeight] = React.useState(window.innerHeight);
   React.useEffect(() => {
@@ -698,9 +698,15 @@ function Sheet({ open, onClose, title, titleColor, children, keyboardHeight = 0,
   // of the bottom-sheet's "attached to the screen edge" look, plus a small
   // gap off the keyboard instead of sitting flush on top of it.
   const floating = effectiveKbHeight > 0;
+  // `center` renders the panel as a card floated in the middle of the screen
+  // (not a bottom sheet): same full rounding, all-round border and elevated
+  // shadow the keyboard-floating variant already uses, so it reads exactly like
+  // the intensity chain sheets, just vertically centered. Opt-in, so no other
+  // sheet changes.
+  const cardLike = floating || center;
   const edgeColor = accent ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong;
-  const shadowLayers = [floating ? '0 4px 24px rgba(0,0,0,0.45)' : '0 -16px 48px rgba(0,0,0,0.6)'];
-  if (floating) shadowLayers.push(`0 1px 0 ${edgeColor}`);
+  const shadowLayers = [cardLike ? '0 4px 24px rgba(0,0,0,0.45)' : '0 -16px 48px rgba(0,0,0,0.6)'];
+  if (cardLike) shadowLayers.push(`0 1px 0 ${edgeColor}`);
   return (
     // The backdrop only shrinks (bottom: keyboardHeight) for the caller-
     // declared custom keyboard, not the auto-detected native one: a custom
@@ -714,7 +720,7 @@ function Sheet({ open, onClose, title, titleColor, children, keyboardHeight = 0,
     <div onClick={onClose} style={{
       position: 'fixed', top: 0, left: 0, right: 0, bottom: keyboardHeight,
       background: 'rgba(0,0,0,0.7)', zIndex: 100,
-      display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
+      display: 'flex', alignItems: center ? 'center' : 'flex-end', justifyContent: 'center',
       paddingBottom: (effectiveKbHeight - keyboardHeight) + (floating ? 10 : 0),
       animation: 'sheet-fade 0.18s ease',
     }}>
@@ -722,7 +728,7 @@ function Sheet({ open, onClose, title, titleColor, children, keyboardHeight = 0,
           to actually render there instead of bleeding straight off-screen
           — a plain width:100% sheet runs edge-to-edge, leaving nowhere for
           an outward glow on the sides to be visible. */}
-      <div style={{ position: 'relative', width: accent ? 'calc(100% - 32px)' : '100%', maxWidth: 540 }}>
+      <div style={{ position: 'relative', width: (accent || center) ? 'calc(100% - 32px)' : '100%', maxWidth: 540 }}>
         {/* Same breathing glow as the Intensity button (.intensity-glow /
             @keyframes intensityGlow in index.html) — a sibling of the
             panel, not a child of it: the panel has overflow:'auto' for its
@@ -733,13 +739,13 @@ function Sheet({ open, onClose, title, titleColor, children, keyboardHeight = 0,
             shadow escapes freely. Its own box-shadow (not the panel's,
             which needs a separate static one for elevation) also avoids
             fighting over the same property while animating. */}
-        {accent && <div className="intensity-glow" style={{ position: 'absolute', inset: 0, borderRadius: floating ? 6 : '6px 6px 0 0', pointerEvents: 'none' }} />}
+        {accent && <div className="intensity-glow" style={{ position: 'absolute', inset: 0, borderRadius: cardLike ? 6 : '6px 6px 0 0', pointerEvents: 'none' }} />}
         <div onClick={e => e.stopPropagation()} style={{
           width: '100%', boxSizing: 'border-box',
           background: UI.bgRaised,
-          borderRadius: floating ? 6 : '6px 6px 0 0',
+          borderRadius: cardLike ? 6 : '6px 6px 0 0',
           border: `1px solid ${edgeColor}`,
-          ...(!floating && { borderBottom: 'none' }),
+          ...(!cardLike && { borderBottom: 'none' }),
           // Floating above the keyboard, every edge needs to read as a real
           // boundary on its own — the bottom-sheet variant gets that for free
           // from the drag handle and the darker screen behind it, but a
@@ -759,7 +765,7 @@ function Sheet({ open, onClose, title, titleColor, children, keyboardHeight = 0,
           // repro. Every other Sheet in the app never sets keyboardHeight, so
           // effectiveKbHeight stays 0 and always took the (valid) calc()
           // branch — which is why "all other sheets work fine" was true.
-          padding: `16px 22px ${floating ? '18px' : 'calc(env(safe-area-inset-bottom, 8px) + 22px)'}`,
+          padding: `16px 22px ${center ? '22px' : (floating ? '18px' : 'calc(env(safe-area-inset-bottom, 8px) + 22px)')}`,
           animation: 'sheet-up 0.22s ease',
           // With a custom keypad open, become a flex column so the content
           // child is bounded to the panel's OWN content box and shrinks to fit
@@ -780,7 +786,7 @@ function Sheet({ open, onClose, title, titleColor, children, keyboardHeight = 0,
           // enough. Clamp at 0 so a mis-measured keypad can't force it negative.
           // Also subtract env(safe-area-inset-top) so the panel's top stops at
           // the iPhone status-bar/clock line instead of sliding up behind it.
-          maxHeight: floating ? `calc(${Math.max(0, vvHeight - keyboardHeight)}px - env(safe-area-inset-top, 0px) - 32px)` : '88dvh', overflow: 'auto', overscrollBehavior: 'contain',
+          maxHeight: center ? '82dvh' : (floating ? `calc(${Math.max(0, vvHeight - keyboardHeight)}px - env(safe-area-inset-top, 0px) - 32px)` : '88dvh'), overflow: 'auto', overscrollBehavior: 'contain',
         }}>
           <div style={{ width: 36, height: 3, background: accent ? 'var(--accent)' : UI.hairStrong, borderRadius: 4, margin: '0 auto 16px' }} />
           {title && (

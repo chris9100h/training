@@ -7631,7 +7631,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
       {/* Pinned exercise note, must acknowledge on exercise start (note_pinned) */}
       {pinnedNote && (
-        <Sheet open={!!pinnedNote} onClose={() => {}} title={pinnedNote.name || 'Note'} titleColor="var(--accent)">
+        <Sheet open={!!pinnedNote} onClose={() => {}} title={pinnedNote.name || 'Note'} titleColor="var(--accent)" accent center>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
             <i className="fa-solid fa-thumbtack" style={{ color: 'var(--accent)', fontSize: 11 }} />
             <span className="micro" style={{ color: UI.inkFaint, letterSpacing: '0.12em' }}>Pinned note</span>
