@@ -852,6 +852,45 @@ async function testAsync(name, fn) {
     assert.strictEqual(JSON.stringify(LB.reearnMesoWeightBoosts(undefined, undefined, undefined)), '{}');
   });
 
+  // ── revertMesoSessionBoosts (delete a meso session → drop its orphaned boost) ──
+  const mesoStateWB = { weightBoosts: { tri_d1: 2.5, chest_d1: 5, tri_d2: 2.5 }, repMissCounts: { tri_d1: 1 } };
+  const delSess = { id: 'A', dayId: 'd1', ended: '2026-07-15T10:00:00Z', entries: [{ exId: 'tri' }, { exId: 'chest' }] };
+  test('revertMesoSessionBoosts: clears the deleted session\'s day keys, leaves other days', () => {
+    const out = LB.revertMesoSessionBoosts(mesoStateWB, delSess, []);
+    assert.ok(!('tri_d1' in out.weightBoosts), 'tri_d1 boost dropped');
+    assert.ok(!('chest_d1' in out.weightBoosts), 'chest_d1 boost dropped');
+    assert.strictEqual(out.weightBoosts.tri_d2, 2.5, 'a different day\'s boost is untouched');
+    assert.ok(!('tri_d1' in out.repMissCounts), 'tri_d1 rep-miss count dropped');
+  });
+  test('revertMesoSessionBoosts: a LATER session of the same day owns the boost, keep it', () => {
+    const later = { id: 'B', dayId: 'd1', ended: '2026-07-16T10:00:00Z', entries: [{ exId: 'tri' }] };
+    const out = LB.revertMesoSessionBoosts(mesoStateWB, delSess, [later]);
+    assert.strictEqual(out, mesoStateWB); // superseded → no change, same object
+  });
+  test('revertMesoSessionBoosts: an OLDER same-day session does not block the rollback', () => {
+    const older = { id: 'Z', dayId: 'd1', ended: '2026-07-14T10:00:00Z', entries: [{ exId: 'tri' }] };
+    const out = LB.revertMesoSessionBoosts(mesoStateWB, delSess, [older]);
+    assert.ok(!('tri_d1' in out.weightBoosts));
+  });
+  test('revertMesoSessionBoosts: deleting a deload session is a no-op', () => {
+    const out = LB.revertMesoSessionBoosts(mesoStateWB, { ...delSess, isDeload: true }, []);
+    assert.strictEqual(out, mesoStateWB);
+  });
+  test('revertMesoSessionBoosts: no entries / no dayId is a safe no-op', () => {
+    assert.strictEqual(LB.revertMesoSessionBoosts(mesoStateWB, { id: 'A', dayId: 'd1', entries: [] }, []), mesoStateWB);
+    assert.strictEqual(LB.revertMesoSessionBoosts(mesoStateWB, { id: 'A', dayId: null, entries: [{ exId: 'tri' }] }, []), mesoStateWB);
+  });
+  test('revertMesoSessionBoosts: nothing to clear returns the same object (no churn)', () => {
+    const clean = { weightBoosts: { other_d9: 2.5 }, repMissCounts: {} };
+    assert.strictEqual(LB.revertMesoSessionBoosts(clean, delSess, []), clean);
+  });
+  test('revertMesoSessionBoosts: cardio entries are ignored when building keys', () => {
+    const st = { weightBoosts: { tri_d1: 2.5 }, repMissCounts: {} };
+    const sess = { id: 'A', dayId: 'd1', ended: '2026-07-15T10:00:00Z', entries: [{ isCardio: true }, { exId: 'tri' }] };
+    const out = LB.revertMesoSessionBoosts(st, sess, []);
+    assert.ok(!('tri_d1' in out.weightBoosts));
+  });
+
   // ── resolveMesoSeedSuggestion (feedback owns weight on a meso plan) ──
   const seedLast = { entry: { sets: [{ kg: 100, reps: 8 }] } };
   test('resolveMesoSeedSuggestion: earned boost with no Smart Progression applies the boost', () => {

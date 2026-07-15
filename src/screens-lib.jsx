@@ -2738,10 +2738,26 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
 
   const deleteSession = async () => {
     if (!await confirm('This session will be permanently deleted.', { title: 'Delete session?', ok: 'Delete', danger: true })) return;
-    setStore(s => ({
-      ...s,
-      sessions: s.sessions.filter(x => x.id !== sessionId),
-      cardioLogs: (s.cardioLogs || []).filter(l => l.sessionId !== sessionId),
+    // Roll back the meso weight boost / rep-miss counts this session earned, so a
+    // re-log (the common "delete, then log again with feedback" flow) doesn't seed
+    // on an older, lower weight with that orphaned boost still stacked on top. Both
+    // the store copy (DB / cross-device) and the per-plan localStorage cache must
+    // move together and be freshly stamped, or getMesoState would keep preferring
+    // the stale finished-session copy by updatedAt.
+    const remaining = store.sessions.filter(x => x.id !== sessionId);
+    const meso = (s.scheduleId && !s.isFreestyle)
+      ? (store.mesoStates || []).find(m => m.scheduleId === s.scheduleId) : null;
+    const reverted = meso ? LB.revertMesoSessionBoosts(meso, s, remaining) : null;
+    const stampedMeso = (reverted && reverted !== meso)
+      ? { ...reverted, updatedAt: new Date().toISOString() } : null;
+    if (stampedMeso) {
+      try { localStorage.setItem(MESO_KEY + '-' + s.scheduleId, JSON.stringify(stampedMeso)); } catch {}
+    }
+    setStore(st => ({
+      ...st,
+      sessions: st.sessions.filter(x => x.id !== sessionId),
+      cardioLogs: (st.cardioLogs || []).filter(l => l.sessionId !== sessionId),
+      ...(stampedMeso ? { mesoStates: (st.mesoStates || []).map(m => m.id === meso.id ? stampedMeso : m) } : {}),
     }));
     go({ name: 'hist' });
   };
