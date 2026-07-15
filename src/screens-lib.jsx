@@ -56,7 +56,7 @@ const mesoVolumeLbl = (loadOnly) => loadOnly
 // note_pinned, migration 0167). Shared by the create + edit exercise forms.
 function PinNoteToggle({ on, onToggle }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginTop: 12 }}>
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
       <div style={{ minWidth: 0 }}>
         <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.ink, fontWeight: 600 }}>Pin note</div>
         <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 2, lineHeight: 1.4 }}>Pops up at the start of this exercise each workout, until you tap to dismiss.</div>
@@ -1188,8 +1188,8 @@ function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = ''
               resize: 'none', outline: 'none',
             }}
           />
-          {note.trim() && <PinNoteToggle on={notePinned} onToggle={() => setNotePinned(v => !v)} />}
         </Field>
+        {note.trim() && <PinNoteToggle on={notePinned} onToggle={() => setNotePinned(v => !v)} />}
         <Btn onClick={save} style={{ opacity: name.trim() ? 1 : 0.4 }} disabled={!name.trim()}>{seed ? 'Add to library' : 'Create'}</Btn>
       </div>
     </Sheet>
@@ -1417,7 +1417,7 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
       />
       <Hairline />
 
-      <div style={{ padding: '14px 22px 0' }}>
+      <div style={{ padding: '14px 22px calc(env(safe-area-inset-bottom, 8px) + 24px)' }}>
         {editMode ? (
           <div onPointerDown={blurKbOnControlTap} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <Field label="Name">
@@ -1486,8 +1486,8 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
                   resize: 'none', outline: 'none',
                 }}
               />
-              {noteVal.trim() && <PinNoteToggle on={editNotePinned} onToggle={() => setEditNotePinned(v => !v)} />}
             </Field>
+            {noteVal.trim() && <PinNoteToggle on={editNotePinned} onToggle={() => setEditNotePinned(v => !v)} />}
             <div style={{ display: 'flex', gap: 10 }}>
               <Btn kind="ghost" onClick={cancelEdit} style={{ flex: 1 }}>
                 {autoEdit ? 'Skip' : 'Cancel'}
