@@ -375,22 +375,23 @@ function AutoregGuideScreen({ store, go, mode: modeProp, back }) {
 
             {/* bump gate */}
             <div style={{ marginTop: 14 }}>
-              <AGPanel title="Bump: five green lights">
-                <p style={{ fontSize: 13.5, color: UI.inkSoft, margin: '11px 0' }}>A bump (+2.5 kg, equipment dependent) needs all of these, re-earned every session. On a jump the reps reset to the range floor.</p>
+              <AGPanel title={`Bump: ${isB ? 'five' : 'four'} green lights`}>
+                <p style={{ fontSize: 13.5, color: UI.inkSoft, margin: '11px 0' }}>A weight bump (+2.5 kg, equipment dependent) needs all of these, re-earned every session. On a jump the reps reset to the range floor.</p>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px,1fr))', gap: 9 }}>
                   {[
-                    ['1 · Reps', 'Every set clears its staggered ladder target.', true],
-                    ['2 · Joint', 'Answer was "None".', true],
-                    ['3 · Pump', '"Moderate" or "Amazing".', true],
-                    ['4 · Volume', isB ? 'Anything but "Too heavy" (Hard counts).' : '"Just right" or "Not enough".', true],
-                    ['5 · Soreness', isB ? 'Muscle is not "Still sore".' : 'Only applies in Load only.', isB],
-                  ].map(([t, d, active]) => (
-                    <div key={t} style={{ background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 6, padding: '12px 13px', opacity: active ? 1 : 0.5 }}>
-                      <div style={{ fontFamily: UI.fontNum, fontSize: 10.5, letterSpacing: '.1em', textTransform: 'uppercase', color: active ? UI.ok : UI.inkFaint, marginBottom: 5 }}>{t}</div>
+                    ['1 · Reps', 'Every set clears its staggered ladder target.'],
+                    ['2 · Joint', 'Answer was "None".'],
+                    ['3 · Pump', '"Moderate" or "Amazing".'],
+                    ['4 · Volume', isB ? 'Anything but "Too heavy" (Hard counts).' : '"Just right" or "Not enough".'],
+                    ...(isB ? [['5 · Soreness', 'Muscle is not "Still sore".']] : []),
+                  ].map(([t, d]) => (
+                    <div key={t} style={{ background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 6, padding: '12px 13px' }}>
+                      <div style={{ fontFamily: UI.fontNum, fontSize: 10.5, letterSpacing: '.1em', textTransform: 'uppercase', color: UI.ok, marginBottom: 5 }}>{t}</div>
                       <div style={{ fontSize: 12.5, color: UI.inkSoft }}>{d}</div>
                     </div>
                   ))}
                 </div>
+                {!isB && <p style={{ fontSize: 12.5, color: UI.inkSoft, margin: '12px 0 0' }}>These gate the <b style={{ color: UI.ink }}>weight</b> only. Soreness is not among them here: in this mode it moves your <b style={{ color: UI.ink }}>sets</b> instead (still sore = one set off the most-grown lift). It only holds the weight in Load only.</p>}
               </AGPanel>
             </div>
 
