@@ -51,6 +51,21 @@ const mesoVolumeLbl = (loadOnly) => loadOnly
   ? { not_enough: 'Too light', just_right: 'Just right', pushed: 'Hard', too_much: 'Too heavy' }
   : { not_enough: 'Not enough', just_right: 'Just right', pushed: 'Pushed my limits', too_much: 'Too much' };
 
+// Toggle shown under a non-empty exercise note: pins the note so it pops up and
+// must be acknowledged at the start of that exercise every workout (zane_exercises
+// note_pinned, migration 0167). Shared by the create + edit exercise forms.
+function PinNoteToggle({ on, onToggle }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginTop: 12 }}>
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.ink, fontWeight: 600 }}>Pin note</div>
+        <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 2, lineHeight: 1.4 }}>Pops up at the start of this exercise each workout, until you tap to dismiss.</div>
+      </div>
+      <Toggle on={on} onToggle={onToggle} />
+    </div>
+  );
+}
+
 // ─── LIBRARY ──────────────────────────────────────────────────────────
 function LibraryScreen({ store, setStore, go, userId }) {
   const [confirmEl, confirm] = useConfirm();
@@ -1043,6 +1058,7 @@ function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = ''
   const pickLogMode = (m) => { setLogModeTouched(true); setLogMode(m); };
   const [equipment, setEquipment] = useStateL(seed ? (seed.equipment || 'no_equipment') : null);
   const [note, setNote] = useStateL('');
+  const [notePinned, setNotePinned] = useStateL(false);
   const [youtubeUrl, setYoutubeUrl] = useStateL(''); // no seed field for this: a catalog entry never carries one
   const [showSizeInfo, setShowSizeInfo] = useStateL(false);
   const [showBodyweightHint, setShowBodyweightHint] = useStateL(false);
@@ -1077,7 +1093,7 @@ function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = ''
   const save = () => {
     if (!name.trim()) return;
     const effLogMode = loggingPickerVisible(equipment, movementType) ? logMode : 'weight';
-    const ex = { id: LB.uid(), name: name.trim(), tags: selectedTags, category: category || null, unilateral: movementType === 'unilateral', movement_type: movementType, no_weight_reps: effLogMode !== 'weight', log_mode: effLogMode, pull_bodyweight: (equipment === 'bodyweight' && effLogMode === 'weight' ? pullBodyweight : false), equipment: equipment || null, note: note.trim(), youtube_url: sanitizeYoutubeUrl(youtubeUrl), progression_reps: null };
+    const ex = { id: LB.uid(), name: name.trim(), tags: selectedTags, category: category || null, unilateral: movementType === 'unilateral', movement_type: movementType, no_weight_reps: effLogMode !== 'weight', log_mode: effLogMode, pull_bodyweight: (equipment === 'bodyweight' && effLogMode === 'weight' ? pullBodyweight : false), equipment: equipment || null, note: note.trim(), note_pinned: note.trim() ? notePinned : false, youtube_url: sanitizeYoutubeUrl(youtubeUrl), progression_reps: null };
     setStore(s => ({ ...s, exercises: [...s.exercises, ex] }));
     onCreated?.(ex.id);
     onClose();
@@ -1172,6 +1188,7 @@ function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = ''
               resize: 'none', outline: 'none',
             }}
           />
+          {note.trim() && <PinNoteToggle on={notePinned} onToggle={() => setNotePinned(v => !v)} />}
         </Field>
         <Btn onClick={save} style={{ opacity: name.trim() ? 1 : 0.4 }} disabled={!name.trim()}>{seed ? 'Add to library' : 'Create'}</Btn>
       </div>
@@ -1215,6 +1232,7 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
   const [editEquipment, setEditEquipment] = useStateL(autoEdit ? (ex.equipment || null) : null);
   const [editYoutubeUrl, setEditYoutubeUrl] = useStateL(autoEdit ? (ex.youtube_url || '') : '');
   const [noteVal, setNoteVal] = useStateL(autoEdit ? (ex.note || '') : '');
+  const [editNotePinned, setEditNotePinned] = useStateL(autoEdit ? !!ex.note_pinned : false);
   const [showSizeInfoEdit, setShowSizeInfoEdit] = useStateL(false);
   const [showBodyweightHint, setShowBodyweightHint] = useStateL(false);
   const handleEditEquipmentChange = (key) => {
@@ -1235,14 +1253,14 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
     }
   };
 
-  const startEdit = () => { setEditName(ex.name); setEditTags([...(ex.tags || [])]); setEditCategory(ex.category || null); setEditMovementType(ex.movement_type ?? (ex.unilateral ? 'unilateral' : 'bilateral')); setEditLogMode(LB.exerciseLogMode(ex)); setEditPullBodyweight(!!ex.pull_bodyweight); setEditEquipment(ex.equipment || null); setEditYoutubeUrl(ex.youtube_url || ''); setNoteVal(ex.note || ''); setEditMode(true); };
+  const startEdit = () => { setEditName(ex.name); setEditTags([...(ex.tags || [])]); setEditCategory(ex.category || null); setEditMovementType(ex.movement_type ?? (ex.unilateral ? 'unilateral' : 'bilateral')); setEditLogMode(LB.exerciseLogMode(ex)); setEditPullBodyweight(!!ex.pull_bodyweight); setEditEquipment(ex.equipment || null); setEditYoutubeUrl(ex.youtube_url || ''); setNoteVal(ex.note || ''); setEditNotePinned(!!ex.note_pinned); setEditMode(true); };
   const cancelEdit = () => { if (autoEdit) advanceQueue(); else setEditMode(false); };
   const saveEdit = () => {
     if (!editName.trim()) return;
     setStore(s => {
       const effLogMode = loggingPickerVisible(editEquipment, editMovementType) ? editLogMode : 'weight';
       const exercises = s.exercises.map(e => e.id === exId
-        ? { ...e, name: editName.trim(), tags: editTags, category: editCategory || null, unilateral: editMovementType === 'unilateral', movement_type: editMovementType, no_weight_reps: effLogMode !== 'weight', log_mode: effLogMode, pull_bodyweight: (editEquipment === 'bodyweight' && effLogMode === 'weight' ? editPullBodyweight : false), equipment: editEquipment || null, note: noteVal.trim(), youtube_url: sanitizeYoutubeUrl(editYoutubeUrl) }
+        ? { ...e, name: editName.trim(), tags: editTags, category: editCategory || null, unilateral: editMovementType === 'unilateral', movement_type: editMovementType, no_weight_reps: effLogMode !== 'weight', log_mode: effLogMode, pull_bodyweight: (editEquipment === 'bodyweight' && effLogMode === 'weight' ? editPullBodyweight : false), equipment: editEquipment || null, note: noteVal.trim(), note_pinned: noteVal.trim() ? editNotePinned : false, youtube_url: sanitizeYoutubeUrl(editYoutubeUrl) }
         : e);
       return { ...s, exercises };
     });
@@ -1468,6 +1486,7 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
                   resize: 'none', outline: 'none',
                 }}
               />
+              {noteVal.trim() && <PinNoteToggle on={editNotePinned} onToggle={() => setEditNotePinned(v => !v)} />}
             </Field>
             <div style={{ display: 'flex', gap: 10 }}>
               <Btn kind="ghost" onClick={cancelEdit} style={{ flex: 1 }}>
@@ -1528,7 +1547,7 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
 
         {/* Note — read-only here; edited via the Edit button's form below */}
         <div>
-          <Bezel>NOTE</Bezel>
+          <Bezel>NOTE{ex.note && ex.note_pinned ? <span style={{ color: 'var(--accent)', marginLeft: 8, letterSpacing: 0 }}><i className="fa-solid fa-thumbtack" style={{ fontSize: 9 }} /> PINNED</span> : ''}</Bezel>
           <div style={{ marginTop: 12 }}>
             <div className="display-it" style={{ fontSize: 16, color: ex.note ? UI.inkSoft : UI.inkFaint, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
               {ex.note || 'No note yet.'}
@@ -2774,9 +2793,23 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
     // move together and be freshly stamped, or getMesoState would keep preferring
     // the stale finished-session copy by updatedAt.
     const remaining = store.sessions.filter(x => x.id !== sessionId);
-    const meso = (s.scheduleId && !s.isFreestyle)
+    // Skip the meso rollback while a session for this plan is in progress: it owns
+    // the localStorage meso cache and will flush its own state at finish, so a
+    // stale rewrite here would corrupt it (mirrors isMesoSessionEditable).
+    const liveForPlan = store.sessions.some(x => x && !x.ended && x.scheduleId === s.scheduleId);
+    const meso = (s.scheduleId && !s.isFreestyle && !liveForPlan)
       ? (store.mesoStates || []).find(m => m.scheduleId === s.scheduleId) : null;
-    const reverted = meso ? LB.revertMesoSessionBoosts(meso, s, remaining) : null;
+    // A windowed session renders with entries:[] until a lazy fetch resolves;
+    // revertMesoSessionBoosts needs the entries to build its exId keys, so load
+    // them first (falls through to a harmless no-op rollback if the fetch fails).
+    let delSession = s;
+    if (meso && (s.aggExercises || 0) > 0 && !(s.entries || []).length) {
+      try {
+        const bySession = await LB.fetchSessionEntries([sessionId]);
+        if (bySession && bySession[sessionId] && bySession[sessionId].length) delSession = { ...s, entries: bySession[sessionId] };
+      } catch {}
+    }
+    const reverted = meso ? LB.revertMesoSessionBoosts(meso, delSession, remaining) : null;
     const stampedMeso = (reverted && reverted !== meso)
       ? { ...reverted, updatedAt: new Date().toISOString() } : null;
     if (stampedMeso) {

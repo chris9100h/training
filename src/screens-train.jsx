@@ -866,6 +866,20 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // on every render — it only recomputes when the library or current exId change.
   const exercise = useMemoT(() => (entry ? LB.findExercise(store, entry.exId) : null), [store.exercises, entry?.exId]);
 
+  // Pinned exercise note: a note flagged note_pinned (migration 0167) pops up in a
+  // must-acknowledge sheet the first time its exercise becomes active this session
+  // ("did you read your own setup note"). Seen exIds are tracked per session in a
+  // ref that survives navigation (only a full remount / reload can re-show it).
+  const [pinnedNote, setPinnedNote] = useStateT(null); // { exId, name, note } | null
+  const pinnedNoteSeenRef = useRefT(null);
+  if (pinnedNoteSeenRef.current === null) pinnedNoteSeenRef.current = new Set();
+  useEffectT(() => {
+    if (!entry || entry.isCardio) return;
+    if (!exercise || !exercise.note_pinned || !(exercise.note || '').trim()) return;
+    if (pinnedNoteSeenRef.current.has(entry.exId)) return;
+    setPinnedNote({ exId: entry.exId, name: exercise.name, note: exercise.note });
+  }, [exIdx]);
+
   // "Last time" reference + remote best e1RM for this day type.
   // Matches LB.bestRecentEntry (best set at the current working weight across
   // the last 3 sessions, not merely the single most recent one) — the same
@@ -3210,8 +3224,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // them here (from the still-populated in-memory refs, not localStorage) makes
     // the last session's feedback correctable later via LB.replayMesoSession.
     // JSON-cloned so a later store mutation can't alias into these records.
-    const raw = (groups.length && mesoAnswersRef.current?.answers) ? {
-      answers: JSON.parse(JSON.stringify(mesoAnswersRef.current.answers)),
+    // mesoAnswersRef.current IS the { soreness, joint, volume } records object
+    // (useRefT(mesoAskedInitRef.current.answers)), so clone it directly, no
+    // `.answers` sub-key.
+    const raw = (groups.length && mesoAnswersRef.current) ? {
+      answers: JSON.parse(JSON.stringify(mesoAnswersRef.current)),
       negOwner: { ...(mesoNegativeDeltaKeysRef.current || {}) },
       frozen: !!(mesoLastWeek || weightFeelMode),
       dayId: session.dayId ?? null,
@@ -7600,6 +7617,18 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           ? (store.settings?.equipmentConfig?.plateInventoryLbs ?? PLATES_LBS)
           : (store.settings?.equipmentConfig?.plateInventoryKg ?? PLATES_KG)}
       />
+
+      {/* Pinned exercise note, must acknowledge on exercise start (note_pinned) */}
+      {pinnedNote && (
+        <Sheet open={!!pinnedNote} onClose={() => {}} title={pinnedNote.name || 'Note'} titleColor="var(--accent)">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+            <i className="fa-solid fa-thumbtack" style={{ color: 'var(--accent)', fontSize: 11 }} />
+            <span className="micro" style={{ color: UI.inkFaint, letterSpacing: '0.12em' }}>Pinned note</span>
+          </div>
+          <div style={{ fontFamily: UI.fontUi, fontSize: 15, color: UI.ink, lineHeight: 1.6, whiteSpace: 'pre-wrap', marginBottom: 20 }}>{pinnedNote.note}</div>
+          <Btn onClick={() => { pinnedNoteSeenRef.current.add(pinnedNote.exId); setPinnedNote(null); }} style={{ width: '100%' }}>Got it</Btn>
+        </Sheet>
+      )}
 
       {/* ── Meso feedback sheets ─────────────────────────────────────────────── */}
 

@@ -862,10 +862,17 @@ async function testAsync(name, fn) {
     assert.strictEqual(out.weightBoosts.tri_d2, 2.5, 'a different day\'s boost is untouched');
     assert.ok(!('tri_d1' in out.repMissCounts), 'tri_d1 rep-miss count dropped');
   });
-  test('revertMesoSessionBoosts: a LATER session of the same day owns the boost, keep it', () => {
+  test('revertMesoSessionBoosts: a later same-day session keeps ITS retrained key, orphans the rest', () => {
     const later = { id: 'B', dayId: 'd1', ended: '2026-07-16T10:00:00Z', entries: [{ exId: 'tri' }] };
     const out = LB.revertMesoSessionBoosts(mesoStateWB, delSess, [later]);
-    assert.strictEqual(out, mesoStateWB); // superseded → no change, same object
+    assert.strictEqual(out.weightBoosts.tri_d1, 2.5, 'tri retrained later → its boost survives');
+    assert.ok(!('chest_d1' in out.weightBoosts), 'chest NOT retrained later → orphaned boost cleared');
+    assert.strictEqual(out.weightBoosts.tri_d2, 2.5, 'a different day is untouched');
+    assert.strictEqual(out.repMissCounts.tri_d1, 1, 'tri rep-miss count survives too');
+  });
+  test('revertMesoSessionBoosts: a later same-day session that retrained ALL exercises is a full no-op', () => {
+    const later = { id: 'B', dayId: 'd1', ended: '2026-07-16T10:00:00Z', entries: [{ exId: 'tri' }, { exId: 'chest' }] };
+    assert.strictEqual(LB.revertMesoSessionBoosts(mesoStateWB, delSess, [later]), mesoStateWB);
   });
   test('revertMesoSessionBoosts: an OLDER same-day session does not block the rollback', () => {
     const older = { id: 'Z', dayId: 'd1', ended: '2026-07-14T10:00:00Z', entries: [{ exId: 'tri' }] };
