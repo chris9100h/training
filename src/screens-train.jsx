@@ -1475,6 +1475,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
     const progressionResult = (() => {
       if (isDeloadSession) return null;
+      // Autoregulation / mesocycle plans hand weight control to the feedback
+      // engine: resolveMesoSeedSuggestion (store.js) vetoes any double-progression
+      // bump the post-set soreness/joint/volume answers don't grant. A
+      // "Progression unlocked" toast here would promise a load the feedback can
+      // silently retract, so suppress it on those plans entirely (the meso recap
+      // is the source of truth for the next load).
+      if (LB.mesoActive(store.schedules?.find(s => s.id === session.scheduleId))) return null;
       if (LB.is531MainLift(store, entry.exId, session.dayId)) return null; // 5/3/1 main lifts climb via the Training Max, never the Smart Progression toast
       if (!LB.progressionEnabled(store, entry?.plannedRepsMax, entry?.plannedProgressionOffset)) return null;
       if (!updatedSets.filter(s => !s.warmup).every(s => s.done || s.skipped)) return null;
@@ -1522,26 +1529,17 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // on to.)
     let overlayHoldMs = 0;
     if (progressionResult) {
-      overlayHoldMs = PROGRESSION_NAV_DELAY_MS; // swap mid-overlay; the show/hide timers below keep their own show + 4000ms
-      // Celebration goes FIRST. Flag it now (synchronously) so the recovery
-      // prompts that also fire off this last-set-done (next muscle's soreness,
-      // any pinned note on the next exercise) hold behind the overlay and open
-      // only once it clears. Fixes "soreness of the next muscle jumped ahead of
-      // the progression notice for the exercise you just finished".
+      overlayHoldMs = PROGRESSION_NAV_DELAY_MS; // swap mid-overlay; the show/hide timers below keep their own 800ms + 4000ms
+      // The overlay only fires on non-autoregulating plans (meso/auto plans
+      // suppress it above), so there's no meso recovery sheet to compete with
+      // here. A pinned note on the next exercise CAN still fire on the upcoming
+      // navigation, so flag the celebration as pending to hold that note behind
+      // it until it clears (see the pinned-note trigger).
       progressionPendingRef.current = true;
-      // In a meso block the joint/pump sheet for THIS exercise opens on this very
-      // set-completion (see the joint trigger below). Show the overlay in the
-      // same tick so it covers that sheet the moment it mounts (z-160 over the
-      // z-100 sheet), and render it opaque from the first frame (coverNow →
-      // celebrationHold, no fade-in) so the question never ghosts through.
-      // A solo (non-meso) bump keeps the dramatic 800ms beat and fade-in.
-      const mesoActive = !!mesoState && !isMesoDeloadSession && mesoWeek != null;
-      const showCelebration = () => {
-        setProgressionUnlocked({ ...progressionResult, coverNow: mesoActive });
+      setTimeout(() => {
+        setProgressionUnlocked(progressionResult);
         setTimeout(() => { progressionPendingRef.current = false; setProgressionUnlocked(null); }, 4000);
-      };
-      if (mesoActive) showCelebration();
-      else setTimeout(showCelebration, 800);
+      }, 800);
     } else if (!entry.sets[setIdx]?.warmup && !isDeloadSession) {
       const completed = entry.sets[setIdx];
       const cReps = LB.effReps(completed);
@@ -2363,12 +2361,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const newBestShownRef = useRefT({}); // exId → true once a NEW BEST flashed (max once per exercise per session)
   const [cardioPR, setCardioPR] = useStateT(null);
   const [progressionUnlocked, setProgressionUnlocked] = useStateT(null);
-  // The "Progression unlocked" overlay and the meso feedback sheets both fire
-  // off the same last-working-set-done event. The celebration goes FIRST: this
-  // ref is set the moment a bump is earned and stays set until the overlay is
-  // dismissed, so the recovery questions (next muscle's soreness, this
-  // exercise's joint/pump/volume) hold behind it and open once it clears. See
-  // the soreness / pinned-note triggers, which defer while this is set.
+  // Set while the "Progression unlocked" overlay is pending/on screen. That
+  // overlay only fires on non-autoregulating plans (meso/auto plans hand the
+  // load to the feedback engine and show no bump toast at all), where the only
+  // other thing that can pop on the next exercise is a pinned note, so this just
+  // holds that note behind the celebration until it clears. See the pinned-note
+  // trigger, which defers while this is set.
   const progressionPendingRef = useRefT(false);
   const [screenFlash, setScreenFlash] = useStateT(false);
   const [restModalOpen, setRestModalOpen] = useStateT(() => {
@@ -3392,12 +3390,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       return primaryMuscleForExercise(ex2) === pm;
     });
     if (!isFirst) return;
-    // Hold the next muscle's soreness behind (a) an unearned progression
-    // celebration and (b) the exercise we just finished still asking its own
-    // joint/pump/volume. It re-runs when any of those clear (deps) and asks
-    // then, so the order stays: bump notice, this exercise's recovery, next
-    // muscle's soreness.
-    if (progressionPendingRef.current || mesoJointOpen || mesoVolumeOpen) return;
+    // Hold the next muscle's soreness while the exercise we just finished is
+    // still asking its own joint/pump/volume, so the order stays: this
+    // exercise's recovery first, then the next muscle's soreness. Re-runs when
+    // those sheets close (deps).
+    if (mesoJointOpen || mesoVolumeOpen) return;
     askedSorenessRef.current.add(pm);
     persistMesoAsked();
     setMesoSorenessMusc(pm);
@@ -3407,7 +3404,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // this flag in the same render pass and defers until soreness is answered.
     sorenessPendingRef.current = true;
     setMesoSorenessOpen(true);
-  }, [exIdx, !!mesoState, !!progressionUnlocked, mesoJointOpen, mesoVolumeOpen]);
+  }, [exIdx, !!mesoState, mesoJointOpen, mesoVolumeOpen]);
 
   // Pinned exercise note: a must-acknowledge cue that also fires on exercise
   // start, but AFTER the soreness recovery check. Declared after the soreness
@@ -5085,7 +5082,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         <div onClick={() => { progressionPendingRef.current = false; setProgressionUnlocked(null); }} style={{
           position: 'fixed', top: 'env(safe-area-inset-top, 0px)', left: 0, right: 0, bottom: 0, zIndex: 160,
           background: 'var(--bg-body)',
-          animation: (progressionUnlocked.coverNow ? 'celebrationHold' : 'improvedFade') + ' 4s ease forwards',
+          animation: 'improvedFade 4s ease forwards',
           display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
           gap: 8,
         }}>
