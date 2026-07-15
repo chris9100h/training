@@ -1593,6 +1593,9 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
         <Btn kind="ghost" className="intensity-glow" onClick={() => go({ name: 'featuremap' })} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
           Feature map
         </Btn>
+        <Btn kind="ghost" onClick={() => go({ name: 'autoreg-guide' })} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+          Autoregulation guide
+        </Btn>
         {isAdmin ? (() => {
           const unseenCount = allUsers.filter(isNewSignup).length;
           const adminUnread = supportInbox.reduce((sum, t) => sum + Number(t.unread_count || 0), 0);

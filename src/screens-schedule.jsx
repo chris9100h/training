@@ -2911,7 +2911,8 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
           <p style={{ margin: 0 }}>Your answers auto-adjust set targets for the next time you run that session — more sets when you need more stimulus, fewer when recovery is lagging.</p>
           <p style={{ margin: 0 }}>Weight increases are earned at session end: if you hit all your reps <em>and</em> the feedback comes back clean — no joint issues, pump was good, volume felt right — Zane banks a load boost for the next time you hit that session. Miss any of those signals and the weight holds. <strong style={{ color: UI.ink }}>Smart Progression</strong> works alongside this: if enabled, it also suggests load steps based on your rep range history. Together they keep the bar moving forward across weeks and into Meso 2.</p>
         </div>
-        <Btn onClick={() => setMesoInfoOpen(false)} style={{ width: '100%', marginTop: 20 }}>Got it</Btn>
+        <Btn kind="ghost" onClick={() => { setMesoInfoOpen(false); go({ name: 'autoreg-guide', mode: draft.mesocycle_weeks != null ? 'C' : (draft.mesocycle_autoregulate_mode === 'load' ? 'B' : 'A'), back: { name: 'schedule-edit', scheduleId } }); }} style={{ width: '100%', marginTop: 16 }}>See the full guide</Btn>
+        <Btn onClick={() => setMesoInfoOpen(false)} style={{ width: '100%', marginTop: 8 }}>Got it</Btn>
       </Sheet>
     </Screen>
   );
