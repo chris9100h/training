@@ -824,6 +824,17 @@ async function testAsync(name, fn) {
     assert.strictEqual(LB.mesoRepOutcome([{ done: true, reps: 9 }], 8, null, 12).allHit, false); // 9 < mid 10
     assert.strictEqual(LB.mesoRepOutcome([{ done: true, reps: 10 }], 8, null, 12).allHit, true);
   });
+  test('mesoRepOutcome (range, single set): below the floor is a miss (single set is not exempt)', () => {
+    const out = LB.mesoRepOutcome([{ done: true, reps: 7 }], 8, null, 12);
+    assert.strictEqual(out.allHit, false);   // 7 < mid 10 → no earn
+    assert.strictEqual(out.earlyMiss, true); // 7 < floor 8, and a lone set counts directly
+  });
+  test('mesoRepOutcome (per-set): the MISS gate uses each set\'s own per-set floor, last set exempt', () => {
+    // first set under its per-set target 10 → early miss
+    assert.strictEqual(LB.mesoRepOutcome([{ done: true, reps: 9 }, { done: true, reps: 8 }], null, [10, 8], null).earlyMiss, true);
+    // only the LAST set is low (5 < 8); it is exempt, so no early miss
+    assert.strictEqual(LB.mesoRepOutcome([{ done: true, reps: 10 }, { done: true, reps: 5 }], null, [10, 8], null).earlyMiss, false);
+  });
 
   // ── reearnMesoWeightBoosts (weight boost must be re-earned every session) ──
   test('reearnMesoWeightBoosts: a boost not re-earned this session is dropped, not kept', () => {
@@ -944,6 +955,21 @@ async function testAsync(name, fn) {
     assert.strictEqual(out.mesoState.growthCounts.e1_d0, 1); // growth granted
     assert.ok(!('e1_d0' in out.raw.negOwner), 'negative slot released');
   });
+  test('applyMesoFeedbackEdit: soreness never with 2+ targets grants +1 to the LEAST-grown target', () => {
+    const ms = { deltas: {}, growthCounts: { e1_d0: 2, e2_d0: 0 }, pumpLowCounts: {}, jointFlags: {} };
+    const raw = { answers: { soreness: { chest: { muscle: 'chest', targets: [{ exId: 'e1', name: 'Bench', key: 'e1_d0' }, { exId: 'e2', name: 'Fly', key: 'e2_d0' }], answer: 'healed_just', contrib: {} } }, joint: {}, volume: {} }, negOwner: {}, frozen: false, dayId: 'd0' };
+    const out = LB.applyMesoFeedbackEdit(ms, raw, { type: 'soreness', subject: 'chest', answer: 'never' }, { dayId: 'd0', loadOnly: false });
+    assert.strictEqual(out.mesoState.deltas.e2_d0, 1, '+1 lands on the least-grown target e2');
+    assert.ok(!out.mesoState.deltas.e1_d0, 'the more-grown target e1 gets nothing');
+    assert.strictEqual(out.mesoState.growthCounts.e2_d0, 1, 'growth count advances on e2');
+  });
+  test('applyMesoFeedbackEdit: soreness still_sore with 2+ targets cuts the MOST-grown target', () => {
+    const ms = { deltas: { e1_d0: 2, e2_d0: 0 }, growthCounts: {}, pumpLowCounts: {}, jointFlags: {} };
+    const raw = { answers: { soreness: { chest: { muscle: 'chest', targets: [{ exId: 'e1', name: 'Bench', key: 'e1_d0' }, { exId: 'e2', name: 'Fly', key: 'e2_d0' }], answer: 'healed_just', contrib: {} } }, joint: {}, volume: {} }, negOwner: {}, frozen: false, dayId: 'd0' };
+    const out = LB.applyMesoFeedbackEdit(ms, raw, { type: 'soreness', subject: 'chest', answer: 'still_sore' }, { dayId: 'd0', loadOnly: false });
+    assert.strictEqual(out.mesoState.deltas.e1_d0, 1, '-1 lands on the most-grown target e1 (2 -> 1)');
+    assert.strictEqual(out.raw.negOwner.e1_d0, 'soreness', 'soreness claims the negative slot');
+  });
   test('applyMesoFeedbackEdit: joint sharp → none clears the -1 and keeps a baseline flag', () => {
     const ms = { deltas: { e1_d1: -1 }, growthCounts: {}, pumpLowCounts: {}, jointFlags: { e1: true } };
     const raw = { answers: { soreness: {}, joint: { e1: { exId: 'e1', muscle: 'chest', exName: 'Bench', flagBaseline: true, answer: 'sharp', contrib: { e1_d1: -1 } } }, volume: {} }, negOwner: { e1_d1: 'joint' }, frozen: false, dayId: 'd1' };
@@ -965,6 +991,22 @@ async function testAsync(name, fn) {
     const out = LB.applyMesoFeedbackEdit(ms, raw, { type: 'volume', subject: 'chest', answer: null, pump: 'moderate', volume: 'just_right' }, { dayId: 'd1', loadOnly: false });
     assert.strictEqual(out.mesoState.deltas.e1_d1, 0);
     assert.strictEqual(out.mesoState.deltas.e2_d1, 0);
+  });
+  test('applyMesoFeedbackEdit: volume not_enough grants +1 to the LEAST-grown exercise', () => {
+    const ms = { deltas: {}, growthCounts: { e1_d1: 3, e2_d1: 0 }, pumpLowCounts: {}, jointFlags: {} };
+    const raw = { answers: { soreness: {}, joint: {}, volume: { chest: { muscle: 'chest', exIds: ['e1', 'e2'], pump: 'moderate', volume: 'just_right', contrib: { e1_d1: 0, e2_d1: 0 } } } }, negOwner: {}, frozen: false, dayId: 'd1' };
+    const out = LB.applyMesoFeedbackEdit(ms, raw, { type: 'volume', subject: 'chest', pump: 'moderate', volume: 'not_enough' }, { dayId: 'd1', loadOnly: false });
+    assert.strictEqual(out.mesoState.deltas.e2_d1, 1, '+1 lands on the least-grown e2');
+    assert.ok(!out.mesoState.deltas.e1_d1, 'the more-grown e1 gets nothing');
+    assert.strictEqual(out.mesoState.growthCounts.e2_d1, 1, 'growth count advances on e2');
+  });
+  test('applyMesoFeedbackEdit: volume pushed cuts the MOST-grown exercise and claims the neg slot', () => {
+    const ms = { deltas: { e1_d1: 2, e2_d1: 0 }, growthCounts: {}, pumpLowCounts: {}, jointFlags: {} };
+    const raw = { answers: { soreness: {}, joint: {}, volume: { chest: { muscle: 'chest', exIds: ['e1', 'e2'], pump: 'moderate', volume: 'just_right', contrib: { e1_d1: 0, e2_d1: 0 } } } }, negOwner: {}, frozen: false, dayId: 'd1' };
+    const out = LB.applyMesoFeedbackEdit(ms, raw, { type: 'volume', subject: 'chest', pump: 'moderate', volume: 'pushed' }, { dayId: 'd1', loadOnly: false });
+    assert.strictEqual(out.mesoState.deltas.e1_d1, 1, '-1 lands on the most-grown e1 (2 -> 1)');
+    assert.strictEqual(out.raw.negOwner.e1_d1, 'volume', 'volume claims the negative slot');
+    assert.strictEqual(out.mesoState.deltas.e2_d1, 0, 'the un-grown e2 is untouched');
   });
   test('applyMesoFeedbackEdit: pumpLowApplied tracked as a diff (low+just_right → +1, changed away → -1)', () => {
     const ms = { deltas: {}, growthCounts: {}, pumpLowCounts: {}, jointFlags: {} };
