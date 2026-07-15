@@ -2494,6 +2494,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const [sessionNoteOpen, setSessionNoteOpen] = useStateT(false);
   const [exNoteOpen, setExNoteOpen] = useStateT(false);
   const [exNoteVal, setExNoteVal] = useStateT('');
+  const [exNotePinned, setExNotePinned] = useStateT(false);
   const [planDiffOpen, setPlanDiffOpen] = useStateT(false);
   const [planDiff, setPlanDiff] = useStateT([]);
   // After "Update plan", walk each newly-added rep-based exercise through the plan
@@ -4090,11 +4091,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   };
 
   const saveExNote = () => {
-    setStore(s => ({ ...s, exercises: s.exercises.map(e => e.id === entry.exId ? { ...e, note: exNoteVal.trim() } : e) }));
+    const trimmed = exNoteVal.trim();
+    setStore(s => ({ ...s, exercises: s.exercises.map(e => e.id === entry.exId ? { ...e, note: trimmed, note_pinned: trimmed ? exNotePinned : false } : e) }));
     setExNoteOpen(false);
   };
   const requestCloseExNote = async () => {
-    const dirty = exNoteVal !== (exercise?.note || '');
+    const dirty = exNoteVal !== (exercise?.note || '') || exNotePinned !== !!exercise?.note_pinned;
     if (dirty && !await confirm('Your exercise note won\'t be saved.', { title: 'Discard changes?', ok: 'Discard', cancel: 'Keep editing', danger: true })) return;
     setExNoteOpen(false);
   };
@@ -6295,8 +6297,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
         {/* Exercise note (permanent, from exercise definition) */}
         {exercise?.note && (
-          <Frame style={{ padding: 14 }} onClick={() => { setExNoteVal(exercise?.note || ''); setExNoteOpen(true); }}>
-            <div className="micro" style={{ marginBottom: 6 }}>NOTE · {entry.name.toUpperCase()}</div>
+          <Frame style={{ padding: 14 }} onClick={() => { setExNoteVal(exercise?.note || ''); setExNotePinned(!!exercise?.note_pinned); setExNoteOpen(true); }}>
+            <div className="micro" style={{ marginBottom: 6 }}>NOTE · {entry.name.toUpperCase()}{exercise?.note_pinned ? <span style={{ color: 'var(--accent)' }}> · 📌 PINNED</span> : ''}</div>
             <div style={{ fontFamily: UI.fontDisplay, fontSize: 16, color: UI.inkSoft, lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>
               {exercise.note}
             </div>
@@ -6500,7 +6502,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             <div style={{ fontSize: 14, fontWeight: 600, color: UI.ink, marginBottom: 4 }}>Session note</div>
             <div style={{ fontSize: 12, color: UI.inkSoft }}>Only for this workout — e.g. how the set felt.</div>
           </button>
-          <button onClick={() => { setNotePicker(false); setExNoteVal(exercise?.note || ''); setExNoteOpen(true); }} style={{
+          <button onClick={() => { setNotePicker(false); setExNoteVal(exercise?.note || ''); setExNotePinned(!!exercise?.note_pinned); setExNoteOpen(true); }} style={{
             background: UI.bgInset, border: `1px solid ${UI.hair}`, borderRadius: 6,
             padding: '14px 16px', cursor: 'pointer', textAlign: 'left',
           }}>
@@ -7173,6 +7175,15 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             resize: 'vertical', outline: 'none',
           }}
         />
+        {exNoteVal.trim() && (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginTop: 14 }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.ink, fontWeight: 600 }}>Pin note</div>
+              <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 2, lineHeight: 1.4 }}>Pops up at the start of this exercise each workout, until you tap to dismiss.</div>
+            </div>
+            <Toggle on={exNotePinned} onToggle={() => setExNotePinned(v => !v)} />
+          </div>
+        )}
         <Btn onClick={saveExNote} style={{ marginTop: 12, width: '100%' }}>Save</Btn>
       </Sheet>
 
