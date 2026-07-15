@@ -873,18 +873,14 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const [pinnedNote, setPinnedNote] = useStateT(null); // { exId, name, note } | null
   const pinnedNoteSeenRef = useRefT(null);
   if (pinnedNoteSeenRef.current === null) pinnedNoteSeenRef.current = new Set();
-  // True while a pinned note is on screen. A REF (not the state) so the meso
-  // soreness trigger, which runs in the SAME effect pass on an exIdx change,
-  // reads it synchronously and defers instead of stacking a second must-dismiss
-  // modal. Cleared on dismiss, which re-fires the soreness check.
-  const pinnedNoteShowingRef = useRefT(false);
-  useEffectT(() => {
-    if (!entry || entry.isCardio) return;
-    if (!exercise || !exercise.note_pinned || !(exercise.note || '').trim()) return;
-    if (pinnedNoteSeenRef.current.has(entry.exId)) return;
-    pinnedNoteShowingRef.current = true;
-    setPinnedNote({ exId: entry.exId, name: exercise.name, note: exercise.note });
-  }, [exIdx]);
+  // The meso soreness question also fires on exercise start and takes priority
+  // (recovery check first, then the setup cue). The pinned-note trigger is
+  // therefore declared AFTER the soreness effect (further below) and defers
+  // while soreness is pending or open. sorenessPendingRef is set synchronously
+  // by the soreness effect so the pinned-note effect, running later in the SAME
+  // pass, sees it and waits; it is cleared when soreness is answered, which
+  // re-runs the pinned-note effect (via its mesoSorenessOpen dep) to show then.
+  const sorenessPendingRef = useRefT(false);
 
   // "Last time" reference + remote best e1RM for this day type.
   // Matches LB.bestRecentEntry (best set at the current working weight across
@@ -1527,16 +1523,15 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     let overlayHoldMs = 0;
     if (progressionResult) {
       overlayHoldMs = PROGRESSION_NAV_DELAY_MS; // swap mid-overlay; the show/hide timers below keep their own 800ms + 4000ms
+      // Celebration goes FIRST. Flag it now (synchronously) so the meso feedback
+      // triggers that also fire off this last-set-done (next muscle's soreness,
+      // this exercise's joint/pump) hold behind the overlay and only open once
+      // it clears. Fixes "soreness of the next muscle jumped ahead of the
+      // progression notice for the exercise you just finished".
+      progressionPendingRef.current = true;
       setTimeout(() => {
-        // If this same last-set-done also opened a meso feedback sheet
-        // (joint/pump/volume), don't slam the overlay on top of it — stash it;
-        // the flush effect shows it once every sheet is answered.
-        if (anyMesoSheetOpenRef.current) {
-          pendingProgressionRef.current = progressionResult;
-        } else {
-          setProgressionUnlocked(progressionResult);
-          setTimeout(() => setProgressionUnlocked(null), 4000);
-        }
+        setProgressionUnlocked(progressionResult);
+        setTimeout(() => { progressionPendingRef.current = false; setProgressionUnlocked(null); }, 4000);
       }, 800);
     } else if (!entry.sets[setIdx]?.warmup && !isDeloadSession) {
       const completed = entry.sets[setIdx];
@@ -2360,12 +2355,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const [cardioPR, setCardioPR] = useStateT(null);
   const [progressionUnlocked, setProgressionUnlocked] = useStateT(null);
   // The "Progression unlocked" overlay and the meso feedback sheets both fire
-  // off the same last-working-set-done event, so they'd otherwise stack. When a
-  // feedback sheet is open we stash the overlay here and show it once every
-  // sheet is answered (see the flush effect near the meso sheet state), so it's
-  // always sequential: questions first, then the celebration.
-  const pendingProgressionRef = useRefT(null);
-  const anyMesoSheetOpenRef = useRefT(false); // latest "a meso sheet is open", for completeSet's deferred-show timer
+  // off the same last-working-set-done event. The celebration goes FIRST: this
+  // ref is set the moment a bump is earned and stays set until the overlay is
+  // dismissed, so the recovery questions (next muscle's soreness, this
+  // exercise's joint/pump/volume) hold behind it and open once it clears. See
+  // the soreness / pinned-note triggers, which defer while this is set.
+  const progressionPendingRef = useRefT(false);
   const [screenFlash, setScreenFlash] = useStateT(false);
   const [restModalOpen, setRestModalOpen] = useStateT(() => {
     const rs = session.restStart ?? null;
@@ -2708,19 +2703,6 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const [mesoVolumeExIds, setMesoVolumeExIds] = useStateT([]); // exId+dayId pairs for delta
   const [mesoPumpAnswer, setMesoPumpAnswer] = useStateT(null);
   const [mesoVolumeAnswer, setMesoVolumeAnswer] = useStateT(null);
-  // Keep the "a meso feedback sheet is open" ref fresh each render (completeSet's
-  // deferred-show timer reads it), and once all three sheets are closed, flush a
-  // stashed "Progression unlocked" overlay — so the celebration lands AFTER the
-  // questions instead of covering them.
-  anyMesoSheetOpenRef.current = mesoSorenessOpen || mesoJointOpen || mesoVolumeOpen;
-  useEffectT(() => {
-    if (!mesoSorenessOpen && !mesoJointOpen && !mesoVolumeOpen && pendingProgressionRef.current) {
-      const result = pendingProgressionRef.current;
-      pendingProgressionRef.current = null;
-      setProgressionUnlocked(result);
-      setTimeout(() => setProgressionUnlocked(null), 4000);
-    }
-  }, [mesoSorenessOpen, mesoJointOpen, mesoVolumeOpen]);
   // Soreness/joint use a select-then-confirm step (like volume already did)
   // so a single mistap only highlights an option instead of committing it.
   const [mesoSorenessSel, setMesoSorenessSel] = useStateT(null);
@@ -2848,6 +2830,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // the difference instead of stacking a second contribution.
   const handleSorenessAnswer = (answer, muscle) => {
     setMesoSorenessOpen(false);
+    sorenessPendingRef.current = false; // pinned note may show now
     setMesoSorenessSel(null);
     mesoEditingRef.current.soreness = null;
     if (!mesoState || !muscle) return;
@@ -3400,17 +3383,38 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       return primaryMuscleForExercise(ex2) === pm;
     });
     if (!isFirst) return;
-    // A pinned exercise note is a must-acknowledge modal that also fires on
-    // exercise start; let it be dismissed first so two modals never stack. This
-    // effect re-runs when the pinned note clears (dep below) and asks then.
-    if (pinnedNoteShowingRef.current) return;
+    // Hold the next muscle's soreness behind (a) an unearned progression
+    // celebration and (b) the exercise we just finished still asking its own
+    // joint/pump/volume. It re-runs when any of those clear (deps) and asks
+    // then, so the order stays: bump notice, this exercise's recovery, next
+    // muscle's soreness.
+    if (progressionPendingRef.current || mesoJointOpen || mesoVolumeOpen) return;
     askedSorenessRef.current.add(pm);
     persistMesoAsked();
     setMesoSorenessMusc(pm);
     setMesoSorenessSel(null);
     mesoEditingRef.current.soreness = null;
+    // Recovery check goes first; the pinned-note effect (declared below) sees
+    // this flag in the same render pass and defers until soreness is answered.
+    sorenessPendingRef.current = true;
     setMesoSorenessOpen(true);
-  }, [exIdx, !!mesoState, !!pinnedNote]);
+  }, [exIdx, !!mesoState, !!progressionUnlocked, mesoJointOpen, mesoVolumeOpen]);
+
+  // Pinned exercise note: a must-acknowledge cue that also fires on exercise
+  // start, but AFTER the soreness recovery check. Declared after the soreness
+  // effect so it runs later in the same pass and can observe sorenessPendingRef;
+  // re-runs when the soreness sheet closes (dep) to show once soreness is done.
+  useEffectT(() => {
+    if (!entry || isCardio) return;
+    const ex = store.exercises?.find(e => e.id === entry.exId);
+    if (!ex || !ex.note_pinned || !(ex.note || '').trim()) return;
+    if (pinnedNoteSeenRef.current.has(entry.exId)) return;
+    // Queue behind the progression celebration and every recovery sheet, so it
+    // is the last thing to pop on a busy exercise-start (bump, soreness,
+    // joint/pump/volume all clear first). Re-runs as each of them closes.
+    if (progressionPendingRef.current || mesoSorenessOpen || sorenessPendingRef.current || mesoJointOpen || mesoVolumeOpen) return;
+    setPinnedNote({ exId: entry.exId, name: ex.name, note: ex.note });
+  }, [exIdx, mesoSorenessOpen, !!progressionUnlocked, mesoJointOpen, mesoVolumeOpen]);
 
   // Joint + pump/volume trigger: when all working sets of an exercise are done,
   // ask joint feedback. Fires whenever the current entry's sets change.
@@ -5069,7 +5073,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
       {/* Progression unlocked overlay */}
       {progressionUnlocked && ReactDOM.createPortal(
-        <div onClick={() => setProgressionUnlocked(null)} style={{
+        <div onClick={() => { progressionPendingRef.current = false; setProgressionUnlocked(null); }} style={{
           position: 'fixed', top: 'env(safe-area-inset-top, 0px)', left: 0, right: 0, bottom: 0, zIndex: 160,
           background: 'var(--bg-body)',
           animation: 'improvedFade 4s ease forwards',
@@ -7647,7 +7651,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             <span className="micro" style={{ color: UI.inkFaint, letterSpacing: '0.12em' }}>Pinned note</span>
           </div>
           <div style={{ fontFamily: UI.fontUi, fontSize: 15, color: UI.ink, lineHeight: 1.6, whiteSpace: 'pre-wrap', marginBottom: 20 }}>{pinnedNote.note}</div>
-          <Btn onClick={() => { pinnedNoteSeenRef.current.add(pinnedNote.exId); pinnedNoteShowingRef.current = false; setPinnedNote(null); }} style={{ width: '100%' }}>Got it</Btn>
+          <Btn onClick={() => { pinnedNoteSeenRef.current.add(pinnedNote.exId); setPinnedNote(null); }} style={{ width: '100%' }}>Got it</Btn>
         </Sheet>
       )}
 
