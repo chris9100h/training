@@ -20,12 +20,17 @@ const STANDARD_DAY_TYPES = ['PUSH','PULL','LEGS','UPPER','LOWER','FULL','ARMS','
 // settings/detail panels). These stack on top of each other (versions →
 // backups → preview → date-pickers), so `dim` lets an inner sheet skip its
 // own backdrop when a parent sheet underneath is already dimming the page.
-function MiniSheet({ zIndex = 300, dim = true, onClose, style, children }) {
+function MiniSheet({ zIndex = 300, dim = true, onClose, style, title, titleColor, children }) {
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', background: dim ? 'rgba(0,0,0,0.5)' : 'transparent' }}
       onClick={onClose}>
       <div style={{ background: UI.bg, borderRadius: '8px 8px 0 0', borderTop: `0.5px solid ${UI.hairStrong}`, padding: '22px 22px calc(22px + env(safe-area-inset-bottom, 0px))', ...style }}
         onClick={e => e.stopPropagation()}>
+        {/* Same 28px title block the Sheet primitive renders (ui.jsx), so a MiniSheet
+            heading stays locked to the canonical title spec instead of being hand-copied. */}
+        {title && (
+          <div style={{ fontFamily: UI.fontDisplay, fontSize: 28, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: titleColor || UI.ink, marginBottom: 16 }}>{title}</div>
+        )}
         {children}
       </div>
     </div>
@@ -63,6 +68,17 @@ function PlanScreen({ store, setStore, go, userId, openNewPlan }) {
   const [newPlanPicker, setNewPlanPicker] = useStateS(false);
   const [confirmEl, confirm] = useConfirm();
   const importRef = React.useRef(null);
+  // Coaches split their own Plan tab into "My Plans" (their own training) vs
+  // "Client Templates" (plans built to push out) so it doesn't turn into one
+  // giant list once a coach has pushed dozens of plans to clients.
+  const isCoach = (store.coaching?.asCoach || []).some(c => c.status === 'active');
+  const [planSubTab, setPlanSubTab] = useStateS('mine');
+  const [planSearch, setPlanSearch] = useStateS('');
+  const inPlanBucket = s => !isCoach || (planSubTab === 'templates' ? !!s.is_template : !s.is_template);
+  const matchesPlanSearch = s => !planSearch.trim() || s.name.toLowerCase().includes(planSearch.trim().toLowerCase());
+  // A non-coach user's list has no sub-tabs to split it up, so only bother
+  // with a search box once they actually have enough plans for it to help.
+  const showPlanSearch = isCoach || store.schedules.filter(s => !s.archived).length > 3;
   // Home's "Create plan" CTA (no-plan state) routes here with openNewPlan so it
   // opens the same Templates/Custom fork the + button does, instead of jumping
   // straight into the wizard.
@@ -172,22 +188,53 @@ function PlanScreen({ store, setStore, go, userId, openNewPlan }) {
         onChange={id => { if (id === 'lib') go({ name: 'lib' }); else if (id === 'cardio') go({ name: 'cardio-plans' }); }}
       />
       <div style={{ padding: '14px 22px 18px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {showPlanSearch && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {isCoach && (
+              <SubTabBar
+                tabs={[
+                  { id: 'mine', label: 'My Plans' },
+                  { id: 'templates', label: 'Client Templates' },
+                ]}
+                active={planSubTab}
+                onChange={id => { setPlanSubTab(id); setPlanSearch(''); }}
+                style={{ padding: 0 }}
+              />
+            )}
+            <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+              <i className="fa-solid fa-magnifying-glass" style={{ position: 'absolute', left: 12, fontSize: 12, color: UI.inkFaint, pointerEvents: 'none' }} />
+              <input value={planSearch} onChange={e => setPlanSearch(e.target.value)}
+                placeholder={isCoach ? (planSubTab === 'templates' ? 'Search client templates' : 'Search my plans') : 'Search plans'}
+                style={{ width: '100%', padding: '9px 12px 9px 32px', borderRadius: 4, border: `1px solid ${UI.hairStrong}`, background: UI.bgInset, color: UI.ink, fontFamily: UI.fontUi, fontSize: 14, outline: 'none' }} />
+            </div>
+          </div>
+        )}
         {store.schedules.length === 0 && (
           <Empty title="No plans yet"
             sub="Create a training plan to start sessions."
             action={<Btn data-tour="plan-new-btn" onClick={() => setNewPlanPicker(true)}>Create plan</Btn>}
             icon={ICON_CALENDAR} />
         )}
-        {[...store.schedules.filter(s => !s.archived)].sort((a, b) => {
+        {store.schedules.length > 0 && store.schedules.filter(s => inPlanBucket(s) && matchesPlanSearch(s)).length === 0 && (
+          <Empty title={planSearch.trim() ? 'No matches' : (planSubTab === 'templates' ? 'No client templates yet' : 'No plans here')}
+            sub={planSearch.trim() ? 'Try a different search.' : (!isCoach ? 'All your plans are archived.' : (planSubTab === 'templates' ? 'Mark a plan as a client template from its actions.' : 'All your plans are marked as client templates.'))}
+            icon={ICON_CALENDAR} />
+        )}
+        {[...store.schedules.filter(s => !s.archived && inPlanBucket(s) && matchesPlanSearch(s))].sort((a, b) => {
           if (a.id === store.activeScheduleId) return -1;
           if (b.id === store.activeScheduleId) return 1;
           return 0;
         }).map(s => {
           const isActive = s.id === store.activeScheduleId;
           const todayDayId = isActive ? (LB.todaysDay(store)?.day?.id ?? null) : null;
-          const mesoSt = s.mesocycle_weeks ? (store.mesoStates || []).find(m => m.scheduleId === s.id) : null;
+          const mesoSt = (s.mesocycle_weeks || s.mesocycle_autoregulate) ? (store.mesoStates || []).find(m => m.scheduleId === s.id) : null;
           const mesoCompletions = mesoSt?.completions ?? 0;
           const mesoPending = mesoSt?.startDate && new Date(mesoSt.startDate + 'T12:00:00') > new Date();
+          // Autoregulate-only badge: pending until the meso's aligned start (flex
+          // plans start on a rotation boundary, so prefer the cycle-aware week over
+          // the date-only mesoPending), then a running AUTO / AUTO · LOAD tag.
+          const autoWeek = (mesoSt && s.mesocycle_autoregulate && typeof mesoCurrentWeek === 'function') ? mesoCurrentWeek(mesoSt, store) : null;
+          const autoPending = s.mesocycle_autoregulate && autoWeek == null;
           // Current plan revision (newest version = highest number, like the editor's
           // version bar). Only shown once a plan has actually been re-versioned (≥2).
           const verCount = s.versions?.length || 0;
@@ -224,11 +271,24 @@ function PlanScreen({ store, setStore, go, userId, openNewPlan }) {
                       </span>
                     );
                   })()}
-                  {!mesoPending && mesoCompletions > 0 && (
+                  {s.mesocycle_weeks && !mesoPending && mesoCompletions > 0 && (
                     <span style={{ fontFamily: UI.fontNum, fontSize: 10, fontWeight: 700, color: UI.gold, background: 'rgba(var(--accent-rgb),0.15)', borderRadius: 4, padding: '2px 6px', letterSpacing: '0.05em' }}>
                       MESO {mesoCompletions + 1}
                     </span>
                   )}
+                  {s.mesocycle_autoregulate && (autoPending && mesoSt?.startDate && new Date(mesoSt.startDate + 'T12:00:00') > new Date() ? (() => {
+                    const d = new Date(mesoSt.startDate + 'T12:00:00');
+                    const startLabel = `${d.getDate().toString().padStart(2,'0')}.${(d.getMonth()+1).toString().padStart(2,'0')}`;
+                    return (
+                      <span style={{ fontFamily: UI.fontNum, fontSize: 10, fontWeight: 700, color: UI.inkFaint, background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 4, padding: '2px 6px', letterSpacing: '0.05em' }}>
+                        AUTO · starts {startLabel}
+                      </span>
+                    );
+                  })() : (
+                    <span style={{ fontFamily: UI.fontNum, fontSize: 10, fontWeight: 700, color: UI.gold, background: 'rgba(var(--accent-rgb),0.15)', borderRadius: 4, padding: '2px 6px', letterSpacing: '0.05em' }}>
+                      {LB.autoregLoadOnly(s) ? 'AUTO · LOAD' : 'AUTO'}
+                    </span>
+                  ))}
                   {is531 && (
                     <span style={{ fontFamily: UI.fontNum, fontSize: 10, fontWeight: 700, color: UI.gold, background: 'rgba(var(--accent-rgb),0.15)', border: `1px solid ${UI.goldSoft}`, borderRadius: 4, padding: '2px 6px', letterSpacing: '0.05em' }}>
                       {label531}
@@ -306,7 +366,7 @@ function PlanScreen({ store, setStore, go, userId, openNewPlan }) {
           );
         })}
         {(() => {
-          const archived = store.schedules.filter(s => s.archived);
+          const archived = store.schedules.filter(s => s.archived && inPlanBucket(s) && matchesPlanSearch(s));
           if (!archived.length) return null;
           return (
             <>
@@ -494,6 +554,13 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
   const [pendingBackup, setPendingBackup] = useStateS(null);
   const [previewBackup, setPreviewBackup] = useStateS(null);
   const [previewDayIdx, setPreviewDayIdx] = useStateS(0);
+  const [pushOpen, setPushOpen] = useStateS(false);      // client picker
+  const [pushTarget, setPushTarget] = useStateS(null);   // chosen client → activate-now-or-later prompt
+  const [pushBusy, setPushBusy] = useStateS(false);
+  const [pushError, setPushError] = useStateS('');
+  const [pushSuccess, setPushSuccess] = useStateS(null); // { clientName, planName, activated } → in-app confirmation
+  const [manageOpen, setManageOpen] = useStateS(false);  // Duplicate/Export/Backups menu
+  const [coachOpen, setCoachOpen] = useStateS(false);    // Push to client/Mark as client template menu
 
   const openBackupSheet = async () => {
     setBackupSheet(true);
@@ -693,15 +760,27 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
   const _shotIsLight = (store.settings?.darkMode ?? 'dark') === 'light';
   const _shotDefaultStyle = { width: '75%', maxWidth: 620, opacity: _shotIsLight ? 0.10 : 0.06, filter: _shotIsLight ? 'grayscale(1)' : 'grayscale(1) brightness(3)', objectFit: 'contain' };
   const _shotCustomStyle = { width: '80%', maxWidth: 680, opacity: 0.13, objectFit: 'contain' };
-  const takeScreenshot = () => captureNodeAsPng(captureRef.current, {
-    filename: `${sch.name.replace(/[^a-z0-9]/gi, '-').toLowerCase()}-plan.png`,
-    setCapturing,
-    // The poster is intentionally wider than a phone viewport (fixed width,
-    // horizontally scrollable below). Without this, html2canvas only
-    // captures whatever width fits the current window instead of the full,
-    // wider poster.
-    fitWidth: true,
-  });
+  const takeScreenshot = async () => {
+    const res = await captureNodeAsPng(captureRef.current, {
+      filename: `${sch.name.replace(/[^a-z0-9]/gi, '-').toLowerCase()}-plan.png`,
+      setCapturing,
+      // The poster is intentionally wider than a phone viewport (fixed width,
+      // horizontally scrollable below). Without this, html2canvas only
+      // captures whatever width fits the current window instead of the full,
+      // wider poster.
+      fitWidth: true,
+    });
+    // Surface the outcome: a failed html2canvas load used to no-op silently, and
+    // the desktop download had no confirmation (the mobile share sheet is its own).
+    if (!res?.ok) {
+      await confirm(res?.reason === 'unavailable'
+        ? 'Could not build the image. Check your connection and try again.'
+        : 'Could not build the image. Please try again.',
+        { title: 'Export failed', ok: 'OK', cancel: null });
+    } else if (res.saved) {
+      await confirm('Plan image saved to your files.', { title: 'Saved', ok: 'OK', cancel: null });
+    }
+  };
   // In a non-active version no day is live, so the selected (viewed) day gets a
   // neutral highlight rather than the gold "today/active" accent.
   const selBorder = viewingActiveVersion ? UI.gold : UI.inkFaint;
@@ -742,6 +821,19 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
     go({ name: 'plan-view', scheduleId: copy.id, fromPlan: true });
   };
 
+  // Moves a plan between the coach's "My Plans" and "Client Templates"
+  // buckets in PlanScreen. Pure flag flip, no data migration.
+  const toggleTemplate = async () => {
+    const nowTemplate = !sch.is_template; // state after the flip
+    setStore(s => ({
+      ...s,
+      schedules: s.schedules.map(x => x.id === sch.id ? { ...x, is_template: !x.is_template } : x),
+    }));
+    // The plan leaves this screen's bucket with no other visible change, so confirm
+    // the move explicitly instead of flipping a hidden flag silently.
+    await confirm(nowTemplate ? 'Moved to Client Templates.' : 'Moved to My Plans.', { title: nowTemplate ? 'Client template' : 'My plans', ok: 'OK', cancel: null });
+  };
+
   const exportPlan = () => {
     const exIds = new Set();
     versionDays.forEach(d => d.items.forEach(it => { if (it.exId) exIds.add(it.exId); }));
@@ -762,6 +854,103 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
     a.download = `${sch.name.replace(/[^a-z0-9]/gi, '-').toLowerCase()}.json`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
+  // Push a fresh copy of this plan into a client's own account, remapping
+  // exercise ids the exact same way PlanScreen's JSON import does (dedupe by
+  // name against the CLIENT's library, copy the rest), just applied
+  // in-memory against a freshly fetched client store instead of round-
+  // tripping through a file. Drops versions (a coach's version history is
+  // tied to their own timeline, meaningless for a client starting fresh) and
+  // strips 531 bumpedCycle, same as duplicate() does for an in-account copy.
+  const pushToClient = async (client, activateNow) => {
+    setPushBusy(true);
+    setPushError('');
+    try {
+      const clientData = await LB.loadClientStore(client.clientId);
+      let copy = JSON.parse(JSON.stringify(sch));
+      // sch.days is always the NEWEST version, if the coach is browsing an
+      // older/scheduled version via the version switcher, versionDays (what's
+      // actually on screen) can differ. Push what's shown, not silently
+      // whatever happens to be newest.
+      copy.days = JSON.parse(JSON.stringify(versionDays));
+      copy.archived = false;
+      // My Plans / Client Templates is a bucket on the COACH's own Plan tab —
+      // meaningless once the plan lands in the client's account, and the
+      // client isn't a coach so it would never surface there anyway. Reset it
+      // so a pushed "client template" doesn't carry the flag along for no
+      // reason.
+      copy.is_template = false;
+      delete copy.versions;
+      if (copy.program_data) delete copy.program_data.bumpedCycle;
+      // versions[] never carry their own mode, only sch.days does, so a
+      // version predating a cycle<->weekday switch can come out of the
+      // version switcher with weekday data that no longer matches copy.mode
+      // (top-level, always current). Left alone, an "activate now" push of
+      // that version resolves to zero days for every weekday client-side.
+      // Same self-heal loadFromSupabase runs on every schedule row it loads.
+      copy = LB.healScheduleWeekdays(copy);
+      const exIds = new Set();
+      copy.days.forEach(d => (d.items || []).forEach(it => { if (it.exId) exIds.add(it.exId); }));
+      const idMap = {};
+      const newExercises = [];
+      store.exercises.filter(ex => exIds.has(ex.id)).forEach(ex => {
+        const existing = clientData.exercises.find(x => x.name.trim().toLowerCase() === ex.name.trim().toLowerCase());
+        if (existing) { idMap[ex.id] = existing.id; return; }
+        const newId = LB.uid();
+        idMap[ex.id] = newId;
+        newExercises.push({ id: newId, name: ex.name, tags: ex.tags || [], note: ex.note || '', category: ex.category || null, unilateral: ex.unilateral || false, equipment: ex.equipment || null, progression_reps: ex.progression_reps || null, movement_type: ex.movement_type || null, log_mode: ex.log_mode || null, no_weight_reps: ex.no_weight_reps || false, pull_bodyweight: ex.pull_bodyweight || false, youtube_url: ex.youtube_url || null });
+      });
+      copy.id = LB.uid();
+      copy.days = copy.days.map(d => ({ ...d, id: LB.uid(), items: (d.items || []).map(it => ({ ...it, exId: idMap[it.exId] || it.exId })) }));
+      if (copy.program_data && typeof copy.program_data === 'object') {
+        const remapKeys = (obj) => { const out = {}; for (const k of Object.keys(obj || {})) out[idMap[k] || k] = obj[k]; return out; };
+        if (copy.program_data.mainLifts) copy.program_data.mainLifts = remapKeys(copy.program_data.mainLifts);
+        if (copy.program_data.tmHistory) copy.program_data.tmHistory = remapKeys(copy.program_data.tmHistory);
+      }
+      const isWd = LB.isWeekdayPlan(copy), isFx = LB.isFlexPlan(copy);
+      // Write the plan (and its new exercises) first, then the active-plan pointer
+      // as a second ordered write, so the pointer can never reference a schedule
+      // that failed to write. This path bypasses app.jsx's flushSync retry, so
+      // write ordering is the only safety net.
+      const withPlan = {
+        ...clientData,
+        exercises: [...clientData.exercises, ...newExercises],
+        schedules: [...clientData.schedules, copy],
+      };
+      await LB.syncStore(clientData, withPlan, client.clientId);
+      if (activateNow) {
+        const activated = {
+          ...withPlan,
+          activeScheduleId: copy.id,
+          cycleIndex: 0,
+          cycleStartDate: (isWd || isFx) ? null : LB.todayISO(),
+          weekPlanStartDate: isWd ? LB.todayISO() : null,
+        };
+        await LB.syncStore(withPlan, activated, client.clientId);
+      }
+      // The plan is committed now: treat THIS as the point of success and close the
+      // flow immediately, so a later note/thread failure can never re-open the push
+      // and let a retry duplicate the plan into the client's account.
+      setPushTarget(null);
+      setPushOpen(false);
+      setPushSuccess({ clientName: client.clientName, planName: copy.name, activated: activateNow });
+      // The coaching note is best-effort: a failure here must not surface as a push
+      // failure, since the plan already landed.
+      try {
+        const threadId = await LB.getOrCreateCoachingThread(client.id, `New plan: ${copy.name}`, userId);
+        const body = activateNow
+          ? `Pushed a new plan: ${copy.name}\n\nIt's now your active plan.`
+          : `Pushed a new plan: ${copy.name}\n\nIt's in your plan list but not active yet, let's talk it through before you switch to it.`;
+        await LB.addCoachingNote(client.id, 'plan', copy.id, copy.name, body, userId, threadId);
+      } catch (noteErr) {
+        console.warn('Plan pushed, but the coaching note could not be posted:', noteErr);
+      }
+    } catch (e) {
+      setPushError(e.message || 'Push failed.');
+    } finally {
+      setPushBusy(false);
+    }
   };
 
   // Directly change the validFrom of the selected past version.
@@ -805,6 +994,8 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
     setVerIdx(newIdx >= 0 ? newIdx : 0);
   };
 
+  const isCoachViewer = (store.coaching?.asCoach || []).some(c => c.status === 'active');
+
   const planActions = fromPlan && (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%' }}>
       {!isActivePlan && <Btn kind="ghost" onClick={activate} style={{ fontSize: 12 }}>Activate</Btn>}
@@ -819,9 +1010,10 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
         </div>
       )}
       <div style={{ display: 'flex', gap: 8 }}>
-        <Btn kind="ghost" onClick={duplicate} style={{ flex: 1, fontSize: 12 }}>Duplicate</Btn>
-        <Btn kind="ghost" onClick={exportPlan} style={{ flex: 1, fontSize: 12 }}>Export</Btn>
-        <Btn kind="ghost" onClick={openBackupSheet} style={{ flex: 1, fontSize: 12 }}>Backups</Btn>
+        <Btn kind="ghost" onClick={() => setManageOpen(true)} style={{ flex: 1, fontSize: 12 }}>Manage</Btn>
+        {isCoachViewer && (
+          <Btn kind="ghost" onClick={() => setCoachOpen(true)} style={{ flex: 1, fontSize: 12 }}>Coach</Btn>
+        )}
       </div>
     </div>
   );
@@ -843,6 +1035,12 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
   // may not exist here, showing the un-adjusted baseline plan. Resolved once
   // (it internally reads localStorage) rather than once per item below.
   const resolvedMeso = (typeof getMesoState === 'function') ? getMesoState(sch?.id, store.mesoStates) : null;
+  // Week 1 of the FIRST meso block has no prior feedback to defer to, so Smart
+  // Progression is NOT vetoed there (mirrors the real session-start seeding in
+  // screens-home.jsx). See LB.resolveMesoSeedSuggestion.
+  const mesoNoPriorFeedback = (resolvedMeso && typeof mesoCurrentWeek === 'function')
+    ? (mesoCurrentWeek(resolvedMeso, store) === 1 && (resolvedMeso.completions ?? 0) === 0)
+    : false;
   const mesoBoosts = resolvedMeso?.weightBoosts ?? null;
 
   const exerciseList = isRest ? (
@@ -878,7 +1076,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
         // Mirror the real session-start (screens-home.jsx): on an autoregulating
         // plan the feedback engine owns the weight, so an earned boost applies
         // and a withheld one vetoes Smart Progression (see LB.resolveMesoSeedSuggestion).
-        const suggestionFinal = LB.resolveMesoSeedSuggestion(suggestion, weightBoost, last, LB.mesoActive(sch));
+        const suggestionFinal = LB.resolveMesoSeedSuggestion(suggestion, weightBoost, last, LB.mesoActive(sch), mesoNoPriorFeedback, (it.repsPerSet?.[0] ?? it.reps ?? null));
         // 5/3/1 main lift: seed the current week's wave prescription instead of
         // echoing last-session weights (buildSeedSets is not 5/3/1-aware). Mirrors
         // the session-start builder in screens-home.jsx.
@@ -1090,10 +1288,11 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
         onBack={onBack || (() => go({ name: fromPlan ? 'plan' : 'home' }))}
         right={fromPlan ? (
           <div style={{ display: 'flex', gap: 8 }}>
-            <button onClick={takeScreenshot} disabled={capturing} style={{
+            <button onClick={takeScreenshot} disabled={capturing || trainingDayCount === 0}
+              aria-label="Share plan as image" title={trainingDayCount === 0 ? 'Add a training day first' : 'Share plan as image'} style={{
               background: 'transparent', border: `1px solid ${UI.hairStrong}`,
-              borderRadius: 4, padding: '5px 10px', cursor: capturing ? 'default' : 'pointer',
-              color: capturing ? UI.inkGhost : UI.inkSoft, lineHeight: 1,
+              borderRadius: 4, padding: '5px 10px', cursor: (capturing || trainingDayCount === 0) ? 'default' : 'pointer',
+              color: (capturing || trainingDayCount === 0) ? UI.inkGhost : UI.inkSoft, lineHeight: 1,
               WebkitTapHighlightColor: 'transparent',
             }}>
               {capturing ? <span style={{ fontFamily: UI.fontUi, fontSize: 10 }}>…</span> : <i className="fa-solid fa-camera" style={{ fontSize: 11 }} />}
@@ -1298,6 +1497,27 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
         <FiveThreeOneProgress sch={sch} store={store} />
       </Sheet>
 
+      {manageOpen && (
+        <MiniSheet onClose={() => setManageOpen(false)} title="Manage Plan" titleColor={UI.gold}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <Btn onClick={() => { setManageOpen(false); duplicate(); }} style={{ fontSize: 12 }}>Duplicate</Btn>
+            <Btn kind="ghost" onClick={() => { setManageOpen(false); exportPlan(); }} style={{ fontSize: 12 }}>Export</Btn>
+            <Btn kind="ghost" onClick={() => { setManageOpen(false); openBackupSheet(); }} style={{ fontSize: 12 }}>Backups</Btn>
+          </div>
+        </MiniSheet>
+      )}
+
+      {coachOpen && (
+        <MiniSheet onClose={() => setCoachOpen(false)} title="Coaching" titleColor={UI.gold}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <Btn onClick={() => { setCoachOpen(false); setPushOpen(true); }} style={{ fontSize: 12 }}>Push to client</Btn>
+            <Btn kind="ghost" onClick={() => { setCoachOpen(false); toggleTemplate(); }} style={{ fontSize: 12 }}>
+              {sch.is_template ? 'Move to My Plans' : 'Mark as client template'}
+            </Btn>
+          </div>
+        </MiniSheet>
+      )}
+
       {reactivateSheet && (
         <MiniSheet onClose={() => setReactivateSheet(false)}>
           <div className="label" style={{ color: UI.inkFaint, marginBottom: 6 }}>REACTIVATE THIS VERSION</div>
@@ -1317,6 +1537,74 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
               Apply
             </Btn>
           </div>
+        </MiniSheet>
+      )}
+
+      {pushOpen && (
+        <MiniSheet onClose={() => { if (!pushBusy) { setPushOpen(false); setPushError(''); } }}>
+          <div className="label" style={{ color: UI.inkFaint, marginBottom: 4 }}>PUSH TO CLIENT</div>
+          <div className="micro" style={{ color: UI.inkFaint, marginBottom: versions && !viewingActiveVersion ? 8 : 16, lineHeight: 1.5, letterSpacing: '0.06em', textTransform: 'none' }}>
+            Copies this plan into a client's account. You'll pick whether it activates right away.
+          </div>
+          {versions && !viewingActiveVersion && (
+            <div style={{ marginBottom: 16, padding: '8px 10px', borderRadius: 4, border: `0.5px solid rgba(var(--danger-rgb),0.35)`, background: 'rgba(var(--danger-rgb),0.08)' }}>
+              <span style={{ fontSize: 11, color: 'rgba(var(--danger-rgb),0.9)', fontFamily: UI.fontUi, lineHeight: 1.4 }}>
+                You're viewing {selectedVersion.validFrom > today ? 'a scheduled version' : 'a past version'} (from {fmtVDate(selectedVersion.validFrom)}), not the active one. That's what gets pushed.
+              </span>
+            </div>
+          )}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {(store.coaching?.asCoach || []).filter(c => c.status === 'active').map(c => (
+              <button key={c.id} onClick={() => { setPushError(''); setPushTarget(c); }} disabled={pushBusy} style={{
+                width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                padding: '12px 14px', background: UI.bgInset, border: `0.5px solid ${UI.hair}`,
+                borderRadius: 6, cursor: pushBusy ? 'default' : 'pointer', opacity: pushBusy ? 0.6 : 1,
+                WebkitTapHighlightColor: 'transparent',
+              }}>
+                <span style={{ fontSize: 14, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi }}>{c.clientName}</span>
+                <ChevronRight />
+              </button>
+            ))}
+          </div>
+          {pushError && <div style={{ marginTop: 10, fontSize: 12, color: 'rgba(var(--danger-rgb),0.85)' }}>{pushError}</div>}
+        </MiniSheet>
+      )}
+
+      {pushTarget && (
+        <MiniSheet zIndex={400} onClose={() => { if (!pushBusy) { setPushTarget(null); setPushError(''); } }}>
+          <div className="label" style={{ color: UI.inkFaint, marginBottom: 4 }}>{pushTarget.clientName.toUpperCase()}</div>
+          <div className="micro" style={{ color: UI.inkFaint, marginBottom: 18, lineHeight: 1.5, letterSpacing: '0.06em', textTransform: 'none' }}>
+            Activate "{sch.name}" for them right away, or just add it to their plan list and talk it through first?
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <Btn onClick={() => pushToClient(pushTarget, true)} disabled={pushBusy}>
+              {pushBusy ? 'Pushing…' : 'Push & activate now'}
+            </Btn>
+            <Btn kind="ghost" onClick={() => pushToClient(pushTarget, false)} disabled={pushBusy}>
+              {pushBusy ? 'Pushing…' : 'Add only, talk to them first'}
+            </Btn>
+          </div>
+          <div className="micro" style={{ color: 'rgba(var(--danger-rgb),0.8)', marginTop: 10, lineHeight: 1.4, letterSpacing: '0.04em', textTransform: 'none' }}>
+            Activating replaces whatever plan they are currently on and starts a fresh cycle.
+          </div>
+          {pushError && <div style={{ marginTop: 10, fontSize: 12, color: 'rgba(var(--danger-rgb),0.85)' }}>{pushError}</div>}
+        </MiniSheet>
+      )}
+
+      {pushSuccess && (
+        <MiniSheet zIndex={400} onClose={() => setPushSuccess(null)}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 18 }}>
+            <div style={{ width: 32, height: 32, borderRadius: 4, background: UI.goldFaint, border: `1px solid ${UI.goldSoft}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke={UI.gold} strokeWidth="1.5"><path d="M2 6l2.5 2.5L10 3"/></svg>
+            </div>
+            <div>
+              <div className="label" style={{ color: UI.gold, marginBottom: 2 }}>PUSHED</div>
+              <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.4 }}>
+                "{pushSuccess.planName}" is in {pushSuccess.clientName}'s account{pushSuccess.activated ? ' and active now.' : ', not activated yet.'}
+              </div>
+            </div>
+          </div>
+          <Btn onClick={() => setPushSuccess(null)} style={{ width: '100%' }}>Done</Btn>
         </MiniSheet>
       )}
 
@@ -2324,7 +2612,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
           normal day-type flow) or becomes a Wendler main lift (its own day that
           waves and bumps a Training Max). Non-531 plans skip this and go
           straight to the day-type picker. */}
-      <Sheet open={addDayChoice} onClose={() => setAddDayChoice(false)} title="Add day">
+      <Sheet open={addDayChoice} onClose={() => setAddDayChoice(false)} title="Add day" titleColor="var(--accent)">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.6 }}>
             How should this day progress?
@@ -2387,7 +2675,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
         })()}
       </Sheet>
 
-      <Sheet open={modifiersOpen} onClose={() => setModifiersOpen(false)} title="Options">
+      <Sheet open={modifiersOpen} onClose={() => setModifiersOpen(false)} title="Options" titleColor="var(--accent)">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
 
           {!isWeekday && (
@@ -2662,7 +2950,7 @@ function DayTypePicker({ store, setStore, title, onClose, onPick, onImport, hide
   };
 
   return (
-    <Sheet open={true} onClose={onClose} title={title}>
+    <Sheet open={true} onClose={onClose} title={title} titleColor="var(--accent)">
       <span className="label">Standard</span>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, margin: '8px 0 18px' }}>
         {STANDARD_DAY_TYPES.filter(t => !(hideRest && t === 'REST')).map(t => (
@@ -2829,7 +3117,7 @@ function DayCopyPicker({ store, schedule, currentDayId, onClose, onCopy, multiSe
 
   if (!selectedPlan) {
     return (
-      <Sheet open={true} onClose={onClose} title="Import exercises from">
+      <Sheet open={true} onClose={onClose} title="Import exercises from" titleColor="var(--accent)">
         {templates.length > 0 && (
           <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
             {[['plans', 'Plans'], ['templates', 'Templates']].map(([key, label]) => (
@@ -4765,4 +5053,4 @@ function FiveThreeOneSetupScreen({ store, setStore, go, userId }) {
   );
 }
 
-Object.assign(window.Screens, { PlanScreen, PlanViewerScreen, ScheduleEditScreen, ScheduleNewScreen, StructuredProgramsScreen, ProgramTemplatesScreen, ProgramPreviewScreen, FiveThreeOneSetupScreen, ExercisePicker, DayTypePicker });
+Object.assign(window.Screens, { PlanScreen, PlanViewerScreen, ScheduleEditScreen, ScheduleNewScreen, StructuredProgramsScreen, ProgramTemplatesScreen, ProgramPreviewScreen, FiveThreeOneSetupScreen, ExercisePicker, DayTypePicker, ExerciseItemEditor });

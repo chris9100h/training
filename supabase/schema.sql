@@ -90,7 +90,8 @@ CREATE TABLE public.zane_exercises (
   no_weight_reps boolean NOT NULL DEFAULT false,
   log_mode text,
   pull_bodyweight boolean NOT NULL DEFAULT false,
-  youtube_url text
+  youtube_url text,
+  note_pinned boolean NOT NULL DEFAULT false
 );
 
 CREATE TABLE public.zane_schedules (
@@ -109,7 +110,8 @@ CREATE TABLE public.zane_schedules (
   mesocycle_autoregulate boolean NOT NULL DEFAULT false,
   mesocycle_autoregulate_mode text,
   program_type text,
-  program_data jsonb
+  program_data jsonb,
+  is_template boolean NOT NULL DEFAULT false
 );
 
 CREATE TABLE public.zane_sessions (
@@ -126,7 +128,8 @@ CREATE TABLE public.zane_sessions (
   feel text,
   is_bonus boolean NOT NULL DEFAULT false,
   is_freestyle boolean NOT NULL DEFAULT false,
-  is_deload boolean NOT NULL DEFAULT false
+  is_deload boolean NOT NULL DEFAULT false,
+  meso_recap jsonb
 );
 
 CREATE TABLE public.zane_session_entries (
@@ -542,6 +545,7 @@ CREATE POLICY "coach can read client skips" ON public.zane_skips FOR SELECT TO p
 CREATE POLICY "own settings" ON public.zane_user_settings FOR ALL TO public USING (((select auth.uid()) = user_id));
 CREATE POLICY "coach can read client settings" ON public.zane_user_settings FOR SELECT TO public USING (zane_is_coach_of(user_id));
 CREATE POLICY "coach can update client settings" ON public.zane_user_settings FOR UPDATE TO public USING (zane_is_coach_of(user_id));
+CREATE POLICY "coach can insert client settings" ON public.zane_user_settings FOR INSERT TO public WITH CHECK (zane_is_coach_of(user_id));
 
 -- coaching
 CREATE POLICY "coaching visible to participants" ON public.zane_coaching FOR SELECT TO public USING (((coach_id = (select auth.uid())) OR (client_id = (select auth.uid()))));
@@ -1911,6 +1915,7 @@ CREATE TABLE zane_meso_states (
   pump_low_counts    jsonb       NOT NULL DEFAULT '{}',
   weight_boosts      jsonb       NOT NULL DEFAULT '{}',
   growth_counts      jsonb       NOT NULL DEFAULT '{}',
+  rep_miss_counts    jsonb       NOT NULL DEFAULT '{}',
   completions        int         NOT NULL DEFAULT 0,
   pending_meso2      boolean     NOT NULL DEFAULT false,
   created_at         timestamptz NOT NULL DEFAULT now(),
@@ -1930,6 +1935,7 @@ CREATE POLICY "Users manage own meso states"
 -- don't silently discard each other's deltas/jointFlags/weightBoosts.
 -- Migration 0122. growth_counts added in migration 0130. started_at in 0138
 -- (COALESCEd on update so an older client that doesn't send it can't null it).
+-- rep_miss_counts added in migration 0165.
 CREATE OR REPLACE FUNCTION public.sync_meso_states_batch(p_states jsonb)
  RETURNS void
  LANGUAGE sql
@@ -1939,7 +1945,7 @@ AS $function$
   INSERT INTO zane_meso_states (
     id, user_id, schedule_id, weeks, start_date, start_cycle_index, started_at,
     deltas, joint_flags, pump_low_counts, weight_boosts, growth_counts,
-    completions, pending_meso2, updated_at
+    rep_miss_counts, completions, pending_meso2, updated_at
   )
   SELECT
     m->>'id',
@@ -1954,6 +1960,7 @@ AS $function$
     COALESCE(m->'pump_low_counts', '{}'::jsonb),
     COALESCE(m->'weight_boosts', '{}'::jsonb),
     COALESCE(m->'growth_counts', '{}'::jsonb),
+    COALESCE(m->'rep_miss_counts', '{}'::jsonb),
     COALESCE((m->>'completions')::int, 0),
     COALESCE((m->>'pending_meso2')::boolean, false),
     COALESCE((m->>'updated_at')::timestamptz, now())
@@ -1968,6 +1975,7 @@ AS $function$
     pump_low_counts   = EXCLUDED.pump_low_counts,
     weight_boosts     = EXCLUDED.weight_boosts,
     growth_counts     = EXCLUDED.growth_counts,
+    rep_miss_counts   = EXCLUDED.rep_miss_counts,
     completions       = EXCLUDED.completions,
     pending_meso2     = EXCLUDED.pending_meso2,
     updated_at        = EXCLUDED.updated_at

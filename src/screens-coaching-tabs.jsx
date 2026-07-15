@@ -272,7 +272,7 @@ function CoachingTabCoachView({ store, setStore, userId, go, hideTopBar = false 
       </Sheet>
 
       {/* End / cancel sheet */}
-      <Sheet open={endOpen} onClose={() => setEndOpen(false)} title="End Coaching">
+      <Sheet open={endOpen} onClose={() => setEndOpen(false)} title="End Coaching" titleColor="var(--accent)">
         <div style={{ padding: '4px 0 24px', display: 'flex', flexDirection: 'column', gap: 8 }}>
           <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 6, lineHeight: 1.5 }}>
             Select a client to end the relationship or cancel a pending invite.

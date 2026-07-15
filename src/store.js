@@ -335,7 +335,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
   const exerciseRows = (backup.exercises || []).map(e => {
     const newId = uid();
     idRemap[e.id] = newId;
-    return { id: newId, name: e.name, tags: e.tags ?? [], note: e.note ?? '', category: e.category ?? null, unilateral: e.unilateral ?? false, equipment: e.equipment ?? null, progression_reps: e.progression_reps ?? null, movement_type: e.movement_type ?? null, no_weight_reps: !!e.no_weight_reps, log_mode: e.log_mode ?? null, pull_bodyweight: !!e.pull_bodyweight, youtube_url: e.youtube_url ?? null, user_id: userId };
+    return { id: newId, name: e.name, tags: e.tags ?? [], note: e.note ?? '', category: e.category ?? null, unilateral: e.unilateral ?? false, equipment: e.equipment ?? null, progression_reps: e.progression_reps ?? null, movement_type: e.movement_type ?? null, no_weight_reps: !!e.no_weight_reps, log_mode: e.log_mode ?? null, pull_bodyweight: !!e.pull_bodyweight, youtube_url: e.youtube_url ?? null, note_pinned: !!e.note_pinned, user_id: userId };
   });
   // Exercises got fresh ids above — everything that references an exId must be
   // remapped or it dangles after restore. remapEx: single id; remapExKeyed:
@@ -604,8 +604,8 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
     prog('Uploading mesocycle states…');
     // id is deterministic (userId + '_' + scheduleId) — regenerate for this user.
     // schedule_id is preserved (schedules keep their ids), but the exId-keyed maps
-    // (deltas/weightBoosts: exId_dayId; jointFlags/pumpLowCounts: exId) must be
-    // remapped onto the fresh exercise ids or they dangle.
+    // (deltas/weightBoosts/repMissCounts: exId_dayId; jointFlags/pumpLowCounts: exId)
+    // must be remapped onto the fresh exercise ids or they dangle.
     await unwrap(_supabase.from('zane_meso_states').upsert(
       backup.mesoStates.map(m => ({
         id: userId + '_' + m.scheduleId, user_id: userId, schedule_id: m.scheduleId,
@@ -613,7 +613,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
         start_cycle_index: m.startCycleIndex ?? 0, started_at: m.startedAt ?? null,
         deltas: remapExDayKeyed(m.deltas), weight_boosts: remapExDayKeyed(m.weightBoosts),
         joint_flags: remapExKeyed(m.jointFlags), pump_low_counts: remapExKeyed(m.pumpLowCounts),
-        growth_counts: remapExDayKeyed(m.growthCounts),
+        growth_counts: remapExDayKeyed(m.growthCounts), rep_miss_counts: remapExDayKeyed(m.repMissCounts),
         completions: m.completions ?? 0, pending_meso2: m.pendingMeso2 ?? false,
       }))
     ));
@@ -774,11 +774,11 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   const histCutoff = historyWindowCutoffISO();
   const queries = [
     _supabase.from('zane_profiles').select('id, name, approved').eq('id', userId).maybeSingle(),
-    _supabase.from('zane_exercises').select('id, name, tags, note, category, unilateral, equipment, progression_reps, movement_type, no_weight_reps, log_mode, pull_bodyweight, youtube_url').eq('user_id', userId),
-    _supabase.from('zane_schedules').select('id, name, days, archived, versions, is_flex, sessions_per_week, mesocycle_weeks, mesocycle_start_rir, mesocycle_end_rir, mesocycle_rir_enabled, mesocycle_autoregulate, mesocycle_autoregulate_mode, program_type, program_data').eq('user_id', userId),
+    _supabase.from('zane_exercises').select('id, name, tags, note, category, unilateral, equipment, progression_reps, movement_type, no_weight_reps, log_mode, pull_bodyweight, youtube_url, note_pinned').eq('user_id', userId),
+    _supabase.from('zane_schedules').select('id, name, days, archived, versions, is_flex, sessions_per_week, mesocycle_weeks, mesocycle_start_rir, mesocycle_end_rir, mesocycle_rir_enabled, mesocycle_autoregulate, mesocycle_autoregulate_mode, program_type, program_data, is_template').eq('user_id', userId),
     // Session METADATA stays complete (cheap; streaks/calendar need the full
     // date list) — the legacy entries JSONB is no longer selected.
-    _supabase.from('zane_sessions').select('id, schedule_id, day_id, day_name, date, started_at, ended, duration_minutes, feel, is_bonus, is_freestyle, is_deload')
+    _supabase.from('zane_sessions').select('id, schedule_id, day_id, day_name, date, started_at, ended, duration_minutes, feel, is_bonus, is_freestyle, is_deload, meso_recap')
       .eq('user_id', userId).order('date', { ascending: false }),
     _supabase.from('zane_user_settings').select('*').eq('user_id', userId).maybeSingle(),
     _supabase.from('zane_skips').select('id, date, day_id, day_name, skip_reason, skipped_at').eq('user_id', userId),
@@ -824,7 +824,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     // Reusable workout templates (migration 0107)
     _supabase.from('zane_workout_templates').select('id, name, exercises, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
     // Mesocycle state per plan — replaces localStorage logbook-meso-state (migration 0120)
-    _supabase.from('zane_meso_states').select('id, schedule_id, weeks, start_date, start_cycle_index, started_at, deltas, joint_flags, pump_low_counts, weight_boosts, growth_counts, completions, pending_meso2, updated_at').eq('user_id', userId),
+    _supabase.from('zane_meso_states').select('id, schedule_id, weeks, start_date, start_cycle_index, started_at, deltas, joint_flags, pump_low_counts, weight_boosts, growth_counts, rep_miss_counts, completions, pending_meso2, updated_at').eq('user_id', userId),
     // Coach's own saved check-in schema templates: irrelevant when loading a
     // CLIENT's store as a coach, these belong to the acting coach, not the client.
     isCoachLoad ? null : _supabase.from('zane_checkin_schema_templates').select('id, name, schema, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
@@ -972,6 +972,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         ...(s.is_bonus     ? { isBonus:     true } : {}),
         ...(s.is_freestyle ? { isFreestyle: true } : {}),
         ...(s.is_deload    ? { isDeload:    true } : {}),
+        ...(s.meso_recap   ? { mesoRecap:   s.meso_recap } : {}),
       };
     }),
     skips: (skipsRes.data || []).map(s => ({
@@ -1032,7 +1033,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
       startedAt: m.started_at ?? null,
       deltas: m.deltas ?? {}, jointFlags: m.joint_flags ?? {},
       pumpLowCounts: m.pump_low_counts ?? {}, weightBoosts: m.weight_boosts ?? {},
-      growthCounts: m.growth_counts ?? {},
+      growthCounts: m.growth_counts ?? {}, repMissCounts: m.rep_miss_counts ?? {},
       completions: m.completions ?? 0, pendingMeso2: m.pending_meso2 ?? false,
       updatedAt: m.updated_at ?? null,
     })),
@@ -1304,7 +1305,7 @@ function sessionToRow(s, userId) {
   // keeps its default '[]' on insert and is left untouched on update.
   // agg* are read-only server aggregates attached at load time — never synced.
   // eslint-disable-next-line no-unused-vars
-  const { currentExIdx, cyclePos, restStart, restDuration, scheduleId, dayId, dayName, startedAt, durationMinutes, feel, entries, aggVolume, aggDoneSets, aggExercises, isBonus, isFreestyle, isDeload, ...rest } = s;
+  const { currentExIdx, cyclePos, restStart, restDuration, scheduleId, dayId, dayName, startedAt, durationMinutes, feel, entries, aggVolume, aggDoneSets, aggExercises, isBonus, isFreestyle, isDeload, mesoRecap, ...rest } = s;
   const row = { ...rest, schedule_id: scheduleId, day_id: dayId, day_name: dayName, user_id: userId };
   if (startedAt != null) row.started_at = startedAt;
   if (durationMinutes != null) row.duration_minutes = durationMinutes;
@@ -1312,6 +1313,7 @@ function sessionToRow(s, userId) {
   row.is_bonus = !!isBonus;
   row.is_freestyle = !!isFreestyle;
   row.is_deload = !!isDeload;
+  row.meso_recap = mesoRecap ?? null;
   return row;
 }
 
@@ -1325,7 +1327,7 @@ async function syncStore(prev, next, userId) {
       return !p || JSON.stringify(p) !== JSON.stringify(e);
     });
     const removed = prev.exercises.filter(e => !next.exercises.find(x => x.id === e.id));
-    if (upsert.length)  ops.push(_supabase.from('zane_exercises').upsert(upsert.map(e => ({ id: e.id, name: e.name, tags: e.tags ?? [], note: e.note ?? '', category: e.category ?? null, unilateral: e.unilateral ?? false, equipment: e.equipment ?? null, progression_reps: e.progression_reps ?? null, movement_type: e.movement_type ?? null, no_weight_reps: !!e.no_weight_reps, log_mode: e.log_mode ?? null, pull_bodyweight: !!e.pull_bodyweight, youtube_url: e.youtube_url ?? null, user_id: userId }))));
+    if (upsert.length)  ops.push(_supabase.from('zane_exercises').upsert(upsert.map(e => ({ id: e.id, name: e.name, tags: e.tags ?? [], note: e.note ?? '', category: e.category ?? null, unilateral: e.unilateral ?? false, equipment: e.equipment ?? null, progression_reps: e.progression_reps ?? null, movement_type: e.movement_type ?? null, no_weight_reps: !!e.no_weight_reps, log_mode: e.log_mode ?? null, pull_bodyweight: !!e.pull_bodyweight, youtube_url: e.youtube_url ?? null, note_pinned: !!e.note_pinned, user_id: userId }))));
     if (removed.length) ops.push(_supabase.from('zane_exercises').delete().in('id', removed.map(e => e.id)));
   }
 
@@ -1469,7 +1471,7 @@ async function syncStore(prev, next, userId) {
       started_at: m.startedAt ?? null,
       deltas: m.deltas ?? {}, joint_flags: m.jointFlags ?? {},
       pump_low_counts: m.pumpLowCounts ?? {}, weight_boosts: m.weightBoosts ?? {},
-      growth_counts: m.growthCounts ?? {},
+      growth_counts: m.growthCounts ?? {}, rep_miss_counts: m.repMissCounts ?? {},
       completions: m.completions ?? 0, pending_meso2: m.pendingMeso2 ?? false,
       updated_at: m.updatedAt ?? new Date().toISOString(),
     })) }));
@@ -4064,15 +4066,25 @@ function macroAdherence(actual, target) {
   return Math.round(weighted * 100);
 }
 
-// Effective macro targets for the user's OWN health screen: their personal
-// targets if set, otherwise the coach-assigned macros (so a coached user gets
-// adherence out of the box; a standalone user sets their own). Both share the
-// {proteinTraining, carbsTraining, …} shape.
+// True when a macro-target object carries at least one macro (protein/carbs/fat,
+// training or rest). Calories alone don't count as "set" (they're derived).
+function hasMacroTargets(m) {
+  return !!(m && (m.proteinTraining != null || m.carbsTraining != null || m.fatTraining != null ||
+    m.proteinRest != null || m.carbsRest != null || m.fatRest != null));
+}
+
+// Effective macro targets for the user's OWN health screen. Coach-assigned
+// macros (a real coach OR self-coaching) ALWAYS take priority; personal targets
+// act only as a fallback when no coach macros exist. This is deliberate: a
+// self-coached user editing their macros in the coaching Nutrition setup expects
+// those to drive the health tab, and a real client shouldn't silently diverge
+// from the coach. The health macro card shows a disclaimer whenever coach macros
+// are set, so an edit to personal targets that appears to do nothing is
+// explained rather than silent. Both share the {proteinTraining, carbsTraining,
+// …} shape.
 function effectiveMacroTargets(personal, coachingMacros) {
-  const has = m => m && (m.proteinTraining != null || m.carbsTraining != null || m.fatTraining != null ||
-    m.proteinRest != null || m.carbsRest != null || m.fatRest != null);
-  if (has(personal)) return personal;
-  if (has(coachingMacros)) return coachingMacros;
+  if (hasMacroTargets(coachingMacros)) return coachingMacros;
+  if (hasMacroTargets(personal)) return personal;
   return null;
 }
 
@@ -4437,6 +4449,88 @@ function pickDeclineRecipient(keys, deltas, prevContrib) {
   return keys.reduce((best, k) => (eff(k) > eff(best) ? k : best), keys[0]);
 }
 
+// Resolve a working set's own rep target for meso rep-outcome checks: its
+// per-set target if the item uses Per-Set, else the exercise's uniform
+// target, which, for a Range-mode exercise, IS plannedReps (the floor);
+// plannedRepsMax only marks the ceiling that EARNS extra Smart Progression
+// (see progressionSuggestion), not what counts as "hit" here.
+function mesoSetTarget(i, plannedReps, plannedRepsPerSet) {
+  const perSet = plannedRepsPerSet && plannedRepsPerSet.length > 1
+    ? (plannedRepsPerSet[i] ?? plannedRepsPerSet[plannedRepsPerSet.length - 1])
+    : null;
+  return perSet ?? plannedReps;
+}
+
+// EARN-side rep target for one working-set position under double progression.
+// Only a Range item (plannedRepsMax present and above the floor, and not a
+// per-set scheme) uses the staggered ladder that makes a weight boost a genuine
+// top-of-range achievement instead of a per-session creep:
+//   • multiple sets: the first (freshest) set must reach rangeMax, the last only
+//     rangeMin, with the sets in between linearly interpolated down the range.
+//   • a single working set: the range midpoint (e.g. 10 on 8-12), since one set
+//     can't demonstrate the top-then-hold pattern.
+// Per-set schemes keep their explicitly authored per-set target; a plain uniform
+// target (no range) returns plannedReps unchanged. This is the EARN gate only:
+// the rep-miss/cut side stays on mesoSetTarget (the range FLOOR), so "too heavy
+// to even hold the bottom" is what eases the load. Pure/testable.
+function mesoEarnTarget(i, nSets, plannedReps, plannedRepsPerSet, plannedRepsMax) {
+  const perSet = plannedRepsPerSet && plannedRepsPerSet.length > 1
+    ? (plannedRepsPerSet[i] ?? plannedRepsPerSet[plannedRepsPerSet.length - 1])
+    : null;
+  if (perSet != null) return perSet;
+  if (plannedRepsMax != null && plannedReps != null && plannedRepsMax > plannedReps) {
+    if (nSets <= 1) return Math.round((plannedReps + plannedRepsMax) / 2);
+    return Math.round(plannedRepsMax - (plannedRepsMax - plannedReps) * i / (nSets - 1));
+  }
+  return plannedReps;
+}
+
+// Rep-target outcome for one exercise's working sets this session, the
+// objective counterpart to the subjective soreness/joint/volume feedback,
+// feeding both the weight-boost EARN gate and the rep-miss-streak CUT
+// trigger (computeMesoGains, screens-train.jsx):
+//   • allHit   , every working set reached its own EARN target (via
+//     mesoEarnTarget: the range-staggered ladder for Range items, the plain
+//     per-set/uniform target otherwise). Strict AND, this gates earning a boost,
+//     so on a range the boost is only granted once the TOP of the range is hit.
+//   • earlyMiss, any working set BEFORE the last one missed its FLOOR target. The
+//     exercise's own last set is deliberately exempt: an all-out final set
+//     failing from accumulated fatigue doesn't mean the weight itself is too
+//     heavy, an earlier set failing does. A single-working-set exercise has
+//     no earlier set to lean on, so it counts directly. This is what feeds
+//     rep_miss_counts toward a cut, a looser bar than allHit on purpose, so
+//     a legitimately hard-fought last rep never nudges the streak.
+// `sets` is an array of { done, skipped, warmup, reps/kg/timeSec... }, pass
+// already-filtered working sets (no warmups/skips). Pure/testable.
+function mesoRepOutcome(workingSets, plannedReps, plannedRepsPerSet, plannedRepsMax = null) {
+  if (!workingSets || !workingSets.length) return { allHit: false, earlyMiss: false };
+  const n = workingSets.length;
+  // EARN gate: every set clears its range-staggered earn target (top-of-range
+  // for the first set down to the floor for the last). On a non-range item the
+  // ladder collapses to the plain target, so this matches the old behavior.
+  const earnHit = (s, i) => {
+    if (!s.done) return false;
+    const target = mesoEarnTarget(i, n, plannedReps, plannedRepsPerSet, plannedRepsMax);
+    if (target == null) return true;
+    const reps = effReps(s);
+    return reps != null && reps >= target;
+  };
+  // MISS gate: an EARLY set that can't even hold the range FLOOR (mesoSetTarget)
+  // means the weight is too heavy, feeding the rep-miss streak / cut, unchanged.
+  const missHit = (s, i) => {
+    if (!s.done) return false;
+    const target = mesoSetTarget(i, plannedReps, plannedRepsPerSet);
+    if (target == null) return true;
+    const reps = effReps(s);
+    return reps != null && reps >= target;
+  };
+  const allHit = workingSets.every(earnHit);
+  const earlyMiss = n > 1
+    ? workingSets.slice(0, -1).some((s, i) => !missHit(s, i))
+    : !missHit(workingSets[0], 0);
+  return { allHit, earlyMiss };
+}
+
 // A mesocycle weight boost (exId_dayId → kg increment applied to the next
 // session's seed) must be RE-EARNED every session — min reps hit + joint fine
 // + pump ok + volume ok, all re-confirmed. Given the exId_dayId keys of the
@@ -4455,27 +4549,315 @@ function reearnMesoWeightBoosts(prevBoosts, sessionKeys, earnedBoosts) {
   return { ...next, ...(earnedBoosts || {}) };
 }
 
+// Rolling back the meso weight levers when a finished session is DELETED. The
+// weight boost / rep-miss counts a session earned live on in the meso state
+// after the session row is gone, so a re-log (the usual "delete, then log again
+// with feedback" flow) would seed on an older, lower "last actual" weight with
+// that orphaned boost still stacked on top: delete a 55 kg session that earned
+// +2.5 and the next seed becomes 50 + 2.5 = 52.5 instead of building on the 55
+// you actually did. Clear this session's exId_dayId keys from weightBoosts and
+// repMissCounts so the re-log starts clean. Guard: only when the deleted session
+// was the most recent non-deload session of its day, so a boost a LATER session
+// of the same day set (reearnMesoWeightBoosts replaces per session) survives.
+// A deload session earns nothing, so it never needs a rollback. Set-count deltas
+// are intentionally left untouched (a separate, accumulating lever). Returns a
+// new state, or the same object when nothing changed. Pure/testable.
+function revertMesoSessionBoosts(mesoState, deletedSession, remainingSessions) {
+  if (!mesoState || !deletedSession || deletedSession.isDeload) return mesoState;
+  const dayId = deletedSession.dayId;
+  if (!dayId) return mesoState;
+  const delEnded = deletedSession.ended || '';
+  // Per exercise: a boost/key is owned by whichever session most recently trained
+  // that exId on this day. So clear only the deleted session's keys whose exId was
+  // NOT retrained by a LATER same-day session (those keys were already replaced at
+  // that later session's finish and must survive). A day-wide "any later session
+  // exists" guard would orphan the boost of an exercise the later session dropped.
+  const retrainedLater = new Set();
+  for (const x of (remainingSessions || [])) {
+    if (!x || !x.ended || x.isDeload || x.dayId !== dayId || (x.ended || '') <= delEnded) continue;
+    for (const e of (x.entries || [])) if (e && !e.isCardio && e.exId) retrainedLater.add(e.exId);
+  }
+  const keys = new Set((deletedSession.entries || [])
+    .filter(e => e && !e.isCardio && e.exId && !retrainedLater.has(e.exId))
+    .map(e => e.exId + '_' + dayId));
+  if (!keys.size) return mesoState;
+  const wb = { ...(mesoState.weightBoosts || {}) };
+  const rmc = { ...(mesoState.repMissCounts || {}) };
+  let changed = false;
+  for (const k of keys) {
+    if (k in wb) { delete wb[k]; changed = true; }
+    if (k in rmc) { delete rmc[k]; changed = true; }
+  }
+  if (!changed) return mesoState;
+  return { ...mesoState, weightBoosts: wb, repMissCounts: rmc };
+}
+
+// ── Post-hoc meso feedback editing ────────────────────────────────────────────
+// Correcting a feedback answer AFTER a session finished (SessionDetailScreen).
+// The live handlers (handleSoreness/Joint/VolumeAnswer + commitContrib in
+// screens-train.jsx) already support editing an answer mid-session by DIFFING
+// the new contribution against the record's stored one; these helpers reproduce
+// exactly that diff purely, so a post-hoc edit is identical to having answered
+// differently in the first place. Only valid for the top-of-stack session (see
+// isMesoSessionEditable), which is what makes the incremental diff exact.
+
+// Rebuild the four weight-boost gate Sets from the per-question answer records,
+// mirroring the mesoBoostSetsInitRef rehydration (screens-train.jsx). Pure.
+function mesoGateSetsFromAnswers(answers, loadOnly) {
+  const a = answers || {};
+  const jointFine = new Set();
+  for (const [exId, rec] of Object.entries(a.joint || {})) if (rec && rec.answer === 'none') jointFine.add(exId);
+  const pumpOk = new Set(), volumeOk = new Set();
+  for (const rec of Object.values(a.volume || {})) {
+    if (!rec || !rec.muscle) continue;
+    if (rec.pump === 'moderate' || rec.pump === 'amazing') pumpOk.add(rec.muscle);
+    if (volumeAnswerAllowsBump(rec.volume, loadOnly)) volumeOk.add(rec.muscle);
+  }
+  const soreBlock = new Set();
+  for (const rec of Object.values(a.soreness || {})) if (rec && rec.answer === 'still_sore' && rec.muscle) soreBlock.add(rec.muscle);
+  return { jointFine, pumpOk, volumeOk, soreBlock };
+}
+
+// Can this finished session's feedback be safely edited? Only the single
+// most-recent non-deload session of its PLAN in the current block. Any later
+// session on the plan may have advanced the muscle-shared rotation/accumulator
+// levers (deltas / growthCounts / pumpLowCounts), which an edit of an older
+// session can no longer reconcile. Also requires the durable raw records
+// (sessions finished before the feature shipped lack them) and blocks while a
+// session for the plan is in progress (it would flush over the edit). Pure.
+function isMesoSessionEditable(session, allSessions, mesoState) {
+  if (!session || !mesoState || !session.ended || session.isDeload) return false;
+  if (!session.mesoRecap || !session.mesoRecap.raw || !session.mesoRecap.raw.answers) return false;
+  if (mesoState.startedAt && (session.ended || '') < mesoState.startedAt) return false;
+  const sid = session.scheduleId;
+  const laterExists = (allSessions || []).some(x =>
+    x && x.ended && !x.isDeload && x.id !== session.id && x.scheduleId === sid && (x.ended || '') > (session.ended || ''));
+  if (laterExists) return false;
+  const liveForPlan = (allSessions || []).some(x => x && !x.ended && x.scheduleId === sid);
+  if (liveForPlan) return false;
+  return true;
+}
+
+// Pure mirror of commitContrib (screens-train.jsx) minus the display ledger:
+// diff `newContrib` against `prevContrib` into `deltas`, honoring the negative-
+// slot ownership in `negOwner` (a second question type never stacks a second -1
+// on the same key). Both `deltas` and `negOwner` are mutated in place. `frozen`
+// (final week / load-only) freezes the whole set-delta system: no delta, contrib
+// left as-is. Returns the record's new contrib.
+function _commitContribInto(deltas, negOwner, prevContrib, questionType, newContrib, frozen) {
+  if (frozen) return prevContrib || {};
+  const keys = new Set([...Object.keys(prevContrib || {}), ...Object.keys(newContrib || {})]);
+  const finalContrib = {};
+  keys.forEach(key => {
+    let want = newContrib[key] || 0;
+    if (want < 0) {
+      const owner = negOwner[key];
+      if (owner && owner !== questionType) want = 0; // another question owns this key's negative slot
+      else negOwner[key] = questionType;
+    }
+    if (want >= 0 && negOwner[key] === questionType) delete negOwner[key];
+    const diff = want - ((prevContrib || {})[key] || 0);
+    if (diff !== 0) deltas[key] = (deltas[key] || 0) + diff;
+    finalContrib[key] = want;
+  });
+  return finalContrib;
+}
+
+// Apply ONE corrected feedback answer to a finished (top-of-stack) session's meso
+// state, mirroring the live edit path of each answer handler. `edit` is
+// { type:'soreness'|'joint'|'volume', subject: muscle|exId, answer, pump, volume }.
+// `raw` is the durable session.mesoRecap.raw ({ answers, negOwner, frozen, dayId }).
+// `ctx` = { dayId, loadOnly }. Touches deltas/growthCounts/pumpLowCounts/jointFlags
+// + the answer record + negOwner; weight boosts are re-earned separately
+// (reearnMesoBoostsFromAnswers) since they also need the objective rep outcome.
+// Pure: returns { mesoState, raw }.
+function applyMesoFeedbackEdit(mesoState, raw, edit, ctx) {
+  const dayId = ctx.dayId;
+  const loadOnly = !!ctx.loadOnly;
+  const frozen = !!(raw && raw.frozen);
+  const deltas = { ...(mesoState.deltas || {}) };
+  let growthCounts = { ...(mesoState.growthCounts || {}) };
+  const pumpLowCounts = { ...(mesoState.pumpLowCounts || {}) };
+  const jointFlags = { ...(mesoState.jointFlags || {}) };
+  const answers = {
+    soreness: { ...((raw.answers && raw.answers.soreness) || {}) },
+    joint: { ...((raw.answers && raw.answers.joint) || {}) },
+    volume: { ...((raw.answers && raw.answers.volume) || {}) },
+  };
+  const negOwner = { ...(raw.negOwner || {}) };
+
+  if (edit.type === 'soreness') {
+    const muscle = edit.subject;
+    const rec = { ...(answers.soreness[muscle] || { muscle }) };
+    rec.answer = edit.answer;
+    // Load-only: soreness only holds the weight (soreBlock gate, rebuilt in the
+    // re-earn), never touches set deltas. Mirrors the handler's early return.
+    if (!loadOnly) {
+      const keys = (rec.targets || []).map(t => t.key);
+      const adds = edit.answer === 'never' || edit.answer === 'healed_long';
+      const prevGrantedTo = Object.keys(rec.contrib || {}).find(k => rec.contrib[k] === 1) ?? null;
+      let recipientKey = null;
+      if (adds && keys.length) {
+        const g = pickGrowthRecipient(keys, growthCounts, prevGrantedTo);
+        recipientKey = g.recipientKey; growthCounts = g.growthCounts;
+      } else if (prevGrantedTo) {
+        growthCounts = retractGrowthGrant(growthCounts, prevGrantedTo);
+      }
+      const declineKey = edit.answer === 'still_sore' ? pickDeclineRecipient(keys, deltas, rec.contrib) : null;
+      const newContrib = {};
+      (rec.targets || []).forEach(t => {
+        let want = 0;
+        if (t.key === recipientKey) want = 1;
+        else if (t.key === declineKey) want = -1;
+        newContrib[t.key] = want;
+      });
+      rec.contrib = _commitContribInto(deltas, negOwner, rec.contrib || {}, 'soreness', newContrib, frozen);
+    }
+    answers.soreness[muscle] = rec;
+  } else if (edit.type === 'joint') {
+    const exId = edit.subject;
+    const rec = { ...(answers.joint[exId] || { exId }) };
+    rec.answer = edit.answer;
+    // jointFlags is a persistent "causes joint pain" marker; restore-from-baseline
+    // is handled implicitly because flagNow OR-s the (immutable) baseline.
+    const flagNow = !!rec.flagBaseline || edit.answer === 'sharp';
+    jointFlags[exId] = flagNow;
+    const key = exId + '_' + dayId;
+    const newContrib = { [key]: (edit.answer === 'noticeable' || edit.answer === 'sharp') ? -1 : 0 };
+    rec.contrib = _commitContribInto(deltas, negOwner, rec.contrib || {}, 'joint', newContrib, frozen);
+    answers.joint[exId] = rec;
+  } else if (edit.type === 'volume') {
+    const muscle = edit.subject;
+    const rec = { ...(answers.volume[muscle] || { muscle }) };
+    const oldPumpLowApplied = !!rec.pumpLowApplied;
+    rec.pump = edit.pump; rec.volume = edit.volume;
+    const exIds = rec.exIds || [];
+    const keys = exIds.map(exId => exId + '_' + dayId);
+    const mainExId = exIds[0];
+    const prevGrantedTo = Object.keys(rec.contrib || {}).find(k => rec.contrib[k] === 1) ?? null;
+    let recipientKey = null;
+    if (frozen) {
+      // frozen: no rotation, no grant (mirrors the volume handler's guard)
+    } else if (edit.volume === 'not_enough') {
+      const g = pickGrowthRecipient(keys, growthCounts, prevGrantedTo);
+      recipientKey = g.recipientKey; growthCounts = g.growthCounts;
+    } else if (prevGrantedTo) {
+      growthCounts = retractGrowthGrant(growthCounts, prevGrantedTo);
+    }
+    const declineKey = edit.volume === 'pushed' ? pickDeclineRecipient(keys, deltas, rec.contrib) : null;
+    const newContrib = {};
+    keys.forEach(key => {
+      let want = 0;
+      if (edit.volume === 'too_much') want = -1;
+      else if (key === recipientKey) want = 1;
+      else if (key === declineKey) want = -1;
+      newContrib[key] = want;
+    });
+    rec.contrib = _commitContribInto(deltas, negOwner, rec.contrib || {}, 'volume', newContrib, frozen);
+    const pumpLowApplied = edit.pump === 'low' && edit.volume === 'just_right';
+    const pumpLowDiff = (pumpLowApplied ? 1 : 0) - (oldPumpLowApplied ? 1 : 0);
+    rec.pumpLowApplied = pumpLowApplied;
+    if (pumpLowDiff !== 0 && mainExId) {
+      pumpLowCounts[mainExId] = Math.max(0, (pumpLowCounts[mainExId] || 0) + pumpLowDiff);
+    }
+    answers.volume[muscle] = rec;
+  }
+
+  return {
+    mesoState: { ...mesoState, deltas, growthCounts, pumpLowCounts, jointFlags },
+    raw: { ...raw, answers, negOwner },
+  };
+}
+
+// Re-earn this session's weight boosts from the (edited) feedback answers,
+// mirroring computeMesoGains' EARN gate: allHit AND jointFine AND pumpOk AND
+// volumeOk AND (load-only) not-still-sore. A rep-miss CUT (a negative existing
+// boost) is rep-driven, not feedback-driven, so it is preserved untouched.
+// earnInputs = this session's exercises [{ exId, key, muscle, allHit, increment }].
+// Pure: returns new mesoState.
+function reearnMesoBoostsFromAnswers(mesoState, answers, earnInputs, loadOnly) {
+  const gates = mesoGateSetsFromAnswers(answers, loadOnly);
+  const wb = mesoState.weightBoosts || {};
+  const earned = {};
+  const sessionKeys = [];
+  for (const e of (earnInputs || [])) {
+    sessionKeys.push(e.key);
+    const existing = wb[e.key];
+    if (existing != null && existing < 0) { earned[e.key] = existing; continue; } // preserve rep-miss cut
+    if (!e.allHit) continue;
+    if (!gates.jointFine.has(e.exId)) continue;
+    if (e.muscle && !gates.pumpOk.has(e.muscle)) continue;
+    if (e.muscle && !gates.volumeOk.has(e.muscle)) continue;
+    if (loadOnly && e.muscle && gates.soreBlock.has(e.muscle)) continue;
+    earned[e.key] = e.increment;
+  }
+  return { ...mesoState, weightBoosts: reearnMesoWeightBoosts(wb, sessionKeys, earned) };
+}
+
+// Recompute the recap "changes earned" rows (name + weightDelta + setDelta per
+// exercise) from the edited answers and the freshly re-earned weightBoosts, so
+// the durable recap display matches the new state. Mirrors computeMesoGains'
+// gainMap: set deltas come from every record's contrib (soreness targets can key
+// a prior day), weight deltas from this session's boosts. Pure.
+function mesoRecapGainsFromEdit(answers, weightBoosts, earnInputs, dayId) {
+  const setDeltaByKey = {}, nameByKey = {};
+  const addContrib = (contrib) => { for (const [k, v] of Object.entries(contrib || {})) setDeltaByKey[k] = (setDeltaByKey[k] || 0) + (v || 0); };
+  for (const rec of Object.values((answers && answers.soreness) || {})) { (rec.targets || []).forEach(t => { if (t && t.key) nameByKey[t.key] = t.name; }); addContrib(rec.contrib); }
+  for (const [exId, rec] of Object.entries((answers && answers.joint) || {})) { nameByKey[exId + '_' + dayId] = rec.exName; addContrib(rec.contrib); }
+  for (const rec of Object.values((answers && answers.volume) || {})) addContrib(rec.contrib);
+  for (const e of (earnInputs || [])) if (e.name) nameByKey[e.key] = nameByKey[e.key] || e.name;
+  const wb = weightBoosts || {};
+  const weightByKey = {};
+  for (const e of (earnInputs || [])) weightByKey[e.key] = wb[e.key] || 0;
+  const keys = new Set([...Object.keys(setDeltaByKey), ...Object.keys(weightByKey)]);
+  const gains = [];
+  keys.forEach(k => {
+    const setDelta = setDeltaByKey[k] || 0;
+    const weightDelta = weightByKey[k] || 0;
+    if (setDelta || weightDelta) gains.push({ name: nameByKey[k] || '?', weightDelta, setDelta });
+  });
+  return gains;
+}
+
 // Reconcile the Smart-Progression suggestion with the meso weight boost when
 // seeding an exercise. On an autoregulating plan the feedback engine is the
 // sole authority over next-session weight:
 //   • boost earned   → apply it on top of the last weight when Smart Progression
 //     is silent; when SP also fired they are the same increment, so keep SP.
+//   • boost negative (two rep-target misses in a row, see rep_miss_counts) →
+//     same "apply on top of last weight" path, just downward, and authoritative:
+//     a session missing its own floor target also misses SP's stricter ceiling
+//     target, so SP is silent here in practice. We still apply the cut even if a
+//     suggestion is somehow present, so the cut can never be swallowed by an
+//     up-suggestion if the two engines ever disagree. The result is floored at 0
+//     so a cut can never drive a light exercise's seed to zero or negative.
 //   • boost withheld (a joint/pump/volume gate failed last session, or a muscle
 //     was still sore on a load-only plan) → veto SP so the weight HOLDS instead
 //     of climbing past the feedback. This is what makes the gating actually
 //     control weight; without it Smart Progression would bump regardless.
+//   • EXCEPTION, noPriorFeedback (the first meso block's week 1): there is no
+//     prior feedback to defer to yet, so the veto has nothing to enforce. Let
+//     Smart Progression through instead of freezing the weight; the feedback
+//     engine takes over from week 2 once it has a completed session to earn from.
 // Off a meso plan (mesoActive false) the suggestion is returned untouched, so
 // normal Smart Progression is unaffected. Pure/testable; `last` is a
 // { entry: { sets } } reference.
-function resolveMesoSeedSuggestion(suggestion, weightBoost, last, mesoActive) {
+function resolveMesoSeedSuggestion(suggestion, weightBoost, last, mesoActive, noPriorFeedback = false, repFloor = null) {
   if (weightBoost != null) {
-    if (!suggestion && last) {
+    const cutWins = weightBoost < 0; // a rep-miss cut is authoritative, never let an up-suggestion swallow it
+    if ((cutWins || !suggestion) && last) {
       const refSet = (last?.entry?.sets || []).filter(s => !s.warmup && !s.skipped).find(s => s.kg != null);
-      if (refSet) return { kg: Math.round((refSet.kg + weightBoost) * 4) / 4, reps: refSet.reps ?? null };
+      // A weight change (bump or cut) restarts double progression: seed the reps
+      // at the range floor (repFloor) so the lifter climbs the range again at the
+      // new load instead of carrying last session's high reps onto a heavier bar.
+      // When Smart Progression itself fired it already reset to the floor; this is
+      // the meso-only branch (SP silent) that previously kept the actual reps.
+      // repFloor null (no range/floor context passed) → keep last reps, as before.
+      if (refSet) return { kg: Math.max(0, Math.round((refSet.kg + weightBoost) * 4) / 4), reps: repFloor ?? refSet.reps ?? null };
     }
     return suggestion;
   }
-  if (mesoActive && suggestion) return null; // feedback withheld the boost → veto the Smart Progression bump
+  if (mesoActive && suggestion && !noPriorFeedback) return null; // feedback withheld the boost → veto the Smart Progression bump
   return suggestion;
 }
 
@@ -4518,6 +4900,39 @@ function mesoPausedDays(statusPeriods, trainedDates, mesoStartISO, todayISO) {
 function mesoRirForWeek(week, weeks, startRir = 3, endRir = 0) {
   if (!weeks || weeks <= 1) return endRir;
   return Math.round(startRir - (week - 1) * (startRir - endRir) / (weeks - 1));
+}
+
+// Whether an ended, non-deload session of this plan trained `muscle` before the
+// meso block started (startTs = the block's startedAt, or startDate for older
+// mesos). Week 1 of a genuinely fresh plan has nothing to be sore from, but when
+// autoregulation is switched on mid-plan the block's week 1 sits on top of real
+// prior training, so the muscle CAN be sore and the soreness question is worth
+// asking. Only sessions we still hold set-level entries for can match (windowed
+// old sessions carry no entries and are not a realistic soreness reference
+// anyway). `muscleOfExId` maps an exId to its primary muscle, kept out here so
+// this stays pure/testable (the caller passes primaryMuscleForExercise).
+function mesoMuscleTrainedBeforeStart(sessions, scheduleId, startTs, muscle, muscleOfExId) {
+  if (!muscle || !scheduleId || startTs == null || typeof muscleOfExId !== 'function') return false;
+  for (const s of (sessions || [])) {
+    if (!s || !s.ended || s.isDeload || s.scheduleId !== scheduleId) continue;
+    if (!(new Date(s.ended).getTime() < startTs)) continue;
+    for (const e of (s.entries || [])) {
+      if (!e || e.isCardio) continue;
+      if (muscleOfExId(e.exId) === muscle) return true;
+    }
+  }
+  return false;
+}
+
+// Whether a pump/volume answer permits the weight bump. Load-only autoregulate
+// plans use the weight-feel framing, where "Hard" (pushed) still earns the bump:
+// training should be hard, and it self-corrects (a too-heavy weight either
+// eventually misses reps for a cut, or the lifter gets stronger and it drops back
+// to Hard). Only "Too heavy" (too_much) holds there. Set-adjusting plans keep the
+// stricter volume rule (just_right / not_enough only). Pure/testable.
+function volumeAnswerAllowsBump(volume, loadOnly) {
+  if (volume === 'just_right' || volume === 'not_enough') return true;
+  return !!loadOnly && volume === 'pushed';
 }
 
 // "5m ago"/"3h ago"/"2d ago" from an ISO timestamp. capDays, if given, rolls
@@ -4783,7 +5198,9 @@ window.LB = {
   checkinWeekStart, submitCheckin, loadCheckins, deleteCheckin, loadCoachCheckinStatus, requestCheckin, setCheckinEnabled, loadCheckinSchema, saveCheckinSchema, saveDefaultCheckinSchema,
   cardioWeekPrefill, detectCardioPRs,
   cardioDistUnit, setCardioDistUnit, distToM, mToDisplay, fmtDistance, fmtPace, fmtSpeed, MI_TO_M, recentCardioTypes,
-  isLoggedTrainingDay, plannedTrainingDay, isTrainingDayForDate, dayTargetFromMacros, macroAdherence, effectiveMacroTargets, dailyLogAdherence, dailyLogsWeekPrefill, weekPerformanceSignal,
+  isLoggedTrainingDay, plannedTrainingDay, isTrainingDayForDate, dayTargetFromMacros, macroAdherence, hasMacroTargets, effectiveMacroTargets, dailyLogAdherence, dailyLogsWeekPrefill, weekPerformanceSignal,
   refreshHealthLogs,
-  pickGrowthRecipient, retractGrowthGrant, pickDeclineRecipient, reearnMesoWeightBoosts, resolveMesoSeedSuggestion, mesoPausedDays, mesoRirForWeek,
+  pickGrowthRecipient, retractGrowthGrant, pickDeclineRecipient, reearnMesoWeightBoosts, revertMesoSessionBoosts, resolveMesoSeedSuggestion, mesoPausedDays, mesoRirForWeek, mesoMuscleTrainedBeforeStart, volumeAnswerAllowsBump,
+  mesoGateSetsFromAnswers, isMesoSessionEditable, applyMesoFeedbackEdit, reearnMesoBoostsFromAnswers, mesoRecapGainsFromEdit,
+  mesoSetTarget, mesoEarnTarget, mesoRepOutcome,
 };

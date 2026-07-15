@@ -105,6 +105,14 @@
   input[type=number]::-webkit-outer-spin-button,
   input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
   input[type=number] { -moz-appearance: textfield; }
+  /* iOS Safari misplaces the native caret in inputs/textareas that sit inside a
+     transformed / position:fixed / overflow-scroll ancestor, and every text field
+     here lives in a Sheet (all three at once), so the caret lands where the field
+     stood before the sheet slid up. Promoting each field to its own compositing
+     layer makes WebKit compute the caret in the field's own coordinate space. This
+     is layer-only (no visual shift) and does not touch the custom numeric keypad,
+     which uses divs, not native inputs. */
+  input, textarea { transform: translateZ(0); }
   input:-webkit-autofill,
   input:-webkit-autofill:hover,
   input:-webkit-autofill:focus {

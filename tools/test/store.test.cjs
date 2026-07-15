@@ -478,12 +478,24 @@ async function testAsync(name, fn) {
     assert.strictEqual(LB.macroAdherence({ protein: 200, carbs: 250, fat: 70 }, null), null);
   });
 
-  test('effectiveMacroTargets prefers personal, falls back to coaching, else null', () => {
+  test('effectiveMacroTargets: coach macros always win, personal is the fallback', () => {
     const personal = { proteinTraining: 210 };
-    assert.strictEqual(LB.effectiveMacroTargets(personal, MACROS), personal);
+    // Coach macros take priority whenever present (real coach or self-coaching).
+    assert.strictEqual(LB.effectiveMacroTargets(personal, MACROS), MACROS);
     assert.strictEqual(LB.effectiveMacroTargets(null, MACROS), MACROS);
     assert.strictEqual(LB.effectiveMacroTargets({}, MACROS), MACROS);
+    // No coach macros → personal targets are used as the fallback.
+    assert.strictEqual(LB.effectiveMacroTargets(personal, null), personal);
+    assert.strictEqual(LB.effectiveMacroTargets(personal, {}), personal);
     assert.strictEqual(LB.effectiveMacroTargets(null, null), null);
+  });
+
+  test('hasMacroTargets: true only when a macro (not just calories) is set', () => {
+    assert.strictEqual(LB.hasMacroTargets(null), false);
+    assert.strictEqual(LB.hasMacroTargets({}), false);
+    assert.strictEqual(LB.hasMacroTargets({ caloriesTraining: 2000, caloriesRest: 1800 }), false);
+    assert.strictEqual(LB.hasMacroTargets({ proteinRest: 150 }), true);
+    assert.strictEqual(LB.hasMacroTargets({ carbsTraining: 300 }), true);
   });
 
   test('dailyLogAdherence snapshots target + dayType, null when targets missing', () => {
@@ -704,6 +716,115 @@ async function testAsync(name, fn) {
     assert.strictEqual(LB.pickDeclineRecipient([], { a_d1: 3 }, null), null);
   });
 
+  // ── mesoSetTarget / mesoRepOutcome (rep performance → earn vs. rep-miss-streak cut) ──
+  test('mesoSetTarget: per-set target used when the array has more than one distinct entry', () => {
+    assert.strictEqual(LB.mesoSetTarget(0, 10, [8, 10]), 8);
+    assert.strictEqual(LB.mesoSetTarget(1, 10, [8, 10]), 10);
+  });
+  test('mesoSetTarget: index past the per-set array falls back to its last entry', () => {
+    assert.strictEqual(LB.mesoSetTarget(3, 10, [8, 10]), 10);
+  });
+  test('mesoSetTarget: a single-entry (or absent) per-set array falls back to the uniform/Range-floor plannedReps', () => {
+    assert.strictEqual(LB.mesoSetTarget(0, 10, [10]), 10);
+    assert.strictEqual(LB.mesoSetTarget(0, 10, null), 10);
+    assert.strictEqual(LB.mesoSetTarget(0, 8, undefined), 8); // Range mode: plannedReps IS the floor
+  });
+
+  test('mesoRepOutcome: every set hits its target → allHit true, earlyMiss false', () => {
+    const sets = [{ done: true, reps: 10 }, { done: true, reps: 10 }, { done: true, reps: 10 }];
+    const out = LB.mesoRepOutcome(sets, 10, null);
+    assert.strictEqual(out.allHit, true);
+    assert.strictEqual(out.earlyMiss, false);
+  });
+  test('mesoRepOutcome: an earlier set missing its target is an earlyMiss (weight too heavy)', () => {
+    const sets = [{ done: true, reps: 8 }, { done: true, reps: 10 }, { done: true, reps: 10 }];
+    const out = LB.mesoRepOutcome(sets, 10, null);
+    assert.strictEqual(out.allHit, false);
+    assert.strictEqual(out.earlyMiss, true);
+  });
+  test('mesoRepOutcome: only the LAST set missing (all-out fatigue) does NOT count as earlyMiss', () => {
+    const sets = [{ done: true, reps: 10 }, { done: true, reps: 10 }, { done: true, reps: 7 }];
+    const out = LB.mesoRepOutcome(sets, 10, null);
+    assert.strictEqual(out.allHit, false, 'still not a full earn, unchanged strictness');
+    assert.strictEqual(out.earlyMiss, false, 'last-set fatigue miss is exempt from the streak');
+  });
+  test('mesoRepOutcome: a single working set has no earlier set to lean on, a miss counts directly', () => {
+    const out = LB.mesoRepOutcome([{ done: true, reps: 5 }], 10, null);
+    assert.strictEqual(out.allHit, false);
+    assert.strictEqual(out.earlyMiss, true);
+  });
+  test('mesoRepOutcome: a single working set that hits is a clean earn, no miss', () => {
+    const out = LB.mesoRepOutcome([{ done: true, reps: 10 }], 10, null);
+    assert.strictEqual(out.allHit, true);
+    assert.strictEqual(out.earlyMiss, false);
+  });
+  test('mesoRepOutcome: per-set targets are respected, set 1\'s lower target saves it from being a miss', () => {
+    // Per-Set 8/10: first set only needs 8, hits it; second (last) set falls short of 10 but is exempt anyway.
+    const sets = [{ done: true, reps: 8 }, { done: true, reps: 9 }];
+    const out = LB.mesoRepOutcome(sets, null, [8, 10]);
+    assert.strictEqual(out.allHit, false);
+    assert.strictEqual(out.earlyMiss, false);
+  });
+  test('mesoRepOutcome: per-set targets, the first (non-last) set missing ITS OWN target is an earlyMiss', () => {
+    const sets = [{ done: true, reps: 6 }, { done: true, reps: 10 }]; // first needed 8, got 6
+    const out = LB.mesoRepOutcome(sets, null, [8, 10]);
+    assert.strictEqual(out.earlyMiss, true);
+  });
+  test('mesoRepOutcome: a not-done (skipped mid-computation) set counts as a miss regardless of reps', () => {
+    const sets = [{ done: false, reps: 10 }, { done: true, reps: 10 }];
+    const out = LB.mesoRepOutcome(sets, 10, null);
+    assert.strictEqual(out.allHit, false);
+    assert.strictEqual(out.earlyMiss, true);
+  });
+  test('mesoRepOutcome: no working sets is a safe no-op', () => {
+    const out = LB.mesoRepOutcome([], 10, null);
+    assert.strictEqual(out.allHit, false);
+    assert.strictEqual(out.earlyMiss, false);
+  });
+
+  // ── mesoEarnTarget (range double-progression EARN ladder) ──
+  test('mesoEarnTarget: multi-set range, first set targets the top, last the floor', () => {
+    assert.strictEqual(LB.mesoEarnTarget(0, 2, 8, null, 12), 12); // first → rangeMax
+    assert.strictEqual(LB.mesoEarnTarget(1, 2, 8, null, 12), 8);  // last  → rangeMin
+  });
+  test('mesoEarnTarget: three sets interpolate to the midpoint in between', () => {
+    assert.strictEqual(LB.mesoEarnTarget(0, 3, 8, null, 12), 12);
+    assert.strictEqual(LB.mesoEarnTarget(1, 3, 8, null, 12), 10); // middle → rangeMid
+    assert.strictEqual(LB.mesoEarnTarget(2, 3, 8, null, 12), 8);
+  });
+  test('mesoEarnTarget: a single working set targets the range midpoint', () => {
+    assert.strictEqual(LB.mesoEarnTarget(0, 1, 8, null, 12), 10); // 8-12 → 10
+  });
+  test('mesoEarnTarget: no range (uniform) returns plannedReps unchanged', () => {
+    assert.strictEqual(LB.mesoEarnTarget(0, 3, 10, null, null), 10);
+    assert.strictEqual(LB.mesoEarnTarget(2, 3, 10, null, null), 10);
+  });
+  test('mesoEarnTarget: per-set targets win over the range ladder', () => {
+    assert.strictEqual(LB.mesoEarnTarget(0, 2, 8, [6, 9], 12), 6);
+    assert.strictEqual(LB.mesoEarnTarget(1, 2, 8, [6, 9], 12), 9);
+  });
+
+  // ── mesoRepOutcome, Range double progression: boost only earned at the top ──
+  test('mesoRepOutcome (range 8-12): first tops out, last holds the floor → earn', () => {
+    const out = LB.mesoRepOutcome([{ done: true, reps: 12 }, { done: true, reps: 8 }], 8, null, 12);
+    assert.strictEqual(out.allHit, true);
+    assert.strictEqual(out.earlyMiss, false);
+  });
+  test('mesoRepOutcome (range 8-12): first set below the top → no earn, but not a miss (weight holds)', () => {
+    const out = LB.mesoRepOutcome([{ done: true, reps: 11 }, { done: true, reps: 8 }], 8, null, 12);
+    assert.strictEqual(out.allHit, false);    // 11 < rangeMax → boost not earned
+    assert.strictEqual(out.earlyMiss, false); // 11 >= floor 8 → weight not too heavy
+  });
+  test('mesoRepOutcome (range 8-12): an early set below the floor is still a miss (weight too heavy)', () => {
+    const out = LB.mesoRepOutcome([{ done: true, reps: 7 }, { done: true, reps: 8 }], 8, null, 12);
+    assert.strictEqual(out.allHit, false);
+    assert.strictEqual(out.earlyMiss, true);  // 7 < floor 8
+  });
+  test('mesoRepOutcome (range, single set): earns only at the midpoint, not the floor', () => {
+    assert.strictEqual(LB.mesoRepOutcome([{ done: true, reps: 9 }], 8, null, 12).allHit, false); // 9 < mid 10
+    assert.strictEqual(LB.mesoRepOutcome([{ done: true, reps: 10 }], 8, null, 12).allHit, true);
+  });
+
   // ── reearnMesoWeightBoosts (weight boost must be re-earned every session) ──
   test('reearnMesoWeightBoosts: a boost not re-earned this session is dropped, not kept', () => {
     // bench earned a boost last session but is trained again this session with
@@ -731,6 +852,179 @@ async function testAsync(name, fn) {
     assert.strictEqual(JSON.stringify(LB.reearnMesoWeightBoosts(undefined, undefined, undefined)), '{}');
   });
 
+  // ── revertMesoSessionBoosts (delete a meso session → drop its orphaned boost) ──
+  const mesoStateWB = { weightBoosts: { tri_d1: 2.5, chest_d1: 5, tri_d2: 2.5 }, repMissCounts: { tri_d1: 1 } };
+  const delSess = { id: 'A', dayId: 'd1', ended: '2026-07-15T10:00:00Z', entries: [{ exId: 'tri' }, { exId: 'chest' }] };
+  test('revertMesoSessionBoosts: clears the deleted session\'s day keys, leaves other days', () => {
+    const out = LB.revertMesoSessionBoosts(mesoStateWB, delSess, []);
+    assert.ok(!('tri_d1' in out.weightBoosts), 'tri_d1 boost dropped');
+    assert.ok(!('chest_d1' in out.weightBoosts), 'chest_d1 boost dropped');
+    assert.strictEqual(out.weightBoosts.tri_d2, 2.5, 'a different day\'s boost is untouched');
+    assert.ok(!('tri_d1' in out.repMissCounts), 'tri_d1 rep-miss count dropped');
+  });
+  test('revertMesoSessionBoosts: a later same-day session keeps ITS retrained key, orphans the rest', () => {
+    const later = { id: 'B', dayId: 'd1', ended: '2026-07-16T10:00:00Z', entries: [{ exId: 'tri' }] };
+    const out = LB.revertMesoSessionBoosts(mesoStateWB, delSess, [later]);
+    assert.strictEqual(out.weightBoosts.tri_d1, 2.5, 'tri retrained later → its boost survives');
+    assert.ok(!('chest_d1' in out.weightBoosts), 'chest NOT retrained later → orphaned boost cleared');
+    assert.strictEqual(out.weightBoosts.tri_d2, 2.5, 'a different day is untouched');
+    assert.strictEqual(out.repMissCounts.tri_d1, 1, 'tri rep-miss count survives too');
+  });
+  test('revertMesoSessionBoosts: a later same-day session that retrained ALL exercises is a full no-op', () => {
+    const later = { id: 'B', dayId: 'd1', ended: '2026-07-16T10:00:00Z', entries: [{ exId: 'tri' }, { exId: 'chest' }] };
+    assert.strictEqual(LB.revertMesoSessionBoosts(mesoStateWB, delSess, [later]), mesoStateWB);
+  });
+  test('revertMesoSessionBoosts: an OLDER same-day session does not block the rollback', () => {
+    const older = { id: 'Z', dayId: 'd1', ended: '2026-07-14T10:00:00Z', entries: [{ exId: 'tri' }] };
+    const out = LB.revertMesoSessionBoosts(mesoStateWB, delSess, [older]);
+    assert.ok(!('tri_d1' in out.weightBoosts));
+  });
+  test('revertMesoSessionBoosts: deleting a deload session is a no-op', () => {
+    const out = LB.revertMesoSessionBoosts(mesoStateWB, { ...delSess, isDeload: true }, []);
+    assert.strictEqual(out, mesoStateWB);
+  });
+  test('revertMesoSessionBoosts: no entries / no dayId is a safe no-op', () => {
+    assert.strictEqual(LB.revertMesoSessionBoosts(mesoStateWB, { id: 'A', dayId: 'd1', entries: [] }, []), mesoStateWB);
+    assert.strictEqual(LB.revertMesoSessionBoosts(mesoStateWB, { id: 'A', dayId: null, entries: [{ exId: 'tri' }] }, []), mesoStateWB);
+  });
+  test('revertMesoSessionBoosts: nothing to clear returns the same object (no churn)', () => {
+    const clean = { weightBoosts: { other_d9: 2.5 }, repMissCounts: {} };
+    assert.strictEqual(LB.revertMesoSessionBoosts(clean, delSess, []), clean);
+  });
+  test('revertMesoSessionBoosts: cardio entries are ignored when building keys', () => {
+    const st = { weightBoosts: { tri_d1: 2.5 }, repMissCounts: {} };
+    const sess = { id: 'A', dayId: 'd1', ended: '2026-07-15T10:00:00Z', entries: [{ isCardio: true }, { exId: 'tri' }] };
+    const out = LB.revertMesoSessionBoosts(st, sess, []);
+    assert.ok(!('tri_d1' in out.weightBoosts));
+  });
+
+  // ── isMesoSessionEditable (only the plan's most-recent session, with raw) ──
+  {
+    const meso = { scheduleId: 'p1', startedAt: '2026-07-01T00:00:00Z' };
+    const withRaw = (over) => ({ id: 'S', scheduleId: 'p1', ended: '2026-07-15T10:00:00Z',
+      mesoRecap: { raw: { answers: {} } }, ...over });
+    test('isMesoSessionEditable: most-recent session of the plan with raw → true', () => {
+      const s = withRaw();
+      assert.strictEqual(LB.isMesoSessionEditable(s, [s], meso), true);
+    });
+    test('isMesoSessionEditable: a later session on the same plan → false', () => {
+      const s = withRaw();
+      const later = { id: 'L', scheduleId: 'p1', ended: '2026-07-16T10:00:00Z' };
+      assert.strictEqual(LB.isMesoSessionEditable(s, [s, later], meso), false);
+    });
+    test('isMesoSessionEditable: a later session on a DIFFERENT plan does not lock it', () => {
+      const s = withRaw();
+      const otherPlan = { id: 'O', scheduleId: 'p2', ended: '2026-07-20T10:00:00Z' };
+      assert.strictEqual(LB.isMesoSessionEditable(s, [s, otherPlan], meso), true);
+    });
+    test('isMesoSessionEditable: deload / no-raw / prior-block / live-session → false', () => {
+      assert.strictEqual(LB.isMesoSessionEditable(withRaw({ isDeload: true }), [], meso), false);
+      assert.strictEqual(LB.isMesoSessionEditable({ id: 'S', scheduleId: 'p1', ended: '2026-07-15T10:00:00Z' }, [], meso), false);
+      assert.strictEqual(LB.isMesoSessionEditable(withRaw({ ended: '2026-06-01T00:00:00Z' }), [], meso), false); // before startedAt
+      const s = withRaw();
+      const live = { id: 'IP', scheduleId: 'p1', ended: null };
+      assert.strictEqual(LB.isMesoSessionEditable(s, [s, live], meso), false);
+    });
+  }
+
+  // ── applyMesoFeedbackEdit (post-hoc feedback correction, mirrors the handlers) ──
+  test('applyMesoFeedbackEdit: no-op edit (same answer) leaves state byte-identical', () => {
+    const ms = { deltas: { e1_d0: -1 }, growthCounts: {}, pumpLowCounts: {}, jointFlags: {} };
+    const raw = { answers: { soreness: { chest: { muscle: 'chest', targets: [{ exId: 'e1', name: 'Bench', key: 'e1_d0' }], answer: 'still_sore', contrib: { e1_d0: -1 } } }, joint: {}, volume: {} }, negOwner: { e1_d0: 'soreness' }, frozen: false, dayId: 'd0' };
+    const out = LB.applyMesoFeedbackEdit(ms, raw, { type: 'soreness', subject: 'chest', answer: 'still_sore' }, { dayId: 'd0', loadOnly: false });
+    assert.strictEqual(JSON.stringify(out.mesoState.deltas), JSON.stringify({ e1_d0: -1 }));
+    assert.strictEqual(JSON.stringify(out.mesoState.growthCounts), '{}');
+    assert.strictEqual(JSON.stringify(out.raw.negOwner), JSON.stringify({ e1_d0: 'soreness' }));
+  });
+  test('applyMesoFeedbackEdit: soreness still_sore → never flips a -1 decline into a +1 growth grant', () => {
+    const ms = { deltas: { e1_d0: -1 }, growthCounts: {}, pumpLowCounts: {}, jointFlags: {} };
+    const raw = { answers: { soreness: { chest: { muscle: 'chest', targets: [{ exId: 'e1', name: 'Bench', key: 'e1_d0' }], answer: 'still_sore', contrib: { e1_d0: -1 } } }, joint: {}, volume: {} }, negOwner: { e1_d0: 'soreness' }, frozen: false, dayId: 'd0' };
+    const out = LB.applyMesoFeedbackEdit(ms, raw, { type: 'soreness', subject: 'chest', answer: 'never' }, { dayId: 'd0', loadOnly: false });
+    assert.strictEqual(out.mesoState.deltas.e1_d0, 1);      // -1 -> +1 (diff +2 applied)
+    assert.strictEqual(out.mesoState.growthCounts.e1_d0, 1); // growth granted
+    assert.ok(!('e1_d0' in out.raw.negOwner), 'negative slot released');
+  });
+  test('applyMesoFeedbackEdit: joint sharp → none clears the -1 and keeps a baseline flag', () => {
+    const ms = { deltas: { e1_d1: -1 }, growthCounts: {}, pumpLowCounts: {}, jointFlags: { e1: true } };
+    const raw = { answers: { soreness: {}, joint: { e1: { exId: 'e1', muscle: 'chest', exName: 'Bench', flagBaseline: true, answer: 'sharp', contrib: { e1_d1: -1 } } }, volume: {} }, negOwner: { e1_d1: 'joint' }, frozen: false, dayId: 'd1' };
+    const out = LB.applyMesoFeedbackEdit(ms, raw, { type: 'joint', subject: 'e1', answer: 'none' }, { dayId: 'd1', loadOnly: false });
+    assert.strictEqual(out.mesoState.deltas.e1_d1, 0);       // -1 undone
+    assert.strictEqual(out.mesoState.jointFlags.e1, true);   // baseline flag NOT erased
+  });
+  test('applyMesoFeedbackEdit: joint none → sharp sets the flag and a -1', () => {
+    const ms = { deltas: {}, growthCounts: {}, pumpLowCounts: {}, jointFlags: {} };
+    const raw = { answers: { soreness: {}, joint: { e1: { exId: 'e1', muscle: 'chest', exName: 'Bench', flagBaseline: false, answer: 'none', contrib: { e1_d1: 0 } } }, volume: {} }, negOwner: {}, frozen: false, dayId: 'd1' };
+    const out = LB.applyMesoFeedbackEdit(ms, raw, { type: 'joint', subject: 'e1', answer: 'sharp' }, { dayId: 'd1', loadOnly: false });
+    assert.strictEqual(out.mesoState.deltas.e1_d1, -1);
+    assert.strictEqual(out.mesoState.jointFlags.e1, true);
+    assert.strictEqual(out.raw.negOwner.e1_d1, 'joint');
+  });
+  test('applyMesoFeedbackEdit: volume too_much → just_right removes the -1s', () => {
+    const ms = { deltas: { e1_d1: -1, e2_d1: -1 }, growthCounts: {}, pumpLowCounts: {}, jointFlags: {} };
+    const raw = { answers: { soreness: {}, joint: {}, volume: { chest: { muscle: 'chest', exIds: ['e1', 'e2'], pump: 'moderate', volume: 'too_much', contrib: { e1_d1: -1, e2_d1: -1 } } } }, negOwner: { e1_d1: 'volume', e2_d1: 'volume' }, frozen: false, dayId: 'd1' };
+    const out = LB.applyMesoFeedbackEdit(ms, raw, { type: 'volume', subject: 'chest', answer: null, pump: 'moderate', volume: 'just_right' }, { dayId: 'd1', loadOnly: false });
+    assert.strictEqual(out.mesoState.deltas.e1_d1, 0);
+    assert.strictEqual(out.mesoState.deltas.e2_d1, 0);
+  });
+  test('applyMesoFeedbackEdit: pumpLowApplied tracked as a diff (low+just_right → +1, changed away → -1)', () => {
+    const ms = { deltas: {}, growthCounts: {}, pumpLowCounts: {}, jointFlags: {} };
+    const raw = { answers: { soreness: {}, joint: {}, volume: { chest: { muscle: 'chest', exIds: ['e1'], pump: 'moderate', volume: 'just_right', contrib: { e1_d1: 0 }, pumpLowApplied: false } } }, negOwner: {}, frozen: false, dayId: 'd1' };
+    const on = LB.applyMesoFeedbackEdit(ms, raw, { type: 'volume', subject: 'chest', pump: 'low', volume: 'just_right' }, { dayId: 'd1', loadOnly: false });
+    assert.strictEqual(on.mesoState.pumpLowCounts.e1, 1);
+    // now change away from low → decrement back
+    const off = LB.applyMesoFeedbackEdit(on.mesoState, on.raw, { type: 'volume', subject: 'chest', pump: 'amazing', volume: 'just_right' }, { dayId: 'd1', loadOnly: false });
+    assert.strictEqual(off.mesoState.pumpLowCounts.e1, 0);
+  });
+  test('applyMesoFeedbackEdit: negOwner stops a second question stacking a -1 on the same key', () => {
+    const ms = { deltas: { e1_d1: -1 }, growthCounts: {}, pumpLowCounts: {}, jointFlags: {} };
+    const raw = { answers: { soreness: {}, joint: {}, volume: { chest: { muscle: 'chest', exIds: ['e1'], pump: 'moderate', volume: 'just_right', contrib: {} } } }, negOwner: { e1_d1: 'joint' }, frozen: false, dayId: 'd1' };
+    const out = LB.applyMesoFeedbackEdit(ms, raw, { type: 'volume', subject: 'chest', pump: 'moderate', volume: 'too_much' }, { dayId: 'd1', loadOnly: false });
+    assert.strictEqual(out.mesoState.deltas.e1_d1, -1); // volume's -1 suppressed (joint owns the slot)
+  });
+  test('applyMesoFeedbackEdit: load-only soreness never touches deltas', () => {
+    const ms = { deltas: {}, growthCounts: {}, pumpLowCounts: {}, jointFlags: {} };
+    const raw = { answers: { soreness: { chest: { muscle: 'chest', targets: [{ exId: 'e1', name: 'Bench', key: 'e1_d0' }], answer: 'still_sore', contrib: {} } }, joint: {}, volume: {} }, negOwner: {}, frozen: false, dayId: 'd0' };
+    const out = LB.applyMesoFeedbackEdit(ms, raw, { type: 'soreness', subject: 'chest', answer: 'never' }, { dayId: 'd0', loadOnly: true });
+    assert.strictEqual(JSON.stringify(out.mesoState.deltas), '{}');
+    assert.strictEqual(out.raw.answers.soreness.chest.answer, 'never');
+  });
+  test('applyMesoFeedbackEdit: frozen (final week) volume edit moves pumpLowCounts but never deltas', () => {
+    const ms = { deltas: {}, growthCounts: {}, pumpLowCounts: {}, jointFlags: {} };
+    const raw = { answers: { soreness: {}, joint: {}, volume: { chest: { muscle: 'chest', exIds: ['e1'], pump: 'moderate', volume: 'just_right', contrib: {}, pumpLowApplied: false } } }, negOwner: {}, frozen: true, dayId: 'd1' };
+    const out = LB.applyMesoFeedbackEdit(ms, raw, { type: 'volume', subject: 'chest', pump: 'low', volume: 'just_right' }, { dayId: 'd1', loadOnly: false });
+    assert.strictEqual(JSON.stringify(out.mesoState.deltas), '{}');
+    assert.strictEqual(out.mesoState.pumpLowCounts.e1, 1);
+  });
+
+  // ── reearnMesoBoostsFromAnswers (weight re-earn from edited gates) ──
+  const earnInputs = [{ exId: 'e1', key: 'e1_d1', muscle: 'chest', allHit: true, increment: 2.5 }];
+  const passAnswers = { joint: { e1: { answer: 'none' } }, volume: { chest: { muscle: 'chest', pump: 'amazing', volume: 'just_right' } }, soreness: {} };
+  test('reearnMesoBoostsFromAnswers: all gates pass + allHit → boost earned', () => {
+    const out = LB.reearnMesoBoostsFromAnswers({ weightBoosts: {} }, passAnswers, earnInputs, false);
+    assert.strictEqual(out.weightBoosts.e1_d1, 2.5);
+  });
+  test('reearnMesoBoostsFromAnswers: a failing gate (volume too_much) drops the boost', () => {
+    const ans = { joint: { e1: { answer: 'none' } }, volume: { chest: { muscle: 'chest', pump: 'amazing', volume: 'too_much' } }, soreness: {} };
+    const out = LB.reearnMesoBoostsFromAnswers({ weightBoosts: { e1_d1: 2.5 } }, ans, earnInputs, false);
+    assert.ok(!('e1_d1' in out.weightBoosts));
+  });
+  test('reearnMesoBoostsFromAnswers: a rep-miss cut (negative) is preserved, feedback cannot erase it', () => {
+    const missInputs = [{ exId: 'e1', key: 'e1_d1', muscle: 'chest', allHit: false, increment: 2.5 }];
+    const out = LB.reearnMesoBoostsFromAnswers({ weightBoosts: { e1_d1: -2.5 } }, passAnswers, missInputs, false);
+    assert.strictEqual(out.weightBoosts.e1_d1, -2.5);
+  });
+  test('reearnMesoBoostsFromAnswers: load-only still-sore muscle blocks the boost', () => {
+    const ans = { joint: { e1: { answer: 'none' } }, volume: { chest: { muscle: 'chest', pump: 'amazing', volume: 'just_right' } }, soreness: { chest: { muscle: 'chest', answer: 'still_sore' } } };
+    const out = LB.reearnMesoBoostsFromAnswers({ weightBoosts: {} }, ans, earnInputs, true);
+    assert.ok(!('e1_d1' in out.weightBoosts));
+  });
+
+  test('mesoRecapGainsFromEdit: combines set deltas and weight deltas per exercise', () => {
+    const answers = { soreness: {}, joint: {}, volume: { chest: { muscle: 'chest', exIds: ['e1'], contrib: { e1_d1: 1 } } } };
+    const gains = LB.mesoRecapGainsFromEdit(answers, { e1_d1: 2.5 }, [{ exId: 'e1', key: 'e1_d1', name: 'Bench' }], 'd1');
+    assert.strictEqual(JSON.stringify(gains), JSON.stringify([{ name: 'Bench', weightDelta: 2.5, setDelta: 1 }]));
+  });
+
   // ── resolveMesoSeedSuggestion (feedback owns weight on a meso plan) ──
   const seedLast = { entry: { sets: [{ kg: 100, reps: 8 }] } };
   test('resolveMesoSeedSuggestion: earned boost with no Smart Progression applies the boost', () => {
@@ -746,6 +1040,10 @@ async function testAsync(name, fn) {
     const sp = { kg: 102.5, reps: 8 };
     assert.strictEqual(LB.resolveMesoSeedSuggestion(sp, null, seedLast, true), null);
   });
+  test('resolveMesoSeedSuggestion: first block week 1 (no prior feedback) lets Smart Progression through', () => {
+    const sp = { kg: 102.5, reps: 8 };
+    assert.strictEqual(LB.resolveMesoSeedSuggestion(sp, null, seedLast, true, true), sp);
+  });
   test('resolveMesoSeedSuggestion: off a meso plan Smart Progression is untouched', () => {
     const sp = { kg: 102.5, reps: 8 };
     assert.strictEqual(LB.resolveMesoSeedSuggestion(sp, null, seedLast, false), sp);
@@ -755,6 +1053,74 @@ async function testAsync(name, fn) {
   });
   test('resolveMesoSeedSuggestion: earned boost but no reference set falls back to the suggestion', () => {
     assert.strictEqual(LB.resolveMesoSeedSuggestion(null, 2.5, null, true), null);
+  });
+  test('resolveMesoSeedSuggestion: rep-miss cut applies downward when Smart Progression is silent', () => {
+    const out = LB.resolveMesoSeedSuggestion(null, -2.5, seedLast, true);
+    assert.strictEqual(out.kg, 97.5);
+  });
+  test('resolveMesoSeedSuggestion: rep-miss cut is authoritative and beats an up-suggestion', () => {
+    const out = LB.resolveMesoSeedSuggestion({ kg: 105, reps: 5 }, -2.5, seedLast, true);
+    assert.strictEqual(out.kg, 97.5); // cut wins, not the 105 suggestion
+  });
+  test('resolveMesoSeedSuggestion: a cut can never drive the seed below zero', () => {
+    const lightLast = { entry: { sets: [{ kg: 2.5, reps: 10 }] } };
+    assert.strictEqual(LB.resolveMesoSeedSuggestion(null, -2.5, lightLast, true).kg, 0);
+  });
+  test('resolveMesoSeedSuggestion: a bump resets the seeded reps to the range floor (double progression)', () => {
+    // last session hit 12 (top of an 8-12 range) at 100 kg and earned a boost;
+    // next seed climbs the weight AND drops reps back to the floor (8), not 12.
+    const topLast = { entry: { sets: [{ kg: 100, reps: 12 }] } };
+    const out = LB.resolveMesoSeedSuggestion(null, 2.5, topLast, true, false, 8);
+    assert.strictEqual(out.kg, 102.5);
+    assert.strictEqual(out.reps, 8); // reset to rangeMin, not carried at 12
+  });
+  test('resolveMesoSeedSuggestion: a cut also reseeds reps at the floor', () => {
+    const missLast = { entry: { sets: [{ kg: 100, reps: 6 }] } };
+    const out = LB.resolveMesoSeedSuggestion(null, -2.5, missLast, true, false, 8);
+    assert.strictEqual(out.kg, 97.5);
+    assert.strictEqual(out.reps, 8);
+  });
+  test('resolveMesoSeedSuggestion: no repFloor passed keeps last reps (backward compatible)', () => {
+    const out = LB.resolveMesoSeedSuggestion(null, 2.5, seedLast, true);
+    assert.strictEqual(out.reps, 8); // seedLast reps == 8, unchanged
+  });
+
+  // ── mesoMuscleTrainedBeforeStart (week-1 soreness on a mid-plan activation) ──
+  const muscleOf = (id) => ({ leg1: 'quads', leg2: 'quads', back1: 'back' }[id] ?? null);
+  const sess = (o) => ({ ended: '2026-01-05T10:00:00Z', isDeload: false, scheduleId: 'plan1', entries: [{ exId: 'leg1' }], ...o });
+  const BLOCK_START = new Date('2026-01-10T00:00:00Z').getTime();
+  test('mesoMuscleTrainedBeforeStart: a fresh plan (no sessions) stays silent', () => {
+    assert.strictEqual(LB.mesoMuscleTrainedBeforeStart([], 'plan1', BLOCK_START, 'quads', muscleOf), false);
+  });
+  test('mesoMuscleTrainedBeforeStart: the muscle trained before the block start counts', () => {
+    assert.strictEqual(LB.mesoMuscleTrainedBeforeStart([sess({})], 'plan1', BLOCK_START, 'quads', muscleOf), true);
+  });
+  test('mesoMuscleTrainedBeforeStart: a session AFTER the start does not count', () => {
+    assert.strictEqual(LB.mesoMuscleTrainedBeforeStart([sess({ ended: '2026-01-12T10:00:00Z' })], 'plan1', BLOCK_START, 'quads', muscleOf), false);
+  });
+  test('mesoMuscleTrainedBeforeStart: a different muscle does not count', () => {
+    assert.strictEqual(LB.mesoMuscleTrainedBeforeStart([sess({ entries: [{ exId: 'back1' }] })], 'plan1', BLOCK_START, 'quads', muscleOf), false);
+  });
+  test('mesoMuscleTrainedBeforeStart: deload and other-plan sessions are ignored', () => {
+    assert.strictEqual(LB.mesoMuscleTrainedBeforeStart([sess({ isDeload: true })], 'plan1', BLOCK_START, 'quads', muscleOf), false);
+    assert.strictEqual(LB.mesoMuscleTrainedBeforeStart([sess({ scheduleId: 'other' })], 'plan1', BLOCK_START, 'quads', muscleOf), false);
+  });
+  test('mesoMuscleTrainedBeforeStart: a windowed session with no entries cannot match', () => {
+    assert.strictEqual(LB.mesoMuscleTrainedBeforeStart([sess({ entries: [] })], 'plan1', BLOCK_START, 'quads', muscleOf), false);
+  });
+
+  // ── volumeAnswerAllowsBump (load-only weight-feel: "Hard" still earns the bump) ──
+  test('volumeAnswerAllowsBump: just_right / not_enough always allow the bump', () => {
+    assert.strictEqual(LB.volumeAnswerAllowsBump('just_right', false), true);
+    assert.strictEqual(LB.volumeAnswerAllowsBump('not_enough', true), true);
+  });
+  test('volumeAnswerAllowsBump: "pushed" (Hard) allows the bump only in load-only mode', () => {
+    assert.strictEqual(LB.volumeAnswerAllowsBump('pushed', true), true);
+    assert.strictEqual(LB.volumeAnswerAllowsBump('pushed', false), false);
+  });
+  test('volumeAnswerAllowsBump: "too_much" (Too heavy) always holds', () => {
+    assert.strictEqual(LB.volumeAnswerAllowsBump('too_much', true), false);
+    assert.strictEqual(LB.volumeAnswerAllowsBump('too_much', false), false);
   });
 
   // ── mesoPausedDays (recovery time must not fast-forward the meso week) ──

@@ -17,6 +17,58 @@
    Entry shape: { id: string, date: string (YYYY-MM-DD), title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.593',
+    date: '2026-07-15',
+    title: 'Earn Your Weight',
+    items: [
+      "📈 Range exercises now progress the honest way. On auto and mesocycle plans, the weight only goes up once your first set reaches the top of the range (say 12 on an 8-12) and your last still holds the bottom (the 8). Then it bumps a notch and your reps reset to the bottom to climb again. No more weight sneaking up before you've fought your way to the top.",
+      "✏️ Fix a feedback answer after the fact. Tapped the wrong soreness or pump on your last auto or mesocycle session? Open it, tap the feedback recap, and correct it: your weight and set changes for next time recompute on the spot.",
+      "📌 Pin a note so you actually read it. Flip on Pin note for any exercise and its setup note pops up the moment that exercise starts in your workout, and stays until you tap it away. Made for the leg-day brain fog. 🧠",
+    ],
+  },
+  {
+    id: 'v2.590',
+    date: '2026-07-15',
+    title: 'Receipts',
+    items: [
+      "🧾 See exactly what your auto plan decided, and why. Auto, weight-only and mesocycle sessions now keep a Feedback recap: open one and tap Feedback recap to see the feedback you gave (soreness, joints, pump) and the weight and set changes you earned or lost that day. No more wondering where that extra set came from.",
+    ],
+  },
+  {
+    id: 'v2.589',
+    date: '2026-07-15',
+    title: 'Dialed In',
+    items: [
+      "🏋️ Intensity techniques now work on single-side exercises too. Drop Sets, Myo-Reps and the rest are finally available on your single-arm and single-leg work in the session editor, no more odd one out.",
+      "🎯 Add an exercise on the fly, keep it for good. When you add an exercise mid-workout and update your plan, it now asks for the rep target (uniform, per-set or a range), pre-filled with the reps you just hit, so it lands in your plan ready to go instead of blank.",
+      "🎛️ Auto plans got smarter mid-plan. Switch autoregulation on partway through a plan and it now knows you have already been training: the right questions from session one, and your weights can move straight away instead of sitting frozen for a week. In weight-only mode it now asks how the weight felt rather than about volume, since on those plans the load is the whole point.",
+      "🐛 Cursors that wandered off, back in place. The text cursor that liked to hover in the wrong spot in note and text fields now sits where you are actually typing, plus a stack of smaller fixes and polish across the app.",
+    ],
+  },
+  {
+    id: 'v2.588',
+    date: '2026-07-14',
+    title: 'The Big Tidy-Up',
+    items: [
+      "✏️ Fix any set in your history, techniques and all. The session editor got a full rebuild: Drop Sets, Myo-Reps, Myo-Rep Match, AMRAP Variations, Lengthened Partials and Weighted Stretch are now all fully editable after the fact, not just weight and reps. Forgot to log your drop set chain properly? Go back and fix it, round by round.",
+      "⏱️ Rest timer stopped panicking at zero. It used to freeze the moment your rest hit 0:00. Now it just keeps counting, past zero and into the red, with a single beep to let you know time's up. No more staring at a stuck clock while you finish your conversation.",
+      "🎛️ Fewer buttons, same power. The plan screen's action buttons got tidied up: Duplicate, Export and Backups now live behind one Manage button instead of cluttering the screen. Coaches get the same treatment for their own actions, tucked behind a Coach button.",
+      "📤 Coaches: push a plan straight to a client, no export/import dance. Open any of your plans, hit Push to client, pick who gets it, and decide whether it goes live immediately or just lands in their list to talk through first.",
+      "🗂️ Your Plan tab just got a coach-sized upgrade. Once you're coaching, it now splits into My Plans and Client Templates, so your own training and the plans you build for clients stop piling up in one giant list. Each tab has its own search too, handy once you're juggling more than a handful.",
+      "📈 Weight chart gridlines finally make sense. The Y-axis now snaps to clean 5 lb / 2.5 kg steps instead of odd, hard-to-read numbers, so a glance at the chart tells you something instead of making you squint.",
+    ],
+  },
+  {
+    id: 'v2.586',
+    date: '2026-07-13',
+    title: 'See Every Point, Not Just the Line',
+    items: [
+      "📍 Tap or hover any chart, get the exact story. Every graph on the Health tab (weight, steps, macros, cardio, adherence, glucose) now shows you the date and value behind each point. No more squinting at the line trying to guess which day was which.",
+      "🖱️ Works everywhere. Mouse users get a hover tooltip, on your phone just touch and drag across the chart to scrub through your data point by point.",
+      "🎯 A little marker locks onto the exact spot you're looking at, so you always know precisely what you're reading.",
+    ],
+  },
+  {
     id: 'v2.579',
     date: '2026-07-13',
     title: 'Your Plan, Picture-Perfect',

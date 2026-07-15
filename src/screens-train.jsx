@@ -683,32 +683,43 @@ function RestGauge({ restStart, restDef, variant }) {
   useEffectT(() => { const t = setInterval(() => tick(n => n + 1), 250); return () => clearInterval(t); }, []);
   const active = restStart != null && restDef != null;
   const el = active ? Math.floor((Date.now() - restStart) / 1000) : 0;
-  const remaining = active ? Math.max(0, restDef - el) : null;
+  // No longer clamped at 0, once the rest period elapses this goes negative,
+  // turning the countdown into an overrun count-up so the user can see
+  // exactly how long they've gone past their rest, not just "0:00" forever.
+  const remaining = active ? restDef - el : null;
+  const overrun = remaining != null && remaining < 0;
   const pct = active ? Math.max(0, Math.min(100, (el / restDef) * 100)) : 0;
-  const mmss = remaining != null ? `${Math.floor(remaining / 60)}:${(remaining % 60).toString().padStart(2, '0')}` : '—';
+  const absRemaining = remaining != null ? Math.abs(remaining) : null;
+  const mmss = absRemaining != null
+    ? `${overrun ? '+' : ''}${Math.floor(absRemaining / 60)}:${(absRemaining % 60).toString().padStart(2, '0')}`
+    : '—';
+  // done stays the single zero-crossing tick (drives the one-time "GO" pulse,
+  // matching fireRestDone's one-time beep/flash), overrun is its own,
+  // steady state after that, not a repeating alarm.
   const done = remaining === 0;
+  const gaugeColor = overrun ? UI.danger : UI.gold;
   if (variant === 'header') {
     return (<>
-      <span className="num" style={{ color: UI.gold, fontSize: 14, letterSpacing: '0.14em', fontWeight: 500, animation: 'timerPulse 1.6s ease-in-out infinite' }}>{mmss}</span>
+      <span className="num" style={{ color: gaugeColor, fontSize: 14, letterSpacing: '0.14em', fontWeight: 500, animation: 'timerPulse 1.6s ease-in-out infinite' }}>{mmss}</span>
       <div style={{ width: 44, height: 2, background: UI.hair, borderRadius: 4, overflow: 'hidden' }}>
-        <div style={{ height: '100%', width: `${pct}%`, background: UI.gold, transition: 'width 0.25s linear' }} />
+        <div style={{ height: '100%', width: `${pct}%`, background: gaugeColor, transition: 'width 0.25s linear' }} />
       </div>
     </>);
   }
   if (variant === 'modal') {
     return (<>
-      <div className="num" style={{ fontSize: 72, fontWeight: 300, letterSpacing: '-0.02em', lineHeight: 1, color: UI.gold, animation: done ? 'timerPulse 0.8s ease-in-out infinite' : 'none', cursor: done ? 'pointer' : 'default' }}>{mmss}</div>
-      {done && <div style={{ marginTop: 10, fontSize: 11, letterSpacing: '0.18em', color: UI.gold, fontFamily: UI.fontUi, fontWeight: 600 }}>GO</div>}
+      <div className="num" style={{ fontSize: 72, fontWeight: 300, letterSpacing: '-0.02em', lineHeight: 1, color: gaugeColor, animation: done ? 'timerPulse 0.8s ease-in-out infinite' : 'none', cursor: (done || overrun) ? 'pointer' : 'default' }}>{mmss}</div>
+      {(done || overrun) && <div style={{ marginTop: 10, fontSize: 11, letterSpacing: '0.18em', color: UI.gold, fontFamily: UI.fontUi, fontWeight: 600 }}>{done ? 'GO' : 'TAP TO CONTINUE'}</div>}
       <div style={{ height: 2, background: UI.hair, borderRadius: 4, overflow: 'hidden', marginTop: 18, width: 200 }}>
-        <div style={{ height: '100%', width: `${pct}%`, background: UI.gold, transition: 'width 0.25s linear' }} />
+        <div style={{ height: '100%', width: `${pct}%`, background: gaugeColor, transition: 'width 0.25s linear' }} />
       </div>
     </>);
   }
   // warmup overlay
   return (<>
-    <div className="num" style={{ fontSize: 88, fontWeight: 300, letterSpacing: '-0.03em', lineHeight: 1, color: UI.gold, textShadow: '0 0 40px rgba(var(--accent-rgb),0.55), 0 0 80px rgba(var(--accent-rgb),0.25)', animation: 'timerPulse 1.6s ease-in-out infinite' }}>{mmss}</div>
+    <div className="num" style={{ fontSize: 88, fontWeight: 300, letterSpacing: '-0.03em', lineHeight: 1, color: gaugeColor, textShadow: overrun ? '0 0 40px rgba(var(--danger-rgb),0.55), 0 0 80px rgba(var(--danger-rgb),0.25)' : '0 0 40px rgba(var(--accent-rgb),0.55), 0 0 80px rgba(var(--accent-rgb),0.25)', animation: 'timerPulse 1.6s ease-in-out infinite' }}>{mmss}</div>
     <div style={{ height: 2, background: UI.hair, borderRadius: 4, overflow: 'hidden', marginTop: 22, width: 180 }}>
-      <div style={{ height: '100%', width: `${pct}%`, background: UI.gold, transition: 'width 0.25s linear' }} />
+      <div style={{ height: '100%', width: `${pct}%`, background: gaugeColor, transition: 'width 0.25s linear' }} />
     </div>
   </>);
 }
@@ -854,6 +865,22 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // 250ms `now` tick below no longer re-runs a linear scan of the whole library
   // on every render — it only recomputes when the library or current exId change.
   const exercise = useMemoT(() => (entry ? LB.findExercise(store, entry.exId) : null), [store.exercises, entry?.exId]);
+
+  // Pinned exercise note: a note flagged note_pinned (migration 0167) pops up in a
+  // must-acknowledge sheet the first time its exercise becomes active this session
+  // ("did you read your own setup note"). Seen exIds are tracked per session in a
+  // ref that survives navigation (only a full remount / reload can re-show it).
+  const [pinnedNote, setPinnedNote] = useStateT(null); // { exId, name, note } | null
+  const pinnedNoteSeenRef = useRefT(null);
+  if (pinnedNoteSeenRef.current === null) pinnedNoteSeenRef.current = new Set();
+  // The meso soreness question also fires on exercise start and takes priority
+  // (recovery check first, then the setup cue). The pinned-note trigger is
+  // therefore declared AFTER the soreness effect (further below) and defers
+  // while soreness is pending or open. sorenessPendingRef is set synchronously
+  // by the soreness effect so the pinned-note effect, running later in the SAME
+  // pass, sees it and waits; it is cleared when soreness is answered, which
+  // re-runs the pinned-note effect (via its mesoSorenessOpen dep) to show then.
+  const sorenessPendingRef = useRefT(false);
 
   // "Last time" reference + remote best e1RM for this day type.
   // Matches LB.bestRecentEntry (best set at the current working weight across
@@ -1448,6 +1475,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
     const progressionResult = (() => {
       if (isDeloadSession) return null;
+      // Autoregulation / mesocycle plans hand weight control to the feedback
+      // engine: resolveMesoSeedSuggestion (store.js) vetoes any double-progression
+      // bump the post-set soreness/joint/volume answers don't grant. A
+      // "Progression unlocked" toast here would promise a load the feedback can
+      // silently retract, so suppress it on those plans entirely (the meso recap
+      // is the source of truth for the next load).
+      if (LB.mesoActive(store.schedules?.find(s => s.id === session.scheduleId))) return null;
       if (LB.is531MainLift(store, entry.exId, session.dayId)) return null; // 5/3/1 main lifts climb via the Training Max, never the Smart Progression toast
       if (!LB.progressionEnabled(store, entry?.plannedRepsMax, entry?.plannedProgressionOffset)) return null;
       if (!updatedSets.filter(s => !s.warmup).every(s => s.done || s.skipped)) return null;
@@ -1496,16 +1530,15 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     let overlayHoldMs = 0;
     if (progressionResult) {
       overlayHoldMs = PROGRESSION_NAV_DELAY_MS; // swap mid-overlay; the show/hide timers below keep their own 800ms + 4000ms
+      // The overlay only fires on non-autoregulating plans (meso/auto plans
+      // suppress it above), so there's no meso recovery sheet to compete with
+      // here. A pinned note on the next exercise CAN still fire on the upcoming
+      // navigation, so flag the celebration as pending to hold that note behind
+      // it until it clears (see the pinned-note trigger).
+      progressionPendingRef.current = true;
       setTimeout(() => {
-        // If this same last-set-done also opened a meso feedback sheet
-        // (joint/pump/volume), don't slam the overlay on top of it — stash it;
-        // the flush effect shows it once every sheet is answered.
-        if (anyMesoSheetOpenRef.current) {
-          pendingProgressionRef.current = progressionResult;
-        } else {
-          setProgressionUnlocked(progressionResult);
-          setTimeout(() => setProgressionUnlocked(null), 4000);
-        }
+        setProgressionUnlocked(progressionResult);
+        setTimeout(() => { progressionPendingRef.current = false; setProgressionUnlocked(null); }, 4000);
       }, 800);
     } else if (!entry.sets[setIdx]?.warmup && !isDeloadSession) {
       const completed = entry.sets[setIdx];
@@ -2197,6 +2230,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       // via the gain sheet's onClose) whose mesoState freshness differs.
       if (isComplete) mesoNextNumRef.current = (mesoState.completions ?? 0) + 2;
       const gains = computeMesoGains(isComplete); // also flushes final meso state to store
+      // Persist a durable recap (feedback given + bumps/cuts earned) onto the
+      // session so the detail screen can show it later; survives across devices.
+      const recap = buildMesoRecap(gains);
+      if (recap) updateSession(sess => ({ ...sess, mesoRecap: recap }));
       if (gains.length > 0) {
         mesoGainNavRef.current = session.id;
         setMesoGainItems(gains);
@@ -2324,13 +2361,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const newBestShownRef = useRefT({}); // exId → true once a NEW BEST flashed (max once per exercise per session)
   const [cardioPR, setCardioPR] = useStateT(null);
   const [progressionUnlocked, setProgressionUnlocked] = useStateT(null);
-  // The "Progression unlocked" overlay and the meso feedback sheets both fire
-  // off the same last-working-set-done event, so they'd otherwise stack. When a
-  // feedback sheet is open we stash the overlay here and show it once every
-  // sheet is answered (see the flush effect near the meso sheet state), so it's
-  // always sequential: questions first, then the celebration.
-  const pendingProgressionRef = useRefT(null);
-  const anyMesoSheetOpenRef = useRefT(false); // latest "a meso sheet is open", for completeSet's deferred-show timer
+  // Set while the "Progression unlocked" overlay is pending/on screen. That
+  // overlay only fires on non-autoregulating plans (meso/auto plans hand the
+  // load to the feedback engine and show no bump toast at all), where the only
+  // other thing that can pop on the next exercise is a pinned note, so this just
+  // holds that note behind the celebration until it clears. See the pinned-note
+  // trigger, which defers while this is set.
+  const progressionPendingRef = useRefT(false);
   const [screenFlash, setScreenFlash] = useStateT(false);
   const [restModalOpen, setRestModalOpen] = useStateT(() => {
     const rs = session.restStart ?? null;
@@ -2465,8 +2502,16 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const [sessionNoteOpen, setSessionNoteOpen] = useStateT(false);
   const [exNoteOpen, setExNoteOpen] = useStateT(false);
   const [exNoteVal, setExNoteVal] = useStateT('');
+  const [exNotePinned, setExNotePinned] = useStateT(false);
   const [planDiffOpen, setPlanDiffOpen] = useStateT(false);
   const [planDiff, setPlanDiff] = useStateT([]);
+  // After "Update plan", walk each newly-added rep-based exercise through the plan
+  // editor so it lands in the plan WITH a rep target instead of a blank one. The
+  // queue holds the session entries to configure; the ref collects each editor's
+  // saved patch, keyed by exId, for applyPlanAndFinish to fold in.
+  const [repTargetQueue, setRepTargetQueue] = useStateT([]);
+  const [repTargetIdx, setRepTargetIdx] = useStateT(0);
+  const addedRepPatchesRef = useRefT({});
   const [swapOpen, setSwapOpen] = useStateT(false);
   const [addOpen, setAddOpen] = useStateT(() => !!(session.isFreestyle && session.entries.length === 0));
   const [addSupersetData, setAddSupersetData] = useStateT(null); // { newIdx } | null
@@ -2528,6 +2573,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // Meso 2), so the joint + pump/volume questions stay — they gate the boost —
   // while the soreness question (pure set-delta, no weight gate) is skipped.
   const mesoLastWeek = mesoState != null && mesoWeek != null && mesoState.weeks != null && mesoWeek >= mesoState.weeks;
+  // The "≥X reps · next weight" hint is Smart Progression's promise. On a meso
+  // plan the feedback engine owns the weight from week 2 on (Smart Progression is
+  // vetoed, see LB.resolveMesoSeedSuggestion), so instead of promising a bump that
+  // can't fire we show an "auto · feedback-driven" label there. The SP promise
+  // still shows on non-meso plans and in the first block's week 1, where Smart
+  // Progression is actually the weight authority.
+  const spHintApplies = !mesoState || !LB.mesoActive(mesoSch) || (mesoWeek === 1 && (mesoState.completions ?? 0) === 0);
   // Beyond-failure block: a negative RIR target prescribes |RIR| lengthened
   // partials on every working set this session (RIR -3 → 3 partials). Auto-
   // attached at set completion / seeded into the intensity-chain finisher.
@@ -2658,19 +2710,6 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const [mesoVolumeExIds, setMesoVolumeExIds] = useStateT([]); // exId+dayId pairs for delta
   const [mesoPumpAnswer, setMesoPumpAnswer] = useStateT(null);
   const [mesoVolumeAnswer, setMesoVolumeAnswer] = useStateT(null);
-  // Keep the "a meso feedback sheet is open" ref fresh each render (completeSet's
-  // deferred-show timer reads it), and once all three sheets are closed, flush a
-  // stashed "Progression unlocked" overlay — so the celebration lands AFTER the
-  // questions instead of covering them.
-  anyMesoSheetOpenRef.current = mesoSorenessOpen || mesoJointOpen || mesoVolumeOpen;
-  useEffectT(() => {
-    if (!mesoSorenessOpen && !mesoJointOpen && !mesoVolumeOpen && pendingProgressionRef.current) {
-      const result = pendingProgressionRef.current;
-      pendingProgressionRef.current = null;
-      setProgressionUnlocked(result);
-      setTimeout(() => setProgressionUnlocked(null), 4000);
-    }
-  }, [mesoSorenessOpen, mesoJointOpen, mesoVolumeOpen]);
   // Soreness/joint use a select-then-confirm step (like volume already did)
   // so a single mistap only highlights an option instead of committing it.
   const [mesoSorenessSel, setMesoSorenessSel] = useStateT(null);
@@ -2716,7 +2755,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     for (const rec of Object.values(a.volume || {})) {
       if (!rec || !rec.muscle) continue;
       if (rec.pump === 'moderate' || rec.pump === 'amazing') pumpOk.add(rec.muscle);
-      if (rec.volume === 'just_right' || rec.volume === 'not_enough') volumeOk.add(rec.muscle);
+      if (LB.volumeAnswerAllowsBump(rec.volume, LB.autoregLoadOnly(mesoSch))) volumeOk.add(rec.muscle);
     }
     const soreBlock = new Set();
     for (const rec of Object.values(a.soreness || {})) { if (rec && rec.answer === 'still_sore' && rec.muscle) soreBlock.add(rec.muscle); }
@@ -2798,6 +2837,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // the difference instead of stacking a second contribution.
   const handleSorenessAnswer = (answer, muscle) => {
     setMesoSorenessOpen(false);
+    sorenessPendingRef.current = false; // pinned note may show now
     setMesoSorenessSel(null);
     mesoEditingRef.current.soreness = null;
     if (!mesoState || !muscle) return;
@@ -2962,7 +3002,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     if (!mesoState || !mesoVolumeExIds.length) return;
     const muscle = mesoVolumeMusc;
     if (pump === 'moderate' || pump === 'amazing') mesoPumpOkRef.current.add(muscle); else mesoPumpOkRef.current.delete(muscle);
-    if (volume === 'just_right' || volume === 'not_enough') mesoVolumeOkRef.current.add(muscle); else mesoVolumeOkRef.current.delete(muscle);
+    if (LB.volumeAnswerAllowsBump(volume, LB.autoregLoadOnly(mesoSch))) mesoVolumeOkRef.current.add(muscle); else mesoVolumeOkRef.current.delete(muscle);
 
     const record = mesoAnswersRef.current.volume[muscle] || { muscle, exIds: mesoVolumeExIds };
     record.pump = pump;
@@ -3103,7 +3143,16 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const SORENESS_LABELS = { never: 'Never sore', healed_long: 'Healed a while ago', healed_just: 'Healed just in time', still_sore: 'Still sore', very_sore: 'Very sore' };
   const JOINT_LABELS = { none: 'None', noticeable: 'Noticeable', sharp: 'Sharp pain' };
   const PUMP_LABELS = { low: 'Low', moderate: 'Moderate', amazing: 'Amazing' };
-  const VOLUME_LABELS = { not_enough: 'Not enough', just_right: 'Just right', pushed: 'Pushed my limits', too_much: 'Too much' };
+  // Load-only autoregulate plans don't adjust volume, so the "volume" answer's
+  // only remaining effect is gating the weight bump (see handleVolumeAnswer /
+  // computeMesoGains). Relabel the SAME answers/column as a weight-feel question
+  // there, so what the lifter is asked matches what actually happens: too light /
+  // just right lets the weight climb, hard / too heavy holds it. Same storage,
+  // same calculation, only the strings change.
+  const weightFeelMode = LB.autoregLoadOnly(mesoSch);
+  const VOLUME_LABELS = weightFeelMode
+    ? { not_enough: 'Too light', just_right: 'Just right', pushed: 'Hard', too_much: 'Too heavy' }
+    : { not_enough: 'Not enough', just_right: 'Just right', pushed: 'Pushed my limits', too_much: 'Too much' };
   // Every answered question this session, grouped by muscle in workout order
   // (the order questions are actually asked within a muscle group: Soreness
   // first, then each exercise's Joint check, then Pump & Volume last) — for
@@ -3139,11 +3188,58 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         generalRows.push({ key: 'soreness-' + muscle, title: 'Soreness', sub: SORENESS_LABELS[sRec.answer] || sRec.answer, onEdit: () => openSorenessEdit(muscle) });
       }
       if (vRec?.pump != null && vRec?.volume != null) {
-        generalRows.push({ key: 'volume-' + muscle, title: 'Pump & Volume', sub: `${PUMP_LABELS[vRec.pump] || vRec.pump} pump · ${VOLUME_LABELS[vRec.volume] || vRec.volume}`, onEdit: () => openVolumeEdit(muscle) });
+        generalRows.push({ key: 'volume-' + muscle, title: weightFeelMode ? 'Pump & Weight' : 'Pump & Volume', sub: `${PUMP_LABELS[vRec.pump] || vRec.pump} pump · ${VOLUME_LABELS[vRec.volume] || vRec.volume}`, onEdit: () => openVolumeEdit(muscle) });
       }
       if (jointRows.length || generalRows.length) groups.push({ muscle, jointRows, generalRows });
     });
     return groups;
+  };
+
+  // Serializable snapshot of this session's meso feedback + earned bumps/cuts,
+  // written onto the session (meso_recap column) at finish so the session detail
+  // screen can show it durably on any device. The live mesoRecapGroups rows and
+  // mesoGainItems state only existed in localStorage / React state and vanished
+  // once the session was left. Reuses the exact same label logic (drops the
+  // onEdit closures, which aren't serializable and only matter mid-session).
+  const buildMesoRecap = (gains) => {
+    if (!mesoState) return null;
+    const groups = mesoRecapGroups().map(g => ({
+      muscle: g.muscle,
+      general: g.generalRows.map(r => ({ title: r.title, sub: r.sub })),
+      joint: g.jointRows.map(r => ({ title: r.title, sub: r.sub })),
+    })).filter(g => g.general.length || g.joint.length);
+    const gainRows = (gains || []).map(g => ({
+      name: g.name, weightDelta: g.weightDelta || 0, setDelta: g.setDelta || 0,
+    })).filter(g => g.weightDelta || g.setDelta);
+    // Nothing to remember: no feedback answered and no bump/cut earned.
+    if (!groups.length && !gainRows.length) return null;
+    // `raw` is the durable copy of the raw per-question answer records (answer
+    // codes, per-key contrib, resolved soreness targets, joint flagBaseline,
+    // pumpLowApplied) plus the negative-slot ownership and the freeze context.
+    // These only ever lived in device localStorage (loadMesoAskedSets) and were
+    // wiped at finish, so post-hoc feedback editing had no source. Snapshotting
+    // them here (from the still-populated in-memory refs, not localStorage) makes
+    // the last session's feedback correctable later via LB.replayMesoSession.
+    // JSON-cloned so a later store mutation can't alias into these records.
+    // mesoAnswersRef.current IS the { soreness, joint, volume } records object
+    // (useRefT(mesoAskedInitRef.current.answers)), so clone it directly, no
+    // `.answers` sub-key.
+    const raw = (groups.length && mesoAnswersRef.current) ? {
+      answers: JSON.parse(JSON.stringify(mesoAnswersRef.current)),
+      negOwner: { ...(mesoNegativeDeltaKeysRef.current || {}) },
+      frozen: !!(mesoLastWeek || weightFeelMode),
+      dayId: session.dayId ?? null,
+    } : null;
+    return {
+      loadOnly: !!weightFeelMode,
+      meso: mesoState.weeks != null,
+      week: mesoWeek ?? null,
+      weeks: mesoState.weeks ?? null,
+      unit: store.settings?.unit || 'kg',
+      groups,
+      gains: gainRows,
+      ...(raw ? { raw } : {}),
+    };
   };
 
   // Compute per-exercise weight boosts earned this session and return gain items for
@@ -3152,6 +3248,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     if (!mesoState) return [];
     const unit = store.settings?.unit || 'kg';
     const weightBoostMap = {};
+    const repMissCounts = { ...(mesoState.repMissCounts || {}) };
     const gainMap = {}; // key → { name, setDelta, weightDelta }
 
     // Set changes recorded during feedback (positive = gain, negative = reduction)
@@ -3160,44 +3257,78 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       gainMap[key].setDelta += (delta ?? 1);
     }
 
-    // Weight boosts: joint fine + pump ok + volume ok + all reps hit
+    // Weight boosts (earn) + rep-miss streak (cut), both driven purely by
+    // rep performance, independently of the joint/pump/volume feedback below
+    // (which only gates the EARN side, unchanged). Computed unconditionally,
+    // same as before this streak existed, a deload session's own feedback
+    // Sets are always empty (no questions asked), so the EARN side already
+    // self-excludes; PERSISTING either side is what's actually gated for
+    // deload, below, matching the pre-existing weightBoosts pattern.
+    // The rep-miss streak must advance at most once per exercise-key per session:
+    // a day that programs the same exercise twice (repeat lift, or a superset
+    // reusing it) shares one key and would otherwise double-count into an instant
+    // cut instead of two consecutive sessions.
+    const streakSeen = new Set();
     for (const e of session.entries) {
       if (e.isCardio) continue;
       const exId = e.exId;
       const ex = store.exercises?.find(x => x.id === exId);
       const muscle = primaryMuscleForExercise(ex);
+      const key = exId + '_' + session.dayId;
 
+      const workingSets = e.sets.filter(s => !s.warmup && !s.skipped);
+      if (!workingSets.length) continue;
+      // An exercise with no confirmed working set was not actually attempted
+      // (finish() seals it skipped): it is neither a hit nor a rep miss.
+      // computeMesoGains runs on the pre-seal session, so guard here to match the
+      // seal, otherwise an untouched exercise would count as an early rep miss.
+      if (!workingSets.some(s => s.done)) continue;
+      // allHit gates the earn side (strict, unchanged); earlyMiss (a looser
+      // bar, the last working set is exempt) feeds the miss-streak cut below.
+      // See LB.mesoRepOutcome for the exact per-set/range-aware rules.
+      const { allHit, earlyMiss } = LB.mesoRepOutcome(workingSets, e.plannedReps ?? null, e.plannedRepsPerSet, e.plannedRepsMax ?? null);
+
+      const catCfg = ex?.equipment ? (store.settings?.equipmentConfig?.[ex.equipment] ?? {}) : {};
+      const increment = catCfg.increment ?? (unit === 'lbs' ? 5 : 2.5);
+
+      if (!streakSeen.has(key)) {
+        streakSeen.add(key);
+        if (earlyMiss) {
+          const n = (repMissCounts[key] || 0) + 1;
+          if (n >= 2) {
+            // Two misses in a row: the weight itself is too heavy for this rep
+            // target. Cut it back one increment for next session and re-arm.
+            weightBoostMap[key] = -increment;
+            if (!gainMap[key]) gainMap[key] = { name: e.name, setDelta: 0, weightDelta: 0 };
+            gainMap[key].weightDelta = -increment;
+            repMissCounts[key] = 0;
+          } else {
+            repMissCounts[key] = n;
+          }
+        } else {
+          repMissCounts[key] = 0;
+        }
+      }
+
+      if (!allHit) continue;
       if (!mesoJointFineRef.current.has(exId)) continue;
       if (muscle && !mesoPumpOkRef.current.has(muscle)) continue;
       if (muscle && !mesoVolumeOkRef.current.has(muscle)) continue;
       // Load-only: still-sore holds the weight for that muscle this session.
       if (LB.autoregLoadOnly(mesoSch) && muscle && mesoSoreBlockRef.current.has(muscle)) continue;
 
-      const workingSets = e.sets.filter(s => !s.warmup && !s.skipped);
-      if (!workingSets.length) continue;
-      const plannedReps = e.plannedReps ?? null;
-      const allHit = workingSets.every(s => {
-        if (!s.done) return false;
-        if (plannedReps == null) return true;
-        const reps = LB.effReps(s);
-        return reps != null && reps >= plannedReps;
-      });
-      if (!allHit) continue;
-
-      const catCfg = ex?.equipment ? (store.settings?.equipmentConfig?.[ex.equipment] ?? {}) : {};
-      const increment = catCfg.increment ?? (unit === 'lbs' ? 5 : 2.5);
-      const key = exId + '_' + session.dayId;
       weightBoostMap[key] = increment;
       if (!gainMap[key]) gainMap[key] = { name: e.name, setDelta: 0, weightDelta: 0 };
       gainMap[key].weightDelta = increment;
     }
 
     // Weight boosts must be re-earned every session (min reps + joint fine +
-    // pump ok + volume ok, all re-confirmed this session). Replace this
-    // session's exercise keys wholesale — earned ones set, un-earned ones
-    // dropped — leaving other training days' boosts untouched. A deload
-    // session collects no feedback, so it must NOT wipe boosts earned before
-    // it: skip the recompute entirely and leave the map as-is.
+    // pump ok + volume ok, all re-confirmed this session), or, on the other
+    // side, cut by the rep-miss streak above. Replace this session's exercise
+    // keys wholesale, earned/cut ones set, everything else dropped, leaving
+    // other training days' boosts untouched. A deload session collects no
+    // feedback, so it must NOT wipe boosts earned before it: skip the
+    // recompute entirely and leave the map (and the miss streak) as-is.
     // mesoState here is the React state — already contains all feedback deltas from this session.
     const newWeightBoosts = isMesoDeloadSession
       ? (mesoState.weightBoosts || {})
@@ -3206,7 +3337,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           session.entries.filter(e => !e.isCardio).map(e => e.exId + '_' + session.dayId),
           weightBoostMap,
         );
-    const withBoosts = { ...mesoState, weightBoosts: newWeightBoosts };
+    const withBoosts = {
+      ...mesoState,
+      weightBoosts: newWeightBoosts,
+      repMissCounts: isMesoDeloadSession ? (mesoState.repMissCounts || {}) : repMissCounts,
+    };
     // If the last meso week just finished: bump completions + set pendingMeso2 so the
     // home screen can offer Meso 2 after a deload (or immediately). isComplete is
     // true for EVERY session of the final week, and this runs per session-end, so
@@ -3231,25 +3366,61 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   useEffectT(() => {
     if (!mesoState || !entry || isCardio || isMesoDeloadSession) return;
     if (mesoWeek == null) return; // pending period — meso not yet started
-    if (mesoWeek === 1) return; // week 1: no previous meso session to be sore from
     if (mesoLastWeek) return; // final week: set deltas frozen, and soreness only drives deltas
     // Load-only keeps asking soreness: there it holds the weight (recovery brake)
     // instead of adjusting sets — see handleSorenessAnswer / computeMesoGains.
     const ex = entry ? store.exercises?.find(e => e.id === entry.exId) : null;
     const pm = primaryMuscleForExercise(ex);
     if (!pm || askedSorenessRef.current.has(pm)) return;
+    // Week 1 normally has no previous meso session to be sore from, so it stays
+    // silent. But when autoregulation is switched on mid-plan (e.g. cycle 10 of a
+    // long-running plan), week 1 sits on top of real prior training, so ask
+    // soreness if THIS muscle was trained before the block began. A genuinely
+    // fresh plan has no such history and stays silent as before.
+    if (mesoWeek === 1) {
+      const startTs = mesoState.startedAt ? new Date(mesoState.startedAt).getTime()
+        : (mesoState.startDate ? LB.parseDate(mesoState.startDate).getTime() : null);
+      const soreRef = LB.mesoMuscleTrainedBeforeStart(
+        store.sessions, mesoState.scheduleId, startTs, pm,
+        exId => primaryMuscleForExercise(store.exercises?.find(x => x.id === exId)));
+      if (!soreRef) return;
+    }
     const isFirst = !session.entries.slice(0, exIdx).some(e => {
       const ex2 = store.exercises?.find(x => x.id === e.exId);
       return primaryMuscleForExercise(ex2) === pm;
     });
     if (!isFirst) return;
+    // Hold the next muscle's soreness while the exercise we just finished is
+    // still asking its own joint/pump/volume, so the order stays: this
+    // exercise's recovery first, then the next muscle's soreness. Re-runs when
+    // those sheets close (deps).
+    if (mesoJointOpen || mesoVolumeOpen) return;
     askedSorenessRef.current.add(pm);
     persistMesoAsked();
     setMesoSorenessMusc(pm);
     setMesoSorenessSel(null);
     mesoEditingRef.current.soreness = null;
+    // Recovery check goes first; the pinned-note effect (declared below) sees
+    // this flag in the same render pass and defers until soreness is answered.
+    sorenessPendingRef.current = true;
     setMesoSorenessOpen(true);
-  }, [exIdx, !!mesoState]);
+  }, [exIdx, !!mesoState, mesoJointOpen, mesoVolumeOpen]);
+
+  // Pinned exercise note: a must-acknowledge cue that also fires on exercise
+  // start, but AFTER the soreness recovery check. Declared after the soreness
+  // effect so it runs later in the same pass and can observe sorenessPendingRef;
+  // re-runs when the soreness sheet closes (dep) to show once soreness is done.
+  useEffectT(() => {
+    if (!entry || isCardio) return;
+    const ex = store.exercises?.find(e => e.id === entry.exId);
+    if (!ex || !ex.note_pinned || !(ex.note || '').trim()) return;
+    if (pinnedNoteSeenRef.current.has(entry.exId)) return;
+    // Queue behind the progression celebration and every recovery sheet, so it
+    // is the last thing to pop on a busy exercise-start (bump, soreness,
+    // joint/pump/volume all clear first). Re-runs as each of them closes.
+    if (progressionPendingRef.current || mesoSorenessOpen || sorenessPendingRef.current || mesoJointOpen || mesoVolumeOpen) return;
+    setPinnedNote({ exId: entry.exId, name: ex.name, note: ex.note });
+  }, [exIdx, mesoSorenessOpen, !!progressionUnlocked, mesoJointOpen, mesoVolumeOpen]);
 
   // Joint + pump/volume trigger: when all working sets of an exercise are done,
   // ask joint feedback. Fires whenever the current entry's sets change.
@@ -3940,11 +4111,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   };
 
   const saveExNote = () => {
-    setStore(s => ({ ...s, exercises: s.exercises.map(e => e.id === entry.exId ? { ...e, note: exNoteVal.trim() } : e) }));
+    const trimmed = exNoteVal.trim();
+    setStore(s => ({ ...s, exercises: s.exercises.map(e => e.id === entry.exId ? { ...e, note: trimmed, note_pinned: trimmed ? exNotePinned : false } : e) }));
     setExNoteOpen(false);
   };
   const requestCloseExNote = async () => {
-    const dirty = exNoteVal !== (exercise?.note || '');
+    const dirty = exNoteVal !== (exercise?.note || '') || exNotePinned !== !!exercise?.note_pinned;
     if (dirty && !await confirm('Your exercise note won\'t be saved.', { title: 'Discard changes?', ok: 'Discard', cancel: 'Keep editing', danger: true })) return;
     setExNoteOpen(false);
   };
@@ -3995,33 +4167,39 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   };
 
   const doAdd = (ids) => {
-    const newExId = Array.isArray(ids) ? ids[0] : ids;
+    const idList = Array.isArray(ids) ? ids : [ids];
+    const newExId = idList[0];
     const jump = addAndJumpRef.current;
     setAddOpen(false);
     if (session.entries.length === 0) {
-      // First exercise in an empty session — skip the superset prompt and insert directly.
+      // First exercise(s) in an empty session, skip the superset prompt and
+      // insert directly. Unlike every other picker in this file, the one for
+      // an empty session allows multi-select (its "Add N exercises →" button),
+      // so idList can hold more than one id here: build one standalone entry
+      // per id, in picked order, instead of dropping every id but the first.
       let isNewCardio = false;
       setStore(s => {
         const sess = s.sessions.find(x => x.id === session.id);
         if (!sess) return s;
-        const newEx = LB.findExercise(s, newExId);
-        isNewCardio = newEx?.movement_type === 'cardio';
-        let newEntry;
-        if (isNewCardio) {
-          newEntry = { exId: newExId, name: newEx?.name || newExId, isCardio: true, plannedSets: 0, plannedReps: null, plannedRepsPerSet: null, sets: [], cardioDone: false, cardioData: null, note: '', supersetGroup: null, addedDuringSession: true };
-        } else {
+        const newEntries = idList.map(id => {
+          const newEx = LB.findExercise(s, id);
+          const isCardio = newEx?.movement_type === 'cardio';
+          if (id === newExId) isNewCardio = isCardio;
+          if (isCardio) {
+            return { exId: id, name: newEx?.name || id, isCardio: true, plannedSets: 0, plannedReps: null, plannedRepsPerSet: null, sets: [], cardioDone: false, cardioData: null, note: '', supersetGroup: null, addedDuringSession: true };
+          }
           const isUni = newEx?.movement_type === 'unilateral';
           const bwKg = LB.shouldPullBodyweight(newEx) ? LB.latestBodyweight(s) ?? null : null;
-          const last = LB.bestRecentEntry(s, newExId, session.dayId);
-          const suggestion = LB.progressionSuggestion(s, newExId, session.dayId, null, null, last);
-          const seedSets = LB.buildSeedSets({ exId: newExId, sets: 3, repsPerSet: null }, last, suggestion, isUni, s, bwKg);
-          newEntry = { exId: newExId, name: newEx?.name || newExId, plannedSets: 3, plannedReps: null, plannedRepsPerSet: null, sets: seedSets, note: '', supersetGroup: null, addedDuringSession: true };
-        }
+          const last = LB.bestRecentEntry(s, id, session.dayId);
+          const suggestion = LB.progressionSuggestion(s, id, session.dayId, null, null, last);
+          const seedSets = LB.buildSeedSets({ exId: id, sets: 3, repsPerSet: null }, last, suggestion, isUni, s, bwKg);
+          return { exId: id, name: newEx?.name || id, plannedSets: 3, plannedReps: null, plannedRepsPerSet: null, sets: seedSets, note: '', supersetGroup: null, addedDuringSession: true };
+        });
         return {
           ...s,
           sessions: s.sessions.map(x => x.id !== session.id ? x : {
             ...x,
-            entries: [newEntry],
+            entries: newEntries,
             currentExIdx: 0,
           }),
         };
@@ -4031,8 +4209,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         const ff = firstFieldForExercise(LB.findExercise(store, newExId));
         if (ff) setTimeout(() => activateKb(0, ff), 200);
       }
+    } else if (idList.length > 1) {
+      // Mid-session multi-select: several exercises picked at once go in solo,
+      // in picked order, no superset prompt (which only fits a single new pick).
+      if (jump) addAndJumpRef.current = false;
+      addSoloExercises(idList, jump);
     } else if (addSupersetCandidates.length === 0) {
-      // Nothing eligible to pair with — skip the superset prompt entirely
+      // Nothing eligible to pair with, skip the superset prompt entirely
       // rather than show an empty picker.
       if (jump) addAndJumpRef.current = false;
       linkNewExercise(null, newExId, jump);
@@ -4108,6 +4291,38 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       const ff = newEx?.movement_type !== 'cardio' ? firstFieldForExercise(newEx) : null;
       if (ff) setTimeout(() => activateKb(0, ff), 200);
     }
+  };
+
+  // Mid-session multi-select: insert each picked id as a standalone entry right
+  // after the current one, in picked order. The superset prompt only makes sense
+  // for a single new exercise, so multi picks always go in solo.
+  const addSoloExercises = (idList, jump) => {
+    setStore(s => {
+      const sess = s.sessions.find(x => x.id === session.id);
+      if (!sess) return s;
+      const currentIdx = sess.currentExIdx || 0;
+      let entries = sess.entries.slice();
+      let insertAt = currentIdx + 1;
+      idList.forEach(id => {
+        const newEx = LB.findExercise(s, id);
+        let newEntry;
+        if (newEx?.movement_type === 'cardio') {
+          newEntry = { exId: id, name: newEx?.name || id, isCardio: true, plannedSets: 0, plannedReps: null, plannedRepsPerSet: null, sets: [], cardioDone: false, cardioData: null, note: '', supersetGroup: null, addedDuringSession: true };
+        } else {
+          const isUni = newEx?.movement_type === 'unilateral';
+          const bwKg = LB.shouldPullBodyweight(newEx) ? LB.latestBodyweight(s) ?? null : null;
+          const insertOcc = entries.slice(0, insertAt).filter(en => en.exId === id).length;
+          const last = LB.bestRecentEntry(s, id, session.dayId, 3, insertOcc);
+          const suggestion = LB.progressionSuggestion(s, id, session.dayId, null, null, last, null, null, insertOcc);
+          const seedSets = LB.buildSeedSets({ exId: id, sets: 3, repsPerSet: null }, last, suggestion, isUni, s, bwKg);
+          newEntry = { exId: id, name: newEx?.name || id, plannedSets: 3, plannedReps: null, plannedRepsPerSet: null, sets: seedSets, note: '', supersetGroup: null, addedDuringSession: true };
+        }
+        entries = [...entries.slice(0, insertAt), newEntry, ...entries.slice(insertAt)];
+        insertAt += 1;
+      });
+      const newCurrentIdx = jump ? currentIdx + 1 : currentIdx;
+      return { ...s, sessions: s.sessions.map(x => x.id !== session.id ? x : { ...x, entries, currentExIdx: newCurrentIdx }) };
+    });
   };
 
   // Called from the superset modal opened by the "Add exercise" button.
@@ -4402,7 +4617,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       }
       // 4. Insert ad-hoc exercises (process in session order so chained insertions work)
       for (const diff of planDiff.filter(d => d.type === 'added')) {
-        const newItem = { exId: diff.exId, sets: diff.sets, reps: null, repsPerSet: null, supersetGroup: diff.supersetGroup };
+        // Rep target picked in the wizard (startRepTargetWizardOrApply); cardio /
+        // checkbox / time adds have none and fall back to a blank target.
+        const patch = addedRepPatchesRef.current?.[diff.exId] || null;
+        const newItem = patch
+          ? { exId: diff.exId, sets: patch.sets ?? diff.sets, reps: patch.reps ?? null, repsPerSet: patch.repsPerSet ?? null, repsMax: patch.repsMax ?? null, progressionOffset: patch.progressionOffset ?? null, plannedTechniques: patch.plannedTechniques ?? null, supersetGroup: diff.supersetGroup }
+          : { exId: diff.exId, sets: diff.sets, reps: null, repsPerSet: null, supersetGroup: diff.supersetGroup };
         const afterIdx = diff.insertAfterExId
           ? newItems.findIndex(it => it.exId === diff.insertAfterExId)
           : -1;
@@ -4428,6 +4648,62 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     }
     finish(pendingFeel);
     setPendingFeel(null);
+  };
+
+  // Prefill for the plan editor of a newly-added exercise, built from what was
+  // just logged: same reps across the working sets -> Uniform, varied -> Per Set
+  // with the exact per-set reps. The user can switch to any model in the editor.
+  const buildRepPrefill = (entry) => {
+    const working = (entry.sets || []).filter(s => !s.warmup && !s.skipped);
+    const repsOf = (s) => (s.repsL != null || s.repsR != null)
+      ? Math.min(s.repsL ?? s.repsR ?? 0, s.repsR ?? s.repsL ?? 0)
+      : s.reps;
+    const logged = working.map(repsOf);
+    const setCount = working.length || entry.plannedSets || 3;
+    const allValid = working.length > 0 && logged.every(r => r != null && r > 0);
+    if (allValid && !logged.every(r => r === logged[0])) {
+      return { exId: entry.exId, sets: setCount, reps: logged[0], repsPerSet: logged };
+    }
+    const firstValid = logged.find(r => r != null && r > 0);
+    return { exId: entry.exId, sets: setCount, reps: firstValid ?? 8 };
+  };
+  // The untouched prefill as a patch: used when the editor is dismissed without
+  // saving, so a skipped exercise still lands with a sensible target, never blank.
+  const prefillPatch = (item) => ({ sets: item.sets, reps: item.reps, repsPerSet: item.repsPerSet, repsMax: item.repsMax });
+
+  // Advance the rep-target wizard: store this exercise's target, then move to the
+  // next added exercise, or apply the plan once every one has a target.
+  const advanceRepWizard = (patch) => {
+    const entry = repTargetQueue[repTargetIdx];
+    if (entry && patch) addedRepPatchesRef.current[entry.exId] = patch;
+    const nextIdx = repTargetIdx + 1;
+    if (nextIdx >= repTargetQueue.length) {
+      setRepTargetQueue([]);
+      setRepTargetIdx(0);
+      applyPlanAndFinish();
+    } else {
+      setRepTargetIdx(nextIdx);
+    }
+  };
+
+  // From the plan-diff prompt: gather rep targets for newly-added rep-based
+  // exercises first (so they don't land in the plan blank), then apply. Cardio and
+  // checkbox/time adds carry no rep target, so with none of those it applies straight.
+  const startRepTargetWizardOrApply = () => {
+    addedRepPatchesRef.current = {};
+    const seen = new Set();
+    const queue = [];
+    for (const e of session.entries) {
+      if (!e.addedDuringSession || e.isCardio || seen.has(e.exId)) continue;
+      if (!planDiff.some(d => d.type === 'added' && d.exId === e.exId)) continue;
+      const m = LB.exerciseLogMode(store.exercises?.find(x => x.id === e.exId));
+      if (m === 'checkbox' || m === 'time') continue;
+      seen.add(e.exId);
+      queue.push(e);
+    }
+    if (!queue.length) { applyPlanAndFinish(); return; }
+    setRepTargetQueue(queue);
+    setRepTargetIdx(0);
   };
 
   // Pace-bar base: the parts that DON'T depend on `now`. The 250 ms `now` tick
@@ -4803,7 +5079,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
       {/* Progression unlocked overlay */}
       {progressionUnlocked && ReactDOM.createPortal(
-        <div onClick={() => setProgressionUnlocked(null)} style={{
+        <div onClick={() => { progressionPendingRef.current = false; setProgressionUnlocked(null); }} style={{
           position: 'fixed', top: 'env(safe-area-inset-top, 0px)', left: 0, right: 0, bottom: 0, zIndex: 160,
           background: 'var(--bg-body)',
           animation: 'improvedFade 4s ease forwards',
@@ -4904,8 +5180,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               : <SessionClock startedAt={session.startedAt} style={{ color: UI.gold, fontSize: 14, letterSpacing: '0.16em', fontWeight: 500 }} />
             }
           </div>
-          {/* rest countdown — only when active */}
-          {restStart && !restExpired && (<>
+          {/* rest countdown, stays through overrun so the red count-up (how far
+              past rest) shows in the header too, matching the modal and overlay */}
+          {restStart && (<>
             <div style={{ width: 0.5, height: 14, background: UI.hairStrong, flexShrink: 0 }} />
             <button onClick={() => setRestModalOpen(true)} style={{
               flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4,
@@ -5340,7 +5617,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                     </span>
                   ) : null}
                   {progressionTarget && (
-                    <div className="micro" style={{ color: UI.gold, opacity: 0.65, marginTop: 3 }}>≥{progressionTarget} reps · next weight</div>
+                    <div className="micro" style={{ color: UI.gold, opacity: 0.65, marginTop: 3 }}>
+                      {spHintApplies ? `≥${progressionTarget} reps · next weight` : 'auto · feedback-driven'}
+                    </div>
                   )}
                   {/* Range's own configured span is shown as a permanent badge next to the
                       exercise name instead (doesn't vary per set, so no need to repeat it here). */}
@@ -6038,8 +6317,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
         {/* Exercise note (permanent, from exercise definition) */}
         {exercise?.note && (
-          <Frame style={{ padding: 14 }} onClick={() => { setExNoteVal(exercise?.note || ''); setExNoteOpen(true); }}>
-            <div className="micro" style={{ marginBottom: 6 }}>NOTE · {entry.name.toUpperCase()}</div>
+          <Frame style={{ padding: 14 }} onClick={() => { setExNoteVal(exercise?.note || ''); setExNotePinned(!!exercise?.note_pinned); setExNoteOpen(true); }}>
+            <div className="micro" style={{ marginBottom: 6 }}>NOTE · {entry.name.toUpperCase()}{exercise?.note_pinned ? <span style={{ color: 'var(--accent)' }}> · 📌 PINNED</span> : ''}</div>
             <div style={{ fontFamily: UI.fontDisplay, fontSize: 16, color: UI.inkSoft, lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>
               {exercise.note}
             </div>
@@ -6234,7 +6513,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       </Sheet>
 
       {/* note type picker */}
-      <Sheet open={notePicker} onClose={() => setNotePicker(false)} title="Which note?">
+      <Sheet open={notePicker} onClose={() => setNotePicker(false)} title="Which note?" titleColor="var(--accent)">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           <button onClick={() => { setNotePicker(false); setSessionNoteOpen(true); }} style={{
             background: UI.bgInset, border: `1px solid ${UI.hair}`, borderRadius: 6,
@@ -6243,7 +6522,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             <div style={{ fontSize: 14, fontWeight: 600, color: UI.ink, marginBottom: 4 }}>Session note</div>
             <div style={{ fontSize: 12, color: UI.inkSoft }}>Only for this workout — e.g. how the set felt.</div>
           </button>
-          <button onClick={() => { setNotePicker(false); setExNoteVal(exercise?.note || ''); setExNoteOpen(true); }} style={{
+          <button onClick={() => { setNotePicker(false); setExNoteVal(exercise?.note || ''); setExNotePinned(!!exercise?.note_pinned); setExNoteOpen(true); }} style={{
             background: UI.bgInset, border: `1px solid ${UI.hair}`, borderRadius: 6,
             padding: '14px 16px', cursor: 'pointer', textAlign: 'left',
           }}>
@@ -6259,7 +6538,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           resets to root when the sheet closes, so it never reopens mid-drill. */}
       <Sheet open={intensityOpen} onClose={() => { setIntensityOpen(false); setIntensityPage(null); }}
         title={intensityPage === 'chained' ? 'Chained' : intensityPage === 'standalone' ? 'Standalone' : 'Intensity'}
-        accent>
+        titleColor="var(--accent)" accent>
         {(() => {
           // Exactly one intensity technique can be "in flight" at a time —
           // picking one always clears any other left unfinished (e.g. the
@@ -6855,7 +7134,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
       {/* superset-link modal (from Intensity): step 1 existing-vs-new, step 2 pick existing */}
       {supersetLinkData && (
-        <Sheet open={true} onClose={() => setSupersetLinkData(null)} title={supersetMode === 'giant' ? 'Giant Set' : 'Superset'} accent>
+        <Sheet open={true} onClose={() => setSupersetLinkData(null)} title={supersetMode === 'giant' ? 'Giant Set' : 'Superset'} titleColor="var(--accent)" accent>
           {!supersetLinkData.picking ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
               <div style={{ fontFamily: UI.fontUi, fontSize: 14, color: UI.inkSoft, lineHeight: 1.5 }}>
@@ -6916,6 +7195,15 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             resize: 'vertical', outline: 'none',
           }}
         />
+        {exNoteVal.trim() && (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginTop: 14 }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.ink, fontWeight: 600 }}>Pin note</div>
+              <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 2, lineHeight: 1.4 }}>Pops up at the start of this exercise each workout, until you tap to dismiss.</div>
+            </div>
+            <Toggle on={exNotePinned} onToggle={() => setExNotePinned(v => !v)} />
+          </div>
+        )}
         <Btn onClick={saveExNote} style={{ marginTop: 12, width: '100%' }}>Save</Btn>
       </Sheet>
 
@@ -7050,19 +7338,41 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <Btn kind="ghost" onClick={() => { setPlanDiffOpen(false); finish(pendingFeel); setPendingFeel(null); }} style={{ flex: 1 }}>Leave plan</Btn>
-          <Btn onClick={() => { setPlanDiffOpen(false); applyPlanAndFinish(); }} style={{ flex: 2 }}>Update plan</Btn>
+          <Btn onClick={() => { setPlanDiffOpen(false); startRepTargetWizardOrApply(); }} style={{ flex: 2 }}>Update plan</Btn>
         </div>
       </Sheet>
+
+      {/* Rep-target wizard: newly-added exercises get the full plan editor (pre-filled
+          from what was just logged) so they land in the plan WITH a rep target. */}
+      {repTargetQueue.length > 0 && repTargetIdx < repTargetQueue.length && window.Screens?.ExerciseItemEditor && (() => {
+        const entry = repTargetQueue[repTargetIdx];
+        const item = buildRepPrefill(entry);
+        const ex = store.exercises?.find(x => x.id === entry.exId);
+        return (
+          <window.Screens.ExerciseItemEditor
+            key={entry.exId + '-' + repTargetIdx}
+            item={item}
+            exName={ex?.name || entry.name}
+            isCheckboxOnly={false}
+            queuePos={repTargetIdx + 1}
+            queueTotal={repTargetQueue.length}
+            store={store}
+            setStore={setStore}
+            onClose={() => advanceRepWizard(prefillPatch(item))}
+            onSave={(patch) => advanceRepWizard(patch)}
+          />
+        );
+      })()}
 
       {/* exercise swap picker */}
       {swapOpen && <window.Screens.ExercisePicker store={store} setStore={setStore} onClose={() => setSwapOpen(false)} onPick={doSwap} singleSelect />}
 
       {/* exercise add picker */}
-      {addOpen && <window.Screens.ExercisePicker store={store} setStore={setStore} onClose={() => setAddOpen(false)} onPick={doAdd} singleSelect />}
+      {addOpen && <window.Screens.ExercisePicker store={store} setStore={setStore} onClose={() => setAddOpen(false)} onPick={doAdd} />}
 
       {/* superset modal — step 1: ask yes/no; step 2: pick exercise to link */}
       {addSupersetData && (
-        <Sheet open={true} onClose={() => confirmAdd(null)} title="Add exercise">
+        <Sheet open={true} onClose={() => confirmAdd(null)} title="Add exercise" titleColor="var(--accent)">
           {!addSupersetData.picking ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
               <div style={{ fontFamily: UI.fontUi, fontSize: 14, color: UI.inkSoft, lineHeight: 1.5 }}>
@@ -7106,16 +7416,27 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               color: UI.inkSoft, borderRadius: 6, cursor: 'pointer',
               fontSize: 11, letterSpacing: '0.12em', textTransform: 'uppercase', fontFamily: UI.fontUi, fontWeight: 500,
             }}>Skip</button>
-            <button onClick={() => persistRestStart(restStart - 30000, activeRestDef)} style={{
-              flex: 1, padding: '12px 0', background: 'transparent', border: `1px solid ${UI.hairStrong}`,
-              color: UI.inkSoft, borderRadius: 6, cursor: 'pointer',
-              fontSize: 11, letterSpacing: '0.12em', textTransform: 'uppercase', fontFamily: UI.fontUi, fontWeight: 500,
-            }}>−30s</button>
-            <button onClick={() => persistRestStart(restStart + 30000, activeRestDef)} style={{
-              flex: 1, padding: '12px 0', background: 'transparent', border: `1px solid ${UI.hairStrong}`,
-              color: UI.inkSoft, borderRadius: 6, cursor: 'pointer',
-              fontSize: 11, letterSpacing: '0.12em', textTransform: 'uppercase', fontFamily: UI.fontUi, fontWeight: 500,
-            }}>+30s</button>
+            {/* Adjusting a rest that is already over is meaningless (persistRestStart
+                clamps to now and would just re-fire the "rest done" push), so once
+                overrun we drop the +/-30s buttons entirely and say so plainly rather
+                than leaving two greyed, unexplained controls. */}
+            {restExpired ? (
+              <div style={{
+                flex: 2, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 11, letterSpacing: '0.12em', textTransform: 'uppercase', fontFamily: UI.fontUi, fontWeight: 500, color: UI.inkGhost,
+              }}>Rest is over</div>
+            ) : (<>
+              <button onClick={() => persistRestStart(restStart - 30000, activeRestDef)} style={{
+                flex: 1, padding: '12px 0', background: 'transparent', border: `1px solid ${UI.hairStrong}`,
+                color: UI.inkSoft, borderRadius: 6, cursor: 'pointer',
+                fontSize: 11, letterSpacing: '0.12em', textTransform: 'uppercase', fontFamily: UI.fontUi, fontWeight: 500,
+              }}>−30s</button>
+              <button onClick={() => persistRestStart(restStart + 30000, activeRestDef)} style={{
+                flex: 1, padding: '12px 0', background: 'transparent', border: `1px solid ${UI.hairStrong}`,
+                color: UI.inkSoft, borderRadius: 6, cursor: 'pointer',
+                fontSize: 11, letterSpacing: '0.12em', textTransform: 'uppercase', fontFamily: UI.fontUi, fontWeight: 500,
+              }}>+30s</button>
+            </>)}
           </div>
         </div>
       </Sheet>
@@ -7328,6 +7649,18 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           : (store.settings?.equipmentConfig?.plateInventoryKg ?? PLATES_KG)}
       />
 
+      {/* Pinned exercise note, must acknowledge on exercise start (note_pinned) */}
+      {pinnedNote && (
+        <Sheet open={!!pinnedNote} onClose={() => {}} title={pinnedNote.name || 'Note'} titleColor="var(--accent)" accent center>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+            <i className="fa-solid fa-thumbtack" style={{ color: 'var(--accent)', fontSize: 11 }} />
+            <span className="micro" style={{ color: UI.inkFaint, letterSpacing: '0.12em' }}>Pinned note</span>
+          </div>
+          <div style={{ fontFamily: UI.fontUi, fontSize: 15, color: UI.ink, lineHeight: 1.6, whiteSpace: 'pre-wrap', marginBottom: 20 }}>{pinnedNote.note}</div>
+          <Btn onClick={() => { pinnedNoteSeenRef.current.add(pinnedNote.exId); setPinnedNote(null); }} style={{ width: '100%' }}>Got it</Btn>
+        </Sheet>
+      )}
+
       {/* ── Meso feedback sheets ─────────────────────────────────────────────── */}
 
       {/* Soreness */}
@@ -7418,11 +7751,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             </button>
           ))}
         </div>
-        <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Volume</div>
-        <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.inkSoft, marginBottom: 14, lineHeight: 1.5 }}>Overall, how did the {mesoVolumeMusc ? mesoVolumeMusc.toLowerCase() + ' ' : ''}workload sit with you today?</div>
+        <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4, letterSpacing: '0.06em', textTransform: 'uppercase' }}>{weightFeelMode ? 'Weight' : 'Volume'}</div>
+        <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.inkSoft, marginBottom: 14, lineHeight: 1.5 }}>{weightFeelMode
+          ? `How did the weight feel on your ${mesoVolumeMusc ? mesoVolumeMusc.toLowerCase() + ' ' : ''}sets today?`
+          : `Overall, how did the ${mesoVolumeMusc ? mesoVolumeMusc.toLowerCase() + ' ' : ''}workload sit with you today?`}</div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 20 }}>
           {['not_enough', 'just_right', 'pushed', 'too_much'].map(key => {
-            const label = key === 'not_enough' ? 'Not enough' : key === 'just_right' ? 'Just right' : key === 'pushed' ? 'Pushed my limits' : 'Too much';
+            const label = VOLUME_LABELS[key];
             const sel = mesoVolumeAnswer === key;
             return (
               <button key={key} onClick={() => setMesoVolumeAnswer(key)} style={{
@@ -7452,7 +7787,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           exercise's Joint check, Pump & Volume) to actually revise. Opened
           from the small square button in the footer nav (see "Footer nav"
           below). */}
-      <Sheet open={mesoRecapOpen} onClose={() => setMesoRecapOpen(false)} title="Session feedback">
+      <Sheet open={mesoRecapOpen} onClose={() => setMesoRecapOpen(false)} title="Session review" titleColor="var(--accent)">
         <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: 1.5 }}>
           Tap a muscle group to review and change its feedback — everything stays editable until you finish the session.
         </div>
@@ -7492,7 +7827,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           </button>
         );
         return (
-          <Sheet open={!!mesoRecapDetailMuscle} onClose={() => setMesoRecapDetailMuscle(null)} title={mesoRecapDetailMuscle ? `${mesoRecapDetailMuscle} feedback` : 'Feedback'}>
+          <Sheet open={!!mesoRecapDetailMuscle} onClose={() => setMesoRecapDetailMuscle(null)} title={mesoRecapDetailMuscle ? `${mesoRecapDetailMuscle} review` : 'Review'} titleColor="var(--accent)">
             {!!detailGroup?.jointRows.length && (<>
               <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>JOINT FEEDBACK</div>
               <div className="knurl" style={{ marginBottom: 10 }} />
@@ -7530,15 +7865,22 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               padding: '10px 0',
               borderBottom: i < mesoGainItems.length - 1 ? `1px solid ${UI.hair}` : 'none',
             }}>
-              <span style={{ fontFamily: UI.fontUi, fontSize: 14, fontWeight: 600, color: UI.ink }}>{item.name}</span>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+                <span style={{ fontFamily: UI.fontUi, fontSize: 14, fontWeight: 600, color: UI.ink }}>{item.name}</span>
+                {item.weightDelta < 0 && (
+                  <span style={{ fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.06em', textTransform: 'uppercase', color: UI.inkGhost }}>Reps missed, easing load</span>
+                )}
+              </div>
               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                 {item.setDelta !== 0 && (
                   <span style={{ fontFamily: UI.fontNum, fontSize: 12, fontWeight: 700, color: item.setDelta > 0 ? 'var(--accent)' : 'rgba(var(--danger-rgb),0.9)' }}>
                     {item.setDelta > 0 ? '+' : ''}{item.setDelta} set
                   </span>
                 )}
-                {item.weightDelta > 0 && (
-                  <span style={{ fontFamily: UI.fontNum, fontSize: 12, color: 'var(--accent)', fontWeight: 700 }}>+{item.weightDelta} {UI.unit()}</span>
+                {item.weightDelta !== 0 && (
+                  <span style={{ fontFamily: UI.fontNum, fontSize: 12, fontWeight: 700, color: item.weightDelta > 0 ? 'var(--accent)' : 'rgba(var(--danger-rgb),0.9)' }}>
+                    {item.weightDelta > 0 ? '+' : ''}{item.weightDelta} {UI.unit()}
+                  </span>
                 )}
               </div>
             </div>
