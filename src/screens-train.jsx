@@ -873,10 +873,16 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const [pinnedNote, setPinnedNote] = useStateT(null); // { exId, name, note } | null
   const pinnedNoteSeenRef = useRefT(null);
   if (pinnedNoteSeenRef.current === null) pinnedNoteSeenRef.current = new Set();
+  // True while a pinned note is on screen. A REF (not the state) so the meso
+  // soreness trigger, which runs in the SAME effect pass on an exIdx change,
+  // reads it synchronously and defers instead of stacking a second must-dismiss
+  // modal. Cleared on dismiss, which re-fires the soreness check.
+  const pinnedNoteShowingRef = useRefT(false);
   useEffectT(() => {
     if (!entry || entry.isCardio) return;
     if (!exercise || !exercise.note_pinned || !(exercise.note || '').trim()) return;
     if (pinnedNoteSeenRef.current.has(entry.exId)) return;
+    pinnedNoteShowingRef.current = true;
     setPinnedNote({ exId: entry.exId, name: exercise.name, note: exercise.note });
   }, [exIdx]);
 
@@ -3394,13 +3400,17 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       return primaryMuscleForExercise(ex2) === pm;
     });
     if (!isFirst) return;
+    // A pinned exercise note is a must-acknowledge modal that also fires on
+    // exercise start; let it be dismissed first so two modals never stack. This
+    // effect re-runs when the pinned note clears (dep below) and asks then.
+    if (pinnedNoteShowingRef.current) return;
     askedSorenessRef.current.add(pm);
     persistMesoAsked();
     setMesoSorenessMusc(pm);
     setMesoSorenessSel(null);
     mesoEditingRef.current.soreness = null;
     setMesoSorenessOpen(true);
-  }, [exIdx, !!mesoState]);
+  }, [exIdx, !!mesoState, !!pinnedNote]);
 
   // Joint + pump/volume trigger: when all working sets of an exercise are done,
   // ask joint feedback. Fires whenever the current entry's sets change.
@@ -7637,7 +7647,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             <span className="micro" style={{ color: UI.inkFaint, letterSpacing: '0.12em' }}>Pinned note</span>
           </div>
           <div style={{ fontFamily: UI.fontUi, fontSize: 15, color: UI.ink, lineHeight: 1.6, whiteSpace: 'pre-wrap', marginBottom: 20 }}>{pinnedNote.note}</div>
-          <Btn onClick={() => { pinnedNoteSeenRef.current.add(pinnedNote.exId); setPinnedNote(null); }} style={{ width: '100%' }}>Got it</Btn>
+          <Btn onClick={() => { pinnedNoteSeenRef.current.add(pinnedNote.exId); pinnedNoteShowingRef.current = false; setPinnedNote(null); }} style={{ width: '100%' }}>Got it</Btn>
         </Sheet>
       )}
 
