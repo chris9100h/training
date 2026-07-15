@@ -2541,9 +2541,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const mesoLastWeek = mesoState != null && mesoWeek != null && mesoState.weeks != null && mesoWeek >= mesoState.weeks;
   // The "≥X reps · next weight" hint is Smart Progression's promise. On a meso
   // plan the feedback engine owns the weight from week 2 on (Smart Progression is
-  // vetoed, see LB.resolveMesoSeedSuggestion), so the hint would promise a bump
-  // that can't fire, so suppress it there, the same way the deload gate does. It
-  // still shows in the first block's week 1, where Smart Progression is active.
+  // vetoed, see LB.resolveMesoSeedSuggestion), so instead of promising a bump that
+  // can't fire we show an "auto · feedback-driven" label there. The SP promise
+  // still shows on non-meso plans and in the first block's week 1, where Smart
+  // Progression is actually the weight authority.
   const spHintApplies = !mesoState || !LB.mesoActive(mesoSch) || (mesoWeek === 1 && (mesoState.completions ?? 0) === 0);
   // Beyond-failure block: a negative RIR target prescribes |RIR| lengthened
   // partials on every working set this session (RIR -3 → 3 partials). Auto-
@@ -5451,8 +5452,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                       LAST TIME <span style={{ color: UI.inkSoft }}>{prevHeroSet.kg}{UI.unit()} × {(prevHeroSet.repsL != null || prevHeroSet.repsR != null) ? `L${prevHeroSet.repsL ?? '?'}/R${prevHeroSet.repsR ?? '?'}` : prevHeroSet.reps}</span>
                     </span>
                   ) : null}
-                  {progressionTarget && spHintApplies && (
-                    <div className="micro" style={{ color: UI.gold, opacity: 0.65, marginTop: 3 }}>≥{progressionTarget} reps · next weight</div>
+                  {progressionTarget && (
+                    <div className="micro" style={{ color: UI.gold, opacity: 0.65, marginTop: 3 }}>
+                      {spHintApplies ? `≥${progressionTarget} reps · next weight` : 'auto · feedback-driven'}
+                    </div>
                   )}
                   {/* Range's own configured span is shown as a permanent badge next to the
                       exercise name instead (doesn't vary per set, so no need to repeat it here). */}
