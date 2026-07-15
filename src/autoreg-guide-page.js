@@ -165,12 +165,12 @@
 
     /* 05 weight dial */
     out+='<section class="sec">'+sechead('05 / Dial 2','The weight dial',
-      'Two independent halves, both driven by your real reps: the earn ladder (up) and the rep-miss streak (down). Example: range 8 to 12, step 2.5 kg.');
+      'Two independent halves, both driven by your real reps: the earn ladder (up) and the rep-miss streak (down). Example: range 8 to 12, step 2.5 kg / 5 lbs.');
     /* earn ladder */
     out+='<div class="card"><div class="kick">The staggered earn ladder (per set target)</div>'+
       '<div style="display:flex;align-items:flex-end;gap:12px;padding:26px 4px 4px">'+[[118,12,'Set 1'],[94,10,'Set 2'],[70,8,'Set 3']].map(function(b){
         return '<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:8px">'+
-          '<div style="width:100%;max-width:58px;height:'+b[0]+'px;border-radius:5px 5px 0 0;background:linear-gradient(180deg,var(--accent),var(--accent-deep));border:0.5px solid color-mix(in srgb,var(--accent) 50%,transparent);border-bottom:none;position:relative">'+
+          '<div style="width:100%;max-width:58px;height:'+b[0]+'px;border-radius:4px 4px 0 0;background:linear-gradient(180deg,var(--accent),var(--accent-deep));border:0.5px solid color-mix(in srgb,var(--accent) 50%,transparent);border-bottom:none;position:relative">'+
           '<div style="position:absolute;top:-22px;left:0;right:0;text-align:center;font-family:var(--f-mono);font-weight:700;font-size:13px;color:var(--ink)">'+b[1]+'</div></div>'+
           '<div style="font-family:var(--f-mono);font-size:10px;letter-spacing:0.05em;text-transform:uppercase;color:var(--ink-faint)">'+b[2]+'</div></div>';
       }).join('')+'</div>'+
@@ -184,7 +184,7 @@
       ['4 · Volume', isB?'Anything but "Too heavy" (Hard counts).':'"Just right" or "Not enough".']
     ];
     if(isB) gates.push(['5 · Soreness','Muscle is not "Still sore".']);
-    var gate='<p class="panel-intro">A weight bump (+2.5 kg, equipment dependent) needs all of these, re-earned every session. On a jump the reps reset to the range floor.</p>';
+    var gate='<p class="panel-intro">A weight bump (+2.5 kg / 5 lbs, equipment dependent) needs all of these, re-earned every session. On a jump the reps reset to the range floor.</p>';
     gate+='<div class="grid g150">'+gates.map(function(g){
       return '<div class="inset" style="border-radius:6px"><div style="font-family:var(--f-mono);font-size:10.5px;letter-spacing:0.1em;text-transform:uppercase;color:var(--ok);margin-bottom:5px">'+g[0]+'</div><div style="font-size:12.5px;color:var(--ink-soft)">'+g[1]+'</div></div>';
     }).join('')+'</div>';
@@ -192,7 +192,7 @@
     out+='<div style="margin-top:14px">'+panel(null,'Bump: '+(isB?'five':'four')+' green lights',null,gate)+'</div>';
     out+='<div class="grid g240" style="margin-top:14px">'+
       '<div class="card"><h3 class="display h3">Between jumps: +1 rep</h3><p style="font-size:14px;color:var(--ink-soft)">With no jump due, the app seeds the rep target +1 higher each session, capped at the range top, same weight. That is the rep climb you feel.</p></div>'+
-      '<div class="card"><h3 class="display h3" style="color:var(--danger)">Cut: two failed sessions</h3><p style="font-size:14px;color:var(--ink-soft)">An early set below the range floor starts a streak (the last set is exempt when there are 2+ sets; a single set counts directly). Two in a row pull -2.5 kg.</p></div></div>';
+      '<div class="card"><h3 class="display h3" style="color:var(--danger)">Cut: two failed sessions</h3><p style="font-size:14px;color:var(--ink-soft)">An early set below the range floor starts a streak (the last set is exempt when there are 2+ sets; a single set counts directly). Two in a row cut the weight one increment (2.5 kg / 5 lbs).</p></div></div>';
     out+='<div class="card lb accented" style="margin-top:14px"><div class="kick" style="color:var(--accent)">How it seeds next time</div>'+
       '<div style="margin-top:6px;font-size:13.5px;color:var(--ink-soft)"><b>Cut</b> overrides an increase. <b>Bump granted</b> means up, reps back to the floor. <b>Bump withheld</b> (a light red) holds the weight while the reps keep climbing. '+(isC?'The only exception is the very first week of your first block: no feedback exists yet, so Smart Progression is allowed through until week 2.':'The only exception is the very first week after enabling it: no feedback exists yet, so Smart Progression is allowed through until the first feedback session lands.')+'</div></div>';
     out+='</section>';
@@ -261,7 +261,7 @@
     out+='</section>';
 
     /* 09 cheat sheet */
-    out+='<section class="sec">'+sechead('09 / Reference','Cheat sheet','Range 8 to 12, 3 sets, step 2.5 kg. What you log, what comes out.');
+    out+='<section class="sec">'+sechead('09 / Reference','Cheat sheet','Range 8 to 12, 3 sets, step 2.5 kg / 5 lbs. What you log, what comes out.');
     var rows=[
       ['Fully earned','12 / 10 / 8',['bump +2.5, lights green','var(--ok)'],'weight +2.5, reps → 8'],
       ['Feedback blocks','12 / 10 / 8',['no bump (e.g. pump low)','var(--ink-faint)'],'weight holds'],

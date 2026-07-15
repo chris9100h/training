@@ -21,13 +21,13 @@ function agTint(c, pct) { return `color-mix(in srgb, ${c} ${pct}%, transparent)`
 
 const AG_MODES = ['A', 'B', 'C'];
 const AG_MODE_META = {
-  A: { tag: 'Badge · AUTO', nm: 'Volume + Load', short: 'Vol + Load',
+  A: { tag: 'AUTO', nm: 'Volume + Load', short: 'Vol + Load',
        d: 'Open-ended autoregulation. Feedback tunes both your set counts and your weights, forever.',
        pills: ['Sets move', 'Weight moves', 'No RIR taper'] },
-  B: { tag: 'Badge · AUTO · LOAD', nm: 'Load only', short: 'Load only',
+  B: { tag: 'AUTO · LOAD', nm: 'Load only', short: 'Load only',
        d: 'Set counts stay exactly as written. Feedback tunes weight only, and soreness becomes a brake on it.',
        pills: ['Sets frozen', 'Weight moves', 'No RIR taper'] },
-  C: { tag: 'Badge · MESO', nm: 'Mesocycle', short: 'Mesocycle',
+  C: { tag: 'MESO', nm: 'Mesocycle', short: 'Mesocycle',
        d: 'A fixed 4 to 8 week block. Both dials move, each week ramps closer to failure, then a deload.',
        pills: ['Sets move', 'Weight moves', 'RIR taper + deload'] },
 };
@@ -110,7 +110,7 @@ function AGSecHead({ n, title, sub, chip }) {
       <div style={{ fontFamily: UI.fontNum, fontSize: 11, letterSpacing: '.14em', color: UI.gold }}>{n}</div>
       <h2 className="display" style={{ fontSize: 'clamp(23px,5vw,32px)', margin: '7px 0 0', letterSpacing: '-.01em', display: 'flex', alignItems: 'baseline', gap: 12, flexWrap: 'wrap' }}>
         {title}
-        {chip && <span style={{ fontFamily: UI.fontNum, fontSize: 10, letterSpacing: '.08em', textTransform: 'uppercase', color: UI.gold, border: `0.5px solid ${agTint(UI.gold, 45)}`, background: agTint(UI.gold, 8), borderRadius: 20, padding: '3px 10px' }}>{chip}</span>}
+        {chip && <span style={{ fontFamily: UI.fontNum, fontSize: 10, letterSpacing: '.08em', textTransform: 'uppercase', color: UI.gold, border: `0.5px solid ${agTint(UI.gold, 45)}`, background: agTint(UI.gold, 8), borderRadius: 999, padding: '3px 10px' }}>{chip}</span>}
       </h2>
       {sub && <p style={{ color: UI.inkSoft, margin: '11px 0 0', fontSize: 14.5, maxWidth: '62ch' }}>{sub}</p>}
     </div>
@@ -369,14 +369,14 @@ function AutoregGuideScreen({ store, go, mode: modeProp, back }) {
           {/* ── 05 weight dial ── */}
           <Section>
             <AGSecHead n="05 / Dial 2" title="The weight dial"
-              sub="Two independent halves, both driven by your real reps: the earn ladder (up) and the rep-miss streak (down). Example: range 8 to 12, step 2.5 kg." />
+              sub="Two independent halves, both driven by your real reps: the earn ladder (up) and the rep-miss streak (down). Example: range 8 to 12, step 2.5 kg / 5 lbs." />
             {/* earn ladder */}
             <div style={cardStyle}>
               <AGKick>The staggered earn ladder (per set target)</AGKick>
               <div style={{ display: 'flex', alignItems: 'flex-end', gap: 12, padding: '26px 4px 4px' }}>
                 {[[118, 12, 'Set 1'], [94, 10, 'Set 2'], [70, 8, 'Set 3']].map(([h, v, l]) => (
                   <div key={l} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
-                    <div style={{ width: '100%', maxWidth: 58, height: h, borderRadius: '5px 5px 0 0', background: `linear-gradient(180deg, ${UI.gold}, ${UI.goldDeep})`, border: `0.5px solid ${agTint(UI.gold, 50)}`, borderBottom: 'none', position: 'relative' }}>
+                    <div style={{ width: '100%', maxWidth: 58, height: h, borderRadius: '4px 4px 0 0', background: `linear-gradient(180deg, ${UI.gold}, ${UI.goldDeep})`, border: `0.5px solid ${agTint(UI.gold, 50)}`, borderBottom: 'none', position: 'relative' }}>
                       <div style={{ position: 'absolute', top: -22, left: 0, right: 0, textAlign: 'center', fontFamily: UI.fontNum, fontWeight: 700, fontSize: 13, color: UI.ink }}>{v}</div>
                     </div>
                     <div style={{ fontFamily: UI.fontNum, fontSize: 10, letterSpacing: '.05em', textTransform: 'uppercase', color: UI.inkFaint }}>{l}</div>
@@ -390,7 +390,7 @@ function AutoregGuideScreen({ store, go, mode: modeProp, back }) {
             {/* bump gate */}
             <div style={{ marginTop: 14 }}>
               <AGPanel title={`Bump: ${isB ? 'five' : 'four'} green lights`}>
-                <p style={{ fontSize: 13.5, color: UI.inkSoft, margin: '11px 0' }}>A weight bump (+2.5 kg, equipment dependent) needs all of these, re-earned every session. On a jump the reps reset to the range floor.</p>
+                <p style={{ fontSize: 13.5, color: UI.inkSoft, margin: '11px 0' }}>A weight bump (+2.5 kg / 5 lbs, equipment dependent) needs all of these, re-earned every session. On a jump the reps reset to the range floor.</p>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px,1fr))', gap: 9 }}>
                   {[
                     ['1 · Reps', 'Every set clears its staggered ladder target.'],
@@ -411,7 +411,7 @@ function AutoregGuideScreen({ store, go, mode: modeProp, back }) {
 
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px,1fr))', gap: 12, marginTop: 14 }}>
               <div style={cardStyle}><h3 className="display" style={h3}>Between jumps: +1 rep</h3><p style={{ fontSize: 14, color: UI.inkSoft, margin: 0 }}>With no jump due, the app seeds the rep target +1 higher each session, capped at the range top, same weight. That is the rep climb you feel.</p></div>
-              <div style={cardStyle}><h3 className="display" style={{ ...h3, color: UI.danger }}>Cut: two failed sessions</h3><p style={{ fontSize: 14, color: UI.inkSoft, margin: 0 }}>An early set below the range floor starts a streak (the last set is exempt when there are 2+ sets; a single set counts directly). Two in a row pull -2.5 kg.</p></div>
+              <div style={cardStyle}><h3 className="display" style={{ ...h3, color: UI.danger }}>Cut: two failed sessions</h3><p style={{ fontSize: 14, color: UI.inkSoft, margin: 0 }}>An early set below the range floor starts a streak (the last set is exempt when there are 2+ sets; a single set counts directly). Two in a row cut the weight one increment (2.5 kg / 5 lbs).</p></div>
             </div>
 
             <div style={{ ...cardStyle, borderLeft: `3px solid ${UI.gold}`, marginTop: 14 }}>
@@ -510,7 +510,7 @@ function AutoregGuideScreen({ store, go, mode: modeProp, back }) {
 
           {/* ── 09 cheat sheet ── */}
           <Section>
-            <AGSecHead n="09 / Reference" title="Cheat sheet" sub="Range 8 to 12, 3 sets, step 2.5 kg. What you log, what comes out." />
+            <AGSecHead n="09 / Reference" title="Cheat sheet" sub="Range 8 to 12, 3 sets, step 2.5 kg / 5 lbs. What you log, what comes out." />
             <div style={{ overflowX: 'auto', border: `0.5px solid ${UI.hair}`, borderRadius: 8 }}>
               <table style={{ borderCollapse: 'collapse', width: '100%', minWidth: 460, fontSize: 13 }}>
                 <thead><tr>{['What happens', 'Reps 1/2/3', 'Result', 'Next seed'].map(h => <th key={h} style={{ textAlign: 'left', padding: '10px 13px', borderBottom: `0.5px solid ${UI.hair}`, background: UI.bgInset, fontFamily: UI.fontNum, fontSize: 10, letterSpacing: '.1em', textTransform: 'uppercase', color: UI.inkFaint, fontWeight: 600 }}>{h}</th>)}</tr></thead>
