@@ -603,6 +603,7 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
   const [reminderSheet, setReminderSheet] = useStateSet(false);
   const [passkeySheet, setPasskeySheet] = useStateSet(false);
   const [supportSheet, setSupportSheet] = useStateSet(false);
+  const [guidesSheet, setGuidesSheet] = useStateSet(false);
   const [supportView, setSupportView] = useStateSet('list'); // 'list' | 'thread' | 'new'
   const [supportActiveTicketId, setSupportActiveTicketId] = useStateSet(null);
   const [supportActiveNotes, setSupportActiveNotes] = useStateSet([]);
@@ -1590,11 +1591,8 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       </div>
       <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 8, padding: '16px 20px', paddingBottom: 'calc(env(safe-area-inset-bottom, 8px) + 16px)', borderTop: `0.5px solid ${UI.hair}`, background: UI.bg }}>
         <Btn kind="ghost" onClick={() => LB.clearCachesAndReload()}>Clear cache &amp; reload</Btn>
-        <Btn kind="ghost" className="intensity-glow" onClick={() => go({ name: 'featuremap' })} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-          Feature map
-        </Btn>
-        <Btn kind="ghost" onClick={() => go({ name: 'autoreg-guide' })} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-          Autoregulation guide
+        <Btn kind="ghost" className="intensity-glow" onClick={() => setGuidesSheet(true)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+          Guides
         </Btn>
         {isAdmin ? (() => {
           const unseenCount = allUsers.filter(isNewSignup).length;
@@ -1619,6 +1617,31 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       </div>
 
       {confirmEl}
+
+      {/* ══ Guides Sheet (Feature map + Autoregulation, one umbrella entry) ══ */}
+      <SettingsSheet open={guidesSheet} onClose={() => setGuidesSheet(false)} title="Guides">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {[
+            { icon: 'fa-diagram-project', title: 'Feature map', sub: 'What the app can do', route: 'featuremap' },
+            { icon: 'fa-sliders', title: 'Autoregulation', sub: 'How the plan adapts to you', route: 'autoreg-guide' },
+          ].map(g => (
+            <button key={g.route} onClick={() => { setGuidesSheet(false); go({ name: g.route }); }} style={{
+              display: 'flex', alignItems: 'center', gap: 12, width: '100%', textAlign: 'left', cursor: 'pointer',
+              background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '13px 14px',
+              WebkitTapHighlightColor: 'transparent', font: 'inherit', color: UI.ink,
+            }}>
+              <span style={{ width: 34, height: 34, borderRadius: 6, background: 'rgba(var(--accent-rgb),0.1)', border: `0.5px solid ${UI.hairStrong}`, display: 'grid', placeItems: 'center', flexShrink: 0 }}>
+                <i className={`fa-solid ${g.icon}`} style={{ fontSize: 14, color: UI.gold }} />
+              </span>
+              <span style={{ flex: 1, minWidth: 0 }}>
+                <span style={{ display: 'block', fontFamily: UI.fontUi, fontSize: 14, fontWeight: 600, color: UI.ink }}>{g.title}</span>
+                <span style={{ display: 'block', fontFamily: UI.fontUi, fontSize: 12, color: UI.inkFaint, marginTop: 2 }}>{g.sub}</span>
+              </span>
+              <i className="fa-solid fa-chevron-right" style={{ fontSize: 11, color: UI.inkGhost }} />
+            </button>
+          ))}
+        </div>
+      </SettingsSheet>
 
       {/* ══ Active Users Sheet ══ */}
       <SettingsSheet open={activeUsersSheet} onClose={() => setActiveUsersSheet(false)} title="Active users">
