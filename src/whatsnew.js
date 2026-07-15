@@ -17,6 +17,16 @@
    Entry shape: { id: string, date: string (YYYY-MM-DD), title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.591',
+    date: '2026-07-15',
+    title: 'Earn Your Weight',
+    items: [
+      "📈 Range exercises now progress the honest way. On auto and mesocycle plans, the weight only goes up once your first set reaches the top of the range (say 12 on an 8-12) and your last still holds the bottom (the 8). Then it bumps a notch and your reps reset to the bottom to climb again. No more weight sneaking up before you've fought your way to the top.",
+      "✏️ Fix a feedback answer after the fact. Tapped the wrong soreness or pump on your last auto or mesocycle session? Open it, tap the feedback recap, and correct it: your weight and set changes for next time recompute on the spot.",
+      "📌 Pin a note so you actually read it. Flip on Pin note for any exercise and its setup note pops up the moment that exercise starts in your workout, and stays until you tap it away. Made for the leg-day brain fog. 🧠",
+    ],
+  },
+  {
     id: 'v2.590',
     date: '2026-07-15',
     title: 'Receipts',
