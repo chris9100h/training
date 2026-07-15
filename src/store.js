@@ -4524,10 +4524,14 @@ function reearnMesoWeightBoosts(prevBoosts, sessionKeys, earnedBoosts) {
 //     was still sore on a load-only plan) → veto SP so the weight HOLDS instead
 //     of climbing past the feedback. This is what makes the gating actually
 //     control weight; without it Smart Progression would bump regardless.
+//   • EXCEPTION, noPriorFeedback (the first meso block's week 1): there is no
+//     prior feedback to defer to yet, so the veto has nothing to enforce. Let
+//     Smart Progression through instead of freezing the weight; the feedback
+//     engine takes over from week 2 once it has a completed session to earn from.
 // Off a meso plan (mesoActive false) the suggestion is returned untouched, so
 // normal Smart Progression is unaffected. Pure/testable; `last` is a
 // { entry: { sets } } reference.
-function resolveMesoSeedSuggestion(suggestion, weightBoost, last, mesoActive) {
+function resolveMesoSeedSuggestion(suggestion, weightBoost, last, mesoActive, noPriorFeedback = false) {
   if (weightBoost != null) {
     const cutWins = weightBoost < 0; // a rep-miss cut is authoritative, never let an up-suggestion swallow it
     if ((cutWins || !suggestion) && last) {
@@ -4536,7 +4540,7 @@ function resolveMesoSeedSuggestion(suggestion, weightBoost, last, mesoActive) {
     }
     return suggestion;
   }
-  if (mesoActive && suggestion) return null; // feedback withheld the boost → veto the Smart Progression bump
+  if (mesoActive && suggestion && !noPriorFeedback) return null; // feedback withheld the boost → veto the Smart Progression bump
   return suggestion;
 }
 

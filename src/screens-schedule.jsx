@@ -1035,6 +1035,12 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
   // may not exist here, showing the un-adjusted baseline plan. Resolved once
   // (it internally reads localStorage) rather than once per item below.
   const resolvedMeso = (typeof getMesoState === 'function') ? getMesoState(sch?.id, store.mesoStates) : null;
+  // Week 1 of the FIRST meso block has no prior feedback to defer to, so Smart
+  // Progression is NOT vetoed there (mirrors the real session-start seeding in
+  // screens-home.jsx). See LB.resolveMesoSeedSuggestion.
+  const mesoNoPriorFeedback = (resolvedMeso && typeof mesoCurrentWeek === 'function')
+    ? (mesoCurrentWeek(resolvedMeso, store) === 1 && (resolvedMeso.completions ?? 0) === 0)
+    : false;
   const mesoBoosts = resolvedMeso?.weightBoosts ?? null;
 
   const exerciseList = isRest ? (
@@ -1070,7 +1076,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
         // Mirror the real session-start (screens-home.jsx): on an autoregulating
         // plan the feedback engine owns the weight, so an earned boost applies
         // and a withheld one vetoes Smart Progression (see LB.resolveMesoSeedSuggestion).
-        const suggestionFinal = LB.resolveMesoSeedSuggestion(suggestion, weightBoost, last, LB.mesoActive(sch));
+        const suggestionFinal = LB.resolveMesoSeedSuggestion(suggestion, weightBoost, last, LB.mesoActive(sch), mesoNoPriorFeedback);
         // 5/3/1 main lift: seed the current week's wave prescription instead of
         // echoing last-session weights (buildSeedSets is not 5/3/1-aware). Mirrors
         // the session-start builder in screens-home.jsx.

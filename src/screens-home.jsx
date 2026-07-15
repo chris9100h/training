@@ -2215,6 +2215,13 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     // Resolve meso state once (it internally reads localStorage) instead of
     // once per item below.
     const resolvedMeso = (typeof getMesoState === 'function') ? getMesoState(sch?.id, store.mesoStates) : null;
+    // Week 1 of the FIRST meso block has no prior feedback to defer to, so Smart
+    // Progression is NOT vetoed there (it stays the weight authority until the
+    // feedback engine has a completed session to earn from). Later weeks/blocks
+    // keep the veto. See LB.resolveMesoSeedSuggestion.
+    const mesoNoPriorFeedback = (resolvedMeso && typeof mesoCurrentWeek === 'function')
+      ? (mesoCurrentWeek(resolvedMeso, store) === 1 && (resolvedMeso.completions ?? 0) === 0)
+      : false;
     const mesoBoosts = resolvedMeso?.weightBoosts ?? null;
     // occ counter: the Nth appearance of an exercise in the day seeds from the
     // Nth occurrence of past sessions, so a repeated exercise's slots don't share
@@ -2275,7 +2282,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       const weightBoost = mesoBoosts?.[it.exId + '_' + dayId] ?? null;
       // On an autoregulating plan the feedback engine owns the weight: apply an
       // earned boost, but a withheld one vetoes Smart Progression (see helper).
-      const suggestionFinal = LB.resolveMesoSeedSuggestion(suggestion, weightBoost, last, LB.mesoActive(sch));
+      const suggestionFinal = LB.resolveMesoSeedSuggestion(suggestion, weightBoost, last, LB.mesoActive(sch), mesoNoPriorFeedback);
       const seedSets = LB.buildSeedSets(itAdj, last, suggestionFinal, isUnilateral, store, bodyweightKg);
       return {
         exId: it.exId, name: ex?.name || '?',

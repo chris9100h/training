@@ -2539,6 +2539,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // Meso 2), so the joint + pump/volume questions stay — they gate the boost —
   // while the soreness question (pure set-delta, no weight gate) is skipped.
   const mesoLastWeek = mesoState != null && mesoWeek != null && mesoState.weeks != null && mesoWeek >= mesoState.weeks;
+  // The "≥X reps · next weight" hint is Smart Progression's promise. On a meso
+  // plan the feedback engine owns the weight from week 2 on (Smart Progression is
+  // vetoed, see LB.resolveMesoSeedSuggestion), so the hint would promise a bump
+  // that can't fire, so suppress it there, the same way the deload gate does. It
+  // still shows in the first block's week 1, where Smart Progression is active.
+  const spHintApplies = !mesoState || !LB.mesoActive(mesoSch) || (mesoWeek === 1 && (mesoState.completions ?? 0) === 0);
   // Beyond-failure block: a negative RIR target prescribes |RIR| lengthened
   // partials on every working set this session (RIR -3 → 3 partials). Auto-
   // attached at set completion / seeded into the intensity-chain finisher.
@@ -5445,7 +5451,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                       LAST TIME <span style={{ color: UI.inkSoft }}>{prevHeroSet.kg}{UI.unit()} × {(prevHeroSet.repsL != null || prevHeroSet.repsR != null) ? `L${prevHeroSet.repsL ?? '?'}/R${prevHeroSet.repsR ?? '?'}` : prevHeroSet.reps}</span>
                     </span>
                   ) : null}
-                  {progressionTarget && (
+                  {progressionTarget && spHintApplies && (
                     <div className="micro" style={{ color: UI.gold, opacity: 0.65, marginTop: 3 }}>≥{progressionTarget} reps · next weight</div>
                   )}
                   {/* Range's own configured span is shown as a permanent badge next to the

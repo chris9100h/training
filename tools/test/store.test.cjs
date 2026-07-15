@@ -824,6 +824,10 @@ async function testAsync(name, fn) {
     const sp = { kg: 102.5, reps: 8 };
     assert.strictEqual(LB.resolveMesoSeedSuggestion(sp, null, seedLast, true), null);
   });
+  test('resolveMesoSeedSuggestion: first block week 1 (no prior feedback) lets Smart Progression through', () => {
+    const sp = { kg: 102.5, reps: 8 };
+    assert.strictEqual(LB.resolveMesoSeedSuggestion(sp, null, seedLast, true, true), sp);
+  });
   test('resolveMesoSeedSuggestion: off a meso plan Smart Progression is untouched', () => {
     const sp = { kg: 102.5, reps: 8 };
     assert.strictEqual(LB.resolveMesoSeedSuggestion(sp, null, seedLast, false), sp);
