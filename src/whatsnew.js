@@ -17,6 +17,14 @@
    Entry shape: { id: string, date: string (YYYY-MM-DD), title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.590',
+    date: '2026-07-15',
+    title: 'Receipts',
+    items: [
+      "🧾 See exactly what your auto plan decided, and why. Auto, weight-only and mesocycle sessions now keep a Feedback recap: open one and tap Feedback recap to see the feedback you gave (soreness, joints, pump) and the weight and set changes you earned or lost that day. No more wondering where that extra set came from.",
+    ],
+  },
+  {
     id: 'v2.589',
     date: '2026-07-15',
     title: 'Dialed In',
