@@ -139,7 +139,8 @@
   /* Section 03 feedback options tile into a responsive 2-up grid (1-up on a
      phone, wider on desktop) so the long list stays compact instead of running
      mega-tall. Grid cells stretch, so a short cell matches its row neighbour. */
-  .opt-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px;}
+  .opt-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px;}
+  @media(min-width:760px){.opt-grid{grid-template-columns:repeat(3,minmax(0,1fr));}}
   .opt-cell{background:var(--inset);border:0.5px solid var(--hair);border-radius:6px;padding:10px 12px;}
   .opt-cell .opt-txt{font-size:12.5px;line-height:1.45;}
   .chip{font-family:var(--f-mono);font-size:11px;font-weight:600;color:var(--ink);background:var(--inset);border:0.5px solid var(--hair-strong);border-radius:4px;padding:3px 8px;white-space:nowrap;}

@@ -104,6 +104,12 @@
     html, body { background: var(--bg); }
   }
   * { box-sizing: border-box; }
+  /* Autoreg guide (screens-autoreg-guide.jsx), section 03 feedback options:
+     two columns on a phone, three on a wide screen. A media query (not CSS
+     auto-fit) so a narrow phone reliably keeps two columns instead of dropping
+     to one once the panel padding eats into the available width. */
+  .ag-opt-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
+  @media (min-width: 760px) { .ag-opt-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
   input[type=number]::-webkit-outer-spin-button,
   input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
   input[type=number] { -moz-appearance: textfield; }
