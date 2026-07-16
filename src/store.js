@@ -605,7 +605,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
     prog('Uploading mesocycle states…');
     // id is deterministic (userId + '_' + scheduleId) — regenerate for this user.
     // schedule_id is preserved (schedules keep their ids), but the exId-keyed maps
-    // (deltas/weightBoosts/repMissCounts: exId_dayId; jointFlags/pumpLowCounts: exId)
+    // (deltas/weightBoosts/repMissCounts: exId_dayId; jointFlags/pumpLowCounts/affinity: exId)
     // must be remapped onto the fresh exercise ids or they dangle.
     await unwrap(_supabase.from('zane_meso_states').upsert(
       backup.mesoStates.map(m => ({
@@ -615,6 +615,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
         deltas: remapExDayKeyed(m.deltas), weight_boosts: remapExDayKeyed(m.weightBoosts),
         joint_flags: remapExKeyed(m.jointFlags), pump_low_counts: remapExKeyed(m.pumpLowCounts),
         growth_counts: remapExDayKeyed(m.growthCounts), rep_miss_counts: remapExDayKeyed(m.repMissCounts),
+        affinity: remapExKeyed(m.affinity),
         completions: m.completions ?? 0, pending_meso2: m.pendingMeso2 ?? false,
       }))
     ));
@@ -825,7 +826,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     // Reusable workout templates (migration 0107)
     _supabase.from('zane_workout_templates').select('id, name, exercises, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
     // Mesocycle state per plan — replaces localStorage logbook-meso-state (migration 0120)
-    _supabase.from('zane_meso_states').select('id, schedule_id, weeks, start_date, start_cycle_index, started_at, deltas, joint_flags, pump_low_counts, weight_boosts, growth_counts, rep_miss_counts, completions, pending_meso2, updated_at').eq('user_id', userId),
+    _supabase.from('zane_meso_states').select('id, schedule_id, weeks, start_date, start_cycle_index, started_at, deltas, joint_flags, pump_low_counts, weight_boosts, growth_counts, rep_miss_counts, affinity, completions, pending_meso2, updated_at').eq('user_id', userId),
     // Coach's own saved check-in schema templates: irrelevant when loading a
     // CLIENT's store as a coach, these belong to the acting coach, not the client.
     isCoachLoad ? null : _supabase.from('zane_checkin_schema_templates').select('id, name, schema, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
@@ -1035,6 +1036,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
       deltas: m.deltas ?? {}, jointFlags: m.joint_flags ?? {},
       pumpLowCounts: m.pump_low_counts ?? {}, weightBoosts: m.weight_boosts ?? {},
       growthCounts: m.growth_counts ?? {}, repMissCounts: m.rep_miss_counts ?? {},
+      affinity: m.affinity ?? {},
       completions: m.completions ?? 0, pendingMeso2: m.pending_meso2 ?? false,
       updatedAt: m.updated_at ?? null,
     })),
@@ -1474,6 +1476,7 @@ async function syncStore(prev, next, userId) {
       deltas: m.deltas ?? {}, joint_flags: m.jointFlags ?? {},
       pump_low_counts: m.pumpLowCounts ?? {}, weight_boosts: m.weightBoosts ?? {},
       growth_counts: m.growthCounts ?? {}, rep_miss_counts: m.repMissCounts ?? {},
+      affinity: m.affinity ?? {},
       completions: m.completions ?? 0, pending_meso2: m.pendingMeso2 ?? false,
       updated_at: m.updatedAt ?? new Date().toISOString(),
     })) }));
