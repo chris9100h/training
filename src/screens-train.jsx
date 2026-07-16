@@ -3183,19 +3183,20 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const JOINT_LABELS = { none: 'None', noticeable: 'Noticeable', sharp: 'Sharp pain' };
   const PUMP_LABELS = { low: 'Low', moderate: 'Moderate', amazing: 'Amazing' };
   const AFFINITY_LABELS = { love: 'Love it', ok: "It's fine", dislike: 'Not my lift' };
-  // Toned option chip for the per-exercise feedback sheet: each answer is a colored
-  // chip (semantic tone as the label + a subtle border, tinted fill when selected),
-  // following the sharp-joint button the user liked. The neutral / on-target option of
-  // each question carries the user's accent. rgba over the *-rgb vars stays theme-aware.
+  // Toned option chip for the per-exercise feedback sheet. Calm at rest (neutral ink
+  // label + hairline border), the answer's SEMANTIC tone reveals only when selected:
+  // None goes green, Sharp red, Too heavy red, and the neutral / on-target option of
+  // each graded question (Just right, Moderate, It's fine) the user's accent. rgba over
+  // the *-rgb vars stays theme-aware.
   const TONE_RGB = { ok: '--ok-rgb', warn: '--warn-rgb', danger: '--danger-rgb', accent: '--accent-rgb' };
   const TONE_COL = { ok: 'var(--ok)', warn: 'var(--warn)', danger: 'var(--danger)', accent: 'var(--accent)' };
   const toneBtn = (tone, sel, extra) => ({
     padding: '12px 8px', borderRadius: 6, cursor: 'pointer', textAlign: 'center', WebkitTapHighlightColor: 'transparent',
-    background: sel ? `rgba(var(${TONE_RGB[tone]}),0.15)` : UI.bgInset,
-    border: `1px solid ${sel ? `rgba(var(${TONE_RGB[tone]}),0.8)` : `rgba(var(${TONE_RGB[tone]}),0.3)`}`,
+    background: sel ? `rgba(var(${TONE_RGB[tone]}),0.14)` : UI.bgInset,
+    border: `1px solid ${sel ? `rgba(var(${TONE_RGB[tone]}),0.7)` : UI.hairStrong}`,
     ...(extra || {}),
   });
-  const toneLbl = (tone) => ({ fontFamily: UI.fontUi, fontSize: 13, fontWeight: 700, color: TONE_COL[tone] });
+  const toneLbl = (tone, sel) => ({ fontFamily: UI.fontUi, fontSize: 13, fontWeight: sel ? 700 : 600, color: sel ? TONE_COL[tone] : UI.ink });
   // Two label sets over the SAME four answer codes. WEIGHT_LABELS is the per-exercise
   // weight-feel question (asked every mode now): how the load felt, too light / just
   // right lets the weight climb, hard / too heavy holds it. WORKLOAD_LABELS is the
@@ -7802,7 +7803,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             const sel = mesoJointSel === opt.key;
             return (
               <button key={opt.key} onClick={() => setMesoJointSel(opt.key)} style={toneBtn(opt.tone, sel, { flex: 1 })}>
-                <div style={toneLbl(opt.tone)}>{opt.label}</div>
+                <div style={toneLbl(opt.tone, sel)}>{opt.label}</div>
               </button>
             );
           })}
@@ -7818,7 +7819,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             const wsel = mesoJointWeightSel === opt.key;
             return (
               <button key={opt.key} onClick={() => setMesoJointWeightSel(opt.key)} style={toneBtn(opt.tone, wsel)}>
-                <div style={toneLbl(opt.tone)}>{WEIGHT_LABELS[opt.key]}</div>
+                <div style={toneLbl(opt.tone, wsel)}>{WEIGHT_LABELS[opt.key]}</div>
               </button>
             );
           })}
@@ -7833,7 +7834,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             const psel = mesoJointPumpSel === opt.key;
             return (
               <button key={opt.key} onClick={() => setMesoJointPumpSel(opt.key)} style={toneBtn(opt.tone, psel, { flex: 1 })}>
-                <div style={toneLbl(opt.tone)}>{opt.label}</div>
+                <div style={toneLbl(opt.tone, psel)}>{opt.label}</div>
               </button>
             );
           })}
@@ -7850,7 +7851,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             const asel = mesoJointAffinitySel === opt.key;
             return (
               <button key={opt.key} onClick={() => setMesoJointAffinitySel(asel ? null : opt.key)} style={toneBtn(opt.tone, asel, { flex: 1 })}>
-                <div style={toneLbl(opt.tone)}>{opt.label}</div>
+                <div style={toneLbl(opt.tone, asel)}>{opt.label}</div>
               </button>
             );
           })}
