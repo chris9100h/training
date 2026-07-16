@@ -2715,6 +2715,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const [mesoJointSel, setMesoJointSel] = useStateT(null);
   const [mesoJointWeightSel, setMesoJointWeightSel] = useStateT(null); // weight-feel answer, folded into the per-exercise step (every mode)
   const [mesoJointPumpSel, setMesoJointPumpSel] = useStateT(null); // pump answer, now per exercise (every mode)
+  const [mesoJointAffinitySel, setMesoJointAffinitySel] = useStateT(null); // affinity ('love'|'ok'|'dislike'), sticky per exId, optional
   // Editing an already-answered question reopens the same sheet prefilled;
   // these track which subject (muscle/exId) is currently being re-answered
   // vs. freshly asked for the first time (both paths call the same commit
@@ -2940,11 +2941,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     persistMesoAsked();
   };
 
-  const handleJointAnswer = (answer, weight, pump) => {
+  const handleJointAnswer = (answer, weight, pump, affinity) => {
     setMesoJointOpen(false);
     setMesoJointSel(null);
     setMesoJointWeightSel(null);
     setMesoJointPumpSel(null);
+    setMesoJointAffinitySel(null);
     mesoEditingRef.current.joint = null;
     const exId = mesoJointExId;
     const muscle = mesoJointMuscle;
@@ -2974,6 +2976,17 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       if (pumpLowDiff !== 0) {
         saveMesoState(m => ({ ...m, pumpLowCounts: { ...(m.pumpLowCounts || {}), [exId]: Math.max(0, ((m.pumpLowCounts || {})[exId] || 0) + pumpLowDiff) } }));
       }
+    }
+    // Affinity ("keeper, or would you swap it?") is a sticky per-exId preference. It
+    // gates nothing, it only feeds the adherence swap hint. The streak counts
+    // consecutive sessions confirmed 'dislike' (love/ok reset it). affinityStreakBase
+    // captures the streak BEFORE this session, once, so editing the answer back and
+    // forth within the session recomputes from the true baseline (jointFlags pattern).
+    if (affinity != null) {
+      record.affinity = affinity;
+      if (record.affinityStreakBase === undefined) record.affinityStreakBase = (mesoState.affinity?.[exId]?.streak) || 0;
+      const newStreak = affinity === 'dislike' ? record.affinityStreakBase + 1 : 0;
+      saveMesoState(m => ({ ...m, affinity: { ...(m.affinity || {}), [exId]: { v: affinity, streak: newStreak } } }));
     }
     // jointFlags is a persistent "causes joint pain" marker (survives across
     // sessions) — flagBaseline captures whatever it already was BEFORE this
@@ -3145,6 +3158,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     setMesoJointSel(record.answer);
     setMesoJointWeightSel(record.weight ?? null);
     setMesoJointPumpSel(record.pump ?? null);
+    setMesoJointAffinitySel(record.affinity ?? mesoState?.affinity?.[exId]?.v ?? null);
     mesoEditingRef.current.joint = exId;
     setMesoRecapOpen(false);
     setMesoRecapDetailMuscle(null);
@@ -3168,6 +3182,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const SORENESS_LABELS = { never: 'Never sore', healed_long: 'Healed a while ago', healed_just: 'Healed just in time', still_sore: 'Still sore', very_sore: 'Very sore' };
   const JOINT_LABELS = { none: 'None', noticeable: 'Noticeable', sharp: 'Sharp pain' };
   const PUMP_LABELS = { low: 'Low', moderate: 'Moderate', amazing: 'Amazing' };
+  const AFFINITY_LABELS = { love: 'Love it', ok: "It's fine", dislike: 'Not my lift' };
   // Two label sets over the SAME four answer codes. WEIGHT_LABELS is the per-exercise
   // weight-feel question (asked every mode now): how the load felt, too light / just
   // right lets the weight climb, hard / too heavy holds it. WORKLOAD_LABELS is the
@@ -3208,6 +3223,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         const parts = [JOINT_LABELS[r.answer] || r.answer];
         if (r.weight != null) parts.push(`weight ${(WEIGHT_LABELS[r.weight] || r.weight).toLowerCase()}`);
         if (r.pump != null) parts.push(`pump ${(PUMP_LABELS[r.pump] || r.pump).toLowerCase()}`);
+        if (r.affinity != null) parts.push((AFFINITY_LABELS[r.affinity] || r.affinity).toLowerCase());
         jointRows.push({ key: 'joint-' + e.exId, title: r.exName, sub: parts.join(' · '), onEdit: () => openJointEdit(e.exId) });
       });
       const generalRows = [];
@@ -3478,6 +3494,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     setMesoJointSel(null);
     setMesoJointWeightSel(null);
     setMesoJointPumpSel(null);
+    // Affinity is sticky: pre-fill from the durable value so it costs no taps unless
+    // it changed. Never rated yet stays null (optional, does not block Confirm).
+    setMesoJointAffinitySel(mesoState?.affinity?.[exId]?.v ?? null);
     mesoEditingRef.current.joint = null;
     setMesoJointOpen(true);
     // Encode done AND skipped: finishing an exercise by SKIPPING its last open
@@ -5448,9 +5467,18 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             if (mesoState.jointFlags?.[exercise.id]) {
               flags.push({ icon: '⚠️', msg: 'Flagged for sharp joint pain last session. Consider swapping this exercise.' });
             }
-            const pumpLow = mesoState.pumpLowCounts?.[exercise.id] || 0;
-            if (pumpLow >= 3) {
-              flags.push({ icon: '💡', msg: `Pump has been flat here ${pumpLow} sessions. A different variation might hit this muscle better.` });
+            // Two independent swap signals with distinct voices: stimulus (low pump
+            // 3 sessions running) and adherence (marked "Not my lift" 2 sessions
+            // running). If both fire, one combined note instead of two, so at most two
+            // notes show (with the sharp-joint one).
+            const pumpLow = (mesoState.pumpLowCounts?.[exercise.id] || 0) >= 3;
+            const disliked = (mesoState.affinity?.[exercise.id]?.streak || 0) >= 2;
+            if (pumpLow && disliked) {
+              flags.push({ icon: '💡', msg: 'Flat pump and not your favorite. A variation you enjoy could hit better too, swap it whenever you like.' });
+            } else if (pumpLow) {
+              flags.push({ icon: '💡', msg: `Pump has been flat here ${mesoState.pumpLowCounts[exercise.id]} sessions. A different variation might hit this muscle better.` });
+            } else if (disliked) {
+              flags.push({ icon: '💡', msg: 'You keep flagging this one to swap. Pick a variation you enjoy and you will actually stick with it.' });
             }
             if (!flags.length) return null;
             return (
@@ -7811,9 +7839,33 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             );
           })}
         </div>
+        <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+          This lift{mesoJointAffinitySel == null ? ' · optional' : ''}
+        </div>
+        <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.inkSoft, marginBottom: 8, lineHeight: 1.5 }}>Keeper, or would you swap it?</div>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 4 }}>
+          {[
+            { key: 'love', label: 'Love it', sub: 'Keep it coming' },
+            { key: 'ok', label: "It's fine", sub: 'No strong feelings' },
+            { key: 'dislike', label: 'Not my lift', sub: 'Swap it when you can' },
+          ].map(opt => {
+            const asel = mesoJointAffinitySel === opt.key;
+            return (
+              <button key={opt.key} onClick={() => setMesoJointAffinitySel(asel ? null : opt.key)} style={{
+                flex: 1, padding: '10px 8px',
+                background: asel ? `rgba(var(--accent-rgb),0.12)` : UI.bgInset,
+                border: `1px solid ${asel ? 'var(--accent)' : UI.hairStrong}`,
+                borderRadius: 6, cursor: 'pointer', textAlign: 'center', WebkitTapHighlightColor: 'transparent',
+              }}>
+                <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: asel ? 'var(--accent)' : UI.ink, fontWeight: 600 }}>{opt.label}</div>
+                <div style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint, marginTop: 2 }}>{opt.sub}</div>
+              </button>
+            );
+          })}
+        </div>
         <Btn
           disabled={!mesoJointSel || !mesoJointWeightSel || !mesoJointPumpSel}
-          onClick={() => handleJointAnswer(mesoJointSel, mesoJointWeightSel, mesoJointPumpSel)}
+          onClick={() => handleJointAnswer(mesoJointSel, mesoJointWeightSel, mesoJointPumpSel, mesoJointAffinitySel)}
           style={{ width: '100%', marginTop: 12 }}
         >
           {mesoEditingRef.current.joint ? 'Save changes' : 'Confirm'}

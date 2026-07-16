@@ -4718,6 +4718,7 @@ function applyMesoFeedbackEdit(mesoState, raw, edit, ctx) {
   let growthCounts = { ...(mesoState.growthCounts || {}) };
   const pumpLowCounts = { ...(mesoState.pumpLowCounts || {}) };
   const jointFlags = { ...(mesoState.jointFlags || {}) };
+  const affinity = { ...(mesoState.affinity || {}) };
   const answers = {
     soreness: { ...((raw.answers && raw.answers.soreness) || {}) },
     joint: { ...((raw.answers && raw.answers.joint) || {}) },
@@ -4779,6 +4780,15 @@ function applyMesoFeedbackEdit(mesoState, raw, edit, ctx) {
       rec.pumpLowApplied = pumpLowApplied;
       if (pumpLowDiff !== 0) pumpLowCounts[exId] = Math.max(0, (pumpLowCounts[exId] || 0) + pumpLowDiff);
     }
+    // Affinity (sticky per-exId preference) gates nothing, only the swap hint. The
+    // streak recomputes from rec.affinityStreakBase (captured live, the streak BEFORE
+    // this session) so a post-hoc edit re-derives it cleanly. edit.affinity === null
+    // means "deselected", which leaves the sticky value/streak as-is (no re-confirm).
+    if ('affinity' in edit && edit.affinity != null) {
+      rec.affinity = edit.affinity;
+      if (rec.affinityStreakBase === undefined) rec.affinityStreakBase = (mesoState.affinity?.[exId]?.streak) || 0;
+      affinity[exId] = { v: edit.affinity, streak: edit.affinity === 'dislike' ? rec.affinityStreakBase + 1 : 0 };
+    }
     answers.joint[exId] = rec;
   } else if (edit.type === 'volume') {
     const muscle = edit.subject;
@@ -4813,7 +4823,7 @@ function applyMesoFeedbackEdit(mesoState, raw, edit, ctx) {
   }
 
   return {
-    mesoState: { ...mesoState, deltas, growthCounts, pumpLowCounts, jointFlags },
+    mesoState: { ...mesoState, deltas, growthCounts, pumpLowCounts, jointFlags, affinity },
     raw: { ...raw, answers, negOwner },
   };
 }

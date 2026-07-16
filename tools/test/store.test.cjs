@@ -1162,6 +1162,32 @@ async function testAsync(name, fn) {
     assert.strictEqual(out.mesoState.pumpLowCounts.e1, 0, 'counter goes back down');
     assert.strictEqual(out.raw.answers.joint.e1.pumpLowApplied, false);
   });
+  test('applyMesoFeedbackEdit: an affinity edit sets the sticky value and advances the streak from the stored base', () => {
+    // affinityStreakBase (captured live = the streak BEFORE this session) is 1, so a
+    // dislike edit lands the streak at 2 (fires the adherence swap hint). It gates
+    // nothing: no delta, no weight change.
+    const ms = { deltas: {}, growthCounts: {}, pumpLowCounts: {}, jointFlags: {}, affinity: { e1: { v: 'dislike', streak: 2 } } };
+    const raw = { answers: { soreness: {}, joint: { e1: { exId: 'e1', muscle: 'chest', answer: 'none', pump: 'moderate', weight: 'just_right', affinity: 'ok', affinityStreakBase: 1, contrib: {} } }, volume: {} }, negOwner: {}, frozen: false, dayId: 'd1' };
+    const out = LB.applyMesoFeedbackEdit(ms, raw, { type: 'joint', subject: 'e1', answer: 'none', weight: 'just_right', pump: 'moderate', affinity: 'dislike' }, { dayId: 'd1', loadOnly: false });
+    assert.strictEqual(out.raw.answers.joint.e1.affinity, 'dislike', 'answer persisted');
+    assert.strictEqual(out.mesoState.affinity.e1.v, 'dislike');
+    assert.strictEqual(out.mesoState.affinity.e1.streak, 2, 'streak = base(1) + 1');
+    assert.strictEqual(JSON.stringify(out.mesoState.deltas), '{}', 'affinity moves no set delta');
+  });
+  test('applyMesoFeedbackEdit: editing affinity to love resets the streak to 0', () => {
+    const ms = { deltas: {}, growthCounts: {}, pumpLowCounts: {}, jointFlags: {}, affinity: { e1: { v: 'dislike', streak: 2 } } };
+    const raw = { answers: { soreness: {}, joint: { e1: { exId: 'e1', muscle: 'chest', answer: 'none', pump: 'moderate', weight: 'just_right', affinity: 'dislike', affinityStreakBase: 1, contrib: {} } }, volume: {} }, negOwner: {}, frozen: false, dayId: 'd1' };
+    const out = LB.applyMesoFeedbackEdit(ms, raw, { type: 'joint', subject: 'e1', answer: 'none', weight: 'just_right', pump: 'moderate', affinity: 'love' }, { dayId: 'd1', loadOnly: false });
+    assert.strictEqual(out.mesoState.affinity.e1.v, 'love');
+    assert.strictEqual(out.mesoState.affinity.e1.streak, 0, 'love resets the streak');
+  });
+  test('applyMesoFeedbackEdit: a null affinity (deselected) leaves the sticky value and streak untouched', () => {
+    const ms = { deltas: {}, growthCounts: {}, pumpLowCounts: {}, jointFlags: {}, affinity: { e1: { v: 'dislike', streak: 2 } } };
+    const raw = { answers: { soreness: {}, joint: { e1: { exId: 'e1', muscle: 'chest', answer: 'none', pump: 'moderate', weight: 'just_right', affinity: 'dislike', affinityStreakBase: 1, contrib: {} } }, volume: {} }, negOwner: {}, frozen: false, dayId: 'd1' };
+    const out = LB.applyMesoFeedbackEdit(ms, raw, { type: 'joint', subject: 'e1', answer: 'none', weight: 'just_right', pump: 'moderate', affinity: null }, { dayId: 'd1', loadOnly: false });
+    assert.strictEqual(out.mesoState.affinity.e1.v, 'dislike', 'deselect does not change the value');
+    assert.strictEqual(out.mesoState.affinity.e1.streak, 2, 'deselect does not re-confirm or reset');
+  });
   test('applyMesoFeedbackEdit: a volume edit only drives set deltas, never pump', () => {
     const ms = { deltas: {}, growthCounts: {}, pumpLowCounts: {}, jointFlags: {} };
     const raw = { answers: { soreness: {}, joint: { e1: { exId: 'e1', muscle: 'chest', answer: 'none', pump: 'moderate', weight: 'just_right', contrib: {} } }, volume: { chest: { muscle: 'chest', exIds: ['e1'], volume: 'just_right', contrib: {} } } }, negOwner: {}, frozen: false, dayId: 'd1' };

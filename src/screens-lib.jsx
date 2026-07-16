@@ -44,9 +44,15 @@ const MESO_PUMP_OPTS = [
   { key: 'moderate', label: 'Moderate', sub: 'Decent pump' },
   { key: 'amazing', label: 'Amazing', sub: 'Skin-splitting' },
 ];
+const MESO_AFFINITY_OPTS = [
+  { key: 'love', label: 'Love it', sub: 'Keep it coming' },
+  { key: 'ok', label: "It's fine", sub: 'No strong feelings' },
+  { key: 'dislike', label: 'Not my lift', sub: 'Swap it when you can' },
+];
 const MESO_SORENESS_LBL = { never: 'Never sore', healed_long: 'Healed a while ago', healed_just: 'Healed just in time', still_sore: 'Still sore', very_sore: 'Very sore' };
 const MESO_JOINT_LBL = { none: 'None', noticeable: 'Noticeable', sharp: 'Sharp pain' };
 const MESO_PUMP_LBL = { low: 'Low', moderate: 'Moderate', amazing: 'Amazing' };
+const MESO_AFFINITY_LBL = { love: 'Love it', ok: "It's fine", dislike: 'Not my lift' };
 const mesoVolumeLbl = (loadOnly) => loadOnly
   ? { not_enough: 'Too light', just_right: 'Just right', pushed: 'Hard', too_much: 'Too heavy' }
   : { not_enough: 'Not enough', just_right: 'Just right', pushed: 'Pushed my limits', too_much: 'Too much' };
@@ -2865,7 +2871,8 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
         const parts = [MESO_JOINT_LBL[jRec.answer] || jRec.answer];
         if (jRec.weight != null) parts.push(`weight ${(wLbl[jRec.weight] || jRec.weight).toLowerCase()}`);
         if (jRec.pump != null) parts.push(`pump ${(MESO_PUMP_LBL[jRec.pump] || jRec.pump).toLowerCase()}`);
-        rows.push({ type: 'joint', subject: e.exId, name: jRec.exName || e.name, sub: parts.join(' · '), sel: jRec.answer, weight: jRec.weight ?? null, pump: jRec.pump ?? null });
+        if (jRec.affinity != null) parts.push((MESO_AFFINITY_LBL[jRec.affinity] || jRec.affinity).toLowerCase());
+        rows.push({ type: 'joint', subject: e.exId, name: jRec.exName || e.name, sub: parts.join(' · '), sel: jRec.answer, weight: jRec.weight ?? null, pump: jRec.pump ?? null, affinity: jRec.affinity ?? null });
       });
       const vRec = a.volume && a.volume[muscle];
       // Per-muscle workload row (Volume+Load / non-final Meso weeks); drives set deltas.
@@ -2915,6 +2922,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
         const parts = [MESO_JOINT_LBL[jRec.answer] || jRec.answer];
         if (jRec.weight != null) parts.push(`weight ${(wLbl[jRec.weight] || jRec.weight).toLowerCase()}`);
         if (jRec.pump != null) parts.push(`pump ${(MESO_PUMP_LBL[jRec.pump] || jRec.pump).toLowerCase()}`);
+        if (jRec.affinity != null) parts.push((MESO_AFFINITY_LBL[jRec.affinity] || jRec.affinity).toLowerCase());
         joint.push({ title: jRec.exName || e.name, sub: parts.join(' · ') });
       });
       const vRec = answers.volume && answers.volume[muscle];
@@ -3234,7 +3242,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
             const label = <span style={{ fontFamily: UI.fontUi, fontSize: 12.5, color: UI.inkFaint, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.name}</span>;
             if (useEdit) {
               return (
-                <button key={key} onClick={() => setFbEdit({ type: r.type, subject: r.subject, name: r.name, sel: r.sel ?? null, weight: r.weight ?? null, pump: r.pump ?? null, volume: r.volume ?? null })} style={{
+                <button key={key} onClick={() => setFbEdit({ type: r.type, subject: r.subject, name: r.name, sel: r.sel ?? null, weight: r.weight ?? null, pump: r.pump ?? null, affinity: r.affinity ?? null, volume: r.volume ?? null })} style={{
                   width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10,
                   padding: '7px 0', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left', WebkitTapHighlightColor: 'transparent',
                 }}>
@@ -3427,7 +3435,23 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                   );
                 })}
               </div>
-              <Btn disabled={!fbEdit.sel || !fbEdit.weight || !fbEdit.pump} onClick={() => saveFeedbackEdit({ type: 'joint', subject: fbEdit.subject, answer: fbEdit.sel, weight: fbEdit.weight, pump: fbEdit.pump })} style={{ width: '100%', marginTop: 12 }}>Save changes</Btn>
+              <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4, letterSpacing: '0.06em', textTransform: 'uppercase' }}>This lift{fbEdit.affinity == null ? ' · optional' : ''}</div>
+              <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.inkSoft, marginBottom: 8, lineHeight: 1.5 }}>Keeper, or would you swap it?</div>
+              <div style={{ display: 'flex', gap: 8, marginBottom: 4 }}>
+                {MESO_AFFINITY_OPTS.map(opt => {
+                  const asel = fbEdit.affinity === opt.key;
+                  return (
+                    <button key={opt.key} onClick={() => setFbEdit(e => ({ ...e, affinity: asel ? null : opt.key }))} style={{
+                      flex: 1, padding: '10px 8px', background: asel ? 'rgba(var(--accent-rgb),0.12)' : UI.bgInset,
+                      border: `1px solid ${asel ? 'var(--accent)' : UI.hairStrong}`, borderRadius: 6, cursor: 'pointer', textAlign: 'center', WebkitTapHighlightColor: 'transparent',
+                    }}>
+                      <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: asel ? 'var(--accent)' : UI.ink, fontWeight: 600 }}>{opt.label}</div>
+                      <div style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint, marginTop: 2 }}>{opt.sub}</div>
+                    </button>
+                  );
+                })}
+              </div>
+              <Btn disabled={!fbEdit.sel || !fbEdit.weight || !fbEdit.pump} onClick={() => saveFeedbackEdit({ type: 'joint', subject: fbEdit.subject, answer: fbEdit.sel, weight: fbEdit.weight, pump: fbEdit.pump, affinity: fbEdit.affinity })} style={{ width: '100%', marginTop: 12 }}>Save changes</Btn>
             </>)}
             {fbEdit.type === 'volume' && (<>
               {/* Per-muscle workload (Volume+Load / non-final Meso weeks); drives set deltas. */}

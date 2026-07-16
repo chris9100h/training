@@ -314,6 +314,10 @@ function AutoregGuideScreen({ store, go, mode: modeProp, back }) {
                 <AGOpt chip="Low" dirs={<><AGDir kind="block">bump</AGDir><AGDir kind="flag">swap</AGDir></>}>Barely felt it. Blocks the bump. Low pump on 3 sessions running suggests swapping this exercise, not forcing it.</AGOpt>
                 <AGOpt chip="Moderate" dirs={<AGDir kind="hold">gate green</AGDir>}>Decent stimulus. Weight can climb.</AGOpt>
                 <AGOpt chip="Amazing" dirs={<AGDir kind="hold">gate green</AGDir>}>Great stimulus.</AGOpt>
+                <div style={{ marginTop: 14 }}><AGKick>This lift (optional)</AGKick></div>
+                <AGOpt chip="Love it" dirs={<AGDir kind="hold">no dial</AGDir>}>A keeper. Pre-filled next time, so it costs no taps unless it changes.</AGOpt>
+                <AGOpt chip="It's fine" dirs={<AGDir kind="hold">no dial</AGDir>}>No strong feelings. Neutral.</AGOpt>
+                <AGOpt chip="Not my lift" dirs={<AGDir kind="flag">swap</AGDir>}>Marking this two sessions running suggests a variation you enjoy, so you actually stick with it. It gates nothing: a lift you dislike but that works still earns its weight.</AGOpt>
               </AGPanel>
 
               {/* per-muscle workload (Volume+Load / Meso only) */}
@@ -547,7 +551,7 @@ function AutoregGuideScreen({ store, go, mode: modeProp, back }) {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px,1fr))', gap: 12, marginTop: 14 }}>
               <div style={cardStyle}><h3 className="display" style={h3}>Weight, one line</h3><p style={{ fontSize: 13.5, color: UI.inkSoft, margin: 0 }}>Feedback owns the direction. Cut wins. Red holds. Only all-green climbs. Step is one increment (2.5 kg / 5 lbs).</p></div>
               <div style={cardStyle}><h3 className="display" style={h3}>Volume, one line</h3><p style={{ fontSize: 13.5, color: UI.inkSoft, margin: 0 }}>{isB ? 'Frozen. Your set counts never change in Load only. The per-exercise weight-feel question only opens or holds the weight gate.' : isC ? 'Recovered or too little adds a set to the least-grown lift. Sore or too much cuts from the most-grown. Frozen in the final week.' : 'Recovered or too little adds a set to the least-grown lift. Sore or too much cuts from the most-grown. Never below 1, no cap.'}</p></div>
-              <div style={cardStyle}><h3 className="display" style={h3}>Warnings, one line</h3><p style={{ fontSize: 13.5, color: UI.inkSoft, margin: 0 }}>Sharp joint pain sets a durable swap warning. Low pump on an exercise 3 sessions running suggests swapping it, not forcing it.</p></div>
+              <div style={cardStyle}><h3 className="display" style={h3}>Warnings, one line</h3><p style={{ fontSize: 13.5, color: UI.inkSoft, margin: 0 }}>Sharp joint pain sets a durable swap warning. Low pump 3 sessions running, or "not my lift" 2 sessions running, suggests swapping the exercise.</p></div>
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px,1fr))', gap: 12, marginTop: 12 }}>
               <div style={cardStyle}><AGKick>Editing</AGKick><p style={{ fontSize: 13.5, color: UI.inkSoft, margin: '6px 0 0' }}>Any answer is editable until the session ends. Afterward, only your single most recent session of a plan can be corrected.</p></div>

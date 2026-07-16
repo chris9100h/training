@@ -135,6 +135,10 @@
     jn+=opt('Low', dir('block','bump')+dir('flag','swap'), 'Barely felt it. Blocks the bump. Low pump on 3 sessions running suggests swapping this exercise, not forcing it.');
     jn+=opt('Moderate', dir('hold','gate green'), 'Decent stimulus. Weight can climb.');
     jn+=opt('Amazing', dir('hold','gate green'), 'Great stimulus.');
+    jn+='<div style="margin-top:14px"><div class="kick">This lift (optional)</div></div>';
+    jn+=opt('Love it', dir('hold','no dial'), 'A keeper. Pre-filled next time, so it costs no taps unless it changes.');
+    jn+=opt("It's fine", dir('hold','no dial'), 'No strong feelings. Neutral.');
+    jn+=opt('Not my lift', dir('flag','swap'), 'Marking this two sessions running suggests a variation you enjoy, so you actually stick with it. It gates nothing: a lift you dislike but that works still earns its weight.');
     out+=panel('2', 'Per exercise','per exercise<br>after last set', jn);
     /* per-muscle workload (Volume+Load / Meso only) */
     if(!isB){
@@ -288,7 +292,7 @@
     out+='<div class="grid g220" style="margin-top:14px">'+
       '<div class="card"><h3 class="display h3">Weight, one line</h3><p style="font-size:13.5px;color:var(--ink-soft)">Feedback owns the direction. Cut wins. Red holds. Only all-green climbs. Step is one increment (2.5 kg / 5 lbs).</p></div>'+
       '<div class="card"><h3 class="display h3">Volume, one line</h3><p style="font-size:13.5px;color:var(--ink-soft)">'+(isB?'Frozen. Your set counts never change in Load only. The per-exercise weight-feel question only opens or holds the weight gate.':isC?'Recovered or too little adds a set to the least-grown lift. Sore or too much cuts from the most-grown. Frozen in the final week.':'Recovered or too little adds a set to the least-grown lift. Sore or too much cuts from the most-grown. Never below 1, no cap.')+'</p></div>'+
-      '<div class="card"><h3 class="display h3">Warnings, one line</h3><p style="font-size:13.5px;color:var(--ink-soft)">Sharp joint pain sets a durable swap warning. Low pump on an exercise 3 sessions running suggests swapping it, not forcing it.</p></div></div>';
+      '<div class="card"><h3 class="display h3">Warnings, one line</h3><p style="font-size:13.5px;color:var(--ink-soft)">Sharp joint pain sets a durable swap warning. Low pump 3 sessions running, or "not my lift" 2 sessions running, suggests swapping the exercise.</p></div></div>';
     out+='<div class="grid g220" style="margin-top:12px">'+
       '<div class="card"><div class="kick">Editing</div><p style="font-size:13.5px;color:var(--ink-soft);margin-top:6px">Any answer is editable until the session ends. Afterward, only your single most recent session of a plan can be corrected.</p></div>'+
       '<div class="card"><div class="kick">Edge cases</div><p style="font-size:13.5px;color:var(--ink-soft);margin-top:6px">Skipped sets count as neither hit nor miss. Unilateral uses the weaker side. Bodyweight is not halved in a deload.</p></div>'+
