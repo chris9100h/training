@@ -17,6 +17,17 @@
    Entry shape: { id: string, date: string (YYYY-MM-DD), title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.598',
+    date: '2026-07-16',
+    title: 'Every Lift, Its Own Call',
+    items: [
+      "🎯 On auto and mesocycle plans, every lift now gets its own verdict. The weight-feel and pump check-ins used to be asked once for a whole muscle group. Now they're per exercise, so each lift earns or holds its next weight on how that lift actually felt. Your flat bench can keep climbing while your incline press taps the brakes.",
+      "💚 Flag the lifts you love (and the ones you don't). On auto and mesocycle plans, a quick, optional 'keeper, or not my lift?' now rides along with your feedback. Keep giving a movement the thumbs-down, or never getting a pump out of it, and the app nudges you to swap it for something you'll actually enjoy instead of just piling on more sets.",
+      "🙈 Peeking ahead stopped spoiling the surprise. Tapping to an exercise in the top bar used to fire its pinned note and soreness check too early. Both now wait until your workout genuinely reaches that lift, so you can scout ahead without setting anything off.",
+      "📖 And the Autoregulation guide got a tidier layout. The feedback cheat-sheet now lays its answers out in a clean grid instead of one endless column, so it's far easier to skim.",
+    ],
+  },
+  {
     id: 'v2.595',
     date: '2026-07-15',
     title: 'Autoregulation, Sharpened',
