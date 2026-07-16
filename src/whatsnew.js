@@ -17,6 +17,16 @@
    Entry shape: { id: string, date: string (YYYY-MM-DD), title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.601',
+    date: '2026-07-16',
+    title: 'No More Mystery Rest Days',
+    items: [
+      "🗺️ 'Why does my leg day say recover?!' Solved. A training day with no exercises yet now says exactly that, plainly, with a one-tap 'Add exercises' shortcut straight into it, on your home screen and in the plan view. And if you try to leave the plan editor with a day still empty, we give you a friendly heads-up before you go.",
+      "🎉 Finish a workout in peace. The 'update available' prompt now waits until you're done admiring your session summary (and grabbing your share image) before it pops up, instead of yanking you off to the home screen mid-victory-lap.",
+      "⚙️ Less to second-guess on autoregulating plans. On Autoregulate and Mesocycle plans, the per-exercise Smart Progression toggle is gone from the exercise settings. Your feedback drives the weight there, not Smart Progression, so the toggle was only ever a red herring.",
+    ],
+  },
+  {
     id: 'v2.599',
     date: '2026-07-16',
     title: 'Every Lift, Its Own Call',
