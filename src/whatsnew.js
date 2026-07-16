@@ -17,7 +17,7 @@
    Entry shape: { id: string, date: string (YYYY-MM-DD), title: string, items: string[] } */
 window.WHATS_NEW = [
   {
-    id: 'v2.598',
+    id: 'v2.599',
     date: '2026-07-16',
     title: 'Every Lift, Its Own Call',
     items: [
