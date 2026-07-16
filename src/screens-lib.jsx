@@ -34,19 +34,12 @@ const MESO_SORENESS_OPTS = [
   { key: 'healed_just', label: 'Healed just in time', sub: 'Recovered right around this session' },
   { key: 'still_sore', label: 'Still sore', sub: 'Still feeling last session in this muscle' },
 ];
-const MESO_JOINT_OPTS = [
-  { key: 'none', label: 'None', sub: 'All good, joints felt fine' },
-  { key: 'noticeable', label: 'Noticeable', sub: 'Some discomfort but manageable' },
-  { key: 'sharp', label: 'Sharp pain', sub: 'Clear pain, this exercise gets flagged' },
-];
-const MESO_PUMP_OPTS = [
-  { key: 'low', label: 'Low', sub: 'Barely felt it' },
-  { key: 'moderate', label: 'Moderate', sub: 'Decent pump' },
-  { key: 'amazing', label: 'Amazing', sub: 'Skin-splitting' },
-];
+// Joint / pump / affinity edit chips are toned inline (see toneBtn); only the soreness
+// edit sheet still uses a full option list with descriptions, so keep that one.
 const MESO_SORENESS_LBL = { never: 'Never sore', healed_long: 'Healed a while ago', healed_just: 'Healed just in time', still_sore: 'Still sore', very_sore: 'Very sore' };
 const MESO_JOINT_LBL = { none: 'None', noticeable: 'Noticeable', sharp: 'Sharp pain' };
 const MESO_PUMP_LBL = { low: 'Low', moderate: 'Moderate', amazing: 'Amazing' };
+const MESO_AFFINITY_LBL = { love: 'Love it', ok: "It's fine", dislike: 'Not my lift' };
 const mesoVolumeLbl = (loadOnly) => loadOnly
   ? { not_enough: 'Too light', just_right: 'Just right', pushed: 'Hard', too_much: 'Too heavy' }
   : { not_enough: 'Not enough', just_right: 'Just right', pushed: 'Pushed my limits', too_much: 'Too much' };
@@ -2827,6 +2820,18 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
   };
 
   // ── Post-hoc meso feedback editing ──
+  // Toned option chip, identical to the live capture sheet (screens-train.jsx): calm at
+  // rest (neutral ink label + hairline border), the answer's semantic tone reveals only
+  // when selected. Keep in sync with the live sheet by hand.
+  const TONE_RGB = { ok: '--ok-rgb', warn: '--warn-rgb', danger: '--danger-rgb', accent: '--accent-rgb' };
+  const TONE_COL = { ok: 'var(--ok)', warn: 'var(--warn)', danger: 'var(--danger)', accent: 'var(--accent)' };
+  const toneBtn = (tone, sel, extra) => ({
+    padding: '12px 8px', borderRadius: 6, cursor: 'pointer', textAlign: 'center', WebkitTapHighlightColor: 'transparent',
+    background: sel ? `rgba(var(${TONE_RGB[tone]}),0.14)` : UI.bgInset,
+    border: `1px solid ${sel ? `rgba(var(${TONE_RGB[tone]}),0.7)` : UI.hairStrong}`,
+    ...(extra || {}),
+  });
+  const toneLbl = (tone, sel) => ({ fontFamily: UI.fontUi, fontSize: 13, fontWeight: sel ? 700 : 600, color: sel ? TONE_COL[tone] : UI.ink });
   // The meso state for this session's plan (DB-synced copy; no live session can
   // be open when a session is editable, so the localStorage cache and this agree).
   const sessionMeso = s.scheduleId ? (store.mesoStates || []).find(m => m.scheduleId === s.scheduleId) : null;
@@ -2848,7 +2853,8 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
       const pm = muscleOf(e.exId);
       if (pm && !seen.has(pm)) { seen.add(pm); order.push(pm); }
     });
-    const volLbl = mesoVolumeLbl(fbLoadOnly);
+    const wLbl = mesoVolumeLbl(true);    // weight-feel labels
+    const workLbl = mesoVolumeLbl(false); // workload labels
     const groups = [];
     order.forEach(muscle => {
       const rows = [];
@@ -2858,10 +2864,20 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
         if (e.isCardio || muscleOf(e.exId) !== muscle) return;
         const jRec = a.joint && a.joint[e.exId];
         if (!jRec || jRec.answer == null) return;
-        rows.push({ type: 'joint', subject: e.exId, name: jRec.exName || e.name, sub: MESO_JOINT_LBL[jRec.answer] || jRec.answer, sel: jRec.answer });
+        // Per-exercise feedback: joint + weight-feel + pump, all edited together in the
+        // joint sheet (mirrors screens-train.jsx mesoRecapGroups). Old sessions that
+        // predate the per-exercise move simply carry no weight/pump here.
+        const parts = [MESO_JOINT_LBL[jRec.answer] || jRec.answer];
+        if (jRec.weight != null) parts.push(wLbl[jRec.weight] || jRec.weight);
+        if (jRec.pump != null) parts.push(MESO_PUMP_LBL[jRec.pump] || jRec.pump);
+        if (jRec.affinity != null) parts.push(MESO_AFFINITY_LBL[jRec.affinity] || jRec.affinity);
+        rows.push({ type: 'joint', subject: e.exId, name: jRec.exName || e.name, sub: parts.join(' · '), sel: jRec.answer, weight: jRec.weight ?? null, pump: jRec.pump ?? null, affinity: jRec.affinity ?? null });
       });
       const vRec = a.volume && a.volume[muscle];
-      if (vRec && vRec.pump != null && vRec.volume != null) rows.push({ type: 'volume', subject: muscle, name: fbLoadOnly ? 'Pump & Weight' : 'Pump & Volume', sub: `${MESO_PUMP_LBL[vRec.pump] || vRec.pump} pump · ${volLbl[vRec.volume] || vRec.volume}`, pump: vRec.pump, volume: vRec.volume });
+      // Per-muscle workload row (Volume+Load / non-final Meso weeks); drives set deltas.
+      if (vRec && vRec.volume != null) {
+        rows.push({ type: 'volume', subject: muscle, name: 'Workload', sub: workLbl[vRec.volume] || vRec.volume, volume: vRec.volume });
+      }
       if (rows.length) groups.push({ muscle, rows });
     });
     return groups;
@@ -2892,20 +2908,24 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
       ? primaryMuscleForExercise(store.exercises?.find(x => x.id === exId)) : null);
     const order = [], seen = new Set();
     (s.entries || []).forEach(e => { if (e.isCardio) return; const pm = muscleOf(e.exId); if (pm && !seen.has(pm)) { seen.add(pm); order.push(pm); } });
-    const volLbl = mesoVolumeLbl(fbLoadOnly);
+    const wLbl = mesoVolumeLbl(true), workLbl = mesoVolumeLbl(false);
     const groups = [];
     order.forEach(muscle => {
       const general = [], joint = [];
       const sRec = answers.soreness && answers.soreness[muscle];
       if (sRec && sRec.answer != null) general.push({ title: 'Soreness', sub: MESO_SORENESS_LBL[sRec.answer] || sRec.answer });
-      const vRec = answers.volume && answers.volume[muscle];
-      if (vRec && vRec.pump != null && vRec.volume != null) general.push({ title: fbLoadOnly ? 'Pump & Weight' : 'Pump & Volume', sub: `${MESO_PUMP_LBL[vRec.pump] || vRec.pump} pump · ${volLbl[vRec.volume] || vRec.volume}` });
       (s.entries || []).forEach(e => {
         if (e.isCardio || muscleOf(e.exId) !== muscle) return;
         const jRec = answers.joint && answers.joint[e.exId];
         if (!jRec || jRec.answer == null) return;
-        joint.push({ title: jRec.exName || e.name, sub: MESO_JOINT_LBL[jRec.answer] || jRec.answer });
+        const parts = [MESO_JOINT_LBL[jRec.answer] || jRec.answer];
+        if (jRec.weight != null) parts.push(wLbl[jRec.weight] || jRec.weight);
+        if (jRec.pump != null) parts.push(MESO_PUMP_LBL[jRec.pump] || jRec.pump);
+        if (jRec.affinity != null) parts.push(MESO_AFFINITY_LBL[jRec.affinity] || jRec.affinity);
+        joint.push({ title: jRec.exName || e.name, sub: parts.join(' · ') });
       });
+      const vRec = answers.volume && answers.volume[muscle];
+      if (vRec && vRec.volume != null) general.push({ title: 'Workload', sub: workLbl[vRec.volume] || vRec.volume });
       if (general.length || joint.length) groups.push({ muscle, general, joint });
     });
     return groups;
@@ -3205,9 +3225,10 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
         )}
 
         {/* Feedback recap, as a bottom sheet. Structured per muscle group like the
-            in-session review: General feedback (Soreness, Pump) and Joint feedback
-            (per exercise) split with knurled dividers, then the changes it earned.
-            On the latest still-editable session every answer is a tap-to-fix row. */}
+            in-session review: General feedback (Soreness, and Workload in Volume+Load /
+            Meso) and Per exercise (joint + weight + pump + affinity, two-line) split with
+            knurled dividers, then the changes it earned. On the latest still-editable
+            session every answer is a tap-to-fix row. */}
         {!capturing && s.mesoRecap && recapOpen && (() => {
           const editGroups = fbEditable ? fbEditRows() : null;
           const useEdit = !!(editGroups && editGroups.length);
@@ -3217,11 +3238,31 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
           const modeLabel = s.mesoRecap.loadOnly ? 'Autoregulation · load only'
             : s.mesoRecap.meso ? `Mesocycle${s.mesoRecap.week ? ` · Week ${s.mesoRecap.week}` : ''}`
             : 'Autoregulation';
-          const fbRow = (r, key) => {
+          const fbRow = (r, key, twoLine) => {
+            // Per-exercise rows (joint + weight + pump + affinity) get a two-line layout:
+            // the exercise name on its own line (no truncation), the answer summary muted
+            // beneath. Muscle-level rows (Soreness, Workload) stay one-line name/value.
+            if (twoLine) {
+              const body = (<>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, fontWeight: 600, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name}</span>
+                  {useEdit && <i className="fa-solid fa-pen" style={{ fontSize: 9, color: 'var(--accent)', flexShrink: 0 }} />}
+                </div>
+                <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.inkSoft, marginTop: 3 }}>{r.sub}</div>
+              </>);
+              if (useEdit) {
+                return (
+                  <button key={key} onClick={() => setFbEdit({ type: r.type, subject: r.subject, name: r.name, sel: r.sel ?? null, weight: r.weight ?? null, pump: r.pump ?? null, affinity: r.affinity ?? null, volume: r.volume ?? null })} style={{
+                    width: '100%', padding: '8px 0', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left', WebkitTapHighlightColor: 'transparent',
+                  }}>{body}</button>
+                );
+              }
+              return <div key={key} style={{ padding: '7px 0' }}>{body}</div>;
+            }
             const label = <span style={{ fontFamily: UI.fontUi, fontSize: 12.5, color: UI.inkFaint, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.name}</span>;
             if (useEdit) {
               return (
-                <button key={key} onClick={() => setFbEdit({ type: r.type, subject: r.subject, name: r.name, sel: r.sel ?? null, pump: r.pump ?? null, volume: r.volume ?? null })} style={{
+                <button key={key} onClick={() => setFbEdit({ type: r.type, subject: r.subject, name: r.name, sel: r.sel ?? null, weight: r.weight ?? null, pump: r.pump ?? null, affinity: r.affinity ?? null, volume: r.volume ?? null })} style={{
                   width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10,
                   padding: '7px 0', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left', WebkitTapHighlightColor: 'transparent',
                 }}>
@@ -3279,12 +3320,12 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                           {g.general.length > 0 && (<>
                             <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>General feedback</div>
                             <div className="knurl" style={{ marginBottom: 4 }} />
-                            {g.general.map((r, ri) => fbRow(r, 'g' + ri))}
+                            {g.general.map((r, ri) => fbRow(r, 'g' + ri, false))}
                           </>)}
                           {g.joint.length > 0 && (<>
-                            <div className="micro" style={{ color: UI.inkFaint, marginTop: g.general.length ? 14 : 0, marginBottom: 6 }}>Joint feedback</div>
+                            <div className="micro" style={{ color: UI.inkFaint, marginTop: g.general.length ? 14 : 0, marginBottom: 6 }}>Per exercise</div>
                             <div className="knurl" style={{ marginBottom: 4 }} />
-                            {g.joint.map((r, ri) => fbRow(r, 'j' + ri))}
+                            {g.joint.map((r, ri) => fbRow(r, 'j' + ri, true))}
                           </>)}
                         </div>
                       ))}
@@ -3343,7 +3384,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
         {/* Meso feedback edit picker (post-hoc correction of the last session) */}
         {fbEdit && (
           <Sheet open={!!fbEdit} onClose={() => setFbEdit(null)}
-            title={fbEdit.type === 'joint' ? 'Joint check' : fbEdit.type === 'volume' ? (fbEdit.name || 'Feedback') : 'Soreness check'}
+            title={fbEdit.type === 'joint' ? (fbEdit.name || 'Feedback') : fbEdit.type === 'volume' ? 'Workload' : 'Soreness check'}
             titleColor="var(--accent)">
             {fbEdit.type === 'soreness' && (<>
               <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: 1.5 }}>
@@ -3365,42 +3406,57 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
               <Btn disabled={!fbEdit.sel} onClick={() => saveFeedbackEdit({ type: 'soreness', subject: fbEdit.subject, answer: fbEdit.sel })} style={{ width: '100%', marginTop: 12 }}>Save changes</Btn>
             </>)}
             {fbEdit.type === 'joint' && (<>
-              <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: 1.5 }}>
-                Joint discomfort during <strong style={{ color: UI.ink }}>{fbEdit.name}</strong>?
-              </div>
-              {MESO_JOINT_OPTS.map(opt => {
-                const sel = fbEdit.sel === opt.key;
-                const danger = opt.key === 'sharp';
-                return (
-                  <button key={opt.key} onClick={() => setFbEdit(e => ({ ...e, sel: opt.key }))} style={{
-                    width: '100%', marginBottom: 8, padding: '12px 14px',
-                    background: sel ? (danger ? 'rgba(var(--danger-rgb),0.12)' : 'rgba(var(--accent-rgb),0.12)') : UI.bgInset,
-                    border: `1px solid ${sel ? (danger ? 'rgba(var(--danger-rgb),0.6)' : 'var(--accent)') : (danger ? 'rgba(var(--danger-rgb),0.4)' : UI.hairStrong)}`, borderRadius: 6, cursor: 'pointer', textAlign: 'left', WebkitTapHighlightColor: 'transparent',
-                  }}>
-                    <div style={{ fontFamily: UI.fontUi, fontSize: 13, color: danger ? UI.danger : (sel ? 'var(--accent)' : UI.ink), fontWeight: 600 }}>{opt.label}</div>
-                    <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 2 }}>{opt.sub}</div>
-                  </button>
-                );
-              })}
-              <Btn disabled={!fbEdit.sel} onClick={() => saveFeedbackEdit({ type: 'joint', subject: fbEdit.subject, answer: fbEdit.sel })} style={{ width: '100%', marginTop: 12 }}>Save changes</Btn>
-            </>)}
-            {fbEdit.type === 'volume' && (<>
-              <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 12, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Pump</div>
-              <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
-                {MESO_PUMP_OPTS.map(opt => {
-                  const sel = fbEdit.pump === opt.key;
+              {/* Per-exercise feedback: joints, weight feel and pump, mirroring the live
+                  sheet in screens-train.jsx. */}
+              <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 8, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Joint pain</div>
+              <div style={{ display: 'flex', gap: 8, marginBottom: 18 }}>
+                {[{ key: 'none', label: 'None', tone: 'ok' }, { key: 'noticeable', label: 'Noticeable', tone: 'warn' }, { key: 'sharp', label: 'Sharp pain', tone: 'danger' }].map(opt => {
+                  const sel = fbEdit.sel === opt.key;
                   return (
-                    <button key={opt.key} onClick={() => setFbEdit(e => ({ ...e, pump: opt.key }))} style={{
-                      flex: 1, padding: '10px 8px', background: sel ? 'rgba(var(--accent-rgb),0.12)' : UI.bgInset,
-                      border: `1px solid ${sel ? 'var(--accent)' : UI.hairStrong}`, borderRadius: 6, cursor: 'pointer', textAlign: 'center', WebkitTapHighlightColor: 'transparent',
-                    }}>
-                      <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: sel ? 'var(--accent)' : UI.ink, fontWeight: 600 }}>{opt.label}</div>
-                      <div style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint, marginTop: 2 }}>{opt.sub}</div>
+                    <button key={opt.key} onClick={() => setFbEdit(e => ({ ...e, sel: opt.key }))} style={toneBtn(opt.tone, sel, { flex: 1 })}>
+                      <div style={toneLbl(opt.tone, sel)}>{opt.label}</div>
                     </button>
                   );
                 })}
               </div>
-              <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 8, letterSpacing: '0.06em', textTransform: 'uppercase' }}>{fbLoadOnly ? 'Weight' : 'Volume'}</div>
+              <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 8, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Weight feel</div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 18 }}>
+                {[{ key: 'not_enough', tone: 'ok' }, { key: 'just_right', tone: 'accent' }, { key: 'pushed', tone: 'warn' }, { key: 'too_much', tone: 'danger' }].map(opt => {
+                  const wsel = fbEdit.weight === opt.key;
+                  return (
+                    <button key={opt.key} onClick={() => setFbEdit(e => ({ ...e, weight: opt.key }))} style={toneBtn(opt.tone, wsel)}>
+                      <div style={toneLbl(opt.tone, wsel)}>{mesoVolumeLbl(true)[opt.key]}</div>
+                    </button>
+                  );
+                })}
+              </div>
+              <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 8, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Pump</div>
+              <div style={{ display: 'flex', gap: 8, marginBottom: 18 }}>
+                {[{ key: 'low', label: 'Low', tone: 'warn' }, { key: 'moderate', label: 'Moderate', tone: 'accent' }, { key: 'amazing', label: 'Amazing', tone: 'ok' }].map(opt => {
+                  const psel = fbEdit.pump === opt.key;
+                  return (
+                    <button key={opt.key} onClick={() => setFbEdit(e => ({ ...e, pump: opt.key }))} style={toneBtn(opt.tone, psel, { flex: 1 })}>
+                      <div style={toneLbl(opt.tone, psel)}>{opt.label}</div>
+                    </button>
+                  );
+                })}
+              </div>
+              <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 8, letterSpacing: '0.06em', textTransform: 'uppercase' }}>This lift{fbEdit.affinity == null ? ' · optional' : ''}</div>
+              <div style={{ display: 'flex', gap: 8, marginBottom: 4 }}>
+                {[{ key: 'love', label: 'Love it', tone: 'ok' }, { key: 'ok', label: "It's fine", tone: 'accent' }, { key: 'dislike', label: 'Not my lift', tone: 'warn' }].map(opt => {
+                  const asel = fbEdit.affinity === opt.key;
+                  return (
+                    <button key={opt.key} onClick={() => setFbEdit(e => ({ ...e, affinity: asel ? null : opt.key }))} style={toneBtn(opt.tone, asel, { flex: 1 })}>
+                      <div style={toneLbl(opt.tone, asel)}>{opt.label}</div>
+                    </button>
+                  );
+                })}
+              </div>
+              <Btn disabled={!fbEdit.sel || !fbEdit.weight || !fbEdit.pump} onClick={() => saveFeedbackEdit({ type: 'joint', subject: fbEdit.subject, answer: fbEdit.sel, weight: fbEdit.weight, pump: fbEdit.pump, affinity: fbEdit.affinity })} style={{ width: '100%', marginTop: 12 }}>Save changes</Btn>
+            </>)}
+            {fbEdit.type === 'volume' && (<>
+              {/* Per-muscle workload (Volume+Load / non-final Meso weeks); drives set deltas. */}
+              <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 8, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Workload</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 20 }}>
                 {['not_enough', 'just_right', 'pushed', 'too_much'].map(key => {
                   const sel = fbEdit.volume === key;
@@ -3409,12 +3465,12 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                       width: '100%', padding: '10px 14px', background: sel ? 'rgba(var(--accent-rgb),0.12)' : UI.bgInset,
                       border: `1px solid ${sel ? 'var(--accent)' : UI.hairStrong}`, borderRadius: 6, cursor: 'pointer', textAlign: 'left', WebkitTapHighlightColor: 'transparent',
                     }}>
-                      <div style={{ fontFamily: UI.fontUi, fontSize: 13, color: sel ? 'var(--accent)' : UI.ink, fontWeight: 600 }}>{mesoVolumeLbl(fbLoadOnly)[key]}</div>
+                      <div style={{ fontFamily: UI.fontUi, fontSize: 13, color: sel ? 'var(--accent)' : UI.ink, fontWeight: 600 }}>{mesoVolumeLbl(false)[key]}</div>
                     </button>
                   );
                 })}
               </div>
-              <Btn disabled={!fbEdit.pump || !fbEdit.volume} onClick={() => saveFeedbackEdit({ type: 'volume', subject: fbEdit.subject, pump: fbEdit.pump, volume: fbEdit.volume })} style={{ width: '100%' }}>Save changes</Btn>
+              <Btn disabled={!fbEdit.volume} onClick={() => saveFeedbackEdit({ type: 'volume', subject: fbEdit.subject, volume: fbEdit.volume })} style={{ width: '100%' }}>Save changes</Btn>
             </>)}
           </Sheet>
         )}

@@ -1536,7 +1536,6 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
         {/* ─── Category navigation ─── */}
         <Frame style={{ padding: '0 14px' }}>
           <NavRow label="Changelog" hint={(window.WHATS_NEW || [])[0]?.id} onTap={() => setChangelogSheet(true)} accent first />
-          <NavRow label="How to…" onTap={() => setHowToSheet(true)} />
           {hasActiveUsersAccess && (
             <NavRow label="Active users" hint={activeCount > 0 ? `${activeCount} active` : null} onTap={() => setActiveUsersSheet(true)} />
           )}
@@ -1618,14 +1617,15 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
 
       {confirmEl}
 
-      {/* ══ Guides Sheet (Feature map + Autoregulation, one umbrella entry) ══ */}
+      {/* ══ Guides Sheet (How to tours + Feature map + Autoregulation, one umbrella entry) ══ */}
       <SettingsSheet open={guidesSheet} onClose={() => setGuidesSheet(false)} title="Guides">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {[
+            { icon: 'fa-compass', title: 'How to…', sub: 'Guided tours of the app', sheet: 'howto' },
             { icon: 'fa-diagram-project', title: 'Feature map', sub: 'What the app can do', route: 'featuremap' },
             { icon: 'fa-sliders', title: 'Autoregulation', sub: 'How the plan adapts to you', route: 'autoreg-guide' },
           ].map(g => (
-            <button key={g.route} onClick={() => { setGuidesSheet(false); go({ name: g.route }); }} style={{
+            <button key={g.title} onClick={() => { setGuidesSheet(false); if (g.sheet === 'howto') setHowToSheet(true); else go({ name: g.route }); }} style={{
               display: 'flex', alignItems: 'center', gap: 12, width: '100%', textAlign: 'left', cursor: 'pointer',
               background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '13px 14px',
               WebkitTapHighlightColor: 'transparent', font: 'inherit', color: UI.ink,
@@ -2020,6 +2020,12 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           <Row label="Regression indicator">
             <Toggle on={store.settings?.showRegression !== false} onToggle={() => setStore(s => ({ ...s, settings: { ...s.settings, showRegression: s.settings?.showRegression === false } }))} />
           </Row>
+          <Row label="Pin all exercise notes">
+            <Toggle on={!!store.settings?.pinAllNotes} onToggle={() => setStore(s => ({ ...s, settings: { ...s.settings, pinAllNotes: !s.settings?.pinAllNotes } }))} />
+          </Row>
+          <div className="micro" style={{ color: UI.inkFaint, marginTop: 8, lineHeight: 1.5 }}>
+            When on, every exercise note pops up on its first set of the session. When off, only notes you pin individually do.
+          </div>
           <div style={{ marginTop: 24 }}>
             <Btn style={{ width: '100%' }} onClick={() => setSessionBehaviourSheet(false)}>Done</Btn>
           </div>
@@ -3178,7 +3184,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           {isIosDevice && !pushEnabled && !iosDisclaimerSeen && (
             <div style={{ background: 'rgba(var(--accent-rgb),0.07)', border: '0.5px solid rgba(var(--accent-rgb),0.2)', borderRadius: 6, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 10 }}>
               <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.55 }}>
-                Push notifications on iPhone and iPad require Zane to be installed as an app on your home screen. For instructions, see <span style={{ color: 'var(--accent)' }}>How to… → Install as app</span>.
+                Push notifications on iPhone and iPad require Zane to be installed as an app on your home screen. For instructions, see <span style={{ color: 'var(--accent)' }}>Guides → How to… → Install as app</span>.
               </div>
               <button onClick={() => { setIosDisclaimerSeen(true); localStorage.setItem('logbook-push-ios-hint-seen', 'true'); }} style={{ ...accentBtn, alignSelf: 'flex-start' }}>Got it</button>
             </div>

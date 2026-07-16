@@ -262,7 +262,8 @@ CREATE TABLE public.zane_user_settings (
   glucose_unit text DEFAULT 'mmol'::text,
   vip_background text,
   deload_prompt_dismissed_at timestamp with time zone,
-  sw_version text
+  sw_version text,
+  pin_all_notes boolean NOT NULL DEFAULT false
 );
 
 CREATE TABLE public.zane_pushover_active (
@@ -1916,6 +1917,7 @@ CREATE TABLE zane_meso_states (
   weight_boosts      jsonb       NOT NULL DEFAULT '{}',
   growth_counts      jsonb       NOT NULL DEFAULT '{}',
   rep_miss_counts    jsonb       NOT NULL DEFAULT '{}',
+  affinity           jsonb       NOT NULL DEFAULT '{}',  -- per-exId { v, streak } exercise affinity (Migration 0169)
   completions        int         NOT NULL DEFAULT 0,
   pending_meso2      boolean     NOT NULL DEFAULT false,
   created_at         timestamptz NOT NULL DEFAULT now(),
@@ -1935,7 +1937,7 @@ CREATE POLICY "Users manage own meso states"
 -- don't silently discard each other's deltas/jointFlags/weightBoosts.
 -- Migration 0122. growth_counts added in migration 0130. started_at in 0138
 -- (COALESCEd on update so an older client that doesn't send it can't null it).
--- rep_miss_counts added in migration 0165.
+-- rep_miss_counts added in migration 0165. affinity added in migration 0169.
 CREATE OR REPLACE FUNCTION public.sync_meso_states_batch(p_states jsonb)
  RETURNS void
  LANGUAGE sql
@@ -1945,7 +1947,7 @@ AS $function$
   INSERT INTO zane_meso_states (
     id, user_id, schedule_id, weeks, start_date, start_cycle_index, started_at,
     deltas, joint_flags, pump_low_counts, weight_boosts, growth_counts,
-    rep_miss_counts, completions, pending_meso2, updated_at
+    rep_miss_counts, affinity, completions, pending_meso2, updated_at
   )
   SELECT
     m->>'id',
@@ -1961,6 +1963,7 @@ AS $function$
     COALESCE(m->'weight_boosts', '{}'::jsonb),
     COALESCE(m->'growth_counts', '{}'::jsonb),
     COALESCE(m->'rep_miss_counts', '{}'::jsonb),
+    COALESCE(m->'affinity', '{}'::jsonb),
     COALESCE((m->>'completions')::int, 0),
     COALESCE((m->>'pending_meso2')::boolean, false),
     COALESCE((m->>'updated_at')::timestamptz, now())
@@ -1976,6 +1979,7 @@ AS $function$
     weight_boosts     = EXCLUDED.weight_boosts,
     growth_counts     = EXCLUDED.growth_counts,
     rep_miss_counts   = EXCLUDED.rep_miss_counts,
+    affinity          = EXCLUDED.affinity,
     completions       = EXCLUDED.completions,
     pending_meso2     = EXCLUDED.pending_meso2,
     updated_at        = EXCLUDED.updated_at

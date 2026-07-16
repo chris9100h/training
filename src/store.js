@@ -400,6 +400,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
     show_health_tab: sett.showHealthTab ?? false,
     onboarding_completed: sett.onboardingCompleted ?? false,
     show_regression: sett.showRegression ?? true,
+    pin_all_notes: sett.pinAllNotes ?? false,
     glucose_unit: sett.glucoseUnit ?? 'mmol',
     default_checkin_schema: sett.defaultCheckinSchema ?? null,
     vip_background: sett.vipBackground ?? null,
@@ -604,7 +605,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
     prog('Uploading mesocycle states…');
     // id is deterministic (userId + '_' + scheduleId) — regenerate for this user.
     // schedule_id is preserved (schedules keep their ids), but the exId-keyed maps
-    // (deltas/weightBoosts/repMissCounts: exId_dayId; jointFlags/pumpLowCounts: exId)
+    // (deltas/weightBoosts/repMissCounts: exId_dayId; jointFlags/pumpLowCounts/affinity: exId)
     // must be remapped onto the fresh exercise ids or they dangle.
     await unwrap(_supabase.from('zane_meso_states').upsert(
       backup.mesoStates.map(m => ({
@@ -614,6 +615,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
         deltas: remapExDayKeyed(m.deltas), weight_boosts: remapExDayKeyed(m.weightBoosts),
         joint_flags: remapExKeyed(m.jointFlags), pump_low_counts: remapExKeyed(m.pumpLowCounts),
         growth_counts: remapExDayKeyed(m.growthCounts), rep_miss_counts: remapExDayKeyed(m.repMissCounts),
+        affinity: remapExKeyed(m.affinity),
         completions: m.completions ?? 0, pending_meso2: m.pendingMeso2 ?? false,
       }))
     ));
@@ -824,7 +826,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     // Reusable workout templates (migration 0107)
     _supabase.from('zane_workout_templates').select('id, name, exercises, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
     // Mesocycle state per plan — replaces localStorage logbook-meso-state (migration 0120)
-    _supabase.from('zane_meso_states').select('id, schedule_id, weeks, start_date, start_cycle_index, started_at, deltas, joint_flags, pump_low_counts, weight_boosts, growth_counts, rep_miss_counts, completions, pending_meso2, updated_at').eq('user_id', userId),
+    _supabase.from('zane_meso_states').select('id, schedule_id, weeks, start_date, start_cycle_index, started_at, deltas, joint_flags, pump_low_counts, weight_boosts, growth_counts, rep_miss_counts, affinity, completions, pending_meso2, updated_at').eq('user_id', userId),
     // Coach's own saved check-in schema templates: irrelevant when loading a
     // CLIENT's store as a coach, these belong to the acting coach, not the client.
     isCoachLoad ? null : _supabase.from('zane_checkin_schema_templates').select('id, name, schema, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
@@ -1034,6 +1036,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
       deltas: m.deltas ?? {}, jointFlags: m.joint_flags ?? {},
       pumpLowCounts: m.pump_low_counts ?? {}, weightBoosts: m.weight_boosts ?? {},
       growthCounts: m.growth_counts ?? {}, repMissCounts: m.rep_miss_counts ?? {},
+      affinity: m.affinity ?? {},
       completions: m.completions ?? 0, pendingMeso2: m.pending_meso2 ?? false,
       updatedAt: m.updated_at ?? null,
     })),
@@ -1080,6 +1083,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         reminderTime: sett.reminder_time ?? '07:00',
         showWarmupInSummary: sett.show_warmup_in_summary ?? true,
         showRegression: sett.show_regression ?? true,
+        pinAllNotes: sett.pin_all_notes ?? false,
         showCoachingTab: sett.show_coaching_tab ?? false,
         beYourOwnCoach: sett.be_your_own_coach ?? false,
         sessionTimeoutMinutes: sett.session_timeout_minutes ?? 90,
@@ -1472,6 +1476,7 @@ async function syncStore(prev, next, userId) {
       deltas: m.deltas ?? {}, joint_flags: m.jointFlags ?? {},
       pump_low_counts: m.pumpLowCounts ?? {}, weight_boosts: m.weightBoosts ?? {},
       growth_counts: m.growthCounts ?? {}, rep_miss_counts: m.repMissCounts ?? {},
+      affinity: m.affinity ?? {},
       completions: m.completions ?? 0, pending_meso2: m.pendingMeso2 ?? false,
       updated_at: m.updatedAt ?? new Date().toISOString(),
     })) }));
@@ -1556,6 +1561,7 @@ async function syncStore(prev, next, userId) {
     prev.settings?.reminderTime         !== next.settings?.reminderTime         ||
     prev.settings?.showWarmupInSummary  !== next.settings?.showWarmupInSummary  ||
     prev.settings?.showRegression       !== next.settings?.showRegression       ||
+    prev.settings?.pinAllNotes          !== next.settings?.pinAllNotes          ||
     prev.settings?.showCoachingTab      !== next.settings?.showCoachingTab      ||
     prev.settings?.beYourOwnCoach         !== next.settings?.beYourOwnCoach         ||
     prev.settings?.sessionTimeoutMinutes  !== next.settings?.sessionTimeoutMinutes  ||
@@ -1599,6 +1605,7 @@ async function syncStore(prev, next, userId) {
       reminder_time: next.settings?.reminderTime ?? '07:00',
       show_warmup_in_summary: next.settings?.showWarmupInSummary ?? true,
       show_regression: next.settings?.showRegression ?? true,
+      pin_all_notes: next.settings?.pinAllNotes ?? false,
       show_coaching_tab: next.settings?.showCoachingTab ?? false,
       be_your_own_coach: next.settings?.beYourOwnCoach ?? false,
       session_timeout_minutes: next.settings?.sessionTimeoutMinutes ?? 90,
@@ -4601,21 +4608,51 @@ function revertMesoSessionBoosts(mesoState, deletedSession, remainingSessions) {
 // differently in the first place. Only valid for the top-of-stack session (see
 // isMesoSessionEditable), which is what makes the incremental diff exact.
 
-// Rebuild the four weight-boost gate Sets from the per-question answer records,
+// Rebuild the weight-boost gate Sets from the per-question answer records,
 // mirroring the mesoBoostSetsInitRef rehydration (screens-train.jsx). Pure.
+// Joint, pump and weight-feel are all per EXERCISE in every mode (joint[exId].answer
+// / .pump / .weight); soreness stays per muscle. Each per-exercise gate resolves PER
+// EXID with a legacy fallback: sessions finished before pump/weight moved per-exercise
+// carry pump on volume[muscle].pump and the weight/workload answer on
+// volume[muscle].volume. For any exId WITHOUT its own answer, spread the muscle answer
+// over that muscle's exIds. Never a union (an explicit per-exercise answer is never
+// overridden), so a fully-new session ignores the fallback and an old session is driven
+// entirely by it. weightOk is now built in every mode (weight-feel is the sole weight
+// gate everywhere); volumeOk is gone (the workload answer only drives set deltas now).
 function mesoGateSetsFromAnswers(answers, loadOnly) {
   const a = answers || {};
   const jointFine = new Set();
   for (const [exId, rec] of Object.entries(a.joint || {})) if (rec && rec.answer === 'none') jointFine.add(exId);
-  const pumpOk = new Set(), volumeOk = new Set();
-  for (const rec of Object.values(a.volume || {})) {
-    if (!rec || !rec.muscle) continue;
-    if (rec.pump === 'moderate' || rec.pump === 'amazing') pumpOk.add(rec.muscle);
-    if (volumeAnswerAllowsBump(rec.volume, loadOnly)) volumeOk.add(rec.muscle);
+
+  // Pump gate, per exId. Good = moderate/amazing. Legacy fallback: old sessions kept
+  // pump on the per-muscle volume rec; spread a good muscle pump over its unanswered exIds.
+  const pumpOk = new Set(), pumpAnswered = new Set();
+  for (const [exId, rec] of Object.entries(a.joint || {})) {
+    if (rec && 'pump' in rec) { pumpAnswered.add(exId); if (rec.pump === 'moderate' || rec.pump === 'amazing') pumpOk.add(exId); }
   }
+  for (const rec of Object.values(a.volume || {})) {
+    if (!rec || !(rec.pump === 'moderate' || rec.pump === 'amazing')) continue;
+    (rec.exIds || []).forEach(id => { if (!pumpAnswered.has(id)) pumpOk.add(id); });
+  }
+
+  // Weight-feel gate, per exId, every mode. joint[exId].weight uses weight-feel semantics
+  // (too_heavy blocks, hard/pushed still allows: volumeAnswerAllowsBump(_, true)). The
+  // legacy fallback reads volume[muscle].volume with the session's OWN mode semantics: an
+  // old load-only session stored the weight answer there (loadOnly semantics); an old
+  // Volume+Load/Meso session stored the workload answer there, which WAS the weight gate
+  // then (workload semantics), so honoring loadOnly reproduces old behavior exactly.
+  const weightOk = new Set(), weightAnswered = new Set();
+  for (const [exId, rec] of Object.entries(a.joint || {})) {
+    if (rec && 'weight' in rec) { weightAnswered.add(exId); if (volumeAnswerAllowsBump(rec.weight, true)) weightOk.add(exId); }
+  }
+  for (const rec of Object.values(a.volume || {})) {
+    if (!rec || rec.volume == null || !volumeAnswerAllowsBump(rec.volume, loadOnly)) continue;
+    (rec.exIds || []).forEach(id => { if (!weightAnswered.has(id)) weightOk.add(id); });
+  }
+
   const soreBlock = new Set();
   for (const rec of Object.values(a.soreness || {})) if (rec && rec.answer === 'still_sore' && rec.muscle) soreBlock.add(rec.muscle);
-  return { jointFine, pumpOk, volumeOk, soreBlock };
+  return { jointFine, pumpOk, weightOk, soreBlock };
 }
 
 // Can this finished session's feedback be safely edited? Only the single
@@ -4665,7 +4702,9 @@ function _commitContribInto(deltas, negOwner, prevContrib, questionType, newCont
 
 // Apply ONE corrected feedback answer to a finished (top-of-stack) session's meso
 // state, mirroring the live edit path of each answer handler. `edit` is
-// { type:'soreness'|'joint'|'volume', subject: muscle|exId, answer, pump, volume }.
+// { type:'soreness'|'joint'|'volume', subject: muscle|exId, answer, weight, pump, volume }.
+// A 'joint' edit is the per-exercise feedback: it can carry answer (joint) plus weight
+// and pump (both per exId now). A 'volume' edit is the per-muscle workload answer only.
 // `raw` is the durable session.mesoRecap.raw ({ answers, negOwner, frozen, dayId }).
 // `ctx` = { dayId, loadOnly }. Touches deltas/growthCounts/pumpLowCounts/jointFlags
 // + the answer record + negOwner; weight boosts are re-earned separately
@@ -4679,6 +4718,7 @@ function applyMesoFeedbackEdit(mesoState, raw, edit, ctx) {
   let growthCounts = { ...(mesoState.growthCounts || {}) };
   const pumpLowCounts = { ...(mesoState.pumpLowCounts || {}) };
   const jointFlags = { ...(mesoState.jointFlags || {}) };
+  const affinity = { ...(mesoState.affinity || {}) };
   const answers = {
     soreness: { ...((raw.answers && raw.answers.soreness) || {}) },
     joint: { ...((raw.answers && raw.answers.joint) || {}) },
@@ -4725,15 +4765,40 @@ function applyMesoFeedbackEdit(mesoState, raw, edit, ctx) {
     const key = exId + '_' + dayId;
     const newContrib = { [key]: (edit.answer === 'noticeable' || edit.answer === 'sharp') ? -1 : 0 };
     rec.contrib = _commitContribInto(deltas, negOwner, rec.contrib || {}, 'joint', newContrib, frozen);
+    // Weight-feel and pump both live on the per-exercise joint record now. They only
+    // gate the weight (rebuilt in the re-earn), never a set delta, so no contrib.
+    if ('weight' in edit) rec.weight = edit.weight;
+    if ('pump' in edit) {
+      const oldPumpLowApplied = !!rec.pumpLowApplied;
+      rec.pump = edit.pump;
+      // Low-pump swap counter, now per exId (was per muscle, attributed to the first
+      // lift). Idempotent diff so an edit applies only its own delta. The old
+      // volume === 'just_right' confound guard is dropped: pump is per exercise now and
+      // is answered before the muscle's workload answer, so it cannot read it here.
+      const pumpLowApplied = edit.pump === 'low';
+      const pumpLowDiff = (pumpLowApplied ? 1 : 0) - (oldPumpLowApplied ? 1 : 0);
+      rec.pumpLowApplied = pumpLowApplied;
+      if (pumpLowDiff !== 0) pumpLowCounts[exId] = Math.max(0, (pumpLowCounts[exId] || 0) + pumpLowDiff);
+    }
+    // Affinity (sticky per-exId preference) gates nothing, only the swap hint. The
+    // streak recomputes from rec.affinityStreakBase (captured live, the streak BEFORE
+    // this session) so a post-hoc edit re-derives it cleanly. edit.affinity === null
+    // means "deselected", which leaves the sticky value/streak as-is (no re-confirm).
+    if ('affinity' in edit && edit.affinity != null) {
+      rec.affinity = edit.affinity;
+      if (rec.affinityStreakBase === undefined) rec.affinityStreakBase = (mesoState.affinity?.[exId]?.streak) || 0;
+      affinity[exId] = { v: edit.affinity, streak: edit.affinity === 'dislike' ? rec.affinityStreakBase + 1 : 0 };
+    }
     answers.joint[exId] = rec;
   } else if (edit.type === 'volume') {
     const muscle = edit.subject;
     const rec = { ...(answers.volume[muscle] || { muscle }) };
-    const oldPumpLowApplied = !!rec.pumpLowApplied;
-    rec.pump = edit.pump; rec.volume = edit.volume;
+    // The per-muscle step now carries only the workload answer (pump moved to the
+    // per-exercise joint records). It drives set deltas (Volume+Load / Meso), never
+    // the weight gate. Only overwrite volume when the edit actually carries one.
+    if (edit.volume !== undefined) rec.volume = edit.volume;
     const exIds = rec.exIds || [];
     const keys = exIds.map(exId => exId + '_' + dayId);
-    const mainExId = exIds[0];
     const prevGrantedTo = Object.keys(rec.contrib || {}).find(k => rec.contrib[k] === 1) ?? null;
     let recipientKey = null;
     if (frozen) {
@@ -4754,25 +4819,19 @@ function applyMesoFeedbackEdit(mesoState, raw, edit, ctx) {
       newContrib[key] = want;
     });
     rec.contrib = _commitContribInto(deltas, negOwner, rec.contrib || {}, 'volume', newContrib, frozen);
-    const pumpLowApplied = edit.pump === 'low' && edit.volume === 'just_right';
-    const pumpLowDiff = (pumpLowApplied ? 1 : 0) - (oldPumpLowApplied ? 1 : 0);
-    rec.pumpLowApplied = pumpLowApplied;
-    if (pumpLowDiff !== 0 && mainExId) {
-      pumpLowCounts[mainExId] = Math.max(0, (pumpLowCounts[mainExId] || 0) + pumpLowDiff);
-    }
     answers.volume[muscle] = rec;
   }
 
   return {
-    mesoState: { ...mesoState, deltas, growthCounts, pumpLowCounts, jointFlags },
+    mesoState: { ...mesoState, deltas, growthCounts, pumpLowCounts, jointFlags, affinity },
     raw: { ...raw, answers, negOwner },
   };
 }
 
 // Re-earn this session's weight boosts from the (edited) feedback answers,
-// mirroring computeMesoGains' EARN gate: allHit AND jointFine AND pumpOk AND
-// volumeOk AND (load-only) not-still-sore. A rep-miss CUT (a negative existing
-// boost) is rep-driven, not feedback-driven, so it is preserved untouched.
+// mirroring computeMesoGains' EARN gate: allHit AND jointFine AND pumpOk AND weightOk
+// (all per exId, every mode) AND (load-only) not-still-sore. A rep-miss CUT (a negative
+// existing boost) is rep-driven, not feedback-driven, so it is preserved untouched.
 // earnInputs = this session's exercises [{ exId, key, muscle, allHit, increment }].
 // Pure: returns new mesoState.
 function reearnMesoBoostsFromAnswers(mesoState, answers, earnInputs, loadOnly) {
@@ -4786,8 +4845,14 @@ function reearnMesoBoostsFromAnswers(mesoState, answers, earnInputs, loadOnly) {
     if (existing != null && existing < 0) { earned[e.key] = existing; continue; } // preserve rep-miss cut
     if (!e.allHit) continue;
     if (!gates.jointFine.has(e.exId)) continue;
-    if (e.muscle && !gates.pumpOk.has(e.muscle)) continue;
-    if (e.muscle && !gates.volumeOk.has(e.muscle)) continue;
+    // Pump and weight-feel are per exId. A muscle-less exercise (no primary muscle) in
+    // a session finished BEFORE they moved per-exercise has no per-exercise answer AND
+    // no muscle rec to fall back on, so it stays exempt from these gates and earns on
+    // reps + joint alone (the old behavior). Any exercise with its own per-exercise
+    // answer, or any muscled exercise (fallback available), IS gated.
+    const jRec = (answers.joint || {})[e.exId];
+    if ((e.muscle || (jRec && 'pump' in jRec)) && !gates.pumpOk.has(e.exId)) continue;
+    if ((e.muscle || (jRec && 'weight' in jRec)) && !gates.weightOk.has(e.exId)) continue;
     if (loadOnly && e.muscle && gates.soreBlock.has(e.muscle)) continue;
     earned[e.key] = e.increment;
   }
