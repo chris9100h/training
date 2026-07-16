@@ -2868,9 +2868,9 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
         // joint sheet (mirrors screens-train.jsx mesoRecapGroups). Old sessions that
         // predate the per-exercise move simply carry no weight/pump here.
         const parts = [MESO_JOINT_LBL[jRec.answer] || jRec.answer];
-        if (jRec.weight != null) parts.push(`weight ${(wLbl[jRec.weight] || jRec.weight).toLowerCase()}`);
-        if (jRec.pump != null) parts.push(`pump ${(MESO_PUMP_LBL[jRec.pump] || jRec.pump).toLowerCase()}`);
-        if (jRec.affinity != null) parts.push((MESO_AFFINITY_LBL[jRec.affinity] || jRec.affinity).toLowerCase());
+        if (jRec.weight != null) parts.push(wLbl[jRec.weight] || jRec.weight);
+        if (jRec.pump != null) parts.push(MESO_PUMP_LBL[jRec.pump] || jRec.pump);
+        if (jRec.affinity != null) parts.push(MESO_AFFINITY_LBL[jRec.affinity] || jRec.affinity);
         rows.push({ type: 'joint', subject: e.exId, name: jRec.exName || e.name, sub: parts.join(' · '), sel: jRec.answer, weight: jRec.weight ?? null, pump: jRec.pump ?? null, affinity: jRec.affinity ?? null });
       });
       const vRec = a.volume && a.volume[muscle];
@@ -2919,9 +2919,9 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
         const jRec = answers.joint && answers.joint[e.exId];
         if (!jRec || jRec.answer == null) return;
         const parts = [MESO_JOINT_LBL[jRec.answer] || jRec.answer];
-        if (jRec.weight != null) parts.push(`weight ${(wLbl[jRec.weight] || jRec.weight).toLowerCase()}`);
-        if (jRec.pump != null) parts.push(`pump ${(MESO_PUMP_LBL[jRec.pump] || jRec.pump).toLowerCase()}`);
-        if (jRec.affinity != null) parts.push((MESO_AFFINITY_LBL[jRec.affinity] || jRec.affinity).toLowerCase());
+        if (jRec.weight != null) parts.push(wLbl[jRec.weight] || jRec.weight);
+        if (jRec.pump != null) parts.push(MESO_PUMP_LBL[jRec.pump] || jRec.pump);
+        if (jRec.affinity != null) parts.push(MESO_AFFINITY_LBL[jRec.affinity] || jRec.affinity);
         joint.push({ title: jRec.exName || e.name, sub: parts.join(' · ') });
       });
       const vRec = answers.volume && answers.volume[muscle];
@@ -3225,9 +3225,10 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
         )}
 
         {/* Feedback recap, as a bottom sheet. Structured per muscle group like the
-            in-session review: General feedback (Soreness, Pump) and Joint feedback
-            (per exercise) split with knurled dividers, then the changes it earned.
-            On the latest still-editable session every answer is a tap-to-fix row. */}
+            in-session review: General feedback (Soreness, and Workload in Volume+Load /
+            Meso) and Per exercise (joint + weight + pump + affinity, two-line) split with
+            knurled dividers, then the changes it earned. On the latest still-editable
+            session every answer is a tap-to-fix row. */}
         {!capturing && s.mesoRecap && recapOpen && (() => {
           const editGroups = fbEditable ? fbEditRows() : null;
           const useEdit = !!(editGroups && editGroups.length);
@@ -3237,7 +3238,27 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
           const modeLabel = s.mesoRecap.loadOnly ? 'Autoregulation · load only'
             : s.mesoRecap.meso ? `Mesocycle${s.mesoRecap.week ? ` · Week ${s.mesoRecap.week}` : ''}`
             : 'Autoregulation';
-          const fbRow = (r, key) => {
+          const fbRow = (r, key, twoLine) => {
+            // Per-exercise rows (joint + weight + pump + affinity) get a two-line layout:
+            // the exercise name on its own line (no truncation), the answer summary muted
+            // beneath. Muscle-level rows (Soreness, Workload) stay one-line name/value.
+            if (twoLine) {
+              const body = (<>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, fontWeight: 600, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name}</span>
+                  {useEdit && <i className="fa-solid fa-pen" style={{ fontSize: 9, color: 'var(--accent)', flexShrink: 0 }} />}
+                </div>
+                <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.inkSoft, marginTop: 3 }}>{r.sub}</div>
+              </>);
+              if (useEdit) {
+                return (
+                  <button key={key} onClick={() => setFbEdit({ type: r.type, subject: r.subject, name: r.name, sel: r.sel ?? null, weight: r.weight ?? null, pump: r.pump ?? null, affinity: r.affinity ?? null, volume: r.volume ?? null })} style={{
+                    width: '100%', padding: '8px 0', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left', WebkitTapHighlightColor: 'transparent',
+                  }}>{body}</button>
+                );
+              }
+              return <div key={key} style={{ padding: '7px 0' }}>{body}</div>;
+            }
             const label = <span style={{ fontFamily: UI.fontUi, fontSize: 12.5, color: UI.inkFaint, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.name}</span>;
             if (useEdit) {
               return (
@@ -3299,12 +3320,12 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                           {g.general.length > 0 && (<>
                             <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>General feedback</div>
                             <div className="knurl" style={{ marginBottom: 4 }} />
-                            {g.general.map((r, ri) => fbRow(r, 'g' + ri))}
+                            {g.general.map((r, ri) => fbRow(r, 'g' + ri, false))}
                           </>)}
                           {g.joint.length > 0 && (<>
-                            <div className="micro" style={{ color: UI.inkFaint, marginTop: g.general.length ? 14 : 0, marginBottom: 6 }}>Joint feedback</div>
+                            <div className="micro" style={{ color: UI.inkFaint, marginTop: g.general.length ? 14 : 0, marginBottom: 6 }}>Per exercise</div>
                             <div className="knurl" style={{ marginBottom: 4 }} />
-                            {g.joint.map((r, ri) => fbRow(r, 'j' + ri))}
+                            {g.joint.map((r, ri) => fbRow(r, 'j' + ri, true))}
                           </>)}
                         </div>
                       ))}

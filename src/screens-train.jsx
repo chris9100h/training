@@ -3235,9 +3235,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         const r = mesoAnswersRef.current.joint[e.exId];
         if (!r || r.answer == null) return;
         const parts = [JOINT_LABELS[r.answer] || r.answer];
-        if (r.weight != null) parts.push(`weight ${(WEIGHT_LABELS[r.weight] || r.weight).toLowerCase()}`);
-        if (r.pump != null) parts.push(`pump ${(PUMP_LABELS[r.pump] || r.pump).toLowerCase()}`);
-        if (r.affinity != null) parts.push((AFFINITY_LABELS[r.affinity] || r.affinity).toLowerCase());
+        if (r.weight != null) parts.push(WEIGHT_LABELS[r.weight] || r.weight);
+        if (r.pump != null) parts.push(PUMP_LABELS[r.pump] || r.pump);
+        if (r.affinity != null) parts.push(AFFINITY_LABELS[r.affinity] || r.affinity);
         jointRows.push({ key: 'joint-' + e.exId, title: r.exName, sub: parts.join(' · '), onEdit: () => openJointEdit(e.exId) });
       });
       const generalRows = [];
