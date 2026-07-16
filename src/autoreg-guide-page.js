@@ -44,17 +44,21 @@
 
   function signals(isB){
     var up=function(l){return dir('up',l);},dn=function(l){return dir('down',l);},ho=function(l){return dir('hold',l);},bl=function(l){return dir('block',l);};
-    return [
+    var rows=[
       ['Reps all hit the earn ladder', ho('no direct effect'), up('bump, if gates green')],
       ['Early set misses the floor (x2)', ho('none'), dn('cut, overrides all')],
       ['Soreness: none / healed early', isB?ho('frozen'):up('+1 set'), ho('no effect')],
       ['Soreness: still sore', isB?ho('frozen'):dn('-1 set'), isB?bl('holds weight'):ho('no effect')],
       ['Joint: noticeable / sharp', isB?ho('frozen'):dn('-1 set'), bl('blocks bump')],
-      ['Pump: low', ho(isB?'none':'none, tracks swap'), bl('blocks bump')],
-      [isB?'Weight feel: too light (per exercise)':'Volume: not enough', isB?ho('frozen'):up('+1 set'), isB?up('earns bump'):ho('allows bump')],
-      [isB?'Weight feel: hard (per exercise)':'Volume: pushed', isB?ho('frozen'):dn('-1 set'), isB?up('still earns'):bl('blocks bump')],
-      [isB?'Weight feel: too heavy (per exercise)':'Volume: too much', isB?ho('frozen'):dn('-1 every ex'), bl('blocks bump')]
+      ['Pump: low', ho('none, tracks swap'), bl('blocks bump')],
+      ['Weight feel: too light / hard', ho('no effect'), up('earns bump')],
+      ['Weight feel: too heavy', ho('no effect'), bl('blocks bump')]
     ];
+    if(!isB){
+      rows.push(['Workload: not enough', up('+1 set'), ho('no effect')]);
+      rows.push(['Workload: pushed / too much', dn('-1 set'), ho('no effect')]);
+    }
+    return rows;
   }
 
   function guideHTML(M){
@@ -84,7 +88,7 @@
       'One session in, one re-seeded session out. The pipeline is always the same; the difference between modes is only which dial each signal moves.');
     var stages=[
       ['Stage 1','You train','Log your real reps. Answer up to 4 quick questions per muscle group.'],
-      ['Stage 2','Two signals', isB?'Objective: did the reps land. Subjective: soreness, joints, pump, weight feel.':'Objective: did the reps land. Subjective: soreness, joints, pump, workload.'],
+      ['Stage 2','Two signals', isB?'Objective: did the reps land. Subjective: soreness, joints, pump, weight feel.':'Objective: did the reps land. Subjective: soreness, joints, pump, weight feel, workload.'],
       ['Stage 3','Two dials', isB?'Sets stay put, weight earns or cuts.':'Sets rotate, weight earns or cuts.'],
       ['Stage 4','Next session','Seeded automatically: new set counts, new weight, reps reset on a jump.']
     ];
@@ -104,7 +108,7 @@
 
     /* 03 feedback */
     out+='<section class="sec">'+sechead('03 / Feedback','The questions and every answer',
-      isB?'Asked in order per muscle group: soreness first, then a joint and weight check per exercise, then the pump last.':'Asked in order per muscle group: soreness first, then a joint check per exercise, then pump and workload together.');
+      isB?'Asked per muscle group: soreness first, then per exercise the joint, weight and pump check.':'Asked per muscle group: soreness first, then per exercise the joint, weight and pump check, then the muscle workload last.');
     out+='<div style="display:flex;flex-wrap:wrap;gap:9px 14px;margin-bottom:18px">'+dir('up','set up')+dir('down','set down')+dir('hold','nothing')+dir('block','blocks weight bump')+dir('flag','warning')+'</div>';
     out+='<div style="display:flex;flex-direction:column;gap:14px">';
     /* soreness */
@@ -116,32 +120,31 @@
     sor+=opt('Healed just in time', dir('hold','hold'), 'The optimal window. No change.');
     sor+=opt('Still sore', isB?dir('block','holds weight'):dir('down','-1 set'), isB?'Brakes the weight: no bump for this muscle this session.':'Over-reach. -1 set from the most-grown exercise.');
     out+=panel('1','Soreness','per muscle<br>at start', sor);
-    /* joint (+ weight in Load only) */
-    var jn='<p class="panel-intro">Asked for every exercise, every mode, every week. It gates the weight'+(isB?'. The set effect is frozen in Load only, so it only gates the weight, and the weight-feel question rides along here per exercise (each lift owns its own weight verdict, just like joint pain)':' and moves that exercise’s set count')+'.</p>';
+    /* per exercise: joint + weight feel + pump */
+    var jn='<p class="panel-intro">Asked for every exercise, every mode. Joint comfort, how the weight felt, and the pump: together these three gate the weight bump for this exercise'+(isB?'.':'. In Volume+Load and Meso, joint pain also shaves a set off this exercise.')+'</p>';
+    jn+='<div class="kick">Joint</div>';
     jn+=opt('None', dir('hold','gate green'), 'Joints fine. This exercise can earn its bump.');
     jn+=opt('Noticeable', (!isB?dir('down','-1 set'):'')+dir('block','bump'), 'Discomfort. Blocks the bump'+(isB?'.':', and shaves a set off this exercise.'));
     jn+=opt('Sharp pain', (!isB?dir('down','-1 set'):'')+dir('block','bump')+dir('flag','warning'), 'Real pain. As above, plus a durable warning on the exercise ("caused sharp joint pain, consider swapping it").');
-    if(isB){
-      jn+='<div style="margin-top:14px"><div class="kick">Weight (how it felt)</div></div>';
-      jn+=opt('Too light', dir('up','earns bump'), 'Weight can climb on this exercise.');
-      jn+=opt('Just right', dir('hold','hold'), 'On point, gate green.');
-      jn+=opt('Hard', dir('up','still earns bump'), 'Training should be hard. "Hard" still lets the weight climb. It self-corrects.');
-      jn+=opt('Too heavy', dir('block','holds weight'), 'The only weight answer that holds. Everything lighter lets it climb.');
-    }
-    out+=panel('2', isB?'Joint & weight':'Joint check','per exercise<br>after last set', jn);
-    /* pump (+ volume outside Load only) */
-    var pv='<div class="kick">Pump</div>';
-    pv+=opt('Low', isB?dir('block','bump'):(dir('block','bump')+dir('flag','swap')), 'Barely felt it. Blocks the bump.'+(isB?'':' Low pump on 3 sessions (with workload "just right") suggests swapping the exercise, not adding sets.'));
-    pv+=opt('Moderate', dir('hold','gate green'), 'Decent stimulus. Weight can climb.');
-    pv+=opt('Amazing', dir('hold','gate green'), 'Great stimulus.');
+    jn+='<div style="margin-top:14px"><div class="kick">Weight feel</div></div>';
+    jn+=opt('Too light', dir('up','earns bump'), 'Weight can climb on this exercise.');
+    jn+=opt('Just right', dir('hold','hold'), 'On point, gate green.');
+    jn+=opt('Hard', dir('up','still earns bump'), 'Training should be hard. "Hard" still lets the weight climb. It self-corrects.');
+    jn+=opt('Too heavy', dir('block','holds weight'), 'The only weight answer that holds. Everything lighter lets it climb.');
+    jn+='<div style="margin-top:14px"><div class="kick">Pump</div></div>';
+    jn+=opt('Low', dir('block','bump')+dir('flag','swap'), 'Barely felt it. Blocks the bump. Low pump on 3 sessions running suggests swapping this exercise, not forcing it.');
+    jn+=opt('Moderate', dir('hold','gate green'), 'Decent stimulus. Weight can climb.');
+    jn+=opt('Amazing', dir('hold','gate green'), 'Great stimulus.');
+    out+=panel('2', 'Per exercise','per exercise<br>after last set', jn);
+    /* per-muscle workload (Volume+Load / Meso only) */
     if(!isB){
-      pv+='<div style="margin-top:14px"><div class="kick">Volume (workload)</div></div>';
-      pv+=opt('Not enough', dir('up','+1 set'), 'Too little. +1 set to the least-grown exercise, gate stays green.');
-      pv+=opt('Just right', dir('hold','hold'), 'On point, gate green.');
-      pv+=opt('Pushed my limits', dir('down','-1 set')+dir('block','bump'), 'To the limit. Cuts a set and holds the weight.');
-      pv+=opt('Too much', dir('down','-1 every exercise')+dir('block','bump'), 'Clearly too much. Cuts a set off every exercise, holds the weight.');
+      var pv='<p class="panel-intro">One question per muscle group: how much total work it got. This drives the set dial only. It no longer touches the weight, the per-exercise weight-feel question owns that now.</p>';
+      pv+=opt('Not enough', dir('up','+1 set'), 'Too little. +1 set to the least-grown exercise.');
+      pv+=opt('Just right', dir('hold','hold'), 'On point.');
+      pv+=opt('Pushed my limits', dir('down','-1 set'), 'To the limit. Cuts a set off the most-grown exercise.');
+      pv+=opt('Too much', dir('down','-1 every exercise'), 'Clearly too much. Cuts a set off every exercise of the group.');
+      out+=panel('3', 'Workload','per muscle<br>after last exercise', pv);
     }
-    out+=panel('3', isB?'Pump':'Pump & Volume','per muscle<br>after last exercise', pv);
     out+='</div>';
     out+='<div class="card lb accented" style="margin-top:16px"><div class="kick" style="color:var(--accent)">No double-stacking</div>'+
       '<div style="margin-top:6px;font-size:13.5px;color:var(--ink-soft)">'+(isB?'Every set effect above is frozen in Load only, so the questions only ever open or close the weight gate. You can still fix any answer until the session ends, it re-computes cleanly.':'Two negative answers on the same exercise never stack to -2: the first one to cut it owns that cut for the session, a later -1 just drops. You can fix any answer until the session ends, it re-computes cleanly.')+'</div></div>';
@@ -190,15 +193,15 @@
       ['1 · Reps','Every set clears its staggered ladder target.'],
       ['2 · Joint','Answer was "None".'],
       ['3 · Pump','"Moderate" or "Amazing".'],
-      [isB?'4 · Weight':'4 · Volume', isB?'Per exercise: anything but "Too heavy" (Hard counts).':'"Just right" or "Not enough".']
+      ['4 · Weight feel','Anything but "Too heavy" ("Hard" still counts).']
     ];
     if(isB) gates.push(['5 · Soreness','Muscle is not "Still sore".']);
     var gate='<p class="panel-intro">A weight bump (+2.5 kg / 5 lbs, equipment dependent) needs all of these, re-earned every session. On a jump the reps reset to the range floor.</p>';
     gate+='<div class="grid g150">'+gates.map(function(g){
       return '<div class="inset" style="border-radius:6px"><div style="font-family:var(--f-mono);font-size:10.5px;letter-spacing:0.1em;text-transform:uppercase;color:var(--ok);margin-bottom:5px">'+g[0]+'</div><div style="font-size:12.5px;color:var(--ink-soft)">'+g[1]+'</div></div>';
     }).join('')+'</div>';
-    if(isB) gate+='<p style="font-size:12.5px;color:var(--ink-soft);margin:12px 0 0">Reps, Joint and Weight are judged <b style="color:var(--ink)">per exercise</b>, so each lift earns or holds its own weight. Pump and Soreness apply to the whole <b style="color:var(--ink)">muscle group</b>.</p>';
-    if(!isB) gate+='<p style="font-size:12.5px;color:var(--ink-soft);margin:12px 0 0">These gate the <b style="color:var(--ink)">weight</b> only. Soreness is not among them here: in this mode it moves your <b style="color:var(--ink)">sets</b> instead (still sore = one set off the most-grown lift). It only holds the weight in Load only.</p>';
+    if(isB) gate+='<p style="font-size:12.5px;color:var(--ink-soft);margin:12px 0 0">Reps, Joint, Pump and Weight feel are all judged <b style="color:var(--ink)">per exercise</b>, so each lift earns or holds its own weight. Soreness applies to the whole <b style="color:var(--ink)">muscle group</b>.</p>';
+    if(!isB) gate+='<p style="font-size:12.5px;color:var(--ink-soft);margin:12px 0 0">All four are judged <b style="color:var(--ink)">per exercise</b>. Soreness is not among them here: in this mode it moves your <b style="color:var(--ink)">sets</b> instead (still sore = one set off the most-grown lift). It only holds the weight in Load only.</p>';
     out+='<div style="margin-top:14px">'+panel(null,'Bump: '+(isB?'five':'four')+' green lights',null,gate)+'</div>';
     out+='<div class="grid g240" style="margin-top:14px">'+
       '<div class="card"><h3 class="display h3">Between jumps: +1 rep</h3><p style="font-size:14px;color:var(--ink-soft)">With no jump due, the app seeds the rep target +1 higher each session, capped at the range top, same weight. That is the rep climb you feel.</p></div>'+
@@ -285,7 +288,7 @@
     out+='<div class="grid g220" style="margin-top:14px">'+
       '<div class="card"><h3 class="display h3">Weight, one line</h3><p style="font-size:13.5px;color:var(--ink-soft)">Feedback owns the direction. Cut wins. Red holds. Only all-green climbs. Step is one increment (2.5 kg / 5 lbs).</p></div>'+
       '<div class="card"><h3 class="display h3">Volume, one line</h3><p style="font-size:13.5px;color:var(--ink-soft)">'+(isB?'Frozen. Your set counts never change in Load only. The per-exercise weight-feel question only opens or holds the weight gate.':isC?'Recovered or too little adds a set to the least-grown lift. Sore or too much cuts from the most-grown. Frozen in the final week.':'Recovered or too little adds a set to the least-grown lift. Sore or too much cuts from the most-grown. Never below 1, no cap.')+'</p></div>'+
-      '<div class="card"><h3 class="display h3">Warnings, one line</h3><p style="font-size:13.5px;color:var(--ink-soft)">Sharp joint pain sets a durable swap warning.'+(isB?'':' Low pump 3 sessions running suggests changing the exercise, not adding sets.')+'</p></div></div>';
+      '<div class="card"><h3 class="display h3">Warnings, one line</h3><p style="font-size:13.5px;color:var(--ink-soft)">Sharp joint pain sets a durable swap warning. Low pump on an exercise 3 sessions running suggests swapping it, not forcing it.</p></div></div>';
     out+='<div class="grid g220" style="margin-top:12px">'+
       '<div class="card"><div class="kick">Editing</div><p style="font-size:13.5px;color:var(--ink-soft);margin-top:6px">Any answer is editable until the session ends. Afterward, only your single most recent session of a plan can be corrected.</p></div>'+
       '<div class="card"><div class="kick">Edge cases</div><p style="font-size:13.5px;color:var(--ink-soft);margin-top:6px">Skipped sets count as neither hit nor miss. Unilateral uses the weaker side. Bodyweight is not halved in a deload.</p></div>'+

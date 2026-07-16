@@ -2840,13 +2840,6 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
   const fbEditRows = () => {
     if (!fbRaw || !fbRaw.answers) return [];
     const a = fbRaw.answers;
-    // Shape probe (identical to the engine's mesoGateSetsFromAnswers): a NEW
-    // load-only session folds the weight-feel answer into each per-exercise joint
-    // record (joint[exId].weight) and keeps the per-muscle rec pump-only; an OLDER
-    // finished/backfilled load-only session kept the weight per-muscle in
-    // volume[muscle].volume. This decides whether joint rows also edit weight and
-    // whether the per-muscle row is pump-only.
-    const perExWeight = fbLoadOnly && Object.values(a.joint || {}).some(rec => rec && 'weight' in rec);
     const muscleOf = (exId) => (typeof primaryMuscleForExercise === 'function'
       ? primaryMuscleForExercise(store.exercises?.find(x => x.id === exId)) : null);
     const order = [], seen = new Set();
@@ -2855,7 +2848,8 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
       const pm = muscleOf(e.exId);
       if (pm && !seen.has(pm)) { seen.add(pm); order.push(pm); }
     });
-    const volLbl = mesoVolumeLbl(fbLoadOnly);
+    const wLbl = mesoVolumeLbl(true);    // weight-feel labels
+    const workLbl = mesoVolumeLbl(false); // workload labels
     const groups = [];
     order.forEach(muscle => {
       const rows = [];
@@ -2865,28 +2859,18 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
         if (e.isCardio || muscleOf(e.exId) !== muscle) return;
         const jRec = a.joint && a.joint[e.exId];
         if (!jRec || jRec.answer == null) return;
-        const row = { type: 'joint', subject: e.exId, name: jRec.exName || e.name, sub: MESO_JOINT_LBL[jRec.answer] || jRec.answer, sel: jRec.answer };
-        if (perExWeight) {
-          // Load-only new shape: the weight-feel answer rides on this joint record,
-          // so the row edits both joint discomfort and weight (mirrors the durable
-          // display fold in screens-train.jsx mesoRecapGroups).
-          row.askWeight = true;
-          row.weight = jRec.weight ?? null;
-          if (jRec.weight != null) row.sub = `${MESO_JOINT_LBL[jRec.answer] || jRec.answer} · weight ${(volLbl[jRec.weight] || jRec.weight).toLowerCase()}`;
-        }
-        rows.push(row);
+        // Per-exercise feedback: joint + weight-feel + pump, all edited together in the
+        // joint sheet (mirrors screens-train.jsx mesoRecapGroups). Old sessions that
+        // predate the per-exercise move simply carry no weight/pump here.
+        const parts = [MESO_JOINT_LBL[jRec.answer] || jRec.answer];
+        if (jRec.weight != null) parts.push(`weight ${(wLbl[jRec.weight] || jRec.weight).toLowerCase()}`);
+        if (jRec.pump != null) parts.push(`pump ${(MESO_PUMP_LBL[jRec.pump] || jRec.pump).toLowerCase()}`);
+        rows.push({ type: 'joint', subject: e.exId, name: jRec.exName || e.name, sub: parts.join(' · '), sel: jRec.answer, weight: jRec.weight ?? null, pump: jRec.pump ?? null });
       });
       const vRec = a.volume && a.volume[muscle];
-      if (vRec && vRec.pump != null) {
-        // New load-only sessions keep this rec pump-only (weight moved to the joint
-        // rows); older/non-load sessions carry the per-muscle answer in .volume.
-        const hasVol = vRec.volume != null;
-        rows.push({
-          type: 'volume', subject: muscle, pumpOnly: !hasVol,
-          name: !hasVol ? 'Pump' : (fbLoadOnly ? 'Pump & Weight' : 'Pump & Volume'),
-          sub: hasVol ? `${MESO_PUMP_LBL[vRec.pump] || vRec.pump} pump · ${volLbl[vRec.volume] || vRec.volume}` : `${MESO_PUMP_LBL[vRec.pump] || vRec.pump} pump`,
-          pump: vRec.pump, volume: hasVol ? vRec.volume : null,
-        });
+      // Per-muscle workload row (Volume+Load / non-final Meso weeks); drives set deltas.
+      if (vRec && vRec.volume != null) {
+        rows.push({ type: 'volume', subject: muscle, name: 'Workload', sub: workLbl[vRec.volume] || vRec.volume, volume: vRec.volume });
       }
       if (rows.length) groups.push({ muscle, rows });
     });
@@ -2914,31 +2898,27 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
   // Rebuild the display groups (read-only shape { muscle, general[], joint[] }) so
   // the stored recap matches the edited answers on the next render / boot.
   const fbGroupsForStore = (answers) => {
-    const perExWeight = fbLoadOnly && Object.values(answers.joint || {}).some(rec => rec && 'weight' in rec);
     const muscleOf = (exId) => (typeof primaryMuscleForExercise === 'function'
       ? primaryMuscleForExercise(store.exercises?.find(x => x.id === exId)) : null);
     const order = [], seen = new Set();
     (s.entries || []).forEach(e => { if (e.isCardio) return; const pm = muscleOf(e.exId); if (pm && !seen.has(pm)) { seen.add(pm); order.push(pm); } });
-    const volLbl = mesoVolumeLbl(fbLoadOnly);
+    const wLbl = mesoVolumeLbl(true), workLbl = mesoVolumeLbl(false);
     const groups = [];
     order.forEach(muscle => {
       const general = [], joint = [];
       const sRec = answers.soreness && answers.soreness[muscle];
       if (sRec && sRec.answer != null) general.push({ title: 'Soreness', sub: MESO_SORENESS_LBL[sRec.answer] || sRec.answer });
-      const vRec = answers.volume && answers.volume[muscle];
-      if (vRec && vRec.pump != null) {
-        const hasVol = vRec.volume != null;
-        general.push({ title: !hasVol ? 'Pump' : (fbLoadOnly ? 'Pump & Weight' : 'Pump & Volume'), sub: hasVol ? `${MESO_PUMP_LBL[vRec.pump] || vRec.pump} pump · ${volLbl[vRec.volume] || vRec.volume}` : `${MESO_PUMP_LBL[vRec.pump] || vRec.pump} pump` });
-      }
       (s.entries || []).forEach(e => {
         if (e.isCardio || muscleOf(e.exId) !== muscle) return;
         const jRec = answers.joint && answers.joint[e.exId];
         if (!jRec || jRec.answer == null) return;
-        const jSub = (perExWeight && jRec.weight != null)
-          ? `${MESO_JOINT_LBL[jRec.answer] || jRec.answer} · weight ${(volLbl[jRec.weight] || jRec.weight).toLowerCase()}`
-          : (MESO_JOINT_LBL[jRec.answer] || jRec.answer);
-        joint.push({ title: jRec.exName || e.name, sub: jSub });
+        const parts = [MESO_JOINT_LBL[jRec.answer] || jRec.answer];
+        if (jRec.weight != null) parts.push(`weight ${(wLbl[jRec.weight] || jRec.weight).toLowerCase()}`);
+        if (jRec.pump != null) parts.push(`pump ${(MESO_PUMP_LBL[jRec.pump] || jRec.pump).toLowerCase()}`);
+        joint.push({ title: jRec.exName || e.name, sub: parts.join(' · ') });
       });
+      const vRec = answers.volume && answers.volume[muscle];
+      if (vRec && vRec.volume != null) general.push({ title: 'Workload', sub: workLbl[vRec.volume] || vRec.volume });
       if (general.length || joint.length) groups.push({ muscle, general, joint });
     });
     return groups;
@@ -3254,7 +3234,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
             const label = <span style={{ fontFamily: UI.fontUi, fontSize: 12.5, color: UI.inkFaint, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.name}</span>;
             if (useEdit) {
               return (
-                <button key={key} onClick={() => setFbEdit({ type: r.type, subject: r.subject, name: r.name, sel: r.sel ?? null, pump: r.pump ?? null, volume: r.volume ?? null, weight: r.weight ?? null, askWeight: !!r.askWeight, pumpOnly: !!r.pumpOnly })} style={{
+                <button key={key} onClick={() => setFbEdit({ type: r.type, subject: r.subject, name: r.name, sel: r.sel ?? null, weight: r.weight ?? null, pump: r.pump ?? null, volume: r.volume ?? null })} style={{
                   width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10,
                   padding: '7px 0', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left', WebkitTapHighlightColor: 'transparent',
                 }}>
@@ -3376,7 +3356,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
         {/* Meso feedback edit picker (post-hoc correction of the last session) */}
         {fbEdit && (
           <Sheet open={!!fbEdit} onClose={() => setFbEdit(null)}
-            title={fbEdit.type === 'joint' ? (fbEdit.askWeight ? 'Joint & weight' : 'Joint check') : fbEdit.type === 'volume' ? (fbEdit.name || 'Feedback') : 'Soreness check'}
+            title={fbEdit.type === 'joint' ? (fbEdit.name || 'Feedback') : fbEdit.type === 'volume' ? 'Workload' : 'Soreness check'}
             titleColor="var(--accent)">
             {fbEdit.type === 'soreness' && (<>
               <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: 1.5 }}>
@@ -3398,10 +3378,10 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
               <Btn disabled={!fbEdit.sel} onClick={() => saveFeedbackEdit({ type: 'soreness', subject: fbEdit.subject, answer: fbEdit.sel })} style={{ width: '100%', marginTop: 12 }}>Save changes</Btn>
             </>)}
             {fbEdit.type === 'joint' && (<>
-              <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: 1.5 }}>
-                Joint discomfort during <strong style={{ color: UI.ink }}>{fbEdit.name}</strong>?
-              </div>
-              <div style={{ display: 'flex', gap: 8, marginBottom: fbEdit.askWeight ? 20 : 8 }}>
+              {/* Per-exercise feedback: joints, weight feel and pump, mirroring the live
+                  sheet in screens-train.jsx. */}
+              <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 8, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Joints</div>
+              <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
                 {MESO_JOINT_OPTS.map(opt => {
                   const sel = fbEdit.sel === opt.key;
                   const danger = opt.key === 'sharp';
@@ -3417,57 +3397,55 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                   );
                 })}
               </div>
-              {fbEdit.askWeight && (<>
-                <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, margin: '2px 0 6px', letterSpacing: '0.06em', textTransform: 'uppercase' }}>Weight feel</div>
-                <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.inkSoft, marginBottom: 12, lineHeight: 1.5 }}>How did the weight feel on <strong style={{ color: UI.ink }}>{fbEdit.name}</strong> today?</div>
+              <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 6, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Weight feel</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 20 }}>
                 {['not_enough', 'just_right', 'pushed', 'too_much'].map(key => {
                   const wsel = fbEdit.weight === key;
                   return (
                     <button key={key} onClick={() => setFbEdit(e => ({ ...e, weight: key }))} style={{
-                      width: '100%', marginBottom: 8, padding: '12px 14px',
+                      width: '100%', padding: '10px 14px',
                       background: wsel ? 'rgba(var(--accent-rgb),0.12)' : UI.bgInset,
                       border: `1px solid ${wsel ? 'var(--accent)' : UI.hairStrong}`, borderRadius: 6, cursor: 'pointer', textAlign: 'left', WebkitTapHighlightColor: 'transparent',
                     }}>
-                      <div style={{ fontFamily: UI.fontUi, fontSize: 13, color: wsel ? 'var(--accent)' : UI.ink, fontWeight: 600 }}>{mesoVolumeLbl(fbLoadOnly)[key]}</div>
+                      <div style={{ fontFamily: UI.fontUi, fontSize: 13, color: wsel ? 'var(--accent)' : UI.ink, fontWeight: 600 }}>{mesoVolumeLbl(true)[key]}</div>
                     </button>
                   );
                 })}
-              </>)}
-              <Btn disabled={!fbEdit.sel || (fbEdit.askWeight && !fbEdit.weight)} onClick={() => saveFeedbackEdit({ type: 'joint', subject: fbEdit.subject, answer: fbEdit.sel, ...(fbEdit.askWeight ? { weight: fbEdit.weight } : {}) })} style={{ width: '100%', marginTop: 12 }}>Save changes</Btn>
-            </>)}
-            {fbEdit.type === 'volume' && (<>
-              <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 12, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Pump</div>
-              <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
+              </div>
+              <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 8, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Pump</div>
+              <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
                 {MESO_PUMP_OPTS.map(opt => {
-                  const sel = fbEdit.pump === opt.key;
+                  const psel = fbEdit.pump === opt.key;
                   return (
                     <button key={opt.key} onClick={() => setFbEdit(e => ({ ...e, pump: opt.key }))} style={{
-                      flex: 1, padding: '10px 8px', background: sel ? 'rgba(var(--accent-rgb),0.12)' : UI.bgInset,
-                      border: `1px solid ${sel ? 'var(--accent)' : UI.hairStrong}`, borderRadius: 6, cursor: 'pointer', textAlign: 'center', WebkitTapHighlightColor: 'transparent',
+                      flex: 1, padding: '10px 8px', background: psel ? 'rgba(var(--accent-rgb),0.12)' : UI.bgInset,
+                      border: `1px solid ${psel ? 'var(--accent)' : UI.hairStrong}`, borderRadius: 6, cursor: 'pointer', textAlign: 'center', WebkitTapHighlightColor: 'transparent',
                     }}>
-                      <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: sel ? 'var(--accent)' : UI.ink, fontWeight: 600 }}>{opt.label}</div>
+                      <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: psel ? 'var(--accent)' : UI.ink, fontWeight: 600 }}>{opt.label}</div>
                       <div style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint, marginTop: 2 }}>{opt.sub}</div>
                     </button>
                   );
                 })}
               </div>
-              {!fbEdit.pumpOnly && (<>
-                <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 8, letterSpacing: '0.06em', textTransform: 'uppercase' }}>{fbLoadOnly ? 'Weight' : 'Volume'}</div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 20 }}>
-                  {['not_enough', 'just_right', 'pushed', 'too_much'].map(key => {
-                    const sel = fbEdit.volume === key;
-                    return (
-                      <button key={key} onClick={() => setFbEdit(e => ({ ...e, volume: key }))} style={{
-                        width: '100%', padding: '10px 14px', background: sel ? 'rgba(var(--accent-rgb),0.12)' : UI.bgInset,
-                        border: `1px solid ${sel ? 'var(--accent)' : UI.hairStrong}`, borderRadius: 6, cursor: 'pointer', textAlign: 'left', WebkitTapHighlightColor: 'transparent',
-                      }}>
-                        <div style={{ fontFamily: UI.fontUi, fontSize: 13, color: sel ? 'var(--accent)' : UI.ink, fontWeight: 600 }}>{mesoVolumeLbl(fbLoadOnly)[key]}</div>
-                      </button>
-                    );
-                  })}
-                </div>
-              </>)}
-              <Btn disabled={!fbEdit.pump || (!fbEdit.pumpOnly && !fbEdit.volume)} onClick={() => saveFeedbackEdit({ type: 'volume', subject: fbEdit.subject, pump: fbEdit.pump, ...(fbEdit.pumpOnly ? {} : { volume: fbEdit.volume }) })} style={{ width: '100%' }}>Save changes</Btn>
+              <Btn disabled={!fbEdit.sel || !fbEdit.weight || !fbEdit.pump} onClick={() => saveFeedbackEdit({ type: 'joint', subject: fbEdit.subject, answer: fbEdit.sel, weight: fbEdit.weight, pump: fbEdit.pump })} style={{ width: '100%', marginTop: 12 }}>Save changes</Btn>
+            </>)}
+            {fbEdit.type === 'volume' && (<>
+              {/* Per-muscle workload (Volume+Load / non-final Meso weeks); drives set deltas. */}
+              <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 8, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Workload</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 20 }}>
+                {['not_enough', 'just_right', 'pushed', 'too_much'].map(key => {
+                  const sel = fbEdit.volume === key;
+                  return (
+                    <button key={key} onClick={() => setFbEdit(e => ({ ...e, volume: key }))} style={{
+                      width: '100%', padding: '10px 14px', background: sel ? 'rgba(var(--accent-rgb),0.12)' : UI.bgInset,
+                      border: `1px solid ${sel ? 'var(--accent)' : UI.hairStrong}`, borderRadius: 6, cursor: 'pointer', textAlign: 'left', WebkitTapHighlightColor: 'transparent',
+                    }}>
+                      <div style={{ fontFamily: UI.fontUi, fontSize: 13, color: sel ? 'var(--accent)' : UI.ink, fontWeight: 600 }}>{mesoVolumeLbl(false)[key]}</div>
+                    </button>
+                  );
+                })}
+              </div>
+              <Btn disabled={!fbEdit.volume} onClick={() => saveFeedbackEdit({ type: 'volume', subject: fbEdit.subject, volume: fbEdit.volume })} style={{ width: '100%' }}>Save changes</Btn>
             </>)}
           </Sheet>
         )}

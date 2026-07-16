@@ -4605,50 +4605,51 @@ function revertMesoSessionBoosts(mesoState, deletedSession, remainingSessions) {
 // differently in the first place. Only valid for the top-of-stack session (see
 // isMesoSessionEditable), which is what makes the incremental diff exact.
 
-// Rebuild the four weight-boost gate Sets from the per-question answer records,
+// Rebuild the weight-boost gate Sets from the per-question answer records,
 // mirroring the mesoBoostSetsInitRef rehydration (screens-train.jsx). Pure.
+// Joint, pump and weight-feel are all per EXERCISE in every mode (joint[exId].answer
+// / .pump / .weight); soreness stays per muscle. Each per-exercise gate resolves PER
+// EXID with a legacy fallback: sessions finished before pump/weight moved per-exercise
+// carry pump on volume[muscle].pump and the weight/workload answer on
+// volume[muscle].volume. For any exId WITHOUT its own answer, spread the muscle answer
+// over that muscle's exIds. Never a union (an explicit per-exercise answer is never
+// overridden), so a fully-new session ignores the fallback and an old session is driven
+// entirely by it. weightOk is now built in every mode (weight-feel is the sole weight
+// gate everywhere); volumeOk is gone (the workload answer only drives set deltas now).
 function mesoGateSetsFromAnswers(answers, loadOnly) {
   const a = answers || {};
   const jointFine = new Set();
   for (const [exId, rec] of Object.entries(a.joint || {})) if (rec && rec.answer === 'none') jointFine.add(exId);
-  const pumpOk = new Set(), volumeOk = new Set();
+
+  // Pump gate, per exId. Good = moderate/amazing. Legacy fallback: old sessions kept
+  // pump on the per-muscle volume rec; spread a good muscle pump over its unanswered exIds.
+  const pumpOk = new Set(), pumpAnswered = new Set();
+  for (const [exId, rec] of Object.entries(a.joint || {})) {
+    if (rec && 'pump' in rec) { pumpAnswered.add(exId); if (rec.pump === 'moderate' || rec.pump === 'amazing') pumpOk.add(exId); }
+  }
   for (const rec of Object.values(a.volume || {})) {
-    if (!rec || !rec.muscle) continue;
-    if (rec.pump === 'moderate' || rec.pump === 'amazing') pumpOk.add(rec.muscle);
-    if (volumeAnswerAllowsBump(rec.volume, loadOnly)) volumeOk.add(rec.muscle);
+    if (!rec || !(rec.pump === 'moderate' || rec.pump === 'amazing')) continue;
+    (rec.exIds || []).forEach(id => { if (!pumpAnswered.has(id)) pumpOk.add(id); });
   }
-  // Load-only: the weight-feel question is per EXERCISE (folded into the joint
-  // record as joint[exId].weight), so its bump gate is keyed by exId, not muscle.
-  // weightOk = exIds whose weight answer allows the bump. Older finished/backfilled
-  // load-only sessions carry the weight answer per-muscle in volume[muscle].volume
-  // instead; spread that over the muscle's exIds as a backward-compat fallback (new
-  // sessions write pump-only volume recs, so rec.volume is absent and adds nothing).
-  const weightOk = new Set();
-  if (loadOnly) {
-    // Weight-feel is per exercise (joint[exId].weight). Resolve PER EXERCISE, not per
-    // session: an exId with its own weight answer uses only that (an explicit answer is
-    // never overridden), an exId without one falls back to its muscle's legacy per-muscle
-    // weight (volume[muscle].volume). One rule covers all three shapes:
-    //  - fully NEW: every joint rec has a weight and volume recs stay pump-only (no
-    //    .volume), so the fallback is inert.
-    //  - fully OLD (finished/backfilled pre-change): no joint weights, so the fallback
-    //    drives the whole gate.
-    //  - MIXED (a recap that straddled a mid-recap client update: some exercises answered
-    //    pre-change with the weight still per-muscle, some post-change per-exercise): each
-    //    exId is resolved from its own answer, the rest fall back. Never a union, so a
-    //    legacy muscle answer never overrides an explicit per-exercise one.
-    const jointWeighted = new Set();
-    for (const [exId, rec] of Object.entries(a.joint || {})) {
-      if (rec && 'weight' in rec) { jointWeighted.add(exId); if (volumeAnswerAllowsBump(rec.weight, true)) weightOk.add(exId); }
-    }
-    for (const rec of Object.values(a.volume || {})) {
-      if (!rec || rec.volume == null || !volumeAnswerAllowsBump(rec.volume, true)) continue;
-      (rec.exIds || []).forEach(id => { if (!jointWeighted.has(id)) weightOk.add(id); });
-    }
+
+  // Weight-feel gate, per exId, every mode. joint[exId].weight uses weight-feel semantics
+  // (too_heavy blocks, hard/pushed still allows: volumeAnswerAllowsBump(_, true)). The
+  // legacy fallback reads volume[muscle].volume with the session's OWN mode semantics: an
+  // old load-only session stored the weight answer there (loadOnly semantics); an old
+  // Volume+Load/Meso session stored the workload answer there, which WAS the weight gate
+  // then (workload semantics), so honoring loadOnly reproduces old behavior exactly.
+  const weightOk = new Set(), weightAnswered = new Set();
+  for (const [exId, rec] of Object.entries(a.joint || {})) {
+    if (rec && 'weight' in rec) { weightAnswered.add(exId); if (volumeAnswerAllowsBump(rec.weight, true)) weightOk.add(exId); }
   }
+  for (const rec of Object.values(a.volume || {})) {
+    if (!rec || rec.volume == null || !volumeAnswerAllowsBump(rec.volume, loadOnly)) continue;
+    (rec.exIds || []).forEach(id => { if (!weightAnswered.has(id)) weightOk.add(id); });
+  }
+
   const soreBlock = new Set();
   for (const rec of Object.values(a.soreness || {})) if (rec && rec.answer === 'still_sore' && rec.muscle) soreBlock.add(rec.muscle);
-  return { jointFine, pumpOk, volumeOk, weightOk, soreBlock };
+  return { jointFine, pumpOk, weightOk, soreBlock };
 }
 
 // Can this finished session's feedback be safely edited? Only the single
@@ -4698,7 +4699,9 @@ function _commitContribInto(deltas, negOwner, prevContrib, questionType, newCont
 
 // Apply ONE corrected feedback answer to a finished (top-of-stack) session's meso
 // state, mirroring the live edit path of each answer handler. `edit` is
-// { type:'soreness'|'joint'|'volume', subject: muscle|exId, answer, pump, volume }.
+// { type:'soreness'|'joint'|'volume', subject: muscle|exId, answer, weight, pump, volume }.
+// A 'joint' edit is the per-exercise feedback: it can carry answer (joint) plus weight
+// and pump (both per exId now). A 'volume' edit is the per-muscle workload answer only.
 // `raw` is the durable session.mesoRecap.raw ({ answers, negOwner, frozen, dayId }).
 // `ctx` = { dayId, loadOnly }. Touches deltas/growthCounts/pumpLowCounts/jointFlags
 // + the answer record + negOwner; weight boosts are re-earned separately
@@ -4758,23 +4761,31 @@ function applyMesoFeedbackEdit(mesoState, raw, edit, ctx) {
     const key = exId + '_' + dayId;
     const newContrib = { [key]: (edit.answer === 'noticeable' || edit.answer === 'sharp') ? -1 : 0 };
     rec.contrib = _commitContribInto(deltas, negOwner, rec.contrib || {}, 'joint', newContrib, frozen);
-    // Load-only weight-feel lives on the joint record (per exercise). It only
-    // gates the weight, never a set delta, so it needs no contrib handling.
+    // Weight-feel and pump both live on the per-exercise joint record now. They only
+    // gate the weight (rebuilt in the re-earn), never a set delta, so no contrib.
     if ('weight' in edit) rec.weight = edit.weight;
+    if ('pump' in edit) {
+      const oldPumpLowApplied = !!rec.pumpLowApplied;
+      rec.pump = edit.pump;
+      // Low-pump swap counter, now per exId (was per muscle, attributed to the first
+      // lift). Idempotent diff so an edit applies only its own delta. The old
+      // volume === 'just_right' confound guard is dropped: pump is per exercise now and
+      // is answered before the muscle's workload answer, so it cannot read it here.
+      const pumpLowApplied = edit.pump === 'low';
+      const pumpLowDiff = (pumpLowApplied ? 1 : 0) - (oldPumpLowApplied ? 1 : 0);
+      rec.pumpLowApplied = pumpLowApplied;
+      if (pumpLowDiff !== 0) pumpLowCounts[exId] = Math.max(0, (pumpLowCounts[exId] || 0) + pumpLowDiff);
+    }
     answers.joint[exId] = rec;
   } else if (edit.type === 'volume') {
     const muscle = edit.subject;
     const rec = { ...(answers.volume[muscle] || { muscle }) };
-    const oldPumpLowApplied = !!rec.pumpLowApplied;
-    // Only overwrite volume when the edit actually carries one. A new load-only
-    // session's per-muscle rec is pump-only (weight moved to the joint records),
-    // so a pump edit passes volume===undefined and must not clobber the rec (nor
-    // an old session's per-muscle weight answer that the gate fallback reads).
-    rec.pump = edit.pump;
+    // The per-muscle step now carries only the workload answer (pump moved to the
+    // per-exercise joint records). It drives set deltas (Volume+Load / Meso), never
+    // the weight gate. Only overwrite volume when the edit actually carries one.
     if (edit.volume !== undefined) rec.volume = edit.volume;
     const exIds = rec.exIds || [];
     const keys = exIds.map(exId => exId + '_' + dayId);
-    const mainExId = exIds[0];
     const prevGrantedTo = Object.keys(rec.contrib || {}).find(k => rec.contrib[k] === 1) ?? null;
     let recipientKey = null;
     if (frozen) {
@@ -4795,12 +4806,6 @@ function applyMesoFeedbackEdit(mesoState, raw, edit, ctx) {
       newContrib[key] = want;
     });
     rec.contrib = _commitContribInto(deltas, negOwner, rec.contrib || {}, 'volume', newContrib, frozen);
-    const pumpLowApplied = edit.pump === 'low' && edit.volume === 'just_right';
-    const pumpLowDiff = (pumpLowApplied ? 1 : 0) - (oldPumpLowApplied ? 1 : 0);
-    rec.pumpLowApplied = pumpLowApplied;
-    if (pumpLowDiff !== 0 && mainExId) {
-      pumpLowCounts[mainExId] = Math.max(0, (pumpLowCounts[mainExId] || 0) + pumpLowDiff);
-    }
     answers.volume[muscle] = rec;
   }
 
@@ -4811,9 +4816,9 @@ function applyMesoFeedbackEdit(mesoState, raw, edit, ctx) {
 }
 
 // Re-earn this session's weight boosts from the (edited) feedback answers,
-// mirroring computeMesoGains' EARN gate: allHit AND jointFine AND pumpOk AND
-// volumeOk AND (load-only) not-still-sore. A rep-miss CUT (a negative existing
-// boost) is rep-driven, not feedback-driven, so it is preserved untouched.
+// mirroring computeMesoGains' EARN gate: allHit AND jointFine AND pumpOk AND weightOk
+// (all per exId, every mode) AND (load-only) not-still-sore. A rep-miss CUT (a negative
+// existing boost) is rep-driven, not feedback-driven, so it is preserved untouched.
 // earnInputs = this session's exercises [{ exId, key, muscle, allHit, increment }].
 // Pure: returns new mesoState.
 function reearnMesoBoostsFromAnswers(mesoState, answers, earnInputs, loadOnly) {
@@ -4826,13 +4831,13 @@ function reearnMesoBoostsFromAnswers(mesoState, answers, earnInputs, loadOnly) {
     const existing = wb[e.key];
     if (existing != null && existing < 0) { earned[e.key] = existing; continue; } // preserve rep-miss cut
     if (!e.allHit) continue;
+    // Joint, pump and weight-feel are all per exId now, asked for every exercise in
+    // every mode, so none needs a muscle guard: an unanswered/blocking answer simply
+    // withholds the bump. Soreness stays per muscle and only holds the weight in
+    // load-only (where sets are frozen, so recovery brakes the load instead).
     if (!gates.jointFine.has(e.exId)) continue;
-    if (e.muscle && !gates.pumpOk.has(e.muscle)) continue;
-    // Weight-feel gate: per-exercise in load-only (weightOk keyed by exId),
-    // per-muscle otherwise (volumeOk keyed by muscle). Muscle-less exercises stay
-    // exempt (matches the old behavior and old sessions that had no per-muscle rec).
-    if (loadOnly) { if (e.muscle && !gates.weightOk.has(e.exId)) continue; }
-    else if (e.muscle && !gates.volumeOk.has(e.muscle)) continue;
+    if (!gates.pumpOk.has(e.exId)) continue;
+    if (!gates.weightOk.has(e.exId)) continue;
     if (loadOnly && e.muscle && gates.soreBlock.has(e.muscle)) continue;
     earned[e.key] = e.increment;
   }
