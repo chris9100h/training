@@ -1846,7 +1846,7 @@ function ProgressionInfoBody() {
   );
 }
 
-function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFrom, draftStore = store, setDraftStore = setStore }) {
+function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFrom, openDayId, draftStore = store, setDraftStore = setStore }) {
   const [confirmEl, confirm] = useConfirm();
   const original = store.schedules.find(s => s.id === scheduleId);
   // Which version is being edited (identified by validFrom). -1 = unversioned
@@ -1946,7 +1946,10 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
   const [applyFromSheet, setApplyFromSheet] = useStateS(false);
   const [applyFromDate, setApplyFromDate] = useStateS('');
   const [applyFromDayIdx, setApplyFromDayIdx] = useStateS(0);
-  const [editingDay, setEditingDay] = useStateS(null);
+  // Deep-link from the home "add exercises" prompt: open straight into that
+  // day's editor when it still exists in the draft, else fall through to the
+  // normal day list. One-shot, evaluated at mount.
+  const [editingDay, setEditingDay] = useStateS(() => (openDayId && (draft?.days || []).some(d => d.id === openDayId)) ? openDayId : null);
   const [mesoInfoOpen, setMesoInfoOpen] = useStateS(false);
   const [modifiersOpen, setModifiersOpen] = useStateS(false);
   const [tmEditOpen, setTmEditOpen] = useStateS(false);

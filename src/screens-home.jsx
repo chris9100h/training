@@ -2984,7 +2984,23 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
         )}
 
         {/* day card — flex:1 so it fills */}
-        {isActiveRest ? (
+        {isActiveRest ? ((activeDay && activeDay.name !== 'REST' && !selectedDayStatusMode) ? (
+          // A named training day with no exercises is not a real rest day, it is
+          // just unbuilt. Showing "RECOVER." here is the top source of confusion
+          // ("legs today but it says recover?!"), so prompt to add exercises and
+          // deep-link straight into this day's editor instead.
+          <BracketFrame style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', textAlign: 'center', padding: 28 }}>
+            <div className="micro-gold" style={{ marginBottom: 12 }}>{cardLabel}</div>
+            <FitText text={(activeDay.name || '').toUpperCase()} max={56} min={28} style={{ fontFamily: UI.fontDisplay, fontWeight: 900, letterSpacing: '0.04em', color: UI.gold, lineHeight: 0.9, marginBottom: 14, maxWidth: '100%' }} />
+            <div style={{ fontSize: 13, color: UI.inkFaint, marginBottom: 22, maxWidth: 240, lineHeight: 1.5 }}>
+              This day has no exercises yet. Add some to train it.
+            </div>
+            <div style={{ display: 'flex', gap: 8, width: '100%' }}>
+              <Btn onClick={() => go({ name: 'schedule-edit', scheduleId: sch.id, openDayId: activeDay.id })} style={{ flex: 2 }}>Add exercises</Btn>
+              <Btn kind="ghost" onClick={() => go({ name: 'plan-view' })} style={{ flex: 1 }}>View plan</Btn>
+            </div>
+          </BracketFrame>
+        ) : (
           <BracketFrame style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', textAlign: 'center', padding: 28 }}>
             <div className="micro" style={{ marginBottom: 12 }}>{cardLabel}</div>
             <div style={{ fontFamily: UI.fontDisplay, fontSize: 56, fontWeight: 900, letterSpacing: '0.04em', textTransform: 'uppercase', color: UI.inkSoft, lineHeight: 0.9, marginBottom: 14 }}>
@@ -3001,7 +3017,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
             </div>
             {!cardioPlanPrefill && cardioBanner}
           </BracketFrame>
-        ) : (
+        )) : (
           <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%' }}>
             {/* Fixed: label, name, stats, CTAs */}
             <div style={{ flexShrink: 0, width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: 4 }}>
