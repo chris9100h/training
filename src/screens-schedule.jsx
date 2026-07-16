@@ -2173,7 +2173,10 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
     width: '100%', boxSizing: 'border-box', display: 'block', colorScheme: 'dark', textAlign: 'center', WebkitAppearance: 'none',
   };
 
-  const dayActionLabel = (day) => (day.name === 'REST' || !day.items.length) ? 'edit' : `${day.items.length} ex · edit`;
+  // Empty training days must scream that exercises are still missing: without
+  // any, the day can't be trained. So a named day with no items reads "add
+  // exercises" (in accent), REST reads "edit", a filled day "N ex · edit".
+  const dayActionLabel = (day) => day.name === 'REST' ? 'edit' : !day.items.length ? 'add exercises' : `${day.items.length} ex · edit`;
 
   const switchMode = async () => {
     if (!isWeekday) {
@@ -2378,7 +2381,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
                     padding: '6px 8px', borderRadius: 4,
                     display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
                     color: day.name === 'REST' ? UI.inkFaint : UI.ink, fontSize: 14, fontWeight: 600, fontFamily: UI.fontUi,
-                  }}><span>{day.name}</span><span className="micro" style={{ fontStyle: 'normal' }}>{dayActionLabel(day)}</span></button>
+                  }}><span>{day.name}</span><span className="micro" style={{ fontStyle: 'normal', color: (day.name !== 'REST' && !day.items.length) ? UI.gold : undefined }}>{dayActionLabel(day)}</span></button>
                   <button onClick={() => toggleWeekdayEdit(day.weekday)} style={{ ...dayEditIconBtn, color: UI.danger, fontSize: 18 }}>×</button>
                 </div>
               ))}
@@ -2400,7 +2403,10 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
             <span className="label">Cycle · {draft.days.length} days</span>
             <div ref={daysListRef} data-reorder-list="true" style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 10 }}>
               {draft.days.map((day, i) => {
-                const isRest = day.name === 'REST' || !day.items.length;
+                // Only a true REST day is muted; an empty training day keeps its
+                // normal name so its gold "add exercises" cue reads as a real,
+                // unfinished day rather than blending in as a rest slot.
+                const isRest = day.name === 'REST';
                 return (
                   <div key={day.id} data-reorder-item="true" style={{
                     display: 'flex', alignItems: 'center', gap: 8,
@@ -2414,7 +2420,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
                       padding: '6px 8px', borderRadius: 4,
                       display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
                       color: isRest ? UI.inkFaint : UI.ink, fontSize: 14, fontWeight: 600, fontFamily: UI.fontUi,
-                    }}><span>{day.name}</span><span className="micro" style={{ fontStyle: 'normal' }}>{dayActionLabel(day)}</span></button>
+                    }}><span>{day.name}</span><span className="micro" style={{ fontStyle: 'normal', color: (day.name !== 'REST' && !day.items.length) ? UI.gold : undefined }}>{dayActionLabel(day)}</span></button>
                     <button data-reorder-ignore="true" onClick={() => removeDay(i)} style={{ ...dayEditIconBtn, color: UI.danger, fontSize: 18 }}>×</button>
                   </div>
                 );
