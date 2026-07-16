@@ -1402,19 +1402,23 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         }
       }
 
-      // Determine violations
+      // Determine violations.
+      // 5/3/1 main lifts are exempt from BOTH outlier guards. Their load swings
+      // ~20% week to week by design (65/75/85% waves plus a built-in deload),
+      // and their top set is an AMRAP ("+") set where the reps intentionally
+      // blow past the printed target, so comparing either against a reference
+      // throws false prompts. Skip them like the progression toast does below.
+      const is531Main = LB.is531MainLift(store, entry.exId, session.dayId);
+
       let weightBad = false, weightHigh = false;
-      // 5/3/1 main lifts swing ~20% week to week by design (65/75/85% waves,
-      // built-in deload), so comparing against last session's load throws false
-      // outlier prompts, so skip them like the progression toast does below.
-      if (!LB.is531MainLift(store, entry.exId, session.dayId) && refKg != null && refKg > 0 && loggedKg != null && loggedKg > 0) {
+      if (!is531Main && refKg != null && refKg > 0 && loggedKg != null && loggedKg > 0) {
         const tooLow  = loggedKg < refKg - increment * 5;
         const tooHigh = loggedKg > refKg * 1.5;
         if (tooLow || tooHigh) { weightBad = true; weightHigh = tooHigh; }
       }
 
       let repsBad = false, repsHigh = false;
-      if (refReps != null && refReps >= 4 && loggedReps != null && loggedReps > 0) {
+      if (!is531Main && refReps != null && refReps >= 4 && loggedReps != null && loggedReps > 0) {
         if (loggedReps < refReps / 3) { repsBad = true; repsHigh = false; }
         else if (loggedReps > refReps * 3 || loggedReps > refReps + 10) { repsBad = true; repsHigh = true; }
       }
