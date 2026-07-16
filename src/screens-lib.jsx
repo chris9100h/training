@@ -3401,20 +3401,22 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
               <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: 1.5 }}>
                 Joint discomfort during <strong style={{ color: UI.ink }}>{fbEdit.name}</strong>?
               </div>
-              {MESO_JOINT_OPTS.map(opt => {
-                const sel = fbEdit.sel === opt.key;
-                const danger = opt.key === 'sharp';
-                return (
-                  <button key={opt.key} onClick={() => setFbEdit(e => ({ ...e, sel: opt.key }))} style={{
-                    width: '100%', marginBottom: 8, padding: '12px 14px',
-                    background: sel ? (danger ? 'rgba(var(--danger-rgb),0.12)' : 'rgba(var(--accent-rgb),0.12)') : UI.bgInset,
-                    border: `1px solid ${sel ? (danger ? 'rgba(var(--danger-rgb),0.6)' : 'var(--accent)') : (danger ? 'rgba(var(--danger-rgb),0.4)' : UI.hairStrong)}`, borderRadius: 6, cursor: 'pointer', textAlign: 'left', WebkitTapHighlightColor: 'transparent',
-                  }}>
-                    <div style={{ fontFamily: UI.fontUi, fontSize: 13, color: danger ? UI.danger : (sel ? 'var(--accent)' : UI.ink), fontWeight: 600 }}>{opt.label}</div>
-                    <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 2 }}>{opt.sub}</div>
-                  </button>
-                );
-              })}
+              <div style={{ display: 'flex', gap: 8, marginBottom: fbEdit.askWeight ? 20 : 8 }}>
+                {MESO_JOINT_OPTS.map(opt => {
+                  const sel = fbEdit.sel === opt.key;
+                  const danger = opt.key === 'sharp';
+                  return (
+                    <button key={opt.key} onClick={() => setFbEdit(e => ({ ...e, sel: opt.key }))} style={{
+                      flex: 1, padding: '10px 8px',
+                      background: sel ? (danger ? 'rgba(var(--danger-rgb),0.12)' : 'rgba(var(--accent-rgb),0.12)') : UI.bgInset,
+                      border: `1px solid ${sel ? (danger ? 'rgba(var(--danger-rgb),0.6)' : 'var(--accent)') : (danger ? 'rgba(var(--danger-rgb),0.4)' : UI.hairStrong)}`, borderRadius: 6, cursor: 'pointer', textAlign: 'center', WebkitTapHighlightColor: 'transparent',
+                    }}>
+                      <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: danger ? UI.danger : (sel ? 'var(--accent)' : UI.ink), fontWeight: 600 }}>{opt.label}</div>
+                      <div style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint, marginTop: 2 }}>{opt.sub}</div>
+                    </button>
+                  );
+                })}
+              </div>
               {fbEdit.askWeight && (<>
                 <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, margin: '2px 0 6px', letterSpacing: '0.06em', textTransform: 'uppercase' }}>Weight feel</div>
                 <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.inkSoft, marginBottom: 12, lineHeight: 1.5 }}>How did the weight feel on <strong style={{ color: UI.ink }}>{fbEdit.name}</strong> today?</div>
