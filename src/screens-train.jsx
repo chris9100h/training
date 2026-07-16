@@ -7478,6 +7478,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             item={item}
             exName={ex?.name || entry.name}
             isCheckboxOnly={false}
+            feedbackDrivenWeight={!!(mesoSch?.mesocycle_autoregulate || mesoSch?.mesocycle_weeks != null)}
             queuePos={repTargetIdx + 1}
             queueTotal={repTargetQueue.length}
             store={store}

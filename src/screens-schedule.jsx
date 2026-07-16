@@ -3299,7 +3299,7 @@ function DayCopyPicker({ store, schedule, currentDayId, onClose, onCopy, multiSe
 }
 
 // ─── Day editor (exercises within a day) ─────────────────────────────
-function ExerciseItemEditor({ item, exName, isCheckboxOnly, queuePos, queueTotal, store, setStore, onClose, onSave }) {
+function ExerciseItemEditor({ item, exName, isCheckboxOnly, queuePos, queueTotal, feedbackDrivenWeight, store, setStore, onClose, onSave }) {
   // The exercise note is global (same record, shared across every plan that
   // uses this exercise) — not part of this day/plan item — so it's read from
   // and written straight back to store.exercises, independent of onSave's
@@ -3483,7 +3483,15 @@ function ExerciseItemEditor({ item, exName, isCheckboxOnly, queuePos, queueTotal
         )}</>}
       </div>
 
-      {!isCheckboxOnly && (() => {
+      {/* Autoregulate / mesocycle plans: the feedback engine owns the weight, so
+          per-exercise Smart Progression is inert here. Hide the toggle (it would
+          imply it drives the load) and say what actually does. */}
+      {!isCheckboxOnly && feedbackDrivenWeight && (
+        <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.4, marginBottom: 24 }}>
+          In this plan, weight is autoregulated from your training feedback, not Smart Progression.
+        </div>
+      )}
+      {!isCheckboxOnly && !feedbackDrivenWeight && (() => {
         if (mode === 'range') {
           // Range's own Max is always the ceiling when on — no separate
           // offset number to configure, just whether progression applies
@@ -3887,6 +3895,7 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave, onDraftCha
           item={draft.items[editingItem]}
           exName={LB.findExercise(store, draft.items[editingItem]?.exId)?.name || '—'}
           isCheckboxOnly={!!LB.findExercise(store, draft.items[editingItem]?.exId)?.no_weight_reps}
+          feedbackDrivenWeight={!!(schedule?.mesocycle_autoregulate || schedule?.mesocycle_weeks != null)}
           queuePos={editQueue ? editQueue.pos + 1 : undefined}
           queueTotal={editQueue ? editQueue.indices.length : undefined}
           store={store}
