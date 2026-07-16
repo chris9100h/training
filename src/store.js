@@ -4831,13 +4831,15 @@ function reearnMesoBoostsFromAnswers(mesoState, answers, earnInputs, loadOnly) {
     const existing = wb[e.key];
     if (existing != null && existing < 0) { earned[e.key] = existing; continue; } // preserve rep-miss cut
     if (!e.allHit) continue;
-    // Joint, pump and weight-feel are all per exId now, asked for every exercise in
-    // every mode, so none needs a muscle guard: an unanswered/blocking answer simply
-    // withholds the bump. Soreness stays per muscle and only holds the weight in
-    // load-only (where sets are frozen, so recovery brakes the load instead).
     if (!gates.jointFine.has(e.exId)) continue;
-    if (!gates.pumpOk.has(e.exId)) continue;
-    if (!gates.weightOk.has(e.exId)) continue;
+    // Pump and weight-feel are per exId. A muscle-less exercise (no primary muscle) in
+    // a session finished BEFORE they moved per-exercise has no per-exercise answer AND
+    // no muscle rec to fall back on, so it stays exempt from these gates and earns on
+    // reps + joint alone (the old behavior). Any exercise with its own per-exercise
+    // answer, or any muscled exercise (fallback available), IS gated.
+    const jRec = (answers.joint || {})[e.exId];
+    if ((e.muscle || (jRec && 'pump' in jRec)) && !gates.pumpOk.has(e.exId)) continue;
+    if ((e.muscle || (jRec && 'weight' in jRec)) && !gates.weightOk.has(e.exId)) continue;
     if (loadOnly && e.muscle && gates.soreBlock.has(e.muscle)) continue;
     earned[e.key] = e.increment;
   }

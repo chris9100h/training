@@ -295,7 +295,7 @@ function AutoregGuideScreen({ store, go, mode: modeProp, back }) {
               {/* per exercise: joint + weight feel + pump */}
               <AGPanel idx="2" title="Per exercise" when={<>per exercise<br />after last set</>}>
                 <p style={{ fontSize: 13.5, color: UI.inkSoft, margin: '11px 0' }}>
-                  Asked for every exercise, every mode. Joint comfort, how the weight felt, and the pump: together these three gate this exercise's weight bump{isB ? '.' : '. In Volume+Load and Meso, joint pain also shaves a set off this exercise.'}
+                  Asked for every exercise, every mode. Joint comfort, how the weight felt, and the pump: together these three gate the weight bump for this exercise{isB ? '.' : '. In Volume+Load and Meso, joint pain also shaves a set off this exercise.'}
                 </p>
                 <AGKick>Joint</AGKick>
                 <AGOpt chip="None" dirs={<AGDir kind="hold">gate green</AGDir>}>Joints fine. This exercise can earn its bump.</AGOpt>
@@ -320,7 +320,7 @@ function AutoregGuideScreen({ store, go, mode: modeProp, back }) {
               {!isB && (
                 <AGPanel idx="3" title="Workload" when={<>per muscle<br />after last exercise</>}>
                   <p style={{ fontSize: 13.5, color: UI.inkSoft, margin: '11px 0' }}>
-                    One question per muscle group: how much total work it got. This drives the set dial only. It no longer touches the weight, that is the per-exercise weight-feel question's job now.
+                    One question per muscle group: how much total work it got. This drives the set dial only. It no longer touches the weight, the per-exercise weight-feel question owns that now.
                   </p>
                   <AGOpt chip="Not enough" dirs={<AGDir kind="up">+1 set</AGDir>}>Too little. +1 set to the least-grown exercise.</AGOpt>
                   <AGOpt chip="Just right" dirs={<AGDir kind="hold">hold</AGDir>}>On point.</AGOpt>

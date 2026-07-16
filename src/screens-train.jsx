@@ -3178,11 +3178,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const WORKLOAD_LABELS = { not_enough: 'Not enough', just_right: 'Just right', pushed: 'Pushed my limits', too_much: 'Too much' };
   // Every answered question this session, grouped by muscle in workout order
   // (the order questions are actually asked within a muscle group: Soreness
-  // first, then each exercise's Joint check, then Pump & Volume last) — for
-  // the recap sheet. Deriving joint rows straight from session.entries (not
-  // from mesoAnswersRef directly) automatically excludes an exercise that was
-  // swapped out or removed since — it's simply no longer in session.entries,
-  // so there's nothing left to reason a stale index against.
+  // first, then each exercise's Joint + Weight + Pump check, then the per-muscle
+  // Workload last), for the recap sheet. Deriving joint rows straight from
+  // session.entries (not from mesoAnswersRef directly) automatically excludes an
+  // exercise that was swapped out or removed since: it's simply no longer in
+  // session.entries, so there's nothing left to reason a stale index against.
   const mesoRecapGroups = () => {
     const muscleOrder = [];
     const seenMuscles = new Set();
@@ -3340,11 +3340,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       }
 
       if (!allHit) continue;
-      // Joint, pump and weight-feel are all per exId now, asked for every exercise in
-      // every mode. Mirrors LB.reearnMesoBoostsFromAnswers exactly.
+      // Joint, pump and weight-feel are all per exId now. Mirrors LB.reearnMesoBoostsFromAnswers
+      // exactly, including the muscle-less exemption: an untagged exercise with no
+      // per-exercise pump/weight answer and no muscle fallback earns on reps + joint alone.
       if (!mesoJointFineRef.current.has(exId)) continue;
-      if (!mesoPumpOkRef.current.has(exId)) continue;
-      if (!mesoWeightOkRef.current.has(exId)) continue;
+      const jointRec = mesoAnswersRef.current.joint[exId];
+      if ((muscle || (jointRec && 'pump' in jointRec)) && !mesoPumpOkRef.current.has(exId)) continue;
+      if ((muscle || (jointRec && 'weight' in jointRec)) && !mesoWeightOkRef.current.has(exId)) continue;
       // Load-only: still-sore holds the weight for that muscle this session.
       if (LB.autoregLoadOnly(mesoSch) && muscle && mesoSoreBlockRef.current.has(muscle)) continue;
 
@@ -7848,15 +7850,15 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         </Btn>
       </Sheet>
 
-      {/* Session feedback recap — two levels. This top sheet lists one button
+      {/* Session feedback recap, two levels. This top sheet lists one button
           per muscle ("Chest feedback"); tapping it opens the detail sheet
           below with that muscle's individual answers (Soreness, each
-          exercise's Joint check, Pump & Volume) to actually revise. Opened
-          from the small square button in the footer nav (see "Footer nav"
-          below). */}
+          exercise's Joint + Weight + Pump, the per-muscle Workload) to actually
+          revise. Opened from the small square button in the footer nav (see
+          "Footer nav" below). */}
       <Sheet open={mesoRecapOpen} onClose={() => setMesoRecapOpen(false)} title="Session review" titleColor="var(--accent)">
         <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: 1.5 }}>
-          Tap a muscle group to review and change its feedback — everything stays editable until you finish the session.
+          Tap a muscle group to review and change its feedback. Everything stays editable until you finish the session.
         </div>
         {mesoFeedbackGroups.map(group => (
           <button key={group.muscle} onClick={() => { setMesoRecapOpen(false); setMesoRecapDetailMuscle(group.muscle); }} style={{
@@ -7874,8 +7876,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
       {/* Detail sheet for one muscle group's feedback, opened from the list
           above. Split into two sections so it's clear which answer applies to
-          what: Joint feedback is per exercise, General feedback (Soreness +
-          Pump & Volume) applies to the whole muscle group. */}
+          what: the per-exercise feedback (Joint + Weight + Pump) is per exercise,
+          the general feedback (Soreness + Workload) applies to the whole muscle
+          group. */}
       {(() => {
         const detailGroup = mesoFeedbackGroups.find(g => g.muscle === mesoRecapDetailMuscle);
         const feedbackRow = row => (

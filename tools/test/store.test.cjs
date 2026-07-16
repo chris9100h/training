@@ -1100,6 +1100,29 @@ async function testAsync(name, fn) {
     assert.ok(g.weightOk.has('e2'), 'e2 keeps its own just_right, the muscle too_much never touches it');
     assert.ok(!g.weightOk.has('e1'), 'e1 (no per-exercise weight) inherits the muscle too_much hold');
   });
+  test('mesoGateSetsFromAnswers: MIXED raw, a GRANTING muscle answer is inherited by the unanswered sibling (weight and pump)', () => {
+    // The load-bearing mixed case: muscle answer GRANTS, e2 has its own answer, e1 is
+    // unanswered and must inherit the muscle grant (not be silently dropped).
+    const a = { joint: { e1: { answer: 'none' }, e2: { answer: 'none', pump: 'moderate', weight: 'just_right' } }, volume: { chest: { muscle: 'chest', exIds: ['e1', 'e2'], pump: 'moderate', volume: 'just_right' } }, soreness: {} };
+    const g = LB.mesoGateSetsFromAnswers(a, false);
+    assert.ok(g.weightOk.has('e1') && g.weightOk.has('e2'), 'e1 inherits the muscle just_right weight, e2 keeps its own');
+    assert.ok(g.pumpOk.has('e1') && g.pumpOk.has('e2'), 'e1 inherits the muscle moderate pump, e2 keeps its own');
+  });
+  test('reearnMesoBoostsFromAnswers: a muscle-less exercise with no per-exercise pump/weight earns on reps + joint alone', () => {
+    // An untagged (muscle-less) exercise in a pre-change session has no per-exercise
+    // pump/weight and no muscle rec to fall back on. It must stay exempt from those
+    // gates, not lose its bump on a later edit.
+    const inputs = [{ exId: 'x1', key: 'x1_d1', muscle: null, allHit: true, increment: 2.5 }];
+    const ans = { joint: { x1: { answer: 'none' } }, volume: {}, soreness: {} };
+    const out = LB.reearnMesoBoostsFromAnswers({ weightBoosts: { x1_d1: 2.5 } }, ans, inputs, false);
+    assert.strictEqual(out.weightBoosts.x1_d1, 2.5, 'muscle-less exercise keeps its bump (pump/weight gates exempt)');
+  });
+  test('reearnMesoBoostsFromAnswers: a muscle-less exercise WITH its own too-heavy weight is still gated', () => {
+    const inputs = [{ exId: 'x1', key: 'x1_d1', muscle: null, allHit: true, increment: 2.5 }];
+    const ans = { joint: { x1: { answer: 'none', pump: 'amazing', weight: 'too_much' } }, volume: {}, soreness: {} };
+    const out = LB.reearnMesoBoostsFromAnswers({ weightBoosts: { x1_d1: 2.5 } }, ans, inputs, false);
+    assert.ok(!('x1_d1' in out.weightBoosts), 'once it has its own weight answer, the gate applies even without a muscle');
+  });
   test('reearnMesoBoostsFromAnswers: holds only the too-heavy exercise, bumps the others (same muscle, per exId)', () => {
     const inputs = [
       { exId: 'e1', key: 'e1_d1', muscle: 'shoulders', allHit: true, increment: 2.5 },
