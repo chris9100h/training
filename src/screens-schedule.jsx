@@ -691,6 +691,11 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
   const day = dayForSeed;
   const dayIdx = displayDays.findIndex(d => d.id === day.id);
   const isRest = !day.items.length;
+  // A named day with no exercises is not a real rest day, just unbuilt. The
+  // viewer must not present it as "Recover." (the same home-screen confusion),
+  // so it gets a clear "no exercises yet" state, with an add shortcut on your
+  // own plan.
+  const isEmptyNamed = isRest && day.name !== 'REST';
   const isTodaySel = day.id === todayDayId;
   const dayLabel = isWeekday ? weekdayFullLabel(day.weekday, dayIdx) : `Day ${dayIdx + 1}`;
   const trainingDayCount = displayDays.filter(d => d.items.length).length;
@@ -1023,7 +1028,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
       <div className={isTodaySel ? 'micro-gold' : 'micro'} style={{ marginBottom: 4, color: isTodaySel ? undefined : UI.inkFaint }}>
         {dayLabel.toUpperCase()}{isTodaySel ? ' · TODAY' : ''}
       </div>
-      <div className="display" style={{ fontSize: 30, color: isRest ? UI.inkSoft : UI.ink, fontStyle: isRest ? 'italic' : 'normal', lineHeight: 1.05, letterSpacing: '-0.01em' }}>
+      <div className="display" style={{ fontSize: 30, color: (isRest && !isEmptyNamed) ? UI.inkSoft : UI.ink, fontStyle: (isRest && !isEmptyNamed) ? 'italic' : 'normal', lineHeight: 1.05, letterSpacing: '-0.01em' }}>
         {day.name}
       </div>
     </div>
@@ -1043,7 +1048,17 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
     : false;
   const mesoBoosts = resolvedMeso?.weightBoosts ?? null;
 
-  const exerciseList = isRest ? (
+  const exerciseList = isEmptyNamed ? (
+    <BracketFrame style={{ textAlign: 'center', padding: 36 }}>
+      <div className="display-it" style={{ fontSize: 30, color: UI.gold, fontStyle: 'italic', fontWeight: 300, marginBottom: 6 }}>No exercises yet.</div>
+      <div style={{ fontSize: 13, color: UI.inkFaint }}>{fromPlan ? 'Add some to train this day.' : 'This day needs exercises to be trainable.'}</div>
+      {fromPlan && (
+        <div style={{ display: 'flex', justifyContent: 'center', marginTop: 18 }}>
+          <Btn onClick={() => go({ name: 'schedule-edit', scheduleId: sch.id, versionFrom: selectedVersion?.validFrom, openDayId: day.id })} style={{ minWidth: 200 }}>Add exercises</Btn>
+        </div>
+      )}
+    </BracketFrame>
+  ) : isRest ? (
     <BracketFrame style={{ textAlign: 'center', padding: 36 }}>
       <div className="display-it" style={{ fontSize: 38, color: UI.inkSoft, fontStyle: 'italic', fontWeight: 300, marginBottom: 6 }}>Recover.</div>
       <div style={{ fontSize: 13, color: UI.inkFaint }}>Recovery is part of the plan.</div>
@@ -2120,7 +2135,22 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
     go({ name: 'plan-view', scheduleId: draft.id, fromPlan: true });
   };
 
-  const save = () => {
+  // Empty named training days aren't trainable (they surface as rest days), so
+  // warn before leaving the editor with any. Non-blocking: the user can still go,
+  // but at least they've read that exercises belong there.
+  const warnLeaveEmptyDays = async () => {
+    const empties = (draft?.days || []).filter(d => d.name !== 'REST' && !(d.items && d.items.length));
+    if (!empties.length) return true;
+    const names = [...new Set(empties.map(d => d.name))];
+    const list = names.length === 1 ? names[0] : names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1];
+    const one = names.length === 1;
+    return confirm(
+      `${list} still ${one ? 'has' : 'have'} no exercises, so ${one ? "it won't" : "they won't"} be trainable and will show as a rest day on your home screen. Leave anyway?`,
+      { title: one ? 'A day has no exercises' : 'Some days have no exercises', ok: 'Leave anyway', cancel: 'Keep editing' }
+    );
+  };
+  const save = async () => {
+    if (!(await warnLeaveEmptyDays())) return;
     if (editVerIdx > 0) { doSaveVersion(); return; } // older version → update in place, no date prompt
     if (!dirty || store.activeScheduleId !== draft.id) { doSave(null); return; }
     const isWdPlan = LB.isWeekdayPlan(original);
@@ -2244,6 +2274,8 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
                 )
               : await confirm('Unsaved changes will be lost.', { title: 'Discard changes?', ok: 'Discard', danger: true });
             if (!confirmed) return;
+          } else if (!(await warnLeaveEmptyDays())) {
+            return;
           }
           clearDraft();
           go({ name: 'plan-view', scheduleId: draft.id, fromPlan: true });
