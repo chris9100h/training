@@ -131,9 +131,9 @@ function agSignals(mode) {
     { sig: 'Soreness: still sore', sets: B ? ho('frozen') : dn('-1 set'), wt: B ? bl('holds weight') : ho('no effect') },
     { sig: 'Joint: noticeable / sharp', sets: B ? ho('frozen') : dn('-1 set'), wt: bl('blocks bump') },
     { sig: 'Pump: low', sets: ho(B ? 'none' : 'none, tracks swap'), wt: bl('blocks bump') },
-    { sig: 'Volume: not enough / too light', sets: B ? ho('frozen') : up('+1 set'), wt: B ? up('earns bump') : ho('allows bump') },
-    { sig: 'Volume: pushed / hard', sets: B ? ho('frozen') : dn('-1 set'), wt: B ? up('still earns') : bl('blocks bump') },
-    { sig: 'Volume: too much / too heavy', sets: B ? ho('frozen') : dn('-1 every ex'), wt: bl('blocks bump') },
+    { sig: B ? 'Weight feel: too light (per exercise)' : 'Volume: not enough', sets: B ? ho('frozen') : up('+1 set'), wt: B ? up('earns bump') : ho('allows bump') },
+    { sig: B ? 'Weight feel: hard (per exercise)' : 'Volume: pushed', sets: B ? ho('frozen') : dn('-1 set'), wt: B ? up('still earns') : bl('blocks bump') },
+    { sig: B ? 'Weight feel: too heavy (per exercise)' : 'Volume: too much', sets: B ? ho('frozen') : dn('-1 every ex'), wt: bl('blocks bump') },
   ];
 }
 
@@ -231,7 +231,7 @@ function AutoregGuideScreen({ store, go, mode: modeProp, back }) {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 8, marginBottom: 18 }}>
               {[
                 ['Stage 1', 'You train', 'Log your real reps. Answer up to 4 quick questions per muscle group.'],
-                ['Stage 2', 'Two signals', 'Objective: did the reps land. Subjective: soreness, joints, pump, workload.'],
+                ['Stage 2', 'Two signals', isB ? 'Objective: did the reps land. Subjective: soreness, joints, pump, weight feel.' : 'Objective: did the reps land. Subjective: soreness, joints, pump, workload.'],
                 ['Stage 3', 'Two dials', isB ? 'Sets stay put, weight earns or cuts.' : 'Sets rotate, weight earns or cuts.'],
                 ['Stage 4', 'Next session', 'Seeded automatically: new set counts, new weight, reps reset on a jump.'],
               ].map(([n, h, l]) => (
@@ -262,7 +262,7 @@ function AutoregGuideScreen({ store, go, mode: modeProp, back }) {
           {/* ── 03 the four questions ── */}
           <Section>
             <AGSecHead n="03 / Feedback" title="The questions and every answer"
-              sub="Asked in order per muscle group: soreness first, then a joint check per exercise, then pump and workload together." />
+              sub={isB ? 'Asked in order per muscle group: soreness first, then a joint and weight check per exercise, then the pump last.' : 'Asked in order per muscle group: soreness first, then a joint check per exercise, then pump and workload together.'} />
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '9px 14px', marginBottom: 18 }}>
               <AGDir kind="up">set up</AGDir><AGDir kind="down">set down</AGDir><AGDir kind="hold">nothing</AGDir><AGDir kind="block">blocks weight bump</AGDir><AGDir kind="flag">warning</AGDir>
             </div>
@@ -286,9 +286,9 @@ function AutoregGuideScreen({ store, go, mode: modeProp, back }) {
               </AGPanel>
 
               {/* joint */}
-              <AGPanel idx="2" title="Joint check" when={<>per exercise<br />after last set</>}>
+              <AGPanel idx="2" title={isB ? 'Joint & weight' : 'Joint check'} when={<>per exercise<br />after last set</>}>
                 <p style={{ fontSize: 13.5, color: UI.inkSoft, margin: '11px 0' }}>
-                  Asked for every exercise, every mode, every week. It gates the weight{isB ? '; the set effect is frozen here, so it only gates the weight' : ' and moves that exercise’s set count'}.
+                  Asked for every exercise, every mode, every week. It gates the weight{isB ? '. The set effect is frozen in Load only, so it only gates the weight, and the weight-feel question rides along here per exercise (each lift owns its own weight verdict, just like joint pain)' : ' and moves that exercise’s set count'}.
                 </p>
                 <AGOpt chip="None" dirs={<AGDir kind="hold">gate green</AGDir>}>Joints fine. This exercise can earn its bump.</AGOpt>
                 <AGOpt chip="Noticeable" dirs={<>{!isB && <AGDir kind="down">-1 set</AGDir>}<AGDir kind="block">bump</AGDir></>}>
@@ -297,25 +297,28 @@ function AutoregGuideScreen({ store, go, mode: modeProp, back }) {
                 <AGOpt chip="Sharp pain" dirs={<>{!isB && <AGDir kind="down">-1 set</AGDir>}<AGDir kind="block">bump</AGDir><AGDir kind="flag">warning</AGDir></>}>
                   Real pain. As above, plus a durable warning on the exercise ("caused sharp joint pain, consider swapping it").
                 </AGOpt>
+                {isB && (<>
+                  <div style={{ marginTop: 14 }}><AGKick>Weight (how it felt)</AGKick></div>
+                  <AGOpt chip="Too light" dirs={<AGDir kind="up">earns bump</AGDir>}>Weight can climb on this exercise.</AGOpt>
+                  <AGOpt chip="Just right" dirs={<AGDir kind="hold">hold</AGDir>}>On point, gate green.</AGOpt>
+                  <AGOpt chip="Hard" dirs={<AGDir kind="up">still earns bump</AGDir>}>Training should be hard. "Hard" still lets the weight climb. It self-corrects.</AGOpt>
+                  <AGOpt chip="Too heavy" dirs={<AGDir kind="block">holds weight</AGDir>}>The only weight answer that holds. Everything lighter lets it climb.</AGOpt>
+                </>)}
               </AGPanel>
 
-              {/* pump + volume */}
-              <AGPanel idx="3" title={isB ? 'Pump & Weight' : 'Pump & Volume'} when={<>per muscle<br />after last exercise</>}>
+              {/* pump (+ volume outside Load only) */}
+              <AGPanel idx="3" title={isB ? 'Pump' : 'Pump & Volume'} when={<>per muscle<br />after last exercise</>}>
                 <AGKick>Pump</AGKick>
-                <AGOpt chip="Low" dirs={<><AGDir kind="block">bump</AGDir><AGDir kind="flag">swap</AGDir></>}>Barely felt it. Blocks the bump. Low pump on 3 sessions (with workload "just right") suggests swapping the exercise, not adding sets.</AGOpt>
+                <AGOpt chip="Low" dirs={isB ? <AGDir kind="block">bump</AGDir> : <><AGDir kind="block">bump</AGDir><AGDir kind="flag">swap</AGDir></>}>Barely felt it. Blocks the bump.{isB ? '' : ' Low pump on 3 sessions (with workload "just right") suggests swapping the exercise, not adding sets.'}</AGOpt>
                 <AGOpt chip="Moderate" dirs={<AGDir kind="hold">gate green</AGDir>}>Decent stimulus. Weight can climb.</AGOpt>
                 <AGOpt chip="Amazing" dirs={<AGDir kind="hold">gate green</AGDir>}>Great stimulus.</AGOpt>
-                <div style={{ marginTop: 14 }}><AGKick>{isB ? 'Weight (how it felt)' : 'Volume (workload)'}</AGKick></div>
-                <AGOpt chip={isB ? 'Too light' : 'Not enough'} dirs={isB ? <AGDir kind="up">earns bump</AGDir> : <AGDir kind="up">+1 set</AGDir>}>
-                  {isB ? 'Weight can climb.' : 'Too little. +1 set to the least-grown exercise, gate stays green.'}
-                </AGOpt>
-                <AGOpt chip="Just right" dirs={<AGDir kind="hold">hold</AGDir>}>On point, gate green.</AGOpt>
-                <AGOpt chip={isB ? 'Hard' : 'Pushed my limits'} dirs={isB ? <AGDir kind="up">still earns bump</AGDir> : <><AGDir kind="down">-1 set</AGDir><AGDir kind="block">bump</AGDir></>}>
-                  {isB ? 'Training should be hard. "Hard" still lets the weight climb. It self-corrects.' : 'To the limit. Cuts a set and holds the weight.'}
-                </AGOpt>
-                <AGOpt chip={isB ? 'Too heavy' : 'Too much'} dirs={isB ? <AGDir kind="block">holds weight</AGDir> : <><AGDir kind="down">-1 every exercise</AGDir><AGDir kind="block">bump</AGDir></>}>
-                  {isB ? 'The only weight answer that holds. Everything lighter lets it climb.' : 'Clearly too much. Cuts a set off every exercise, holds the weight.'}
-                </AGOpt>
+                {!isB && (<>
+                  <div style={{ marginTop: 14 }}><AGKick>Volume (workload)</AGKick></div>
+                  <AGOpt chip="Not enough" dirs={<AGDir kind="up">+1 set</AGDir>}>Too little. +1 set to the least-grown exercise, gate stays green.</AGOpt>
+                  <AGOpt chip="Just right" dirs={<AGDir kind="hold">hold</AGDir>}>On point, gate green.</AGOpt>
+                  <AGOpt chip="Pushed my limits" dirs={<><AGDir kind="down">-1 set</AGDir><AGDir kind="block">bump</AGDir></>}>To the limit. Cuts a set and holds the weight.</AGOpt>
+                  <AGOpt chip="Too much" dirs={<><AGDir kind="down">-1 every exercise</AGDir><AGDir kind="block">bump</AGDir></>}>Clearly too much. Cuts a set off every exercise, holds the weight.</AGOpt>
+                </>)}
               </AGPanel>
             </div>
 
@@ -396,7 +399,7 @@ function AutoregGuideScreen({ store, go, mode: modeProp, back }) {
                     ['1 · Reps', 'Every set clears its staggered ladder target.'],
                     ['2 · Joint', 'Answer was "None".'],
                     ['3 · Pump', '"Moderate" or "Amazing".'],
-                    ['4 · Volume', isB ? 'Anything but "Too heavy" (Hard counts).' : '"Just right" or "Not enough".'],
+                    [isB ? '4 · Weight' : '4 · Volume', isB ? 'Per exercise: anything but "Too heavy" (Hard counts).' : '"Just right" or "Not enough".'],
                     ...(isB ? [['5 · Soreness', 'Muscle is not "Still sore".']] : []),
                   ].map(([t, d]) => (
                     <div key={t} style={{ background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 6, padding: '12px 13px' }}>
@@ -405,6 +408,7 @@ function AutoregGuideScreen({ store, go, mode: modeProp, back }) {
                     </div>
                   ))}
                 </div>
+                {isB && <p style={{ fontSize: 12.5, color: UI.inkSoft, margin: '12px 0 0' }}>Reps, Joint and Weight are judged <b style={{ color: UI.ink }}>per exercise</b>, so each lift earns or holds its own weight. Pump and Soreness apply to the whole <b style={{ color: UI.ink }}>muscle group</b>.</p>}
                 {!isB && <p style={{ fontSize: 12.5, color: UI.inkSoft, margin: '12px 0 0' }}>These gate the <b style={{ color: UI.ink }}>weight</b> only. Soreness is not among them here: in this mode it moves your <b style={{ color: UI.ink }}>sets</b> instead (still sore = one set off the most-grown lift). It only holds the weight in Load only.</p>}
               </AGPanel>
             </div>
@@ -534,7 +538,7 @@ function AutoregGuideScreen({ store, go, mode: modeProp, back }) {
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px,1fr))', gap: 12, marginTop: 14 }}>
               <div style={cardStyle}><h3 className="display" style={h3}>Weight, one line</h3><p style={{ fontSize: 13.5, color: UI.inkSoft, margin: 0 }}>Feedback owns the direction. Cut wins. Red holds. Only all-green climbs. Step is one increment (2.5 kg / 5 lbs).</p></div>
-              <div style={cardStyle}><h3 className="display" style={h3}>Volume, one line</h3><p style={{ fontSize: 13.5, color: UI.inkSoft, margin: 0 }}>{isB ? 'Frozen. Your set counts never change in Load only. The workload question only opens or holds the weight gate.' : isC ? 'Recovered or too little adds a set to the least-grown lift. Sore or too much cuts from the most-grown. Frozen in the final week.' : 'Recovered or too little adds a set to the least-grown lift. Sore or too much cuts from the most-grown. Never below 1, no cap.'}</p></div>
+              <div style={cardStyle}><h3 className="display" style={h3}>Volume, one line</h3><p style={{ fontSize: 13.5, color: UI.inkSoft, margin: 0 }}>{isB ? 'Frozen. Your set counts never change in Load only. The per-exercise weight-feel question only opens or holds the weight gate.' : isC ? 'Recovered or too little adds a set to the least-grown lift. Sore or too much cuts from the most-grown. Frozen in the final week.' : 'Recovered or too little adds a set to the least-grown lift. Sore or too much cuts from the most-grown. Never below 1, no cap.'}</p></div>
               <div style={cardStyle}><h3 className="display" style={h3}>Warnings, one line</h3><p style={{ fontSize: 13.5, color: UI.inkSoft, margin: 0 }}>Sharp joint pain sets a durable swap warning. Low pump 3 sessions running suggests changing the exercise, not adding sets.</p></div>
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px,1fr))', gap: 12, marginTop: 12 }}>

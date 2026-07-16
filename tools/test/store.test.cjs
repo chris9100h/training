@@ -1056,9 +1056,70 @@ async function testAsync(name, fn) {
     assert.strictEqual(out.weightBoosts.e1_d1, -2.5);
   });
   test('reearnMesoBoostsFromAnswers: load-only still-sore muscle blocks the boost', () => {
-    const ans = { joint: { e1: { answer: 'none' } }, volume: { chest: { muscle: 'chest', pump: 'amazing', volume: 'just_right' } }, soreness: { chest: { muscle: 'chest', answer: 'still_sore' } } };
+    // Legacy shape: weight per-muscle in volume.chest.volume (carries exIds so the
+    // weight gate PASSES); the block here must come from soreness, not a missing gate.
+    const ans = { joint: { e1: { answer: 'none' } }, volume: { chest: { muscle: 'chest', exIds: ['e1'], pump: 'amazing', volume: 'just_right' } }, soreness: { chest: { muscle: 'chest', answer: 'still_sore' } } };
     const out = LB.reearnMesoBoostsFromAnswers({ weightBoosts: {} }, ans, earnInputs, true);
     assert.ok(!('e1_d1' in out.weightBoosts));
+  });
+  // ── load-only per-exercise weight-feel gate (weight moved from per-muscle to per-exId) ──
+  test('mesoGateSetsFromAnswers: non-load-only keys the weight gate by muscle (volumeOk), no weightOk', () => {
+    const a = { joint: { e1: { answer: 'none' } }, volume: { chest: { muscle: 'chest', exIds: ['e1'], pump: 'moderate', volume: 'just_right' } }, soreness: { chest: { muscle: 'chest', answer: 'still_sore' } } };
+    const g = LB.mesoGateSetsFromAnswers(a, false);
+    assert.ok(g.volumeOk.has('chest'), 'weight gate by muscle in Volume+Load/Meso');
+    assert.ok(g.pumpOk.has('chest'));
+    assert.ok(g.soreBlock.has('chest'));
+    assert.strictEqual(g.weightOk.size, 0, 'weightOk is only built in load-only');
+  });
+  test('mesoGateSetsFromAnswers: load-only keys the weight gate by exId from joint[exId].weight', () => {
+    const a = { joint: { e1: { answer: 'none', weight: 'just_right' }, e2: { answer: 'none', weight: 'too_much' } }, volume: { chest: { muscle: 'chest', pump: 'moderate' } }, soreness: {} };
+    const g = LB.mesoGateSetsFromAnswers(a, true);
+    assert.ok(g.weightOk.has('e1'), 'e1 (just_right) allows the bump');
+    assert.ok(!g.weightOk.has('e2'), 'e2 (too heavy) holds only itself');
+    assert.ok(g.pumpOk.has('chest'), 'pump stays per muscle');
+  });
+  test('mesoGateSetsFromAnswers: load-only falls back to the legacy per-muscle weight (volume[muscle].volume)', () => {
+    const a = { joint: { e1: { answer: 'none' }, e2: { answer: 'none' } }, volume: { chest: { muscle: 'chest', exIds: ['e1', 'e2'], pump: 'moderate', volume: 'just_right' } }, soreness: {} };
+    const g = LB.mesoGateSetsFromAnswers(a, true);
+    assert.ok(g.weightOk.has('e1') && g.weightOk.has('e2'), 'legacy just_right spreads over both exIds');
+  });
+  test('mesoGateSetsFromAnswers: load-only new per-exId weight wins over the legacy per-muscle answer', () => {
+    // Hybrid: e1 explicitly too_much per-exercise, muscle answer just_right. New wins.
+    const a = { joint: { e1: { answer: 'none', weight: 'too_much' }, e2: { answer: 'none', weight: 'just_right' } }, volume: { chest: { muscle: 'chest', exIds: ['e1', 'e2'], pump: 'moderate', volume: 'just_right' } }, soreness: {} };
+    const g = LB.mesoGateSetsFromAnswers(a, true);
+    assert.ok(!g.weightOk.has('e1'), 'per-exId too_much is not overridden by the muscle just_right');
+    assert.ok(g.weightOk.has('e2'));
+  });
+  test('reearnMesoBoostsFromAnswers: load-only holds only the too-heavy exercise, bumps the others', () => {
+    const inputs = [
+      { exId: 'e1', key: 'e1_d1', muscle: 'shoulders', allHit: true, increment: 2.5 },
+      { exId: 'e2', key: 'e2_d1', muscle: 'shoulders', allHit: true, increment: 2.5 },
+    ];
+    const ans = {
+      joint: { e1: { answer: 'none', weight: 'just_right' }, e2: { answer: 'none', weight: 'too_much' } },
+      volume: { shoulders: { muscle: 'shoulders', pump: 'moderate' } }, soreness: {},
+    };
+    const out = LB.reearnMesoBoostsFromAnswers({ weightBoosts: {} }, ans, inputs, true);
+    assert.strictEqual(out.weightBoosts.e1_d1, 2.5, 'e1 (just right) bumps');
+    assert.ok(!('e2_d1' in out.weightBoosts), 'e2 (too heavy) holds, same muscle');
+  });
+  test('applyMesoFeedbackEdit: load-only weight edit updates joint[exId].weight, no set delta, and re-earn follows', () => {
+    const ms = { deltas: {}, growthCounts: {}, pumpLowCounts: {}, jointFlags: {} };
+    const raw = { answers: { soreness: {}, joint: { e1: { exId: 'e1', muscle: 'shoulders', answer: 'none', weight: 'just_right', contrib: {} } }, volume: { shoulders: { muscle: 'shoulders', exIds: ['e1'], pump: 'moderate' } } }, negOwner: {}, frozen: true, dayId: 'd1' };
+    const out = LB.applyMesoFeedbackEdit(ms, raw, { type: 'joint', subject: 'e1', answer: 'none', weight: 'too_much' }, { dayId: 'd1', loadOnly: true });
+    assert.strictEqual(out.raw.answers.joint.e1.weight, 'too_much', 'weight persisted on the joint record');
+    assert.strictEqual(out.raw.answers.joint.e1.answer, 'none', 'joint answer preserved');
+    assert.strictEqual(JSON.stringify(out.mesoState.deltas), '{}', 'frozen: no set delta from a load-only weight edit');
+    const inputs = [{ exId: 'e1', key: 'e1_d1', muscle: 'shoulders', allHit: true, increment: 2.5 }];
+    const re = LB.reearnMesoBoostsFromAnswers(out.mesoState, out.raw.answers, inputs, true);
+    assert.ok(!('e1_d1' in re.weightBoosts), 'after editing to too heavy, the boost is withheld');
+  });
+  test('applyMesoFeedbackEdit: a pump-only edit does not clobber an old load-only session per-muscle weight', () => {
+    const ms = { deltas: {}, growthCounts: {}, pumpLowCounts: {}, jointFlags: {} };
+    const raw = { answers: { soreness: {}, joint: { e1: { exId: 'e1', muscle: 'shoulders', answer: 'none', contrib: {} } }, volume: { shoulders: { muscle: 'shoulders', exIds: ['e1'], pump: 'moderate', volume: 'just_right' } } }, negOwner: {}, frozen: true, dayId: 'd1' };
+    const out = LB.applyMesoFeedbackEdit(ms, raw, { type: 'volume', subject: 'shoulders', pump: 'amazing' }, { dayId: 'd1', loadOnly: true });
+    assert.strictEqual(out.raw.answers.volume.shoulders.volume, 'just_right', 'legacy weight preserved when the edit carries no volume');
+    assert.strictEqual(out.raw.answers.volume.shoulders.pump, 'amazing', 'pump updated');
   });
 
   test('mesoRecapGainsFromEdit: combines set deltas and weight deltas per exercise', () => {

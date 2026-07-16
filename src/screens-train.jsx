@@ -2714,6 +2714,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // so a single mistap only highlights an option instead of committing it.
   const [mesoSorenessSel, setMesoSorenessSel] = useStateT(null);
   const [mesoJointSel, setMesoJointSel] = useStateT(null);
+  const [mesoJointWeightSel, setMesoJointWeightSel] = useStateT(null); // load-only: weight-feel answer folded into the joint step
   // Editing an already-answered question reopens the same sheet prefilled;
   // these track which subject (muscle/exId) is currently being re-answered
   // vs. freshly asked for the first time (both paths call the same commit
@@ -2749,21 +2750,36 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const mesoBoostSetsInitRef = useRefT(null);
   if (mesoBoostSetsInitRef.current === null) {
     const a = mesoAskedInitRef.current.answers || {};
+    const loadOnly = LB.autoregLoadOnly(mesoSch);
     const jointFine = new Set();
     for (const [exId, rec] of Object.entries(a.joint || {})) { if (rec && rec.answer === 'none') jointFine.add(exId); }
     const pumpOk = new Set(), volumeOk = new Set();
     for (const rec of Object.values(a.volume || {})) {
       if (!rec || !rec.muscle) continue;
       if (rec.pump === 'moderate' || rec.pump === 'amazing') pumpOk.add(rec.muscle);
-      if (LB.volumeAnswerAllowsBump(rec.volume, LB.autoregLoadOnly(mesoSch))) volumeOk.add(rec.muscle);
+      if (LB.volumeAnswerAllowsBump(rec.volume, loadOnly)) volumeOk.add(rec.muscle);
+    }
+    // Load-only weight-feel is per exercise (joint[exId].weight). Rebuild it EXACTLY
+    // like LB.mesoGateSetsFromAnswers: a new session (any joint rec has a weight)
+    // uses the per-exercise answers; a legacy in-progress session reloaded mid-deploy
+    // falls back to the per-muscle volume[muscle].volume spread over its exIds.
+    const weightOk = new Set();
+    if (loadOnly) {
+      const perExercise = Object.values(a.joint || {}).some(rec => rec && 'weight' in rec);
+      if (perExercise) {
+        for (const [exId, rec] of Object.entries(a.joint || {})) { if (rec && LB.volumeAnswerAllowsBump(rec.weight, true)) weightOk.add(exId); }
+      } else {
+        for (const rec of Object.values(a.volume || {})) { if (rec && rec.volume != null && LB.volumeAnswerAllowsBump(rec.volume, true)) (rec.exIds || []).forEach(id => weightOk.add(id)); }
+      }
     }
     const soreBlock = new Set();
     for (const rec of Object.values(a.soreness || {})) { if (rec && rec.answer === 'still_sore' && rec.muscle) soreBlock.add(rec.muscle); }
-    mesoBoostSetsInitRef.current = { jointFine, pumpOk, volumeOk, soreBlock };
+    mesoBoostSetsInitRef.current = { jointFine, pumpOk, volumeOk, weightOk, soreBlock };
   }
   const mesoJointFineRef = useRefT(mesoBoostSetsInitRef.current.jointFine);    // exIds where joint was 'fine'
   const mesoPumpOkRef = useRefT(mesoBoostSetsInitRef.current.pumpOk);          // muscles where pump was moderate/amazing
-  const mesoVolumeOkRef = useRefT(mesoBoostSetsInitRef.current.volumeOk);      // muscles where volume was just_right/not_enough
+  const mesoVolumeOkRef = useRefT(mesoBoostSetsInitRef.current.volumeOk);      // muscles where volume was just_right/not_enough (Volume+Load / Meso)
+  const mesoWeightOkRef = useRefT(mesoBoostSetsInitRef.current.weightOk);      // load-only: exIds whose weight-feel answer allows the bump
   // Load-only plans: muscles answered 'still sore' this session. There sets are
   // frozen, so soreness instead HOLDS the weight (a recovery-based load brake) —
   // this set blocks the boost for those muscles. Modeled as "block on sore" (not
@@ -2924,12 +2940,14 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     persistMesoAsked();
   };
 
-  const handleJointAnswer = (answer) => {
+  const handleJointAnswer = (answer, weight) => {
     setMesoJointOpen(false);
     setMesoJointSel(null);
+    setMesoJointWeightSel(null);
     mesoEditingRef.current.joint = null;
     const exId = mesoJointExId;
     const muscle = mesoJointMuscle;
+    const loadOnly = LB.autoregLoadOnly(mesoSch);
     if (!mesoState || !exId) return;
 
     if (answer === 'none') mesoJointFineRef.current.add(exId); else mesoJointFineRef.current.delete(exId);
@@ -2938,6 +2956,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     record.answer = answer;
     record.exName = mesoJointExName;
     record.muscle = muscle;
+    // Load-only: the weight-feel answer rides on this per-exercise joint record and
+    // gates the weight boost (weightOk keyed by exId); it never moves a set delta.
+    if (loadOnly && weight != null) {
+      record.weight = weight;
+      if (LB.volumeAnswerAllowsBump(weight, true)) mesoWeightOkRef.current.add(exId); else mesoWeightOkRef.current.delete(exId);
+    }
     // jointFlags is a persistent "causes joint pain" marker (survives across
     // sessions) — flagBaseline captures whatever it already was BEFORE this
     // session touched it, captured once, so editing back and forth within
@@ -3001,12 +3025,16 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     mesoEditingRef.current.volume = null;
     if (!mesoState || !mesoVolumeExIds.length) return;
     const muscle = mesoVolumeMusc;
+    const loadOnly = LB.autoregLoadOnly(mesoSch);
     if (pump === 'moderate' || pump === 'amazing') mesoPumpOkRef.current.add(muscle); else mesoPumpOkRef.current.delete(muscle);
-    if (LB.volumeAnswerAllowsBump(volume, LB.autoregLoadOnly(mesoSch))) mesoVolumeOkRef.current.add(muscle); else mesoVolumeOkRef.current.delete(muscle);
+    // Load-only: this per-muscle step is pump-only. The weight-feel answer moved to
+    // the per-exercise joint step (mesoWeightOkRef), so leave the muscle-keyed volume
+    // gate and the rec's volume field untouched here.
+    if (!loadOnly) { if (LB.volumeAnswerAllowsBump(volume, loadOnly)) mesoVolumeOkRef.current.add(muscle); else mesoVolumeOkRef.current.delete(muscle); }
 
     const record = mesoAnswersRef.current.volume[muscle] || { muscle, exIds: mesoVolumeExIds };
     record.pump = pump;
-    record.volume = volume;
+    if (!loadOnly) record.volume = volume;
     record.exIds = mesoVolumeExIds;
 
     // "Not enough" → rotates a +1 among the muscle group's exercises (see
@@ -3119,6 +3147,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     setMesoJointExName(record.exName);
     setMesoJointMuscle(record.muscle);
     setMesoJointSel(record.answer);
+    setMesoJointWeightSel(record.weight ?? null);
     mesoEditingRef.current.joint = exId;
     setMesoRecapOpen(false);
     setMesoRecapDetailMuscle(null);
@@ -3181,14 +3210,26 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         if (primaryMuscleForExercise(store.exercises?.find(x => x.id === e.exId)) !== muscle) return;
         const r = mesoAnswersRef.current.joint[e.exId];
         if (!r || r.answer == null) return;
-        jointRows.push({ key: 'joint-' + e.exId, title: r.exName, sub: JOINT_LABELS[r.answer] || r.answer, onEdit: () => openJointEdit(e.exId) });
+        // Load-only folds the weight-feel answer into this per-exercise joint row.
+        const jSub = (weightFeelMode && r.weight != null)
+          ? `${JOINT_LABELS[r.answer] || r.answer} · weight ${(VOLUME_LABELS[r.weight] || r.weight).toLowerCase()}`
+          : (JOINT_LABELS[r.answer] || r.answer);
+        jointRows.push({ key: 'joint-' + e.exId, title: r.exName, sub: jSub, onEdit: () => openJointEdit(e.exId) });
       });
       const generalRows = [];
       if (sRec?.answer != null) {
         generalRows.push({ key: 'soreness-' + muscle, title: 'Soreness', sub: SORENESS_LABELS[sRec.answer] || sRec.answer, onEdit: () => openSorenessEdit(muscle) });
       }
-      if (vRec?.pump != null && vRec?.volume != null) {
-        generalRows.push({ key: 'volume-' + muscle, title: weightFeelMode ? 'Pump & Weight' : 'Pump & Volume', sub: `${PUMP_LABELS[vRec.pump] || vRec.pump} pump · ${VOLUME_LABELS[vRec.volume] || vRec.volume}`, onEdit: () => openVolumeEdit(muscle) });
+      if (vRec?.pump != null) {
+        // New load-only sessions store this per-muscle rec pump-only (weight moved to
+        // the joint rows); older sessions still carry the per-muscle weight in .volume.
+        const hasVol = vRec.volume != null;
+        generalRows.push({
+          key: 'volume-' + muscle,
+          title: !hasVol ? 'Pump' : (weightFeelMode ? 'Pump & Weight' : 'Pump & Volume'),
+          sub: hasVol ? `${PUMP_LABELS[vRec.pump] || vRec.pump} pump · ${VOLUME_LABELS[vRec.volume] || vRec.volume}` : `${PUMP_LABELS[vRec.pump] || vRec.pump} pump`,
+          onEdit: () => openVolumeEdit(muscle),
+        });
       }
       if (jointRows.length || generalRows.length) groups.push({ muscle, jointRows, generalRows });
     });
@@ -3313,7 +3354,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       if (!allHit) continue;
       if (!mesoJointFineRef.current.has(exId)) continue;
       if (muscle && !mesoPumpOkRef.current.has(muscle)) continue;
-      if (muscle && !mesoVolumeOkRef.current.has(muscle)) continue;
+      // Weight-feel gate: per-exercise in load-only (weightOk by exId), per-muscle
+      // otherwise (volumeOk by muscle). Mirrors LB.reearnMesoBoostsFromAnswers.
+      if (LB.autoregLoadOnly(mesoSch)) { if (muscle && !mesoWeightOkRef.current.has(exId)) continue; }
+      else if (muscle && !mesoVolumeOkRef.current.has(muscle)) continue;
       // Load-only: still-sore holds the weight for that muscle this session.
       if (LB.autoregLoadOnly(mesoSch) && muscle && mesoSoreBlockRef.current.has(muscle)) continue;
 
@@ -7713,7 +7757,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       </Sheet>
 
       {/* Joint discomfort */}
-      <Sheet open={mesoJointOpen} onClose={() => {}} title="Joint check">
+      <Sheet open={mesoJointOpen} onClose={() => {}} title={weightFeelMode ? 'Joint & weight' : 'Joint check'}>
         <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 20, lineHeight: 1.5 }}>
           Any joint discomfort during <strong style={{ color: UI.ink }}>{mesoJointExName}</strong>?
         </div>
@@ -7736,9 +7780,26 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             </button>
           );
         })}
+        {weightFeelMode && (<>
+          <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, margin: '2px 0 6px', letterSpacing: '0.06em', textTransform: 'uppercase' }}>Weight feel</div>
+          <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.inkSoft, marginBottom: 12, lineHeight: 1.5 }}>How did the weight feel on <strong style={{ color: UI.ink }}>{mesoJointExName}</strong> today?</div>
+          {['not_enough', 'just_right', 'pushed', 'too_much'].map(key => {
+            const wsel = mesoJointWeightSel === key;
+            return (
+              <button key={key} onClick={() => setMesoJointWeightSel(key)} style={{
+                width: '100%', marginBottom: 8, padding: '12px 14px',
+                background: wsel ? `rgba(var(--accent-rgb),0.12)` : UI.bgInset,
+                border: `1px solid ${wsel ? 'var(--accent)' : UI.hairStrong}`,
+                borderRadius: 6, cursor: 'pointer', textAlign: 'left', WebkitTapHighlightColor: 'transparent',
+              }}>
+                <div style={{ fontFamily: UI.fontUi, fontSize: 13, color: wsel ? 'var(--accent)' : UI.ink, fontWeight: 600 }}>{VOLUME_LABELS[key]}</div>
+              </button>
+            );
+          })}
+        </>)}
         <Btn
-          disabled={!mesoJointSel}
-          onClick={() => handleJointAnswer(mesoJointSel)}
+          disabled={!mesoJointSel || (weightFeelMode && !mesoJointWeightSel)}
+          onClick={() => handleJointAnswer(mesoJointSel, mesoJointWeightSel)}
           style={{ width: '100%', marginTop: 12 }}
         >
           {mesoEditingRef.current.joint ? 'Save changes' : 'Confirm'}
@@ -7766,30 +7827,33 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             </button>
           ))}
         </div>
-        <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4, letterSpacing: '0.06em', textTransform: 'uppercase' }}>{weightFeelMode ? 'Weight' : 'Volume'}</div>
-        <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.inkSoft, marginBottom: 14, lineHeight: 1.5 }}>{weightFeelMode
-          ? `How did the weight feel on your ${mesoVolumeMusc ? mesoVolumeMusc.toLowerCase() + ' ' : ''}sets today?`
-          : `Overall, how did the ${mesoVolumeMusc ? mesoVolumeMusc.toLowerCase() + ' ' : ''}workload sit with you today?`}</div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 20 }}>
-          {['not_enough', 'just_right', 'pushed', 'too_much'].map(key => {
-            const label = VOLUME_LABELS[key];
-            const sel = mesoVolumeAnswer === key;
-            return (
-              <button key={key} onClick={() => setMesoVolumeAnswer(key)} style={{
-                width: '100%', padding: '10px 14px',
-                background: sel ? `rgba(var(--accent-rgb),0.12)` : UI.bgInset,
-                border: `1px solid ${sel ? 'var(--accent)' : UI.hairStrong}`,
-                borderRadius: 6, cursor: 'pointer', textAlign: 'left',
-                WebkitTapHighlightColor: 'transparent',
-              }}>
-                <div style={{ fontFamily: UI.fontUi, fontSize: 13, color: sel ? 'var(--accent)' : UI.ink, fontWeight: 600 }}>{label}</div>
-              </button>
-            );
-          })}
-        </div>
+        {/* Load-only asks the weight feel per exercise (folded into the joint step),
+            so this per-muscle step is pump-only there. Volume+Load / Meso keep the
+            workload/volume question that drives set deltas. */}
+        {!weightFeelMode && (<>
+          <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Volume</div>
+          <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.inkSoft, marginBottom: 14, lineHeight: 1.5 }}>{`Overall, how did the ${mesoVolumeMusc ? mesoVolumeMusc.toLowerCase() + ' ' : ''}workload sit with you today?`}</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 20 }}>
+            {['not_enough', 'just_right', 'pushed', 'too_much'].map(key => {
+              const label = VOLUME_LABELS[key];
+              const sel = mesoVolumeAnswer === key;
+              return (
+                <button key={key} onClick={() => setMesoVolumeAnswer(key)} style={{
+                  width: '100%', padding: '10px 14px',
+                  background: sel ? `rgba(var(--accent-rgb),0.12)` : UI.bgInset,
+                  border: `1px solid ${sel ? 'var(--accent)' : UI.hairStrong}`,
+                  borderRadius: 6, cursor: 'pointer', textAlign: 'left',
+                  WebkitTapHighlightColor: 'transparent',
+                }}>
+                  <div style={{ fontFamily: UI.fontUi, fontSize: 13, color: sel ? 'var(--accent)' : UI.ink, fontWeight: 600 }}>{label}</div>
+                </button>
+              );
+            })}
+          </div>
+        </>)}
         <Btn
-          disabled={!mesoPumpAnswer || !mesoVolumeAnswer}
-          onClick={() => handleVolumeAnswer(mesoPumpAnswer, mesoVolumeAnswer)}
+          disabled={!mesoPumpAnswer || (!weightFeelMode && !mesoVolumeAnswer)}
+          onClick={() => handleVolumeAnswer(mesoPumpAnswer, weightFeelMode ? null : mesoVolumeAnswer)}
           style={{ width: '100%' }}
         >
           {mesoEditingRef.current.volume ? 'Save changes' : 'Save feedback'}

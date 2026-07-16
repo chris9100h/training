@@ -4617,9 +4617,29 @@ function mesoGateSetsFromAnswers(answers, loadOnly) {
     if (rec.pump === 'moderate' || rec.pump === 'amazing') pumpOk.add(rec.muscle);
     if (volumeAnswerAllowsBump(rec.volume, loadOnly)) volumeOk.add(rec.muscle);
   }
+  // Load-only: the weight-feel question is per EXERCISE (folded into the joint
+  // record as joint[exId].weight), so its bump gate is keyed by exId, not muscle.
+  // weightOk = exIds whose weight answer allows the bump. Older finished/backfilled
+  // load-only sessions carry the weight answer per-muscle in volume[muscle].volume
+  // instead; spread that over the muscle's exIds as a backward-compat fallback (new
+  // sessions write pump-only volume recs, so rec.volume is absent and adds nothing).
+  const weightOk = new Set();
+  if (loadOnly) {
+    // Shape probe: a NEW session carries at least one per-exercise weight answer
+    // (joint[exId].weight). A LEGACY finished/backfilled session kept the weight
+    // per-muscle in volume[muscle].volume. New wins: only fall back to the legacy
+    // per-muscle answer when no per-exercise weight exists at all (never a union,
+    // so an explicit per-exercise answer is never overridden by the muscle one).
+    const perExercise = Object.values(a.joint || {}).some(rec => rec && 'weight' in rec);
+    if (perExercise) {
+      for (const [exId, rec] of Object.entries(a.joint || {})) if (rec && volumeAnswerAllowsBump(rec.weight, true)) weightOk.add(exId);
+    } else {
+      for (const rec of Object.values(a.volume || {})) if (rec && rec.volume != null && volumeAnswerAllowsBump(rec.volume, true)) (rec.exIds || []).forEach(id => weightOk.add(id));
+    }
+  }
   const soreBlock = new Set();
   for (const rec of Object.values(a.soreness || {})) if (rec && rec.answer === 'still_sore' && rec.muscle) soreBlock.add(rec.muscle);
-  return { jointFine, pumpOk, volumeOk, soreBlock };
+  return { jointFine, pumpOk, volumeOk, weightOk, soreBlock };
 }
 
 // Can this finished session's feedback be safely edited? Only the single
@@ -4729,12 +4749,20 @@ function applyMesoFeedbackEdit(mesoState, raw, edit, ctx) {
     const key = exId + '_' + dayId;
     const newContrib = { [key]: (edit.answer === 'noticeable' || edit.answer === 'sharp') ? -1 : 0 };
     rec.contrib = _commitContribInto(deltas, negOwner, rec.contrib || {}, 'joint', newContrib, frozen);
+    // Load-only weight-feel lives on the joint record (per exercise). It only
+    // gates the weight, never a set delta, so it needs no contrib handling.
+    if ('weight' in edit) rec.weight = edit.weight;
     answers.joint[exId] = rec;
   } else if (edit.type === 'volume') {
     const muscle = edit.subject;
     const rec = { ...(answers.volume[muscle] || { muscle }) };
     const oldPumpLowApplied = !!rec.pumpLowApplied;
-    rec.pump = edit.pump; rec.volume = edit.volume;
+    // Only overwrite volume when the edit actually carries one. A new load-only
+    // session's per-muscle rec is pump-only (weight moved to the joint records),
+    // so a pump edit passes volume===undefined and must not clobber the rec (nor
+    // an old session's per-muscle weight answer that the gate fallback reads).
+    rec.pump = edit.pump;
+    if (edit.volume !== undefined) rec.volume = edit.volume;
     const exIds = rec.exIds || [];
     const keys = exIds.map(exId => exId + '_' + dayId);
     const mainExId = exIds[0];
@@ -4791,7 +4819,11 @@ function reearnMesoBoostsFromAnswers(mesoState, answers, earnInputs, loadOnly) {
     if (!e.allHit) continue;
     if (!gates.jointFine.has(e.exId)) continue;
     if (e.muscle && !gates.pumpOk.has(e.muscle)) continue;
-    if (e.muscle && !gates.volumeOk.has(e.muscle)) continue;
+    // Weight-feel gate: per-exercise in load-only (weightOk keyed by exId),
+    // per-muscle otherwise (volumeOk keyed by muscle). Muscle-less exercises stay
+    // exempt (matches the old behavior and old sessions that had no per-muscle rec).
+    if (loadOnly) { if (e.muscle && !gates.weightOk.has(e.exId)) continue; }
+    else if (e.muscle && !gates.volumeOk.has(e.muscle)) continue;
     if (loadOnly && e.muscle && gates.soreBlock.has(e.muscle)) continue;
     earned[e.key] = e.increment;
   }
