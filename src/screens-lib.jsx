@@ -3387,7 +3387,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
             {fbEdit.type === 'joint' && (<>
               {/* Per-exercise feedback: joints, weight feel and pump, mirroring the live
                   sheet in screens-train.jsx. */}
-              <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 8, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Joints</div>
+              <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 8, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Joint pain</div>
               <div style={{ display: 'flex', gap: 8, marginBottom: 18 }}>
                 {[{ key: 'none', label: 'None', tone: 'ok' }, { key: 'noticeable', label: 'Noticeable', tone: 'warn' }, { key: 'sharp', label: 'Sharp pain', tone: 'danger' }].map(opt => {
                   const sel = fbEdit.sel === opt.key;

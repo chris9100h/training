@@ -7793,7 +7793,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       <Sheet open={mesoJointOpen} onClose={() => {}} title={mesoJointExName || 'Feedback'}>
         {/* Per-exercise feedback: joints, weight feel and pump, all for this one lift
             (every mode). The per-muscle sheet below is workload only (Volume+Load / Meso). */}
-        <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 8, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Joints</div>
+        <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 8, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Joint pain</div>
         <div style={{ display: 'flex', gap: 8, marginBottom: 18 }}>
           {[
             { key: 'none', label: 'None', tone: 'ok' },
