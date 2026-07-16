@@ -1390,6 +1390,16 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     });
   }, [sch, dayIdx, todayStripIdx, dayCount, weekdayMode, cycleWeekView, todayWd, weekOffset, store.cycleStartDate]);
 
+  // Latest calendar day currently shown in the strip. Lets the autoregulate
+  // badge tell whether it belongs on a browsed-back period: if the whole viewed
+  // span predates the meso's aligned start, autoregulation was not running then.
+  const viewedPeriodEndTs = useMemo(() => {
+    const ts = week
+      .map(d => (d.date instanceof Date ? d.date.getTime() : (d.date ? new Date(d.date).getTime() : NaN)))
+      .filter(t => !isNaN(t));
+    return ts.length ? Math.max(...ts) : null;
+  }, [week]);
+
   const activeDay = useMemo(() => {
     if (!sch) return day;
     if (weekdayMode) {
@@ -2821,6 +2831,12 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                   // LOAD in load-only mode) once it's running. Mirrors the bounded
                   // meso badge's pending/active split, minus the week counter.
                   const m = (typeof getMesoState === 'function') ? getMesoState(sch.id, store.mesoStates) : null;
+                  // The cycle label above already reads the browsed cycle (e.g.
+                  // CYCLE 9). Drop the AUTO badge for a period that ends before
+                  // autoregulation's aligned start, so a pre-autoreg cycle no
+                  // longer inherits the current AUTO / LOAD flag.
+                  const autoStartTs = m?.startDate ? new Date(m.startDate + 'T12:00:00').getTime() : null;
+                  if (autoStartTs != null && viewedPeriodEndTs != null && viewedPeriodEndTs < autoStartTs) return null;
                   const week = (m && typeof mesoCurrentWeek === 'function') ? mesoCurrentWeek(m, store) : null;
                   if (week == null) {
                     const startLabel = m?.startDate
