@@ -23,8 +23,9 @@
     return '<span class="dir" style="color:'+m[0]+';background:color-mix(in srgb,'+m[0]+' 13%,transparent)"><span style="font-size:'+sz+'px">'+m[1]+'</span>'+label+'</span>';
   }
   function chip(t){return '<span class="chip">'+t+'</span>';}
-  function opt(chipText,dirsHTML,txtHTML){
-    return '<div class="opt"><div class="opt-row">'+chip(chipText)+dirsHTML+'</div><div class="opt-txt">'+txtHTML+'</div></div>';
+  function opt(chipText,dirsHTML,txtHTML,cell){
+    var cls=cell?'opt-cell':'opt';
+    return '<div class="'+cls+'"><div class="opt-row">'+chip(chipText)+dirsHTML+'</div><div class="opt-txt">'+txtHTML+'</div></div>';
   }
   function stat(k,v,vColor,s){
     return '<div class="stat"><div class="kick">'+k+'</div><div class="display v" style="color:'+(vColor||'var(--ink)')+'">'+v+'</div><div class="s">'+s+'</div></div>';
@@ -115,38 +116,51 @@
     var sor='<p class="panel-intro">'+(isB?'In Load only, sets are frozen, so soreness is repurposed: it becomes a recovery brake on the weight. A still-sore muscle simply holds its weight this session.'
       :isC?'A recovery signal that points both ways. It moves the sets. It is not asked in the final week (sets are frozen there), nor in week 1 of a fresh plan.'
       :'A recovery signal that points both ways. Too little is as much an off-target signal as too much. It moves the sets.')+'</p>';
-    sor+=opt('Never sore', isB?dir('hold','weight not braked'):dir('up','+1 set'), isB?'Clears any weight brake on this muscle.':'Recovered easily, likely below target volume. +1 set to the least-grown exercise.');
-    sor+=opt('Healed a while ago', isB?dir('hold','weight not braked'):dir('up','+1 set'), 'Same as "Never sore".');
-    sor+=opt('Healed just in time', dir('hold','hold'), 'The optimal window. No change.');
-    sor+=opt('Still sore', isB?dir('block','holds weight'):dir('down','-1 set'), isB?'Brakes the weight: no bump for this muscle this session.':'Over-reach. -1 set from the most-grown exercise.');
+    sor+='<div class="opt-grid">';
+    sor+=opt('Never sore', isB?dir('hold','weight not braked'):dir('up','+1 set'), isB?'Clears any weight brake on this muscle.':'Recovered easily, likely below target volume. +1 set to the least-grown exercise.', true);
+    sor+=opt('Healed a while ago', isB?dir('hold','weight not braked'):dir('up','+1 set'), 'Same as "Never sore".', true);
+    sor+=opt('Healed just in time', dir('hold','hold'), 'The optimal window. No change.', true);
+    sor+=opt('Still sore', isB?dir('block','holds weight'):dir('down','-1 set'), isB?'Brakes the weight: no bump for this muscle this session.':'Over-reach. -1 set from the most-grown exercise.', true);
+    sor+='</div>';
     out+=panel('1','Soreness','per muscle<br>at start', sor);
-    /* per exercise: joint + weight feel + pump */
+    /* per exercise: joint + weight feel + pump. Each sub-block tiles into its
+       own responsive grid so the (long) list stays compact, not mega-tall. */
     var jn='<p class="panel-intro">Asked for every exercise, every mode. Joint comfort, how the weight felt, and the pump: together these three gate the weight bump for this exercise'+(isB?'.':'. In Volume+Load and Meso, joint pain also shaves a set off this exercise.')+'</p>';
     jn+='<div class="kick">Joint</div>';
-    jn+=opt('None', dir('hold','gate green'), 'Joints fine. This exercise can earn its bump.');
-    jn+=opt('Noticeable', (!isB?dir('down','-1 set'):'')+dir('block','bump'), 'Discomfort. Blocks the bump'+(isB?'.':', and shaves a set off this exercise.'));
-    jn+=opt('Sharp pain', (!isB?dir('down','-1 set'):'')+dir('block','bump')+dir('flag','warning'), 'Real pain. As above, plus a durable warning on the exercise ("caused sharp joint pain, consider swapping it").');
+    jn+='<div class="opt-grid" style="margin-top:8px">';
+    jn+=opt('None', dir('hold','gate green'), 'Joints fine. This exercise can earn its bump.', true);
+    jn+=opt('Noticeable', (!isB?dir('down','-1 set'):'')+dir('block','bump'), 'Discomfort. Blocks the bump'+(isB?'.':', and shaves a set off this exercise.'), true);
+    jn+=opt('Sharp pain', (!isB?dir('down','-1 set'):'')+dir('block','bump')+dir('flag','warning'), 'Real pain. As above, plus a durable warning on the exercise ("caused sharp joint pain, consider swapping it").', true);
+    jn+='</div>';
     jn+='<div style="margin-top:14px"><div class="kick">Weight feel</div></div>';
-    jn+=opt('Too light', dir('up','earns bump'), 'Weight can climb on this exercise.');
-    jn+=opt('Just right', dir('hold','hold'), 'On point, gate green.');
-    jn+=opt('Hard', dir('up','still earns bump'), 'Training should be hard. "Hard" still lets the weight climb. It self-corrects.');
-    jn+=opt('Too heavy', dir('block','holds weight'), 'The only weight answer that holds. Everything lighter lets it climb.');
+    jn+='<div class="opt-grid" style="margin-top:8px">';
+    jn+=opt('Too light', dir('up','earns bump'), 'Weight can climb on this exercise.', true);
+    jn+=opt('Just right', dir('hold','hold'), 'On point, gate green.', true);
+    jn+=opt('Hard', dir('up','still earns bump'), 'Training should be hard. "Hard" still lets the weight climb. It self-corrects.', true);
+    jn+=opt('Too heavy', dir('block','holds weight'), 'The only weight answer that holds. Everything lighter lets it climb.', true);
+    jn+='</div>';
     jn+='<div style="margin-top:14px"><div class="kick">Pump</div></div>';
-    jn+=opt('Low', dir('block','bump')+dir('flag','swap'), 'Barely felt it. Blocks the bump. Low pump on 3 sessions running suggests swapping this exercise, not forcing it.');
-    jn+=opt('Moderate', dir('hold','gate green'), 'Decent stimulus. Weight can climb.');
-    jn+=opt('Amazing', dir('hold','gate green'), 'Great stimulus.');
+    jn+='<div class="opt-grid" style="margin-top:8px">';
+    jn+=opt('Low', dir('block','bump')+dir('flag','swap'), 'Barely felt it. Blocks the bump. Low pump on 3 sessions running suggests swapping this exercise, not forcing it.', true);
+    jn+=opt('Moderate', dir('hold','gate green'), 'Decent stimulus. Weight can climb.', true);
+    jn+=opt('Amazing', dir('hold','gate green'), 'Great stimulus.', true);
+    jn+='</div>';
     jn+='<div style="margin-top:14px"><div class="kick">This lift (optional)</div></div>';
-    jn+=opt('Love it', dir('hold','no dial'), 'A keeper. Pre-filled next time, so it costs no taps unless it changes.');
-    jn+=opt("It's fine", dir('hold','no dial'), 'No strong feelings. Neutral.');
-    jn+=opt('Not my lift', dir('flag','swap'), 'Marking this two sessions running suggests a variation you enjoy, so you actually stick with it. It gates nothing: a lift you dislike but that works still earns its weight.');
+    jn+='<div class="opt-grid" style="margin-top:8px">';
+    jn+=opt('Love it', dir('hold','no dial'), 'A keeper. Pre-filled next time, so it costs no taps unless it changes.', true);
+    jn+=opt("It's fine", dir('hold','no dial'), 'No strong feelings. Neutral.', true);
+    jn+=opt('Not my lift', dir('flag','swap'), 'Marking this two sessions running suggests a variation you enjoy, so you actually stick with it. It gates nothing: a lift you dislike but that works still earns its weight.', true);
+    jn+='</div>';
     out+=panel('2', 'Per exercise','per exercise<br>after last set', jn);
     /* per-muscle workload (Volume+Load / Meso only) */
     if(!isB){
       var pv='<p class="panel-intro">One question per muscle group: how much total work it got. This drives the set dial only. It no longer touches the weight, the per-exercise weight-feel question owns that now.</p>';
-      pv+=opt('Not enough', dir('up','+1 set'), 'Too little. +1 set to the least-grown exercise.');
-      pv+=opt('Just right', dir('hold','hold'), 'On point.');
-      pv+=opt('Pushed my limits', dir('down','-1 set'), 'To the limit. Cuts a set off the most-grown exercise.');
-      pv+=opt('Too much', dir('down','-1 every exercise'), 'Clearly too much. Cuts a set off every exercise of the group.');
+      pv+='<div class="opt-grid">';
+      pv+=opt('Not enough', dir('up','+1 set'), 'Too little. +1 set to the least-grown exercise.', true);
+      pv+=opt('Just right', dir('hold','hold'), 'On point.', true);
+      pv+=opt('Pushed my limits', dir('down','-1 set'), 'To the limit. Cuts a set off the most-grown exercise.', true);
+      pv+=opt('Too much', dir('down','-1 every exercise'), 'Clearly too much. Cuts a set off every exercise of the group.', true);
+      pv+='</div>';
       out+=panel('3', 'Workload','per muscle<br>after last exercise', pv);
     }
     out+='</div>';

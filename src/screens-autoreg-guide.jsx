@@ -79,10 +79,25 @@ function AGPanel({ idx, title, when, children }) {
   );
 }
 
-// One answer row inside a panel. Stacked so every row aligns left regardless of
-// chip width: [chip] [dir pills] on the first line, the explanation on its own
-// full-width line below. Avoids the per-row column drift of a 2-column grid.
-function AGOpt({ chip, dirs, children }) {
+// One answer row inside a panel. Two shapes, same content:
+//  - default: a divided list row ([chip] [dir pills], explanation below). Used
+//    where a panel has only a handful of options that read best as a column.
+//  - cell: a self-contained inset card, for the feedback grids in section 03
+//    where the options tile into a responsive 2-up grid to keep the (long)
+//    question list from running mega-tall. Grid rows stretch, so a short cell
+//    matches its taller neighbour instead of drifting.
+function AGOpt({ chip, dirs, children, cell }) {
+  if (cell) {
+    return (
+      <div style={{ background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 6, padding: '10px 12px', height: '100%' }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 7, marginBottom: 6 }}>
+          <AGChip>{chip}</AGChip>
+          {dirs}
+        </div>
+        <div style={{ fontSize: 12.5, color: UI.inkSoft, lineHeight: 1.45 }}>{children}</div>
+      </div>
+    );
+  }
   return (
     <div style={{ padding: '12px 0', borderTop: `0.5px solid ${UI.hair}` }}>
       <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginBottom: 6 }}>
@@ -93,6 +108,11 @@ function AGOpt({ chip, dirs, children }) {
     </div>
   );
 }
+
+// Responsive tile grid for the section 03 feedback options: two columns at the
+// widths this guide is usually read at, collapsing to one on a phone and
+// expanding on a wide desktop. Sub-block headers sit above their own grid.
+const AG_OPT_GRID = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 8 };
 
 function AGStat({ k, v, vColor, s }) {
   return (
@@ -282,14 +302,16 @@ function AutoregGuideScreen({ store, go, mode: modeProp, back }) {
                     : isC ? 'A recovery signal that points both ways. It moves the sets. It is not asked in the final week (sets are frozen there), nor in week 1 of a fresh plan.'
                     : 'A recovery signal that points both ways. Too little is as much an off-target signal as too much. It moves the sets.'}
                 </p>
-                <AGOpt chip="Never sore" dirs={isB ? <AGDir kind="hold">weight not braked</AGDir> : <AGDir kind="up">+1 set</AGDir>}>
-                  {isB ? 'Clears any weight brake on this muscle.' : 'Recovered easily, likely below target volume. +1 set to the least-grown exercise.'}
-                </AGOpt>
-                <AGOpt chip="Healed a while ago" dirs={isB ? <AGDir kind="hold">weight not braked</AGDir> : <AGDir kind="up">+1 set</AGDir>}>Same as "Never sore".</AGOpt>
-                <AGOpt chip="Healed just in time" dirs={<AGDir kind="hold">hold</AGDir>}>The optimal window. No change.</AGOpt>
-                <AGOpt chip="Still sore" dirs={isB ? <AGDir kind="block">holds weight</AGDir> : <AGDir kind="down">-1 set</AGDir>}>
-                  {isB ? 'Brakes the weight: no bump for this muscle this session.' : 'Over-reach. -1 set from the most-grown exercise.'}
-                </AGOpt>
+                <div style={AG_OPT_GRID}>
+                  <AGOpt cell chip="Never sore" dirs={isB ? <AGDir kind="hold">weight not braked</AGDir> : <AGDir kind="up">+1 set</AGDir>}>
+                    {isB ? 'Clears any weight brake on this muscle.' : 'Recovered easily, likely below target volume. +1 set to the least-grown exercise.'}
+                  </AGOpt>
+                  <AGOpt cell chip="Healed a while ago" dirs={isB ? <AGDir kind="hold">weight not braked</AGDir> : <AGDir kind="up">+1 set</AGDir>}>Same as "Never sore".</AGOpt>
+                  <AGOpt cell chip="Healed just in time" dirs={<AGDir kind="hold">hold</AGDir>}>The optimal window. No change.</AGOpt>
+                  <AGOpt cell chip="Still sore" dirs={isB ? <AGDir kind="block">holds weight</AGDir> : <AGDir kind="down">-1 set</AGDir>}>
+                    {isB ? 'Brakes the weight: no bump for this muscle this session.' : 'Over-reach. -1 set from the most-grown exercise.'}
+                  </AGOpt>
+                </div>
               </AGPanel>
 
               {/* per exercise: joint + weight feel + pump */}
@@ -298,26 +320,34 @@ function AutoregGuideScreen({ store, go, mode: modeProp, back }) {
                   Asked for every exercise, every mode. Joint comfort, how the weight felt, and the pump: together these three gate the weight bump for this exercise{isB ? '.' : '. In Volume+Load and Meso, joint pain also shaves a set off this exercise.'}
                 </p>
                 <AGKick>Joint</AGKick>
-                <AGOpt chip="None" dirs={<AGDir kind="hold">gate green</AGDir>}>Joints fine. This exercise can earn its bump.</AGOpt>
-                <AGOpt chip="Noticeable" dirs={<>{!isB && <AGDir kind="down">-1 set</AGDir>}<AGDir kind="block">bump</AGDir></>}>
-                  Discomfort. Blocks the bump{isB ? '.' : ', and shaves a set off this exercise.'}
-                </AGOpt>
-                <AGOpt chip="Sharp pain" dirs={<>{!isB && <AGDir kind="down">-1 set</AGDir>}<AGDir kind="block">bump</AGDir><AGDir kind="flag">warning</AGDir></>}>
-                  Real pain. As above, plus a durable warning on the exercise ("caused sharp joint pain, consider swapping it").
-                </AGOpt>
+                <div style={{ ...AG_OPT_GRID, marginTop: 8 }}>
+                  <AGOpt cell chip="None" dirs={<AGDir kind="hold">gate green</AGDir>}>Joints fine. This exercise can earn its bump.</AGOpt>
+                  <AGOpt cell chip="Noticeable" dirs={<>{!isB && <AGDir kind="down">-1 set</AGDir>}<AGDir kind="block">bump</AGDir></>}>
+                    Discomfort. Blocks the bump{isB ? '.' : ', and shaves a set off this exercise.'}
+                  </AGOpt>
+                  <AGOpt cell chip="Sharp pain" dirs={<>{!isB && <AGDir kind="down">-1 set</AGDir>}<AGDir kind="block">bump</AGDir><AGDir kind="flag">warning</AGDir></>}>
+                    Real pain. As above, plus a durable warning on the exercise ("caused sharp joint pain, consider swapping it").
+                  </AGOpt>
+                </div>
                 <div style={{ marginTop: 14 }}><AGKick>Weight feel</AGKick></div>
-                <AGOpt chip="Too light" dirs={<AGDir kind="up">earns bump</AGDir>}>Weight can climb on this exercise.</AGOpt>
-                <AGOpt chip="Just right" dirs={<AGDir kind="hold">hold</AGDir>}>On point, gate green.</AGOpt>
-                <AGOpt chip="Hard" dirs={<AGDir kind="up">still earns bump</AGDir>}>Training should be hard. "Hard" still lets the weight climb. It self-corrects.</AGOpt>
-                <AGOpt chip="Too heavy" dirs={<AGDir kind="block">holds weight</AGDir>}>The only weight answer that holds. Everything lighter lets it climb.</AGOpt>
+                <div style={{ ...AG_OPT_GRID, marginTop: 8 }}>
+                  <AGOpt cell chip="Too light" dirs={<AGDir kind="up">earns bump</AGDir>}>Weight can climb on this exercise.</AGOpt>
+                  <AGOpt cell chip="Just right" dirs={<AGDir kind="hold">hold</AGDir>}>On point, gate green.</AGOpt>
+                  <AGOpt cell chip="Hard" dirs={<AGDir kind="up">still earns bump</AGDir>}>Training should be hard. "Hard" still lets the weight climb. It self-corrects.</AGOpt>
+                  <AGOpt cell chip="Too heavy" dirs={<AGDir kind="block">holds weight</AGDir>}>The only weight answer that holds. Everything lighter lets it climb.</AGOpt>
+                </div>
                 <div style={{ marginTop: 14 }}><AGKick>Pump</AGKick></div>
-                <AGOpt chip="Low" dirs={<><AGDir kind="block">bump</AGDir><AGDir kind="flag">swap</AGDir></>}>Barely felt it. Blocks the bump. Low pump on 3 sessions running suggests swapping this exercise, not forcing it.</AGOpt>
-                <AGOpt chip="Moderate" dirs={<AGDir kind="hold">gate green</AGDir>}>Decent stimulus. Weight can climb.</AGOpt>
-                <AGOpt chip="Amazing" dirs={<AGDir kind="hold">gate green</AGDir>}>Great stimulus.</AGOpt>
+                <div style={{ ...AG_OPT_GRID, marginTop: 8 }}>
+                  <AGOpt cell chip="Low" dirs={<><AGDir kind="block">bump</AGDir><AGDir kind="flag">swap</AGDir></>}>Barely felt it. Blocks the bump. Low pump on 3 sessions running suggests swapping this exercise, not forcing it.</AGOpt>
+                  <AGOpt cell chip="Moderate" dirs={<AGDir kind="hold">gate green</AGDir>}>Decent stimulus. Weight can climb.</AGOpt>
+                  <AGOpt cell chip="Amazing" dirs={<AGDir kind="hold">gate green</AGDir>}>Great stimulus.</AGOpt>
+                </div>
                 <div style={{ marginTop: 14 }}><AGKick>This lift (optional)</AGKick></div>
-                <AGOpt chip="Love it" dirs={<AGDir kind="hold">no dial</AGDir>}>A keeper. Pre-filled next time, so it costs no taps unless it changes.</AGOpt>
-                <AGOpt chip="It's fine" dirs={<AGDir kind="hold">no dial</AGDir>}>No strong feelings. Neutral.</AGOpt>
-                <AGOpt chip="Not my lift" dirs={<AGDir kind="flag">swap</AGDir>}>Marking this two sessions running suggests a variation you enjoy, so you actually stick with it. It gates nothing: a lift you dislike but that works still earns its weight.</AGOpt>
+                <div style={{ ...AG_OPT_GRID, marginTop: 8 }}>
+                  <AGOpt cell chip="Love it" dirs={<AGDir kind="hold">no dial</AGDir>}>A keeper. Pre-filled next time, so it costs no taps unless it changes.</AGOpt>
+                  <AGOpt cell chip="It's fine" dirs={<AGDir kind="hold">no dial</AGDir>}>No strong feelings. Neutral.</AGOpt>
+                  <AGOpt cell chip="Not my lift" dirs={<AGDir kind="flag">swap</AGDir>}>Marking this two sessions running suggests a variation you enjoy, so you actually stick with it. It gates nothing: a lift you dislike but that works still earns its weight.</AGOpt>
+                </div>
               </AGPanel>
 
               {/* per-muscle workload (Volume+Load / Meso only) */}
@@ -326,10 +356,12 @@ function AutoregGuideScreen({ store, go, mode: modeProp, back }) {
                   <p style={{ fontSize: 13.5, color: UI.inkSoft, margin: '11px 0' }}>
                     One question per muscle group: how much total work it got. This drives the set dial only. It no longer touches the weight, the per-exercise weight-feel question owns that now.
                   </p>
-                  <AGOpt chip="Not enough" dirs={<AGDir kind="up">+1 set</AGDir>}>Too little. +1 set to the least-grown exercise.</AGOpt>
-                  <AGOpt chip="Just right" dirs={<AGDir kind="hold">hold</AGDir>}>On point.</AGOpt>
-                  <AGOpt chip="Pushed my limits" dirs={<AGDir kind="down">-1 set</AGDir>}>To the limit. Cuts a set off the most-grown exercise.</AGOpt>
-                  <AGOpt chip="Too much" dirs={<AGDir kind="down">-1 every exercise</AGDir>}>Clearly too much. Cuts a set off every exercise of the group.</AGOpt>
+                  <div style={AG_OPT_GRID}>
+                    <AGOpt cell chip="Not enough" dirs={<AGDir kind="up">+1 set</AGDir>}>Too little. +1 set to the least-grown exercise.</AGOpt>
+                    <AGOpt cell chip="Just right" dirs={<AGDir kind="hold">hold</AGDir>}>On point.</AGOpt>
+                    <AGOpt cell chip="Pushed my limits" dirs={<AGDir kind="down">-1 set</AGDir>}>To the limit. Cuts a set off the most-grown exercise.</AGOpt>
+                    <AGOpt cell chip="Too much" dirs={<AGDir kind="down">-1 every exercise</AGDir>}>Clearly too much. Cuts a set off every exercise of the group.</AGOpt>
+                  </div>
                 </AGPanel>
               )}
             </div>
