@@ -34,21 +34,8 @@ const MESO_SORENESS_OPTS = [
   { key: 'healed_just', label: 'Healed just in time', sub: 'Recovered right around this session' },
   { key: 'still_sore', label: 'Still sore', sub: 'Still feeling last session in this muscle' },
 ];
-const MESO_JOINT_OPTS = [
-  { key: 'none', label: 'None', sub: 'All good, joints felt fine' },
-  { key: 'noticeable', label: 'Noticeable', sub: 'Some discomfort but manageable' },
-  { key: 'sharp', label: 'Sharp pain', sub: 'Clear pain, this exercise gets flagged' },
-];
-const MESO_PUMP_OPTS = [
-  { key: 'low', label: 'Low', sub: 'Barely felt it' },
-  { key: 'moderate', label: 'Moderate', sub: 'Decent pump' },
-  { key: 'amazing', label: 'Amazing', sub: 'Skin-splitting' },
-];
-const MESO_AFFINITY_OPTS = [
-  { key: 'love', label: 'Love it', sub: 'Keep it coming' },
-  { key: 'ok', label: "It's fine", sub: 'No strong feelings' },
-  { key: 'dislike', label: 'Not my lift', sub: 'Swap it when you can' },
-];
+// Joint / pump / affinity edit chips are toned inline (see toneBtn); only the soreness
+// edit sheet still uses a full option list with descriptions, so keep that one.
 const MESO_SORENESS_LBL = { never: 'Never sore', healed_long: 'Healed a while ago', healed_just: 'Healed just in time', still_sore: 'Still sore', very_sore: 'Very sore' };
 const MESO_JOINT_LBL = { none: 'None', noticeable: 'Noticeable', sharp: 'Sharp pain' };
 const MESO_PUMP_LBL = { low: 'Low', moderate: 'Moderate', amazing: 'Amazing' };
@@ -2833,6 +2820,18 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
   };
 
   // ── Post-hoc meso feedback editing ──
+  // Toned option chip, identical to the live capture sheet (screens-train.jsx): calm at
+  // rest (neutral ink label + hairline border), the answer's semantic tone reveals only
+  // when selected. Keep in sync with the live sheet by hand.
+  const TONE_RGB = { ok: '--ok-rgb', warn: '--warn-rgb', danger: '--danger-rgb', accent: '--accent-rgb' };
+  const TONE_COL = { ok: 'var(--ok)', warn: 'var(--warn)', danger: 'var(--danger)', accent: 'var(--accent)' };
+  const toneBtn = (tone, sel, extra) => ({
+    padding: '12px 8px', borderRadius: 6, cursor: 'pointer', textAlign: 'center', WebkitTapHighlightColor: 'transparent',
+    background: sel ? `rgba(var(${TONE_RGB[tone]}),0.14)` : UI.bgInset,
+    border: `1px solid ${sel ? `rgba(var(${TONE_RGB[tone]}),0.7)` : UI.hairStrong}`,
+    ...(extra || {}),
+  });
+  const toneLbl = (tone, sel) => ({ fontFamily: UI.fontUi, fontSize: 13, fontWeight: sel ? 700 : 600, color: sel ? TONE_COL[tone] : UI.ink });
   // The meso state for this session's plan (DB-synced copy; no live session can
   // be open when a session is editable, so the localStorage cache and this agree).
   const sessionMeso = s.scheduleId ? (store.mesoStates || []).find(m => m.scheduleId === s.scheduleId) : null;
@@ -3389,64 +3388,45 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
               {/* Per-exercise feedback: joints, weight feel and pump, mirroring the live
                   sheet in screens-train.jsx. */}
               <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 8, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Joints</div>
-              <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
-                {MESO_JOINT_OPTS.map(opt => {
+              <div style={{ display: 'flex', gap: 8, marginBottom: 18 }}>
+                {[{ key: 'none', label: 'None', tone: 'ok' }, { key: 'noticeable', label: 'Noticeable', tone: 'warn' }, { key: 'sharp', label: 'Sharp pain', tone: 'danger' }].map(opt => {
                   const sel = fbEdit.sel === opt.key;
-                  const danger = opt.key === 'sharp';
                   return (
-                    <button key={opt.key} onClick={() => setFbEdit(e => ({ ...e, sel: opt.key }))} style={{
-                      flex: 1, padding: '10px 8px',
-                      background: sel ? (danger ? 'rgba(var(--danger-rgb),0.12)' : 'rgba(var(--accent-rgb),0.12)') : UI.bgInset,
-                      border: `1px solid ${sel ? (danger ? 'rgba(var(--danger-rgb),0.6)' : 'var(--accent)') : (danger ? 'rgba(var(--danger-rgb),0.4)' : UI.hairStrong)}`, borderRadius: 6, cursor: 'pointer', textAlign: 'center', WebkitTapHighlightColor: 'transparent',
-                    }}>
-                      <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: danger ? UI.danger : (sel ? 'var(--accent)' : UI.ink), fontWeight: 600 }}>{opt.label}</div>
-                      <div style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint, marginTop: 2 }}>{opt.sub}</div>
+                    <button key={opt.key} onClick={() => setFbEdit(e => ({ ...e, sel: opt.key }))} style={toneBtn(opt.tone, sel, { flex: 1 })}>
+                      <div style={toneLbl(opt.tone, sel)}>{opt.label}</div>
                     </button>
                   );
                 })}
               </div>
-              <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 6, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Weight feel</div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 20 }}>
-                {['not_enough', 'just_right', 'pushed', 'too_much'].map(key => {
-                  const wsel = fbEdit.weight === key;
+              <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 8, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Weight feel</div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 18 }}>
+                {[{ key: 'not_enough', tone: 'ok' }, { key: 'just_right', tone: 'accent' }, { key: 'pushed', tone: 'warn' }, { key: 'too_much', tone: 'danger' }].map(opt => {
+                  const wsel = fbEdit.weight === opt.key;
                   return (
-                    <button key={key} onClick={() => setFbEdit(e => ({ ...e, weight: key }))} style={{
-                      width: '100%', padding: '10px 14px',
-                      background: wsel ? 'rgba(var(--accent-rgb),0.12)' : UI.bgInset,
-                      border: `1px solid ${wsel ? 'var(--accent)' : UI.hairStrong}`, borderRadius: 6, cursor: 'pointer', textAlign: 'left', WebkitTapHighlightColor: 'transparent',
-                    }}>
-                      <div style={{ fontFamily: UI.fontUi, fontSize: 13, color: wsel ? 'var(--accent)' : UI.ink, fontWeight: 600 }}>{mesoVolumeLbl(true)[key]}</div>
+                    <button key={opt.key} onClick={() => setFbEdit(e => ({ ...e, weight: opt.key }))} style={toneBtn(opt.tone, wsel)}>
+                      <div style={toneLbl(opt.tone, wsel)}>{mesoVolumeLbl(true)[opt.key]}</div>
                     </button>
                   );
                 })}
               </div>
               <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 8, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Pump</div>
-              <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-                {MESO_PUMP_OPTS.map(opt => {
+              <div style={{ display: 'flex', gap: 8, marginBottom: 18 }}>
+                {[{ key: 'low', label: 'Low', tone: 'warn' }, { key: 'moderate', label: 'Moderate', tone: 'accent' }, { key: 'amazing', label: 'Amazing', tone: 'ok' }].map(opt => {
                   const psel = fbEdit.pump === opt.key;
                   return (
-                    <button key={opt.key} onClick={() => setFbEdit(e => ({ ...e, pump: opt.key }))} style={{
-                      flex: 1, padding: '10px 8px', background: psel ? 'rgba(var(--accent-rgb),0.12)' : UI.bgInset,
-                      border: `1px solid ${psel ? 'var(--accent)' : UI.hairStrong}`, borderRadius: 6, cursor: 'pointer', textAlign: 'center', WebkitTapHighlightColor: 'transparent',
-                    }}>
-                      <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: psel ? 'var(--accent)' : UI.ink, fontWeight: 600 }}>{opt.label}</div>
-                      <div style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint, marginTop: 2 }}>{opt.sub}</div>
+                    <button key={opt.key} onClick={() => setFbEdit(e => ({ ...e, pump: opt.key }))} style={toneBtn(opt.tone, psel, { flex: 1 })}>
+                      <div style={toneLbl(opt.tone, psel)}>{opt.label}</div>
                     </button>
                   );
                 })}
               </div>
-              <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4, letterSpacing: '0.06em', textTransform: 'uppercase' }}>This lift{fbEdit.affinity == null ? ' · optional' : ''}</div>
-              <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.inkSoft, marginBottom: 8, lineHeight: 1.5 }}>Keeper, or would you swap it?</div>
+              <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 8, letterSpacing: '0.06em', textTransform: 'uppercase' }}>This lift{fbEdit.affinity == null ? ' · optional' : ''}</div>
               <div style={{ display: 'flex', gap: 8, marginBottom: 4 }}>
-                {MESO_AFFINITY_OPTS.map(opt => {
+                {[{ key: 'love', label: 'Love it', tone: 'ok' }, { key: 'ok', label: "It's fine", tone: 'accent' }, { key: 'dislike', label: 'Not my lift', tone: 'warn' }].map(opt => {
                   const asel = fbEdit.affinity === opt.key;
                   return (
-                    <button key={opt.key} onClick={() => setFbEdit(e => ({ ...e, affinity: asel ? null : opt.key }))} style={{
-                      flex: 1, padding: '10px 8px', background: asel ? 'rgba(var(--accent-rgb),0.12)' : UI.bgInset,
-                      border: `1px solid ${asel ? 'var(--accent)' : UI.hairStrong}`, borderRadius: 6, cursor: 'pointer', textAlign: 'center', WebkitTapHighlightColor: 'transparent',
-                    }}>
-                      <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: asel ? 'var(--accent)' : UI.ink, fontWeight: 600 }}>{opt.label}</div>
-                      <div style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint, marginTop: 2 }}>{opt.sub}</div>
+                    <button key={opt.key} onClick={() => setFbEdit(e => ({ ...e, affinity: asel ? null : opt.key }))} style={toneBtn(opt.tone, asel, { flex: 1 })}>
+                      <div style={toneLbl(opt.tone, asel)}>{opt.label}</div>
                     </button>
                   );
                 })}
