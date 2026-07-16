@@ -1356,9 +1356,13 @@ function App() {
   return (
     <>
       {layout}
-      {/* Hold the update banner back while a session is live — never interrupt a workout.
+      {/* Hold the update banner back while a session is live (never interrupt a
+          workout), and also across the just-finished "Well done" summary, which
+          runs after inProgress has already cleared. Otherwise the banner pops the
+          moment a session ends and updating skips the summary (and its share
+          image). It shows once the user leaves that screen (justFinished clears).
           forceShowUpdateBanner (Settings "Test update banner") deliberately bypasses this. */}
-      {(forceShowUpdateBanner || (updateAvailable && !store?.inProgress && !onboardingState)) && <UpdateBanner onUpdate={applyUpdate} />}
+      {(forceShowUpdateBanner || (updateAvailable && !store?.inProgress && !(route?.name === 'session' && route?.justFinished) && !onboardingState)) && <UpdateBanner onUpdate={applyUpdate} />}
       {autoCloseNotify && <AutoCloseBanner notify={autoCloseNotify} onDismiss={() => setAutoCloseNotify(null)} />}
       {whatsNew && <WhatsNewModal entries={whatsNew} onDismiss={dismissWhatsNew} />}
       {store && <window.Screens.CoachingPendingBanner store={store} setStore={setStore} userId={userId} />}
