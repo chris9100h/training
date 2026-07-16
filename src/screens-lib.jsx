@@ -2444,12 +2444,15 @@ function HistoryScreen({ store, setStore, go, userId, initialTab }) {
                       return (
                         <div
                           className="display"
-                          style={{ fontSize: 21, color: UI.ink, lineHeight: 1.1, marginBottom: 4, display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                          style={{ fontSize: 21, color: UI.ink, lineHeight: 1.1, marginBottom: 4, display: 'inline-flex', flexWrap: 'wrap', alignItems: 'center', gap: 6 }}
                           onClick={hasCharts ? e => { e.stopPropagation(); setEffortChart({ dayId: s.dayId, dayName: s.dayName }); } : undefined}
                         >
                           {s.dayName}
                           {s.isBonus && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.gold, background: 'rgba(var(--accent-rgb), 0.12)', border: `0.5px solid rgba(var(--accent-rgb), 0.3)`, borderRadius: 4, padding: '3px 6px' }}>BONUS</span>}
                           {s.isDeload && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkSoft, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '3px 6px' }}>DELOAD</span>}
+                          {/* Ran under autoregulation / a mesocycle (mesoRecap captures the mode
+                              at the time, so the badge stays right even if the plan changed since). */}
+                          {s.mesoRecap && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.gold, background: 'rgba(var(--accent-rgb), 0.12)', border: `0.5px solid rgba(var(--accent-rgb), 0.3)`, borderRadius: 4, padding: '3px 6px' }}>{s.mesoRecap.meso ? 'MESO' : 'AUTO'}</span>}
                           {hasCharts && <i className="fa-solid fa-chart-line" style={{ fontSize: 10, color: UI.gold }} />}
                         </div>
                       );
