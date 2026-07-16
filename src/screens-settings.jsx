@@ -2020,6 +2020,12 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           <Row label="Regression indicator">
             <Toggle on={store.settings?.showRegression !== false} onToggle={() => setStore(s => ({ ...s, settings: { ...s.settings, showRegression: s.settings?.showRegression === false } }))} />
           </Row>
+          <Row label="Pin all exercise notes">
+            <Toggle on={!!store.settings?.pinAllNotes} onToggle={() => setStore(s => ({ ...s, settings: { ...s.settings, pinAllNotes: !s.settings?.pinAllNotes } }))} />
+          </Row>
+          <div className="micro" style={{ color: UI.inkFaint, marginTop: 8, lineHeight: 1.5 }}>
+            When on, every exercise note pops up on its first set of the session. When off, only notes you pin individually do.
+          </div>
           <div style={{ marginTop: 24 }}>
             <Btn style={{ width: '100%' }} onClick={() => setSessionBehaviourSheet(false)}>Done</Btn>
           </div>

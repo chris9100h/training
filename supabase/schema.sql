@@ -262,7 +262,8 @@ CREATE TABLE public.zane_user_settings (
   glucose_unit text DEFAULT 'mmol'::text,
   vip_background text,
   deload_prompt_dismissed_at timestamp with time zone,
-  sw_version text
+  sw_version text,
+  pin_all_notes boolean NOT NULL DEFAULT false
 );
 
 CREATE TABLE public.zane_pushover_active (

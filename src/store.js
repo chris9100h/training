@@ -400,6 +400,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
     show_health_tab: sett.showHealthTab ?? false,
     onboarding_completed: sett.onboardingCompleted ?? false,
     show_regression: sett.showRegression ?? true,
+    pin_all_notes: sett.pinAllNotes ?? false,
     glucose_unit: sett.glucoseUnit ?? 'mmol',
     default_checkin_schema: sett.defaultCheckinSchema ?? null,
     vip_background: sett.vipBackground ?? null,
@@ -1080,6 +1081,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         reminderTime: sett.reminder_time ?? '07:00',
         showWarmupInSummary: sett.show_warmup_in_summary ?? true,
         showRegression: sett.show_regression ?? true,
+        pinAllNotes: sett.pin_all_notes ?? false,
         showCoachingTab: sett.show_coaching_tab ?? false,
         beYourOwnCoach: sett.be_your_own_coach ?? false,
         sessionTimeoutMinutes: sett.session_timeout_minutes ?? 90,
@@ -1556,6 +1558,7 @@ async function syncStore(prev, next, userId) {
     prev.settings?.reminderTime         !== next.settings?.reminderTime         ||
     prev.settings?.showWarmupInSummary  !== next.settings?.showWarmupInSummary  ||
     prev.settings?.showRegression       !== next.settings?.showRegression       ||
+    prev.settings?.pinAllNotes          !== next.settings?.pinAllNotes          ||
     prev.settings?.showCoachingTab      !== next.settings?.showCoachingTab      ||
     prev.settings?.beYourOwnCoach         !== next.settings?.beYourOwnCoach         ||
     prev.settings?.sessionTimeoutMinutes  !== next.settings?.sessionTimeoutMinutes  ||
@@ -1599,6 +1602,7 @@ async function syncStore(prev, next, userId) {
       reminder_time: next.settings?.reminderTime ?? '07:00',
       show_warmup_in_summary: next.settings?.showWarmupInSummary ?? true,
       show_regression: next.settings?.showRegression ?? true,
+      pin_all_notes: next.settings?.pinAllNotes ?? false,
       show_coaching_tab: next.settings?.showCoachingTab ?? false,
       be_your_own_coach: next.settings?.beYourOwnCoach ?? false,
       session_timeout_minutes: next.settings?.sessionTimeoutMinutes ?? 90,

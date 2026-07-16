@@ -3413,7 +3413,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   useEffectT(() => {
     if (!entry || isCardio) return;
     const ex = store.exercises?.find(e => e.id === entry.exId);
-    if (!ex || !ex.note_pinned || !(ex.note || '').trim()) return;
+    // Pin the note when the exercise opts in (note_pinned) OR the global
+    // "pin all notes" setting is on. Either way it needs a non-empty note.
+    if (!ex || !(store.settings?.pinAllNotes || ex.note_pinned) || !(ex.note || '').trim()) return;
     if (pinnedNoteSeenRef.current.has(entry.exId)) return;
     // Queue behind the progression celebration and every recovery sheet, so it
     // is the last thing to pop on a busy exercise-start (bump, soreness,
