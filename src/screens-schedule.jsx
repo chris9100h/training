@@ -2145,7 +2145,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
     const list = names.length === 1 ? names[0] : names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1];
     const one = names.length === 1;
     return confirm(
-      `${list} still ${one ? 'has' : 'have'} no exercises, so ${one ? "it won't" : "they won't"} be trainable and will show as a rest day on your home screen. Leave anyway?`,
+      `${list} still ${one ? 'has' : 'have'} no exercises, so ${one ? "you can't train it" : "you can't train them"} until you add some. Leave anyway?`,
       { title: one ? 'A day has no exercises' : 'Some days have no exercises', ok: 'Leave anyway', cancel: 'Keep editing' }
     );
   };
