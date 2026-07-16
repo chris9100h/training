@@ -3183,6 +3183,19 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const JOINT_LABELS = { none: 'None', noticeable: 'Noticeable', sharp: 'Sharp pain' };
   const PUMP_LABELS = { low: 'Low', moderate: 'Moderate', amazing: 'Amazing' };
   const AFFINITY_LABELS = { love: 'Love it', ok: "It's fine", dislike: 'Not my lift' };
+  // Toned option chip for the per-exercise feedback sheet: each answer is a colored
+  // chip (semantic tone as the label + a subtle border, tinted fill when selected),
+  // following the sharp-joint button the user liked. The neutral / on-target option of
+  // each question carries the user's accent. rgba over the *-rgb vars stays theme-aware.
+  const TONE_RGB = { ok: '--ok-rgb', warn: '--warn-rgb', danger: '--danger-rgb', accent: '--accent-rgb' };
+  const TONE_COL = { ok: 'var(--ok)', warn: 'var(--warn)', danger: 'var(--danger)', accent: 'var(--accent)' };
+  const toneBtn = (tone, sel, extra) => ({
+    padding: '12px 8px', borderRadius: 6, cursor: 'pointer', textAlign: 'center', WebkitTapHighlightColor: 'transparent',
+    background: sel ? `rgba(var(${TONE_RGB[tone]}),0.15)` : UI.bgInset,
+    border: `1px solid ${sel ? `rgba(var(${TONE_RGB[tone]}),0.8)` : `rgba(var(${TONE_RGB[tone]}),0.3)`}`,
+    ...(extra || {}),
+  });
+  const toneLbl = (tone) => ({ fontFamily: UI.fontUi, fontSize: 13, fontWeight: 700, color: TONE_COL[tone] });
   // Two label sets over the SAME four answer codes. WEIGHT_LABELS is the per-exercise
   // weight-feel question (asked every mode now): how the load felt, too light / just
   // right lets the weight climb, hard / too heavy holds it. WORKLOAD_LABELS is the
@@ -7780,85 +7793,64 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         {/* Per-exercise feedback: joints, weight feel and pump, all for this one lift
             (every mode). The per-muscle sheet below is workload only (Volume+Load / Meso). */}
         <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 8, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Joints</div>
-        <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 18 }}>
           {[
-            { key: 'none', label: 'None', sub: 'All good, joints felt fine' },
-            { key: 'noticeable', label: 'Noticeable', sub: 'Some discomfort but manageable' },
-            { key: 'sharp', label: 'Sharp pain', sub: 'Clear pain, this exercise gets flagged' },
+            { key: 'none', label: 'None', tone: 'ok' },
+            { key: 'noticeable', label: 'Noticeable', tone: 'warn' },
+            { key: 'sharp', label: 'Sharp pain', tone: 'danger' },
           ].map(opt => {
             const sel = mesoJointSel === opt.key;
-            const danger = opt.key === 'sharp';
             return (
-              <button key={opt.key} onClick={() => setMesoJointSel(opt.key)} style={{
-                flex: 1, padding: '10px 8px',
-                background: sel ? (danger ? 'rgba(var(--danger-rgb),0.12)' : `rgba(var(--accent-rgb),0.12)`) : UI.bgInset,
-                border: `1px solid ${sel ? (danger ? 'rgba(var(--danger-rgb),0.6)' : 'var(--accent)') : (danger ? 'rgba(var(--danger-rgb),0.4)' : UI.hairStrong)}`,
-                borderRadius: 6, cursor: 'pointer', textAlign: 'center',
-                WebkitTapHighlightColor: 'transparent',
-              }}>
-                <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: danger ? UI.danger : (sel ? 'var(--accent)' : UI.ink), fontWeight: 600 }}>{opt.label}</div>
-                <div style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint, marginTop: 2 }}>{opt.sub}</div>
+              <button key={opt.key} onClick={() => setMesoJointSel(opt.key)} style={toneBtn(opt.tone, sel, { flex: 1 })}>
+                <div style={toneLbl(opt.tone)}>{opt.label}</div>
               </button>
             );
           })}
         </div>
-        <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 6, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Weight feel</div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 20 }}>
-          {['not_enough', 'just_right', 'pushed', 'too_much'].map(key => {
-            const wsel = mesoJointWeightSel === key;
+        <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 8, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Weight feel</div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 18 }}>
+          {[
+            { key: 'not_enough', tone: 'ok' },
+            { key: 'just_right', tone: 'accent' },
+            { key: 'pushed', tone: 'warn' },
+            { key: 'too_much', tone: 'danger' },
+          ].map(opt => {
+            const wsel = mesoJointWeightSel === opt.key;
             return (
-              <button key={key} onClick={() => setMesoJointWeightSel(key)} style={{
-                width: '100%', padding: '10px 14px',
-                background: wsel ? `rgba(var(--accent-rgb),0.12)` : UI.bgInset,
-                border: `1px solid ${wsel ? 'var(--accent)' : UI.hairStrong}`,
-                borderRadius: 6, cursor: 'pointer', textAlign: 'left', WebkitTapHighlightColor: 'transparent',
-              }}>
-                <div style={{ fontFamily: UI.fontUi, fontSize: 13, color: wsel ? 'var(--accent)' : UI.ink, fontWeight: 600 }}>{WEIGHT_LABELS[key]}</div>
+              <button key={opt.key} onClick={() => setMesoJointWeightSel(opt.key)} style={toneBtn(opt.tone, wsel)}>
+                <div style={toneLbl(opt.tone)}>{WEIGHT_LABELS[opt.key]}</div>
               </button>
             );
           })}
         </div>
         <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 8, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Pump</div>
-        <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 18 }}>
           {[
-            { key: 'low', label: 'Low', sub: 'Barely felt it' },
-            { key: 'moderate', label: 'Moderate', sub: 'Decent pump' },
-            { key: 'amazing', label: 'Amazing', sub: 'Skin-splitting' },
+            { key: 'low', label: 'Low', tone: 'warn' },
+            { key: 'moderate', label: 'Moderate', tone: 'accent' },
+            { key: 'amazing', label: 'Amazing', tone: 'ok' },
           ].map(opt => {
             const psel = mesoJointPumpSel === opt.key;
             return (
-              <button key={opt.key} onClick={() => setMesoJointPumpSel(opt.key)} style={{
-                flex: 1, padding: '10px 8px',
-                background: psel ? `rgba(var(--accent-rgb),0.12)` : UI.bgInset,
-                border: `1px solid ${psel ? 'var(--accent)' : UI.hairStrong}`,
-                borderRadius: 6, cursor: 'pointer', textAlign: 'center', WebkitTapHighlightColor: 'transparent',
-              }}>
-                <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: psel ? 'var(--accent)' : UI.ink, fontWeight: 600 }}>{opt.label}</div>
-                <div style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint, marginTop: 2 }}>{opt.sub}</div>
+              <button key={opt.key} onClick={() => setMesoJointPumpSel(opt.key)} style={toneBtn(opt.tone, psel, { flex: 1 })}>
+                <div style={toneLbl(opt.tone)}>{opt.label}</div>
               </button>
             );
           })}
         </div>
-        <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+        <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 8, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
           This lift{mesoJointAffinitySel == null ? ' · optional' : ''}
         </div>
-        <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.inkSoft, marginBottom: 8, lineHeight: 1.5 }}>Keeper, or would you swap it?</div>
         <div style={{ display: 'flex', gap: 8, marginBottom: 4 }}>
           {[
-            { key: 'love', label: 'Love it', sub: 'Keep it coming' },
-            { key: 'ok', label: "It's fine", sub: 'No strong feelings' },
-            { key: 'dislike', label: 'Not my lift', sub: 'Swap it when you can' },
+            { key: 'love', label: 'Love it', tone: 'ok' },
+            { key: 'ok', label: "It's fine", tone: 'accent' },
+            { key: 'dislike', label: 'Not my lift', tone: 'warn' },
           ].map(opt => {
             const asel = mesoJointAffinitySel === opt.key;
             return (
-              <button key={opt.key} onClick={() => setMesoJointAffinitySel(asel ? null : opt.key)} style={{
-                flex: 1, padding: '10px 8px',
-                background: asel ? `rgba(var(--accent-rgb),0.12)` : UI.bgInset,
-                border: `1px solid ${asel ? 'var(--accent)' : UI.hairStrong}`,
-                borderRadius: 6, cursor: 'pointer', textAlign: 'center', WebkitTapHighlightColor: 'transparent',
-              }}>
-                <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: asel ? 'var(--accent)' : UI.ink, fontWeight: 600 }}>{opt.label}</div>
-                <div style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint, marginTop: 2 }}>{opt.sub}</div>
+              <button key={opt.key} onClick={() => setMesoJointAffinitySel(asel ? null : opt.key)} style={toneBtn(opt.tone, asel, { flex: 1 })}>
+                <div style={toneLbl(opt.tone)}>{opt.label}</div>
               </button>
             );
           })}
