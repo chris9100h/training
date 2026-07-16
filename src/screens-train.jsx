@@ -873,16 +873,16 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const [pinnedNote, setPinnedNote] = useStateT(null); // { exId, name, note } | null
   const pinnedNoteSeenRef = useRefT(null);
   if (pinnedNoteSeenRef.current === null) pinnedNoteSeenRef.current = new Set();
-  // Peeking must not fire the note: it should pop only when training PROGRESSES
+  // Peeking must not fire the exercise-start prompts (the soreness recovery
+  // check and the pinned note): they should pop only when training PROGRESSES
   // to an exercise (auto-advance or the forward "next" button), never when the
-  // user jumps around via the chip bar or steps back with the arrow. manualRef
-  // is set right before such a peek; the effect consumes it on the resulting
-  // fresh arrival and records the muted exIdx (suppressIdxRef) so the note stays
-  // suppressed across sheet-close re-runs, until a later real arrival (flag
-  // clear) lands on the same exercise and re-enables it.
-  const pinnedNoteManualRef = useRefT(false);
-  const pinnedNoteSuppressIdxRef = useRefT(-1);
-  const pinnedNoteLastIdxRef = useRefT(-1);
+  // user jumps around via the chip bar or steps back with the arrow.
+  // peekManualRef is set right before such a peek; a dedicated detection effect
+  // (below) records the peeked exIdx in peekSuppressIdxRef on the resulting
+  // arrival, and both triggers skip that exIdx until a later real arrival (flag
+  // clear) lands on the same exercise and re-enables them.
+  const peekManualRef = useRefT(false);
+  const peekSuppressIdxRef = useRefT(-1);
   // The meso soreness question also fires on exercise start and takes priority
   // (recovery check first, then the setup cue). The pinned-note trigger is
   // therefore declared AFTER the soreness effect (further below) and defers
@@ -1977,9 +1977,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     const newIdx = exIdx + dir;
     if (newIdx < 0) return;
     if (newIdx >= session.entries.length) { setFinishOpen(true); return; }
-    // Stepping back is browsing, not progression: mute the pinned-note pop.
-    // Forward nav leaves the flag clear so the note fires on arrival.
-    if (dir < 0) pinnedNoteManualRef.current = true;
+    // Stepping back is browsing, not progression: mute the exercise-start
+    // prompts. Forward nav leaves the flag clear so they fire on arrival.
+    if (dir < 0) peekManualRef.current = true;
     updateSession(sess => ({ ...sess, currentExIdx: newIdx }));
   };
 
@@ -3438,10 +3438,23 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   };
   // ──────────────────────────────────────────────────────────────────────────
 
+  // Arrival-vs-peek detection, shared by the soreness and pinned-note triggers
+  // below. Both fire on an exIdx change, but neither should fire when the user
+  // reached the exercise by peeking (chip tap / back arrow) rather than by
+  // training progressing there. Declared before both so it runs first on an
+  // exIdx-change commit: it records whether this arrival was a manual peek, and
+  // (deps [exIdx]) only re-runs on the next arrival, so the verdict survives the
+  // sheet-open/close re-runs those triggers also react to.
+  useEffectT(() => {
+    peekSuppressIdxRef.current = peekManualRef.current ? exIdx : -1;
+    peekManualRef.current = false;
+  }, [exIdx]);
+
   // Soreness trigger: fires when exIdx changes to first exercise of a new muscle group
   useEffectT(() => {
     if (!mesoState || !entry || isCardio || isMesoDeloadSession) return;
     if (mesoWeek == null) return; // pending period — meso not yet started
+    if (peekSuppressIdxRef.current === exIdx) return; // reached here by peeking, not progression
     if (mesoLastWeek) return; // final week: set deltas frozen, and soreness only drives deltas
     // Load-only keeps asking soreness: there it holds the weight (recovery brake)
     // instead of adjusting sets — see handleSorenessAnswer / computeMesoGains.
@@ -3487,17 +3500,6 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // effect so it runs later in the same pass and can observe sorenessPendingRef;
   // re-runs when the soreness sheet closes (dep) to show once soreness is done.
   useEffectT(() => {
-    // Distinguish a genuine arrival at a new exIdx from a same-exIdx re-run
-    // triggered by a sheet opening/closing. On each fresh arrival, decide if
-    // this exercise's note is muted: yes if we got here by a manual peek (chip
-    // tap / back arrow), no if training progressed here. The verdict sticks to
-    // this exIdx across sheet-close re-runs, and clears when a later real
-    // arrival lands on the same exercise.
-    if (pinnedNoteLastIdxRef.current !== exIdx) {
-      pinnedNoteLastIdxRef.current = exIdx;
-      pinnedNoteSuppressIdxRef.current = pinnedNoteManualRef.current ? exIdx : -1;
-      pinnedNoteManualRef.current = false;
-    }
     if (!entry || isCardio) return;
     const ex = store.exercises?.find(e => e.id === entry.exId);
     // Pin the note when the exercise opts in (note_pinned) OR the global
@@ -3505,7 +3507,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     if (!ex || !(store.settings?.pinAllNotes || ex.note_pinned) || !(ex.note || '').trim()) return;
     if (pinnedNoteSeenRef.current.has(entry.exId)) return;
     // Muted because we arrived here by peeking, not by training progression.
-    if (pinnedNoteSuppressIdxRef.current === exIdx) return;
+    if (peekSuppressIdxRef.current === exIdx) return;
     // Queue behind the progression celebration and every recovery sheet, so it
     // is the last thing to pop on a busy exercise-start (bump, soreness,
     // joint/pump/volume all clear first). Re-runs as each of them closes.
@@ -5376,7 +5378,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             <button key={`chip-${i}`}
               data-reorder-item="true"
               data-ex-idx={i}
-              onClick={() => { if (i !== exIdx) pinnedNoteManualRef.current = true; updateSession(sess => ({ ...sess, currentExIdx: i })); }}
+              onClick={() => { if (i !== exIdx) peekManualRef.current = true; updateSession(sess => ({ ...sess, currentExIdx: i })); }}
               style={{
                 flexShrink: 0, maxWidth: 110,
                 padding: '5px 11px 4px', borderRadius: 4,
