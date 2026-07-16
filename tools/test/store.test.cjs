@@ -1090,6 +1090,22 @@ async function testAsync(name, fn) {
     assert.ok(!g.weightOk.has('e1'), 'per-exId too_much is not overridden by the muscle just_right');
     assert.ok(g.weightOk.has('e2'));
   });
+  test('mesoGateSetsFromAnswers: load-only MIXED mid-deploy raw resolves per exId (own weight wins, unweighted falls back)', () => {
+    // e1 answered on the pre-change build (no joint weight; its weight is in the per-muscle
+    // volume rec), e2 answered on the post-change build (joint[e2].weight). A later edit
+    // must gate BOTH: e2 from its own answer, e1 from the muscle fallback, so neither loses
+    // a correctly-earned boost.
+    const a = { joint: { e1: { answer: 'none' }, e2: { answer: 'none', weight: 'just_right' } }, volume: { chest: { muscle: 'chest', exIds: ['e1', 'e2'], pump: 'moderate', volume: 'just_right' } }, soreness: {} };
+    const g = LB.mesoGateSetsFromAnswers(a, true);
+    assert.ok(g.weightOk.has('e2'), 'e2 uses its own per-exercise weight');
+    assert.ok(g.weightOk.has('e1'), 'e1 (no per-exercise weight) falls back to the legacy per-muscle answer');
+  });
+  test('mesoGateSetsFromAnswers: load-only MIXED raw, an unweighted exercise inherits a holding muscle answer without polluting the weighted one', () => {
+    const a = { joint: { e1: { answer: 'none' }, e2: { answer: 'none', weight: 'just_right' } }, volume: { chest: { muscle: 'chest', exIds: ['e1', 'e2'], pump: 'moderate', volume: 'too_much' } }, soreness: {} };
+    const g = LB.mesoGateSetsFromAnswers(a, true);
+    assert.ok(g.weightOk.has('e2'), 'e2 still bumps on its own just_right (muscle too_much never touches it)');
+    assert.ok(!g.weightOk.has('e1'), 'e1 inherits the muscle too_much hold, no bump');
+  });
   test('reearnMesoBoostsFromAnswers: load-only holds only the too-heavy exercise, bumps the others', () => {
     const inputs = [
       { exId: 'e1', key: 'e1_d1', muscle: 'shoulders', allHit: true, increment: 2.5 },

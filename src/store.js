@@ -4625,16 +4625,25 @@ function mesoGateSetsFromAnswers(answers, loadOnly) {
   // sessions write pump-only volume recs, so rec.volume is absent and adds nothing).
   const weightOk = new Set();
   if (loadOnly) {
-    // Shape probe: a NEW session carries at least one per-exercise weight answer
-    // (joint[exId].weight). A LEGACY finished/backfilled session kept the weight
-    // per-muscle in volume[muscle].volume. New wins: only fall back to the legacy
-    // per-muscle answer when no per-exercise weight exists at all (never a union,
-    // so an explicit per-exercise answer is never overridden by the muscle one).
-    const perExercise = Object.values(a.joint || {}).some(rec => rec && 'weight' in rec);
-    if (perExercise) {
-      for (const [exId, rec] of Object.entries(a.joint || {})) if (rec && volumeAnswerAllowsBump(rec.weight, true)) weightOk.add(exId);
-    } else {
-      for (const rec of Object.values(a.volume || {})) if (rec && rec.volume != null && volumeAnswerAllowsBump(rec.volume, true)) (rec.exIds || []).forEach(id => weightOk.add(id));
+    // Weight-feel is per exercise (joint[exId].weight). Resolve PER EXERCISE, not per
+    // session: an exId with its own weight answer uses only that (an explicit answer is
+    // never overridden), an exId without one falls back to its muscle's legacy per-muscle
+    // weight (volume[muscle].volume). One rule covers all three shapes:
+    //  - fully NEW: every joint rec has a weight and volume recs stay pump-only (no
+    //    .volume), so the fallback is inert.
+    //  - fully OLD (finished/backfilled pre-change): no joint weights, so the fallback
+    //    drives the whole gate.
+    //  - MIXED (a recap that straddled a mid-recap client update: some exercises answered
+    //    pre-change with the weight still per-muscle, some post-change per-exercise): each
+    //    exId is resolved from its own answer, the rest fall back. Never a union, so a
+    //    legacy muscle answer never overrides an explicit per-exercise one.
+    const jointWeighted = new Set();
+    for (const [exId, rec] of Object.entries(a.joint || {})) {
+      if (rec && 'weight' in rec) { jointWeighted.add(exId); if (volumeAnswerAllowsBump(rec.weight, true)) weightOk.add(exId); }
+    }
+    for (const rec of Object.values(a.volume || {})) {
+      if (!rec || rec.volume == null || !volumeAnswerAllowsBump(rec.volume, true)) continue;
+      (rec.exIds || []).forEach(id => { if (!jointWeighted.has(id)) weightOk.add(id); });
     }
   }
   const soreBlock = new Set();

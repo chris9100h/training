@@ -2760,16 +2760,20 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       if (LB.volumeAnswerAllowsBump(rec.volume, loadOnly)) volumeOk.add(rec.muscle);
     }
     // Load-only weight-feel is per exercise (joint[exId].weight). Rebuild it EXACTLY
-    // like LB.mesoGateSetsFromAnswers: a new session (any joint rec has a weight)
-    // uses the per-exercise answers; a legacy in-progress session reloaded mid-deploy
-    // falls back to the per-muscle volume[muscle].volume spread over its exIds.
+    // like LB.mesoGateSetsFromAnswers: resolve per exId (an exId's own weight wins), and
+    // for any exId without one (a legacy in-progress session reloaded mid-deploy, whose
+    // early exercises kept the weight per-muscle in volume[muscle].volume) fall back to
+    // its muscle answer. Never a union: an explicit per-exercise answer is never
+    // overridden by the muscle one.
     const weightOk = new Set();
     if (loadOnly) {
-      const perExercise = Object.values(a.joint || {}).some(rec => rec && 'weight' in rec);
-      if (perExercise) {
-        for (const [exId, rec] of Object.entries(a.joint || {})) { if (rec && LB.volumeAnswerAllowsBump(rec.weight, true)) weightOk.add(exId); }
-      } else {
-        for (const rec of Object.values(a.volume || {})) { if (rec && rec.volume != null && LB.volumeAnswerAllowsBump(rec.volume, true)) (rec.exIds || []).forEach(id => weightOk.add(id)); }
+      const jointWeighted = new Set();
+      for (const [exId, rec] of Object.entries(a.joint || {})) {
+        if (rec && 'weight' in rec) { jointWeighted.add(exId); if (LB.volumeAnswerAllowsBump(rec.weight, true)) weightOk.add(exId); }
+      }
+      for (const rec of Object.values(a.volume || {})) {
+        if (!rec || rec.volume == null || !LB.volumeAnswerAllowsBump(rec.volume, true)) continue;
+        (rec.exIds || []).forEach(id => { if (!jointWeighted.has(id)) weightOk.add(id); });
       }
     }
     const soreBlock = new Set();
