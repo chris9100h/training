@@ -1815,6 +1815,37 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
 }
 
 // ─── Edit screen — rename, manage pattern ─
+// The "Progression" explainer body, shared by the plan editor's info sheet and
+// the new-plan wizard's info modal. Content only (no wrapper / buttons) so each
+// caller can host it in a Sheet or a high-z overlay as its stacking allows.
+function ProgressionInfoBody() {
+  return (
+    <div style={{ fontSize: 13, color: UI.inkSoft, lineHeight: 1.6, display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <p style={{ margin: 0 }}>Both modes auto-tune your sets and weight from the feedback you give during training. They just differ in shape, and only one can be on at a time.</p>
+      <p style={{ margin: 0 }}><strong style={{ color: UI.ink }}>Autoregulate</strong> runs indefinitely: no fixed end, no RIR ramp, just sets and weight adjusting session to session. Prefer to keep your set counts fixed? Switch it to <strong style={{ color: UI.ink }}>Load only</strong> and just the weight climbs, held back when you report a muscle is still sore.</p>
+      <p style={{ margin: 0 }}>A <strong style={{ color: UI.ink }}>mesocycle</strong> is a structured block (4 to 8 weeks) where effort progressively increases each week, measured by <strong style={{ color: UI.ink }}>Reps in Reserve (RIR)</strong>, how many reps you could still do before failure. It ends in a deload.</p>
+      <p style={{ margin: 0 }}>By default week 1 starts easy (3 RIR) and ramps up to all-out effort (0 RIR) by the final week, then you deload. You can adjust both endpoints, and even set the peak <em>past</em> failure (negative RIR), which auto-adds that many lengthened partials to every set. That last one's for very advanced lifters. 🔥</p>
+      <div style={{ background: UI.bgInset, borderRadius: 6, padding: '12px 14px', border: `1px solid ${UI.hairStrong}` }}>
+        <div className="label" style={{ marginBottom: 10 }}>What Zane asks during training</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {[
+            ['Before first set of a muscle group', 'Soreness carryover from last session?'],
+            ['After last set of each exercise', 'Any joint discomfort?'],
+            ['After last exercise of a muscle group', 'Pump quality + volume feel?'],
+          ].map(([when, what]) => (
+            <div key={when} style={{ fontSize: 12 }}>
+              <div style={{ color: UI.gold, fontWeight: 600, marginBottom: 2 }}>{when}</div>
+              <div style={{ color: UI.ink }}>{what}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+      <p style={{ margin: 0 }}>Your answers auto-adjust set targets for the next time you run that session, more sets when you need more stimulus, fewer when recovery is lagging.</p>
+      <p style={{ margin: 0 }}>Weight increases are earned at session end: if you hit all your reps <em>and</em> the feedback comes back clean (no joint issues, pump was good, volume felt right), Zane banks a load boost for the next time you hit that session. Miss any of those signals and the weight holds. <strong style={{ color: UI.ink }}>Smart Progression</strong> works alongside this: if enabled, it also suggests load steps based on your rep range history. Together they keep the bar moving forward across weeks and into Meso 2.</p>
+    </div>
+  );
+}
+
 function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFrom, draftStore = store, setDraftStore = setStore }) {
   const [confirmEl, confirm] = useConfirm();
   const original = store.schedules.find(s => s.id === scheduleId);
@@ -2888,30 +2919,9 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
       </Sheet>
 
       <Sheet open={mesoInfoOpen} onClose={() => setMesoInfoOpen(false)} title="Progression">
-        <div style={{ fontSize: 13, color: UI.inkSoft, lineHeight: 1.6, display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <p style={{ margin: 0 }}>Both modes auto-tune your sets and weight from the feedback you give during training. They just differ in shape, and only one can be on at a time.</p>
-          <p style={{ margin: 0 }}><strong style={{ color: UI.ink }}>Autoregulate</strong> runs indefinitely: no fixed end, no RIR ramp, just sets and weight adjusting session to session. Prefer to keep your set counts fixed? Switch it to <strong style={{ color: UI.ink }}>Load only</strong> and just the weight climbs, held back when you report a muscle is still sore.</p>
-          <p style={{ margin: 0 }}>A <strong style={{ color: UI.ink }}>mesocycle</strong> is a structured block (4 to 8 weeks) where effort progressively increases each week, measured by <strong style={{ color: UI.ink }}>Reps in Reserve (RIR)</strong>, how many reps you could still do before failure. It ends in a deload.</p>
-          <p style={{ margin: 0 }}>By default week 1 starts easy (3 RIR) and ramps up to all-out effort (0 RIR) by the final week, then you deload. You can adjust both endpoints — and even set the peak <em>past</em> failure (negative RIR), which auto-adds that many lengthened partials to every set. That last one's for very advanced lifters. 🔥</p>
-          <div style={{ background: UI.bgInset, borderRadius: 6, padding: '12px 14px', border: `1px solid ${UI.hairStrong}` }}>
-            <div className="label" style={{ marginBottom: 10 }}>What Zane asks during training</div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {[
-                ['Before first set of a muscle group', 'Soreness carryover from last session?'],
-                ['After last set of each exercise', 'Any joint discomfort?'],
-                ['After last exercise of a muscle group', 'Pump quality + volume feel?'],
-              ].map(([when, what]) => (
-                <div key={when} style={{ fontSize: 12 }}>
-                  <div style={{ color: UI.gold, fontWeight: 600, marginBottom: 2 }}>{when}</div>
-                  <div style={{ color: UI.ink }}>{what}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-          <p style={{ margin: 0 }}>Your answers auto-adjust set targets for the next time you run that session — more sets when you need more stimulus, fewer when recovery is lagging.</p>
-          <p style={{ margin: 0 }}>Weight increases are earned at session end: if you hit all your reps <em>and</em> the feedback comes back clean — no joint issues, pump was good, volume felt right — Zane banks a load boost for the next time you hit that session. Miss any of those signals and the weight holds. <strong style={{ color: UI.ink }}>Smart Progression</strong> works alongside this: if enabled, it also suggests load steps based on your rep range history. Together they keep the bar moving forward across weeks and into Meso 2.</p>
-        </div>
-        <Btn onClick={() => setMesoInfoOpen(false)} style={{ width: '100%', marginTop: 20 }}>Got it</Btn>
+        <ProgressionInfoBody />
+        <Btn kind="ghost" onClick={() => { setMesoInfoOpen(false); go({ name: 'autoreg-guide', mode: draft.mesocycle_weeks != null ? 'C' : (draft.mesocycle_autoregulate_mode === 'load' ? 'B' : 'A'), back: { name: 'schedule-edit', scheduleId } }); }} style={{ width: '100%', marginTop: 16 }}>See the full guide</Btn>
+        <Btn onClick={() => setMesoInfoOpen(false)} style={{ width: '100%', marginTop: 8 }}>Got it</Btn>
       </Sheet>
     </Screen>
   );
@@ -4119,6 +4129,11 @@ function PlanWizard({ store, setStore, go }) {
   const [dayFlash, setDayFlash] = useStateS(false); // brief checkmark when a day type is picked
   const [weekdaysSel, setWeekdaysSel] = useStateS([]); // weekday indices 0..6
   const [planMode, setPlanMode] = useStateS('standard'); // 'standard' | 'autoregulate' | 'meso'
+  // Progression explainer, opened from the meso step. Both render as high-z
+  // overlays (the wizard itself is a z-9998 overlay, so a plain Sheet would sit
+  // behind it) and keep the wizard mounted so in-progress choices are not lost.
+  const [wizInfoOpen, setWizInfoOpen] = useStateS(false);
+  const [wizGuideOpen, setWizGuideOpen] = useStateS(false);
   const [autoregMode, setAutoregMode] = useStateS('both'); // 'both' | 'load' — what the autoregulate plan tunes
   const [mesoWeeks, setMesoWeeks] = useStateS(6);
   const [mesoStartRir, setMesoStartRir] = useStateS(3);
@@ -4502,6 +4517,11 @@ function PlanWizard({ store, setStore, go }) {
           )}
         </div>
       )}
+      {planMode !== 'standard' && (
+        <button onClick={() => setWizInfoOpen(true)} style={{ alignSelf: 'center', marginTop: 2, background: 'transparent', border: 'none', color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 12.5, cursor: 'pointer', padding: '6px 8px', WebkitTapHighlightColor: 'transparent' }}>
+          {planMode === 'meso' ? 'How a Mesocycle works' : 'How autoregulation works'}
+        </button>
+      )}
     </div>;
   }
 
@@ -4610,6 +4630,22 @@ function PlanWizard({ store, setStore, go }) {
           </div>
         )}
       </div>
+      {wizInfoOpen && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(0,0,0,0.74)', backdropFilter: 'blur(14px)', WebkitBackdropFilter: 'blur(14px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }} onClick={e => { if (e.target === e.currentTarget) setWizInfoOpen(false); }}>
+          <div style={{ background: UI.bgRaised, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 8, padding: 18, width: '100%', maxWidth: 460, maxHeight: '82vh', overflowY: 'auto', overscrollBehavior: 'contain' }}>
+            <div style={{ fontFamily: UI.fontDisplay, fontSize: 22, color: 'var(--accent)', fontWeight: 400, textTransform: 'uppercase', letterSpacing: '0.02em', marginBottom: 14 }}>Progression</div>
+            <ProgressionInfoBody />
+            <Btn kind="ghost" onClick={() => { setWizInfoOpen(false); setWizGuideOpen(true); }} style={{ width: '100%', marginTop: 16 }}>See the full guide</Btn>
+            <Btn onClick={() => setWizInfoOpen(false)} style={{ width: '100%', marginTop: 8 }}>Got it</Btn>
+          </div>
+        </div>
+      )}
+      {wizGuideOpen && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 10000, background: UI.bg, display: 'flex', flexDirection: 'column', paddingTop: 'env(safe-area-inset-top, 0px)' }}>
+          <window.Screens.AutoregGuideScreen store={store} go={() => setWizGuideOpen(false)} back={{ name: 'wizard' }}
+            mode={planMode === 'meso' ? 'C' : (planMode === 'autoregulate' ? (autoregMode === 'load' ? 'B' : 'A') : 'A')} />
+        </div>
+      )}
     </div>
   );
 }

@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Zane · Autoregulation guide</title>
+<meta name="description" content="A field manual for Zane's autoregulation and mesocycle training engine. Pick a mode to see exactly how it adapts your sets and weight to your feedback." />
+<meta name="theme-color" content="#141218" />
+<link rel="icon" href="icons/icon-192.png" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@500;700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600;700&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    color-scheme: light dark;
+    /* default = app dark theme */
+    --bg:#141218; --panel:#252334; --inset:#2f2c3c; --hero:#1a1820;
+    --ink:#ece4d0; --ink-soft:rgba(236,228,208,0.66); --ink-faint:rgba(236,228,208,0.5);
+    --hair:rgba(236,228,208,0.10); --hair-strong:rgba(236,228,208,0.18);
+    --accent:#c9a961; --accent-light:#e5c97e; --accent-deep:#8b6f3d; --accent-rgb:201,169,97;
+    --ok:#8fb069; --danger:#c87469; --knurl:236,228,208;
+    --f-display:"Big Shoulders Display","Arial Narrow",sans-serif;
+    --f-body:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    --f-mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
+    --maxw:980px;
+  }
+  @media (prefers-color-scheme: light){
+    :root{
+      --bg:#e8e1d4; --panel:#eae3d6; --inset:#e2dacb; --hero:#f2ede4;
+      --ink:#1f1b16; --ink-soft:rgba(31,27,22,0.66); --ink-faint:rgba(31,27,22,0.5);
+      --hair:rgba(31,27,22,0.16); --hair-strong:rgba(31,27,22,0.34);
+      --accent:#9a7b34; --accent-light:#b8933f; --accent-deep:#6f581f; --accent-rgb:154,123,52;
+      --ok:#5f8038; --danger:#b0503f; --knurl:31,27,22;
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#141218; --panel:#252334; --inset:#2f2c3c; --hero:#1a1820;
+    --ink:#ece4d0; --ink-soft:rgba(236,228,208,0.66); --ink-faint:rgba(236,228,208,0.5);
+    --hair:rgba(236,228,208,0.10); --hair-strong:rgba(236,228,208,0.18);
+    --accent:#c9a961; --accent-light:#e5c97e; --accent-deep:#8b6f3d; --accent-rgb:201,169,97;
+    --ok:#8fb069; --danger:#c87469; --knurl:236,228,208;
+  }
+  :root[data-theme="light"]{
+    --bg:#e8e1d4; --panel:#eae3d6; --inset:#e2dacb; --hero:#f2ede4;
+    --ink:#1f1b16; --ink-soft:rgba(31,27,22,0.66); --ink-faint:rgba(31,27,22,0.5);
+    --hair:rgba(31,27,22,0.16); --hair-strong:rgba(31,27,22,0.34);
+    --accent:#9a7b34; --accent-light:#b8933f; --accent-deep:#6f581f; --accent-rgb:154,123,52;
+    --ok:#5f8038; --danger:#b0503f; --knurl:31,27,22;
+  }
+  *{box-sizing:border-box;}
+  html{scroll-behavior:smooth;}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--f-body);line-height:1.5;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;}
+  .display{font-family:var(--f-display);font-weight:700;line-height:1;}
+  .num,.mono{font-family:var(--f-mono);font-variant-numeric:tabular-nums;}
+  .wrap{max-width:var(--maxw);margin:0 auto;padding:0 20px;}
+  .knurl{background-image:repeating-linear-gradient(45deg,rgba(var(--knurl),0.05) 0 1px,transparent 1px 6px),repeating-linear-gradient(-45deg,rgba(var(--knurl),0.05) 0 1px,transparent 1px 6px);}
+
+  /* hero */
+  .hero{position:relative;background:var(--hero);border-bottom:1px solid var(--hair);overflow:hidden;}
+  .hero::after{content:"";position:absolute;left:0;right:0;bottom:0;height:1px;background:linear-gradient(90deg,transparent,rgba(var(--accent-rgb),0.6),transparent);}
+  .hero-inner{max-width:var(--maxw);margin:0 auto;padding:44px 20px 30px;}
+  .eyebrow{display:flex;align-items:center;gap:12px;color:var(--accent);margin-bottom:18px;}
+  .eyebrow .dot{width:7px;height:7px;border-radius:50%;background:var(--accent);box-shadow:0 0 10px rgba(var(--accent-rgb),0.7);}
+  .eyebrow .rule{flex:1;height:1px;background:var(--hair);}
+  .micro{font-family:var(--f-mono);font-size:10px;letter-spacing:0.2em;text-transform:uppercase;font-weight:600;}
+  .wordmark{font-family:var(--f-display);font-weight:800;text-transform:uppercase;font-size:clamp(34px,8.5vw,78px);line-height:0.9;letter-spacing:0.005em;margin:0;text-wrap:balance;}
+  .wordmark .k{color:var(--accent);}
+  .tagline{margin:16px 0 0;max-width:54ch;font-size:clamp(14.5px,2vw,17px);line-height:1.5;color:var(--ink-soft);}
+  .tagline b{color:var(--ink);font-weight:600;}
+
+  /* sticky controls */
+  .controls{position:sticky;top:0;z-index:20;background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border-bottom:1px solid var(--hair);}
+  .controls-inner{max-width:var(--maxw);margin:0 auto;padding:11px 20px;display:flex;align-items:center;gap:14px;}
+  .crumb{font-family:var(--f-mono);font-size:11px;letter-spacing:0.06em;text-transform:uppercase;color:var(--ink-faint);}
+  .crumb b{color:var(--accent);}
+  .tt{margin-left:auto;appearance:none;cursor:pointer;border:1px solid var(--hair-strong);background:var(--panel);color:var(--ink-soft);width:38px;height:38px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;flex:none;}
+  .tt:hover{color:var(--ink);border-color:var(--accent);}
+  .tt svg{width:17px;height:17px;}
+
+  /* mode selector */
+  .modesel{padding-top:20px;}
+  .selhead{font-family:var(--f-mono);font-size:10.5px;letter-spacing:0.18em;text-transform:uppercase;color:var(--ink-faint);margin:0 0 12px;display:flex;align-items:center;gap:10px;}
+  .selhead .rule{flex:1;height:1px;background:var(--hair);}
+  .modegrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;}
+  .modecard{position:relative;overflow:hidden;text-align:left;cursor:pointer;font:inherit;color:var(--ink);background:var(--panel);border:1px solid var(--hair);border-radius:8px;padding:16px 16px 14px;transition:border-color .15s,box-shadow .15s;}
+  .modecard:hover{border-color:rgba(var(--accent-rgb),0.5);}
+  .modecard.active{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent);}
+  .mc-rail{position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--accent);opacity:0;}
+  .modecard.active .mc-rail{opacity:1;}
+  .mc-dot{position:absolute;top:13px;right:13px;width:16px;height:16px;border-radius:50%;border:2px solid var(--hair-strong);}
+  .modecard.active .mc-dot{border-color:var(--accent);background:radial-gradient(circle,var(--accent) 0 40%,transparent 46%);}
+  .mc-tag{font-family:var(--f-mono);font-size:9.5px;letter-spacing:0.13em;text-transform:uppercase;color:var(--ink-faint);}
+  .mc-nm{font-size:21px;margin:4px 0 8px;}
+  .modecard.active .mc-nm{color:var(--accent);}
+  .mc-d{font-size:12.5px;color:var(--ink-soft);line-height:1.42;}
+  .mc-pills{display:flex;flex-wrap:wrap;gap:5px;margin-top:11px;}
+  .mc-pills span{font-family:var(--f-mono);font-size:9px;letter-spacing:0.04em;text-transform:uppercase;color:var(--ink-soft);background:var(--inset);border:0.5px solid var(--hair);border-radius:4px;padding:3px 6px;}
+
+  .hint{margin:22px 0 8px;padding:26px 20px;border:1px dashed var(--hair-strong);border-radius:8px;text-align:center;color:var(--ink-faint);font-family:var(--f-mono);font-size:12.5px;letter-spacing:0.03em;}
+
+  /* guide */
+  #guide{scroll-margin-top:64px;}
+  .sec{padding:30px 0;border-top:1px solid var(--hair);}
+  .sec.first{border-top:none;padding-top:22px;}
+  .sech{margin-bottom:22px;}
+  .sech-n{font-family:var(--f-mono);font-size:11px;letter-spacing:0.14em;color:var(--accent);}
+  .sech-t{font-size:clamp(23px,5vw,32px);margin:7px 0 0;letter-spacing:-0.01em;display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;}
+  .sech-chip{font-family:var(--f-mono);font-size:10px;letter-spacing:0.08em;text-transform:uppercase;color:var(--accent);border:0.5px solid color-mix(in srgb,var(--accent) 45%,transparent);background:color-mix(in srgb,var(--accent) 8%,transparent);border-radius:999px;padding:3px 10px;}
+  .sech-sub{color:var(--ink-soft);margin:11px 0 0;font-size:14.5px;max-width:62ch;}
+
+  .kick{font-family:var(--f-mono);font-size:10px;letter-spacing:0.16em;text-transform:uppercase;color:var(--ink-faint);}
+  .card{background:var(--panel);border:0.5px solid var(--hair);border-radius:8px;padding:18px;}
+  .h3{font-size:18px;margin:0 0 7px;}
+  .card p{margin:0;}
+
+  .stat{background:var(--panel);border:0.5px solid var(--hair);border-radius:8px;padding:14px 15px;}
+  .stat .v{font-size:20px;margin-top:4px;line-height:1.05;}
+  .stat .s{font-size:12px;color:var(--ink-soft);margin-top:5px;line-height:1.4;}
+
+  .grid{display:grid;gap:12px;}
+  .g180{grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:11px;}
+  .g150{grid-template-columns:repeat(auto-fit,minmax(150px,1fr));}
+  .g220{grid-template-columns:repeat(auto-fit,minmax(220px,1fr));}
+  .g240{grid-template-columns:repeat(auto-fit,minmax(240px,1fr));}
+  .g260{grid-template-columns:repeat(auto-fit,minmax(260px,1fr));}
+  .g230{grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:8px;}
+
+  .panel{background:var(--panel);border:0.5px solid var(--hair);border-radius:8px;overflow:hidden;}
+  .panel-head{display:flex;align-items:center;gap:11px;padding:13px 16px;border-bottom:0.5px solid var(--hair);background:color-mix(in srgb,var(--accent) 5%,transparent);}
+  .panel-idx{font-family:var(--f-mono);font-size:12px;font-weight:700;color:var(--bg);background:var(--accent);width:24px;height:24px;border-radius:6px;display:grid;place-items:center;flex:none;}
+  .panel-title{font-size:19px;letter-spacing:0.01em;}
+  .panel-when{margin-left:auto;font-family:var(--f-mono);font-size:9.5px;letter-spacing:0.1em;text-transform:uppercase;color:var(--ink-faint);text-align:right;line-height:1.35;}
+  .panel-body{padding:4px 16px 14px;}
+  .panel-intro{font-size:13.5px;color:var(--ink-soft);margin:11px 0;}
+
+  .opt{padding:12px 0;border-top:0.5px solid var(--hair);}
+  .opt-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:6px;}
+  .opt-txt{font-size:13px;color:var(--ink-soft);line-height:1.5;}
+  .chip{font-family:var(--f-mono);font-size:11px;font-weight:600;color:var(--ink);background:var(--inset);border:0.5px solid var(--hair-strong);border-radius:4px;padding:3px 8px;white-space:nowrap;}
+  .dir{display:inline-flex;align-items:center;gap:5px;font-family:var(--f-mono);font-size:10.5px;font-weight:600;letter-spacing:0.03em;text-transform:uppercase;border-radius:4px;padding:3px 8px;white-space:nowrap;}
+
+  .inset{background:var(--inset);border:0.5px solid var(--hair);border-radius:8px;padding:12px 13px;}
+  .lb{border-left:3px solid var(--accent);}
+  .lb-red{border-left:3px solid var(--danger);}
+  .lb-faint{border-left:3px solid var(--ink-faint);}
+  .accented b,.opt-txt b,.card p b,.stat .s b{color:var(--ink);font-weight:600;}
+
+  table.cheat{border-collapse:collapse;width:100%;min-width:460px;font-size:13px;}
+  table.cheat th{text-align:left;padding:10px 13px;border-bottom:0.5px solid var(--hair);background:var(--inset);font-family:var(--f-mono);font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:var(--ink-faint);font-weight:600;}
+  table.cheat td{padding:10px 13px;border-bottom:0.5px solid var(--hair);}
+  table.cheat td.m{font-family:var(--f-mono);white-space:nowrap;}
+  .scrollx{overflow-x:auto;border:0.5px solid var(--hair);border-radius:8px;}
+
+  .totop{position:fixed;right:16px;bottom:calc(18px + env(safe-area-inset-bottom,0px));z-index:40;width:44px;height:44px;border-radius:50%;border:0.5px solid var(--hair-strong);background:var(--panel);color:var(--accent);cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 8px 22px -8px rgba(0,0,0,0.65);opacity:0;pointer-events:none;transform:translateY(8px);transition:opacity .2s ease,transform .2s ease;}
+  .totop.show{opacity:1;pointer-events:auto;transform:none;}
+  .totop svg{width:18px;height:18px;}
+
+  footer{border-top:1px solid var(--hair);margin-top:20px;}
+  .foot{max-width:var(--maxw);margin:0 auto;padding:26px 20px 52px;display:flex;flex-wrap:wrap;gap:16px;justify-content:space-between;align-items:baseline;}
+  .foot p{margin:0;color:var(--ink-faint);font-size:12.5px;max-width:64ch;line-height:1.6;}
+  .foot .stamp{font-family:var(--f-mono);font-size:11px;letter-spacing:0.1em;text-transform:uppercase;color:var(--ink-faint);}
+
+  @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto;}.modecard,.totop{transition:none;}}
+</style>
+</head>
+<body>
+
+<div class="hero knurl">
+  <div class="hero-inner">
+    <div class="eyebrow"><span class="dot"></span><span class="micro">Field manual</span><span class="rule"></span><span class="micro">Zane</span></div>
+    <h1 class="wordmark">AUTOREGU<span class="k">L</span>ATION</h1>
+    <p class="tagline">How your plan adapts to <b>you</b>, one honest signal at a time. Zane tunes two dials, your <b>sets</b> and your <b>weight</b>, from the feedback you give after each session. Pick a plan mode below and this page reshapes to show exactly how that mode behaves.</p>
+  </div>
+</div>
+
+<div class="controls">
+  <div class="controls-inner">
+    <span class="crumb" id="crumb">Pick a mode to begin</span>
+    <button class="tt" id="themeBtn" title="Toggle light / dark" aria-label="Toggle theme">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4.5"></circle><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5 5l1.5 1.5M17.5 17.5 19 19M19 5l-1.5 1.5M6.5 17.5 5 19"></path></svg>
+    </button>
+  </div>
+</div>
+
+<main class="wrap">
+  <section class="modesel">
+    <div class="selhead">Select your plan mode<span class="rule"></span></div>
+    <div class="modegrid" id="modegrid" role="group" aria-label="Select a plan mode"></div>
+    <div class="hint" id="hint">Pick a mode above to see its field manual.</div>
+  </section>
+  <div id="guide"></div>
+</main>
+
+<footer><div class="foot">
+  <p>Zane is a strength-training logbook and coaching platform. This page explains how its autoregulation and mesocycle engine adapts your training to your feedback. No account needed to read it.</p>
+  <div class="stamp">Autoregulation engine</div>
+</div></footer>
+
+<button class="totop" id="toTop" aria-label="Back to top" title="Back to top">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 15 6-6 6 6"/></svg>
+</button>
+
+<!-- Guide content lives in its own file so it can be cache-busted like the
+     feature map. autoreg.html sits outside the service worker and has no
+     SW-cache-version to force a refetch, so bump ?v= in lockstep with the
+     sw.js CACHE version whenever the guide changes, otherwise returning
+     visitors keep serving a stale autoreg-guide-page.js from the browser
+     cache even after a fresh deploy. -->
+<script src="src/autoreg-guide-page.js?v=2.596"></script>
+</body>
+</html>

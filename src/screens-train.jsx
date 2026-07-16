@@ -4589,7 +4589,16 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       let newItems = day.items.map((item, i) => {
         const diff = planDiff.find(d => (d.type === 'swap' || d.type === 'sets') && d.idx === i);
         if (!diff) return item;
-        if (diff.type === 'swap') return { ...item, exId: diff.newExId };
+        if (diff.type === 'swap') {
+          // A rep-based swap-in went through the rep-target wizard; apply its
+          // picked target (clearing the swapped-out exercise's reps/techniques).
+          // Cardio / checkbox / time swaps skip the wizard, so keep the plain
+          // exId change and their (irrelevant) inherited target.
+          const patch = addedRepPatchesRef.current?.[diff.newExId] || null;
+          return patch
+            ? { ...item, exId: diff.newExId, sets: patch.sets ?? item.sets, reps: patch.reps ?? null, repsPerSet: patch.repsPerSet ?? null, repsMax: patch.repsMax ?? null, progressionOffset: patch.progressionOffset ?? null, plannedTechniques: patch.plannedTechniques ?? null }
+            : { ...item, exId: diff.newExId };
+        }
         // Persist only the user-driven delta on top of the base plan — newSets
         // includes the meso set-delta, which applyMesoSetDelta re-adds next
         // session; writing newSets directly would compound it (base+2 → base+3).
@@ -4694,8 +4703,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     const seen = new Set();
     const queue = [];
     for (const e of session.entries) {
-      if (!e.addedDuringSession || e.isCardio || seen.has(e.exId)) continue;
-      if (!planDiff.some(d => d.type === 'added' && d.exId === e.exId)) continue;
+      if (e.isCardio || seen.has(e.exId)) continue;
+      // Ad-hoc adds would land in the plan blank; swap-ins would otherwise
+      // inherit the swapped-out exercise's rep target. Both need to pick one.
+      const isAdded = e.addedDuringSession && planDiff.some(d => d.type === 'added' && d.exId === e.exId);
+      const isSwapIn = planDiff.some(d => d.type === 'swap' && d.newExId === e.exId);
+      if (!isAdded && !isSwapIn) continue;
       const m = LB.exerciseLogMode(store.exercises?.find(x => x.id === e.exId));
       if (m === 'checkbox' || m === 'time') continue;
       seen.add(e.exId);

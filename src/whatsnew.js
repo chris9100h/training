@@ -17,32 +17,15 @@
    Entry shape: { id: string, date: string (YYYY-MM-DD), title: string, items: string[] } */
 window.WHATS_NEW = [
   {
-    id: 'v2.593',
+    id: 'v2.595',
     date: '2026-07-15',
-    title: 'Earn Your Weight',
+    title: 'Autoregulation, Sharpened',
     items: [
-      "📈 Range exercises now progress the honest way. On auto and mesocycle plans, the weight only goes up once your first set reaches the top of the range (say 12 on an 8-12) and your last still holds the bottom (the 8). Then it bumps a notch and your reps reset to the bottom to climb again. No more weight sneaking up before you've fought your way to the top.",
-      "✏️ Fix a feedback answer after the fact. Tapped the wrong soreness or pump on your last auto or mesocycle session? Open it, tap the feedback recap, and correct it: your weight and set changes for next time recompute on the spot.",
-      "📌 Pin a note so you actually read it. Flip on Pin note for any exercise and its setup note pops up the moment that exercise starts in your workout, and stays until you tap it away. Made for the leg-day brain fog. 🧠",
-    ],
-  },
-  {
-    id: 'v2.590',
-    date: '2026-07-15',
-    title: 'Receipts',
-    items: [
-      "🧾 See exactly what your auto plan decided, and why. Auto, weight-only and mesocycle sessions now keep a Feedback recap: open one and tap Feedback recap to see the feedback you gave (soreness, joints, pump) and the weight and set changes you earned or lost that day. No more wondering where that extra set came from.",
-    ],
-  },
-  {
-    id: 'v2.589',
-    date: '2026-07-15',
-    title: 'Dialed In',
-    items: [
-      "🏋️ Intensity techniques now work on single-side exercises too. Drop Sets, Myo-Reps and the rest are finally available on your single-arm and single-leg work in the session editor, no more odd one out.",
-      "🎯 Add an exercise on the fly, keep it for good. When you add an exercise mid-workout and update your plan, it now asks for the rep target (uniform, per-set or a range), pre-filled with the reps you just hit, so it lands in your plan ready to go instead of blank.",
-      "🎛️ Auto plans got smarter mid-plan. Switch autoregulation on partway through a plan and it now knows you have already been training: the right questions from session one, and your weights can move straight away instead of sitting frozen for a week. In weight-only mode it now asks how the weight felt rather than about volume, since on those plans the load is the whole point.",
-      "🐛 Cursors that wandered off, back in place. The text cursor that liked to hover in the wrong spot in note and text fields now sits where you are actually typing, plus a stack of smaller fixes and polish across the app.",
+      "📈 Your weight has to earn its raise now. On auto and mesocycle plans, range exercises only bump the load once your first set reaches the top of the range (the 12 on an 8-12) and your last set still holds the bottom (the 8). Then it climbs a notch and your reps reset to fight their way back up. No more weight sneaking on before you've beaten the range.",
+      "🎛️ Turn autoregulation on mid-plan and it plays catch-up. It knows you have already been training: you get the right check-in questions from session one, and your weights can move straight away instead of sitting frozen for a week. On weight-only plans it asks how the load felt rather than about volume, since there the load is the whole point.",
+      "🧾 See what your plan decided, then fix it if you fat-fingered it. Every auto and mesocycle session keeps a Feedback recap: open one to see the soreness, joints and pump you reported and the exact weight and set changes you earned that day. Tapped the wrong answer? Correct it and next session recomputes on the spot.",
+      "📌 Pin a note so leg-day brain can't ignore it. Flip on Pin note for any exercise and its setup note pops up the moment that exercise starts in your workout, and stays until you tap it away. 🧠",
+      "🏋️ Plus a round of smaller wins: intensity techniques (drop sets, myo-reps and friends) now work on single-arm and single-leg exercises too, an exercise you add mid-workout can be kept in your plan with its rep target pre-filled, and the text cursor stopped wandering off in note fields.",
     ],
   },
   {
