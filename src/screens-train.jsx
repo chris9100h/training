@@ -3255,7 +3255,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         if (r.weight != null) parts.push(WEIGHT_LABELS[r.weight] || r.weight);
         if (r.pump != null) parts.push(PUMP_LABELS[r.pump] || r.pump);
         if (r.affinity != null) parts.push(AFFINITY_LABELS[r.affinity] || r.affinity);
-        jointRows.push({ key: 'joint-' + e.exId, title: r.exName, sub: parts.join(' · '), onEdit: () => openJointEdit(e.exId) });
+        jointRows.push({ key: 'joint-' + e.exId, title: r.exName, sub: parts.join(' · '), sel: r.answer, weight: r.weight ?? null, pump: r.pump ?? null, affinity: r.affinity ?? null, onEdit: () => openJointEdit(e.exId) });
       });
       const generalRows = [];
       if (sRec?.answer != null) {
@@ -3282,7 +3282,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     const groups = mesoRecapGroups().map(g => ({
       muscle: g.muscle,
       general: g.generalRows.map(r => ({ title: r.title, sub: r.sub })),
-      joint: g.jointRows.map(r => ({ title: r.title, sub: r.sub })),
+      joint: g.jointRows.map(r => ({ title: r.title, sub: r.sub, sel: r.sel, weight: r.weight, pump: r.pump, affinity: r.affinity })),
     })).filter(g => g.general.length || g.joint.length);
     const gainRows = (gains || []).map(g => ({
       name: g.name, weightDelta: g.weightDelta || 0, setDelta: g.setDelta || 0,
@@ -7959,25 +7959,47 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           group. */}
       {(() => {
         const detailGroup = mesoFeedbackGroups.find(g => g.muscle === mesoRecapDetailMuscle);
-        const feedbackRow = row => (
-          <button key={row.key} onClick={row.onEdit} style={{
-            width: '100%', marginBottom: 8, padding: '12px 14px',
-            background: UI.bgInset, border: `1px solid ${UI.hairStrong}`,
-            borderRadius: 6, cursor: 'pointer', textAlign: 'left',
-            display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10,
-            WebkitTapHighlightColor: 'transparent',
-          }}>
-            <div style={{ minWidth: 0 }}>
-              <div style={{ fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{row.title}</div>
-              <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 2 }}>{row.sub}</div>
-            </div>
-            <i className="fa-solid fa-chevron-right" style={{ fontSize: 11, color: UI.inkFaint, flexShrink: 0 }} />
-          </button>
-        );
+        // Per-exercise rows carry structured answers (joint/weight/pump/affinity):
+        // render them as a labelled 4-column grid (Pain / Weight / Pump / Verdict)
+        // so it's clear which value is which. General rows (Soreness, Workload)
+        // stay a simple title/value line.
+        const feedbackRow = row => {
+          const structured = row.sel != null || row.weight != null || row.pump != null || row.affinity != null;
+          return (
+            <button key={row.key} onClick={row.onEdit} style={{
+              width: '100%', marginBottom: 8, padding: '12px 14px',
+              background: UI.bgInset, border: `1px solid ${UI.hairStrong}`,
+              borderRadius: 6, cursor: 'pointer', textAlign: 'left',
+              display: structured ? 'block' : 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10,
+              WebkitTapHighlightColor: 'transparent',
+            }}>
+              {structured ? (<>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+                  <div style={{ fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, fontWeight: 600, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{row.title}</div>
+                  <i className="fa-solid fa-chevron-right" style={{ fontSize: 11, color: UI.inkFaint, flexShrink: 0 }} />
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0,1fr))', gap: 8, marginTop: 8 }}>
+                  {[['Pain', JOINT_LABELS[row.sel] ?? null], ['Weight', row.weight != null ? (WEIGHT_LABELS[row.weight] ?? row.weight) : null], ['Pump', row.pump != null ? (PUMP_LABELS[row.pump] ?? row.pump) : null], ['Verdict', row.affinity != null ? (AFFINITY_LABELS[row.affinity] ?? row.affinity) : null]].map(([lbl, val], i) => (
+                    <div key={i}>
+                      <div className="micro" style={{ color: UI.inkFaint, marginBottom: 3 }}>{lbl}</div>
+                      <div style={{ fontFamily: UI.fontUi, fontSize: 12.5, color: val ? UI.ink : UI.inkGhost, lineHeight: 1.25 }}>{val || '–'}</div>
+                    </div>
+                  ))}
+                </div>
+              </>) : (<>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{row.title}</div>
+                  <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 2 }}>{row.sub}</div>
+                </div>
+                <i className="fa-solid fa-chevron-right" style={{ fontSize: 11, color: UI.inkFaint, flexShrink: 0 }} />
+              </>)}
+            </button>
+          );
+        };
         return (
           <Sheet open={!!mesoRecapDetailMuscle} onClose={() => setMesoRecapDetailMuscle(null)} title={mesoRecapDetailMuscle ? `${mesoRecapDetailMuscle} review` : 'Review'} titleColor="var(--accent)">
             {!!detailGroup?.jointRows.length && (<>
-              <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>JOINT FEEDBACK</div>
+              <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>PER EXERCISE</div>
               <div className="knurl" style={{ marginBottom: 10 }} />
               {detailGroup.jointRows.map(feedbackRow)}
             </>)}

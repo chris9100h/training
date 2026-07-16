@@ -2922,7 +2922,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
         if (jRec.weight != null) parts.push(wLbl[jRec.weight] || jRec.weight);
         if (jRec.pump != null) parts.push(MESO_PUMP_LBL[jRec.pump] || jRec.pump);
         if (jRec.affinity != null) parts.push(MESO_AFFINITY_LBL[jRec.affinity] || jRec.affinity);
-        joint.push({ title: jRec.exName || e.name, sub: parts.join(' · ') });
+        joint.push({ title: jRec.exName || e.name, sub: parts.join(' · '), sel: jRec.answer, weight: jRec.weight ?? null, pump: jRec.pump ?? null, affinity: jRec.affinity ?? null });
       });
       const vRec = answers.volume && answers.volume[muscle];
       if (vRec && vRec.volume != null) general.push({ title: 'Workload', sub: workLbl[vRec.volume] || vRec.volume });
@@ -3234,21 +3234,44 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
           const useEdit = !!(editGroups && editGroups.length);
           const groups = useEdit
             ? editGroups.map(g => ({ muscle: g.muscle, general: g.rows.filter(r => r.type !== 'joint'), joint: g.rows.filter(r => r.type === 'joint') }))
-            : (s.mesoRecap.groups || []).map(g => ({ muscle: g.muscle, general: (g.general || []).map(r => ({ name: r.title, sub: r.sub })), joint: (g.joint || []).map(r => ({ name: r.title, sub: r.sub })) }));
+            : (s.mesoRecap.groups || []).map(g => ({ muscle: g.muscle, general: (g.general || []).map(r => ({ name: r.title, sub: r.sub })), joint: (g.joint || []).map(r => ({ name: r.title, sub: r.sub, sel: r.sel, weight: r.weight, pump: r.pump, affinity: r.affinity })) }));
           const modeLabel = s.mesoRecap.loadOnly ? 'Autoregulation · load only'
             : s.mesoRecap.meso ? `Mesocycle${s.mesoRecap.week ? ` · Week ${s.mesoRecap.week}` : ''}`
             : 'Autoregulation';
+          // Per-exercise answer as a labelled 4-column grid (Pain / Weight / Pump /
+          // Verdict) so it's unambiguous which value is which, instead of one
+          // squished "None · Hard · Amazing · Love it" line. Missing answers show
+          // a dash. Older recaps without structured values fall back to the line.
+          const FB_COLS = ['Pain', 'Weight', 'Pump', 'Verdict'];
+          const fbGridCells = (r) => [
+            MESO_JOINT_LBL[r.sel] ?? null,
+            r.weight != null ? (mesoVolumeLbl(true)[r.weight] ?? r.weight) : null,
+            r.pump != null ? (MESO_PUMP_LBL[r.pump] ?? r.pump) : null,
+            r.affinity != null ? (MESO_AFFINITY_LBL[r.affinity] ?? r.affinity) : null,
+          ];
           const fbRow = (r, key, twoLine) => {
             // Per-exercise rows (joint + weight + pump + affinity) get a two-line layout:
-            // the exercise name on its own line (no truncation), the answer summary muted
-            // beneath. Muscle-level rows (Soreness, Workload) stay one-line name/value.
+            // the exercise name on its own line (no truncation), the labelled grid beneath.
+            // Muscle-level rows (Soreness, Workload) stay one-line name/value.
             if (twoLine) {
+              const structured = r.sel != null || r.weight != null || r.pump != null || r.affinity != null;
               const body = (<>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
                   <span style={{ fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, fontWeight: 600, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name}</span>
                   {useEdit && <i className="fa-solid fa-pen" style={{ fontSize: 9, color: 'var(--accent)', flexShrink: 0 }} />}
                 </div>
-                <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.inkSoft, marginTop: 3 }}>{r.sub}</div>
+                {structured ? (
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0,1fr))', gap: 8, marginTop: 7 }}>
+                    {fbGridCells(r).map((val, i) => (
+                      <div key={i}>
+                        <div className="micro" style={{ color: UI.inkFaint, marginBottom: 3 }}>{FB_COLS[i]}</div>
+                        <div style={{ fontFamily: UI.fontUi, fontSize: 12.5, color: val ? UI.ink : UI.inkGhost, lineHeight: 1.25 }}>{val || '–'}</div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.inkSoft, marginTop: 3 }}>{r.sub}</div>
+                )}
               </>);
               if (useEdit) {
                 return (
