@@ -294,7 +294,7 @@ function AutoregGuideScreen({ store, go, mode: modeProp, back }) {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 11 }}>
               <AGStat k="Fresh" v="Push" vColor={UI.ok} s="A strong day. Train as usual and chase the bump." />
               <AGStat k="Normal" v="As usual" s="The default. Nothing changes, the engine runs normally." />
-              <AGStat k="Rough" v="+1 RIR" vColor={UI.gold} s="Low on energy. The app suggests a rep more in reserve and counts the session gently, so a bad night never cuts your progression." />
+              <AGStat k="Rough" v={isC ? '+1 RIR' : 'Ease off'} vColor={UI.gold} s={isC ? 'Low on energy. The app suggests a rep more in reserve and counts the session gently, so a bad night never cuts your progression.' : 'Low on energy. The app eases the target (leave a little more in reserve) and counts the session gently, so a bad night never cuts your progression.'} />
             </div>
             <div style={{ ...cardStyle, borderLeft: `3px solid ${UI.gold}`, marginTop: 16 }}>
               <AGKick color={UI.gold}>Why it matters</AGKick>

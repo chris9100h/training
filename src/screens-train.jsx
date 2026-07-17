@@ -792,18 +792,28 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   useEffectT(() => {
     if (session.readiness != null) return;
     const anyDone = session.entries.some(e => !e.isCardio && e.sets.some(s => s.done && !s.warmup && !s.skipped));
-    if (anyDone) return;
+    if (anyDone) {
+      // Resumed session (a working set is already logged): the readiness moment has
+      // passed, but the soreness / joint prompts are now gated on readiness != null,
+      // so stamp a neutral default here to UNBLOCK them instead of leaving null and
+      // silently swallowing this session's meso feedback.
+      updateSession(s => ({ ...s, readiness: 'normal', signalWeight: isMesoDeloadSession ? 'none' : 'full' }));
+      return;
+    }
     // Autoreg v2 P4: post-break re-entry ramp (spec 7). When a sick/vacation break
     // longer than the threshold just ended and we are still inside the first
-    // microcycle back, ease this session in WITHOUT a manual tap: stamp readiness
-    // 'reentry' + signalWeight 'discounted' (protects learning, keeps earn) and skip
-    // the prompt. The discount only lowers the suggestion, never the cap: performance
-    // overrides at the set level, so the lifter can still push to their limit and a
-    // strong return snaps straight back via earn. Deload sessions keep 'none'.
+    // microcycle back, open the readiness prompt with the eased-in option
+    // PRESELECTED (readiness 'reentry', signalWeight 'discounted' on Confirm), so the
+    // protective discount is the default but a lifter who comes back strong can still
+    // pick Fresh and drop it for this session (agency preserved). The discount only
+    // lowers the suggestion, never the cap: performance overrides at the set level, so
+    // a strong return snaps straight back via earn. Deload sessions keep 'none'.
     const rSch = store.schedules?.find(s => s.id === session.scheduleId);
     const reentry = LB.reentryRamp(store.statusPeriods, store.sessions, rSch, { todayStr: LB.todayISO() });
     if (reentry.active && store.statusMode !== 'deload' && !session.isDeload) {
-      updateSession(s => ({ ...s, readiness: 'reentry', signalWeight: 'discounted' }));
+      setReadinessReentry(true);
+      setReadinessSel('reentry');
+      setReadinessOpen(true);
       return;
     }
     setReadinessOpen(true);
@@ -2484,6 +2494,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // per session before the first working set. Skippable: a null readiness reads
   // as normal/full everywhere.
   const [readinessOpen, setReadinessOpen] = useStateT(false);
+  // Tap SELECTS an option (visual highlight), a Confirm button commits it, so a
+  // mis-tap is correctable before it takes effect. readinessReentry preselects the
+  // eased-in option after a break (see the on-mount effect above).
+  const [readinessSel, setReadinessSel] = useStateT(null);
+  const [readinessReentry, setReadinessReentry] = useStateT(false);
   const [finishOpen, setFinishOpen] = useStateT(false);
   const [finishStep, setFinishStep] = useStateT('confirm');
   const [pendingFeel, setPendingFeel] = useStateT(null);
@@ -2853,60 +2868,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     }));
   };
 
-  // Autoreg v2 P2: the shared Block-Recap content node (spec 5.1), rendered inside
-  // a confirm() sheet (its message accepts a node). `evidence` is null for the
-  // block-end CELEBRATION framing (gains only) and the detector strings for the
-  // mid-block DECLINE framing. Mirrors the durable recap render's delta chips.
-  const blockRecapNode = (recap, evidence, escalation) => {
-    const u = UI.unit();
-    const tile = (k, v) => (
-      <div style={{ background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 6, padding: '10px 12px' }}>
-        <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>{k}</div>
-        <div style={{ fontFamily: UI.fontNum, fontSize: 20, fontWeight: 700, color: UI.ink }}>{v}</div>
-      </div>
-    );
-    return (
-      <div style={{ textAlign: 'left' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0,1fr))', gap: 8, marginBottom: 16 }}>
-          {tile('Weight PRs', recap.prCount)}
-          {tile('Sessions', recap.sessionCount)}
-        </div>
-        {recap.loadPRs.length > 0 && (<>
-          <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>WHAT YOU BUILT</div>
-          <div className="knurl" style={{ marginBottom: 10 }} />
-          <div style={{ marginBottom: 16 }}>
-            {recap.loadPRs.map((g, i) => (
-              <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 0', borderBottom: i < recap.loadPRs.length - 1 ? `1px solid ${UI.hair}` : 'none' }}>
-                <span style={{ fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{g.name}</span>
-                <span style={{ fontFamily: UI.fontNum, fontSize: 12, fontWeight: 700, color: 'var(--accent)', flexShrink: 0, marginLeft: 10 }}>+{g.weightDelta} {u}</span>
-              </div>
-            ))}
-          </div>
-        </>)}
-        {recap.setGains.some(g => g.setDelta > 0) && (<>
-          <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>MORE SETS</div>
-          <div className="knurl" style={{ marginBottom: 10 }} />
-          <div style={{ marginBottom: 16 }}>
-            {recap.setGains.filter(g => g.setDelta > 0).map((g, i, arr) => (
-              <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 0', borderBottom: i < arr.length - 1 ? `1px solid ${UI.hair}` : 'none' }}>
-                <span style={{ fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{g.name}</span>
-                <span style={{ fontFamily: UI.fontNum, fontSize: 12, fontWeight: 700, color: 'var(--accent)', flexShrink: 0, marginLeft: 10 }}>+{g.setDelta} set{g.setDelta > 1 ? 's' : ''}</span>
-              </div>
-            ))}
-          </div>
-        </>)}
-        {evidence && evidence.length > 0 && (<>
-          <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>{escalation > 0 ? 'THE FATIGUE, STILL CLIMBING' : 'THE FATIGUE'}</div>
-          <div className="knurl" style={{ marginBottom: 10 }} />
-          <div>
-            {evidence.map((e, i) => (
-              <div key={i} style={{ fontFamily: UI.fontUi, fontSize: 12.5, color: UI.inkSoft, lineHeight: 1.45, marginBottom: 6 }}>{e}</div>
-            ))}
-          </div>
-        </>)}
-      </div>
-    );
-  };
+  // Autoreg v2 P2: thin wrapper over the shared top-level BlockRecap component
+  // (screens-lib.jsx), so the training screen and the home 8-cycle nudge render the
+  // identical recap with no duplication. `evidence` null + escalation 0 is the
+  // block-end CELEBRATION framing; a non-null evidence array is the DECLINE framing.
+  const blockRecapNode = (recap, evidence, escalation) => (
+    <BlockRecap recap={recap} evidence={evidence} escalation={escalation} />
+  );
 
   const handleMesoComplete = async () => {
     const scheduleId = session.scheduleId;
@@ -3666,6 +3634,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       negOwner: { ...(mesoNegativeDeltaKeysRef.current || {}) },
       frozen: !!(mesoLastWeek || weightFeelMode),
       dayId: session.dayId ?? null,
+      // Pre-session rep-miss streak (before computeMesoGains advanced it): captured
+      // so a post-hoc readiness edit can recompute this session's cut cleanly (a
+      // full->discounted edit restores the frozen streak from here). mesoState is the
+      // still-pre-session React closure at this point, so its counts are the base.
+      repMissBase: { ...(mesoState.repMissCounts || {}) },
     } : null;
     return {
       loadOnly: !!weightFeelMode,
@@ -3845,6 +3818,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // Soreness trigger: fires when exIdx changes to first exercise of a new muscle group
   useEffectT(() => {
     if (!mesoState || !entry || isCardio || isMesoDeloadSession) return;
+    if (session.readiness == null) return; // readiness is always the first prompt of a session
     if (mesoWeek == null) return; // pending period — meso not yet started
     if (peekSuppressIdxRef.current === exIdx) return; // reached here by peeking, not progression
     if (mesoLastWeek) return; // final week: set deltas frozen, and soreness only drives deltas
@@ -3885,7 +3859,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // this flag in the same render pass and defers until soreness is answered.
     sorenessPendingRef.current = true;
     setMesoSorenessOpen(true);
-  }, [exIdx, !!mesoState, mesoJointOpen, mesoVolumeOpen]);
+  }, [exIdx, !!mesoState, mesoJointOpen, mesoVolumeOpen, session.readiness]);
 
   // Pinned exercise note: a must-acknowledge cue that also fires on exercise
   // start, but AFTER the soreness recovery check. Declared after the soreness
@@ -3911,6 +3885,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // ask joint feedback. Fires whenever the current entry's sets change.
   useEffectT(() => {
     if (!mesoState || !entry || isCardio || isMesoDeloadSession) return;
+    if (session.readiness == null) return; // readiness is always the first prompt of a session
     if (mesoWeek == null) return; // pending period — meso not yet started
     const exId = entry.exId;
     if (askedJointRef.current.has(exId)) return;
@@ -3938,7 +3913,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // set (skipped, not done) must still re-run this effect. Keying only on
     // `done` left the signature unchanged on a skip, so the joint/pump/volume
     // sheet never fired and its boost gates / volume feedback were skipped.
-  }, [exIdx, entry?.sets?.map(s => s.done ? 1 : s.skipped ? 2 : 0).join(','), !!mesoState]);
+  }, [exIdx, entry?.sets?.map(s => s.done ? 1 : s.skipped ? 2 : 0).join(','), !!mesoState, session.readiness]);
 
   const tempoTimerRef = useRefT(null);
   const audioCtxRef = useRefT(null);
@@ -5371,41 +5346,57 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   }, [entry, isCardio, exIdx, mesoPartials, dropSetIdx, myoSetIdx, avSetIdx, lpTarget, wsTarget]);
 
   // Autoreg v2 P0: commit a readiness choice and its derived signalWeight.
-  // Deload always stays 'none' (no earn, no cut). Rough discounts the session
-  // (keeps earn, skips the rep-miss cut). Fresh / Normal are full.
+  // Deload always stays 'none' (no earn, no cut). Rough and the re-entry ramp both
+  // discount the session (keep earn, skip the rep-miss cut). Fresh / Normal are full.
   const chooseReadiness = (readiness) => {
-    const signalWeight = isMesoDeloadSession ? 'none' : (readiness === 'rough' ? 'discounted' : 'full');
+    const signalWeight = isMesoDeloadSession
+      ? 'none'
+      : ((readiness === 'rough' || readiness === 'reentry') ? 'discounted' : 'full');
     updateSession(s => ({ ...s, readiness, signalWeight }));
     setReadinessOpen(false);
+    setReadinessReentry(false);
+    setReadinessSel(null);
   };
+  // Rough copy is mode-aware: RIR only exists on a bounded meso / RIR-enabled plan
+  // (mesoRirVal != null). In the autoreg modes (no weeks => no RIR) the '+1 RIR'
+  // phrasing is wrong, so use a neutral, non-binding suggestion instead.
+  const roughSub = mesoRirVal != null
+    ? 'Low on energy: we ease the target (+1 RIR), earn still counts'
+    : 'Low on energy: ease off a touch and leave more in reserve, earn still counts';
   // Rendered in BOTH return paths (empty freestyle early return + main return),
-  // so an ad-hoc empty session gets the prompt too.
+  // so an ad-hoc empty session gets the prompt too. A tap SELECTS an option (accent
+  // highlight); the Confirm button commits it, so a mis-tap is correctable first.
   const readinessSheet = (
-    <Sheet open={readinessOpen} onClose={() => chooseReadiness('normal')} title="How do you feel today?">
-      <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 20, lineHeight: 1.5 }}>
-        One tap sets today's baseline. It only nudges the suggestion, you can always push to your limit.
+    <Sheet open={readinessOpen} onClose={() => chooseReadiness(readinessSel || 'normal')} title="How do you feel today?">
+      <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: readinessReentry ? 12 : 20, lineHeight: 1.5 }}>
+        Pick today's baseline, then Confirm. It only nudges the suggestion, you can always push to your limit.
       </div>
+      {readinessReentry && (
+        <div style={{ fontSize: 12.5, color: 'var(--accent)', fontFamily: UI.fontUi, marginBottom: 16, lineHeight: 1.5 }}>
+          Coming back from a break, so we preselected an easier day to protect your return. Feeling strong? Pick Fresh.
+        </div>
+      )}
       {[
         { key: 'fresh',  label: 'Fresh',  sub: 'Feeling strong, ready to push' },
         { key: 'normal', label: 'Normal', sub: 'A regular day, train as usual' },
-        { key: 'rough',  label: 'Rough',  sub: 'Low on energy: we ease the target (+1 RIR), earn still counts' },
-      ].map(opt => (
-        <button key={opt.key} onClick={() => chooseReadiness(opt.key)} style={{
-          width: '100%', marginBottom: 8, padding: '14px 16px',
-          background: UI.bgInset,
-          border: `1px solid ${UI.hairStrong}`,
-          borderRadius: 6, cursor: 'pointer', textAlign: 'left',
-          WebkitTapHighlightColor: 'transparent',
-        }}>
-          <div style={{ fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, fontWeight: 600 }}>{opt.label}</div>
-          <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 2 }}>{opt.sub}</div>
-        </button>
-      ))}
-      <button onClick={() => chooseReadiness('normal')} style={{
-        width: '100%', marginTop: 4, padding: '10px', background: 'transparent',
-        border: 'none', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 12,
-        cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
-      }}>Skip</button>
+        { key: 'rough',  label: 'Rough',  sub: roughSub },
+      ].map(opt => {
+        const sel = readinessSel === opt.key || (readinessSel === 'reentry' && opt.key === 'rough');
+        return (
+          <button key={opt.key} onClick={() => setReadinessSel(opt.key)} style={{
+            width: '100%', marginBottom: 8, padding: '14px 16px',
+            background: sel ? 'rgba(var(--accent-rgb),0.12)' : UI.bgInset,
+            border: `1px solid ${sel ? 'var(--accent)' : UI.hairStrong}`,
+            borderRadius: 6, cursor: 'pointer', textAlign: 'left',
+            WebkitTapHighlightColor: 'transparent',
+          }}>
+            <div style={{ fontFamily: UI.fontUi, fontSize: 14, color: sel ? 'var(--accent)' : UI.ink, fontWeight: 600 }}>{opt.label}</div>
+            <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 2 }}>{opt.sub}</div>
+          </button>
+        );
+      })}
+      <Btn onClick={() => chooseReadiness(readinessSel || 'normal')} style={{ width: '100%', marginTop: 12 }}>Confirm</Btn>
+      <Btn kind="ghost" onClick={() => chooseReadiness('normal')} style={{ width: '100%', marginTop: 8 }}>Skip</Btn>
     </Sheet>
   );
 
@@ -6246,14 +6237,15 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                       the session is discounted (no rep-miss cut) but you can still push. */}
                   {session.readiness === 'rough' && !isCurrentWarmup && (
                     <div className="micro" style={{ color: UI.inkSoft, opacity: 0.8, marginTop: 3 }}>
-                      Rough day · +1 RIR suggested
+                      {mesoRirVal != null ? 'Rough day · +1 RIR suggested' : 'Rough day · ease off, more in reserve'}
                     </div>
                   )}
                   {/* Autoreg v2 P4: post-break re-entry ramp. Non-binding, display only:
-                      the session is discounted (protects learning) but you can still push. */}
+                      the session is discounted (protects learning) but you can still push.
+                      RIR phrasing only where RIR exists (mesoRirVal != null). */}
                   {session.readiness === 'reentry' && !isCurrentWarmup && (
                     <div className="micro" style={{ color: UI.inkSoft, opacity: 0.8, marginTop: 3 }}>
-                      Coming back · easing in, +1 RIR suggested
+                      {mesoRirVal != null ? 'Coming back · easing in, +1 RIR suggested' : 'Coming back · easing in, more in reserve'}
                     </div>
                   )}
                   {/* Range's own configured span is shown as a permanent badge next to the

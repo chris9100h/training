@@ -114,7 +114,7 @@
     out+='<div class="grid g180">'+
       stat('Fresh','Push','var(--ok)','A strong day. Train as usual and chase the bump.')+
       stat('Normal','As usual',null,'The default. Nothing changes, the engine runs normally.')+
-      stat('Rough','+1 RIR','var(--accent)','Low on energy. The app suggests a rep more in reserve and counts the session gently, so a bad night never cuts your progression.')+
+      stat('Rough',isC?'+1 RIR':'Ease off','var(--accent)',isC?'Low on energy. The app suggests a rep more in reserve and counts the session gently, so a bad night never cuts your progression.':'Low on energy. The app eases the target (leave a little more in reserve) and counts the session gently, so a bad night never cuts your progression.')+
       '</div>';
     out+='<div class="card lb accented" style="margin-top:16px"><div class="kick" style="color:var(--accent)">Why it matters</div>'+
       '<div style="margin-top:6px;font-size:13.5px;color:var(--ink-soft)"><b>A rough day is discounted, not thrown away.</b> On Rough the app holds off the rep-miss cut and does not chase the earn ladder, so one tired session can never drag your weight down. If you push through and hit your reps anyway, the bump still lands. Skip the tap to train exactly as normal.</div></div>';

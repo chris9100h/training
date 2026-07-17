@@ -43,6 +43,66 @@ const MESO_AFFINITY_LBL = { love: 'Love it', ok: "It's fine", dislike: 'Not my l
 const mesoVolumeLbl = (loadOnly) => loadOnly
   ? { not_enough: 'Too light', just_right: 'Just right', pushed: 'Hard', too_much: 'Too heavy' }
   : { not_enough: 'Not enough', just_right: 'Just right', pushed: 'Pushed my limits', too_much: 'Too much' };
+// Readiness labels for the recap edit row (mirrors the live sheet in screens-train.jsx).
+// 'reentry' is the auto-stamped post-break ramp (discounted, like Rough).
+const MESO_READINESS_LBL = { fresh: 'Fresh', normal: 'Normal', rough: 'Rough day', reentry: 'Easing back in' };
+
+// Autoreg v2 P2: shared Block-Recap content node (spec 5.1), rendered inside a
+// confirm() sheet (its message accepts a node). Pure: depends only on the global UI
+// object and its args, no store/closure state, so both the training screen (via the
+// blockRecapNode wrapper) and the home 8-cycle nudge render the identical recap.
+// evidence null + escalation 0 is the block-end CELEBRATION framing (gains only); a
+// non-null evidence array is the mid-block DECLINE framing (adds the fatigue section).
+function BlockRecap({ recap, evidence = null, escalation = 0 }) {
+  const u = UI.unit();
+  const tile = (k, v) => (
+    <div style={{ background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 6, padding: '10px 12px' }}>
+      <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>{k}</div>
+      <div style={{ fontFamily: UI.fontNum, fontSize: 20, fontWeight: 700, color: UI.ink }}>{v}</div>
+    </div>
+  );
+  return (
+    <div style={{ textAlign: 'left' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0,1fr))', gap: 8, marginBottom: 16 }}>
+        {tile('Weight PRs', recap.prCount)}
+        {tile('Sessions', recap.sessionCount)}
+      </div>
+      {recap.loadPRs.length > 0 && (<>
+        <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>WHAT YOU BUILT</div>
+        <div className="knurl" style={{ marginBottom: 10 }} />
+        <div style={{ marginBottom: 16 }}>
+          {recap.loadPRs.map((g, i) => (
+            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 0', borderBottom: i < recap.loadPRs.length - 1 ? `1px solid ${UI.hair}` : 'none' }}>
+              <span style={{ fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{g.name}</span>
+              <span style={{ fontFamily: UI.fontNum, fontSize: 12, fontWeight: 700, color: 'var(--accent)', flexShrink: 0, marginLeft: 10 }}>+{g.weightDelta} {u}</span>
+            </div>
+          ))}
+        </div>
+      </>)}
+      {recap.setGains.some(g => g.setDelta > 0) && (<>
+        <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>MORE SETS</div>
+        <div className="knurl" style={{ marginBottom: 10 }} />
+        <div style={{ marginBottom: 16 }}>
+          {recap.setGains.filter(g => g.setDelta > 0).map((g, i, arr) => (
+            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 0', borderBottom: i < arr.length - 1 ? `1px solid ${UI.hair}` : 'none' }}>
+              <span style={{ fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{g.name}</span>
+              <span style={{ fontFamily: UI.fontNum, fontSize: 12, fontWeight: 700, color: 'var(--accent)', flexShrink: 0, marginLeft: 10 }}>+{g.setDelta} set{g.setDelta > 1 ? 's' : ''}</span>
+            </div>
+          ))}
+        </div>
+      </>)}
+      {evidence && evidence.length > 0 && (<>
+        <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>{escalation > 0 ? 'THE FATIGUE, STILL CLIMBING' : 'THE FATIGUE'}</div>
+        <div className="knurl" style={{ marginBottom: 10 }} />
+        <div>
+          {evidence.map((e, i) => (
+            <div key={i} style={{ fontFamily: UI.fontUi, fontSize: 12.5, color: UI.inkSoft, lineHeight: 1.45, marginBottom: 6 }}>{e}</div>
+          ))}
+        </div>
+      </>)}
+    </div>
+  );
+}
 
 // Toggle shown under a non-empty exercise note: pins the note so it pops up and
 // must be acknowledged at the start of that exercise every workout (zane_exercises
@@ -2901,11 +2961,15 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
       const ex = store.exercises?.find(x => x.id === e.exId);
       const muscle = typeof primaryMuscleForExercise === 'function' ? primaryMuscleForExercise(ex) : null;
       const workingSets = (e.sets || []).filter(st => !st.warmup && !st.skipped);
-      const allHit = workingSets.some(st => st.done)
-        && LB.mesoRepOutcome(workingSets, e.plannedReps ?? null, e.plannedRepsPerSet, e.plannedRepsMax ?? null).allHit;
+      // attempted mirrors computeMesoGains' `!workingSets.some(done) continue` guard:
+      // an untouched exercise is neither a hit nor a rep miss and must not move the streak.
+      const attempted = workingSets.length > 0 && workingSets.some(st => st.done);
+      const outcome = LB.mesoRepOutcome(workingSets, e.plannedReps ?? null, e.plannedRepsPerSet, e.plannedRepsMax ?? null);
+      const allHit = attempted && outcome.allHit;
+      const earlyMiss = attempted && outcome.earlyMiss; // feeds the rep-miss cut recompute
       const catCfg = ex?.equipment ? (store.settings?.equipmentConfig?.[ex.equipment] ?? {}) : {};
       const increment = catCfg.increment ?? (unit === 'lbs' ? 5 : 2.5);
-      out.push({ exId: e.exId, key: e.exId + '_' + s.dayId, muscle, allHit, increment, name: e.name });
+      out.push({ exId: e.exId, key: e.exId + '_' + s.dayId, muscle, allHit, earlyMiss, attempted, increment, name: e.name });
     });
     return out;
   };
@@ -2940,6 +3004,42 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
   };
   const saveFeedbackEdit = (edit) => {
     if (!sessionMeso || !fbRaw) { setFbEdit(null); return; }
+    // Readiness edit: change the session's readiness + signalWeight, and RESPECT the
+    // new signalWeight so it is not cosmetic. A full->discounted edit freezes the
+    // rep-miss cut (drops this session's -increment and restores the frozen streak);
+    // discounted->full re-enables it. The EARN side stays allowed on discounted, so
+    // it is re-earned unchanged from the (untouched) answers. There is no answer-record
+    // diff here, so bypass applyMesoFeedbackEdit entirely.
+    if (edit.type === 'readiness') {
+      const readiness = edit.readiness;
+      // Editable sessions are never deload (isMesoSessionEditable excludes it), so the
+      // map is rough/reentry -> discounted, else full. Mirrors chooseReadiness.
+      const oldSignal = s.signalWeight || 'full';
+      const newSignal = (readiness === 'rough' || readiness === 'reentry') ? 'discounted' : 'full';
+      const earnInputs = fbEarnInputs();
+      const repMissBase = fbRaw.repMissBase || null;
+      // 1. Recompute the CUT for the signalWeight flip (no-op on a same-side edit).
+      const cutMeso = LB.recomputeMesoRepMissCut(sessionMeso, earnInputs, repMissBase, oldSignal, newSignal);
+      // 2. Re-earn the EARN side from the unchanged answers (discounted still earns);
+      //    reearn preserves a re-armed cut and drops a frozen one.
+      const newMeso = LB.reearnMesoBoostsFromAnswers(cutMeso, fbRaw.answers, earnInputs, fbLoadOnly);
+      const gains = LB.mesoRecapGainsFromEdit(fbRaw.answers, newMeso.weightBoosts, earnInputs, s.dayId);
+      const groups = fbGroupsForStore(fbRaw.answers);
+      const stampedMeso = { ...newMeso, updatedAt: new Date().toISOString() };
+      const newRecap = { ...s.mesoRecap, groups, gains, raw: fbRaw };
+      // Move the store copy and the per-plan localStorage cache together (fresh
+      // updatedAt) so getMesoState never masks the edit with a stale cache.
+      if (typeof MESO_KEY === 'string') {
+        try { localStorage.setItem(MESO_KEY + '-' + s.scheduleId, JSON.stringify(stampedMeso)); } catch {}
+      }
+      setStore(st => ({
+        ...st,
+        mesoStates: (st.mesoStates || []).map(m => m.id === sessionMeso.id ? stampedMeso : m),
+        sessions: st.sessions.map(x => x.id === sessionId ? { ...x, readiness, signalWeight: newSignal, mesoRecap: newRecap } : x),
+      }));
+      setFbEdit(null);
+      return;
+    }
     // Autoreg v2 P1 MRV cap: re-run the stateless overreach detector so a post-hoc
     // edit freezes a positive set-add for an at-ceiling muscle exactly like the
     // live session would have (spec 2.2 / 2.3). typeof-guarded: primaryMuscleForExercise
@@ -3365,6 +3465,16 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                   </button>
                   {recapFbOpen && (
                     <div style={{ padding: '2px 12px 12px' }}>
+                      {/* Session-level readiness row (above the per-muscle groups). Editing
+                          it flips signalWeight and re-runs the cut recompute (saveFeedbackEdit),
+                          so it is not cosmetic. Tap-to-fix only on the still-editable session. */}
+                      {s.readiness != null && (
+                        <div style={{ background: 'rgba(var(--knurl-rgb),0.03)', border: `1px solid ${UI.hair}`, borderRadius: 6, padding: '13px 14px 6px', marginBottom: 8 }}>
+                          <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>Session</div>
+                          <div className="knurl" style={{ marginBottom: 4 }} />
+                          {fbRow({ type: 'readiness', subject: sessionId, name: 'Readiness', sub: MESO_READINESS_LBL[s.readiness] || s.readiness, sel: s.readiness }, 'readiness', false)}
+                        </div>
+                      )}
                       {groups.map((g, gi) => (
                         <div key={gi} style={{ background: 'rgba(var(--knurl-rgb),0.03)', border: `1px solid ${UI.hair}`, borderRadius: 6, padding: '13px 14px 10px', marginBottom: gi < groups.length - 1 ? 8 : 0 }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
@@ -3438,8 +3548,31 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
         {/* Meso feedback edit picker (post-hoc correction of the last session) */}
         {fbEdit && (
           <Sheet open={!!fbEdit} onClose={() => setFbEdit(null)}
-            title={fbEdit.type === 'joint' ? (fbEdit.name || 'Feedback') : fbEdit.type === 'volume' ? 'Workload' : 'Soreness check'}
+            title={fbEdit.type === 'joint' ? (fbEdit.name || 'Feedback') : fbEdit.type === 'volume' ? 'Workload' : fbEdit.type === 'readiness' ? 'Readiness' : 'Soreness check'}
             titleColor="var(--accent)">
+            {fbEdit.type === 'readiness' && (<>
+              <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: 1.5 }}>
+                How you felt sets how much this session counts. A rough day freezes the load cut (your streak pauses), a full day lets it move. Earn always counts.
+              </div>
+              {[
+                { key: 'fresh', label: 'Fresh', sub: 'Feeling strong, counts in full' },
+                { key: 'normal', label: 'Normal', sub: 'A regular day, counts in full' },
+                { key: 'rough', label: 'Rough', sub: 'Low on energy, the load cut is frozen, earn still counts' },
+              ].map(opt => {
+                const sel = fbEdit.sel === opt.key || (fbEdit.sel === 'reentry' && opt.key === 'rough');
+                return (
+                  <button key={opt.key} onClick={() => setFbEdit(e => ({ ...e, sel: opt.key }))} style={{
+                    width: '100%', marginBottom: 8, padding: '12px 14px',
+                    background: sel ? 'rgba(var(--accent-rgb),0.12)' : UI.bgInset,
+                    border: `1px solid ${sel ? 'var(--accent)' : UI.hairStrong}`, borderRadius: 6, cursor: 'pointer', textAlign: 'left', WebkitTapHighlightColor: 'transparent',
+                  }}>
+                    <div style={{ fontFamily: UI.fontUi, fontSize: 13, color: sel ? 'var(--accent)' : UI.ink, fontWeight: 600 }}>{opt.label}</div>
+                    <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 2 }}>{opt.sub}</div>
+                  </button>
+                );
+              })}
+              <Btn disabled={!fbEdit.sel} onClick={() => saveFeedbackEdit({ type: 'readiness', readiness: fbEdit.sel })} style={{ width: '100%', marginTop: 12 }}>Save changes</Btn>
+            </>)}
             {fbEdit.type === 'soreness' && (<>
               <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: 1.5 }}>
                 Soreness carryover from your last <strong style={{ color: UI.ink }}>{fbEdit.subject}</strong> workout?

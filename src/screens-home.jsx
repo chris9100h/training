@@ -2083,6 +2083,16 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     if (!shouldPrompt) return;
     deloadNudgeShown.current = true;
     (async () => {
+      // Autoreg v2 P2: on an Auto-meso plan (unbounded autoregulate; bounded mesos are
+      // suppressed above at sch.mesocycle_weeks), show the block-end CELEBRATION recap
+      // before the deload nudge, so a cruising lifter who never overreaches still gets a
+      // periodic recap of what they built. Plain cycle/weekday/flex plans have no
+      // mesoState, so blockSessions returns [] and the gate below skips the recap.
+      const mesoState = (typeof getMesoState === 'function') ? getMesoState(sch.id, store.mesoStates) : null;
+      const bRecap = LB.buildBlockRecap(LB.blockSessions(store.sessions, mesoState, store.statusPeriods));
+      if (bRecap && (bRecap.prCount > 0 || bRecap.setGains.some(g => g.setDelta > 0))) {
+        await confirm(<BlockRecap recap={bRecap} />, { title: 'Block complete 🎉', ok: "Let's go", cancel: null, preventBackdropClose: true });
+      }
       const yes = await confirm(body, { title, ok: 'Start deload', cancel: 'Not now', preventBackdropClose: true });
       const stamp = new Date().toISOString();
       setStore(s => ({ ...s, deloadPromptDismissedAt: stamp }));

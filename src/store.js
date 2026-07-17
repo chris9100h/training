@@ -4928,6 +4928,53 @@ function mesoRecapGainsFromEdit(answers, weightBoosts, earnInputs, dayId) {
   return gains;
 }
 
+// Recompute this (top-of-stack) session's rep-miss CUT + streak contribution when a
+// post-hoc readiness edit flips its signalWeight, mirroring computeMesoGains' cut
+// gate (screens-train.jsx). A 'full' session advances the per-key miss streak and,
+// at 2 consecutive early misses, cuts the weight one increment; 'discounted'/'none'
+// FREEZE the streak and take no cut (spec 4.3). Because the live re-earn
+// (reearnMesoBoostsFromAnswers) PRESERVES an existing negative boost, dropping a
+// frozen cut must happen here explicitly, and re-arming a cut here lets the re-earn
+// carry it. Only the full-vs-non-full flip changes anything, so a same-side edit
+// (fresh->normal, both 'full') is a no-op.
+// earnInputs = this session's exercises [{ key, increment, earlyMiss, attempted }].
+// repMissBase = the per-key miss streak BEFORE this session (mesoRecap.raw.repMissBase);
+//   falls back to the current counts when absent (older sessions): exact for a
+//   'discounted' origin (which never advanced the streak) and a safe degrade for a
+//   'full' origin (the cut is still dropped, only the restored streak may be approximate).
+// Pure: returns a new mesoState with repMissCounts + weightBoosts adjusted.
+function recomputeMesoRepMissCut(mesoState, earnInputs, repMissBase, oldSignal, newSignal) {
+  if (!mesoState) return mesoState;
+  // A same-side flip (both full, or both non-full) leaves the cut/streak untouched.
+  if ((oldSignal === 'full') === (newSignal === 'full')) return mesoState;
+  const repMissCounts = { ...(mesoState.repMissCounts || {}) };
+  const weightBoosts = { ...(mesoState.weightBoosts || {}) };
+  const base = repMissBase || mesoState.repMissCounts || {};
+  const seen = new Set();
+  for (const e of (earnInputs || [])) {
+    const key = e.key;
+    if (seen.has(key)) continue; // one advance per key per session (mirrors streakSeen)
+    // Skip an unattempted exposure BEFORE marking the key seen (mirrors
+    // computeMesoGains), so a later attempted occurrence of a duplicate key still advances.
+    if (!e.attempted) continue;
+    seen.add(key);
+    const b = base[key] || 0;
+    const clearCut = () => { if ((weightBoosts[key] || 0) < 0) delete weightBoosts[key]; };
+    if (newSignal === 'full') {
+      if (e.earlyMiss) {
+        const n = b + 1;
+        if (n >= 2) { repMissCounts[key] = 0; weightBoosts[key] = -e.increment; }
+        else { repMissCounts[key] = n; clearCut(); }
+      } else { repMissCounts[key] = 0; clearCut(); }
+    } else {
+      // discounted / none: freeze the streak at its pre-session base, drop the cut.
+      repMissCounts[key] = b;
+      clearCut();
+    }
+  }
+  return { ...mesoState, repMissCounts, weightBoosts };
+}
+
 // Reconcile the Smart-Progression suggestion with the meso weight boost when
 // seeding an exercise. On an autoregulating plan the feedback engine is the
 // sole authority over next-session weight:
@@ -5687,8 +5734,9 @@ function suggestSwap(exId, exercises, systemExercises, muscleOf, opts = {}) {
 // Post-break re-entry ramp (spec 7). PURE/stateless: derived from statusPeriods +
 // session dates, no new persistence. Finds the most-recent CLOSED sick/vacation
 // period; if it ran longer than REENTRY_MIN_BREAK_DAYS the first sessions back get
-// an eased-in suggestion (the caller stamps signalWeight='discounted' + a +1 RIR
-// hint, reusing the P0 readiness path). The systemic ease-in decays over ONE
+// an eased-in suggestion (the caller PRESELECTS the eased-in readiness option, so
+// signalWeight='discounted' commits on Confirm with an easier-target hint that is
+// mode-aware, reusing the P0 readiness path). The systemic ease-in decays over ONE
 // microcycle by plan structure, NOT raw sessions (spec 2.1): flex counts a full
 // rotation of trained sessions, weekday/cycle a calendar window. A long break
 // stretches it over two microcycles. The ramp only lowers the SUGGESTION, never the
@@ -6020,6 +6068,6 @@ window.LB = {
   blockStartTs, blockSessions, buildBlockRecap, deloadNudgeDecision, recordDeloadDecline, clearDeloadNudge,
   updateLandmarkMrv, snapshotBlockStart, backoffDeltas,
   detectStall, suggestSwap, reentryRamp,
-  mesoGateSetsFromAnswers, isMesoSessionEditable, applyMesoFeedbackEdit, reearnMesoBoostsFromAnswers, mesoRecapGainsFromEdit,
+  mesoGateSetsFromAnswers, isMesoSessionEditable, applyMesoFeedbackEdit, reearnMesoBoostsFromAnswers, mesoRecapGainsFromEdit, recomputeMesoRepMissCut,
   mesoSetTarget, mesoEarnTarget, mesoRepOutcome, reshapeSetsUnilateral,
 };

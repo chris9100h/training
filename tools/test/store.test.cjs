@@ -2987,6 +2987,51 @@ async function testAsync(name, fn) {
     assert.ok(!capped.mesoState.deltas.e1_d0, 'no soreness +1 while at ceiling');
   });
 
+  // ── Autoreg v2 polish: readiness-edit rep-miss cut recompute ─────────────────
+  // recomputeMesoRepMissCut mirrors computeMesoGains' cut gate: a 'full' session
+  // advances the per-key miss streak (cut at 2 early misses); 'discounted' freezes it.
+  test('recomputeMesoRepMissCut: full->discounted freezes an applied rep-miss cut', () => {
+    // Session was logged 'full' with an early miss that tripped the 2nd-miss cut:
+    // weightBoosts[e1_d1] = -2.5, repMissCounts reset to 0, streak base was 1.
+    const ms = { repMissCounts: { e1_d1: 0 }, weightBoosts: { e1_d1: -2.5 } };
+    const earnInputs = [{ key: 'e1_d1', increment: 2.5, earlyMiss: true, attempted: true }];
+    const out = LB.recomputeMesoRepMissCut(ms, earnInputs, { e1_d1: 1 }, 'full', 'discounted');
+    assert.ok(!('e1_d1' in out.weightBoosts) || out.weightBoosts.e1_d1 >= 0, 'the -increment cut is dropped on discounted');
+    assert.strictEqual(out.repMissCounts.e1_d1, 1, 'the streak is restored to its pre-session base, frozen');
+  });
+
+  test('recomputeMesoRepMissCut: discounted->full re-enables the cut from the frozen streak', () => {
+    // Session was 'discounted' so it never advanced the streak (base == current == 1),
+    // and no cut was applied. Flipping to 'full' with an early miss reaches 2 -> cut.
+    const ms = { repMissCounts: { e1_d1: 1 }, weightBoosts: {} };
+    const earnInputs = [{ key: 'e1_d1', increment: 2.5, earlyMiss: true, attempted: true }];
+    const out = LB.recomputeMesoRepMissCut(ms, earnInputs, { e1_d1: 1 }, 'discounted', 'full');
+    assert.strictEqual(out.weightBoosts.e1_d1, -2.5, 'the cut is re-armed at 2 consecutive misses');
+    assert.strictEqual(out.repMissCounts.e1_d1, 0, 'the streak resets after the cut, as in computeMesoGains');
+  });
+
+  test('recomputeMesoRepMissCut: discounted->full with one miss advances but does not cut', () => {
+    const ms = { repMissCounts: { e1_d1: 0 }, weightBoosts: {} };
+    const earnInputs = [{ key: 'e1_d1', increment: 2.5, earlyMiss: true, attempted: true }];
+    const out = LB.recomputeMesoRepMissCut(ms, earnInputs, { e1_d1: 0 }, 'discounted', 'full');
+    assert.strictEqual(out.repMissCounts.e1_d1, 1, 'streak advances to 1');
+    assert.ok(!('e1_d1' in out.weightBoosts), 'no cut yet at a single miss');
+  });
+
+  test('recomputeMesoRepMissCut: a same-side edit (full->full) is a no-op', () => {
+    const ms = { repMissCounts: { e1_d1: 0 }, weightBoosts: { e1_d1: -2.5 } };
+    const earnInputs = [{ key: 'e1_d1', increment: 2.5, earlyMiss: true, attempted: true }];
+    const out = LB.recomputeMesoRepMissCut(ms, earnInputs, { e1_d1: 1 }, 'full', 'full');
+    assert.strictEqual(out, ms, 'no-op returns the same object, leaving the cut untouched');
+  });
+
+  test('recomputeMesoRepMissCut: an unattempted exercise never touches the streak', () => {
+    const ms = { repMissCounts: { e1_d1: 1 }, weightBoosts: {} };
+    const earnInputs = [{ key: 'e1_d1', increment: 2.5, earlyMiss: false, attempted: false }];
+    const out = LB.recomputeMesoRepMissCut(ms, earnInputs, { e1_d1: 1 }, 'discounted', 'full');
+    assert.strictEqual(out.repMissCounts.e1_d1, 1, 'the streak is left as-is for an unattempted lift');
+  });
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();
