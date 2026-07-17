@@ -4363,8 +4363,11 @@ function SessionEditSheet({ session, duration, exercises, store, setStore, onClo
     }
     // Autoreg v2 swap re-key (#1 / #E): if a swap corrected an entry's exId, the captured
     // meso feedback is keyed by the OLD exId; a later feedback edit / delete / revoke
-    // re-derives its keys from the CURRENT entry exId and would miss it. For each swap,
-    // pick the scope:
+    // re-derives its keys from the CURRENT entry exId and would miss it. Decide AND apply
+    // BOTH the recap re-key and the meso-row re-key TOGETHER inside ONE functional updater
+    // reading FRESH state, so the owner/clobber decision and the two moves can never
+    // disagree (a concurrent sync between render and commit can't leave raw re-keyed while
+    // the row is not). Per swap:
     //   FULL (recap raw + the exId_dayId meso ROW levers move together) when this session
     //   OWNS the levers: no later same-day ended session on the plan retrained the old
     //   exId, and the new exId has no lever of its own to clobber. Then the corrected
@@ -4373,37 +4376,41 @@ function SessionEditSheet({ session, duration, exercises, store, setStore, onClo
     //   sync with the unremapped deltas) otherwise, which is always safe.
     // Same-index compare: SessionEditSheet only edits sets / swaps exIds, never
     // adds/removes/reorders entries.
-    if (session.mesoRecap?.raw?.answers) {
-      let raw = session.mesoRecap.raw;
-      const mesoRow = session.scheduleId ? (store.mesoStates || []).find(m => m.scheduleId === session.scheduleId) : null;
-      const rowSwaps = [];
-      (session.entries || []).forEach((orig, i) => {
-        const now = draftEntries[i];
-        if (!now || !orig || now.isCardio || now.exId === orig.exId) return;
-        const oldExId = orig.exId, newExId = now.exId;
-        const owner = !!mesoRow
-          && !LB.laterSessionTrainsExId(store.sessions, oldExId, session.dayId, session.ended, sessionId, session.scheduleId)
-          && !LB.mesoRowHasExId(mesoRow, newExId, session.dayId);
-        if (owner) {
-          raw = LB.remapMesoRecapRawForSwap(raw, oldExId, newExId, session.dayId, now.name);
-          rowSwaps.push({ oldExId, newExId });
-        } else {
-          const na = LB.remapMesoAnswersExId(raw.answers, oldExId, newExId, now.name);
-          if (na !== raw.answers) raw = { ...raw, answers: na };
-        }
-      });
-      if (raw !== session.mesoRecap.raw) patch.mesoRecap = { ...session.mesoRecap, raw };
-      if (rowSwaps.length && session.scheduleId) {
-        setStore(st => ({
+    const swaps = [];
+    (session.entries || []).forEach((orig, i) => {
+      const now = draftEntries[i];
+      if (now && orig && !now.isCardio && now.exId !== orig.exId) swaps.push({ oldExId: orig.exId, newExId: now.exId, name: now.name });
+    });
+    if (swaps.length && session.mesoRecap?.raw?.answers) {
+      setStore(st => {
+        const row = session.scheduleId ? (st.mesoStates || []).find(m => m.scheduleId === session.scheduleId) : null;
+        let raw = session.mesoRecap.raw;
+        let nextRow = row;
+        swaps.forEach(sw => {
+          const owner = !!row
+            && !LB.laterSessionTrainsExId(st.sessions, sw.oldExId, session.dayId, session.ended, session.id, session.scheduleId)
+            && !LB.mesoRowHasExId(nextRow, sw.newExId, session.dayId);
+          if (owner) {
+            raw = LB.remapMesoRecapRawForSwap(raw, sw.oldExId, sw.newExId, session.dayId, sw.name);
+            nextRow = LB.remapMesoStateExId(nextRow, sw.oldExId, sw.newExId, session.dayId);
+          } else {
+            const na = LB.remapMesoAnswersExId(raw.answers, sw.oldExId, sw.newExId, sw.name);
+            if (na !== raw.answers) raw = { ...raw, answers: na };
+          }
+        });
+        const recapChanged = raw !== session.mesoRecap.raw;
+        const rowChanged = !!row && nextRow !== row;
+        if (!recapChanged && !rowChanged) return st;
+        return {
           ...st,
-          mesoStates: (st.mesoStates || []).map(m => {
-            if (m.scheduleId !== session.scheduleId) return m;
-            let next = m;
-            rowSwaps.forEach(sw => { next = LB.remapMesoStateExId(next, sw.oldExId, sw.newExId, session.dayId); });
-            return next === m ? m : { ...next, updatedAt: new Date().toISOString() };
-          }),
-        }));
-      }
+          sessions: recapChanged
+            ? st.sessions.map(x => x.id === session.id ? { ...x, mesoRecap: { ...session.mesoRecap, raw } } : x)
+            : st.sessions,
+          mesoStates: rowChanged
+            ? (st.mesoStates || []).map(m => m === row ? { ...nextRow, updatedAt: new Date().toISOString() } : m)
+            : st.mesoStates,
+        };
+      });
     }
     onSave(patch);
   };
