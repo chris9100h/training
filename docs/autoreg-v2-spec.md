@@ -211,6 +211,12 @@ langen Cycles Unsinn, manche Lifts kommen gar nicht dran):
   (Plan-Einheit aus §2.1: Rotation / Cycle / Woche), nicht über X rohe Sessions. Auf
   einem 9-Tage-Cycle also **eine** Rotation Ease-in, nicht vier.
 
+Konkret (9-Tage-Cycle, ~10 Tage Pause): Rotation 1 (D1..D9) ist der Ease-in, **ab der
+zweiten D1 (Start Rotation 2) ist alles normal.** Bei starker Rückkehr ist ein Lift
+sogar schon bei der **ersten** Exposure wieder auf altem Gewicht, weil Leistung den
+Vorschlag überschreibt. Nur bei sehr langer Pause (Wochen+) skaliert der Ramp über
+mehr als eine Rotation.
+
 Magnitude/Dauer skalieren leicht mit der Pausenlänge (7-14 Tage minimal; Wochen:
 weiter runter starten, längerer Ramp), aber immer **durch Leistung überschreibbar**.
 Modelliert als abklingender Readiness-Modifier (Reuse §4) mit `signalWeight = discounted`.
