@@ -7420,9 +7420,18 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                               ? (s.kg != null && sessionBest != null && Math.abs(s.kg - sessionBest) < 0.01)
                               : (sessionBest > 0 && Math.abs(e1rmForSet(s) - sessionBest) < 0.01);
                             const repsStr = (s.repsL != null || s.repsR != null) ? `L${s.repsL ?? '?'}/R${s.repsR ?? '?'}` : s.reps;
+                            // Annotate intensity-technique sets (myo-reps, drop,
+                            // partials, ...) with the technique badge and, for a
+                            // rep-summed technique, its total reps — otherwise a
+                            // myo set reads as just its top set (e.g. "×14" hiding
+                            // a 20-rep total).
+                            const tr = LB.techniqueRounds(s, { exName: entry?.name });
                             return (
-                              <span key={i} className="num" style={{ fontSize: 13, color: isBest ? UI.gold : UI.ink }}>
+                              <span key={i} className="num" style={{ fontSize: 13, color: isBest ? UI.gold : UI.ink, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
                                 {s.timeSec != null ? LB.fmtDuration(s.timeSec) : s.kg != null ? <>{s.kg}<span style={{ color: isBest ? UI.goldSoft : UI.inkFaint }}>×</span>{repsStr}</> : repsStr}
+                                {tr.badge && (
+                                  <span style={{ fontFamily: UI.fontUi, fontSize: 7, fontWeight: 700, letterSpacing: '0.08em', color: UI.gold, background: 'rgba(var(--accent-rgb),0.12)', border: '0.5px solid rgba(var(--accent-rgb),0.35)', borderRadius: 4, padding: '1px 4px', whiteSpace: 'nowrap' }}>{tr.badge}{tr.totalReps != null ? ` ${tr.totalReps}` : ''}</span>
+                                )}
                               </span>
                             );
                           })}
