@@ -432,6 +432,12 @@ function AutoregGuideScreen({ store, go, mode: modeProp, back }) {
                 <p style={{ fontSize: 13.5, color: UI.inkSoft, margin: '11px 0' }}>
                   Asked for every exercise, every mode. Joint comfort, how the weight felt, and the pump: together these three gate the weight bump for this exercise{isB ? '.' : '. In Volume+Load and Meso, joint pain also shaves a set off this exercise.'}
                 </p>
+                <div style={{ ...cardStyle, borderLeft: `3px solid ${UI.gold}`, marginBottom: 14 }}>
+                  <AGKick color={UI.gold}>One-tap shortcut</AGKick>
+                  <div style={{ marginTop: 6, fontSize: 13.5, color: UI.inkSoft }}>
+                    <b style={{ color: UI.ink }}>Nothing to report? One tap.</b> The sheet opens asking "How did that feel?" with a single "On point" button that answers all four at once: joint none, weight just right, pump moderate, lift affinity "It's fine". "Flag a detail" opens the full set instead, pre-filled to on-target, so you only touch what actually deviated. Soreness above stays its own separate tap, per muscle, untouched by this shortcut.
+                  </div>
+                </div>
                 <AGKick>Joint</AGKick>
                 <div className="ag-opt-grid" style={{ marginTop: 8 }}>
                   <AGOpt cell chip="None" dirs={<AGDir kind="hold">gate green</AGDir>}>Joints fine. This exercise can earn its bump.</AGOpt>

@@ -207,6 +207,8 @@
     /* per exercise: joint + weight feel + pump. Each sub-block tiles into its
        own responsive grid so the (long) list stays compact, not mega-tall. */
     var jn='<p class="panel-intro">Asked for every exercise, every mode. Joint comfort, how the weight felt, and the pump: together these three gate the weight bump for this exercise'+(isB?'.':'. In Volume+Load and Meso, joint pain also shaves a set off this exercise.')+'</p>';
+    jn+='<div class="card lb accented" style="margin-bottom:14px"><div class="kick" style="color:var(--accent)">One-tap shortcut</div>'+
+      '<div style="margin-top:6px;font-size:13.5px;color:var(--ink-soft)"><b>Nothing to report? One tap.</b> The sheet opens asking "How did that feel?" with a single "On point" button that answers all four at once: joint none, weight just right, pump moderate, lift affinity "It\'s fine". "Flag a detail" opens the full set instead, pre-filled to on-target, so you only touch what actually deviated. Soreness above stays its own separate tap, per muscle, untouched by this shortcut.</div></div>';
     jn+='<div class="kick">Joint</div>';
     jn+='<div class="opt-grid" style="margin-top:8px">';
     jn+=opt('None', dir('hold','gate green'), 'Joints fine. This exercise can earn its bump.', true);
