@@ -156,6 +156,7 @@ function agSignals(mode) {
     { sig: 'Pump: low', sets: ho('none, tracks swap'), wt: bl('blocks bump') },
     { sig: 'Weight feel: too light / hard', sets: ho('no effect'), wt: up('earns bump') },
     { sig: 'Weight feel: too heavy', sets: ho('no effect'), wt: bl('blocks bump') },
+    { sig: 'Overreach: sore + reps flat / joints, 2 exposures', sets: ho('adds frozen (at ceiling)'), wt: bl('deload suggested') },
   ];
   if (!B) {
     rows.push({ sig: 'Workload: not enough', sets: up('+1 set'), wt: ho('no effect') });
@@ -299,6 +300,27 @@ function AutoregGuideScreen({ store, go, mode: modeProp, back }) {
               <AGKick color={UI.gold}>Why it matters</AGKick>
               <div style={{ marginTop: 6, fontSize: 13.5, color: UI.inkSoft }}>
                 <b style={{ color: UI.ink }}>A rough day is discounted, not thrown away.</b> On Rough the app holds off the rep-miss cut and does not chase the earn ladder, so one tired session can never drag your weight down. If you push through and hit your reps anyway, the bump still lands. Skip the tap to train exactly as normal.
+              </div>
+            </div>
+          </Section>
+
+          {/* ── volume ceiling / overreach (modus-agnostic) ── */}
+          <Section>
+            <AGSecHead n="Ceiling · Volume" title="When a muscle has had enough"
+              sub="The engine counts your hard sets per muscle over each microcycle (a rotation, a week, or a cycle, depending on the plan) and watches for the overreaching signature. It is the same guard in every mode, it just pulls a different lever." />
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 11 }}>
+              <AGStat k="The signal" v="Sore + stalled" s="A muscle that stays sore across its last two exposures while its reps go flat under the same load, or its joints start complaining." />
+              <AGStat k="The hold" v="No more sets" vColor={UI.gold} s="Once a muscle hits its ceiling the app stops adding sets to it. Weight and every other muscle keep progressing normally." />
+              <AGStat k="The offer" v="Deload, 1 tap" s="If a muscle is at its ceiling when you finish, the app offers a deload with the reason spelled out. Always wave-off-able." />
+            </div>
+            <div style={{ ...cardStyle, borderLeft: `3px solid ${UI.gold}`, marginTop: 16 }}>
+              <AGKick color={UI.gold}>Per mode</AGKick>
+              <div style={{ marginTop: 6, fontSize: 13.5, color: UI.inkSoft }}>
+                {isC
+                  ? <span><b style={{ color: UI.ink }}>Mesocycle:</b> if a muscle tops out before the planned peak week, its sets stop climbing early (held, not cut). The planned deload still arrives at block end, so no separate offer pops mid-block.</span>
+                  : isB
+                    ? <span><b style={{ color: UI.ink }}>Load only:</b> your set counts are fixed anyway, so there is nothing to freeze. The detector's only job here is to hold the load and offer the deload when the fatigue signature shows.</span>
+                    : <span><b style={{ color: UI.ink }}>Volume + Load:</b> the ceiling is the only thing holding your sets back. Hit it and adds pause for that muscle, then the deload offer lets you reset when you are ready. Nothing is ever forced, keep training if you would rather push on.</span>}
               </div>
             </div>
           </Section>
@@ -542,6 +564,12 @@ function AutoregGuideScreen({ store, go, mode: modeProp, back }) {
                 <h3 className="display" style={h3}>2 · Manual, anytime</h3>
                 <p style={{ fontSize: 14, color: UI.inkSoft, margin: 0 }}>The active plan card has a Deload button in every mode. It runs your normal plan at ~50% load for one cycle, then auto-ends.</p>
               </div>
+              {!isC && (
+                <div style={{ ...cardStyle, borderLeft: `3px solid ${UI.gold}` }}>
+                  <h3 className="display" style={h3}>3 · Overreach-driven</h3>
+                  <p style={{ fontSize: 14, color: UI.inkSoft, margin: 0 }}>When a muscle hits its volume ceiling (see the Volume section), the finish screen offers a deload right then, with the reason spelled out. It is a suggestion: wave it off and keep training.</p>
+                </div>
+              )}
             </div>
             <div style={cardStyle}>
               <h3 className="display" style={h3}>What a deload week actually does</h3>

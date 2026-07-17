@@ -2940,7 +2940,16 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
   };
   const saveFeedbackEdit = (edit) => {
     if (!sessionMeso || !fbRaw) { setFbEdit(null); return; }
-    const ctx = { dayId: s.dayId, loadOnly: fbLoadOnly };
+    // Autoreg v2 P1 MRV cap: re-run the stateless overreach detector so a post-hoc
+    // edit freezes a positive set-add for an at-ceiling muscle exactly like the
+    // live session would have (spec 2.2 / 2.3). typeof-guarded: primaryMuscleForExercise
+    // is a screens-train.jsx global that may not be loaded in every context.
+    const muscleOf = (exId) => (typeof primaryMuscleForExercise === 'function'
+      ? primaryMuscleForExercise(store.exercises?.find(x => x.id === exId)) : null);
+    const editSch = store.schedules?.find(x => x.id === s.scheduleId) || null;
+    const overreach = editSch ? LB.detectOverreach(store.sessions, editSch, muscleOf) : {};
+    const atCeilingMuscles = new Set(Object.keys(overreach).filter(m => overreach[m] && overreach[m].atCeiling));
+    const ctx = { dayId: s.dayId, loadOnly: fbLoadOnly, atCeilingMuscles };
     const r1 = LB.applyMesoFeedbackEdit(sessionMeso, fbRaw, edit, ctx);
     const earnInputs = fbEarnInputs();
     const newMeso = LB.reearnMesoBoostsFromAnswers(r1.mesoState, r1.raw.answers, earnInputs, fbLoadOnly);

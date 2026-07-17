@@ -2262,6 +2262,25 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       // session so the detail screen can show it later; survives across devices.
       const recap = buildMesoRecap(gains);
       if (recap) updateSession(sess => ({ ...sess, mesoRecap: recap }));
+      // Autoreg v2 P1: run the overreach detector including THIS just-finished
+      // session (store.sessions doesn't hold its ended/recap yet), so the emergent
+      // deload offer can fire on the exposure that just tipped a muscle over. Only
+      // for the Auto modes (bounded meso keeps its planned end-of-block deload).
+      if (mesoState.weeks == null && !store.statusMode) {
+        const muscleOfExId = (exId) => primaryMuscleForExercise(store.exercises?.find(x => x.id === exId));
+        const finishedSnapshot = {
+          ...session,
+          ended: new Date().toISOString(),
+          isDeload: store.statusMode === 'deload',
+          signalWeight: session.signalWeight || (isMesoDeloadSession ? 'none' : 'full'),
+          mesoRecap: recap || session.mesoRecap,
+        };
+        const detSessions = [...(store.sessions || []).filter(x => x.id !== session.id), finishedSnapshot];
+        const overreachNow = mesoSch ? LB.detectOverreach(detSessions, mesoSch, muscleOfExId) : {};
+        if (Object.keys(overreachNow).some(m => overreachNow[m] && overreachNow[m].atCeiling)) {
+          pendingDeloadOfferRef.current = overreachNow;
+        }
+      }
       if (gains.length > 0) {
         mesoGainNavRef.current = session.id;
         setMesoGainItems(gains);
@@ -2275,7 +2294,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         return;
       }
     }
-    go({ name: 'session', sessionId: session.id, justFinished: true });
+    goJustFinished(session.id);
   };
 
   const abandon = async () => {
@@ -2605,6 +2624,24 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // Meso 2), so the joint + pump/volume questions stay — they gate the boost —
   // while the soreness question (pure set-delta, no weight gate) is skipped.
   const mesoLastWeek = mesoState != null && mesoWeek != null && mesoState.weeks != null && mesoWeek >= mesoState.weeks;
+  // Autoreg v2 P1: overreach detector over the loaded history (stateless, spec
+  // 2.2). Keyed off the same session inputs mesoWeek reads so it only recomputes
+  // when history changes, not on every tick. Uses PRIOR exposures (the current
+  // in-progress session isn't ended in store.sessions yet), which is exactly what
+  // decides whether to FREEZE this session's positive set-adds (the MRV cap).
+  const overreach = useMemoT(() => {
+    if (!mesoState || !mesoSch) return {};
+    const muscleOfExId = (exId) => primaryMuscleForExercise(store.exercises?.find(x => x.id === exId));
+    return LB.detectOverreach(store.sessions, mesoSch, muscleOfExId);
+  }, [mesoState, mesoSch, store.sessions, store.exercises]);
+  // MRV cap lookup (spec 2.3): true when a muscle already hit its ceiling from
+  // prior exposures, so this session must not ADD sets for it (positive-only,
+  // per-muscle, non-destructive: cuts/declines still apply).
+  const atCeiling = (muscle) => !!(muscle && overreach[muscle] && overreach[muscle].atCeiling);
+  // Holds the just-finished session's detector result (computed in finish() over
+  // the sealed session) so the post-session deload offer can read the reason
+  // strings after navigation. Cleared once consumed.
+  const pendingDeloadOfferRef = useRefT(null);
   // The "≥X reps · next weight" hint is Smart Progression's promise. On a meso
   // plan the feedback engine owns the weight from week 2 on (Smart Progression is
   // vetoed, see LB.resolveMesoSeedSuggestion), so instead of promising a bump that
@@ -2726,6 +2763,43 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       deactivatePlanForMeso(scheduleId);
     }
     go({ name: 'session', sessionId: session.id, justFinished: true });
+  };
+
+  // Autoreg v2 P1: emergent deload offer at session finish (spec 3 / 5.3). A
+  // lightweight, wave-off-able 1-tap suggestion, shown only when a muscle actually
+  // hit its ceiling this block. Scope by mode: a bounded Meso (weeks != null) gets
+  // its planned deload at block end plus the early MRV cap, so it is NOT offered a
+  // separate emergent deload here (mirrors home.jsx suppressing the generic nudge
+  // while mesocycle_weeks is set); the Auto modes (Full / Load-only) are exactly
+  // where the emergent deload lives. Accept starts the existing deload overlay;
+  // decline just closes.
+  const offerEmergentDeload = async (overreachMap) => {
+    if (!mesoState || isMesoDeloadSession) return;
+    if (mesoState.weeks != null) return;      // bounded meso: deload comes at block end
+    if (store.statusMode) return;             // never stack on sick / vacation / deload
+    const flagged = Object.keys(overreachMap || {}).filter(m => overreachMap[m] && overreachMap[m].atCeiling);
+    if (!flagged.length) return;
+    const reasons = flagged
+      .map(m => (overreachMap[m].evidence && overreachMap[m].evidence[0]) || `${m} at its ceiling.`)
+      .join('  ');
+    const accept = await confirm(
+      `${reasons}  A deload now (about a week at ~50% load) clears the fatigue so you come back stronger. Want to start one? You can always wave it off and keep training.`,
+      { title: 'Time for a deload?', ok: 'Start deload', cancel: 'Not now', preventBackdropClose: true },
+    );
+    if (accept) {
+      await LB.startDeload(userId, store, setStore);
+    }
+    // TODO(P2): on decline, persist a fatigue recap + cooldown (deloadNudge in
+    // autoreg_state) so we re-ask with escalating evidence after N sessions
+    // instead of every session (spec 5.3). P1 intentionally just closes.
+  };
+  // Terminal navigation after a finished session: run the emergent-deload offer
+  // (if the detector flagged a ceiling this finish) before landing on the summary.
+  const goJustFinished = async (sessionId) => {
+    const map = pendingDeloadOfferRef.current;
+    pendingDeloadOfferRef.current = null;
+    if (map) await offerEmergentDeload(map);
+    go({ name: 'session', sessionId, justFinished: true });
   };
 
   // Per-session meso feedback tracking
@@ -2946,12 +3020,16 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     //     negative-slot ownership still stops it from double-stacking with a
     //     "pushed"/"too much" -1 on the same key.
     const adds = answer === 'never' || answer === 'healed_long';
+    // Autoreg v2 P1 MRV cap: freeze the soreness +1 (and its growthCounts rotation)
+    // for an at-ceiling muscle. Positive-only: the still_sore -1 decline below stays
+    // live. On a fresh session record.contrib is empty, so no existing set is stripped.
+    const capped = atCeiling(muscle);
     const prevGrantedTo = Object.keys(record.contrib || {}).find(k => record.contrib[k] === 1) ?? null;
     let recipientKey = null;
-    if (adds && keys.length) {
+    if (adds && keys.length && !capped) {
       recipientKey = LB.pickGrowthRecipient(keys, mesoState.growthCounts, prevGrantedTo).recipientKey;
       saveMesoState(m => ({ ...m, growthCounts: LB.pickGrowthRecipient(keys, m.growthCounts, prevGrantedTo).growthCounts }));
-    } else if (prevGrantedTo) {
+    } else if (prevGrantedTo && !capped) {
       // Edited away from an adding answer this session → undo the prior grant.
       saveMesoState(m => ({ ...m, growthCounts: LB.retractGrowthGrant(m.growthCounts, prevGrantedTo) }));
     }
@@ -3139,7 +3217,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // reason, so its rotation is pointless too.
     const prevGrantedTo = Object.keys(record.contrib || {}).find(k => record.contrib[k] === 1) ?? null;
     let recipientKey = null;
-    if (mesoLastWeek || LB.autoregLoadOnly(mesoSch)) {
+    // Autoreg v2 P1 MRV cap: an at-ceiling muscle takes the frozen branch, so its
+    // +1 add and growthCounts bump are skipped (positive-only, per-muscle). The
+    // decline paths (pushed / too_much, below) stay live so it can still shed sets.
+    if (mesoLastWeek || LB.autoregLoadOnly(mesoSch) || atCeiling(muscle)) {
       // frozen: no rotation, no grant
     } else if (volume === 'not_enough') {
       recipientKey = LB.pickGrowthRecipient(keys, mesoState.growthCounts, prevGrantedTo).recipientKey;
@@ -8159,7 +8240,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             mesoJustCompletedRef.current = false;
             handleMesoComplete();
           } else {
-            go({ name: 'session', sessionId: mesoGainNavRef.current, justFinished: true });
+            goJustFinished(mesoGainNavRef.current);
           }
         }} title="Next session">
           <div style={{ fontFamily: UI.fontUi, fontSize: 13, color: UI.inkSoft, marginBottom: 20, lineHeight: 1.5 }}>
@@ -8197,7 +8278,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               mesoJustCompletedRef.current = false;
               handleMesoComplete();
             } else {
-              go({ name: 'session', sessionId: mesoGainNavRef.current, justFinished: true });
+              goJustFinished(mesoGainNavRef.current);
             }
           }} style={{ width: '100%', marginTop: 20 }}>Got it</Btn>
         </Sheet>

@@ -2427,6 +2427,186 @@ async function testAsync(name, fn) {
     assert.strictEqual(Object.keys(LB.mergePlanDrafts(null, null, null)).length, 0);
   });
 
+  // ── Autoreg v2 P1: microcycle accounting (hard sets per muscle) ──────────────
+  {
+    const muscleOf = (id) => ({ bench: 'Chest', squat: 'Quads', curl: 'Biceps' }[id] || null);
+    // A bench entry: 2 hard sets (a plain done set + a technique set), plus a
+    // warmup, a skipped, and an undone set that must all be excluded.
+    const benchEntry = () => ({ exId: 'bench', sets: [
+      { done: true },
+      { done: true, warmup: true },
+      { done: true, skipped: true },
+      { done: false },
+      { done: true, technique: 'myo' },
+    ] });
+    const squatEntry = () => ({ exId: 'squat', sets: [{ done: true }, { done: true }, { done: true }] });
+    const untagged = () => ({ exId: 'mystery', sets: [{ done: true }, { done: true }] });
+
+    test('microcycleSetsByMuscle: hard-set count excludes warmup/skipped/undone, technique counts as 1', () => {
+      const sch = { id: 'p', is_flex: true, days: [{ id: 'd1' }] };
+      const s = { id: 's', scheduleId: 'p', ended: '2026-07-13T10:00:00Z', date: '2026-07-13', entries: [benchEntry(), untagged()] };
+      const out = LB.microcycleSetsByMuscle([s], sch, muscleOf);
+      assert.strictEqual(out.Chest, 2, 'plain done + technique = 2, warmup/skipped/undone excluded');
+      assert.ok(!('null' in out) && out[null] === undefined, 'untagged exercise ignored');
+    });
+
+    test('microcycleSetsByMuscle: FLEX slices current vs previous rotation by trained-session count, not date', () => {
+      const sch = { id: 'p', is_flex: true, days: [{ id: 'd1' }, { id: 'd2' }, { id: 'd3' }] }; // len 3
+      const mk = (id, ended, entries) => ({ id, scheduleId: 'p', ended, date: ended.slice(0, 10), entries });
+      // 6 trained sessions, newest last in array (order should not matter, fn sorts by ended desc).
+      const sessions = [
+        mk('s1', '2026-07-01T10:00:00Z', [benchEntry()]),
+        mk('s2', '2026-07-03T10:00:00Z', [benchEntry()]),
+        mk('s3', '2026-07-05T10:00:00Z', [benchEntry()]),
+        mk('s4', '2026-07-07T10:00:00Z', [benchEntry()]),
+        mk('s5', '2026-07-09T10:00:00Z', [benchEntry()]),
+        mk('s6', '2026-07-11T10:00:00Z', [benchEntry(), squatEntry()]),
+      ];
+      const cur = LB.microcycleSetsByMuscle(sessions, sch, muscleOf, { which: 0 });
+      assert.strictEqual(cur.Chest, 6, 'current rotation = last 3 sessions x 2 hard sets');
+      assert.strictEqual(cur.Quads, 3, 'squat only in the current rotation');
+      const prev = LB.microcycleSetsByMuscle(sessions, sch, muscleOf, { which: 1 });
+      assert.strictEqual(prev.Chest, 6, 'previous rotation = the 3 sessions before that');
+      assert.ok(!prev.Quads, 'no squat in the previous rotation');
+    });
+
+    test('microcycleSetsByMuscle: WEEKDAY window is the calendar week (Mon..Sun)', () => {
+      const sch = { id: 'wp', mode: 'weekday', days: [{ weekday: 0 }] };
+      const mk = (id, date) => ({ id, scheduleId: 'wp', ended: date + 'T10:00:00Z', date, entries: [benchEntry()] });
+      const sessions = [mk('a', '2026-07-15'), mk('b', '2026-07-08')]; // 7 days apart
+      const cur = LB.microcycleSetsByMuscle(sessions, sch, muscleOf, { which: 0, todayStr: '2026-07-15' });
+      assert.strictEqual(cur.Chest, 2, 'only this week counts');
+      const prev = LB.microcycleSetsByMuscle(sessions, sch, muscleOf, { which: 1, todayStr: '2026-07-15' });
+      assert.strictEqual(prev.Chest, 2, 'the prior week counts in which:1');
+    });
+
+    test('microcycleSetsByMuscle: CYCLE window uses cumulative cycle numbering', () => {
+      const sch = { id: 'cp', days: [{}, {}, {}], versions: [{ validFrom: '2026-07-01', days: [{}, {}, {}] }] }; // len 3
+      const mk = (id, date) => ({ id, scheduleId: 'cp', ended: date + 'T10:00:00Z', date, entries: [benchEntry()] });
+      // Cycle 1 = 07-01..07-03, Cycle 2 = 07-04..07-06.
+      const sessions = [mk('c1', '2026-07-02'), mk('c2', '2026-07-05')];
+      const cur = LB.microcycleSetsByMuscle(sessions, sch, muscleOf, { which: 0, todayStr: '2026-07-06' });
+      assert.strictEqual(cur.Chest, 2, 'current cycle (2) holds the 07-05 session');
+      const prev = LB.microcycleSetsByMuscle(sessions, sch, muscleOf, { which: 1, todayStr: '2026-07-06' });
+      assert.strictEqual(prev.Chest, 2, 'previous cycle (1) holds the 07-02 session');
+    });
+  }
+
+  // ── Autoreg v2 P1: overreach detector (stateless, last-2-exposures) ──────────
+  {
+    const muscleOf = (id) => (id === 'bench' ? 'Chest' : id === 'squat' ? 'Quads' : null);
+    const sch = { id: 'p', is_flex: true, days: [{ id: 'd1' }, { id: 'd2' }] };
+    const ans = (sore, jointAns) => ({
+      soreness: sore ? { Chest: { muscle: 'Chest', answer: sore } } : {},
+      joint: jointAns ? { bench: { exId: 'bench', answer: jointAns } } : {},
+      volume: {},
+    });
+    const mk = (id, ended, opts = {}) => ({
+      id, scheduleId: 'p', ended, date: ended.slice(0, 10),
+      ...(opts.signalWeight ? { signalWeight: opts.signalWeight } : {}),
+      entries: opts.entries || [{ exId: 'bench', sets: [{ done: true, kg: 100, reps: 8 }] }],
+      ...(opts.answers ? { mesoRecap: { raw: { answers: opts.answers } } } : {}),
+    });
+
+    test('detectOverreach: still_sore + joint on both last exposures → atCeiling with evidence', () => {
+      const sessions = [
+        mk('E1', '2026-07-10T10:00:00Z', { answers: ans('still_sore', 'sharp') }),
+        mk('E2', '2026-07-13T10:00:00Z', { answers: ans('still_sore', 'sharp') }),
+      ];
+      const out = LB.detectOverreach(sessions, sch, muscleOf);
+      assert.ok(out.Chest && out.Chest.atCeiling === true, 'Chest flagged at ceiling');
+      assert.ok(out.Chest.evidence[0].indexOf('Chest') === 0, 'evidence string leads with the muscle');
+    });
+
+    test('detectOverreach: a clean latest exposure stands the detector down', () => {
+      const sessions = [
+        mk('E1', '2026-07-10T10:00:00Z', { answers: ans('still_sore', 'sharp') }),
+        mk('E2', '2026-07-13T10:00:00Z', { answers: ans('never', null) }),
+      ];
+      const out = LB.detectOverreach(sessions, sch, muscleOf);
+      assert.ok(!(out.Chest && out.Chest.atCeiling), 'not at ceiling after a clean session');
+    });
+
+    test('detectOverreach: still_sore + FLAT e1RM across exposures → atCeiling (rep-regression path)', () => {
+      const flat = { done: true, kg: 100, reps: 8 };
+      const sessions = [
+        mk('E0', '2026-07-07T10:00:00Z', { answers: ans('still_sore', null), entries: [{ exId: 'bench', sets: [flat] }] }),
+        mk('E1', '2026-07-10T10:00:00Z', { answers: ans('still_sore', null), entries: [{ exId: 'bench', sets: [flat] }] }),
+        mk('E2', '2026-07-13T10:00:00Z', { answers: ans('still_sore', null), entries: [{ exId: 'bench', sets: [flat] }] }),
+      ];
+      assert.ok(LB.detectOverreach(sessions, sch, muscleOf).Chest?.atCeiling, 'flat reps at same load, both sore → ceiling');
+    });
+
+    test('detectOverreach: reps improving on the latest exposure → not at ceiling', () => {
+      const sessions = [
+        mk('E1', '2026-07-10T10:00:00Z', { answers: ans('still_sore', null), entries: [{ exId: 'bench', sets: [{ done: true, kg: 100, reps: 8 }] }] }),
+        mk('E2', '2026-07-13T10:00:00Z', { answers: ans('still_sore', null), entries: [{ exId: 'bench', sets: [{ done: true, kg: 100, reps: 10 }] }] }),
+      ];
+      assert.ok(!LB.detectOverreach(sessions, sch, muscleOf).Chest?.atCeiling, 'improving reps stand it down');
+    });
+
+    test('detectOverreach: frequency-adaptive: the 2 exposures may span rotations (1x/rotation muscle)', () => {
+      const sessions = [
+        mk('E1', '2026-07-08T10:00:00Z', { answers: ans('still_sore', 'sharp') }),
+        // a Quads-only session sits between the two Chest exposures (Chest is 1x/rotation)
+        mk('Q1', '2026-07-10T10:00:00Z', { entries: [{ exId: 'squat', sets: [{ done: true, kg: 100, reps: 8 }] }] }),
+        mk('E2', '2026-07-12T10:00:00Z', { answers: ans('still_sore', 'sharp') }),
+      ];
+      assert.ok(LB.detectOverreach(sessions, sch, muscleOf).Chest?.atCeiling, 'the last 2 Chest exposures confirm regardless of the gap');
+    });
+
+    test('detectOverreach: a discounted (rough) latest session is not counted as an exposure', () => {
+      const base = [
+        mk('E0', '2026-07-07T10:00:00Z', { answers: ans('never', null) }),
+        mk('E1', '2026-07-10T10:00:00Z', { answers: ans('still_sore', 'sharp') }),
+      ];
+      // Discounted E2: skipped, so exposures fall back to [E1, E0(clean)] → not both signal.
+      const discounted = [...base, mk('E2', '2026-07-13T10:00:00Z', { signalWeight: 'discounted', answers: ans('still_sore', 'sharp') })];
+      assert.ok(!LB.detectOverreach(discounted, sch, muscleOf).Chest?.atCeiling, 'rough day must not trip the ceiling');
+      // Same session at full weight DOES count → [E2, E1] both signal.
+      const full = [...base, mk('E2', '2026-07-13T10:00:00Z', { signalWeight: 'full', answers: ans('still_sore', 'sharp') })];
+      assert.ok(LB.detectOverreach(full, sch, muscleOf).Chest?.atCeiling, 'a full session on the same data confirms');
+    });
+
+    test('detectOverreach: a single exposure cannot confirm a ceiling', () => {
+      const sessions = [mk('E1', '2026-07-13T10:00:00Z', { answers: ans('still_sore', 'sharp') })];
+      assert.ok(!LB.detectOverreach(sessions, sch, muscleOf).Chest?.atCeiling, 'one exposure is not enough to confirm');
+    });
+
+    test('detectOverreach: a weighted to bodyweight switch is not a fake regression', () => {
+      // E0, E1 weighted flat (a legit regression pair, both sore); E2 logs the same
+      // lift bodyweight (kg null). Without the metric-kind guard, E2s reps would be
+      // compared against E1s e1RM and read as a regression, false-flagging a ceiling.
+      // The guard makes the switch incomparable, so E2 has no regression and, with no
+      // joint flag, does not trigger.
+      const w = { done: true, kg: 100, reps: 8 };
+      const bw = { done: true, reps: 12 };
+      const sessions = [
+        mk('E0', '2026-07-07T10:00:00Z', { answers: ans('still_sore', null), entries: [{ exId: 'bench', sets: [w] }] }),
+        mk('E1', '2026-07-10T10:00:00Z', { answers: ans('still_sore', null), entries: [{ exId: 'bench', sets: [w] }] }),
+        mk('E2', '2026-07-13T10:00:00Z', { answers: ans('still_sore', null), entries: [{ exId: 'bench', sets: [bw] }] }),
+      ];
+      assert.ok(!LB.detectOverreach(sessions, sch, muscleOf).Chest?.atCeiling, 'a metric switch must not fabricate a ceiling');
+    });
+  }
+
+  // ── Autoreg v2 P1: MRV cap mirror in applyMesoFeedbackEdit ───────────────────
+  test('applyMesoFeedbackEdit: an at-ceiling muscle freezes a volume not_enough +1 (non-destructive)', () => {
+    const ms = { deltas: {}, growthCounts: {}, pumpLowCounts: {}, jointFlags: {} };
+    const raw = { answers: { soreness: {}, joint: {}, volume: { Chest: { muscle: 'Chest', exIds: ['e1'], contrib: {} } } }, negOwner: {}, frozen: false, dayId: 'd1' };
+    const capped = LB.applyMesoFeedbackEdit(ms, raw, { type: 'volume', subject: 'Chest', volume: 'not_enough' }, { dayId: 'd1', loadOnly: false, atCeilingMuscles: new Set(['Chest']) });
+    assert.ok(!capped.mesoState.deltas.e1_d1, 'no +1 added while at ceiling');
+    const free = LB.applyMesoFeedbackEdit(ms, raw, { type: 'volume', subject: 'Chest', volume: 'not_enough' }, { dayId: 'd1', loadOnly: false });
+    assert.strictEqual(free.mesoState.deltas.e1_d1, 1, 'the same edit adds +1 when not at ceiling');
+  });
+
+  test('applyMesoFeedbackEdit: an at-ceiling muscle freezes a soreness +1 grant', () => {
+    const ms = { deltas: {}, growthCounts: {}, pumpLowCounts: {}, jointFlags: {} };
+    const raw = { answers: { soreness: { Chest: { muscle: 'Chest', targets: [{ exId: 'e1', name: 'Bench', key: 'e1_d0' }], contrib: {} } }, joint: {}, volume: {} }, negOwner: {}, frozen: false, dayId: 'd0' };
+    const capped = LB.applyMesoFeedbackEdit(ms, raw, { type: 'soreness', subject: 'Chest', answer: 'never' }, { dayId: 'd0', loadOnly: false, atCeilingMuscles: new Set(['Chest']) });
+    assert.ok(!capped.mesoState.deltas.e1_d0, 'no soreness +1 while at ceiling');
+  });
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();

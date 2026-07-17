@@ -4767,9 +4767,13 @@ function applyMesoFeedbackEdit(mesoState, raw, edit, ctx) {
     if (!loadOnly) {
       const keys = (rec.targets || []).map(t => t.key);
       const adds = edit.answer === 'never' || edit.answer === 'healed_long';
+      // Autoreg v2 P1 MRV cap: an at-ceiling muscle freezes its positive set-adds
+      // (mirror of the live handler). Non-destructive: the decline (-1) path stays
+      // live so the muscle can still shed volume.
+      const capped = !!(ctx.atCeilingMuscles && ctx.atCeilingMuscles.has(muscle));
       const prevGrantedTo = Object.keys(rec.contrib || {}).find(k => rec.contrib[k] === 1) ?? null;
       let recipientKey = null;
-      if (adds && keys.length) {
+      if (adds && keys.length && !capped) {
         const g = pickGrowthRecipient(keys, growthCounts, prevGrantedTo);
         recipientKey = g.recipientKey; growthCounts = g.growthCounts;
       } else if (prevGrantedTo) {
@@ -4833,9 +4837,12 @@ function applyMesoFeedbackEdit(mesoState, raw, edit, ctx) {
     const keys = exIds.map(exId => exId + '_' + dayId);
     const prevGrantedTo = Object.keys(rec.contrib || {}).find(k => rec.contrib[k] === 1) ?? null;
     let recipientKey = null;
+    // Autoreg v2 P1 MRV cap: freeze the +1 for an at-ceiling muscle (mirror of
+    // the live handleVolumeAnswer guard). Decline (pushed / too_much) stays live.
+    const capped = !!(ctx.atCeilingMuscles && ctx.atCeilingMuscles.has(muscle));
     if (frozen) {
       // frozen: no rotation, no grant (mirrors the volume handler's guard)
-    } else if (edit.volume === 'not_enough') {
+    } else if (edit.volume === 'not_enough' && !capped) {
       const g = pickGrowthRecipient(keys, growthCounts, prevGrantedTo);
       recipientKey = g.recipientKey; growthCounts = g.growthCounts;
     } else if (prevGrantedTo) {
@@ -5019,6 +5026,249 @@ function mesoMuscleTrainedBeforeStart(sessions, scheduleId, startTs, muscle, mus
     }
   }
   return false;
+}
+
+// ─── Autoreg v2 P1: microcycle accounting + overreach detector (pure) ──────────
+// Everything below is stateless and recomputed from the loaded session history:
+// no new persistence, no server aggregate (a microcycle always sits inside the
+// 70-day set window). `muscleOfExId(exId) -> muscle|null` is injected because
+// primaryMuscleForExercise lives in screens-train.jsx (classic-script global,
+// not on window.LB); pass it the same way mesoMuscleTrainedBeforeStart does.
+
+// Count a session's HARD sets per muscle into `counts` (mutated in place). A hard
+// set is a completed working set: done && !warmup && !skipped. Technique sets
+// (myo/drop/amrap) are a single set row, so they naturally count as 1; partials/
+// stretch finishers ride on an existing set row and never add an extra one. Sets
+// on an exercise with no muscle tag (muscleOfExId -> null) are ignored (spec 2.1).
+function accumulateHardSets(counts, sessions, muscleOfExId) {
+  for (const s of (sessions || [])) {
+    if (!s) continue;
+    for (const e of (s.entries || [])) {
+      if (!e || e.isCardio) continue;
+      const m = muscleOfExId(e.exId);
+      if (!m) continue;
+      let n = 0;
+      for (const st of (e.sets || [])) {
+        if (st && st.done && !st.warmup && !st.skipped) n++;
+      }
+      if (n) counts[m] = (counts[m] || 0) + n;
+    }
+  }
+}
+
+// Monday-anchored [start,end] ISO window for the calendar week `which` weeks back.
+function weekWindowISO(todayStr, which) {
+  const d = parseDate(todayStr);
+  const js = d.getDay();
+  const wd = js === 0 ? 6 : js - 1; // 0 = Monday
+  const mon = new Date(d); mon.setDate(d.getDate() - wd - (which || 0) * 7);
+  const sun = new Date(mon); sun.setDate(mon.getDate() + 6);
+  return [fmtISO(mon), fmtISO(sun)];
+}
+
+// Hard sets per muscle over ONE microcycle of `sch` (spec 2.1). The microcycle
+// unit is plan-structure dependent, NOT a fixed 7 days:
+//   - weekday plan  -> one calendar week (Mon..Sun)
+//   - flex plan     -> one rotation (a full pass over sch.days), sliced by
+//                      TRAINED-session count, never by date or raw cycleIndex
+//                      (skips inflate cycleIndex, so a date/index window would
+//                      over-count; mirrors mesoCurrentWeek's trained/len math)
+//   - cycle plan    -> one cycle window (getCycleNumForDate / getCycleStartForNum)
+// `opts.which` (default 0) selects the current microcycle; 1 the previous one, etc.
+// `opts.todayStr` overrides "today"; `opts.cycleStartDate` supports an unversioned
+// cycle plan's date window. Returns { [muscle]: hardSetCount }. Pure/testable.
+// TODO(P3), before this is wired to learned MRV: (1) the weekday window should
+// mirror mesoCurrentWeek (7-day steps from mesoState.startDate MINUS paused
+// deload/sick days), not a Mon..Sun calendar week, so it aligns with the engine's
+// meso week; (2) the flex rotation slice should bucket by rotation index
+// (floor(pos/len)), not a fixed count of trained sessions, so a rotation with a
+// skipped day never borrows from the adjacent one; (3) the weekday window should
+// also filter s.scheduleId === sch.id (the flex/detector paths already do). These
+// are LATENT: this function is exported and tested but not yet consumed by a live
+// P1 path (only detectOverreach ships in P1).
+function microcycleSetsByMuscle(sessions, sch, muscleOfExId, opts = {}) {
+  const counts = {};
+  if (!sch || typeof muscleOfExId !== 'function') return counts;
+  const which = opts.which || 0;
+  const todayStr = opts.todayStr || todayISO();
+  const ended = (sessions || []).filter(s => s && s.ended && !s.isDeload);
+
+  if (isWeekdayPlan(sch)) {
+    const [start, end] = weekWindowISO(todayStr, which);
+    const win = ended.filter(s => s.date && s.date.slice(0, 10) >= start && s.date.slice(0, 10) <= end);
+    accumulateHardSets(counts, win, muscleOfExId);
+    return counts;
+  }
+
+  if (isFlexPlan(sch)) {
+    const len = sch.days.length || 1;
+    const trained = ended
+      .filter(s => s.scheduleId === sch.id)
+      .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''));
+    const win = trained.slice(which * len, which * len + len);
+    accumulateHardSets(counts, win, muscleOfExId);
+    return counts;
+  }
+
+  // Date-driven cycle plan.
+  const curNum = getCycleNumForDate(sch, todayStr);
+  if (curNum != null) {
+    const num = curNum - which;
+    if (num < 1) return counts;
+    const startD = getCycleStartForNum(sch, num);
+    if (!startD) return counts;
+    const nextD = getCycleStartForNum(sch, num + 1);
+    const start = fmtISO(startD);
+    const end = nextD ? fmtISO(new Date(nextD.getTime() - 86400000)) : todayStr;
+    const win = ended.filter(s => s.date && s.date.slice(0, 10) >= start && s.date.slice(0, 10) <= end);
+    accumulateHardSets(counts, win, muscleOfExId);
+    return counts;
+  }
+
+  // Unversioned cycle plan: fall back to a cycleStartDate-anchored date window.
+  const len = sch.days.length || 1;
+  const csd = opts.cycleStartDate;
+  if (csd) {
+    const base = parseDate(csd);
+    const n = Math.round((parseDate(todayStr) - base) / 86400000);
+    const idxInCycle = ((n % len) + len) % len;
+    const curStart = new Date(parseDate(todayStr));
+    curStart.setDate(curStart.getDate() - idxInCycle - which * len);
+    const curEnd = new Date(curStart); curEnd.setDate(curStart.getDate() + len - 1);
+    const start = fmtISO(curStart), end = fmtISO(curEnd);
+    const win = ended.filter(s => s.date && s.date.slice(0, 10) >= start && s.date.slice(0, 10) <= end);
+    accumulateHardSets(counts, win, muscleOfExId);
+  }
+  return counts;
+}
+
+// Read the durable per-question answer blob off a finished session (persisted on
+// every session, never windowed). Tolerant of sessions finished before the recap
+// feature shipped (no raw.answers).
+function sessionAnswers(s) {
+  return (s && s.mesoRecap && s.mesoRecap.raw && s.mesoRecap.raw.answers) || null;
+}
+
+// Did this exposure answer "still sore" for `muscle`?
+function overreachStillSore(s, muscle) {
+  const a = sessionAnswers(s);
+  const rec = a && a.soreness ? a.soreness[muscle] : null;
+  return !!(rec && rec.answer === 'still_sore');
+}
+
+// Did any of this muscle's exercises get a joint answer other than "none" this
+// exposure (spec 2.2: joint feedback != none on the muscle's exercises)?
+function overreachJointFlagged(s, muscle, muscleOfExId) {
+  const a = sessionAnswers(s);
+  if (!a || !a.joint) return false;
+  for (const exId of Object.keys(a.joint)) {
+    const rec = a.joint[exId];
+    if (rec && rec.answer && rec.answer !== 'none' && muscleOfExId(exId) === muscle) return true;
+  }
+  return false;
+}
+
+// Best performance metric per exercise of `muscle` in one session: e1RM for
+// weighted work, else top reps (reps-only), else longest hold (timed). Only
+// completed working sets count. Returns { [exId]: { v, kind } } where kind is
+// 'e1rm' | 'reps' | 'time', so a cross-exposure comparison can skip an exercise
+// whose metric kind changed (e.g. a weighted lift logged bodyweight next time),
+// which would otherwise compare an e1RM against a raw rep count.
+function overreachBestPerfByEx(session, muscle, muscleOfExId) {
+  const map = {};
+  for (const e of (session.entries || [])) {
+    if (!e || e.isCardio) continue;
+    if (muscleOfExId(e.exId) !== muscle) continue;
+    let best = null, kind = null;
+    for (const st of (e.sets || [])) {
+      if (!st || !st.done || st.warmup || st.skipped) continue;
+      const reps = effReps(st);
+      let v, k;
+      if (st.kg != null && reps != null && reps > 0) { v = e1rm(st.kg, reps); k = 'e1rm'; }
+      else if (reps != null && reps > 0) { v = reps; k = 'reps'; }
+      else if (st.timeSec != null) { v = st.timeSec; k = 'time'; }
+      else continue;
+      if (best == null || v > best) { best = v; kind = k; }
+    }
+    if (best != null) map[e.exId] = { v: best, kind };
+  }
+  return map;
+}
+
+// Rep-regression signal for one exposure vs the previous exposure of the same
+// muscle (spec 2.2): the muscle made NO progress on any shared exercise (every
+// shared lift is flat or down). Needs set-level entries on both, which the last
+// exposures have by definition (they are recent, inside the 70-day window).
+// Only exercises measured the SAME way in both exposures count as shared, so a
+// weighted-to-bodyweight switch never fakes a regression.
+function overreachRepRegression(cur, prev, muscle, muscleOfExId) {
+  if (!prev) return false;
+  const c = overreachBestPerfByEx(cur, muscle, muscleOfExId);
+  const p = overreachBestPerfByEx(prev, muscle, muscleOfExId);
+  let sawShared = false, improved = false;
+  for (const exId of Object.keys(c)) {
+    const pe = p[exId];
+    if (pe == null || pe.kind !== c[exId].kind) continue; // absent or incomparable metric
+    sawShared = true;
+    if (c[exId].v > pe.v + 1e-9) improved = true;
+  }
+  return sawShared && !improved;
+}
+
+// The per-exposure overreach signature: still-sore AND (rep-regression OR joint).
+function overreachExposureSignal(cur, prev, muscle, muscleOfExId) {
+  const sore = overreachStillSore(cur, muscle);
+  const joint = overreachJointFlagged(cur, muscle, muscleOfExId);
+  const regress = overreachRepRegression(cur, prev, muscle, muscleOfExId);
+  return { sore, joint, regress, triggered: sore && (regress || joint) };
+}
+
+// Overreach detector (spec 2.2). STATELESS: recomputed from history each call.
+// For every muscle trained on `sch`, look at the last 2 consecutive exposures
+// (the last 2 full-signal sessions that trained the muscle, frequency-adaptive:
+// they may sit inside one rotation for a 2x/rotation muscle or span two rotations
+// for a 1x/rotation muscle). A muscle is atCeiling when BOTH exposures show the
+// signature. A single clean latest exposure stands the detector down (implicit).
+// signalWeight discipline (spec 4.3): discounted/none sessions are NOT counted as
+// exposures, so a rough day or a deload can never trip or advance the ceiling;
+// absent signalWeight reads as 'full' for legacy sessions. Returns
+// { [muscle]: { atCeiling:true, since, evidence:[string] } } only for at-ceiling
+// muscles (evidence per spec 8, human-readable, straight into the nudge/recap).
+function detectOverreach(sessions, sch, muscleOfExId, opts = {}) {
+  const out = {};
+  if (!sch || typeof muscleOfExId !== 'function') return out;
+  const planId = sch.id;
+  const trained = (sessions || [])
+    .filter(s => s && s.ended && !s.isDeload && s.scheduleId === planId && (s.signalWeight || 'full') === 'full')
+    .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''));
+
+  const muscles = new Set();
+  for (const s of trained) {
+    for (const e of (s.entries || [])) {
+      if (!e || e.isCardio) continue;
+      const m = muscleOfExId(e.exId);
+      if (m) muscles.add(m);
+    }
+  }
+
+  for (const muscle of muscles) {
+    const exps = trained.filter(s =>
+      (s.entries || []).some(e => e && !e.isCardio && muscleOfExId(e.exId) === muscle));
+    if (exps.length < 2) continue; // need two exposures to confirm a ceiling
+    const E2 = exps[0], E1 = exps[1], E0 = exps[2] || null;
+    const s2 = overreachExposureSignal(E2, E1, muscle, muscleOfExId);
+    const s1 = overreachExposureSignal(E1, E0, muscle, muscleOfExId);
+    if (!(s2.triggered && s1.triggered)) continue; // stand-down is implicit
+
+    const soreCount = (s2.sore ? 1 : 0) + (s1.sore ? 1 : 0);
+    const parts = [];
+    if (soreCount) parts.push(`sore ${soreCount} session${soreCount > 1 ? 's' : ''}`);
+    if (s2.regress || s1.regress) parts.push('reps flat under the same load');
+    if (s2.joint || s1.joint) parts.push('joints flagged');
+    const evidence = [`${muscle} at its ceiling: ${parts.join(', ')}.`];
+    out[muscle] = { atCeiling: true, since: E1.ended || E1.date || null, evidence };
+  }
+  return out;
 }
 
 // Whether a pump/volume answer permits the weight bump. Load-only autoregulate
@@ -5298,6 +5548,7 @@ window.LB = {
   isLoggedTrainingDay, plannedTrainingDay, isTrainingDayForDate, dayTargetFromMacros, macroAdherence, hasMacroTargets, effectiveMacroTargets, dailyLogAdherence, dailyLogsWeekPrefill, weekPerformanceSignal,
   refreshHealthLogs,
   pickGrowthRecipient, retractGrowthGrant, pickDeclineRecipient, reearnMesoWeightBoosts, revertMesoSessionBoosts, resolveMesoSeedSuggestion, mesoPausedDays, mesoRirForWeek, mesoMuscleTrainedBeforeStart, volumeAnswerAllowsBump,
+  microcycleSetsByMuscle, detectOverreach,
   mesoGateSetsFromAnswers, isMesoSessionEditable, applyMesoFeedbackEdit, reearnMesoBoostsFromAnswers, mesoRecapGainsFromEdit,
   mesoSetTarget, mesoEarnTarget, mesoRepOutcome, reshapeSetsUnilateral,
 };

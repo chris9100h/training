@@ -53,7 +53,8 @@
       ['Joint: noticeable / sharp', isB?ho('frozen'):dn('-1 set'), bl('blocks bump')],
       ['Pump: low', ho('none, tracks swap'), bl('blocks bump')],
       ['Weight feel: too light / hard', ho('no effect'), up('earns bump')],
-      ['Weight feel: too heavy', ho('no effect'), bl('blocks bump')]
+      ['Weight feel: too heavy', ho('no effect'), bl('blocks bump')],
+      ['Overreach: sore + reps flat / joints, 2 exposures', ho('adds frozen (at ceiling)'), bl('deload suggested')]
     ];
     if(!isB){
       rows.push(['Workload: not enough', up('+1 set'), ho('no effect')]);
@@ -117,6 +118,21 @@
       '</div>';
     out+='<div class="card lb accented" style="margin-top:16px"><div class="kick" style="color:var(--accent)">Why it matters</div>'+
       '<div style="margin-top:6px;font-size:13.5px;color:var(--ink-soft)"><b>A rough day is discounted, not thrown away.</b> On Rough the app holds off the rep-miss cut and does not chase the earn ladder, so one tired session can never drag your weight down. If you push through and hit your reps anyway, the bump still lands. Skip the tap to train exactly as normal.</div></div>';
+    out+='</section>';
+
+    /* volume ceiling / overreach (modus-agnostic) */
+    out+='<section class="sec">'+sechead('Ceiling · Volume','When a muscle has had enough',
+      'The engine counts your hard sets per muscle over each microcycle (a rotation, a week, or a cycle, depending on the plan) and watches for the overreaching signature. It is the same guard in every mode, it just pulls a different lever.');
+    out+='<div class="grid g180">'+
+      stat('The signal','Sore + stalled',null,'A muscle that stays sore across its last two exposures while its reps go flat under the same load, or its joints start complaining.')+
+      stat('The hold','No more sets','var(--accent)','Once a muscle hits its ceiling the app stops adding sets to it. Weight and every other muscle keep progressing normally.')+
+      stat('The offer','Deload, 1 tap',null,'If a muscle is at its ceiling when you finish, the app offers a deload with the reason spelled out. Always wave-off-able.')+
+      '</div>';
+    out+='<div class="card lb accented" style="margin-top:16px"><div class="kick" style="color:var(--accent)">Per mode</div><div style="margin-top:6px;font-size:13.5px;color:var(--ink-soft)">'+
+      (isC?'<b>Mesocycle:</b> if a muscle tops out before the planned peak week, its sets stop climbing early (held, not cut). The planned deload still arrives at block end, so no separate offer pops mid-block.'
+        :isB?'<b>Load only:</b> your set counts are fixed anyway, so there is nothing to freeze. The detector\'s only job here is to hold the load and offer the deload when the fatigue signature shows.'
+        :'<b>Volume + Load:</b> the ceiling is the only thing holding your sets back. Hit it and adds pause for that muscle, then the deload offer lets you reset when you are ready. Nothing is ever forced, keep training if you would rather push on.')+
+      '</div></div>';
     out+='</section>';
 
     /* 03 feedback */
@@ -282,7 +298,8 @@
       :'Open-ended plans have no built-in end, so their automatic deload is a generic nudge after roughly 8 weeks of training, plus a manual deload you can start anytime.');
     out+='<div class="grid g240" style="margin-bottom:14px">'+
       '<div class="card lb accented"><h3 class="display h3">'+(isC?'1 · Planned end-of-block':'1 · The 8 week nudge')+'</h3><p style="font-size:14px;color:var(--ink-soft)">'+(isC?'Finishing the final week pops "Mesocycle complete! Start deload?". Taking it runs one light week, then offers the next block. Unique to bounded blocks.':'After about 8 weeks of training since your last deload (counted by sessions, weeks, or cycles depending on plan type), the app offers "Start deload". Take it or dismiss it.')+'</p></div>'+
-      '<div class="card lb-faint"><h3 class="display h3">2 · Manual, anytime</h3><p style="font-size:14px;color:var(--ink-soft)">The active plan card has a Deload button in every mode. It runs your normal plan at ~50% load for one cycle, then auto-ends.</p></div></div>';
+      '<div class="card lb-faint"><h3 class="display h3">2 · Manual, anytime</h3><p style="font-size:14px;color:var(--ink-soft)">The active plan card has a Deload button in every mode. It runs your normal plan at ~50% load for one cycle, then auto-ends.</p></div>'+
+      (isC?'':'<div class="card lb accented"><h3 class="display h3">3 · Overreach-driven</h3><p style="font-size:14px;color:var(--ink-soft)">When a muscle hits its volume ceiling (see the Volume section), the finish screen offers a deload right then, with the reason spelled out. It is a suggestion: wave it off and keep training.</p></div>')+'</div>';
     out+='<div class="card"><h3 class="display h3">What a deload week actually does</h3>'+
       '<div class="grid g240" style="gap:8px 16px;margin-top:6px">'+[
         ['Loads halved','to about 50% (rounded to 2.5). Reps are not reduced. Bodyweight and assisted lifts are not halved.'],
