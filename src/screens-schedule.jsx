@@ -691,6 +691,11 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
   const day = dayForSeed;
   const dayIdx = displayDays.findIndex(d => d.id === day.id);
   const isRest = !day.items.length;
+  // A named day with no exercises is not a real rest day, just unbuilt. The
+  // viewer must not present it as "Recover." (the same home-screen confusion),
+  // so it gets a clear "no exercises yet" state, with an add shortcut on your
+  // own plan.
+  const isEmptyNamed = isRest && day.name !== 'REST';
   const isTodaySel = day.id === todayDayId;
   const dayLabel = isWeekday ? weekdayFullLabel(day.weekday, dayIdx) : `Day ${dayIdx + 1}`;
   const trainingDayCount = displayDays.filter(d => d.items.length).length;
@@ -1023,7 +1028,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
       <div className={isTodaySel ? 'micro-gold' : 'micro'} style={{ marginBottom: 4, color: isTodaySel ? undefined : UI.inkFaint }}>
         {dayLabel.toUpperCase()}{isTodaySel ? ' · TODAY' : ''}
       </div>
-      <div className="display" style={{ fontSize: 30, color: isRest ? UI.inkSoft : UI.ink, fontStyle: isRest ? 'italic' : 'normal', lineHeight: 1.05, letterSpacing: '-0.01em' }}>
+      <div className="display" style={{ fontSize: 30, color: (isRest && !isEmptyNamed) ? UI.inkSoft : UI.ink, fontStyle: (isRest && !isEmptyNamed) ? 'italic' : 'normal', lineHeight: 1.05, letterSpacing: '-0.01em' }}>
         {day.name}
       </div>
     </div>
@@ -1043,7 +1048,17 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
     : false;
   const mesoBoosts = resolvedMeso?.weightBoosts ?? null;
 
-  const exerciseList = isRest ? (
+  const exerciseList = isEmptyNamed ? (
+    <BracketFrame style={{ textAlign: 'center', padding: 36 }}>
+      <div className="display-it" style={{ fontSize: 30, color: UI.gold, fontStyle: 'italic', fontWeight: 300, marginBottom: 6 }}>No exercises yet.</div>
+      <div style={{ fontSize: 13, color: UI.inkFaint }}>{fromPlan ? 'Add some to train this day.' : 'This day needs exercises to be trainable.'}</div>
+      {fromPlan && (
+        <div style={{ display: 'flex', justifyContent: 'center', marginTop: 18 }}>
+          <Btn onClick={() => go({ name: 'schedule-edit', scheduleId: sch.id, versionFrom: selectedVersion?.validFrom, openDayId: day.id })} style={{ minWidth: 200 }}>Add exercises</Btn>
+        </div>
+      )}
+    </BracketFrame>
+  ) : isRest ? (
     <BracketFrame style={{ textAlign: 'center', padding: 36 }}>
       <div className="display-it" style={{ fontSize: 38, color: UI.inkSoft, fontStyle: 'italic', fontWeight: 300, marginBottom: 6 }}>Recover.</div>
       <div style={{ fontSize: 13, color: UI.inkFaint }}>Recovery is part of the plan.</div>
@@ -1846,7 +1861,7 @@ function ProgressionInfoBody() {
   );
 }
 
-function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFrom, draftStore = store, setDraftStore = setStore }) {
+function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFrom, openDayId, draftStore = store, setDraftStore = setStore }) {
   const [confirmEl, confirm] = useConfirm();
   const original = store.schedules.find(s => s.id === scheduleId);
   // Which version is being edited (identified by validFrom). -1 = unversioned
@@ -1946,7 +1961,10 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
   const [applyFromSheet, setApplyFromSheet] = useStateS(false);
   const [applyFromDate, setApplyFromDate] = useStateS('');
   const [applyFromDayIdx, setApplyFromDayIdx] = useStateS(0);
-  const [editingDay, setEditingDay] = useStateS(null);
+  // Deep-link from the home "add exercises" prompt: open straight into that
+  // day's editor when it still exists in the draft, else fall through to the
+  // normal day list. One-shot, evaluated at mount.
+  const [editingDay, setEditingDay] = useStateS(() => (openDayId && (draft?.days || []).some(d => d.id === openDayId)) ? openDayId : null);
   const [mesoInfoOpen, setMesoInfoOpen] = useStateS(false);
   const [modifiersOpen, setModifiersOpen] = useStateS(false);
   const [tmEditOpen, setTmEditOpen] = useStateS(false);
@@ -2117,7 +2135,22 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
     go({ name: 'plan-view', scheduleId: draft.id, fromPlan: true });
   };
 
-  const save = () => {
+  // Empty named training days aren't trainable (they surface as rest days), so
+  // warn before leaving the editor with any. Non-blocking: the user can still go,
+  // but at least they've read that exercises belong there.
+  const warnLeaveEmptyDays = async () => {
+    const empties = (draft?.days || []).filter(d => d.name !== 'REST' && !(d.items && d.items.length));
+    if (!empties.length) return true;
+    const names = [...new Set(empties.map(d => d.name))];
+    const list = names.length === 1 ? names[0] : names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1];
+    const one = names.length === 1;
+    return confirm(
+      `${list} still ${one ? 'has' : 'have'} no exercises, so ${one ? "you can't train it" : "you can't train them"} until you add some. Leave anyway?`,
+      { title: one ? 'A day has no exercises' : 'Some days have no exercises', ok: 'Leave anyway', cancel: 'Keep editing' }
+    );
+  };
+  const save = async () => {
+    if (!(await warnLeaveEmptyDays())) return;
     if (editVerIdx > 0) { doSaveVersion(); return; } // older version → update in place, no date prompt
     if (!dirty || store.activeScheduleId !== draft.id) { doSave(null); return; }
     const isWdPlan = LB.isWeekdayPlan(original);
@@ -2173,7 +2206,10 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
     width: '100%', boxSizing: 'border-box', display: 'block', colorScheme: 'dark', textAlign: 'center', WebkitAppearance: 'none',
   };
 
-  const dayActionLabel = (day) => (day.name === 'REST' || !day.items.length) ? 'edit' : `${day.items.length} ex · edit`;
+  // Empty training days must scream that exercises are still missing: without
+  // any, the day can't be trained. So a named day with no items reads "add
+  // exercises" (in accent), REST reads "edit", a filled day "N ex · edit".
+  const dayActionLabel = (day) => day.name === 'REST' ? 'edit' : !day.items.length ? 'add exercises' : `${day.items.length} ex · edit`;
 
   const switchMode = async () => {
     if (!isWeekday) {
@@ -2238,6 +2274,8 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
                 )
               : await confirm('Unsaved changes will be lost.', { title: 'Discard changes?', ok: 'Discard', danger: true });
             if (!confirmed) return;
+          } else if (!(await warnLeaveEmptyDays())) {
+            return;
           }
           clearDraft();
           go({ name: 'plan-view', scheduleId: draft.id, fromPlan: true });
@@ -2378,7 +2416,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
                     padding: '6px 8px', borderRadius: 4,
                     display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
                     color: day.name === 'REST' ? UI.inkFaint : UI.ink, fontSize: 14, fontWeight: 600, fontFamily: UI.fontUi,
-                  }}><span>{day.name}</span><span className="micro" style={{ fontStyle: 'normal' }}>{dayActionLabel(day)}</span></button>
+                  }}><span>{day.name}</span><span className="micro" style={{ fontStyle: 'normal', color: (day.name !== 'REST' && !day.items.length) ? UI.gold : undefined }}>{dayActionLabel(day)}</span></button>
                   <button onClick={() => toggleWeekdayEdit(day.weekday)} style={{ ...dayEditIconBtn, color: UI.danger, fontSize: 18 }}>×</button>
                 </div>
               ))}
@@ -2400,7 +2438,10 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
             <span className="label">Cycle · {draft.days.length} days</span>
             <div ref={daysListRef} data-reorder-list="true" style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 10 }}>
               {draft.days.map((day, i) => {
-                const isRest = day.name === 'REST' || !day.items.length;
+                // Only a true REST day is muted; an empty training day keeps its
+                // normal name so its gold "add exercises" cue reads as a real,
+                // unfinished day rather than blending in as a rest slot.
+                const isRest = day.name === 'REST';
                 return (
                   <div key={day.id} data-reorder-item="true" style={{
                     display: 'flex', alignItems: 'center', gap: 8,
@@ -2414,7 +2455,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
                       padding: '6px 8px', borderRadius: 4,
                       display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
                       color: isRest ? UI.inkFaint : UI.ink, fontSize: 14, fontWeight: 600, fontFamily: UI.fontUi,
-                    }}><span>{day.name}</span><span className="micro" style={{ fontStyle: 'normal' }}>{dayActionLabel(day)}</span></button>
+                    }}><span>{day.name}</span><span className="micro" style={{ fontStyle: 'normal', color: (day.name !== 'REST' && !day.items.length) ? UI.gold : undefined }}>{dayActionLabel(day)}</span></button>
                     <button data-reorder-ignore="true" onClick={() => removeDay(i)} style={{ ...dayEditIconBtn, color: UI.danger, fontSize: 18 }}>×</button>
                   </div>
                 );
@@ -3293,7 +3334,7 @@ function DayCopyPicker({ store, schedule, currentDayId, onClose, onCopy, multiSe
 }
 
 // ─── Day editor (exercises within a day) ─────────────────────────────
-function ExerciseItemEditor({ item, exName, isCheckboxOnly, queuePos, queueTotal, store, setStore, onClose, onSave }) {
+function ExerciseItemEditor({ item, exName, isCheckboxOnly, queuePos, queueTotal, feedbackDrivenWeight, store, setStore, onClose, onSave }) {
   // The exercise note is global (same record, shared across every plan that
   // uses this exercise) — not part of this day/plan item — so it's read from
   // and written straight back to store.exercises, independent of onSave's
@@ -3477,7 +3518,15 @@ function ExerciseItemEditor({ item, exName, isCheckboxOnly, queuePos, queueTotal
         )}</>}
       </div>
 
-      {!isCheckboxOnly && (() => {
+      {/* Autoregulate / mesocycle plans: the feedback engine owns the weight, so
+          per-exercise Smart Progression is inert here. Hide the toggle (it would
+          imply it drives the load) and say what actually does. */}
+      {!isCheckboxOnly && feedbackDrivenWeight && (
+        <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.4, marginBottom: 24 }}>
+          In this plan, weight is autoregulated from your training feedback, not Smart Progression.
+        </div>
+      )}
+      {!isCheckboxOnly && !feedbackDrivenWeight && (() => {
         if (mode === 'range') {
           // Range's own Max is always the ceiling when on — no separate
           // offset number to configure, just whether progression applies
@@ -3881,6 +3930,7 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave, onDraftCha
           item={draft.items[editingItem]}
           exName={LB.findExercise(store, draft.items[editingItem]?.exId)?.name || '—'}
           isCheckboxOnly={!!LB.findExercise(store, draft.items[editingItem]?.exId)?.no_weight_reps}
+          feedbackDrivenWeight={!!(schedule?.mesocycle_autoregulate || schedule?.mesocycle_weeks != null)}
           queuePos={editQueue ? editQueue.pos + 1 : undefined}
           queueTotal={editQueue ? editQueue.indices.length : undefined}
           store={store}

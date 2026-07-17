@@ -53,7 +53,8 @@
       ['Joint: noticeable / sharp', isB?ho('frozen'):dn('-1 set'), bl('blocks bump')],
       ['Pump: low', ho('none, tracks swap'), bl('blocks bump')],
       ['Weight feel: too light / hard', ho('no effect'), up('earns bump')],
-      ['Weight feel: too heavy', ho('no effect'), bl('blocks bump')]
+      ['Weight feel: too heavy', ho('no effect'), bl('blocks bump')],
+      ['Overreach: sore + reps flat / joints, 2 exposures', ho('adds frozen (at ceiling)'), bl('deload suggested')]
     ];
     if(!isB){
       rows.push(['Workload: not enough', up('+1 set'), ho('no effect')]);
@@ -107,6 +108,86 @@
     if(isB) out+='<div style="font-size:12.5px;color:var(--ink-soft);margin-top:12px">In Load only the sets column is inert: every set answer is frozen, so the questions exist purely to gate the weight. Soreness is repurposed as a recovery brake that holds the weight instead of cutting a set.</div>';
     out+='</section>';
 
+    /* readiness (modus-agnostic, same in every mode) */
+    out+='<section class="sec">'+sechead('Readiness · Today','One tap for how you feel',
+      'At the start of every session the app asks Fresh, Normal or Rough. It only nudges the suggestion, never the ceiling: you can always push to your limit, and a real PR counts on any day.');
+    out+='<div class="grid g180">'+
+      stat('Fresh','Push','var(--ok)','A strong day. Train as usual and chase the bump.')+
+      stat('Normal','As usual',null,'The default. Nothing changes, the engine runs normally.')+
+      stat('Rough',isC?'+1 RIR':'Ease off','var(--accent)',isC?'Low on energy. The app suggests a rep more in reserve and counts the session gently, so a bad night never cuts your progression.':'Low on energy. The app eases the target (leave a little more in reserve) and counts the session gently, so a bad night never cuts your progression.')+
+      '</div>';
+    out+='<div class="card lb accented" style="margin-top:16px"><div class="kick" style="color:var(--accent)">Why it matters</div>'+
+      '<div style="margin-top:6px;font-size:13.5px;color:var(--ink-soft)"><b>A rough day is discounted, not thrown away.</b> On Rough the app holds off the rep-miss cut and does not chase the earn ladder, so one tired session can never drag your weight down. If you push through and hit your reps anyway, the bump still lands. Skip the tap to train exactly as normal.</div></div>';
+    out+='</section>';
+
+    /* re-entry ramp (modus-agnostic) */
+    out+='<section class="sec">'+sechead('Coming back · Break','Eased in after time off',
+      'Take a sick or vacation break longer than a week and the first sessions back start eased in: a rep more in reserve, counted gently, so a layoff never punishes your numbers. It only lowers the suggestion, never the ceiling, one strong set snaps you straight back.');
+    out+='<div class="grid g180">'+
+      stat('Auto','No tap needed',null,'After a break over a week the app opens your first session back already eased in, discounted like a rough day. Nothing to set.')+
+      stat('Per lift','1, maybe 2 sets','var(--accent)','Each lift starts a touch lighter, but hit your reps and earn pulls it straight back, usually on the first exposure, at most the second.')+
+      stat('Systemic','One microcycle',null,'The gentle count fades over a single rotation, week or cycle (your plan\'s unit), not a fixed number of sessions. A longer break eases in longer.')+
+      '</div>';
+    out+='<div class="card lb accented" style="margin-top:16px"><div class="kick" style="color:var(--accent)">Why it matters</div>'+
+      '<div style="margin-top:6px;font-size:13.5px;color:var(--ink-soft)"><b>Never held below what you can do.</b> The ramp lowers the target, never caps the weight. Come back strong and your performance overrides it instantly, the discount just means a good day after time off still counts and a rough one never drags your progression down. Short break (a week or less)? No ramp at all.</div></div>';
+    out+='</section>';
+
+    /* volume ceiling / overreach (modus-agnostic) */
+    out+='<section class="sec">'+sechead('Ceiling · Volume','When a muscle has had enough',
+      'The engine counts your hard sets per muscle over each microcycle (a rotation, a week, or a cycle, depending on the plan) and watches for the overreaching signature. It is the same guard in every mode, it just pulls a different lever.');
+    out+='<div class="grid g180">'+
+      stat('The signal','Sore + stalled',null,'A muscle that stays sore across its last two exposures while its reps go flat under the same load, or its joints start complaining.')+
+      stat('The hold','No more sets','var(--accent)','Once a muscle hits its ceiling the app stops adding sets to it. Weight and every other muscle keep progressing normally.')+
+      stat('The offer','Deload, 1 tap',null,'If a muscle is at its ceiling when you finish, the app offers a deload with the reason spelled out. Always wave-off-able.')+
+      '</div>';
+    out+='<div class="card lb accented" style="margin-top:16px"><div class="kick" style="color:var(--accent)">Per mode</div><div style="margin-top:6px;font-size:13.5px;color:var(--ink-soft)">'+
+      (isC?'<b>Mesocycle:</b> if a muscle tops out before the planned peak week, its sets stop climbing early (held, not cut). The planned deload still arrives at block end, so no separate offer pops mid-block.'
+        :isB?'<b>Load only:</b> your set counts are fixed anyway, so there is nothing to freeze. The detector\'s only job here is to hold the load and offer the deload when the fatigue signature shows.'
+        :'<b>Volume + Load:</b> the ceiling is the only thing holding your sets back. Hit it and adds pause for that muscle, then the deload offer lets you reset when you are ready. Nothing is ever forced, keep training if you would rather push on.')+
+      '</div></div>';
+    out+='</section>';
+
+    /* volume landmarks / self-timed block (modus-agnostic) */
+    out+='<section class="sec">'+sechead('Landmarks · Memory','A ceiling it learns and remembers',
+      'The first time a muscle hits its overreaching signature, the app remembers the set count it happened at as that muscle\'s ceiling. It is smoothed across blocks, so one rough block nudges the number, never craters it. That memory is what turns an open-ended plan into a self-timed block.');
+    out+='<div class="grid g180">'+
+      stat('Learned ceiling','Per muscle',null,'Your MRV is stored per muscle, not per exercise, and averaged across blocks. A single bad week moves it a little, so it settles on your real ceiling over time.')+
+      stat('Self-timed block','Recovery, not a number','var(--accent)','A block ends when you hit the ceiling, not on a fixed date. Take the deload and the app starts a fresh block right there.')+
+      stat('Reset & re-ramp','Back off, build again',null,'On that reset each exercise drops about 2 sets from where it topped out (never below your plan\'s base), then set adds climb again, capped by the same learned ceiling.')+
+      '</div>';
+    out+='<div class="card lb accented" style="margin-top:16px"><div class="kick" style="color:var(--accent)">Per mode</div><div style="margin-top:6px;font-size:13.5px;color:var(--ink-soft)">'+
+      (isB?'<b>Load only:</b> no volume landmarks here by design, your set counts are fixed on purpose. You still get the ceiling detector and the deload offer, they just hold and drop the weight instead of your sets.'
+        :isC?'<b>Mesocycle:</b> the block still ends on its planned week, but the learned ceiling carries as a memory and caps your sets early if you reach it before the peak. Your next block starts fresh from a backed-off base.'
+        :'<b>Volume + Load:</b> this is what makes the plan a self-paced mesocycle. Grow until a muscle tops out, take the deload when you are ready, and the next block re-ramps from a backed-off start toward the ceiling you actually reached. Never forced, always wave-off-able.')+
+      '</div></div>';
+    out+='</section>';
+
+    /* block recap (modus-agnostic) */
+    out+='<section class="sec">'+sechead('Recap · Block','What you built, and what it cost',
+      'When a block wraps up, the app sums up everything since your last reset: weight PRs, the lifts that climbed, how many sessions you put in and your best day. It shows up in two moments, and reads differently in each.');
+    out+='<div class="grid g180">'+
+      stat('Block end','Pure win','var(--ok)','Finish a block or take a deload and the recap is a celebration: PRs, sessions, best day, nothing else.')+
+      stat('Deload declined','Win + cost','var(--accent)','Wave a suggested deload off and the recap shows the same gains next to the fatigue evidence, so the choice is an honest one.')+
+      stat('Anti-nag','Asked once',null,'After you decline it goes quiet for a few sessions, just a small deload ready tag, then only speaks up again if the fatigue is clearly worse.')+
+      '</div>';
+    out+='<div class="card lb accented" style="margin-top:16px"><div class="kick" style="color:var(--accent)">Why both sides</div><div style="margin-top:6px;font-size:13.5px;color:var(--ink-soft)">'+
+      (isC?'<b>Mesocycle:</b> your recap lands at the end of the block, when the mesocycle finishes, as a straight celebration. There is no mid-block nag: the planned deload is already on the calendar.'
+        :'<b>Gains alone would argue against ever stopping.</b> "It is going great, why deload?" Seeing what you built next to the fatigue that came with it makes the call a real one. The app asks once with honest data, never blocks you, and never guilt-trips: keep training if you would rather push on.')+
+      '</div></div>';
+    out+='</section>';
+
+    /* stall + concrete swap (modus-agnostic) */
+    out+='<section class="sec">'+sechead('Stall · Swap','When a lift stops moving',
+      'Separate from a tired muscle: sometimes one exercise just stalls. If your estimated 1RM on a lift goes flat for three sessions while your gates are green (joints fine, good pump, the muscle not at its ceiling), the app flags it and names a concrete alternative to try.');
+    out+='<div class="grid g180">'+
+      stat('The signal','Flat 3 sessions',null,'Three sessions with no new estimated 1RM on that lift, while joints, pump and muscle volume all read fine. That points at the exercise, not fatigue.')+
+      stat('The swap','A real change','var(--accent)','It names a sibling for the same muscle with a different movement or equipment, so the stimulus actually changes, not just a rename.')+
+      stat('One tap','Or ignore it',null,'Tap to swap it in and your sets carry over, or wave it off and keep grinding. Always a suggestion, never forced.')+
+      '</div>';
+    out+='<div class="card lb accented" style="margin-top:16px"><div class="kick" style="color:var(--accent)">Why the gates matter</div>'+
+      '<div style="margin-top:6px;font-size:13.5px;color:var(--ink-soft)"><b>A stall is a lift problem, not a fatigue problem.</b> If the muscle were at its ceiling or your joints were complaining, the fix would be a deload, not a swap. By only firing when everything else looks healthy, this tells apart a lift that has run its course from a body that needs a break. It skips lifts you already flagged and never suggests one you disliked.</div></div>';
+    out+='</section>';
+
     /* 03 feedback */
     out+='<section class="sec">'+sechead('03 / Feedback','The questions and every answer',
       isB?'Asked per muscle group: soreness first, then per exercise the joint, weight and pump check.':'Asked per muscle group: soreness first, then per exercise the joint, weight and pump check, then the muscle workload last.');
@@ -126,6 +207,8 @@
     /* per exercise: joint + weight feel + pump. Each sub-block tiles into its
        own responsive grid so the (long) list stays compact, not mega-tall. */
     var jn='<p class="panel-intro">Asked for every exercise, every mode. Joint comfort, how the weight felt, and the pump: together these three gate the weight bump for this exercise'+(isB?'.':'. In Volume+Load and Meso, joint pain also shaves a set off this exercise.')+'</p>';
+    jn+='<div class="card lb accented" style="margin-bottom:14px"><div class="kick" style="color:var(--accent)">One-tap shortcut</div>'+
+      '<div style="margin-top:6px;font-size:13.5px;color:var(--ink-soft)"><b>Nothing to report? One tap.</b> The sheet opens asking "How did that feel?" with a single "On point" button that answers all four at once: joint none, weight just right, pump moderate, lift affinity "It\'s fine". "Flag a detail" opens the full set instead, pre-filled to on-target, so you only touch what actually deviated. Soreness above stays its own separate tap, per muscle, untouched by this shortcut.</div></div>';
     jn+='<div class="kick">Joint</div>';
     jn+='<div class="opt-grid" style="margin-top:8px">';
     jn+=opt('None', dir('hold','gate green'), 'Joints fine. This exercise can earn its bump.', true);
@@ -270,7 +353,8 @@
       :'Open-ended plans have no built-in end, so their automatic deload is a generic nudge after roughly 8 weeks of training, plus a manual deload you can start anytime.');
     out+='<div class="grid g240" style="margin-bottom:14px">'+
       '<div class="card lb accented"><h3 class="display h3">'+(isC?'1 · Planned end-of-block':'1 · The 8 week nudge')+'</h3><p style="font-size:14px;color:var(--ink-soft)">'+(isC?'Finishing the final week pops "Mesocycle complete! Start deload?". Taking it runs one light week, then offers the next block. Unique to bounded blocks.':'After about 8 weeks of training since your last deload (counted by sessions, weeks, or cycles depending on plan type), the app offers "Start deload". Take it or dismiss it.')+'</p></div>'+
-      '<div class="card lb-faint"><h3 class="display h3">2 · Manual, anytime</h3><p style="font-size:14px;color:var(--ink-soft)">The active plan card has a Deload button in every mode. It runs your normal plan at ~50% load for one cycle, then auto-ends.</p></div></div>';
+      '<div class="card lb-faint"><h3 class="display h3">2 · Manual, anytime</h3><p style="font-size:14px;color:var(--ink-soft)">The active plan card has a Deload button in every mode. It runs your normal plan at ~50% load for one cycle, then auto-ends.</p></div>'+
+      (isC?'':'<div class="card lb accented"><h3 class="display h3">3 · Overreach-driven</h3><p style="font-size:14px;color:var(--ink-soft)">When a muscle hits its learned volume ceiling (see the Landmarks section), the finish screen offers a deload right then, with the reason spelled out. Take it and the block resets: each lift backs off about 2 sets and a fresh block re-ramps. It is a suggestion: wave it off and keep training.</p></div>')+'</div>';
     out+='<div class="card"><h3 class="display h3">What a deload week actually does</h3>'+
       '<div class="grid g240" style="gap:8px 16px;margin-top:6px">'+[
         ['Loads halved','to about 50% (rounded to 2.5). Reps are not reduced. Bodyweight and assisted lifts are not halved.'],

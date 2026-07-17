@@ -829,11 +829,45 @@ async function testAsync(name, fn) {
     assert.strictEqual(out.allHit, false);   // 7 < mid 10 → no earn
     assert.strictEqual(out.earlyMiss, true); // 7 < floor 8, and a lone set counts directly
   });
+  test('mesoRepOutcome: no rep target at all (ad-hoc mid-session add) never earns a boost', () => {
+    // A brand-new exercise carries no plannedReps until the post-session plan
+    // wizard assigns one. Its earn gate must stay shut (there is no top-of-range
+    // to clear) instead of auto-passing off any rep count, which used to fire a
+    // weight bump on a fresh add. The miss gate stays permissive: no target so
+    // nothing is "too heavy".
+    const sets = [{ done: true, reps: 20 }, { done: true, reps: 20 }];
+    const out = LB.mesoRepOutcome(sets, null, null, null);
+    assert.strictEqual(out.allHit, false, 'no target → cannot earn a weight bump');
+    assert.strictEqual(out.earlyMiss, false, 'no target → cannot be a rep miss either');
+  });
   test('mesoRepOutcome (per-set): the MISS gate uses each set\'s own per-set floor, last set exempt', () => {
     // first set under its per-set target 10 → early miss
     assert.strictEqual(LB.mesoRepOutcome([{ done: true, reps: 9 }, { done: true, reps: 8 }], null, [10, 8], null).earlyMiss, true);
     // only the LAST set is low (5 < 8); it is exempt, so no early miss
     assert.strictEqual(LB.mesoRepOutcome([{ done: true, reps: 10 }, { done: true, reps: 5 }], null, [10, 8], null).earlyMiss, false);
+  });
+
+  // ── reshapeSetsUnilateral (set rep shape follows a swap's unilateral-ness) ──
+  // (field-by-field asserts: the vm realm's distinct Object.prototype trips
+  // deepStrictEqual, same as the rest of this suite avoids it.)
+  test('reshapeSetsUnilateral: unilateral → bilateral collapses L/R to the min single rep', () => {
+    const out = LB.reshapeSetsUnilateral([{ kg: 50, repsL: 13, repsR: 12 }, { kg: 50, repsL: 12, repsR: 12 }], false);
+    assert.strictEqual(out[0].reps, 12); assert.strictEqual(out[0].repsL, null); assert.strictEqual(out[0].repsR, null); assert.strictEqual(out[0].kg, 50);
+    assert.strictEqual(out[1].reps, 12); assert.strictEqual(out[1].repsL, null); assert.strictEqual(out[1].repsR, null);
+  });
+  test('reshapeSetsUnilateral: bilateral → unilateral mirrors the single rep onto both sides', () => {
+    const out = LB.reshapeSetsUnilateral([{ kg: 50, reps: 13 }], true);
+    assert.strictEqual(out[0].repsL, 13); assert.strictEqual(out[0].repsR, 13); assert.strictEqual(out[0].reps, null); assert.strictEqual(out[0].kg, 50);
+  });
+  test('reshapeSetsUnilateral: sets already in the target shape (or empty) pass through untouched', () => {
+    const already = [{ kg: 50, reps: 10 }];
+    assert.strictEqual(LB.reshapeSetsUnilateral(already, false)[0], already[0], 'no needless rewrite');
+    const empty = [{ kg: null, reps: null }];
+    assert.strictEqual(LB.reshapeSetsUnilateral(empty, true)[0], empty[0], 'nothing logged to mirror');
+  });
+  test('reshapeSetsUnilateral: a one-sided log still collapses to that side\'s reps', () => {
+    const out = LB.reshapeSetsUnilateral([{ kg: 40, repsL: 8, repsR: null }], false);
+    assert.strictEqual(out[0].reps, 8); assert.strictEqual(out[0].repsL, null); assert.strictEqual(out[0].repsR, null);
   });
 
   // ── reearnMesoWeightBoosts (weight boost must be re-earned every session) ──
@@ -935,6 +969,146 @@ async function testAsync(name, fn) {
       const s = withRaw();
       const live = { id: 'IP', scheduleId: 'p1', ended: null };
       assert.strictEqual(LB.isMesoSessionEditable(s, [s, live], meso), false);
+    });
+  }
+
+  // ── remapMesoAnswersExId (swap-correction moves the joint record identity, #1) ──
+  {
+    const answers = {
+      soreness: { chest: { muscle: 'chest', targets: [{ exId: 'A', name: 'Bench', key: 'A_d0' }], answer: 'still_sore', contrib: { A_d0: -1 } } },
+      joint: { A: { exId: 'A', exName: 'Bench', answer: 'sharp', pump: 'low', weight: 'ok', contrib: { A_d0: -1 } } },
+      volume: { chest: { muscle: 'chest', exIds: ['A', 'e2'], volume: 'not_enough', contrib: { A_d0: 1 } } },
+    };
+    test('remapMesoAnswersExId: moves the joint record identity to the new exId', () => {
+      const out = LB.remapMesoAnswersExId(answers, 'A', 'B', 'Incline Bench');
+      assert.ok(!('A' in out.joint), 'old joint key removed');
+      assert.strictEqual(out.joint.B.exId, 'B');
+      assert.strictEqual(out.joint.B.exName, 'Incline Bench');
+      assert.strictEqual(out.joint.B.answer, 'sharp');
+      assert.strictEqual(out.joint.B.pump, 'low');
+      assert.strictEqual(out.joint.B.weight, 'ok');
+    });
+    test('remapMesoAnswersExId: KEEPS the joint contrib under the old key (deltas stay in sync)', () => {
+      const out = LB.remapMesoAnswersExId(answers, 'A', 'B', 'Incline Bench');
+      assert.strictEqual(out.joint.B.contrib.A_d0, -1, 'contrib key left under the old exId_dayId');
+      assert.ok(!('B_d0' in out.joint.B.contrib), 'contrib NOT re-keyed to the new exId');
+    });
+    test('remapMesoAnswersExId: leaves soreness + volume entirely untouched', () => {
+      const out = LB.remapMesoAnswersExId(answers, 'A', 'B', 'Incline Bench');
+      assert.strictEqual(out.soreness, answers.soreness, 'soreness object identity preserved');
+      assert.strictEqual(out.volume, answers.volume, 'volume object identity preserved');
+    });
+    test('remapMesoAnswersExId: no-op returns the same ref (absent / same id / target exists)', () => {
+      assert.strictEqual(LB.remapMesoAnswersExId(answers, 'ZZZ', 'B', 'X'), answers);
+      assert.strictEqual(LB.remapMesoAnswersExId(answers, 'A', 'A', 'X'), answers);
+      const withB = { joint: { A: { exId: 'A' }, B: { exId: 'B', exName: 'keep' } } };
+      const out = LB.remapMesoAnswersExId(withB, 'A', 'B', 'X');
+      assert.strictEqual(out, withB, 'does not clobber an existing target record');
+      assert.strictEqual(withB.joint.B.exName, 'keep');
+    });
+    test('remapMesoAnswersExId: does not mutate the input', () => {
+      const snapshot = JSON.stringify(answers);
+      LB.remapMesoAnswersExId(answers, 'A', 'B', 'Incline Bench');
+      assert.strictEqual(JSON.stringify(answers), snapshot, 'input answers untouched');
+    });
+  }
+
+  // ── deriveSignalWeight (#D, shared live/edit signal-hygiene) ──
+  test('deriveSignalWeight: active deload -> none (ignores stamped value)', () => {
+    assert.strictEqual(LB.deriveSignalWeight({ signalWeight: 'full', readiness: 'normal' }, true), 'none');
+  });
+  test('deriveSignalWeight: a stamped non-none value is preserved', () => {
+    assert.strictEqual(LB.deriveSignalWeight({ signalWeight: 'discounted', readiness: 'rough' }, false), 'discounted');
+  });
+  test('deriveSignalWeight: stale none (deload ended) re-derives from readiness', () => {
+    assert.strictEqual(LB.deriveSignalWeight({ signalWeight: 'none', readiness: 'normal' }, false), 'full');
+    assert.strictEqual(LB.deriveSignalWeight({ signalWeight: 'none', readiness: 'rough' }, false), 'discounted');
+    assert.strictEqual(LB.deriveSignalWeight({ signalWeight: 'none', readiness: 'reentry' }, false), 'discounted');
+  });
+  test('deriveSignalWeight: no signalWeight derives from readiness', () => {
+    assert.strictEqual(LB.deriveSignalWeight({ readiness: 'normal' }, false), 'full');
+    assert.strictEqual(LB.deriveSignalWeight({ readiness: 'rough' }, false), 'discounted');
+  });
+
+  // ── remapMesoStateExId / mesoRowHasExId / laterSessionTrainsExId (#E full swap re-key) ──
+  {
+    const ms = () => ({
+      weightBoosts: { A_d0: 2.5, X_d0: 5 }, repMissCounts: { A_d0: 1 },
+      deltas: { A_d0: 1, Y_d0: -1 }, growthCounts: { A_d0: 3 },
+      jointFlags: { A: true }, pumpLowCounts: { A: 2 }, affinity: { A: { v: 'dislike', streak: 1 } },
+    });
+    test('remapMesoStateExId: moves exId_dayId levers A_d0->B_d0 and bare-exId levers A->B', () => {
+      const out = LB.remapMesoStateExId(ms(), 'A', 'B', 'd0');
+      assert.strictEqual(out.weightBoosts.B_d0, 2.5); assert.ok(!('A_d0' in out.weightBoosts));
+      assert.strictEqual(out.weightBoosts.X_d0, 5, 'unrelated key kept');
+      assert.strictEqual(out.repMissCounts.B_d0, 1);
+      assert.strictEqual(out.deltas.B_d0, 1); assert.strictEqual(out.deltas.Y_d0, -1);
+      assert.strictEqual(out.growthCounts.B_d0, 3);
+      assert.strictEqual(out.jointFlags.B, true); assert.ok(!('A' in out.jointFlags));
+      assert.strictEqual(out.pumpLowCounts.B, 2);
+      assert.deepStrictEqual(out.affinity.B, { v: 'dislike', streak: 1 });
+    });
+    test('remapMesoStateExId: never clobbers an existing target lever', () => {
+      const out = LB.remapMesoStateExId({ weightBoosts: { A_d0: 2.5, B_d0: 7 } }, 'A', 'B', 'd0');
+      assert.strictEqual(out.weightBoosts.B_d0, 7, 'existing B kept');
+      assert.strictEqual(out.weightBoosts.A_d0, 2.5, 'A left in place (not clobbered)');
+    });
+    test('remapMesoStateExId: no-op returns same ref, does not mutate', () => {
+      const s = ms(); const snap = JSON.stringify(s);
+      assert.strictEqual(LB.remapMesoStateExId(s, 'Z', 'B', 'd0'), s);
+      assert.strictEqual(LB.remapMesoStateExId(s, 'A', 'A', 'd0'), s);
+      LB.remapMesoStateExId(s, 'A', 'B', 'd0');
+      assert.strictEqual(JSON.stringify(s), snap, 'input untouched');
+    });
+    test('mesoRowHasExId: true when the new exId owns any lever', () => {
+      assert.strictEqual(LB.mesoRowHasExId({ weightBoosts: { B_d0: 5 } }, 'B', 'd0'), true);
+      assert.strictEqual(LB.mesoRowHasExId({ jointFlags: { B: true } }, 'B', 'd0'), true);
+      assert.strictEqual(LB.mesoRowHasExId({ weightBoosts: { C_d0: 5 } }, 'B', 'd0'), false);
+      assert.strictEqual(LB.mesoRowHasExId(null, 'B', 'd0'), false);
+    });
+    test('laterSessionTrainsExId: owner test mirrors revertMesoSessionBoosts.retrainedLater', () => {
+      const later = { id: 'L', ended: '2026-07-17T10:00:00Z', dayId: 'd0', scheduleId: 'p', entries: [{ exId: 'A' }] };
+      assert.strictEqual(LB.laterSessionTrainsExId([later], 'A', 'd0', '2026-07-10T00:00:00Z', 'S', 'p'), true);
+      assert.strictEqual(LB.laterSessionTrainsExId([{ ...later, dayId: 'd1' }], 'A', 'd0', '2026-07-10T00:00:00Z', 'S', 'p'), false, 'diff day');
+      assert.strictEqual(LB.laterSessionTrainsExId([{ ...later, scheduleId: 'q' }], 'A', 'd0', '2026-07-10T00:00:00Z', 'S', 'p'), false, 'diff plan');
+      assert.strictEqual(LB.laterSessionTrainsExId([{ ...later, entries: [{ exId: 'Z' }] }], 'A', 'd0', '2026-07-10T00:00:00Z', 'S', 'p'), false, 'did not retrain');
+      assert.strictEqual(LB.laterSessionTrainsExId([{ ...later, id: 'S' }], 'A', 'd0', '2026-07-10T00:00:00Z', 'S', 'p'), false, 'excepted self');
+      assert.strictEqual(LB.laterSessionTrainsExId([{ ...later, ended: '2026-07-05T00:00:00Z' }], 'A', 'd0', '2026-07-10T00:00:00Z', 'S', 'p'), false, 'earlier');
+    });
+  }
+
+  // ── remapMesoRecapRawForSwap (#E full recap re-key) ──
+  {
+    const raw = () => ({
+      answers: {
+        soreness: { chest: { muscle: 'chest', targets: [{ exId: 'A', name: 'Bench', key: 'A_d0' }], answer: 'still_sore', contrib: { A_d0: -1 } } },
+        joint: { A: { exId: 'A', exName: 'Bench', answer: 'sharp', pump: 'low', contrib: { A_d0: -1 } } },
+        volume: { chest: { muscle: 'chest', exIds: ['A', 'e2'], volume: 'not_enough', contrib: { A_d0: 1 } } },
+      },
+      negOwner: { A_d0: 'joint' }, dayId: 'd0',
+    });
+    test('remapMesoRecapRawForSwap: re-keys joint identity + contrib to the new exId', () => {
+      const out = LB.remapMesoRecapRawForSwap(raw(), 'A', 'B', 'd0', 'Incline');
+      assert.strictEqual(out.answers.joint.B.exId, 'B');
+      assert.strictEqual(out.answers.joint.B.exName, 'Incline');
+      assert.strictEqual(out.answers.joint.B.contrib.B_d0, -1);
+      assert.ok(!('A' in out.answers.joint));
+    });
+    test('remapMesoRecapRawForSwap: re-keys soreness targets+contrib, volume exIds+contrib, negOwner', () => {
+      const out = LB.remapMesoRecapRawForSwap(raw(), 'A', 'B', 'd0', 'Incline');
+      assert.strictEqual(out.answers.soreness.chest.targets[0].key, 'B_d0');
+      assert.strictEqual(out.answers.soreness.chest.targets[0].name, 'Incline');
+      assert.strictEqual(out.answers.soreness.chest.contrib.B_d0, -1);
+      assert.deepStrictEqual(out.answers.volume.chest.exIds, ['B', 'e2']);
+      assert.strictEqual(out.answers.volume.chest.contrib.B_d0, 1);
+      assert.strictEqual(out.negOwner.B_d0, 'joint');
+      assert.ok(!('A_d0' in out.negOwner));
+    });
+    test('remapMesoRecapRawForSwap: no-op returns same ref, does not mutate', () => {
+      const r = raw(); const snap = JSON.stringify(r);
+      assert.strictEqual(LB.remapMesoRecapRawForSwap(r, 'Z', 'B', 'd0', 'x'), r);
+      LB.remapMesoRecapRawForSwap(r, 'A', 'B', 'd0', 'Incline');
+      assert.strictEqual(JSON.stringify(r), snap, 'input untouched');
     });
   }
 
@@ -2391,6 +2565,613 @@ async function testAsync(name, fn) {
     // rejects two structurally-equal {} across realms.
     assert.strictEqual(Object.keys(LB.mergePlanDrafts(undefined, undefined, undefined)).length, 0);
     assert.strictEqual(Object.keys(LB.mergePlanDrafts(null, null, null)).length, 0);
+  });
+
+  // ── Autoreg v2 P1: microcycle accounting (hard sets per muscle) ──────────────
+  {
+    const muscleOf = (id) => ({ bench: 'Chest', squat: 'Quads', curl: 'Biceps' }[id] || null);
+    // A bench entry: 2 hard sets (a plain done set + a technique set), plus a
+    // warmup, a skipped, and an undone set that must all be excluded.
+    const benchEntry = () => ({ exId: 'bench', sets: [
+      { done: true },
+      { done: true, warmup: true },
+      { done: true, skipped: true },
+      { done: false },
+      { done: true, technique: 'myo' },
+    ] });
+    const squatEntry = () => ({ exId: 'squat', sets: [{ done: true }, { done: true }, { done: true }] });
+    const untagged = () => ({ exId: 'mystery', sets: [{ done: true }, { done: true }] });
+
+    test('microcycleSetsByMuscle: hard-set count excludes warmup/skipped/undone, technique counts as 1', () => {
+      const sch = { id: 'p', is_flex: true, days: [{ id: 'd1' }] };
+      const s = { id: 's', scheduleId: 'p', ended: '2026-07-13T10:00:00Z', date: '2026-07-13', entries: [benchEntry(), untagged()] };
+      const out = LB.microcycleSetsByMuscle([s], sch, muscleOf);
+      assert.strictEqual(out.Chest, 2, 'plain done + technique = 2, warmup/skipped/undone excluded');
+      assert.ok(!('null' in out) && out[null] === undefined, 'untagged exercise ignored');
+    });
+
+    test('microcycleSetsByMuscle: FLEX buckets by rotation index (dayId), current vs previous', () => {
+      const sch = { id: 'p', is_flex: true, days: [{ id: 'd1' }, { id: 'd2' }, { id: 'd3' }] }; // len 3
+      const mk = (id, ended, dayId, entries) => ({ id, scheduleId: 'p', ended, date: ended.slice(0, 10), dayId, entries });
+      // Two full rotations. Order in the array should not matter (fn sorts by ended).
+      const sessions = [
+        mk('a1', '2026-07-01T10:00:00Z', 'd1', [benchEntry()]),
+        mk('a2', '2026-07-02T10:00:00Z', 'd2', [benchEntry()]),
+        mk('a3', '2026-07-03T10:00:00Z', 'd3', [benchEntry()]),
+        mk('b1', '2026-07-04T10:00:00Z', 'd1', [benchEntry()]),
+        mk('b2', '2026-07-05T10:00:00Z', 'd2', [benchEntry()]),
+        mk('b3', '2026-07-06T10:00:00Z', 'd3', [benchEntry(), squatEntry()]),
+      ];
+      const opts = { startDate: '2026-06-30', startedAt: '2026-06-30T00:00:00Z' };
+      const cur = LB.microcycleSetsByMuscle(sessions, sch, muscleOf, { ...opts, which: 0 });
+      assert.strictEqual(cur.Chest, 6, 'current rotation = its 3 sessions x 2 hard sets');
+      assert.strictEqual(cur.Quads, 3, 'squat only in the current rotation');
+      const prev = LB.microcycleSetsByMuscle(sessions, sch, muscleOf, { ...opts, which: 1 });
+      assert.strictEqual(prev.Chest, 6, 'previous rotation = the earlier 3 sessions');
+      assert.ok(!prev.Quads, 'no squat in the previous rotation');
+    });
+
+    test('microcycleSetsByMuscle: FLEX skipped-day rotation never borrows from the adjacent one', () => {
+      const sch = { id: 'p', is_flex: true, days: [{ id: 'd1' }, { id: 'd2' }, { id: 'd3' }] }; // len 3
+      const mk = (id, ended, dayId, entries) => ({ id, scheduleId: 'p', ended, date: ended.slice(0, 10), dayId, entries });
+      // Rotation A is complete (d1,d2,d3). Rotation B (current) skipped d2: only d1,d3.
+      const sessions = [
+        mk('a1', '2026-07-01T10:00:00Z', 'd1', [benchEntry()]),
+        mk('a2', '2026-07-02T10:00:00Z', 'd2', [benchEntry()]),
+        mk('a3', '2026-07-03T10:00:00Z', 'd3', [benchEntry()]),
+        mk('b1', '2026-07-04T10:00:00Z', 'd1', [benchEntry()]),
+        mk('b3', '2026-07-05T10:00:00Z', 'd3', [benchEntry(), squatEntry()]),
+      ];
+      const opts = { startDate: '2026-06-30', startedAt: '2026-06-30T00:00:00Z' };
+      const cur = LB.microcycleSetsByMuscle(sessions, sch, muscleOf, { ...opts, which: 0 });
+      // Only b1 + b3 (Chest 4), NOT the old trained-count slice which would have
+      // borrowed a3 into the current window and reported Chest 6.
+      assert.strictEqual(cur.Chest, 4, 'current rotation is only its own two trained days');
+      assert.strictEqual(cur.Quads, 3, 'squat (in b3) belongs to the current rotation');
+      const prev = LB.microcycleSetsByMuscle(sessions, sch, muscleOf, { ...opts, which: 1 });
+      assert.strictEqual(prev.Chest, 6, 'previous rotation keeps all three of its days');
+    });
+
+    test('microcycleSetsByMuscle: WEEKDAY window is the pause-adjusted meso week + scheduleId scoped', () => {
+      const sch = { id: 'wp', mode: 'weekday', days: [{ weekday: 0 }] };
+      const mk = (id, date, scheduleId) => ({ id, scheduleId: scheduleId || 'wp', ended: date + 'T10:00:00Z', date, entries: [benchEntry()] });
+      // A 7-day deload sits mid-block. Without pause-adjustment s2 (rawDays 12) would
+      // fall in meso week 1; with 7 frozen days subtracted it drops back to week 0,
+      // sharing the current window with s1. s4 (rawDays 15 - 7 = 8) is week 1 = today.
+      const statusPeriods = [{ mode: 'deload', startedAt: '2026-07-05T00:00:00Z', endedAt: '2026-07-11T00:00:00Z' }];
+      const sessions = [
+        mk('s1', '2026-07-02'),
+        mk('s2', '2026-07-13'),
+        mk('s4', '2026-07-16'),
+        mk('other', '2026-07-16', 'zz'), // cross-plan: must be excluded (FIX 3)
+      ];
+      const opts = { startDate: '2026-07-01', statusPeriods, todayStr: '2026-07-16' };
+      const cur = LB.microcycleSetsByMuscle(sessions, sch, muscleOf, { ...opts, which: 0 });
+      assert.strictEqual(cur.Chest, 2, 'current meso week holds only s4 (cross-plan session excluded)');
+      const prev = LB.microcycleSetsByMuscle(sessions, sch, muscleOf, { ...opts, which: 1 });
+      assert.strictEqual(prev.Chest, 4, 'the prior meso week holds s1 AND s2, grouped by the pause adjustment');
+    });
+
+    test('microcycleSetsByMuscle: CYCLE window uses cumulative cycle numbering', () => {
+      const sch = { id: 'cp', days: [{}, {}, {}], versions: [{ validFrom: '2026-07-01', days: [{}, {}, {}] }] }; // len 3
+      const mk = (id, date) => ({ id, scheduleId: 'cp', ended: date + 'T10:00:00Z', date, entries: [benchEntry()] });
+      // Cycle 1 = 07-01..07-03, Cycle 2 = 07-04..07-06.
+      const sessions = [mk('c1', '2026-07-02'), mk('c2', '2026-07-05')];
+      const cur = LB.microcycleSetsByMuscle(sessions, sch, muscleOf, { which: 0, todayStr: '2026-07-06' });
+      assert.strictEqual(cur.Chest, 2, 'current cycle (2) holds the 07-05 session');
+      const prev = LB.microcycleSetsByMuscle(sessions, sch, muscleOf, { which: 1, todayStr: '2026-07-06' });
+      assert.strictEqual(prev.Chest, 2, 'previous cycle (1) holds the 07-02 session');
+    });
+  }
+
+  // ── Autoreg v2 P3: landmarks (learned MRV EMA) + block backoff ───────────────
+  {
+    test('updateLandmarkMrv: first observation seeds the ceiling', () => {
+      const out = LB.updateLandmarkMrv(null, 'Chest', 18);
+      assert.strictEqual(out.landmarks.Chest.mrv, 18, 'first flag seeds mrv at the observed set count');
+      assert.strictEqual(out.landmarks.Chest.mev, 9, 'mev is a light half-of-mrv default');
+      assert.strictEqual(out.version, 2, 'stamps the P3 blob version');
+    });
+
+    test('updateLandmarkMrv: a single low spike does NOT fully drop a learned ceiling', () => {
+      const seeded = LB.updateLandmarkMrv(null, 'Chest', 20);
+      const spiked = LB.updateLandmarkMrv(seeded, 'Chest', 10); // one rough block
+      assert.ok(spiked.landmarks.Chest.mrv > 10, 'EMA keeps the ceiling above the one-off low observation');
+      assert.ok(spiked.landmarks.Chest.mrv < 20, 'but it moves down toward it, it does not ignore the signal');
+      assert.strictEqual(spiked.landmarks.Chest.mrv, Math.round(0.35 * 10 + 0.65 * 20), 'EMA blend at alpha 0.35');
+    });
+
+    test('updateLandmarkMrv: invalid input is a same-ref no-op', () => {
+      const seeded = LB.updateLandmarkMrv(null, 'Chest', 20);
+      assert.strictEqual(LB.updateLandmarkMrv(seeded, 'Chest', 0), seeded, 'zero sets never lowers the ceiling');
+      assert.strictEqual(LB.updateLandmarkMrv(seeded, null, 12), seeded, 'no muscle is a no-op');
+    });
+
+    test('numeric MRV cap decision: banked volume >= learned MRV freezes (else detector-only)', () => {
+      // Mirror of the live atCeiling helper: freeze when cycleSets[m] >= landmarks[m].mrv.
+      const atCeiling = (overreach, landmarks, cycleSets, muscle) => {
+        if (overreach[muscle] && overreach[muscle].atCeiling) return true;
+        const lm = landmarks[muscle];
+        return !!(lm && lm.mrv != null && (cycleSets[muscle] || 0) >= lm.mrv);
+      };
+      const landmarks = LB.updateLandmarkMrv(null, 'Chest', 16).landmarks;
+      assert.strictEqual(atCeiling({}, landmarks, { Chest: 16 }, 'Chest'), true, 'at MRV freezes');
+      assert.strictEqual(atCeiling({}, landmarks, { Chest: 17 }, 'Chest'), true, 'over MRV freezes');
+      assert.strictEqual(atCeiling({}, landmarks, { Chest: 15 }, 'Chest'), false, 'under MRV stays open');
+      assert.strictEqual(atCeiling({}, {}, { Chest: 99 }, 'Chest'), false, 'no learned mrv → detector-only (open)');
+      assert.strictEqual(atCeiling({ Chest: { atCeiling: true } }, {}, {}, 'Chest'), true, 'detector alone still freezes');
+    });
+
+    test('backoffDeltas: reduces grown lifts by ~2, never below base, leaves base/cut lifts', () => {
+      const out = LB.backoffDeltas({ a: 3, b: 2, c: 1, d: 0, e: -1 }, 2);
+      assert.strictEqual(out.a, 1, '+3 backs off to +1');
+      assert.strictEqual(out.b, 0, '+2 backs off exactly to base (0), not below');
+      assert.strictEqual(out.c, 0, '+1 floors at base (0), never negative');
+      assert.strictEqual(out.d, 0, 'a lift already at base is untouched');
+      assert.strictEqual(out.e, -1, 'a cut lift is left as-is (backoff never RAISES volume)');
+    });
+
+    test('snapshotBlockStart: records block start volume, preserves landmarks across the reset', () => {
+      const withLm = LB.updateLandmarkMrv(null, 'Chest', 20);
+      const out = LB.snapshotBlockStart(withLm, '2026-07-16', { Chest: 12 });
+      assert.strictEqual(out.landmarks.Chest.mrv, 20, 'landmarks persist across the block snapshot');
+      assert.strictEqual(out.block.startDate, '2026-07-16', 'records the new block start date');
+      assert.strictEqual(out.block.startVolByMuscle.Chest, 12, 'records per-muscle start volume');
+    });
+  }
+
+  // ── Autoreg v2 P1: overreach detector (stateless, last-2-exposures) ──────────
+  {
+    const muscleOf = (id) => (id === 'bench' ? 'Chest' : id === 'squat' ? 'Quads' : null);
+    const sch = { id: 'p', is_flex: true, days: [{ id: 'd1' }, { id: 'd2' }] };
+    const ans = (sore, jointAns) => ({
+      soreness: sore ? { Chest: { muscle: 'Chest', answer: sore } } : {},
+      joint: jointAns ? { bench: { exId: 'bench', answer: jointAns } } : {},
+      volume: {},
+    });
+    const mk = (id, ended, opts = {}) => ({
+      id, scheduleId: 'p', ended, date: ended.slice(0, 10),
+      ...(opts.signalWeight ? { signalWeight: opts.signalWeight } : {}),
+      entries: opts.entries || [{ exId: 'bench', sets: [{ done: true, kg: 100, reps: 8 }] }],
+      ...(opts.answers ? { mesoRecap: { raw: { answers: opts.answers } } } : {}),
+    });
+
+    test('detectOverreach: still_sore + joint on both last exposures → atCeiling with evidence', () => {
+      const sessions = [
+        mk('E1', '2026-07-10T10:00:00Z', { answers: ans('still_sore', 'sharp') }),
+        mk('E2', '2026-07-13T10:00:00Z', { answers: ans('still_sore', 'sharp') }),
+      ];
+      const out = LB.detectOverreach(sessions, sch, muscleOf);
+      assert.ok(out.Chest && out.Chest.atCeiling === true, 'Chest flagged at ceiling');
+      assert.ok(out.Chest.evidence[0].indexOf('Chest') === 0, 'evidence string leads with the muscle');
+    });
+
+    test('detectOverreach: a clean latest exposure stands the detector down', () => {
+      const sessions = [
+        mk('E1', '2026-07-10T10:00:00Z', { answers: ans('still_sore', 'sharp') }),
+        mk('E2', '2026-07-13T10:00:00Z', { answers: ans('never', null) }),
+      ];
+      const out = LB.detectOverreach(sessions, sch, muscleOf);
+      assert.ok(!(out.Chest && out.Chest.atCeiling), 'not at ceiling after a clean session');
+    });
+
+    test('detectOverreach: still_sore + FLAT e1RM across exposures → atCeiling (rep-regression path)', () => {
+      const flat = { done: true, kg: 100, reps: 8 };
+      const sessions = [
+        mk('E0', '2026-07-07T10:00:00Z', { answers: ans('still_sore', null), entries: [{ exId: 'bench', sets: [flat] }] }),
+        mk('E1', '2026-07-10T10:00:00Z', { answers: ans('still_sore', null), entries: [{ exId: 'bench', sets: [flat] }] }),
+        mk('E2', '2026-07-13T10:00:00Z', { answers: ans('still_sore', null), entries: [{ exId: 'bench', sets: [flat] }] }),
+      ];
+      assert.ok(LB.detectOverreach(sessions, sch, muscleOf).Chest?.atCeiling, 'flat reps at same load, both sore → ceiling');
+    });
+
+    test('detectOverreach: reps improving on the latest exposure → not at ceiling', () => {
+      const sessions = [
+        mk('E1', '2026-07-10T10:00:00Z', { answers: ans('still_sore', null), entries: [{ exId: 'bench', sets: [{ done: true, kg: 100, reps: 8 }] }] }),
+        mk('E2', '2026-07-13T10:00:00Z', { answers: ans('still_sore', null), entries: [{ exId: 'bench', sets: [{ done: true, kg: 100, reps: 10 }] }] }),
+      ];
+      assert.ok(!LB.detectOverreach(sessions, sch, muscleOf).Chest?.atCeiling, 'improving reps stand it down');
+    });
+
+    test('detectOverreach: frequency-adaptive: the 2 exposures may span rotations (1x/rotation muscle)', () => {
+      const sessions = [
+        mk('E1', '2026-07-08T10:00:00Z', { answers: ans('still_sore', 'sharp') }),
+        // a Quads-only session sits between the two Chest exposures (Chest is 1x/rotation)
+        mk('Q1', '2026-07-10T10:00:00Z', { entries: [{ exId: 'squat', sets: [{ done: true, kg: 100, reps: 8 }] }] }),
+        mk('E2', '2026-07-12T10:00:00Z', { answers: ans('still_sore', 'sharp') }),
+      ];
+      assert.ok(LB.detectOverreach(sessions, sch, muscleOf).Chest?.atCeiling, 'the last 2 Chest exposures confirm regardless of the gap');
+    });
+
+    test('detectOverreach: a discounted (rough) latest session is not counted as an exposure', () => {
+      const base = [
+        mk('E0', '2026-07-07T10:00:00Z', { answers: ans('never', null) }),
+        mk('E1', '2026-07-10T10:00:00Z', { answers: ans('still_sore', 'sharp') }),
+      ];
+      // Discounted E2: skipped, so exposures fall back to [E1, E0(clean)] → not both signal.
+      const discounted = [...base, mk('E2', '2026-07-13T10:00:00Z', { signalWeight: 'discounted', answers: ans('still_sore', 'sharp') })];
+      assert.ok(!LB.detectOverreach(discounted, sch, muscleOf).Chest?.atCeiling, 'rough day must not trip the ceiling');
+      // Same session at full weight DOES count → [E2, E1] both signal.
+      const full = [...base, mk('E2', '2026-07-13T10:00:00Z', { signalWeight: 'full', answers: ans('still_sore', 'sharp') })];
+      assert.ok(LB.detectOverreach(full, sch, muscleOf).Chest?.atCeiling, 'a full session on the same data confirms');
+    });
+
+    test('detectOverreach: a single exposure cannot confirm a ceiling', () => {
+      const sessions = [mk('E1', '2026-07-13T10:00:00Z', { answers: ans('still_sore', 'sharp') })];
+      assert.ok(!LB.detectOverreach(sessions, sch, muscleOf).Chest?.atCeiling, 'one exposure is not enough to confirm');
+    });
+
+    test('detectOverreach: a weighted to bodyweight switch is not a fake regression', () => {
+      // E0, E1 weighted flat (a legit regression pair, both sore); E2 logs the same
+      // lift bodyweight (kg null). Without the metric-kind guard, E2s reps would be
+      // compared against E1s e1RM and read as a regression, false-flagging a ceiling.
+      // The guard makes the switch incomparable, so E2 has no regression and, with no
+      // joint flag, does not trigger.
+      const w = { done: true, kg: 100, reps: 8 };
+      const bw = { done: true, reps: 12 };
+      const sessions = [
+        mk('E0', '2026-07-07T10:00:00Z', { answers: ans('still_sore', null), entries: [{ exId: 'bench', sets: [w] }] }),
+        mk('E1', '2026-07-10T10:00:00Z', { answers: ans('still_sore', null), entries: [{ exId: 'bench', sets: [w] }] }),
+        mk('E2', '2026-07-13T10:00:00Z', { answers: ans('still_sore', null), entries: [{ exId: 'bench', sets: [bw] }] }),
+      ];
+      assert.ok(!LB.detectOverreach(sessions, sch, muscleOf).Chest?.atCeiling, 'a metric switch must not fabricate a ceiling');
+    });
+  }
+
+  // ── Autoreg v2 P4: strength-stall detector ───────────────────────────────────
+  {
+    const muscleOf = (id) => (id === 'bench' ? 'Chest' : id === 'squat' ? 'Quads' : null);
+    const mk = (id, ended, sets, opts = {}) => ({
+      id, scheduleId: 'p', ended, date: ended.slice(0, 10), isDeload: !!opts.isDeload,
+      ...(opts.signalWeight ? { signalWeight: opts.signalWeight } : {}),
+      entries: [{ exId: 'bench', sets }],
+      ...(opts.joint ? { mesoRecap: { raw: { answers: { joint: { bench: opts.joint } } } } } : {}),
+    });
+    const flat = [{ done: true, kg: 100, reps: 8 }];
+
+    test('detectStall: flat e1RM over 3 sessions at green gates → stalled with evidence', () => {
+      const sessions = [
+        mk('E0', '2026-07-07T10:00:00Z', flat),
+        mk('E1', '2026-07-10T10:00:00Z', flat),
+        mk('E2', '2026-07-13T10:00:00Z', flat),
+      ];
+      const out = LB.detectStall(sessions, 'bench', muscleOf, { planId: 'p', atCeiling: () => false, exName: 'Bench' });
+      assert.strictEqual(out.stalled, true, 'flat e1RM at green gates is a stall');
+      assert.ok(out.evidence[0].indexOf('Bench') === 0, 'evidence leads with the lift name');
+    });
+
+    test('detectStall: improving e1RM on the latest session → not stalled', () => {
+      const sessions = [
+        mk('E0', '2026-07-07T10:00:00Z', flat),
+        mk('E1', '2026-07-10T10:00:00Z', flat),
+        mk('E2', '2026-07-13T10:00:00Z', [{ done: true, kg: 105, reps: 8 }]),
+      ];
+      assert.strictEqual(LB.detectStall(sessions, 'bench', muscleOf, { planId: 'p', atCeiling: () => false }).stalled, false);
+    });
+
+    test('detectStall: muscle at its ceiling → not a stall (overreach owns it)', () => {
+      const sessions = [mk('E0', '2026-07-07T10:00:00Z', flat), mk('E1', '2026-07-10T10:00:00Z', flat), mk('E2', '2026-07-13T10:00:00Z', flat)];
+      assert.strictEqual(LB.detectStall(sessions, 'bench', muscleOf, { planId: 'p', atCeiling: () => true }).stalled, false, 'ceiling gate not green');
+    });
+
+    test('detectStall: a joint flag on the latest session → not a clean stall', () => {
+      const sessions = [
+        mk('E0', '2026-07-07T10:00:00Z', flat),
+        mk('E1', '2026-07-10T10:00:00Z', flat),
+        mk('E2', '2026-07-13T10:00:00Z', flat, { joint: { exId: 'bench', answer: 'sharp' } }),
+      ];
+      assert.strictEqual(LB.detectStall(sessions, 'bench', muscleOf, { planId: 'p', atCeiling: () => false }).stalled, false, 'joint flag is not a green gate');
+    });
+
+    test('detectStall: a discounted (rough) session is ignored, never fakes or breaks a stall', () => {
+      // Three full flat sessions = a stall. A newest DISCOUNTED session with a big PR
+      // would break it if counted, but signalWeight discipline drops it.
+      const sessions = [
+        mk('E0', '2026-07-07T10:00:00Z', flat),
+        mk('E1', '2026-07-10T10:00:00Z', flat),
+        mk('E2', '2026-07-13T10:00:00Z', flat),
+        mk('E3', '2026-07-16T10:00:00Z', [{ done: true, kg: 130, reps: 10 }], { signalWeight: 'discounted' }),
+      ];
+      assert.strictEqual(LB.detectStall(sessions, 'bench', muscleOf, { planId: 'p', atCeiling: () => false }).stalled, true, 'the rough-day PR must not count');
+    });
+
+    test('detectStall: fewer than 3 weighted sessions → not enough data', () => {
+      const sessions = [mk('E0', '2026-07-07T10:00:00Z', flat), mk('E1', '2026-07-10T10:00:00Z', flat)];
+      assert.strictEqual(LB.detectStall(sessions, 'bench', muscleOf, { planId: 'p', atCeiling: () => false }).stalled, false);
+    });
+
+    test('detectStall: reps-only (no kg) exercise never stalls (no e1RM)', () => {
+      const bw = [{ done: true, reps: 12 }];
+      const sessions = [mk('E0', '2026-07-07T10:00:00Z', bw), mk('E1', '2026-07-10T10:00:00Z', bw), mk('E2', '2026-07-13T10:00:00Z', bw)];
+      assert.strictEqual(LB.detectStall(sessions, 'bench', muscleOf, { planId: 'p', atCeiling: () => false }).stalled, false, 'e1RM is meaningless without weight');
+    });
+  }
+
+  // ── Autoreg v2 P4: concrete swap suggestion ──────────────────────────────────
+  {
+    const muscleOf = (id) => ({ bench: 'Chest', db_press: 'Chest', machine_press: 'Chest', squat: 'Quads' }[id] || null);
+    const exercises = [
+      { id: 'bench', name: 'Barbell Bench', tags: ['Chest'], equipment: 'barbell_dual', movement_type: 'bilateral' },
+      { id: 'db_press', name: 'Dumbbell Press', tags: ['Chest'], equipment: 'dumbbell', movement_type: 'bilateral' },
+      { id: 'machine_press', name: 'Machine Press', tags: ['Chest'], equipment: 'machine', movement_type: 'bilateral' },
+      { id: 'squat', name: 'Back Squat', tags: ['Quads'], equipment: 'barbell_dual', movement_type: 'bilateral' },
+    ];
+
+    test('suggestSwap: same muscle, different equipment, user-owned sibling', () => {
+      const out = LB.suggestSwap('bench', exercises, [], muscleOf);
+      assert.ok(out && out.id !== 'bench', 'returns a sibling');
+      assert.strictEqual(out.isSystem, false, 'a user-owned copy is preferred');
+      assert.notStrictEqual(out.id, 'squat', 'never a different-muscle exercise');
+    });
+
+    test('suggestSwap: skips an affinity-disliked candidate', () => {
+      const out = LB.suggestSwap('bench', exercises, [], muscleOf, { affinity: { db_press: { v: 'dislike' }, machine_press: { v: 'dislike' } } });
+      assert.strictEqual(out, null, 'both chest siblings disliked → no suggestion');
+    });
+
+    test('suggestSwap: skips a recently swapped-away id (excludeIds)', () => {
+      const out = LB.suggestSwap('bench', exercises, [], muscleOf, { excludeIds: ['db_press', 'machine_press'] });
+      assert.strictEqual(out, null, 'excluded siblings leave no candidate');
+    });
+
+    test('suggestSwap: no different-equipment sibling → null (never a same-equipment pick)', () => {
+      const thin = [
+        { id: 'bench', name: 'Barbell Bench', tags: ['Chest'], equipment: 'barbell_dual', movement_type: 'bilateral' },
+        { id: 'incline_bb', name: 'Incline Barbell', tags: ['Chest'], equipment: 'barbell_dual', movement_type: 'bilateral' },
+      ];
+      assert.strictEqual(LB.suggestSwap('bench', thin, [], muscleOf), null, 'same equipment + same movement is not a real variation');
+    });
+
+    test('suggestSwap: falls back to a system sibling, bucketed by tag priority', () => {
+      const onlyBench = [{ id: 'bench', name: 'Barbell Bench', tags: ['Chest'], equipment: 'barbell_dual', movement_type: 'bilateral' }];
+      const sys = [
+        { id: 'sys_pec_deck', name: 'Pec Deck', tags: ['Chest'], equipment: 'machine', category: 'small' },
+        { id: 'sys_squat', name: 'Back Squat', tags: ['Quads'], equipment: 'barbell_dual' },
+      ];
+      const out = LB.suggestSwap('bench', onlyBench, sys, (id) => (id === 'bench' ? 'Chest' : null));
+      assert.ok(out && out.isSystem === true && out.id === 'sys_pec_deck', 'a system chest sibling with different equipment');
+    });
+
+    test('suggestSwap: a system sibling already owned by name is skipped', () => {
+      const owned = [
+        { id: 'bench', name: 'Barbell Bench', tags: ['Chest'], equipment: 'barbell_dual', movement_type: 'bilateral' },
+        { id: 'mine', name: 'Pec Deck', tags: ['Chest'], equipment: 'machine', movement_type: 'bilateral' },
+      ];
+      const sys = [{ id: 'sys_pec_deck', name: 'Pec Deck', tags: ['Chest'], equipment: 'machine' }];
+      const ownedMuscleOf = (id) => (id === 'bench' || id === 'mine' ? 'Chest' : null);
+      const out = LB.suggestSwap('bench', owned, sys, ownedMuscleOf, {});
+      // The user already owns "Pec Deck", so the user-owned copy is returned, not the sys id.
+      assert.ok(out && out.id === 'mine' && out.isSystem === false, 'prefer the owned copy over the catalog duplicate');
+    });
+  }
+
+  // ── Autoreg v2 P4: post-break re-entry ramp ──────────────────────────────────
+  {
+    const flexSch = { id: 'p', is_flex: true, days: [{ id: 'd1' }, { id: 'd2' }, { id: 'd3' }] };
+    const trained = (id, date) => ({ id, scheduleId: 'p', ended: date + 'T10:00:00Z', date, isDeload: false });
+
+    test('reentryRamp: fires after a > 7-day sick/vacation break', () => {
+      const sp = [{ mode: 'vacation', startedAt: '2026-07-01', endedAt: '2026-07-12' }]; // 11 days
+      const out = LB.reentryRamp(sp, [], flexSch, { todayStr: '2026-07-14' });
+      assert.strictEqual(out.active, true, 'an 11-day break arms the ramp');
+      assert.strictEqual(out.breakDays, 11);
+    });
+
+    test('reentryRamp: inert for a short break (≤ 7 days)', () => {
+      const sp = [{ mode: 'sick', startedAt: '2026-07-05', endedAt: '2026-07-10' }]; // 5 days
+      assert.strictEqual(LB.reentryRamp(sp, [], flexSch, { todayStr: '2026-07-12' }).active, false);
+    });
+
+    test('reentryRamp: decays over ONE rotation, then goes inert', () => {
+      const sp = [{ mode: 'vacation', startedAt: '2026-07-01', endedAt: '2026-07-12' }];
+      const twoBack = [trained('a', '2026-07-13'), trained('b', '2026-07-15')];
+      assert.strictEqual(LB.reentryRamp(sp, twoBack, flexSch, { todayStr: '2026-07-16' }).active, true, 'still inside the first rotation (2 of 3)');
+      const rotationDone = [...twoBack, trained('c', '2026-07-17')];
+      assert.strictEqual(LB.reentryRamp(sp, rotationDone, flexSch, { todayStr: '2026-07-18' }).active, false, 'a full rotation back → normal');
+    });
+
+    test('reentryRamp: an active (open) break does not fire (not back yet)', () => {
+      const sp = [{ mode: 'sick', startedAt: '2026-07-01', endedAt: null }];
+      assert.strictEqual(LB.reentryRamp(sp, [], flexSch, { todayStr: '2026-07-20' }).active, false);
+    });
+
+    test('reentryRamp: a long break stretches over two microcycles', () => {
+      const sp = [{ mode: 'sick', startedAt: '2026-06-01', endedAt: '2026-07-10' }]; // ~39 days
+      const out = LB.reentryRamp(sp, [trained('a', '2026-07-11'), trained('b', '2026-07-13'), trained('c', '2026-07-15')], flexSch, { todayStr: '2026-07-16' });
+      assert.strictEqual(out.microcycles, 2, 'weeks-long break → longer ramp');
+      assert.strictEqual(out.active, true, '3 of 6 sessions back is still inside the stretched ramp');
+    });
+  }
+
+  // ── Autoreg v2 P2: block start window ────────────────────────────────────────
+  {
+    const ms = { scheduleId: 'p', startedAt: '2026-07-01T08:00:00Z', startDate: '2026-07-01' };
+    const sess = (id, ended, opts = {}) => ({ id, scheduleId: opts.scheduleId ?? 'p', ended, date: (ended || '').slice(0, 10), isDeload: !!opts.isDeload });
+
+    test('blockStartTs: uses startedAt when no deload has happened', () => {
+      assert.strictEqual(LB.blockStartTs(ms, []), Date.parse('2026-07-01T08:00:00Z'));
+    });
+    test('blockStartTs: falls back to startDate (local noon) for older mesos without startedAt', () => {
+      // startDate is a bare day, anchored at LOCAL noon (parseDate), not UTC midnight,
+      // so it stays on the intended calendar day for users west of UTC.
+      assert.strictEqual(LB.blockStartTs({ scheduleId: 'p', startDate: '2026-07-01' }, []), LB.parseDate('2026-07-01').getTime());
+    });
+    test('blockStartTs: a later completed deload end wins over the block anchor', () => {
+      const sp = [{ mode: 'deload', startedAt: '2026-07-10T00:00:00Z', endedAt: '2026-07-17T00:00:00Z' }];
+      assert.strictEqual(LB.blockStartTs(ms, sp), Date.parse('2026-07-17T00:00:00Z'));
+    });
+    test('blockStartTs: an active (open) deload is ignored, sick/vacation never count', () => {
+      const sp = [{ mode: 'deload', startedAt: '2026-07-10T00:00:00Z', endedAt: null },
+                  { mode: 'vacation', startedAt: '2026-07-20T00:00:00Z', endedAt: '2026-07-25T00:00:00Z' }];
+      assert.strictEqual(LB.blockStartTs(ms, sp), Date.parse('2026-07-01T08:00:00Z'));
+    });
+    test('blockSessions: keeps this plan, ended, non-deload sessions after block start', () => {
+      const sessions = [
+        sess('before', '2026-06-30T10:00:00Z'),
+        sess('in', '2026-07-05T10:00:00Z'),
+        sess('deload', '2026-07-06T10:00:00Z', { isDeload: true }),
+        sess('other', '2026-07-07T10:00:00Z', { scheduleId: 'q' }),
+        { id: 'open', scheduleId: 'p', ended: null },
+      ];
+      const out = LB.blockSessions(sessions, ms, []).map(s => s.id);
+      assert.deepStrictEqual(out, ['in']);
+    });
+  }
+
+  // ── Autoreg v2 P2: block recap aggregation ───────────────────────────────────
+  {
+    const S = (id, gains, opts = {}) => ({ id, ended: (opts.date || '2026-07-05') + 'T10:00:00Z', date: opts.date || '2026-07-05', signalWeight: opts.signalWeight, mesoRecap: { gains } });
+
+    test('buildBlockRecap: folds set + weight deltas across the block', () => {
+      const r = LB.buildBlockRecap([
+        S('a', [{ name: 'Bench', weightDelta: 2.5, setDelta: 1 }], { date: '2026-07-02' }),
+        S('b', [{ name: 'Bench', weightDelta: 2.5, setDelta: 0 }, { name: 'Squat', weightDelta: 5, setDelta: 2 }], { date: '2026-07-04' }),
+      ]);
+      assert.strictEqual(r.sessionCount, 2);
+      assert.strictEqual(r.prCount, 3, 'three positive weight deltas across the block');
+      assert.strictEqual(r.setGains.find(x => x.name === 'Bench').setDelta, 1);
+      assert.strictEqual(r.setGains.find(x => x.name === 'Squat').setDelta, 2);
+      assert.strictEqual(r.loadPRs.find(x => x.name === 'Bench').weightDelta, 5, 'Bench kg folds 2.5+2.5');
+    });
+    test('buildBlockRecap: best session is the one with the most PRs', () => {
+      const r = LB.buildBlockRecap([
+        S('a', [{ name: 'Bench', weightDelta: 2.5 }], { date: '2026-07-02' }),
+        S('b', [{ name: 'Bench', weightDelta: 2.5 }, { name: 'Row', weightDelta: 2.5 }], { date: '2026-07-04' }),
+      ]);
+      assert.strictEqual(r.bestSession.date, '2026-07-04');
+      assert.strictEqual(r.bestSession.prs, 2);
+    });
+    test('buildBlockRecap: a deload (signalWeight none) session is excluded, a rough (discounted) PR still counts', () => {
+      const r = LB.buildBlockRecap([
+        S('none', [{ name: 'Bench', weightDelta: 2.5 }], { signalWeight: 'none' }),
+        S('rough', [{ name: 'Squat', weightDelta: 2.5 }], { signalWeight: 'discounted' }),
+      ]);
+      assert.strictEqual(r.sessionCount, 1, 'the none session is dropped');
+      assert.strictEqual(r.prCount, 1, 'the discounted PR is real and counts');
+      assert.strictEqual(r.loadPRs[0].name, 'Squat');
+    });
+    test('buildBlockRecap: a negative weight delta (rep-miss cut) is not a PR', () => {
+      const r = LB.buildBlockRecap([S('a', [{ name: 'Bench', weightDelta: -2.5, setDelta: 0 }])]);
+      assert.strictEqual(r.prCount, 0);
+      assert.strictEqual(r.loadPRs.length, 0, 'a cut is never a load PR');
+      assert.strictEqual(r.bestSession, null);
+    });
+  }
+
+  // ── Autoreg v2 P2: anti-nag deload governance ────────────────────────────────
+  {
+    test('deloadNudgeDecision: first at-ceiling finish, nothing recorded yet -> full offer', () => {
+      const d = LB.deloadNudgeDecision(null, 0, true);
+      assert.strictEqual(d.mode, 'full');
+      assert.strictEqual(d.escalation, 0);
+    });
+    test('deloadNudgeDecision: not at ceiling -> none (auto stand-down)', () => {
+      assert.strictEqual(LB.deloadNudgeDecision({ deloadNudge: { block: { declinedAt: 'x', cooldownUntil: 5, escalation: 1 } } }, 2, false).mode, 'none');
+    });
+    test('deloadNudgeDecision: inside the cooldown -> hint only, carries escalation', () => {
+      const st = { deloadNudge: { block: { declinedAt: 'x', cooldownUntil: 5, escalation: 1 } } };
+      const d = LB.deloadNudgeDecision(st, 3, true);
+      assert.strictEqual(d.mode, 'hint');
+      assert.strictEqual(d.escalation, 1);
+    });
+    test('deloadNudgeDecision: cooldown elapsed, still at ceiling -> full re-ask with escalation', () => {
+      const st = { deloadNudge: { block: { declinedAt: 'x', cooldownUntil: 5, escalation: 1 } } };
+      const d = LB.deloadNudgeDecision(st, 5, true);
+      assert.strictEqual(d.mode, 'full');
+      assert.strictEqual(d.escalation, 1);
+    });
+    test('recordDeloadDecline: first decline arms a 3-session cooldown at escalation 1', () => {
+      const st = LB.recordDeloadDecline(null, 4);
+      assert.strictEqual(st.deloadNudge.block.cooldownUntil, 7);
+      assert.strictEqual(st.deloadNudge.block.escalation, 1);
+      assert.strictEqual(st.version, 2, 'stamps the current P3 blob version');
+      assert.ok(st.deloadNudge.block.declinedAt, 'stamps declinedAt');
+    });
+    test('recordDeloadDecline: a second decline bumps escalation and re-arms the cooldown', () => {
+      const first = LB.recordDeloadDecline(null, 4);   // cooldownUntil 7, esc 1
+      const second = LB.recordDeloadDecline(first, 8);  // past cooldown, re-ask declined
+      assert.strictEqual(second.deloadNudge.block.escalation, 2);
+      assert.strictEqual(second.deloadNudge.block.cooldownUntil, 11);
+    });
+    test('recordDeloadDecline: is immutable (does not mutate the input state)', () => {
+      const st = { version: 1, deloadNudge: { block: { declinedAt: 'a', cooldownUntil: 7, escalation: 0 } } };
+      const next = LB.recordDeloadDecline(st, 10);
+      assert.strictEqual(st.deloadNudge.block.escalation, 0, 'input untouched');
+      assert.strictEqual(next.deloadNudge.block.escalation, 1);
+    });
+    test('clearDeloadNudge: drops the block nudge and preserves other keys', () => {
+      const st = { version: 1, landmarks: { Chest: {} }, deloadNudge: { block: { declinedAt: 'a', cooldownUntil: 7, escalation: 0 } } };
+      const cleared = LB.clearDeloadNudge(st);
+      assert.ok(!cleared.deloadNudge, 'block was the only nudge, so deloadNudge is gone');
+      assert.deepStrictEqual(cleared.landmarks, { Chest: {} }, 'unrelated keys survive');
+    });
+    test('clearDeloadNudge: returns the SAME reference when there is nothing to clear', () => {
+      const st = { version: 1 };
+      assert.strictEqual(LB.clearDeloadNudge(st), st);
+      assert.strictEqual(LB.clearDeloadNudge(null), null);
+    });
+  }
+
+  // ── Autoreg v2 P1: MRV cap mirror in applyMesoFeedbackEdit ───────────────────
+  test('applyMesoFeedbackEdit: an at-ceiling muscle freezes a volume not_enough +1 (non-destructive)', () => {
+    const ms = { deltas: {}, growthCounts: {}, pumpLowCounts: {}, jointFlags: {} };
+    const raw = { answers: { soreness: {}, joint: {}, volume: { Chest: { muscle: 'Chest', exIds: ['e1'], contrib: {} } } }, negOwner: {}, frozen: false, dayId: 'd1' };
+    const capped = LB.applyMesoFeedbackEdit(ms, raw, { type: 'volume', subject: 'Chest', volume: 'not_enough' }, { dayId: 'd1', loadOnly: false, atCeilingMuscles: new Set(['Chest']) });
+    assert.ok(!capped.mesoState.deltas.e1_d1, 'no +1 added while at ceiling');
+    const free = LB.applyMesoFeedbackEdit(ms, raw, { type: 'volume', subject: 'Chest', volume: 'not_enough' }, { dayId: 'd1', loadOnly: false });
+    assert.strictEqual(free.mesoState.deltas.e1_d1, 1, 'the same edit adds +1 when not at ceiling');
+  });
+
+  test('applyMesoFeedbackEdit: an at-ceiling muscle freezes a soreness +1 grant', () => {
+    const ms = { deltas: {}, growthCounts: {}, pumpLowCounts: {}, jointFlags: {} };
+    const raw = { answers: { soreness: { Chest: { muscle: 'Chest', targets: [{ exId: 'e1', name: 'Bench', key: 'e1_d0' }], contrib: {} } }, joint: {}, volume: {} }, negOwner: {}, frozen: false, dayId: 'd0' };
+    const capped = LB.applyMesoFeedbackEdit(ms, raw, { type: 'soreness', subject: 'Chest', answer: 'never' }, { dayId: 'd0', loadOnly: false, atCeilingMuscles: new Set(['Chest']) });
+    assert.ok(!capped.mesoState.deltas.e1_d0, 'no soreness +1 while at ceiling');
+  });
+
+  // ── Autoreg v2 polish: readiness-edit rep-miss cut recompute ─────────────────
+  // recomputeMesoRepMissCut mirrors computeMesoGains' cut gate: a 'full' session
+  // advances the per-key miss streak (cut at 2 early misses); 'discounted' freezes it.
+  test('recomputeMesoRepMissCut: full->discounted freezes an applied rep-miss cut', () => {
+    // Session was logged 'full' with an early miss that tripped the 2nd-miss cut:
+    // weightBoosts[e1_d1] = -2.5, repMissCounts reset to 0, streak base was 1.
+    const ms = { repMissCounts: { e1_d1: 0 }, weightBoosts: { e1_d1: -2.5 } };
+    const earnInputs = [{ key: 'e1_d1', increment: 2.5, earlyMiss: true, attempted: true }];
+    const out = LB.recomputeMesoRepMissCut(ms, earnInputs, { e1_d1: 1 }, 'full', 'discounted');
+    assert.ok(!('e1_d1' in out.weightBoosts) || out.weightBoosts.e1_d1 >= 0, 'the -increment cut is dropped on discounted');
+    assert.strictEqual(out.repMissCounts.e1_d1, 1, 'the streak is restored to its pre-session base, frozen');
+  });
+
+  test('recomputeMesoRepMissCut: discounted->full re-enables the cut from the frozen streak', () => {
+    // Session was 'discounted' so it never advanced the streak (base == current == 1),
+    // and no cut was applied. Flipping to 'full' with an early miss reaches 2 -> cut.
+    const ms = { repMissCounts: { e1_d1: 1 }, weightBoosts: {} };
+    const earnInputs = [{ key: 'e1_d1', increment: 2.5, earlyMiss: true, attempted: true }];
+    const out = LB.recomputeMesoRepMissCut(ms, earnInputs, { e1_d1: 1 }, 'discounted', 'full');
+    assert.strictEqual(out.weightBoosts.e1_d1, -2.5, 'the cut is re-armed at 2 consecutive misses');
+    assert.strictEqual(out.repMissCounts.e1_d1, 0, 'the streak resets after the cut, as in computeMesoGains');
+  });
+
+  test('recomputeMesoRepMissCut: discounted->full with one miss advances but does not cut', () => {
+    const ms = { repMissCounts: { e1_d1: 0 }, weightBoosts: {} };
+    const earnInputs = [{ key: 'e1_d1', increment: 2.5, earlyMiss: true, attempted: true }];
+    const out = LB.recomputeMesoRepMissCut(ms, earnInputs, { e1_d1: 0 }, 'discounted', 'full');
+    assert.strictEqual(out.repMissCounts.e1_d1, 1, 'streak advances to 1');
+    assert.ok(!('e1_d1' in out.weightBoosts), 'no cut yet at a single miss');
+  });
+
+  test('recomputeMesoRepMissCut: a same-side edit (full->full) is a no-op', () => {
+    const ms = { repMissCounts: { e1_d1: 0 }, weightBoosts: { e1_d1: -2.5 } };
+    const earnInputs = [{ key: 'e1_d1', increment: 2.5, earlyMiss: true, attempted: true }];
+    const out = LB.recomputeMesoRepMissCut(ms, earnInputs, { e1_d1: 1 }, 'full', 'full');
+    assert.strictEqual(out, ms, 'no-op returns the same object, leaving the cut untouched');
+  });
+
+  test('recomputeMesoRepMissCut: an unattempted exercise never touches the streak', () => {
+    const ms = { repMissCounts: { e1_d1: 1 }, weightBoosts: {} };
+    const earnInputs = [{ key: 'e1_d1', increment: 2.5, earlyMiss: false, attempted: false }];
+    const out = LB.recomputeMesoRepMissCut(ms, earnInputs, { e1_d1: 1 }, 'discounted', 'full');
+    assert.strictEqual(out.repMissCounts.e1_d1, 1, 'the streak is left as-is for an unattempted lift');
   });
 
   console.log(`\n${pass} passed, ${fail} failed`);

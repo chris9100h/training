@@ -785,6 +785,52 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     };
   }, []);
 
+  // Auto-open the readiness prompt once on mount, before the first working set is
+  // logged, so the Fresh / Normal / Rough tap comes first (ahead of the meso
+  // soreness / joint prompts). If the session already carries a readiness, or a
+  // working set is already done (resumed session), stay closed.
+  useEffectT(() => {
+    if (session.readiness != null) return;
+    const rSch = store.schedules?.find(s => s.id === session.scheduleId);
+    // Readiness only feeds autoregulation (its signalWeight drives the meso gains).
+    // On a plain, non-autoregulating plan it has zero effect AND the tap can never be
+    // reviewed or corrected (the feedback recap is gated on mesoRecap, which those
+    // sessions never get), so the flow would only persist dead, unremovable data.
+    // Skip it entirely off-autoreg.
+    if (!LB.mesoActive(rSch)) return;
+    const anyDone = session.entries.some(e => !e.isCardio && e.sets.some(s => s.done && !s.warmup && !s.skipped));
+    // Autoreg v2 P4: post-break re-entry ramp (spec 7). When a sick/vacation break
+    // longer than the threshold just ended and we are still inside the first
+    // microcycle back, the eased-in default (readiness 'reentry', signalWeight
+    // 'discounted') applies. Resolve it BEFORE stamping any default so a RESUMED
+    // session in the ramp window keeps the protective discount instead of a flat
+    // 'normal'/'full' it could never correct. Deload sessions keep 'none'.
+    const reentry = LB.reentryRamp(store.statusPeriods, store.sessions, rSch, { todayStr: LB.todayISO() });
+    const reentryActive = reentry.active && store.statusMode !== 'deload' && !session.isDeload;
+    if (anyDone) {
+      // Resumed session (a working set is already logged): the readiness moment has
+      // passed, but the soreness / joint prompts are now gated on readiness != null,
+      // so stamp a default here to UNBLOCK them instead of leaving null and silently
+      // swallowing this session's meso feedback. Honor an active re-entry ramp.
+      updateSession(s => ({
+        ...s,
+        readiness: reentryActive ? 'reentry' : 'normal',
+        signalWeight: isMesoDeloadSession ? 'none' : (reentryActive ? 'discounted' : 'full'),
+      }));
+      return;
+    }
+    if (reentryActive) {
+      // Preselect the eased-in option but let a lifter who comes back strong pick Fresh
+      // and drop it for this session (agency preserved); the discount only lowers the
+      // suggestion, never the cap, so a strong return snaps straight back via earn.
+      setReadinessReentry(true);
+      setReadinessSel('reentry');
+      setReadinessOpen(true);
+      return;
+    }
+    setReadinessOpen(true);
+  }, []);
+
   const _sch = store.schedules?.find(s => s.id === session.scheduleId);
   const isWeekdayMode = _sch ? LB.isWeekdayPlan(_sch) : false;
 
@@ -1402,19 +1448,23 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         }
       }
 
-      // Determine violations
+      // Determine violations.
+      // 5/3/1 main lifts are exempt from BOTH outlier guards. Their load swings
+      // ~20% week to week by design (65/75/85% waves plus a built-in deload),
+      // and their top set is an AMRAP ("+") set where the reps intentionally
+      // blow past the printed target, so comparing either against a reference
+      // throws false prompts. Skip them like the progression toast does below.
+      const is531Main = LB.is531MainLift(store, entry.exId, session.dayId);
+
       let weightBad = false, weightHigh = false;
-      // 5/3/1 main lifts swing ~20% week to week by design (65/75/85% waves,
-      // built-in deload), so comparing against last session's load throws false
-      // outlier prompts, so skip them like the progression toast does below.
-      if (!LB.is531MainLift(store, entry.exId, session.dayId) && refKg != null && refKg > 0 && loggedKg != null && loggedKg > 0) {
+      if (!is531Main && refKg != null && refKg > 0 && loggedKg != null && loggedKg > 0) {
         const tooLow  = loggedKg < refKg - increment * 5;
         const tooHigh = loggedKg > refKg * 1.5;
         if (tooLow || tooHigh) { weightBad = true; weightHigh = tooHigh; }
       }
 
       let repsBad = false, repsHigh = false;
-      if (refReps != null && refReps >= 4 && loggedReps != null && loggedReps > 0) {
+      if (!is531Main && refReps != null && refReps >= 4 && loggedReps != null && loggedReps > 0) {
         if (loggedReps < refReps / 3) { repsBad = true; repsHigh = false; }
         else if (loggedReps > refReps * 3 || loggedReps > refReps + 10) { repsBad = true; repsHigh = true; }
       }
@@ -2247,6 +2297,70 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       // session so the detail screen can show it later; survives across devices.
       const recap = buildMesoRecap(gains);
       if (recap) updateSession(sess => ({ ...sess, mesoRecap: recap }));
+      // Autoreg v2 P2: snapshot THIS just-finished session (store.sessions won't
+      // hold its ended/recap until the setState flushes) so both block-recap
+      // framings, the block-end celebration and the mid-block decline, aggregate
+      // the FULL block including the session that just closed it out.
+      const finishedSnapshot = {
+        ...session,
+        ended: new Date().toISOString(),
+        isDeload: store.statusMode === 'deload',
+        signalWeight: deriveSignalWeight(),
+        mesoRecap: recap || session.mesoRecap,
+      };
+      const detSessions = [...(store.sessions || []).filter(x => x.id !== session.id), finishedSnapshot];
+      const blockSess = LB.blockSessions(detSessions, mesoState, store.statusPeriods);
+      blockRecapRef.current = LB.buildBlockRecap(blockSess);
+      // Autoreg v2 P1/P2: overreach detector + anti-nag gating. Only the Auto modes
+      // (bounded meso keeps its planned end-of-block deload). Runs the detector over
+      // the snapshot above so the emergent offer can fire on the exposure that just
+      // tipped a muscle over.
+      if (mesoState.weeks == null && !store.statusMode) {
+        const muscleOfExId = (exId) => primaryMuscleForExercise(store.exercises?.find(x => x.id === exId));
+        const overreachNow = mesoSch ? LB.detectOverreach(detSessions, mesoSch, muscleOfExId) : {};
+        const flaggedNow = Object.keys(overreachNow).filter(m => overreachNow[m] && overreachNow[m].atCeiling);
+        if (!flaggedNow.length) {
+          // Auto stand-down (spec 5.3 step 5): the signals receded, so drop any
+          // armed nudge and the passive hint disappears with it.
+          const cleared = LB.clearDeloadNudge(mesoState.autoregState);
+          if (cleared !== (mesoState.autoregState ?? null)) persistAutoregState(() => cleared);
+        } else {
+          // Autoreg v2 P3 landmark learning (spec 2.3): the detector flagged these
+          // muscles at their ceiling this finish, so record each one's CURRENT-
+          // microcycle banked set count as the learned MRV, EMA-smoothed across blocks
+          // (updateLandmarkMrv damps a single spike). Only detector-flagged muscles are
+          // touched, and the detector only counts full-signal exposures, so a
+          // discounted/none session can never drive a ceiling down (spec 4.3). The
+          // functional-updater form reads the freshest row so it composes with the
+          // computeMesoGains flush and the nudge writes below.
+          const microNow = mesoSch ? LB.microcycleSetsByMuscle(detSessions, mesoSch, muscleOfExId, {
+            which: 0, todayStr: LB.todayISO(),
+            startDate: mesoState.startDate, startedAt: mesoState.startedAt,
+            startCycleIndex: mesoState.startCycleIndex, cycleIndex: store.cycleIndex,
+            statusPeriods: store.statusPeriods, cycleStartDate: store.cycleStartDate,
+          }) : {};
+          persistAutoregState(prev => {
+            let next = prev;
+            for (const m of flaggedNow) {
+              const obs = microNow[m];
+              if (obs > 0) next = LB.updateLandmarkMrv(next, m, obs);
+            }
+            return next;
+          });
+          // Cooldown gate (spec 5.3 step 3): fire the full prompt only when allowed.
+          // During cooldown the ref stays null so goJustFinished skips the offer;
+          // the passive home hint is the only surface until the cooldown elapses.
+          const decision = LB.deloadNudgeDecision(mesoState.autoregState, blockSess.length, true);
+          if (decision.mode === 'full') {
+            pendingDeloadOfferRef.current = {
+              map: overreachNow,
+              escalation: decision.escalation,
+              blockCount: blockSess.length,
+              evidence: flaggedNow.map(m => (overreachNow[m].evidence && overreachNow[m].evidence[0]) || `${m} at its ceiling.`),
+            };
+          }
+        }
+      }
       if (gains.length > 0) {
         mesoGainNavRef.current = session.id;
         setMesoGainItems(gains);
@@ -2260,7 +2374,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         return;
       }
     }
-    go({ name: 'session', sessionId: session.id, justFinished: true });
+    goJustFinished(session.id);
   };
 
   const abandon = async () => {
@@ -2388,6 +2502,16 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     return !!(rs && rd && Date.now() >= rs + rd * 1000);
   });
   const [confirmEl, confirm] = useConfirm();
+  // Autoreg v2 P0: one-tap readiness prompt (Fresh / Normal / Rough), shown once
+  // per session before the first working set. Confirm with nothing selected, or a
+  // backdrop dismiss, both commit 'normal' (a null readiness reads as normal/full
+  // everywhere), so there is no separate Skip control.
+  const [readinessOpen, setReadinessOpen] = useStateT(false);
+  // Tap SELECTS an option (visual highlight), a Confirm button commits it, so a
+  // mis-tap is correctable before it takes effect. readinessReentry preselects the
+  // eased-in option after a break (see the on-mount effect above).
+  const [readinessSel, setReadinessSel] = useStateT(null);
+  const [readinessReentry, setReadinessReentry] = useStateT(false);
   const [finishOpen, setFinishOpen] = useStateT(false);
   const [finishStep, setFinishStep] = useStateT('confirm');
   const [pendingFeel, setPendingFeel] = useStateT(null);
@@ -2569,6 +2693,25 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     try { localStorage.removeItem(MESO_KEY); } catch {} // old single-key format
     try { localStorage.removeItem(MESO_ASKED_KEY + session.id); } catch {}
   };
+  // Autoreg v2 P2: persist a change to this plan's autoreg_state blob (the anti-nag
+  // deloadNudge cooldown, spec 5.3 / 9). Writes straight into store.mesoStates so
+  // syncStore's diff carries it to the DB via sync_meso_states_batch. A functional
+  // setStore updater reads the freshest row, so this composes safely with the
+  // computeMesoGains flush that already ran this finish. mutator: (prev) -> next
+  // autoreg_state; returning the same reference is a no-op.
+  const persistAutoregState = (mutator) => {
+    setStore(s => {
+      const list = s.mesoStates || [];
+      const idx = list.findIndex(m => m.scheduleId === session.scheduleId);
+      if (idx < 0) return s;
+      const cur = list[idx];
+      const nextAutoreg = mutator(cur.autoregState ?? null);
+      if (nextAutoreg === (cur.autoregState ?? null)) return s;
+      const next = list.slice();
+      next[idx] = { ...cur, autoregState: nextAutoreg, updatedAt: new Date().toISOString() };
+      return { ...s, mesoStates: next };
+    });
+  };
   // Memoized on everything mesoCurrentWeek reads (it filters all sessions twice
   // for meso plans) plus a per-day token so the date-based week still advances at
   // midnight — without this it recomputed on every 250ms tick for meso users.
@@ -2586,6 +2729,88 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // Meso 2), so the joint + pump/volume questions stay — they gate the boost —
   // while the soreness question (pure set-delta, no weight gate) is skipped.
   const mesoLastWeek = mesoState != null && mesoWeek != null && mesoState.weeks != null && mesoWeek >= mesoState.weeks;
+  // Autoreg v2 P1: overreach detector over the loaded history (stateless, spec
+  // 2.2). Keyed off the same session inputs mesoWeek reads so it only recomputes
+  // when history changes, not on every tick. Uses PRIOR exposures (the current
+  // in-progress session isn't ended in store.sessions yet), which is exactly what
+  // decides whether to FREEZE this session's positive set-adds (the MRV cap).
+  // Autoreg v2 perf: detectOverreach + microcycleSetsByMuscle below read only ENDED
+  // sessions, but updateSession rewrites the in-progress (ended:null) session on every
+  // set edit, minting a fresh store.sessions ref that would otherwise re-run both full
+  // 70-day aggregations on every keystroke. Snapshot the ended slice with a STABLE
+  // reference: updateSession preserves the identity of every other session object, so
+  // when no ended session actually changed we hand the memos the same array back and
+  // they skip the recompute; any real change to a past session (edit, sync/merge) mints
+  // a new object ref and is still caught.
+  const endedSessionsRef = useRefT([]);
+  const endedSessions = (() => {
+    const list = (store.sessions || []).filter(x => x.ended);
+    const prev = endedSessionsRef.current;
+    if (list.length === prev.length && list.every((x, i) => x === prev[i])) return prev;
+    endedSessionsRef.current = list;
+    return list;
+  })();
+  const overreach = useMemoT(() => {
+    if (!mesoState || !mesoSch) return {};
+    const muscleOfExId = (exId) => primaryMuscleForExercise(store.exercises?.find(x => x.id === exId));
+    return LB.detectOverreach(endedSessions, mesoSch, muscleOfExId);
+  }, [mesoState, mesoSch, endedSessions, store.exercises]);
+  // Autoreg v2 P3: banked hard sets per muscle in the CURRENT microcycle (which:0),
+  // the numeric side of the learned-MRV cap. Counts ENDED sessions only, so it reads
+  // banked volume (the in-progress session isn't in it yet), exactly like the detector
+  // reads prior exposures. Windowed with the block/pause context so flex rotations and
+  // paused deloads align with the engine's meso week (the microcycleSetsByMuscle
+  // FIX 1/2/3). Memoized on the mesoWeek dep set.
+  const cycleSets = useMemoT(() => {
+    if (!mesoState || !mesoSch) return {};
+    const muscleOfExId = (exId) => primaryMuscleForExercise(store.exercises?.find(x => x.id === exId));
+    return LB.microcycleSetsByMuscle(endedSessions, mesoSch, muscleOfExId, {
+      which: 0, todayStr: LB.todayISO(),
+      startDate: mesoState.startDate, startedAt: mesoState.startedAt,
+      startCycleIndex: mesoState.startCycleIndex, cycleIndex: store.cycleIndex,
+      statusPeriods: store.statusPeriods, cycleStartDate: store.cycleStartDate,
+    });
+  }, [mesoState, mesoSch, endedSessions, store.exercises, store.cycleIndex, store.statusPeriods, LB.todayISO()]);
+  // Learned per-muscle MRV ceiling (spec 2.3), persisted in autoreg_state.landmarks.
+  // Absent until P3 learning has flagged a muscle at least once, so the numeric cap
+  // below degrades cleanly to detector-only when a muscle has no learned mrv yet.
+  const learnedMrv = mesoState?.autoregState?.landmarks || {};
+  // MRV cap lookup (spec 2.3): true when a muscle already hit its ceiling. Two
+  // independent triggers, OR-ed: (a) the stateless overreach detector flags it from
+  // prior exposures, or (b) its banked current-microcycle volume has reached the
+  // learned MRV. Positive-only, per-muscle, non-destructive: this only FREEZES set
+  // adds; cuts/declines still apply.
+  const atCeiling = (muscle) => {
+    if (!muscle) return false;
+    if (overreach[muscle] && overreach[muscle].atCeiling) return true;
+    const lm = learnedMrv[muscle];
+    return !!(lm && lm.mrv != null && (cycleSets[muscle] || 0) >= lm.mrv);
+  };
+  // Autoreg v2 P4 perf: the stall detector + concrete-swap suggestion for the CURRENT
+  // exercise are pure functions of the ended history, the exercise, and the ceiling
+  // signals. Computing them here (instead of inline in the render IIFE far below) keeps
+  // every unrelated re-render (a keystroke, a timer tick, an unrelated sheet toggle)
+  // from rescanning the plan's full history and, on a stall, the entire exercise
+  // catalog. mesoState/overreach/cycleSets cover everything atCeiling reads.
+  const stallInfo = useMemoT(() => {
+    if (!mesoState || !exercise) return null;
+    const muscleOf = (id) => primaryMuscleForExercise(store.exercises?.find(x => x.id === id));
+    const stall = LB.detectStall(endedSessions, exercise.id, muscleOf, {
+      planId: mesoState.scheduleId, atCeiling, exName: exercise.name,
+    });
+    if (!stall.stalled) return { stalled: false, swap: null };
+    const swap = LB.suggestSwap(exercise.id, store.exercises, window.SYSTEM_EXERCISES, muscleOf, { affinity: mesoState.affinity });
+    return { stalled: true, swap };
+  }, [mesoState, exercise, endedSessions, store.exercises, overreach, cycleSets]);
+  // Holds the just-finished session's detector result (computed in finish() over
+  // the sealed session) so the post-session deload offer can read the reason
+  // strings after navigation. Cleared once consumed.
+  const pendingDeloadOfferRef = useRefT(null);
+  // Autoreg v2 P2: the block-level recap aggregated at finish() (gains since block
+  // start), read by both the celebration (handleMesoComplete) and the decline
+  // (offerEmergentDeload) framings. Built once over a snapshot that includes the
+  // just-finished session, since store.sessions lags a tick behind.
+  const blockRecapRef = useRefT(null);
   // The "≥X reps · next weight" hint is Smart Progression's promise. On a meso
   // plan the feedback engine owns the weight from week 2 on (Smart Progression is
   // vetoed, see LB.resolveMesoSeedSuggestion), so instead of promising a bump that
@@ -2624,25 +2849,52 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       startDate2 = LB.nextCycleD1ISOFromSchedule(sch2, store.cycleStartDate);
       startCycleIndex2 = 0;
     }
-    const newMeso = {
-      ...existing,
-      startDate: startDate2,
-      startCycleIndex: startCycleIndex2,
-      deltas: {},
-      jointFlags: {},
-      pumpLowCounts: {},
-      growthCounts: {},
-      pendingMeso2: false,
-      // weightBoosts carries over to meso 2
-      startedAt: new Date().toISOString(), // fresh block-start anchor (flex week count)
-      updatedAt: new Date().toISOString(),
-    };
-    // Keep the per-plan localStorage cache in sync with the store (getMesoState
-    // picks the newer of the two by updatedAt) so the stale Meso-1 cache can't
-    // keep winning on the home strip after Meso 2 starts.
-    saveMesoStateToStorage(newMeso);
-    setMesoStateLocal(newMeso);
-    setStore(s => ({ ...s, mesoStates: [...(s.mesoStates || []).filter(m => m.scheduleId !== scheduleId), newMeso] }));
+    // Autoreg v2 P3: snapshot the just-finished block's per-muscle volume as the new
+    // block's starting point (spec 9). Landmarks carry across (they spread in via
+    // the row's autoregState: MRV is EMA-smoothed ACROSS blocks); only block.startVol
+    // resets. Bounded Meso resets its set deltas anyway, so no per-exercise backoff
+    // here (that is the Auto emergent-reset lever, offerEmergentDeload).
+    const muscleOfExId = (exId) => primaryMuscleForExercise(store.exercises?.find(x => x.id === exId));
+    const now = new Date().toISOString();
+    // Compose Meso 2 on the FRESHEST row inside the functional updater: this finish()
+    // already queued a completions/pendingMeso2 bump via computeMesoGains'
+    // flushMesoStateToStore, and this handler is reached AFTER awaited dialogs, so the
+    // closed-over `existing` can lag it. Spreading the stale `existing` would revert
+    // the completions bump (understating the "Start Meso N" number later). Mirrors
+    // applyEmergentBlockReset. #4
+    let composed = null;
+    setStore(s => {
+      const cur = (s.mesoStates || []).find(m => m.scheduleId === scheduleId) || existing;
+      const startVol = sch2 ? LB.microcycleSetsByMuscle(s.sessions, sch2, muscleOfExId, {
+        which: 0, todayStr: LB.todayISO(),
+        startDate: cur.startDate, startedAt: cur.startedAt,
+        startCycleIndex: cur.startCycleIndex, cycleIndex: s.cycleIndex,
+        statusPeriods: s.statusPeriods, cycleStartDate: s.cycleStartDate,
+      }) : {};
+      composed = {
+        ...cur,
+        startDate: startDate2,
+        startCycleIndex: startCycleIndex2,
+        deltas: {},
+        jointFlags: {},
+        pumpLowCounts: {},
+        growthCounts: {},
+        pendingMeso2: false,
+        // weightBoosts + completions carry over from the fresh row to meso 2
+        autoregState: LB.snapshotBlockStart(cur.autoregState, startDate2, startVol),
+        startedAt: now, // fresh block-start anchor (flex week count)
+        updatedAt: now,
+      };
+      // Write the per-plan localStorage cache INSIDE the updater so it is atomic with the
+      // store row and can never be skipped by a deferred updater (mirrors saveMesoState).
+      // getMesoState (newer of store vs cache by updatedAt) then can't let a stale Meso-1
+      // cache win on the home strip.
+      saveMesoStateToStorage(composed);
+      return { ...s, mesoStates: [...(s.mesoStates || []).filter(m => m.scheduleId !== scheduleId), composed] };
+    });
+    // Update the in-session mirror (cosmetic; TrainingScreenInner is unmounting after the
+    // block finishes). Kept outside the updater since setMesoStateLocal is a child setter.
+    if (composed) setMesoStateLocal(composed);
   };
 
   const continueAsCycle = (scheduleId) => {
@@ -2675,10 +2927,27 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     }));
   };
 
+  // Autoreg v2 P2: thin wrapper over the shared top-level BlockRecap component
+  // (screens-lib.jsx), so the training screen and the home 8-cycle nudge render the
+  // identical recap with no duplication. `evidence` null + escalation 0 is the
+  // block-end CELEBRATION framing; a non-null evidence array is the DECLINE framing.
+  const blockRecapNode = (recap, evidence, escalation) => (
+    <BlockRecap recap={recap} evidence={evidence} escalation={escalation} />
+  );
+
   const handleMesoComplete = async () => {
     const scheduleId = session.scheduleId;
+    // Autoreg v2 P2: block-end recap, pure CELEBRATION (spec 5.2), gains only, no
+    // fatigue evidence. Shown before the deload/Meso-N offers when there is
+    // anything worth celebrating; a single-button acknowledge, not a decision.
+    const bRecap = blockRecapRef.current;
+    if (bRecap && (bRecap.prCount > 0 || bRecap.setGains.some(g => g.setDelta > 0))) {
+      await confirm(blockRecapNode(bRecap, null, 0), {
+        title: 'Block complete 🎉', ok: 'Let\'s go', cancel: null, preventBackdropClose: true,
+      });
+    }
     const wantDeload = await confirm(
-      'You crushed it — that\'s one full mesocycle done! A deload now helps you recover and come back even stronger. Want to start one?',
+      'You crushed it, that\'s one full mesocycle done! A deload now helps you recover and come back even stronger. Want to start one?',
       { title: 'Mesocycle complete! 🎉', ok: 'Start deload', cancel: 'Skip deload', preventBackdropClose: true },
     );
     if (wantDeload) {
@@ -2709,6 +2978,119 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     go({ name: 'session', sessionId: session.id, justFinished: true });
   };
 
+  // Autoreg v2 P1: emergent deload offer at session finish (spec 3 / 5.3). A
+  // lightweight, wave-off-able 1-tap suggestion, shown only when a muscle actually
+  // hit its ceiling this block. Scope by mode: a bounded Meso (weeks != null) gets
+  // its planned deload at block end plus the early MRV cap, so it is NOT offered a
+  // separate emergent deload here (mirrors home.jsx suppressing the generic nudge
+  // while mesocycle_weeks is set); the Auto modes (Full / Load-only) are exactly
+  // where the emergent deload lives. Accept starts the existing deload overlay;
+  // decline just closes.
+  // Autoreg v2 P3: the emergent block reset (spec 2.3 / 3). Fires on deload ACCEPT in
+  // Auto Full only. It is what makes Auto Full a self-timed mesocycle: snapshot the
+  // block's per-muscle volume, back each grown exercise off ~2 sets (non-destructive,
+  // never below the plan base), clear the nudge, and stamp a fresh block anchor so the
+  // next block re-ramps from a backed-off start, capped per-muscle by the learned MRV.
+  // Excluded by design: bounded Meso (weeks != null) has its own planned deload +
+  // reset; Load-only (autoregLoadOnly) has fixed volume and no landmarks. Combines
+  // deltas + autoregState + updatedAt into ONE meso-row write (so the staleness guard
+  // carries them together) and mirrors startMeso2ForSchedule's storage/local/store
+  // triple-write so the localStorage cache can't out-stale the row.
+  const applyEmergentBlockReset = () => {
+    if (!mesoState || mesoState.weeks != null || !mesoSch || LB.autoregLoadOnly(mesoSch)) return;
+    const scheduleId = session.scheduleId;
+    const muscleOfExId = (exId) => primaryMuscleForExercise(store.exercises?.find(x => x.id === exId));
+    const now = new Date().toISOString();
+    const todayIso = LB.todayISO();
+    // Compose on the FRESH row inside a functional updater. This finish already
+    // flushed the session's feedback (flushMesoStateToStore) and learned the
+    // ceiling on the triggering session (persistAutoregState); reading the closed-
+    // over `store` here would clobber both with a stale row. flushMesoStateToStore
+    // also cleared the localStorage copy, so the store row is now authoritative.
+    setStore(s => {
+      const cur = (s.mesoStates || []).find(m => m.scheduleId === scheduleId);
+      if (!cur) return s;
+      const startVol = LB.microcycleSetsByMuscle(s.sessions, mesoSch, muscleOfExId, {
+        which: 0, todayStr: todayIso,
+        startDate: cur.startDate, startedAt: cur.startedAt,
+        startCycleIndex: cur.startCycleIndex, cycleIndex: s.cycleIndex,
+        statusPeriods: s.statusPeriods, cycleStartDate: s.cycleStartDate,
+      });
+      // clearDeloadNudge first (the block is resetting), then snapshot the new block.
+      const nextAutoreg = LB.snapshotBlockStart(LB.clearDeloadNudge(cur.autoregState), todayIso, startVol);
+      const newMeso = {
+        ...cur,
+        deltas: LB.backoffDeltas(cur.deltas, 2),
+        autoregState: nextAutoreg,
+        startedAt: now,       // fresh block anchor for flex windowing
+        startDate: todayIso,  // re-anchor weekday/cycle microcycle window + week counter too
+        updatedAt: now,
+      };
+      return { ...s, mesoStates: (s.mesoStates || []).filter(m => m.scheduleId !== scheduleId).concat(newMeso) };
+    });
+  };
+
+  const offerEmergentDeload = async (offer) => {
+    if (!mesoState || isMesoDeloadSession) return;
+    if (mesoState.weeks != null) return;      // bounded meso: deload comes at block end
+    if (store.statusMode) return;             // never stack on sick / vacation / deload
+    const overreachMap = (offer && offer.map) || offer || {};
+    const escalation = (offer && offer.escalation) || 0;
+    const blockCount = (offer && offer.blockCount) || 0;
+    const flagged = Object.keys(overreachMap).filter(m => overreachMap[m] && overreachMap[m].atCeiling);
+    if (!flagged.length) return;
+    const evidence = (offer && offer.evidence) ||
+      flagged.map(m => (overreachMap[m].evidence && overreachMap[m].evidence[0]) || `${m} at its ceiling.`);
+    // Step 1 (spec 5.3): the light 1-tap offer. On a re-ask after cooldown the copy
+    // leads with the escalated framing instead of repeating the same reason.
+    const lead = escalation > 0 ? 'The fatigue is still climbing.' : evidence.join('  ');
+    const accept = await confirm(
+      `${lead}  A deload now (about a week at ~50% load) clears the fatigue so you come back stronger. Want to start one? You can always wave it off and keep training.`,
+      { title: escalation > 0 ? 'Still at the ceiling' : 'Time for a deload?', ok: 'Start deload', cancel: 'Not now', preventBackdropClose: true },
+    );
+    if (accept) {
+      // Deload accepted (spec 5.2 "Deload angenommen"): pure celebration recap, then
+      // start the deload. Clear the nudge, the block is resetting.
+      const bRecap = blockRecapRef.current;
+      if (bRecap && (bRecap.prCount > 0 || bRecap.setGains.some(g => g.setDelta > 0))) {
+        await confirm(blockRecapNode(bRecap, null, 0), { title: 'Block complete 🎉', ok: 'Start deload', cancel: null, preventBackdropClose: true });
+      }
+      // Auto Full: reset the block (backoff + snapshot + fresh anchor, clears the nudge
+      // inline). Load-only has no volume landmarks, so just clear the nudge.
+      if (!LB.autoregLoadOnly(mesoSch)) applyEmergentBlockReset();
+      else persistAutoregState(prev => LB.clearDeloadNudge(prev));
+      await LB.startDeload(userId, store, setStore);
+      return;
+    }
+    // Step 2 (spec 5.3 / 5.2 decline framing): the recap with gains AND fatigue
+    // evidence, then exactly ONE re-ask. The recap is the decision helper here, not
+    // an epilogue: "you built this, and here is the fatigue".
+    const bRecap = blockRecapRef.current || LB.buildBlockRecap(LB.blockSessions(store.sessions, mesoState, store.statusPeriods));
+    const reAsk = await confirm(
+      blockRecapNode(bRecap, evidence, escalation),
+      { title: escalation > 0 ? 'The trend is still up' : 'Before you skip it', ok: 'Start deload', cancel: 'Skip it, keep training', preventBackdropClose: true },
+    );
+    if (reAsk) {
+      if (!LB.autoregLoadOnly(mesoSch)) applyEmergentBlockReset();
+      else persistAutoregState(prev => LB.clearDeloadNudge(prev));
+      await LB.startDeload(userId, store, setStore);
+      return;
+    }
+    // Step 3 (spec 5.3): declined again. Arm the N-session cooldown so the full
+    // prompt does not fire every finish; the passive home hint carries it until the
+    // cooldown elapses, then the evidence escalates rather than the frequency.
+    persistAutoregState(prev => LB.recordDeloadDecline(prev, blockCount));
+  };
+  // Terminal navigation after a finished session: run the emergent-deload offer
+  // (if the detector flagged a ceiling this finish and the cooldown allows it)
+  // before landing on the summary.
+  const goJustFinished = async (sessionId) => {
+    const offer = pendingDeloadOfferRef.current;
+    pendingDeloadOfferRef.current = null;
+    if (offer) await offerEmergentDeload(offer);
+    go({ name: 'session', sessionId, justFinished: true });
+  };
+
   // Per-session meso feedback tracking
   const [mesoSorenessOpen, setMesoSorenessOpen] = useStateT(false);
   const [mesoSorenessMusc, setMesoSorenessMusc] = useStateT(null); // muscle group being asked
@@ -2729,6 +3111,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const [mesoJointWeightSel, setMesoJointWeightSel] = useStateT(null); // weight-feel answer, folded into the per-exercise step (every mode)
   const [mesoJointPumpSel, setMesoJointPumpSel] = useStateT(null); // pump answer, now per exercise (every mode)
   const [mesoJointAffinitySel, setMesoJointAffinitySel] = useStateT(null); // affinity ('love'|'ok'|'dislike'), sticky per exId, optional
+  const [mesoJointExpanded, setMesoJointExpanded] = useStateT(false); // fast path: false = one-tap "On point" / "Flag a detail", true = the four detail chips
   // Editing an already-answered question reopens the same sheet prefilled;
   // these track which subject (muscle/exId) is currently being re-answered
   // vs. freshly asked for the first time (both paths call the same commit
@@ -2809,6 +3192,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // letting another question claim it. See commitContrib.
   const mesoNegativeDeltaKeysRef = useRefT(mesoAskedInitRef.current.negOwner);
   const isMesoDeloadSession = store.statusMode === 'deload' || session.isDeload;
+  // Autoreg v2 P0 signal-hygiene: how much this session counts toward autoreg learning.
+  // Delegates to the shared pure LB.deriveSignalWeight so the live finish and the post-hoc
+  // readiness edit (screens-lib.jsx) score a session identically. Hoisted fn so the
+  // textually-earlier finish() snapshot can call it.
+  function deriveSignalWeight() { return LB.deriveSignalWeight(session, isMesoDeloadSession); }
 
   // Apply `newContrib` (key -> desired delta) as this question's current
   // contribution to mesoState.deltas, replacing whatever it contributed last
@@ -2926,12 +3314,16 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     //     negative-slot ownership still stops it from double-stacking with a
     //     "pushed"/"too much" -1 on the same key.
     const adds = answer === 'never' || answer === 'healed_long';
+    // Autoreg v2 P1 MRV cap: freeze the soreness +1 (and its growthCounts rotation)
+    // for an at-ceiling muscle. Positive-only: the still_sore -1 decline below stays
+    // live. On a fresh session record.contrib is empty, so no existing set is stripped.
+    const capped = atCeiling(muscle);
     const prevGrantedTo = Object.keys(record.contrib || {}).find(k => record.contrib[k] === 1) ?? null;
     let recipientKey = null;
-    if (adds && keys.length) {
+    if (adds && keys.length && !capped) {
       recipientKey = LB.pickGrowthRecipient(keys, mesoState.growthCounts, prevGrantedTo).recipientKey;
       saveMesoState(m => ({ ...m, growthCounts: LB.pickGrowthRecipient(keys, m.growthCounts, prevGrantedTo).growthCounts }));
-    } else if (prevGrantedTo) {
+    } else if (prevGrantedTo && !capped) {
       // Edited away from an adding answer this session → undo the prior grant.
       saveMesoState(m => ({ ...m, growthCounts: LB.retractGrowthGrant(m.growthCounts, prevGrantedTo) }));
     }
@@ -2960,6 +3352,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     setMesoJointWeightSel(null);
     setMesoJointPumpSel(null);
     setMesoJointAffinitySel(null);
+    setMesoJointExpanded(false);
     mesoEditingRef.current.joint = null;
     const exId = mesoJointExId;
     const muscle = mesoJointMuscle;
@@ -3118,7 +3511,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // reason, so its rotation is pointless too.
     const prevGrantedTo = Object.keys(record.contrib || {}).find(k => record.contrib[k] === 1) ?? null;
     let recipientKey = null;
-    if (mesoLastWeek || LB.autoregLoadOnly(mesoSch)) {
+    // Autoreg v2 P1 MRV cap: an at-ceiling muscle takes the frozen branch, so its
+    // +1 add and growthCounts bump are skipped (positive-only, per-muscle). The
+    // decline paths (pushed / too_much, below) stay live so it can still shed sets.
+    if (mesoLastWeek || LB.autoregLoadOnly(mesoSch) || atCeiling(muscle)) {
       // frozen: no rotation, no grant
     } else if (volume === 'not_enough') {
       recipientKey = LB.pickGrowthRecipient(keys, mesoState.growthCounts, prevGrantedTo).recipientKey;
@@ -3175,6 +3571,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     mesoEditingRef.current.joint = exId;
     setMesoRecapOpen(false);
     setMesoRecapDetailMuscle(null);
+    setMesoJointExpanded(true); // editing a specific answer opens straight to the chips
     setMesoJointOpen(true);
   };
   const openVolumeEdit = (muscle) => {
@@ -3251,7 +3648,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         if (r.weight != null) parts.push(WEIGHT_LABELS[r.weight] || r.weight);
         if (r.pump != null) parts.push(PUMP_LABELS[r.pump] || r.pump);
         if (r.affinity != null) parts.push(AFFINITY_LABELS[r.affinity] || r.affinity);
-        jointRows.push({ key: 'joint-' + e.exId, title: r.exName, sub: parts.join(' · '), onEdit: () => openJointEdit(e.exId) });
+        jointRows.push({ key: 'joint-' + e.exId, title: r.exName, sub: parts.join(' · '), sel: r.answer, weight: r.weight ?? null, pump: r.pump ?? null, affinity: r.affinity ?? null, onEdit: () => openJointEdit(e.exId) });
       });
       const generalRows = [];
       if (sRec?.answer != null) {
@@ -3278,7 +3675,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     const groups = mesoRecapGroups().map(g => ({
       muscle: g.muscle,
       general: g.generalRows.map(r => ({ title: r.title, sub: r.sub })),
-      joint: g.jointRows.map(r => ({ title: r.title, sub: r.sub })),
+      joint: g.jointRows.map(r => ({ title: r.title, sub: r.sub, sel: r.sel, weight: r.weight, pump: r.pump, affinity: r.affinity })),
     })).filter(g => g.general.length || g.joint.length);
     const gainRows = (gains || []).map(g => ({
       name: g.name, weightDelta: g.weightDelta || 0, setDelta: g.setDelta || 0,
@@ -3301,6 +3698,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       negOwner: { ...(mesoNegativeDeltaKeysRef.current || {}) },
       frozen: !!(mesoLastWeek || weightFeelMode),
       dayId: session.dayId ?? null,
+      // Pre-session rep-miss streak (before computeMesoGains advanced it): captured
+      // so a post-hoc readiness edit can recompute this session's cut cleanly (a
+      // full->discounted edit restores the frozen streak from here). mesoState is the
+      // still-pre-session React closure at this point, so its counts are the base.
+      repMissBase: { ...(mesoState.repMissCounts || {}) },
     } : null;
     return {
       loadOnly: !!weightFeelMode,
@@ -3318,6 +3720,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // the post-session screen. Also merges set-gain info from mesoSessionSetGainsRef.
   const computeMesoGains = (isComplete = false) => {
     if (!mesoState) return [];
+    // Signal-hygiene (Autoreg v2 P0): how much this session counts toward
+    // autoregulation learning. An untagged deload still reads as 'none' for
+    // back-compat. 'none' = deload (no earn, no cut). 'discounted' = rough day
+    // or re-entry ramp: the rep-miss cut and MRV do NOT advance, but a real PR
+    // may still EARN a weight boost. 'full' = normal.
+    const signalWeight = deriveSignalWeight();
     const unit = store.settings?.unit || 'kg';
     const weightBoostMap = {};
     const repMissCounts = { ...(mesoState.repMissCounts || {}) };
@@ -3355,15 +3763,31 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       // computeMesoGains runs on the pre-seal session, so guard here to match the
       // seal, otherwise an untouched exercise would count as an early rep miss.
       if (!workingSets.some(s => s.done)) continue;
+      // A newly-added or swapped-in exercise's session entry carries no (or an
+      // inherited, wrong) rep target: the real one is what the user just picked
+      // in the post-session rep wizard (addedRepPatchesRef, applied to the plan
+      // in applyPlanAndFinish). Since computeMesoGains runs on the pre-seal
+      // session, that target hasn't been written back to the entry yet, so read
+      // it from the patch ref and fall back to the entry's own target otherwise.
+      // This makes the earn gate below judge the reps against the target the
+      // user actually set for THIS exercise, not a stale / blank one (which used
+      // to auto-earn a boost off any rep count on a fresh add).
+      const repPatch = addedRepPatchesRef.current?.[exId];
+      const planReps = repPatch ? (repPatch.reps ?? null) : (e.plannedReps ?? null);
+      const planRepsPerSet = repPatch ? (repPatch.repsPerSet ?? null) : e.plannedRepsPerSet;
+      const planRepsMax = repPatch ? (repPatch.repsMax ?? null) : (e.plannedRepsMax ?? null);
       // allHit gates the earn side (strict, unchanged); earlyMiss (a looser
       // bar, the last working set is exempt) feeds the miss-streak cut below.
       // See LB.mesoRepOutcome for the exact per-set/range-aware rules.
-      const { allHit, earlyMiss } = LB.mesoRepOutcome(workingSets, e.plannedReps ?? null, e.plannedRepsPerSet, e.plannedRepsMax ?? null);
+      const { allHit, earlyMiss } = LB.mesoRepOutcome(workingSets, planReps, planRepsPerSet, planRepsMax);
 
       const catCfg = ex?.equipment ? (store.settings?.equipmentConfig?.[ex.equipment] ?? {}) : {};
       const increment = catCfg.increment ?? (unit === 'lbs' ? 5 : 2.5);
 
-      if (!streakSeen.has(key)) {
+      // Only a 'full' session advances the rep-miss cut. 'discounted'/'none'
+      // freeze the streak: a rough day or deload must never push toward a cut
+      // (spec 4.3). Leaving the block unentered keeps repMissCounts untouched.
+      if (signalWeight === 'full' && !streakSeen.has(key)) {
         streakSeen.add(key);
         if (earlyMiss) {
           const n = (repMissCounts[key] || 0) + 1;
@@ -3406,7 +3830,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // feedback, so it must NOT wipe boosts earned before it: skip the
     // recompute entirely and leave the map (and the miss streak) as-is.
     // mesoState here is the React state — already contains all feedback deltas from this session.
-    const newWeightBoosts = isMesoDeloadSession
+    // EARN persist: only a 'none' session (deload) keeps the old map untouched.
+    // 'discounted' falls through and CAN still earn a boost (a PR on a tired day
+    // is real, spec 4.3); 'full' is the normal re-earn.
+    const newWeightBoosts = signalWeight === 'none'
       ? (mesoState.weightBoosts || {})
       : LB.reearnMesoWeightBoosts(
           mesoState.weightBoosts,
@@ -3416,7 +3843,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     const withBoosts = {
       ...mesoState,
       weightBoosts: newWeightBoosts,
-      repMissCounts: isMesoDeloadSession ? (mesoState.repMissCounts || {}) : repMissCounts,
+      // Freeze the miss streak for anything but a full session (discounted and
+      // none both leave it as-is), matching the streak guard above.
+      repMissCounts: signalWeight !== 'full' ? (mesoState.repMissCounts || {}) : repMissCounts,
     };
     // If the last meso week just finished: bump completions + set pendingMeso2 so the
     // home screen can offer Meso 2 after a deload (or immediately). isComplete is
@@ -3453,6 +3882,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // Soreness trigger: fires when exIdx changes to first exercise of a new muscle group
   useEffectT(() => {
     if (!mesoState || !entry || isCardio || isMesoDeloadSession) return;
+    if (session.readiness == null) return; // readiness is always the first prompt of a session
     if (mesoWeek == null) return; // pending period — meso not yet started
     if (peekSuppressIdxRef.current === exIdx) return; // reached here by peeking, not progression
     if (mesoLastWeek) return; // final week: set deltas frozen, and soreness only drives deltas
@@ -3493,7 +3923,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // this flag in the same render pass and defers until soreness is answered.
     sorenessPendingRef.current = true;
     setMesoSorenessOpen(true);
-  }, [exIdx, !!mesoState, mesoJointOpen, mesoVolumeOpen]);
+  }, [exIdx, !!mesoState, mesoJointOpen, mesoVolumeOpen, session.readiness]);
 
   // Pinned exercise note: a must-acknowledge cue that also fires on exercise
   // start, but AFTER the soreness recovery check. Declared after the soreness
@@ -3519,6 +3949,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // ask joint feedback. Fires whenever the current entry's sets change.
   useEffectT(() => {
     if (!mesoState || !entry || isCardio || isMesoDeloadSession) return;
+    if (session.readiness == null) return; // readiness is always the first prompt of a session
     if (mesoWeek == null) return; // pending period — meso not yet started
     const exId = entry.exId;
     if (askedJointRef.current.has(exId)) return;
@@ -3540,12 +3971,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // it changed. Never rated yet stays null (optional, does not block Confirm).
     setMesoJointAffinitySel(mesoState?.affinity?.[exId]?.v ?? null);
     mesoEditingRef.current.joint = null;
+    setMesoJointExpanded(false); // fresh capture opens on the one-tap fast path
     setMesoJointOpen(true);
     // Encode done AND skipped: finishing an exercise by SKIPPING its last open
     // set (skipped, not done) must still re-run this effect. Keying only on
     // `done` left the signature unchanged on a skip, so the joint/pump/volume
     // sheet never fired and its boost gates / volume feedback were skipped.
-  }, [exIdx, entry?.sets?.map(s => s.done ? 1 : s.skipped ? 2 : 0).join(','), !!mesoState]);
+  }, [exIdx, entry?.sets?.map(s => s.done ? 1 : s.skipped ? 2 : 0).join(','), !!mesoState, session.readiness]);
 
   const tempoTimerRef = useRefT(null);
   const audioCtxRef = useRefT(null);
@@ -4224,42 +4656,73 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     setSwapOpen(true);
   };
 
+  // Pure entry swap: return a new sessions array with the entry at exIdx repointed to
+  // newExId, reshaping/reseeding its sets as the log mode / assist / unilateral flags
+  // require. Reads exercises from the passed (fresh) state `s`, so a just-materialized
+  // row resolves correctly. Shared by doSwap and applyStallSwap.
+  const swapEntrySessions = (s, newExId) => {
+    const newEx = LB.findExercise(s, newExId);
+    const isNewCardio = newEx?.movement_type === 'cardio';
+    return s.sessions.map(x => x.id !== session.id ? x : {
+      ...x,
+      entries: x.entries.map((e, i) => {
+        if (i !== exIdx) return e;
+        if (isNewCardio) {
+          return { ...e, exId: newExId, name: newEx?.name || e.name, isCardio: true, plannedSets: 0, sets: [], cardioDone: false, cardioData: null };
+        }
+        // Reshape the sets when the swapped-in exercise logs differently
+        // (time vs weight/reps) or flips assisted-ness, so a time/assisted
+        // exercise never inherits the old weight-shaped sets, and vice versa.
+        const oldEx = LB.findExercise(s, e.exId);
+        const modeChanged = LB.exerciseLogMode(oldEx) !== LB.exerciseLogMode(newEx);
+        const assistChanged = (oldEx?.movement_type === 'assisted') !== (newEx?.movement_type === 'assisted');
+        if (modeChanged || assistChanged) {
+          const isUni = newEx?.movement_type === 'unilateral';
+          const bwKg = LB.shouldPullBodyweight(newEx) ? LB.latestBodyweight(s) ?? null : null;
+          const swapOcc = x.entries.slice(0, i).filter(en => en.exId === newExId).length;
+          const last = LB.bestRecentEntry(s, newExId, session.dayId, 3, swapOcc);
+          const suggestion = LB.progressionSuggestion(s, newExId, session.dayId, null, null, last, null, null, swapOcc);
+          const setCount = e.sets?.length || e.plannedSets || 3;
+          const seedSets = LB.buildSeedSets({ exId: newExId, sets: setCount, repsPerSet: null }, last, suggestion, isUni, s, bwKg);
+          return { ...e, exId: newExId, name: newEx?.name || e.name, sets: seedSets };
+        }
+        // Same log mode & assist-ness: keep the logged sets, but if the swap
+        // flips unilateral-ness reshape them (per-side L/R vs a single rep) so
+        // a bilateral exercise never inherits stray L/R data and renders as
+        // "L13/R13" in history.
+        const uniChanged = (!!oldEx?.unilateral) !== (!!newEx?.unilateral);
+        const sets = uniChanged ? LB.reshapeSetsUnilateral(e.sets, !!newEx?.unilateral) : e.sets;
+        return { ...e, exId: newExId, name: newEx?.name || e.name, sets };
+      }),
+    });
+  };
+
   const doSwap = (ids) => {
     const newExId = Array.isArray(ids) ? ids[0] : ids;
     // resolve the name from fresh state — a just-created exercise isn't in the
     // closed-over `store` yet (its setStore hasn't re-rendered the screen)
+    setStore(s => ({ ...s, sessions: swapEntrySessions(s, newExId) }));
+    setSwapOpen(false);
+  };
+
+  // Autoreg v2 P4: apply a concrete stall-swap suggestion (spec 6). A system (sys_)
+  // candidate is materialized into store.exercises (mapped to an existing same-named
+  // copy, else a fresh row) AND the entry repointed in ONE functional updater, so a
+  // rapid second tap on another stall flag dedups against the row this tap just
+  // appended instead of re-reading a stale outer `store` and minting a duplicate.
+  const applyStallSwap = (swap) => {
+    if (!swap) return;
+    if (!swap.isSystem) { doSwap(swap.id); return; }
+    const sys = (window.SYSTEM_EXERCISES || []).find(s => s.id === swap.id);
+    const upper = (swap.name || '').toUpperCase();
     setStore(s => {
-      const newEx = LB.findExercise(s, newExId);
-      const isNewCardio = newEx?.movement_type === 'cardio';
-      return {
-        ...s,
-        sessions: s.sessions.map(x => x.id !== session.id ? x : {
-          ...x,
-          entries: x.entries.map((e, i) => {
-            if (i !== exIdx) return e;
-            if (isNewCardio) {
-              return { ...e, exId: newExId, name: newEx?.name || e.name, isCardio: true, plannedSets: 0, sets: [], cardioDone: false, cardioData: null };
-            }
-            // Reshape the sets when the swapped-in exercise logs differently
-            // (time vs weight/reps) or flips assisted-ness, so a time/assisted
-            // exercise never inherits the old weight-shaped sets, and vice versa.
-            const oldEx = LB.findExercise(s, e.exId);
-            const modeChanged = LB.exerciseLogMode(oldEx) !== LB.exerciseLogMode(newEx);
-            const assistChanged = (oldEx?.movement_type === 'assisted') !== (newEx?.movement_type === 'assisted');
-            if (modeChanged || assistChanged) {
-              const isUni = newEx?.movement_type === 'unilateral';
-              const bwKg = LB.shouldPullBodyweight(newEx) ? LB.latestBodyweight(s) ?? null : null;
-              const swapOcc = x.entries.slice(0, i).filter(en => en.exId === newExId).length;
-              const last = LB.bestRecentEntry(s, newExId, session.dayId, 3, swapOcc);
-              const suggestion = LB.progressionSuggestion(s, newExId, session.dayId, null, null, last, null, null, swapOcc);
-              const setCount = e.sets?.length || e.plannedSets || 3;
-              const seedSets = LB.buildSeedSets({ exId: newExId, sets: setCount, repsPerSet: null }, last, suggestion, isUni, s, bwKg);
-              return { ...e, exId: newExId, name: newEx?.name || e.name, sets: seedSets };
-            }
-            return { ...e, exId: newExId, name: newEx?.name || e.name };
-          }),
-        }),
-      };
+      const existing = s.exercises?.find(e => (e.name || '').toUpperCase() === upper);
+      let exercises = s.exercises, targetId;
+      if (existing) targetId = existing.id;
+      else if (sys) { const row = LB.systemExerciseToRow(sys); exercises = [...s.exercises, row]; targetId = row.id; }
+      else return s; // no system source and no owned copy: nothing to swap to
+      const withEx = { ...s, exercises };
+      return { ...withEx, sessions: swapEntrySessions(withEx, targetId) };
     });
     setSwapOpen(false);
   };
@@ -4665,6 +5128,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   };
 
   const confirmWithFeel = (feel) => {
+    // Clear any rep-target patches from a prior finish attempt so a "Leave plan"
+    // or diff-free finish can't inherit a stale target (the wizard repopulates
+    // this on the "Update plan" path).
+    addedRepPatchesRef.current = {};
     const diffs = computePlanDiff();
     if (diffs.length > 0) {
       setPendingFeel(feel);
@@ -4753,26 +5220,36 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         } : sch),
       }));
     }
+    // Mirror each wizard-picked rep target onto its live session entry too (not
+    // just the plan), so the persisted zane_session_entries row and any later
+    // feedback-edit re-earn judge the weight boost against the same target the
+    // finish-time earn gate used (computeMesoGains reads it from the patch ref).
+    // Entries with no patch (unchanged, or an add the user left out of the plan)
+    // keep their own target.
+    const repPatches = addedRepPatchesRef.current || {};
+    if (Object.keys(repPatches).length) {
+      updateSession(sess => ({
+        ...sess,
+        entries: sess.entries.map(e => {
+          const p = repPatches[e.exId];
+          if (!p) return e;
+          return { ...e, plannedReps: p.reps ?? null, plannedRepsPerSet: p.repsPerSet ?? null, plannedRepsMax: p.repsMax ?? null };
+        }),
+      }));
+    }
     finish(pendingFeel);
     setPendingFeel(null);
   };
 
-  // Prefill for the plan editor of a newly-added exercise, built from what was
-  // just logged: same reps across the working sets -> Uniform, varied -> Per Set
-  // with the exact per-set reps. The user can switch to any model in the editor.
+  // Prefill for the plan editor of a newly-added / swapped-in exercise. The rep
+  // target defaults to a Range of 8-12 (the target that fits the vast majority
+  // of exercises) rather than pinning it to whatever reps happened to get logged
+  // this session; only the set count carries over from what was actually done.
+  // The user can switch to any model / reps in the editor before saving.
   const buildRepPrefill = (entry) => {
     const working = (entry.sets || []).filter(s => !s.warmup && !s.skipped);
-    const repsOf = (s) => (s.repsL != null || s.repsR != null)
-      ? Math.min(s.repsL ?? s.repsR ?? 0, s.repsR ?? s.repsL ?? 0)
-      : s.reps;
-    const logged = working.map(repsOf);
     const setCount = working.length || entry.plannedSets || 3;
-    const allValid = working.length > 0 && logged.every(r => r != null && r > 0);
-    if (allValid && !logged.every(r => r === logged[0])) {
-      return { exId: entry.exId, sets: setCount, reps: logged[0], repsPerSet: logged };
-    }
-    const firstValid = logged.find(r => r != null && r > 0);
-    return { exId: entry.exId, sets: setCount, reps: firstValid ?? 8 };
+    return { exId: entry.exId, sets: setCount, reps: 8, repsMax: 12 };
   };
   // The untouched prefill as a patch: used when the editor is dismissed without
   // saving, so a skipped exercise still lands with a sensible target, never blank.
@@ -4940,6 +5417,60 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     setLpStretch(null);
   }, [entry, isCardio, exIdx, mesoPartials, dropSetIdx, myoSetIdx, avSetIdx, lpTarget, wsTarget]);
 
+  // Autoreg v2 P0: commit a readiness choice and its derived signalWeight.
+  // Deload always stays 'none' (no earn, no cut). Rough and the re-entry ramp both
+  // discount the session (keep earn, skip the rep-miss cut). Fresh / Normal are full.
+  const chooseReadiness = (readiness) => {
+    const signalWeight = isMesoDeloadSession
+      ? 'none'
+      : ((readiness === 'rough' || readiness === 'reentry') ? 'discounted' : 'full');
+    updateSession(s => ({ ...s, readiness, signalWeight }));
+    setReadinessOpen(false);
+    setReadinessReentry(false);
+    setReadinessSel(null);
+  };
+  // Rough copy is mode-aware: RIR only exists on a bounded meso / RIR-enabled plan
+  // (mesoRirVal != null). In the autoreg modes (no weeks => no RIR) the '+1 RIR'
+  // phrasing is wrong, so use a neutral, non-binding suggestion instead.
+  const roughSub = mesoRirVal != null
+    ? 'Low on energy: we ease the target (+1 RIR), earn still counts'
+    : 'Low on energy: ease off a touch and leave more in reserve, earn still counts';
+  // Rendered in BOTH return paths (empty freestyle early return + main return),
+  // so an ad-hoc empty session gets the prompt too. A tap SELECTS an option (accent
+  // highlight); the Confirm button commits it, so a mis-tap is correctable first.
+  const readinessSheet = (
+    <Sheet open={readinessOpen} onClose={() => chooseReadiness(readinessSel || 'normal')} title="How do you feel today?">
+      <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: readinessReentry ? 12 : 20, lineHeight: 1.5 }}>
+        Pick today's baseline, then Confirm. It only nudges the suggestion, you can always push to your limit.
+      </div>
+      {readinessReentry && (
+        <div style={{ fontSize: 12.5, color: 'var(--accent)', fontFamily: UI.fontUi, marginBottom: 16, lineHeight: 1.5 }}>
+          Coming back from a break, so we preselected an easier day to protect your return. Feeling strong? Pick Fresh.
+        </div>
+      )}
+      {[
+        { key: 'fresh',  label: 'Fresh',  sub: 'Feeling strong, ready to push' },
+        { key: 'normal', label: 'Normal', sub: 'A regular day, train as usual' },
+        { key: 'rough',  label: 'Rough',  sub: roughSub },
+      ].map(opt => {
+        const sel = readinessSel === opt.key || (readinessSel === 'reentry' && opt.key === 'rough');
+        return (
+          <button key={opt.key} onClick={() => setReadinessSel(opt.key)} style={{
+            width: '100%', marginBottom: 8, padding: '14px 16px',
+            background: sel ? 'rgba(var(--accent-rgb),0.12)' : UI.bgInset,
+            border: `1px solid ${sel ? 'var(--accent)' : UI.hairStrong}`,
+            borderRadius: 6, cursor: 'pointer', textAlign: 'left',
+            WebkitTapHighlightColor: 'transparent',
+          }}>
+            <div style={{ fontFamily: UI.fontUi, fontSize: 14, color: sel ? 'var(--accent)' : UI.ink, fontWeight: 600 }}>{opt.label}</div>
+            <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 2 }}>{opt.sub}</div>
+          </button>
+        );
+      })}
+      <Btn onClick={() => chooseReadiness(readinessSel || 'normal')} style={{ width: '100%', marginTop: 12 }}>Confirm</Btn>
+    </Sheet>
+  );
+
   if (!entry) {
     if (!session.isBonus) {
       return <Screen><Empty title="This session is empty" action={<Btn onClick={() => go({ name: 'home' })}>Back</Btn>} /></Screen>;
@@ -4954,7 +5485,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           <div style={{ fontFamily: UI.fontUi, fontSize: 13, color: UI.inkSoft, textAlign: 'center' }}>Add an exercise to get started.</div>
           <Btn onClick={() => setAddOpen(true)}>Add exercise</Btn>
         </div>
-        {addOpen && <window.Screens.ExercisePicker store={store} setStore={setStore} onClose={() => setAddOpen(false)} onPick={doAdd} />}
+        {/* Gate the auto-opened picker behind the readiness tap so the prompt
+            comes first (the picker is a full-screen overlay that would cover it). */}
+        {addOpen && session.readiness != null && <window.Screens.ExercisePicker store={store} setStore={setStore} onClose={() => setAddOpen(false)} onPick={doAdd} />}
+        {readinessSheet}
         {confirmEl}
       </Screen>
     );
@@ -5522,13 +6056,40 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             } else if (disliked) {
               flags.push({ icon: '💡', msg: 'You keep flagging this one to swap. Pick a variation you enjoy and you will actually stick with it.' });
             }
+            // Autoreg v2 P4: strength-stall + concrete swap (spec 6). A LIFT whose
+            // e1RM has gone flat over 3 sessions at green gates (joints fine, pump ok,
+            // muscle not at its ceiling) gets a distinct nudge and a concrete sibling
+            // to try. Kept apart from the pump-flat / disliked voices above: this is
+            // about the exercise stalling, not the muscle or your preference.
+            // Precomputed in the `stallInfo` memo above (pure over the ended history /
+            // ceiling signals) so this render doesn't rescan the full history + catalog.
+            if (stallInfo?.stalled) {
+              const swap = stallInfo.swap;
+              flags.push({
+                icon: '📉',
+                msg: swap
+                  ? 'e1RM has been flat here 3 sessions and your gates are green. The stimulus may be stale, a different movement could get it climbing again.'
+                  : 'e1RM has been flat here 3 sessions and your gates are green. A different variation for this muscle could get things moving again.',
+                swap,
+              });
+            }
             if (!flags.length) return null;
             return (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 10 }}>
                 {flags.map((f, i) => (
-                  <div key={i} style={{ background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 6, padding: '8px 12px', display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-                    <span style={{ fontSize: 13 }}>{f.icon}</span>
-                    <span style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>{f.msg}</span>
+                  <div key={i} style={{ background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 6, padding: '8px 12px' }}>
+                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                      <span style={{ fontSize: 13 }}>{f.icon}</span>
+                      <span style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>{f.msg}</span>
+                    </div>
+                    {f.swap && (
+                      <button onClick={() => applyStallSwap(f.swap)} style={{
+                        marginTop: 8, padding: '6px 12px', background: 'transparent',
+                        border: `1px solid rgba(var(--accent-rgb), 0.5)`, borderRadius: 4,
+                        color: UI.gold, fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600,
+                        cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+                      }}>Swap to {f.swap.name}</button>
+                    )}
                   </div>
                 ))}
               </div>
@@ -5739,6 +6300,21 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   {progressionTarget && (
                     <div className="micro" style={{ color: UI.gold, opacity: 0.65, marginTop: 3 }}>
                       {spHintApplies ? `≥${progressionTarget} reps · next weight` : 'auto · feedback-driven'}
+                    </div>
+                  )}
+                  {/* Autoreg v2 P0: Rough-day suggestion. Non-binding, display only:
+                      the session is discounted (no rep-miss cut) but you can still push. */}
+                  {session.readiness === 'rough' && !isCurrentWarmup && (
+                    <div className="micro" style={{ color: UI.inkSoft, opacity: 0.8, marginTop: 3 }}>
+                      {mesoRirVal != null ? 'Rough day · +1 RIR suggested' : 'Rough day · ease off, more in reserve'}
+                    </div>
+                  )}
+                  {/* Autoreg v2 P4: post-break re-entry ramp. Non-binding, display only:
+                      the session is discounted (protects learning) but you can still push.
+                      RIR phrasing only where RIR exists (mesoRirVal != null). */}
+                  {session.readiness === 'reentry' && !isCurrentWarmup && (
+                    <div className="micro" style={{ color: UI.inkSoft, opacity: 0.8, marginTop: 3 }}>
+                      {mesoRirVal != null ? 'Coming back · easing in, +1 RIR suggested' : 'Coming back · easing in, more in reserve'}
                     </div>
                   )}
                   {/* Range's own configured span is shown as a permanent badge next to the
@@ -7379,9 +7955,18 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                               ? (s.kg != null && sessionBest != null && Math.abs(s.kg - sessionBest) < 0.01)
                               : (sessionBest > 0 && Math.abs(e1rmForSet(s) - sessionBest) < 0.01);
                             const repsStr = (s.repsL != null || s.repsR != null) ? `L${s.repsL ?? '?'}/R${s.repsR ?? '?'}` : s.reps;
+                            // Annotate intensity-technique sets (myo-reps, drop,
+                            // partials, ...) with the technique badge and, for a
+                            // rep-summed technique, its total reps. Otherwise a
+                            // myo set reads as just its top set (e.g. "×14" hiding
+                            // a 20-rep total).
+                            const tr = LB.techniqueRounds(s, { exName: entry?.name });
                             return (
-                              <span key={i} className="num" style={{ fontSize: 13, color: isBest ? UI.gold : UI.ink }}>
+                              <span key={i} className="num" style={{ fontSize: 13, color: isBest ? UI.gold : UI.ink, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
                                 {s.timeSec != null ? LB.fmtDuration(s.timeSec) : s.kg != null ? <>{s.kg}<span style={{ color: isBest ? UI.goldSoft : UI.inkFaint }}>×</span>{repsStr}</> : repsStr}
+                                {tr.badge && (
+                                  <span style={{ fontFamily: UI.fontUi, fontSize: 7, fontWeight: 700, letterSpacing: '0.08em', color: UI.gold, background: 'rgba(var(--accent-rgb),0.12)', border: '0.5px solid rgba(var(--accent-rgb),0.35)', borderRadius: 4, padding: '1px 4px', whiteSpace: 'nowrap' }}>{tr.badge}{tr.totalReps != null ? ` ${tr.totalReps}` : ''}</span>
+                                )}
                               </span>
                             );
                           })}
@@ -7474,6 +8059,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             item={item}
             exName={ex?.name || entry.name}
             isCheckboxOnly={false}
+            feedbackDrivenWeight={!!(mesoSch?.mesocycle_autoregulate || mesoSch?.mesocycle_weeks != null)}
             queuePos={repTargetIdx + 1}
             queueTotal={repTargetQueue.length}
             store={store}
@@ -7728,6 +8314,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         </div>
       )}
 
+      {readinessSheet}
+
       {confirmEl}
 
       {/* Post-dismiss shield: blocks ghost clicks that land on revealed content
@@ -7820,7 +8408,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       {/* Joint discomfort */}
       <Sheet open={mesoJointOpen} onClose={() => {}} title={mesoJointExName || 'Feedback'}>
         {/* Per-exercise feedback: joints, weight feel and pump, all for this one lift
-            (every mode). The per-muscle sheet below is workload only (Volume+Load / Meso). */}
+            (every mode). The per-muscle sheet below is workload only (Volume+Load / Meso).
+            Fast path: a fresh capture opens collapsed, so a normal session is one "On point"
+            tap that logs the on-target answers; "Flag a detail" expands the chips (pre-filled
+            to on-target, so you only tap deviations). Editing from the recap opens straight to
+            the chips (openJointEdit sets mesoJointExpanded). */}
+        {mesoJointExpanded ? (<>
         <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 8, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Joint pain</div>
         <div style={{ display: 'flex', gap: 8, marginBottom: 18 }}>
           {[
@@ -7891,6 +8484,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         >
           {mesoEditingRef.current.joint ? 'Save changes' : 'Confirm'}
         </Btn>
+        </>) : (<>
+        <div style={{ fontSize: 13.5, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: 1.45 }}>How did that feel?</div>
+        <Btn onClick={() => handleJointAnswer('none', 'just_right', 'moderate', 'ok')} style={{ width: '100%' }}>On point</Btn>
+        <Btn kind="ghost" onClick={() => { setMesoJointSel('none'); setMesoJointWeightSel('just_right'); setMesoJointPumpSel('moderate'); setMesoJointExpanded(true); }} style={{ width: '100%', marginTop: 8 }}>Flag a detail</Btn>
+        </>)}
       </Sheet>
 
       {/* Per-muscle workload (Volume+Load / non-final Meso weeks): drives the set deltas.
@@ -7954,25 +8552,47 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           group. */}
       {(() => {
         const detailGroup = mesoFeedbackGroups.find(g => g.muscle === mesoRecapDetailMuscle);
-        const feedbackRow = row => (
-          <button key={row.key} onClick={row.onEdit} style={{
-            width: '100%', marginBottom: 8, padding: '12px 14px',
-            background: UI.bgInset, border: `1px solid ${UI.hairStrong}`,
-            borderRadius: 6, cursor: 'pointer', textAlign: 'left',
-            display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10,
-            WebkitTapHighlightColor: 'transparent',
-          }}>
-            <div style={{ minWidth: 0 }}>
-              <div style={{ fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{row.title}</div>
-              <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 2 }}>{row.sub}</div>
-            </div>
-            <i className="fa-solid fa-chevron-right" style={{ fontSize: 11, color: UI.inkFaint, flexShrink: 0 }} />
-          </button>
-        );
+        // Per-exercise rows carry structured answers (joint/weight/pump/affinity):
+        // render them as a labelled 4-column grid (Pain / Weight / Pump / Verdict)
+        // so it's clear which value is which. General rows (Soreness, Workload)
+        // stay a simple title/value line.
+        const feedbackRow = row => {
+          const structured = row.sel != null || row.weight != null || row.pump != null || row.affinity != null;
+          return (
+            <button key={row.key} onClick={row.onEdit} style={{
+              width: '100%', marginBottom: 8, padding: '12px 14px',
+              background: UI.bgInset, border: `1px solid ${UI.hairStrong}`,
+              borderRadius: 6, cursor: 'pointer', textAlign: 'left',
+              display: structured ? 'block' : 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10,
+              WebkitTapHighlightColor: 'transparent',
+            }}>
+              {structured ? (<>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+                  <div style={{ fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, fontWeight: 600, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{row.title}</div>
+                  <i className="fa-solid fa-chevron-right" style={{ fontSize: 11, color: UI.inkFaint, flexShrink: 0 }} />
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0,1fr))', gap: 8, marginTop: 8 }}>
+                  {[['Pain', JOINT_LABELS[row.sel] ?? null], ['Weight', row.weight != null ? (WEIGHT_LABELS[row.weight] ?? row.weight) : null], ['Pump', row.pump != null ? (PUMP_LABELS[row.pump] ?? row.pump) : null], ['Verdict', row.affinity != null ? (AFFINITY_LABELS[row.affinity] ?? row.affinity) : null]].map(([lbl, val], i) => (
+                    <div key={i}>
+                      <div className="micro" style={{ color: UI.inkFaint, marginBottom: 3 }}>{lbl}</div>
+                      <div style={{ fontFamily: UI.fontUi, fontSize: 12.5, color: val ? UI.ink : UI.inkGhost, lineHeight: 1.25 }}>{val || '–'}</div>
+                    </div>
+                  ))}
+                </div>
+              </>) : (<>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{row.title}</div>
+                  <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 2 }}>{row.sub}</div>
+                </div>
+                <i className="fa-solid fa-chevron-right" style={{ fontSize: 11, color: UI.inkFaint, flexShrink: 0 }} />
+              </>)}
+            </button>
+          );
+        };
         return (
           <Sheet open={!!mesoRecapDetailMuscle} onClose={() => setMesoRecapDetailMuscle(null)} title={mesoRecapDetailMuscle ? `${mesoRecapDetailMuscle} review` : 'Review'} titleColor="var(--accent)">
             {!!detailGroup?.jointRows.length && (<>
-              <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>JOINT FEEDBACK</div>
+              <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>PER EXERCISE</div>
               <div className="knurl" style={{ marginBottom: 10 }} />
               {detailGroup.jointRows.map(feedbackRow)}
             </>)}
@@ -7996,7 +8616,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             mesoJustCompletedRef.current = false;
             handleMesoComplete();
           } else {
-            go({ name: 'session', sessionId: mesoGainNavRef.current, justFinished: true });
+            goJustFinished(mesoGainNavRef.current);
           }
         }} title="Next session">
           <div style={{ fontFamily: UI.fontUi, fontSize: 13, color: UI.inkSoft, marginBottom: 20, lineHeight: 1.5 }}>
@@ -8034,7 +8654,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               mesoJustCompletedRef.current = false;
               handleMesoComplete();
             } else {
-              go({ name: 'session', sessionId: mesoGainNavRef.current, justFinished: true });
+              goJustFinished(mesoGainNavRef.current);
             }
           }} style={{ width: '100%', marginTop: 20 }}>Got it</Btn>
         </Sheet>

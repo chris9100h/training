@@ -616,6 +616,9 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
         joint_flags: remapExKeyed(m.jointFlags), pump_low_counts: remapExKeyed(m.pumpLowCounts),
         growth_counts: remapExDayKeyed(m.growthCounts), rep_miss_counts: remapExDayKeyed(m.repMissCounts),
         affinity: remapExKeyed(m.affinity),
+        // autoreg_state (deloadNudge / later block snapshots) is muscle/scope-keyed,
+        // not exId-keyed, so it round-trips verbatim with no remap.
+        autoreg_state: m.autoregState ?? null,
         completions: m.completions ?? 0, pending_meso2: m.pendingMeso2 ?? false,
       }))
     ));
@@ -780,7 +783,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     _supabase.from('zane_schedules').select('id, name, days, archived, versions, is_flex, sessions_per_week, mesocycle_weeks, mesocycle_start_rir, mesocycle_end_rir, mesocycle_rir_enabled, mesocycle_autoregulate, mesocycle_autoregulate_mode, program_type, program_data, is_template').eq('user_id', userId),
     // Session METADATA stays complete (cheap; streaks/calendar need the full
     // date list) — the legacy entries JSONB is no longer selected.
-    _supabase.from('zane_sessions').select('id, schedule_id, day_id, day_name, date, started_at, ended, duration_minutes, feel, is_bonus, is_freestyle, is_deload, meso_recap')
+    _supabase.from('zane_sessions').select('id, schedule_id, day_id, day_name, date, started_at, ended, duration_minutes, feel, is_bonus, is_freestyle, is_deload, meso_recap, readiness, signal_weight')
       .eq('user_id', userId).order('date', { ascending: false }),
     _supabase.from('zane_user_settings').select('*').eq('user_id', userId).maybeSingle(),
     _supabase.from('zane_skips').select('id, date, day_id, day_name, skip_reason, skipped_at').eq('user_id', userId),
@@ -826,7 +829,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     // Reusable workout templates (migration 0107)
     _supabase.from('zane_workout_templates').select('id, name, exercises, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
     // Mesocycle state per plan — replaces localStorage logbook-meso-state (migration 0120)
-    _supabase.from('zane_meso_states').select('id, schedule_id, weeks, start_date, start_cycle_index, started_at, deltas, joint_flags, pump_low_counts, weight_boosts, growth_counts, rep_miss_counts, affinity, completions, pending_meso2, updated_at').eq('user_id', userId),
+    _supabase.from('zane_meso_states').select('id, schedule_id, weeks, start_date, start_cycle_index, started_at, deltas, joint_flags, pump_low_counts, weight_boosts, growth_counts, rep_miss_counts, affinity, autoreg_state, completions, pending_meso2, updated_at').eq('user_id', userId),
     // Coach's own saved check-in schema templates: irrelevant when loading a
     // CLIENT's store as a coach, these belong to the acting coach, not the client.
     isCoachLoad ? null : _supabase.from('zane_checkin_schema_templates').select('id, name, schema, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
@@ -975,6 +978,8 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         ...(s.is_freestyle ? { isFreestyle: true } : {}),
         ...(s.is_deload    ? { isDeload:    true } : {}),
         ...(s.meso_recap   ? { mesoRecap:   s.meso_recap } : {}),
+        ...(s.readiness     ? { readiness:     s.readiness } : {}),
+        ...(s.signal_weight ? { signalWeight:  s.signal_weight } : {}),
       };
     }),
     skips: (skipsRes.data || []).map(s => ({
@@ -1037,6 +1042,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
       pumpLowCounts: m.pump_low_counts ?? {}, weightBoosts: m.weight_boosts ?? {},
       growthCounts: m.growth_counts ?? {}, repMissCounts: m.rep_miss_counts ?? {},
       affinity: m.affinity ?? {},
+      autoregState: m.autoreg_state ?? null,
       completions: m.completions ?? 0, pendingMeso2: m.pending_meso2 ?? false,
       updatedAt: m.updated_at ?? null,
     })),
@@ -1309,7 +1315,7 @@ function sessionToRow(s, userId) {
   // keeps its default '[]' on insert and is left untouched on update.
   // agg* are read-only server aggregates attached at load time — never synced.
   // eslint-disable-next-line no-unused-vars
-  const { currentExIdx, cyclePos, restStart, restDuration, scheduleId, dayId, dayName, startedAt, durationMinutes, feel, entries, aggVolume, aggDoneSets, aggExercises, isBonus, isFreestyle, isDeload, mesoRecap, ...rest } = s;
+  const { currentExIdx, cyclePos, restStart, restDuration, scheduleId, dayId, dayName, startedAt, durationMinutes, feel, entries, aggVolume, aggDoneSets, aggExercises, isBonus, isFreestyle, isDeload, mesoRecap, readiness, signalWeight, ...rest } = s;
   const row = { ...rest, schedule_id: scheduleId, day_id: dayId, day_name: dayName, user_id: userId };
   if (startedAt != null) row.started_at = startedAt;
   if (durationMinutes != null) row.duration_minutes = durationMinutes;
@@ -1318,6 +1324,8 @@ function sessionToRow(s, userId) {
   row.is_freestyle = !!isFreestyle;
   row.is_deload = !!isDeload;
   row.meso_recap = mesoRecap ?? null;
+  row.readiness = readiness ?? null;
+  row.signal_weight = signalWeight ?? null;
   return row;
 }
 
@@ -1477,6 +1485,7 @@ async function syncStore(prev, next, userId) {
       pump_low_counts: m.pumpLowCounts ?? {}, weight_boosts: m.weightBoosts ?? {},
       growth_counts: m.growthCounts ?? {}, rep_miss_counts: m.repMissCounts ?? {},
       affinity: m.affinity ?? {},
+      autoreg_state: m.autoregState ?? null,
       completions: m.completions ?? 0, pending_meso2: m.pendingMeso2 ?? false,
       updated_at: m.updatedAt ?? new Date().toISOString(),
     })) }));
@@ -4518,7 +4527,12 @@ function mesoRepOutcome(workingSets, plannedReps, plannedRepsPerSet, plannedReps
   const earnHit = (s, i) => {
     if (!s.done) return false;
     const target = mesoEarnTarget(i, n, plannedReps, plannedRepsPerSet, plannedRepsMax);
-    if (target == null) return true;
+    // No rep target at all (an exercise added ad-hoc mid-session, before its
+    // target is assigned in the post-session plan wizard): there is no top-of-
+    // range to clear, so it must NOT earn a weight bump. Auto-passing here made
+    // a fresh add fire a boost off any rep count. The MISS gate below stays
+    // permissive (no target, so it can't be "too heavy"): only the earn shuts.
+    if (target == null) return false;
     const reps = effReps(s);
     return reps != null && reps >= target;
   };
@@ -4536,6 +4550,29 @@ function mesoRepOutcome(workingSets, plannedReps, plannedRepsPerSet, plannedReps
     ? workingSets.slice(0, -1).some((s, i) => !missHit(s, i))
     : !missHit(workingSets[0], 0);
   return { allHit, earlyMiss };
+}
+
+// Convert a set array's rep SHAPE when an exercise swap flips its unilateral-ness.
+// A unilateral set carries per-side repsL/repsR; a bilateral set carries a single
+// reps. When the movement changes we must reshape so the stored data (and every
+// view that reads it) matches the new exercise: otherwise a bilateral exercise
+// keeps stray L/R data and renders as "L13/R13" in history. Logged effort is
+// preserved: bilateral -> unilateral mirrors the rep count onto both sides;
+// unilateral -> bilateral collapses to the min (the app-wide effective-reps
+// convention). Sets already in the target shape (or empty) pass through untouched.
+// Pure and side-effect free so it can be unit-tested. `toUni` = the new exercise
+// is unilateral.
+function reshapeSetsUnilateral(sets, toUni) {
+  return (sets || []).map(st => {
+    if (toUni) {
+      if (st.repsL != null || st.repsR != null) return st; // already per-side
+      if (st.reps == null) return st;                      // nothing logged to mirror
+      return { ...st, repsL: st.reps, repsR: st.reps, reps: null };
+    }
+    if (st.repsL == null && st.repsR == null) return st;   // already single
+    const collapsed = Math.min(st.repsL ?? st.repsR ?? 0, st.repsR ?? st.repsL ?? 0);
+    return { ...st, reps: collapsed, repsL: null, repsR: null };
+  });
 }
 
 // A mesocycle weight boost (exId_dayId → kg increment applied to the next
@@ -4681,6 +4718,9 @@ function isMesoSessionEditable(session, allSessions, mesoState) {
 // on the same key). Both `deltas` and `negOwner` are mutated in place. `frozen`
 // (final week / load-only) freezes the whole set-delta system: no delta, contrib
 // left as-is. Returns the record's new contrib.
+// Known limitation (autoreg-v2-spec.md 13.1, accepted): when this question releases a
+// negative slot it owned, a still-standing OTHER question that also wanted -1 on that key
+// does not reclaim it (its intent was already dropped to 0). One-set edge, self-limiting.
 function _commitContribInto(deltas, negOwner, prevContrib, questionType, newContrib, frozen) {
   if (frozen) return prevContrib || {};
   const keys = new Set([...Object.keys(prevContrib || {}), ...Object.keys(newContrib || {})]);
@@ -4735,12 +4775,20 @@ function applyMesoFeedbackEdit(mesoState, raw, edit, ctx) {
     if (!loadOnly) {
       const keys = (rec.targets || []).map(t => t.key);
       const adds = edit.answer === 'never' || edit.answer === 'healed_long';
+      // Autoreg v2 P1 MRV cap: an at-ceiling muscle freezes its positive set-adds
+      // (mirror of the live handler). Non-destructive: the decline (-1) path stays
+      // live so the muscle can still shed volume.
+      const capped = !!(ctx.atCeilingMuscles && ctx.atCeilingMuscles.has(muscle));
       const prevGrantedTo = Object.keys(rec.contrib || {}).find(k => rec.contrib[k] === 1) ?? null;
       let recipientKey = null;
-      if (adds && keys.length) {
+      if (adds && keys.length && !capped) {
         const g = pickGrowthRecipient(keys, growthCounts, prevGrantedTo);
         recipientKey = g.recipientKey; growthCounts = g.growthCounts;
-      } else if (prevGrantedTo) {
+      } else if (prevGrantedTo && !capped) {
+        // Mirror the live handleSorenessAnswer guard (screens-train.jsx): an
+        // at-ceiling muscle freezes BOTH the grant and the retract, so a re-save
+        // of the same answer can't strip a previously-earned set the live path
+        // would have left frozen.
         growthCounts = retractGrowthGrant(growthCounts, prevGrantedTo);
       }
       const declineKey = edit.answer === 'still_sore' ? pickDeclineRecipient(keys, deltas, rec.contrib) : null;
@@ -4801,8 +4849,14 @@ function applyMesoFeedbackEdit(mesoState, raw, edit, ctx) {
     const keys = exIds.map(exId => exId + '_' + dayId);
     const prevGrantedTo = Object.keys(rec.contrib || {}).find(k => rec.contrib[k] === 1) ?? null;
     let recipientKey = null;
-    if (frozen) {
-      // frozen: no rotation, no grant (mirrors the volume handler's guard)
+    // Autoreg v2 P1 MRV cap: freeze the +1 for an at-ceiling muscle (mirror of
+    // the live handleVolumeAnswer guard). Decline (pushed / too_much) stays live.
+    const capped = !!(ctx.atCeilingMuscles && ctx.atCeilingMuscles.has(muscle));
+    if (frozen || capped) {
+      // frozen or at-ceiling: no rotation, no grant. Mirrors the live
+      // handleVolumeAnswer, which groups atCeiling(muscle) INTO its freeze
+      // condition, so an at-ceiling muscle never falls through to the retract
+      // branch and loses a previously-earned set on a re-save.
     } else if (edit.volume === 'not_enough') {
       const g = pickGrowthRecipient(keys, growthCounts, prevGrantedTo);
       recipientKey = g.recipientKey; growthCounts = g.growthCounts;
@@ -4882,6 +4936,194 @@ function mesoRecapGainsFromEdit(answers, weightBoosts, earnInputs, dayId) {
     if (setDelta || weightDelta) gains.push({ name: nameByKey[k] || '?', weightDelta, setDelta });
   });
   return gains;
+}
+
+// Autoreg v2: when a mis-logged entry's exId is corrected (oldExId -> newExId) via the
+// session editor, the weight-boost EARN gate can no longer re-earn for the corrected
+// exercise: a later feedback edit re-derives its earn keys from the CURRENT entry exId,
+// and reearnMesoBoostsFromAnswers / mesoGateSetsFromAnswers read answers.joint[exId], so
+// a joint record left under the OLD id makes gates.jointFine.has(new) stay false forever.
+// Move ONLY the joint record's IDENTITY (key + exId + exName) to the new id.
+// Deliberately narrow:
+//   - The joint record's `contrib` is KEPT under the old exId_dayId. That set-delta lives
+//     in mesoState.deltas under the same key (the row levers are intentionally NOT
+//     remapped), so a later joint edit must diff against that key to undo it cleanly;
+//     re-keying it would orphan the delta and apply a phantom one.
+//   - soreness (keyed by muscle; the earn path reads soreBlock per-muscle, not per exId)
+//     and volume (not read by the earn path at all) are NOT touched. Re-keying their
+//     contrib/exIds would desync them from the unremapped mesoState.deltas.
+// Pure: returns a new answers object, or the SAME reference when there is nothing to move.
+function remapMesoAnswersExId(answers, oldExId, newExId, newName) {
+  if (!answers || !oldExId || !newExId || oldExId === newExId) return answers;
+  const joint = answers.joint || {};
+  // Nothing to move, or the target already owns a joint record (both exercises present in
+  // the session): leave it rather than clobber the genuine record.
+  if (!joint[oldExId] || joint[newExId]) return answers;
+  const nextJoint = { ...joint };
+  nextJoint[newExId] = { ...nextJoint[oldExId], exId: newExId, ...(newName ? { exName: newName } : {}) };
+  delete nextJoint[oldExId];
+  return { ...answers, joint: nextJoint };
+}
+
+// Autoreg v2 (swap-correction, FULL re-key). remapMesoAnswersExId above moves only the
+// joint record identity (safe in every case). When this session OWNS the exId_dayId meso
+// levers, the caller instead does the FULL re-key so the corrected exercise inherits the
+// earned boost/cut and deletes/edits/revokes reach it: this deep-remaps the recap's raw
+// (joint identity + contrib, soreness targets + contrib, volume exIds + contrib, top-level
+// negOwner) AND (via remapMesoStateExId) the meso ROW levers, so answers and deltas move
+// TOGETHER and stay in sync. Pure; returns a new raw or the SAME reference if nothing moved.
+function remapMesoRecapRawForSwap(raw, oldExId, newExId, dayId, newName) {
+  if (!raw || !raw.answers || !oldExId || !newExId || oldExId === newExId) return raw;
+  const oldKey = oldExId + '_' + dayId;
+  const newKey = newExId + '_' + dayId;
+  const remapKeys = (obj) => {
+    if (!obj || !(oldKey in obj)) return obj;
+    const out = {};
+    for (const [k, v] of Object.entries(obj)) out[k === oldKey ? newKey : k] = v;
+    return out;
+  };
+  const a = raw.answers;
+  let changed = false;
+  const joint = { ...(a.joint || {}) };
+  if (joint[oldExId] && !joint[newExId]) {
+    const rec = { ...joint[oldExId], exId: newExId, ...(newName ? { exName: newName } : {}) };
+    rec.contrib = remapKeys(rec.contrib);
+    delete joint[oldExId];
+    joint[newExId] = rec;
+    changed = true;
+  }
+  const remapMuscleRecs = (bucket, exIdsField) => {
+    const out = {};
+    for (const [muscle, rec0] of Object.entries(bucket || {})) {
+      let rec = rec0, touched = false;
+      if (exIdsField && Array.isArray(rec0[exIdsField]) && rec0[exIdsField].includes(oldExId)) {
+        rec = { ...rec, [exIdsField]: rec0[exIdsField].map(id => id === oldExId ? newExId : id) };
+        touched = true;
+      }
+      if (Array.isArray((touched ? rec : rec0).targets) && (touched ? rec : rec0).targets.some(t => t && t.key === oldKey)) {
+        rec = { ...(touched ? rec : rec0), targets: (touched ? rec : rec0).targets.map(t => (t && t.key === oldKey) ? { ...t, key: newKey, ...(newName ? { name: newName } : {}) } : t) };
+        touched = true;
+      }
+      const nc = remapKeys((touched ? rec : rec0).contrib);
+      if (nc !== (touched ? rec : rec0).contrib) { rec = { ...(touched ? rec : rec0), contrib: nc }; touched = true; }
+      out[muscle] = touched ? rec : rec0;
+      if (touched) changed = true;
+    }
+    return out;
+  };
+  const soreness = remapMuscleRecs(a.soreness, null);
+  const volume = remapMuscleRecs(a.volume, 'exIds');
+  let negOwner = raw.negOwner;
+  const nn = remapKeys(negOwner);
+  if (nn !== negOwner) { negOwner = nn; changed = true; }
+  if (!changed) return raw;
+  return { ...raw, answers: { ...a, joint, soreness, volume }, negOwner };
+}
+
+// Move the exId-keyed meso ROW levers on a swap-correction: exId_dayId levers
+// (weightBoosts / repMissCounts / deltas / growthCounts) from oldExId_dayId -> newExId_dayId,
+// and bare-exId levers (jointFlags / pumpLowCounts / affinity) from oldExId -> newExId. Never
+// clobbers an existing target key (the caller only invokes this when the new exId has no
+// lever, but this guards anyway). Pure; returns a new state or the SAME reference.
+function remapMesoStateExId(mesoState, oldExId, newExId, dayId) {
+  if (!mesoState || !oldExId || !newExId || oldExId === newExId) return mesoState;
+  const oldKey = oldExId + '_' + dayId, newKey = newExId + '_' + dayId;
+  let changed = false;
+  const out = { ...mesoState };
+  const move = (field, from, to) => {
+    const m = mesoState[field];
+    if (m && (from in m) && !(to in m)) {
+      const n = { ...m }; n[to] = n[from]; delete n[from];
+      out[field] = n; changed = true;
+    }
+  };
+  ['weightBoosts', 'repMissCounts', 'deltas', 'growthCounts'].forEach(f => move(f, oldKey, newKey));
+  ['jointFlags', 'pumpLowCounts', 'affinity'].forEach(f => move(f, oldExId, newExId));
+  return changed ? out : mesoState;
+}
+
+// True if the new exId already owns any meso-row lever for this day (so a full swap re-key
+// would clobber it). Used to gate the FULL re-key down to the safe identity-only path. Pure.
+function mesoRowHasExId(mesoState, exId, dayId) {
+  if (!mesoState || !exId) return false;
+  const k = exId + '_' + dayId;
+  return ['weightBoosts', 'repMissCounts', 'deltas', 'growthCounts'].some(f => mesoState[f] && (k in mesoState[f]))
+    || ['jointFlags', 'pumpLowCounts', 'affinity'].some(f => mesoState[f] && (exId in mesoState[f]));
+}
+
+// True if a LATER (ended, non-deload, same plan, same day) session than `afterEnded`
+// retrained `exId`. Mirrors revertMesoSessionBoosts's retrainedLater ownership test: when
+// true, this session does NOT own the exId_dayId levers (a later session's contribution
+// currently sits in them), so a swap must not move them. Pure.
+function laterSessionTrainsExId(sessions, exId, dayId, afterEnded, exceptId, scheduleId) {
+  if (!exId || !dayId) return false;
+  const after = afterEnded || '';
+  return (sessions || []).some(x =>
+    x && x.ended && !x.isDeload && x.id !== exceptId && x.dayId === dayId
+    && (scheduleId == null || x.scheduleId === scheduleId)
+    && (x.ended || '') > after
+    && (x.entries || []).some(e => e && !e.isCardio && e.exId === exId));
+}
+
+// Autoreg v2 P0 signal-hygiene: how much a session counts toward autoreg learning.
+// 'none' is legitimate ONLY for an active deload; a session stamped 'none' whose deload
+// has since ended must re-derive from readiness, else the stale 'none' short-circuits
+// and freezes earn + cut for a session that should score full-signal. Shared by the live
+// finish (computeMesoGains) and the post-hoc readiness edit, so both score a session
+// identically. Pure.
+function deriveSignalWeight(session, isDeload) {
+  if (isDeload) return 'none';
+  const sw = session && session.signalWeight;
+  if (sw && sw !== 'none') return sw;
+  const r = session && session.readiness;
+  return (r === 'rough' || r === 'reentry') ? 'discounted' : 'full';
+}
+
+// Recompute this (top-of-stack) session's rep-miss CUT + streak contribution when a
+// post-hoc readiness edit flips its signalWeight, mirroring computeMesoGains' cut
+// gate (screens-train.jsx). A 'full' session advances the per-key miss streak and,
+// at 2 consecutive early misses, cuts the weight one increment; 'discounted'/'none'
+// FREEZE the streak and take no cut (spec 4.3). Because the live re-earn
+// (reearnMesoBoostsFromAnswers) PRESERVES an existing negative boost, dropping a
+// frozen cut must happen here explicitly, and re-arming a cut here lets the re-earn
+// carry it. Only the full-vs-non-full flip changes anything, so a same-side edit
+// (fresh->normal, both 'full') is a no-op.
+// earnInputs = this session's exercises [{ key, increment, earlyMiss, attempted }].
+// repMissBase = the per-key miss streak BEFORE this session (mesoRecap.raw.repMissBase);
+//   falls back to the current counts when absent (older sessions): exact for a
+//   'discounted' origin (which never advanced the streak) and a safe degrade for a
+//   'full' origin (the cut is still dropped, only the restored streak may be approximate).
+// Pure: returns a new mesoState with repMissCounts + weightBoosts adjusted.
+function recomputeMesoRepMissCut(mesoState, earnInputs, repMissBase, oldSignal, newSignal) {
+  if (!mesoState) return mesoState;
+  // A same-side flip (both full, or both non-full) leaves the cut/streak untouched.
+  if ((oldSignal === 'full') === (newSignal === 'full')) return mesoState;
+  const repMissCounts = { ...(mesoState.repMissCounts || {}) };
+  const weightBoosts = { ...(mesoState.weightBoosts || {}) };
+  const base = repMissBase || mesoState.repMissCounts || {};
+  const seen = new Set();
+  for (const e of (earnInputs || [])) {
+    const key = e.key;
+    if (seen.has(key)) continue; // one advance per key per session (mirrors streakSeen)
+    // Skip an unattempted exposure BEFORE marking the key seen (mirrors
+    // computeMesoGains), so a later attempted occurrence of a duplicate key still advances.
+    if (!e.attempted) continue;
+    seen.add(key);
+    const b = base[key] || 0;
+    const clearCut = () => { if ((weightBoosts[key] || 0) < 0) delete weightBoosts[key]; };
+    if (newSignal === 'full') {
+      if (e.earlyMiss) {
+        const n = b + 1;
+        if (n >= 2) { repMissCounts[key] = 0; weightBoosts[key] = -e.increment; }
+        else { repMissCounts[key] = n; clearCut(); }
+      } else { repMissCounts[key] = 0; clearCut(); }
+    } else {
+      // discounted / none: freeze the streak at its pre-session base, drop the cut.
+      repMissCounts[key] = b;
+      clearCut();
+    }
+  }
+  return { ...mesoState, repMissCounts, weightBoosts };
 }
 
 // Reconcile the Smart-Progression suggestion with the meso weight boost when
@@ -4987,6 +5229,718 @@ function mesoMuscleTrainedBeforeStart(sessions, scheduleId, startTs, muscle, mus
     }
   }
   return false;
+}
+
+// ─── Autoreg v2 P1: microcycle accounting + overreach detector (pure) ──────────
+// Everything below is stateless and recomputed from the loaded session history:
+// no new persistence, no server aggregate (a microcycle always sits inside the
+// 70-day set window). `muscleOfExId(exId) -> muscle|null` is injected because
+// primaryMuscleForExercise lives in screens-train.jsx (classic-script global,
+// not on window.LB); pass it the same way mesoMuscleTrainedBeforeStart does.
+
+// Count a session's HARD sets per muscle into `counts` (mutated in place). A hard
+// set is a completed working set: done && !warmup && !skipped. Technique sets
+// (myo/drop/amrap) are a single set row, so they naturally count as 1; partials/
+// stretch finishers ride on an existing set row and never add an extra one. Sets
+// on an exercise with no muscle tag (muscleOfExId -> null) are ignored (spec 2.1).
+function accumulateHardSets(counts, sessions, muscleOfExId) {
+  for (const s of (sessions || [])) {
+    if (!s) continue;
+    for (const e of (s.entries || [])) {
+      if (!e || e.isCardio) continue;
+      const m = muscleOfExId(e.exId);
+      if (!m) continue;
+      let n = 0;
+      for (const st of (e.sets || [])) {
+        if (st && st.done && !st.warmup && !st.skipped) n++;
+      }
+      if (n) counts[m] = (counts[m] || 0) + n;
+    }
+  }
+}
+
+// Monday-anchored [start,end] ISO window for the calendar week `which` weeks back.
+function weekWindowISO(todayStr, which) {
+  const d = parseDate(todayStr);
+  const js = d.getDay();
+  const wd = js === 0 ? 6 : js - 1; // 0 = Monday
+  const mon = new Date(d); mon.setDate(d.getDate() - wd - (which || 0) * 7);
+  const sun = new Date(mon); sun.setDate(mon.getDate() + 6);
+  return [fmtISO(mon), fmtISO(sun)];
+}
+
+// Hard sets per muscle over ONE microcycle of `sch` (spec 2.1). The microcycle
+// unit is plan-structure dependent, NOT a fixed 7 days:
+//   - weekday plan  -> one meso week: a 7-day step from opts.startDate, MINUS the
+//                      paused (deload/sick/idle-vacation) days, so it lines up
+//                      with the engine's mesoCurrentWeek instead of a Mon..Sun
+//                      calendar week. Also scoped to s.scheduleId === sch.id.
+//   - flex plan     -> one rotation (a full pass over sch.days), bucketed by each
+//                      session's OWN rotation index (recovered from its dayId's
+//                      slot in sch.days), so a rotation with a skipped day never
+//                      borrows a session from the adjacent one.
+//   - cycle plan    -> one cycle window (getCycleNumForDate / getCycleStartForNum)
+// `opts.which` (default 0) selects the current microcycle; 1 the previous one, etc.
+// `opts.todayStr` overrides "today"; `opts.cycleStartDate` supports an unversioned
+// cycle plan's date window. Meso context (threaded by the live consumer so this
+// stays pure): `opts.startDate` (block start, weekday pause-adjustment + flex
+// block filter), `opts.startedAt` (precise flex block anchor), `opts.statusPeriods`
+// (weekday paused-day math via mesoPausedDays). When `opts.startDate` is absent the
+// weekday branch falls back to the legacy Mon..Sun window (no meso context to align
+// to). Returns { [muscle]: hardSetCount }. Pure/testable.
+function microcycleSetsByMuscle(sessions, sch, muscleOfExId, opts = {}) {
+  const counts = {};
+  if (!sch || typeof muscleOfExId !== 'function') return counts;
+  const which = opts.which || 0;
+  const todayStr = opts.todayStr || todayISO();
+  const ended = (sessions || []).filter(s => s && s.ended && !s.isDeload && s.scheduleId === sch.id);
+
+  if (isWeekdayPlan(sch)) {
+    // FIX 3: scope to this plan so a multi-plan user's other-plan sessions never
+    // leak into the count (mirrors the flex/detector paths).
+    const planned = ended.filter(s => s.scheduleId === sch.id);
+    if (!opts.startDate) {
+      // Legacy fallback (no meso context threaded): Mon..Sun calendar week.
+      const [start, end] = weekWindowISO(todayStr, which);
+      const win = planned.filter(s => s.date && s.date.slice(0, 10) >= start && s.date.slice(0, 10) <= end);
+      accumulateHardSets(counts, win, muscleOfExId);
+      return counts;
+    }
+    // FIX 1: pause-adjusted meso-week bucketing (mirror mesoCurrentWeek's weekday
+    // path). Each session's meso week = floor((rawDays - pausedDays) / 7), pausedDays
+    // counted from startDate up to that session's date, so a deload/sick break in the
+    // middle shifts later sessions' weeks down exactly like the RIR taper.
+    const startISO = opts.startDate.slice(0, 10);
+    const trainedDates = new Set(planned.filter(s => s.date).map(s => s.date.slice(0, 10)));
+    const startD = parseDate(startISO);
+    const weekIdxFor = (iso) => {
+      const rawDays = Math.round((parseDate(iso) - startD) / 86400000);
+      if (rawDays < 0) return -1;
+      const paused = mesoPausedDays(opts.statusPeriods, trainedDates, startISO, iso);
+      return Math.floor(Math.max(0, rawDays - paused) / 7);
+    };
+    const target = weekIdxFor(todayStr) - which;
+    if (target < 0) return counts;
+    const win = planned.filter(s => s.date && weekIdxFor(s.date.slice(0, 10)) === target);
+    accumulateHardSets(counts, win, muscleOfExId);
+    return counts;
+  }
+
+  if (isFlexPlan(sch)) {
+    // FIX 2: bucket the block's trained sessions by their OWN rotation index instead
+    // of slicing a fixed count of `len` trained sessions off the top. Recover each
+    // session's within-rotation slot from its dayId (cyclePos is not persisted, see
+    // syncStore), then walk chronologically: a slot that does not advance past the
+    // previous one opens a new rotation. A rotation with a skipped day is still one
+    // rotation and never pulls a session out of the neighbouring one.
+    const startISO = opts.startDate ? opts.startDate.slice(0, 10) : null;
+    const startedTs = opts.startedAt ? Date.parse(opts.startedAt) : null;
+    const inBlock = (s) => {
+      if (startedTs != null && !isNaN(startedTs)) { const t = Date.parse(s.ended); return isNaN(t) ? true : t > startedTs; }
+      if (startISO) return (s.date || '') >= startISO;
+      return true; // no block anchor threaded: fall back to the whole history
+    };
+    const dayIndex = {};
+    (sch.days || []).forEach((d, i) => { if (d && d.id != null) dayIndex[d.id] = i; });
+    const blockTrained = ended
+      .filter(s => s.scheduleId === sch.id && inBlock(s))
+      .sort((a, b) => (a.ended || '').localeCompare(b.ended || '')); // chronological
+    if (!blockTrained.length) return counts;
+    const rotationOf = new Map();
+    let rot = 0, lastPos = -1, started = false;
+    for (const s of blockTrained) {
+      const pos = dayIndex[s.dayId];
+      const p = (pos == null) ? lastPos + 1 : pos; // unknown dayId stays in the current rotation
+      if (started && p <= lastPos) rot++;
+      rotationOf.set(s, rot);
+      lastPos = p;
+      started = true;
+    }
+    const target = rot - which; // rot = the current (newest) rotation index
+    if (target < 0) return counts;
+    const win = blockTrained.filter(s => rotationOf.get(s) === target);
+    accumulateHardSets(counts, win, muscleOfExId);
+    return counts;
+  }
+
+  // Date-driven cycle plan.
+  const curNum = getCycleNumForDate(sch, todayStr);
+  if (curNum != null) {
+    const num = curNum - which;
+    if (num < 1) return counts;
+    const startD = getCycleStartForNum(sch, num);
+    if (!startD) return counts;
+    const nextD = getCycleStartForNum(sch, num + 1);
+    const start = fmtISO(startD);
+    const end = nextD ? fmtISO(new Date(nextD.getTime() - 86400000)) : todayStr;
+    const win = ended.filter(s => s.date && s.date.slice(0, 10) >= start && s.date.slice(0, 10) <= end);
+    accumulateHardSets(counts, win, muscleOfExId);
+    return counts;
+  }
+
+  // Unversioned cycle plan: fall back to a cycleStartDate-anchored date window.
+  const len = sch.days.length || 1;
+  const csd = opts.cycleStartDate;
+  if (csd) {
+    const base = parseDate(csd);
+    const n = Math.round((parseDate(todayStr) - base) / 86400000);
+    const idxInCycle = ((n % len) + len) % len;
+    const curStart = new Date(parseDate(todayStr));
+    curStart.setDate(curStart.getDate() - idxInCycle - which * len);
+    const curEnd = new Date(curStart); curEnd.setDate(curStart.getDate() + len - 1);
+    const start = fmtISO(curStart), end = fmtISO(curEnd);
+    const win = ended.filter(s => s.date && s.date.slice(0, 10) >= start && s.date.slice(0, 10) <= end);
+    accumulateHardSets(counts, win, muscleOfExId);
+  }
+  return counts;
+}
+
+// Read the durable per-question answer blob off a finished session (persisted on
+// every session, never windowed). Tolerant of sessions finished before the recap
+// feature shipped (no raw.answers).
+function sessionAnswers(s) {
+  return (s && s.mesoRecap && s.mesoRecap.raw && s.mesoRecap.raw.answers) || null;
+}
+
+// Did this exposure answer "still sore" for `muscle`?
+function overreachStillSore(s, muscle) {
+  const a = sessionAnswers(s);
+  const rec = a && a.soreness ? a.soreness[muscle] : null;
+  return !!(rec && rec.answer === 'still_sore');
+}
+
+// Did any of this muscle's exercises get a joint answer other than "none" this
+// exposure (spec 2.2: joint feedback != none on the muscle's exercises)?
+function overreachJointFlagged(s, muscle, muscleOfExId) {
+  const a = sessionAnswers(s);
+  if (!a || !a.joint) return false;
+  for (const exId of Object.keys(a.joint)) {
+    const rec = a.joint[exId];
+    if (rec && rec.answer && rec.answer !== 'none' && muscleOfExId(exId) === muscle) return true;
+  }
+  return false;
+}
+
+// Best performance metric per exercise of `muscle` in one session: e1RM for
+// weighted work, else top reps (reps-only), else longest hold (timed). Only
+// completed working sets count. Returns { [exId]: { v, kind } } where kind is
+// 'e1rm' | 'reps' | 'time', so a cross-exposure comparison can skip an exercise
+// whose metric kind changed (e.g. a weighted lift logged bodyweight next time),
+// which would otherwise compare an e1RM against a raw rep count.
+function overreachBestPerfByEx(session, muscle, muscleOfExId) {
+  const map = {};
+  for (const e of (session.entries || [])) {
+    if (!e || e.isCardio) continue;
+    if (muscleOfExId(e.exId) !== muscle) continue;
+    let best = null, kind = null;
+    for (const st of (e.sets || [])) {
+      if (!st || !st.done || st.warmup || st.skipped) continue;
+      const reps = effReps(st);
+      let v, k;
+      if (st.kg != null && reps != null && reps > 0) { v = e1rm(st.kg, reps); k = 'e1rm'; }
+      else if (reps != null && reps > 0) { v = reps; k = 'reps'; }
+      else if (st.timeSec != null) { v = st.timeSec; k = 'time'; }
+      else continue;
+      if (best == null || v > best) { best = v; kind = k; }
+    }
+    if (best != null) map[e.exId] = { v: best, kind };
+  }
+  return map;
+}
+
+// Rep-regression signal for one exposure vs the previous exposure of the same
+// muscle (spec 2.2): the muscle made NO progress on any shared exercise (every
+// shared lift is flat or down). Needs set-level entries on both, which the last
+// exposures have by definition (they are recent, inside the 70-day window).
+// Only exercises measured the SAME way in both exposures count as shared, so a
+// weighted-to-bodyweight switch never fakes a regression.
+function overreachRepRegression(cur, prev, muscle, muscleOfExId) {
+  if (!prev) return false;
+  const c = overreachBestPerfByEx(cur, muscle, muscleOfExId);
+  const p = overreachBestPerfByEx(prev, muscle, muscleOfExId);
+  let sawShared = false, improved = false;
+  for (const exId of Object.keys(c)) {
+    const pe = p[exId];
+    if (pe == null || pe.kind !== c[exId].kind) continue; // absent or incomparable metric
+    sawShared = true;
+    if (c[exId].v > pe.v + 1e-9) improved = true;
+  }
+  return sawShared && !improved;
+}
+
+// The per-exposure overreach signature: still-sore AND (rep-regression OR joint).
+function overreachExposureSignal(cur, prev, muscle, muscleOfExId) {
+  const sore = overreachStillSore(cur, muscle);
+  const joint = overreachJointFlagged(cur, muscle, muscleOfExId);
+  const regress = overreachRepRegression(cur, prev, muscle, muscleOfExId);
+  return { sore, joint, regress, triggered: sore && (regress || joint) };
+}
+
+// Overreach detector (spec 2.2). STATELESS: recomputed from history each call.
+// For every muscle trained on `sch`, look at the last 2 consecutive exposures
+// (the last 2 full-signal sessions that trained the muscle, frequency-adaptive:
+// they may sit inside one rotation for a 2x/rotation muscle or span two rotations
+// for a 1x/rotation muscle). A muscle is atCeiling when BOTH exposures show the
+// signature. A single clean latest exposure stands the detector down (implicit).
+// signalWeight discipline (spec 4.3): discounted/none sessions are NOT counted as
+// exposures, so a rough day or a deload can never trip or advance the ceiling;
+// absent signalWeight reads as 'full' for legacy sessions. Returns
+// { [muscle]: { atCeiling:true, since, evidence:[string] } } only for at-ceiling
+// muscles (evidence per spec 8, human-readable, straight into the nudge/recap).
+function detectOverreach(sessions, sch, muscleOfExId, opts = {}) {
+  const out = {};
+  if (!sch || typeof muscleOfExId !== 'function') return out;
+  const planId = sch.id;
+  const trained = (sessions || [])
+    .filter(s => s && s.ended && !s.isDeload && s.scheduleId === planId && (s.signalWeight || 'full') === 'full')
+    .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''));
+
+  const muscles = new Set();
+  for (const s of trained) {
+    for (const e of (s.entries || [])) {
+      if (!e || e.isCardio) continue;
+      const m = muscleOfExId(e.exId);
+      if (m) muscles.add(m);
+    }
+  }
+
+  for (const muscle of muscles) {
+    const exps = trained.filter(s =>
+      (s.entries || []).some(e => e && !e.isCardio && muscleOfExId(e.exId) === muscle));
+    if (exps.length < 2) continue; // need two exposures to confirm a ceiling
+    const E2 = exps[0], E1 = exps[1], E0 = exps[2] || null;
+    const s2 = overreachExposureSignal(E2, E1, muscle, muscleOfExId);
+    const s1 = overreachExposureSignal(E1, E0, muscle, muscleOfExId);
+    if (!(s2.triggered && s1.triggered)) continue; // stand-down is implicit
+
+    const soreCount = (s2.sore ? 1 : 0) + (s1.sore ? 1 : 0);
+    const parts = [];
+    if (soreCount) parts.push(`sore ${soreCount} session${soreCount > 1 ? 's' : ''}`);
+    if (s2.regress || s1.regress) parts.push('reps flat under the same load');
+    if (s2.joint || s1.joint) parts.push('joints flagged');
+    const evidence = [`${muscle} at its ceiling: ${parts.join(', ')}.`];
+    out[muscle] = { atCeiling: true, since: E1.ended || E1.date || null, evidence };
+  }
+  return out;
+}
+
+// ── Autoreg v2 P2: block start, block recap, anti-nag governance ─────────────
+
+// Current schema version of the autoreg_state blob (spec 9). Bumped when the
+// persisted shape changes; readers tolerate a missing/older version. v2 adds the
+// P3 landmarks ({ [muscle]: { mrv, mev, updatedAt } }) and block ({ startDate,
+// startVolByMuscle }) keys alongside the P2 deloadNudge.
+const AUTOREG_STATE_VERSION = 2;
+// EMA smoothing factor for the learned per-muscle MRV (spec 2.3 / 10). A fresh
+// observation moves the ceiling by only this fraction, so a single overreaching
+// spike can never crater a muscle's learned ceiling (spec 2.2 "no learning from one
+// bad week"); the rest of the weight stays on the remembered value across blocks.
+const LANDMARK_MRV_ALPHA = 0.35;
+// Deload-nudge cooldown, counted in SESSIONS not days (spec 10: N = 3). After a
+// decline the full offer is suppressed for this many block sessions, then, if the
+// muscle is still at its ceiling, it re-asks with escalated evidence.
+const DELOAD_NUDGE_COOLDOWN = 3;
+// Autoreg v2 P4. Strength-stall: a lift's e1RM flat/declining over this many
+// qualifying sessions at green gates counts as a stall (spec 10: N = 3).
+const STALL_SESSIONS = 3;
+// Re-entry ramp (spec 7 / 10): a sick/vacation break longer than this many days
+// arms the ease-in; a break of a week or less needs no ramp.
+const REENTRY_MIN_BREAK_DAYS = 7;
+// A long break (weeks+) stretches the systemic ease-in over more than one
+// microcycle (spec 7: "Wochen: weiter runter starten, laengerer Ramp").
+const REENTRY_LONG_BREAK_DAYS = 28;
+// Primary-muscle priority, mirrored from MESO_MUSCLE_PRIORITY in screens-train.jsx
+// so a system-catalog candidate (not in store.exercises, so the injected muscleOf
+// cannot resolve it) buckets to the SAME primary muscle as primaryMuscleForExercise.
+// Keep the two lists in sync: if one changes, change the other.
+const STALL_MUSCLE_PRIORITY = ['Back', 'Quads', 'Chest', 'Glutes', 'Hamstrings', 'Shoulders', 'Calves', 'Abs', 'Triceps', 'Biceps', 'Forearms'];
+function primaryMuscleFromTags(tags) {
+  if (!tags || !tags.length) return null;
+  for (const m of STALL_MUSCLE_PRIORITY) if (tags.includes(m)) return m;
+  return tags[0] || null;
+}
+
+// Resolve the current block's start timestamp (ms) for the recap window (spec 5:
+// "since the last reset / deload"). It is the MAX of the meso block anchor
+// (started_at, or start_date for older mesos) and the end of the most recent
+// COMPLETED deload status period. P1's emergent deload only calls startDeload, it
+// does NOT advance mesoState.startedAt (that reset is P3), so a post-deload Auto
+// block must read the deload end here or the recap would fold in the pre-deload
+// block. Returns null when neither anchor is known (fall back to "include all").
+function blockStartTs(mesoState, statusPeriods) {
+  if (!mesoState) return null;
+  let ts = null;
+  if (mesoState.startedAt) { const p = Date.parse(mesoState.startedAt); if (!isNaN(p)) ts = p; }
+  // startDate is a bare 'YYYY-MM-DD'. Date.parse() reads it as UTC midnight, which
+  // lands on the PRIOR calendar day for users west of UTC, misattributing that
+  // day's sessions to the new block. parseDate anchors it at LOCAL noon, matching
+  // mesoCurrentWeek's own comparison. startedAt above is a full instant, so its
+  // Date.parse stays correct.
+  if (ts == null && mesoState.startDate) { const p = parseDate(mesoState.startDate); if (p) ts = p.getTime(); }
+  // Most recent CLOSED deload period (an active one has endedAt == null; skip it,
+  // the block hasn't restarted yet).
+  let lastDeloadEnd = null;
+  for (const p of (statusPeriods || [])) {
+    if (!p || p.mode !== 'deload' || !p.endedAt) continue;
+    const e = Date.parse(p.endedAt);
+    if (!isNaN(e) && (lastDeloadEnd == null || e > lastDeloadEnd)) lastDeloadEnd = e;
+  }
+  if (lastDeloadEnd != null && (ts == null || lastDeloadEnd > ts)) ts = lastDeloadEnd;
+  return ts;
+}
+
+// The sessions belonging to the current block for the recap (spec 5.1): ended,
+// non-deload, this plan, finished after blockStartTs. Mirrors the mesoCurrentWeek
+// "sessions since block began" filter (prefer the ended timestamp over the
+// date-only anchor so a same-day block transition can't leak the prior block in).
+function blockSessions(sessions, mesoState, statusPeriods) {
+  if (!mesoState) return [];
+  const planId = mesoState.scheduleId;
+  const startTs = blockStartTs(mesoState, statusPeriods);
+  return (sessions || []).filter(s => {
+    if (!s || !s.ended || s.isDeload || s.scheduleId !== planId) return false;
+    if (startTs == null) return true;
+    const t = Date.parse(s.ended);
+    return isNaN(t) ? ((s.date || '') >= (mesoState.startDate || '')) : t > startTs;
+  });
+}
+
+// Aggregate a block-level recap over the block's sessions (spec 5.1). Reads each
+// session's durably persisted mesoRecap.gains ({ name, weightDelta kg, setDelta })
+// and folds them across the whole block. signalWeight discipline (spec 4.3): a
+// 'none' (deload) session is excluded, but a 'discounted' (rough-day) session
+// still counts, a PR on a tired day is real and earns. Nothing is pre-aggregated
+// (there is no persisted PR count or "best session"), so both are derived here.
+// Returns { sessionCount, setGains:[{name,setDelta}], loadPRs:[{name,weightDelta}],
+//   prCount, bestSession:{date,prs,weightGain}|null }. Pure/testable.
+function buildBlockRecap(sessions) {
+  const list = (sessions || []).filter(s => s && s.ended && (s.signalWeight || 'full') !== 'none');
+  const byExSet = {};  // exercise name -> net set delta
+  const byExLoad = {}; // exercise name -> net kg delta
+  let prCount = 0;
+  let best = null;
+  for (const s of list) {
+    const gains = (s.mesoRecap && Array.isArray(s.mesoRecap.gains)) ? s.mesoRecap.gains : [];
+    let sessionPrs = 0, sessionWeightGain = 0;
+    for (const g of gains) {
+      if (!g || !g.name) continue;
+      if (g.setDelta) byExSet[g.name] = (byExSet[g.name] || 0) + g.setDelta;
+      if (g.weightDelta) {
+        byExLoad[g.name] = (byExLoad[g.name] || 0) + g.weightDelta;
+        if (g.weightDelta > 0) { prCount += 1; sessionPrs += 1; sessionWeightGain += g.weightDelta; }
+      }
+    }
+    if (sessionPrs > 0) {
+      const better = best == null || sessionPrs > best.prs || (sessionPrs === best.prs && sessionWeightGain > best.weightGain);
+      if (better) best = { date: s.date || (s.ended || '').slice(0, 10), prs: sessionPrs, weightGain: sessionWeightGain };
+    }
+  }
+  const setGains = Object.entries(byExSet).filter(([, v]) => v !== 0).map(([name, setDelta]) => ({ name, setDelta }));
+  const loadPRs = Object.entries(byExLoad).filter(([, v]) => v > 0).map(([name, weightDelta]) => ({ name, weightDelta }));
+  return { sessionCount: list.length, setGains, loadPRs, prCount, bestSession: best };
+}
+
+// Anti-nag deload governance (spec 5.3). PURE. Given the persisted autoreg_state,
+// the count of block sessions so far (the cooldown clock, spec 10 counts sessions
+// not days), and whether the detector still flags a ceiling this finish, decide
+// what to surface:
+//   'full'  fire the 1-tap offer + decline recap + one re-ask. No nudge recorded
+//           yet, OR the cooldown elapsed and the muscle is STILL at its ceiling
+//           (re-ask with escalated evidence, spec step 4).
+//   'hint'  in cooldown, still at ceiling: passive hint only, no full prompt.
+//   'none'  detector no longer flags anything (auto stand-down, spec step 5), or
+//           nothing to show.
+// escalation is the count of prior declines this block (0 on the first offer),
+// which the recap uses to phrase the escalated framing.
+function deloadNudgeDecision(autoregState, blockSessionCount, atCeiling) {
+  if (!atCeiling) return { mode: 'none', escalation: 0 };
+  const n = (autoregState && autoregState.deloadNudge && autoregState.deloadNudge.block) || null;
+  if (!n || n.declinedAt == null) return { mode: 'full', escalation: 0 };
+  const esc = n.escalation || 0;
+  if (n.cooldownUntil != null && (blockSessionCount || 0) < n.cooldownUntil) return { mode: 'hint', escalation: esc };
+  return { mode: 'full', escalation: esc };
+}
+
+// Record a deload decline (spec 5.3 step 2/3): bump the escalation counter and arm
+// an N-session cooldown from the current block session count. Returns a NEW
+// autoreg_state (immutable) safe to persist through sync_meso_states_batch. Scope
+// is the block (spec 5.3 governs one deload decision per block, not per muscle).
+function recordDeloadDecline(autoregState, blockSessionCount) {
+  const base = (autoregState && typeof autoregState === 'object') ? autoregState : {};
+  const prev = (base.deloadNudge && base.deloadNudge.block) || null;
+  // First decline records escalation 1 so the post-cooldown re-ask reads >= 1 and
+  // renders the escalated framing (spec 5.3 step 4); a fresh offer with no nudge
+  // yet stays escalation 0 via deloadNudgeDecision's early return.
+  const escalation = prev ? (prev.escalation || 0) + 1 : 1;
+  return {
+    ...base,
+    version: AUTOREG_STATE_VERSION,
+    deloadNudge: {
+      ...(base.deloadNudge || {}),
+      block: {
+        declinedAt: new Date().toISOString(),
+        cooldownUntil: (blockSessionCount || 0) + DELOAD_NUDGE_COOLDOWN,
+        escalation,
+      },
+    },
+  };
+}
+
+// Auto stand-down (spec 5.3 step 5): the detector no longer flags a ceiling, so
+// drop the block nudge. Returns a NEW autoreg_state with deloadNudge.block cleared,
+// or the SAME reference (===) when there was nothing to clear, so a caller can skip
+// a redundant write.
+function clearDeloadNudge(autoregState) {
+  if (!autoregState || !autoregState.deloadNudge || !autoregState.deloadNudge.block) return autoregState || null;
+  const nudge = { ...autoregState.deloadNudge };
+  delete nudge.block;
+  const rest = Object.keys(nudge);
+  const next = { ...autoregState };
+  if (rest.length) next.deloadNudge = nudge; else delete next.deloadNudge;
+  return next;
+}
+
+// ── Autoreg v2 P3: volume landmarks (learned MRV) + block backoff (pure) ─────
+
+// EMA-update a muscle's learned MRV from one at-ceiling observation (spec 2.3).
+// `observedSets` is the microcycle hard-set count at which the overreach signature
+// struck this block. First time we simply seed the ceiling; after that we blend it
+// toward the observation with LANDMARK_MRV_ALPHA so a one-off rough block can only
+// nudge the remembered ceiling, never replace it (spec 2.2). Discipline (spec 4.3):
+// the CALLER only invokes this for muscles the full-signal detector flagged, so a
+// discounted/none session can never drive a learned ceiling down. MEV is a light,
+// conservative derived default here (real per-muscle MEV detection is v2, spec 10),
+// kept only so the persisted shape carries it. Returns a NEW autoreg_state, or the
+// SAME reference when there is nothing to record (invalid input), so callers can
+// skip a redundant write. Muscle/scope-keyed only (round-trips backup verbatim).
+function updateLandmarkMrv(autoregState, muscle, observedSets, opts = {}) {
+  if (!muscle || !(observedSets > 0)) return autoregState || null;
+  const alpha = (opts.alpha != null) ? opts.alpha : LANDMARK_MRV_ALPHA;
+  const base = (autoregState && typeof autoregState === 'object') ? autoregState : {};
+  const landmarks = { ...(base.landmarks || {}) };
+  const prev = landmarks[muscle] || null;
+  const prevMrv = (prev && typeof prev.mrv === 'number') ? prev.mrv : null;
+  const nextMrv = (prevMrv == null) ? Math.round(observedSets)
+    : Math.round(alpha * observedSets + (1 - alpha) * prevMrv);
+  const nextMev = Math.max(1, Math.round(nextMrv / 2));
+  landmarks[muscle] = { mrv: nextMrv, mev: nextMev, updatedAt: new Date().toISOString() };
+  return { ...base, version: AUTOREG_STATE_VERSION, landmarks };
+}
+
+// Snapshot a new block's starting volume per muscle into autoreg_state.block (spec
+// 9). Called at every block-start anchor (planned Meso-2 and the Auto emergent
+// reset) so the recap and future landmark reasoning know where the block began.
+// Preserves everything else (landmarks persist ACROSS blocks, spec 2.3: MRV is
+// EMA-smoothed across blocks; only block.startVolByMuscle resets). Returns a NEW
+// autoreg_state.
+function snapshotBlockStart(autoregState, startDate, startVolByMuscle) {
+  const base = (autoregState && typeof autoregState === 'object') ? autoregState : {};
+  return {
+    ...base,
+    version: AUTOREG_STATE_VERSION,
+    block: { startDate: startDate || null, startVolByMuscle: startVolByMuscle || {} },
+  };
+}
+
+// Block-start per-exercise backoff (spec 2.3 / 10: −2 sets per exercise). Non-
+// destructive: reduces a GROWN lift's set-delta by `amount` but never below the
+// plan base (delta floored at 0), and leaves at-base and cut lifts untouched so a
+// reset never silently RAISES volume. The next block re-ramps from this backed-off
+// start, capped per-muscle by the learned MRV. Keys are exId_dayId (NOT per muscle),
+// so the same exercise on two days backs off independently (correct per spec). Lives
+// in mesoState.deltas (exId-remapped on backup restore, unlike autoreg_state).
+// Returns a NEW deltas map. Pure/testable.
+function backoffDeltas(deltas, amount = 2) {
+  const out = {};
+  for (const [k, v] of Object.entries(deltas || {})) {
+    out[k] = (v > 0) ? Math.max(0, v - amount) : v;
+  }
+  return out;
+}
+
+// ── Autoreg v2 P4: strength-stall detection + concrete swap + re-entry ramp ──
+
+// Strength-stall detector (spec 6). PURE/stateless, recomputed from history. A
+// LIFT stalls when its best e1RM is flat or declining over the last N qualifying
+// sessions DESPITE green gates: joints fine, pump not flat, and the muscle NOT at
+// its ceiling. The gate condition is what tells a stalled lift apart from an
+// overreached/deloaded muscle (spec 6): if the muscle is at its ceiling, the story
+// is fatigue, not the exercise. Only weighted work has a meaningful e1RM, so a
+// reps-only / timed / assisted / bodyweight-logged lift never stalls here (no kg on
+// its sets -> no e1RM series). signalWeight discipline (spec 4.3): discounted/none
+// sessions are skipped, a rough or deload day's flat e1RM is not a real stall, and
+// the library per-session series does NOT do this (gotcha), so this filter is the
+// single biggest correctness gate. `muscleOfExId` is injected (see the P1 note).
+// opts: { n, planId, atCeiling:(muscle)->bool, exName }. Returns
+// { stalled, since, series:[e1rm newest-first], evidence:[string] }.
+function detectStall(sessions, exId, muscleOfExId, opts = {}) {
+  const out = { stalled: false, since: null, series: [], evidence: [] };
+  if (!exId || typeof muscleOfExId !== 'function') return out;
+  const n = opts.n || STALL_SESSIONS;
+  const planId = opts.planId ?? null;
+  const muscle = muscleOfExId(exId);
+  // Muscle at its ceiling -> overreach/deload owns this, not a stalled lift (spec 6).
+  if (muscle && typeof opts.atCeiling === 'function' && opts.atCeiling(muscle)) return out;
+
+  // Full-signal exposures of this exercise, newest-first (mirror detectOverreach's
+  // filter: ended && !isDeload && this plan && signalWeight full). Build the best
+  // e1RM per session over completed weighted working sets, effReps for unilateral.
+  const qualifying = (sessions || [])
+    .filter(s => s && s.ended && !s.isDeload && (planId == null || s.scheduleId === planId) && (s.signalWeight || 'full') === 'full')
+    .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''));
+  const series = [];
+  for (const s of qualifying) {
+    let best = null;
+    for (const e of (s.entries || [])) {
+      if (!e || e.isCardio || e.exId !== exId) continue;
+      for (const st of (e.sets || [])) {
+        if (!st || !st.done || st.warmup || st.skipped) continue;
+        const reps = effReps(st);
+        if (st.kg == null || reps == null || reps <= 0) continue; // non-weighted set -> no e1RM
+        const v = e1rm(st.kg, reps);
+        if (best == null || v > best) best = v;
+      }
+    }
+    if (best != null) series.push({ session: s, est: best });
+    if (series.length >= n) break;
+  }
+  out.series = series.map(x => x.est);
+  if (series.length < n) return out; // too little weighted data to judge a stall
+
+  // Green gates on the newest qualifying exposure (spec 6): a present joint flag or
+  // a flat ("low") pump means a different story owns this lift, not a stall.
+  const a = sessionAnswers(series[0].session);
+  const jrec = a && a.joint ? a.joint[exId] : null;
+  if (jrec && jrec.answer && jrec.answer !== 'none') return out;
+  if (jrec && jrec.pump === 'low') return out;
+
+  // Flat/declining = NO new e1RM best across the window (chronological running max).
+  const chrono = series.slice().reverse().map(x => x.est);
+  let progressed = false, mx = chrono[0];
+  for (let i = 1; i < chrono.length; i++) {
+    if (chrono[i] > mx + 1e-6) { progressed = true; break; }
+    if (chrono[i] > mx) mx = chrono[i];
+  }
+  if (progressed) return out;
+
+  out.stalled = true;
+  const oldest = series[series.length - 1].session;
+  out.since = oldest.ended || oldest.date || null;
+  const name = opts.exName || 'This lift';
+  out.evidence = [`${name} stalled: ${n} sessions, no e1RM progress, gates green.`];
+  return out;
+}
+
+// Concrete swap suggestion (spec 6). PURE. Given a stalling exercise, pick a
+// sibling with the SAME primary muscle but a DIFFERENT movement/equipment, so the
+// swap actually changes the stimulus. Guards: never the exercise itself nor one
+// recently swapped away (opts.excludeIds), never an affinity-disliked candidate
+// (opts.affinity[id].v === 'dislike'), and a system candidate already owned by name
+// is skipped (the user's own copy would be picked instead). Prefers a user-owned
+// sibling, else a system-catalog one; within each pool a different-EQUIPMENT sibling
+// ranks above a mere movement change. Returns { id, name, isSystem } or null when the
+// library is too thin (spec 6 explicitly accepts "then no concrete one"). `muscleOf`
+// resolves USER exercises only; system candidates bucket via primaryMuscleFromTags,
+// the same priority order as primaryMuscleForExercise. Pure/testable.
+function suggestSwap(exId, exercises, systemExercises, muscleOf, opts = {}) {
+  if (!exId || typeof muscleOf !== 'function') return null;
+  const list = exercises || [];
+  const src = list.find(e => e && e.id === exId);
+  if (!src) return null;
+  const muscle = muscleOf(exId);
+  if (!muscle) return null;
+  const srcEquip = src.equipment ?? null;
+  const srcMove = src.movement_type || (src.unilateral ? 'unilateral' : 'bilateral');
+  const affinity = opts.affinity || {};
+  const exclude = new Set([exId, ...(opts.excludeIds || [])]);
+  if (opts.excludeId) exclude.add(opts.excludeId);
+  const disliked = (id) => !!(affinity[id] && affinity[id].v === 'dislike');
+  const differs = (equip, move) => (equip ?? null) !== srcEquip || (move || 'bilateral') !== srcMove;
+  // Rank: a different-equipment sibling (a real variation) above a movement-only
+  // change, then alphabetically by name for a stable, testable pick.
+  const rank = (equip, name) => [(equip ?? null) !== srcEquip ? 0 : 1, (name || '').toLowerCase()];
+  const cmp = (a, b) => (a._r[0] - b._r[0]) || (a._r[1] < b._r[1] ? -1 : a._r[1] > b._r[1] ? 1 : 0);
+
+  // 1. User-owned siblings first (spec 6: prefer user, then system).
+  const userCands = [];
+  for (const e of list) {
+    if (!e || exclude.has(e.id) || disliked(e.id)) continue;
+    if (muscleOf(e.id) !== muscle) continue;
+    const mv = e.movement_type || (e.unilateral ? 'unilateral' : 'bilateral');
+    if (!differs(e.equipment, mv)) continue;
+    userCands.push({ id: e.id, name: e.name, isSystem: false, _r: rank(e.equipment, e.name) });
+  }
+  if (userCands.length) { userCands.sort(cmp); const p = userCands[0]; return { id: p.id, name: p.name, isSystem: false }; }
+
+  // 2. System-catalog siblings, skipping any the user already owns by name.
+  const ownedNames = new Set(list.map(e => (e.name || '').toLowerCase()));
+  const sysCands = [];
+  for (const sys of (systemExercises || [])) {
+    if (!sys || exclude.has(sys.id) || disliked(sys.id)) continue;
+    if (ownedNames.has((sys.name || '').toLowerCase())) continue;
+    if (primaryMuscleFromTags(sys.tags) !== muscle) continue;
+    const mv = sys.movement || 'bilateral';
+    if (!differs(sys.equipment, mv)) continue;
+    sysCands.push({ id: sys.id, name: sys.name, isSystem: true, _r: rank(sys.equipment, sys.name) });
+  }
+  if (sysCands.length) { sysCands.sort(cmp); const p = sysCands[0]; return { id: p.id, name: p.name, isSystem: true }; }
+  return null;
+}
+
+// Post-break re-entry ramp (spec 7). PURE/stateless: derived from statusPeriods +
+// session dates, no new persistence. Finds the most-recent CLOSED sick/vacation
+// period; if it ran longer than REENTRY_MIN_BREAK_DAYS the first sessions back get
+// an eased-in suggestion (the caller PRESELECTS the eased-in readiness option, so
+// signalWeight='discounted' commits on Confirm with an easier-target hint that is
+// mode-aware, reusing the P0 readiness path). The systemic ease-in decays over ONE
+// microcycle by plan structure, NOT raw sessions (spec 2.1): flex counts a full
+// rotation of trained sessions, weekday/cycle a calendar window. A long break
+// stretches it over two microcycles. The ramp only lowers the SUGGESTION, never the
+// cap: performance always overrides and earn snaps a strong return straight back.
+// Returns { active, decayStep, breakDays, microcycles }. Pure/testable.
+function reentryRamp(statusPeriods, sessions, sch, opts = {}) {
+  const out = { active: false, decayStep: 0, breakDays: 0, microcycles: 1 };
+  const threshold = opts.thresholdDays != null ? opts.thresholdDays : REENTRY_MIN_BREAK_DAYS;
+  const todayStr = (opts.todayStr || todayISO()).slice(0, 10);
+  // A currently-open sick/vacation break means we are not back yet: no ramp.
+  if ((statusPeriods || []).some(p => p && !p.endedAt && (p.mode === 'sick' || p.mode === 'vacation'))) return out;
+  // Most-recent CLOSED sick/vacation period (deload has its own block-reset path).
+  let last = null, lastEnd = -Infinity;
+  for (const p of (statusPeriods || [])) {
+    if (!p || !p.endedAt || !p.startedAt) continue;
+    if (p.mode !== 'sick' && p.mode !== 'vacation') continue;
+    const e = Date.parse(p.endedAt.slice(0, 10) + 'T12:00:00');
+    if (isNaN(e)) continue;
+    if (e > lastEnd) { lastEnd = e; last = p; }
+  }
+  if (!last) return out;
+  const startD = new Date(last.startedAt.slice(0, 10) + 'T12:00:00');
+  const endD = new Date(last.endedAt.slice(0, 10) + 'T12:00:00');
+  const breakDays = Math.round((endD - startD) / 86400000);
+  out.breakDays = breakDays;
+  if (!(breakDays > threshold)) return out; // a short break needs no ramp
+  const microcycles = breakDays >= REENTRY_LONG_BREAK_DAYS ? 2 : 1;
+  out.microcycles = microcycles;
+  const breakEndISO = last.endedAt.slice(0, 10);
+  if (todayStr <= breakEndISO) return out; // the break ends today/future: ramp starts once back
+
+  if (sch && isFlexPlan(sch)) {
+    // Flex advances by trained sessions, so one rotation = sch.days.length of them.
+    const rampLen = ((sch.days || []).length || 1) * microcycles;
+    const trainedSince = (sessions || []).filter(s =>
+      s && s.ended && !s.isDeload && s.scheduleId === sch.id && (s.date || '').slice(0, 10) > breakEndISO).length;
+    out.decayStep = trainedSince;
+    out.active = trainedSince < rampLen;
+    return out;
+  }
+  // Weekday (one 7-day week) and cycle (one cycle window) plans decay on a calendar
+  // window from the break end; after a break there are no pause days to adjust for.
+  const perCycle = (sch && !isWeekdayPlan(sch) && (sch.days || []).length) ? sch.days.length : 7;
+  const rampDays = perCycle * microcycles;
+  const daysSince = Math.round((new Date(todayStr + 'T12:00:00') - endD) / 86400000);
+  out.decayStep = Math.max(0, daysSince);
+  out.active = daysSince > 0 && daysSince <= rampDays;
+  return out;
 }
 
 // Whether a pump/volume answer permits the weight bump. Load-only autoregulate
@@ -5266,6 +6220,10 @@ window.LB = {
   isLoggedTrainingDay, plannedTrainingDay, isTrainingDayForDate, dayTargetFromMacros, macroAdherence, hasMacroTargets, effectiveMacroTargets, dailyLogAdherence, dailyLogsWeekPrefill, weekPerformanceSignal,
   refreshHealthLogs,
   pickGrowthRecipient, retractGrowthGrant, pickDeclineRecipient, reearnMesoWeightBoosts, revertMesoSessionBoosts, resolveMesoSeedSuggestion, mesoPausedDays, mesoRirForWeek, mesoMuscleTrainedBeforeStart, volumeAnswerAllowsBump,
-  mesoGateSetsFromAnswers, isMesoSessionEditable, applyMesoFeedbackEdit, reearnMesoBoostsFromAnswers, mesoRecapGainsFromEdit,
-  mesoSetTarget, mesoEarnTarget, mesoRepOutcome,
+  microcycleSetsByMuscle, detectOverreach,
+  blockStartTs, blockSessions, buildBlockRecap, deloadNudgeDecision, recordDeloadDecline, clearDeloadNudge,
+  updateLandmarkMrv, snapshotBlockStart, backoffDeltas,
+  detectStall, suggestSwap, reentryRamp,
+  mesoGateSetsFromAnswers, isMesoSessionEditable, applyMesoFeedbackEdit, reearnMesoBoostsFromAnswers, mesoRecapGainsFromEdit, recomputeMesoRepMissCut, remapMesoAnswersExId, deriveSignalWeight, remapMesoRecapRawForSwap, remapMesoStateExId, mesoRowHasExId, laterSessionTrainsExId,
+  mesoSetTarget, mesoEarnTarget, mesoRepOutcome, reshapeSetsUnilateral,
 };

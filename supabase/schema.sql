@@ -129,7 +129,9 @@ CREATE TABLE public.zane_sessions (
   is_bonus boolean NOT NULL DEFAULT false,
   is_freestyle boolean NOT NULL DEFAULT false,
   is_deload boolean NOT NULL DEFAULT false,
-  meso_recap jsonb
+  meso_recap jsonb,
+  readiness text,
+  signal_weight text
 );
 
 CREATE TABLE public.zane_session_entries (
@@ -1439,7 +1441,8 @@ AS $function$
       SELECT jsonb_agg(jsonb_build_object(
         'kg', st.kg, 'reps', st.reps, 'repsL', st.reps_l, 'repsR', st.reps_r,
         'timeSec', st.time_sec,
-        'done', st.done, 'skipped', st.skipped, 'warmup', st.warmup
+        'done', st.done, 'skipped', st.skipped, 'warmup', st.warmup,
+        'technique', st.technique, 'drops', st.drops
       ) ORDER BY st.set_idx)
       FROM zane_sets st WHERE st.entry_id = e.id
     ), '[]'::jsonb) AS sets
@@ -1918,6 +1921,7 @@ CREATE TABLE zane_meso_states (
   growth_counts      jsonb       NOT NULL DEFAULT '{}',
   rep_miss_counts    jsonb       NOT NULL DEFAULT '{}',
   affinity           jsonb       NOT NULL DEFAULT '{}',  -- per-exId { v, streak } exercise affinity (Migration 0169)
+  autoreg_state      jsonb,      -- nullable versioned autoreg blob: anti-nag deloadNudge cooldown, later landmarks (Migration 0172)
   completions        int         NOT NULL DEFAULT 0,
   pending_meso2      boolean     NOT NULL DEFAULT false,
   created_at         timestamptz NOT NULL DEFAULT now(),
@@ -1938,6 +1942,8 @@ CREATE POLICY "Users manage own meso states"
 -- Migration 0122. growth_counts added in migration 0130. started_at in 0138
 -- (COALESCEd on update so an older client that doesn't send it can't null it).
 -- rep_miss_counts added in migration 0165. affinity added in migration 0169.
+-- autoreg_state added in migration 0172 (nullable, COALESCE-preserved on update
+-- so an older client that omits it can't wipe live nag state).
 CREATE OR REPLACE FUNCTION public.sync_meso_states_batch(p_states jsonb)
  RETURNS void
  LANGUAGE sql
@@ -1947,7 +1953,7 @@ AS $function$
   INSERT INTO zane_meso_states (
     id, user_id, schedule_id, weeks, start_date, start_cycle_index, started_at,
     deltas, joint_flags, pump_low_counts, weight_boosts, growth_counts,
-    rep_miss_counts, affinity, completions, pending_meso2, updated_at
+    rep_miss_counts, affinity, autoreg_state, completions, pending_meso2, updated_at
   )
   SELECT
     m->>'id',
@@ -1964,6 +1970,7 @@ AS $function$
     COALESCE(m->'growth_counts', '{}'::jsonb),
     COALESCE(m->'rep_miss_counts', '{}'::jsonb),
     COALESCE(m->'affinity', '{}'::jsonb),
+    NULLIF(m->'autoreg_state', 'null'::jsonb),
     COALESCE((m->>'completions')::int, 0),
     COALESCE((m->>'pending_meso2')::boolean, false),
     COALESCE((m->>'updated_at')::timestamptz, now())
@@ -1980,6 +1987,7 @@ AS $function$
     growth_counts     = EXCLUDED.growth_counts,
     rep_miss_counts   = EXCLUDED.rep_miss_counts,
     affinity          = EXCLUDED.affinity,
+    autoreg_state     = COALESCE(NULLIF(EXCLUDED.autoreg_state, 'null'::jsonb), zane_meso_states.autoreg_state),
     completions       = EXCLUDED.completions,
     pending_meso2     = EXCLUDED.pending_meso2,
     updated_at        = EXCLUDED.updated_at

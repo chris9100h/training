@@ -156,6 +156,7 @@ function agSignals(mode) {
     { sig: 'Pump: low', sets: ho('none, tracks swap'), wt: bl('blocks bump') },
     { sig: 'Weight feel: too light / hard', sets: ho('no effect'), wt: up('earns bump') },
     { sig: 'Weight feel: too heavy', sets: ho('no effect'), wt: bl('blocks bump') },
+    { sig: 'Overreach: sore + reps flat / joints, 2 exposures', sets: ho('adds frozen (at ceiling)'), wt: bl('deload suggested') },
   ];
   if (!B) {
     rows.push({ sig: 'Workload: not enough', sets: up('+1 set'), wt: ho('no effect') });
@@ -286,6 +287,118 @@ function AutoregGuideScreen({ store, go, mode: modeProp, back }) {
             {isB && <div style={{ fontSize: 12.5, color: UI.inkSoft, marginTop: 12 }}>In Load only the sets column is inert: every set answer is frozen, so the questions exist purely to gate the weight. Soreness is repurposed as a recovery brake that holds the weight instead of cutting a set.</div>}
           </Section>
 
+          {/* ── readiness (modus-agnostic, same in every mode) ── */}
+          <Section>
+            <AGSecHead n="Readiness · Today" title="One tap for how you feel"
+              sub="At the start of every session the app asks Fresh, Normal or Rough. It only nudges the suggestion, never the ceiling: you can always push to your limit, and a real PR counts on any day." />
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 11 }}>
+              <AGStat k="Fresh" v="Push" vColor={UI.ok} s="A strong day. Train as usual and chase the bump." />
+              <AGStat k="Normal" v="As usual" s="The default. Nothing changes, the engine runs normally." />
+              <AGStat k="Rough" v={isC ? '+1 RIR' : 'Ease off'} vColor={UI.gold} s={isC ? 'Low on energy. The app suggests a rep more in reserve and counts the session gently, so a bad night never cuts your progression.' : 'Low on energy. The app eases the target (leave a little more in reserve) and counts the session gently, so a bad night never cuts your progression.'} />
+            </div>
+            <div style={{ ...cardStyle, borderLeft: `3px solid ${UI.gold}`, marginTop: 16 }}>
+              <AGKick color={UI.gold}>Why it matters</AGKick>
+              <div style={{ marginTop: 6, fontSize: 13.5, color: UI.inkSoft }}>
+                <b style={{ color: UI.ink }}>A rough day is discounted, not thrown away.</b> On Rough the app holds off the rep-miss cut and does not chase the earn ladder, so one tired session can never drag your weight down. If you push through and hit your reps anyway, the bump still lands. Skip the tap to train exactly as normal.
+              </div>
+            </div>
+          </Section>
+
+          {/* ── re-entry ramp (modus-agnostic) ── */}
+          <Section>
+            <AGSecHead n="Coming back · Break" title="Eased in after time off"
+              sub="Take a sick or vacation break longer than a week and the first sessions back start eased in: a rep more in reserve, counted gently, so a layoff never punishes your numbers. It only lowers the suggestion, never the ceiling, one strong set snaps you straight back." />
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 11 }}>
+              <AGStat k="Auto" v="No tap needed" s="After a break over a week the app opens your first session back already eased in, discounted like a rough day. Nothing to set." />
+              <AGStat k="Per lift" v="1, maybe 2 sets" vColor={UI.gold} s="Each lift starts a touch lighter, but hit your reps and earn pulls it straight back, usually on the first exposure, at most the second." />
+              <AGStat k="Systemic" v="One microcycle" s="The gentle count fades over a single rotation, week or cycle (your plan's unit), not a fixed number of sessions. A longer break eases in longer." />
+            </div>
+            <div style={{ ...cardStyle, borderLeft: `3px solid ${UI.gold}`, marginTop: 16 }}>
+              <AGKick color={UI.gold}>Why it matters</AGKick>
+              <div style={{ marginTop: 6, fontSize: 13.5, color: UI.inkSoft }}>
+                <b style={{ color: UI.ink }}>Never held below what you can do.</b> The ramp lowers the target, never caps the weight. Come back strong and your performance overrides it instantly, the discount just means a good day after time off still counts and a rough one never drags your progression down. Short break (a week or less)? No ramp at all.
+              </div>
+            </div>
+          </Section>
+
+          {/* ── volume ceiling / overreach (modus-agnostic) ── */}
+          <Section>
+            <AGSecHead n="Ceiling · Volume" title="When a muscle has had enough"
+              sub="The engine counts your hard sets per muscle over each microcycle (a rotation, a week, or a cycle, depending on the plan) and watches for the overreaching signature. It is the same guard in every mode, it just pulls a different lever." />
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 11 }}>
+              <AGStat k="The signal" v="Sore + stalled" s="A muscle that stays sore across its last two exposures while its reps go flat under the same load, or its joints start complaining." />
+              <AGStat k="The hold" v="No more sets" vColor={UI.gold} s="Once a muscle hits its ceiling the app stops adding sets to it. Weight and every other muscle keep progressing normally." />
+              <AGStat k="The offer" v="Deload, 1 tap" s="If a muscle is at its ceiling when you finish, the app offers a deload with the reason spelled out. Always wave-off-able." />
+            </div>
+            <div style={{ ...cardStyle, borderLeft: `3px solid ${UI.gold}`, marginTop: 16 }}>
+              <AGKick color={UI.gold}>Per mode</AGKick>
+              <div style={{ marginTop: 6, fontSize: 13.5, color: UI.inkSoft }}>
+                {isC
+                  ? <span><b style={{ color: UI.ink }}>Mesocycle:</b> if a muscle tops out before the planned peak week, its sets stop climbing early (held, not cut). The planned deload still arrives at block end, so no separate offer pops mid-block.</span>
+                  : isB
+                    ? <span><b style={{ color: UI.ink }}>Load only:</b> your set counts are fixed anyway, so there is nothing to freeze. The detector's only job here is to hold the load and offer the deload when the fatigue signature shows.</span>
+                    : <span><b style={{ color: UI.ink }}>Volume + Load:</b> the ceiling is the only thing holding your sets back. Hit it and adds pause for that muscle, then the deload offer lets you reset when you are ready. Nothing is ever forced, keep training if you would rather push on.</span>}
+              </div>
+            </div>
+          </Section>
+
+          {/* ── volume landmarks / self-timed block (modus-agnostic) ── */}
+          <Section>
+            <AGSecHead n="Landmarks · Memory" title="A ceiling it learns and remembers"
+              sub="The first time a muscle hits its overreaching signature, the app remembers the set count it happened at as that muscle's ceiling. It is smoothed across blocks, so one rough block nudges the number, never craters it. That memory is what turns an open-ended plan into a self-timed block." />
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 11 }}>
+              <AGStat k="Learned ceiling" v="Per muscle" s="Your MRV is stored per muscle, not per exercise, and averaged across blocks. A single bad week moves it a little, so it settles on your real ceiling over time." />
+              <AGStat k="Self-timed block" v="Recovery, not a number" vColor={UI.gold} s="A block ends when you hit the ceiling, not on a fixed date. Take the deload and the app starts a fresh block right there." />
+              <AGStat k="Reset & re-ramp" v="Back off, build again" s="On that reset each exercise drops about 2 sets from where it topped out (never below your plan's base), then set adds climb again, capped by the same learned ceiling." />
+            </div>
+            <div style={{ ...cardStyle, borderLeft: `3px solid ${UI.gold}`, marginTop: 16 }}>
+              <AGKick color={UI.gold}>Per mode</AGKick>
+              <div style={{ marginTop: 6, fontSize: 13.5, color: UI.inkSoft }}>
+                {isB
+                  ? <span><b style={{ color: UI.ink }}>Load only:</b> no volume landmarks here by design, your set counts are fixed on purpose. You still get the ceiling detector and the deload offer, they just hold and drop the weight instead of your sets.</span>
+                  : isC
+                    ? <span><b style={{ color: UI.ink }}>Mesocycle:</b> the block still ends on its planned week, but the learned ceiling carries as a memory and caps your sets early if you reach it before the peak. Your next block starts fresh from a backed-off base.</span>
+                    : <span><b style={{ color: UI.ink }}>Volume + Load:</b> this is what makes the plan a self-paced mesocycle. Grow until a muscle tops out, take the deload when you are ready, and the next block re-ramps from a backed-off start toward the ceiling you actually reached. Never forced, always wave-off-able.</span>}
+              </div>
+            </div>
+          </Section>
+
+          {/* ── block recap (modus-agnostic) ── */}
+          <Section>
+            <AGSecHead n="Recap · Block" title="What you built, and what it cost"
+              sub="When a block wraps up, the app sums up everything since your last reset: weight PRs, the lifts that climbed, how many sessions you put in and your best day. It shows up in two moments, and reads differently in each." />
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 11 }}>
+              <AGStat k="Block end" v="Pure win" vColor={UI.ok} s="Finish a block or take a deload and the recap is a celebration: PRs, sessions, best day, nothing else." />
+              <AGStat k="Deload declined" v="Win + cost" vColor={UI.gold} s="Wave a suggested deload off and the recap shows the same gains next to the fatigue evidence, so the choice is an honest one." />
+              <AGStat k="Anti-nag" v="Asked once" s="After you decline it goes quiet for a few sessions, just a small deload ready tag, then only speaks up again if the fatigue is clearly worse." />
+            </div>
+            <div style={{ ...cardStyle, borderLeft: `3px solid ${UI.gold}`, marginTop: 16 }}>
+              <AGKick color={UI.gold}>Why both sides</AGKick>
+              <div style={{ marginTop: 6, fontSize: 13.5, color: UI.inkSoft }}>
+                {isC
+                  ? <span><b style={{ color: UI.ink }}>Mesocycle:</b> your recap lands at the end of the block, when the mesocycle finishes, as a straight celebration. There is no mid-block nag: the planned deload is already on the calendar.</span>
+                  : <span><b style={{ color: UI.ink }}>Gains alone would argue against ever stopping.</b> "It is going great, why deload?" Seeing what you built next to the fatigue that came with it makes the call a real one. The app asks once with honest data, never blocks you, and never guilt-trips: keep training if you would rather push on.</span>}
+              </div>
+            </div>
+          </Section>
+
+          {/* ── stall + concrete swap (modus-agnostic) ── */}
+          <Section>
+            <AGSecHead n="Stall · Swap" title="When a lift stops moving"
+              sub="Separate from a tired muscle: sometimes one exercise just stalls. If your estimated 1RM on a lift goes flat for three sessions while your gates are green (joints fine, good pump, the muscle not at its ceiling), the app flags it and names a concrete alternative to try." />
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 11 }}>
+              <AGStat k="The signal" v="Flat 3 sessions" s="Three sessions with no new estimated 1RM on that lift, while joints, pump and muscle volume all read fine. That points at the exercise, not fatigue." />
+              <AGStat k="The swap" v="A real change" vColor={UI.gold} s="It names a sibling for the same muscle with a different movement or equipment, so the stimulus actually changes, not just a rename." />
+              <AGStat k="One tap" v="Or ignore it" s="Tap to swap it in and your sets carry over, or wave it off and keep grinding. Always a suggestion, never forced." />
+            </div>
+            <div style={{ ...cardStyle, borderLeft: `3px solid ${UI.gold}`, marginTop: 16 }}>
+              <AGKick color={UI.gold}>Why the gates matter</AGKick>
+              <div style={{ marginTop: 6, fontSize: 13.5, color: UI.inkSoft }}>
+                <b style={{ color: UI.ink }}>A stall is a lift problem, not a fatigue problem.</b> If the muscle were at its ceiling or your joints were complaining, the fix would be a deload, not a swap. By only firing when everything else looks healthy, this tells apart a lift that has run its course from a body that needs a break. It skips lifts you already flagged and never suggests one you disliked.
+              </div>
+            </div>
+          </Section>
+
           {/* ── 03 the four questions ── */}
           <Section>
             <AGSecHead n="03 / Feedback" title="The questions and every answer"
@@ -319,6 +432,12 @@ function AutoregGuideScreen({ store, go, mode: modeProp, back }) {
                 <p style={{ fontSize: 13.5, color: UI.inkSoft, margin: '11px 0' }}>
                   Asked for every exercise, every mode. Joint comfort, how the weight felt, and the pump: together these three gate the weight bump for this exercise{isB ? '.' : '. In Volume+Load and Meso, joint pain also shaves a set off this exercise.'}
                 </p>
+                <div style={{ ...cardStyle, borderLeft: `3px solid ${UI.gold}`, marginBottom: 14 }}>
+                  <AGKick color={UI.gold}>One-tap shortcut</AGKick>
+                  <div style={{ marginTop: 6, fontSize: 13.5, color: UI.inkSoft }}>
+                    <b style={{ color: UI.ink }}>Nothing to report? One tap.</b> The sheet opens asking "How did that feel?" with a single "On point" button that answers all four at once: joint none, weight just right, pump moderate, lift affinity "It's fine". "Flag a detail" opens the full set instead, pre-filled to on-target, so you only touch what actually deviated. Soreness above stays its own separate tap, per muscle, untouched by this shortcut.
+                  </div>
+                </div>
                 <AGKick>Joint</AGKick>
                 <div className="ag-opt-grid" style={{ marginTop: 8 }}>
                   <AGOpt cell chip="None" dirs={<AGDir kind="hold">gate green</AGDir>}>Joints fine. This exercise can earn its bump.</AGOpt>
@@ -525,6 +644,12 @@ function AutoregGuideScreen({ store, go, mode: modeProp, back }) {
                 <h3 className="display" style={h3}>2 · Manual, anytime</h3>
                 <p style={{ fontSize: 14, color: UI.inkSoft, margin: 0 }}>The active plan card has a Deload button in every mode. It runs your normal plan at ~50% load for one cycle, then auto-ends.</p>
               </div>
+              {!isC && (
+                <div style={{ ...cardStyle, borderLeft: `3px solid ${UI.gold}` }}>
+                  <h3 className="display" style={h3}>3 · Overreach-driven</h3>
+                  <p style={{ fontSize: 14, color: UI.inkSoft, margin: 0 }}>When a muscle hits its learned volume ceiling (see the Landmarks section), the finish screen offers a deload right then, with the reason spelled out. Take it and the block resets: each lift backs off about 2 sets and a fresh block re-ramps. It is a suggestion: wave it off and keep training.</p>
+                </div>
+              )}
             </div>
             <div style={cardStyle}>
               <h3 className="display" style={h3}>What a deload week actually does</h3>

@@ -43,6 +43,66 @@ const MESO_AFFINITY_LBL = { love: 'Love it', ok: "It's fine", dislike: 'Not my l
 const mesoVolumeLbl = (loadOnly) => loadOnly
   ? { not_enough: 'Too light', just_right: 'Just right', pushed: 'Hard', too_much: 'Too heavy' }
   : { not_enough: 'Not enough', just_right: 'Just right', pushed: 'Pushed my limits', too_much: 'Too much' };
+// Readiness labels for the recap edit row (mirrors the live sheet in screens-train.jsx).
+// 'reentry' is the auto-stamped post-break ramp (discounted, like Rough).
+const MESO_READINESS_LBL = { fresh: 'Fresh', normal: 'Normal', rough: 'Rough day', reentry: 'Easing back in' };
+
+// Autoreg v2 P2: shared Block-Recap content node (spec 5.1), rendered inside a
+// confirm() sheet (its message accepts a node). Pure: depends only on the global UI
+// object and its args, no store/closure state, so both the training screen (via the
+// blockRecapNode wrapper) and the home 8-cycle nudge render the identical recap.
+// evidence null + escalation 0 is the block-end CELEBRATION framing (gains only); a
+// non-null evidence array is the mid-block DECLINE framing (adds the fatigue section).
+function BlockRecap({ recap, evidence = null, escalation = 0 }) {
+  const u = UI.unit();
+  const tile = (k, v) => (
+    <div style={{ background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 6, padding: '10px 12px' }}>
+      <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>{k}</div>
+      <div style={{ fontFamily: UI.fontNum, fontSize: 20, fontWeight: 700, color: UI.ink }}>{v}</div>
+    </div>
+  );
+  return (
+    <div style={{ textAlign: 'left' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0,1fr))', gap: 8, marginBottom: 16 }}>
+        {tile('Weight PRs', recap.prCount)}
+        {tile('Sessions', recap.sessionCount)}
+      </div>
+      {recap.loadPRs.length > 0 && (<>
+        <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>WHAT YOU BUILT</div>
+        <div className="knurl" style={{ marginBottom: 10 }} />
+        <div style={{ marginBottom: 16 }}>
+          {recap.loadPRs.map((g, i) => (
+            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 0', borderBottom: i < recap.loadPRs.length - 1 ? `1px solid ${UI.hair}` : 'none' }}>
+              <span style={{ fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{g.name}</span>
+              <span style={{ fontFamily: UI.fontNum, fontSize: 12, fontWeight: 700, color: 'var(--accent)', flexShrink: 0, marginLeft: 10 }}>+{g.weightDelta} {u}</span>
+            </div>
+          ))}
+        </div>
+      </>)}
+      {recap.setGains.some(g => g.setDelta > 0) && (<>
+        <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>MORE SETS</div>
+        <div className="knurl" style={{ marginBottom: 10 }} />
+        <div style={{ marginBottom: 16 }}>
+          {recap.setGains.filter(g => g.setDelta > 0).map((g, i, arr) => (
+            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 0', borderBottom: i < arr.length - 1 ? `1px solid ${UI.hair}` : 'none' }}>
+              <span style={{ fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{g.name}</span>
+              <span style={{ fontFamily: UI.fontNum, fontSize: 12, fontWeight: 700, color: 'var(--accent)', flexShrink: 0, marginLeft: 10 }}>+{g.setDelta} set{g.setDelta > 1 ? 's' : ''}</span>
+            </div>
+          ))}
+        </div>
+      </>)}
+      {evidence && evidence.length > 0 && (<>
+        <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>{escalation > 0 ? 'THE FATIGUE, STILL CLIMBING' : 'THE FATIGUE'}</div>
+        <div className="knurl" style={{ marginBottom: 10 }} />
+        <div>
+          {evidence.map((e, i) => (
+            <div key={i} style={{ fontFamily: UI.fontUi, fontSize: 12.5, color: UI.inkSoft, lineHeight: 1.45, marginBottom: 6 }}>{e}</div>
+          ))}
+        </div>
+      </>)}
+    </div>
+  );
+}
 
 // Toggle shown under a non-empty exercise note: pins the note so it pops up and
 // must be acknowledged at the start of that exercise every workout (zane_exercises
@@ -1583,9 +1643,14 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
                         const isBest = isAssistedEx
                           ? (sessionBest != null && valForSet(s) != null && Math.abs(valForSet(s) - sessionBest) < 0.01)
                           : (sessionBest > 0 && Math.abs(valForSet(s) - sessionBest) < 0.01);
-                        const repsStr = (s.repsL != null || s.repsR != null)
-                          ? `L${s.repsL ?? '?'}/R${s.repsR ?? '?'}`
-                          : s.reps;
+                        // Per-side L/R only for an actually-unilateral exercise. A
+                        // set left with stray L/R data after a swap to a bilateral
+                        // exercise collapses to one number (the min, the app-wide
+                        // effective-reps convention) instead of rendering as L/R.
+                        const exIsUni = ex.movement_type === 'unilateral' || (ex.unilateral && !ex.movement_type);
+                        const repsStr = exIsUni
+                          ? ((s.repsL != null || s.repsR != null) ? `L${s.repsL ?? '?'}/R${s.repsR ?? '?'}` : s.reps)
+                          : (s.reps != null ? s.reps : ((s.repsL != null || s.repsR != null) ? Math.min(s.repsL ?? s.repsR ?? 0, s.repsR ?? s.repsL ?? 0) : s.reps));
                         return (
                           <span key={i} className="num" style={{ fontSize: 13, color: isBest ? UI.gold : UI.ink }}>
                             {s.timeSec != null
@@ -2444,12 +2509,15 @@ function HistoryScreen({ store, setStore, go, userId, initialTab }) {
                       return (
                         <div
                           className="display"
-                          style={{ fontSize: 21, color: UI.ink, lineHeight: 1.1, marginBottom: 4, display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                          style={{ fontSize: 21, color: UI.ink, lineHeight: 1.1, marginBottom: 4, display: 'inline-flex', flexWrap: 'wrap', alignItems: 'center', gap: 6 }}
                           onClick={hasCharts ? e => { e.stopPropagation(); setEffortChart({ dayId: s.dayId, dayName: s.dayName }); } : undefined}
                         >
                           {s.dayName}
                           {s.isBonus && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.gold, background: 'rgba(var(--accent-rgb), 0.12)', border: `0.5px solid rgba(var(--accent-rgb), 0.3)`, borderRadius: 4, padding: '3px 6px' }}>BONUS</span>}
                           {s.isDeload && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkSoft, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '3px 6px' }}>DELOAD</span>}
+                          {/* Ran under autoregulation / a mesocycle (mesoRecap captures the mode
+                              at the time, so the badge stays right even if the plan changed since). */}
+                          {s.mesoRecap && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.gold, background: 'rgba(var(--accent-rgb), 0.12)', border: `0.5px solid rgba(var(--accent-rgb), 0.3)`, borderRadius: 4, padding: '3px 6px' }}>{s.mesoRecap.meso ? 'MESO' : 'AUTO'}</span>}
                           {hasCharts && <i className="fa-solid fa-chart-line" style={{ fontSize: 10, color: UI.gold }} />}
                         </div>
                       );
@@ -2787,35 +2855,41 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
     // the store copy (DB / cross-device) and the per-plan localStorage cache must
     // move together and be freshly stamped, or getMesoState would keep preferring
     // the stale finished-session copy by updatedAt.
-    const remaining = store.sessions.filter(x => x.id !== sessionId);
     // Skip the meso rollback while a session for this plan is in progress: it owns
     // the localStorage meso cache and will flush its own state at finish, so a
     // stale rewrite here would corrupt it (mirrors isMesoSessionEditable).
     const liveForPlan = store.sessions.some(x => x && !x.ended && x.scheduleId === s.scheduleId);
-    const meso = (s.scheduleId && !s.isFreestyle && !liveForPlan)
-      ? (store.mesoStates || []).find(m => m.scheduleId === s.scheduleId) : null;
+    const doMesoRollback = !!(s.scheduleId && !s.isFreestyle && !liveForPlan
+      && (store.mesoStates || []).some(m => m.scheduleId === s.scheduleId));
     // A windowed session renders with entries:[] until a lazy fetch resolves;
     // revertMesoSessionBoosts needs the entries to build its exId keys, so load
     // them first (falls through to a harmless no-op rollback if the fetch fails).
     let delSession = s;
-    if (meso && (s.aggExercises || 0) > 0 && !(s.entries || []).length) {
+    if (doMesoRollback && (s.aggExercises || 0) > 0 && !(s.entries || []).length) {
       try {
         const bySession = await LB.fetchSessionEntries([sessionId]);
         if (bySession && bySession[sessionId] && bySession[sessionId].length) delSession = { ...s, entries: bySession[sessionId] };
       } catch {}
     }
-    const reverted = meso ? LB.revertMesoSessionBoosts(meso, delSession, remaining) : null;
-    const stampedMeso = (reverted && reverted !== meso)
-      ? { ...reverted, updatedAt: new Date().toISOString() } : null;
-    if (stampedMeso) {
-      try { localStorage.setItem(MESO_KEY + '-' + s.scheduleId, JSON.stringify(stampedMeso)); } catch {}
-    }
-    setStore(st => ({
-      ...st,
-      sessions: st.sessions.filter(x => x.id !== sessionId),
-      cardioLogs: (st.cardioLogs || []).filter(l => l.sessionId !== sessionId),
-      ...(stampedMeso ? { mesoStates: (st.mesoStates || []).map(m => m.id === meso.id ? stampedMeso : m) } : {}),
-    }));
+    // Compose the boost-rollback on the FRESHEST row INSIDE the updater: the await above
+    // (and any concurrent same-plan sync) can stale the closed-over row, and the old code
+    // wrote both localStorage and the store row from that stale copy, silently reverting a
+    // concurrent update. Read the fresh row + fresh remaining sessions here. #C
+    setStore(st => {
+      const base = {
+        ...st,
+        sessions: st.sessions.filter(x => x.id !== sessionId),
+        cardioLogs: (st.cardioLogs || []).filter(l => l.sessionId !== sessionId),
+      };
+      if (!doMesoRollback) return base;
+      const cur = (st.mesoStates || []).find(m => m.scheduleId === s.scheduleId);
+      if (!cur) return base;
+      const reverted = LB.revertMesoSessionBoosts(cur, delSession, base.sessions);
+      if (!reverted || reverted === cur) return base;
+      const stamped = { ...reverted, updatedAt: new Date().toISOString() };
+      try { localStorage.setItem(MESO_KEY + '-' + s.scheduleId, JSON.stringify(stamped)); } catch {}
+      return { ...base, mesoStates: (st.mesoStates || []).map(m => m.id === cur.id ? stamped : m) };
+    });
     go({ name: 'hist' });
   };
 
@@ -2885,6 +2959,9 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
   // Objective per-exercise earn inputs (exId, key, muscle, allHit, increment) for
   // this session, mirroring computeMesoGains' earn loop, so a feedback edit can
   // re-earn weight boosts. Rep-miss cuts are preserved inside the pure helper.
+  // Known limitation (autoreg-v2-spec.md 13.2, accepted): this scores the SEALED session
+  // while computeMesoGains scored PRE-seal, so a set with reps entered but never marked done
+  // (finish() seals it skipped) can flip allHit/earlyMiss here. Rare edge, one increment.
   const fbEarnInputs = () => {
     const unit = store.settings?.unit || 'kg';
     const out = [];
@@ -2893,11 +2970,15 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
       const ex = store.exercises?.find(x => x.id === e.exId);
       const muscle = typeof primaryMuscleForExercise === 'function' ? primaryMuscleForExercise(ex) : null;
       const workingSets = (e.sets || []).filter(st => !st.warmup && !st.skipped);
-      const allHit = workingSets.some(st => st.done)
-        && LB.mesoRepOutcome(workingSets, e.plannedReps ?? null, e.plannedRepsPerSet, e.plannedRepsMax ?? null).allHit;
+      // attempted mirrors computeMesoGains' `!workingSets.some(done) continue` guard:
+      // an untouched exercise is neither a hit nor a rep miss and must not move the streak.
+      const attempted = workingSets.length > 0 && workingSets.some(st => st.done);
+      const outcome = LB.mesoRepOutcome(workingSets, e.plannedReps ?? null, e.plannedRepsPerSet, e.plannedRepsMax ?? null);
+      const allHit = attempted && outcome.allHit;
+      const earlyMiss = attempted && outcome.earlyMiss; // feeds the rep-miss cut recompute
       const catCfg = ex?.equipment ? (store.settings?.equipmentConfig?.[ex.equipment] ?? {}) : {};
       const increment = catCfg.increment ?? (unit === 'lbs' ? 5 : 2.5);
-      out.push({ exId: e.exId, key: e.exId + '_' + s.dayId, muscle, allHit, increment, name: e.name });
+      out.push({ exId: e.exId, key: e.exId + '_' + s.dayId, muscle, allHit, earlyMiss, attempted, increment, name: e.name });
     });
     return out;
   };
@@ -2922,7 +3003,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
         if (jRec.weight != null) parts.push(wLbl[jRec.weight] || jRec.weight);
         if (jRec.pump != null) parts.push(MESO_PUMP_LBL[jRec.pump] || jRec.pump);
         if (jRec.affinity != null) parts.push(MESO_AFFINITY_LBL[jRec.affinity] || jRec.affinity);
-        joint.push({ title: jRec.exName || e.name, sub: parts.join(' · ') });
+        joint.push({ title: jRec.exName || e.name, sub: parts.join(' · '), sel: jRec.answer, weight: jRec.weight ?? null, pump: jRec.pump ?? null, affinity: jRec.affinity ?? null });
       });
       const vRec = answers.volume && answers.volume[muscle];
       if (vRec && vRec.volume != null) general.push({ title: 'Workload', sub: workLbl[vRec.volume] || vRec.volume });
@@ -2932,24 +3013,111 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
   };
   const saveFeedbackEdit = (edit) => {
     if (!sessionMeso || !fbRaw) { setFbEdit(null); return; }
-    const ctx = { dayId: s.dayId, loadOnly: fbLoadOnly };
-    const r1 = LB.applyMesoFeedbackEdit(sessionMeso, fbRaw, edit, ctx);
-    const earnInputs = fbEarnInputs();
-    const newMeso = LB.reearnMesoBoostsFromAnswers(r1.mesoState, r1.raw.answers, earnInputs, fbLoadOnly);
-    const gains = LB.mesoRecapGainsFromEdit(r1.raw.answers, newMeso.weightBoosts, earnInputs, s.dayId);
-    const groups = fbGroupsForStore(r1.raw.answers);
-    const stampedMeso = { ...newMeso, updatedAt: new Date().toISOString() };
-    const newRecap = { ...s.mesoRecap, groups, gains, raw: r1.raw };
-    // Move the store copy and the per-plan localStorage cache together (fresh
-    // updatedAt) so getMesoState never masks the edit with a stale cache.
-    if (typeof MESO_KEY === 'string') {
-      try { localStorage.setItem(MESO_KEY + '-' + s.scheduleId, JSON.stringify(stampedMeso)); } catch {}
+    // Readiness edit: change the session's readiness + signalWeight, and RESPECT the
+    // new signalWeight so it is not cosmetic. A full->discounted edit freezes the
+    // rep-miss cut (drops this session's -increment and restores the frozen streak);
+    // discounted->full re-enables it. The EARN side stays allowed on discounted, so
+    // it is re-earned unchanged from the (untouched) answers. There is no answer-record
+    // diff here, so bypass applyMesoFeedbackEdit entirely.
+    if (edit.type === 'readiness') {
+      const readiness = edit.readiness;
+      // Editable sessions are never deload (isMesoSessionEditable excludes it), so the
+      // map is rough/reentry -> discounted, else full. Mirrors chooseReadiness.
+      // Mirror the live scoring (LB.deriveSignalWeight): a session stamped 'none' whose
+      // deload ended mid-session scored 'full' live, so oldSignal must re-derive too,
+      // else recomputeMesoRepMissCut would compute the wrong cut flip. Editable sessions
+      // are never deload (isMesoSessionEditable excludes them). #D
+      const oldSignal = LB.deriveSignalWeight(s, !!s.isDeload);
+      const newSignal = (readiness === 'rough' || readiness === 'reentry') ? 'discounted' : 'full';
+      const earnInputs = fbEarnInputs();
+      const repMissBase = fbRaw.repMissBase || null;
+      const groups = fbGroupsForStore(fbRaw.answers);
+      // Recompute the CUT + re-earn on the FRESHEST mesoStates row INSIDE the updater:
+      // a background multi-device sync may have landed a newer row (e.g. fresh
+      // autoregState landmarks) since this sheet opened, and recompute/reearn spread
+      // the row through (...meso). Composing on the stale render-closure `sessionMeso`
+      // and writing it back wholesale would revert those concurrent fields. #3
+      setStore(st => {
+        const cur = (st.mesoStates || []).find(m => m.id === sessionMeso.id) || sessionMeso;
+        // 1. Recompute the CUT for the signalWeight flip (no-op on a same-side edit).
+        const cutMeso = LB.recomputeMesoRepMissCut(cur, earnInputs, repMissBase, oldSignal, newSignal);
+        // 2. Re-earn the EARN side from the unchanged answers (discounted still earns);
+        //    reearn preserves a re-armed cut and drops a frozen one.
+        const newMeso = LB.reearnMesoBoostsFromAnswers(cutMeso, fbRaw.answers, earnInputs, fbLoadOnly);
+        const composedMeso = { ...newMeso, updatedAt: new Date().toISOString() };
+        const gains = LB.mesoRecapGainsFromEdit(fbRaw.answers, composedMeso.weightBoosts, earnInputs, s.dayId);
+        const newRecap = { ...s.mesoRecap, groups, gains, raw: fbRaw };
+        // Write the per-plan localStorage cache in lockstep with the row (same fresh
+        // updatedAt), INSIDE the updater so it is atomic with the store write and can
+        // never be skipped by a deferred updater (mirrors saveMesoState's own in-updater
+        // localStorage write). getMesoState then never masks the edit with a stale cache.
+        if (typeof MESO_KEY === 'string') {
+          try { localStorage.setItem(MESO_KEY + '-' + s.scheduleId, JSON.stringify(composedMeso)); } catch {}
+        }
+        return {
+          ...st,
+          mesoStates: (st.mesoStates || []).map(m => m.id === sessionMeso.id ? composedMeso : m),
+          sessions: st.sessions.map(x => x.id === sessionId ? { ...x, readiness, signalWeight: newSignal, mesoRecap: newRecap } : x),
+        };
+      });
+      setFbEdit(null);
+      return;
     }
-    setStore(st => ({
-      ...st,
-      mesoStates: (st.mesoStates || []).map(m => m.id === sessionMeso.id ? stampedMeso : m),
-      sessions: st.sessions.map(x => x.id === sessionId ? { ...x, mesoRecap: newRecap } : x),
-    }));
+    // Autoreg v2 P1 MRV cap: re-run the stateless overreach detector so a post-hoc
+    // edit freezes a positive set-add for an at-ceiling muscle exactly like the
+    // live session would have (spec 2.2 / 2.3). typeof-guarded: primaryMuscleForExercise
+    // is a screens-train.jsx global that may not be loaded in every context.
+    const muscleOf = (exId) => (typeof primaryMuscleForExercise === 'function'
+      ? primaryMuscleForExercise(store.exercises?.find(x => x.id === exId)) : null);
+    const editSch = store.schedules?.find(x => x.id === s.scheduleId) || null;
+    // Compute at-ceiling over PRIOR exposures, EXCLUDING the edited session itself. The
+    // live session decided its freezes over endedSessions while it was still in-progress
+    // (so its OWN hard sets were not yet counted); store.sessions now contains it as an
+    // ended session, so including it would flip a muscle to at-ceiling that was NOT
+    // capped live and silently strip a set the live session granted. #A
+    const priorSessions = (store.sessions || []).filter(x => x.id !== sessionId);
+    const overreach = editSch ? LB.detectOverreach(priorSessions, editSch, muscleOf) : {};
+    const atCeilingMuscles = new Set(Object.keys(overreach).filter(m => overreach[m] && overreach[m].atCeiling));
+    // Autoreg v2 P3 numeric MRV cap: also freeze a muscle whose banked current-
+    // microcycle volume has reached its learned MRV (mirror of the live atCeiling
+    // helper). Degrades to detector-only when landmarks/mrv is absent.
+    const cycleSets = editSch ? LB.microcycleSetsByMuscle(priorSessions, editSch, muscleOf, {
+      which: 0, todayStr: LB.todayISO(),
+      startDate: sessionMeso?.startDate, startedAt: sessionMeso?.startedAt,
+      startCycleIndex: sessionMeso?.startCycleIndex, cycleIndex: store.cycleIndex,
+      statusPeriods: store.statusPeriods, cycleStartDate: store.cycleStartDate,
+    }) : {};
+    const landmarks = sessionMeso?.autoregState?.landmarks || {};
+    Object.keys(landmarks).forEach(m => {
+      const lm = landmarks[m];
+      if (lm && lm.mrv != null && (cycleSets[m] || 0) >= lm.mrv) atCeilingMuscles.add(m);
+    });
+    const ctx = { dayId: s.dayId, loadOnly: fbLoadOnly, atCeilingMuscles };
+    const earnInputs = fbEarnInputs();
+    // Apply the edit + re-earn on the FRESHEST mesoStates row INSIDE the updater (same
+    // reasoning as the readiness branch above, #3): a background multi-device sync may
+    // have landed a newer row since the sheet opened, and applyMesoFeedbackEdit /
+    // reearnMesoBoostsFromAnswers spread the row through (...meso). Composing on the
+    // stale render-closure `sessionMeso` and writing it back wholesale would revert
+    // those concurrent fields. localStorage is written inside so it stays atomic with
+    // the store write (mirrors saveMesoState).
+    setStore(st => {
+      const cur = (st.mesoStates || []).find(m => m.id === sessionMeso.id) || sessionMeso;
+      const r1 = LB.applyMesoFeedbackEdit(cur, fbRaw, edit, ctx);
+      const newMeso = LB.reearnMesoBoostsFromAnswers(r1.mesoState, r1.raw.answers, earnInputs, fbLoadOnly);
+      const stampedMeso = { ...newMeso, updatedAt: new Date().toISOString() };
+      const gains = LB.mesoRecapGainsFromEdit(r1.raw.answers, stampedMeso.weightBoosts, earnInputs, s.dayId);
+      const groups = fbGroupsForStore(r1.raw.answers);
+      const newRecap = { ...s.mesoRecap, groups, gains, raw: r1.raw };
+      if (typeof MESO_KEY === 'string') {
+        try { localStorage.setItem(MESO_KEY + '-' + s.scheduleId, JSON.stringify(stampedMeso)); } catch {}
+      }
+      return {
+        ...st,
+        mesoStates: (st.mesoStates || []).map(m => m.id === sessionMeso.id ? stampedMeso : m),
+        sessions: st.sessions.map(x => x.id === sessionId ? { ...x, mesoRecap: newRecap } : x),
+      };
+    });
     setFbEdit(null);
   };
 
@@ -3234,21 +3402,44 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
           const useEdit = !!(editGroups && editGroups.length);
           const groups = useEdit
             ? editGroups.map(g => ({ muscle: g.muscle, general: g.rows.filter(r => r.type !== 'joint'), joint: g.rows.filter(r => r.type === 'joint') }))
-            : (s.mesoRecap.groups || []).map(g => ({ muscle: g.muscle, general: (g.general || []).map(r => ({ name: r.title, sub: r.sub })), joint: (g.joint || []).map(r => ({ name: r.title, sub: r.sub })) }));
+            : (s.mesoRecap.groups || []).map(g => ({ muscle: g.muscle, general: (g.general || []).map(r => ({ name: r.title, sub: r.sub })), joint: (g.joint || []).map(r => ({ name: r.title, sub: r.sub, sel: r.sel, weight: r.weight, pump: r.pump, affinity: r.affinity })) }));
           const modeLabel = s.mesoRecap.loadOnly ? 'Autoregulation · load only'
             : s.mesoRecap.meso ? `Mesocycle${s.mesoRecap.week ? ` · Week ${s.mesoRecap.week}` : ''}`
             : 'Autoregulation';
+          // Per-exercise answer as a labelled 4-column grid (Pain / Weight / Pump /
+          // Verdict) so it's unambiguous which value is which, instead of one
+          // squished "None · Hard · Amazing · Love it" line. Missing answers show
+          // a dash. Older recaps without structured values fall back to the line.
+          const FB_COLS = ['Pain', 'Weight', 'Pump', 'Verdict'];
+          const fbGridCells = (r) => [
+            MESO_JOINT_LBL[r.sel] ?? null,
+            r.weight != null ? (mesoVolumeLbl(true)[r.weight] ?? r.weight) : null,
+            r.pump != null ? (MESO_PUMP_LBL[r.pump] ?? r.pump) : null,
+            r.affinity != null ? (MESO_AFFINITY_LBL[r.affinity] ?? r.affinity) : null,
+          ];
           const fbRow = (r, key, twoLine) => {
             // Per-exercise rows (joint + weight + pump + affinity) get a two-line layout:
-            // the exercise name on its own line (no truncation), the answer summary muted
-            // beneath. Muscle-level rows (Soreness, Workload) stay one-line name/value.
+            // the exercise name on its own line (no truncation), the labelled grid beneath.
+            // Muscle-level rows (Soreness, Workload) stay one-line name/value.
             if (twoLine) {
+              const structured = r.sel != null || r.weight != null || r.pump != null || r.affinity != null;
               const body = (<>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
                   <span style={{ fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, fontWeight: 600, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name}</span>
                   {useEdit && <i className="fa-solid fa-pen" style={{ fontSize: 9, color: 'var(--accent)', flexShrink: 0 }} />}
                 </div>
-                <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.inkSoft, marginTop: 3 }}>{r.sub}</div>
+                {structured ? (
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0,1fr))', gap: 8, marginTop: 7 }}>
+                    {fbGridCells(r).map((val, i) => (
+                      <div key={i}>
+                        <div className="micro" style={{ color: UI.inkFaint, marginBottom: 3 }}>{FB_COLS[i]}</div>
+                        <div style={{ fontFamily: UI.fontUi, fontSize: 12.5, color: val ? UI.ink : UI.inkGhost, lineHeight: 1.25 }}>{val || '–'}</div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.inkSoft, marginTop: 3 }}>{r.sub}</div>
+                )}
               </>);
               if (useEdit) {
                 return (
@@ -3311,6 +3502,16 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                   </button>
                   {recapFbOpen && (
                     <div style={{ padding: '2px 12px 12px' }}>
+                      {/* Session-level readiness row (above the per-muscle groups). Editing
+                          it flips signalWeight and re-runs the cut recompute (saveFeedbackEdit),
+                          so it is not cosmetic. Tap-to-fix only on the still-editable session. */}
+                      {s.readiness != null && (
+                        <div style={{ background: 'rgba(var(--knurl-rgb),0.03)', border: `1px solid ${UI.hair}`, borderRadius: 6, padding: '13px 14px 6px', marginBottom: 8 }}>
+                          <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>Session</div>
+                          <div className="knurl" style={{ marginBottom: 4 }} />
+                          {fbRow({ type: 'readiness', subject: sessionId, name: 'Readiness', sub: MESO_READINESS_LBL[s.readiness] || s.readiness, sel: s.readiness }, 'readiness', false)}
+                        </div>
+                      )}
                       {groups.map((g, gi) => (
                         <div key={gi} style={{ background: 'rgba(var(--knurl-rgb),0.03)', border: `1px solid ${UI.hair}`, borderRadius: 6, padding: '13px 14px 10px', marginBottom: gi < groups.length - 1 ? 8 : 0 }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
@@ -3384,8 +3585,31 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
         {/* Meso feedback edit picker (post-hoc correction of the last session) */}
         {fbEdit && (
           <Sheet open={!!fbEdit} onClose={() => setFbEdit(null)}
-            title={fbEdit.type === 'joint' ? (fbEdit.name || 'Feedback') : fbEdit.type === 'volume' ? 'Workload' : 'Soreness check'}
+            title={fbEdit.type === 'joint' ? (fbEdit.name || 'Feedback') : fbEdit.type === 'volume' ? 'Workload' : fbEdit.type === 'readiness' ? 'Readiness' : 'Soreness check'}
             titleColor="var(--accent)">
+            {fbEdit.type === 'readiness' && (<>
+              <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: 1.5 }}>
+                How you felt sets how much this session counts. A rough day freezes the load cut (your streak pauses), a full day lets it move. Earn always counts.
+              </div>
+              {[
+                { key: 'fresh', label: 'Fresh', sub: 'Feeling strong, counts in full' },
+                { key: 'normal', label: 'Normal', sub: 'A regular day, counts in full' },
+                { key: 'rough', label: 'Rough', sub: 'Low on energy, the load cut is frozen, earn still counts' },
+              ].map(opt => {
+                const sel = fbEdit.sel === opt.key || (fbEdit.sel === 'reentry' && opt.key === 'rough');
+                return (
+                  <button key={opt.key} onClick={() => setFbEdit(e => ({ ...e, sel: opt.key }))} style={{
+                    width: '100%', marginBottom: 8, padding: '12px 14px',
+                    background: sel ? 'rgba(var(--accent-rgb),0.12)' : UI.bgInset,
+                    border: `1px solid ${sel ? 'var(--accent)' : UI.hairStrong}`, borderRadius: 6, cursor: 'pointer', textAlign: 'left', WebkitTapHighlightColor: 'transparent',
+                  }}>
+                    <div style={{ fontFamily: UI.fontUi, fontSize: 13, color: sel ? 'var(--accent)' : UI.ink, fontWeight: 600 }}>{opt.label}</div>
+                    <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 2 }}>{opt.sub}</div>
+                  </button>
+                );
+              })}
+              <Btn disabled={!fbEdit.sel} onClick={() => saveFeedbackEdit({ type: 'readiness', readiness: fbEdit.sel })} style={{ width: '100%', marginTop: 12 }}>Save changes</Btn>
+            </>)}
             {fbEdit.type === 'soreness' && (<>
               <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: 1.5 }}>
                 Soreness carryover from your last <strong style={{ color: UI.ink }}>{fbEdit.subject}</strong> workout?
@@ -3585,21 +3809,12 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                         const chipBg = highlight ? UI.goldFaint : decline ? 'rgba(var(--danger-rgb),0.08)' : 'transparent';
                         return (
                           <div key={j} style={{
-                            width: '100%', marginTop: j > 0 ? 6 : 0,
+                            width: '100%', marginTop: j > 0 ? 5 : 0,
                             borderLeft: `2px solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.4)' : 'rgba(var(--accent-rgb),0.35)'}`,
-                            paddingLeft: 10,
+                            paddingLeft: 9,
                           }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
-                              <span style={{
-                                fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em',
-                                color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.85)' : UI.inkFaint,
-                                background: highlight ? UI.goldFaint : decline ? 'rgba(var(--danger-rgb),0.08)' : 'rgba(var(--accent-rgb),0.08)',
-                                border: `0.5px solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : 'rgba(var(--accent-rgb),0.25)'}`,
-                                borderRadius: 4, padding: '2px 6px',
-                              }}>DROP SET</span>
-                              {pr && <i className="fa-solid fa-dumbbell" style={{ fontSize: 9, color: UI.gold }} />}
-                            </div>
-                            <div data-shot-chips="1" style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 4, overflow: 'hidden' }}>
+                            <div data-shot-chips="1" style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 5, overflow: 'hidden' }}>
+                              <IntensityBadge label="DROP" highlight={highlight} decline={decline} />
                               {drops.map((d, di) => (
                                 <React.Fragment key={di}>
                                   {di > 0 && (
@@ -3619,6 +3834,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                                   </span>
                                 </React.Fragment>
                               ))}
+                              {pr && <i className="fa-solid fa-dumbbell" style={{ fontSize: 9, color: UI.gold, marginLeft: 2 }} />}
                             </div>
                             <FinisherTags drops={st.drops} labelFor={(di) => di === 0 ? 'top' : 'drop ' + di} />
                           </div>
@@ -3635,50 +3851,36 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                         const isMatch = st.technique === 'myorep_match';
                         return (
                           <div key={j} style={{
-                            width: '100%', marginTop: j > 0 ? 6 : 0,
+                            width: '100%', marginTop: j > 0 ? 5 : 0,
                             borderLeft: `2px solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.4)' : 'rgba(var(--accent-rgb),0.35)'}`,
-                            paddingLeft: 10,
+                            paddingLeft: 9,
                           }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
-                              <span style={{
-                                fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em',
-                                color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.85)' : UI.inkFaint,
-                                background: highlight ? UI.goldFaint : decline ? 'rgba(var(--danger-rgb),0.08)' : 'rgba(var(--accent-rgb),0.08)',
-                                border: `0.5px solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : 'rgba(var(--accent-rgb),0.25)'}`,
-                                borderRadius: 4, padding: '2px 6px',
-                              }}>{isMatch ? 'MYO MATCH' : 'MYO-REPS'}</span>
-                              {pr && <i className="fa-solid fa-dumbbell" style={{ fontSize: 9, color: UI.gold }} />}
-                            </div>
-                            <div data-shot-chips="1" style={{ display: 'inline-flex', flexDirection: 'column', gap: 4, overflow: 'hidden' }}>
-                              <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
-                                {drops.map((d, di) => (
-                                  <React.Fragment key={di}>
-                                    {di > 0 && (
-                                      <span style={{ color: UI.inkGhost, fontSize: 10, fontFamily: UI.fontUi }}>↺</span>
-                                    )}
-                                    <span style={{
-                                      background: di === 0 ? chipBg : 'transparent',
-                                      border: `1px solid ${di === 0 ? chipBorder : UI.hair}`,
-                                      borderRadius: 4, padding: '3px 8px',
-                                      fontFamily: UI.fontNum, fontSize: 12,
-                                      color: di === 0 ? chipColor : UI.inkSoft,
-                                      opacity: di === 0 ? 1 : 0.7,
-                                    }}>
-                                      {di === 0 && <>{d.kg ?? '—'}<span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, fontSize: 10 }}>{UI.unit()}</span><span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, margin: '0 1px' }}>×</span></>}
-                                      {d.reps ?? '—'}
-                                    </span>
-                                  </React.Fragment>
-                                ))}
-                              </div>
+                            <div data-shot-chips="1" style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 5, overflow: 'hidden' }}>
+                              <IntensityBadge label={isMatch ? 'MYO+' : 'MYO'} highlight={highlight} decline={decline} />
+                              {drops.map((d, di) => (
+                                <React.Fragment key={di}>
+                                  {di > 0 && (
+                                    <span style={{ color: UI.inkGhost, fontSize: 10, fontFamily: UI.fontUi }}>↺</span>
+                                  )}
+                                  <span style={{
+                                    background: di === 0 ? chipBg : 'transparent',
+                                    border: `1px solid ${di === 0 ? chipBorder : UI.hair}`,
+                                    borderRadius: 4, padding: '3px 8px',
+                                    fontFamily: UI.fontNum, fontSize: 12,
+                                    color: di === 0 ? chipColor : UI.inkSoft,
+                                    opacity: di === 0 ? 1 : 0.7,
+                                  }}>
+                                    {di === 0 && <>{d.kg ?? '—'}<span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, fontSize: 10 }}>{UI.unit()}</span><span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, margin: '0 1px' }}>×</span></>}
+                                    {d.reps ?? '—'}
+                                  </span>
+                                </React.Fragment>
+                              ))}
                               {tr.totalReps > 0 && (
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                                  <div style={{ border: `1px solid var(--accent)`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontUi, fontSize: 11, color: 'var(--accent)', letterSpacing: '0.03em', textAlign: 'center' }}>
-                                    Total {tr.totalReps}
-                                  </div>
-                                </div>
+                                <span style={{ border: `1px solid var(--accent)`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontNum, fontSize: 12, color: 'var(--accent)', letterSpacing: '0.02em', whiteSpace: 'nowrap' }}>Σ {tr.totalReps}</span>
                               )}
-                              <FinisherTags drops={st.drops} labelFor={(di) => di === 0 ? 'act' : 'myo ' + di} />
+                              {pr && <i className="fa-solid fa-dumbbell" style={{ fontSize: 9, color: UI.gold, marginLeft: 2 }} />}
                             </div>
+                            <FinisherTags drops={st.drops} labelFor={(di) => di === 0 ? 'act' : 'myo ' + di} />
                           </div>
                         );
                       }
@@ -3690,18 +3892,16 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                         const chipBorder = highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : UI.hairStrong;
                         const chipBg = highlight ? UI.goldFaint : decline ? 'rgba(var(--danger-rgb),0.08)' : 'transparent';
                         return (
-                          <div key={j} style={{ width: '100%', marginTop: j > 0 ? 6 : 0, borderLeft: `2px solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.4)' : 'rgba(var(--accent-rgb),0.35)'}`, paddingLeft: 10 }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
-                              <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.85)' : UI.inkFaint, background: highlight ? UI.goldFaint : decline ? 'rgba(var(--danger-rgb),0.08)' : 'rgba(var(--accent-rgb),0.08)', border: `0.5px solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : 'rgba(var(--accent-rgb),0.25)'}`, borderRadius: 4, padding: '2px 6px' }}>PARTIALS</span>
-                              {pr && <i className="fa-solid fa-dumbbell" style={{ fontSize: 9, color: UI.gold }} />}
-                            </div>
-                            <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
+                          <div key={j} style={{ width: '100%', marginTop: j > 0 ? 5 : 0, borderLeft: `2px solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.4)' : 'rgba(var(--accent-rgb),0.35)'}`, paddingLeft: 9 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 5 }}>
+                              <IntensityBadge label="PARTIALS" highlight={highlight} decline={decline} />
                               <span style={{ background: chipBg, border: `1px solid ${chipBorder}`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontNum, fontSize: 12, color: chipColor }}>
                                 {st.kg ?? '—'}<span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, fontSize: 10 }}>{UI.unit()}</span><span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, margin: '0 1px' }}>×</span>{st.reps ?? '—'}
                               </span>
                               {partials > 0 && <span style={{ color: UI.inkGhost, fontSize: 10, fontFamily: UI.fontUi }}>+</span>}
                               {partials > 0 && <span style={{ border: `1px solid rgba(var(--accent-rgb),0.35)`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontNum, fontSize: 12, color: UI.inkSoft }}>{partials}</span>}
                               <StretchChipLib tr={LB.techniqueRounds(st)} />
+                              {pr && <i className="fa-solid fa-dumbbell" style={{ fontSize: 9, color: UI.gold, marginLeft: 2 }} />}
                             </div>
                           </div>
                         );
@@ -3714,16 +3914,14 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                         const chipBorder = highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : UI.hairStrong;
                         const chipBg = highlight ? UI.goldFaint : decline ? 'rgba(var(--danger-rgb),0.08)' : 'transparent';
                         return (
-                          <div key={j} style={{ width: '100%', marginTop: j > 0 ? 6 : 0, borderLeft: `2px solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.4)' : 'rgba(var(--accent-rgb),0.35)'}`, paddingLeft: 10 }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
-                              <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.85)' : UI.inkFaint, background: highlight ? UI.goldFaint : decline ? 'rgba(var(--danger-rgb),0.08)' : 'rgba(var(--accent-rgb),0.08)', border: `0.5px solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : 'rgba(var(--accent-rgb),0.25)'}`, borderRadius: 4, padding: '2px 6px' }}>STRETCH</span>
-                              {pr && <i className="fa-solid fa-dumbbell" style={{ fontSize: 9, color: UI.gold }} />}
-                            </div>
-                            <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
+                          <div key={j} style={{ width: '100%', marginTop: j > 0 ? 5 : 0, borderLeft: `2px solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.4)' : 'rgba(var(--accent-rgb),0.35)'}`, paddingLeft: 9 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 5 }}>
+                              <IntensityBadge label="STRETCH" highlight={highlight} decline={decline} />
                               <span style={{ background: chipBg, border: `1px solid ${chipBorder}`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontNum, fontSize: 12, color: chipColor }}>
                                 {st.kg ?? '—'}<span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, fontSize: 10 }}>{UI.unit()}</span><span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, margin: '0 1px' }}>×</span>{st.reps ?? '—'}
                               </span>
                               <StretchChipLib tr={tr} />
+                              {pr && <i className="fa-solid fa-dumbbell" style={{ fontSize: 9, color: UI.gold, marginLeft: 2 }} />}
                             </div>
                           </div>
                         );
@@ -3745,21 +3943,12 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                         const chipBg = highlight ? UI.goldFaint : decline ? 'rgba(var(--danger-rgb),0.08)' : 'transparent';
                         return (
                           <div key={j} style={{
-                            width: '100%', marginTop: j > 0 ? 6 : 0,
+                            width: '100%', marginTop: j > 0 ? 5 : 0,
                             borderLeft: `2px solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.4)' : 'rgba(var(--accent-rgb),0.35)'}`,
-                            paddingLeft: 10,
+                            paddingLeft: 9,
                           }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
-                              <span style={{
-                                fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em',
-                                color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.85)' : UI.inkFaint,
-                                background: highlight ? UI.goldFaint : decline ? 'rgba(var(--danger-rgb),0.08)' : 'rgba(var(--accent-rgb),0.08)',
-                                border: `0.5px solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : 'rgba(var(--accent-rgb),0.25)'}`,
-                                borderRadius: 4, padding: '2px 6px',
-                              }}>AMRAP</span>
-                              {pr && <i className="fa-solid fa-dumbbell" style={{ fontSize: 9, color: UI.gold }} />}
-                            </div>
-                            <div data-shot-chips="1" style={{ display: 'flex', alignItems: 'flex-end', flexWrap: 'wrap', gap: 4, overflow: 'hidden' }}>
+                            <div data-shot-chips="1" style={{ display: 'flex', alignItems: 'flex-end', flexWrap: 'wrap', gap: 5, overflow: 'hidden' }}>
+                              <span style={{ alignSelf: 'center' }}><IntensityBadge label="AMRAP" highlight={highlight} decline={decline} /></span>
                               {drops.map((d, di) => (
                                 <React.Fragment key={di}>
                                   {di > 0 && (
@@ -3784,6 +3973,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                                   </div>
                                 </React.Fragment>
                               ))}
+                              {pr && <i className="fa-solid fa-dumbbell" style={{ fontSize: 9, color: UI.gold, alignSelf: 'center', marginLeft: 2 }} />}
                             </div>
                             <FinisherTags drops={st.drops} labelFor={(di) => 'round ' + (di + 1)} />
                           </div>
@@ -3845,6 +4035,8 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
           session={s}
           duration={duration}
           exercises={store.exercises}
+          store={store}
+          setStore={setStore}
           onClose={() => setEditing(false)}
           onSave={(patch) => {
             setStore(st => ({ ...st, sessions: st.sessions.map(x => x.id === s.id ? { ...x, ...patch } : x) }));
@@ -4012,11 +4204,13 @@ function StandaloneTechEditor({ st, kind, onPatch }) {
   );
 }
 
-function SessionEditSheet({ session, duration, exercises, onClose, onSave }) {
+function SessionEditSheet({ session, duration, exercises, store, setStore, onClose, onSave }) {
   const [draftDate, setDraftDate] = useStateL(session.date ? session.date.slice(0, 10) : '');
   const [draftDuration, setDraftDuration] = useStateL(duration != null ? String(Math.round(duration / 5) * 5) : '0');
   const [draftEntries, setDraftEntries] = useStateL(() => JSON.parse(JSON.stringify(session.entries)));
   const [openWarmups, setOpenWarmups] = useStateL({}); // eIdx -> bool, collapsed by default
+  const [swapEIdx, setSwapEIdx] = useStateL(null); // entry index whose exercise is being corrected via the picker
+  const [pendingSwap, setPendingSwap] = useStateL(null); // { eIdx, newExId } queued until the picked exercise resolves
   const [confirmEl, confirm] = useConfirm();
   const origDate = session.date ? session.date.slice(0, 10) : '';
   const origDuration = duration != null ? String(Math.round(duration / 5) * 5) : '0';
@@ -4026,6 +4220,43 @@ function SessionEditSheet({ session, duration, exercises, onClose, onSave }) {
     if (isDirty && !await confirm('Your edits won\'t be saved.', { title: 'Discard changes?', ok: 'Discard', cancel: 'Keep editing', danger: true })) return;
     onClose();
   };
+
+  // Correct a mis-logged exercise: point this entry at a different exercise while
+  // keeping its logged sets (the numbers were right, the movement was picked
+  // wrong, e.g. neutral vs overhand lat pulldown). The picker resolves to a
+  // user-owned id; the entry's cached name follows so history / PRs re-attribute.
+  const swapExercise = (ids) => {
+    const newExId = Array.isArray(ids) ? ids[0] : ids;
+    const eIdx = swapEIdx;
+    setSwapEIdx(null);
+    if (newExId == null || eIdx == null) return;
+    // finalizePick may materialize a picked SYSTEM exercise into store.exercises via
+    // setStore and then call this synchronously, BEFORE the sheet re-renders with the
+    // new `exercises` prop. Resolving the new exercise inline would miss it (undefined
+    // name / unilateral flag), silently skipping the L/R reshape this feature exists to
+    // do. Queue the swap; the effect below applies it once the exercise resolves. #5
+    setPendingSwap({ eIdx, newExId });
+  };
+  // Apply a queued swap once the picked exercise appears in `exercises` (an already-
+  // owned pick resolves on the first pass; a freshly materialized system exercise
+  // resolves a render later, when finalizePick's setStore has landed the new row).
+  useEffectL(() => {
+    if (!pendingSwap) return;
+    const { eIdx, newExId } = pendingSwap;
+    const newEx = exercises?.find(x => x.id === newExId);
+    if (!newEx) return; // wait for the materialized row to arrive
+    setDraftEntries(entries => entries.map((en, i) => {
+      if (i !== eIdx) return en;
+      // If the swap flips unilateral-ness, reshape the kept sets to match the new
+      // exercise (per-side L/R vs a single rep count) so a bilateral exercise
+      // never inherits stray L/R data and renders as "L13/R13" in history.
+      const oldEx = exercises?.find(x => x.id === en.exId);
+      const wasUni = !!oldEx?.unilateral, isUni = !!newEx.unilateral;
+      const sets = wasUni !== isUni ? LB.reshapeSetsUnilateral(en.sets, isUni) : en.sets;
+      return { ...en, exId: newExId, name: newEx.name ?? en.name, sets };
+    }));
+    setPendingSwap(null);
+  }, [pendingSwap, exercises]);
 
   const updateSet = (eIdx, sIdx, patch) => {
     setDraftEntries(entries => entries.map((e, i) =>
@@ -4133,6 +4364,57 @@ function SessionEditSheet({ session, duration, exercises, onClose, onSave }) {
       const mins = parseInt(draftDuration, 10);
       patch.durationMinutes = (!isNaN(mins) && mins > 0) ? mins : null;
     }
+    // Autoreg v2 swap re-key (#1 / #E): if a swap corrected an entry's exId, the captured
+    // meso feedback is keyed by the OLD exId; a later feedback edit / delete / revoke
+    // re-derives its keys from the CURRENT entry exId and would miss it. Decide AND apply
+    // BOTH the recap re-key and the meso-row re-key TOGETHER inside ONE functional updater
+    // reading FRESH state, so the owner/clobber decision and the two moves can never
+    // disagree (a concurrent sync between render and commit can't leave raw re-keyed while
+    // the row is not). Per swap:
+    //   FULL (recap raw + the exId_dayId meso ROW levers move together) when this session
+    //   OWNS the levers: no later same-day ended session on the plan retrained the old
+    //   exId, and the new exId has no lever of its own to clobber. Then the corrected
+    //   exercise inherits the earned boost/cut and delete/edit/revoke all reach it.
+    //   IDENTITY-ONLY (move just the joint record, contrib stays under the old key, in
+    //   sync with the unremapped deltas) otherwise, which is always safe.
+    // Same-index compare: SessionEditSheet only edits sets / swaps exIds, never
+    // adds/removes/reorders entries.
+    const swaps = [];
+    (session.entries || []).forEach((orig, i) => {
+      const now = draftEntries[i];
+      if (now && orig && !now.isCardio && now.exId !== orig.exId) swaps.push({ oldExId: orig.exId, newExId: now.exId, name: now.name });
+    });
+    if (swaps.length && session.mesoRecap?.raw?.answers) {
+      setStore(st => {
+        const row = session.scheduleId ? (st.mesoStates || []).find(m => m.scheduleId === session.scheduleId) : null;
+        let raw = session.mesoRecap.raw;
+        let nextRow = row;
+        swaps.forEach(sw => {
+          const owner = !!row
+            && !LB.laterSessionTrainsExId(st.sessions, sw.oldExId, session.dayId, session.ended, session.id, session.scheduleId)
+            && !LB.mesoRowHasExId(nextRow, sw.newExId, session.dayId);
+          if (owner) {
+            raw = LB.remapMesoRecapRawForSwap(raw, sw.oldExId, sw.newExId, session.dayId, sw.name);
+            nextRow = LB.remapMesoStateExId(nextRow, sw.oldExId, sw.newExId, session.dayId);
+          } else {
+            const na = LB.remapMesoAnswersExId(raw.answers, sw.oldExId, sw.newExId, sw.name);
+            if (na !== raw.answers) raw = { ...raw, answers: na };
+          }
+        });
+        const recapChanged = raw !== session.mesoRecap.raw;
+        const rowChanged = !!row && nextRow !== row;
+        if (!recapChanged && !rowChanged) return st;
+        return {
+          ...st,
+          sessions: recapChanged
+            ? st.sessions.map(x => x.id === session.id ? { ...x, mesoRecap: { ...session.mesoRecap, raw } } : x)
+            : st.sessions,
+          mesoStates: rowChanged
+            ? (st.mesoStates || []).map(m => m === row ? { ...nextRow, updatedAt: new Date().toISOString() } : m)
+            : st.mesoStates,
+        };
+      });
+    }
     onSave(patch);
   };
 
@@ -4149,6 +4431,7 @@ function SessionEditSheet({ session, duration, exercises, onClose, onSave }) {
   };
 
   return (
+    <>
     <Sheet open={true} onClose={requestClose} title="Edit session">
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14, paddingBottom: 160 }}>
         <div>
@@ -4273,8 +4556,11 @@ function SessionEditSheet({ session, duration, exercises, onClose, onSave }) {
             return (
               <div key={eIdx} style={{ position: 'relative', background: UI.bgInset, borderRadius: 8, overflow: 'hidden', border: `1px solid ${UI.hairStrong}` }}>
                 <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 3, background: 'var(--accent)' }} />
-                <div style={{ padding: '14px 16px 12px 18px', fontFamily: UI.fontDisplay, fontSize: 18, fontWeight: 700, letterSpacing: '0.01em', textTransform: 'uppercase', color: UI.ink, lineHeight: 1.15 }}>
-                  {exName}
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '14px 16px 12px 18px' }}>
+                  <div style={{ flex: 1, minWidth: 0, fontFamily: UI.fontDisplay, fontSize: 18, fontWeight: 700, letterSpacing: '0.01em', textTransform: 'uppercase', color: UI.ink, lineHeight: 1.15 }}>
+                    {exName}
+                  </div>
+                  <button onClick={() => setSwapEIdx(eIdx)} style={{ flexShrink: 0, marginTop: 1, background: 'transparent', border: `1px solid ${UI.hairStrong}`, borderRadius: 4, padding: '5px 10px', cursor: 'pointer', color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', WebkitTapHighlightColor: 'transparent' }}>Swap</button>
                 </div>
 
                 {warmupSets.length > 0 && (
@@ -4321,6 +4607,10 @@ function SessionEditSheet({ session, duration, exercises, onClose, onSave }) {
       </div>
       {confirmEl}
     </Sheet>
+    {swapEIdx != null && window.Screens?.ExercisePicker && (
+      <window.Screens.ExercisePicker store={store} setStore={setStore} onClose={() => setSwapEIdx(null)} onPick={swapExercise} singleSelect />
+    )}
+    </>
   );
 }
 
@@ -4342,6 +4632,22 @@ function StretchChipLib({ tr }) {
   const txt = stretchText(tr);
   if (!txt) return null;
   return <span style={{ border: `1px solid rgba(var(--accent-rgb),0.35)`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontNum, fontSize: 12, color: UI.inkSoft, whiteSpace: 'nowrap' }}>stretch {txt}</span>;
+}
+
+// Compact inline technique badge for the session-detail set list. It sits at the
+// head of the (now single-row) technique set instead of on its own line above,
+// which used to make a technique-heavy workout balloon vertically. Gold on a PR /
+// improvement, danger on a decline, a muted accent otherwise.
+function IntensityBadge({ label, highlight, decline }) {
+  return (
+    <span style={{
+      fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.1em',
+      color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.85)' : 'var(--accent)',
+      background: highlight ? UI.goldFaint : decline ? 'rgba(var(--danger-rgb),0.08)' : 'rgba(var(--accent-rgb),0.10)',
+      border: `0.5px solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : 'rgba(var(--accent-rgb),0.30)'}`,
+      borderRadius: 4, padding: '2px 6px', whiteSpace: 'nowrap', flexShrink: 0,
+    }}>{label}</span>
+  );
 }
 
 // Per-round finisher breakdown for a completed chain set (drop/myo/AMRAP): one

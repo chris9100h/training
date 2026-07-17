@@ -1187,6 +1187,25 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
   // Mon–Sun cycle-week overlay never applies.
   const cycleWeekView = !weekdayMode && !isFlex && (store.settings?.cycleWeekView ?? localStorage.getItem('logbook-cycle-week-view') === 'true');
 
+  // Autoreg v2 P2: passive deload hint (spec 5.3 step 3). After a declined
+  // emergent deload the full offer is suppressed for an N-session cooldown, so a
+  // small persistent chip carries the "at the ceiling, deload available" signal
+  // instead. Only for an active Auto-mode plan (a bounded meso keeps its planned
+  // end-of-block deload); shows when a decline cooldown is armed on this plan AND
+  // the detector still flags a ceiling. Auto stand-down clears it: once the
+  // signals recede the nudge is dropped at the next finish and this goes false.
+  const deloadHintActive = useMemo(() => {
+    if (!sch || !sch.mesocycle_autoregulate || sch.mesocycle_weeks != null) return false;
+    if (store.statusMode) return false;
+    const m = (typeof getMesoState === 'function') ? getMesoState(sch.id, store.mesoStates) : null;
+    const nudge = m && m.autoregState && m.autoregState.deloadNudge && m.autoregState.deloadNudge.block;
+    if (!nudge || nudge.declinedAt == null) return false;
+    if (typeof primaryMuscleForExercise !== 'function' || typeof LB.detectOverreach !== 'function') return false;
+    const muscleOfExId = (exId) => primaryMuscleForExercise(store.exercises?.find(x => x.id === exId));
+    const over = LB.detectOverreach(store.sessions, sch, muscleOfExId);
+    return Object.keys(over).some(mm => over[mm] && over[mm].atCeiling);
+  }, [sch?.id, sch?.mesocycle_autoregulate, sch?.mesocycle_weeks, store.statusMode, store.mesoStates, store.sessions, store.exercises]);
+
   const jsDay = new Date().getDay();
   const todayWd = jsDay === 0 ? 6 : jsDay - 1;
   // Oldest version = original plan start; null when no versioning
@@ -1389,6 +1408,16 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       return { ...d, slotIdx: i, date, isToday: weekOffset === 0 && i === dayIdx };
     });
   }, [sch, dayIdx, todayStripIdx, dayCount, weekdayMode, cycleWeekView, todayWd, weekOffset, store.cycleStartDate]);
+
+  // Latest calendar day currently shown in the strip. Lets the autoregulate
+  // badge tell whether it belongs on a browsed-back period: if the whole viewed
+  // span predates the meso's aligned start, autoregulation was not running then.
+  const viewedPeriodEndTs = useMemo(() => {
+    const ts = week
+      .map(d => (d.date instanceof Date ? d.date.getTime() : (d.date ? new Date(d.date).getTime() : NaN)))
+      .filter(t => !isNaN(t));
+    return ts.length ? Math.max(...ts) : null;
+  }, [week]);
 
   const activeDay = useMemo(() => {
     if (!sch) return day;
@@ -1890,24 +1919,30 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
             startDate2 = LB.nextCycleD1ISOFromSchedule(sc2, store.cycleStartDate);
             startCycleIndex2 = 0;
           }
-          const newMeso = {
-            ...existing,
-            startDate: startDate2,
-            startCycleIndex: startCycleIndex2,
-            deltas: {},
-            jointFlags: {},
-            pumpLowCounts: {},
-            growthCounts: {},
-            pendingMeso2: false,
-            startedAt: new Date().toISOString(), // fresh block-start anchor (flex week count)
-            updatedAt: new Date().toISOString(),
-          };
-          // Overwrite the per-plan localStorage cache too — getMesoState returns
-          // whichever of {store, cache} is newer by updatedAt, so leaving the
-          // stale Meso-1 cache in place would keep winning and the home strip /
-          // training screen would still show the old (completed) block.
-          if (typeof saveMesoStateToStorage === 'function') saveMesoStateToStorage(newMeso);
-          setStore(s => ({ ...s, mesoStates: [...(s.mesoStates || []).filter(m => m.scheduleId !== scheduleId), newMeso] }));
+          const now = new Date().toISOString();
+          // Compose Meso 2 on the FRESHEST row INSIDE the updater (twin of the training-
+          // screen startMeso2ForSchedule fix #4): the closed-over `existing` can lag a
+          // concurrent meso-row sync, and spreading it would revert completions or
+          // resurrect a cut weight boost into the new block. Overwrite the per-plan
+          // localStorage cache in lockstep (getMesoState returns whichever of store/cache
+          // is newer by updatedAt), inside the updater so it stays atomic. #B
+          setStore(s => {
+            const cur = (s.mesoStates || []).find(m => m.scheduleId === scheduleId) || existing;
+            const newMeso = {
+              ...cur,
+              startDate: startDate2,
+              startCycleIndex: startCycleIndex2,
+              deltas: {},
+              jointFlags: {},
+              pumpLowCounts: {},
+              growthCounts: {},
+              pendingMeso2: false,
+              startedAt: now, // fresh block-start anchor (flex week count)
+              updatedAt: now,
+            };
+            if (typeof saveMesoStateToStorage === 'function') saveMesoStateToStorage(newMeso);
+            return { ...s, mesoStates: [...(s.mesoStates || []).filter(m => m.scheduleId !== scheduleId), newMeso] };
+          });
         }
         return;
       }
@@ -2054,6 +2089,16 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     if (!shouldPrompt) return;
     deloadNudgeShown.current = true;
     (async () => {
+      // Autoreg v2 P2: on an Auto-meso plan (unbounded autoregulate; bounded mesos are
+      // suppressed above at sch.mesocycle_weeks), show the block-end CELEBRATION recap
+      // before the deload nudge, so a cruising lifter who never overreaches still gets a
+      // periodic recap of what they built. Plain cycle/weekday/flex plans have no
+      // mesoState, so blockSessions returns [] and the gate below skips the recap.
+      const mesoState = (typeof getMesoState === 'function') ? getMesoState(sch.id, store.mesoStates) : null;
+      const bRecap = LB.buildBlockRecap(LB.blockSessions(store.sessions, mesoState, store.statusPeriods));
+      if (bRecap && (bRecap.prCount > 0 || bRecap.setGains.some(g => g.setDelta > 0))) {
+        await confirm(<BlockRecap recap={bRecap} />, { title: 'Block complete 🎉', ok: "Let's go", cancel: null, preventBackdropClose: true });
+      }
       const yes = await confirm(body, { title, ok: 'Start deload', cancel: 'Not now', preventBackdropClose: true });
       const stamp = new Date().toISOString();
       setStore(s => ({ ...s, deloadPromptDismissedAt: stamp }));
@@ -2821,6 +2866,12 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                   // LOAD in load-only mode) once it's running. Mirrors the bounded
                   // meso badge's pending/active split, minus the week counter.
                   const m = (typeof getMesoState === 'function') ? getMesoState(sch.id, store.mesoStates) : null;
+                  // The cycle label above already reads the browsed cycle (e.g.
+                  // CYCLE 9). Drop the AUTO badge for a period that ends before
+                  // autoregulation's aligned start, so a pre-autoreg cycle no
+                  // longer inherits the current AUTO / LOAD flag.
+                  const autoStartTs = m?.startDate ? new Date(m.startDate + 'T12:00:00').getTime() : null;
+                  if (autoStartTs != null && viewedPeriodEndTs != null && viewedPeriodEndTs < autoStartTs) return null;
                   const week = (m && typeof mesoCurrentWeek === 'function') ? mesoCurrentWeek(m, store) : null;
                   if (week == null) {
                     const startLabel = m?.startDate
@@ -2838,6 +2889,11 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                     </span>
                   );
                 })()}
+                {deloadHintActive && (
+                  <span title="A muscle is at its ceiling. A deload is available whenever you want it." style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase', color: UI.gold, background: 'rgba(var(--accent-rgb),0.1)', border: `0.5px solid rgba(var(--accent-rgb),0.4)`, borderRadius: 4, padding: '2px 8px' }}>
+                    Deload ready
+                  </span>
+                )}
               </div>
             )}
           </div>
@@ -2968,7 +3024,23 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
         )}
 
         {/* day card — flex:1 so it fills */}
-        {isActiveRest ? (
+        {isActiveRest ? ((activeDay && activeDay.name !== 'REST' && !selectedDayStatusMode) ? (
+          // A named training day with no exercises is not a real rest day, it is
+          // just unbuilt. Showing "RECOVER." here is the top source of confusion
+          // ("legs today but it says recover?!"), so prompt to add exercises and
+          // deep-link straight into this day's editor instead.
+          <BracketFrame style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', textAlign: 'center', padding: 28 }}>
+            <div className="micro-gold" style={{ marginBottom: 12 }}>{cardLabel}</div>
+            <FitText text={(activeDay.name || '').toUpperCase()} max={56} min={28} style={{ fontFamily: UI.fontDisplay, fontWeight: 900, letterSpacing: '0.04em', color: UI.gold, lineHeight: 0.9, marginBottom: 14, maxWidth: '100%' }} />
+            <div style={{ fontSize: 13, color: UI.inkFaint, marginBottom: 22, maxWidth: 240, lineHeight: 1.5 }}>
+              This day has no exercises yet. Add some to train it.
+            </div>
+            <div style={{ display: 'flex', gap: 8, width: '100%' }}>
+              <Btn onClick={() => go({ name: 'schedule-edit', scheduleId: sch.id, openDayId: activeDay.id })} style={{ flex: 2 }}>Add exercises</Btn>
+              <Btn kind="ghost" onClick={() => go({ name: 'plan-view' })} style={{ flex: 1 }}>View plan</Btn>
+            </div>
+          </BracketFrame>
+        ) : (
           <BracketFrame style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', textAlign: 'center', padding: 28 }}>
             <div className="micro" style={{ marginBottom: 12 }}>{cardLabel}</div>
             <div style={{ fontFamily: UI.fontDisplay, fontSize: 56, fontWeight: 900, letterSpacing: '0.04em', textTransform: 'uppercase', color: UI.inkSoft, lineHeight: 0.9, marginBottom: 14 }}>
@@ -2985,7 +3057,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
             </div>
             {!cardioPlanPrefill && cardioBanner}
           </BracketFrame>
-        ) : (
+        )) : (
           <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%' }}>
             {/* Fixed: label, name, stats, CTAs */}
             <div style={{ flexShrink: 0, width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: 4 }}>
