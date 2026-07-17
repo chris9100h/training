@@ -2733,6 +2733,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const [mesoJointWeightSel, setMesoJointWeightSel] = useStateT(null); // weight-feel answer, folded into the per-exercise step (every mode)
   const [mesoJointPumpSel, setMesoJointPumpSel] = useStateT(null); // pump answer, now per exercise (every mode)
   const [mesoJointAffinitySel, setMesoJointAffinitySel] = useStateT(null); // affinity ('love'|'ok'|'dislike'), sticky per exId, optional
+  const [mesoJointExpanded, setMesoJointExpanded] = useStateT(false); // fast path: false = one-tap "On point" / "Flag a detail", true = the four detail chips
   // Editing an already-answered question reopens the same sheet prefilled;
   // these track which subject (muscle/exId) is currently being re-answered
   // vs. freshly asked for the first time (both paths call the same commit
@@ -2964,6 +2965,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     setMesoJointWeightSel(null);
     setMesoJointPumpSel(null);
     setMesoJointAffinitySel(null);
+    setMesoJointExpanded(false);
     mesoEditingRef.current.joint = null;
     const exId = mesoJointExId;
     const muscle = mesoJointMuscle;
@@ -3179,6 +3181,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     mesoEditingRef.current.joint = exId;
     setMesoRecapOpen(false);
     setMesoRecapDetailMuscle(null);
+    setMesoJointExpanded(true); // editing a specific answer opens straight to the chips
     setMesoJointOpen(true);
   };
   const openVolumeEdit = (muscle) => {
@@ -3544,6 +3547,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // it changed. Never rated yet stays null (optional, does not block Confirm).
     setMesoJointAffinitySel(mesoState?.affinity?.[exId]?.v ?? null);
     mesoEditingRef.current.joint = null;
+    setMesoJointExpanded(false); // fresh capture opens on the one-tap fast path
     setMesoJointOpen(true);
     // Encode done AND skipped: finishing an exercise by SKIPPING its last open
     // set (skipped, not done) must still re-run this effect. Keying only on
@@ -7825,7 +7829,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       {/* Joint discomfort */}
       <Sheet open={mesoJointOpen} onClose={() => {}} title={mesoJointExName || 'Feedback'}>
         {/* Per-exercise feedback: joints, weight feel and pump, all for this one lift
-            (every mode). The per-muscle sheet below is workload only (Volume+Load / Meso). */}
+            (every mode). The per-muscle sheet below is workload only (Volume+Load / Meso).
+            Fast path: a fresh capture opens collapsed, so a normal session is one "On point"
+            tap that logs the on-target answers; "Flag a detail" expands the chips (pre-filled
+            to on-target, so you only tap deviations). Editing from the recap opens straight to
+            the chips (openJointEdit sets mesoJointExpanded). */}
+        {mesoJointExpanded ? (<>
         <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 8, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Joint pain</div>
         <div style={{ display: 'flex', gap: 8, marginBottom: 18 }}>
           {[
@@ -7896,6 +7905,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         >
           {mesoEditingRef.current.joint ? 'Save changes' : 'Confirm'}
         </Btn>
+        </>) : (<>
+        <div style={{ fontSize: 13.5, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: 1.45 }}>How did that feel?</div>
+        <Btn onClick={() => handleJointAnswer('none', 'just_right', 'moderate', mesoJointAffinitySel)} style={{ width: '100%' }}>On point</Btn>
+        <Btn kind="ghost" onClick={() => { setMesoJointSel('none'); setMesoJointWeightSel('just_right'); setMesoJointPumpSel('moderate'); setMesoJointExpanded(true); }} style={{ width: '100%', marginTop: 8 }}>Flag a detail</Btn>
+        </>)}
       </Sheet>
 
       {/* Per-muscle workload (Volume+Load / non-final Meso weeks): drives the set deltas.
