@@ -3362,10 +3362,23 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       // computeMesoGains runs on the pre-seal session, so guard here to match the
       // seal, otherwise an untouched exercise would count as an early rep miss.
       if (!workingSets.some(s => s.done)) continue;
+      // A newly-added or swapped-in exercise's session entry carries no (or an
+      // inherited, wrong) rep target: the real one is what the user just picked
+      // in the post-session rep wizard (addedRepPatchesRef, applied to the plan
+      // in applyPlanAndFinish). Since computeMesoGains runs on the pre-seal
+      // session, that target hasn't been written back to the entry yet, so read
+      // it from the patch ref and fall back to the entry's own target otherwise.
+      // This makes the earn gate below judge the reps against the target the
+      // user actually set for THIS exercise, not a stale / blank one (which used
+      // to auto-earn a boost off any rep count on a fresh add).
+      const repPatch = addedRepPatchesRef.current?.[exId];
+      const planReps = repPatch ? (repPatch.reps ?? null) : (e.plannedReps ?? null);
+      const planRepsPerSet = repPatch ? (repPatch.repsPerSet ?? null) : e.plannedRepsPerSet;
+      const planRepsMax = repPatch ? (repPatch.repsMax ?? null) : (e.plannedRepsMax ?? null);
       // allHit gates the earn side (strict, unchanged); earlyMiss (a looser
       // bar, the last working set is exempt) feeds the miss-streak cut below.
       // See LB.mesoRepOutcome for the exact per-set/range-aware rules.
-      const { allHit, earlyMiss } = LB.mesoRepOutcome(workingSets, e.plannedReps ?? null, e.plannedRepsPerSet, e.plannedRepsMax ?? null);
+      const { allHit, earlyMiss } = LB.mesoRepOutcome(workingSets, planReps, planRepsPerSet, planRepsMax);
 
       const catCfg = ex?.equipment ? (store.settings?.equipmentConfig?.[ex.equipment] ?? {}) : {};
       const increment = catCfg.increment ?? (unit === 'lbs' ? 5 : 2.5);
@@ -4673,6 +4686,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   };
 
   const confirmWithFeel = (feel) => {
+    // Clear any rep-target patches from a prior finish attempt so a "Leave plan"
+    // or diff-free finish can't inherit a stale target (the wizard repopulates
+    // this on the "Update plan" path).
+    addedRepPatchesRef.current = {};
     const diffs = computePlanDiff();
     if (diffs.length > 0) {
       setPendingFeel(feel);
@@ -4759,6 +4776,23 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           ...sch,
           days: sch.days.map(d => d.id === day.id ? { ...d, items: newItems } : d),
         } : sch),
+      }));
+    }
+    // Mirror each wizard-picked rep target onto its live session entry too (not
+    // just the plan), so the persisted zane_session_entries row and any later
+    // feedback-edit re-earn judge the weight boost against the same target the
+    // finish-time earn gate used (computeMesoGains reads it from the patch ref).
+    // Entries with no patch (unchanged, or an add the user left out of the plan)
+    // keep their own target.
+    const repPatches = addedRepPatchesRef.current || {};
+    if (Object.keys(repPatches).length) {
+      updateSession(sess => ({
+        ...sess,
+        entries: sess.entries.map(e => {
+          const p = repPatches[e.exId];
+          if (!p) return e;
+          return { ...e, plannedReps: p.reps ?? null, plannedRepsPerSet: p.repsPerSet ?? null, plannedRepsMax: p.repsMax ?? null };
+        }),
       }));
     }
     finish(pendingFeel);
