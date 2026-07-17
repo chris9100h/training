@@ -71,9 +71,20 @@ Output: `cycleSets[muscle]` = harte Sätze im aktuellen/letzten Mikrozyklus.
 
 ### 2.2 Overreach-Detektor
 
-Universeller Baustein, alle Signale sammelt ihr schon pro Session. Pro Muskel
-über ein **Bestätigungsfenster** (Vorschlag: 2 aufeinanderfolgende Muskel-
-Sessions, weil ein Muskel oft 2x/Woche drankommt):
+Universeller Baustein, alle Signale sammelt ihr schon pro Session. Pro Muskel über
+ein **Bestätigungsfenster: die letzten 2 aufeinanderfolgenden Muskel-Exposures**
+(wie oft der MUSKEL trainiert wurde, nicht Day-Types, nicht fix Rotationen).
+**Frequenz-adaptiv:**
+- Muskel **2x/Rotation** (z.B. Brust auf Push1 + Push2): die 2 Exposures liegen **in
+  einer Rotation** → schnelle Bestätigung.
+- Muskel **1x/Rotation**: die 2 Exposures spannen **2 Rotationen** (kein zweites Mal
+  in der Rotation). Unproblematisch, so selten trainierte Muskeln überreizen praktisch
+  nie über Volumen.
+
+Das Deload ist eh nur ein wegwischbarer Vorschlag, ein Fehlalarm kostet also nichts
+Erzwungenes; deshalb reichen 2 Exposures. Ab P3 kommt der gelernte MRV-Wert als
+zusätzliche Volumen-Schwelle dazu (nur triggern, wenn wirklich nah an der Decke).
+Die Regel selbst:
 
 - **Soreness:** wiederholt "still sore" (per-Muskel-Antwort).
 - **Joint-Flags:** Joint-Feedback ≠ "none" auf Übungen dieses Muskels.
@@ -134,8 +145,11 @@ Schlaf/Stress**, also bleibt der manuelle Tap die Primärquelle. (Gewichts-Trend
 Steps können den Vorschlag später vorbelegen.)
 
 ### 4.2 Heute-Effekt
-- **Rough:** +1 RIR (näher am Vorbehalt), Earn-Ladder heute **nicht** jagen,
-  optional letzten Accessory-Satz kappen.
+Durchweg **Vorschlag, nie Drosselung**: die App senkt das Ziel, deckelt aber nie die
+Leistung. Wer sich stark fühlt, geht ans Limit, und Earn zieht sofort nach (gleiches
+Prinzip wie Wiedereinstieg §7). Der Nutzer behält immer die Freiheit, ans Limit zu gehen.
+- **Rough:** +1 RIR als **Vorschlag** (näher am Vorbehalt starten), Earn-Ladder heute
+  nicht aktiv jagen. **Kein** erzwungenes Satz-Kappen.
 - **Fresh:** normal, darf pushen.
 - **Normal:** wie heute.
 
@@ -256,14 +270,17 @@ Intelligenz wie Willkür an. Beispiele:
 - Harter Satz: Myo/Drop zählen als **1**.
 - Deload-Nudge-Cooldown: **3** Sessions, dann nur passiver Hinweis.
 - Stall: **3** Sessions ohne e1RM-Fortschritt bei grünen Gates.
+- Readiness "Rough": **+1 RIR als Vorschlag, kein Satz-Kappen**, durch Leistung
+  überschreibbar (App schlägt vor, drosselt nicht).
 - Block-Backoff: **−2 Sätze pro Übung** am Blockstart; Decke (MRV) pro Muskel.
 - Buchhaltungs-Fenster: ein Mikrozyklus nach Plan-Struktur (§2.1).
 
-**Vorgeschlagen, noch zu bestätigen:**
-- Detektor-Bestätigungsfenster: die **letzten 2 Mal**, die der Muskel drankam.
-- Readiness "Rough": **+1 RIR** und letzten Accessory-Satz kappen.
 - Wiedereinstieg: ab **7** Pausentagen; systemischer Ease-in über **1 Mikrozyklus**,
   Last-Catch-up **≤2 Exposures/Übung**, immer durch Leistung überschreibbar (§7).
+
+**Vorgeschlagen, noch zu bestätigen:**
+- Detektor-Bestätigungsfenster: die **letzten 2 aufeinanderfolgenden Muskel-Exposures**,
+  frequenz-adaptiv (§2.2), nicht fix in Rotationen gezählt.
 
 **Später (nicht v1-blockierend):**
 - MRV-EMA-Glättungsfaktor (Startwert im Bau festlegen, dann tunen).
