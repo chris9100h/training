@@ -4765,22 +4765,15 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     setPendingFeel(null);
   };
 
-  // Prefill for the plan editor of a newly-added exercise, built from what was
-  // just logged: same reps across the working sets -> Uniform, varied -> Per Set
-  // with the exact per-set reps. The user can switch to any model in the editor.
+  // Prefill for the plan editor of a newly-added / swapped-in exercise. The rep
+  // target defaults to a Range of 8-12 (the target that fits the vast majority
+  // of exercises) rather than pinning it to whatever reps happened to get logged
+  // this session; only the set count carries over from what was actually done.
+  // The user can switch to any model / reps in the editor before saving.
   const buildRepPrefill = (entry) => {
     const working = (entry.sets || []).filter(s => !s.warmup && !s.skipped);
-    const repsOf = (s) => (s.repsL != null || s.repsR != null)
-      ? Math.min(s.repsL ?? s.repsR ?? 0, s.repsR ?? s.repsL ?? 0)
-      : s.reps;
-    const logged = working.map(repsOf);
     const setCount = working.length || entry.plannedSets || 3;
-    const allValid = working.length > 0 && logged.every(r => r != null && r > 0);
-    if (allValid && !logged.every(r => r === logged[0])) {
-      return { exId: entry.exId, sets: setCount, reps: logged[0], repsPerSet: logged };
-    }
-    const firstValid = logged.find(r => r != null && r > 0);
-    return { exId: entry.exId, sets: setCount, reps: firstValid ?? 8 };
+    return { exId: entry.exId, sets: setCount, reps: 8, repsMax: 12 };
   };
   // The untouched prefill as a patch: used when the editor is dismissed without
   // saving, so a skipped exercise still lands with a sensible target, never blank.

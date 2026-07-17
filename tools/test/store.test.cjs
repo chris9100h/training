@@ -829,6 +829,17 @@ async function testAsync(name, fn) {
     assert.strictEqual(out.allHit, false);   // 7 < mid 10 → no earn
     assert.strictEqual(out.earlyMiss, true); // 7 < floor 8, and a lone set counts directly
   });
+  test('mesoRepOutcome: no rep target at all (ad-hoc mid-session add) never earns a boost', () => {
+    // A brand-new exercise carries no plannedReps until the post-session plan
+    // wizard assigns one. Its earn gate must stay shut (there is no top-of-range
+    // to clear) instead of auto-passing off any rep count, which used to fire a
+    // weight bump on a fresh add. The miss gate stays permissive: no target so
+    // nothing is "too heavy".
+    const sets = [{ done: true, reps: 20 }, { done: true, reps: 20 }];
+    const out = LB.mesoRepOutcome(sets, null, null, null);
+    assert.strictEqual(out.allHit, false, 'no target → cannot earn a weight bump');
+    assert.strictEqual(out.earlyMiss, false, 'no target → cannot be a rep miss either');
+  });
   test('mesoRepOutcome (per-set): the MISS gate uses each set\'s own per-set floor, last set exempt', () => {
     // first set under its per-set target 10 → early miss
     assert.strictEqual(LB.mesoRepOutcome([{ done: true, reps: 9 }, { done: true, reps: 8 }], null, [10, 8], null).earlyMiss, true);

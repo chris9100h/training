@@ -4518,7 +4518,12 @@ function mesoRepOutcome(workingSets, plannedReps, plannedRepsPerSet, plannedReps
   const earnHit = (s, i) => {
     if (!s.done) return false;
     const target = mesoEarnTarget(i, n, plannedReps, plannedRepsPerSet, plannedRepsMax);
-    if (target == null) return true;
+    // No rep target at all (an exercise added ad-hoc mid-session, before its
+    // target is assigned in the post-session plan wizard): there is no top-of-
+    // range to clear, so it must NOT earn a weight bump. Auto-passing here made
+    // a fresh add fire a boost off any rep count. The MISS gate below stays
+    // permissive (no target, so it can't be "too heavy"): only the earn shuts.
+    if (target == null) return false;
     const reps = effReps(s);
     return reps != null && reps >= target;
   };
