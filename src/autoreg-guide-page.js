@@ -120,6 +120,18 @@
       '<div style="margin-top:6px;font-size:13.5px;color:var(--ink-soft)"><b>A rough day is discounted, not thrown away.</b> On Rough the app holds off the rep-miss cut and does not chase the earn ladder, so one tired session can never drag your weight down. If you push through and hit your reps anyway, the bump still lands. Skip the tap to train exactly as normal.</div></div>';
     out+='</section>';
 
+    /* re-entry ramp (modus-agnostic) */
+    out+='<section class="sec">'+sechead('Coming back · Break','Eased in after time off',
+      'Take a sick or vacation break longer than a week and the first sessions back start eased in: a rep more in reserve, counted gently, so a layoff never punishes your numbers. It only lowers the suggestion, never the ceiling, one strong set snaps you straight back.');
+    out+='<div class="grid g180">'+
+      stat('Auto','No tap needed',null,'After a break over a week the app opens your first session back already eased in, discounted like a rough day. Nothing to set.')+
+      stat('Per lift','1, maybe 2 sets','var(--accent)','Each lift starts a touch lighter, but hit your reps and earn pulls it straight back, usually on the first exposure, at most the second.')+
+      stat('Systemic','One microcycle',null,'The gentle count fades over a single rotation, week or cycle (your plan\'s unit), not a fixed number of sessions. A longer break eases in longer.')+
+      '</div>';
+    out+='<div class="card lb accented" style="margin-top:16px"><div class="kick" style="color:var(--accent)">Why it matters</div>'+
+      '<div style="margin-top:6px;font-size:13.5px;color:var(--ink-soft)"><b>Never held below what you can do.</b> The ramp lowers the target, never caps the weight. Come back strong and your performance overrides it instantly, the discount just means a good day after time off still counts and a rough one never drags your progression down. Short break (a week or less)? No ramp at all.</div></div>';
+    out+='</section>';
+
     /* volume ceiling / overreach (modus-agnostic) */
     out+='<section class="sec">'+sechead('Ceiling · Volume','When a muscle has had enough',
       'The engine counts your hard sets per muscle over each microcycle (a rotation, a week, or a cycle, depending on the plan) and watches for the overreaching signature. It is the same guard in every mode, it just pulls a different lever.');
@@ -162,6 +174,18 @@
       (isC?'<b>Mesocycle:</b> your recap lands at the end of the block, when the mesocycle finishes, as a straight celebration. There is no mid-block nag: the planned deload is already on the calendar.'
         :'<b>Gains alone would argue against ever stopping.</b> "It is going great, why deload?" Seeing what you built next to the fatigue that came with it makes the call a real one. The app asks once with honest data, never blocks you, and never guilt-trips: keep training if you would rather push on.')+
       '</div></div>';
+    out+='</section>';
+
+    /* stall + concrete swap (modus-agnostic) */
+    out+='<section class="sec">'+sechead('Stall · Swap','When a lift stops moving',
+      'Separate from a tired muscle: sometimes one exercise just stalls. If your estimated 1RM on a lift goes flat for three sessions while your gates are green (joints fine, good pump, the muscle not at its ceiling), the app flags it and names a concrete alternative to try.');
+    out+='<div class="grid g180">'+
+      stat('The signal','Flat 3 sessions',null,'Three sessions with no new estimated 1RM on that lift, while joints, pump and muscle volume all read fine. That points at the exercise, not fatigue.')+
+      stat('The swap','A real change','var(--accent)','It names a sibling for the same muscle with a different movement or equipment, so the stimulus actually changes, not just a rename.')+
+      stat('One tap','Or ignore it',null,'Tap to swap it in and your sets carry over, or wave it off and keep grinding. Always a suggestion, never forced.')+
+      '</div>';
+    out+='<div class="card lb accented" style="margin-top:16px"><div class="kick" style="color:var(--accent)">Why the gates matter</div>'+
+      '<div style="margin-top:6px;font-size:13.5px;color:var(--ink-soft)"><b>A stall is a lift problem, not a fatigue problem.</b> If the muscle were at its ceiling or your joints were complaining, the fix would be a deload, not a swap. By only firing when everything else looks healthy, this tells apart a lift that has run its course from a body that needs a break. It skips lifts you already flagged and never suggests one you disliked.</div></div>';
     out+='</section>';
 
     /* 03 feedback */

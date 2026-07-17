@@ -304,6 +304,23 @@ function AutoregGuideScreen({ store, go, mode: modeProp, back }) {
             </div>
           </Section>
 
+          {/* ── re-entry ramp (modus-agnostic) ── */}
+          <Section>
+            <AGSecHead n="Coming back · Break" title="Eased in after time off"
+              sub="Take a sick or vacation break longer than a week and the first sessions back start eased in: a rep more in reserve, counted gently, so a layoff never punishes your numbers. It only lowers the suggestion, never the ceiling, one strong set snaps you straight back." />
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 11 }}>
+              <AGStat k="Auto" v="No tap needed" s="After a break over a week the app opens your first session back already eased in, discounted like a rough day. Nothing to set." />
+              <AGStat k="Per lift" v="1, maybe 2 sets" vColor={UI.gold} s="Each lift starts a touch lighter, but hit your reps and earn pulls it straight back, usually on the first exposure, at most the second." />
+              <AGStat k="Systemic" v="One microcycle" s="The gentle count fades over a single rotation, week or cycle (your plan's unit), not a fixed number of sessions. A longer break eases in longer." />
+            </div>
+            <div style={{ ...cardStyle, borderLeft: `3px solid ${UI.gold}`, marginTop: 16 }}>
+              <AGKick color={UI.gold}>Why it matters</AGKick>
+              <div style={{ marginTop: 6, fontSize: 13.5, color: UI.inkSoft }}>
+                <b style={{ color: UI.ink }}>Never held below what you can do.</b> The ramp lowers the target, never caps the weight. Come back strong and your performance overrides it instantly, the discount just means a good day after time off still counts and a rough one never drags your progression down. Short break (a week or less)? No ramp at all.
+              </div>
+            </div>
+          </Section>
+
           {/* ── volume ceiling / overreach (modus-agnostic) ── */}
           <Section>
             <AGSecHead n="Ceiling · Volume" title="When a muscle has had enough"
@@ -361,6 +378,23 @@ function AutoregGuideScreen({ store, go, mode: modeProp, back }) {
                 {isC
                   ? <span><b style={{ color: UI.ink }}>Mesocycle:</b> your recap lands at the end of the block, when the mesocycle finishes, as a straight celebration. There is no mid-block nag: the planned deload is already on the calendar.</span>
                   : <span><b style={{ color: UI.ink }}>Gains alone would argue against ever stopping.</b> "It is going great, why deload?" Seeing what you built next to the fatigue that came with it makes the call a real one. The app asks once with honest data, never blocks you, and never guilt-trips: keep training if you would rather push on.</span>}
+              </div>
+            </div>
+          </Section>
+
+          {/* ── stall + concrete swap (modus-agnostic) ── */}
+          <Section>
+            <AGSecHead n="Stall · Swap" title="When a lift stops moving"
+              sub="Separate from a tired muscle: sometimes one exercise just stalls. If your estimated 1RM on a lift goes flat for three sessions while your gates are green (joints fine, good pump, the muscle not at its ceiling), the app flags it and names a concrete alternative to try." />
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 11 }}>
+              <AGStat k="The signal" v="Flat 3 sessions" s="Three sessions with no new estimated 1RM on that lift, while joints, pump and muscle volume all read fine. That points at the exercise, not fatigue." />
+              <AGStat k="The swap" v="A real change" vColor={UI.gold} s="It names a sibling for the same muscle with a different movement or equipment, so the stimulus actually changes, not just a rename." />
+              <AGStat k="One tap" v="Or ignore it" s="Tap to swap it in and your sets carry over, or wave it off and keep grinding. Always a suggestion, never forced." />
+            </div>
+            <div style={{ ...cardStyle, borderLeft: `3px solid ${UI.gold}`, marginTop: 16 }}>
+              <AGKick color={UI.gold}>Why the gates matter</AGKick>
+              <div style={{ marginTop: 6, fontSize: 13.5, color: UI.inkSoft }}>
+                <b style={{ color: UI.ink }}>A stall is a lift problem, not a fatigue problem.</b> If the muscle were at its ceiling or your joints were complaining, the fix would be a deload, not a swap. By only firing when everything else looks healthy, this tells apart a lift that has run its course from a body that needs a break. It skips lifts you already flagged and never suggests one you disliked.
               </div>
             </div>
           </Section>

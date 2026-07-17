@@ -5342,6 +5342,25 @@ const LANDMARK_MRV_ALPHA = 0.35;
 // decline the full offer is suppressed for this many block sessions, then, if the
 // muscle is still at its ceiling, it re-asks with escalated evidence.
 const DELOAD_NUDGE_COOLDOWN = 3;
+// Autoreg v2 P4. Strength-stall: a lift's e1RM flat/declining over this many
+// qualifying sessions at green gates counts as a stall (spec 10: N = 3).
+const STALL_SESSIONS = 3;
+// Re-entry ramp (spec 7 / 10): a sick/vacation break longer than this many days
+// arms the ease-in; a break of a week or less needs no ramp.
+const REENTRY_MIN_BREAK_DAYS = 7;
+// A long break (weeks+) stretches the systemic ease-in over more than one
+// microcycle (spec 7: "Wochen: weiter runter starten, laengerer Ramp").
+const REENTRY_LONG_BREAK_DAYS = 28;
+// Primary-muscle priority, mirrored from MESO_MUSCLE_PRIORITY in screens-train.jsx
+// so a system-catalog candidate (not in store.exercises, so the injected muscleOf
+// cannot resolve it) buckets to the SAME primary muscle as primaryMuscleForExercise.
+// Keep the two lists in sync: if one changes, change the other.
+const STALL_MUSCLE_PRIORITY = ['Back', 'Quads', 'Chest', 'Glutes', 'Hamstrings', 'Shoulders', 'Calves', 'Abs', 'Triceps', 'Biceps', 'Forearms'];
+function primaryMuscleFromTags(tags) {
+  if (!tags || !tags.length) return null;
+  for (const m of STALL_MUSCLE_PRIORITY) if (tags.includes(m)) return m;
+  return tags[0] || null;
+}
 
 // Resolve the current block's start timestamp (ms) for the recap window (spec 5:
 // "since the last reset / deload"). It is the MAX of the meso block anchor
@@ -5533,6 +5552,190 @@ function backoffDeltas(deltas, amount = 2) {
   for (const [k, v] of Object.entries(deltas || {})) {
     out[k] = (v > 0) ? Math.max(0, v - amount) : v;
   }
+  return out;
+}
+
+// ── Autoreg v2 P4: strength-stall detection + concrete swap + re-entry ramp ──
+
+// Strength-stall detector (spec 6). PURE/stateless, recomputed from history. A
+// LIFT stalls when its best e1RM is flat or declining over the last N qualifying
+// sessions DESPITE green gates: joints fine, pump not flat, and the muscle NOT at
+// its ceiling. The gate condition is what tells a stalled lift apart from an
+// overreached/deloaded muscle (spec 6): if the muscle is at its ceiling, the story
+// is fatigue, not the exercise. Only weighted work has a meaningful e1RM, so a
+// reps-only / timed / assisted / bodyweight-logged lift never stalls here (no kg on
+// its sets -> no e1RM series). signalWeight discipline (spec 4.3): discounted/none
+// sessions are skipped, a rough or deload day's flat e1RM is not a real stall, and
+// the library per-session series does NOT do this (gotcha), so this filter is the
+// single biggest correctness gate. `muscleOfExId` is injected (see the P1 note).
+// opts: { n, planId, atCeiling:(muscle)->bool, exName }. Returns
+// { stalled, since, series:[e1rm newest-first], evidence:[string] }.
+function detectStall(sessions, exId, muscleOfExId, opts = {}) {
+  const out = { stalled: false, since: null, series: [], evidence: [] };
+  if (!exId || typeof muscleOfExId !== 'function') return out;
+  const n = opts.n || STALL_SESSIONS;
+  const planId = opts.planId ?? null;
+  const muscle = muscleOfExId(exId);
+  // Muscle at its ceiling -> overreach/deload owns this, not a stalled lift (spec 6).
+  if (muscle && typeof opts.atCeiling === 'function' && opts.atCeiling(muscle)) return out;
+
+  // Full-signal exposures of this exercise, newest-first (mirror detectOverreach's
+  // filter: ended && !isDeload && this plan && signalWeight full). Build the best
+  // e1RM per session over completed weighted working sets, effReps for unilateral.
+  const qualifying = (sessions || [])
+    .filter(s => s && s.ended && !s.isDeload && (planId == null || s.scheduleId === planId) && (s.signalWeight || 'full') === 'full')
+    .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''));
+  const series = [];
+  for (const s of qualifying) {
+    let best = null;
+    for (const e of (s.entries || [])) {
+      if (!e || e.isCardio || e.exId !== exId) continue;
+      for (const st of (e.sets || [])) {
+        if (!st || !st.done || st.warmup || st.skipped) continue;
+        const reps = effReps(st);
+        if (st.kg == null || reps == null || reps <= 0) continue; // non-weighted set -> no e1RM
+        const v = e1rm(st.kg, reps);
+        if (best == null || v > best) best = v;
+      }
+    }
+    if (best != null) series.push({ session: s, est: best });
+    if (series.length >= n) break;
+  }
+  out.series = series.map(x => x.est);
+  if (series.length < n) return out; // too little weighted data to judge a stall
+
+  // Green gates on the newest qualifying exposure (spec 6): a present joint flag or
+  // a flat ("low") pump means a different story owns this lift, not a stall.
+  const a = sessionAnswers(series[0].session);
+  const jrec = a && a.joint ? a.joint[exId] : null;
+  if (jrec && jrec.answer && jrec.answer !== 'none') return out;
+  if (jrec && jrec.pump === 'low') return out;
+
+  // Flat/declining = NO new e1RM best across the window (chronological running max).
+  const chrono = series.slice().reverse().map(x => x.est);
+  let progressed = false, mx = chrono[0];
+  for (let i = 1; i < chrono.length; i++) {
+    if (chrono[i] > mx + 1e-6) { progressed = true; break; }
+    if (chrono[i] > mx) mx = chrono[i];
+  }
+  if (progressed) return out;
+
+  out.stalled = true;
+  const oldest = series[series.length - 1].session;
+  out.since = oldest.ended || oldest.date || null;
+  const name = opts.exName || 'This lift';
+  out.evidence = [`${name} stalled: ${n} sessions, no e1RM progress, gates green.`];
+  return out;
+}
+
+// Concrete swap suggestion (spec 6). PURE. Given a stalling exercise, pick a
+// sibling with the SAME primary muscle but a DIFFERENT movement/equipment, so the
+// swap actually changes the stimulus. Guards: never the exercise itself nor one
+// recently swapped away (opts.excludeIds), never an affinity-disliked candidate
+// (opts.affinity[id].v === 'dislike'), and a system candidate already owned by name
+// is skipped (the user's own copy would be picked instead). Prefers a user-owned
+// sibling, else a system-catalog one; within each pool a different-EQUIPMENT sibling
+// ranks above a mere movement change. Returns { id, name, isSystem } or null when the
+// library is too thin (spec 6 explicitly accepts "then no concrete one"). `muscleOf`
+// resolves USER exercises only; system candidates bucket via primaryMuscleFromTags,
+// the same priority order as primaryMuscleForExercise. Pure/testable.
+function suggestSwap(exId, exercises, systemExercises, muscleOf, opts = {}) {
+  if (!exId || typeof muscleOf !== 'function') return null;
+  const list = exercises || [];
+  const src = list.find(e => e && e.id === exId);
+  if (!src) return null;
+  const muscle = muscleOf(exId);
+  if (!muscle) return null;
+  const srcEquip = src.equipment ?? null;
+  const srcMove = src.movement_type || (src.unilateral ? 'unilateral' : 'bilateral');
+  const affinity = opts.affinity || {};
+  const exclude = new Set([exId, ...(opts.excludeIds || [])]);
+  if (opts.excludeId) exclude.add(opts.excludeId);
+  const disliked = (id) => !!(affinity[id] && affinity[id].v === 'dislike');
+  const differs = (equip, move) => (equip ?? null) !== srcEquip || (move || 'bilateral') !== srcMove;
+  // Rank: a different-equipment sibling (a real variation) above a movement-only
+  // change, then alphabetically by name for a stable, testable pick.
+  const rank = (equip, name) => [(equip ?? null) !== srcEquip ? 0 : 1, (name || '').toLowerCase()];
+  const cmp = (a, b) => (a._r[0] - b._r[0]) || (a._r[1] < b._r[1] ? -1 : a._r[1] > b._r[1] ? 1 : 0);
+
+  // 1. User-owned siblings first (spec 6: prefer user, then system).
+  const userCands = [];
+  for (const e of list) {
+    if (!e || exclude.has(e.id) || disliked(e.id)) continue;
+    if (muscleOf(e.id) !== muscle) continue;
+    const mv = e.movement_type || (e.unilateral ? 'unilateral' : 'bilateral');
+    if (!differs(e.equipment, mv)) continue;
+    userCands.push({ id: e.id, name: e.name, isSystem: false, _r: rank(e.equipment, e.name) });
+  }
+  if (userCands.length) { userCands.sort(cmp); const p = userCands[0]; return { id: p.id, name: p.name, isSystem: false }; }
+
+  // 2. System-catalog siblings, skipping any the user already owns by name.
+  const ownedNames = new Set(list.map(e => (e.name || '').toLowerCase()));
+  const sysCands = [];
+  for (const sys of (systemExercises || [])) {
+    if (!sys || exclude.has(sys.id) || disliked(sys.id)) continue;
+    if (ownedNames.has((sys.name || '').toLowerCase())) continue;
+    if (primaryMuscleFromTags(sys.tags) !== muscle) continue;
+    const mv = sys.movement || 'bilateral';
+    if (!differs(sys.equipment, mv)) continue;
+    sysCands.push({ id: sys.id, name: sys.name, isSystem: true, _r: rank(sys.equipment, sys.name) });
+  }
+  if (sysCands.length) { sysCands.sort(cmp); const p = sysCands[0]; return { id: p.id, name: p.name, isSystem: true }; }
+  return null;
+}
+
+// Post-break re-entry ramp (spec 7). PURE/stateless: derived from statusPeriods +
+// session dates, no new persistence. Finds the most-recent CLOSED sick/vacation
+// period; if it ran longer than REENTRY_MIN_BREAK_DAYS the first sessions back get
+// an eased-in suggestion (the caller stamps signalWeight='discounted' + a +1 RIR
+// hint, reusing the P0 readiness path). The systemic ease-in decays over ONE
+// microcycle by plan structure, NOT raw sessions (spec 2.1): flex counts a full
+// rotation of trained sessions, weekday/cycle a calendar window. A long break
+// stretches it over two microcycles. The ramp only lowers the SUGGESTION, never the
+// cap: performance always overrides and earn snaps a strong return straight back.
+// Returns { active, decayStep, breakDays, microcycles }. Pure/testable.
+function reentryRamp(statusPeriods, sessions, sch, opts = {}) {
+  const out = { active: false, decayStep: 0, breakDays: 0, microcycles: 1 };
+  const threshold = opts.thresholdDays != null ? opts.thresholdDays : REENTRY_MIN_BREAK_DAYS;
+  const todayStr = (opts.todayStr || todayISO()).slice(0, 10);
+  // A currently-open sick/vacation break means we are not back yet: no ramp.
+  if ((statusPeriods || []).some(p => p && !p.endedAt && (p.mode === 'sick' || p.mode === 'vacation'))) return out;
+  // Most-recent CLOSED sick/vacation period (deload has its own block-reset path).
+  let last = null, lastEnd = -Infinity;
+  for (const p of (statusPeriods || [])) {
+    if (!p || !p.endedAt || !p.startedAt) continue;
+    if (p.mode !== 'sick' && p.mode !== 'vacation') continue;
+    const e = Date.parse(p.endedAt.slice(0, 10) + 'T12:00:00');
+    if (isNaN(e)) continue;
+    if (e > lastEnd) { lastEnd = e; last = p; }
+  }
+  if (!last) return out;
+  const startD = new Date(last.startedAt.slice(0, 10) + 'T12:00:00');
+  const endD = new Date(last.endedAt.slice(0, 10) + 'T12:00:00');
+  const breakDays = Math.round((endD - startD) / 86400000);
+  out.breakDays = breakDays;
+  if (!(breakDays > threshold)) return out; // a short break needs no ramp
+  const microcycles = breakDays >= REENTRY_LONG_BREAK_DAYS ? 2 : 1;
+  out.microcycles = microcycles;
+  const breakEndISO = last.endedAt.slice(0, 10);
+  if (todayStr <= breakEndISO) return out; // the break ends today/future: ramp starts once back
+
+  if (sch && isFlexPlan(sch)) {
+    // Flex advances by trained sessions, so one rotation = sch.days.length of them.
+    const rampLen = ((sch.days || []).length || 1) * microcycles;
+    const trainedSince = (sessions || []).filter(s =>
+      s && s.ended && !s.isDeload && s.scheduleId === sch.id && (s.date || '').slice(0, 10) > breakEndISO).length;
+    out.decayStep = trainedSince;
+    out.active = trainedSince < rampLen;
+    return out;
+  }
+  // Weekday (one 7-day week) and cycle (one cycle window) plans decay on a calendar
+  // window from the break end; after a break there are no pause days to adjust for.
+  const perCycle = (sch && !isWeekdayPlan(sch) && (sch.days || []).length) ? sch.days.length : 7;
+  const rampDays = perCycle * microcycles;
+  const daysSince = Math.round((new Date(todayStr + 'T12:00:00') - endD) / 86400000);
+  out.decayStep = Math.max(0, daysSince);
+  out.active = daysSince > 0 && daysSince <= rampDays;
   return out;
 }
 
@@ -5816,6 +6019,7 @@ window.LB = {
   microcycleSetsByMuscle, detectOverreach,
   blockStartTs, blockSessions, buildBlockRecap, deloadNudgeDecision, recordDeloadDecline, clearDeloadNudge,
   updateLandmarkMrv, snapshotBlockStart, backoffDeltas,
+  detectStall, suggestSwap, reentryRamp,
   mesoGateSetsFromAnswers, isMesoSessionEditable, applyMesoFeedbackEdit, reearnMesoBoostsFromAnswers, mesoRecapGainsFromEdit,
   mesoSetTarget, mesoEarnTarget, mesoRepOutcome, reshapeSetsUnilateral,
 };

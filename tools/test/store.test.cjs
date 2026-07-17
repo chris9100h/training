@@ -2678,6 +2678,171 @@ async function testAsync(name, fn) {
     });
   }
 
+  // ── Autoreg v2 P4: strength-stall detector ───────────────────────────────────
+  {
+    const muscleOf = (id) => (id === 'bench' ? 'Chest' : id === 'squat' ? 'Quads' : null);
+    const mk = (id, ended, sets, opts = {}) => ({
+      id, scheduleId: 'p', ended, date: ended.slice(0, 10), isDeload: !!opts.isDeload,
+      ...(opts.signalWeight ? { signalWeight: opts.signalWeight } : {}),
+      entries: [{ exId: 'bench', sets }],
+      ...(opts.joint ? { mesoRecap: { raw: { answers: { joint: { bench: opts.joint } } } } } : {}),
+    });
+    const flat = [{ done: true, kg: 100, reps: 8 }];
+
+    test('detectStall: flat e1RM over 3 sessions at green gates → stalled with evidence', () => {
+      const sessions = [
+        mk('E0', '2026-07-07T10:00:00Z', flat),
+        mk('E1', '2026-07-10T10:00:00Z', flat),
+        mk('E2', '2026-07-13T10:00:00Z', flat),
+      ];
+      const out = LB.detectStall(sessions, 'bench', muscleOf, { planId: 'p', atCeiling: () => false, exName: 'Bench' });
+      assert.strictEqual(out.stalled, true, 'flat e1RM at green gates is a stall');
+      assert.ok(out.evidence[0].indexOf('Bench') === 0, 'evidence leads with the lift name');
+    });
+
+    test('detectStall: improving e1RM on the latest session → not stalled', () => {
+      const sessions = [
+        mk('E0', '2026-07-07T10:00:00Z', flat),
+        mk('E1', '2026-07-10T10:00:00Z', flat),
+        mk('E2', '2026-07-13T10:00:00Z', [{ done: true, kg: 105, reps: 8 }]),
+      ];
+      assert.strictEqual(LB.detectStall(sessions, 'bench', muscleOf, { planId: 'p', atCeiling: () => false }).stalled, false);
+    });
+
+    test('detectStall: muscle at its ceiling → not a stall (overreach owns it)', () => {
+      const sessions = [mk('E0', '2026-07-07T10:00:00Z', flat), mk('E1', '2026-07-10T10:00:00Z', flat), mk('E2', '2026-07-13T10:00:00Z', flat)];
+      assert.strictEqual(LB.detectStall(sessions, 'bench', muscleOf, { planId: 'p', atCeiling: () => true }).stalled, false, 'ceiling gate not green');
+    });
+
+    test('detectStall: a joint flag on the latest session → not a clean stall', () => {
+      const sessions = [
+        mk('E0', '2026-07-07T10:00:00Z', flat),
+        mk('E1', '2026-07-10T10:00:00Z', flat),
+        mk('E2', '2026-07-13T10:00:00Z', flat, { joint: { exId: 'bench', answer: 'sharp' } }),
+      ];
+      assert.strictEqual(LB.detectStall(sessions, 'bench', muscleOf, { planId: 'p', atCeiling: () => false }).stalled, false, 'joint flag is not a green gate');
+    });
+
+    test('detectStall: a discounted (rough) session is ignored, never fakes or breaks a stall', () => {
+      // Three full flat sessions = a stall. A newest DISCOUNTED session with a big PR
+      // would break it if counted, but signalWeight discipline drops it.
+      const sessions = [
+        mk('E0', '2026-07-07T10:00:00Z', flat),
+        mk('E1', '2026-07-10T10:00:00Z', flat),
+        mk('E2', '2026-07-13T10:00:00Z', flat),
+        mk('E3', '2026-07-16T10:00:00Z', [{ done: true, kg: 130, reps: 10 }], { signalWeight: 'discounted' }),
+      ];
+      assert.strictEqual(LB.detectStall(sessions, 'bench', muscleOf, { planId: 'p', atCeiling: () => false }).stalled, true, 'the rough-day PR must not count');
+    });
+
+    test('detectStall: fewer than 3 weighted sessions → not enough data', () => {
+      const sessions = [mk('E0', '2026-07-07T10:00:00Z', flat), mk('E1', '2026-07-10T10:00:00Z', flat)];
+      assert.strictEqual(LB.detectStall(sessions, 'bench', muscleOf, { planId: 'p', atCeiling: () => false }).stalled, false);
+    });
+
+    test('detectStall: reps-only (no kg) exercise never stalls (no e1RM)', () => {
+      const bw = [{ done: true, reps: 12 }];
+      const sessions = [mk('E0', '2026-07-07T10:00:00Z', bw), mk('E1', '2026-07-10T10:00:00Z', bw), mk('E2', '2026-07-13T10:00:00Z', bw)];
+      assert.strictEqual(LB.detectStall(sessions, 'bench', muscleOf, { planId: 'p', atCeiling: () => false }).stalled, false, 'e1RM is meaningless without weight');
+    });
+  }
+
+  // ── Autoreg v2 P4: concrete swap suggestion ──────────────────────────────────
+  {
+    const muscleOf = (id) => ({ bench: 'Chest', db_press: 'Chest', machine_press: 'Chest', squat: 'Quads' }[id] || null);
+    const exercises = [
+      { id: 'bench', name: 'Barbell Bench', tags: ['Chest'], equipment: 'barbell_dual', movement_type: 'bilateral' },
+      { id: 'db_press', name: 'Dumbbell Press', tags: ['Chest'], equipment: 'dumbbell', movement_type: 'bilateral' },
+      { id: 'machine_press', name: 'Machine Press', tags: ['Chest'], equipment: 'machine', movement_type: 'bilateral' },
+      { id: 'squat', name: 'Back Squat', tags: ['Quads'], equipment: 'barbell_dual', movement_type: 'bilateral' },
+    ];
+
+    test('suggestSwap: same muscle, different equipment, user-owned sibling', () => {
+      const out = LB.suggestSwap('bench', exercises, [], muscleOf);
+      assert.ok(out && out.id !== 'bench', 'returns a sibling');
+      assert.strictEqual(out.isSystem, false, 'a user-owned copy is preferred');
+      assert.notStrictEqual(out.id, 'squat', 'never a different-muscle exercise');
+    });
+
+    test('suggestSwap: skips an affinity-disliked candidate', () => {
+      const out = LB.suggestSwap('bench', exercises, [], muscleOf, { affinity: { db_press: { v: 'dislike' }, machine_press: { v: 'dislike' } } });
+      assert.strictEqual(out, null, 'both chest siblings disliked → no suggestion');
+    });
+
+    test('suggestSwap: skips a recently swapped-away id (excludeIds)', () => {
+      const out = LB.suggestSwap('bench', exercises, [], muscleOf, { excludeIds: ['db_press', 'machine_press'] });
+      assert.strictEqual(out, null, 'excluded siblings leave no candidate');
+    });
+
+    test('suggestSwap: no different-equipment sibling → null (never a same-equipment pick)', () => {
+      const thin = [
+        { id: 'bench', name: 'Barbell Bench', tags: ['Chest'], equipment: 'barbell_dual', movement_type: 'bilateral' },
+        { id: 'incline_bb', name: 'Incline Barbell', tags: ['Chest'], equipment: 'barbell_dual', movement_type: 'bilateral' },
+      ];
+      assert.strictEqual(LB.suggestSwap('bench', thin, [], muscleOf), null, 'same equipment + same movement is not a real variation');
+    });
+
+    test('suggestSwap: falls back to a system sibling, bucketed by tag priority', () => {
+      const onlyBench = [{ id: 'bench', name: 'Barbell Bench', tags: ['Chest'], equipment: 'barbell_dual', movement_type: 'bilateral' }];
+      const sys = [
+        { id: 'sys_pec_deck', name: 'Pec Deck', tags: ['Chest'], equipment: 'machine', category: 'small' },
+        { id: 'sys_squat', name: 'Back Squat', tags: ['Quads'], equipment: 'barbell_dual' },
+      ];
+      const out = LB.suggestSwap('bench', onlyBench, sys, (id) => (id === 'bench' ? 'Chest' : null));
+      assert.ok(out && out.isSystem === true && out.id === 'sys_pec_deck', 'a system chest sibling with different equipment');
+    });
+
+    test('suggestSwap: a system sibling already owned by name is skipped', () => {
+      const owned = [
+        { id: 'bench', name: 'Barbell Bench', tags: ['Chest'], equipment: 'barbell_dual', movement_type: 'bilateral' },
+        { id: 'mine', name: 'Pec Deck', tags: ['Chest'], equipment: 'machine', movement_type: 'bilateral' },
+      ];
+      const sys = [{ id: 'sys_pec_deck', name: 'Pec Deck', tags: ['Chest'], equipment: 'machine' }];
+      const ownedMuscleOf = (id) => (id === 'bench' || id === 'mine' ? 'Chest' : null);
+      const out = LB.suggestSwap('bench', owned, sys, ownedMuscleOf, {});
+      // The user already owns "Pec Deck", so the user-owned copy is returned, not the sys id.
+      assert.ok(out && out.id === 'mine' && out.isSystem === false, 'prefer the owned copy over the catalog duplicate');
+    });
+  }
+
+  // ── Autoreg v2 P4: post-break re-entry ramp ──────────────────────────────────
+  {
+    const flexSch = { id: 'p', is_flex: true, days: [{ id: 'd1' }, { id: 'd2' }, { id: 'd3' }] };
+    const trained = (id, date) => ({ id, scheduleId: 'p', ended: date + 'T10:00:00Z', date, isDeload: false });
+
+    test('reentryRamp: fires after a > 7-day sick/vacation break', () => {
+      const sp = [{ mode: 'vacation', startedAt: '2026-07-01', endedAt: '2026-07-12' }]; // 11 days
+      const out = LB.reentryRamp(sp, [], flexSch, { todayStr: '2026-07-14' });
+      assert.strictEqual(out.active, true, 'an 11-day break arms the ramp');
+      assert.strictEqual(out.breakDays, 11);
+    });
+
+    test('reentryRamp: inert for a short break (≤ 7 days)', () => {
+      const sp = [{ mode: 'sick', startedAt: '2026-07-05', endedAt: '2026-07-10' }]; // 5 days
+      assert.strictEqual(LB.reentryRamp(sp, [], flexSch, { todayStr: '2026-07-12' }).active, false);
+    });
+
+    test('reentryRamp: decays over ONE rotation, then goes inert', () => {
+      const sp = [{ mode: 'vacation', startedAt: '2026-07-01', endedAt: '2026-07-12' }];
+      const twoBack = [trained('a', '2026-07-13'), trained('b', '2026-07-15')];
+      assert.strictEqual(LB.reentryRamp(sp, twoBack, flexSch, { todayStr: '2026-07-16' }).active, true, 'still inside the first rotation (2 of 3)');
+      const rotationDone = [...twoBack, trained('c', '2026-07-17')];
+      assert.strictEqual(LB.reentryRamp(sp, rotationDone, flexSch, { todayStr: '2026-07-18' }).active, false, 'a full rotation back → normal');
+    });
+
+    test('reentryRamp: an active (open) break does not fire (not back yet)', () => {
+      const sp = [{ mode: 'sick', startedAt: '2026-07-01', endedAt: null }];
+      assert.strictEqual(LB.reentryRamp(sp, [], flexSch, { todayStr: '2026-07-20' }).active, false);
+    });
+
+    test('reentryRamp: a long break stretches over two microcycles', () => {
+      const sp = [{ mode: 'sick', startedAt: '2026-06-01', endedAt: '2026-07-10' }]; // ~39 days
+      const out = LB.reentryRamp(sp, [trained('a', '2026-07-11'), trained('b', '2026-07-13'), trained('c', '2026-07-15')], flexSch, { todayStr: '2026-07-16' });
+      assert.strictEqual(out.microcycles, 2, 'weeks-long break → longer ramp');
+      assert.strictEqual(out.active, true, '3 of 6 sessions back is still inside the stretched ramp');
+    });
+  }
+
   // ── Autoreg v2 P2: block start window ────────────────────────────────────────
   {
     const ms = { scheduleId: 'p', startedAt: '2026-07-01T08:00:00Z', startDate: '2026-07-01' };

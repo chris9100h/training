@@ -793,6 +793,19 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     if (session.readiness != null) return;
     const anyDone = session.entries.some(e => !e.isCardio && e.sets.some(s => s.done && !s.warmup && !s.skipped));
     if (anyDone) return;
+    // Autoreg v2 P4: post-break re-entry ramp (spec 7). When a sick/vacation break
+    // longer than the threshold just ended and we are still inside the first
+    // microcycle back, ease this session in WITHOUT a manual tap: stamp readiness
+    // 'reentry' + signalWeight 'discounted' (protects learning, keeps earn) and skip
+    // the prompt. The discount only lowers the suggestion, never the cap: performance
+    // overrides at the set level, so the lifter can still push to their limit and a
+    // strong return snaps straight back via earn. Deload sessions keep 'none'.
+    const rSch = store.schedules?.find(s => s.id === session.scheduleId);
+    const reentry = LB.reentryRamp(store.statusPeriods, store.sessions, rSch, { todayStr: LB.todayISO() });
+    if (reentry.active && store.statusMode !== 'deload' && !session.isDeload) {
+      updateSession(s => ({ ...s, readiness: 'reentry', signalWeight: 'discounted' }));
+      return;
+    }
     setReadinessOpen(true);
   }, []);
 
@@ -4650,6 +4663,23 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     setSwapOpen(false);
   };
 
+  // Autoreg v2 P4: apply a concrete stall-swap suggestion (spec 6). A system (sys_)
+  // candidate is materialized into store.exercises first (mapped to an existing
+  // same-named copy, else a fresh row) so doSwap always gets a real user-owned id;
+  // doSwap reads fresh state via a functional setStore, so the appended row resolves
+  // before it runs. Mirrors finalizePick's sys_ -> user materialization.
+  const applyStallSwap = (swap) => {
+    if (!swap) return;
+    if (!swap.isSystem) { doSwap(swap.id); return; }
+    const existing = store.exercises?.find(e => (e.name || '').toUpperCase() === (swap.name || '').toUpperCase());
+    if (existing) { doSwap(existing.id); return; }
+    const sys = (window.SYSTEM_EXERCISES || []).find(s => s.id === swap.id);
+    if (!sys) return;
+    const row = LB.systemExerciseToRow(sys);
+    setStore(s => ({ ...s, exercises: [...s.exercises, row] }));
+    doSwap(row.id);
+  };
+
   const doAdd = (ids) => {
     const idList = Array.isArray(ids) ? ids : [ids];
     const newExId = idList[0];
@@ -5964,13 +5994,42 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             } else if (disliked) {
               flags.push({ icon: '💡', msg: 'You keep flagging this one to swap. Pick a variation you enjoy and you will actually stick with it.' });
             }
+            // Autoreg v2 P4: strength-stall + concrete swap (spec 6). A LIFT whose
+            // e1RM has gone flat over 3 sessions at green gates (joints fine, pump ok,
+            // muscle not at its ceiling) gets a distinct nudge and a concrete sibling
+            // to try. Kept apart from the pump-flat / disliked voices above: this is
+            // about the exercise stalling, not the muscle or your preference.
+            const muscleOf = (id) => primaryMuscleForExercise(store.exercises?.find(x => x.id === id));
+            const stall = LB.detectStall(store.sessions, exercise.id, muscleOf, {
+              planId: mesoState.scheduleId, atCeiling, exName: exercise.name,
+            });
+            if (stall.stalled) {
+              const swap = LB.suggestSwap(exercise.id, store.exercises, window.SYSTEM_EXERCISES, muscleOf, { affinity: mesoState.affinity });
+              flags.push({
+                icon: '📉',
+                msg: swap
+                  ? 'e1RM has been flat here 3 sessions and your gates are green. The stimulus may be stale, a different movement could get it climbing again.'
+                  : 'e1RM has been flat here 3 sessions and your gates are green. A different variation for this muscle could get things moving again.',
+                swap,
+              });
+            }
             if (!flags.length) return null;
             return (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 10 }}>
                 {flags.map((f, i) => (
-                  <div key={i} style={{ background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 6, padding: '8px 12px', display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-                    <span style={{ fontSize: 13 }}>{f.icon}</span>
-                    <span style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>{f.msg}</span>
+                  <div key={i} style={{ background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 6, padding: '8px 12px' }}>
+                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                      <span style={{ fontSize: 13 }}>{f.icon}</span>
+                      <span style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>{f.msg}</span>
+                    </div>
+                    {f.swap && (
+                      <button onClick={() => applyStallSwap(f.swap)} style={{
+                        marginTop: 8, padding: '6px 12px', background: 'transparent',
+                        border: `1px solid rgba(var(--accent-rgb), 0.5)`, borderRadius: 4,
+                        color: UI.gold, fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600,
+                        cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+                      }}>Swap to {f.swap.name}</button>
+                    )}
                   </div>
                 ))}
               </div>
@@ -6188,6 +6247,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   {session.readiness === 'rough' && !isCurrentWarmup && (
                     <div className="micro" style={{ color: UI.inkSoft, opacity: 0.8, marginTop: 3 }}>
                       Rough day · +1 RIR suggested
+                    </div>
+                  )}
+                  {/* Autoreg v2 P4: post-break re-entry ramp. Non-binding, display only:
+                      the session is discounted (protects learning) but you can still push. */}
+                  {session.readiness === 'reentry' && !isCurrentWarmup && (
+                    <div className="micro" style={{ color: UI.inkSoft, opacity: 0.8, marginTop: 3 }}>
+                      Coming back · easing in, +1 RIR suggested
                     </div>
                   )}
                   {/* Range's own configured span is shown as a permanent badge next to the
