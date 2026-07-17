@@ -3074,23 +3074,31 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
       if (lm && lm.mrv != null && (cycleSets[m] || 0) >= lm.mrv) atCeilingMuscles.add(m);
     });
     const ctx = { dayId: s.dayId, loadOnly: fbLoadOnly, atCeilingMuscles };
-    const r1 = LB.applyMesoFeedbackEdit(sessionMeso, fbRaw, edit, ctx);
     const earnInputs = fbEarnInputs();
-    const newMeso = LB.reearnMesoBoostsFromAnswers(r1.mesoState, r1.raw.answers, earnInputs, fbLoadOnly);
-    const gains = LB.mesoRecapGainsFromEdit(r1.raw.answers, newMeso.weightBoosts, earnInputs, s.dayId);
-    const groups = fbGroupsForStore(r1.raw.answers);
-    const stampedMeso = { ...newMeso, updatedAt: new Date().toISOString() };
-    const newRecap = { ...s.mesoRecap, groups, gains, raw: r1.raw };
-    // Move the store copy and the per-plan localStorage cache together (fresh
-    // updatedAt) so getMesoState never masks the edit with a stale cache.
-    if (typeof MESO_KEY === 'string') {
-      try { localStorage.setItem(MESO_KEY + '-' + s.scheduleId, JSON.stringify(stampedMeso)); } catch {}
-    }
-    setStore(st => ({
-      ...st,
-      mesoStates: (st.mesoStates || []).map(m => m.id === sessionMeso.id ? stampedMeso : m),
-      sessions: st.sessions.map(x => x.id === sessionId ? { ...x, mesoRecap: newRecap } : x),
-    }));
+    // Apply the edit + re-earn on the FRESHEST mesoStates row INSIDE the updater (same
+    // reasoning as the readiness branch above, #3): a background multi-device sync may
+    // have landed a newer row since the sheet opened, and applyMesoFeedbackEdit /
+    // reearnMesoBoostsFromAnswers spread the row through (...meso). Composing on the
+    // stale render-closure `sessionMeso` and writing it back wholesale would revert
+    // those concurrent fields. localStorage is written inside so it stays atomic with
+    // the store write (mirrors saveMesoState).
+    setStore(st => {
+      const cur = (st.mesoStates || []).find(m => m.id === sessionMeso.id) || sessionMeso;
+      const r1 = LB.applyMesoFeedbackEdit(cur, fbRaw, edit, ctx);
+      const newMeso = LB.reearnMesoBoostsFromAnswers(r1.mesoState, r1.raw.answers, earnInputs, fbLoadOnly);
+      const stampedMeso = { ...newMeso, updatedAt: new Date().toISOString() };
+      const gains = LB.mesoRecapGainsFromEdit(r1.raw.answers, stampedMeso.weightBoosts, earnInputs, s.dayId);
+      const groups = fbGroupsForStore(r1.raw.answers);
+      const newRecap = { ...s.mesoRecap, groups, gains, raw: r1.raw };
+      if (typeof MESO_KEY === 'string') {
+        try { localStorage.setItem(MESO_KEY + '-' + s.scheduleId, JSON.stringify(stampedMeso)); } catch {}
+      }
+      return {
+        ...st,
+        mesoStates: (st.mesoStates || []).map(m => m.id === sessionMeso.id ? stampedMeso : m),
+        sessions: st.sessions.map(x => x.id === sessionId ? { ...x, mesoRecap: newRecap } : x),
+      };
+    });
     setFbEdit(null);
   };
 
