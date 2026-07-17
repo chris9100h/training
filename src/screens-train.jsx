@@ -2491,8 +2491,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   });
   const [confirmEl, confirm] = useConfirm();
   // Autoreg v2 P0: one-tap readiness prompt (Fresh / Normal / Rough), shown once
-  // per session before the first working set. Skippable: a null readiness reads
-  // as normal/full everywhere.
+  // per session before the first working set. Confirm with nothing selected, or a
+  // backdrop dismiss, both commit 'normal' (a null readiness reads as normal/full
+  // everywhere), so there is no separate Skip control.
   const [readinessOpen, setReadinessOpen] = useStateT(false);
   // Tap SELECTS an option (visual highlight), a Confirm button commits it, so a
   // mis-tap is correctable before it takes effect. readinessReentry preselects the
@@ -5396,7 +5397,6 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         );
       })}
       <Btn onClick={() => chooseReadiness(readinessSel || 'normal')} style={{ width: '100%', marginTop: 12 }}>Confirm</Btn>
-      <Btn kind="ghost" onClick={() => chooseReadiness('normal')} style={{ width: '100%', marginTop: 8 }}>Skip</Btn>
     </Sheet>
   );
 
