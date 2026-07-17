@@ -4781,7 +4781,11 @@ function applyMesoFeedbackEdit(mesoState, raw, edit, ctx) {
       if (adds && keys.length && !capped) {
         const g = pickGrowthRecipient(keys, growthCounts, prevGrantedTo);
         recipientKey = g.recipientKey; growthCounts = g.growthCounts;
-      } else if (prevGrantedTo) {
+      } else if (prevGrantedTo && !capped) {
+        // Mirror the live handleSorenessAnswer guard (screens-train.jsx): an
+        // at-ceiling muscle freezes BOTH the grant and the retract, so a re-save
+        // of the same answer can't strip a previously-earned set the live path
+        // would have left frozen.
         growthCounts = retractGrowthGrant(growthCounts, prevGrantedTo);
       }
       const declineKey = edit.answer === 'still_sore' ? pickDeclineRecipient(keys, deltas, rec.contrib) : null;
@@ -4845,9 +4849,12 @@ function applyMesoFeedbackEdit(mesoState, raw, edit, ctx) {
     // Autoreg v2 P1 MRV cap: freeze the +1 for an at-ceiling muscle (mirror of
     // the live handleVolumeAnswer guard). Decline (pushed / too_much) stays live.
     const capped = !!(ctx.atCeilingMuscles && ctx.atCeilingMuscles.has(muscle));
-    if (frozen) {
-      // frozen: no rotation, no grant (mirrors the volume handler's guard)
-    } else if (edit.volume === 'not_enough' && !capped) {
+    if (frozen || capped) {
+      // frozen or at-ceiling: no rotation, no grant. Mirrors the live
+      // handleVolumeAnswer, which groups atCeiling(muscle) INTO its freeze
+      // condition, so an at-ceiling muscle never falls through to the retract
+      // branch and loses a previously-earned set on a re-save.
+    } else if (edit.volume === 'not_enough') {
       const g = pickGrowthRecipient(keys, growthCounts, prevGrantedTo);
       recipientKey = g.recipientKey; growthCounts = g.growthCounts;
     } else if (prevGrantedTo) {
@@ -4926,6 +4933,64 @@ function mesoRecapGainsFromEdit(answers, weightBoosts, earnInputs, dayId) {
     if (setDelta || weightDelta) gains.push({ name: nameByKey[k] || '?', weightDelta, setDelta });
   });
   return gains;
+}
+
+// Autoreg v2: when a mis-logged entry's exId is corrected (oldExId -> newExId) via the
+// session editor, re-key this session's captured meso feedback answers so a LATER
+// feedback edit still finds them. fbEarnInputs re-derives its earn keys from the
+// CURRENT entry exId, and reearnMesoBoostsFromAnswers / mesoGateSetsFromAnswers read
+// answers.joint[exId], so answers left under the old id would orphan (the corrected
+// exercise could never re-earn, gates.jointFine.has(new) stays false). Re-keys the
+// joint record (by exId), every contrib/target reference (by exId_dayId) and the volume
+// exIds list; dayId is unchanged (a swap never moves the session's day). Pure: returns a
+// new answers object, or the SAME reference when nothing referenced the old id.
+// Scope note: the cumulative exId_dayId levers on the meso ROW (weightBoosts etc.) are
+// intentionally left; the corrected exercise re-earns cleanly from here forward and the
+// stale key is inert (the day-slot no longer trains the old exercise).
+function remapMesoAnswersExId(answers, oldExId, newExId, dayId, newName) {
+  if (!answers || !oldExId || !newExId || oldExId === newExId) return answers;
+  const oldKey = oldExId + '_' + dayId;
+  const newKey = newExId + '_' + dayId;
+  const remapContrib = (contrib) => {
+    if (!contrib || !(oldKey in contrib)) return contrib;
+    const out = {};
+    for (const [k, v] of Object.entries(contrib)) out[k === oldKey ? newKey : k] = v;
+    return out;
+  };
+  let changed = false;
+  const joint = { ...(answers.joint || {}) };
+  if (joint[oldExId]) {
+    const rec = { ...joint[oldExId], exId: newExId, ...(newName ? { exName: newName } : {}) };
+    rec.contrib = remapContrib(rec.contrib);
+    delete joint[oldExId];
+    joint[newExId] = rec;
+    changed = true;
+  }
+  const soreness = {};
+  for (const [muscle, rec0] of Object.entries(answers.soreness || {})) {
+    let rec = rec0, touched = false;
+    if (Array.isArray(rec0.targets) && rec0.targets.some(t => t && t.key === oldKey)) {
+      rec = { ...rec, targets: rec0.targets.map(t => (t && t.key === oldKey) ? { ...t, key: newKey, ...(newName ? { name: newName } : {}) } : t) };
+      touched = true;
+    }
+    const nc = remapContrib((touched ? rec : rec0).contrib);
+    if (nc !== (touched ? rec : rec0).contrib) { rec = { ...(touched ? rec : rec0), contrib: nc }; touched = true; }
+    soreness[muscle] = touched ? rec : rec0;
+    if (touched) changed = true;
+  }
+  const volume = {};
+  for (const [muscle, rec0] of Object.entries(answers.volume || {})) {
+    let rec = rec0, touched = false;
+    if (Array.isArray(rec0.exIds) && rec0.exIds.includes(oldExId)) {
+      rec = { ...rec, exIds: rec0.exIds.map(id => id === oldExId ? newExId : id) };
+      touched = true;
+    }
+    const nc = remapContrib((touched ? rec : rec0).contrib);
+    if (nc !== (touched ? rec : rec0).contrib) { rec = { ...(touched ? rec : rec0), contrib: nc }; touched = true; }
+    volume[muscle] = touched ? rec : rec0;
+    if (touched) changed = true;
+  }
+  return changed ? { ...answers, joint, soreness, volume } : answers;
 }
 
 // Recompute this (top-of-stack) session's rep-miss CUT + streak contribution when a
@@ -5420,7 +5485,12 @@ function blockStartTs(mesoState, statusPeriods) {
   if (!mesoState) return null;
   let ts = null;
   if (mesoState.startedAt) { const p = Date.parse(mesoState.startedAt); if (!isNaN(p)) ts = p; }
-  if (ts == null && mesoState.startDate) { const p = Date.parse(mesoState.startDate); if (!isNaN(p)) ts = p; }
+  // startDate is a bare 'YYYY-MM-DD'. Date.parse() reads it as UTC midnight, which
+  // lands on the PRIOR calendar day for users west of UTC, misattributing that
+  // day's sessions to the new block. parseDate anchors it at LOCAL noon, matching
+  // mesoCurrentWeek's own comparison. startedAt above is a full instant, so its
+  // Date.parse stays correct.
+  if (ts == null && mesoState.startDate) { const p = parseDate(mesoState.startDate); if (p) ts = p.getTime(); }
   // Most recent CLOSED deload period (an active one has endedAt == null; skip it,
   // the block hasn't restarted yet).
   let lastDeloadEnd = null;
@@ -6068,6 +6138,6 @@ window.LB = {
   blockStartTs, blockSessions, buildBlockRecap, deloadNudgeDecision, recordDeloadDecline, clearDeloadNudge,
   updateLandmarkMrv, snapshotBlockStart, backoffDeltas,
   detectStall, suggestSwap, reentryRamp,
-  mesoGateSetsFromAnswers, isMesoSessionEditable, applyMesoFeedbackEdit, reearnMesoBoostsFromAnswers, mesoRecapGainsFromEdit, recomputeMesoRepMissCut,
+  mesoGateSetsFromAnswers, isMesoSessionEditable, applyMesoFeedbackEdit, reearnMesoBoostsFromAnswers, mesoRecapGainsFromEdit, recomputeMesoRepMissCut, remapMesoAnswersExId,
   mesoSetTarget, mesoEarnTarget, mesoRepOutcome, reshapeSetsUnilateral,
 };

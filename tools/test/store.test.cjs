@@ -972,6 +972,48 @@ async function testAsync(name, fn) {
     });
   }
 
+  // ── remapMesoAnswersExId (swap-correction re-keys captured feedback, #1) ──
+  {
+    const dayId = 'd0';
+    const answers = {
+      soreness: { chest: { muscle: 'chest', targets: [{ exId: 'A', name: 'Bench', key: 'A_d0' }, { exId: 'e2', name: 'Fly', key: 'e2_d0' }], answer: 'still_sore', contrib: { A_d0: -1 } } },
+      joint: { A: { exId: 'A', exName: 'Bench', answer: 'sharp', pump: 'low', contrib: { A_d0: -1 } } },
+      volume: { chest: { muscle: 'chest', exIds: ['A', 'e2'], volume: 'not_enough', contrib: { A_d0: 1 } } },
+    };
+    test('remapMesoAnswersExId: re-keys the joint record from old exId to new', () => {
+      const out = LB.remapMesoAnswersExId(answers, 'A', 'B', dayId, 'Incline Bench');
+      assert.ok(!('A' in out.joint), 'old joint key removed');
+      assert.strictEqual(out.joint.B.exId, 'B');
+      assert.strictEqual(out.joint.B.exName, 'Incline Bench');
+      assert.strictEqual(out.joint.B.answer, 'sharp');
+      assert.strictEqual(out.joint.B.contrib.B_d0, -1);
+      assert.ok(!('A_d0' in out.joint.B.contrib), 'joint contrib re-keyed');
+    });
+    test('remapMesoAnswersExId: re-keys soreness targets + contrib, leaves siblings', () => {
+      const out = LB.remapMesoAnswersExId(answers, 'A', 'B', dayId, 'Incline Bench');
+      assert.strictEqual(out.soreness.chest.targets[0].key, 'B_d0', 'target key re-keyed');
+      assert.strictEqual(out.soreness.chest.targets[0].name, 'Incline Bench', 'target name updated');
+      assert.strictEqual(out.soreness.chest.targets[1].key, 'e2_d0', 'sibling target untouched');
+      assert.strictEqual(out.soreness.chest.contrib.B_d0, -1);
+      assert.ok(!('A_d0' in out.soreness.chest.contrib), 'soreness contrib re-keyed');
+    });
+    test('remapMesoAnswersExId: re-keys volume exIds + contrib', () => {
+      const out = LB.remapMesoAnswersExId(answers, 'A', 'B', dayId, 'Incline Bench');
+      assert.deepStrictEqual(out.volume.chest.exIds, ['B', 'e2']);
+      assert.strictEqual(out.volume.chest.contrib.B_d0, 1);
+      assert.ok(!('A_d0' in out.volume.chest.contrib), 'volume contrib re-keyed');
+    });
+    test('remapMesoAnswersExId: no-op returns the same reference (absent id / same id)', () => {
+      assert.strictEqual(LB.remapMesoAnswersExId(answers, 'ZZZ', 'B', dayId, 'X'), answers);
+      assert.strictEqual(LB.remapMesoAnswersExId(answers, 'A', 'A', dayId, 'X'), answers);
+    });
+    test('remapMesoAnswersExId: does not mutate the input', () => {
+      const snapshot = JSON.stringify(answers);
+      LB.remapMesoAnswersExId(answers, 'A', 'B', dayId, 'Incline Bench');
+      assert.strictEqual(JSON.stringify(answers), snapshot, 'input answers untouched');
+    });
+  }
+
   // ── applyMesoFeedbackEdit (post-hoc feedback correction, mirrors the handlers) ──
   test('applyMesoFeedbackEdit: no-op edit (same answer) leaves state byte-identical', () => {
     const ms = { deltas: { e1_d0: -1 }, growthCounts: {}, pumpLowCounts: {}, jointFlags: {} };
@@ -2851,8 +2893,10 @@ async function testAsync(name, fn) {
     test('blockStartTs: uses startedAt when no deload has happened', () => {
       assert.strictEqual(LB.blockStartTs(ms, []), Date.parse('2026-07-01T08:00:00Z'));
     });
-    test('blockStartTs: falls back to startDate for older mesos without startedAt', () => {
-      assert.strictEqual(LB.blockStartTs({ scheduleId: 'p', startDate: '2026-07-01' }, []), Date.parse('2026-07-01'));
+    test('blockStartTs: falls back to startDate (local noon) for older mesos without startedAt', () => {
+      // startDate is a bare day, anchored at LOCAL noon (parseDate), not UTC midnight,
+      // so it stays on the intended calendar day for users west of UTC.
+      assert.strictEqual(LB.blockStartTs({ scheduleId: 'p', startDate: '2026-07-01' }, []), LB.parseDate('2026-07-01').getTime());
     });
     test('blockStartTs: a later completed deload end wins over the block anchor', () => {
       const sp = [{ mode: 'deload', startedAt: '2026-07-10T00:00:00Z', endedAt: '2026-07-17T00:00:00Z' }];

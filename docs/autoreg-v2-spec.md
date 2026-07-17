@@ -288,18 +288,18 @@ Intelligenz wie Willkür an. Beispiele:
 
 ## 11. Bau-Phasen (jede einzeln lieferbar + testbar)
 
-- **P0 — Readiness + Signal-Hygiene.** Session-Start-Tap, Heute-Effekt,
+- **P0: Readiness + Signal-Hygiene.** Session-Start-Tap, Heute-Effekt,
   `signalWeight`-Tag, `computeMesoGains` respektiert es. Voll modus-agnostisch,
   liefert allein schon ein USP-Feature, null Lern-Risiko.
-- **P1 — Wochenbuchhaltung + Detektor + MRV-Cap + Deload-Angebot.** Der geteilte
+- **P1: Wochenbuchhaltung + Detektor + MRV-Cap + Deload-Angebot.** Der geteilte
   Kern. Killt sofort das Sägezahn (A), cappt früh (C), hält Last (B). Ab hier greift
   die Grund-Intelligenz in **allen drei** Modi. Noch kein Cross-Block-Gedächtnis.
-- **P2 — Recap (zwei Rahmungen) + Anti-Nag.** Nutzt P1s Detektor; der Decline-Recap
+- **P2: Recap (zwei Rahmungen) + Anti-Nag.** Nutzt P1s Detektor; der Decline-Recap
   hängt an P1.
-- **P3 — Landmarks + emergente Blöcke + MEV-Reset.** Persistiert MEV/MRV, Reset an
+- **P3: Landmarks + emergente Blöcke + MEV-Reset.** Persistiert MEV/MRV, Reset an
   der Grenze, emergenter Deload → Reset für die Auto-Modi. Erst ab hier wird Auto
   Full zum selbst-getakteten Meso.
-- **P4 — Stall + konkreter Swap, Wiedereinstiegs-Ramp.**
+- **P4: Stall + konkreter Swap, Wiedereinstiegs-Ramp.**
 
 P1 ist der Dreh- und Angelpunkt: sobald der Detektor auf der Mikrozyklus-
 Buchhaltung steht, ist "für alle drei Modi" gelöst, alles danach ist nur noch Policy.

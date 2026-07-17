@@ -3018,25 +3018,34 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
       const newSignal = (readiness === 'rough' || readiness === 'reentry') ? 'discounted' : 'full';
       const earnInputs = fbEarnInputs();
       const repMissBase = fbRaw.repMissBase || null;
-      // 1. Recompute the CUT for the signalWeight flip (no-op on a same-side edit).
-      const cutMeso = LB.recomputeMesoRepMissCut(sessionMeso, earnInputs, repMissBase, oldSignal, newSignal);
-      // 2. Re-earn the EARN side from the unchanged answers (discounted still earns);
-      //    reearn preserves a re-armed cut and drops a frozen one.
-      const newMeso = LB.reearnMesoBoostsFromAnswers(cutMeso, fbRaw.answers, earnInputs, fbLoadOnly);
-      const gains = LB.mesoRecapGainsFromEdit(fbRaw.answers, newMeso.weightBoosts, earnInputs, s.dayId);
       const groups = fbGroupsForStore(fbRaw.answers);
-      const stampedMeso = { ...newMeso, updatedAt: new Date().toISOString() };
-      const newRecap = { ...s.mesoRecap, groups, gains, raw: fbRaw };
-      // Move the store copy and the per-plan localStorage cache together (fresh
-      // updatedAt) so getMesoState never masks the edit with a stale cache.
-      if (typeof MESO_KEY === 'string') {
-        try { localStorage.setItem(MESO_KEY + '-' + s.scheduleId, JSON.stringify(stampedMeso)); } catch {}
+      // Recompute the CUT + re-earn on the FRESHEST mesoStates row INSIDE the updater:
+      // a background multi-device sync may have landed a newer row (e.g. fresh
+      // autoregState landmarks) since this sheet opened, and recompute/reearn spread
+      // the row through (...meso). Composing on the stale render-closure `sessionMeso`
+      // and writing it back wholesale would revert those concurrent fields. #3
+      let composedMeso = null;
+      setStore(st => {
+        const cur = (st.mesoStates || []).find(m => m.id === sessionMeso.id) || sessionMeso;
+        // 1. Recompute the CUT for the signalWeight flip (no-op on a same-side edit).
+        const cutMeso = LB.recomputeMesoRepMissCut(cur, earnInputs, repMissBase, oldSignal, newSignal);
+        // 2. Re-earn the EARN side from the unchanged answers (discounted still earns);
+        //    reearn preserves a re-armed cut and drops a frozen one.
+        const newMeso = LB.reearnMesoBoostsFromAnswers(cutMeso, fbRaw.answers, earnInputs, fbLoadOnly);
+        composedMeso = { ...newMeso, updatedAt: new Date().toISOString() };
+        const gains = LB.mesoRecapGainsFromEdit(fbRaw.answers, composedMeso.weightBoosts, earnInputs, s.dayId);
+        const newRecap = { ...s.mesoRecap, groups, gains, raw: fbRaw };
+        return {
+          ...st,
+          mesoStates: (st.mesoStates || []).map(m => m.id === sessionMeso.id ? composedMeso : m),
+          sessions: st.sessions.map(x => x.id === sessionId ? { ...x, readiness, signalWeight: newSignal, mesoRecap: newRecap } : x),
+        };
+      });
+      // Move the per-plan localStorage cache in lockstep (fresh updatedAt) so
+      // getMesoState never masks the edit with a stale cache.
+      if (composedMeso && typeof MESO_KEY === 'string') {
+        try { localStorage.setItem(MESO_KEY + '-' + s.scheduleId, JSON.stringify(composedMeso)); } catch {}
       }
-      setStore(st => ({
-        ...st,
-        mesoStates: (st.mesoStates || []).map(m => m.id === sessionMeso.id ? stampedMeso : m),
-        sessions: st.sessions.map(x => x.id === sessionId ? { ...x, readiness, signalWeight: newSignal, mesoRecap: newRecap } : x),
-      }));
       setFbEdit(null);
       return;
     }
@@ -4173,6 +4182,7 @@ function SessionEditSheet({ session, duration, exercises, store, setStore, onClo
   const [draftEntries, setDraftEntries] = useStateL(() => JSON.parse(JSON.stringify(session.entries)));
   const [openWarmups, setOpenWarmups] = useStateL({}); // eIdx -> bool, collapsed by default
   const [swapEIdx, setSwapEIdx] = useStateL(null); // entry index whose exercise is being corrected via the picker
+  const [pendingSwap, setPendingSwap] = useStateL(null); // { eIdx, newExId } queued until the picked exercise resolves
   const [confirmEl, confirm] = useConfirm();
   const origDate = session.date ? session.date.slice(0, 10) : '';
   const origDuration = duration != null ? String(Math.round(duration / 5) * 5) : '0';
@@ -4192,19 +4202,33 @@ function SessionEditSheet({ session, duration, exercises, store, setStore, onClo
     const eIdx = swapEIdx;
     setSwapEIdx(null);
     if (newExId == null || eIdx == null) return;
+    // finalizePick may materialize a picked SYSTEM exercise into store.exercises via
+    // setStore and then call this synchronously, BEFORE the sheet re-renders with the
+    // new `exercises` prop. Resolving the new exercise inline would miss it (undefined
+    // name / unilateral flag), silently skipping the L/R reshape this feature exists to
+    // do. Queue the swap; the effect below applies it once the exercise resolves. #5
+    setPendingSwap({ eIdx, newExId });
+  };
+  // Apply a queued swap once the picked exercise appears in `exercises` (an already-
+  // owned pick resolves on the first pass; a freshly materialized system exercise
+  // resolves a render later, when finalizePick's setStore has landed the new row).
+  useEffectL(() => {
+    if (!pendingSwap) return;
+    const { eIdx, newExId } = pendingSwap;
+    const newEx = exercises?.find(x => x.id === newExId);
+    if (!newEx) return; // wait for the materialized row to arrive
     setDraftEntries(entries => entries.map((en, i) => {
       if (i !== eIdx) return en;
-      const newEx = exercises?.find(x => x.id === newExId);
-      const nm = newEx?.name ?? en.name;
       // If the swap flips unilateral-ness, reshape the kept sets to match the new
       // exercise (per-side L/R vs a single rep count) so a bilateral exercise
-      // never inherits stray L/R data and render as "L13/R13" in history.
+      // never inherits stray L/R data and renders as "L13/R13" in history.
       const oldEx = exercises?.find(x => x.id === en.exId);
-      const wasUni = !!oldEx?.unilateral, isUni = !!newEx?.unilateral;
+      const wasUni = !!oldEx?.unilateral, isUni = !!newEx.unilateral;
       const sets = wasUni !== isUni ? LB.reshapeSetsUnilateral(en.sets, isUni) : en.sets;
-      return { ...en, exId: newExId, name: nm, sets };
+      return { ...en, exId: newExId, name: newEx.name ?? en.name, sets };
     }));
-  };
+    setPendingSwap(null);
+  }, [pendingSwap, exercises]);
 
   const updateSet = (eIdx, sIdx, patch) => {
     setDraftEntries(entries => entries.map((e, i) =>
@@ -4311,6 +4335,23 @@ function SessionEditSheet({ session, duration, exercises, store, setStore, onClo
     if (draftDuration !== origDuration) {
       const mins = parseInt(draftDuration, 10);
       patch.durationMinutes = (!isNaN(mins) && mins > 0) ? mins : null;
+    }
+    // Autoreg v2 #1: if a swap corrected an entry's exId, re-key this session's captured
+    // meso feedback (mesoRecap.raw.answers is keyed by the OLD exId). A later feedback
+    // edit re-derives its earn keys from the CURRENT entry exId, so without this the
+    // corrected exercise could never re-earn (answers.joint[new] would be missing) and
+    // its answers would orphan. Same-index compare: a swap never reorders entries.
+    if (session.mesoRecap?.raw?.answers) {
+      let answers = session.mesoRecap.raw.answers;
+      let remapped = false;
+      (session.entries || []).forEach((orig, i) => {
+        const now = draftEntries[i];
+        if (now && orig && !now.isCardio && now.exId !== orig.exId) {
+          answers = LB.remapMesoAnswersExId(answers, orig.exId, now.exId, session.dayId, now.name);
+          remapped = true;
+        }
+      });
+      if (remapped) patch.mesoRecap = { ...session.mesoRecap, raw: { ...session.mesoRecap.raw, answers } };
     }
     onSave(patch);
   };
@@ -4532,8 +4573,8 @@ function StretchChipLib({ tr }) {
 }
 
 // Compact inline technique badge for the session-detail set list. It sits at the
-// head of the (now single-row) technique set instead of on its own line above —
-// what used to make a technique-heavy workout balloon vertically. Gold on a PR /
+// head of the (now single-row) technique set instead of on its own line above,
+// which used to make a technique-heavy workout balloon vertically. Gold on a PR /
 // improvement, danger on a decline, a muted accent otherwise.
 function IntensityBadge({ label, highlight, decline }) {
   return (

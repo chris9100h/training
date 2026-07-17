@@ -791,26 +791,38 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // working set is already done (resumed session), stay closed.
   useEffectT(() => {
     if (session.readiness != null) return;
+    const rSch = store.schedules?.find(s => s.id === session.scheduleId);
+    // Readiness only feeds autoregulation (its signalWeight drives the meso gains).
+    // On a plain, non-autoregulating plan it has zero effect AND the tap can never be
+    // reviewed or corrected (the feedback recap is gated on mesoRecap, which those
+    // sessions never get), so the flow would only persist dead, unremovable data.
+    // Skip it entirely off-autoreg.
+    if (!LB.mesoActive(rSch)) return;
     const anyDone = session.entries.some(e => !e.isCardio && e.sets.some(s => s.done && !s.warmup && !s.skipped));
+    // Autoreg v2 P4: post-break re-entry ramp (spec 7). When a sick/vacation break
+    // longer than the threshold just ended and we are still inside the first
+    // microcycle back, the eased-in default (readiness 'reentry', signalWeight
+    // 'discounted') applies. Resolve it BEFORE stamping any default so a RESUMED
+    // session in the ramp window keeps the protective discount instead of a flat
+    // 'normal'/'full' it could never correct. Deload sessions keep 'none'.
+    const reentry = LB.reentryRamp(store.statusPeriods, store.sessions, rSch, { todayStr: LB.todayISO() });
+    const reentryActive = reentry.active && store.statusMode !== 'deload' && !session.isDeload;
     if (anyDone) {
       // Resumed session (a working set is already logged): the readiness moment has
       // passed, but the soreness / joint prompts are now gated on readiness != null,
-      // so stamp a neutral default here to UNBLOCK them instead of leaving null and
-      // silently swallowing this session's meso feedback.
-      updateSession(s => ({ ...s, readiness: 'normal', signalWeight: isMesoDeloadSession ? 'none' : 'full' }));
+      // so stamp a default here to UNBLOCK them instead of leaving null and silently
+      // swallowing this session's meso feedback. Honor an active re-entry ramp.
+      updateSession(s => ({
+        ...s,
+        readiness: reentryActive ? 'reentry' : 'normal',
+        signalWeight: isMesoDeloadSession ? 'none' : (reentryActive ? 'discounted' : 'full'),
+      }));
       return;
     }
-    // Autoreg v2 P4: post-break re-entry ramp (spec 7). When a sick/vacation break
-    // longer than the threshold just ended and we are still inside the first
-    // microcycle back, open the readiness prompt with the eased-in option
-    // PRESELECTED (readiness 'reentry', signalWeight 'discounted' on Confirm), so the
-    // protective discount is the default but a lifter who comes back strong can still
-    // pick Fresh and drop it for this session (agency preserved). The discount only
-    // lowers the suggestion, never the cap: performance overrides at the set level, so
-    // a strong return snaps straight back via earn. Deload sessions keep 'none'.
-    const rSch = store.schedules?.find(s => s.id === session.scheduleId);
-    const reentry = LB.reentryRamp(store.statusPeriods, store.sessions, rSch, { todayStr: LB.todayISO() });
-    if (reentry.active && store.statusMode !== 'deload' && !session.isDeload) {
+    if (reentryActive) {
+      // Preselect the eased-in option but let a lifter who comes back strong pick Fresh
+      // and drop it for this session (agency preserved); the discount only lowers the
+      // suggestion, never the cap, so a strong return snaps straight back via earn.
       setReadinessReentry(true);
       setReadinessSel('reentry');
       setReadinessOpen(true);
@@ -2293,7 +2305,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         ...session,
         ended: new Date().toISOString(),
         isDeload: store.statusMode === 'deload',
-        signalWeight: session.signalWeight || (isMesoDeloadSession ? 'none' : 'full'),
+        signalWeight: deriveSignalWeight(),
         mesoRecap: recap || session.mesoRecap,
       };
       const detSessions = [...(store.sessions || []).filter(x => x.id !== session.id), finishedSnapshot];
@@ -2722,11 +2734,27 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // when history changes, not on every tick. Uses PRIOR exposures (the current
   // in-progress session isn't ended in store.sessions yet), which is exactly what
   // decides whether to FREEZE this session's positive set-adds (the MRV cap).
+  // Autoreg v2 perf: detectOverreach + microcycleSetsByMuscle below read only ENDED
+  // sessions, but updateSession rewrites the in-progress (ended:null) session on every
+  // set edit, minting a fresh store.sessions ref that would otherwise re-run both full
+  // 70-day aggregations on every keystroke. Snapshot the ended slice with a STABLE
+  // reference: updateSession preserves the identity of every other session object, so
+  // when no ended session actually changed we hand the memos the same array back and
+  // they skip the recompute; any real change to a past session (edit, sync/merge) mints
+  // a new object ref and is still caught.
+  const endedSessionsRef = useRefT([]);
+  const endedSessions = (() => {
+    const list = (store.sessions || []).filter(x => x.ended);
+    const prev = endedSessionsRef.current;
+    if (list.length === prev.length && list.every((x, i) => x === prev[i])) return prev;
+    endedSessionsRef.current = list;
+    return list;
+  })();
   const overreach = useMemoT(() => {
     if (!mesoState || !mesoSch) return {};
     const muscleOfExId = (exId) => primaryMuscleForExercise(store.exercises?.find(x => x.id === exId));
-    return LB.detectOverreach(store.sessions, mesoSch, muscleOfExId);
-  }, [mesoState, mesoSch, store.sessions, store.exercises]);
+    return LB.detectOverreach(endedSessions, mesoSch, muscleOfExId);
+  }, [mesoState, mesoSch, endedSessions, store.exercises]);
   // Autoreg v2 P3: banked hard sets per muscle in the CURRENT microcycle (which:0),
   // the numeric side of the learned-MRV cap. Counts ENDED sessions only, so it reads
   // banked volume (the in-progress session isn't in it yet), exactly like the detector
@@ -2736,13 +2764,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const cycleSets = useMemoT(() => {
     if (!mesoState || !mesoSch) return {};
     const muscleOfExId = (exId) => primaryMuscleForExercise(store.exercises?.find(x => x.id === exId));
-    return LB.microcycleSetsByMuscle(store.sessions, mesoSch, muscleOfExId, {
+    return LB.microcycleSetsByMuscle(endedSessions, mesoSch, muscleOfExId, {
       which: 0, todayStr: LB.todayISO(),
       startDate: mesoState.startDate, startedAt: mesoState.startedAt,
       startCycleIndex: mesoState.startCycleIndex, cycleIndex: store.cycleIndex,
       statusPeriods: store.statusPeriods, cycleStartDate: store.cycleStartDate,
     });
-  }, [mesoState, mesoSch, store.sessions, store.exercises, store.cycleIndex, store.statusPeriods, LB.todayISO()]);
+  }, [mesoState, mesoSch, endedSessions, store.exercises, store.cycleIndex, store.statusPeriods, LB.todayISO()]);
   // Learned per-muscle MRV ceiling (spec 2.3), persisted in autoreg_state.landmarks.
   // Absent until P3 learning has flagged a muscle at least once, so the numeric cap
   // below degrades cleanly to detector-only when a muscle has no learned mrv yet.
@@ -2758,6 +2786,22 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     const lm = learnedMrv[muscle];
     return !!(lm && lm.mrv != null && (cycleSets[muscle] || 0) >= lm.mrv);
   };
+  // Autoreg v2 P4 perf: the stall detector + concrete-swap suggestion for the CURRENT
+  // exercise are pure functions of the ended history, the exercise, and the ceiling
+  // signals. Computing them here (instead of inline in the render IIFE far below) keeps
+  // every unrelated re-render (a keystroke, a timer tick, an unrelated sheet toggle)
+  // from rescanning the plan's full history and, on a stall, the entire exercise
+  // catalog. mesoState/overreach/cycleSets cover everything atCeiling reads.
+  const stallInfo = useMemoT(() => {
+    if (!mesoState || !exercise) return null;
+    const muscleOf = (id) => primaryMuscleForExercise(store.exercises?.find(x => x.id === id));
+    const stall = LB.detectStall(endedSessions, exercise.id, muscleOf, {
+      planId: mesoState.scheduleId, atCeiling, exName: exercise.name,
+    });
+    if (!stall.stalled) return { stalled: false, swap: null };
+    const swap = LB.suggestSwap(exercise.id, store.exercises, window.SYSTEM_EXERCISES, muscleOf, { affinity: mesoState.affinity });
+    return { stalled: true, swap };
+  }, [mesoState, exercise, endedSessions, store.exercises, overreach, cycleSets]);
   // Holds the just-finished session's detector result (computed in finish() over
   // the sealed session) so the post-session deload offer can read the reason
   // strings after navigation. Cleared once consumed.
@@ -2807,36 +2851,48 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     }
     // Autoreg v2 P3: snapshot the just-finished block's per-muscle volume as the new
     // block's starting point (spec 9). Landmarks carry across (they spread in via
-    // existing.autoregState: MRV is EMA-smoothed ACROSS blocks); only block.startVol
+    // the row's autoregState: MRV is EMA-smoothed ACROSS blocks); only block.startVol
     // resets. Bounded Meso resets its set deltas anyway, so no per-exercise backoff
     // here (that is the Auto emergent-reset lever, offerEmergentDeload).
     const muscleOfExId = (exId) => primaryMuscleForExercise(store.exercises?.find(x => x.id === exId));
-    const startVol = sch2 ? LB.microcycleSetsByMuscle(store.sessions, sch2, muscleOfExId, {
-      which: 0, todayStr: LB.todayISO(),
-      startDate: existing.startDate, startedAt: existing.startedAt,
-      startCycleIndex: existing.startCycleIndex, cycleIndex: store.cycleIndex,
-      statusPeriods: store.statusPeriods, cycleStartDate: store.cycleStartDate,
-    }) : {};
-    const newMeso = {
-      ...existing,
-      startDate: startDate2,
-      startCycleIndex: startCycleIndex2,
-      deltas: {},
-      jointFlags: {},
-      pumpLowCounts: {},
-      growthCounts: {},
-      pendingMeso2: false,
-      // weightBoosts carries over to meso 2
-      autoregState: LB.snapshotBlockStart(existing.autoregState, startDate2, startVol),
-      startedAt: new Date().toISOString(), // fresh block-start anchor (flex week count)
-      updatedAt: new Date().toISOString(),
-    };
-    // Keep the per-plan localStorage cache in sync with the store (getMesoState
-    // picks the newer of the two by updatedAt) so the stale Meso-1 cache can't
-    // keep winning on the home strip after Meso 2 starts.
-    saveMesoStateToStorage(newMeso);
-    setMesoStateLocal(newMeso);
-    setStore(s => ({ ...s, mesoStates: [...(s.mesoStates || []).filter(m => m.scheduleId !== scheduleId), newMeso] }));
+    const now = new Date().toISOString();
+    // Compose Meso 2 on the FRESHEST row inside the functional updater: this finish()
+    // already queued a completions/pendingMeso2 bump via computeMesoGains'
+    // flushMesoStateToStore, and this handler is reached AFTER awaited dialogs, so the
+    // closed-over `existing` can lag it. Spreading the stale `existing` would revert
+    // the completions bump (understating the "Start Meso N" number later). Mirrors
+    // applyEmergentBlockReset. #4
+    let composed = null;
+    setStore(s => {
+      const cur = (s.mesoStates || []).find(m => m.scheduleId === scheduleId) || existing;
+      const startVol = sch2 ? LB.microcycleSetsByMuscle(s.sessions, sch2, muscleOfExId, {
+        which: 0, todayStr: LB.todayISO(),
+        startDate: cur.startDate, startedAt: cur.startedAt,
+        startCycleIndex: cur.startCycleIndex, cycleIndex: s.cycleIndex,
+        statusPeriods: s.statusPeriods, cycleStartDate: s.cycleStartDate,
+      }) : {};
+      composed = {
+        ...cur,
+        startDate: startDate2,
+        startCycleIndex: startCycleIndex2,
+        deltas: {},
+        jointFlags: {},
+        pumpLowCounts: {},
+        growthCounts: {},
+        pendingMeso2: false,
+        // weightBoosts + completions carry over from the fresh row to meso 2
+        autoregState: LB.snapshotBlockStart(cur.autoregState, startDate2, startVol),
+        startedAt: now, // fresh block-start anchor (flex week count)
+        updatedAt: now,
+      };
+      return { ...s, mesoStates: [...(s.mesoStates || []).filter(m => m.scheduleId !== scheduleId), composed] };
+    });
+    // Mirror the composed row into the per-plan localStorage cache + in-session copy so
+    // getMesoState (newer of store vs cache by updatedAt) can't let a stale Meso-1 cache
+    // win on the home strip. Guarded on `composed`: if the updater ran (it does in this
+    // app's synchronous store) we have the fresh row; the store write above is
+    // authoritative either way.
+    if (composed) { saveMesoStateToStorage(composed); setMesoStateLocal(composed); }
   };
 
   const continueAsCycle = (scheduleId) => {
@@ -3134,6 +3190,17 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // letting another question claim it. See commitContrib.
   const mesoNegativeDeltaKeysRef = useRefT(mesoAskedInitRef.current.negOwner);
   const isMesoDeloadSession = store.statusMode === 'deload' || session.isDeload;
+  // Autoreg v2 P0 signal-hygiene: how much this session counts toward autoreg
+  // learning. 'none' is legitimate ONLY for an active deload. A session stamped
+  // 'none' whose deload has since ENDED mid-session must re-derive from readiness,
+  // else the stale 'none' short-circuits and wrongly freezes earn + cut for a
+  // session that should now score full-signal. Shared by computeMesoGains and the
+  // finish() snapshot (declared as a hoisted fn so the earlier snapshot can call it).
+  function deriveSignalWeight() {
+    if (isMesoDeloadSession) return 'none';
+    if (session.signalWeight && session.signalWeight !== 'none') return session.signalWeight;
+    return (session.readiness === 'rough' || session.readiness === 'reentry') ? 'discounted' : 'full';
+  }
 
   // Apply `newContrib` (key -> desired delta) as this question's current
   // contribution to mesoState.deltas, replacing whatever it contributed last
@@ -3662,7 +3729,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // back-compat. 'none' = deload (no earn, no cut). 'discounted' = rough day
     // or re-entry ramp: the rep-miss cut and MRV do NOT advance, but a real PR
     // may still EARN a weight boost. 'full' = normal.
-    const signalWeight = session.signalWeight || (isMesoDeloadSession ? 'none' : 'full');
+    const signalWeight = deriveSignalWeight();
     const unit = store.settings?.unit || 'kg';
     const weightBoostMap = {};
     const repMissCounts = { ...(mesoState.repMissCounts || {}) };
@@ -4593,67 +4660,75 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     setSwapOpen(true);
   };
 
+  // Pure entry swap: return a new sessions array with the entry at exIdx repointed to
+  // newExId, reshaping/reseeding its sets as the log mode / assist / unilateral flags
+  // require. Reads exercises from the passed (fresh) state `s`, so a just-materialized
+  // row resolves correctly. Shared by doSwap and applyStallSwap.
+  const swapEntrySessions = (s, newExId) => {
+    const newEx = LB.findExercise(s, newExId);
+    const isNewCardio = newEx?.movement_type === 'cardio';
+    return s.sessions.map(x => x.id !== session.id ? x : {
+      ...x,
+      entries: x.entries.map((e, i) => {
+        if (i !== exIdx) return e;
+        if (isNewCardio) {
+          return { ...e, exId: newExId, name: newEx?.name || e.name, isCardio: true, plannedSets: 0, sets: [], cardioDone: false, cardioData: null };
+        }
+        // Reshape the sets when the swapped-in exercise logs differently
+        // (time vs weight/reps) or flips assisted-ness, so a time/assisted
+        // exercise never inherits the old weight-shaped sets, and vice versa.
+        const oldEx = LB.findExercise(s, e.exId);
+        const modeChanged = LB.exerciseLogMode(oldEx) !== LB.exerciseLogMode(newEx);
+        const assistChanged = (oldEx?.movement_type === 'assisted') !== (newEx?.movement_type === 'assisted');
+        if (modeChanged || assistChanged) {
+          const isUni = newEx?.movement_type === 'unilateral';
+          const bwKg = LB.shouldPullBodyweight(newEx) ? LB.latestBodyweight(s) ?? null : null;
+          const swapOcc = x.entries.slice(0, i).filter(en => en.exId === newExId).length;
+          const last = LB.bestRecentEntry(s, newExId, session.dayId, 3, swapOcc);
+          const suggestion = LB.progressionSuggestion(s, newExId, session.dayId, null, null, last, null, null, swapOcc);
+          const setCount = e.sets?.length || e.plannedSets || 3;
+          const seedSets = LB.buildSeedSets({ exId: newExId, sets: setCount, repsPerSet: null }, last, suggestion, isUni, s, bwKg);
+          return { ...e, exId: newExId, name: newEx?.name || e.name, sets: seedSets };
+        }
+        // Same log mode & assist-ness: keep the logged sets, but if the swap
+        // flips unilateral-ness reshape them (per-side L/R vs a single rep) so
+        // a bilateral exercise never inherits stray L/R data and renders as
+        // "L13/R13" in history.
+        const uniChanged = (!!oldEx?.unilateral) !== (!!newEx?.unilateral);
+        const sets = uniChanged ? LB.reshapeSetsUnilateral(e.sets, !!newEx?.unilateral) : e.sets;
+        return { ...e, exId: newExId, name: newEx?.name || e.name, sets };
+      }),
+    });
+  };
+
   const doSwap = (ids) => {
     const newExId = Array.isArray(ids) ? ids[0] : ids;
     // resolve the name from fresh state — a just-created exercise isn't in the
     // closed-over `store` yet (its setStore hasn't re-rendered the screen)
-    setStore(s => {
-      const newEx = LB.findExercise(s, newExId);
-      const isNewCardio = newEx?.movement_type === 'cardio';
-      return {
-        ...s,
-        sessions: s.sessions.map(x => x.id !== session.id ? x : {
-          ...x,
-          entries: x.entries.map((e, i) => {
-            if (i !== exIdx) return e;
-            if (isNewCardio) {
-              return { ...e, exId: newExId, name: newEx?.name || e.name, isCardio: true, plannedSets: 0, sets: [], cardioDone: false, cardioData: null };
-            }
-            // Reshape the sets when the swapped-in exercise logs differently
-            // (time vs weight/reps) or flips assisted-ness, so a time/assisted
-            // exercise never inherits the old weight-shaped sets, and vice versa.
-            const oldEx = LB.findExercise(s, e.exId);
-            const modeChanged = LB.exerciseLogMode(oldEx) !== LB.exerciseLogMode(newEx);
-            const assistChanged = (oldEx?.movement_type === 'assisted') !== (newEx?.movement_type === 'assisted');
-            if (modeChanged || assistChanged) {
-              const isUni = newEx?.movement_type === 'unilateral';
-              const bwKg = LB.shouldPullBodyweight(newEx) ? LB.latestBodyweight(s) ?? null : null;
-              const swapOcc = x.entries.slice(0, i).filter(en => en.exId === newExId).length;
-              const last = LB.bestRecentEntry(s, newExId, session.dayId, 3, swapOcc);
-              const suggestion = LB.progressionSuggestion(s, newExId, session.dayId, null, null, last, null, null, swapOcc);
-              const setCount = e.sets?.length || e.plannedSets || 3;
-              const seedSets = LB.buildSeedSets({ exId: newExId, sets: setCount, repsPerSet: null }, last, suggestion, isUni, s, bwKg);
-              return { ...e, exId: newExId, name: newEx?.name || e.name, sets: seedSets };
-            }
-            // Same log mode & assist-ness: keep the logged sets, but if the swap
-            // flips unilateral-ness reshape them (per-side L/R vs a single rep) so
-            // a bilateral exercise never inherits stray L/R data and renders as
-            // "L13/R13" in history.
-            const uniChanged = (!!oldEx?.unilateral) !== (!!newEx?.unilateral);
-            const sets = uniChanged ? LB.reshapeSetsUnilateral(e.sets, !!newEx?.unilateral) : e.sets;
-            return { ...e, exId: newExId, name: newEx?.name || e.name, sets };
-          }),
-        }),
-      };
-    });
+    setStore(s => ({ ...s, sessions: swapEntrySessions(s, newExId) }));
     setSwapOpen(false);
   };
 
   // Autoreg v2 P4: apply a concrete stall-swap suggestion (spec 6). A system (sys_)
-  // candidate is materialized into store.exercises first (mapped to an existing
-  // same-named copy, else a fresh row) so doSwap always gets a real user-owned id;
-  // doSwap reads fresh state via a functional setStore, so the appended row resolves
-  // before it runs. Mirrors finalizePick's sys_ -> user materialization.
+  // candidate is materialized into store.exercises (mapped to an existing same-named
+  // copy, else a fresh row) AND the entry repointed in ONE functional updater, so a
+  // rapid second tap on another stall flag dedups against the row this tap just
+  // appended instead of re-reading a stale outer `store` and minting a duplicate.
   const applyStallSwap = (swap) => {
     if (!swap) return;
     if (!swap.isSystem) { doSwap(swap.id); return; }
-    const existing = store.exercises?.find(e => (e.name || '').toUpperCase() === (swap.name || '').toUpperCase());
-    if (existing) { doSwap(existing.id); return; }
     const sys = (window.SYSTEM_EXERCISES || []).find(s => s.id === swap.id);
-    if (!sys) return;
-    const row = LB.systemExerciseToRow(sys);
-    setStore(s => ({ ...s, exercises: [...s.exercises, row] }));
-    doSwap(row.id);
+    const upper = (swap.name || '').toUpperCase();
+    setStore(s => {
+      const existing = s.exercises?.find(e => (e.name || '').toUpperCase() === upper);
+      let exercises = s.exercises, targetId;
+      if (existing) targetId = existing.id;
+      else if (sys) { const row = LB.systemExerciseToRow(sys); exercises = [...s.exercises, row]; targetId = row.id; }
+      else return s; // no system source and no owned copy: nothing to swap to
+      const withEx = { ...s, exercises };
+      return { ...withEx, sessions: swapEntrySessions(withEx, targetId) };
+    });
+    setSwapOpen(false);
   };
 
   const doAdd = (ids) => {
@@ -5990,12 +6065,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             // muscle not at its ceiling) gets a distinct nudge and a concrete sibling
             // to try. Kept apart from the pump-flat / disliked voices above: this is
             // about the exercise stalling, not the muscle or your preference.
-            const muscleOf = (id) => primaryMuscleForExercise(store.exercises?.find(x => x.id === id));
-            const stall = LB.detectStall(store.sessions, exercise.id, muscleOf, {
-              planId: mesoState.scheduleId, atCeiling, exName: exercise.name,
-            });
-            if (stall.stalled) {
-              const swap = LB.suggestSwap(exercise.id, store.exercises, window.SYSTEM_EXERCISES, muscleOf, { affinity: mesoState.affinity });
+            // Precomputed in the `stallInfo` memo above (pure over the ended history /
+            // ceiling signals) so this render doesn't rescan the full history + catalog.
+            if (stallInfo?.stalled) {
+              const swap = stallInfo.swap;
               flags.push({
                 icon: '📉',
                 msg: swap
@@ -7888,7 +7961,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                             const repsStr = (s.repsL != null || s.repsR != null) ? `L${s.repsL ?? '?'}/R${s.repsR ?? '?'}` : s.reps;
                             // Annotate intensity-technique sets (myo-reps, drop,
                             // partials, ...) with the technique badge and, for a
-                            // rep-summed technique, its total reps — otherwise a
+                            // rep-summed technique, its total reps. Otherwise a
                             // myo set reads as just its top set (e.g. "×14" hiding
                             // a 20-rep total).
                             const tr = LB.techniqueRounds(s, { exName: entry?.name });
