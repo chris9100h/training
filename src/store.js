@@ -4718,6 +4718,9 @@ function isMesoSessionEditable(session, allSessions, mesoState) {
 // on the same key). Both `deltas` and `negOwner` are mutated in place. `frozen`
 // (final week / load-only) freezes the whole set-delta system: no delta, contrib
 // left as-is. Returns the record's new contrib.
+// Known limitation (autoreg-v2-spec.md 13.1, accepted): when this question releases a
+// negative slot it owned, a still-standing OTHER question that also wanted -1 on that key
+// does not reclaim it (its intent was already dropped to 0). One-set edge, self-limiting.
 function _commitContribInto(deltas, negOwner, prevContrib, questionType, newContrib, frozen) {
   if (frozen) return prevContrib || {};
   const keys = new Set([...Object.keys(prevContrib || {}), ...Object.keys(newContrib || {})]);

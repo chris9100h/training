@@ -2959,6 +2959,9 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
   // Objective per-exercise earn inputs (exId, key, muscle, allHit, increment) for
   // this session, mirroring computeMesoGains' earn loop, so a feedback edit can
   // re-earn weight boosts. Rep-miss cuts are preserved inside the pure helper.
+  // Known limitation (autoreg-v2-spec.md 13.2, accepted): this scores the SEALED session
+  // while computeMesoGains scored PRE-seal, so a set with reps entered but never marked done
+  // (finish() seals it skipped) can flip allHit/earlyMiss here. Rare edge, one increment.
   const fbEarnInputs = () => {
     const unit = store.settings?.unit || 'kg';
     const out = [];

@@ -316,3 +316,44 @@ läuft die Doku der Realität hinterher:
 - **Pro Phase ans Ende:** jede Phase, die sichtbares Verhalten ändert (Readiness,
   Cap-Meldungen, Recap, Stall-Vorschlag), zieht Guide + Feature-Map-Karte nach. Damit
   bleibt "alles auf Stand" ein Schritt jeder Phase, kein Nachlauf-Projekt.
+
+## 13. Bekannte Limitierungen (akzeptiert, nicht gefixt)
+
+Zwei enge Randfälle im Feedback-Edit-Pfad wurden bewusst nicht behoben: der Fix-Aufwand
+liegt an Kern-Mechanik, die jede Session durchläuft (reales Regressions-Risiko), der
+Nutzer-Impact ist minimal (ein Satz bzw. ein Gewichts-Increment auf einem überschreibbaren
+Vorschlag, sehr enge Trigger, selbstlimitierend). Falls je angefasst, hier die Analyse.
+
+### 13.1 negOwner-Slot wird nach Freigabe nicht zurückgeholt
+
+- **Mechanik:** Pro `exId_dayId`-Key hält `negOwner` genau ein -1 (ein Fragetyp „besitzt" den
+  negativen Set-Delta-Slot; ein zweiter, der denselben Key mit -1 belegen will, wird auf 0
+  gesetzt und vergisst seine Absicht). Wird die besitzende Antwort später auf nicht-negativ
+  editiert, geben `_commitContribInto` (store.js) / `commitContrib` (screens-train.jsx) den Slot
+  frei, aber der zweite, noch stehende Fragetyp reaktiviert sein -1 nicht (die Absicht ist nicht
+  mehr gespeichert).
+- **Trigger:** Zwei verschiedene Fragetypen belegen dieselbe Übung-an-diesem-Tag mit -1 (z.B.
+  Gelenkschmerz auf Übung A **und** „zu viel gepusht" für A's Muskel, Rotation trifft A), **und**
+  die besitzende Antwort wird nachträglich weg-editiert.
+- **Effekt:** ein Satz zu viel im nächsten Vorschlag für diese Übung. Kein Crash, keine
+  Korruption, überschreibbar, gleicht sich über die laufende Feedback-Schleife faktisch aus.
+- **Korrekter Fix (falls je nötig):** die unterdrückte Absicht merken und beim Freigeben einen
+  Wartenden nachrücken lassen, **synchron in beiden** Implementierungen (live + edit), sonst
+  driften sie. Eigene, getestete Einheit.
+
+### 13.2 Pre-Seal- vs. Sealed-Scoring bei „Reps eingetippt, nicht abgehakt"
+
+- **Mechanik:** `computeMesoGains` (Earn/Cut, live) läuft **vor** dem Versiegeln: ein Satz mit
+  Reps, aber `done:false`, zählt dort als anwesend-aber-nicht-erledigt und blockiert den Earn
+  (`mesoRepOutcome`: `earnHit`/`missHit` geben bei `!done` beide `false`). `finish()` markiert
+  solche Sätze danach als `skipped`. Der Feedback-Edit (`fbEarnInputs`, screens-lib.jsx) scort
+  die **versiegelte** Session, wo der Satz weg (skipped) ist, also anderes `allHit`/`earlyMiss`.
+- **Trigger:** ein Satz mit eingetippten Reps, der nie als done bestätigt wurde, **und** ein
+  späterer Feedback-Edit derselben Session.
+- **Effekt:** der Edit kann einen Gewichts-Boost (ein Increment) vergeben, den die Live-Session
+  nicht vergab (oder einen Cut fallen lassen). Kein Crash, überschreibbar, sehr selten.
+- **Sicherer Fix (falls je nötig):** das objektive Rep-Ergebnis (`allHit`/`earlyMiss` je Key)
+  beim Finish im Recap-`raw` mitspeichern und im Edit von dort lesen, statt aus den versiegelten
+  Sätzen neu zu rechnen (ändert kein Live-Scoring, hilft nur neuen Sessions). Alternative
+  (riskanter): nicht-done-Sätze in `mesoRepOutcome` ignorieren, trifft aber eine geteilte,
+  getestete Kernfunktion.
