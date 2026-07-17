@@ -2855,35 +2855,41 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
     // the store copy (DB / cross-device) and the per-plan localStorage cache must
     // move together and be freshly stamped, or getMesoState would keep preferring
     // the stale finished-session copy by updatedAt.
-    const remaining = store.sessions.filter(x => x.id !== sessionId);
     // Skip the meso rollback while a session for this plan is in progress: it owns
     // the localStorage meso cache and will flush its own state at finish, so a
     // stale rewrite here would corrupt it (mirrors isMesoSessionEditable).
     const liveForPlan = store.sessions.some(x => x && !x.ended && x.scheduleId === s.scheduleId);
-    const meso = (s.scheduleId && !s.isFreestyle && !liveForPlan)
-      ? (store.mesoStates || []).find(m => m.scheduleId === s.scheduleId) : null;
+    const doMesoRollback = !!(s.scheduleId && !s.isFreestyle && !liveForPlan
+      && (store.mesoStates || []).some(m => m.scheduleId === s.scheduleId));
     // A windowed session renders with entries:[] until a lazy fetch resolves;
     // revertMesoSessionBoosts needs the entries to build its exId keys, so load
     // them first (falls through to a harmless no-op rollback if the fetch fails).
     let delSession = s;
-    if (meso && (s.aggExercises || 0) > 0 && !(s.entries || []).length) {
+    if (doMesoRollback && (s.aggExercises || 0) > 0 && !(s.entries || []).length) {
       try {
         const bySession = await LB.fetchSessionEntries([sessionId]);
         if (bySession && bySession[sessionId] && bySession[sessionId].length) delSession = { ...s, entries: bySession[sessionId] };
       } catch {}
     }
-    const reverted = meso ? LB.revertMesoSessionBoosts(meso, delSession, remaining) : null;
-    const stampedMeso = (reverted && reverted !== meso)
-      ? { ...reverted, updatedAt: new Date().toISOString() } : null;
-    if (stampedMeso) {
-      try { localStorage.setItem(MESO_KEY + '-' + s.scheduleId, JSON.stringify(stampedMeso)); } catch {}
-    }
-    setStore(st => ({
-      ...st,
-      sessions: st.sessions.filter(x => x.id !== sessionId),
-      cardioLogs: (st.cardioLogs || []).filter(l => l.sessionId !== sessionId),
-      ...(stampedMeso ? { mesoStates: (st.mesoStates || []).map(m => m.id === meso.id ? stampedMeso : m) } : {}),
-    }));
+    // Compose the boost-rollback on the FRESHEST row INSIDE the updater: the await above
+    // (and any concurrent same-plan sync) can stale the closed-over row, and the old code
+    // wrote both localStorage and the store row from that stale copy, silently reverting a
+    // concurrent update. Read the fresh row + fresh remaining sessions here. #C
+    setStore(st => {
+      const base = {
+        ...st,
+        sessions: st.sessions.filter(x => x.id !== sessionId),
+        cardioLogs: (st.cardioLogs || []).filter(l => l.sessionId !== sessionId),
+      };
+      if (!doMesoRollback) return base;
+      const cur = (st.mesoStates || []).find(m => m.scheduleId === s.scheduleId);
+      if (!cur) return base;
+      const reverted = LB.revertMesoSessionBoosts(cur, delSession, base.sessions);
+      if (!reverted || reverted === cur) return base;
+      const stamped = { ...reverted, updatedAt: new Date().toISOString() };
+      try { localStorage.setItem(MESO_KEY + '-' + s.scheduleId, JSON.stringify(stamped)); } catch {}
+      return { ...base, mesoStates: (st.mesoStates || []).map(m => m.id === cur.id ? stamped : m) };
+    });
     go({ name: 'hist' });
   };
 
@@ -3014,7 +3020,11 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
       const readiness = edit.readiness;
       // Editable sessions are never deload (isMesoSessionEditable excludes it), so the
       // map is rough/reentry -> discounted, else full. Mirrors chooseReadiness.
-      const oldSignal = s.signalWeight || 'full';
+      // Mirror the live scoring (LB.deriveSignalWeight): a session stamped 'none' whose
+      // deload ended mid-session scored 'full' live, so oldSignal must re-derive too,
+      // else recomputeMesoRepMissCut would compute the wrong cut flip. Editable sessions
+      // are never deload (isMesoSessionEditable excludes them). #D
+      const oldSignal = LB.deriveSignalWeight(s, !!s.isDeload);
       const newSignal = (readiness === 'rough' || readiness === 'reentry') ? 'discounted' : 'full';
       const earnInputs = fbEarnInputs();
       const repMissBase = fbRaw.repMissBase || null;
@@ -3057,12 +3067,18 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
     const muscleOf = (exId) => (typeof primaryMuscleForExercise === 'function'
       ? primaryMuscleForExercise(store.exercises?.find(x => x.id === exId)) : null);
     const editSch = store.schedules?.find(x => x.id === s.scheduleId) || null;
-    const overreach = editSch ? LB.detectOverreach(store.sessions, editSch, muscleOf) : {};
+    // Compute at-ceiling over PRIOR exposures, EXCLUDING the edited session itself. The
+    // live session decided its freezes over endedSessions while it was still in-progress
+    // (so its OWN hard sets were not yet counted); store.sessions now contains it as an
+    // ended session, so including it would flip a muscle to at-ceiling that was NOT
+    // capped live and silently strip a set the live session granted. #A
+    const priorSessions = (store.sessions || []).filter(x => x.id !== sessionId);
+    const overreach = editSch ? LB.detectOverreach(priorSessions, editSch, muscleOf) : {};
     const atCeilingMuscles = new Set(Object.keys(overreach).filter(m => overreach[m] && overreach[m].atCeiling));
     // Autoreg v2 P3 numeric MRV cap: also freeze a muscle whose banked current-
     // microcycle volume has reached its learned MRV (mirror of the live atCeiling
     // helper). Degrades to detector-only when landmarks/mrv is absent.
-    const cycleSets = editSch ? LB.microcycleSetsByMuscle(store.sessions, editSch, muscleOf, {
+    const cycleSets = editSch ? LB.microcycleSetsByMuscle(priorSessions, editSch, muscleOf, {
       which: 0, todayStr: LB.todayISO(),
       startDate: sessionMeso?.startDate, startedAt: sessionMeso?.startedAt,
       startCycleIndex: sessionMeso?.startCycleIndex, cycleIndex: store.cycleIndex,
@@ -4345,23 +4361,49 @@ function SessionEditSheet({ session, duration, exercises, store, setStore, onClo
       const mins = parseInt(draftDuration, 10);
       patch.durationMinutes = (!isNaN(mins) && mins > 0) ? mins : null;
     }
-    // Autoreg v2 #1: if a swap corrected an entry's exId, move this session's captured
-    // joint feedback record to the new exId. A later feedback edit re-derives its earn
-    // keys from the CURRENT entry exId, so without this the corrected exercise could
-    // never re-earn a weight boost (answers.joint[new] would be missing). Same-index
-    // compare: SessionEditSheet only edits sets / swaps exIds, never adds/removes/reorders
-    // entries.
+    // Autoreg v2 swap re-key (#1 / #E): if a swap corrected an entry's exId, the captured
+    // meso feedback is keyed by the OLD exId; a later feedback edit / delete / revoke
+    // re-derives its keys from the CURRENT entry exId and would miss it. For each swap,
+    // pick the scope:
+    //   FULL (recap raw + the exId_dayId meso ROW levers move together) when this session
+    //   OWNS the levers: no later same-day ended session on the plan retrained the old
+    //   exId, and the new exId has no lever of its own to clobber. Then the corrected
+    //   exercise inherits the earned boost/cut and delete/edit/revoke all reach it.
+    //   IDENTITY-ONLY (move just the joint record, contrib stays under the old key, in
+    //   sync with the unremapped deltas) otherwise, which is always safe.
+    // Same-index compare: SessionEditSheet only edits sets / swaps exIds, never
+    // adds/removes/reorders entries.
     if (session.mesoRecap?.raw?.answers) {
-      let answers = session.mesoRecap.raw.answers;
-      let remapped = false;
+      let raw = session.mesoRecap.raw;
+      const mesoRow = session.scheduleId ? (store.mesoStates || []).find(m => m.scheduleId === session.scheduleId) : null;
+      const rowSwaps = [];
       (session.entries || []).forEach((orig, i) => {
         const now = draftEntries[i];
-        if (now && orig && !now.isCardio && now.exId !== orig.exId) {
-          answers = LB.remapMesoAnswersExId(answers, orig.exId, now.exId, now.name);
-          remapped = true;
+        if (!now || !orig || now.isCardio || now.exId === orig.exId) return;
+        const oldExId = orig.exId, newExId = now.exId;
+        const owner = !!mesoRow
+          && !LB.laterSessionTrainsExId(store.sessions, oldExId, session.dayId, session.ended, sessionId, session.scheduleId)
+          && !LB.mesoRowHasExId(mesoRow, newExId, session.dayId);
+        if (owner) {
+          raw = LB.remapMesoRecapRawForSwap(raw, oldExId, newExId, session.dayId, now.name);
+          rowSwaps.push({ oldExId, newExId });
+        } else {
+          const na = LB.remapMesoAnswersExId(raw.answers, oldExId, newExId, now.name);
+          if (na !== raw.answers) raw = { ...raw, answers: na };
         }
       });
-      if (remapped) patch.mesoRecap = { ...session.mesoRecap, raw: { ...session.mesoRecap.raw, answers } };
+      if (raw !== session.mesoRecap.raw) patch.mesoRecap = { ...session.mesoRecap, raw };
+      if (rowSwaps.length && session.scheduleId) {
+        setStore(st => ({
+          ...st,
+          mesoStates: (st.mesoStates || []).map(m => {
+            if (m.scheduleId !== session.scheduleId) return m;
+            let next = m;
+            rowSwaps.forEach(sw => { next = LB.remapMesoStateExId(next, sw.oldExId, sw.newExId, session.dayId); });
+            return next === m ? m : { ...next, updatedAt: new Date().toISOString() };
+          }),
+        }));
+      }
     }
     onSave(patch);
   };

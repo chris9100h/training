@@ -3192,17 +3192,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // letting another question claim it. See commitContrib.
   const mesoNegativeDeltaKeysRef = useRefT(mesoAskedInitRef.current.negOwner);
   const isMesoDeloadSession = store.statusMode === 'deload' || session.isDeload;
-  // Autoreg v2 P0 signal-hygiene: how much this session counts toward autoreg
-  // learning. 'none' is legitimate ONLY for an active deload. A session stamped
-  // 'none' whose deload has since ENDED mid-session must re-derive from readiness,
-  // else the stale 'none' short-circuits and wrongly freezes earn + cut for a
-  // session that should now score full-signal. Shared by computeMesoGains and the
-  // finish() snapshot (declared as a hoisted fn so the earlier snapshot can call it).
-  function deriveSignalWeight() {
-    if (isMesoDeloadSession) return 'none';
-    if (session.signalWeight && session.signalWeight !== 'none') return session.signalWeight;
-    return (session.readiness === 'rough' || session.readiness === 'reentry') ? 'discounted' : 'full';
-  }
+  // Autoreg v2 P0 signal-hygiene: how much this session counts toward autoreg learning.
+  // Delegates to the shared pure LB.deriveSignalWeight so the live finish and the post-hoc
+  // readiness edit (screens-lib.jsx) score a session identically. Hoisted fn so the
+  // textually-earlier finish() snapshot can call it.
+  function deriveSignalWeight() { return LB.deriveSignalWeight(session, isMesoDeloadSession); }
 
   // Apply `newContrib` (key -> desired delta) as this question's current
   // contribution to mesoState.deltas, replacing whatever it contributed last

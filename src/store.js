@@ -4962,6 +4962,120 @@ function remapMesoAnswersExId(answers, oldExId, newExId, newName) {
   return { ...answers, joint: nextJoint };
 }
 
+// Autoreg v2 (swap-correction, FULL re-key). remapMesoAnswersExId above moves only the
+// joint record identity (safe in every case). When this session OWNS the exId_dayId meso
+// levers, the caller instead does the FULL re-key so the corrected exercise inherits the
+// earned boost/cut and deletes/edits/revokes reach it: this deep-remaps the recap's raw
+// (joint identity + contrib, soreness targets + contrib, volume exIds + contrib, top-level
+// negOwner) AND (via remapMesoStateExId) the meso ROW levers, so answers and deltas move
+// TOGETHER and stay in sync. Pure; returns a new raw or the SAME reference if nothing moved.
+function remapMesoRecapRawForSwap(raw, oldExId, newExId, dayId, newName) {
+  if (!raw || !raw.answers || !oldExId || !newExId || oldExId === newExId) return raw;
+  const oldKey = oldExId + '_' + dayId;
+  const newKey = newExId + '_' + dayId;
+  const remapKeys = (obj) => {
+    if (!obj || !(oldKey in obj)) return obj;
+    const out = {};
+    for (const [k, v] of Object.entries(obj)) out[k === oldKey ? newKey : k] = v;
+    return out;
+  };
+  const a = raw.answers;
+  let changed = false;
+  const joint = { ...(a.joint || {}) };
+  if (joint[oldExId] && !joint[newExId]) {
+    const rec = { ...joint[oldExId], exId: newExId, ...(newName ? { exName: newName } : {}) };
+    rec.contrib = remapKeys(rec.contrib);
+    delete joint[oldExId];
+    joint[newExId] = rec;
+    changed = true;
+  }
+  const remapMuscleRecs = (bucket, exIdsField) => {
+    const out = {};
+    for (const [muscle, rec0] of Object.entries(bucket || {})) {
+      let rec = rec0, touched = false;
+      if (exIdsField && Array.isArray(rec0[exIdsField]) && rec0[exIdsField].includes(oldExId)) {
+        rec = { ...rec, [exIdsField]: rec0[exIdsField].map(id => id === oldExId ? newExId : id) };
+        touched = true;
+      }
+      if (Array.isArray((touched ? rec : rec0).targets) && (touched ? rec : rec0).targets.some(t => t && t.key === oldKey)) {
+        rec = { ...(touched ? rec : rec0), targets: (touched ? rec : rec0).targets.map(t => (t && t.key === oldKey) ? { ...t, key: newKey, ...(newName ? { name: newName } : {}) } : t) };
+        touched = true;
+      }
+      const nc = remapKeys((touched ? rec : rec0).contrib);
+      if (nc !== (touched ? rec : rec0).contrib) { rec = { ...(touched ? rec : rec0), contrib: nc }; touched = true; }
+      out[muscle] = touched ? rec : rec0;
+      if (touched) changed = true;
+    }
+    return out;
+  };
+  const soreness = remapMuscleRecs(a.soreness, null);
+  const volume = remapMuscleRecs(a.volume, 'exIds');
+  let negOwner = raw.negOwner;
+  const nn = remapKeys(negOwner);
+  if (nn !== negOwner) { negOwner = nn; changed = true; }
+  if (!changed) return raw;
+  return { ...raw, answers: { ...a, joint, soreness, volume }, negOwner };
+}
+
+// Move the exId-keyed meso ROW levers on a swap-correction: exId_dayId levers
+// (weightBoosts / repMissCounts / deltas / growthCounts) from oldExId_dayId -> newExId_dayId,
+// and bare-exId levers (jointFlags / pumpLowCounts / affinity) from oldExId -> newExId. Never
+// clobbers an existing target key (the caller only invokes this when the new exId has no
+// lever, but this guards anyway). Pure; returns a new state or the SAME reference.
+function remapMesoStateExId(mesoState, oldExId, newExId, dayId) {
+  if (!mesoState || !oldExId || !newExId || oldExId === newExId) return mesoState;
+  const oldKey = oldExId + '_' + dayId, newKey = newExId + '_' + dayId;
+  let changed = false;
+  const out = { ...mesoState };
+  const move = (field, from, to) => {
+    const m = mesoState[field];
+    if (m && (from in m) && !(to in m)) {
+      const n = { ...m }; n[to] = n[from]; delete n[from];
+      out[field] = n; changed = true;
+    }
+  };
+  ['weightBoosts', 'repMissCounts', 'deltas', 'growthCounts'].forEach(f => move(f, oldKey, newKey));
+  ['jointFlags', 'pumpLowCounts', 'affinity'].forEach(f => move(f, oldExId, newExId));
+  return changed ? out : mesoState;
+}
+
+// True if the new exId already owns any meso-row lever for this day (so a full swap re-key
+// would clobber it). Used to gate the FULL re-key down to the safe identity-only path. Pure.
+function mesoRowHasExId(mesoState, exId, dayId) {
+  if (!mesoState || !exId) return false;
+  const k = exId + '_' + dayId;
+  return ['weightBoosts', 'repMissCounts', 'deltas', 'growthCounts'].some(f => mesoState[f] && (k in mesoState[f]))
+    || ['jointFlags', 'pumpLowCounts', 'affinity'].some(f => mesoState[f] && (exId in mesoState[f]));
+}
+
+// True if a LATER (ended, non-deload, same plan, same day) session than `afterEnded`
+// retrained `exId`. Mirrors revertMesoSessionBoosts's retrainedLater ownership test: when
+// true, this session does NOT own the exId_dayId levers (a later session's contribution
+// currently sits in them), so a swap must not move them. Pure.
+function laterSessionTrainsExId(sessions, exId, dayId, afterEnded, exceptId, scheduleId) {
+  if (!exId || !dayId) return false;
+  const after = afterEnded || '';
+  return (sessions || []).some(x =>
+    x && x.ended && !x.isDeload && x.id !== exceptId && x.dayId === dayId
+    && (scheduleId == null || x.scheduleId === scheduleId)
+    && (x.ended || '') > after
+    && (x.entries || []).some(e => e && !e.isCardio && e.exId === exId));
+}
+
+// Autoreg v2 P0 signal-hygiene: how much a session counts toward autoreg learning.
+// 'none' is legitimate ONLY for an active deload; a session stamped 'none' whose deload
+// has since ended must re-derive from readiness, else the stale 'none' short-circuits
+// and freezes earn + cut for a session that should score full-signal. Shared by the live
+// finish (computeMesoGains) and the post-hoc readiness edit, so both score a session
+// identically. Pure.
+function deriveSignalWeight(session, isDeload) {
+  if (isDeload) return 'none';
+  const sw = session && session.signalWeight;
+  if (sw && sw !== 'none') return sw;
+  const r = session && session.readiness;
+  return (r === 'rough' || r === 'reentry') ? 'discounted' : 'full';
+}
+
 // Recompute this (top-of-stack) session's rep-miss CUT + streak contribution when a
 // post-hoc readiness edit flips its signalWeight, mirroring computeMesoGains' cut
 // gate (screens-train.jsx). A 'full' session advances the per-key miss streak and,
@@ -6107,6 +6221,6 @@ window.LB = {
   blockStartTs, blockSessions, buildBlockRecap, deloadNudgeDecision, recordDeloadDecline, clearDeloadNudge,
   updateLandmarkMrv, snapshotBlockStart, backoffDeltas,
   detectStall, suggestSwap, reentryRamp,
-  mesoGateSetsFromAnswers, isMesoSessionEditable, applyMesoFeedbackEdit, reearnMesoBoostsFromAnswers, mesoRecapGainsFromEdit, recomputeMesoRepMissCut, remapMesoAnswersExId,
+  mesoGateSetsFromAnswers, isMesoSessionEditable, applyMesoFeedbackEdit, reearnMesoBoostsFromAnswers, mesoRecapGainsFromEdit, recomputeMesoRepMissCut, remapMesoAnswersExId, deriveSignalWeight, remapMesoRecapRawForSwap, remapMesoStateExId, mesoRowHasExId, laterSessionTrainsExId,
   mesoSetTarget, mesoEarnTarget, mesoRepOutcome, reshapeSetsUnilateral,
 };

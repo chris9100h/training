@@ -1919,24 +1919,30 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
             startDate2 = LB.nextCycleD1ISOFromSchedule(sc2, store.cycleStartDate);
             startCycleIndex2 = 0;
           }
-          const newMeso = {
-            ...existing,
-            startDate: startDate2,
-            startCycleIndex: startCycleIndex2,
-            deltas: {},
-            jointFlags: {},
-            pumpLowCounts: {},
-            growthCounts: {},
-            pendingMeso2: false,
-            startedAt: new Date().toISOString(), // fresh block-start anchor (flex week count)
-            updatedAt: new Date().toISOString(),
-          };
-          // Overwrite the per-plan localStorage cache too — getMesoState returns
-          // whichever of {store, cache} is newer by updatedAt, so leaving the
-          // stale Meso-1 cache in place would keep winning and the home strip /
-          // training screen would still show the old (completed) block.
-          if (typeof saveMesoStateToStorage === 'function') saveMesoStateToStorage(newMeso);
-          setStore(s => ({ ...s, mesoStates: [...(s.mesoStates || []).filter(m => m.scheduleId !== scheduleId), newMeso] }));
+          const now = new Date().toISOString();
+          // Compose Meso 2 on the FRESHEST row INSIDE the updater (twin of the training-
+          // screen startMeso2ForSchedule fix #4): the closed-over `existing` can lag a
+          // concurrent meso-row sync, and spreading it would revert completions or
+          // resurrect a cut weight boost into the new block. Overwrite the per-plan
+          // localStorage cache in lockstep (getMesoState returns whichever of store/cache
+          // is newer by updatedAt), inside the updater so it stays atomic. #B
+          setStore(s => {
+            const cur = (s.mesoStates || []).find(m => m.scheduleId === scheduleId) || existing;
+            const newMeso = {
+              ...cur,
+              startDate: startDate2,
+              startCycleIndex: startCycleIndex2,
+              deltas: {},
+              jointFlags: {},
+              pumpLowCounts: {},
+              growthCounts: {},
+              pendingMeso2: false,
+              startedAt: now, // fresh block-start anchor (flex week count)
+              updatedAt: now,
+            };
+            if (typeof saveMesoStateToStorage === 'function') saveMesoStateToStorage(newMeso);
+            return { ...s, mesoStates: [...(s.mesoStates || []).filter(m => m.scheduleId !== scheduleId), newMeso] };
+          });
         }
         return;
       }

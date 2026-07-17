@@ -1013,6 +1013,105 @@ async function testAsync(name, fn) {
     });
   }
 
+  // ── deriveSignalWeight (#D, shared live/edit signal-hygiene) ──
+  test('deriveSignalWeight: active deload -> none (ignores stamped value)', () => {
+    assert.strictEqual(LB.deriveSignalWeight({ signalWeight: 'full', readiness: 'normal' }, true), 'none');
+  });
+  test('deriveSignalWeight: a stamped non-none value is preserved', () => {
+    assert.strictEqual(LB.deriveSignalWeight({ signalWeight: 'discounted', readiness: 'rough' }, false), 'discounted');
+  });
+  test('deriveSignalWeight: stale none (deload ended) re-derives from readiness', () => {
+    assert.strictEqual(LB.deriveSignalWeight({ signalWeight: 'none', readiness: 'normal' }, false), 'full');
+    assert.strictEqual(LB.deriveSignalWeight({ signalWeight: 'none', readiness: 'rough' }, false), 'discounted');
+    assert.strictEqual(LB.deriveSignalWeight({ signalWeight: 'none', readiness: 'reentry' }, false), 'discounted');
+  });
+  test('deriveSignalWeight: no signalWeight derives from readiness', () => {
+    assert.strictEqual(LB.deriveSignalWeight({ readiness: 'normal' }, false), 'full');
+    assert.strictEqual(LB.deriveSignalWeight({ readiness: 'rough' }, false), 'discounted');
+  });
+
+  // ── remapMesoStateExId / mesoRowHasExId / laterSessionTrainsExId (#E full swap re-key) ──
+  {
+    const ms = () => ({
+      weightBoosts: { A_d0: 2.5, X_d0: 5 }, repMissCounts: { A_d0: 1 },
+      deltas: { A_d0: 1, Y_d0: -1 }, growthCounts: { A_d0: 3 },
+      jointFlags: { A: true }, pumpLowCounts: { A: 2 }, affinity: { A: { v: 'dislike', streak: 1 } },
+    });
+    test('remapMesoStateExId: moves exId_dayId levers A_d0->B_d0 and bare-exId levers A->B', () => {
+      const out = LB.remapMesoStateExId(ms(), 'A', 'B', 'd0');
+      assert.strictEqual(out.weightBoosts.B_d0, 2.5); assert.ok(!('A_d0' in out.weightBoosts));
+      assert.strictEqual(out.weightBoosts.X_d0, 5, 'unrelated key kept');
+      assert.strictEqual(out.repMissCounts.B_d0, 1);
+      assert.strictEqual(out.deltas.B_d0, 1); assert.strictEqual(out.deltas.Y_d0, -1);
+      assert.strictEqual(out.growthCounts.B_d0, 3);
+      assert.strictEqual(out.jointFlags.B, true); assert.ok(!('A' in out.jointFlags));
+      assert.strictEqual(out.pumpLowCounts.B, 2);
+      assert.deepStrictEqual(out.affinity.B, { v: 'dislike', streak: 1 });
+    });
+    test('remapMesoStateExId: never clobbers an existing target lever', () => {
+      const out = LB.remapMesoStateExId({ weightBoosts: { A_d0: 2.5, B_d0: 7 } }, 'A', 'B', 'd0');
+      assert.strictEqual(out.weightBoosts.B_d0, 7, 'existing B kept');
+      assert.strictEqual(out.weightBoosts.A_d0, 2.5, 'A left in place (not clobbered)');
+    });
+    test('remapMesoStateExId: no-op returns same ref, does not mutate', () => {
+      const s = ms(); const snap = JSON.stringify(s);
+      assert.strictEqual(LB.remapMesoStateExId(s, 'Z', 'B', 'd0'), s);
+      assert.strictEqual(LB.remapMesoStateExId(s, 'A', 'A', 'd0'), s);
+      LB.remapMesoStateExId(s, 'A', 'B', 'd0');
+      assert.strictEqual(JSON.stringify(s), snap, 'input untouched');
+    });
+    test('mesoRowHasExId: true when the new exId owns any lever', () => {
+      assert.strictEqual(LB.mesoRowHasExId({ weightBoosts: { B_d0: 5 } }, 'B', 'd0'), true);
+      assert.strictEqual(LB.mesoRowHasExId({ jointFlags: { B: true } }, 'B', 'd0'), true);
+      assert.strictEqual(LB.mesoRowHasExId({ weightBoosts: { C_d0: 5 } }, 'B', 'd0'), false);
+      assert.strictEqual(LB.mesoRowHasExId(null, 'B', 'd0'), false);
+    });
+    test('laterSessionTrainsExId: owner test mirrors revertMesoSessionBoosts.retrainedLater', () => {
+      const later = { id: 'L', ended: '2026-07-17T10:00:00Z', dayId: 'd0', scheduleId: 'p', entries: [{ exId: 'A' }] };
+      assert.strictEqual(LB.laterSessionTrainsExId([later], 'A', 'd0', '2026-07-10T00:00:00Z', 'S', 'p'), true);
+      assert.strictEqual(LB.laterSessionTrainsExId([{ ...later, dayId: 'd1' }], 'A', 'd0', '2026-07-10T00:00:00Z', 'S', 'p'), false, 'diff day');
+      assert.strictEqual(LB.laterSessionTrainsExId([{ ...later, scheduleId: 'q' }], 'A', 'd0', '2026-07-10T00:00:00Z', 'S', 'p'), false, 'diff plan');
+      assert.strictEqual(LB.laterSessionTrainsExId([{ ...later, entries: [{ exId: 'Z' }] }], 'A', 'd0', '2026-07-10T00:00:00Z', 'S', 'p'), false, 'did not retrain');
+      assert.strictEqual(LB.laterSessionTrainsExId([{ ...later, id: 'S' }], 'A', 'd0', '2026-07-10T00:00:00Z', 'S', 'p'), false, 'excepted self');
+      assert.strictEqual(LB.laterSessionTrainsExId([{ ...later, ended: '2026-07-05T00:00:00Z' }], 'A', 'd0', '2026-07-10T00:00:00Z', 'S', 'p'), false, 'earlier');
+    });
+  }
+
+  // ── remapMesoRecapRawForSwap (#E full recap re-key) ──
+  {
+    const raw = () => ({
+      answers: {
+        soreness: { chest: { muscle: 'chest', targets: [{ exId: 'A', name: 'Bench', key: 'A_d0' }], answer: 'still_sore', contrib: { A_d0: -1 } } },
+        joint: { A: { exId: 'A', exName: 'Bench', answer: 'sharp', pump: 'low', contrib: { A_d0: -1 } } },
+        volume: { chest: { muscle: 'chest', exIds: ['A', 'e2'], volume: 'not_enough', contrib: { A_d0: 1 } } },
+      },
+      negOwner: { A_d0: 'joint' }, dayId: 'd0',
+    });
+    test('remapMesoRecapRawForSwap: re-keys joint identity + contrib to the new exId', () => {
+      const out = LB.remapMesoRecapRawForSwap(raw(), 'A', 'B', 'd0', 'Incline');
+      assert.strictEqual(out.answers.joint.B.exId, 'B');
+      assert.strictEqual(out.answers.joint.B.exName, 'Incline');
+      assert.strictEqual(out.answers.joint.B.contrib.B_d0, -1);
+      assert.ok(!('A' in out.answers.joint));
+    });
+    test('remapMesoRecapRawForSwap: re-keys soreness targets+contrib, volume exIds+contrib, negOwner', () => {
+      const out = LB.remapMesoRecapRawForSwap(raw(), 'A', 'B', 'd0', 'Incline');
+      assert.strictEqual(out.answers.soreness.chest.targets[0].key, 'B_d0');
+      assert.strictEqual(out.answers.soreness.chest.targets[0].name, 'Incline');
+      assert.strictEqual(out.answers.soreness.chest.contrib.B_d0, -1);
+      assert.deepStrictEqual(out.answers.volume.chest.exIds, ['B', 'e2']);
+      assert.strictEqual(out.answers.volume.chest.contrib.B_d0, 1);
+      assert.strictEqual(out.negOwner.B_d0, 'joint');
+      assert.ok(!('A_d0' in out.negOwner));
+    });
+    test('remapMesoRecapRawForSwap: no-op returns same ref, does not mutate', () => {
+      const r = raw(); const snap = JSON.stringify(r);
+      assert.strictEqual(LB.remapMesoRecapRawForSwap(r, 'Z', 'B', 'd0', 'x'), r);
+      LB.remapMesoRecapRawForSwap(r, 'A', 'B', 'd0', 'Incline');
+      assert.strictEqual(JSON.stringify(r), snap, 'input untouched');
+    });
+  }
+
   // ── applyMesoFeedbackEdit (post-hoc feedback correction, mirrors the handlers) ──
   test('applyMesoFeedbackEdit: no-op edit (same answer) leaves state byte-identical', () => {
     const ms = { deltas: { e1_d0: -1 }, growthCounts: {}, pumpLowCounts: {}, jointFlags: {} };
