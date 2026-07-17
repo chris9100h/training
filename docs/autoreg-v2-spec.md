@@ -19,7 +19,7 @@ und zwar in **allen drei Modi**, nicht nur im wochenbegrenzten Meso.
 Damit ist es **eine** Engine mit einer dünnen Mode-Policy, kein Dreifach-Code:
 - **blockBoundary(mode)**: geplant (Meso) vs. erkannt (Auto)
 - **throttleLever(mode)**: Sätze (Auto Full), Sätze früh cappen (Meso), Last (Load-only)
-- **onReset(mode)**: Volumen → MEV (Full/Meso) vs. Last-Drop (Load-only)
+- **onReset(mode)**: Block-Backoff pro Übung (Full/Meso, §2.3) vs. Last-Drop (Load-only)
 
 ## 1. Modi
 
@@ -44,23 +44,30 @@ Volumen ist der Sinn von B). B bekommt alles andere.
 
 ## 2. Geteilte Primitive (modus-agnostisch)
 
-### 2.1 Wochenbuchhaltung: harte Sätze pro Muskel
+### 2.1 Mikrozyklus-Buchhaltung: harte Sätze pro Muskel
 
-Neu, das Fundament. Heute rechnet alles pro `exId_dayId`; MEV/MRV sind aber
-**wöchentliches Volumen pro Muskel** über alle Tage.
+Neu, das Fundament. Heute rechnet alles pro `exId_dayId`; MEV/MRV sind
+**Volumen pro Muskel pro Mikrozyklus** über alle Tage.
 
-- **Fenster:** rollierende **7 Tage** (nicht Kalenderwoche). Robust gegen Flex-/
-  Rotations-/Weekday-Pläne, in denen "eine Woche" nicht sauber definiert ist.
+- **Fenster = ein Mikrozyklus, nach Plan-Struktur** (NICHT fix 7 Tage):
+  - **Weekday-Plan** (`isWeekdayPlan`): pro **Woche**.
+  - **Flex-Plan** (`isFlexPlan`; Meso läuft aktuell immer hier): pro **Rotation**
+    (ein voller Durchlauf der Trainingstage).
+  - **Cycle-Plan**: pro **Cycle** (ein Durchlauf der Version).
+
+  Grund: die Engine taktet ihre Progression ohnehin in dieser Einheit
+  (`mesoWeek` / `cycleIndex`). Die Volumen-Zählung muss dieselbe Einheit nutzen,
+  sonst misaligniert sie (eine 5-Tage-Rotation ist keine Woche). **"Pro Woche"
+  gilt nur im Wochenmodus.**
 - **Harter Satz:** ein erledigter Working-Set (kein Warmup, kein Skip). Technik-
-  Sätze (Myo/Drop/AMRAP) zählen als **1** (ein harter Satz mit verlängertem Reiz).
-  Partials/Stretch als Finisher zählen **nicht** extra. (→ offener Parameter, ob
-  Myo/Drop mit Faktor 1.x zählen sollen.)
-- **Zuordnung:** `primaryMuscleForExercise` (vorhanden). Sätze ohne Muskel-Tag
-  gehen in keinen Landmark ein.
-- **Quelle:** clientseitig aus der relationalen Session-Historie. Das 7-Tage-
-  Fenster liegt komfortabel im 70-Tage-History-Fenster, keine Server-Aggregate nötig.
+  Sätze (Myo/Drop/AMRAP) zählen als **1**. Partials/Stretch als Finisher zählen
+  **nicht** extra.
+- **Zuordnung:** `primaryMuscleForExercise`. Sätze ohne Muskel-Tag gehen in keinen
+  Landmark ein.
+- **Quelle:** clientseitig aus der relationalen Session-Historie; ein Mikrozyklus
+  liegt im 70-Tage-Fenster, keine Server-Aggregate nötig.
 
-Output: `weeklySets[muscle]` = harte Sätze der letzten 7 Tage.
+Output: `cycleSets[muscle]` = harte Sätze im aktuellen/letzten Mikrozyklus.
 
 ### 2.2 Overreach-Detektor
 
@@ -84,16 +91,21 @@ selbst abklingen, ziehen den Detektor zurück (war evtl. nur Schlaf/Stress).
 Output pro Muskel: `{ atCeiling: bool, since, evidence: [...] }`. `evidence` sind
 menschenlesbare Strings (siehe §8), die direkt in Recap/Nudge wandern.
 
-### 2.3 Landmark-Speicher (MEV/MRV pro Muskel)
+### 2.3 Landmarks: MRV-Cap (pro Muskel) + Block-Backoff (pro Übung)
 
-- **MRV[muscle]:** die 7-Tage-Satzzahl, bei der die Signatur zuschlug, **geglättet**
-  über Blöcke (EMA, damit ein Ausreisser die Decke nicht dauerhaft verschiebt).
-- **MEV[muscle]:** Blockstart-Volumen. **v1 bewusst konservativ:** Default pro
-  Muskelgruppe bzw. `MRV − N` als Startpunkt. Echte MEV-Erkennung (kleinste
-  Volumen mit noch spürbarem Reiz) ist eine spätere Stufe, nicht v1.
+Wichtige Trennung nach Rücksprache:
+- **MRV[muscle] = Decke, PRO MUSKEL.** Muss pro Muskel sein: Brust erholt sich als
+  Ganzes, egal über wie viele Übungen die Sätze laufen. Pro Übung gedacht hätte jede
+  Brustübung ihre eigene Decke und das Gesamtvolumen explodiert. Wert = die
+  Mikrozyklus-Satzzahl, bei der die Signatur zuschlug, **EMA-geglättet** über Blöcke.
+- **Block-Backoff = PRO ÜBUNG.** Kein echtes MEV in v1 (echtes MEV liegt weit unter
+  MRV, grob halb, und ist pro Muskel; das ist v2-Wissenschaft). Stattdessen
+  pragmatisch: beim Blockstart zieht **jede Übung ~2 Sätze** von ihrem zuletzt
+  erreichten Volumen ab, danach baut die normale Satz-drauf-Logik wieder hoch,
+  **gedeckelt von der per-Muskel-MRV.** Decke korrekt (pro Muskel), Stellschraube
+  wie gehabt (pro Übung).
 
-Persistiert, versioniert (§9). Überlebt das History-Windowing, weil es im
-`mesoState` (Server) liegt, nicht in den gefensterten Sets.
+Persistiert, versioniert (§9). Überlebt das History-Windowing (liegt im `mesoState`).
 
 ## 3. Blockgrenze & Reset (die Mode-Policy)
 
@@ -101,8 +113,9 @@ Persistiert, versioniert (§9). Überlebt das History-Windowing, weil es im
   Schlägt der Detektor **vor** der Peak-Woche an, wird **früh gecappt** (Volumen
   halten statt aufs geplante Peak-Volumen hochziehen); der geplante Deload kommt eh.
 - **Auto Full (A):** Grenze **erkannt.** MRV-Signatur → **Deload vorschlagen** →
-  bei Annahme Reset Richtung MEV + neuer Ramp. Das macht Auto Full zum
-  **selbst-getakteten Mesozyklus:** Blocklänge = deine Erholung, nicht eine Zahl.
+  bei Annahme Block-Backoff (§2.3, −2 Sätze/Übung) + neuer Ramp bis zur per-Muskel-
+  MRV. Das macht Auto Full zum **selbst-getakteten Mesozyklus:** Blocklänge = deine
+  Erholung, nicht eine Zahl.
 - **Auto Load-only (B):** Volumen fix, also kein Volumen-Reset. Derselbe Detektor
   hält/senkt die **Last** und schlägt einen Deload vor.
 
@@ -217,16 +230,23 @@ Intelligenz wie Willkür an. Beispiele:
 - Sync-Guard: `autoreg_state` fährt über `sync_meso_states_batch` mit dem
   bestehenden `updated_at`-Staleness-Schutz mit.
 
-## 10. Offene Parameter (bitte entscheiden)
+## 10. Parameter
 
-1. Harter Satz: zählen Myo/Drop als 1 oder 1.x?
-2. Bestätigungsfenster des Detektors: 2 Muskel-Sessions?
-3. MRV-Glättung: EMA-Faktor?
-4. MEV-Init: Default pro Muskel, oder `MRV − N`? Welches N?
-5. Cooldown-Länge des Deload-Nudges: wie viele Sessions?
-6. Readiness-Effekt: +1 RIR fix? Accessory-Satz kappen ja/nein?
-7. Stall: N Sessions ohne e1RM-Fortschritt?
-8. Wiedereinstieg: Schwelle (Pausentage) + Ramp-Länge (K Sessions)?
+**Entschieden:**
+- Harter Satz: Myo/Drop zählen als **1**.
+- Deload-Nudge-Cooldown: **3** Sessions, dann nur passiver Hinweis.
+- Stall: **3** Sessions ohne e1RM-Fortschritt bei grünen Gates.
+- Block-Backoff: **−2 Sätze pro Übung** am Blockstart; Decke (MRV) pro Muskel.
+- Buchhaltungs-Fenster: ein Mikrozyklus nach Plan-Struktur (§2.1).
+
+**Vorgeschlagen, noch zu bestätigen:**
+- Detektor-Bestätigungsfenster: die **letzten 2 Mal**, die der Muskel drankam.
+- Readiness "Rough": **+1 RIR** und letzten Accessory-Satz kappen.
+- Wiedereinstieg: ab **7** Pausentagen, Ramp über **~3** Sessions.
+
+**Später (nicht v1-blockierend):**
+- MRV-EMA-Glättungsfaktor (Startwert im Bau festlegen, dann tunen).
+- Echte MEV-Erkennung pro Muskel (v2).
 
 ## 11. Bau-Phasen (jede einzeln lieferbar + testbar)
 
@@ -243,5 +263,18 @@ Intelligenz wie Willkür an. Beispiele:
   Full zum selbst-getakteten Meso.
 - **P4 — Stall + konkreter Swap, Wiedereinstiegs-Ramp.**
 
-P1 ist der Dreh- und Angelpunkt: sobald der Detektor auf der Wochenbuchhaltung
-steht, ist "für alle drei Modi" gelöst, alles danach ist nur noch Policy.
+P1 ist der Dreh- und Angelpunkt: sobald der Detektor auf der Mikrozyklus-
+Buchhaltung steht, ist "für alle drei Modi" gelöst, alles danach ist nur noch Policy.
+
+## 12. Definition of Done: Guide & Feature Map aktualisieren
+
+Wenn (Teile) der Engine live gehen, müssen die nutzerseitigen Erklärungen mit, sonst
+läuft die Doku der Realität hinterher:
+- **Autoreg-Guide, doppelt pflegen:** `src/screens-autoreg-guide.jsx` (In-App) **und**
+  `src/autoreg-guide-page.js` (Public `autoreg.html`), inhaltlich synchron. Bei der
+  Public-Seite den `?v=`-Cache-Buster im Gleichschritt mit dem SW-Cache-Bump hochziehen.
+- **Feature Map:** Karte(n) in `src/feature-map-db.js` ergänzen/editieren (stabile
+  `id`, kein Tech-Jargon, nur End-User-Nutzen). Erscheint automatisch für alle.
+- **Pro Phase ans Ende:** jede Phase, die sichtbares Verhalten ändert (Readiness,
+  Cap-Meldungen, Recap, Stall-Vorschlag), zieht Guide + Feature-Map-Karte nach. Damit
+  bleibt "alles auf Stand" ein Schritt jeder Phase, kein Nachlauf-Projekt.
