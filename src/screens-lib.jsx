@@ -2949,6 +2949,20 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
     const editSch = store.schedules?.find(x => x.id === s.scheduleId) || null;
     const overreach = editSch ? LB.detectOverreach(store.sessions, editSch, muscleOf) : {};
     const atCeilingMuscles = new Set(Object.keys(overreach).filter(m => overreach[m] && overreach[m].atCeiling));
+    // Autoreg v2 P3 numeric MRV cap: also freeze a muscle whose banked current-
+    // microcycle volume has reached its learned MRV (mirror of the live atCeiling
+    // helper). Degrades to detector-only when landmarks/mrv is absent.
+    const cycleSets = editSch ? LB.microcycleSetsByMuscle(store.sessions, editSch, muscleOf, {
+      which: 0, todayStr: LB.todayISO(),
+      startDate: sessionMeso?.startDate, startedAt: sessionMeso?.startedAt,
+      startCycleIndex: sessionMeso?.startCycleIndex, cycleIndex: store.cycleIndex,
+      statusPeriods: store.statusPeriods, cycleStartDate: store.cycleStartDate,
+    }) : {};
+    const landmarks = sessionMeso?.autoregState?.landmarks || {};
+    Object.keys(landmarks).forEach(m => {
+      const lm = landmarks[m];
+      if (lm && lm.mrv != null && (cycleSets[m] || 0) >= lm.mrv) atCeilingMuscles.add(m);
+    });
     const ctx = { dayId: s.dayId, loadOnly: fbLoadOnly, atCeilingMuscles };
     const r1 = LB.applyMesoFeedbackEdit(sessionMeso, fbRaw, edit, ctx);
     const earnInputs = fbEarnInputs();

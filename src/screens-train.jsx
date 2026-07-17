@@ -2290,6 +2290,28 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           const cleared = LB.clearDeloadNudge(mesoState.autoregState);
           if (cleared !== (mesoState.autoregState ?? null)) persistAutoregState(() => cleared);
         } else {
+          // Autoreg v2 P3 landmark learning (spec 2.3): the detector flagged these
+          // muscles at their ceiling this finish, so record each one's CURRENT-
+          // microcycle banked set count as the learned MRV, EMA-smoothed across blocks
+          // (updateLandmarkMrv damps a single spike). Only detector-flagged muscles are
+          // touched, and the detector only counts full-signal exposures, so a
+          // discounted/none session can never drive a ceiling down (spec 4.3). The
+          // functional-updater form reads the freshest row so it composes with the
+          // computeMesoGains flush and the nudge writes below.
+          const microNow = mesoSch ? LB.microcycleSetsByMuscle(detSessions, mesoSch, muscleOfExId, {
+            which: 0, todayStr: LB.todayISO(),
+            startDate: mesoState.startDate, startedAt: mesoState.startedAt,
+            startCycleIndex: mesoState.startCycleIndex, cycleIndex: store.cycleIndex,
+            statusPeriods: store.statusPeriods, cycleStartDate: store.cycleStartDate,
+          }) : {};
+          persistAutoregState(prev => {
+            let next = prev;
+            for (const m of flaggedNow) {
+              const obs = microNow[m];
+              if (obs > 0) next = LB.updateLandmarkMrv(next, m, obs);
+            }
+            return next;
+          });
           // Cooldown gate (spec 5.3 step 3): fire the full prompt only when allowed.
           // During cooldown the ref stays null so goJustFinished skips the offer;
           // the passive home hint is the only surface until the cooldown elapses.
@@ -2676,10 +2698,37 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     const muscleOfExId = (exId) => primaryMuscleForExercise(store.exercises?.find(x => x.id === exId));
     return LB.detectOverreach(store.sessions, mesoSch, muscleOfExId);
   }, [mesoState, mesoSch, store.sessions, store.exercises]);
-  // MRV cap lookup (spec 2.3): true when a muscle already hit its ceiling from
-  // prior exposures, so this session must not ADD sets for it (positive-only,
-  // per-muscle, non-destructive: cuts/declines still apply).
-  const atCeiling = (muscle) => !!(muscle && overreach[muscle] && overreach[muscle].atCeiling);
+  // Autoreg v2 P3: banked hard sets per muscle in the CURRENT microcycle (which:0),
+  // the numeric side of the learned-MRV cap. Counts ENDED sessions only, so it reads
+  // banked volume (the in-progress session isn't in it yet), exactly like the detector
+  // reads prior exposures. Windowed with the block/pause context so flex rotations and
+  // paused deloads align with the engine's meso week (the microcycleSetsByMuscle
+  // FIX 1/2/3). Memoized on the mesoWeek dep set.
+  const cycleSets = useMemoT(() => {
+    if (!mesoState || !mesoSch) return {};
+    const muscleOfExId = (exId) => primaryMuscleForExercise(store.exercises?.find(x => x.id === exId));
+    return LB.microcycleSetsByMuscle(store.sessions, mesoSch, muscleOfExId, {
+      which: 0, todayStr: LB.todayISO(),
+      startDate: mesoState.startDate, startedAt: mesoState.startedAt,
+      startCycleIndex: mesoState.startCycleIndex, cycleIndex: store.cycleIndex,
+      statusPeriods: store.statusPeriods, cycleStartDate: store.cycleStartDate,
+    });
+  }, [mesoState, mesoSch, store.sessions, store.exercises, store.cycleIndex, store.statusPeriods, LB.todayISO()]);
+  // Learned per-muscle MRV ceiling (spec 2.3), persisted in autoreg_state.landmarks.
+  // Absent until P3 learning has flagged a muscle at least once, so the numeric cap
+  // below degrades cleanly to detector-only when a muscle has no learned mrv yet.
+  const learnedMrv = mesoState?.autoregState?.landmarks || {};
+  // MRV cap lookup (spec 2.3): true when a muscle already hit its ceiling. Two
+  // independent triggers, OR-ed: (a) the stateless overreach detector flags it from
+  // prior exposures, or (b) its banked current-microcycle volume has reached the
+  // learned MRV. Positive-only, per-muscle, non-destructive: this only FREEZES set
+  // adds; cuts/declines still apply.
+  const atCeiling = (muscle) => {
+    if (!muscle) return false;
+    if (overreach[muscle] && overreach[muscle].atCeiling) return true;
+    const lm = learnedMrv[muscle];
+    return !!(lm && lm.mrv != null && (cycleSets[muscle] || 0) >= lm.mrv);
+  };
   // Holds the just-finished session's detector result (computed in finish() over
   // the sealed session) so the post-session deload offer can read the reason
   // strings after navigation. Cleared once consumed.
@@ -2727,6 +2776,18 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       startDate2 = LB.nextCycleD1ISOFromSchedule(sch2, store.cycleStartDate);
       startCycleIndex2 = 0;
     }
+    // Autoreg v2 P3: snapshot the just-finished block's per-muscle volume as the new
+    // block's starting point (spec 9). Landmarks carry across (they spread in via
+    // existing.autoregState: MRV is EMA-smoothed ACROSS blocks); only block.startVol
+    // resets. Bounded Meso resets its set deltas anyway, so no per-exercise backoff
+    // here (that is the Auto emergent-reset lever, offerEmergentDeload).
+    const muscleOfExId = (exId) => primaryMuscleForExercise(store.exercises?.find(x => x.id === exId));
+    const startVol = sch2 ? LB.microcycleSetsByMuscle(store.sessions, sch2, muscleOfExId, {
+      which: 0, todayStr: LB.todayISO(),
+      startDate: existing.startDate, startedAt: existing.startedAt,
+      startCycleIndex: existing.startCycleIndex, cycleIndex: store.cycleIndex,
+      statusPeriods: store.statusPeriods, cycleStartDate: store.cycleStartDate,
+    }) : {};
     const newMeso = {
       ...existing,
       startDate: startDate2,
@@ -2737,6 +2798,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       growthCounts: {},
       pendingMeso2: false,
       // weightBoosts carries over to meso 2
+      autoregState: LB.snapshotBlockStart(existing.autoregState, startDate2, startVol),
       startedAt: new Date().toISOString(), // fresh block-start anchor (flex week count)
       updatedAt: new Date().toISOString(),
     };
@@ -2884,6 +2946,50 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // while mesocycle_weeks is set); the Auto modes (Full / Load-only) are exactly
   // where the emergent deload lives. Accept starts the existing deload overlay;
   // decline just closes.
+  // Autoreg v2 P3: the emergent block reset (spec 2.3 / 3). Fires on deload ACCEPT in
+  // Auto Full only. It is what makes Auto Full a self-timed mesocycle: snapshot the
+  // block's per-muscle volume, back each grown exercise off ~2 sets (non-destructive,
+  // never below the plan base), clear the nudge, and stamp a fresh block anchor so the
+  // next block re-ramps from a backed-off start, capped per-muscle by the learned MRV.
+  // Excluded by design: bounded Meso (weeks != null) has its own planned deload +
+  // reset; Load-only (autoregLoadOnly) has fixed volume and no landmarks. Combines
+  // deltas + autoregState + updatedAt into ONE meso-row write (so the staleness guard
+  // carries them together) and mirrors startMeso2ForSchedule's storage/local/store
+  // triple-write so the localStorage cache can't out-stale the row.
+  const applyEmergentBlockReset = () => {
+    if (!mesoState || mesoState.weeks != null || !mesoSch || LB.autoregLoadOnly(mesoSch)) return;
+    const scheduleId = session.scheduleId;
+    const muscleOfExId = (exId) => primaryMuscleForExercise(store.exercises?.find(x => x.id === exId));
+    const now = new Date().toISOString();
+    const todayIso = LB.todayISO();
+    // Compose on the FRESH row inside a functional updater. This finish already
+    // flushed the session's feedback (flushMesoStateToStore) and learned the
+    // ceiling on the triggering session (persistAutoregState); reading the closed-
+    // over `store` here would clobber both with a stale row. flushMesoStateToStore
+    // also cleared the localStorage copy, so the store row is now authoritative.
+    setStore(s => {
+      const cur = (s.mesoStates || []).find(m => m.scheduleId === scheduleId);
+      if (!cur) return s;
+      const startVol = LB.microcycleSetsByMuscle(s.sessions, mesoSch, muscleOfExId, {
+        which: 0, todayStr: todayIso,
+        startDate: cur.startDate, startedAt: cur.startedAt,
+        startCycleIndex: cur.startCycleIndex, cycleIndex: s.cycleIndex,
+        statusPeriods: s.statusPeriods, cycleStartDate: s.cycleStartDate,
+      });
+      // clearDeloadNudge first (the block is resetting), then snapshot the new block.
+      const nextAutoreg = LB.snapshotBlockStart(LB.clearDeloadNudge(cur.autoregState), todayIso, startVol);
+      const newMeso = {
+        ...cur,
+        deltas: LB.backoffDeltas(cur.deltas, 2),
+        autoregState: nextAutoreg,
+        startedAt: now,       // fresh block anchor for flex windowing
+        startDate: todayIso,  // re-anchor weekday/cycle microcycle window + week counter too
+        updatedAt: now,
+      };
+      return { ...s, mesoStates: (s.mesoStates || []).filter(m => m.scheduleId !== scheduleId).concat(newMeso) };
+    });
+  };
+
   const offerEmergentDeload = async (offer) => {
     if (!mesoState || isMesoDeloadSession) return;
     if (mesoState.weeks != null) return;      // bounded meso: deload comes at block end
@@ -2909,7 +3015,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       if (bRecap && (bRecap.prCount > 0 || bRecap.setGains.some(g => g.setDelta > 0))) {
         await confirm(blockRecapNode(bRecap, null, 0), { title: 'Block complete 🎉', ok: 'Start deload', cancel: null, preventBackdropClose: true });
       }
-      persistAutoregState(prev => LB.clearDeloadNudge(prev));
+      // Auto Full: reset the block (backoff + snapshot + fresh anchor, clears the nudge
+      // inline). Load-only has no volume landmarks, so just clear the nudge.
+      if (!LB.autoregLoadOnly(mesoSch)) applyEmergentBlockReset();
+      else persistAutoregState(prev => LB.clearDeloadNudge(prev));
       await LB.startDeload(userId, store, setStore);
       return;
     }
@@ -2922,7 +3031,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       { title: escalation > 0 ? 'The trend is still up' : 'Before you skip it', ok: 'Start deload', cancel: 'Skip it, keep training', preventBackdropClose: true },
     );
     if (reAsk) {
-      persistAutoregState(prev => LB.clearDeloadNudge(prev));
+      if (!LB.autoregLoadOnly(mesoSch)) applyEmergentBlockReset();
+      else persistAutoregState(prev => LB.clearDeloadNudge(prev));
       await LB.startDeload(userId, store, setStore);
       return;
     }

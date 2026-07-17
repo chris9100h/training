@@ -135,6 +135,21 @@
       '</div></div>';
     out+='</section>';
 
+    /* volume landmarks / self-timed block (modus-agnostic) */
+    out+='<section class="sec">'+sechead('Landmarks · Memory','A ceiling it learns and remembers',
+      'The first time a muscle hits its overreaching signature, the app remembers the set count it happened at as that muscle\'s ceiling. It is smoothed across blocks, so one rough block nudges the number, never craters it. That memory is what turns an open-ended plan into a self-timed block.');
+    out+='<div class="grid g180">'+
+      stat('Learned ceiling','Per muscle',null,'Your MRV is stored per muscle, not per exercise, and averaged across blocks. A single bad week moves it a little, so it settles on your real ceiling over time.')+
+      stat('Self-timed block','Recovery, not a number','var(--accent)','A block ends when you hit the ceiling, not on a fixed date. Take the deload and the app starts a fresh block right there.')+
+      stat('Reset & re-ramp','Back off, build again',null,'On that reset each exercise drops about 2 sets from where it topped out (never below your plan\'s base), then set adds climb again, capped by the same learned ceiling.')+
+      '</div>';
+    out+='<div class="card lb accented" style="margin-top:16px"><div class="kick" style="color:var(--accent)">Per mode</div><div style="margin-top:6px;font-size:13.5px;color:var(--ink-soft)">'+
+      (isB?'<b>Load only:</b> no volume landmarks here by design, your set counts are fixed on purpose. You still get the ceiling detector and the deload offer, they just hold and drop the weight instead of your sets.'
+        :isC?'<b>Mesocycle:</b> the block still ends on its planned week, but the learned ceiling carries as a memory and caps your sets early if you reach it before the peak. Your next block starts fresh from a backed-off base.'
+        :'<b>Volume + Load:</b> this is what makes the plan a self-paced mesocycle. Grow until a muscle tops out, take the deload when you are ready, and the next block re-ramps from a backed-off start toward the ceiling you actually reached. Never forced, always wave-off-able.')+
+      '</div></div>';
+    out+='</section>';
+
     /* block recap (modus-agnostic) */
     out+='<section class="sec">'+sechead('Recap · Block','What you built, and what it cost',
       'When a block wraps up, the app sums up everything since your last reset: weight PRs, the lifts that climbed, how many sessions you put in and your best day. It shows up in two moments, and reads differently in each.');
@@ -313,7 +328,7 @@
     out+='<div class="grid g240" style="margin-bottom:14px">'+
       '<div class="card lb accented"><h3 class="display h3">'+(isC?'1 · Planned end-of-block':'1 · The 8 week nudge')+'</h3><p style="font-size:14px;color:var(--ink-soft)">'+(isC?'Finishing the final week pops "Mesocycle complete! Start deload?". Taking it runs one light week, then offers the next block. Unique to bounded blocks.':'After about 8 weeks of training since your last deload (counted by sessions, weeks, or cycles depending on plan type), the app offers "Start deload". Take it or dismiss it.')+'</p></div>'+
       '<div class="card lb-faint"><h3 class="display h3">2 · Manual, anytime</h3><p style="font-size:14px;color:var(--ink-soft)">The active plan card has a Deload button in every mode. It runs your normal plan at ~50% load for one cycle, then auto-ends.</p></div>'+
-      (isC?'':'<div class="card lb accented"><h3 class="display h3">3 · Overreach-driven</h3><p style="font-size:14px;color:var(--ink-soft)">When a muscle hits its volume ceiling (see the Volume section), the finish screen offers a deload right then, with the reason spelled out. It is a suggestion: wave it off and keep training.</p></div>')+'</div>';
+      (isC?'':'<div class="card lb accented"><h3 class="display h3">3 · Overreach-driven</h3><p style="font-size:14px;color:var(--ink-soft)">When a muscle hits its learned volume ceiling (see the Landmarks section), the finish screen offers a deload right then, with the reason spelled out. Take it and the block resets: each lift backs off about 2 sets and a fresh block re-ramps. It is a suggestion: wave it off and keep training.</p></div>')+'</div>';
     out+='<div class="card"><h3 class="display h3">What a deload week actually does</h3>'+
       '<div class="grid g240" style="gap:8px 16px;margin-top:6px">'+[
         ['Loads halved','to about 50% (rounded to 2.5). Reps are not reduced. Bodyweight and assisted lifts are not halved.'],

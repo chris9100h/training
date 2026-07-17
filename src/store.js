@@ -5073,44 +5073,94 @@ function weekWindowISO(todayStr, which) {
 
 // Hard sets per muscle over ONE microcycle of `sch` (spec 2.1). The microcycle
 // unit is plan-structure dependent, NOT a fixed 7 days:
-//   - weekday plan  -> one calendar week (Mon..Sun)
-//   - flex plan     -> one rotation (a full pass over sch.days), sliced by
-//                      TRAINED-session count, never by date or raw cycleIndex
-//                      (skips inflate cycleIndex, so a date/index window would
-//                      over-count; mirrors mesoCurrentWeek's trained/len math)
+//   - weekday plan  -> one meso week: a 7-day step from opts.startDate, MINUS the
+//                      paused (deload/sick/idle-vacation) days, so it lines up
+//                      with the engine's mesoCurrentWeek instead of a Mon..Sun
+//                      calendar week. Also scoped to s.scheduleId === sch.id.
+//   - flex plan     -> one rotation (a full pass over sch.days), bucketed by each
+//                      session's OWN rotation index (recovered from its dayId's
+//                      slot in sch.days), so a rotation with a skipped day never
+//                      borrows a session from the adjacent one.
 //   - cycle plan    -> one cycle window (getCycleNumForDate / getCycleStartForNum)
 // `opts.which` (default 0) selects the current microcycle; 1 the previous one, etc.
 // `opts.todayStr` overrides "today"; `opts.cycleStartDate` supports an unversioned
-// cycle plan's date window. Returns { [muscle]: hardSetCount }. Pure/testable.
-// TODO(P3), before this is wired to learned MRV: (1) the weekday window should
-// mirror mesoCurrentWeek (7-day steps from mesoState.startDate MINUS paused
-// deload/sick days), not a Mon..Sun calendar week, so it aligns with the engine's
-// meso week; (2) the flex rotation slice should bucket by rotation index
-// (floor(pos/len)), not a fixed count of trained sessions, so a rotation with a
-// skipped day never borrows from the adjacent one; (3) the weekday window should
-// also filter s.scheduleId === sch.id (the flex/detector paths already do). These
-// are LATENT: this function is exported and tested but not yet consumed by a live
-// P1 path (only detectOverreach ships in P1).
+// cycle plan's date window. Meso context (threaded by the live consumer so this
+// stays pure): `opts.startDate` (block start, weekday pause-adjustment + flex
+// block filter), `opts.startedAt` (precise flex block anchor), `opts.statusPeriods`
+// (weekday paused-day math via mesoPausedDays). When `opts.startDate` is absent the
+// weekday branch falls back to the legacy Mon..Sun window (no meso context to align
+// to). Returns { [muscle]: hardSetCount }. Pure/testable.
 function microcycleSetsByMuscle(sessions, sch, muscleOfExId, opts = {}) {
   const counts = {};
   if (!sch || typeof muscleOfExId !== 'function') return counts;
   const which = opts.which || 0;
   const todayStr = opts.todayStr || todayISO();
-  const ended = (sessions || []).filter(s => s && s.ended && !s.isDeload);
+  const ended = (sessions || []).filter(s => s && s.ended && !s.isDeload && s.scheduleId === sch.id);
 
   if (isWeekdayPlan(sch)) {
-    const [start, end] = weekWindowISO(todayStr, which);
-    const win = ended.filter(s => s.date && s.date.slice(0, 10) >= start && s.date.slice(0, 10) <= end);
+    // FIX 3: scope to this plan so a multi-plan user's other-plan sessions never
+    // leak into the count (mirrors the flex/detector paths).
+    const planned = ended.filter(s => s.scheduleId === sch.id);
+    if (!opts.startDate) {
+      // Legacy fallback (no meso context threaded): Mon..Sun calendar week.
+      const [start, end] = weekWindowISO(todayStr, which);
+      const win = planned.filter(s => s.date && s.date.slice(0, 10) >= start && s.date.slice(0, 10) <= end);
+      accumulateHardSets(counts, win, muscleOfExId);
+      return counts;
+    }
+    // FIX 1: pause-adjusted meso-week bucketing (mirror mesoCurrentWeek's weekday
+    // path). Each session's meso week = floor((rawDays - pausedDays) / 7), pausedDays
+    // counted from startDate up to that session's date, so a deload/sick break in the
+    // middle shifts later sessions' weeks down exactly like the RIR taper.
+    const startISO = opts.startDate.slice(0, 10);
+    const trainedDates = new Set(planned.filter(s => s.date).map(s => s.date.slice(0, 10)));
+    const startD = parseDate(startISO);
+    const weekIdxFor = (iso) => {
+      const rawDays = Math.round((parseDate(iso) - startD) / 86400000);
+      if (rawDays < 0) return -1;
+      const paused = mesoPausedDays(opts.statusPeriods, trainedDates, startISO, iso);
+      return Math.floor(Math.max(0, rawDays - paused) / 7);
+    };
+    const target = weekIdxFor(todayStr) - which;
+    if (target < 0) return counts;
+    const win = planned.filter(s => s.date && weekIdxFor(s.date.slice(0, 10)) === target);
     accumulateHardSets(counts, win, muscleOfExId);
     return counts;
   }
 
   if (isFlexPlan(sch)) {
-    const len = sch.days.length || 1;
-    const trained = ended
-      .filter(s => s.scheduleId === sch.id)
-      .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''));
-    const win = trained.slice(which * len, which * len + len);
+    // FIX 2: bucket the block's trained sessions by their OWN rotation index instead
+    // of slicing a fixed count of `len` trained sessions off the top. Recover each
+    // session's within-rotation slot from its dayId (cyclePos is not persisted, see
+    // syncStore), then walk chronologically: a slot that does not advance past the
+    // previous one opens a new rotation. A rotation with a skipped day is still one
+    // rotation and never pulls a session out of the neighbouring one.
+    const startISO = opts.startDate ? opts.startDate.slice(0, 10) : null;
+    const startedTs = opts.startedAt ? Date.parse(opts.startedAt) : null;
+    const inBlock = (s) => {
+      if (startedTs != null && !isNaN(startedTs)) { const t = Date.parse(s.ended); return isNaN(t) ? true : t > startedTs; }
+      if (startISO) return (s.date || '') >= startISO;
+      return true; // no block anchor threaded: fall back to the whole history
+    };
+    const dayIndex = {};
+    (sch.days || []).forEach((d, i) => { if (d && d.id != null) dayIndex[d.id] = i; });
+    const blockTrained = ended
+      .filter(s => s.scheduleId === sch.id && inBlock(s))
+      .sort((a, b) => (a.ended || '').localeCompare(b.ended || '')); // chronological
+    if (!blockTrained.length) return counts;
+    const rotationOf = new Map();
+    let rot = 0, lastPos = -1, started = false;
+    for (const s of blockTrained) {
+      const pos = dayIndex[s.dayId];
+      const p = (pos == null) ? lastPos + 1 : pos; // unknown dayId stays in the current rotation
+      if (started && p <= lastPos) rot++;
+      rotationOf.set(s, rot);
+      lastPos = p;
+      started = true;
+    }
+    const target = rot - which; // rot = the current (newest) rotation index
+    if (target < 0) return counts;
+    const win = blockTrained.filter(s => rotationOf.get(s) === target);
     accumulateHardSets(counts, win, muscleOfExId);
     return counts;
   }
@@ -5279,8 +5329,15 @@ function detectOverreach(sessions, sch, muscleOfExId, opts = {}) {
 // ── Autoreg v2 P2: block start, block recap, anti-nag governance ─────────────
 
 // Current schema version of the autoreg_state blob (spec 9). Bumped when the
-// persisted shape changes; readers tolerate a missing/older version.
-const AUTOREG_STATE_VERSION = 1;
+// persisted shape changes; readers tolerate a missing/older version. v2 adds the
+// P3 landmarks ({ [muscle]: { mrv, mev, updatedAt } }) and block ({ startDate,
+// startVolByMuscle }) keys alongside the P2 deloadNudge.
+const AUTOREG_STATE_VERSION = 2;
+// EMA smoothing factor for the learned per-muscle MRV (spec 2.3 / 10). A fresh
+// observation moves the ceiling by only this fraction, so a single overreaching
+// spike can never crater a muscle's learned ceiling (spec 2.2 "no learning from one
+// bad week"); the rest of the weight stays on the remembered value across blocks.
+const LANDMARK_MRV_ALPHA = 0.35;
 // Deload-nudge cooldown, counted in SESSIONS not days (spec 10: N = 3). After a
 // decline the full offer is suppressed for this many block sessions, then, if the
 // muscle is still at its ceiling, it re-asks with escalated evidence.
@@ -5395,7 +5452,7 @@ function recordDeloadDecline(autoregState, blockSessionCount) {
   const escalation = prev ? (prev.escalation || 0) + 1 : 1;
   return {
     ...base,
-    version: base.version || AUTOREG_STATE_VERSION,
+    version: AUTOREG_STATE_VERSION,
     deloadNudge: {
       ...(base.deloadNudge || {}),
       block: {
@@ -5419,6 +5476,64 @@ function clearDeloadNudge(autoregState) {
   const next = { ...autoregState };
   if (rest.length) next.deloadNudge = nudge; else delete next.deloadNudge;
   return next;
+}
+
+// ── Autoreg v2 P3: volume landmarks (learned MRV) + block backoff (pure) ─────
+
+// EMA-update a muscle's learned MRV from one at-ceiling observation (spec 2.3).
+// `observedSets` is the microcycle hard-set count at which the overreach signature
+// struck this block. First time we simply seed the ceiling; after that we blend it
+// toward the observation with LANDMARK_MRV_ALPHA so a one-off rough block can only
+// nudge the remembered ceiling, never replace it (spec 2.2). Discipline (spec 4.3):
+// the CALLER only invokes this for muscles the full-signal detector flagged, so a
+// discounted/none session can never drive a learned ceiling down. MEV is a light,
+// conservative derived default here (real per-muscle MEV detection is v2, spec 10),
+// kept only so the persisted shape carries it. Returns a NEW autoreg_state, or the
+// SAME reference when there is nothing to record (invalid input), so callers can
+// skip a redundant write. Muscle/scope-keyed only (round-trips backup verbatim).
+function updateLandmarkMrv(autoregState, muscle, observedSets, opts = {}) {
+  if (!muscle || !(observedSets > 0)) return autoregState || null;
+  const alpha = (opts.alpha != null) ? opts.alpha : LANDMARK_MRV_ALPHA;
+  const base = (autoregState && typeof autoregState === 'object') ? autoregState : {};
+  const landmarks = { ...(base.landmarks || {}) };
+  const prev = landmarks[muscle] || null;
+  const prevMrv = (prev && typeof prev.mrv === 'number') ? prev.mrv : null;
+  const nextMrv = (prevMrv == null) ? Math.round(observedSets)
+    : Math.round(alpha * observedSets + (1 - alpha) * prevMrv);
+  const nextMev = Math.max(1, Math.round(nextMrv / 2));
+  landmarks[muscle] = { mrv: nextMrv, mev: nextMev, updatedAt: new Date().toISOString() };
+  return { ...base, version: AUTOREG_STATE_VERSION, landmarks };
+}
+
+// Snapshot a new block's starting volume per muscle into autoreg_state.block (spec
+// 9). Called at every block-start anchor (planned Meso-2 and the Auto emergent
+// reset) so the recap and future landmark reasoning know where the block began.
+// Preserves everything else (landmarks persist ACROSS blocks, spec 2.3: MRV is
+// EMA-smoothed across blocks; only block.startVolByMuscle resets). Returns a NEW
+// autoreg_state.
+function snapshotBlockStart(autoregState, startDate, startVolByMuscle) {
+  const base = (autoregState && typeof autoregState === 'object') ? autoregState : {};
+  return {
+    ...base,
+    version: AUTOREG_STATE_VERSION,
+    block: { startDate: startDate || null, startVolByMuscle: startVolByMuscle || {} },
+  };
+}
+
+// Block-start per-exercise backoff (spec 2.3 / 10: −2 sets per exercise). Non-
+// destructive: reduces a GROWN lift's set-delta by `amount` but never below the
+// plan base (delta floored at 0), and leaves at-base and cut lifts untouched so a
+// reset never silently RAISES volume. The next block re-ramps from this backed-off
+// start, capped per-muscle by the learned MRV. Keys are exId_dayId (NOT per muscle),
+// so the same exercise on two days backs off independently (correct per spec). Lives
+// in mesoState.deltas (exId-remapped on backup restore, unlike autoreg_state).
+// Returns a NEW deltas map. Pure/testable.
+function backoffDeltas(deltas, amount = 2) {
+  const out = {};
+  for (const [k, v] of Object.entries(deltas || {})) {
+    out[k] = (v > 0) ? Math.max(0, v - amount) : v;
+  }
+  return out;
 }
 
 // Whether a pump/volume answer permits the weight bump. Load-only autoregulate
@@ -5700,6 +5815,7 @@ window.LB = {
   pickGrowthRecipient, retractGrowthGrant, pickDeclineRecipient, reearnMesoWeightBoosts, revertMesoSessionBoosts, resolveMesoSeedSuggestion, mesoPausedDays, mesoRirForWeek, mesoMuscleTrainedBeforeStart, volumeAnswerAllowsBump,
   microcycleSetsByMuscle, detectOverreach,
   blockStartTs, blockSessions, buildBlockRecap, deloadNudgeDecision, recordDeloadDecline, clearDeloadNudge,
+  updateLandmarkMrv, snapshotBlockStart, backoffDeltas,
   mesoGateSetsFromAnswers, isMesoSessionEditable, applyMesoFeedbackEdit, reearnMesoBoostsFromAnswers, mesoRecapGainsFromEdit,
   mesoSetTarget, mesoEarnTarget, mesoRepOutcome, reshapeSetsUnilateral,
 };

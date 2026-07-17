@@ -2450,34 +2450,66 @@ async function testAsync(name, fn) {
       assert.ok(!('null' in out) && out[null] === undefined, 'untagged exercise ignored');
     });
 
-    test('microcycleSetsByMuscle: FLEX slices current vs previous rotation by trained-session count, not date', () => {
+    test('microcycleSetsByMuscle: FLEX buckets by rotation index (dayId), current vs previous', () => {
       const sch = { id: 'p', is_flex: true, days: [{ id: 'd1' }, { id: 'd2' }, { id: 'd3' }] }; // len 3
-      const mk = (id, ended, entries) => ({ id, scheduleId: 'p', ended, date: ended.slice(0, 10), entries });
-      // 6 trained sessions, newest last in array (order should not matter, fn sorts by ended desc).
+      const mk = (id, ended, dayId, entries) => ({ id, scheduleId: 'p', ended, date: ended.slice(0, 10), dayId, entries });
+      // Two full rotations. Order in the array should not matter (fn sorts by ended).
       const sessions = [
-        mk('s1', '2026-07-01T10:00:00Z', [benchEntry()]),
-        mk('s2', '2026-07-03T10:00:00Z', [benchEntry()]),
-        mk('s3', '2026-07-05T10:00:00Z', [benchEntry()]),
-        mk('s4', '2026-07-07T10:00:00Z', [benchEntry()]),
-        mk('s5', '2026-07-09T10:00:00Z', [benchEntry()]),
-        mk('s6', '2026-07-11T10:00:00Z', [benchEntry(), squatEntry()]),
+        mk('a1', '2026-07-01T10:00:00Z', 'd1', [benchEntry()]),
+        mk('a2', '2026-07-02T10:00:00Z', 'd2', [benchEntry()]),
+        mk('a3', '2026-07-03T10:00:00Z', 'd3', [benchEntry()]),
+        mk('b1', '2026-07-04T10:00:00Z', 'd1', [benchEntry()]),
+        mk('b2', '2026-07-05T10:00:00Z', 'd2', [benchEntry()]),
+        mk('b3', '2026-07-06T10:00:00Z', 'd3', [benchEntry(), squatEntry()]),
       ];
-      const cur = LB.microcycleSetsByMuscle(sessions, sch, muscleOf, { which: 0 });
-      assert.strictEqual(cur.Chest, 6, 'current rotation = last 3 sessions x 2 hard sets');
+      const opts = { startDate: '2026-06-30', startedAt: '2026-06-30T00:00:00Z' };
+      const cur = LB.microcycleSetsByMuscle(sessions, sch, muscleOf, { ...opts, which: 0 });
+      assert.strictEqual(cur.Chest, 6, 'current rotation = its 3 sessions x 2 hard sets');
       assert.strictEqual(cur.Quads, 3, 'squat only in the current rotation');
-      const prev = LB.microcycleSetsByMuscle(sessions, sch, muscleOf, { which: 1 });
-      assert.strictEqual(prev.Chest, 6, 'previous rotation = the 3 sessions before that');
+      const prev = LB.microcycleSetsByMuscle(sessions, sch, muscleOf, { ...opts, which: 1 });
+      assert.strictEqual(prev.Chest, 6, 'previous rotation = the earlier 3 sessions');
       assert.ok(!prev.Quads, 'no squat in the previous rotation');
     });
 
-    test('microcycleSetsByMuscle: WEEKDAY window is the calendar week (Mon..Sun)', () => {
+    test('microcycleSetsByMuscle: FLEX skipped-day rotation never borrows from the adjacent one', () => {
+      const sch = { id: 'p', is_flex: true, days: [{ id: 'd1' }, { id: 'd2' }, { id: 'd3' }] }; // len 3
+      const mk = (id, ended, dayId, entries) => ({ id, scheduleId: 'p', ended, date: ended.slice(0, 10), dayId, entries });
+      // Rotation A is complete (d1,d2,d3). Rotation B (current) skipped d2: only d1,d3.
+      const sessions = [
+        mk('a1', '2026-07-01T10:00:00Z', 'd1', [benchEntry()]),
+        mk('a2', '2026-07-02T10:00:00Z', 'd2', [benchEntry()]),
+        mk('a3', '2026-07-03T10:00:00Z', 'd3', [benchEntry()]),
+        mk('b1', '2026-07-04T10:00:00Z', 'd1', [benchEntry()]),
+        mk('b3', '2026-07-05T10:00:00Z', 'd3', [benchEntry(), squatEntry()]),
+      ];
+      const opts = { startDate: '2026-06-30', startedAt: '2026-06-30T00:00:00Z' };
+      const cur = LB.microcycleSetsByMuscle(sessions, sch, muscleOf, { ...opts, which: 0 });
+      // Only b1 + b3 (Chest 4), NOT the old trained-count slice which would have
+      // borrowed a3 into the current window and reported Chest 6.
+      assert.strictEqual(cur.Chest, 4, 'current rotation is only its own two trained days');
+      assert.strictEqual(cur.Quads, 3, 'squat (in b3) belongs to the current rotation');
+      const prev = LB.microcycleSetsByMuscle(sessions, sch, muscleOf, { ...opts, which: 1 });
+      assert.strictEqual(prev.Chest, 6, 'previous rotation keeps all three of its days');
+    });
+
+    test('microcycleSetsByMuscle: WEEKDAY window is the pause-adjusted meso week + scheduleId scoped', () => {
       const sch = { id: 'wp', mode: 'weekday', days: [{ weekday: 0 }] };
-      const mk = (id, date) => ({ id, scheduleId: 'wp', ended: date + 'T10:00:00Z', date, entries: [benchEntry()] });
-      const sessions = [mk('a', '2026-07-15'), mk('b', '2026-07-08')]; // 7 days apart
-      const cur = LB.microcycleSetsByMuscle(sessions, sch, muscleOf, { which: 0, todayStr: '2026-07-15' });
-      assert.strictEqual(cur.Chest, 2, 'only this week counts');
-      const prev = LB.microcycleSetsByMuscle(sessions, sch, muscleOf, { which: 1, todayStr: '2026-07-15' });
-      assert.strictEqual(prev.Chest, 2, 'the prior week counts in which:1');
+      const mk = (id, date, scheduleId) => ({ id, scheduleId: scheduleId || 'wp', ended: date + 'T10:00:00Z', date, entries: [benchEntry()] });
+      // A 7-day deload sits mid-block. Without pause-adjustment s2 (rawDays 12) would
+      // fall in meso week 1; with 7 frozen days subtracted it drops back to week 0,
+      // sharing the current window with s1. s4 (rawDays 15 - 7 = 8) is week 1 = today.
+      const statusPeriods = [{ mode: 'deload', startedAt: '2026-07-05T00:00:00Z', endedAt: '2026-07-11T00:00:00Z' }];
+      const sessions = [
+        mk('s1', '2026-07-02'),
+        mk('s2', '2026-07-13'),
+        mk('s4', '2026-07-16'),
+        mk('other', '2026-07-16', 'zz'), // cross-plan: must be excluded (FIX 3)
+      ];
+      const opts = { startDate: '2026-07-01', statusPeriods, todayStr: '2026-07-16' };
+      const cur = LB.microcycleSetsByMuscle(sessions, sch, muscleOf, { ...opts, which: 0 });
+      assert.strictEqual(cur.Chest, 2, 'current meso week holds only s4 (cross-plan session excluded)');
+      const prev = LB.microcycleSetsByMuscle(sessions, sch, muscleOf, { ...opts, which: 1 });
+      assert.strictEqual(prev.Chest, 4, 'the prior meso week holds s1 AND s2, grouped by the pause adjustment');
     });
 
     test('microcycleSetsByMuscle: CYCLE window uses cumulative cycle numbering', () => {
@@ -2489,6 +2521,62 @@ async function testAsync(name, fn) {
       assert.strictEqual(cur.Chest, 2, 'current cycle (2) holds the 07-05 session');
       const prev = LB.microcycleSetsByMuscle(sessions, sch, muscleOf, { which: 1, todayStr: '2026-07-06' });
       assert.strictEqual(prev.Chest, 2, 'previous cycle (1) holds the 07-02 session');
+    });
+  }
+
+  // ── Autoreg v2 P3: landmarks (learned MRV EMA) + block backoff ───────────────
+  {
+    test('updateLandmarkMrv: first observation seeds the ceiling', () => {
+      const out = LB.updateLandmarkMrv(null, 'Chest', 18);
+      assert.strictEqual(out.landmarks.Chest.mrv, 18, 'first flag seeds mrv at the observed set count');
+      assert.strictEqual(out.landmarks.Chest.mev, 9, 'mev is a light half-of-mrv default');
+      assert.strictEqual(out.version, 2, 'stamps the P3 blob version');
+    });
+
+    test('updateLandmarkMrv: a single low spike does NOT fully drop a learned ceiling', () => {
+      const seeded = LB.updateLandmarkMrv(null, 'Chest', 20);
+      const spiked = LB.updateLandmarkMrv(seeded, 'Chest', 10); // one rough block
+      assert.ok(spiked.landmarks.Chest.mrv > 10, 'EMA keeps the ceiling above the one-off low observation');
+      assert.ok(spiked.landmarks.Chest.mrv < 20, 'but it moves down toward it, it does not ignore the signal');
+      assert.strictEqual(spiked.landmarks.Chest.mrv, Math.round(0.35 * 10 + 0.65 * 20), 'EMA blend at alpha 0.35');
+    });
+
+    test('updateLandmarkMrv: invalid input is a same-ref no-op', () => {
+      const seeded = LB.updateLandmarkMrv(null, 'Chest', 20);
+      assert.strictEqual(LB.updateLandmarkMrv(seeded, 'Chest', 0), seeded, 'zero sets never lowers the ceiling');
+      assert.strictEqual(LB.updateLandmarkMrv(seeded, null, 12), seeded, 'no muscle is a no-op');
+    });
+
+    test('numeric MRV cap decision: banked volume >= learned MRV freezes (else detector-only)', () => {
+      // Mirror of the live atCeiling helper: freeze when cycleSets[m] >= landmarks[m].mrv.
+      const atCeiling = (overreach, landmarks, cycleSets, muscle) => {
+        if (overreach[muscle] && overreach[muscle].atCeiling) return true;
+        const lm = landmarks[muscle];
+        return !!(lm && lm.mrv != null && (cycleSets[muscle] || 0) >= lm.mrv);
+      };
+      const landmarks = LB.updateLandmarkMrv(null, 'Chest', 16).landmarks;
+      assert.strictEqual(atCeiling({}, landmarks, { Chest: 16 }, 'Chest'), true, 'at MRV freezes');
+      assert.strictEqual(atCeiling({}, landmarks, { Chest: 17 }, 'Chest'), true, 'over MRV freezes');
+      assert.strictEqual(atCeiling({}, landmarks, { Chest: 15 }, 'Chest'), false, 'under MRV stays open');
+      assert.strictEqual(atCeiling({}, {}, { Chest: 99 }, 'Chest'), false, 'no learned mrv → detector-only (open)');
+      assert.strictEqual(atCeiling({ Chest: { atCeiling: true } }, {}, {}, 'Chest'), true, 'detector alone still freezes');
+    });
+
+    test('backoffDeltas: reduces grown lifts by ~2, never below base, leaves base/cut lifts', () => {
+      const out = LB.backoffDeltas({ a: 3, b: 2, c: 1, d: 0, e: -1 }, 2);
+      assert.strictEqual(out.a, 1, '+3 backs off to +1');
+      assert.strictEqual(out.b, 0, '+2 backs off exactly to base (0), not below');
+      assert.strictEqual(out.c, 0, '+1 floors at base (0), never negative');
+      assert.strictEqual(out.d, 0, 'a lift already at base is untouched');
+      assert.strictEqual(out.e, -1, 'a cut lift is left as-is (backoff never RAISES volume)');
+    });
+
+    test('snapshotBlockStart: records block start volume, preserves landmarks across the reset', () => {
+      const withLm = LB.updateLandmarkMrv(null, 'Chest', 20);
+      const out = LB.snapshotBlockStart(withLm, '2026-07-16', { Chest: 12 });
+      assert.strictEqual(out.landmarks.Chest.mrv, 20, 'landmarks persist across the block snapshot');
+      assert.strictEqual(out.block.startDate, '2026-07-16', 'records the new block start date');
+      assert.strictEqual(out.block.startVolByMuscle.Chest, 12, 'records per-muscle start volume');
     });
   }
 
@@ -2689,7 +2777,7 @@ async function testAsync(name, fn) {
       const st = LB.recordDeloadDecline(null, 4);
       assert.strictEqual(st.deloadNudge.block.cooldownUntil, 7);
       assert.strictEqual(st.deloadNudge.block.escalation, 1);
-      assert.strictEqual(st.version, 1);
+      assert.strictEqual(st.version, 2, 'stamps the current P3 blob version');
       assert.ok(st.deloadNudge.block.declinedAt, 'stamps declinedAt');
     });
     test('recordDeloadDecline: a second decline bumps escalation and re-arms the cooldown', () => {

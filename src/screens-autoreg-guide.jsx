@@ -325,6 +325,27 @@ function AutoregGuideScreen({ store, go, mode: modeProp, back }) {
             </div>
           </Section>
 
+          {/* ── volume landmarks / self-timed block (modus-agnostic) ── */}
+          <Section>
+            <AGSecHead n="Landmarks · Memory" title="A ceiling it learns and remembers"
+              sub="The first time a muscle hits its overreaching signature, the app remembers the set count it happened at as that muscle's ceiling. It is smoothed across blocks, so one rough block nudges the number, never craters it. That memory is what turns an open-ended plan into a self-timed block." />
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 11 }}>
+              <AGStat k="Learned ceiling" v="Per muscle" s="Your MRV is stored per muscle, not per exercise, and averaged across blocks. A single bad week moves it a little, so it settles on your real ceiling over time." />
+              <AGStat k="Self-timed block" v="Recovery, not a number" vColor={UI.gold} s="A block ends when you hit the ceiling, not on a fixed date. Take the deload and the app starts a fresh block right there." />
+              <AGStat k="Reset & re-ramp" v="Back off, build again" s="On that reset each exercise drops about 2 sets from where it topped out (never below your plan's base), then set adds climb again, capped by the same learned ceiling." />
+            </div>
+            <div style={{ ...cardStyle, borderLeft: `3px solid ${UI.gold}`, marginTop: 16 }}>
+              <AGKick color={UI.gold}>Per mode</AGKick>
+              <div style={{ marginTop: 6, fontSize: 13.5, color: UI.inkSoft }}>
+                {isB
+                  ? <span><b style={{ color: UI.ink }}>Load only:</b> no volume landmarks here by design, your set counts are fixed on purpose. You still get the ceiling detector and the deload offer, they just hold and drop the weight instead of your sets.</span>
+                  : isC
+                    ? <span><b style={{ color: UI.ink }}>Mesocycle:</b> the block still ends on its planned week, but the learned ceiling carries as a memory and caps your sets early if you reach it before the peak. Your next block starts fresh from a backed-off base.</span>
+                    : <span><b style={{ color: UI.ink }}>Volume + Load:</b> this is what makes the plan a self-paced mesocycle. Grow until a muscle tops out, take the deload when you are ready, and the next block re-ramps from a backed-off start toward the ceiling you actually reached. Never forced, always wave-off-able.</span>}
+              </div>
+            </div>
+          </Section>
+
           {/* ── block recap (modus-agnostic) ── */}
           <Section>
             <AGSecHead n="Recap · Block" title="What you built, and what it cost"
@@ -586,7 +607,7 @@ function AutoregGuideScreen({ store, go, mode: modeProp, back }) {
               {!isC && (
                 <div style={{ ...cardStyle, borderLeft: `3px solid ${UI.gold}` }}>
                   <h3 className="display" style={h3}>3 · Overreach-driven</h3>
-                  <p style={{ fontSize: 14, color: UI.inkSoft, margin: 0 }}>When a muscle hits its volume ceiling (see the Volume section), the finish screen offers a deload right then, with the reason spelled out. It is a suggestion: wave it off and keep training.</p>
+                  <p style={{ fontSize: 14, color: UI.inkSoft, margin: 0 }}>When a muscle hits its learned volume ceiling (see the Landmarks section), the finish screen offers a deload right then, with the reason spelled out. Take it and the block resets: each lift backs off about 2 sets and a fresh block re-ramps. It is a suggestion: wave it off and keep training.</p>
                 </div>
               )}
             </div>
