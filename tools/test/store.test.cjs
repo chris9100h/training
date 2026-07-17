@@ -847,6 +847,29 @@ async function testAsync(name, fn) {
     assert.strictEqual(LB.mesoRepOutcome([{ done: true, reps: 10 }, { done: true, reps: 5 }], null, [10, 8], null).earlyMiss, false);
   });
 
+  // ── reshapeSetsUnilateral (set rep shape follows a swap's unilateral-ness) ──
+  // (field-by-field asserts: the vm realm's distinct Object.prototype trips
+  // deepStrictEqual, same as the rest of this suite avoids it.)
+  test('reshapeSetsUnilateral: unilateral → bilateral collapses L/R to the min single rep', () => {
+    const out = LB.reshapeSetsUnilateral([{ kg: 50, repsL: 13, repsR: 12 }, { kg: 50, repsL: 12, repsR: 12 }], false);
+    assert.strictEqual(out[0].reps, 12); assert.strictEqual(out[0].repsL, null); assert.strictEqual(out[0].repsR, null); assert.strictEqual(out[0].kg, 50);
+    assert.strictEqual(out[1].reps, 12); assert.strictEqual(out[1].repsL, null); assert.strictEqual(out[1].repsR, null);
+  });
+  test('reshapeSetsUnilateral: bilateral → unilateral mirrors the single rep onto both sides', () => {
+    const out = LB.reshapeSetsUnilateral([{ kg: 50, reps: 13 }], true);
+    assert.strictEqual(out[0].repsL, 13); assert.strictEqual(out[0].repsR, 13); assert.strictEqual(out[0].reps, null); assert.strictEqual(out[0].kg, 50);
+  });
+  test('reshapeSetsUnilateral: sets already in the target shape (or empty) pass through untouched', () => {
+    const already = [{ kg: 50, reps: 10 }];
+    assert.strictEqual(LB.reshapeSetsUnilateral(already, false)[0], already[0], 'no needless rewrite');
+    const empty = [{ kg: null, reps: null }];
+    assert.strictEqual(LB.reshapeSetsUnilateral(empty, true)[0], empty[0], 'nothing logged to mirror');
+  });
+  test('reshapeSetsUnilateral: a one-sided log still collapses to that side\'s reps', () => {
+    const out = LB.reshapeSetsUnilateral([{ kg: 40, repsL: 8, repsR: null }], false);
+    assert.strictEqual(out[0].reps, 8); assert.strictEqual(out[0].repsL, null); assert.strictEqual(out[0].repsR, null);
+  });
+
   // ── reearnMesoWeightBoosts (weight boost must be re-earned every session) ──
   test('reearnMesoWeightBoosts: a boost not re-earned this session is dropped, not kept', () => {
     // bench earned a boost last session but is trained again this session with

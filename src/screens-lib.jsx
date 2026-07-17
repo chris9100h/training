@@ -1583,9 +1583,14 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
                         const isBest = isAssistedEx
                           ? (sessionBest != null && valForSet(s) != null && Math.abs(valForSet(s) - sessionBest) < 0.01)
                           : (sessionBest > 0 && Math.abs(valForSet(s) - sessionBest) < 0.01);
-                        const repsStr = (s.repsL != null || s.repsR != null)
-                          ? `L${s.repsL ?? '?'}/R${s.repsR ?? '?'}`
-                          : s.reps;
+                        // Per-side L/R only for an actually-unilateral exercise. A
+                        // set left with stray L/R data after a swap to a bilateral
+                        // exercise collapses to one number (the min, the app-wide
+                        // effective-reps convention) instead of rendering as L/R.
+                        const exIsUni = ex.movement_type === 'unilateral' || (ex.unilateral && !ex.movement_type);
+                        const repsStr = exIsUni
+                          ? ((s.repsL != null || s.repsR != null) ? `L${s.repsL ?? '?'}/R${s.repsR ?? '?'}` : s.reps)
+                          : (s.reps != null ? s.reps : ((s.repsL != null || s.repsR != null) ? Math.min(s.repsL ?? s.repsR ?? 0, s.repsR ?? s.repsL ?? 0) : s.reps));
                         return (
                           <span key={i} className="num" style={{ fontSize: 13, color: isBest ? UI.gold : UI.ink }}>
                             {s.timeSec != null
@@ -4067,8 +4072,15 @@ function SessionEditSheet({ session, duration, exercises, store, setStore, onClo
     if (newExId == null || eIdx == null) return;
     setDraftEntries(entries => entries.map((en, i) => {
       if (i !== eIdx) return en;
-      const nm = exercises?.find(x => x.id === newExId)?.name ?? en.name;
-      return { ...en, exId: newExId, name: nm };
+      const newEx = exercises?.find(x => x.id === newExId);
+      const nm = newEx?.name ?? en.name;
+      // If the swap flips unilateral-ness, reshape the kept sets to match the new
+      // exercise (per-side L/R vs a single rep count) so a bilateral exercise
+      // never inherits stray L/R data and render as "L13/R13" in history.
+      const oldEx = exercises?.find(x => x.id === en.exId);
+      const wasUni = !!oldEx?.unilateral, isUni = !!newEx?.unilateral;
+      const sets = wasUni !== isUni ? LB.reshapeSetsUnilateral(en.sets, isUni) : en.sets;
+      return { ...en, exId: newExId, name: nm, sets };
     }));
   };
 

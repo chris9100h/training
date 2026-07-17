@@ -4277,7 +4277,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               const seedSets = LB.buildSeedSets({ exId: newExId, sets: setCount, repsPerSet: null }, last, suggestion, isUni, s, bwKg);
               return { ...e, exId: newExId, name: newEx?.name || e.name, sets: seedSets };
             }
-            return { ...e, exId: newExId, name: newEx?.name || e.name };
+            // Same log mode & assist-ness: keep the logged sets, but if the swap
+            // flips unilateral-ness reshape them (per-side L/R vs a single rep) so
+            // a bilateral exercise never inherits stray L/R data and renders as
+            // "L13/R13" in history.
+            const uniChanged = (!!oldEx?.unilateral) !== (!!newEx?.unilateral);
+            const sets = uniChanged ? LB.reshapeSetsUnilateral(e.sets, !!newEx?.unilateral) : e.sets;
+            return { ...e, exId: newExId, name: newEx?.name || e.name, sets };
           }),
         }),
       };

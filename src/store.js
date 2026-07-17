@@ -4543,6 +4543,29 @@ function mesoRepOutcome(workingSets, plannedReps, plannedRepsPerSet, plannedReps
   return { allHit, earlyMiss };
 }
 
+// Convert a set array's rep SHAPE when an exercise swap flips its unilateral-ness.
+// A unilateral set carries per-side repsL/repsR; a bilateral set carries a single
+// reps. When the movement changes we must reshape so the stored data (and every
+// view that reads it) matches the new exercise: otherwise a bilateral exercise
+// keeps stray L/R data and renders as "L13/R13" in history. Logged effort is
+// preserved: bilateral -> unilateral mirrors the rep count onto both sides;
+// unilateral -> bilateral collapses to the min (the app-wide effective-reps
+// convention). Sets already in the target shape (or empty) pass through untouched.
+// Pure and side-effect free so it can be unit-tested. `toUni` = the new exercise
+// is unilateral.
+function reshapeSetsUnilateral(sets, toUni) {
+  return (sets || []).map(st => {
+    if (toUni) {
+      if (st.repsL != null || st.repsR != null) return st; // already per-side
+      if (st.reps == null) return st;                      // nothing logged to mirror
+      return { ...st, repsL: st.reps, repsR: st.reps, reps: null };
+    }
+    if (st.repsL == null && st.repsR == null) return st;   // already single
+    const collapsed = Math.min(st.repsL ?? st.repsR ?? 0, st.repsR ?? st.repsL ?? 0);
+    return { ...st, reps: collapsed, repsL: null, repsR: null };
+  });
+}
+
 // A mesocycle weight boost (exId_dayId → kg increment applied to the next
 // session's seed) must be RE-EARNED every session — min reps hit + joint fine
 // + pump ok + volume ok, all re-confirmed. Given the exId_dayId keys of the
@@ -5272,5 +5295,5 @@ window.LB = {
   refreshHealthLogs,
   pickGrowthRecipient, retractGrowthGrant, pickDeclineRecipient, reearnMesoWeightBoosts, revertMesoSessionBoosts, resolveMesoSeedSuggestion, mesoPausedDays, mesoRirForWeek, mesoMuscleTrainedBeforeStart, volumeAnswerAllowsBump,
   mesoGateSetsFromAnswers, isMesoSessionEditable, applyMesoFeedbackEdit, reearnMesoBoostsFromAnswers, mesoRecapGainsFromEdit,
-  mesoSetTarget, mesoEarnTarget, mesoRepOutcome,
+  mesoSetTarget, mesoEarnTarget, mesoRepOutcome, reshapeSetsUnilateral,
 };
