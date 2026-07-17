@@ -129,7 +129,9 @@ CREATE TABLE public.zane_sessions (
   is_bonus boolean NOT NULL DEFAULT false,
   is_freestyle boolean NOT NULL DEFAULT false,
   is_deload boolean NOT NULL DEFAULT false,
-  meso_recap jsonb
+  meso_recap jsonb,
+  readiness text,
+  signal_weight text
 );
 
 CREATE TABLE public.zane_session_entries (

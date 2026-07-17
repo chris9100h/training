@@ -785,6 +785,17 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     };
   }, []);
 
+  // Auto-open the readiness prompt once on mount, before the first working set is
+  // logged, so the Fresh / Normal / Rough tap comes first (ahead of the meso
+  // soreness / joint prompts). If the session already carries a readiness, or a
+  // working set is already done (resumed session), stay closed.
+  useEffectT(() => {
+    if (session.readiness != null) return;
+    const anyDone = session.entries.some(e => !e.isCardio && e.sets.some(s => s.done && !s.warmup && !s.skipped));
+    if (anyDone) return;
+    setReadinessOpen(true);
+  }, []);
+
   const _sch = store.schedules?.find(s => s.id === session.scheduleId);
   const isWeekdayMode = _sch ? LB.isWeekdayPlan(_sch) : false;
 
@@ -2392,6 +2403,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     return !!(rs && rd && Date.now() >= rs + rd * 1000);
   });
   const [confirmEl, confirm] = useConfirm();
+  // Autoreg v2 P0: one-tap readiness prompt (Fresh / Normal / Rough), shown once
+  // per session before the first working set. Skippable: a null readiness reads
+  // as normal/full everywhere.
+  const [readinessOpen, setReadinessOpen] = useStateT(false);
   const [finishOpen, setFinishOpen] = useStateT(false);
   const [finishStep, setFinishStep] = useStateT('confirm');
   const [pendingFeel, setPendingFeel] = useStateT(null);
@@ -3325,6 +3340,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // the post-session screen. Also merges set-gain info from mesoSessionSetGainsRef.
   const computeMesoGains = (isComplete = false) => {
     if (!mesoState) return [];
+    // Signal-hygiene (Autoreg v2 P0): how much this session counts toward
+    // autoregulation learning. An untagged deload still reads as 'none' for
+    // back-compat. 'none' = deload (no earn, no cut). 'discounted' = rough day
+    // or re-entry ramp: the rep-miss cut and MRV do NOT advance, but a real PR
+    // may still EARN a weight boost. 'full' = normal.
+    const signalWeight = session.signalWeight || (isMesoDeloadSession ? 'none' : 'full');
     const unit = store.settings?.unit || 'kg';
     const weightBoostMap = {};
     const repMissCounts = { ...(mesoState.repMissCounts || {}) };
@@ -3383,7 +3404,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       const catCfg = ex?.equipment ? (store.settings?.equipmentConfig?.[ex.equipment] ?? {}) : {};
       const increment = catCfg.increment ?? (unit === 'lbs' ? 5 : 2.5);
 
-      if (!streakSeen.has(key)) {
+      // Only a 'full' session advances the rep-miss cut. 'discounted'/'none'
+      // freeze the streak: a rough day or deload must never push toward a cut
+      // (spec 4.3). Leaving the block unentered keeps repMissCounts untouched.
+      if (signalWeight === 'full' && !streakSeen.has(key)) {
         streakSeen.add(key);
         if (earlyMiss) {
           const n = (repMissCounts[key] || 0) + 1;
@@ -3426,7 +3450,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // feedback, so it must NOT wipe boosts earned before it: skip the
     // recompute entirely and leave the map (and the miss streak) as-is.
     // mesoState here is the React state — already contains all feedback deltas from this session.
-    const newWeightBoosts = isMesoDeloadSession
+    // EARN persist: only a 'none' session (deload) keeps the old map untouched.
+    // 'discounted' falls through and CAN still earn a boost (a PR on a tired day
+    // is real, spec 4.3); 'full' is the normal re-earn.
+    const newWeightBoosts = signalWeight === 'none'
       ? (mesoState.weightBoosts || {})
       : LB.reearnMesoWeightBoosts(
           mesoState.weightBoosts,
@@ -3436,7 +3463,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     const withBoosts = {
       ...mesoState,
       weightBoosts: newWeightBoosts,
-      repMissCounts: isMesoDeloadSession ? (mesoState.repMissCounts || {}) : repMissCounts,
+      // Freeze the miss streak for anything but a full session (discounted and
+      // none both leave it as-is), matching the streak guard above.
+      repMissCounts: signalWeight !== 'full' ? (mesoState.repMissCounts || {}) : repMissCounts,
     };
     // If the last meso week just finished: bump completions + set pendingMeso2 so the
     // home screen can offer Meso 2 after a deload (or immediately). isComplete is
@@ -4981,6 +5010,45 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     setLpStretch(null);
   }, [entry, isCardio, exIdx, mesoPartials, dropSetIdx, myoSetIdx, avSetIdx, lpTarget, wsTarget]);
 
+  // Autoreg v2 P0: commit a readiness choice and its derived signalWeight.
+  // Deload always stays 'none' (no earn, no cut). Rough discounts the session
+  // (keeps earn, skips the rep-miss cut). Fresh / Normal are full.
+  const chooseReadiness = (readiness) => {
+    const signalWeight = isMesoDeloadSession ? 'none' : (readiness === 'rough' ? 'discounted' : 'full');
+    updateSession(s => ({ ...s, readiness, signalWeight }));
+    setReadinessOpen(false);
+  };
+  // Rendered in BOTH return paths (empty freestyle early return + main return),
+  // so an ad-hoc empty session gets the prompt too.
+  const readinessSheet = (
+    <Sheet open={readinessOpen} onClose={() => chooseReadiness('normal')} title="How do you feel today?">
+      <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 20, lineHeight: 1.5 }}>
+        One tap sets today's baseline. It only nudges the suggestion, you can always push to your limit.
+      </div>
+      {[
+        { key: 'fresh',  label: 'Fresh',  sub: 'Feeling strong, ready to push' },
+        { key: 'normal', label: 'Normal', sub: 'A regular day, train as usual' },
+        { key: 'rough',  label: 'Rough',  sub: 'Low on energy: we ease the target (+1 RIR), earn still counts' },
+      ].map(opt => (
+        <button key={opt.key} onClick={() => chooseReadiness(opt.key)} style={{
+          width: '100%', marginBottom: 8, padding: '14px 16px',
+          background: UI.bgInset,
+          border: `1px solid ${UI.hairStrong}`,
+          borderRadius: 6, cursor: 'pointer', textAlign: 'left',
+          WebkitTapHighlightColor: 'transparent',
+        }}>
+          <div style={{ fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, fontWeight: 600 }}>{opt.label}</div>
+          <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 2 }}>{opt.sub}</div>
+        </button>
+      ))}
+      <button onClick={() => chooseReadiness('normal')} style={{
+        width: '100%', marginTop: 4, padding: '10px', background: 'transparent',
+        border: 'none', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 12,
+        cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+      }}>Skip</button>
+    </Sheet>
+  );
+
   if (!entry) {
     if (!session.isBonus) {
       return <Screen><Empty title="This session is empty" action={<Btn onClick={() => go({ name: 'home' })}>Back</Btn>} /></Screen>;
@@ -4995,7 +5063,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           <div style={{ fontFamily: UI.fontUi, fontSize: 13, color: UI.inkSoft, textAlign: 'center' }}>Add an exercise to get started.</div>
           <Btn onClick={() => setAddOpen(true)}>Add exercise</Btn>
         </div>
-        {addOpen && <window.Screens.ExercisePicker store={store} setStore={setStore} onClose={() => setAddOpen(false)} onPick={doAdd} />}
+        {/* Gate the auto-opened picker behind the readiness tap so the prompt
+            comes first (the picker is a full-screen overlay that would cover it). */}
+        {addOpen && session.readiness != null && <window.Screens.ExercisePicker store={store} setStore={setStore} onClose={() => setAddOpen(false)} onPick={doAdd} />}
+        {readinessSheet}
         {confirmEl}
       </Screen>
     );
@@ -5780,6 +5851,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   {progressionTarget && (
                     <div className="micro" style={{ color: UI.gold, opacity: 0.65, marginTop: 3 }}>
                       {spHintApplies ? `≥${progressionTarget} reps · next weight` : 'auto · feedback-driven'}
+                    </div>
+                  )}
+                  {/* Autoreg v2 P0: Rough-day suggestion. Non-binding, display only:
+                      the session is discounted (no rep-miss cut) but you can still push. */}
+                  {session.readiness === 'rough' && !isCurrentWarmup && (
+                    <div className="micro" style={{ color: UI.inkSoft, opacity: 0.8, marginTop: 3 }}>
+                      Rough day · +1 RIR suggested
                     </div>
                   )}
                   {/* Range's own configured span is shown as a permanent badge next to the
@@ -7778,6 +7856,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           }}>Start now →</button>
         </div>
       )}
+
+      {readinessSheet}
 
       {confirmEl}
 

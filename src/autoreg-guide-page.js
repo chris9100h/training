@@ -107,6 +107,18 @@
     if(isB) out+='<div style="font-size:12.5px;color:var(--ink-soft);margin-top:12px">In Load only the sets column is inert: every set answer is frozen, so the questions exist purely to gate the weight. Soreness is repurposed as a recovery brake that holds the weight instead of cutting a set.</div>';
     out+='</section>';
 
+    /* readiness (modus-agnostic, same in every mode) */
+    out+='<section class="sec">'+sechead('Readiness · Today','One tap for how you feel',
+      'At the start of every session the app asks Fresh, Normal or Rough. It only nudges the suggestion, never the ceiling: you can always push to your limit, and a real PR counts on any day.');
+    out+='<div class="grid g180">'+
+      stat('Fresh','Push','var(--ok)','A strong day. Train as usual and chase the bump.')+
+      stat('Normal','As usual',null,'The default. Nothing changes, the engine runs normally.')+
+      stat('Rough','+1 RIR','var(--accent)','Low on energy. The app suggests a rep more in reserve and counts the session gently, so a bad night never cuts your progression.')+
+      '</div>';
+    out+='<div class="card lb accented" style="margin-top:16px"><div class="kick" style="color:var(--accent)">Why it matters</div>'+
+      '<div style="margin-top:6px;font-size:13.5px;color:var(--ink-soft)"><b>A rough day is discounted, not thrown away.</b> On Rough the app holds off the rep-miss cut and does not chase the earn ladder, so one tired session can never drag your weight down. If you push through and hit your reps anyway, the bump still lands. Skip the tap to train exactly as normal.</div></div>';
+    out+='</section>';
+
     /* 03 feedback */
     out+='<section class="sec">'+sechead('03 / Feedback','The questions and every answer',
       isB?'Asked per muscle group: soreness first, then per exercise the joint, weight and pump check.':'Asked per muscle group: soreness first, then per exercise the joint, weight and pump check, then the muscle workload last.');
