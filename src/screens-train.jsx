@@ -7907,7 +7907,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         </Btn>
         </>) : (<>
         <div style={{ fontSize: 13.5, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: 1.45 }}>How did that feel?</div>
-        <Btn onClick={() => handleJointAnswer('none', 'just_right', 'moderate', mesoJointAffinitySel)} style={{ width: '100%' }}>On point</Btn>
+        <Btn onClick={() => handleJointAnswer('none', 'just_right', 'moderate', 'ok')} style={{ width: '100%' }}>On point</Btn>
         <Btn kind="ghost" onClick={() => { setMesoJointSel('none'); setMesoJointWeightSel('just_right'); setMesoJointPumpSel('moderate'); setMesoJointExpanded(true); }} style={{ width: '100%', marginTop: 8 }}>Flag a detail</Btn>
         </>)}
       </Sheet>
