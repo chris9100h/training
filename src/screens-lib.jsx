@@ -3616,21 +3616,12 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                         const chipBg = highlight ? UI.goldFaint : decline ? 'rgba(var(--danger-rgb),0.08)' : 'transparent';
                         return (
                           <div key={j} style={{
-                            width: '100%', marginTop: j > 0 ? 6 : 0,
+                            width: '100%', marginTop: j > 0 ? 5 : 0,
                             borderLeft: `2px solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.4)' : 'rgba(var(--accent-rgb),0.35)'}`,
-                            paddingLeft: 10,
+                            paddingLeft: 9,
                           }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
-                              <span style={{
-                                fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em',
-                                color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.85)' : UI.inkFaint,
-                                background: highlight ? UI.goldFaint : decline ? 'rgba(var(--danger-rgb),0.08)' : 'rgba(var(--accent-rgb),0.08)',
-                                border: `0.5px solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : 'rgba(var(--accent-rgb),0.25)'}`,
-                                borderRadius: 4, padding: '2px 6px',
-                              }}>DROP SET</span>
-                              {pr && <i className="fa-solid fa-dumbbell" style={{ fontSize: 9, color: UI.gold }} />}
-                            </div>
-                            <div data-shot-chips="1" style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 4, overflow: 'hidden' }}>
+                            <div data-shot-chips="1" style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 5, overflow: 'hidden' }}>
+                              <IntensityBadge label="DROP" highlight={highlight} decline={decline} />
                               {drops.map((d, di) => (
                                 <React.Fragment key={di}>
                                   {di > 0 && (
@@ -3650,6 +3641,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                                   </span>
                                 </React.Fragment>
                               ))}
+                              {pr && <i className="fa-solid fa-dumbbell" style={{ fontSize: 9, color: UI.gold, marginLeft: 2 }} />}
                             </div>
                             <FinisherTags drops={st.drops} labelFor={(di) => di === 0 ? 'top' : 'drop ' + di} />
                           </div>
@@ -3666,50 +3658,36 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                         const isMatch = st.technique === 'myorep_match';
                         return (
                           <div key={j} style={{
-                            width: '100%', marginTop: j > 0 ? 6 : 0,
+                            width: '100%', marginTop: j > 0 ? 5 : 0,
                             borderLeft: `2px solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.4)' : 'rgba(var(--accent-rgb),0.35)'}`,
-                            paddingLeft: 10,
+                            paddingLeft: 9,
                           }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
-                              <span style={{
-                                fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em',
-                                color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.85)' : UI.inkFaint,
-                                background: highlight ? UI.goldFaint : decline ? 'rgba(var(--danger-rgb),0.08)' : 'rgba(var(--accent-rgb),0.08)',
-                                border: `0.5px solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : 'rgba(var(--accent-rgb),0.25)'}`,
-                                borderRadius: 4, padding: '2px 6px',
-                              }}>{isMatch ? 'MYO MATCH' : 'MYO-REPS'}</span>
-                              {pr && <i className="fa-solid fa-dumbbell" style={{ fontSize: 9, color: UI.gold }} />}
-                            </div>
-                            <div data-shot-chips="1" style={{ display: 'inline-flex', flexDirection: 'column', gap: 4, overflow: 'hidden' }}>
-                              <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
-                                {drops.map((d, di) => (
-                                  <React.Fragment key={di}>
-                                    {di > 0 && (
-                                      <span style={{ color: UI.inkGhost, fontSize: 10, fontFamily: UI.fontUi }}>↺</span>
-                                    )}
-                                    <span style={{
-                                      background: di === 0 ? chipBg : 'transparent',
-                                      border: `1px solid ${di === 0 ? chipBorder : UI.hair}`,
-                                      borderRadius: 4, padding: '3px 8px',
-                                      fontFamily: UI.fontNum, fontSize: 12,
-                                      color: di === 0 ? chipColor : UI.inkSoft,
-                                      opacity: di === 0 ? 1 : 0.7,
-                                    }}>
-                                      {di === 0 && <>{d.kg ?? '—'}<span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, fontSize: 10 }}>{UI.unit()}</span><span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, margin: '0 1px' }}>×</span></>}
-                                      {d.reps ?? '—'}
-                                    </span>
-                                  </React.Fragment>
-                                ))}
-                              </div>
+                            <div data-shot-chips="1" style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 5, overflow: 'hidden' }}>
+                              <IntensityBadge label={isMatch ? 'MYO+' : 'MYO'} highlight={highlight} decline={decline} />
+                              {drops.map((d, di) => (
+                                <React.Fragment key={di}>
+                                  {di > 0 && (
+                                    <span style={{ color: UI.inkGhost, fontSize: 10, fontFamily: UI.fontUi }}>↺</span>
+                                  )}
+                                  <span style={{
+                                    background: di === 0 ? chipBg : 'transparent',
+                                    border: `1px solid ${di === 0 ? chipBorder : UI.hair}`,
+                                    borderRadius: 4, padding: '3px 8px',
+                                    fontFamily: UI.fontNum, fontSize: 12,
+                                    color: di === 0 ? chipColor : UI.inkSoft,
+                                    opacity: di === 0 ? 1 : 0.7,
+                                  }}>
+                                    {di === 0 && <>{d.kg ?? '—'}<span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, fontSize: 10 }}>{UI.unit()}</span><span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, margin: '0 1px' }}>×</span></>}
+                                    {d.reps ?? '—'}
+                                  </span>
+                                </React.Fragment>
+                              ))}
                               {tr.totalReps > 0 && (
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                                  <div style={{ border: `1px solid var(--accent)`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontUi, fontSize: 11, color: 'var(--accent)', letterSpacing: '0.03em', textAlign: 'center' }}>
-                                    Total {tr.totalReps}
-                                  </div>
-                                </div>
+                                <span style={{ border: `1px solid var(--accent)`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontNum, fontSize: 12, color: 'var(--accent)', letterSpacing: '0.02em', whiteSpace: 'nowrap' }}>Σ {tr.totalReps}</span>
                               )}
-                              <FinisherTags drops={st.drops} labelFor={(di) => di === 0 ? 'act' : 'myo ' + di} />
+                              {pr && <i className="fa-solid fa-dumbbell" style={{ fontSize: 9, color: UI.gold, marginLeft: 2 }} />}
                             </div>
+                            <FinisherTags drops={st.drops} labelFor={(di) => di === 0 ? 'act' : 'myo ' + di} />
                           </div>
                         );
                       }
@@ -3721,18 +3699,16 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                         const chipBorder = highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : UI.hairStrong;
                         const chipBg = highlight ? UI.goldFaint : decline ? 'rgba(var(--danger-rgb),0.08)' : 'transparent';
                         return (
-                          <div key={j} style={{ width: '100%', marginTop: j > 0 ? 6 : 0, borderLeft: `2px solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.4)' : 'rgba(var(--accent-rgb),0.35)'}`, paddingLeft: 10 }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
-                              <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.85)' : UI.inkFaint, background: highlight ? UI.goldFaint : decline ? 'rgba(var(--danger-rgb),0.08)' : 'rgba(var(--accent-rgb),0.08)', border: `0.5px solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : 'rgba(var(--accent-rgb),0.25)'}`, borderRadius: 4, padding: '2px 6px' }}>PARTIALS</span>
-                              {pr && <i className="fa-solid fa-dumbbell" style={{ fontSize: 9, color: UI.gold }} />}
-                            </div>
-                            <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
+                          <div key={j} style={{ width: '100%', marginTop: j > 0 ? 5 : 0, borderLeft: `2px solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.4)' : 'rgba(var(--accent-rgb),0.35)'}`, paddingLeft: 9 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 5 }}>
+                              <IntensityBadge label="PARTIALS" highlight={highlight} decline={decline} />
                               <span style={{ background: chipBg, border: `1px solid ${chipBorder}`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontNum, fontSize: 12, color: chipColor }}>
                                 {st.kg ?? '—'}<span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, fontSize: 10 }}>{UI.unit()}</span><span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, margin: '0 1px' }}>×</span>{st.reps ?? '—'}
                               </span>
                               {partials > 0 && <span style={{ color: UI.inkGhost, fontSize: 10, fontFamily: UI.fontUi }}>+</span>}
                               {partials > 0 && <span style={{ border: `1px solid rgba(var(--accent-rgb),0.35)`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontNum, fontSize: 12, color: UI.inkSoft }}>{partials}</span>}
                               <StretchChipLib tr={LB.techniqueRounds(st)} />
+                              {pr && <i className="fa-solid fa-dumbbell" style={{ fontSize: 9, color: UI.gold, marginLeft: 2 }} />}
                             </div>
                           </div>
                         );
@@ -3745,16 +3721,14 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                         const chipBorder = highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : UI.hairStrong;
                         const chipBg = highlight ? UI.goldFaint : decline ? 'rgba(var(--danger-rgb),0.08)' : 'transparent';
                         return (
-                          <div key={j} style={{ width: '100%', marginTop: j > 0 ? 6 : 0, borderLeft: `2px solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.4)' : 'rgba(var(--accent-rgb),0.35)'}`, paddingLeft: 10 }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
-                              <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.85)' : UI.inkFaint, background: highlight ? UI.goldFaint : decline ? 'rgba(var(--danger-rgb),0.08)' : 'rgba(var(--accent-rgb),0.08)', border: `0.5px solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : 'rgba(var(--accent-rgb),0.25)'}`, borderRadius: 4, padding: '2px 6px' }}>STRETCH</span>
-                              {pr && <i className="fa-solid fa-dumbbell" style={{ fontSize: 9, color: UI.gold }} />}
-                            </div>
-                            <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
+                          <div key={j} style={{ width: '100%', marginTop: j > 0 ? 5 : 0, borderLeft: `2px solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.4)' : 'rgba(var(--accent-rgb),0.35)'}`, paddingLeft: 9 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 5 }}>
+                              <IntensityBadge label="STRETCH" highlight={highlight} decline={decline} />
                               <span style={{ background: chipBg, border: `1px solid ${chipBorder}`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontNum, fontSize: 12, color: chipColor }}>
                                 {st.kg ?? '—'}<span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, fontSize: 10 }}>{UI.unit()}</span><span style={{ color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.6)' : UI.inkFaint, margin: '0 1px' }}>×</span>{st.reps ?? '—'}
                               </span>
                               <StretchChipLib tr={tr} />
+                              {pr && <i className="fa-solid fa-dumbbell" style={{ fontSize: 9, color: UI.gold, marginLeft: 2 }} />}
                             </div>
                           </div>
                         );
@@ -3776,21 +3750,12 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                         const chipBg = highlight ? UI.goldFaint : decline ? 'rgba(var(--danger-rgb),0.08)' : 'transparent';
                         return (
                           <div key={j} style={{
-                            width: '100%', marginTop: j > 0 ? 6 : 0,
+                            width: '100%', marginTop: j > 0 ? 5 : 0,
                             borderLeft: `2px solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.4)' : 'rgba(var(--accent-rgb),0.35)'}`,
-                            paddingLeft: 10,
+                            paddingLeft: 9,
                           }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
-                              <span style={{
-                                fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em',
-                                color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.85)' : UI.inkFaint,
-                                background: highlight ? UI.goldFaint : decline ? 'rgba(var(--danger-rgb),0.08)' : 'rgba(var(--accent-rgb),0.08)',
-                                border: `0.5px solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : 'rgba(var(--accent-rgb),0.25)'}`,
-                                borderRadius: 4, padding: '2px 6px',
-                              }}>AMRAP</span>
-                              {pr && <i className="fa-solid fa-dumbbell" style={{ fontSize: 9, color: UI.gold }} />}
-                            </div>
-                            <div data-shot-chips="1" style={{ display: 'flex', alignItems: 'flex-end', flexWrap: 'wrap', gap: 4, overflow: 'hidden' }}>
+                            <div data-shot-chips="1" style={{ display: 'flex', alignItems: 'flex-end', flexWrap: 'wrap', gap: 5, overflow: 'hidden' }}>
+                              <span style={{ alignSelf: 'center' }}><IntensityBadge label="AMRAP" highlight={highlight} decline={decline} /></span>
                               {drops.map((d, di) => (
                                 <React.Fragment key={di}>
                                   {di > 0 && (
@@ -3815,6 +3780,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                                   </div>
                                 </React.Fragment>
                               ))}
+                              {pr && <i className="fa-solid fa-dumbbell" style={{ fontSize: 9, color: UI.gold, alignSelf: 'center', marginLeft: 2 }} />}
                             </div>
                             <FinisherTags drops={st.drops} labelFor={(di) => 'round ' + (di + 1)} />
                           </div>
@@ -4407,6 +4373,22 @@ function StretchChipLib({ tr }) {
   const txt = stretchText(tr);
   if (!txt) return null;
   return <span style={{ border: `1px solid rgba(var(--accent-rgb),0.35)`, borderRadius: 4, padding: '3px 8px', fontFamily: UI.fontNum, fontSize: 12, color: UI.inkSoft, whiteSpace: 'nowrap' }}>stretch {txt}</span>;
+}
+
+// Compact inline technique badge for the session-detail set list. It sits at the
+// head of the (now single-row) technique set instead of on its own line above —
+// what used to make a technique-heavy workout balloon vertically. Gold on a PR /
+// improvement, danger on a decline, a muted accent otherwise.
+function IntensityBadge({ label, highlight, decline }) {
+  return (
+    <span style={{
+      fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.1em',
+      color: highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.85)' : 'var(--accent)',
+      background: highlight ? UI.goldFaint : decline ? 'rgba(var(--danger-rgb),0.08)' : 'rgba(var(--accent-rgb),0.10)',
+      border: `0.5px solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : 'rgba(var(--accent-rgb),0.30)'}`,
+      borderRadius: 4, padding: '2px 6px', whiteSpace: 'nowrap', flexShrink: 0,
+    }}>{label}</span>
+  );
 }
 
 // Per-round finisher breakdown for a completed chain set (drop/myo/AMRAP): one
