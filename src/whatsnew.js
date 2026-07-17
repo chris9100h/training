@@ -17,6 +17,23 @@
    Entry shape: { id: string, date: string (YYYY-MM-DD), title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.603',
+    date: '2026-07-17',
+    title: 'Autoregulation v2 Is Here',
+    items: [
+      "🧠 Autoregulation just got rebuilt from the ground up, and it now works the same smart way across all three modes: Volume + Load, Load only, and Mesocycle. First up: a quick readiness check-in before every workout, one tap for Fresh, Normal, or Rough. It only nudges that day's suggestion (easing off a touch on a Rough day), it never caps you: push to your limit whenever you want, and a real PR always counts. (The Skip button is gone too, since closing the prompt or confirming blank already defaulted to Normal.)",
+      "🚧 It now recognizes when a muscle has genuinely hit its ceiling for the block (repeated soreness, reps gone flat or dropping, joints flagging) instead of just piling on more sets forever. When that happens, it holds steady on new sets for that muscle and offers a deload with the real reasons why, not a vague nag.",
+      "🧩 It remembers your real volume ceiling per muscle over time, not just per exercise, and gets smarter about it block after block, so one rough week won't wrongly reset what it's learned. On Volume + Load (the open-ended mode where sets can grow), accepting a suggested deload now also backs off a touch and automatically kicks off a fresh, self-paced block, so an open-ended plan can run like its own mini mesocycle without you managing block lengths by hand.",
+      "🏆 Get a Block recap when a block wraps up or a deload gets suggested: sets added, weight gained, PRs, and your best session, all in one summary, so the progress you made is something you can actually see. Cruising along and never hit a ceiling? You get this recap too now, roughly every 8 cycles, right alongside the usual well-done deload check-in.",
+      "🔍 If one specific lift's estimated max stalls for 3 sessions straight while everything else about it checks out (joints fine, good pump, muscle nowhere near maxed), the app now names that exact lift and suggests a concrete, different exercise for the same muscle to try, not just a shrug.",
+      "🏖️ Coming back from a break (sick or vacation, more than a week off)? Your first sessions back now ease in a little automatically to protect you, but it's just a starting suggestion. Feeling strong? Pick Fresh and skip the ease-in entirely, any weight you can actually hit still counts immediately.",
+      "📖 That's the highlight reel. There's real nuance in how all of this thinks, and the full explainer lives in Settings → Autoregulation.",
+      "⚡ Rating a set just got faster too. Felt totally normal (joint fine, weight right, pump solid)? One tap on \"On point\" answers all four feedback questions at once instead of stepping through each. Something off instead? \"Flag a detail\" still opens the full set, pre-filled to on-target.",
+      "🔧 Logged the wrong exercise? The session editor can now swap it for the right one after the fact (say, a neutral-grip pulldown that was actually overhand), keeping your logged sets and numbers exactly as they were. Adding or swapping an exercise mid-workout also now defaults to a sensible 8-12 rep range instead of copying whatever reps happened to be logged, which quietly fixes a bug where a brand-new exercise could earn a weight bump before it even had a real target to judge against.",
+      "🩹 A few smaller bugs got fixed too. Swapping between a two-sided exercise (like a dumbbell curl) and a two-handed one (like a barbell curl) mid-session no longer garbles your history into nonsense like \"L13/R13\", and older entries now display correctly too. Intensity techniques like drop sets and myo-reps now actually show up when you check an exercise's history mid-workout instead of silently vanishing. And on a technique-heavy session, every drop set or myo-rep set now renders as one tidy line instead of up to three, cutting scroll length roughly in half.",
+    ],
+  },
+  {
     id: 'v2.601',
     date: '2026-07-16',
     title: 'No More Mystery Rest Days',
