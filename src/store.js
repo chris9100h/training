@@ -4936,61 +4936,30 @@ function mesoRecapGainsFromEdit(answers, weightBoosts, earnInputs, dayId) {
 }
 
 // Autoreg v2: when a mis-logged entry's exId is corrected (oldExId -> newExId) via the
-// session editor, re-key this session's captured meso feedback answers so a LATER
-// feedback edit still finds them. fbEarnInputs re-derives its earn keys from the
-// CURRENT entry exId, and reearnMesoBoostsFromAnswers / mesoGateSetsFromAnswers read
-// answers.joint[exId], so answers left under the old id would orphan (the corrected
-// exercise could never re-earn, gates.jointFine.has(new) stays false). Re-keys the
-// joint record (by exId), every contrib/target reference (by exId_dayId) and the volume
-// exIds list; dayId is unchanged (a swap never moves the session's day). Pure: returns a
-// new answers object, or the SAME reference when nothing referenced the old id.
-// Scope note: the cumulative exId_dayId levers on the meso ROW (weightBoosts etc.) are
-// intentionally left; the corrected exercise re-earns cleanly from here forward and the
-// stale key is inert (the day-slot no longer trains the old exercise).
-function remapMesoAnswersExId(answers, oldExId, newExId, dayId, newName) {
+// session editor, the weight-boost EARN gate can no longer re-earn for the corrected
+// exercise: a later feedback edit re-derives its earn keys from the CURRENT entry exId,
+// and reearnMesoBoostsFromAnswers / mesoGateSetsFromAnswers read answers.joint[exId], so
+// a joint record left under the OLD id makes gates.jointFine.has(new) stay false forever.
+// Move ONLY the joint record's IDENTITY (key + exId + exName) to the new id.
+// Deliberately narrow:
+//   - The joint record's `contrib` is KEPT under the old exId_dayId. That set-delta lives
+//     in mesoState.deltas under the same key (the row levers are intentionally NOT
+//     remapped), so a later joint edit must diff against that key to undo it cleanly;
+//     re-keying it would orphan the delta and apply a phantom one.
+//   - soreness (keyed by muscle; the earn path reads soreBlock per-muscle, not per exId)
+//     and volume (not read by the earn path at all) are NOT touched. Re-keying their
+//     contrib/exIds would desync them from the unremapped mesoState.deltas.
+// Pure: returns a new answers object, or the SAME reference when there is nothing to move.
+function remapMesoAnswersExId(answers, oldExId, newExId, newName) {
   if (!answers || !oldExId || !newExId || oldExId === newExId) return answers;
-  const oldKey = oldExId + '_' + dayId;
-  const newKey = newExId + '_' + dayId;
-  const remapContrib = (contrib) => {
-    if (!contrib || !(oldKey in contrib)) return contrib;
-    const out = {};
-    for (const [k, v] of Object.entries(contrib)) out[k === oldKey ? newKey : k] = v;
-    return out;
-  };
-  let changed = false;
-  const joint = { ...(answers.joint || {}) };
-  if (joint[oldExId]) {
-    const rec = { ...joint[oldExId], exId: newExId, ...(newName ? { exName: newName } : {}) };
-    rec.contrib = remapContrib(rec.contrib);
-    delete joint[oldExId];
-    joint[newExId] = rec;
-    changed = true;
-  }
-  const soreness = {};
-  for (const [muscle, rec0] of Object.entries(answers.soreness || {})) {
-    let rec = rec0, touched = false;
-    if (Array.isArray(rec0.targets) && rec0.targets.some(t => t && t.key === oldKey)) {
-      rec = { ...rec, targets: rec0.targets.map(t => (t && t.key === oldKey) ? { ...t, key: newKey, ...(newName ? { name: newName } : {}) } : t) };
-      touched = true;
-    }
-    const nc = remapContrib((touched ? rec : rec0).contrib);
-    if (nc !== (touched ? rec : rec0).contrib) { rec = { ...(touched ? rec : rec0), contrib: nc }; touched = true; }
-    soreness[muscle] = touched ? rec : rec0;
-    if (touched) changed = true;
-  }
-  const volume = {};
-  for (const [muscle, rec0] of Object.entries(answers.volume || {})) {
-    let rec = rec0, touched = false;
-    if (Array.isArray(rec0.exIds) && rec0.exIds.includes(oldExId)) {
-      rec = { ...rec, exIds: rec0.exIds.map(id => id === oldExId ? newExId : id) };
-      touched = true;
-    }
-    const nc = remapContrib((touched ? rec : rec0).contrib);
-    if (nc !== (touched ? rec : rec0).contrib) { rec = { ...(touched ? rec : rec0), contrib: nc }; touched = true; }
-    volume[muscle] = touched ? rec : rec0;
-    if (touched) changed = true;
-  }
-  return changed ? { ...answers, joint, soreness, volume } : answers;
+  const joint = answers.joint || {};
+  // Nothing to move, or the target already owns a joint record (both exercises present in
+  // the session): leave it rather than clobber the genuine record.
+  if (!joint[oldExId] || joint[newExId]) return answers;
+  const nextJoint = { ...joint };
+  nextJoint[newExId] = { ...nextJoint[oldExId], exId: newExId, ...(newName ? { exName: newName } : {}) };
+  delete nextJoint[oldExId];
+  return { ...answers, joint: nextJoint };
 }
 
 // Recompute this (top-of-stack) session's rep-miss CUT + streak contribution when a

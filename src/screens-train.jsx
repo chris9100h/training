@@ -2885,14 +2885,16 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         startedAt: now, // fresh block-start anchor (flex week count)
         updatedAt: now,
       };
+      // Write the per-plan localStorage cache INSIDE the updater so it is atomic with the
+      // store row and can never be skipped by a deferred updater (mirrors saveMesoState).
+      // getMesoState (newer of store vs cache by updatedAt) then can't let a stale Meso-1
+      // cache win on the home strip.
+      saveMesoStateToStorage(composed);
       return { ...s, mesoStates: [...(s.mesoStates || []).filter(m => m.scheduleId !== scheduleId), composed] };
     });
-    // Mirror the composed row into the per-plan localStorage cache + in-session copy so
-    // getMesoState (newer of store vs cache by updatedAt) can't let a stale Meso-1 cache
-    // win on the home strip. Guarded on `composed`: if the updater ran (it does in this
-    // app's synchronous store) we have the fresh row; the store write above is
-    // authoritative either way.
-    if (composed) { saveMesoStateToStorage(composed); setMesoStateLocal(composed); }
+    // Update the in-session mirror (cosmetic; TrainingScreenInner is unmounting after the
+    // block finishes). Kept outside the updater since setMesoStateLocal is a child setter.
+    if (composed) setMesoStateLocal(composed);
   };
 
   const continueAsCycle = (scheduleId) => {

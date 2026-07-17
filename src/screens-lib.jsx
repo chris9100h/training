@@ -3024,7 +3024,6 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
       // autoregState landmarks) since this sheet opened, and recompute/reearn spread
       // the row through (...meso). Composing on the stale render-closure `sessionMeso`
       // and writing it back wholesale would revert those concurrent fields. #3
-      let composedMeso = null;
       setStore(st => {
         const cur = (st.mesoStates || []).find(m => m.id === sessionMeso.id) || sessionMeso;
         // 1. Recompute the CUT for the signalWeight flip (no-op on a same-side edit).
@@ -3032,20 +3031,22 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
         // 2. Re-earn the EARN side from the unchanged answers (discounted still earns);
         //    reearn preserves a re-armed cut and drops a frozen one.
         const newMeso = LB.reearnMesoBoostsFromAnswers(cutMeso, fbRaw.answers, earnInputs, fbLoadOnly);
-        composedMeso = { ...newMeso, updatedAt: new Date().toISOString() };
+        const composedMeso = { ...newMeso, updatedAt: new Date().toISOString() };
         const gains = LB.mesoRecapGainsFromEdit(fbRaw.answers, composedMeso.weightBoosts, earnInputs, s.dayId);
         const newRecap = { ...s.mesoRecap, groups, gains, raw: fbRaw };
+        // Write the per-plan localStorage cache in lockstep with the row (same fresh
+        // updatedAt), INSIDE the updater so it is atomic with the store write and can
+        // never be skipped by a deferred updater (mirrors saveMesoState's own in-updater
+        // localStorage write). getMesoState then never masks the edit with a stale cache.
+        if (typeof MESO_KEY === 'string') {
+          try { localStorage.setItem(MESO_KEY + '-' + s.scheduleId, JSON.stringify(composedMeso)); } catch {}
+        }
         return {
           ...st,
           mesoStates: (st.mesoStates || []).map(m => m.id === sessionMeso.id ? composedMeso : m),
           sessions: st.sessions.map(x => x.id === sessionId ? { ...x, readiness, signalWeight: newSignal, mesoRecap: newRecap } : x),
         };
       });
-      // Move the per-plan localStorage cache in lockstep (fresh updatedAt) so
-      // getMesoState never masks the edit with a stale cache.
-      if (composedMeso && typeof MESO_KEY === 'string') {
-        try { localStorage.setItem(MESO_KEY + '-' + s.scheduleId, JSON.stringify(composedMeso)); } catch {}
-      }
       setFbEdit(null);
       return;
     }
@@ -4336,18 +4337,19 @@ function SessionEditSheet({ session, duration, exercises, store, setStore, onClo
       const mins = parseInt(draftDuration, 10);
       patch.durationMinutes = (!isNaN(mins) && mins > 0) ? mins : null;
     }
-    // Autoreg v2 #1: if a swap corrected an entry's exId, re-key this session's captured
-    // meso feedback (mesoRecap.raw.answers is keyed by the OLD exId). A later feedback
-    // edit re-derives its earn keys from the CURRENT entry exId, so without this the
-    // corrected exercise could never re-earn (answers.joint[new] would be missing) and
-    // its answers would orphan. Same-index compare: a swap never reorders entries.
+    // Autoreg v2 #1: if a swap corrected an entry's exId, move this session's captured
+    // joint feedback record to the new exId. A later feedback edit re-derives its earn
+    // keys from the CURRENT entry exId, so without this the corrected exercise could
+    // never re-earn a weight boost (answers.joint[new] would be missing). Same-index
+    // compare: SessionEditSheet only edits sets / swaps exIds, never adds/removes/reorders
+    // entries.
     if (session.mesoRecap?.raw?.answers) {
       let answers = session.mesoRecap.raw.answers;
       let remapped = false;
       (session.entries || []).forEach((orig, i) => {
         const now = draftEntries[i];
         if (now && orig && !now.isCardio && now.exId !== orig.exId) {
-          answers = LB.remapMesoAnswersExId(answers, orig.exId, now.exId, session.dayId, now.name);
+          answers = LB.remapMesoAnswersExId(answers, orig.exId, now.exId, now.name);
           remapped = true;
         }
       });
