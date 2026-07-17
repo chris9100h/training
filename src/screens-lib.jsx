@@ -3871,6 +3871,8 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
           session={s}
           duration={duration}
           exercises={store.exercises}
+          store={store}
+          setStore={setStore}
           onClose={() => setEditing(false)}
           onSave={(patch) => {
             setStore(st => ({ ...st, sessions: st.sessions.map(x => x.id === s.id ? { ...x, ...patch } : x) }));
@@ -4038,11 +4040,12 @@ function StandaloneTechEditor({ st, kind, onPatch }) {
   );
 }
 
-function SessionEditSheet({ session, duration, exercises, onClose, onSave }) {
+function SessionEditSheet({ session, duration, exercises, store, setStore, onClose, onSave }) {
   const [draftDate, setDraftDate] = useStateL(session.date ? session.date.slice(0, 10) : '');
   const [draftDuration, setDraftDuration] = useStateL(duration != null ? String(Math.round(duration / 5) * 5) : '0');
   const [draftEntries, setDraftEntries] = useStateL(() => JSON.parse(JSON.stringify(session.entries)));
   const [openWarmups, setOpenWarmups] = useStateL({}); // eIdx -> bool, collapsed by default
+  const [swapEIdx, setSwapEIdx] = useStateL(null); // entry index whose exercise is being corrected via the picker
   const [confirmEl, confirm] = useConfirm();
   const origDate = session.date ? session.date.slice(0, 10) : '';
   const origDuration = duration != null ? String(Math.round(duration / 5) * 5) : '0';
@@ -4051,6 +4054,22 @@ function SessionEditSheet({ session, duration, exercises, onClose, onSave }) {
   const requestClose = async () => {
     if (isDirty && !await confirm('Your edits won\'t be saved.', { title: 'Discard changes?', ok: 'Discard', cancel: 'Keep editing', danger: true })) return;
     onClose();
+  };
+
+  // Correct a mis-logged exercise: point this entry at a different exercise while
+  // keeping its logged sets (the numbers were right, the movement was picked
+  // wrong, e.g. neutral vs overhand lat pulldown). The picker resolves to a
+  // user-owned id; the entry's cached name follows so history / PRs re-attribute.
+  const swapExercise = (ids) => {
+    const newExId = Array.isArray(ids) ? ids[0] : ids;
+    const eIdx = swapEIdx;
+    setSwapEIdx(null);
+    if (newExId == null || eIdx == null) return;
+    setDraftEntries(entries => entries.map((en, i) => {
+      if (i !== eIdx) return en;
+      const nm = exercises?.find(x => x.id === newExId)?.name ?? en.name;
+      return { ...en, exId: newExId, name: nm };
+    }));
   };
 
   const updateSet = (eIdx, sIdx, patch) => {
@@ -4175,6 +4194,7 @@ function SessionEditSheet({ session, duration, exercises, onClose, onSave }) {
   };
 
   return (
+    <>
     <Sheet open={true} onClose={requestClose} title="Edit session">
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14, paddingBottom: 160 }}>
         <div>
@@ -4299,8 +4319,11 @@ function SessionEditSheet({ session, duration, exercises, onClose, onSave }) {
             return (
               <div key={eIdx} style={{ position: 'relative', background: UI.bgInset, borderRadius: 8, overflow: 'hidden', border: `1px solid ${UI.hairStrong}` }}>
                 <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 3, background: 'var(--accent)' }} />
-                <div style={{ padding: '14px 16px 12px 18px', fontFamily: UI.fontDisplay, fontSize: 18, fontWeight: 700, letterSpacing: '0.01em', textTransform: 'uppercase', color: UI.ink, lineHeight: 1.15 }}>
-                  {exName}
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '14px 16px 12px 18px' }}>
+                  <div style={{ flex: 1, minWidth: 0, fontFamily: UI.fontDisplay, fontSize: 18, fontWeight: 700, letterSpacing: '0.01em', textTransform: 'uppercase', color: UI.ink, lineHeight: 1.15 }}>
+                    {exName}
+                  </div>
+                  <button onClick={() => setSwapEIdx(eIdx)} style={{ flexShrink: 0, marginTop: 1, background: 'transparent', border: `1px solid ${UI.hairStrong}`, borderRadius: 4, padding: '5px 10px', cursor: 'pointer', color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', WebkitTapHighlightColor: 'transparent' }}>Swap</button>
                 </div>
 
                 {warmupSets.length > 0 && (
@@ -4347,6 +4370,10 @@ function SessionEditSheet({ session, duration, exercises, onClose, onSave }) {
       </div>
       {confirmEl}
     </Sheet>
+    {swapEIdx != null && window.Screens?.ExercisePicker && (
+      <window.Screens.ExercisePicker store={store} setStore={setStore} onClose={() => setSwapEIdx(null)} onPick={swapExercise} singleSelect />
+    )}
+    </>
   );
 }
 
