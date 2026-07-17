@@ -195,11 +195,25 @@ Rote Linie: **einmal ehrlich fragen mit echten Daten, nie blockieren, nie guilt-
 
 ## 7. Wiedereinstieg nach Pause
 
-Nach einer Status-Periode (Sick/Vacation) über Schwelle: die ersten **K** Sessions
-zurück laufen mit **abklingendem** Readiness-Malus (Start z.B. −1 RIR + getrimmtes
-Volumen, Ramp auf normal über ~1-2 Mikrozyklen). Modelliert als **abklingender
-Readiness-Modifier** (Reuse von §4) mit `signalWeight = discounted`, kein eigenes
-System. Trigger-Länge liefern die vorhandenen Status-Perioden.
+Nach einer Status-Periode (Sick/Vacation) über Schwelle (~7 Tage). Kernprinzip,
+damit es sich nie nach Verarsche anfühlt: **der Wiedereinstieg senkt den VORSCHLAG,
+deckelt aber nicht die Leistung.** Die normale Earn-Logik läuft oben drauf, wer stark
+zurückkommt, ist mit EINER Wiederholung wieder beim alten Gewicht. Nie unter dem
+gehalten, was man tatsächlich kann.
+
+Zwei entkoppelte Uhren, bewusst **NICHT** in rohen Sessions gezählt (das wäre auf
+langen Cycles Unsinn, manche Lifts kommen gar nicht dran):
+- **Pro Übung (Last):** erste Exposure zurück startet einen Tick tiefer (bzw. altes
+  Gewicht bei +1 RIR); packst du es, zieht Earn dich **sofort** hoch. In der Regel
+  nach 1, spätestens 2 Exposures **der Übung** zurück auf altem Niveau. Kein
+  erzwungenes Hochkriechen über mehrere Rotationen.
+- **Systemisch (Volumen/RIR):** milder Malus, der über **einen Mikrozyklus** abklingt
+  (Plan-Einheit aus §2.1: Rotation / Cycle / Woche), nicht über X rohe Sessions. Auf
+  einem 9-Tage-Cycle also **eine** Rotation Ease-in, nicht vier.
+
+Magnitude/Dauer skalieren leicht mit der Pausenlänge (7-14 Tage minimal; Wochen:
+weiter runter starten, längerer Ramp), aber immer **durch Leistung überschreibbar**.
+Modelliert als abklingender Readiness-Modifier (Reuse §4) mit `signalWeight = discounted`.
 
 ## 8. Erklärbarkeit
 
@@ -242,7 +256,8 @@ Intelligenz wie Willkür an. Beispiele:
 **Vorgeschlagen, noch zu bestätigen:**
 - Detektor-Bestätigungsfenster: die **letzten 2 Mal**, die der Muskel drankam.
 - Readiness "Rough": **+1 RIR** und letzten Accessory-Satz kappen.
-- Wiedereinstieg: ab **7** Pausentagen, Ramp über **~3** Sessions.
+- Wiedereinstieg: ab **7** Pausentagen; systemischer Ease-in über **1 Mikrozyklus**,
+  Last-Catch-up **≤2 Exposures/Übung**, immer durch Leistung überschreibbar (§7).
 
 **Später (nicht v1-blockierend):**
 - MRV-EMA-Glättungsfaktor (Startwert im Bau festlegen, dann tunen).
