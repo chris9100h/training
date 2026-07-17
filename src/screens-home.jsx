@@ -1187,6 +1187,25 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
   // Mon–Sun cycle-week overlay never applies.
   const cycleWeekView = !weekdayMode && !isFlex && (store.settings?.cycleWeekView ?? localStorage.getItem('logbook-cycle-week-view') === 'true');
 
+  // Autoreg v2 P2: passive deload hint (spec 5.3 step 3). After a declined
+  // emergent deload the full offer is suppressed for an N-session cooldown, so a
+  // small persistent chip carries the "at the ceiling, deload available" signal
+  // instead. Only for an active Auto-mode plan (a bounded meso keeps its planned
+  // end-of-block deload); shows when a decline cooldown is armed on this plan AND
+  // the detector still flags a ceiling. Auto stand-down clears it: once the
+  // signals recede the nudge is dropped at the next finish and this goes false.
+  const deloadHintActive = useMemo(() => {
+    if (!sch || !sch.mesocycle_autoregulate || sch.mesocycle_weeks != null) return false;
+    if (store.statusMode) return false;
+    const m = (typeof getMesoState === 'function') ? getMesoState(sch.id, store.mesoStates) : null;
+    const nudge = m && m.autoregState && m.autoregState.deloadNudge && m.autoregState.deloadNudge.block;
+    if (!nudge || nudge.declinedAt == null) return false;
+    if (typeof primaryMuscleForExercise !== 'function' || typeof LB.detectOverreach !== 'function') return false;
+    const muscleOfExId = (exId) => primaryMuscleForExercise(store.exercises?.find(x => x.id === exId));
+    const over = LB.detectOverreach(store.sessions, sch, muscleOfExId);
+    return Object.keys(over).some(mm => over[mm] && over[mm].atCeiling);
+  }, [sch?.id, sch?.mesocycle_autoregulate, sch?.mesocycle_weeks, store.statusMode, store.mesoStates, store.sessions, store.exercises]);
+
   const jsDay = new Date().getDay();
   const todayWd = jsDay === 0 ? 6 : jsDay - 1;
   // Oldest version = original plan start; null when no versioning
@@ -2854,6 +2873,11 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                     </span>
                   );
                 })()}
+                {deloadHintActive && (
+                  <span title="A muscle is at its ceiling. A deload is available whenever you want it." style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase', color: UI.gold, background: 'rgba(var(--accent-rgb),0.1)', border: `0.5px solid rgba(var(--accent-rgb),0.4)`, borderRadius: 4, padding: '2px 8px' }}>
+                    Deload ready
+                  </span>
+                )}
               </div>
             )}
           </div>

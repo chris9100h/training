@@ -135,6 +135,20 @@
       '</div></div>';
     out+='</section>';
 
+    /* block recap (modus-agnostic) */
+    out+='<section class="sec">'+sechead('Recap · Block','What you built, and what it cost',
+      'When a block wraps up, the app sums up everything since your last reset: weight PRs, the lifts that climbed, how many sessions you put in and your best day. It shows up in two moments, and reads differently in each.');
+    out+='<div class="grid g180">'+
+      stat('Block end','Pure win','var(--ok)','Finish a block or take a deload and the recap is a celebration: PRs, sessions, best day, nothing else.')+
+      stat('Deload declined','Win + cost','var(--accent)','Wave a suggested deload off and the recap shows the same gains next to the fatigue evidence, so the choice is an honest one.')+
+      stat('Anti-nag','Asked once',null,'After you decline it goes quiet for a few sessions, just a small deload ready tag, then only speaks up again if the fatigue is clearly worse.')+
+      '</div>';
+    out+='<div class="card lb accented" style="margin-top:16px"><div class="kick" style="color:var(--accent)">Why both sides</div><div style="margin-top:6px;font-size:13.5px;color:var(--ink-soft)">'+
+      (isC?'<b>Mesocycle:</b> your recap lands at the end of the block, when the mesocycle finishes, as a straight celebration. There is no mid-block nag: the planned deload is already on the calendar.'
+        :'<b>Gains alone would argue against ever stopping.</b> "It is going great, why deload?" Seeing what you built next to the fatigue that came with it makes the call a real one. The app asks once with honest data, never blocks you, and never guilt-trips: keep training if you would rather push on.')+
+      '</div></div>';
+    out+='</section>';
+
     /* 03 feedback */
     out+='<section class="sec">'+sechead('03 / Feedback','The questions and every answer',
       isB?'Asked per muscle group: soreness first, then per exercise the joint, weight and pump check.':'Asked per muscle group: soreness first, then per exercise the joint, weight and pump check, then the muscle workload last.');

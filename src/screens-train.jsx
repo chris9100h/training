@@ -2262,23 +2262,46 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       // session so the detail screen can show it later; survives across devices.
       const recap = buildMesoRecap(gains);
       if (recap) updateSession(sess => ({ ...sess, mesoRecap: recap }));
-      // Autoreg v2 P1: run the overreach detector including THIS just-finished
-      // session (store.sessions doesn't hold its ended/recap yet), so the emergent
-      // deload offer can fire on the exposure that just tipped a muscle over. Only
-      // for the Auto modes (bounded meso keeps its planned end-of-block deload).
+      // Autoreg v2 P2: snapshot THIS just-finished session (store.sessions won't
+      // hold its ended/recap until the setState flushes) so both block-recap
+      // framings, the block-end celebration and the mid-block decline, aggregate
+      // the FULL block including the session that just closed it out.
+      const finishedSnapshot = {
+        ...session,
+        ended: new Date().toISOString(),
+        isDeload: store.statusMode === 'deload',
+        signalWeight: session.signalWeight || (isMesoDeloadSession ? 'none' : 'full'),
+        mesoRecap: recap || session.mesoRecap,
+      };
+      const detSessions = [...(store.sessions || []).filter(x => x.id !== session.id), finishedSnapshot];
+      const blockSess = LB.blockSessions(detSessions, mesoState, store.statusPeriods);
+      blockRecapRef.current = LB.buildBlockRecap(blockSess);
+      // Autoreg v2 P1/P2: overreach detector + anti-nag gating. Only the Auto modes
+      // (bounded meso keeps its planned end-of-block deload). Runs the detector over
+      // the snapshot above so the emergent offer can fire on the exposure that just
+      // tipped a muscle over.
       if (mesoState.weeks == null && !store.statusMode) {
         const muscleOfExId = (exId) => primaryMuscleForExercise(store.exercises?.find(x => x.id === exId));
-        const finishedSnapshot = {
-          ...session,
-          ended: new Date().toISOString(),
-          isDeload: store.statusMode === 'deload',
-          signalWeight: session.signalWeight || (isMesoDeloadSession ? 'none' : 'full'),
-          mesoRecap: recap || session.mesoRecap,
-        };
-        const detSessions = [...(store.sessions || []).filter(x => x.id !== session.id), finishedSnapshot];
         const overreachNow = mesoSch ? LB.detectOverreach(detSessions, mesoSch, muscleOfExId) : {};
-        if (Object.keys(overreachNow).some(m => overreachNow[m] && overreachNow[m].atCeiling)) {
-          pendingDeloadOfferRef.current = overreachNow;
+        const flaggedNow = Object.keys(overreachNow).filter(m => overreachNow[m] && overreachNow[m].atCeiling);
+        if (!flaggedNow.length) {
+          // Auto stand-down (spec 5.3 step 5): the signals receded, so drop any
+          // armed nudge and the passive hint disappears with it.
+          const cleared = LB.clearDeloadNudge(mesoState.autoregState);
+          if (cleared !== (mesoState.autoregState ?? null)) persistAutoregState(() => cleared);
+        } else {
+          // Cooldown gate (spec 5.3 step 3): fire the full prompt only when allowed.
+          // During cooldown the ref stays null so goJustFinished skips the offer;
+          // the passive home hint is the only surface until the cooldown elapses.
+          const decision = LB.deloadNudgeDecision(mesoState.autoregState, blockSess.length, true);
+          if (decision.mode === 'full') {
+            pendingDeloadOfferRef.current = {
+              map: overreachNow,
+              escalation: decision.escalation,
+              blockCount: blockSess.length,
+              evidence: flaggedNow.map(m => (overreachNow[m].evidence && overreachNow[m].evidence[0]) || `${m} at its ceiling.`),
+            };
+          }
         }
       }
       if (gains.length > 0) {
@@ -2607,6 +2630,25 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     try { localStorage.removeItem(MESO_KEY); } catch {} // old single-key format
     try { localStorage.removeItem(MESO_ASKED_KEY + session.id); } catch {}
   };
+  // Autoreg v2 P2: persist a change to this plan's autoreg_state blob (the anti-nag
+  // deloadNudge cooldown, spec 5.3 / 9). Writes straight into store.mesoStates so
+  // syncStore's diff carries it to the DB via sync_meso_states_batch. A functional
+  // setStore updater reads the freshest row, so this composes safely with the
+  // computeMesoGains flush that already ran this finish. mutator: (prev) -> next
+  // autoreg_state; returning the same reference is a no-op.
+  const persistAutoregState = (mutator) => {
+    setStore(s => {
+      const list = s.mesoStates || [];
+      const idx = list.findIndex(m => m.scheduleId === session.scheduleId);
+      if (idx < 0) return s;
+      const cur = list[idx];
+      const nextAutoreg = mutator(cur.autoregState ?? null);
+      if (nextAutoreg === (cur.autoregState ?? null)) return s;
+      const next = list.slice();
+      next[idx] = { ...cur, autoregState: nextAutoreg, updatedAt: new Date().toISOString() };
+      return { ...s, mesoStates: next };
+    });
+  };
   // Memoized on everything mesoCurrentWeek reads (it filters all sessions twice
   // for meso plans) plus a per-day token so the date-based week still advances at
   // midnight — without this it recomputed on every 250ms tick for meso users.
@@ -2642,6 +2684,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // the sealed session) so the post-session deload offer can read the reason
   // strings after navigation. Cleared once consumed.
   const pendingDeloadOfferRef = useRefT(null);
+  // Autoreg v2 P2: the block-level recap aggregated at finish() (gains since block
+  // start), read by both the celebration (handleMesoComplete) and the decline
+  // (offerEmergentDeload) framings. Built once over a snapshot that includes the
+  // just-finished session, since store.sessions lags a tick behind.
+  const blockRecapRef = useRefT(null);
   // The "≥X reps · next weight" hint is Smart Progression's promise. On a meso
   // plan the feedback engine owns the weight from week 2 on (Smart Progression is
   // vetoed, see LB.resolveMesoSeedSuggestion), so instead of promising a bump that
@@ -2731,10 +2778,74 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     }));
   };
 
+  // Autoreg v2 P2: the shared Block-Recap content node (spec 5.1), rendered inside
+  // a confirm() sheet (its message accepts a node). `evidence` is null for the
+  // block-end CELEBRATION framing (gains only) and the detector strings for the
+  // mid-block DECLINE framing. Mirrors the durable recap render's delta chips.
+  const blockRecapNode = (recap, evidence, escalation) => {
+    const u = UI.unit();
+    const tile = (k, v) => (
+      <div style={{ background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 6, padding: '10px 12px' }}>
+        <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>{k}</div>
+        <div style={{ fontFamily: UI.fontNum, fontSize: 20, fontWeight: 700, color: UI.ink }}>{v}</div>
+      </div>
+    );
+    return (
+      <div style={{ textAlign: 'left' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0,1fr))', gap: 8, marginBottom: 16 }}>
+          {tile('Weight PRs', recap.prCount)}
+          {tile('Sessions', recap.sessionCount)}
+        </div>
+        {recap.loadPRs.length > 0 && (<>
+          <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>WHAT YOU BUILT</div>
+          <div className="knurl" style={{ marginBottom: 10 }} />
+          <div style={{ marginBottom: 16 }}>
+            {recap.loadPRs.map((g, i) => (
+              <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 0', borderBottom: i < recap.loadPRs.length - 1 ? `1px solid ${UI.hair}` : 'none' }}>
+                <span style={{ fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{g.name}</span>
+                <span style={{ fontFamily: UI.fontNum, fontSize: 12, fontWeight: 700, color: 'var(--accent)', flexShrink: 0, marginLeft: 10 }}>+{g.weightDelta} {u}</span>
+              </div>
+            ))}
+          </div>
+        </>)}
+        {recap.setGains.some(g => g.setDelta > 0) && (<>
+          <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>MORE SETS</div>
+          <div className="knurl" style={{ marginBottom: 10 }} />
+          <div style={{ marginBottom: 16 }}>
+            {recap.setGains.filter(g => g.setDelta > 0).map((g, i, arr) => (
+              <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 0', borderBottom: i < arr.length - 1 ? `1px solid ${UI.hair}` : 'none' }}>
+                <span style={{ fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{g.name}</span>
+                <span style={{ fontFamily: UI.fontNum, fontSize: 12, fontWeight: 700, color: 'var(--accent)', flexShrink: 0, marginLeft: 10 }}>+{g.setDelta} set{g.setDelta > 1 ? 's' : ''}</span>
+              </div>
+            ))}
+          </div>
+        </>)}
+        {evidence && evidence.length > 0 && (<>
+          <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>{escalation > 0 ? 'THE FATIGUE, STILL CLIMBING' : 'THE FATIGUE'}</div>
+          <div className="knurl" style={{ marginBottom: 10 }} />
+          <div>
+            {evidence.map((e, i) => (
+              <div key={i} style={{ fontFamily: UI.fontUi, fontSize: 12.5, color: UI.inkSoft, lineHeight: 1.45, marginBottom: 6 }}>{e}</div>
+            ))}
+          </div>
+        </>)}
+      </div>
+    );
+  };
+
   const handleMesoComplete = async () => {
     const scheduleId = session.scheduleId;
+    // Autoreg v2 P2: block-end recap, pure CELEBRATION (spec 5.2), gains only, no
+    // fatigue evidence. Shown before the deload/Meso-N offers when there is
+    // anything worth celebrating; a single-button acknowledge, not a decision.
+    const bRecap = blockRecapRef.current;
+    if (bRecap && (bRecap.prCount > 0 || bRecap.setGains.some(g => g.setDelta > 0))) {
+      await confirm(blockRecapNode(bRecap, null, 0), {
+        title: 'Block complete 🎉', ok: 'Let\'s go', cancel: null, preventBackdropClose: true,
+      });
+    }
     const wantDeload = await confirm(
-      'You crushed it — that\'s one full mesocycle done! A deload now helps you recover and come back even stronger. Want to start one?',
+      'You crushed it, that\'s one full mesocycle done! A deload now helps you recover and come back even stronger. Want to start one?',
       { title: 'Mesocycle complete! 🎉', ok: 'Start deload', cancel: 'Skip deload', preventBackdropClose: true },
     );
     if (wantDeload) {
@@ -2773,32 +2884,60 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // while mesocycle_weeks is set); the Auto modes (Full / Load-only) are exactly
   // where the emergent deload lives. Accept starts the existing deload overlay;
   // decline just closes.
-  const offerEmergentDeload = async (overreachMap) => {
+  const offerEmergentDeload = async (offer) => {
     if (!mesoState || isMesoDeloadSession) return;
     if (mesoState.weeks != null) return;      // bounded meso: deload comes at block end
     if (store.statusMode) return;             // never stack on sick / vacation / deload
-    const flagged = Object.keys(overreachMap || {}).filter(m => overreachMap[m] && overreachMap[m].atCeiling);
+    const overreachMap = (offer && offer.map) || offer || {};
+    const escalation = (offer && offer.escalation) || 0;
+    const blockCount = (offer && offer.blockCount) || 0;
+    const flagged = Object.keys(overreachMap).filter(m => overreachMap[m] && overreachMap[m].atCeiling);
     if (!flagged.length) return;
-    const reasons = flagged
-      .map(m => (overreachMap[m].evidence && overreachMap[m].evidence[0]) || `${m} at its ceiling.`)
-      .join('  ');
+    const evidence = (offer && offer.evidence) ||
+      flagged.map(m => (overreachMap[m].evidence && overreachMap[m].evidence[0]) || `${m} at its ceiling.`);
+    // Step 1 (spec 5.3): the light 1-tap offer. On a re-ask after cooldown the copy
+    // leads with the escalated framing instead of repeating the same reason.
+    const lead = escalation > 0 ? 'The fatigue is still climbing.' : evidence.join('  ');
     const accept = await confirm(
-      `${reasons}  A deload now (about a week at ~50% load) clears the fatigue so you come back stronger. Want to start one? You can always wave it off and keep training.`,
-      { title: 'Time for a deload?', ok: 'Start deload', cancel: 'Not now', preventBackdropClose: true },
+      `${lead}  A deload now (about a week at ~50% load) clears the fatigue so you come back stronger. Want to start one? You can always wave it off and keep training.`,
+      { title: escalation > 0 ? 'Still at the ceiling' : 'Time for a deload?', ok: 'Start deload', cancel: 'Not now', preventBackdropClose: true },
     );
     if (accept) {
+      // Deload accepted (spec 5.2 "Deload angenommen"): pure celebration recap, then
+      // start the deload. Clear the nudge, the block is resetting.
+      const bRecap = blockRecapRef.current;
+      if (bRecap && (bRecap.prCount > 0 || bRecap.setGains.some(g => g.setDelta > 0))) {
+        await confirm(blockRecapNode(bRecap, null, 0), { title: 'Block complete 🎉', ok: 'Start deload', cancel: null, preventBackdropClose: true });
+      }
+      persistAutoregState(prev => LB.clearDeloadNudge(prev));
       await LB.startDeload(userId, store, setStore);
+      return;
     }
-    // TODO(P2): on decline, persist a fatigue recap + cooldown (deloadNudge in
-    // autoreg_state) so we re-ask with escalating evidence after N sessions
-    // instead of every session (spec 5.3). P1 intentionally just closes.
+    // Step 2 (spec 5.3 / 5.2 decline framing): the recap with gains AND fatigue
+    // evidence, then exactly ONE re-ask. The recap is the decision helper here, not
+    // an epilogue: "you built this, and here is the fatigue".
+    const bRecap = blockRecapRef.current || LB.buildBlockRecap(LB.blockSessions(store.sessions, mesoState, store.statusPeriods));
+    const reAsk = await confirm(
+      blockRecapNode(bRecap, evidence, escalation),
+      { title: escalation > 0 ? 'The trend is still up' : 'Before you skip it', ok: 'Start deload', cancel: 'Skip it, keep training', preventBackdropClose: true },
+    );
+    if (reAsk) {
+      persistAutoregState(prev => LB.clearDeloadNudge(prev));
+      await LB.startDeload(userId, store, setStore);
+      return;
+    }
+    // Step 3 (spec 5.3): declined again. Arm the N-session cooldown so the full
+    // prompt does not fire every finish; the passive home hint carries it until the
+    // cooldown elapses, then the evidence escalates rather than the frequency.
+    persistAutoregState(prev => LB.recordDeloadDecline(prev, blockCount));
   };
   // Terminal navigation after a finished session: run the emergent-deload offer
-  // (if the detector flagged a ceiling this finish) before landing on the summary.
+  // (if the detector flagged a ceiling this finish and the cooldown allows it)
+  // before landing on the summary.
   const goJustFinished = async (sessionId) => {
-    const map = pendingDeloadOfferRef.current;
+    const offer = pendingDeloadOfferRef.current;
     pendingDeloadOfferRef.current = null;
-    if (map) await offerEmergentDeload(map);
+    if (offer) await offerEmergentDeload(offer);
     go({ name: 'session', sessionId, justFinished: true });
   };
 

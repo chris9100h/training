@@ -2590,6 +2590,133 @@ async function testAsync(name, fn) {
     });
   }
 
+  // ── Autoreg v2 P2: block start window ────────────────────────────────────────
+  {
+    const ms = { scheduleId: 'p', startedAt: '2026-07-01T08:00:00Z', startDate: '2026-07-01' };
+    const sess = (id, ended, opts = {}) => ({ id, scheduleId: opts.scheduleId ?? 'p', ended, date: (ended || '').slice(0, 10), isDeload: !!opts.isDeload });
+
+    test('blockStartTs: uses startedAt when no deload has happened', () => {
+      assert.strictEqual(LB.blockStartTs(ms, []), Date.parse('2026-07-01T08:00:00Z'));
+    });
+    test('blockStartTs: falls back to startDate for older mesos without startedAt', () => {
+      assert.strictEqual(LB.blockStartTs({ scheduleId: 'p', startDate: '2026-07-01' }, []), Date.parse('2026-07-01'));
+    });
+    test('blockStartTs: a later completed deload end wins over the block anchor', () => {
+      const sp = [{ mode: 'deload', startedAt: '2026-07-10T00:00:00Z', endedAt: '2026-07-17T00:00:00Z' }];
+      assert.strictEqual(LB.blockStartTs(ms, sp), Date.parse('2026-07-17T00:00:00Z'));
+    });
+    test('blockStartTs: an active (open) deload is ignored, sick/vacation never count', () => {
+      const sp = [{ mode: 'deload', startedAt: '2026-07-10T00:00:00Z', endedAt: null },
+                  { mode: 'vacation', startedAt: '2026-07-20T00:00:00Z', endedAt: '2026-07-25T00:00:00Z' }];
+      assert.strictEqual(LB.blockStartTs(ms, sp), Date.parse('2026-07-01T08:00:00Z'));
+    });
+    test('blockSessions: keeps this plan, ended, non-deload sessions after block start', () => {
+      const sessions = [
+        sess('before', '2026-06-30T10:00:00Z'),
+        sess('in', '2026-07-05T10:00:00Z'),
+        sess('deload', '2026-07-06T10:00:00Z', { isDeload: true }),
+        sess('other', '2026-07-07T10:00:00Z', { scheduleId: 'q' }),
+        { id: 'open', scheduleId: 'p', ended: null },
+      ];
+      const out = LB.blockSessions(sessions, ms, []).map(s => s.id);
+      assert.deepStrictEqual(out, ['in']);
+    });
+  }
+
+  // ── Autoreg v2 P2: block recap aggregation ───────────────────────────────────
+  {
+    const S = (id, gains, opts = {}) => ({ id, ended: (opts.date || '2026-07-05') + 'T10:00:00Z', date: opts.date || '2026-07-05', signalWeight: opts.signalWeight, mesoRecap: { gains } });
+
+    test('buildBlockRecap: folds set + weight deltas across the block', () => {
+      const r = LB.buildBlockRecap([
+        S('a', [{ name: 'Bench', weightDelta: 2.5, setDelta: 1 }], { date: '2026-07-02' }),
+        S('b', [{ name: 'Bench', weightDelta: 2.5, setDelta: 0 }, { name: 'Squat', weightDelta: 5, setDelta: 2 }], { date: '2026-07-04' }),
+      ]);
+      assert.strictEqual(r.sessionCount, 2);
+      assert.strictEqual(r.prCount, 3, 'three positive weight deltas across the block');
+      assert.strictEqual(r.setGains.find(x => x.name === 'Bench').setDelta, 1);
+      assert.strictEqual(r.setGains.find(x => x.name === 'Squat').setDelta, 2);
+      assert.strictEqual(r.loadPRs.find(x => x.name === 'Bench').weightDelta, 5, 'Bench kg folds 2.5+2.5');
+    });
+    test('buildBlockRecap: best session is the one with the most PRs', () => {
+      const r = LB.buildBlockRecap([
+        S('a', [{ name: 'Bench', weightDelta: 2.5 }], { date: '2026-07-02' }),
+        S('b', [{ name: 'Bench', weightDelta: 2.5 }, { name: 'Row', weightDelta: 2.5 }], { date: '2026-07-04' }),
+      ]);
+      assert.strictEqual(r.bestSession.date, '2026-07-04');
+      assert.strictEqual(r.bestSession.prs, 2);
+    });
+    test('buildBlockRecap: a deload (signalWeight none) session is excluded, a rough (discounted) PR still counts', () => {
+      const r = LB.buildBlockRecap([
+        S('none', [{ name: 'Bench', weightDelta: 2.5 }], { signalWeight: 'none' }),
+        S('rough', [{ name: 'Squat', weightDelta: 2.5 }], { signalWeight: 'discounted' }),
+      ]);
+      assert.strictEqual(r.sessionCount, 1, 'the none session is dropped');
+      assert.strictEqual(r.prCount, 1, 'the discounted PR is real and counts');
+      assert.strictEqual(r.loadPRs[0].name, 'Squat');
+    });
+    test('buildBlockRecap: a negative weight delta (rep-miss cut) is not a PR', () => {
+      const r = LB.buildBlockRecap([S('a', [{ name: 'Bench', weightDelta: -2.5, setDelta: 0 }])]);
+      assert.strictEqual(r.prCount, 0);
+      assert.strictEqual(r.loadPRs.length, 0, 'a cut is never a load PR');
+      assert.strictEqual(r.bestSession, null);
+    });
+  }
+
+  // ── Autoreg v2 P2: anti-nag deload governance ────────────────────────────────
+  {
+    test('deloadNudgeDecision: first at-ceiling finish, nothing recorded yet -> full offer', () => {
+      const d = LB.deloadNudgeDecision(null, 0, true);
+      assert.strictEqual(d.mode, 'full');
+      assert.strictEqual(d.escalation, 0);
+    });
+    test('deloadNudgeDecision: not at ceiling -> none (auto stand-down)', () => {
+      assert.strictEqual(LB.deloadNudgeDecision({ deloadNudge: { block: { declinedAt: 'x', cooldownUntil: 5, escalation: 1 } } }, 2, false).mode, 'none');
+    });
+    test('deloadNudgeDecision: inside the cooldown -> hint only, carries escalation', () => {
+      const st = { deloadNudge: { block: { declinedAt: 'x', cooldownUntil: 5, escalation: 1 } } };
+      const d = LB.deloadNudgeDecision(st, 3, true);
+      assert.strictEqual(d.mode, 'hint');
+      assert.strictEqual(d.escalation, 1);
+    });
+    test('deloadNudgeDecision: cooldown elapsed, still at ceiling -> full re-ask with escalation', () => {
+      const st = { deloadNudge: { block: { declinedAt: 'x', cooldownUntil: 5, escalation: 1 } } };
+      const d = LB.deloadNudgeDecision(st, 5, true);
+      assert.strictEqual(d.mode, 'full');
+      assert.strictEqual(d.escalation, 1);
+    });
+    test('recordDeloadDecline: first decline arms a 3-session cooldown at escalation 1', () => {
+      const st = LB.recordDeloadDecline(null, 4);
+      assert.strictEqual(st.deloadNudge.block.cooldownUntil, 7);
+      assert.strictEqual(st.deloadNudge.block.escalation, 1);
+      assert.strictEqual(st.version, 1);
+      assert.ok(st.deloadNudge.block.declinedAt, 'stamps declinedAt');
+    });
+    test('recordDeloadDecline: a second decline bumps escalation and re-arms the cooldown', () => {
+      const first = LB.recordDeloadDecline(null, 4);   // cooldownUntil 7, esc 1
+      const second = LB.recordDeloadDecline(first, 8);  // past cooldown, re-ask declined
+      assert.strictEqual(second.deloadNudge.block.escalation, 2);
+      assert.strictEqual(second.deloadNudge.block.cooldownUntil, 11);
+    });
+    test('recordDeloadDecline: is immutable (does not mutate the input state)', () => {
+      const st = { version: 1, deloadNudge: { block: { declinedAt: 'a', cooldownUntil: 7, escalation: 0 } } };
+      const next = LB.recordDeloadDecline(st, 10);
+      assert.strictEqual(st.deloadNudge.block.escalation, 0, 'input untouched');
+      assert.strictEqual(next.deloadNudge.block.escalation, 1);
+    });
+    test('clearDeloadNudge: drops the block nudge and preserves other keys', () => {
+      const st = { version: 1, landmarks: { Chest: {} }, deloadNudge: { block: { declinedAt: 'a', cooldownUntil: 7, escalation: 0 } } };
+      const cleared = LB.clearDeloadNudge(st);
+      assert.ok(!cleared.deloadNudge, 'block was the only nudge, so deloadNudge is gone');
+      assert.deepStrictEqual(cleared.landmarks, { Chest: {} }, 'unrelated keys survive');
+    });
+    test('clearDeloadNudge: returns the SAME reference when there is nothing to clear', () => {
+      const st = { version: 1 };
+      assert.strictEqual(LB.clearDeloadNudge(st), st);
+      assert.strictEqual(LB.clearDeloadNudge(null), null);
+    });
+  }
+
   // ── Autoreg v2 P1: MRV cap mirror in applyMesoFeedbackEdit ───────────────────
   test('applyMesoFeedbackEdit: an at-ceiling muscle freezes a volume not_enough +1 (non-destructive)', () => {
     const ms = { deltas: {}, growthCounts: {}, pumpLowCounts: {}, jointFlags: {} };

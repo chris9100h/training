@@ -325,6 +325,25 @@ function AutoregGuideScreen({ store, go, mode: modeProp, back }) {
             </div>
           </Section>
 
+          {/* ── block recap (modus-agnostic) ── */}
+          <Section>
+            <AGSecHead n="Recap · Block" title="What you built, and what it cost"
+              sub="When a block wraps up, the app sums up everything since your last reset: weight PRs, the lifts that climbed, how many sessions you put in and your best day. It shows up in two moments, and reads differently in each." />
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 11 }}>
+              <AGStat k="Block end" v="Pure win" vColor={UI.ok} s="Finish a block or take a deload and the recap is a celebration: PRs, sessions, best day, nothing else." />
+              <AGStat k="Deload declined" v="Win + cost" vColor={UI.gold} s="Wave a suggested deload off and the recap shows the same gains next to the fatigue evidence, so the choice is an honest one." />
+              <AGStat k="Anti-nag" v="Asked once" s="After you decline it goes quiet for a few sessions, just a small deload ready tag, then only speaks up again if the fatigue is clearly worse." />
+            </div>
+            <div style={{ ...cardStyle, borderLeft: `3px solid ${UI.gold}`, marginTop: 16 }}>
+              <AGKick color={UI.gold}>Why both sides</AGKick>
+              <div style={{ marginTop: 6, fontSize: 13.5, color: UI.inkSoft }}>
+                {isC
+                  ? <span><b style={{ color: UI.ink }}>Mesocycle:</b> your recap lands at the end of the block, when the mesocycle finishes, as a straight celebration. There is no mid-block nag: the planned deload is already on the calendar.</span>
+                  : <span><b style={{ color: UI.ink }}>Gains alone would argue against ever stopping.</b> "It is going great, why deload?" Seeing what you built next to the fatigue that came with it makes the call a real one. The app asks once with honest data, never blocks you, and never guilt-trips: keep training if you would rather push on.</span>}
+              </div>
+            </div>
+          </Section>
+
           {/* ── 03 the four questions ── */}
           <Section>
             <AGSecHead n="03 / Feedback" title="The questions and every answer"

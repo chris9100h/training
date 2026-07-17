@@ -616,6 +616,9 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
         joint_flags: remapExKeyed(m.jointFlags), pump_low_counts: remapExKeyed(m.pumpLowCounts),
         growth_counts: remapExDayKeyed(m.growthCounts), rep_miss_counts: remapExDayKeyed(m.repMissCounts),
         affinity: remapExKeyed(m.affinity),
+        // autoreg_state (deloadNudge / later block snapshots) is muscle/scope-keyed,
+        // not exId-keyed, so it round-trips verbatim with no remap.
+        autoreg_state: m.autoregState ?? null,
         completions: m.completions ?? 0, pending_meso2: m.pendingMeso2 ?? false,
       }))
     ));
@@ -826,7 +829,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     // Reusable workout templates (migration 0107)
     _supabase.from('zane_workout_templates').select('id, name, exercises, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
     // Mesocycle state per plan — replaces localStorage logbook-meso-state (migration 0120)
-    _supabase.from('zane_meso_states').select('id, schedule_id, weeks, start_date, start_cycle_index, started_at, deltas, joint_flags, pump_low_counts, weight_boosts, growth_counts, rep_miss_counts, affinity, completions, pending_meso2, updated_at').eq('user_id', userId),
+    _supabase.from('zane_meso_states').select('id, schedule_id, weeks, start_date, start_cycle_index, started_at, deltas, joint_flags, pump_low_counts, weight_boosts, growth_counts, rep_miss_counts, affinity, autoreg_state, completions, pending_meso2, updated_at').eq('user_id', userId),
     // Coach's own saved check-in schema templates: irrelevant when loading a
     // CLIENT's store as a coach, these belong to the acting coach, not the client.
     isCoachLoad ? null : _supabase.from('zane_checkin_schema_templates').select('id, name, schema, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
@@ -1039,6 +1042,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
       pumpLowCounts: m.pump_low_counts ?? {}, weightBoosts: m.weight_boosts ?? {},
       growthCounts: m.growth_counts ?? {}, repMissCounts: m.rep_miss_counts ?? {},
       affinity: m.affinity ?? {},
+      autoregState: m.autoreg_state ?? null,
       completions: m.completions ?? 0, pendingMeso2: m.pending_meso2 ?? false,
       updatedAt: m.updated_at ?? null,
     })),
@@ -1481,6 +1485,7 @@ async function syncStore(prev, next, userId) {
       pump_low_counts: m.pumpLowCounts ?? {}, weight_boosts: m.weightBoosts ?? {},
       growth_counts: m.growthCounts ?? {}, rep_miss_counts: m.repMissCounts ?? {},
       affinity: m.affinity ?? {},
+      autoreg_state: m.autoregState ?? null,
       completions: m.completions ?? 0, pending_meso2: m.pendingMeso2 ?? false,
       updated_at: m.updatedAt ?? new Date().toISOString(),
     })) }));
@@ -5271,6 +5276,151 @@ function detectOverreach(sessions, sch, muscleOfExId, opts = {}) {
   return out;
 }
 
+// ── Autoreg v2 P2: block start, block recap, anti-nag governance ─────────────
+
+// Current schema version of the autoreg_state blob (spec 9). Bumped when the
+// persisted shape changes; readers tolerate a missing/older version.
+const AUTOREG_STATE_VERSION = 1;
+// Deload-nudge cooldown, counted in SESSIONS not days (spec 10: N = 3). After a
+// decline the full offer is suppressed for this many block sessions, then, if the
+// muscle is still at its ceiling, it re-asks with escalated evidence.
+const DELOAD_NUDGE_COOLDOWN = 3;
+
+// Resolve the current block's start timestamp (ms) for the recap window (spec 5:
+// "since the last reset / deload"). It is the MAX of the meso block anchor
+// (started_at, or start_date for older mesos) and the end of the most recent
+// COMPLETED deload status period. P1's emergent deload only calls startDeload, it
+// does NOT advance mesoState.startedAt (that reset is P3), so a post-deload Auto
+// block must read the deload end here or the recap would fold in the pre-deload
+// block. Returns null when neither anchor is known (fall back to "include all").
+function blockStartTs(mesoState, statusPeriods) {
+  if (!mesoState) return null;
+  let ts = null;
+  if (mesoState.startedAt) { const p = Date.parse(mesoState.startedAt); if (!isNaN(p)) ts = p; }
+  if (ts == null && mesoState.startDate) { const p = Date.parse(mesoState.startDate); if (!isNaN(p)) ts = p; }
+  // Most recent CLOSED deload period (an active one has endedAt == null; skip it,
+  // the block hasn't restarted yet).
+  let lastDeloadEnd = null;
+  for (const p of (statusPeriods || [])) {
+    if (!p || p.mode !== 'deload' || !p.endedAt) continue;
+    const e = Date.parse(p.endedAt);
+    if (!isNaN(e) && (lastDeloadEnd == null || e > lastDeloadEnd)) lastDeloadEnd = e;
+  }
+  if (lastDeloadEnd != null && (ts == null || lastDeloadEnd > ts)) ts = lastDeloadEnd;
+  return ts;
+}
+
+// The sessions belonging to the current block for the recap (spec 5.1): ended,
+// non-deload, this plan, finished after blockStartTs. Mirrors the mesoCurrentWeek
+// "sessions since block began" filter (prefer the ended timestamp over the
+// date-only anchor so a same-day block transition can't leak the prior block in).
+function blockSessions(sessions, mesoState, statusPeriods) {
+  if (!mesoState) return [];
+  const planId = mesoState.scheduleId;
+  const startTs = blockStartTs(mesoState, statusPeriods);
+  return (sessions || []).filter(s => {
+    if (!s || !s.ended || s.isDeload || s.scheduleId !== planId) return false;
+    if (startTs == null) return true;
+    const t = Date.parse(s.ended);
+    return isNaN(t) ? ((s.date || '') >= (mesoState.startDate || '')) : t > startTs;
+  });
+}
+
+// Aggregate a block-level recap over the block's sessions (spec 5.1). Reads each
+// session's durably persisted mesoRecap.gains ({ name, weightDelta kg, setDelta })
+// and folds them across the whole block. signalWeight discipline (spec 4.3): a
+// 'none' (deload) session is excluded, but a 'discounted' (rough-day) session
+// still counts, a PR on a tired day is real and earns. Nothing is pre-aggregated
+// (there is no persisted PR count or "best session"), so both are derived here.
+// Returns { sessionCount, setGains:[{name,setDelta}], loadPRs:[{name,weightDelta}],
+//   prCount, bestSession:{date,prs,weightGain}|null }. Pure/testable.
+function buildBlockRecap(sessions) {
+  const list = (sessions || []).filter(s => s && s.ended && (s.signalWeight || 'full') !== 'none');
+  const byExSet = {};  // exercise name -> net set delta
+  const byExLoad = {}; // exercise name -> net kg delta
+  let prCount = 0;
+  let best = null;
+  for (const s of list) {
+    const gains = (s.mesoRecap && Array.isArray(s.mesoRecap.gains)) ? s.mesoRecap.gains : [];
+    let sessionPrs = 0, sessionWeightGain = 0;
+    for (const g of gains) {
+      if (!g || !g.name) continue;
+      if (g.setDelta) byExSet[g.name] = (byExSet[g.name] || 0) + g.setDelta;
+      if (g.weightDelta) {
+        byExLoad[g.name] = (byExLoad[g.name] || 0) + g.weightDelta;
+        if (g.weightDelta > 0) { prCount += 1; sessionPrs += 1; sessionWeightGain += g.weightDelta; }
+      }
+    }
+    if (sessionPrs > 0) {
+      const better = best == null || sessionPrs > best.prs || (sessionPrs === best.prs && sessionWeightGain > best.weightGain);
+      if (better) best = { date: s.date || (s.ended || '').slice(0, 10), prs: sessionPrs, weightGain: sessionWeightGain };
+    }
+  }
+  const setGains = Object.entries(byExSet).filter(([, v]) => v !== 0).map(([name, setDelta]) => ({ name, setDelta }));
+  const loadPRs = Object.entries(byExLoad).filter(([, v]) => v > 0).map(([name, weightDelta]) => ({ name, weightDelta }));
+  return { sessionCount: list.length, setGains, loadPRs, prCount, bestSession: best };
+}
+
+// Anti-nag deload governance (spec 5.3). PURE. Given the persisted autoreg_state,
+// the count of block sessions so far (the cooldown clock, spec 10 counts sessions
+// not days), and whether the detector still flags a ceiling this finish, decide
+// what to surface:
+//   'full'  fire the 1-tap offer + decline recap + one re-ask. No nudge recorded
+//           yet, OR the cooldown elapsed and the muscle is STILL at its ceiling
+//           (re-ask with escalated evidence, spec step 4).
+//   'hint'  in cooldown, still at ceiling: passive hint only, no full prompt.
+//   'none'  detector no longer flags anything (auto stand-down, spec step 5), or
+//           nothing to show.
+// escalation is the count of prior declines this block (0 on the first offer),
+// which the recap uses to phrase the escalated framing.
+function deloadNudgeDecision(autoregState, blockSessionCount, atCeiling) {
+  if (!atCeiling) return { mode: 'none', escalation: 0 };
+  const n = (autoregState && autoregState.deloadNudge && autoregState.deloadNudge.block) || null;
+  if (!n || n.declinedAt == null) return { mode: 'full', escalation: 0 };
+  const esc = n.escalation || 0;
+  if (n.cooldownUntil != null && (blockSessionCount || 0) < n.cooldownUntil) return { mode: 'hint', escalation: esc };
+  return { mode: 'full', escalation: esc };
+}
+
+// Record a deload decline (spec 5.3 step 2/3): bump the escalation counter and arm
+// an N-session cooldown from the current block session count. Returns a NEW
+// autoreg_state (immutable) safe to persist through sync_meso_states_batch. Scope
+// is the block (spec 5.3 governs one deload decision per block, not per muscle).
+function recordDeloadDecline(autoregState, blockSessionCount) {
+  const base = (autoregState && typeof autoregState === 'object') ? autoregState : {};
+  const prev = (base.deloadNudge && base.deloadNudge.block) || null;
+  // First decline records escalation 1 so the post-cooldown re-ask reads >= 1 and
+  // renders the escalated framing (spec 5.3 step 4); a fresh offer with no nudge
+  // yet stays escalation 0 via deloadNudgeDecision's early return.
+  const escalation = prev ? (prev.escalation || 0) + 1 : 1;
+  return {
+    ...base,
+    version: base.version || AUTOREG_STATE_VERSION,
+    deloadNudge: {
+      ...(base.deloadNudge || {}),
+      block: {
+        declinedAt: new Date().toISOString(),
+        cooldownUntil: (blockSessionCount || 0) + DELOAD_NUDGE_COOLDOWN,
+        escalation,
+      },
+    },
+  };
+}
+
+// Auto stand-down (spec 5.3 step 5): the detector no longer flags a ceiling, so
+// drop the block nudge. Returns a NEW autoreg_state with deloadNudge.block cleared,
+// or the SAME reference (===) when there was nothing to clear, so a caller can skip
+// a redundant write.
+function clearDeloadNudge(autoregState) {
+  if (!autoregState || !autoregState.deloadNudge || !autoregState.deloadNudge.block) return autoregState || null;
+  const nudge = { ...autoregState.deloadNudge };
+  delete nudge.block;
+  const rest = Object.keys(nudge);
+  const next = { ...autoregState };
+  if (rest.length) next.deloadNudge = nudge; else delete next.deloadNudge;
+  return next;
+}
+
 // Whether a pump/volume answer permits the weight bump. Load-only autoregulate
 // plans use the weight-feel framing, where "Hard" (pushed) still earns the bump:
 // training should be hard, and it self-corrects (a too-heavy weight either
@@ -5549,6 +5699,7 @@ window.LB = {
   refreshHealthLogs,
   pickGrowthRecipient, retractGrowthGrant, pickDeclineRecipient, reearnMesoWeightBoosts, revertMesoSessionBoosts, resolveMesoSeedSuggestion, mesoPausedDays, mesoRirForWeek, mesoMuscleTrainedBeforeStart, volumeAnswerAllowsBump,
   microcycleSetsByMuscle, detectOverreach,
+  blockStartTs, blockSessions, buildBlockRecap, deloadNudgeDecision, recordDeloadDecline, clearDeloadNudge,
   mesoGateSetsFromAnswers, isMesoSessionEditable, applyMesoFeedbackEdit, reearnMesoBoostsFromAnswers, mesoRecapGainsFromEdit,
   mesoSetTarget, mesoEarnTarget, mesoRepOutcome, reshapeSetsUnilateral,
 };
