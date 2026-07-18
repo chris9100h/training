@@ -1076,63 +1076,6 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
     </div>
   );
 
-  // This sheet packs 15+ fields across several sections (body, nutrition,
-  // hydration, note, plus the glucose/BP/temp add-forms), so whichever one a
-  // user taps can easily land near the top or bottom edge, or behind the
-  // keyboard. One delegated focus handler (React's onFocus bubbles from any
-  // descendant input) repositions whatever got focused instead of leaving it
-  // wherever it happened to be.
-  //
-  // Deliberately NOT el.scrollIntoView(): that aligns against the LAYOUT
-  // viewport, which on iOS Safari does not shrink when the native keyboard
-  // opens (only window.visualViewport does), so "in view" per scrollIntoView
-  // can still land straight behind the keyboard. Instead this walks up to the
-  // actual scrolling ancestor (the Sheet's panel) and computes the scroll
-  // delta by hand from visualViewport, so the target line is the real visible
-  // bottom edge above the keyboard, not a guess. Target is always the same
-  // spot (just above the keyboard) regardless of where the field started, no
-  // centering math, no ambiguity about which box "center" is relative to.
-  //
-  // pendingRef holds the teardown for whichever placement is still in flight
-  // (the resize listener + its timers), so hopping fields fast (e.g. the
-  // keyboard's own Next button, Steps -> Carbs) cancels the OLD field's wait
-  // before starting the new one. Without this, the stale listener for the
-  // field you just left can still fire (the keyboard doesn't resize again
-  // for it) and reposition on THAT field instead, right after the new one
-  // was already placed — the field you're actually typing in ends up
-  // scrolled back out of view.
-  const pendingRef = useRefH(null);
-  const positionFocusedField = (e) => {
-    const el = e.target;
-    if (el.tagName !== 'INPUT' && el.tagName !== 'TEXTAREA') return;
-    if (pendingRef.current) { pendingRef.current(); pendingRef.current = null; }
-
-    let scroller = el.parentElement;
-    while (scroller) {
-      const s = getComputedStyle(scroller);
-      if (/(auto|scroll)/.test(s.overflowY) && scroller.scrollHeight > scroller.clientHeight) break;
-      scroller = scroller.parentElement;
-    }
-    if (!scroller) return;
-
-    const vv = window.visualViewport;
-    const PAD = 16;
-    const place = () => {
-      const visibleBottom = vv ? vv.height + vv.offsetTop : window.innerHeight;
-      const delta = el.getBoundingClientRect().bottom - (visibleBottom - PAD);
-      if (Math.abs(delta) > 1) scroller.scrollBy({ top: delta, behavior: 'smooth' });
-    };
-    if (!vv) { place(); return; }
-    if (window.innerHeight - vv.height > 40) { place(); return; } // keyboard already open, no resize coming
-    let settleTimer = null;
-    const finish = () => { cleanup(); pendingRef.current = null; place(); };
-    const onResize = () => { clearTimeout(settleTimer); settleTimer = setTimeout(finish, 120); }; // let the animation settle, a raw resize can fire mid-transition
-    const fallbackTimer = setTimeout(finish, 400); // no native keyboard (e.g. external kb, desktop) — place anyway
-    const cleanup = () => { vv.removeEventListener('resize', onResize); clearTimeout(settleTimer); clearTimeout(fallbackTimer); };
-    vv.addEventListener('resize', onResize);
-    pendingRef.current = cleanup;
-  };
-
   // Full page (not a Sheet): the form has 15+ fields across several sections
   // plus the glucose/BP/temp add-forms, a bottom sheet's ~88dvh cap made it
   // cramped. position:fixed so it takes over the whole viewport regardless of
@@ -1146,7 +1089,7 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
   return (
     <Screen style={{ position: 'fixed', inset: 0, zIndex: 100, animation: 'sheet-up 0.22s ease' }}>
       <TopBar title={existing ? 'Edit Day' : 'Log Day'} onBack={requestClose} />
-      <div onFocus={positionFocusedField} style={{ padding: '18px 22px calc(env(safe-area-inset-bottom, 8px) + 22px)' }}>
+      <div style={{ padding: '18px 22px calc(env(safe-area-inset-bottom, 8px) + 22px)' }}>
       {confirmEl}
       <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 14 }}>
         {healthFmtDate(date, { weekday: 'long', day: 'numeric', month: 'long' })}
