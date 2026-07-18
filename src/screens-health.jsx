@@ -1918,7 +1918,7 @@ function HealthDateStrip({ store, setStore, selectedDate, onSelect, onLog, targe
 
 // ─── Glucose card ─────────────────────────────────────────────────────────────
 
-function GlucoseCard({ glucoseLogs, unit, tf, setTf, dragHandle, onExpand }) {
+function GlucoseCard({ glucoseLogs, unit, tf, setTf, dragHandle, onExpand, compact = false }) {
   const today = LB.todayISO();
   const tfDays = id => (HEALTH_TFS.find(t => t.id === id) || HEALTH_TFS[0]).days;
   const { start, end } = healthWindow(tfDays(tf));
@@ -1953,9 +1953,14 @@ function GlucoseCard({ glucoseLogs, unit, tf, setTf, dragHandle, onExpand }) {
       ) : (
         <>
           <GlucoseScatterChart readings={inWindow} from={start} to={end} unit={unit} />
-          {/* Reference legend. Wraps on the narrow 2-col card width instead of
-              clipping — the 3 context dots are separate flex items with no
-              text of their own to fall back on for reflow. */}
+          {/* Reference legend + readings feed only in the full (expanded) view —
+              compact (2-col grid) shows just the chart, so this card's height
+              matches its plain-chart neighbours instead of towering over them. */}
+          {!compact && (
+          <>
+          {/* Wraps on the narrow 2-col card width instead of clipping — the 3
+              context dots are separate flex items with no text of their own
+              to fall back on for reflow. */}
           <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 12, rowGap: 4, marginTop: 4 }}>
             <div style={{ height: 8, width: 28, background: 'rgba(var(--accent-rgb),0.15)', borderRadius: 4, flexShrink: 0 }} />
             <span style={{ fontSize: 9, fontFamily: UI.fontUi, color: UI.inkFaint }}>
@@ -1994,6 +1999,8 @@ function GlucoseCard({ glucoseLogs, unit, tf, setTf, dragHandle, onExpand }) {
               </div>
             </>
           )}
+          </>
+          )}
         </>
       )}
     </HealthChartCard>
@@ -2002,7 +2009,7 @@ function GlucoseCard({ glucoseLogs, unit, tf, setTf, dragHandle, onExpand }) {
 
 // ─── Blood pressure card ────────────────────────────────────────────────────
 
-function BloodPressureCard({ bpLogs, tf, setTf, dragHandle, onExpand }) {
+function BloodPressureCard({ bpLogs, tf, setTf, dragHandle, onExpand, compact = false }) {
   const today = LB.todayISO();
   const tfDays = id => (HEALTH_TFS.find(t => t.id === id) || HEALTH_TFS[0]).days;
   const { start, end } = healthWindow(tfDays(tf));
@@ -2029,6 +2036,10 @@ function BloodPressureCard({ bpLogs, tf, setTf, dragHandle, onExpand }) {
       ) : (
         <>
           <BpScatterChart readings={inWindow} from={start} to={end} />
+          {/* Legend + readings feed only in the full (expanded) view — compact
+              (2-col grid) shows just the chart, matching plain-chart neighbours. */}
+          {!compact && (
+          <>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 6 }}>
             <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
               <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--accent)', display: 'inline-block' }} />
@@ -2056,6 +2067,8 @@ function BloodPressureCard({ bpLogs, tf, setTf, dragHandle, onExpand }) {
               </div>
             </>
           )}
+          </>
+          )}
         </>
       )}
     </HealthChartCard>
@@ -2064,7 +2077,7 @@ function BloodPressureCard({ bpLogs, tf, setTf, dragHandle, onExpand }) {
 
 // ─── Body temperature card ──────────────────────────────────────────────────
 
-function BodyTempCard({ tempLogs, unit, tf, setTf, dragHandle, onExpand }) {
+function BodyTempCard({ tempLogs, unit, tf, setTf, dragHandle, onExpand, compact = false }) {
   const today = LB.todayISO();
   const tfDays = id => (HEALTH_TFS.find(t => t.id === id) || HEALTH_TFS[0]).days;
   const { start, end } = healthWindow(tfDays(tf));
@@ -2093,7 +2106,9 @@ function BodyTempCard({ tempLogs, unit, tf, setTf, dragHandle, onExpand }) {
       ) : (
         <>
           <TempScatterChart readings={inWindow} from={start} to={end} unit={unit} />
-          {sortedReadings.length > 0 && (
+          {/* Readings feed only in the full (expanded) view — compact (2-col
+              grid) shows just the chart, matching plain-chart neighbours. */}
+          {!compact && sortedReadings.length > 0 && (
             <>
               <div style={{ height: '0.5px', background: UI.hair, margin: '8px 0' }} />
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -2558,14 +2573,16 @@ function HealthScreen({ store, setStore, go, userId }) {
         <HealthBarChart series={cardioSeries.data} from={cardioSeries.from} to={cardioSeries.to} format={v => `${Math.round(v)}`} />
       </HealthChartCard>
     ),
+    // compact: hides the reference legend + readings feed so these match the
+    // plain-chart cards' height in the grid — full detail is one expand tap away.
     glucose: (store.glucoseLogs || []).length > 0
-      ? <GlucoseCard glucoseLogs={store.glucoseLogs} unit={store.settings?.glucoseUnit ?? 'mmol'} tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('glucose')} />
+      ? <GlucoseCard glucoseLogs={store.glucoseLogs} unit={store.settings?.glucoseUnit ?? 'mmol'} tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('glucose')} compact />
       : null,
     bloodPressure: (store.bloodPressureLogs || []).length > 0
-      ? <BloodPressureCard bpLogs={store.bloodPressureLogs} tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('bloodPressure')} />
+      ? <BloodPressureCard bpLogs={store.bloodPressureLogs} tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('bloodPressure')} compact />
       : null,
     bodyTemp: (store.bodyTempLogs || []).length > 0
-      ? <BodyTempCard tempLogs={store.bodyTempLogs} unit={LB.defaultTempUnit(store.settings)} tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('bodyTemp')} />
+      ? <BodyTempCard tempLogs={store.bodyTempLogs} unit={LB.defaultTempUnit(store.settings)} tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('bodyTemp')} compact />
       : null,
   };
 
@@ -2667,7 +2684,7 @@ function HealthScreen({ store, setStore, go, userId }) {
 
       <Sheet open={!!expandedCardId} onClose={() => setExpandedCardId(null)}>
         {expandedCardId && expandableCards[expandedCardId] &&
-          React.cloneElement(expandableCards[expandedCardId], { dragHandle: null, onExpand: null })}
+          React.cloneElement(expandableCards[expandedCardId], { dragHandle: null, onExpand: null, compact: false })}
       </Sheet>
 
       <DailyLogSheet open={logOpen} onClose={() => setLogOpen(false)} store={store} setStore={setStore} date={selectedDate} targets={effectiveTargets} activeCoachingSchema={activeCoachingSchema} onSetStatus={handleSetStatus} userId={userId} glucoseLogs={store.glucoseLogs || []} glucoseUnit={store.settings?.glucoseUnit ?? 'mmol'} bloodPressureLogs={store.bloodPressureLogs || []} bodyTempLogs={store.bodyTempLogs || []} tempUnit={LB.defaultTempUnit(store.settings)} />
