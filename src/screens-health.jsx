@@ -1046,10 +1046,10 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
   const CatSection = ({ catKey, label, extra, children }) => {
     const collapsed = collapsedCats.has(catKey);
     return (
-      <Card style={{ padding: '12px 14px', marginBottom: 12 }}>
+      <Card style={{ padding: '12px 14px', marginBottom: 12, borderLeft: `3px solid ${UI.gold}` }}>
         <div onClick={() => toggleCat(catKey)} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', WebkitTapHighlightColor: 'transparent', marginBottom: collapsed ? 0 : 10 }}>
           <i className={`fa-solid fa-chevron-${collapsed ? 'right' : 'down'}`} style={{ fontSize: 9, color: collapsed ? UI.inkGhost : 'var(--accent)', width: 9, flexShrink: 0, transition: 'color 0.15s' }} />
-          <span className="micro" style={{ color: collapsed ? UI.inkFaint : UI.ink, flex: 1, transition: 'color 0.15s' }}>{label}</span>
+          <span style={{ fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: collapsed ? UI.inkFaint : 'var(--accent)', flex: 1, transition: 'color 0.15s' }}>{label}</span>
           {extra}
         </div>
         {!collapsed && children}
