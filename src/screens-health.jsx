@@ -2572,7 +2572,7 @@ function HealthScreen({ store, setStore, go, userId }) {
 
         {/* max-width cap so charts don't blow up on iPad. Reorderable cards —
            drag the grip to reorder; order persists per device. */}
-        <div style={{ padding: capturing ? '8px 16px 16px' : '8px 16px calc(env(safe-area-inset-bottom, 8px) + 24px)', maxWidth: 680, width: '100%', boxSizing: 'border-box', margin: '0 auto' }}>
+        <div style={{ padding: capturing ? '8px 16px 16px' : '8px 16px env(safe-area-inset-bottom, 8px)', maxWidth: 680, width: '100%', boxSizing: 'border-box', margin: '0 auto' }}>
           {cardOrder.every(id => !isCardVisible(id)) ? (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, padding: '48px 16px', textAlign: 'center' }}>
               <i className="fa-solid fa-eye-slash" style={{ fontSize: 24, color: UI.inkGhost }} />
