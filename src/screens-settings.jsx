@@ -537,6 +537,8 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
   const [coachingSheet, setCoachingSheet] = useStateSet(false);
   const [healthSheet, setHealthSheet] = useStateSet(false);
   const [healthCardsSheet, setHealthCardsSheet] = useStateSet(false);
+  const [glucoseSheet, setGlucoseSheet] = useStateSet(false);
+  const [bodyTempSheet, setBodyTempSheet] = useStateSet(false);
   const [accountSheet, setAccountSheet] = useStateSet(false);
   const [trainingSheet, setTrainingSheet] = useStateSet(false);
   const [appearanceSheet, setAppearanceSheet] = useStateSet(false);
@@ -1777,8 +1779,24 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             Pin a Health tab to the nav bar to log daily weight, steps & macros and see your trends. These daily logs also prefill your weekly coach check-in.
           </div>
 
-          <div className="micro" style={{ color: UI.inkFaint, margin: '20px 0 8px' }}>GLUCOSE</div>
-          <Row label="Blood glucose unit" first last>
+          <div style={{ marginTop: 16 }}>
+            <NavRow label="Glucose" first onTap={() => setGlucoseSheet(true)} />
+            <NavRow label="Body Temperature" onTap={() => setBodyTempSheet(true)} />
+            <NavRow label="Cards" hint={(store.settings?.hiddenHealthCards || []).length ? `${store.settings.hiddenHealthCards.length} hidden` : null} onTap={() => setHealthCardsSheet(true)} />
+            {(store.statusPeriods || []).length > 0 && (
+              <NavRow label="Sick & Vacation periods" hint={`${(store.statusPeriods || []).length}`} onTap={() => { setShowAllPeriods(false); setPeriodsSheet(true); }} />
+            )}
+          </div>
+          <div style={{ marginTop: 24 }}>
+            <Btn style={{ width: '100%' }} onClick={() => setHealthSheet(false)}>Done</Btn>
+          </div>
+        </div>
+      </SettingsSheet>
+
+      {/* ══ Health › Glucose ══ */}
+      <SettingsSheet open={glucoseSheet} onClose={() => setGlucoseSheet(false)} title="Glucose">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+          <Row label="Blood glucose unit" first>
             <div style={{ display: 'flex', gap: 0, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, overflow: 'hidden' }}>
               {['mmol', 'mgdl'].map(u => (
                 <button key={u} onClick={() => setStore(s => ({ ...s, settings: { ...s.settings, glucoseUnit: u } }))}
@@ -1791,8 +1809,15 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
               ))}
             </div>
           </Row>
+          <div style={{ marginTop: 24 }}>
+            <Btn style={{ width: '100%' }} onClick={() => setGlucoseSheet(false)}>Done</Btn>
+          </div>
+        </div>
+      </SettingsSheet>
 
-          <div className="micro" style={{ color: UI.inkFaint, margin: '20px 0 8px' }}>BODY TEMPERATURE</div>
+      {/* ══ Health › Body Temperature ══ */}
+      <SettingsSheet open={bodyTempSheet} onClose={() => setBodyTempSheet(false)} title="Body Temperature">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
           <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4, lineHeight: 1.5 }}>
             Defaults to °F on Imperial, °C otherwise. Override it here if that's wrong for you.
           </div>
@@ -1816,15 +1841,8 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
             Log a body temperature at or above this, and we'll ask if you want to mark today as Sick.
           </div>
-
-          <div style={{ marginTop: 16 }}>
-            <NavRow label="Cards" hint={(store.settings?.hiddenHealthCards || []).length ? `${store.settings.hiddenHealthCards.length} hidden` : null} onTap={() => setHealthCardsSheet(true)} />
-          </div>
-          {(store.statusPeriods || []).length > 0 && (
-            <NavRow label="Sick & Vacation periods" hint={`${(store.statusPeriods || []).length}`} onTap={() => { setShowAllPeriods(false); setPeriodsSheet(true); }} />
-          )}
           <div style={{ marginTop: 24 }}>
-            <Btn style={{ width: '100%' }} onClick={() => setHealthSheet(false)}>Done</Btn>
+            <Btn style={{ width: '100%' }} onClick={() => setBodyTempSheet(false)}>Done</Btn>
           </div>
         </div>
       </SettingsSheet>
