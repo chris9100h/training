@@ -529,7 +529,7 @@ function HealthLineChart({ series, from, to, format, color = 'var(--accent)', yM
 }
 
 // Bar chart over a date window. series = [{ date, value }].
-function HealthBarChart({ series, from, to, format, target }) {
+function HealthBarChart({ series, from, to, format, target, color = 'var(--accent)', colorSoft = `rgba(var(--accent-rgb),0.35)` }) {
   const pts = (series || []).filter(p => p.value != null && p.value > 0);
   if (!pts.length) return <HealthChartEmpty />;
   const W = 320, padL = 38, padR = 12, padTop = 10, padBottom = 20, plotH = 96;
@@ -557,7 +557,7 @@ function HealthBarChart({ series, from, to, format, target }) {
       ))}
       <line x1={padL} y1={padTop + plotH} x2={W - padR} y2={padTop + plotH} stroke={UI.hair} strokeWidth="0.5" />
       {target != null && target > 0 && (
-        <line x1={padL} y1={yOf(target).toFixed(1)} x2={W - padR} y2={yOf(target).toFixed(1)} stroke="var(--accent)" strokeWidth="1" strokeDasharray="4 3" opacity="0.7" />
+        <line x1={padL} y1={yOf(target).toFixed(1)} x2={W - padR} y2={yOf(target).toFixed(1)} stroke={color} strokeWidth="1" strokeDasharray="4 3" opacity="0.7" />
       )}
       {pts.map((p, i) => {
         const x = xOf(p.date) - bw / 2;
@@ -565,7 +565,7 @@ function HealthBarChart({ series, from, to, format, target }) {
         const h = (padTop + plotH) - y;
         const above = target && p.value >= target;
         return <rect key={i} x={x.toFixed(1)} y={y.toFixed(1)} width={bw.toFixed(1)} height={Math.max(0, h).toFixed(1)} rx="1"
-          fill={above ? 'var(--accent)' : `rgba(var(--accent-rgb),0.35)`} />;
+          fill={above ? color : colorSoft} />;
       })}
     </svg>
     </ChartHover>
@@ -2486,7 +2486,7 @@ function HealthScreen({ store, setStore, go, userId }) {
     water: (
       <HealthChartCard title="Water" icon="fa-glass-water" tf={tf} setTf={setTf} dragHandle={handle}
         headline={waterAvg != null ? `${UI.waterSummaryValue(waterAvg)}${UI.waterSummaryUnit()}` : null} sub={waterAvg != null ? 'avg / day' : null}>
-        <HealthBarChart series={waterSeries.data} from={waterSeries.from} to={waterSeries.to} format={v => `${UI.waterSummaryValue(v)}${UI.waterSummaryUnit()}`} />
+        <HealthBarChart series={waterSeries.data} from={waterSeries.from} to={waterSeries.to} format={v => `${UI.waterSummaryValue(v)}${UI.waterSummaryUnit()}`} color="#4a9fe0" colorSoft="rgba(74,159,224,0.35)" />
       </HealthChartCard>
     ),
     macros: (
@@ -2730,7 +2730,7 @@ function HealthClientLogs({ clientStore }) {
     water: (
       <HealthChartCard title="Water" icon="fa-glass-water" tf={tf} setTf={setTf} dragHandle={handle}
         headline={waterAvg != null ? `${UI.waterSummaryValue(waterAvg)}${UI.waterSummaryUnit()}` : null} sub={waterAvg != null ? 'avg / day' : null}>
-        <HealthBarChart series={waterSeries.data} from={waterSeries.from} to={waterSeries.to} format={v => `${UI.waterSummaryValue(v)}${UI.waterSummaryUnit()}`} />
+        <HealthBarChart series={waterSeries.data} from={waterSeries.from} to={waterSeries.to} format={v => `${UI.waterSummaryValue(v)}${UI.waterSummaryUnit()}`} color="#4a9fe0" colorSoft="rgba(74,159,224,0.35)" />
       </HealthChartCard>
     ),
     macros: (
