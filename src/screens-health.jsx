@@ -183,11 +183,19 @@ function tempFromInput(raw, unit) {
 }
 // Edit-form prefill: show the stored reading in the display unit but WITHOUT the
 // display rounding, so re-saving an untouched value doesn't clobber the raw °C.
+// c is stored to 2 decimals (tempFromInput), so c*9/5 needs at most 3 decimals
+// to round-trip exactly; round to 4 purely to strip floating-point noise, not
+// to lose precision.
 function tempEditValue(c, unit) {
   if (c == null) return '';
-  return String(unit === 'f' ? Math.round((c * 9 / 5 + 32) * 10) / 10 : c);
+  return String(unit === 'f' ? Math.round((c * 9 / 5 + 32) * 10000) / 10000 : c);
 }
 const tempUnitLabel = unit => unit === 'f' ? '°F' : '°C';
+// Per-device, per-day dismissal for the fever "Mark today as Sick?" nudge: a
+// decline is remembered for the rest of the day so a second elevated reading
+// doesn't re-ask (mirrors the intent of the deload nudge's decline-tracking,
+// scaled down since this is a low-stakes UI nag, not a synced setting).
+const FEVER_NUDGE_DECLINE_KEY = 'logbook-fever-nudge-declined-date';
 
 // Scatter chart: one point per reading, connected by a thin trend line (unlike
 // glucose, temperature has no fasted/fed context split, so its reading-to-
@@ -646,6 +654,13 @@ function MacroLegend() {
 // ─── Daily log sheet ──────────────────────────────────────────────────────────
 
 function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCoachingSchema, onSetStatus, userId, glucoseLogs, glucoseUnit, bloodPressureLogs, bodyTempLogs, tempUnit }) {
+  // Always-current store snapshot: saveTemp's fever nudge awaits a Supabase
+  // write and then a user-interaction-gated confirm dialog, both arbitrarily
+  // long, so it re-reads statusMode from this ref (not the closed-over
+  // `store` prop) right before mutating it, to notice a status change made
+  // elsewhere in this same sheet while that wait was in flight.
+  const storeRef = useRefH(store);
+  storeRef.current = store;
   const existing = useMemoH(() => (store.dailyLogs || []).find(l => l.date === date), [store.dailyLogs, date]);
   const todayISO = LB.todayISO();
   const dayStatusPeriod = useMemoH(() => {
@@ -707,6 +722,7 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
   const [bpForm, setBpForm] = useStateH(emptyBp);
   const [editingBpId, setEditingBpId] = useStateH(null);
   const [confirmDeleteBpId, setConfirmDeleteBpId] = useStateH(null);
+  const [savingBp, setSavingBp] = useStateH(false);
   const setBp = (k, v) => setBpForm(f => ({ ...f, [k]: v }));
 
   // ── Body temperature readings for this day ──
@@ -720,13 +736,14 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
   const [tempForm, setTempForm] = useStateH(emptyTemp);
   const [editingTempId, setEditingTempId] = useStateH(null);
   const [confirmDeleteTempId, setConfirmDeleteTempId] = useStateH(null);
+  const [savingTemp, setSavingTemp] = useStateH(false);
   const setTemp = (k, v) => setTempForm(f => ({ ...f, [k]: v }));
 
   useEffectH(() => {
     if (!open) {
       setAddingGlucose(false); setGlForm(emptyGl); setEditingGlucoseId(null); setConfirmDeleteGlId(null);
-      setAddingBp(false); setBpForm(emptyBp); setEditingBpId(null); setConfirmDeleteBpId(null);
-      setAddingTemp(false); setTempForm(emptyTemp); setEditingTempId(null); setConfirmDeleteTempId(null);
+      setAddingBp(false); setBpForm(emptyBp); setEditingBpId(null); setConfirmDeleteBpId(null); setSavingBp(false);
+      setAddingTemp(false); setTempForm(emptyTemp); setEditingTempId(null); setConfirmDeleteTempId(null); setSavingTemp(false);
     }
   }, [open]);
 
@@ -741,22 +758,31 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
   };
 
   const saveBp = async () => {
+    if (savingBp) return;
     const sys = parseInt(bpForm.systolic, 10), dia = parseInt(bpForm.diastolic, 10);
-    if (!isFinite(sys) || sys <= 0 || !isFinite(dia) || dia <= 0) return;
-    const time = normEntryTime(bpForm.time) || new Date().toTimeString().slice(0, 5);
-    if (editingBpId) {
-      const origEntry = (store.bloodPressureLogs || []).find(l => l.id === editingBpId);
-      const updated = { ...origEntry, time, systolic: sys, diastolic: dia, note: bpForm.note.trim() || null };
-      setStore(s => ({ ...s, bloodPressureLogs: (s.bloodPressureLogs || []).map(l => l.id === editingBpId ? updated : l) }));
-      setEditingBpId(null); setAddingBp(false); setBpForm(emptyBp);
-      const { error } = await LB.supabase.from('zane_blood_pressure_logs').update({ time, systolic: sys, diastolic: dia, note: updated.note }).eq('id', editingBpId).eq('user_id', userId);
-      if (error && origEntry) setStore(s => ({ ...s, bloodPressureLogs: (s.bloodPressureLogs || []).map(l => l.id === editingBpId ? origEntry : l) }));
-    } else {
-      const entry = { id: LB.uid(), date, time, systolic: sys, diastolic: dia, note: bpForm.note.trim() || null, createdAt: new Date().toISOString() };
-      setStore(s => ({ ...s, bloodPressureLogs: [entry, ...(s.bloodPressureLogs || [])] }));
-      setAddingBp(false); setBpForm(emptyBp);
-      const { error } = await LB.supabase.from('zane_blood_pressure_logs').insert({ id: entry.id, user_id: userId, date: entry.date, time: entry.time, systolic: entry.systolic, diastolic: entry.diastolic, note: entry.note });
-      if (error) setStore(s => ({ ...s, bloodPressureLogs: (s.bloodPressureLogs || []).filter(l => l.id !== entry.id) }));
+    if (!isFinite(sys) || sys <= 0 || !isFinite(dia) || dia <= 0) {
+      await confirm('Enter a systolic and diastolic value above 0.', { title: 'Invalid reading', ok: 'OK', cancel: null });
+      return;
+    }
+    setSavingBp(true);
+    try {
+      const time = normEntryTime(bpForm.time) || new Date().toTimeString().slice(0, 5);
+      if (editingBpId) {
+        const origEntry = (store.bloodPressureLogs || []).find(l => l.id === editingBpId);
+        const updated = { ...origEntry, time, systolic: sys, diastolic: dia, note: bpForm.note.trim() || null };
+        setStore(s => ({ ...s, bloodPressureLogs: (s.bloodPressureLogs || []).map(l => l.id === editingBpId ? updated : l) }));
+        setEditingBpId(null); setAddingBp(false); setBpForm(emptyBp);
+        const { error } = await LB.supabase.from('zane_blood_pressure_logs').update({ time, systolic: sys, diastolic: dia, note: updated.note }).eq('id', editingBpId).eq('user_id', userId);
+        if (error && origEntry) setStore(s => ({ ...s, bloodPressureLogs: (s.bloodPressureLogs || []).map(l => l.id === editingBpId ? origEntry : l) }));
+      } else {
+        const entry = { id: LB.uid(), date, time, systolic: sys, diastolic: dia, note: bpForm.note.trim() || null, createdAt: new Date().toISOString() };
+        setStore(s => ({ ...s, bloodPressureLogs: [entry, ...(s.bloodPressureLogs || [])] }));
+        setAddingBp(false); setBpForm(emptyBp);
+        const { error } = await LB.supabase.from('zane_blood_pressure_logs').insert({ id: entry.id, user_id: userId, date: entry.date, time: entry.time, systolic: entry.systolic, diastolic: entry.diastolic, note: entry.note });
+        if (error) setStore(s => ({ ...s, bloodPressureLogs: (s.bloodPressureLogs || []).filter(l => l.id !== entry.id) }));
+      }
+    } finally {
+      setSavingBp(false);
     }
   };
 
@@ -769,31 +795,47 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
   };
 
   const saveTemp = async () => {
+    if (savingTemp) return;
     const c = tempFromInput(tempForm.value, tUnit);
-    if (c == null) return;
-    const time = normEntryTime(tempForm.time) || new Date().toTimeString().slice(0, 5);
-    let ok = true;
-    if (editingTempId) {
-      const origEntry = (store.bodyTempLogs || []).find(l => l.id === editingTempId);
-      const updated = { ...origEntry, time, valueC: c, note: tempForm.note.trim() || null };
-      setStore(s => ({ ...s, bodyTempLogs: (s.bodyTempLogs || []).map(l => l.id === editingTempId ? updated : l) }));
-      setEditingTempId(null); setAddingTemp(false); setTempForm(emptyTemp);
-      const { error } = await LB.supabase.from('zane_body_temp_logs').update({ time, value_c: c, note: updated.note }).eq('id', editingTempId).eq('user_id', userId);
-      if (error && origEntry) { setStore(s => ({ ...s, bodyTempLogs: (s.bodyTempLogs || []).map(l => l.id === editingTempId ? origEntry : l) })); ok = false; }
-    } else {
-      const entry = { id: LB.uid(), date, time, valueC: c, note: tempForm.note.trim() || null, createdAt: new Date().toISOString() };
-      setStore(s => ({ ...s, bodyTempLogs: [entry, ...(s.bodyTempLogs || [])] }));
-      setAddingTemp(false); setTempForm(emptyTemp);
-      const { error } = await LB.supabase.from('zane_body_temp_logs').insert({ id: entry.id, user_id: userId, date: entry.date, time: entry.time, value_c: entry.valueC, note: entry.note });
-      if (error) { setStore(s => ({ ...s, bodyTempLogs: (s.bodyTempLogs || []).filter(l => l.id !== entry.id) })); ok = false; }
+    if (c == null) {
+      await confirm('Enter a valid temperature.', { title: 'Invalid reading', ok: 'OK', cancel: null });
+      return;
     }
-    // Fever nudge: only for a reading logged against TODAY (status is a
-    // "right now" concept, see dayMode above), only once (skip if already
-    // marked Sick), and only after a write that actually stuck.
-    if (ok && onSetStatus && date === todayISO && store.statusMode !== 'sick' && c >= (store.settings?.feverThresholdC ?? 38)) {
-      const disp = tempDisplay(c, tUnit);
-      const markSick = await confirm(`You logged ${disp}${tempUnitLabel(tUnit)}. Mark today as Sick?`, { title: 'Fever detected', ok: 'Mark Sick', cancel: 'Not now' });
-      if (markSick) onSetStatus('sick', null);
+    setSavingTemp(true);
+    try {
+      const time = normEntryTime(tempForm.time) || new Date().toTimeString().slice(0, 5);
+      let ok = true;
+      if (editingTempId) {
+        const origEntry = (store.bodyTempLogs || []).find(l => l.id === editingTempId);
+        const updated = { ...origEntry, time, valueC: c, note: tempForm.note.trim() || null };
+        setStore(s => ({ ...s, bodyTempLogs: (s.bodyTempLogs || []).map(l => l.id === editingTempId ? updated : l) }));
+        setEditingTempId(null); setAddingTemp(false); setTempForm(emptyTemp);
+        const { error } = await LB.supabase.from('zane_body_temp_logs').update({ time, value_c: c, note: updated.note }).eq('id', editingTempId).eq('user_id', userId);
+        if (error) { ok = false; if (origEntry) setStore(s => ({ ...s, bodyTempLogs: (s.bodyTempLogs || []).map(l => l.id === editingTempId ? origEntry : l) })); }
+      } else {
+        const entry = { id: LB.uid(), date, time, valueC: c, note: tempForm.note.trim() || null, createdAt: new Date().toISOString() };
+        setStore(s => ({ ...s, bodyTempLogs: [entry, ...(s.bodyTempLogs || [])] }));
+        setAddingTemp(false); setTempForm(emptyTemp);
+        const { error } = await LB.supabase.from('zane_body_temp_logs').insert({ id: entry.id, user_id: userId, date: entry.date, time: entry.time, value_c: entry.valueC, note: entry.note });
+        if (error) { setStore(s => ({ ...s, bodyTempLogs: (s.bodyTempLogs || []).filter(l => l.id !== entry.id) })); ok = false; }
+      }
+      // Fever nudge: only for a reading logged against TODAY (status is a
+      // "right now" concept, see dayMode above), only once (skip if already
+      // marked Sick or already declined today), and only after a write that
+      // actually stuck.
+      let declinedToday = false;
+      try { declinedToday = localStorage.getItem(FEVER_NUDGE_DECLINE_KEY) === todayISO; } catch (_) {}
+      if (ok && onSetStatus && date === todayISO && !declinedToday && storeRef.current.statusMode !== 'sick' && c >= (store.settings?.feverThresholdC ?? 38)) {
+        const disp = tempDisplay(c, tUnit);
+        const markSick = await confirm(`You logged ${disp}${tempUnitLabel(tUnit)}. Mark today as Sick?`, { title: 'Fever detected', ok: 'Mark Sick', cancel: 'Not now' });
+        // Re-check via the live ref, not the closed-over `store`: status may
+        // have changed (e.g. a Sick/Vacation/Normal tap in this same sheet)
+        // while the write above or this confirm dialog was pending.
+        if (markSick && storeRef.current.statusMode !== 'sick') onSetStatus('sick', null);
+        else if (!markSick) { try { localStorage.setItem(FEVER_NUDGE_DECLINE_KEY, todayISO); } catch (_) {} }
+      }
+    } finally {
+      setSavingTemp(false);
     }
   };
 
@@ -1247,7 +1289,7 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
               <Btn kind="ghost" onClick={() => { setAddingBp(false); setBpForm(emptyBp); setEditingBpId(null); }} style={{ flex: 1 }}>Cancel</Btn>
-              <Btn onClick={saveBp} disabled={!bpForm.systolic || !bpForm.diastolic} style={{ flex: 2 }}>{editingBpId ? 'Update' : 'Add'}</Btn>
+              <Btn onClick={saveBp} disabled={!bpForm.systolic || !bpForm.diastolic || savingBp} style={{ flex: 2 }}>{editingBpId ? 'Update' : 'Add'}</Btn>
             </div>
           </div>
         ) : (
@@ -1318,7 +1360,7 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
               <Btn kind="ghost" onClick={() => { setAddingTemp(false); setTempForm(emptyTemp); setEditingTempId(null); }} style={{ flex: 1 }}>Cancel</Btn>
-              <Btn onClick={saveTemp} disabled={!tempForm.value} style={{ flex: 2 }}>{editingTempId ? 'Update' : 'Add'}</Btn>
+              <Btn onClick={saveTemp} disabled={!tempForm.value || savingTemp} style={{ flex: 2 }}>{editingTempId ? 'Update' : 'Add'}</Btn>
             </div>
           </div>
         ) : (
@@ -1907,12 +1949,13 @@ function GlucoseCard({ glucoseLogs, unit, tf, setTf, dragHandle }) {
 // ─── Blood pressure card ────────────────────────────────────────────────────
 
 function BloodPressureCard({ bpLogs, tf, setTf, dragHandle }) {
+  const today = LB.todayISO();
   const tfDays = id => (HEALTH_TFS.find(t => t.id === id) || HEALTH_TFS[0]).days;
   const { start, end } = healthWindow(tfDays(tf));
 
   const inWindow = useMemoH(
     () => (bpLogs || []).filter(l => l.date >= start && l.date <= end),
-    [bpLogs, tf]
+    [bpLogs, tf, today]
   );
 
   const latest = inWindow.length
@@ -1968,13 +2011,14 @@ function BloodPressureCard({ bpLogs, tf, setTf, dragHandle }) {
 // ─── Body temperature card ──────────────────────────────────────────────────
 
 function BodyTempCard({ tempLogs, unit, tf, setTf, dragHandle }) {
+  const today = LB.todayISO();
   const tfDays = id => (HEALTH_TFS.find(t => t.id === id) || HEALTH_TFS[0]).days;
   const { start, end } = healthWindow(tfDays(tf));
   const unitLabel = tempUnitLabel(unit);
 
   const inWindow = useMemoH(
     () => (tempLogs || []).filter(l => l.date >= start && l.date <= end),
-    [tempLogs, tf]
+    [tempLogs, tf, today]
   );
 
   const latest = inWindow.length
@@ -2481,11 +2525,24 @@ function HealthScreen({ store, setStore, go, userId }) {
         {/* max-width cap so charts don't blow up on iPad. Reorderable cards —
            drag the grip to reorder; order persists per device. */}
         <div style={{ padding: capturing ? '8px 16px 16px' : '8px 16px calc(env(safe-area-inset-bottom, 0px) + 100px)', maxWidth: 680, width: '100%', boxSizing: 'border-box', margin: '0 auto' }}>
-          <ReorderList onReorder={reorderCards} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            {cardOrder.map(id => isCardVisible(id) ? (
-              <div key={id} data-reorder-item="true" data-tour={`health-card-${id}`}>{cardEls[id]}</div>
-            ) : null)}
-          </ReorderList>
+          {cardOrder.every(id => !isCardVisible(id)) ? (
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, padding: '48px 16px', textAlign: 'center' }}>
+              <i className="fa-solid fa-eye-slash" style={{ fontSize: 24, color: UI.inkGhost }} />
+              <div style={{ fontSize: 13, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1.5 }}>All Health cards are hidden.</div>
+              <button onClick={() => go({ name: 'settings' })} style={{
+                background: 'transparent', border: `0.5px solid rgba(var(--accent-rgb),0.4)`,
+                borderRadius: 4, padding: '5px 14px', color: 'var(--accent)', marginTop: 4,
+                fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', cursor: 'pointer',
+                WebkitTapHighlightColor: 'transparent',
+              }}>Settings → Health → Cards</button>
+            </div>
+          ) : (
+            <ReorderList onReorder={reorderCards} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              {cardOrder.map(id => isCardVisible(id) ? (
+                <div key={id} data-reorder-item="true" data-tour={`health-card-${id}`}>{cardEls[id]}</div>
+              ) : null)}
+            </ReorderList>
+          )}
         </div>
       </div>
 
@@ -2683,11 +2740,18 @@ function HealthClientLogs({ clientStore }) {
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <HealthDateStrip store={clientStore} selectedDate={selectedDate} onSelect={setSelectedDate} onLog={null} />
       <div style={{ flex: 1, overflowY: 'auto', padding: '14px 14px 32px', maxWidth: 680, width: '100%', boxSizing: 'border-box', margin: '0 auto' }}>
-        <ReorderList onReorder={reorderCards} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          {cardOrder.map(id => isCardVisible(id) ? (
-            <div key={id} data-reorder-item="true">{cardEls[id]}</div>
-          ) : null)}
-        </ReorderList>
+        {cardOrder.every(id => !isCardVisible(id)) ? (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, padding: '48px 16px', textAlign: 'center' }}>
+            <i className="fa-solid fa-eye-slash" style={{ fontSize: 24, color: UI.inkGhost }} />
+            <div style={{ fontSize: 13, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1.5 }}>Your client has hidden all their Health cards.</div>
+          </div>
+        ) : (
+          <ReorderList onReorder={reorderCards} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            {cardOrder.map(id => isCardVisible(id) ? (
+              <div key={id} data-reorder-item="true">{cardEls[id]}</div>
+            ) : null)}
+          </ReorderList>
+        )}
       </div>
     </div>
   );

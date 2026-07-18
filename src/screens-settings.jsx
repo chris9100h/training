@@ -1871,13 +1871,20 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           {HEALTH_CARD_TOGGLES.map((c, i) => {
             const hidden = (store.settings?.hiddenHealthCards || []).includes(c.id);
             return (
-              <Row key={c.id} label={c.label} first={i === 0}>
-                <Toggle on={!hidden} onToggle={() => setStore(s => {
-                  const cur = s.settings?.hiddenHealthCards || [];
-                  const next = hidden ? cur.filter(x => x !== c.id) : [...cur, c.id];
-                  return { ...s, settings: { ...s.settings, hiddenHealthCards: next } };
-                })} />
-              </Row>
+              <React.Fragment key={c.id}>
+                <Row label={c.label} first={i === 0}>
+                  <Toggle on={!hidden} onToggle={() => setStore(s => {
+                    const cur = s.settings?.hiddenHealthCards || [];
+                    const next = hidden ? cur.filter(x => x !== c.id) : [...cur, c.id];
+                    return { ...s, settings: { ...s.settings, hiddenHealthCards: next } };
+                  })} />
+                </Row>
+                {c.id === 'macros' && (
+                  <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: -4, marginBottom: 6, lineHeight: 1.5 }}>
+                    Also hides the button to set/edit your macro targets. Come back here to bring it back.
+                  </div>
+                )}
+              </React.Fragment>
             );
           })}
           <div style={{ marginTop: 24 }}>

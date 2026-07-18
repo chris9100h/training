@@ -3662,6 +3662,11 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
         targets={LB.effectiveMacroTargets(store.settings?.macroTargets, coachingMacros)}
         activeCoachingSchema={coachingSchema}
         onSetStatus={handleSetStatus}
+        glucoseLogs={store.glucoseLogs || []}
+        glucoseUnit={store.settings?.glucoseUnit ?? 'mmol'}
+        bloodPressureLogs={store.bloodPressureLogs || []}
+        bodyTempLogs={store.bodyTempLogs || []}
+        tempUnit={LB.defaultTempUnit(store.settings)}
       />
 
       </div>{/* end swipe wrapper */}

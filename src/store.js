@@ -900,6 +900,8 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   if (dailyLogsRes.error) throw dailyLogsRes.error;
   if (statusPeriodsRes.error) throw statusPeriodsRes.error;
   if (glucoseLogsRes.error) throw glucoseLogsRes.error;
+  if (bloodPressureLogsRes.error) throw bloodPressureLogsRes.error;
+  if (bodyTempLogsRes.error) throw bodyTempLogsRes.error;
   if (templatesRes.error) throw templatesRes.error;
   if (mesoStatesRes.error) throw mesoStatesRes.error;
   // Coaching queries are null on coach loads (skipped) — guard with optional chaining.
@@ -4416,7 +4418,7 @@ async function refreshHealthLogs(userId) {
     _supabase.from('zane_blood_pressure_logs').select('id, date, time, systolic, diastolic, note, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
     _supabase.from('zane_body_temp_logs').select('id, date, time, value_c, note, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
   ]);
-  if (dailyRes.error || cardioRes.error) return null;
+  if (dailyRes.error || cardioRes.error || glucoseRes.error || bpRes.error || tempRes.error) return null;
   return {
     dailyLogs: (dailyRes.data || []).map(l => ({
       id: l.id, date: l.date,

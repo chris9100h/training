@@ -89,6 +89,7 @@ Diese Datei enthält die verbindlichen Regeln und den Überblick; sie bewusst sc
   - `logbook-whatsnew-seen`: zuletzt gesehene `WHATS_NEW.id`
   - `logbook-health-card-order`: Reihenfolge der Health-Tab-Karten (per Gerät, kein DB-Sync)
   - `logbook-seen-signups`: vom Admin per „Got it" abgehakte Registrierungen im Account-Tab-Feed (Array von user_ids, per Gerät)
+  - `logbook-fever-nudge-declined-date`: Datum der letzten Ablehnung des „Als Sick markieren?"-Prompts nach einer Fieber-Temperaturmessung, verhindert wiederholtes Nachfragen am selben Tag (per Gerät)
 
 ## What's New / Changelog
 
