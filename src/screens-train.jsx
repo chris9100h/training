@@ -5485,9 +5485,15 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           <div style={{ fontFamily: UI.fontUi, fontSize: 13, color: UI.inkSoft, textAlign: 'center' }}>Add an exercise to get started.</div>
           <Btn onClick={() => setAddOpen(true)}>Add exercise</Btn>
         </div>
-        {/* Gate the auto-opened picker behind the readiness tap so the prompt
-            comes first (the picker is a full-screen overlay that would cover it). */}
-        {addOpen && session.readiness != null && <window.Screens.ExercisePicker store={store} setStore={setStore} onClose={() => setAddOpen(false)} onPick={doAdd} />}
+        {/* Gate the auto-opened picker behind the readiness tap so the prompt comes
+            first (the picker is a full-screen overlay that would cover it), but ONLY
+            when a prompt will actually show: the readiness mount effect above now
+            skips entirely off-autoreg (LB.mesoActive), which every freestyle session
+            is (scheduleId: null): this branch exists almost exclusively for those,
+            so gating on session.readiness alone would wait forever for a prompt
+            that's never coming, permanently hiding the picker. Mirror the effect's
+            own gate instead of a bare readiness check. */}
+        {addOpen && (!LB.mesoActive(_sch) || session.readiness != null) && <window.Screens.ExercisePicker store={store} setStore={setStore} onClose={() => setAddOpen(false)} onPick={doAdd} />}
         {readinessSheet}
         {confirmEl}
       </Screen>
