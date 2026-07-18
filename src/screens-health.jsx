@@ -1086,18 +1086,31 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
   // center immediately; otherwise wait for the keyboard's resize event plus a
   // short settle — same debounce Sheet's own keyboard-follow logic uses,
   // since a raw resize event can fire mid-animation — before centering.
+  //
+  // pendingCenterRef holds the teardown for whichever center is still in
+  // flight (the resize listener + its timers), so hopping fields fast (e.g.
+  // the keyboard's own Next button, Steps -> Carbs) cancels the OLD field's
+  // wait before starting the new one. Without this, the stale listener for
+  // the field you just left can still fire (the keyboard doesn't resize
+  // again for it) and recenter on THAT field instead, right after the new
+  // one was already centered — the field you're actually typing in ends up
+  // scrolled back out of view.
+  const pendingCenterRef = useRefH(null);
   const centerFocusedField = (e) => {
     const el = e.target;
     if (el.tagName !== 'INPUT' && el.tagName !== 'TEXTAREA') return;
+    if (pendingCenterRef.current) { pendingCenterRef.current(); pendingCenterRef.current = null; }
     const vv = window.visualViewport;
     const center = () => el.scrollIntoView({ block: 'center', behavior: 'smooth' });
     if (!vv) { center(); return; }
     if (window.innerHeight - vv.height > 40) { center(); return; }
-    let settleTimer = null, fallbackTimer = null;
-    const done = () => { vv.removeEventListener('resize', onResize); clearTimeout(settleTimer); clearTimeout(fallbackTimer); center(); };
-    const onResize = () => { clearTimeout(settleTimer); settleTimer = setTimeout(done, 120); };
+    let settleTimer = null;
+    const finish = () => { cleanup(); pendingCenterRef.current = null; center(); };
+    const onResize = () => { clearTimeout(settleTimer); settleTimer = setTimeout(finish, 120); };
+    const fallbackTimer = setTimeout(finish, 400); // no native keyboard (e.g. external kb, desktop) — center anyway
+    const cleanup = () => { vv.removeEventListener('resize', onResize); clearTimeout(settleTimer); clearTimeout(fallbackTimer); };
     vv.addEventListener('resize', onResize);
-    fallbackTimer = setTimeout(done, 400); // no native keyboard (e.g. external kb, desktop) — center anyway
+    pendingCenterRef.current = cleanup;
   };
 
   return (
