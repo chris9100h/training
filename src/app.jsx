@@ -643,6 +643,31 @@ function App() {
       });
   }, []);
 
+  // One-shot, awaitable flush for the sign-out flow. Unlike flushSync (fire-
+  // and-forget, auto-retried on a 15s timer), SIGNED_OUT wipes the local
+  // cache/pending diff unconditionally and immediately (see below): if that
+  // races an unsynced change (e.g. a flex-plan cycle advance from finishing
+  // today's workout seconds before tapping Sign out), the change is lost with
+  // no local record to retry from on the next login. Callers must await this
+  // BEFORE calling LB.signOut(), while the session is still valid: a flush
+  // attempted reactively inside the SIGNED_OUT handler would already be
+  // fighting a session Supabase is in the middle of invalidating. Bounded so
+  // a dead network can't hang the sign-out button.
+  const flushBeforeSignOut = useCallbackA(async (uid) => {
+    if (uid !== userIdRef.current) return;
+    const target = pendingStore.current;
+    if (!target || target === syncBase.current || !uid) return;
+    const timeout = new Promise(resolve => setTimeout(resolve, 5000));
+    try {
+      await Promise.race([
+        LB.syncStore(syncBase.current, target, uid).then(() => { syncBase.current = target; LB.saveBase(target, uid); }),
+        timeout,
+      ]);
+    } catch (err) {
+      console.error('flushBeforeSignOut: final sync attempt failed', err);
+    }
+  }, []);
+
   const loadData = async (uid) => {
     localDirty.current = false;
     const cached = LB.loadFromLocal(uid);
@@ -1277,7 +1302,7 @@ function App() {
   window.__goHome = () => go({ name: 'home' });
   const onRetrySync = () => { setStorageFull(false); flushSync(userId); };
 
-  const props = { store, setStore, go, userId, syncStatus, storageFull, onRetrySync };
+  const props = { store, setStore, go, userId, syncStatus, storageFull, onRetrySync, flushBeforeSignOut };
   const tabRoutes = ['home', 'plan', 'lib', 'cardio-plans', 'hist', 'health', 'coaching'];
   const showTab = tabRoutes.includes(route.name);
   // Library and cardio-plans live under the merged "Plan" tab — keep that tab lit.
