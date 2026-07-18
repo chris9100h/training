@@ -2538,8 +2538,8 @@ function HealthScreen({ store, setStore, go, userId }) {
     week: <HealthWeekCard stats={weekStats} dragHandle={handle} targets={effectiveTargets} tf={tf} setTf={setTf} />,
     today: <HealthMetricsCard log={selectedLog} dateLabel={dayLabel} isToday={selectedDate === today} onJumpToday={() => setSelectedDate(today)} dragHandle={handle} trained={trainedSelected} hasCardio={cardioSelected} dayTarget={selectedDayTarget} isStatusDay={selectedIsStatusDay} />,
     // Targets on top (full width, needs the room for the P/C/F chip row), then
-    // Adherence + the macro breakdown paired below it — always pinned full-width
-    // as a whole, see PINNED_FULL_WIDTH_CARDS.
+    // Adherence + the macro breakdown paired below it — always full-width as a
+    // whole, see fullWidthCardIds.
     macroGroup: (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
         {macroTargetsCard}
@@ -2593,22 +2593,11 @@ function HealthScreen({ store, setStore, go, userId }) {
     macroAdherence: macroAdherenceCard, macros: macrosCard,
     glucose: cardEls.glucose, bloodPressure: cardEls.bloodPressure, bodyTemp: cardEls.bodyTemp };
 
-  // Week/Today/the macro group always render full width; every other visible
-  // card pairs up into the 2-col grid below. A trailing odd card in a run of
-  // non-pinned cards also spans full width, so a reorder can never leave a
-  // dangling empty half.
-  const PINNED_FULL_WIDTH_CARDS = new Set(['week', 'today', 'macroGroup']);
-  const fullWidthCardIds = (() => {
-    const span = new Set(PINNED_FULL_WIDTH_CARDS);
-    let run = [];
-    const flushRun = () => { if (run.length % 2 === 1) span.add(run[run.length - 1]); run = []; };
-    cardOrder.filter(isCardVisible).forEach(id => {
-      if (PINNED_FULL_WIDTH_CARDS.has(id)) flushRun();
-      else run.push(id);
-    });
-    flushRun();
-    return span;
-  })();
+  // Only Week/Today/the macro group ever span full width. Everything else
+  // stays in the 2-col grid no matter what — a card left alone at the end of
+  // an odd run just leaves the other half of its row empty instead of
+  // stretching to fill it.
+  const fullWidthCardIds = new Set(['week', 'today', 'macroGroup']);
 
   return (
     <Screen>
