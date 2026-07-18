@@ -1076,8 +1076,33 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
     </div>
   );
 
+  // This sheet packs 15+ fields across several sections (body, nutrition,
+  // hydration, note, plus the glucose/BP/temp add-forms), so whichever one a
+  // user taps can easily land near the top or bottom edge, or behind the
+  // keyboard. One delegated focus handler (React's onFocus bubbles from any
+  // descendant input) recenters whatever got focused instead of leaving it
+  // wherever it happened to be. If the keyboard is already open (tapping a
+  // second field right after a first) there's no viewport resize coming, so
+  // center immediately; otherwise wait for the keyboard's resize event plus a
+  // short settle — same debounce Sheet's own keyboard-follow logic uses,
+  // since a raw resize event can fire mid-animation — before centering.
+  const centerFocusedField = (e) => {
+    const el = e.target;
+    if (el.tagName !== 'INPUT' && el.tagName !== 'TEXTAREA') return;
+    const vv = window.visualViewport;
+    const center = () => el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    if (!vv) { center(); return; }
+    if (window.innerHeight - vv.height > 40) { center(); return; }
+    let settleTimer = null, fallbackTimer = null;
+    const done = () => { vv.removeEventListener('resize', onResize); clearTimeout(settleTimer); clearTimeout(fallbackTimer); center(); };
+    const onResize = () => { clearTimeout(settleTimer); settleTimer = setTimeout(done, 120); };
+    vv.addEventListener('resize', onResize);
+    fallbackTimer = setTimeout(done, 400); // no native keyboard (e.g. external kb, desktop) — center anyway
+  };
+
   return (
     <Sheet open={open} onClose={requestClose} title={existing ? 'Edit Day' : 'Log Day'}>
+      <div onFocus={centerFocusedField}>
       {confirmEl}
       <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 14 }}>
         {healthFmtDate(date, { weekday: 'long', day: 'numeric', month: 'long' })}
@@ -1447,6 +1472,7 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
           <Btn kind="ghost" onClick={del} style={{ flex: 1 }}>Delete</Btn>
         )}
         <Btn onClick={save} disabled={!canSave} style={{ flex: 2 }}>{existing ? 'Save' : 'Log'}</Btn>
+      </div>
       </div>
     </Sheet>
   );
@@ -2099,7 +2125,7 @@ function BodyTempCard({ tempLogs, unit, tf, setTf, dragHandle, onExpand, compact
   );
 
   return (
-    <HealthChartCard title="Body Temperature" icon="fa-temperature-half" tf={tf} setTf={setTf}
+    <HealthChartCard title="Body Temp" icon="fa-temperature-half" tf={tf} setTf={setTf}
       headline={latestDisp != null ? String(latestDisp) : null} sub={latestDisp != null ? unitLabel : null} dragHandle={dragHandle} onExpand={onExpand}>
       {!inWindow.length ? (
         <HealthChartEmpty label="No temperature readings in this range" />
