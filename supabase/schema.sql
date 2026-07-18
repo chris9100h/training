@@ -266,7 +266,7 @@ CREATE TABLE public.zane_user_settings (
   deload_prompt_dismissed_at timestamp with time zone,
   sw_version text,
   pin_all_notes boolean NOT NULL DEFAULT false,
-  temp_unit text DEFAULT 'c'::text,
+  temp_unit text,
   hidden_health_cards jsonb
 );
 

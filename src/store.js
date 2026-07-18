@@ -404,7 +404,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
     show_regression: sett.showRegression ?? true,
     pin_all_notes: sett.pinAllNotes ?? false,
     glucose_unit: sett.glucoseUnit ?? 'mmol',
-    temp_unit: sett.tempUnit ?? 'c',
+    temp_unit: sett.tempUnit ?? null,
     hidden_health_cards: sett.hiddenHealthCards ?? null,
     default_checkin_schema: sett.defaultCheckinSchema ?? null,
     vip_background: sett.vipBackground ?? null,
@@ -1139,7 +1139,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         showHealthTab: sett.show_health_tab ?? false,
         onboardingCompleted: sett.onboarding_completed ?? false,
         glucoseUnit: sett.glucose_unit ?? 'mmol',
-        tempUnit: sett.temp_unit ?? 'c',
+        tempUnit: sett.temp_unit ?? null,
         hiddenHealthCards: sett.hidden_health_cards ?? null,
         vipBackground: sett.vip_background ?? null,
         swVersion: sett.sw_version ?? null,
@@ -1667,7 +1667,7 @@ async function syncStore(prev, next, userId) {
       show_health_tab: next.settings?.showHealthTab ?? false,
       onboarding_completed: next.settings?.onboardingCompleted ?? false,
       glucose_unit: next.settings?.glucoseUnit ?? 'mmol',
-      temp_unit: next.settings?.tempUnit ?? 'c',
+      temp_unit: next.settings?.tempUnit ?? null,
       hidden_health_cards: next.settings?.hiddenHealthCards ?? null,
       default_checkin_schema: next.settings?.defaultCheckinSchema ?? null,
       next_reminder_at: next.nextReminderAt ?? null,
@@ -3906,6 +3906,15 @@ function mToDisplay(meters, unit, decimals = 2) {
 function fmtDistance(meters, unit, decimals = 2) {
   if (meters == null) return '';
   return `${mToDisplay(meters, unit, decimals)} ${unit === 'mi' ? 'mi' : 'km'}`;
+}
+
+// Body temperature display unit: an explicit user choice (settings.tempUnit)
+// always wins; otherwise derive from the weight unit preference. 'lbs' (US
+// imperial) implies Fahrenheit, 'kg' and 'mixed' (UK: kg weight + mi distance)
+// both imply Celsius, since UK body-temperature readings are Celsius today.
+function defaultTempUnit(settings) {
+  if (settings?.tempUnit === 'c' || settings?.tempUnit === 'f') return settings.tempUnit;
+  return settings?.unit === 'lbs' ? 'f' : 'c';
 }
 function fmtPace(secPerKm, unit) {
   if (secPerKm == null) return '';
@@ -6276,6 +6285,7 @@ window.LB = {
   checkinWeekStart, submitCheckin, loadCheckins, deleteCheckin, loadCoachCheckinStatus, requestCheckin, setCheckinEnabled, loadCheckinSchema, saveCheckinSchema, saveDefaultCheckinSchema,
   cardioWeekPrefill, detectCardioPRs,
   cardioDistUnit, setCardioDistUnit, distToM, mToDisplay, fmtDistance, fmtPace, fmtSpeed, MI_TO_M, recentCardioTypes,
+  defaultTempUnit,
   isLoggedTrainingDay, plannedTrainingDay, isTrainingDayForDate, dayTargetFromMacros, macroAdherence, hasMacroTargets, effectiveMacroTargets, dailyLogAdherence, dailyLogsWeekPrefill, weekPerformanceSignal,
   refreshHealthLogs,
   pickGrowthRecipient, retractGrowthGrant, pickDeclineRecipient, reearnMesoWeightBoosts, revertMesoSessionBoosts, resolveMesoSeedSuggestion, mesoPausedDays, mesoRirForWeek, mesoMuscleTrainedBeforeStart, volumeAnswerAllowsBump,

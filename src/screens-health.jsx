@@ -2411,7 +2411,7 @@ function HealthScreen({ store, setStore, go, userId }) {
       ? <BloodPressureCard bpLogs={store.bloodPressureLogs} tf={tf} setTf={setTf} dragHandle={handle} />
       : null,
     bodyTemp: (store.bodyTempLogs || []).length > 0
-      ? <BodyTempCard tempLogs={store.bodyTempLogs} unit={store.settings?.tempUnit ?? 'c'} tf={tf} setTf={setTf} dragHandle={handle} />
+      ? <BodyTempCard tempLogs={store.bodyTempLogs} unit={LB.defaultTempUnit(store.settings)} tf={tf} setTf={setTf} dragHandle={handle} />
       : null,
   };
 
@@ -2473,7 +2473,7 @@ function HealthScreen({ store, setStore, go, userId }) {
         </div>
       </div>
 
-      <DailyLogSheet open={logOpen} onClose={() => setLogOpen(false)} store={store} setStore={setStore} date={selectedDate} targets={effectiveTargets} activeCoachingSchema={activeCoachingSchema} onSetStatus={handleSetStatus} userId={userId} glucoseLogs={store.glucoseLogs || []} glucoseUnit={store.settings?.glucoseUnit ?? 'mmol'} bloodPressureLogs={store.bloodPressureLogs || []} bodyTempLogs={store.bodyTempLogs || []} tempUnit={store.settings?.tempUnit ?? 'c'} />
+      <DailyLogSheet open={logOpen} onClose={() => setLogOpen(false)} store={store} setStore={setStore} date={selectedDate} targets={effectiveTargets} activeCoachingSchema={activeCoachingSchema} onSetStatus={handleSetStatus} userId={userId} glucoseLogs={store.glucoseLogs || []} glucoseUnit={store.settings?.glucoseUnit ?? 'mmol'} bloodPressureLogs={store.bloodPressureLogs || []} bodyTempLogs={store.bodyTempLogs || []} tempUnit={LB.defaultTempUnit(store.settings)} />
       <MacroTargetSheet open={targetOpen} onClose={() => setTargetOpen(false)} store={store} setStore={setStore} coachingMacros={coachingMacros} />
       <ExportSheet open={exportOpen} onClose={() => setExportOpen(false)} store={store} />
     </Screen>
@@ -2489,7 +2489,7 @@ function HealthClientLogs({ clientStore }) {
   const glucoseUnit = clientStore?.settings?.glucoseUnit ?? 'mmol';
   const bloodPressureLogs = clientStore?.bloodPressureLogs || [];
   const bodyTempLogs = clientStore?.bodyTempLogs || [];
-  const clientTempUnit = clientStore?.settings?.tempUnit ?? 'c';
+  const clientTempUnit = LB.defaultTempUnit(clientStore?.settings);
   // The coach may run a different weight unit than the client; always label the
   // client's weights in the client's own unit (no conversion, display-only).
   const clientUnit = clientStore?.settings?.unit === 'lbs' ? 'lbs' : 'kg';

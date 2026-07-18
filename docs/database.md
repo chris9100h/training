@@ -329,7 +329,7 @@ Weitere Spalten:
 - `default_checkin_schema` (jsonb, nullable): wiederverwendbares Default-Check-in-Formular-Schema eines Coaches, angewandt auf neue Coaching-Beziehungen. Store field `defaultCheckinSchema`.
 - `vip_background` (text, nullable): admin-vergebener dekorativer Background-Key; gesetzt via `set_user_vip_background`. Store field `vipBackground`. Migration 0103.
 - `sw_version` (text, nullable): letzte SW-Cache-Version (z.B. `'v2.445'`), die dieses Gerät beim Boot gemeldet hat, direkt aus dem Cache Storage gelesen. Store field `swVersion`; lässt den Admin erkennen, ob ein User mit Bug-Report auf einem stalen Cache festhängt, ohne ihn nach den Settings fragen zu müssen. Migration 0123.
-- `temp_unit` (text, default 'c'): Anzeige-Einheit für Körpertemperatur, 'c' = Celsius, 'f' = Fahrenheit; Werte in `zane_body_temp_logs` sind immer in Celsius gespeichert. Store field `tempUnit`. Migration 0173.
+- `temp_unit` (text, nullable): Anzeige-Einheit für Körpertemperatur, 'c' = Celsius, 'f' = Fahrenheit; Werte in `zane_body_temp_logs` sind immer in Celsius gespeichert. `NULL` = User hat nie explizit gewählt, die App leitet dann den Default aus `unit` ab (`LB.defaultTempUnit`: 'lbs' → F, sonst C, siehe `store.js`). Store field `tempUnit`. Migration 0173, Default entfernt in Migration 0174.
 - `hidden_health_cards` (jsonb, nullable): Array von Card-Ids, die der User im Health-Tab ausgeblendet hat (z.B. `["cardio","glucose"]`). Anders als die Card-**Reihenfolge** (`logbook-health-card-order`, per-device localStorage) ist die Sichtbarkeit eine echte, geräteübergreifend synchronisierte Einstellung. Store field `hiddenHealthCards`. Migration 0173.
 
 ## RPCs & Realtime
