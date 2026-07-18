@@ -131,7 +131,8 @@ CREATE TABLE public.zane_sessions (
   is_deload boolean NOT NULL DEFAULT false,
   meso_recap jsonb,
   readiness text,
-  signal_weight text
+  signal_weight text,
+  cycle_pos integer
 );
 
 CREATE TABLE public.zane_session_entries (

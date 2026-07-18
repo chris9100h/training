@@ -1576,9 +1576,14 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       // session for the same day from a previous pass.
       const rotStart = (store.cycleIndex || 0) - dayIdx;
       const targetPos = rotStart + selectedSlot;
-      return [...store.sessions]
-        .filter(s => s.ended && s.dayId === activeDay.id && s.cyclePos === targetPos)
-        .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''))[0] ?? null;
+      const candidates = store.sessions.filter(s => s.ended && s.dayId === activeDay.id);
+      const exact = candidates.filter(s => s.cyclePos === targetPos);
+      // cyclePos only exists on sessions synced since migration 0176: an
+      // older session (or one loaded before that migration reached this
+      // device) has cyclePos == null. Fall back to "most recently ended"
+      // among those instead of losing the match entirely.
+      const pool = exact.length ? exact : candidates.filter(s => s.cyclePos == null);
+      return [...pool].sort((a, b) => (b.ended || '').localeCompare(a.ended || ''))[0] ?? null;
     }
     const dateKey = LB.fmtISO(sessionDate);
     return [...store.sessions]
@@ -1619,6 +1624,19 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     });
     return { improvementCount: improvements, regressionCount: regressions };
   }, [doneSession, store.sessions]);
+
+  // Fallback for the flex day-strip dot when a session's cyclePos wasn't
+  // persisted (pre-migration 0176, or not yet re-synced on this device): can't
+  // place it into completedCyclePos by absolute position, so track "this
+  // dayId was trained at some point" instead. Less precise (can't tell this
+  // rotation pass from an older one) but better than the dot silently
+  // disappearing.
+  const completedFlexDayIdsNoPos = useMemo(() => {
+    if (weekdayMode || !sch || !isFlex) return null;
+    const set = new Set();
+    store.sessions.filter(s => s.ended && s.cyclePos == null && s.dayId).forEach(s => set.add(s.dayId));
+    return set;
+  }, [store.sessions, weekdayMode, sch, isFlex]);
 
   const completedCyclePos = useMemo(() => {
     if (weekdayMode || !sch) return null;
@@ -2935,10 +2953,12 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
             if (!r && isFlex) {
               // Earlier slots in the current rotation pass that have a session,
               // bounded to this pass by absolute rotation position (cyclePos) so a
-              // previous rotation's session can't mark a skipped slot done.
+              // previous rotation's session can't mark a skipped slot done. Falls
+              // back to "this dayId was ever trained" when cyclePos is missing
+              // (see completedFlexDayIdsNoPos).
               const slot = d.slotIdx ?? i;
               const rotStart = (store.cycleIndex || 0) - dayIdx;
-              isCompleted = slot < dayIdx && (completedCyclePos?.has(rotStart + slot) ?? false);
+              isCompleted = slot < dayIdx && ((completedCyclePos?.has(rotStart + slot) ?? false) || (completedFlexDayIdsNoPos?.has(d.id) ?? false));
             } else if (!r && !isFlex) {
               if (weekdayMode) {
                 const slotKey = `${d.date.getFullYear()}-${d.date.getMonth()}-${d.date.getDate()}`;

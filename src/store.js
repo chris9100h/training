@@ -811,7 +811,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     _supabase.from('zane_schedules').select('id, name, days, archived, versions, is_flex, sessions_per_week, mesocycle_weeks, mesocycle_start_rir, mesocycle_end_rir, mesocycle_rir_enabled, mesocycle_autoregulate, mesocycle_autoregulate_mode, program_type, program_data, is_template').eq('user_id', userId),
     // Session METADATA stays complete (cheap; streaks/calendar need the full
     // date list) — the legacy entries JSONB is no longer selected.
-    _supabase.from('zane_sessions').select('id, schedule_id, day_id, day_name, date, started_at, ended, duration_minutes, feel, is_bonus, is_freestyle, is_deload, meso_recap, readiness, signal_weight')
+    _supabase.from('zane_sessions').select('id, schedule_id, day_id, day_name, date, started_at, ended, duration_minutes, feel, is_bonus, is_freestyle, is_deload, meso_recap, readiness, signal_weight, cycle_pos')
       .eq('user_id', userId).order('date', { ascending: false }),
     _supabase.from('zane_user_settings').select('*').eq('user_id', userId).maybeSingle(),
     _supabase.from('zane_skips').select('id, date, day_id, day_name, skip_reason, skipped_at').eq('user_id', userId),
@@ -1014,6 +1014,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         ...(s.meso_recap   ? { mesoRecap:   s.meso_recap } : {}),
         ...(s.readiness     ? { readiness:     s.readiness } : {}),
         ...(s.signal_weight ? { signalWeight:  s.signal_weight } : {}),
+        ...(s.cycle_pos != null ? { cyclePos: s.cycle_pos } : {}),
       };
     }),
     skips: (skipsRes.data || []).map(s => ({
@@ -1373,6 +1374,11 @@ function sessionToRow(s, userId) {
   row.meso_recap = mesoRecap ?? null;
   row.readiness = readiness ?? null;
   row.signal_weight = signalWeight ?? null;
+  // A flex plan's session-to-rotation-slot mapping (migration 0176): without
+  // this, any full reload from Supabase (cleared cache after sign-out, a new
+  // device) loses track of which slot a session belongs to, since the local
+  // cache was the only place it lived before this column existed.
+  row.cycle_pos = cyclePos ?? null;
   return row;
 }
 
