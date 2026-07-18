@@ -455,7 +455,7 @@ function ChartHover({ W, H, points, children, mode = 'x', markerColor = 'var(--a
 // reorder grip at the start of the header when the card is in a reorder list.
 function HealthChartCard({ title, icon, tf, setTf, headline, sub, dragHandle, children }) {
   return (
-    <Card style={{ padding: 14 }}>
+    <Card style={{ padding: 14, borderLeft: `3px solid ${UI.gold}` }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
         {dragHandle}
         {icon && <i className={`fa-solid ${icon}`} style={{ fontSize: 11, color: UI.inkFaint }} />}
@@ -1546,7 +1546,7 @@ function HealthMetricsCard({ log, dateLabel, isToday, onJumpToday, dragHandle, t
     </span>
   );
   return (
-    <Card accent style={{ padding: 16 }}>
+    <Card accent style={{ padding: 16, borderLeft: `3px solid ${UI.gold}` }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: trained || hasCardio ? 8 : 12 }}>
         {dragHandle}
         <span style={{ flex: 1, fontFamily: UI.fontDisplay, fontSize: 20, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: UI.ink }}>
@@ -1676,7 +1676,7 @@ function HealthWeekCard({ stats, dragHandle, targets, tf, setTf, weightUnit }) {
 
   if (!daysLogged && !trainingsDone && !trainingsPlanned && !cardioMinutes) {
     return (
-      <Card style={{ padding: 16 }}>
+      <Card style={{ padding: 16, borderLeft: `3px solid ${UI.gold}` }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
           {dragHandle}
           <span className="micro" style={{ color: UI.inkFaint, flex: 1 }}>{periodLabel}</span>
@@ -1688,7 +1688,7 @@ function HealthWeekCard({ stats, dragHandle, targets, tf, setTf, weightUnit }) {
   }
 
   return (
-    <Card accent style={{ padding: 16 }}>
+    <Card accent style={{ padding: 16, borderLeft: `3px solid ${UI.gold}` }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
         {dragHandle}
         <span className="micro" style={{ color: UI.inkFaint, flex: 1 }}>{periodLabel}</span>
@@ -2761,7 +2761,7 @@ function HealthClientLogs({ clientStore }) {
       ? <BodyTempCard tempLogs={bodyTempLogs} unit={clientTempUnit} tf={tf} setTf={setTf} dragHandle={handle} />
       : null,
     weekly: weeks.length ? (
-      <Card style={{ padding: 14 }}>
+      <Card style={{ padding: 14, borderLeft: `3px solid ${UI.gold}` }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
           {handle}
           <span className="micro" style={{ color: UI.inkFaint }}>WEEKLY AVERAGES</span>
