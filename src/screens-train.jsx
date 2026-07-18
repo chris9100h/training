@@ -6559,7 +6559,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                       gap: 8, alignItems: 'center',
                       padding: '10px 6px',
                       position: 'relative', zIndex: 1,
-                      opacity: s.done || s.skipped ? (isWarmupRow ? 0.3 : 0.4) : 1,
+                      // Full brightness while the lock hint is up — the row's own
+                      // dim-when-done/skipped opacity was muting the unlock ring
+                      // pulse on the checkbox below it (opacity on a parent dims
+                      // its whole subtree, box-shadow rings included).
+                      opacity: lockHint === i ? 1 : (s.done || s.skipped ? (isWarmupRow ? 0.3 : 0.4) : 1),
                       animation: flashSet === i ? 'rowFlash 1.4s ease forwards' : 'none',
                     }}>
                       <div style={{
@@ -6684,10 +6688,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                           opacity: !s.done && !s.skipped && !isNoWeightReps && ((!isBodyweight && s.kg == null) || (isUnilateral ? (s.repsL == null || s.repsR == null) : s.reps == null)) ? 0.35 : 1,
                           flexShrink: 0, justifySelf: 'center',
                           WebkitTapHighlightColor: 'transparent',
-                          // Same ring-pulse the onboarding tour uses to point at a
-                          // target — points straight at the control that unlocks
-                          // this row, right alongside the "Tap ✓/× to unlock" hint.
-                          animation: lockHint === i && (s.done || s.skipped) ? 'tourRingPulse 1s ease-in-out infinite' : 'none',
+                          // Points straight at the control that unlocks this row,
+                          // right alongside the "Tap ✓/× to unlock" hint. Needs the
+                          // row's own dim opacity lifted above (see data-kb-row) or
+                          // this reads as barely-there instead of "much more visible".
+                          animation: lockHint === i && (s.done || s.skipped) ? 'unlockRingPulse 0.9s ease-in-out infinite' : 'none',
                         }}>{s.skipped ? '×' : '✓'}</button>}
 
                     </div>
