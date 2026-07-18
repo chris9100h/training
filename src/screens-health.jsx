@@ -2727,9 +2727,15 @@ function HealthClientLogs({ clientStore }) {
   // client's weights in the client's own unit (no conversion, display-only).
   const clientUnit = clientStore?.settings?.unit === 'lbs' ? 'lbs' : 'kg';
   const [tf, setTf] = useStateH('1W');
+  // Which card is blown up in the expand sheet (id into expandableCards below),
+  // null when closed. Only charts squeezed by the 2-col grid offer this.
+  const [expandedCardId, setExpandedCardId] = useStateH(null);
 
   const COACH_ORDER_KEY = 'logbook-coach-health-card-order';
-  const DEFAULT_COACH_ORDER = ['week', 'today', 'weight', 'steps', 'water', 'macros', 'cardio', 'adherence', 'glucose', 'bloodPressure', 'bodyTemp', 'weekly'];
+  // Macros/Adherence move, hide, and show as one unit — id 'macroGroup', see its
+  // cardEls entry below — same grouping as the client's own Health tab, and
+  // required for hiddenHealthCards (client setting) to hide it correctly here too.
+  const DEFAULT_COACH_ORDER = ['week', 'today', 'macroGroup', 'weight', 'cardio', 'steps', 'water', 'glucose', 'bloodPressure', 'bodyTemp', 'weekly'];
   const [cardOrder, setCardOrder] = useStateH(() => {
     let saved = [];
     try { saved = JSON.parse(localStorage.getItem(COACH_ORDER_KEY) || '[]'); } catch (_) {}
@@ -2825,57 +2831,75 @@ function HealthClientLogs({ clientStore }) {
   const dayLabel = selectedDate === today ? 'Today' : healthFmtDate(selectedDate, { weekday: 'short', day: 'numeric', month: 'short' });
 
   const handle = <DragHandle style={{ width: 20, height: 22, marginLeft: -4, cursor: 'grab' }} />;
+  // Opens a chart full-width in a sheet — offered only on charts the 2-col grid
+  // below actually squeezes to half-width (see expandableCards further down).
+  const expandBtn = id => () => setExpandedCardId(id);
+
+  // Macros + Adherence live together in the macroGroup composite below so
+  // hide/move/reorder always treats them as one unit (mirrors the client's own
+  // Health tab). No Targets sub-card: this read-only view never fetches macro
+  // targets (that lives in the coach's separate Nutrition tab).
+  const macrosCard = (
+    <HealthChartCard title="Macros" icon="fa-utensils" tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('macros')}>
+      <HealthMacroChart series={macroSeries.data} from={macroSeries.from} to={macroSeries.to} />
+      <MacroLegend />
+    </HealthChartCard>
+  );
+  const adherenceCard = (
+    <HealthChartCard title="Adherence" icon="fa-bullseye" tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('adherence')}
+      headline={adhAvg != null ? `${adhAvg}%` : null} sub={adhAvg != null ? 'avg' : null}>
+      <HealthLineChart series={adhSeries.data} from={adhSeries.from} to={adhSeries.to} format={v => `${Math.round(v)}%`} yMin={0} yMax={100} />
+    </HealthChartCard>
+  );
+
   const cardEls = {
     week: <HealthWeekCard stats={weekStats} dragHandle={handle} targets={null} tf={tf} setTf={setTf} weightUnit={clientUnit} />,
     today: (
       <HealthMetricsCard log={selectedLog} dateLabel={dayLabel} isToday={selectedDate === today} onJumpToday={() => setSelectedDate(today)}
         dragHandle={handle} trained={trainedSelected} hasCardio={cardioSelected} dayTarget={null} weightUnit={clientUnit} />
     ),
+    macroGroup: (
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 14 }}>
+        {adherenceCard}
+        {macrosCard}
+      </div>
+    ),
     weight: (
-      <HealthChartCard title="Weight" icon="fa-weight-scale" tf={tf} setTf={setTf} dragHandle={handle}
+      <HealthChartCard title="Weight" icon="fa-weight-scale" tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('weight')}
         headline={weightAvg != null ? `${weightAvg}${clientUnit}` : null} sub={weightAvg != null ? 'avg' : null}>
         <HealthLineChart series={weightSeries.data} from={weightSeries.from} to={weightSeries.to} format={v => `${v}${clientUnit}`} step={clientUnit === 'lbs' ? 5 : 2.5} />
       </HealthChartCard>
     ),
     steps: (
-      <HealthChartCard title="Steps" icon="fa-shoe-prints" tf={tf} setTf={setTf} dragHandle={handle}
+      <HealthChartCard title="Steps" icon="fa-shoe-prints" tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('steps')}
         headline={stepsAvg != null ? stepsAvg.toLocaleString() : null} sub={stepsAvg != null ? 'avg / day' : null}>
         <HealthBarChart series={stepsSeries.data} from={stepsSeries.from} to={stepsSeries.to} format={v => v >= 1000 ? `${Math.round(v / 1000)}k` : `${v}`} />
       </HealthChartCard>
     ),
     water: (
-      <HealthChartCard title="Water" icon="fa-glass-water" tf={tf} setTf={setTf} dragHandle={handle}
+      <HealthChartCard title="Water" icon="fa-glass-water" tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('water')}
         headline={waterAvg != null ? `${UI.waterSummaryValue(waterAvg)}${UI.waterSummaryUnit()}` : null} sub={waterAvg != null ? 'avg / day' : null}>
         <HealthBarChart series={waterSeries.data} from={waterSeries.from} to={waterSeries.to} format={v => `${UI.waterSummaryValue(v)}${UI.waterSummaryUnit()}`} color="#4a9fe0" colorSoft="rgba(74,159,224,0.35)" />
       </HealthChartCard>
     ),
-    macros: (
-      <HealthChartCard title="Macros" icon="fa-utensils" tf={tf} setTf={setTf} dragHandle={handle}>
-        <HealthMacroChart series={macroSeries.data} from={macroSeries.from} to={macroSeries.to} />
-        <MacroLegend />
-      </HealthChartCard>
-    ),
     cardio: (
-      <HealthChartCard title="Cardio" icon="fa-person-running" tf={tf} setTf={setTf} dragHandle={handle}
+      <HealthChartCard title="Cardio" icon="fa-person-running" tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('cardio')}
         headline={cardioTotal || null} sub={cardioTotal ? 'min total' : null}>
         <HealthBarChart series={cardioSeries.data} from={cardioSeries.from} to={cardioSeries.to} format={v => `${Math.round(v)}`} />
       </HealthChartCard>
     ),
-    adherence: (
-      <HealthChartCard title="Macro Adherence" icon="fa-bullseye" tf={tf} setTf={setTf} dragHandle={handle}
-        headline={adhAvg != null ? `${adhAvg}%` : null} sub={adhAvg != null ? 'avg' : null}>
-        <HealthLineChart series={adhSeries.data} from={adhSeries.from} to={adhSeries.to} format={v => `${Math.round(v)}%`} yMin={0} yMax={100} />
-      </HealthChartCard>
-    ),
+    // compact: hides the reference legend + readings feed so these match the
+    // plain-chart cards' height in the grid — full detail is one expand tap away.
     glucose: glucoseLogs.length > 0
-      ? <GlucoseCard glucoseLogs={glucoseLogs} unit={glucoseUnit} tf={tf} setTf={setTf} dragHandle={handle} />
+      ? <GlucoseCard glucoseLogs={glucoseLogs} unit={glucoseUnit} tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('glucose')} compact />
       : null,
     bloodPressure: bloodPressureLogs.length > 0
-      ? <BloodPressureCard bpLogs={bloodPressureLogs} tf={tf} setTf={setTf} dragHandle={handle} />
+      ? <BloodPressureCard bpLogs={bloodPressureLogs} tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('bloodPressure')} compact />
       : null,
     bodyTemp: bodyTempLogs.length > 0
-      ? <BodyTempCard tempLogs={bodyTempLogs} unit={clientTempUnit} tf={tf} setTf={setTf} dragHandle={handle} />
+      ? <BodyTempCard tempLogs={bodyTempLogs} unit={clientTempUnit} tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('bodyTemp')} compact />
       : null,
+    // Dense table, doesn't fit the 2-col grid — always full width (fullWidthCardIds).
     weekly: weeks.length ? (
       <Card style={{ padding: 14, borderLeft: `3px solid ${UI.gold}` }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
@@ -2904,6 +2928,18 @@ function HealthClientLogs({ clientStore }) {
     ) : null,
   };
 
+  // Sheet lookup for expandedCardId — every id any onExpand above can set.
+  // Cloned with dragHandle/onExpand stripped: the expand sheet isn't inside a
+  // reorder list (grip would be inert) and re-expanding itself is meaningless.
+  const expandableCards = { weight: cardEls.weight, steps: cardEls.steps, water: cardEls.water, cardio: cardEls.cardio,
+    adherence: adherenceCard, macros: macrosCard,
+    glucose: cardEls.glucose, bloodPressure: cardEls.bloodPressure, bodyTemp: cardEls.bodyTemp };
+
+  // Only Week/Today/the macro group/Weekly Averages ever span full width.
+  // Everything else stays in the 2-col grid no matter what — matches the
+  // client's own Health tab exactly (see HealthScreen's fullWidthCardIds).
+  const fullWidthCardIds = new Set(['week', 'today', 'macroGroup', 'weekly']);
+
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <HealthDateStrip store={clientStore} selectedDate={selectedDate} onSelect={setSelectedDate} onLog={null} />
@@ -2914,13 +2950,22 @@ function HealthClientLogs({ clientStore }) {
             <div style={{ fontSize: 13, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1.5 }}>Your client has hidden all their Health cards.</div>
           </div>
         ) : (
-          <ReorderList onReorder={reorderCards} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            {cardOrder.map(id => isCardVisible(id) ? (
-              <div key={id} data-reorder-item="true">{cardEls[id]}</div>
-            ) : null)}
-          </ReorderList>
+          // Grid-squeezed charts hide their "Drag to inspect" hint (ChartCompactContext) —
+          // the expand sheet below isn't a descendant of this provider, so it keeps showing it.
+          <ChartCompactContext.Provider value={true}>
+            <ReorderList onReorder={reorderCards} style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 14 }}>
+              {cardOrder.map(id => isCardVisible(id) ? (
+                <div key={id} data-reorder-item="true" style={fullWidthCardIds.has(id) ? { gridColumn: '1 / -1' } : undefined}>{cardEls[id]}</div>
+              ) : null)}
+            </ReorderList>
+          </ChartCompactContext.Provider>
         )}
       </div>
+
+      <Sheet open={!!expandedCardId} onClose={() => setExpandedCardId(null)}>
+        {expandedCardId && expandableCards[expandedCardId] &&
+          React.cloneElement(expandableCards[expandedCardId], { dragHandle: null, onExpand: null, compact: false })}
+      </Sheet>
     </div>
   );
 }
