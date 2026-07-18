@@ -6684,6 +6684,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                           opacity: !s.done && !s.skipped && !isNoWeightReps && ((!isBodyweight && s.kg == null) || (isUnilateral ? (s.repsL == null || s.repsR == null) : s.reps == null)) ? 0.35 : 1,
                           flexShrink: 0, justifySelf: 'center',
                           WebkitTapHighlightColor: 'transparent',
+                          // Same ring-pulse the onboarding tour uses to point at a
+                          // target — points straight at the control that unlocks
+                          // this row, right alongside the "Tap ✓/× to unlock" hint.
+                          animation: lockHint === i && (s.done || s.skipped) ? 'tourRingPulse 1s ease-in-out infinite' : 'none',
                         }}>{s.skipped ? '×' : '✓'}</button>}
 
                     </div>
