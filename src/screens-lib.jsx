@@ -2806,15 +2806,19 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
   // naturally whether this capture is the normal single column or the wider
   // two-column export).
   const _shotIsLight = (store.settings?.darkMode ?? 'dark') === 'light';
-  // Both width AND height are capped (not just width, unlike SessionCompareScreen's
+  // Capped by height as well as width (not just width, unlike SessionCompareScreen's
   // own copy of this recipe below): the two-column export's height varies a lot with
-  // exercise count, right at the SHOT_TWO_COL_THRESHOLD a session can be much shorter
-  // than this mark would render at 75% of the (fixed, wide) capture WIDTH alone, and
-  // the watermark wrapper's overflow:hidden would then clip it top/bottom. Giving the
-  // <img> a real width+height box lets objectFit:contain scale down by whichever
-  // dimension binds first, so the mark always renders fully inside the capture.
-  const _shotDefaultStyle = { width: '75%', maxWidth: 620, height: '75%', maxHeight: 620, opacity: _shotIsLight ? 0.10 : 0.06, filter: _shotIsLight ? 'grayscale(1)' : 'grayscale(1) brightness(3)', objectFit: 'contain' };
-  const _shotCustomStyle = { width: '80%', maxWidth: 680, height: '80%', maxHeight: 680, opacity: 0.13, objectFit: 'contain' };
+  // exercise count, right at SHOT_TWO_COL_THRESHOLD a session can be much shorter than
+  // this mark would render at 75% of the (fixed, wide) capture WIDTH alone, and the
+  // watermark wrapper's overflow:hidden would then clip it top/bottom.
+  // maxWidth/maxHeight ONLY, no explicit width/height/objectFit: an explicit width+
+  // height box (even with objectFit:contain) rendered visibly STRETCHED under
+  // html2canvas, since the box's aspect ratio no longer matched the image's own.
+  // max-* alone lets the image size itself from its own intrinsic ratio and only
+  // shrinks (never distorts) when that exceeds either cap, the standard "responsive
+  // image" pattern, and needs no objectFit since there's no separate box to fit into.
+  const _shotDefaultStyle = { maxWidth: '75%', maxHeight: '75%', opacity: _shotIsLight ? 0.10 : 0.06, filter: _shotIsLight ? 'grayscale(1)' : 'grayscale(1) brightness(3)' };
+  const _shotCustomStyle = { maxWidth: '80%', maxHeight: '80%', opacity: 0.13 };
   const s = store.sessions.find(x => x.id === sessionId);
   useEffectL(() => { if (!s) go({ name: 'hist' }); }, [!!s]);
   // Sessions outside the boot window carry no entries — lazy-load them into
