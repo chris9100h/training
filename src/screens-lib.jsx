@@ -771,6 +771,23 @@ async function captureNodeAsPng(node, { filename, dodgeAvatar = false, setCaptur
     });
     await new Promise(r => requestAnimationFrame(r));
   }
+  // SessionDetailScreen's two-column centered watermark (marked data-shot-fill) is
+  // sized to fill as much of the capture as possible while preserving its aspect
+  // ratio, near edge-to-edge top/bottom. CSS percentage width+height on the <img>
+  // itself (even with objectFit:contain) rendered visibly stretched under
+  // html2canvas, the same class of bug SvgKnurl above already works around for its
+  // own width:'100%', so compute and set an explicit pixel size here instead,
+  // exactly like the knurl canvases below get their width imperatively.
+  const fillEl = node.querySelector('img[data-shot-fill]');
+  if (fillEl && fillEl.naturalWidth && fillEl.naturalHeight) {
+    const wrap = fillEl.parentElement;
+    const availW = wrap ? wrap.offsetWidth : 0, availH = wrap ? wrap.offsetHeight : 0;
+    const scale = Math.min((availW * 0.94) / fillEl.naturalWidth, (availH * 0.96) / fillEl.naturalHeight);
+    if (scale > 0 && isFinite(scale)) {
+      fillEl.style.width = Math.round(fillEl.naturalWidth * scale) + 'px';
+      fillEl.style.height = Math.round(fillEl.naturalHeight * scale) + 'px';
+    }
+  }
   const avatarRect = (dodgeAvatar && avatarEl && avatarEl.getBoundingClientRect().height) ? avatarEl.getBoundingClientRect() : null;
   const KNURL_GAP = 14;
   // Limit chip containers that vertically overlap the avatar so they don't
@@ -2801,24 +2818,12 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
   // Screenshot watermark: VIPs get their home-screen background image instead of the default ZANE mark.
   const _shotLogo = store.settings?.vipBackground || 'icons/zane-logo-2.png';
   const _shotIsCustom = _shotLogo !== 'icons/zane-logo-2.png';
-  // Centered, faint, full-page background watermark, the same recipe the plan
-  // poster and SessionCompareScreen use (percentage-based width, so it scales
-  // naturally whether this capture is the normal single column or the wider
-  // two-column export).
+  // Centered, faint, full-page background watermark, the two-column export's own
+  // size (its actual size is computed and set in px by captureNodeAsPng's
+  // data-shot-fill handling, not by CSS here, see the comment there for why).
   const _shotIsLight = (store.settings?.darkMode ?? 'dark') === 'light';
-  // Capped by height as well as width (not just width, unlike SessionCompareScreen's
-  // own copy of this recipe below): the two-column export's height varies a lot with
-  // exercise count, right at SHOT_TWO_COL_THRESHOLD a session can be much shorter than
-  // this mark would render at 75% of the (fixed, wide) capture WIDTH alone, and the
-  // watermark wrapper's overflow:hidden would then clip it top/bottom.
-  // maxWidth/maxHeight ONLY, no explicit width/height/objectFit: an explicit width+
-  // height box (even with objectFit:contain) rendered visibly STRETCHED under
-  // html2canvas, since the box's aspect ratio no longer matched the image's own.
-  // max-* alone lets the image size itself from its own intrinsic ratio and only
-  // shrinks (never distorts) when that exceeds either cap, the standard "responsive
-  // image" pattern, and needs no objectFit since there's no separate box to fit into.
-  const _shotDefaultStyle = { maxWidth: '75%', maxHeight: '75%', opacity: _shotIsLight ? 0.10 : 0.06, filter: _shotIsLight ? 'grayscale(1)' : 'grayscale(1) brightness(3)' };
-  const _shotCustomStyle = { maxWidth: '80%', maxHeight: '80%', opacity: 0.13 };
+  const _shotDefaultStyle = { opacity: _shotIsLight ? 0.10 : 0.06, filter: _shotIsLight ? 'grayscale(1)' : 'grayscale(1) brightness(3)' };
+  const _shotCustomStyle = { opacity: 0.13 };
   const s = store.sessions.find(x => x.id === sessionId);
   useEffectL(() => { if (!s) go({ name: 'hist' }); }, [!!s]);
   // Sessions outside the boot window carry no entries — lazy-load them into
@@ -3320,7 +3325,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
             further down instead (near the exercises, see dodgeAvatar above). */}
         {twoCol && (
           <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', zIndex: 0, overflow: 'hidden' }}>
-            <img src={_shotLogo} data-shot-avatar="1" style={_shotIsCustom ? _shotCustomStyle : _shotDefaultStyle} />
+            <img src={_shotLogo} data-shot-avatar="1" data-shot-fill="1" style={_shotIsCustom ? _shotCustomStyle : _shotDefaultStyle} />
           </div>
         )}
 
