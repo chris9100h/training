@@ -19,6 +19,7 @@ const HEALTH_CARD_TOGGLES = [
   { id: 'weight', label: 'Weight' },
   { id: 'cardio', label: 'Cardio' },
   { id: 'steps', label: 'Steps' },
+  { id: 'water', label: 'Water' },
   { id: 'glucose', label: 'Glucose' },
   { id: 'bloodPressure', label: 'Blood pressure' },
   { id: 'bodyTemp', label: 'Body temperature' },
