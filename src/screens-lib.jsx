@@ -2806,8 +2806,15 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
   // naturally whether this capture is the normal single column or the wider
   // two-column export).
   const _shotIsLight = (store.settings?.darkMode ?? 'dark') === 'light';
-  const _shotDefaultStyle = { width: '75%', maxWidth: 620, opacity: _shotIsLight ? 0.10 : 0.06, filter: _shotIsLight ? 'grayscale(1)' : 'grayscale(1) brightness(3)', objectFit: 'contain' };
-  const _shotCustomStyle = { width: '80%', maxWidth: 680, opacity: 0.13, objectFit: 'contain' };
+  // Both width AND height are capped (not just width, unlike SessionCompareScreen's
+  // own copy of this recipe below): the two-column export's height varies a lot with
+  // exercise count, right at the SHOT_TWO_COL_THRESHOLD a session can be much shorter
+  // than this mark would render at 75% of the (fixed, wide) capture WIDTH alone, and
+  // the watermark wrapper's overflow:hidden would then clip it top/bottom. Giving the
+  // <img> a real width+height box lets objectFit:contain scale down by whichever
+  // dimension binds first, so the mark always renders fully inside the capture.
+  const _shotDefaultStyle = { width: '75%', maxWidth: 620, height: '75%', maxHeight: 620, opacity: _shotIsLight ? 0.10 : 0.06, filter: _shotIsLight ? 'grayscale(1)' : 'grayscale(1) brightness(3)', objectFit: 'contain' };
+  const _shotCustomStyle = { width: '80%', maxWidth: 680, height: '80%', maxHeight: 680, opacity: 0.13, objectFit: 'contain' };
   const s = store.sessions.find(x => x.id === sessionId);
   useEffectL(() => { if (!s) go({ name: 'hist' }); }, [!!s]);
   // Sessions outside the boot window carry no entries — lazy-load them into
