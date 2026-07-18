@@ -667,12 +667,12 @@ function MacroLegend() {
   );
 }
 
-// ─── Daily log sheet ──────────────────────────────────────────────────────────
+// ─── Daily log screen ─────────────────────────────────────────────────────────
 
 // One card per category: clickable chevron header, optional right-aligned
 // extra content (a unit tag, a toggle) that doesn't itself trigger the
 // collapse, and its fields below when expanded. Defined at module scope
-// (not inside DailyLogSheet) so its function identity is stable across
+// (not inside DailyLogScreen) so its function identity is stable across
 // renders: an inline definition would make React remount the whole
 // subtree (killing input focus/keyboard) on every keystroke.
 function CatSection({ label, extra, collapsed, onToggle, children }) {
@@ -688,7 +688,7 @@ function CatSection({ label, extra, collapsed, onToggle, children }) {
   );
 }
 
-function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCoachingSchema, onSetStatus, userId, glucoseLogs, glucoseUnit, bloodPressureLogs, bodyTempLogs, tempUnit }) {
+function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeCoachingSchema, onSetStatus, userId, glucoseLogs, glucoseUnit, bloodPressureLogs, bodyTempLogs, tempUnit }) {
   // Always-current store snapshot: saveTemp's fever nudge awaits a Supabase
   // write and then a user-interaction-gated confirm dialog, both arbitrarily
   // long, so it re-reads statusMode from this ref (not the closed-over
@@ -1133,9 +1133,20 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
     pendingRef.current = cleanup;
   };
 
+  // Full page (not a Sheet): the form has 15+ fields across several sections
+  // plus the glucose/BP/temp add-forms, a bottom sheet's ~88dvh cap made it
+  // cramped. position:fixed so it takes over the whole viewport regardless of
+  // where it's mounted (HealthScreen or HomeScreen's Quick Actions both render
+  // it locally, gated on their own open state, same as the Sheet it replaces —
+  // it isn't wired into the app's go()/route system). zIndex:100 matches
+  // Sheet's own backdrop convention, so it still sits under the confirm dialog
+  // (useConfirm's Sheet, portaled to document.body, same z-index but later in
+  // the DOM so it paints on top).
+  if (!open) return null;
   return (
-    <Sheet open={open} onClose={requestClose} title={existing ? 'Edit Day' : 'Log Day'}>
-      <div onFocus={positionFocusedField}>
+    <Screen style={{ position: 'fixed', inset: 0, zIndex: 100, animation: 'sheet-up 0.22s ease' }}>
+      <TopBar title={existing ? 'Edit Day' : 'Log Day'} onBack={requestClose} />
+      <div onFocus={positionFocusedField} style={{ padding: '18px 22px calc(env(safe-area-inset-bottom, 8px) + 22px)' }}>
       {confirmEl}
       <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 14 }}>
         {healthFmtDate(date, { weekday: 'long', day: 'numeric', month: 'long' })}
@@ -1507,7 +1518,7 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
         <Btn onClick={save} disabled={!canSave} style={{ flex: 2 }}>{existing ? 'Save' : 'Log'}</Btn>
       </div>
       </div>
-    </Sheet>
+    </Screen>
   );
 }
 
@@ -2313,7 +2324,7 @@ function HealthScreen({ store, setStore, go, userId }) {
   }, [coachingId]);
 
   // Load the check-in schema for the active coaching relationship (real coach
-  // or self-coaching) so DailyLogSheet can show coach-configured daily fields.
+  // or self-coaching) so DailyLogScreen can show coach-configured daily fields.
   const [activeCoachingSchema, setActiveCoachingSchema] = useStateH(null);
   const activeClientCoachingId =
     (store.coaching?.asClient?.status === 'active' ? store.coaching?.asClient?.id : null)
@@ -2735,7 +2746,7 @@ function HealthScreen({ store, setStore, go, userId }) {
           React.cloneElement(expandableCards[expandedCardId], { dragHandle: null, onExpand: null, compact: false })}
       </Sheet>
 
-      <DailyLogSheet open={logOpen} onClose={() => setLogOpen(false)} store={store} setStore={setStore} date={selectedDate} targets={effectiveTargets} activeCoachingSchema={activeCoachingSchema} onSetStatus={handleSetStatus} userId={userId} glucoseLogs={store.glucoseLogs || []} glucoseUnit={store.settings?.glucoseUnit ?? 'mmol'} bloodPressureLogs={store.bloodPressureLogs || []} bodyTempLogs={store.bodyTempLogs || []} tempUnit={LB.defaultTempUnit(store.settings)} />
+      <DailyLogScreen open={logOpen} onClose={() => setLogOpen(false)} store={store} setStore={setStore} date={selectedDate} targets={effectiveTargets} activeCoachingSchema={activeCoachingSchema} onSetStatus={handleSetStatus} userId={userId} glucoseLogs={store.glucoseLogs || []} glucoseUnit={store.settings?.glucoseUnit ?? 'mmol'} bloodPressureLogs={store.bloodPressureLogs || []} bodyTempLogs={store.bodyTempLogs || []} tempUnit={LB.defaultTempUnit(store.settings)} />
       <MacroTargetSheet open={targetOpen} onClose={() => setTargetOpen(false)} store={store} setStore={setStore} coachingMacros={coachingMacros} />
       <ExportSheet open={exportOpen} onClose={() => setExportOpen(false)} store={store} />
     </Screen>

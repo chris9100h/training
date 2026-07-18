@@ -243,17 +243,17 @@ Sonderfälle und RLS:
 ### `zane_glucose_logs`
 
 - `id` (text), `user_id` (uuid), `date` (text, YYYY-MM-DD), `time` (text, HH:MM, lokale Uhrzeit der Messung), `value_mmol` (numeric: immer in mmol/L gespeichert; Anzeige-Einheit ist ein per-User-Setting), `context` (text: 'fasted'|'fed'|'other'), `note` (text, nullable), `created_at` (timestamptz)
-- Store field: `store.glucoseLogs`. Mehrere Messungen pro Tag möglich. Wird direkt via Supabase aus der Glucose-Sektion des DailyLogSheet geschrieben (kein syncStore-Diff). Migration 0101.
+- Store field: `store.glucoseLogs`. Mehrere Messungen pro Tag möglich. Wird direkt via Supabase aus der Glucose-Sektion des DailyLogScreen geschrieben (kein syncStore-Diff). Migration 0101.
 
 ### `zane_blood_pressure_logs`
 
 - `id` (text), `user_id` (uuid), `date` (text, YYYY-MM-DD), `time` (text, HH:MM, lokale Uhrzeit der Messung), `systolic` (int, mmHg), `diastolic` (int, mmHg), `note` (text, nullable), `created_at` (timestamptz)
-- Store field: `store.bloodPressureLogs`. Mehrere Messungen pro Tag möglich. Wird direkt via Supabase aus der Blood-Pressure-Sektion des DailyLogSheet geschrieben (kein syncStore-Diff), strukturell identisch zu `zane_glucose_logs`. Migration 0173.
+- Store field: `store.bloodPressureLogs`. Mehrere Messungen pro Tag möglich. Wird direkt via Supabase aus der Blood-Pressure-Sektion des DailyLogScreen geschrieben (kein syncStore-Diff), strukturell identisch zu `zane_glucose_logs`. Migration 0173.
 
 ### `zane_body_temp_logs`
 
 - `id` (text), `user_id` (uuid), `date` (text, YYYY-MM-DD), `time` (text, HH:MM, lokale Uhrzeit der Messung), `value_c` (numeric: immer in Celsius gespeichert; Anzeige-Einheit ist ein per-User-Setting), `note` (text, nullable), `created_at` (timestamptz)
-- Store field: `store.bodyTempLogs`. Mehrere Messungen pro Tag möglich. Wird direkt via Supabase aus der Body-Temperature-Sektion des DailyLogSheet geschrieben (kein syncStore-Diff), strukturell identisch zu `zane_glucose_logs`. Migration 0173.
+- Store field: `store.bodyTempLogs`. Mehrere Messungen pro Tag möglich. Wird direkt via Supabase aus der Body-Temperature-Sektion des DailyLogScreen geschrieben (kein syncStore-Diff), strukturell identisch zu `zane_glucose_logs`. Migration 0173.
 
 ### `zane_cardio_logs`
 
