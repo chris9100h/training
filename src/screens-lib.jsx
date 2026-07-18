@@ -11,6 +11,16 @@ const _lib = { tab: 'recent', q: '', filterTags: [], filterRestCats: [], filterU
 // support ticket. Explain instead.
 const CARDIO_SYSTEM_MSG = "System exercises can't be deleted. Cardio is here to stay, always ready to drop into a plan or session.";
 
+// SessionDetailScreen screenshot export: a long session (many exercise blocks)
+// renders very tall as a single phone-width column. Above this many blocks,
+// the export switches to a wider two-column grid instead (see the `twoCol`
+// capture treatment below), roughly halving the image height. `SHOT_TWO_COL_WIDTH`
+// is picked so each column's inner content is close to the normal single-column
+// content width (accounting for the Frame card padding + column gap), not simply
+// double the phone viewport, so per-exercise wrapping doesn't get noticeably worse.
+const SHOT_TWO_COL_THRESHOLD = 8;
+const SHOT_TWO_COL_WIDTH = 840;
+
 // Accept only http(s) YouTube URLs. React does NOT block javascript: hrefs in
 // production, so we validate on save (strip otherwise) and guard again at render.
 // Returns the normalized URL string, or null if it is not a valid YouTube link.
@@ -3205,10 +3215,25 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
     s.entries.flatMap(e => store.exercises.find(x => x.id === e.exId)?.tags || []).filter(Boolean)
   )];
 
+  // A long session switches the export to a two-column grid instead of one very
+  // tall column. groupBySuperset is cheap (already called again below for the real
+  // render) and gives the true count of vertically-stacked blocks, a superset
+  // counts once, not per member. Independent of `capturing`: takeScreenshot below
+  // must decide `fitWidth` at CLICK time, while `capturing` is still false (it only
+  // flips true inside captureNodeAsPng, after the click already fired), so this
+  // can't gate on `capturing` the way `twoCol` (the render-time styling flag) does.
+  const willBeTwoCol = LB.groupBySuperset(s.entries).length >= SHOT_TWO_COL_THRESHOLD;
+  // Only while actually capturing (never in the live, single-column scrolling view).
+  const twoCol = capturing && willBeTwoCol;
+
   const takeScreenshot = () => captureNodeAsPng(captureRef.current, {
     filename: `${s.dayName}-${s.date.slice(0, 10)}.png`,
     dodgeAvatar: true,
     setCapturing,
+    // The two-column export is intentionally wider than the phone viewport (see the
+    // `twoCol` capture treatment below); without this, html2canvas only captures
+    // whatever width fits the current window instead of the full wider layout.
+    fitWidth: willBeTwoCol,
   });
 
   return (
@@ -3249,7 +3274,18 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
       />
       <Hairline />
 
-      <div ref={captureRef} style={{ padding: capturing ? '20px 22px 24px' : '14px 22px 28px', display: 'flex', flexDirection: 'column', gap: 18, background: UI.bg }}>
+      <div ref={captureRef} style={{
+        padding: capturing ? '20px 22px 24px' : '14px 22px 28px',
+        display: 'flex', flexDirection: 'column', gap: 18, background: UI.bg,
+        // Escape #root's phone-shaped max-width (index.html) so the wider two-column
+        // export isn't clipped: position:fixed is positioned against the viewport, not
+        // any ancestor, as long as no ancestor between here and #root sets a transform/
+        // filter/contain (none do). Same technique the plan-poster export uses, just
+        // applied to this shared live/capture node directly instead of a separate
+        // always-mounted overlay, so twoCol toggling never remounts (and re-refs) this
+        // node out from under an in-flight captureNodeAsPng call.
+        ...(twoCol ? { position: 'fixed', top: 0, left: '50%', transform: 'translateX(-50%)', width: SHOT_TWO_COL_WIDTH, zIndex: 500 } : {}),
+      }}>
 
         {/* Screenshot-only header */}
         {capturing && (
@@ -3721,7 +3757,10 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
           ) : (
             <Bezel>EXERCISES</Bezel>
           )}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginTop: 14 }}>
+          <div style={twoCol
+            ? { display: 'grid', gridTemplateColumns: '1fr 1fr', columnGap: 20, rowGap: 14, marginTop: 14, alignItems: 'start' }
+            : { display: 'flex', flexDirection: 'column', gap: 14, marginTop: 14 }
+          }>
             {(() => {
               const groups = LB.groupBySuperset(s.entries);
 
@@ -4007,19 +4046,26 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                 );
               };
 
-              return groups.map((g, gi) => (
-                <div key={gi}>
-                  {g.type === 'superset' ? (
-                    <div style={{ borderLeft: `2px solid ${UI.goldSoft}`, paddingLeft: 12 }}>
-                      <div className="micro" style={{ color: UI.gold, marginBottom: 10, letterSpacing: '0.12em' }}>{LB.supersetLabel(g.members.length)}</div>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                        {g.members.map(({ entry: e, idx: i }) => renderEntry(e, i))}
-                      </div>
+              return groups.map((g, gi) => {
+                const groupBody = g.type === 'superset' ? (
+                  <div style={{ borderLeft: `2px solid ${UI.goldSoft}`, paddingLeft: 12 }}>
+                    <div className="micro" style={{ color: UI.gold, marginBottom: 10, letterSpacing: '0.12em' }}>{LB.supersetLabel(g.members.length)}</div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                      {g.members.map(({ entry: e, idx: i }) => renderEntry(e, i))}
                     </div>
-                  ) : renderEntry(g.entry, g.idx)}
-                  {gi < groups.length - 1 && (capturing ? <KnurlCanvas style={{ marginTop: 14 }} /> : <Hairline style={{ marginTop: 14 }} />)}
-                </div>
-              ));
+                  </div>
+                ) : renderEntry(g.entry, g.idx);
+                // Two-column grid: each block gets its own bordered card instead of a
+                // between-block divider, a full-width knurl/hairline only makes sense
+                // spanning one column, not the row it visually sits in.
+                if (twoCol) return <Frame key={gi} padding={14} style={{ minWidth: 0 }}>{groupBody}</Frame>;
+                return (
+                  <div key={gi}>
+                    {groupBody}
+                    {gi < groups.length - 1 && (capturing ? <KnurlCanvas style={{ marginTop: 14 }} /> : <Hairline style={{ marginTop: 14 }} />)}
+                  </div>
+                );
+              });
             })()}
           </div>
           {capturing && (
