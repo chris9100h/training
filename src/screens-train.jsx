@@ -216,7 +216,7 @@ const _log = () => {};
 window._log = _log;
 // ─────────────────────────────────────────────────────────────────────────────
 
-function KgInput({ value, onChange, done, style, onActivate, kbRaw, isKbActive }) {
+function KgInput({ value, onChange, done, style, onActivate, kbRaw, isKbActive, onDisabledTap }) {
   const fmt = v => v != null ? String(v).replace('.', ',') : '';
   const [raw, setRaw] = useStateT(() => fmt(value));
   const focused = useRefT(false);
@@ -229,6 +229,7 @@ function KgInput({ value, onChange, done, style, onActivate, kbRaw, isKbActive }
         placeholder="—"
         disabled={done}
         onActivate={onActivate}
+        onDisabledTap={onDisabledTap}
         style={{ ...style, ...(isKbActive ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }}
       />
     );
@@ -259,11 +260,11 @@ function KgInput({ value, onChange, done, style, onActivate, kbRaw, isKbActive }
 // <input>, so iOS never attaches its AutoFill / QuickType accessory bar — these
 // fields take no native text entry (tapping opens the custom keyboard), so a
 // native control is never needed and only invites the autofill suggestion pill.
-function KbCell({ text, placeholder, style, disabled, onActivate }) {
+function KbCell({ text, placeholder, style, disabled, onActivate, onDisabledTap }) {
   const empty = text == null || text === '';
   return (
     <div
-      onPointerDown={e => { e.preventDefault(); e.stopPropagation(); if (!disabled) onActivate?.(); }}
+      onPointerDown={e => { e.preventDefault(); e.stopPropagation(); if (disabled) { onDisabledTap?.(); return; } onActivate?.(); }}
       style={{
         ...style,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -2478,6 +2479,16 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // beep/auto-open side effect moved to the restExpired setTimeout below.
 
   const [flashSet, setFlashSet] = useStateT(null);
+  // setIdx whose locked (done/skipped) weight or reps field was just tapped —
+  // shows a brief "tap ✓/× to unlock" hint instead of silently doing nothing,
+  // since the checkbox that actually unlocks it is easy to miss.
+  const [lockHint, setLockHint] = useStateT(null);
+  const lockHintTimerRef = useRefT(null);
+  const showLockHint = setIdx => {
+    clearTimeout(lockHintTimerRef.current);
+    setLockHint(setIdx);
+    lockHintTimerRef.current = setTimeout(() => setLockHint(null), 2200);
+  };
   const [improvedSet, setImprovedSet] = useStateT(false);
   const [regressionSet, setRegressionSet] = useStateT(false);
   const [newBestSet, setNewBestSet] = useStateT(false);
@@ -6598,6 +6609,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                         done={s.done || s.skipped}
                         style={setInputStyle(s.done || s.skipped, isCurrent)}
                         onActivate={() => activateKb(i, 'kg')}
+                        onDisabledTap={() => showLockHint(i)}
                         kbRaw={kbRaw}
                         isKbActive={kbField?.setIdx === i && kbField?.field === 'kg'}
                         onChange={kg => updateSession(sess => ({
@@ -6628,11 +6640,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
                       {!isIntensityActive && !isCheckbox && !isTime && (isUnilateral ? (
                         <>
-                          <KbCell text={kbField?.setIdx === i && kbField?.field === 'repsL' ? kbRaw : (s.repsL ?? '')} placeholder="L" disabled={s.done || s.skipped} onActivate={() => activateKb(i, 'repsL')} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), ...(kbField?.setIdx === i && kbField?.field === 'repsL' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }} />
-                          <KbCell text={kbField?.setIdx === i && kbField?.field === 'repsR' ? kbRaw : (s.repsR ?? '')} placeholder="R" disabled={s.done || s.skipped} onActivate={() => activateKb(i, 'repsR')} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), ...(kbField?.setIdx === i && kbField?.field === 'repsR' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }} />
+                          <KbCell text={kbField?.setIdx === i && kbField?.field === 'repsL' ? kbRaw : (s.repsL ?? '')} placeholder="L" disabled={s.done || s.skipped} onActivate={() => activateKb(i, 'repsL')} onDisabledTap={() => showLockHint(i)} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), ...(kbField?.setIdx === i && kbField?.field === 'repsL' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }} />
+                          <KbCell text={kbField?.setIdx === i && kbField?.field === 'repsR' ? kbRaw : (s.repsR ?? '')} placeholder="R" disabled={s.done || s.skipped} onActivate={() => activateKb(i, 'repsR')} onDisabledTap={() => showLockHint(i)} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), ...(kbField?.setIdx === i && kbField?.field === 'repsR' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }} />
                         </>
                       ) : (
-                        <KbCell text={kbField?.setIdx === i && kbField?.field === 'reps' ? kbRaw : (s.reps ?? '')} placeholder={repPlaceholder} disabled={s.done || s.skipped} onActivate={() => activateKb(i, 'reps')} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), ...(kbField?.setIdx === i && kbField?.field === 'reps' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }} />
+                        <KbCell text={kbField?.setIdx === i && kbField?.field === 'reps' ? kbRaw : (s.reps ?? '')} placeholder={repPlaceholder} disabled={s.done || s.skipped} onActivate={() => activateKb(i, 'reps')} onDisabledTap={() => showLockHint(i)} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), ...(kbField?.setIdx === i && kbField?.field === 'reps' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }} />
                       ))}
 
                       {!isIntensityActive && !isLpActive && !isWsActive && <button
@@ -6680,6 +6692,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   {amrapArmed && (
                     <div className="micro-gold" style={{ position: 'relative', zIndex: 1, textAlign: 'center', padding: '0 6px 8px', letterSpacing: '0.14em', lineHeight: 1.4 }}>
                       GO ALL OUT, as many reps as you can
+                    </div>
+                  )}
+                  {lockHint === i && (s.done || s.skipped) && (
+                    <div className="micro-gold" style={{ position: 'relative', zIndex: 1, textAlign: 'center', padding: '0 6px 8px', letterSpacing: '0.14em', lineHeight: 1.4 }}>
+                      Tap {s.skipped ? '×' : '✓'} to unlock
                     </div>
                   )}
                   </div>
