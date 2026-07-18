@@ -3245,7 +3245,11 @@ function mergeSessions(freshSessions, curSessions, inProgressId, baseSessions = 
     return {
       ...s,
       currentExIdx: mem.currentExIdx ?? 0,
-      cyclePos: mem.cyclePos ?? null,
+      // Prefer the cached value (this device's own, always correct at write
+      // time), but fall back to the server's rather than jumping straight to
+      // null: a cache from before cyclePos was persisted (migration 0176) has
+      // no cyclePos of its own, and the server may since have a real one.
+      cyclePos: mem.cyclePos ?? s.cyclePos ?? null,
       // for the active session, local entries/restStart/restDuration are authoritative
       ...(isActive ? { entries: mem.entries, restStart: mem.restStart ?? null, restDuration: mem.restDuration ?? null } : {}),
       ...(keepCachedEntries ? { entries: mem.entries } : {}),
