@@ -165,6 +165,130 @@ const GLUCOSE_CTX_LABELS = { fasted: 'Fasted', fed: 'Fed', other: 'Other' };
 // fasting normal range in mmol/L
 const GLUCOSE_REF_LOW = 3.9, GLUCOSE_REF_HIGH = 5.6, GLUCOSE_REF_FED = 7.8;
 
+// ─── body temperature helpers ───────────────────────────────────────────────
+// Stored always in Celsius; display unit ('c'|'f') is a per-user setting, same
+// pattern as glucose's mmol/mgdl. Unlike glucose's factor, C→F has an additive
+// offset, not a pure ratio, so this is a small conversion pair, not a constant.
+
+function tempDisplay(c, unit) {
+  if (c == null) return null;
+  const v = unit === 'f' ? c * 9 / 5 + 32 : c;
+  return Math.round(v * 10) / 10;
+}
+function tempFromInput(raw, unit) {
+  const n = parseFloat(String(raw).replace(',', '.'));
+  if (!isFinite(n)) return null;
+  const c = unit === 'f' ? (n - 32) * 5 / 9 : n;
+  return Math.round(c * 100) / 100;
+}
+// Edit-form prefill: show the stored reading in the display unit but WITHOUT the
+// display rounding, so re-saving an untouched value doesn't clobber the raw °C.
+function tempEditValue(c, unit) {
+  if (c == null) return '';
+  return String(unit === 'f' ? Math.round((c * 9 / 5 + 32) * 10) / 10 : c);
+}
+const tempUnitLabel = unit => unit === 'f' ? '°F' : '°C';
+
+// Scatter chart: one point per reading, connected by a thin trend line (unlike
+// glucose, temperature has no fasted/fed context split, so its reading-to-
+// reading trend is itself the meaningful signal). No reference band: a
+// "normal" body temperature varies by measurement method and time of day, so a
+// fixed band here would overclaim precision a home reading can't guarantee.
+function TempScatterChart({ readings, from, to, unit }) {
+  const pts = (readings || []).filter(r => r.valueC != null && r.date >= from && r.date <= to)
+    .sort((a, b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time));
+  if (!pts.length) return <HealthChartEmpty />;
+  const W = 320, padL = 34, padR = 12, padTop = 10, padBottom = 20, plotH = 96;
+  const H = padTop + plotH + padBottom, plotW = W - padL - padR;
+
+  const dispVals = pts.map(p => tempDisplay(p.valueC, unit));
+  const dom = UI.chartDomain(Math.min(...dispVals), Math.max(...dispVals));
+  const totalDays = Math.max(1, healthDayDiff(from, to));
+  const xOf = d => padL + (healthDayDiff(from, d) / totalDays) * plotW;
+  const yOf = v => padTop + (1 - (v - dom.min) / dom.range) * plotH;
+  const dec = dom.range >= 4 ? 0 : 1;
+  const gridVals = dom.gridVals || Array.from({ length: 4 }, (_, i) => dom.min + (dom.range / 3) * i);
+  const unitLabel = tempUnitLabel(unit);
+  const hoverPoints = pts.map(p => {
+    const disp = tempDisplay(p.valueC, unit);
+    return { x: xOf(p.date), y: yOf(disp), date: p.date, rows: [{ value: `${disp}${unitLabel}` }], sub: p.time };
+  });
+
+  return (
+    <ChartHover W={W} H={H} points={hoverPoints}>
+    <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display: 'block', overflow: 'visible' }}>
+      {gridVals.map((v, i) => (
+        <g key={i}>
+          {i > 0 && <line x1={padL} y1={yOf(v).toFixed(1)} x2={W - padR} y2={yOf(v).toFixed(1)} stroke={UI.hair} strokeWidth="0.5" strokeDasharray="3 3" />}
+          <text x={padL - 5} y={(yOf(v) + 3).toFixed(1)} textAnchor="end" fontSize="8" fontFamily={UI.fontNum} fill={UI.inkFaint}>{Number(v.toFixed(dec))}</text>
+        </g>
+      ))}
+      <line x1={padL} y1={padTop + plotH} x2={W - padR} y2={padTop + plotH} stroke={UI.hair} strokeWidth="0.5" />
+      {pts.length >= 2 && (
+        <polyline points={pts.map(p => `${xOf(p.date).toFixed(1)},${yOf(tempDisplay(p.valueC, unit)).toFixed(1)}`).join(' ')} fill="none" stroke="var(--accent)" strokeWidth="1.5" opacity="0.5" />
+      )}
+      {pts.map((p, i) => (
+        <circle key={i} cx={xOf(p.date).toFixed(1)} cy={yOf(tempDisplay(p.valueC, unit)).toFixed(1)} r={3} fill="var(--accent)" opacity={0.85} />
+      ))}
+    </svg>
+    </ChartHover>
+  );
+}
+
+// ─── blood pressure helpers ─────────────────────────────────────────────────
+// mmHg is a universal unit, so unlike glucose/temperature there is no display-
+// unit setting or conversion pair here.
+
+// Two-series scatter (systolic + diastolic dots on the same y-axis, mmHg),
+// joined by a thin tie-line per reading. No reference band: unlike glucose's
+// single well-established fasting range, blood pressure classification is
+// multi-tier and context-dependent (rest, time of day, measurement position),
+// better left to the user's own doctor than baked into a fixed color band here.
+function BpScatterChart({ readings, from, to }) {
+  const pts = (readings || []).filter(r => r.systolic != null && r.diastolic != null && r.date >= from && r.date <= to)
+    .sort((a, b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time));
+  if (!pts.length) return <HealthChartEmpty />;
+  const W = 320, padL = 34, padR = 12, padTop = 10, padBottom = 20, plotH = 96;
+  const H = padTop + plotH + padBottom, plotW = W - padL - padR;
+
+  const allVals = pts.flatMap(p => [p.systolic, p.diastolic]);
+  const dom = UI.chartDomain(Math.min(...allVals), Math.max(...allVals));
+  const totalDays = Math.max(1, healthDayDiff(from, to));
+  const xOf = d => padL + (healthDayDiff(from, d) / totalDays) * plotW;
+  const yOf = v => padTop + (1 - (v - dom.min) / dom.range) * plotH;
+  const gridVals = dom.gridVals || Array.from({ length: 4 }, (_, i) => dom.min + (dom.range / 3) * i);
+  const SYS_COLOR = 'var(--accent)', DIA_COLOR = '#4a9fe0';
+  const hoverPoints = pts.map(p => ({
+    x: xOf(p.date), y: yOf(p.systolic), date: p.date,
+    rows: [
+      { label: 'SYS', value: `${p.systolic} mmHg`, color: SYS_COLOR },
+      { label: 'DIA', value: `${p.diastolic} mmHg`, color: DIA_COLOR },
+    ],
+    sub: p.time,
+  }));
+
+  return (
+    <ChartHover W={W} H={H} points={hoverPoints} mode="xy">
+    <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display: 'block', overflow: 'visible' }}>
+      {gridVals.map((v, i) => (
+        <g key={i}>
+          {i > 0 && <line x1={padL} y1={yOf(v).toFixed(1)} x2={W - padR} y2={yOf(v).toFixed(1)} stroke={UI.hair} strokeWidth="0.5" strokeDasharray="3 3" />}
+          <text x={padL - 5} y={(yOf(v) + 3).toFixed(1)} textAnchor="end" fontSize="8" fontFamily={UI.fontNum} fill={UI.inkFaint}>{Math.round(v)}</text>
+        </g>
+      ))}
+      <line x1={padL} y1={padTop + plotH} x2={W - padR} y2={padTop + plotH} stroke={UI.hair} strokeWidth="0.5" />
+      {pts.map((p, i) => (
+        <React.Fragment key={i}>
+          <line x1={xOf(p.date).toFixed(1)} y1={yOf(p.systolic).toFixed(1)} x2={xOf(p.date).toFixed(1)} y2={yOf(p.diastolic).toFixed(1)} stroke={UI.hair} strokeWidth="1" />
+          <circle cx={xOf(p.date).toFixed(1)} cy={yOf(p.systolic).toFixed(1)} r={3} fill={SYS_COLOR} opacity={0.85} />
+          <circle cx={xOf(p.date).toFixed(1)} cy={yOf(p.diastolic).toFixed(1)} r={3} fill={DIA_COLOR} opacity={0.85} />
+        </React.Fragment>
+      ))}
+    </svg>
+    </ChartHover>
+  );
+}
+
 // Scatter chart: one point per reading, coloured by context, with a reference
 // band for the fasting normal range (3.9–5.6 mmol/L).
 function GlucoseScatterChart({ readings, from, to, unit }) {
@@ -515,7 +639,7 @@ function MacroLegend() {
 
 // ─── Daily log sheet ──────────────────────────────────────────────────────────
 
-function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCoachingSchema, onSetStatus, userId, glucoseLogs, glucoseUnit }) {
+function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCoachingSchema, onSetStatus, userId, glucoseLogs, glucoseUnit, bloodPressureLogs, bodyTempLogs, tempUnit }) {
   const existing = useMemoH(() => (store.dailyLogs || []).find(l => l.date === date), [store.dailyLogs, date]);
   const todayISO = LB.todayISO();
   const dayStatusPeriod = useMemoH(() => {
@@ -567,9 +691,104 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
   const [confirmDeleteGlId, setConfirmDeleteGlId] = useStateH(null);
   const setGl = (k, v) => setGlForm(f => ({ ...f, [k]: v }));
 
+  // ── Blood pressure readings for this day ──
+  const bpForDay = useMemoH(
+    () => (bloodPressureLogs || []).filter(l => l.date === date).sort((a, b) => a.time.localeCompare(b.time)),
+    [bloodPressureLogs, date]
+  );
+  const emptyBp = { systolic: '', diastolic: '', time: '', note: '' };
+  const [addingBp, setAddingBp] = useStateH(false);
+  const [bpForm, setBpForm] = useStateH(emptyBp);
+  const [editingBpId, setEditingBpId] = useStateH(null);
+  const [confirmDeleteBpId, setConfirmDeleteBpId] = useStateH(null);
+  const setBp = (k, v) => setBpForm(f => ({ ...f, [k]: v }));
+
+  // ── Body temperature readings for this day ──
+  const tUnit = tempUnit || 'c';
+  const tempForDay = useMemoH(
+    () => (bodyTempLogs || []).filter(l => l.date === date).sort((a, b) => a.time.localeCompare(b.time)),
+    [bodyTempLogs, date]
+  );
+  const emptyTemp = { value: '', time: '', note: '' };
+  const [addingTemp, setAddingTemp] = useStateH(false);
+  const [tempForm, setTempForm] = useStateH(emptyTemp);
+  const [editingTempId, setEditingTempId] = useStateH(null);
+  const [confirmDeleteTempId, setConfirmDeleteTempId] = useStateH(null);
+  const setTemp = (k, v) => setTempForm(f => ({ ...f, [k]: v }));
+
   useEffectH(() => {
-    if (!open) { setAddingGlucose(false); setGlForm(emptyGl); setEditingGlucoseId(null); setConfirmDeleteGlId(null); }
+    if (!open) {
+      setAddingGlucose(false); setGlForm(emptyGl); setEditingGlucoseId(null); setConfirmDeleteGlId(null);
+      setAddingBp(false); setBpForm(emptyBp); setEditingBpId(null); setConfirmDeleteBpId(null);
+      setAddingTemp(false); setTempForm(emptyTemp); setEditingTempId(null); setConfirmDeleteTempId(null);
+    }
   }, [open]);
+
+  // Normalize a free-text time to zero-padded HH:MM (so entries sort
+  // correctly) and fall back to now if it's blank or invalid ("9", "25:99").
+  const normEntryTime = (s) => {
+    const m = /^(\d{1,2}):(\d{2})$/.exec((s || '').trim());
+    if (!m) return null;
+    const h = +m[1], min = +m[2];
+    if (h > 23 || min > 59) return null;
+    return String(h).padStart(2, '0') + ':' + String(min).padStart(2, '0');
+  };
+
+  const saveBp = async () => {
+    const sys = parseInt(bpForm.systolic, 10), dia = parseInt(bpForm.diastolic, 10);
+    if (!isFinite(sys) || sys <= 0 || !isFinite(dia) || dia <= 0) return;
+    const time = normEntryTime(bpForm.time) || new Date().toTimeString().slice(0, 5);
+    if (editingBpId) {
+      const origEntry = (store.bloodPressureLogs || []).find(l => l.id === editingBpId);
+      const updated = { ...origEntry, time, systolic: sys, diastolic: dia, note: bpForm.note.trim() || null };
+      setStore(s => ({ ...s, bloodPressureLogs: (s.bloodPressureLogs || []).map(l => l.id === editingBpId ? updated : l) }));
+      setEditingBpId(null); setAddingBp(false); setBpForm(emptyBp);
+      const { error } = await LB.supabase.from('zane_blood_pressure_logs').update({ time, systolic: sys, diastolic: dia, note: updated.note }).eq('id', editingBpId).eq('user_id', userId);
+      if (error && origEntry) setStore(s => ({ ...s, bloodPressureLogs: (s.bloodPressureLogs || []).map(l => l.id === editingBpId ? origEntry : l) }));
+    } else {
+      const entry = { id: LB.uid(), date, time, systolic: sys, diastolic: dia, note: bpForm.note.trim() || null, createdAt: new Date().toISOString() };
+      setStore(s => ({ ...s, bloodPressureLogs: [entry, ...(s.bloodPressureLogs || [])] }));
+      setAddingBp(false); setBpForm(emptyBp);
+      const { error } = await LB.supabase.from('zane_blood_pressure_logs').insert({ id: entry.id, user_id: userId, date: entry.date, time: entry.time, systolic: entry.systolic, diastolic: entry.diastolic, note: entry.note });
+      if (error) setStore(s => ({ ...s, bloodPressureLogs: (s.bloodPressureLogs || []).filter(l => l.id !== entry.id) }));
+    }
+  };
+
+  const deleteBp = async (id) => {
+    setConfirmDeleteBpId(null);
+    const orig = (store.bloodPressureLogs || []).find(l => l.id === id);
+    setStore(s => ({ ...s, bloodPressureLogs: (s.bloodPressureLogs || []).filter(l => l.id !== id) }));
+    const { error } = await LB.supabase.from('zane_blood_pressure_logs').delete().eq('id', id).eq('user_id', userId);
+    if (error && orig) setStore(s => ({ ...s, bloodPressureLogs: [orig, ...(s.bloodPressureLogs || [])] }));
+  };
+
+  const saveTemp = async () => {
+    const c = tempFromInput(tempForm.value, tUnit);
+    if (c == null) return;
+    const time = normEntryTime(tempForm.time) || new Date().toTimeString().slice(0, 5);
+    if (editingTempId) {
+      const origEntry = (store.bodyTempLogs || []).find(l => l.id === editingTempId);
+      const updated = { ...origEntry, time, valueC: c, note: tempForm.note.trim() || null };
+      setStore(s => ({ ...s, bodyTempLogs: (s.bodyTempLogs || []).map(l => l.id === editingTempId ? updated : l) }));
+      setEditingTempId(null); setAddingTemp(false); setTempForm(emptyTemp);
+      const { error } = await LB.supabase.from('zane_body_temp_logs').update({ time, value_c: c, note: updated.note }).eq('id', editingTempId).eq('user_id', userId);
+      if (error && origEntry) setStore(s => ({ ...s, bodyTempLogs: (s.bodyTempLogs || []).map(l => l.id === editingTempId ? origEntry : l) }));
+    } else {
+      const entry = { id: LB.uid(), date, time, valueC: c, note: tempForm.note.trim() || null, createdAt: new Date().toISOString() };
+      setStore(s => ({ ...s, bodyTempLogs: [entry, ...(s.bodyTempLogs || [])] }));
+      setAddingTemp(false); setTempForm(emptyTemp);
+      const { error } = await LB.supabase.from('zane_body_temp_logs').insert({ id: entry.id, user_id: userId, date: entry.date, time: entry.time, value_c: entry.valueC, note: entry.note });
+      if (error) setStore(s => ({ ...s, bodyTempLogs: (s.bodyTempLogs || []).filter(l => l.id !== entry.id) }));
+    }
+  };
+
+  const deleteTemp = async (id) => {
+    setConfirmDeleteTempId(null);
+    const orig = (store.bodyTempLogs || []).find(l => l.id === id);
+    setStore(s => ({ ...s, bodyTempLogs: (s.bodyTempLogs || []).filter(l => l.id !== id) }));
+    const { error } = await LB.supabase.from('zane_body_temp_logs').delete().eq('id', id).eq('user_id', userId);
+    if (error && orig) setStore(s => ({ ...s, bodyTempLogs: [orig, ...(s.bodyTempLogs || [])] }));
+  };
 
   const saveGlucose = async () => {
     const mmol = glucoseFromInput(glForm.value, glUnit);
@@ -943,6 +1162,152 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
           </div>
         ) : (
           <button onClick={() => { setAddingGlucose(true); setEditingGlucoseId(null); }} style={{
+            width: '100%', padding: '9px', background: UI.bgInset, border: `0.5px dashed ${UI.hairStrong}`, borderRadius: 6,
+            color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 12, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+          }}>+ Add reading</button>
+        )}
+      </div>
+
+      {/* ── Blood pressure ── */}
+      <div style={{ marginTop: 8, marginBottom: 18 }}>
+        <div style={{ display: 'flex', alignItems: 'center', marginBottom: 8 }}>
+          <span className="micro" style={{ color: UI.inkFaint, flex: 1 }}>BLOOD PRESSURE</span>
+          <span style={{ fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontUi }}>mmHg</span>
+        </div>
+        {bpForDay.map(b => {
+          const isConfirm = confirmDeleteBpId === b.id;
+          return (
+            <div key={b.id} style={{ background: UI.bgInset, borderRadius: 6, marginBottom: 6, border: `0.5px solid ${UI.hairStrong}`, overflow: 'hidden' }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '8px 10px' }}>
+                <span style={{ fontFamily: UI.fontUi, fontSize: 9, color: UI.inkFaint, minWidth: 32, paddingTop: 1 }}>{b.time}</span>
+                <div style={{ flex: 1 }}>
+                  <span className="num" style={{ fontSize: 15, color: UI.ink }}>{b.systolic}/{b.diastolic}</span>
+                  {b.note && <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>{b.note}</div>}
+                </div>
+                <button onClick={() => { setEditingBpId(b.id); setAddingBp(true); setConfirmDeleteBpId(null); setBpForm({ systolic: String(b.systolic), diastolic: String(b.diastolic), time: b.time, note: b.note || '' }); }} style={{ background: 'none', border: 'none', color: UI.inkGhost, fontSize: 11, cursor: 'pointer', padding: '0 4px', lineHeight: 1 }}>
+                  <i className="fa-solid fa-pencil" />
+                </button>
+                <button onClick={() => setConfirmDeleteBpId(isConfirm ? null : b.id)} style={{ background: 'none', border: 'none', color: UI.inkGhost, fontSize: 14, cursor: 'pointer', padding: '0 2px', lineHeight: 1 }}>×</button>
+              </div>
+              {isConfirm && (
+                <div style={{ display: 'flex', gap: 0, borderTop: `0.5px solid ${UI.hairStrong}` }}>
+                  <button onClick={() => setConfirmDeleteBpId(null)} style={{ flex: 1, padding: '7px', background: 'none', border: 'none', cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 11, color: UI.inkSoft }}>Cancel</button>
+                  <button onClick={() => deleteBp(b.id)} style={{ flex: 1, padding: '7px', background: 'none', border: 'none', borderLeft: `0.5px solid ${UI.hairStrong}`, cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700, color: UI.danger }}>Delete</button>
+                </div>
+              )}
+            </div>
+          );
+        })}
+        {addingBp ? (
+          <div style={{ background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '12px 10px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {(() => {
+              const bpInputSt = { background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '7px 10px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, outline: 'none', width: '100%', boxSizing: 'border-box' };
+              return (
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={labelStyle}>Systolic</div>
+                    <input type="text" inputMode="numeric" placeholder="—" value={bpForm.systolic} onChange={e => setBp('systolic', e.target.value.replace(/[^0-9]/g, ''))} style={{ ...bpInputSt, fontFamily: UI.fontNum }} autoFocus />
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={labelStyle}>Diastolic</div>
+                    <input type="text" inputMode="numeric" placeholder="—" value={bpForm.diastolic} onChange={e => setBp('diastolic', e.target.value.replace(/[^0-9]/g, ''))} style={{ ...bpInputSt, fontFamily: UI.fontNum }} />
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={labelStyle}>Time</div>
+                    <input type="text" inputMode="numeric" placeholder="HH:MM" maxLength={5}
+                      value={bpForm.time}
+                      onChange={e => {
+                        let v = e.target.value.replace(/[^0-9:]/g, '');
+                        if (v.length === 2 && !v.includes(':') && bpForm.time.length < 2) v += ':';
+                        setBp('time', v);
+                      }}
+                      style={bpInputSt} />
+                  </div>
+                </div>
+              );
+            })()}
+            <div>
+              <div style={labelStyle}>Note (optional)</div>
+              <input type="text" placeholder="…" value={bpForm.note} onChange={e => setBp('note', e.target.value)} style={inputStyle} />
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Btn kind="ghost" onClick={() => { setAddingBp(false); setBpForm(emptyBp); setEditingBpId(null); }} style={{ flex: 1 }}>Cancel</Btn>
+              <Btn onClick={saveBp} disabled={!bpForm.systolic || !bpForm.diastolic} style={{ flex: 2 }}>{editingBpId ? 'Update' : 'Add'}</Btn>
+            </div>
+          </div>
+        ) : (
+          <button onClick={() => { setAddingBp(true); setEditingBpId(null); }} style={{
+            width: '100%', padding: '9px', background: UI.bgInset, border: `0.5px dashed ${UI.hairStrong}`, borderRadius: 6,
+            color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 12, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+          }}>+ Add reading</button>
+        )}
+      </div>
+
+      {/* ── Body temperature ── */}
+      <div style={{ marginTop: 8, marginBottom: 18 }}>
+        <div style={{ display: 'flex', alignItems: 'center', marginBottom: 8 }}>
+          <span className="micro" style={{ color: UI.inkFaint, flex: 1 }}>BODY TEMPERATURE</span>
+          <span style={{ fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontUi }}>{tempUnitLabel(tUnit)}</span>
+        </div>
+        {tempForDay.map(t => {
+          const isConfirm = confirmDeleteTempId === t.id;
+          return (
+            <div key={t.id} style={{ background: UI.bgInset, borderRadius: 6, marginBottom: 6, border: `0.5px solid ${UI.hairStrong}`, overflow: 'hidden' }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '8px 10px' }}>
+                <span style={{ fontFamily: UI.fontUi, fontSize: 9, color: UI.inkFaint, minWidth: 32, paddingTop: 1 }}>{t.time}</span>
+                <div style={{ flex: 1 }}>
+                  <span className="num" style={{ fontSize: 15, color: UI.ink }}>{tempDisplay(t.valueC, tUnit)}</span>
+                  {t.note && <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>{t.note}</div>}
+                </div>
+                <button onClick={() => { setEditingTempId(t.id); setAddingTemp(true); setConfirmDeleteTempId(null); setTempForm({ value: tempEditValue(t.valueC, tUnit), time: t.time, note: t.note || '' }); }} style={{ background: 'none', border: 'none', color: UI.inkGhost, fontSize: 11, cursor: 'pointer', padding: '0 4px', lineHeight: 1 }}>
+                  <i className="fa-solid fa-pencil" />
+                </button>
+                <button onClick={() => setConfirmDeleteTempId(isConfirm ? null : t.id)} style={{ background: 'none', border: 'none', color: UI.inkGhost, fontSize: 14, cursor: 'pointer', padding: '0 2px', lineHeight: 1 }}>×</button>
+              </div>
+              {isConfirm && (
+                <div style={{ display: 'flex', gap: 0, borderTop: `0.5px solid ${UI.hairStrong}` }}>
+                  <button onClick={() => setConfirmDeleteTempId(null)} style={{ flex: 1, padding: '7px', background: 'none', border: 'none', cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 11, color: UI.inkSoft }}>Cancel</button>
+                  <button onClick={() => deleteTemp(t.id)} style={{ flex: 1, padding: '7px', background: 'none', border: 'none', borderLeft: `0.5px solid ${UI.hairStrong}`, cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700, color: UI.danger }}>Delete</button>
+                </div>
+              )}
+            </div>
+          );
+        })}
+        {addingTemp ? (
+          <div style={{ background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '12px 10px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {(() => {
+              const tInputSt = { background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '7px 10px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, outline: 'none', width: '100%', boxSizing: 'border-box' };
+              return (
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={labelStyle}>Value ({tempUnitLabel(tUnit)})</div>
+                    <input type="text" inputMode="decimal" placeholder="—" value={tempForm.value} onChange={e => setTemp('value', e.target.value)} style={{ ...tInputSt, fontFamily: UI.fontNum }} autoFocus />
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={labelStyle}>Time</div>
+                    <input type="text" inputMode="numeric" placeholder="HH:MM" maxLength={5}
+                      value={tempForm.time}
+                      onChange={e => {
+                        let v = e.target.value.replace(/[^0-9:]/g, '');
+                        if (v.length === 2 && !v.includes(':') && tempForm.time.length < 2) v += ':';
+                        setTemp('time', v);
+                      }}
+                      style={tInputSt} />
+                  </div>
+                </div>
+              );
+            })()}
+            <div>
+              <div style={labelStyle}>Note (optional)</div>
+              <input type="text" placeholder="…" value={tempForm.note} onChange={e => setTemp('note', e.target.value)} style={inputStyle} />
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Btn kind="ghost" onClick={() => { setAddingTemp(false); setTempForm(emptyTemp); setEditingTempId(null); }} style={{ flex: 1 }}>Cancel</Btn>
+              <Btn onClick={saveTemp} disabled={!tempForm.value} style={{ flex: 2 }}>{editingTempId ? 'Update' : 'Add'}</Btn>
+            </div>
+          </div>
+        ) : (
+          <button onClick={() => { setAddingTemp(true); setEditingTempId(null); }} style={{
             width: '100%', padding: '9px', background: UI.bgInset, border: `0.5px dashed ${UI.hairStrong}`, borderRadius: 6,
             color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 12, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
           }}>+ Add reading</button>
@@ -1524,6 +1889,118 @@ function GlucoseCard({ glucoseLogs, unit, tf, setTf, dragHandle }) {
   );
 }
 
+// ─── Blood pressure card ────────────────────────────────────────────────────
+
+function BloodPressureCard({ bpLogs, tf, setTf, dragHandle }) {
+  const tfDays = id => (HEALTH_TFS.find(t => t.id === id) || HEALTH_TFS[0]).days;
+  const { start, end } = healthWindow(tfDays(tf));
+
+  const inWindow = useMemoH(
+    () => (bpLogs || []).filter(l => l.date >= start && l.date <= end),
+    [bpLogs, tf]
+  );
+
+  const latest = inWindow.length
+    ? inWindow.reduce((a, b) => (a.date > b.date || (a.date === b.date && a.time > b.time)) ? a : b)
+    : null;
+
+  const sortedReadings = useMemoH(() =>
+    [...inWindow].sort((a, b) => b.date.localeCompare(a.date) || b.time.localeCompare(a.time)).slice(0, 30),
+    [inWindow]
+  );
+
+  return (
+    <HealthChartCard title="Blood Pressure" icon="fa-heart-pulse" tf={tf} setTf={setTf}
+      headline={latest ? `${latest.systolic}/${latest.diastolic}` : null} sub={latest ? 'mmHg' : null} dragHandle={dragHandle}>
+      {!inWindow.length ? (
+        <HealthChartEmpty label="No blood pressure readings in this range" />
+      ) : (
+        <>
+          <BpScatterChart readings={inWindow} from={start} to={end} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 6 }}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--accent)', display: 'inline-block' }} />
+              <span style={{ fontSize: 9, fontFamily: UI.fontUi, color: UI.inkFaint }}>Systolic</span>
+            </span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#4a9fe0', display: 'inline-block' }} />
+              <span style={{ fontSize: 9, fontFamily: UI.fontUi, color: UI.inkFaint }}>Diastolic</span>
+            </span>
+          </div>
+          {sortedReadings.length > 0 && (
+            <>
+              <div style={{ height: '0.5px', background: UI.hair, margin: '8px 0' }} />
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {sortedReadings.map(n => (
+                  <div key={n.id} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 9, fontFamily: UI.fontUi, color: UI.inkGhost }}>{healthFmtDate(n.date, { day: 'numeric', month: 'short' })} · {n.time}</div>
+                      {n.note && <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.4, marginTop: 1 }}>{n.note}</div>}
+                    </div>
+                    <span className="num" style={{ flexShrink: 0, fontSize: 11, color: UI.inkFaint }}>{n.systolic}/{n.diastolic}</span>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </>
+      )}
+    </HealthChartCard>
+  );
+}
+
+// ─── Body temperature card ──────────────────────────────────────────────────
+
+function BodyTempCard({ tempLogs, unit, tf, setTf, dragHandle }) {
+  const tfDays = id => (HEALTH_TFS.find(t => t.id === id) || HEALTH_TFS[0]).days;
+  const { start, end } = healthWindow(tfDays(tf));
+  const unitLabel = tempUnitLabel(unit);
+
+  const inWindow = useMemoH(
+    () => (tempLogs || []).filter(l => l.date >= start && l.date <= end),
+    [tempLogs, tf]
+  );
+
+  const latest = inWindow.length
+    ? inWindow.reduce((a, b) => (a.date > b.date || (a.date === b.date && a.time > b.time)) ? a : b)
+    : null;
+  const latestDisp = latest ? tempDisplay(latest.valueC, unit) : null;
+
+  const sortedReadings = useMemoH(() =>
+    [...inWindow].sort((a, b) => b.date.localeCompare(a.date) || b.time.localeCompare(a.time)).slice(0, 30),
+    [inWindow]
+  );
+
+  return (
+    <HealthChartCard title="Body Temperature" icon="fa-temperature-half" tf={tf} setTf={setTf}
+      headline={latestDisp != null ? String(latestDisp) : null} sub={latestDisp != null ? unitLabel : null} dragHandle={dragHandle}>
+      {!inWindow.length ? (
+        <HealthChartEmpty label="No temperature readings in this range" />
+      ) : (
+        <>
+          <TempScatterChart readings={inWindow} from={start} to={end} unit={unit} />
+          {sortedReadings.length > 0 && (
+            <>
+              <div style={{ height: '0.5px', background: UI.hair, margin: '8px 0' }} />
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {sortedReadings.map(n => (
+                  <div key={n.id} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 9, fontFamily: UI.fontUi, color: UI.inkGhost }}>{healthFmtDate(n.date, { day: 'numeric', month: 'short' })} · {n.time}</div>
+                      {n.note && <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.4, marginTop: 1 }}>{n.note}</div>}
+                    </div>
+                    <span className="num" style={{ flexShrink: 0, fontSize: 11, color: UI.inkFaint }}>{tempDisplay(n.valueC, unit)}{unitLabel}</span>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </>
+      )}
+    </HealthChartCard>
+  );
+}
+
 // ─── HealthScreen ─────────────────────────────────────────────────────────────
 
 function HealthScreen({ store, setStore, go, userId }) {
@@ -1767,7 +2244,7 @@ function HealthScreen({ store, setStore, go, userId }) {
   // Reorderable card order, persisted per device. Missing ids (e.g. after a new
   // card ships) are inserted at their default position, not appended at the end.
   const CARD_ORDER_KEY = 'logbook-health-card-order';
-  const DEFAULT_CARD_ORDER = ['week', 'today', 'macros', 'adherence', 'weight', 'cardio', 'steps', 'glucose'];
+  const DEFAULT_CARD_ORDER = ['week', 'today', 'macros', 'adherence', 'weight', 'cardio', 'steps', 'glucose', 'bloodPressure', 'bodyTemp'];
   const [cardOrder, setCardOrder] = useStateH(() => {
     let saved = [];
     try { saved = JSON.parse(localStorage.getItem(CARD_ORDER_KEY) || '[]'); } catch (_) {}
@@ -1775,10 +2252,14 @@ function HealthScreen({ store, setStore, go, userId }) {
     DEFAULT_CARD_ORDER.forEach((id, i) => { if (!result.includes(id)) result.splice(Math.min(i, result.length), 0, id); });
     return result;
   });
+  // Cross-device preference (settings), separate from the per-device drag
+  // order above: which cards the user never wants to see, regardless of data.
+  const hiddenCards = new Set(store.settings?.hiddenHealthCards || []);
+  const isCardVisible = id => cardEls[id] && !hiddenCards.has(id);
   const reorderCards = (from, to) => {
     if (from === to) return;
     setCardOrder(prev => {
-      const visible = prev.filter(id => cardEls[id]);
+      const visible = prev.filter(isCardVisible);
       const moved = [...visible];
       const [m] = moved.splice(from, 1);
       moved.splice(to, 0, m);
@@ -1926,6 +2407,12 @@ function HealthScreen({ store, setStore, go, userId }) {
     glucose: (store.glucoseLogs || []).length > 0
       ? <GlucoseCard glucoseLogs={store.glucoseLogs} unit={store.settings?.glucoseUnit ?? 'mmol'} tf={tf} setTf={setTf} dragHandle={handle} />
       : null,
+    bloodPressure: (store.bloodPressureLogs || []).length > 0
+      ? <BloodPressureCard bpLogs={store.bloodPressureLogs} tf={tf} setTf={setTf} dragHandle={handle} />
+      : null,
+    bodyTemp: (store.bodyTempLogs || []).length > 0
+      ? <BodyTempCard tempLogs={store.bodyTempLogs} unit={store.settings?.tempUnit ?? 'c'} tf={tf} setTf={setTf} dragHandle={handle} />
+      : null,
   };
 
   return (
@@ -1979,14 +2466,14 @@ function HealthScreen({ store, setStore, go, userId }) {
            drag the grip to reorder; order persists per device. */}
         <div style={{ padding: capturing ? '8px 16px 16px' : '8px 16px calc(env(safe-area-inset-bottom, 0px) + 100px)', maxWidth: 680, width: '100%', boxSizing: 'border-box', margin: '0 auto' }}>
           <ReorderList onReorder={reorderCards} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            {cardOrder.map(id => cardEls[id] ? (
+            {cardOrder.map(id => isCardVisible(id) ? (
               <div key={id} data-reorder-item="true" data-tour={`health-card-${id}`}>{cardEls[id]}</div>
             ) : null)}
           </ReorderList>
         </div>
       </div>
 
-      <DailyLogSheet open={logOpen} onClose={() => setLogOpen(false)} store={store} setStore={setStore} date={selectedDate} targets={effectiveTargets} activeCoachingSchema={activeCoachingSchema} onSetStatus={handleSetStatus} userId={userId} glucoseLogs={store.glucoseLogs || []} glucoseUnit={store.settings?.glucoseUnit ?? 'mmol'} />
+      <DailyLogSheet open={logOpen} onClose={() => setLogOpen(false)} store={store} setStore={setStore} date={selectedDate} targets={effectiveTargets} activeCoachingSchema={activeCoachingSchema} onSetStatus={handleSetStatus} userId={userId} glucoseLogs={store.glucoseLogs || []} glucoseUnit={store.settings?.glucoseUnit ?? 'mmol'} bloodPressureLogs={store.bloodPressureLogs || []} bodyTempLogs={store.bodyTempLogs || []} tempUnit={store.settings?.tempUnit ?? 'c'} />
       <MacroTargetSheet open={targetOpen} onClose={() => setTargetOpen(false)} store={store} setStore={setStore} coachingMacros={coachingMacros} />
       <ExportSheet open={exportOpen} onClose={() => setExportOpen(false)} store={store} />
     </Screen>
@@ -2000,13 +2487,16 @@ function HealthClientLogs({ clientStore }) {
   const cardioLogs = clientStore?.cardioLogs || [];
   const glucoseLogs = clientStore?.glucoseLogs || [];
   const glucoseUnit = clientStore?.settings?.glucoseUnit ?? 'mmol';
+  const bloodPressureLogs = clientStore?.bloodPressureLogs || [];
+  const bodyTempLogs = clientStore?.bodyTempLogs || [];
+  const clientTempUnit = clientStore?.settings?.tempUnit ?? 'c';
   // The coach may run a different weight unit than the client; always label the
   // client's weights in the client's own unit (no conversion, display-only).
   const clientUnit = clientStore?.settings?.unit === 'lbs' ? 'lbs' : 'kg';
   const [tf, setTf] = useStateH('1W');
 
   const COACH_ORDER_KEY = 'logbook-coach-health-card-order';
-  const DEFAULT_COACH_ORDER = ['week', 'today', 'weight', 'steps', 'macros', 'cardio', 'adherence', 'glucose', 'weekly'];
+  const DEFAULT_COACH_ORDER = ['week', 'today', 'weight', 'steps', 'macros', 'cardio', 'adherence', 'glucose', 'bloodPressure', 'bodyTemp', 'weekly'];
   const [cardOrder, setCardOrder] = useStateH(() => {
     let saved = [];
     try { saved = JSON.parse(localStorage.getItem(COACH_ORDER_KEY) || '[]'); } catch (_) {}
@@ -2021,7 +2511,7 @@ function HealthClientLogs({ clientStore }) {
       // rendered, not the full order array — glucose/weekly are routinely
       // absent for new coaching clients, so splicing prev directly (as this
       // used to) reordered the wrong card whenever any card was hidden.
-      const visible = prev.filter(id => cardEls[id]);
+      const visible = prev.filter(isCardVisible);
       const moved = [...visible];
       const [m] = moved.splice(from, 1);
       moved.splice(to, 0, m);
@@ -2030,6 +2520,11 @@ function HealthClientLogs({ clientStore }) {
       return next;
     });
   };
+  // Respect the CLIENT's own card-visibility preference (synced setting), not
+  // the coach's: a card the client chose to hide stays hidden in their coach's
+  // read-only view too.
+  const hiddenCards = new Set(clientStore?.settings?.hiddenHealthCards || []);
+  const isCardVisible = id => cardEls[id] && !hiddenCards.has(id);
 
   const [selectedDate, setSelectedDate] = useStateH(() => LB.todayISO());
 
@@ -2080,7 +2575,7 @@ function HealthClientLogs({ clientStore }) {
     planningState: clientStore || {}, tf, today, selectedDate,
   }), [logs, clientStore?.sessions, clientStore?.cardioLogs, clientStore?.schedules, clientStore?.activeScheduleId, clientStore?.cycleStartDate, clientStore?.weekPlanStartDate, today, selectedDate, tf]);
 
-  if (!logs.length && !cardioLogs.length && !glucoseLogs.length) {
+  if (!logs.length && !cardioLogs.length && !glucoseLogs.length && !bloodPressureLogs.length && !bodyTempLogs.length) {
     return (
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, padding: 32 }}>
         <i className="fa-solid fa-heart-pulse" style={{ fontSize: 28, color: UI.inkGhost }} />
@@ -2134,6 +2629,12 @@ function HealthClientLogs({ clientStore }) {
     glucose: glucoseLogs.length > 0
       ? <GlucoseCard glucoseLogs={glucoseLogs} unit={glucoseUnit} tf={tf} setTf={setTf} dragHandle={handle} />
       : null,
+    bloodPressure: bloodPressureLogs.length > 0
+      ? <BloodPressureCard bpLogs={bloodPressureLogs} tf={tf} setTf={setTf} dragHandle={handle} />
+      : null,
+    bodyTemp: bodyTempLogs.length > 0
+      ? <BodyTempCard tempLogs={bodyTempLogs} unit={clientTempUnit} tf={tf} setTf={setTf} dragHandle={handle} />
+      : null,
     weekly: weeks.length ? (
       <Card style={{ padding: 14 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
@@ -2167,7 +2668,7 @@ function HealthClientLogs({ clientStore }) {
       <HealthDateStrip store={clientStore} selectedDate={selectedDate} onSelect={setSelectedDate} onLog={null} />
       <div style={{ flex: 1, overflowY: 'auto', padding: '14px 14px 32px', maxWidth: 680, width: '100%', boxSizing: 'border-box', margin: '0 auto' }}>
         <ReorderList onReorder={reorderCards} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          {cardOrder.map(id => cardEls[id] ? (
+          {cardOrder.map(id => isCardVisible(id) ? (
             <div key={id} data-reorder-item="true">{cardEls[id]}</div>
           ) : null)}
         </ReorderList>

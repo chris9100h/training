@@ -244,6 +244,16 @@ Sonderfälle und RLS:
 - `id` (text), `user_id` (uuid), `date` (text, YYYY-MM-DD), `time` (text, HH:MM, lokale Uhrzeit der Messung), `value_mmol` (numeric: immer in mmol/L gespeichert; Anzeige-Einheit ist ein per-User-Setting), `context` (text: 'fasted'|'fed'|'other'), `note` (text, nullable), `created_at` (timestamptz)
 - Store field: `store.glucoseLogs`. Mehrere Messungen pro Tag möglich. Wird direkt via Supabase aus der Glucose-Sektion des DailyLogSheet geschrieben (kein syncStore-Diff). Migration 0101.
 
+### `zane_blood_pressure_logs`
+
+- `id` (text), `user_id` (uuid), `date` (text, YYYY-MM-DD), `time` (text, HH:MM, lokale Uhrzeit der Messung), `systolic` (int, mmHg), `diastolic` (int, mmHg), `note` (text, nullable), `created_at` (timestamptz)
+- Store field: `store.bloodPressureLogs`. Mehrere Messungen pro Tag möglich. Wird direkt via Supabase aus der Blood-Pressure-Sektion des DailyLogSheet geschrieben (kein syncStore-Diff), strukturell identisch zu `zane_glucose_logs`. Migration 0173.
+
+### `zane_body_temp_logs`
+
+- `id` (text), `user_id` (uuid), `date` (text, YYYY-MM-DD), `time` (text, HH:MM, lokale Uhrzeit der Messung), `value_c` (numeric: immer in Celsius gespeichert; Anzeige-Einheit ist ein per-User-Setting), `note` (text, nullable), `created_at` (timestamptz)
+- Store field: `store.bodyTempLogs`. Mehrere Messungen pro Tag möglich. Wird direkt via Supabase aus der Body-Temperature-Sektion des DailyLogSheet geschrieben (kein syncStore-Diff), strukturell identisch zu `zane_glucose_logs`. Migration 0173.
+
 ### `zane_cardio_logs`
 
 - `id` (text), `user_id` (uuid), `date` (text, YYYY-MM-DD), `type` (text, nullable), `duration_minutes` (int), `distance_m` (numeric, nullable), `pace_feeling` (int 1-6, nullable), `effort` (int 1-10, nullable), `note` (text, nullable), `created_at` (timestamptz)
@@ -319,6 +329,8 @@ Weitere Spalten:
 - `default_checkin_schema` (jsonb, nullable): wiederverwendbares Default-Check-in-Formular-Schema eines Coaches, angewandt auf neue Coaching-Beziehungen. Store field `defaultCheckinSchema`.
 - `vip_background` (text, nullable): admin-vergebener dekorativer Background-Key; gesetzt via `set_user_vip_background`. Store field `vipBackground`. Migration 0103.
 - `sw_version` (text, nullable): letzte SW-Cache-Version (z.B. `'v2.445'`), die dieses Gerät beim Boot gemeldet hat, direkt aus dem Cache Storage gelesen. Store field `swVersion`; lässt den Admin erkennen, ob ein User mit Bug-Report auf einem stalen Cache festhängt, ohne ihn nach den Settings fragen zu müssen. Migration 0123.
+- `temp_unit` (text, default 'c'): Anzeige-Einheit für Körpertemperatur, 'c' = Celsius, 'f' = Fahrenheit; Werte in `zane_body_temp_logs` sind immer in Celsius gespeichert. Store field `tempUnit`. Migration 0173.
+- `hidden_health_cards` (jsonb, nullable): Array von Card-Ids, die der User im Health-Tab ausgeblendet hat (z.B. `["cardio","glucose"]`). Anders als die Card-**Reihenfolge** (`logbook-health-card-order`, per-device localStorage) ist die Sichtbarkeit eine echte, geräteübergreifend synchronisierte Einstellung. Store field `hiddenHealthCards`. Migration 0173.
 
 ## RPCs & Realtime
 

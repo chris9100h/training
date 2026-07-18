@@ -9,6 +9,21 @@ const fmtSec = s => s < 60 ? `${s}s` : `${Math.floor(s / 60)}:${String(s % 60).p
 // Short "time since" label for the admin sign-up feed.
 const fmtAgo = (iso) => LB.timeAgo(iso, { capDays: 7 });
 
+// Health-tab card visibility toggles: id must match screens-health.jsx's
+// DEFAULT_CARD_ORDER / DEFAULT_COACH_ORDER card ids.
+const HEALTH_CARD_TOGGLES = [
+  { id: 'week', label: 'Week overview' },
+  { id: 'today', label: 'Today' },
+  { id: 'macros', label: 'Macros' },
+  { id: 'adherence', label: 'Macro adherence' },
+  { id: 'weight', label: 'Weight' },
+  { id: 'cardio', label: 'Cardio' },
+  { id: 'steps', label: 'Steps' },
+  { id: 'glucose', label: 'Glucose' },
+  { id: 'bloodPressure', label: 'Blood pressure' },
+  { id: 'bodyTemp', label: 'Body temperature' },
+];
+
 // Boxed input look shared by the settings sheets' plain text/password/email/
 // select inputs (password/email change, OTP, admin tools, ...). Spread and
 // override for a sheet's specific padding/fontSize/etc.
@@ -1775,6 +1790,38 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
               ))}
             </div>
           </Row>
+
+          <div className="micro" style={{ color: UI.inkFaint, margin: '20px 0 8px' }}>BODY TEMPERATURE</div>
+          <Row label="Body temperature unit" first last>
+            <div style={{ display: 'flex', gap: 0, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, overflow: 'hidden' }}>
+              {['c', 'f'].map(u => (
+                <button key={u} onClick={() => setStore(s => ({ ...s, settings: { ...s.settings, tempUnit: u } }))}
+                  style={{ padding: '5px 12px', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600,
+                    background: (store.settings?.tempUnit ?? 'c') === u ? 'var(--accent)' : 'transparent',
+                    color: (store.settings?.tempUnit ?? 'c') === u ? '#0a0805' : UI.inkSoft,
+                    border: 'none', cursor: 'pointer', transition: 'background 0.15s' }}>
+                  {u === 'c' ? '°C' : '°F'}
+                </button>
+              ))}
+            </div>
+          </Row>
+
+          <div className="micro" style={{ color: UI.inkFaint, margin: '20px 0 8px' }}>CARDS</div>
+          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4, lineHeight: 1.5 }}>
+            Hide cards you don't use. Drag a card's grip in the Health tab to reorder the rest.
+          </div>
+          {HEALTH_CARD_TOGGLES.map((c, i) => {
+            const hidden = (store.settings?.hiddenHealthCards || []).includes(c.id);
+            return (
+              <Row key={c.id} label={c.label} first={i === 0}>
+                <Toggle on={!hidden} onToggle={() => setStore(s => {
+                  const cur = s.settings?.hiddenHealthCards || [];
+                  const next = hidden ? cur.filter(x => x !== c.id) : [...cur, c.id];
+                  return { ...s, settings: { ...s.settings, hiddenHealthCards: next } };
+                })} />
+              </Row>
+            );
+          })}
 
           {(store.statusPeriods || []).length > 0 && (
             <div style={{ marginTop: 16 }}>

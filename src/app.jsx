@@ -399,11 +399,15 @@ function App() {
           const serverDailyDates  = new Set(fresh.dailyLogs.map(l => l.date));
           const serverCardioIds   = new Set(fresh.cardioLogs.map(l => l.id));
           const serverGlucoseIds  = new Set((fresh.glucoseLogs || []).map(l => l.id));
+          const serverBpIds       = new Set((fresh.bloodPressureLogs || []).map(l => l.id));
+          const serverTempIds     = new Set((fresh.bodyTempLogs || []).map(l => l.id));
           // Daily logs are one-per-date: also drop a local row whose date the
           // server already has (a divergent id from a pre-RPC multi-device write).
           const localOnlyDaily   = (s.dailyLogs   || []).filter(l => !serverDailyIds.has(l.id) && !serverDailyDates.has(l.date));
           const localOnlyCardio  = (s.cardioLogs  || []).filter(l => !serverCardioIds.has(l.id));
           const localOnlyGlucose = (s.glucoseLogs || []).filter(l => !serverGlucoseIds.has(l.id));
+          const localOnlyBp      = (s.bloodPressureLogs || []).filter(l => !serverBpIds.has(l.id));
+          const localOnlyTemp    = (s.bodyTempLogs || []).filter(l => !serverTempIds.has(l.id));
           // For ids on both sides keep the local row when it carries an unsynced
           // edit (id in the persisted base AND local differs from base) so a
           // background refresh doesn't clobber a health edit made offline.
@@ -420,9 +424,13 @@ function App() {
           const delDaily   = delDel(base?.dailyLogs,   s.dailyLogs);
           const delCardio  = delDel(base?.cardioLogs,  s.cardioLogs);
           const delGlucose = delDel(base?.glucoseLogs, s.glucoseLogs);
+          const delBp      = delDel(base?.bloodPressureLogs, s.bloodPressureLogs);
+          const delTemp    = delDel(base?.bodyTempLogs, s.bodyTempLogs);
           const nextDaily   = [...localOnlyDaily,   ...LB.mergeCollectionById(fresh.dailyLogs, s.dailyLogs, base?.dailyLogs, delDaily)];
           const nextCardio  = [...localOnlyCardio,  ...LB.mergeCollectionById(fresh.cardioLogs, s.cardioLogs, base?.cardioLogs, delCardio)];
           const nextGlucose = [...localOnlyGlucose, ...LB.mergeCollectionById(fresh.glucoseLogs || [], s.glucoseLogs, base?.glucoseLogs, delGlucose)];
+          const nextBp      = [...localOnlyBp,      ...LB.mergeCollectionById(fresh.bloodPressureLogs || [], s.bloodPressureLogs, base?.bloodPressureLogs, delBp)];
+          const nextTemp    = [...localOnlyTemp,    ...LB.mergeCollectionById(fresh.bodyTempLogs || [], s.bodyTempLogs, base?.bodyTempLogs, delTemp)];
           // refreshHealthLogs re-maps every row into a fresh object, so these
           // merged arrays are new references even when nothing actually changed —
           // which forced a full re-render of the active screen on EVERY
@@ -434,11 +442,15 @@ function App() {
           const dSame = sameLogs(nextDaily, s.dailyLogs);
           const cSame = sameLogs(nextCardio, s.cardioLogs);
           const gSame = sameLogs(nextGlucose, s.glucoseLogs);
-          if (dSame && cSame && gSame) return s;
+          const bpSame = sameLogs(nextBp, s.bloodPressureLogs);
+          const tSame = sameLogs(nextTemp, s.bodyTempLogs);
+          if (dSame && cSame && gSame && bpSame && tSame) return s;
           return { ...s,
             dailyLogs:   dSame ? s.dailyLogs : nextDaily,
             cardioLogs:  cSame ? s.cardioLogs : nextCardio,
             glucoseLogs: gSame ? s.glucoseLogs : nextGlucose,
+            bloodPressureLogs: bpSame ? s.bloodPressureLogs : nextBp,
+            bodyTempLogs: tSame ? s.bodyTempLogs : nextTemp,
           };
         });
       }).catch(() => {});

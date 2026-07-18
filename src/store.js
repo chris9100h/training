@@ -277,6 +277,8 @@ async function deleteAllData(userId, { keepPush = false } = {}) {
     unwrap(_supabase.from('zane_daily_logs').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_workout_templates').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_glucose_logs').delete().eq('user_id', userId)),
+    unwrap(_supabase.from('zane_blood_pressure_logs').delete().eq('user_id', userId)),
+    unwrap(_supabase.from('zane_body_temp_logs').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_meso_states').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_status_periods').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_cardio_plans').delete().eq('user_id', userId)),
@@ -402,6 +404,8 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
     show_regression: sett.showRegression ?? true,
     pin_all_notes: sett.pinAllNotes ?? false,
     glucose_unit: sett.glucoseUnit ?? 'mmol',
+    temp_unit: sett.tempUnit ?? 'c',
+    hidden_health_cards: sett.hiddenHealthCards ?? null,
     default_checkin_schema: sett.defaultCheckinSchema ?? null,
     vip_background: sett.vipBackground ?? null,
     active_cardio_plan_id: backup.activeCardioPlanId ?? null,
@@ -431,6 +435,8 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
     + (backup.workoutTemplates?.length ? 1 : 0)
     + (backup.checkinSchemaTemplates?.length ? 1 : 0)
     + (backup.glucoseLogs?.length ? 1 : 0)
+    + (backup.bloodPressureLogs?.length ? 1 : 0)
+    + (backup.bodyTempLogs?.length ? 1 : 0)
     + (backup.cardioPlans?.length ? 1 : 0)
     + (backup.statusPeriods?.length ? 1 : 0)
     + (backup.mesoStates?.length ? 1 : 0);
@@ -573,6 +579,27 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
         id: l.id, user_id: userId, date: l.date, time: l.time,
         value_mmol: l.valueMmol ?? null, context: l.context ?? 'other',
         note: l.note ?? null,
+      }))
+    ));
+    stepsDone++;
+  }
+  if (backup.bloodPressureLogs?.length) {
+    prog('Uploading blood pressure logs…');
+    await unwrap(_supabase.from('zane_blood_pressure_logs').upsert(
+      backup.bloodPressureLogs.map(l => ({
+        id: l.id, user_id: userId, date: l.date, time: l.time,
+        systolic: l.systolic ?? null, diastolic: l.diastolic ?? null,
+        note: l.note ?? null,
+      }))
+    ));
+    stepsDone++;
+  }
+  if (backup.bodyTempLogs?.length) {
+    prog('Uploading body temperature logs…');
+    await unwrap(_supabase.from('zane_body_temp_logs').upsert(
+      backup.bodyTempLogs.map(l => ({
+        id: l.id, user_id: userId, date: l.date, time: l.time,
+        value_c: l.valueC ?? null, note: l.note ?? null,
       }))
     ));
     stepsDone++;
@@ -826,6 +853,10 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     isCoachLoad ? null : _supabase.rpc('get_user_support_chats'),
     // Blood glucose readings — multiple per day, value always in mmol/L (migration 0101)
     _supabase.from('zane_glucose_logs').select('id, date, time, value_mmol, context, note, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
+    // Blood pressure readings: multiple per day, systolic/diastolic in mmHg (migration 0173)
+    _supabase.from('zane_blood_pressure_logs').select('id, date, time, systolic, diastolic, note, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
+    // Body temperature readings: multiple per day, value always in Celsius (migration 0173)
+    _supabase.from('zane_body_temp_logs').select('id, date, time, value_c, note, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
     // Reusable workout templates (migration 0107)
     _supabase.from('zane_workout_templates').select('id, name, exercises, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
     // Mesocycle state per plan — replaces localStorage logbook-meso-state (migration 0120)
@@ -840,7 +871,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
          bestsRes, sessionStatsRes,
          coachInfoRes, coachClientsRes, unreadNotesRes, coachingRowRes, selfRowRes,
          cardioLogsRes, cardioPlansRes, dailyLogsRes, statusPeriodsRes,
-         supportTicketsRes, glucoseLogsRes, templatesRes, mesoStatesRes,
+         supportTicketsRes, glucoseLogsRes, bloodPressureLogsRes, bodyTempLogsRes, templatesRes, mesoStatesRes,
          checkinTemplatesRes, planDraftsRes] = await Promise.all(queries);
 
   // A failed request (offline, RLS, server error) also yields no data — bail
@@ -1024,6 +1055,16 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
       valueMmol: l.value_mmol != null ? parseFloat(l.value_mmol) : null,
       context: l.context ?? 'other', note: l.note ?? null, createdAt: l.created_at,
     })),
+    bloodPressureLogs: (bloodPressureLogsRes?.data || []).map(l => ({
+      id: l.id, date: l.date, time: l.time,
+      systolic: l.systolic ?? null, diastolic: l.diastolic ?? null,
+      note: l.note ?? null, createdAt: l.created_at,
+    })),
+    bodyTempLogs: (bodyTempLogsRes?.data || []).map(l => ({
+      id: l.id, date: l.date, time: l.time,
+      valueC: l.value_c != null ? parseFloat(l.value_c) : null,
+      note: l.note ?? null, createdAt: l.created_at,
+    })),
     workoutTemplates: (templatesRes?.data || []).map(t => ({
       id: t.id, name: t.name,
       exercises: Array.isArray(t.exercises) ? t.exercises : [],
@@ -1098,6 +1139,8 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         showHealthTab: sett.show_health_tab ?? false,
         onboardingCompleted: sett.onboarding_completed ?? false,
         glucoseUnit: sett.glucose_unit ?? 'mmol',
+        tempUnit: sett.temp_unit ?? 'c',
+        hiddenHealthCards: sett.hidden_health_cards ?? null,
         vipBackground: sett.vip_background ?? null,
         swVersion: sett.sw_version ?? null,
       },
@@ -1578,6 +1621,8 @@ async function syncStore(prev, next, userId) {
     JSON.stringify(prev.settings?.macroTargets) !== JSON.stringify(next.settings?.macroTargets) ||
     prev.settings?.onboardingCompleted    !== next.settings?.onboardingCompleted    ||
     prev.settings?.glucoseUnit            !== next.settings?.glucoseUnit            ||
+    prev.settings?.tempUnit               !== next.settings?.tempUnit               ||
+    JSON.stringify(prev.settings?.hiddenHealthCards) !== JSON.stringify(next.settings?.hiddenHealthCards) ||
     JSON.stringify(prev.settings?.defaultCheckinSchema) !== JSON.stringify(next.settings?.defaultCheckinSchema) ||
     prev.nextReminderAt                   !== next.nextReminderAt   ||
     prev.statusMode                       !== next.statusMode       ||
@@ -1622,6 +1667,8 @@ async function syncStore(prev, next, userId) {
       show_health_tab: next.settings?.showHealthTab ?? false,
       onboarding_completed: next.settings?.onboardingCompleted ?? false,
       glucose_unit: next.settings?.glucoseUnit ?? 'mmol',
+      temp_unit: next.settings?.tempUnit ?? 'c',
+      hidden_health_cards: next.settings?.hiddenHealthCards ?? null,
       default_checkin_schema: next.settings?.defaultCheckinSchema ?? null,
       next_reminder_at: next.nextReminderAt ?? null,
       in_progress_session_id: next.inProgress ?? null,
@@ -4349,10 +4396,12 @@ async function endDeload(userId, store, setStore) {
 }
 
 async function refreshHealthLogs(userId) {
-  const [dailyRes, cardioRes, glucoseRes] = await Promise.all([
+  const [dailyRes, cardioRes, glucoseRes, bpRes, tempRes] = await Promise.all([
     _supabase.from('zane_daily_logs').select('id, date, weight, steps, calories, protein, carbs, fat, fiber, water_ml, note, off_plan_note, adherence, targets_snap, daily_coach_fields, updated_at, created_at').eq('user_id', userId).order('date', { ascending: false }),
     _supabase.from('zane_cardio_logs').select('id, date, type, duration_minutes, distance_m, pace_feeling, effort, note, session_id, created_at').eq('user_id', userId).order('date', { ascending: false }),
     _supabase.from('zane_glucose_logs').select('id, date, time, value_mmol, context, note, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
+    _supabase.from('zane_blood_pressure_logs').select('id, date, time, systolic, diastolic, note, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
+    _supabase.from('zane_body_temp_logs').select('id, date, time, value_c, note, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
   ]);
   if (dailyRes.error || cardioRes.error) return null;
   return {
@@ -4378,6 +4427,16 @@ async function refreshHealthLogs(userId) {
       id: l.id, date: l.date, time: l.time,
       valueMmol: l.value_mmol != null ? parseFloat(l.value_mmol) : null,
       context: l.context ?? 'other', note: l.note ?? null, createdAt: l.created_at,
+    })),
+    bloodPressureLogs: (bpRes?.data || []).map(l => ({
+      id: l.id, date: l.date, time: l.time,
+      systolic: l.systolic ?? null, diastolic: l.diastolic ?? null,
+      note: l.note ?? null, createdAt: l.created_at,
+    })),
+    bodyTempLogs: (tempRes?.data || []).map(l => ({
+      id: l.id, date: l.date, time: l.time,
+      valueC: l.value_c != null ? parseFloat(l.value_c) : null,
+      note: l.note ?? null, createdAt: l.created_at,
     })),
   };
 }
