@@ -2029,7 +2029,7 @@ function BloodPressureCard({ bpLogs, tf, setTf, dragHandle, onExpand, compact = 
   );
 
   return (
-    <HealthChartCard title="Blood Pressure" icon="fa-heart-pulse" tf={tf} setTf={setTf}
+    <HealthChartCard title="BP" icon="fa-heart-pulse" tf={tf} setTf={setTf}
       headline={latest ? `${latest.systolic}/${latest.diastolic}` : null} sub={latest ? 'mmHg' : null} dragHandle={dragHandle} onExpand={onExpand}>
       {!inWindow.length ? (
         <HealthChartEmpty label="No blood pressure readings in this range" />
@@ -2522,7 +2522,7 @@ function HealthScreen({ store, setStore, go, userId }) {
     </HealthChartCard>
   );
   const macroAdherenceCard = (
-    <HealthChartCard title="Macro Adherence" icon="fa-bullseye" tf={tf} setTf={setTf} onExpand={expandBtn('macroAdherence')}
+    <HealthChartCard title="Adherence" icon="fa-bullseye" tf={tf} setTf={setTf} onExpand={expandBtn('macroAdherence')}
       headline={adhAvg != null ? `${Math.round(adhAvg)}%` : null} sub={adhAvg != null ? 'avg' : null}>
       <HealthLineChart series={adhSeries.data} from={adhSeries.from} to={adhSeries.to} format={v => `${Math.round(v)}%`} yMin={0} yMax={100} />
     </HealthChartCard>
