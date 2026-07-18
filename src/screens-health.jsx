@@ -2351,7 +2351,7 @@ function HealthScreen({ store, setStore, go, userId }) {
   // Reorderable card order, persisted per device. Missing ids (e.g. after a new
   // card ships) are inserted at their default position, not appended at the end.
   const CARD_ORDER_KEY = 'logbook-health-card-order';
-  const DEFAULT_CARD_ORDER = ['week', 'today', 'macros', 'adherence', 'weight', 'cardio', 'steps', 'water', 'glucose', 'bloodPressure', 'bodyTemp'];
+  const DEFAULT_CARD_ORDER = ['week', 'today', 'macros', 'adherence', 'macroTargets', 'weight', 'cardio', 'steps', 'water', 'glucose', 'bloodPressure', 'bodyTemp'];
   const [cardOrder, setCardOrder] = useStateH(() => {
     let saved = [];
     try { saved = JSON.parse(localStorage.getItem(CARD_ORDER_KEY) || '[]'); } catch (_) {}
@@ -2500,9 +2500,16 @@ function HealthScreen({ store, setStore, go, userId }) {
     ),
     macros: (
       <HealthChartCard title="Macros" icon="fa-utensils" tf={tf} setTf={setTf} dragHandle={handle}>
-        {targetRow}
         <HealthMacroChart series={macroSeries.data} from={macroSeries.from} to={macroSeries.to} />
         <MacroLegend />
+      </HealthChartCard>
+    ),
+    // Own full-width card (not squeezed into Macros): the P/C/F chip row next to
+    // the kcal figure needs more room than the 2-col grid gives a paired card,
+    // it overflowed there. Always pinned full-width, see PINNED_FULL_WIDTH_CARDS.
+    macroTargets: (
+      <HealthChartCard title="Macro Targets" icon="fa-list-check" tf={tf} setTf={setTf} dragHandle={handle}>
+        {targetRow}
       </HealthChartCard>
     ),
     cardio: (
@@ -2531,7 +2538,7 @@ function HealthScreen({ store, setStore, go, userId }) {
   // Week/Today always render full width; every other visible card pairs up into
   // the 2-col grid below. A trailing odd card in a run of non-pinned cards also
   // spans full width, so a reorder can never leave a dangling empty half.
-  const PINNED_FULL_WIDTH_CARDS = new Set(['week', 'today']);
+  const PINNED_FULL_WIDTH_CARDS = new Set(['week', 'today', 'macroTargets']);
   const fullWidthCardIds = (() => {
     const span = new Set(PINNED_FULL_WIDTH_CARDS);
     let run = [];
