@@ -457,7 +457,7 @@ const HEALTH_CARD_HEADER_STYLE = { fontFamily: UI.fontUi, fontSize: 12, fontWeig
 
 // Section wrapper: title + 1W/1M/3M toggle + subtitle. `dragHandle` renders a
 // reorder grip at the start of the header when the card is in a reorder list.
-function HealthChartCard({ title, icon, tf, setTf, headline, sub, dragHandle, children }) {
+function HealthChartCard({ title, icon, tf, setTf, headline, sub, dragHandle, onExpand, children }) {
   return (
     <Card style={{ padding: 14, borderLeft: `3px solid ${UI.gold}` }}>
       {/* flexWrap + the toggle's flexShrink:0 let the TF toggle drop to its own
@@ -467,6 +467,15 @@ function HealthChartCard({ title, icon, tf, setTf, headline, sub, dragHandle, ch
         {dragHandle}
         {icon && <i className={`fa-solid ${icon}`} style={{ fontSize: 11, color: UI.inkFaint }} />}
         <span style={{ ...HEALTH_CARD_HEADER_STYLE, flex: 1, minWidth: 60 }}>{title}</span>
+        {onExpand && (
+          <button data-reorder-ignore="true" onClick={onExpand} aria-label="Expand" style={{
+            background: 'transparent', border: 'none', padding: 2, cursor: 'pointer',
+            color: UI.inkFaint, display: 'flex', alignItems: 'center', flexShrink: 0,
+            WebkitTapHighlightColor: 'transparent',
+          }}>
+            <i className="fa-solid fa-expand" style={{ fontSize: 11 }} />
+          </button>
+        )}
         <div data-reorder-ignore="true" style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `0.5px solid ${UI.hairStrong}`, flexShrink: 0 }}>
           {HEALTH_TFS.map(t => (
             <button key={t.id} onClick={() => setTf(t.id)} style={{
@@ -1909,7 +1918,7 @@ function HealthDateStrip({ store, setStore, selectedDate, onSelect, onLog, targe
 
 // ─── Glucose card ─────────────────────────────────────────────────────────────
 
-function GlucoseCard({ glucoseLogs, unit, tf, setTf, dragHandle }) {
+function GlucoseCard({ glucoseLogs, unit, tf, setTf, dragHandle, onExpand }) {
   const today = LB.todayISO();
   const tfDays = id => (HEALTH_TFS.find(t => t.id === id) || HEALTH_TFS[0]).days;
   const { start, end } = healthWindow(tfDays(tf));
@@ -1938,7 +1947,7 @@ function GlucoseCard({ glucoseLogs, unit, tf, setTf, dragHandle }) {
 
   return (
     <HealthChartCard title="Glucose" icon="fa-droplet" tf={tf} setTf={setTf}
-      headline={latestDisp != null ? String(latestDisp) : null} sub={latestDisp != null ? unitLabel : null} dragHandle={dragHandle}>
+      headline={latestDisp != null ? String(latestDisp) : null} sub={latestDisp != null ? unitLabel : null} dragHandle={dragHandle} onExpand={onExpand}>
       {!inWindow.length ? (
         <HealthChartEmpty label="No glucose readings in this range" />
       ) : (
@@ -1993,7 +2002,7 @@ function GlucoseCard({ glucoseLogs, unit, tf, setTf, dragHandle }) {
 
 // ─── Blood pressure card ────────────────────────────────────────────────────
 
-function BloodPressureCard({ bpLogs, tf, setTf, dragHandle }) {
+function BloodPressureCard({ bpLogs, tf, setTf, dragHandle, onExpand }) {
   const today = LB.todayISO();
   const tfDays = id => (HEALTH_TFS.find(t => t.id === id) || HEALTH_TFS[0]).days;
   const { start, end } = healthWindow(tfDays(tf));
@@ -2014,7 +2023,7 @@ function BloodPressureCard({ bpLogs, tf, setTf, dragHandle }) {
 
   return (
     <HealthChartCard title="Blood Pressure" icon="fa-heart-pulse" tf={tf} setTf={setTf}
-      headline={latest ? `${latest.systolic}/${latest.diastolic}` : null} sub={latest ? 'mmHg' : null} dragHandle={dragHandle}>
+      headline={latest ? `${latest.systolic}/${latest.diastolic}` : null} sub={latest ? 'mmHg' : null} dragHandle={dragHandle} onExpand={onExpand}>
       {!inWindow.length ? (
         <HealthChartEmpty label="No blood pressure readings in this range" />
       ) : (
@@ -2055,7 +2064,7 @@ function BloodPressureCard({ bpLogs, tf, setTf, dragHandle }) {
 
 // ─── Body temperature card ──────────────────────────────────────────────────
 
-function BodyTempCard({ tempLogs, unit, tf, setTf, dragHandle }) {
+function BodyTempCard({ tempLogs, unit, tf, setTf, dragHandle, onExpand }) {
   const today = LB.todayISO();
   const tfDays = id => (HEALTH_TFS.find(t => t.id === id) || HEALTH_TFS[0]).days;
   const { start, end } = healthWindow(tfDays(tf));
@@ -2078,7 +2087,7 @@ function BodyTempCard({ tempLogs, unit, tf, setTf, dragHandle }) {
 
   return (
     <HealthChartCard title="Body Temperature" icon="fa-temperature-half" tf={tf} setTf={setTf}
-      headline={latestDisp != null ? String(latestDisp) : null} sub={latestDisp != null ? unitLabel : null} dragHandle={dragHandle}>
+      headline={latestDisp != null ? String(latestDisp) : null} sub={latestDisp != null ? unitLabel : null} dragHandle={dragHandle} onExpand={onExpand}>
       {!inWindow.length ? (
         <HealthChartEmpty label="No temperature readings in this range" />
       ) : (
@@ -2117,6 +2126,9 @@ function HealthScreen({ store, setStore, go, userId }) {
   const [tf, setTf] = useStateH('1W');
   const [capturing, setCapturing] = useStateH(false);
   const [exportOpen, setExportOpen] = useStateH(false);
+  // Which card is blown up in the expand sheet (id into expandableCards below),
+  // null when closed. Only charts squeezed by the 2-col grid offer this.
+  const [expandedCardId, setExpandedCardId] = useStateH(null);
   const captureRef = useRefH(null);
 
   const takeScreenshot = async () => {
@@ -2351,7 +2363,10 @@ function HealthScreen({ store, setStore, go, userId }) {
   // Reorderable card order, persisted per device. Missing ids (e.g. after a new
   // card ships) are inserted at their default position, not appended at the end.
   const CARD_ORDER_KEY = 'logbook-health-card-order';
-  const DEFAULT_CARD_ORDER = ['week', 'today', 'macros', 'adherence', 'macroTargets', 'weight', 'cardio', 'steps', 'water', 'glucose', 'bloodPressure', 'bodyTemp'];
+  // Macros/Adherence/Targets move, hide, and show as one unit — id 'macroGroup',
+  // see its cardEls entry below — since hiding just one of the three orphans the
+  // others (e.g. an adherence chart with no targets to compare against).
+  const DEFAULT_CARD_ORDER = ['week', 'today', 'macroGroup', 'weight', 'cardio', 'steps', 'water', 'glucose', 'bloodPressure', 'bodyTemp'];
   const [cardOrder, setCardOrder] = useStateH(() => {
     let saved = [];
     try { saved = JSON.parse(localStorage.getItem(CARD_ORDER_KEY) || '[]'); } catch (_) {}
@@ -2477,68 +2492,95 @@ function HealthScreen({ store, setStore, go, userId }) {
       return t >= start && t <= end;
     });
   })();
+  // Opens a chart full-width in a sheet — offered only on charts the 2-col grid
+  // below actually squeezes to half-width (see the onExpand wiring per card and
+  // expandableCards further down, which the sheet renders from by this id).
+  const expandBtn = id => () => setExpandedCardId(id);
+
+  // The 3 macro cards live together in the macroGroup composite below (target
+  // kcal/P/C/F, adherence trend, macro breakdown) so hide/move/reorder always
+  // treats them as one unit — leaving one behind orphans the other two (an
+  // adherence trend with no targets to compare against isn't useful alone).
+  const macroTargetsCard = (
+    <HealthChartCard title="Macro Targets" icon="fa-list-check" tf={tf} setTf={setTf} dragHandle={handle}>
+      {targetRow}
+    </HealthChartCard>
+  );
+  const macroAdherenceCard = (
+    <HealthChartCard title="Macro Adherence" icon="fa-bullseye" tf={tf} setTf={setTf} onExpand={expandBtn('macroAdherence')}
+      headline={adhAvg != null ? `${Math.round(adhAvg)}%` : null} sub={adhAvg != null ? 'avg' : null}>
+      <HealthLineChart series={adhSeries.data} from={adhSeries.from} to={adhSeries.to} format={v => `${Math.round(v)}%`} yMin={0} yMax={100} />
+    </HealthChartCard>
+  );
+  const macrosCard = (
+    <HealthChartCard title="Macros" icon="fa-utensils" tf={tf} setTf={setTf} onExpand={expandBtn('macros')}>
+      <HealthMacroChart series={macroSeries.data} from={macroSeries.from} to={macroSeries.to} />
+      <MacroLegend />
+    </HealthChartCard>
+  );
+
   const cardEls = {
     week: <HealthWeekCard stats={weekStats} dragHandle={handle} targets={effectiveTargets} tf={tf} setTf={setTf} />,
     today: <HealthMetricsCard log={selectedLog} dateLabel={dayLabel} isToday={selectedDate === today} onJumpToday={() => setSelectedDate(today)} dragHandle={handle} trained={trainedSelected} hasCardio={cardioSelected} dayTarget={selectedDayTarget} isStatusDay={selectedIsStatusDay} />,
+    // Targets on top (full width, needs the room for the P/C/F chip row), then
+    // Adherence + the macro breakdown paired below it — always pinned full-width
+    // as a whole, see PINNED_FULL_WIDTH_CARDS.
+    macroGroup: (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        {macroTargetsCard}
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 14 }}>
+          {macroAdherenceCard}
+          {macrosCard}
+        </div>
+      </div>
+    ),
     weight: (
-      <HealthChartCard title="Weight" icon="fa-weight-scale" tf={tf} setTf={setTf} dragHandle={handle}
+      <HealthChartCard title="Weight" icon="fa-weight-scale" tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('weight')}
         headline={weightAvg != null ? `${weightAvg}${UI.unit()}` : null} sub={weightAvg != null ? 'avg' : null}>
         <HealthLineChart series={weightSeries.data} from={weightSeries.from} to={weightSeries.to} format={v => `${v}${UI.unit()}`} step={UI.unit() === 'lbs' ? 5 : 2.5} />
       </HealthChartCard>
     ),
     steps: (
-      <HealthChartCard title="Steps" icon="fa-shoe-prints" tf={tf} setTf={setTf} dragHandle={handle}
+      <HealthChartCard title="Steps" icon="fa-shoe-prints" tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('steps')}
         headline={stepsAvg != null ? Math.round(stepsAvg).toLocaleString() : null} sub={stepsAvg != null ? 'avg / day' : null}>
         <HealthBarChart series={stepsSeries.data} from={stepsSeries.from} to={stepsSeries.to} format={v => v >= 1000 ? `${Math.round(v / 1000)}k` : `${v}`} />
       </HealthChartCard>
     ),
     water: (
-      <HealthChartCard title="Water" icon="fa-glass-water" tf={tf} setTf={setTf} dragHandle={handle}
+      <HealthChartCard title="Water" icon="fa-glass-water" tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('water')}
         headline={waterAvg != null ? `${UI.waterSummaryValue(waterAvg)}${UI.waterSummaryUnit()}` : null} sub={waterAvg != null ? 'avg / day' : null}>
         <HealthBarChart series={waterSeries.data} from={waterSeries.from} to={waterSeries.to} format={v => `${UI.waterSummaryValue(v)}${UI.waterSummaryUnit()}`} color="#4a9fe0" colorSoft="rgba(74,159,224,0.35)" />
       </HealthChartCard>
     ),
-    macros: (
-      <HealthChartCard title="Macros" icon="fa-utensils" tf={tf} setTf={setTf} dragHandle={handle}>
-        <HealthMacroChart series={macroSeries.data} from={macroSeries.from} to={macroSeries.to} />
-        <MacroLegend />
-      </HealthChartCard>
-    ),
-    // Own full-width card (not squeezed into Macros): the P/C/F chip row next to
-    // the kcal figure needs more room than the 2-col grid gives a paired card,
-    // it overflowed there. Always pinned full-width, see PINNED_FULL_WIDTH_CARDS.
-    macroTargets: (
-      <HealthChartCard title="Macro Targets" icon="fa-list-check" tf={tf} setTf={setTf} dragHandle={handle}>
-        {targetRow}
-      </HealthChartCard>
-    ),
     cardio: (
-      <HealthChartCard title="Cardio" icon="fa-person-running" tf={tf} setTf={setTf} dragHandle={handle}
+      <HealthChartCard title="Cardio" icon="fa-person-running" tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('cardio')}
         headline={cardioTotal ? cardioTotal : null} sub={cardioTotal ? 'min total' : null}>
         <HealthBarChart series={cardioSeries.data} from={cardioSeries.from} to={cardioSeries.to} format={v => `${Math.round(v)}`} />
       </HealthChartCard>
     ),
-    adherence: effectiveTargets ? (
-      <HealthChartCard title="Macro Adherence" icon="fa-bullseye" tf={tf} setTf={setTf} dragHandle={handle}
-        headline={adhAvg != null ? `${Math.round(adhAvg)}%` : null} sub={adhAvg != null ? 'avg' : null}>
-        <HealthLineChart series={adhSeries.data} from={adhSeries.from} to={adhSeries.to} format={v => `${Math.round(v)}%`} yMin={0} yMax={100} />
-      </HealthChartCard>
-    ) : null,
     glucose: (store.glucoseLogs || []).length > 0
-      ? <GlucoseCard glucoseLogs={store.glucoseLogs} unit={store.settings?.glucoseUnit ?? 'mmol'} tf={tf} setTf={setTf} dragHandle={handle} />
+      ? <GlucoseCard glucoseLogs={store.glucoseLogs} unit={store.settings?.glucoseUnit ?? 'mmol'} tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('glucose')} />
       : null,
     bloodPressure: (store.bloodPressureLogs || []).length > 0
-      ? <BloodPressureCard bpLogs={store.bloodPressureLogs} tf={tf} setTf={setTf} dragHandle={handle} />
+      ? <BloodPressureCard bpLogs={store.bloodPressureLogs} tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('bloodPressure')} />
       : null,
     bodyTemp: (store.bodyTempLogs || []).length > 0
-      ? <BodyTempCard tempLogs={store.bodyTempLogs} unit={LB.defaultTempUnit(store.settings)} tf={tf} setTf={setTf} dragHandle={handle} />
+      ? <BodyTempCard tempLogs={store.bodyTempLogs} unit={LB.defaultTempUnit(store.settings)} tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('bodyTemp')} />
       : null,
   };
 
-  // Week/Today always render full width; every other visible card pairs up into
-  // the 2-col grid below. A trailing odd card in a run of non-pinned cards also
-  // spans full width, so a reorder can never leave a dangling empty half.
-  const PINNED_FULL_WIDTH_CARDS = new Set(['week', 'today', 'macroTargets']);
+  // Sheet lookup for expandedCardId — every id any onExpand above can set.
+  // Cloned with dragHandle/onExpand stripped: the expand sheet isn't inside a
+  // reorder list (grip would be inert) and re-expanding itself is meaningless.
+  const expandableCards = { weight: cardEls.weight, steps: cardEls.steps, water: cardEls.water, cardio: cardEls.cardio,
+    macroAdherence: macroAdherenceCard, macros: macrosCard,
+    glucose: cardEls.glucose, bloodPressure: cardEls.bloodPressure, bodyTemp: cardEls.bodyTemp };
+
+  // Week/Today/the macro group always render full width; every other visible
+  // card pairs up into the 2-col grid below. A trailing odd card in a run of
+  // non-pinned cards also spans full width, so a reorder can never leave a
+  // dangling empty half.
+  const PINNED_FULL_WIDTH_CARDS = new Set(['week', 'today', 'macroGroup']);
   const fullWidthCardIds = (() => {
     const span = new Set(PINNED_FULL_WIDTH_CARDS);
     let run = [];
@@ -2622,6 +2664,11 @@ function HealthScreen({ store, setStore, go, userId }) {
           )}
         </div>
       </div>
+
+      <Sheet open={!!expandedCardId} onClose={() => setExpandedCardId(null)}>
+        {expandedCardId && expandableCards[expandedCardId] &&
+          React.cloneElement(expandableCards[expandedCardId], { dragHandle: null, onExpand: null })}
+      </Sheet>
 
       <DailyLogSheet open={logOpen} onClose={() => setLogOpen(false)} store={store} setStore={setStore} date={selectedDate} targets={effectiveTargets} activeCoachingSchema={activeCoachingSchema} onSetStatus={handleSetStatus} userId={userId} glucoseLogs={store.glucoseLogs || []} glucoseUnit={store.settings?.glucoseUnit ?? 'mmol'} bloodPressureLogs={store.bloodPressureLogs || []} bodyTempLogs={store.bodyTempLogs || []} tempUnit={LB.defaultTempUnit(store.settings)} />
       <MacroTargetSheet open={targetOpen} onClose={() => setTargetOpen(false)} store={store} setStore={setStore} coachingMacros={coachingMacros} />

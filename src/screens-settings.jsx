@@ -14,9 +14,7 @@ const fmtAgo = (iso) => LB.timeAgo(iso, { capDays: 7 });
 const HEALTH_CARD_TOGGLES = [
   { id: 'week', label: 'Week overview' },
   { id: 'today', label: 'Today' },
-  { id: 'macros', label: 'Macros' },
-  { id: 'adherence', label: 'Macro adherence' },
-  { id: 'macroTargets', label: 'Macro targets' },
+  { id: 'macroGroup', label: 'Macros' },
   { id: 'weight', label: 'Weight' },
   { id: 'cardio', label: 'Cardio' },
   { id: 'steps', label: 'Steps' },
@@ -1881,7 +1879,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                     return { ...s, settings: { ...s.settings, hiddenHealthCards: next } };
                   })} />
                 </Row>
-                {c.id === 'macroTargets' && (
+                {c.id === 'macroGroup' && (
                   <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: -4, marginBottom: 6, lineHeight: 1.5 }}>
                     Also hides the button to set/edit your macro targets. Come back here to bring it back.
                   </div>

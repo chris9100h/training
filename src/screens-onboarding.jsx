@@ -295,7 +295,7 @@ window.TOURS.healthTab = [
     visual: 'healthLog',
   },
   {
-    target: 'health-card-macroTargets',
+    target: 'health-card-macroGroup',
     title: 'Macros & Targets',
     body: 'Set your daily macro targets (protein / carbs / fat) and the app tracks your adherence automatically. Tap SET or EDIT in the Macro Targets card to configure your goals.',
     visual: 'healthMacros',
