@@ -5439,7 +5439,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // so an ad-hoc empty session gets the prompt too. A tap SELECTS an option (accent
   // highlight); the Confirm button commits it, so a mis-tap is correctable first.
   const readinessSheet = (
-    <Sheet open={readinessOpen} onClose={() => chooseReadiness(readinessSel || 'normal')} title="How do you feel today?">
+    <Sheet open={readinessOpen} onClose={() => {}} title="How do you feel today?">
       <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: readinessReentry ? 12 : 20, lineHeight: 1.5 }}>
         Pick today's baseline, then Confirm. It only nudges the suggestion, you can always push to your limit.
       </div>
@@ -8514,7 +8514,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         </>) : (<>
         <div style={{ fontSize: 13.5, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: 1.45 }}>How did that feel?</div>
         <Btn onClick={() => handleJointAnswer('none', 'just_right', 'moderate', 'ok')} style={{ width: '100%' }}>On point</Btn>
-        <Btn kind="ghost" onClick={() => { setMesoJointSel('none'); setMesoJointWeightSel('just_right'); setMesoJointPumpSel('moderate'); setMesoJointExpanded(true); }} style={{ width: '100%', marginTop: 8 }}>Flag a detail</Btn>
+        <Btn kind="ghost" onClick={() => { setMesoJointSel('none'); setMesoJointWeightSel('just_right'); setMesoJointPumpSel('moderate'); setMesoJointAffinitySel(mesoJointAffinitySel ?? 'ok'); setMesoJointExpanded(true); }} style={{ width: '100%', marginTop: 8 }}>Flag a detail</Btn>
         </>)}
       </Sheet>
 
