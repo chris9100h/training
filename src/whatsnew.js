@@ -17,6 +17,16 @@
    Entry shape: { id: string, date: string (YYYY-MM-DD), title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.615',
+    date: '2026-07-18',
+    title: 'A Tidier Daily Log',
+    items: [
+      "🗂️ The Daily Log sheet was getting long (thanks, Glucose/Blood Pressure/Body Temp!). Categories you've never filled in now start collapsed, just tap a header to open one you want to try. Already tracking something? That section stays open, no digging required.",
+      "🎨 Also gave the whole thing a lick of paint: each section is now its own card with a bold, colored header, matching the rest of the Health tab. Easier to scan, nicer to look at.",
+      "📝 The general day note and the off-plan note (for check-ins) were sitting oddly close together. Note now has its own spot, and off-plan note moved to live right under Calories where it actually belongs, next to your macros.",
+    ],
+  },
+  {
     id: 'v2.608',
     date: '2026-07-18',
     title: 'Blood Pressure, Body Temp & a Tidier Health Tab',
