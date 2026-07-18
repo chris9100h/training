@@ -451,6 +451,10 @@ function ChartHover({ W, H, points, children, mode = 'x', markerColor = 'var(--a
   );
 }
 
+// Bigger, bold, accent-colored card header, shared by every card in the
+// Health tab (matches the Daily Log's category headers).
+const HEALTH_CARD_HEADER_STYLE = { fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--accent)' };
+
 // Section wrapper: title + 1W/1M/3M toggle + subtitle. `dragHandle` renders a
 // reorder grip at the start of the header when the card is in a reorder list.
 function HealthChartCard({ title, icon, tf, setTf, headline, sub, dragHandle, children }) {
@@ -459,7 +463,7 @@ function HealthChartCard({ title, icon, tf, setTf, headline, sub, dragHandle, ch
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
         {dragHandle}
         {icon && <i className={`fa-solid ${icon}`} style={{ fontSize: 11, color: UI.inkFaint }} />}
-        <span className="micro" style={{ color: UI.inkFaint, flex: 1 }}>{title}</span>
+        <span style={{ ...HEALTH_CARD_HEADER_STYLE, flex: 1 }}>{title}</span>
         <div data-reorder-ignore="true" style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `0.5px solid ${UI.hairStrong}` }}>
           {HEALTH_TFS.map(t => (
             <button key={t.id} onClick={() => setTf(t.id)} style={{
@@ -1549,7 +1553,7 @@ function HealthMetricsCard({ log, dateLabel, isToday, onJumpToday, dragHandle, t
     <Card accent style={{ padding: 16, borderLeft: `3px solid ${UI.gold}` }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: trained || hasCardio ? 8 : 12 }}>
         {dragHandle}
-        <span style={{ flex: 1, fontFamily: UI.fontDisplay, fontSize: 20, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: UI.ink }}>
+        <span style={{ flex: 1, fontFamily: UI.fontDisplay, fontSize: 20, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--accent)' }}>
           {dateLabel}
         </span>
         {!isToday && onJumpToday && (
@@ -1679,7 +1683,7 @@ function HealthWeekCard({ stats, dragHandle, targets, tf, setTf, weightUnit }) {
       <Card style={{ padding: 16, borderLeft: `3px solid ${UI.gold}` }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
           {dragHandle}
-          <span className="micro" style={{ color: UI.inkFaint, flex: 1 }}>{periodLabel}</span>
+          <span style={{ ...HEALTH_CARD_HEADER_STYLE, flex: 1 }}>{periodLabel}</span>
           {tfToggle}  {/* toggle on right even in empty state */}
         </div>
         <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi }}>Nothing logged yet.</div>
@@ -1691,7 +1695,7 @@ function HealthWeekCard({ stats, dragHandle, targets, tf, setTf, weightUnit }) {
     <Card accent style={{ padding: 16, borderLeft: `3px solid ${UI.gold}` }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
         {dragHandle}
-        <span className="micro" style={{ color: UI.inkFaint, flex: 1 }}>{periodLabel}</span>
+        <span style={{ ...HEALTH_CARD_HEADER_STYLE, flex: 1 }}>{periodLabel}</span>
         <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi }}>{range}</span>
         {tfToggle}
       </div>
@@ -2764,7 +2768,7 @@ function HealthClientLogs({ clientStore }) {
       <Card style={{ padding: 14, borderLeft: `3px solid ${UI.gold}` }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
           {handle}
-          <span className="micro" style={{ color: UI.inkFaint }}>WEEKLY AVERAGES</span>
+          <span style={HEALTH_CARD_HEADER_STYLE}>WEEKLY AVERAGES</span>
         </div>
         <div style={{ background: UI.bgInset, borderRadius: 6, border: `0.5px solid ${UI.hair}`, overflow: 'hidden' }}>
           {weeks.map((w, i) => (
