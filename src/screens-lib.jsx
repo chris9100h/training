@@ -3755,7 +3755,10 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
             <Bezel>EXERCISES</Bezel>
           )}
           <div style={twoCol
-            ? { display: 'grid', gridTemplateColumns: '1fr 1fr', columnGap: 20, rowGap: 14, marginTop: 14, alignItems: 'start' }
+            // alignItems defaults to 'stretch' in a grid: both cards in a row take the
+            // ROW's full height (the taller sibling's), giving every row a clean, even
+            // bottom edge instead of each card hugging its own content height.
+            ? { display: 'grid', gridTemplateColumns: '1fr 1fr', columnGap: 20, rowGap: 14, marginTop: 14 }
             : { display: 'flex', flexDirection: 'column', gap: 14, marginTop: 14 }
           }>
             {(() => {
@@ -4055,7 +4058,12 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                 // Two-column grid: each block gets its own bordered card instead of a
                 // between-block divider, a full-width knurl/hairline only makes sense
                 // spanning one column, not the row it visually sits in.
-                if (twoCol) return <Frame key={gi} padding={14} style={{ minWidth: 0 }}>{groupBody}</Frame>;
+                if (twoCol) {
+                  // A lone last card in an odd-count grid would otherwise sit half-width
+                  // in an empty row. Span both columns instead of leaving it orphaned.
+                  const isLastOdd = gi === groups.length - 1 && groups.length % 2 === 1;
+                  return <Frame key={gi} padding={14} style={{ minWidth: 0, ...(isLastOdd ? { gridColumn: '1 / -1' } : {}) }}>{groupBody}</Frame>;
+                }
                 return (
                   <div key={gi}>
                     {groupBody}
