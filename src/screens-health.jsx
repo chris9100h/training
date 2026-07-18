@@ -383,9 +383,22 @@ function HealthChartEmpty({ label }) {
 //   points: [{ x, y, date:'YYYY-MM-DD', rows:[{label?, value, color?}], sub? }]
 //   mode:   'x' (nearest by column, for lines/bars) | 'xy' (2D, for scatter)
 const CHART_PLOT_TOP = 10, CHART_PLOT_H = 96; // padTop / plotH, shared by every chart
+
+// Whether the current chart is squeezed into the Health tab's 2-col grid, as
+// opposed to shown full-width via a card's expand button. Context instead of
+// a prop threaded through every chart component + HealthChartCard: the grid
+// and the expand sheet render the exact same card element (the expand sheet
+// just clones it, see expandableCards in HealthScreen), and cloneElement is
+// shallow, so a prop set on that outer clone never reaches the chart nested
+// inside it. The grid wraps itself in Provider value={true}; the expand sheet
+// is a sibling of the grid, not a descendant, so it never sees that override
+// and stays at the default (false) below — no explicit "expanded" wrap needed.
+const ChartCompactContext = React.createContext(false);
+
 function ChartHover({ W, H, points, children, mode = 'x', markerColor = 'var(--accent)' }) {
   const wrapRef = useRefH(null);
   const [active, setActive] = useStateH(null);
+  const compact = React.useContext(ChartCompactContext);
 
   const pick = (clientX, clientY) => {
     const el = wrapRef.current;
@@ -426,7 +439,7 @@ function ChartHover({ W, H, points, children, mode = 'x', markerColor = 'var(--a
       style={{ position: 'relative', touchAction: 'pan-y', cursor: points.length ? 'crosshair' : 'default' }}
       onPointerMove={onPoint} onPointerUp={clear} onPointerLeave={clear} onPointerCancel={clear}>
       {children}
-      {!p && points.length > 0 && (
+      {!p && !compact && points.length > 0 && (
         <div style={{ position: 'absolute', top: 2, right: 4, pointerEvents: 'none' }}>
           <span className="micro" style={{ color: UI.inkGhost, letterSpacing: '0.08em' }}>Drag to inspect</span>
         </div>
@@ -2675,11 +2688,15 @@ function HealthScreen({ store, setStore, go, userId }) {
               }}>Settings → Health → Cards</button>
             </div>
           ) : (
-            <ReorderList onReorder={reorderCards} style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 14 }}>
-              {cardOrder.map(id => isCardVisible(id) ? (
-                <div key={id} data-reorder-item="true" data-tour={`health-card-${id}`} style={fullWidthCardIds.has(id) ? { gridColumn: '1 / -1' } : undefined}>{cardEls[id]}</div>
-              ) : null)}
-            </ReorderList>
+            // Grid-squeezed charts hide their "Drag to inspect" hint (ChartCompactContext) —
+            // the expand sheet below isn't a descendant of this provider, so it keeps showing it.
+            <ChartCompactContext.Provider value={true}>
+              <ReorderList onReorder={reorderCards} style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 14 }}>
+                {cardOrder.map(id => isCardVisible(id) ? (
+                  <div key={id} data-reorder-item="true" data-tour={`health-card-${id}`} style={fullWidthCardIds.has(id) ? { gridColumn: '1 / -1' } : undefined}>{cardEls[id]}</div>
+                ) : null)}
+              </ReorderList>
+            </ChartCompactContext.Provider>
           )}
         </div>
       </div>
