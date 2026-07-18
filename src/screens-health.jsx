@@ -653,6 +653,25 @@ function MacroLegend() {
 
 // ─── Daily log sheet ──────────────────────────────────────────────────────────
 
+// One card per category: clickable chevron header, optional right-aligned
+// extra content (a unit tag, a toggle) that doesn't itself trigger the
+// collapse, and its fields below when expanded. Defined at module scope
+// (not inside DailyLogSheet) so its function identity is stable across
+// renders: an inline definition would make React remount the whole
+// subtree (killing input focus/keyboard) on every keystroke.
+function CatSection({ label, extra, collapsed, onToggle, children }) {
+  return (
+    <Card style={{ padding: '12px 14px', marginBottom: 12, borderLeft: `3px solid ${UI.gold}` }}>
+      <div onClick={onToggle} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', WebkitTapHighlightColor: 'transparent', marginBottom: collapsed ? 0 : 10 }}>
+        <i className={`fa-solid fa-chevron-${collapsed ? 'right' : 'down'}`} style={{ fontSize: 9, color: collapsed ? UI.inkGhost : 'var(--accent)', width: 9, flexShrink: 0, transition: 'color 0.15s' }} />
+        <span style={{ fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: collapsed ? UI.inkFaint : 'var(--accent)', flex: 1, transition: 'color 0.15s' }}>{label}</span>
+        {extra}
+      </div>
+      {!collapsed && children}
+    </Card>
+  );
+}
+
 function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCoachingSchema, onSetStatus, userId, glucoseLogs, glucoseUnit, bloodPressureLogs, bodyTempLogs, tempUnit }) {
   // Always-current store snapshot: saveTemp's fever nudge awaits a Supabase
   // write and then a user-interaction-gated confirm dialog, both arbitrarily
@@ -1040,22 +1059,6 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
       <input type="text" inputMode="decimal" placeholder="—" value={form[k]} onChange={e => set(k, e.target.value)} style={inputStyle} />
     </div>
   );
-  // One card per category: clickable chevron header, optional right-aligned
-  // extra content (a unit tag, a toggle) that doesn't itself trigger the
-  // collapse, and its fields below when expanded.
-  const CatSection = ({ catKey, label, extra, children }) => {
-    const collapsed = collapsedCats.has(catKey);
-    return (
-      <Card style={{ padding: '12px 14px', marginBottom: 12, borderLeft: `3px solid ${UI.gold}` }}>
-        <div onClick={() => toggleCat(catKey)} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', WebkitTapHighlightColor: 'transparent', marginBottom: collapsed ? 0 : 10 }}>
-          <i className={`fa-solid fa-chevron-${collapsed ? 'right' : 'down'}`} style={{ fontSize: 9, color: collapsed ? UI.inkGhost : 'var(--accent)', width: 9, flexShrink: 0, transition: 'color 0.15s' }} />
-          <span style={{ fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: collapsed ? UI.inkFaint : 'var(--accent)', flex: 1, transition: 'color 0.15s' }}>{label}</span>
-          {extra}
-        </div>
-        {!collapsed && children}
-      </Card>
-    );
-  };
 
   return (
     <Sheet open={open} onClose={requestClose} title={existing ? 'Edit Day' : 'Log Day'}>
@@ -1114,14 +1117,14 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
         </div>
       )}
 
-      <CatSection catKey="body" label="BODY">
+      <CatSection label="BODY" collapsed={collapsedCats.has('body')} onToggle={() => toggleCat('body')}>
         <div style={{ display: 'flex', gap: 8 }}>
           {numField('weight', 'Weight', UI.unit())}
           {numField('steps', 'Steps')}
         </div>
       </CatSection>
 
-      <CatSection catKey="nutrition" label="NUTRITION" extra={
+      <CatSection label="NUTRITION" collapsed={collapsedCats.has('nutrition')} onToggle={() => toggleCat('nutrition')} extra={
         <div onClick={e => e.stopPropagation()} style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `0.5px solid ${UI.hairStrong}` }}>
           {[{ id: false, label: 'Total carbs' }, { id: true, label: 'Net carbs' }].map(o => (
             <button key={String(o.id)} onClick={() => setNetCarbs(o.id)} style={{
@@ -1160,7 +1163,7 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
         </div>
       </CatSection>
 
-      <CatSection catKey="hydration" label="HYDRATION">
+      <CatSection label="HYDRATION" collapsed={collapsedCats.has('hydration')} onToggle={() => toggleCat('hydration')}>
         <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
           {numField('water', 'Water', UI.waterEntryUnit())}
           {UI.waterQuickAdds().map(inc => (
@@ -1172,11 +1175,11 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
         </div>
       </CatSection>
 
-      <CatSection catKey="note" label="NOTE">
+      <CatSection label="NOTE" collapsed={collapsedCats.has('note')} onToggle={() => toggleCat('note')}>
         <textarea rows={2} placeholder="…" value={form.note} onChange={e => set('note', e.target.value)} style={{ ...inputStyle, resize: 'none', fontFamily: UI.fontUi, fontSize: 14 }} />
       </CatSection>
 
-      <CatSection catKey="glucose" label="GLUCOSE" extra={
+      <CatSection label="GLUCOSE" collapsed={collapsedCats.has('glucose')} onToggle={() => toggleCat('glucose')} extra={
         <span style={{ fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontUi }}>{glucoseUnitLabel(glUnit)}</span>
       }>
         {glucoseForDay.map(g => {
@@ -1264,7 +1267,7 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
         )}
       </CatSection>
 
-      <CatSection catKey="bloodPressure" label="BLOOD PRESSURE" extra={
+      <CatSection label="BLOOD PRESSURE" collapsed={collapsedCats.has('bloodPressure')} onToggle={() => toggleCat('bloodPressure')} extra={
         <span style={{ fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontUi }}>mmHg</span>
       }>
         {bpForDay.map(b => {
@@ -1336,7 +1339,7 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
         )}
       </CatSection>
 
-      <CatSection catKey="bodyTemp" label="BODY TEMPERATURE" extra={
+      <CatSection label="BODY TEMPERATURE" collapsed={collapsedCats.has('bodyTemp')} onToggle={() => toggleCat('bodyTemp')} extra={
         <span style={{ fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontUi }}>{tempUnitLabel(tUnit)}</span>
       }>
         {tempForDay.map(t => {
