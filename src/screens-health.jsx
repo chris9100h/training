@@ -165,6 +165,144 @@ const GLUCOSE_CTX_LABELS = { fasted: 'Fasted', fed: 'Fed', other: 'Other' };
 // fasting normal range in mmol/L
 const GLUCOSE_REF_LOW = 3.9, GLUCOSE_REF_HIGH = 5.6, GLUCOSE_REF_FED = 7.8;
 
+// ─── body temperature helpers ───────────────────────────────────────────────
+// Stored always in Celsius; display unit ('c'|'f') is a per-user setting, same
+// pattern as glucose's mmol/mgdl. Unlike glucose's factor, C→F has an additive
+// offset, not a pure ratio, so this is a small conversion pair, not a constant.
+
+function tempDisplay(c, unit) {
+  if (c == null) return null;
+  const v = unit === 'f' ? c * 9 / 5 + 32 : c;
+  return Math.round(v * 10) / 10;
+}
+function tempFromInput(raw, unit) {
+  const n = parseFloat(String(raw).replace(',', '.'));
+  if (!isFinite(n)) return null;
+  const c = unit === 'f' ? (n - 32) * 5 / 9 : n;
+  return Math.round(c * 100) / 100;
+}
+// Edit-form prefill: show the stored reading in the display unit but WITHOUT the
+// display rounding, so re-saving an untouched value doesn't clobber the raw °C.
+// c is stored to 2 decimals (tempFromInput), so c*9/5 needs at most 3 decimals
+// to round-trip exactly; round to 4 purely to strip floating-point noise, not
+// to lose precision.
+function tempEditValue(c, unit) {
+  if (c == null) return '';
+  return String(unit === 'f' ? Math.round((c * 9 / 5 + 32) * 10000) / 10000 : c);
+}
+const tempUnitLabel = unit => unit === 'f' ? '°F' : '°C';
+// Per-device, per-day dismissal for the fever "Mark today as Sick?" nudge: a
+// decline is remembered for the rest of the day so a second elevated reading
+// doesn't re-ask (mirrors the intent of the deload nudge's decline-tracking,
+// scaled down since this is a low-stakes UI nag, not a synced setting).
+const FEVER_NUDGE_DECLINE_KEY = 'logbook-fever-nudge-declined-date';
+
+// Scatter chart: one point per reading, connected by a thin trend line (unlike
+// glucose, temperature has no fasted/fed context split, so its reading-to-
+// reading trend is itself the meaningful signal). No reference band: a
+// "normal" body temperature varies by measurement method and time of day, so a
+// fixed band here would overclaim precision a home reading can't guarantee.
+function TempScatterChart({ readings, from, to, unit }) {
+  const pts = (readings || []).filter(r => r.valueC != null && r.date >= from && r.date <= to)
+    .sort((a, b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time));
+  if (!pts.length) return <HealthChartEmpty />;
+  const W = 320, padL = 34, padR = 12, padTop = 10, padBottom = 20, plotH = 96;
+  const H = padTop + plotH + padBottom, plotW = W - padL - padR;
+
+  const dispVals = pts.map(p => tempDisplay(p.valueC, unit));
+  const dom = UI.chartDomain(Math.min(...dispVals), Math.max(...dispVals));
+  const totalDays = Math.max(1, healthDayDiff(from, to));
+  const xOf = d => padL + (healthDayDiff(from, d) / totalDays) * plotW;
+  const yOf = v => padTop + (1 - (v - dom.min) / dom.range) * plotH;
+  const dec = dom.range >= 4 ? 0 : 1;
+  const gridVals = dom.gridVals || Array.from({ length: 4 }, (_, i) => dom.min + (dom.range / 3) * i);
+  const unitLabel = tempUnitLabel(unit);
+  const hoverPoints = pts.map(p => {
+    const disp = tempDisplay(p.valueC, unit);
+    return { x: xOf(p.date), y: yOf(disp), date: p.date, rows: [{ value: `${disp}${unitLabel}` }], sub: p.time };
+  });
+
+  return (
+    <ChartHover W={W} H={H} points={hoverPoints}>
+    <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display: 'block', overflow: 'visible' }}>
+      {gridVals.map((v, i) => (
+        <g key={i}>
+          {i > 0 && <line x1={padL} y1={yOf(v).toFixed(1)} x2={W - padR} y2={yOf(v).toFixed(1)} stroke={UI.hair} strokeWidth="0.5" strokeDasharray="3 3" />}
+          <text x={padL - 5} y={(yOf(v) + 3).toFixed(1)} textAnchor="end" fontSize="8" fontFamily={UI.fontNum} fill={UI.inkFaint}>{Number(v.toFixed(dec))}</text>
+        </g>
+      ))}
+      <line x1={padL} y1={padTop + plotH} x2={W - padR} y2={padTop + plotH} stroke={UI.hair} strokeWidth="0.5" />
+      {pts.length >= 2 && (
+        <polyline points={pts.map(p => `${xOf(p.date).toFixed(1)},${yOf(tempDisplay(p.valueC, unit)).toFixed(1)}`).join(' ')} fill="none" stroke="var(--accent)" strokeWidth="1.5" opacity="0.5" />
+      )}
+      {pts.map((p, i) => (
+        <circle key={i} cx={xOf(p.date).toFixed(1)} cy={yOf(tempDisplay(p.valueC, unit)).toFixed(1)} r={3} fill="var(--accent)" opacity={0.85} />
+      ))}
+    </svg>
+    </ChartHover>
+  );
+}
+
+// ─── blood pressure helpers ─────────────────────────────────────────────────
+// mmHg is a universal unit, so unlike glucose/temperature there is no display-
+// unit setting or conversion pair here.
+
+// Two-series scatter (systolic + diastolic dots on the same y-axis, mmHg),
+// joined by a thin tie-line per reading. Two dashed reference lines mark the
+// widely-cited "normal" upper bound (120 systolic / 80 diastolic, AHA/ESC),
+// same treatment as glucose's single fed-line marker. Deliberately NOT a full
+// color-tiered band: unlike glucose's single well-established fasting range,
+// the full blood-pressure classification (elevated / stage 1 / stage 2 / crisis)
+// is multi-tier and context-dependent (rest, time of day, measurement
+// position), better left to the user's own doctor than baked in here.
+const BP_REF_SYS = 120, BP_REF_DIA = 80;
+function BpScatterChart({ readings, from, to }) {
+  const pts = (readings || []).filter(r => r.systolic != null && r.diastolic != null && r.date >= from && r.date <= to)
+    .sort((a, b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time));
+  if (!pts.length) return <HealthChartEmpty />;
+  const W = 320, padL = 34, padR = 12, padTop = 10, padBottom = 20, plotH = 96;
+  const H = padTop + plotH + padBottom, plotW = W - padL - padR;
+
+  const allVals = pts.flatMap(p => [p.systolic, p.diastolic]);
+  const dom = UI.chartDomain(Math.min(...allVals, BP_REF_DIA), Math.max(...allVals, BP_REF_SYS));
+  const totalDays = Math.max(1, healthDayDiff(from, to));
+  const xOf = d => padL + (healthDayDiff(from, d) / totalDays) * plotW;
+  const yOf = v => padTop + (1 - (v - dom.min) / dom.range) * plotH;
+  const gridVals = dom.gridVals || Array.from({ length: 4 }, (_, i) => dom.min + (dom.range / 3) * i);
+  const SYS_COLOR = 'var(--accent)', DIA_COLOR = '#4a9fe0';
+  const hoverPoints = pts.map(p => ({
+    x: xOf(p.date), y: yOf(p.systolic), date: p.date,
+    rows: [
+      { label: 'SYS', value: `${p.systolic} mmHg`, color: SYS_COLOR },
+      { label: 'DIA', value: `${p.diastolic} mmHg`, color: DIA_COLOR },
+    ],
+    sub: p.time,
+  }));
+
+  return (
+    <ChartHover W={W} H={H} points={hoverPoints} mode="xy">
+    <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display: 'block', overflow: 'visible' }}>
+      <line x1={padL} y1={yOf(BP_REF_SYS).toFixed(1)} x2={W - padR} y2={yOf(BP_REF_SYS).toFixed(1)} stroke={SYS_COLOR} strokeWidth="0.75" strokeDasharray="4 3" opacity="0.5" />
+      <line x1={padL} y1={yOf(BP_REF_DIA).toFixed(1)} x2={W - padR} y2={yOf(BP_REF_DIA).toFixed(1)} stroke={DIA_COLOR} strokeWidth="0.75" strokeDasharray="4 3" opacity="0.5" />
+      {gridVals.map((v, i) => (
+        <g key={i}>
+          {i > 0 && <line x1={padL} y1={yOf(v).toFixed(1)} x2={W - padR} y2={yOf(v).toFixed(1)} stroke={UI.hair} strokeWidth="0.5" strokeDasharray="3 3" />}
+          <text x={padL - 5} y={(yOf(v) + 3).toFixed(1)} textAnchor="end" fontSize="8" fontFamily={UI.fontNum} fill={UI.inkFaint}>{Math.round(v)}</text>
+        </g>
+      ))}
+      <line x1={padL} y1={padTop + plotH} x2={W - padR} y2={padTop + plotH} stroke={UI.hair} strokeWidth="0.5" />
+      {pts.map((p, i) => (
+        <React.Fragment key={i}>
+          <line x1={xOf(p.date).toFixed(1)} y1={yOf(p.systolic).toFixed(1)} x2={xOf(p.date).toFixed(1)} y2={yOf(p.diastolic).toFixed(1)} stroke={UI.hair} strokeWidth="1" />
+          <circle cx={xOf(p.date).toFixed(1)} cy={yOf(p.systolic).toFixed(1)} r={3} fill={SYS_COLOR} opacity={0.85} />
+          <circle cx={xOf(p.date).toFixed(1)} cy={yOf(p.diastolic).toFixed(1)} r={3} fill={DIA_COLOR} opacity={0.85} />
+        </React.Fragment>
+      ))}
+    </svg>
+    </ChartHover>
+  );
+}
+
 // Scatter chart: one point per reading, coloured by context, with a reference
 // band for the fasting normal range (3.9–5.6 mmol/L).
 function GlucoseScatterChart({ readings, from, to, unit }) {
@@ -313,15 +451,19 @@ function ChartHover({ W, H, points, children, mode = 'x', markerColor = 'var(--a
   );
 }
 
+// Bigger, bold, accent-colored card header, shared by every card in the
+// Health tab (matches the Daily Log's category headers).
+const HEALTH_CARD_HEADER_STYLE = { fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--accent)' };
+
 // Section wrapper: title + 1W/1M/3M toggle + subtitle. `dragHandle` renders a
 // reorder grip at the start of the header when the card is in a reorder list.
 function HealthChartCard({ title, icon, tf, setTf, headline, sub, dragHandle, children }) {
   return (
-    <Card style={{ padding: 14 }}>
+    <Card style={{ padding: 14, borderLeft: `3px solid ${UI.gold}` }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
         {dragHandle}
         {icon && <i className={`fa-solid ${icon}`} style={{ fontSize: 11, color: UI.inkFaint }} />}
-        <span className="micro" style={{ color: UI.inkFaint, flex: 1 }}>{title}</span>
+        <span style={{ ...HEALTH_CARD_HEADER_STYLE, flex: 1 }}>{title}</span>
         <div data-reorder-ignore="true" style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `0.5px solid ${UI.hairStrong}` }}>
           {HEALTH_TFS.map(t => (
             <button key={t.id} onClick={() => setTf(t.id)} style={{
@@ -391,7 +533,7 @@ function HealthLineChart({ series, from, to, format, color = 'var(--accent)', yM
 }
 
 // Bar chart over a date window. series = [{ date, value }].
-function HealthBarChart({ series, from, to, format, target }) {
+function HealthBarChart({ series, from, to, format, target, color = 'var(--accent)', colorSoft = `rgba(var(--accent-rgb),0.35)` }) {
   const pts = (series || []).filter(p => p.value != null && p.value > 0);
   if (!pts.length) return <HealthChartEmpty />;
   const W = 320, padL = 38, padR = 12, padTop = 10, padBottom = 20, plotH = 96;
@@ -419,7 +561,7 @@ function HealthBarChart({ series, from, to, format, target }) {
       ))}
       <line x1={padL} y1={padTop + plotH} x2={W - padR} y2={padTop + plotH} stroke={UI.hair} strokeWidth="0.5" />
       {target != null && target > 0 && (
-        <line x1={padL} y1={yOf(target).toFixed(1)} x2={W - padR} y2={yOf(target).toFixed(1)} stroke="var(--accent)" strokeWidth="1" strokeDasharray="4 3" opacity="0.7" />
+        <line x1={padL} y1={yOf(target).toFixed(1)} x2={W - padR} y2={yOf(target).toFixed(1)} stroke={color} strokeWidth="1" strokeDasharray="4 3" opacity="0.7" />
       )}
       {pts.map((p, i) => {
         const x = xOf(p.date) - bw / 2;
@@ -427,7 +569,7 @@ function HealthBarChart({ series, from, to, format, target }) {
         const h = (padTop + plotH) - y;
         const above = target && p.value >= target;
         return <rect key={i} x={x.toFixed(1)} y={y.toFixed(1)} width={bw.toFixed(1)} height={Math.max(0, h).toFixed(1)} rx="1"
-          fill={above ? 'var(--accent)' : `rgba(var(--accent-rgb),0.35)`} />;
+          fill={above ? color : colorSoft} />;
       })}
     </svg>
     </ChartHover>
@@ -515,7 +657,33 @@ function MacroLegend() {
 
 // ─── Daily log sheet ──────────────────────────────────────────────────────────
 
-function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCoachingSchema, onSetStatus, userId, glucoseLogs, glucoseUnit }) {
+// One card per category: clickable chevron header, optional right-aligned
+// extra content (a unit tag, a toggle) that doesn't itself trigger the
+// collapse, and its fields below when expanded. Defined at module scope
+// (not inside DailyLogSheet) so its function identity is stable across
+// renders: an inline definition would make React remount the whole
+// subtree (killing input focus/keyboard) on every keystroke.
+function CatSection({ label, extra, collapsed, onToggle, children }) {
+  return (
+    <Card style={{ padding: '12px 14px', marginBottom: 12, borderLeft: `3px solid ${UI.gold}` }}>
+      <div onClick={onToggle} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', WebkitTapHighlightColor: 'transparent', marginBottom: collapsed ? 0 : 10 }}>
+        <i className={`fa-solid fa-chevron-${collapsed ? 'right' : 'down'}`} style={{ fontSize: 9, color: collapsed ? UI.inkGhost : 'var(--accent)', width: 9, flexShrink: 0, transition: 'color 0.15s' }} />
+        <span style={{ fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: collapsed ? UI.inkFaint : 'var(--accent)', flex: 1, transition: 'color 0.15s' }}>{label}</span>
+        {extra}
+      </div>
+      {!collapsed && children}
+    </Card>
+  );
+}
+
+function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCoachingSchema, onSetStatus, userId, glucoseLogs, glucoseUnit, bloodPressureLogs, bodyTempLogs, tempUnit }) {
+  // Always-current store snapshot: saveTemp's fever nudge awaits a Supabase
+  // write and then a user-interaction-gated confirm dialog, both arbitrarily
+  // long, so it re-reads statusMode from this ref (not the closed-over
+  // `store` prop) right before mutating it, to notice a status change made
+  // elsewhere in this same sheet while that wait was in flight.
+  const storeRef = useRefH(store);
+  storeRef.current = store;
   const existing = useMemoH(() => (store.dailyLogs || []).find(l => l.date === date), [store.dailyLogs, date]);
   const todayISO = LB.todayISO();
   const dayStatusPeriod = useMemoH(() => {
@@ -554,6 +722,32 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
   // Snapshot of the form as it was opened, to detect unsaved edits on dismiss.
   const initialSnap = useRefH({ form: empty, coach: {}, net: false });
 
+  // Categories the user has never once filled in start collapsed, so a sheet
+  // that's grown to include glucose/BP/temp/etc. doesn't bury the fields
+  // someone actually uses under ones they don't. Computed once per open (not
+  // live-reactive), so filling one in for the first time doesn't yank the
+  // section shut mid-edit; a manual toggle always wins until the sheet
+  // re-opens.
+  const [collapsedCats, setCollapsedCats] = useStateH(new Set());
+  const toggleCat = (key) => setCollapsedCats(prev => {
+    const next = new Set(prev);
+    if (next.has(key)) next.delete(key); else next.add(key);
+    return next;
+  });
+  useEffectH(() => {
+    if (!open) return;
+    const everUsed = {
+      body: (store.dailyLogs || []).some(l => l.weight != null || l.steps != null),
+      nutrition: (store.dailyLogs || []).some(l => l.protein != null || l.carbs != null || l.fat != null || l.calories != null || l.offPlanNote),
+      hydration: (store.dailyLogs || []).some(l => l.waterMl != null),
+      note: (store.dailyLogs || []).some(l => l.note),
+      glucose: (store.glucoseLogs || []).length > 0,
+      bloodPressure: (store.bloodPressureLogs || []).length > 0,
+      bodyTemp: (store.bodyTempLogs || []).length > 0,
+    };
+    setCollapsedCats(new Set(Object.keys(everUsed).filter(k => !everUsed[k])));
+  }, [open]);
+
   // ── Glucose readings for this day ──
   const glUnit = glucoseUnit || 'mmol';
   const glucoseForDay = useMemoH(
@@ -567,9 +761,140 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
   const [confirmDeleteGlId, setConfirmDeleteGlId] = useStateH(null);
   const setGl = (k, v) => setGlForm(f => ({ ...f, [k]: v }));
 
+  // ── Blood pressure readings for this day ──
+  const bpForDay = useMemoH(
+    () => (bloodPressureLogs || []).filter(l => l.date === date).sort((a, b) => a.time.localeCompare(b.time)),
+    [bloodPressureLogs, date]
+  );
+  const emptyBp = { systolic: '', diastolic: '', time: '', note: '' };
+  const [addingBp, setAddingBp] = useStateH(false);
+  const [bpForm, setBpForm] = useStateH(emptyBp);
+  const [editingBpId, setEditingBpId] = useStateH(null);
+  const [confirmDeleteBpId, setConfirmDeleteBpId] = useStateH(null);
+  const [savingBp, setSavingBp] = useStateH(false);
+  const setBp = (k, v) => setBpForm(f => ({ ...f, [k]: v }));
+
+  // ── Body temperature readings for this day ──
+  const tUnit = tempUnit || 'c';
+  const tempForDay = useMemoH(
+    () => (bodyTempLogs || []).filter(l => l.date === date).sort((a, b) => a.time.localeCompare(b.time)),
+    [bodyTempLogs, date]
+  );
+  const emptyTemp = { value: '', time: '', note: '' };
+  const [addingTemp, setAddingTemp] = useStateH(false);
+  const [tempForm, setTempForm] = useStateH(emptyTemp);
+  const [editingTempId, setEditingTempId] = useStateH(null);
+  const [confirmDeleteTempId, setConfirmDeleteTempId] = useStateH(null);
+  const [savingTemp, setSavingTemp] = useStateH(false);
+  const setTemp = (k, v) => setTempForm(f => ({ ...f, [k]: v }));
+
   useEffectH(() => {
-    if (!open) { setAddingGlucose(false); setGlForm(emptyGl); setEditingGlucoseId(null); setConfirmDeleteGlId(null); }
+    if (!open) {
+      setAddingGlucose(false); setGlForm(emptyGl); setEditingGlucoseId(null); setConfirmDeleteGlId(null);
+      setAddingBp(false); setBpForm(emptyBp); setEditingBpId(null); setConfirmDeleteBpId(null); setSavingBp(false);
+      setAddingTemp(false); setTempForm(emptyTemp); setEditingTempId(null); setConfirmDeleteTempId(null); setSavingTemp(false);
+    }
   }, [open]);
+
+  // Normalize a free-text time to zero-padded HH:MM (so entries sort
+  // correctly) and fall back to now if it's blank or invalid ("9", "25:99").
+  const normEntryTime = (s) => {
+    const m = /^(\d{1,2}):(\d{2})$/.exec((s || '').trim());
+    if (!m) return null;
+    const h = +m[1], min = +m[2];
+    if (h > 23 || min > 59) return null;
+    return String(h).padStart(2, '0') + ':' + String(min).padStart(2, '0');
+  };
+
+  const saveBp = async () => {
+    if (savingBp) return;
+    const sys = parseInt(bpForm.systolic, 10), dia = parseInt(bpForm.diastolic, 10);
+    if (!isFinite(sys) || sys <= 0 || !isFinite(dia) || dia <= 0) {
+      await confirm('Enter a systolic and diastolic value above 0.', { title: 'Invalid reading', ok: 'OK', cancel: null });
+      return;
+    }
+    setSavingBp(true);
+    try {
+      const time = normEntryTime(bpForm.time) || new Date().toTimeString().slice(0, 5);
+      if (editingBpId) {
+        const origEntry = (store.bloodPressureLogs || []).find(l => l.id === editingBpId);
+        const updated = { ...origEntry, time, systolic: sys, diastolic: dia, note: bpForm.note.trim() || null };
+        setStore(s => ({ ...s, bloodPressureLogs: (s.bloodPressureLogs || []).map(l => l.id === editingBpId ? updated : l) }));
+        setEditingBpId(null); setAddingBp(false); setBpForm(emptyBp);
+        const { error } = await LB.supabase.from('zane_blood_pressure_logs').update({ time, systolic: sys, diastolic: dia, note: updated.note }).eq('id', editingBpId).eq('user_id', userId);
+        if (error && origEntry) setStore(s => ({ ...s, bloodPressureLogs: (s.bloodPressureLogs || []).map(l => l.id === editingBpId ? origEntry : l) }));
+      } else {
+        const entry = { id: LB.uid(), date, time, systolic: sys, diastolic: dia, note: bpForm.note.trim() || null, createdAt: new Date().toISOString() };
+        setStore(s => ({ ...s, bloodPressureLogs: [entry, ...(s.bloodPressureLogs || [])] }));
+        setAddingBp(false); setBpForm(emptyBp);
+        const { error } = await LB.supabase.from('zane_blood_pressure_logs').insert({ id: entry.id, user_id: userId, date: entry.date, time: entry.time, systolic: entry.systolic, diastolic: entry.diastolic, note: entry.note });
+        if (error) setStore(s => ({ ...s, bloodPressureLogs: (s.bloodPressureLogs || []).filter(l => l.id !== entry.id) }));
+      }
+    } finally {
+      setSavingBp(false);
+    }
+  };
+
+  const deleteBp = async (id) => {
+    setConfirmDeleteBpId(null);
+    const orig = (store.bloodPressureLogs || []).find(l => l.id === id);
+    setStore(s => ({ ...s, bloodPressureLogs: (s.bloodPressureLogs || []).filter(l => l.id !== id) }));
+    const { error } = await LB.supabase.from('zane_blood_pressure_logs').delete().eq('id', id).eq('user_id', userId);
+    if (error && orig) setStore(s => ({ ...s, bloodPressureLogs: [orig, ...(s.bloodPressureLogs || [])] }));
+  };
+
+  const saveTemp = async () => {
+    if (savingTemp) return;
+    const c = tempFromInput(tempForm.value, tUnit);
+    if (c == null) {
+      await confirm('Enter a valid temperature.', { title: 'Invalid reading', ok: 'OK', cancel: null });
+      return;
+    }
+    setSavingTemp(true);
+    try {
+      const time = normEntryTime(tempForm.time) || new Date().toTimeString().slice(0, 5);
+      let ok = true;
+      if (editingTempId) {
+        const origEntry = (store.bodyTempLogs || []).find(l => l.id === editingTempId);
+        const updated = { ...origEntry, time, valueC: c, note: tempForm.note.trim() || null };
+        setStore(s => ({ ...s, bodyTempLogs: (s.bodyTempLogs || []).map(l => l.id === editingTempId ? updated : l) }));
+        setEditingTempId(null); setAddingTemp(false); setTempForm(emptyTemp);
+        const { error } = await LB.supabase.from('zane_body_temp_logs').update({ time, value_c: c, note: updated.note }).eq('id', editingTempId).eq('user_id', userId);
+        if (error) { ok = false; if (origEntry) setStore(s => ({ ...s, bodyTempLogs: (s.bodyTempLogs || []).map(l => l.id === editingTempId ? origEntry : l) })); }
+      } else {
+        const entry = { id: LB.uid(), date, time, valueC: c, note: tempForm.note.trim() || null, createdAt: new Date().toISOString() };
+        setStore(s => ({ ...s, bodyTempLogs: [entry, ...(s.bodyTempLogs || [])] }));
+        setAddingTemp(false); setTempForm(emptyTemp);
+        const { error } = await LB.supabase.from('zane_body_temp_logs').insert({ id: entry.id, user_id: userId, date: entry.date, time: entry.time, value_c: entry.valueC, note: entry.note });
+        if (error) { setStore(s => ({ ...s, bodyTempLogs: (s.bodyTempLogs || []).filter(l => l.id !== entry.id) })); ok = false; }
+      }
+      // Fever nudge: only for a reading logged against TODAY (status is a
+      // "right now" concept, see dayMode above), only once (skip if already
+      // marked Sick or already declined today), and only after a write that
+      // actually stuck.
+      let declinedToday = false;
+      try { declinedToday = localStorage.getItem(FEVER_NUDGE_DECLINE_KEY) === todayISO; } catch (_) {}
+      if (ok && onSetStatus && date === todayISO && !declinedToday && storeRef.current.statusMode !== 'sick' && c >= (store.settings?.feverThresholdC ?? 38)) {
+        const disp = tempDisplay(c, tUnit);
+        const markSick = await confirm(`You logged ${disp}${tempUnitLabel(tUnit)}. Mark today as Sick?`, { title: 'Fever detected', ok: 'Mark Sick', cancel: 'Not now' });
+        // Re-check via the live ref, not the closed-over `store`: status may
+        // have changed (e.g. a Sick/Vacation/Normal tap in this same sheet)
+        // while the write above or this confirm dialog was pending.
+        if (markSick && storeRef.current.statusMode !== 'sick') onSetStatus('sick', null);
+        else if (!markSick) { try { localStorage.setItem(FEVER_NUDGE_DECLINE_KEY, todayISO); } catch (_) {} }
+      }
+    } finally {
+      setSavingTemp(false);
+    }
+  };
+
+  const deleteTemp = async (id) => {
+    setConfirmDeleteTempId(null);
+    const orig = (store.bodyTempLogs || []).find(l => l.id === id);
+    setStore(s => ({ ...s, bodyTempLogs: (s.bodyTempLogs || []).filter(l => l.id !== id) }));
+    const { error } = await LB.supabase.from('zane_body_temp_logs').delete().eq('id', id).eq('user_id', userId);
+    if (error && orig) setStore(s => ({ ...s, bodyTempLogs: [orig, ...(s.bodyTempLogs || [])] }));
+  };
 
   const saveGlucose = async () => {
     const mmol = glucoseFromInput(glForm.value, glUnit);
@@ -796,15 +1121,15 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
         </div>
       )}
 
-      <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>BODY</div>
-      <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-        {numField('weight', 'Weight', UI.unit())}
-        {numField('steps', 'Steps')}
-      </div>
+      <CatSection label="BODY" collapsed={collapsedCats.has('body')} onToggle={() => toggleCat('body')}>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {numField('weight', 'Weight', UI.unit())}
+          {numField('steps', 'Steps')}
+        </div>
+      </CatSection>
 
-      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 8 }}>
-        <span className="micro" style={{ color: UI.inkFaint, flex: 1 }}>NUTRITION</span>
-        <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `0.5px solid ${UI.hairStrong}` }}>
+      <CatSection label="NUTRITION" collapsed={collapsedCats.has('nutrition')} onToggle={() => toggleCat('nutrition')} extra={
+        <div onClick={e => e.stopPropagation()} style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `0.5px solid ${UI.hairStrong}` }}>
           {[{ id: false, label: 'Total carbs' }, { id: true, label: 'Net carbs' }].map(o => (
             <button key={String(o.id)} onClick={() => setNetCarbs(o.id)} style={{
               padding: '4px 10px', cursor: 'pointer', border: 'none',
@@ -815,55 +1140,52 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
             }}>{o.label}</button>
           ))}
         </div>
-      </div>
-      <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-        {numField('protein', 'Protein', 'g')}
-        {numField('carbs', 'Carbs', 'g')}
-        {numField('fat', 'Fat', 'g')}
-      </div>
-      {netCarbs && (
+      }>
         <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-          {numField('fiber', 'Fiber', 'g')}
-          <div style={{ flex: 1 }}>
-            <div style={labelStyle}>Net carbs (g)</div>
-            <div style={{ ...inputStyle, color: netCarbsVal != null ? UI.inkSoft : UI.inkGhost, pointerEvents: 'none', userSelect: 'none' }}>
-              {netCarbsVal != null ? netCarbsVal : '—'}
+          {numField('protein', 'Protein', 'g')}
+          {numField('carbs', 'Carbs', 'g')}
+          {numField('fat', 'Fat', 'g')}
+        </div>
+        {netCarbs && (
+          <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+            {numField('fiber', 'Fiber', 'g')}
+            <div style={{ flex: 1 }}>
+              <div style={labelStyle}>Net carbs (g)</div>
+              <div style={{ ...inputStyle, color: netCarbsVal != null ? UI.inkSoft : UI.inkGhost, pointerEvents: 'none', userSelect: 'none' }}>
+                {netCarbsVal != null ? netCarbsVal : '—'}
+              </div>
             </div>
           </div>
+        )}
+        <div style={{ marginBottom: 12 }}>
+          <div style={labelStyle}>Calories (kcal){autoCals != null && form.calories === '' ? (netCarbs ? ' · net carbs' : ' · from macros') : ''}</div>
+          <input type="text" inputMode="decimal" placeholder={autoCals != null ? String(autoCals) : '—'} value={form.calories} onChange={e => set('calories', e.target.value)} style={inputStyle} />
         </div>
-      )}
-      <div style={{ marginBottom: 16 }}>
-        <div style={labelStyle}>Calories (kcal){autoCals != null && form.calories === '' ? (netCarbs ? ' · net carbs' : ' · from macros') : ''}</div>
-        <input type="text" inputMode="decimal" placeholder={autoCals != null ? String(autoCals) : '—'} value={form.calories} onChange={e => set('calories', e.target.value)} style={inputStyle} />
-      </div>
+        <div>
+          <div style={labelStyle}>Off-plan note <span style={{ textTransform: 'none', fontWeight: 400, color: UI.inkGhost }}>(optional · prefills check-in)</span></div>
+          <textarea rows={2} placeholder="e.g. Birthday cake, 2 slices" value={form.offPlanNote} onChange={e => set('offPlanNote', e.target.value)} style={{ ...inputStyle, resize: 'none', fontFamily: UI.fontUi, fontSize: 14 }} />
+        </div>
+      </CatSection>
 
-      <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>HYDRATION</div>
-      <div style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'flex-end' }}>
-        {numField('water', 'Water', UI.waterEntryUnit())}
-        {UI.waterQuickAdds().map(inc => (
-          <button key={inc} onClick={() => set('water', String((healthInt(form.water) || 0) + inc))} style={{
-            padding: '10px 12px', borderRadius: 4, border: `0.5px solid ${UI.hairStrong}`, background: UI.bgInset,
-            color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap', WebkitTapHighlightColor: 'transparent',
-          }}>+{inc}</button>
-        ))}
-      </div>
+      <CatSection label="HYDRATION" collapsed={collapsedCats.has('hydration')} onToggle={() => toggleCat('hydration')}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+          {numField('water', 'Water', UI.waterEntryUnit())}
+          {UI.waterQuickAdds().map(inc => (
+            <button key={inc} onClick={() => set('water', String((healthInt(form.water) || 0) + inc))} style={{
+              padding: '10px 12px', borderRadius: 4, border: `0.5px solid ${UI.hairStrong}`, background: UI.bgInset,
+              color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap', WebkitTapHighlightColor: 'transparent',
+            }}>+{inc}</button>
+          ))}
+        </div>
+      </CatSection>
 
-      <div style={{ marginTop: 8, marginBottom: 10 }}>
-        <div style={labelStyle}>Note (optional)</div>
+      <CatSection label="NOTE" collapsed={collapsedCats.has('note')} onToggle={() => toggleCat('note')}>
         <textarea rows={2} placeholder="…" value={form.note} onChange={e => set('note', e.target.value)} style={{ ...inputStyle, resize: 'none', fontFamily: UI.fontUi, fontSize: 14 }} />
-      </div>
+      </CatSection>
 
-      <div style={{ marginBottom: 18 }}>
-        <div style={labelStyle}>Off-plan note <span style={{ textTransform: 'none', fontWeight: 400, color: UI.inkGhost }}>(optional · prefills check-in)</span></div>
-        <textarea rows={2} placeholder="e.g. Birthday cake, 2 slices" value={form.offPlanNote} onChange={e => set('offPlanNote', e.target.value)} style={{ ...inputStyle, resize: 'none', fontFamily: UI.fontUi, fontSize: 14 }} />
-      </div>
-
-      {/* ── Glucose ── */}
-      <div style={{ marginTop: 8, marginBottom: 18 }}>
-        <div style={{ display: 'flex', alignItems: 'center', marginBottom: 8 }}>
-          <span className="micro" style={{ color: UI.inkFaint, flex: 1 }}>GLUCOSE</span>
-          <span style={{ fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontUi }}>{glucoseUnitLabel(glUnit)}</span>
-        </div>
+      <CatSection label="GLUCOSE" collapsed={collapsedCats.has('glucose')} onToggle={() => toggleCat('glucose')} extra={
+        <span style={{ fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontUi }}>{glucoseUnitLabel(glUnit)}</span>
+      }>
         {glucoseForDay.map(g => {
           const disp = glucoseDisplay(g.valueMmol, glUnit);
           const ctxColor = { fasted: 'var(--accent)', fed: '#4a9fe0', other: UI.inkSoft }[g.context] || UI.inkSoft;
@@ -947,7 +1269,147 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
             color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 12, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
           }}>+ Add reading</button>
         )}
-      </div>
+      </CatSection>
+
+      <CatSection label="BLOOD PRESSURE" collapsed={collapsedCats.has('bloodPressure')} onToggle={() => toggleCat('bloodPressure')} extra={
+        <span style={{ fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontUi }}>mmHg</span>
+      }>
+        {bpForDay.map(b => {
+          const isConfirm = confirmDeleteBpId === b.id;
+          return (
+            <div key={b.id} style={{ background: UI.bgInset, borderRadius: 6, marginBottom: 6, border: `0.5px solid ${UI.hairStrong}`, overflow: 'hidden' }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '8px 10px' }}>
+                <span style={{ fontFamily: UI.fontUi, fontSize: 9, color: UI.inkFaint, minWidth: 32, paddingTop: 1 }}>{b.time}</span>
+                <div style={{ flex: 1 }}>
+                  <span className="num" style={{ fontSize: 15, color: UI.ink }}>{b.systolic}/{b.diastolic}</span>
+                  {b.note && <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>{b.note}</div>}
+                </div>
+                <button onClick={() => { setEditingBpId(b.id); setAddingBp(true); setConfirmDeleteBpId(null); setBpForm({ systolic: String(b.systolic), diastolic: String(b.diastolic), time: b.time, note: b.note || '' }); }} style={{ background: 'none', border: 'none', color: UI.inkGhost, fontSize: 11, cursor: 'pointer', padding: '0 4px', lineHeight: 1 }}>
+                  <i className="fa-solid fa-pencil" />
+                </button>
+                <button onClick={() => setConfirmDeleteBpId(isConfirm ? null : b.id)} style={{ background: 'none', border: 'none', color: UI.inkGhost, fontSize: 14, cursor: 'pointer', padding: '0 2px', lineHeight: 1 }}>×</button>
+              </div>
+              {isConfirm && (
+                <div style={{ display: 'flex', gap: 0, borderTop: `0.5px solid ${UI.hairStrong}` }}>
+                  <button onClick={() => setConfirmDeleteBpId(null)} style={{ flex: 1, padding: '7px', background: 'none', border: 'none', cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 11, color: UI.inkSoft }}>Cancel</button>
+                  <button onClick={() => deleteBp(b.id)} style={{ flex: 1, padding: '7px', background: 'none', border: 'none', borderLeft: `0.5px solid ${UI.hairStrong}`, cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700, color: UI.danger }}>Delete</button>
+                </div>
+              )}
+            </div>
+          );
+        })}
+        {addingBp ? (
+          <div style={{ background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '12px 10px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {(() => {
+              const bpInputSt = { background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '7px 10px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, outline: 'none', width: '100%', boxSizing: 'border-box' };
+              return (
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={labelStyle}>Systolic</div>
+                    <input type="text" inputMode="numeric" placeholder="—" value={bpForm.systolic} onChange={e => setBp('systolic', e.target.value.replace(/[^0-9]/g, ''))} style={{ ...bpInputSt, fontFamily: UI.fontNum }} autoFocus />
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={labelStyle}>Diastolic</div>
+                    <input type="text" inputMode="numeric" placeholder="—" value={bpForm.diastolic} onChange={e => setBp('diastolic', e.target.value.replace(/[^0-9]/g, ''))} style={{ ...bpInputSt, fontFamily: UI.fontNum }} />
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={labelStyle}>Time</div>
+                    <input type="text" inputMode="numeric" placeholder="HH:MM" maxLength={5}
+                      value={bpForm.time}
+                      onChange={e => {
+                        let v = e.target.value.replace(/[^0-9:]/g, '');
+                        if (v.length === 2 && !v.includes(':') && bpForm.time.length < 2) v += ':';
+                        setBp('time', v);
+                      }}
+                      style={bpInputSt} />
+                  </div>
+                </div>
+              );
+            })()}
+            <div>
+              <div style={labelStyle}>Note (optional)</div>
+              <input type="text" placeholder="…" value={bpForm.note} onChange={e => setBp('note', e.target.value)} style={inputStyle} />
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Btn kind="ghost" onClick={() => { setAddingBp(false); setBpForm(emptyBp); setEditingBpId(null); }} style={{ flex: 1 }}>Cancel</Btn>
+              <Btn onClick={saveBp} disabled={!bpForm.systolic || !bpForm.diastolic || savingBp} style={{ flex: 2 }}>{editingBpId ? 'Update' : 'Add'}</Btn>
+            </div>
+          </div>
+        ) : (
+          <button onClick={() => { setAddingBp(true); setEditingBpId(null); }} style={{
+            width: '100%', padding: '9px', background: UI.bgInset, border: `0.5px dashed ${UI.hairStrong}`, borderRadius: 6,
+            color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 12, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+          }}>+ Add reading</button>
+        )}
+      </CatSection>
+
+      <CatSection label="BODY TEMPERATURE" collapsed={collapsedCats.has('bodyTemp')} onToggle={() => toggleCat('bodyTemp')} extra={
+        <span style={{ fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontUi }}>{tempUnitLabel(tUnit)}</span>
+      }>
+        {tempForDay.map(t => {
+          const isConfirm = confirmDeleteTempId === t.id;
+          return (
+            <div key={t.id} style={{ background: UI.bgInset, borderRadius: 6, marginBottom: 6, border: `0.5px solid ${UI.hairStrong}`, overflow: 'hidden' }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '8px 10px' }}>
+                <span style={{ fontFamily: UI.fontUi, fontSize: 9, color: UI.inkFaint, minWidth: 32, paddingTop: 1 }}>{t.time}</span>
+                <div style={{ flex: 1 }}>
+                  <span className="num" style={{ fontSize: 15, color: UI.ink }}>{tempDisplay(t.valueC, tUnit)}</span>
+                  {t.note && <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>{t.note}</div>}
+                </div>
+                <button onClick={() => { setEditingTempId(t.id); setAddingTemp(true); setConfirmDeleteTempId(null); setTempForm({ value: tempEditValue(t.valueC, tUnit), time: t.time, note: t.note || '' }); }} style={{ background: 'none', border: 'none', color: UI.inkGhost, fontSize: 11, cursor: 'pointer', padding: '0 4px', lineHeight: 1 }}>
+                  <i className="fa-solid fa-pencil" />
+                </button>
+                <button onClick={() => setConfirmDeleteTempId(isConfirm ? null : t.id)} style={{ background: 'none', border: 'none', color: UI.inkGhost, fontSize: 14, cursor: 'pointer', padding: '0 2px', lineHeight: 1 }}>×</button>
+              </div>
+              {isConfirm && (
+                <div style={{ display: 'flex', gap: 0, borderTop: `0.5px solid ${UI.hairStrong}` }}>
+                  <button onClick={() => setConfirmDeleteTempId(null)} style={{ flex: 1, padding: '7px', background: 'none', border: 'none', cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 11, color: UI.inkSoft }}>Cancel</button>
+                  <button onClick={() => deleteTemp(t.id)} style={{ flex: 1, padding: '7px', background: 'none', border: 'none', borderLeft: `0.5px solid ${UI.hairStrong}`, cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700, color: UI.danger }}>Delete</button>
+                </div>
+              )}
+            </div>
+          );
+        })}
+        {addingTemp ? (
+          <div style={{ background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '12px 10px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {(() => {
+              const tInputSt = { background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '7px 10px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, outline: 'none', width: '100%', boxSizing: 'border-box' };
+              return (
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={labelStyle}>Value ({tempUnitLabel(tUnit)})</div>
+                    <input type="text" inputMode="decimal" placeholder="—" value={tempForm.value} onChange={e => setTemp('value', e.target.value)} style={{ ...tInputSt, fontFamily: UI.fontNum }} autoFocus />
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={labelStyle}>Time</div>
+                    <input type="text" inputMode="numeric" placeholder="HH:MM" maxLength={5}
+                      value={tempForm.time}
+                      onChange={e => {
+                        let v = e.target.value.replace(/[^0-9:]/g, '');
+                        if (v.length === 2 && !v.includes(':') && tempForm.time.length < 2) v += ':';
+                        setTemp('time', v);
+                      }}
+                      style={tInputSt} />
+                  </div>
+                </div>
+              );
+            })()}
+            <div>
+              <div style={labelStyle}>Note (optional)</div>
+              <input type="text" placeholder="…" value={tempForm.note} onChange={e => setTemp('note', e.target.value)} style={inputStyle} />
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Btn kind="ghost" onClick={() => { setAddingTemp(false); setTempForm(emptyTemp); setEditingTempId(null); }} style={{ flex: 1 }}>Cancel</Btn>
+              <Btn onClick={saveTemp} disabled={!tempForm.value || savingTemp} style={{ flex: 2 }}>{editingTempId ? 'Update' : 'Add'}</Btn>
+            </div>
+          </div>
+        ) : (
+          <button onClick={() => { setAddingTemp(true); setEditingTempId(null); }} style={{
+            width: '100%', padding: '9px', background: UI.bgInset, border: `0.5px dashed ${UI.hairStrong}`, borderRadius: 6,
+            color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 12, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+          }}>+ Add reading</button>
+        )}
+      </CatSection>
 
       {coachFields.length > 0 && (
         <div style={{ marginBottom: 18, padding: '14px 14px', borderRadius: 6, background: `rgba(var(--accent-rgb),0.05)`, border: `0.5px solid rgba(var(--accent-rgb),0.2)` }}>
@@ -1088,10 +1550,10 @@ function HealthMetricsCard({ log, dateLabel, isToday, onJumpToday, dragHandle, t
     </span>
   );
   return (
-    <Card accent style={{ padding: 16 }}>
+    <Card accent style={{ padding: 16, borderLeft: `3px solid ${UI.gold}` }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: trained || hasCardio ? 8 : 12 }}>
         {dragHandle}
-        <span style={{ flex: 1, fontFamily: UI.fontDisplay, fontSize: 20, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: UI.ink }}>
+        <span style={{ flex: 1, fontFamily: UI.fontDisplay, fontSize: 20, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--accent)' }}>
           {dateLabel}
         </span>
         {!isToday && onJumpToday && (
@@ -1218,10 +1680,10 @@ function HealthWeekCard({ stats, dragHandle, targets, tf, setTf, weightUnit }) {
 
   if (!daysLogged && !trainingsDone && !trainingsPlanned && !cardioMinutes) {
     return (
-      <Card style={{ padding: 16 }}>
+      <Card style={{ padding: 16, borderLeft: `3px solid ${UI.gold}` }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
           {dragHandle}
-          <span className="micro" style={{ color: UI.inkFaint, flex: 1 }}>{periodLabel}</span>
+          <span style={{ ...HEALTH_CARD_HEADER_STYLE, flex: 1 }}>{periodLabel}</span>
           {tfToggle}  {/* toggle on right even in empty state */}
         </div>
         <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi }}>Nothing logged yet.</div>
@@ -1230,10 +1692,10 @@ function HealthWeekCard({ stats, dragHandle, targets, tf, setTf, weightUnit }) {
   }
 
   return (
-    <Card accent style={{ padding: 16 }}>
+    <Card accent style={{ padding: 16, borderLeft: `3px solid ${UI.gold}` }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
         {dragHandle}
-        <span className="micro" style={{ color: UI.inkFaint, flex: 1 }}>{periodLabel}</span>
+        <span style={{ ...HEALTH_CARD_HEADER_STYLE, flex: 1 }}>{periodLabel}</span>
         <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi }}>{range}</span>
         {tfToggle}
       </div>
@@ -1524,6 +1986,121 @@ function GlucoseCard({ glucoseLogs, unit, tf, setTf, dragHandle }) {
   );
 }
 
+// ─── Blood pressure card ────────────────────────────────────────────────────
+
+function BloodPressureCard({ bpLogs, tf, setTf, dragHandle }) {
+  const today = LB.todayISO();
+  const tfDays = id => (HEALTH_TFS.find(t => t.id === id) || HEALTH_TFS[0]).days;
+  const { start, end } = healthWindow(tfDays(tf));
+
+  const inWindow = useMemoH(
+    () => (bpLogs || []).filter(l => l.date >= start && l.date <= end),
+    [bpLogs, tf, today]
+  );
+
+  const latest = inWindow.length
+    ? inWindow.reduce((a, b) => (a.date > b.date || (a.date === b.date && a.time > b.time)) ? a : b)
+    : null;
+
+  const sortedReadings = useMemoH(() =>
+    [...inWindow].sort((a, b) => b.date.localeCompare(a.date) || b.time.localeCompare(a.time)).slice(0, 30),
+    [inWindow]
+  );
+
+  return (
+    <HealthChartCard title="Blood Pressure" icon="fa-heart-pulse" tf={tf} setTf={setTf}
+      headline={latest ? `${latest.systolic}/${latest.diastolic}` : null} sub={latest ? 'mmHg' : null} dragHandle={dragHandle}>
+      {!inWindow.length ? (
+        <HealthChartEmpty label="No blood pressure readings in this range" />
+      ) : (
+        <>
+          <BpScatterChart readings={inWindow} from={start} to={end} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 6 }}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--accent)', display: 'inline-block' }} />
+              <span style={{ fontSize: 9, fontFamily: UI.fontUi, color: UI.inkFaint }}>Systolic</span>
+            </span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#4a9fe0', display: 'inline-block' }} />
+              <span style={{ fontSize: 9, fontFamily: UI.fontUi, color: UI.inkFaint }}>Diastolic</span>
+            </span>
+            <span style={{ fontSize: 9, fontFamily: UI.fontUi, color: UI.inkGhost }}>· dashed = 120/80 normal</span>
+          </div>
+          {sortedReadings.length > 0 && (
+            <>
+              <div style={{ height: '0.5px', background: UI.hair, margin: '8px 0' }} />
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {sortedReadings.map(n => (
+                  <div key={n.id} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 9, fontFamily: UI.fontUi, color: UI.inkGhost }}>{healthFmtDate(n.date, { day: 'numeric', month: 'short' })} · {n.time}</div>
+                      {n.note && <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.4, marginTop: 1 }}>{n.note}</div>}
+                    </div>
+                    <span className="num" style={{ flexShrink: 0, fontSize: 11, color: UI.inkFaint }}>{n.systolic}/{n.diastolic}</span>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </>
+      )}
+    </HealthChartCard>
+  );
+}
+
+// ─── Body temperature card ──────────────────────────────────────────────────
+
+function BodyTempCard({ tempLogs, unit, tf, setTf, dragHandle }) {
+  const today = LB.todayISO();
+  const tfDays = id => (HEALTH_TFS.find(t => t.id === id) || HEALTH_TFS[0]).days;
+  const { start, end } = healthWindow(tfDays(tf));
+  const unitLabel = tempUnitLabel(unit);
+
+  const inWindow = useMemoH(
+    () => (tempLogs || []).filter(l => l.date >= start && l.date <= end),
+    [tempLogs, tf, today]
+  );
+
+  const latest = inWindow.length
+    ? inWindow.reduce((a, b) => (a.date > b.date || (a.date === b.date && a.time > b.time)) ? a : b)
+    : null;
+  const latestDisp = latest ? tempDisplay(latest.valueC, unit) : null;
+
+  const sortedReadings = useMemoH(() =>
+    [...inWindow].sort((a, b) => b.date.localeCompare(a.date) || b.time.localeCompare(a.time)).slice(0, 30),
+    [inWindow]
+  );
+
+  return (
+    <HealthChartCard title="Body Temperature" icon="fa-temperature-half" tf={tf} setTf={setTf}
+      headline={latestDisp != null ? String(latestDisp) : null} sub={latestDisp != null ? unitLabel : null} dragHandle={dragHandle}>
+      {!inWindow.length ? (
+        <HealthChartEmpty label="No temperature readings in this range" />
+      ) : (
+        <>
+          <TempScatterChart readings={inWindow} from={start} to={end} unit={unit} />
+          {sortedReadings.length > 0 && (
+            <>
+              <div style={{ height: '0.5px', background: UI.hair, margin: '8px 0' }} />
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {sortedReadings.map(n => (
+                  <div key={n.id} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 9, fontFamily: UI.fontUi, color: UI.inkGhost }}>{healthFmtDate(n.date, { day: 'numeric', month: 'short' })} · {n.time}</div>
+                      {n.note && <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.4, marginTop: 1 }}>{n.note}</div>}
+                    </div>
+                    <span className="num" style={{ flexShrink: 0, fontSize: 11, color: UI.inkFaint }}>{tempDisplay(n.valueC, unit)}{unitLabel}</span>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </>
+      )}
+    </HealthChartCard>
+  );
+}
+
 // ─── HealthScreen ─────────────────────────────────────────────────────────────
 
 function HealthScreen({ store, setStore, go, userId }) {
@@ -1740,6 +2317,7 @@ function HealthScreen({ store, setStore, go, userId }) {
   const weekWindow = tf === '1W' ? healthMondayWeekBounds(selectedDate || today) : null;
   const weightSeries = useMemoH(() => healthSeriesFor(dailyLogs, windowDays, l => ({ value: l.weight }), weekWindow), [dailyLogs, tf, selectedDate]);
   const stepsSeries = useMemoH(() => healthSeriesFor(dailyLogs, windowDays, l => ({ value: l.steps }), weekWindow), [dailyLogs, tf, selectedDate]);
+  const waterSeries = useMemoH(() => healthSeriesFor(dailyLogs, windowDays, l => ({ value: l.waterMl }), weekWindow), [dailyLogs, tf, selectedDate]);
   const macroSeries = useMemoH(() => healthSeriesFor(dailyLogs, windowDays, l => ({ protein: l.protein, carbs: l.carbs, fat: l.fat, fiber: l.fiber, calories: l.calories, targetCal: l.targetsSnap?.calories ?? null }), weekWindow), [dailyLogs, tf, selectedDate]);
   const adhSeries = useMemoH(() => healthSeriesFor(dailyLogs, windowDays, l => ({ value: l.adherence }), weekWindow), [dailyLogs, tf, selectedDate]);
 
@@ -1761,13 +2339,14 @@ function HealthScreen({ store, setStore, go, userId }) {
   const weightAvgRaw = avg(weightSeries.data, 'value');
   const weightAvg = weightAvgRaw != null ? Math.round(weightAvgRaw * 10) / 10 : null;
   const stepsAvg = avg(stepsSeries.data, 'value');
+  const waterAvg = avg(waterSeries.data, 'value');
   const adhAvg = avg(adhSeries.data, 'value');
   const cardioTotal = cardioSeries.data.reduce((s, d) => s + (d.value || 0), 0);
 
   // Reorderable card order, persisted per device. Missing ids (e.g. after a new
   // card ships) are inserted at their default position, not appended at the end.
   const CARD_ORDER_KEY = 'logbook-health-card-order';
-  const DEFAULT_CARD_ORDER = ['week', 'today', 'macros', 'adherence', 'weight', 'cardio', 'steps', 'glucose'];
+  const DEFAULT_CARD_ORDER = ['week', 'today', 'macros', 'adherence', 'weight', 'cardio', 'steps', 'water', 'glucose', 'bloodPressure', 'bodyTemp'];
   const [cardOrder, setCardOrder] = useStateH(() => {
     let saved = [];
     try { saved = JSON.parse(localStorage.getItem(CARD_ORDER_KEY) || '[]'); } catch (_) {}
@@ -1775,10 +2354,14 @@ function HealthScreen({ store, setStore, go, userId }) {
     DEFAULT_CARD_ORDER.forEach((id, i) => { if (!result.includes(id)) result.splice(Math.min(i, result.length), 0, id); });
     return result;
   });
+  // Cross-device preference (settings), separate from the per-device drag
+  // order above: which cards the user never wants to see, regardless of data.
+  const hiddenCards = new Set(store.settings?.hiddenHealthCards || []);
+  const isCardVisible = id => cardEls[id] && !hiddenCards.has(id);
   const reorderCards = (from, to) => {
     if (from === to) return;
     setCardOrder(prev => {
-      const visible = prev.filter(id => cardEls[id]);
+      const visible = prev.filter(isCardVisible);
       const moved = [...visible];
       const [m] = moved.splice(from, 1);
       moved.splice(to, 0, m);
@@ -1904,6 +2487,12 @@ function HealthScreen({ store, setStore, go, userId }) {
         <HealthBarChart series={stepsSeries.data} from={stepsSeries.from} to={stepsSeries.to} format={v => v >= 1000 ? `${Math.round(v / 1000)}k` : `${v}`} />
       </HealthChartCard>
     ),
+    water: (
+      <HealthChartCard title="Water" icon="fa-glass-water" tf={tf} setTf={setTf} dragHandle={handle}
+        headline={waterAvg != null ? `${UI.waterSummaryValue(waterAvg)}${UI.waterSummaryUnit()}` : null} sub={waterAvg != null ? 'avg / day' : null}>
+        <HealthBarChart series={waterSeries.data} from={waterSeries.from} to={waterSeries.to} format={v => `${UI.waterSummaryValue(v)}${UI.waterSummaryUnit()}`} color="#4a9fe0" colorSoft="rgba(74,159,224,0.35)" />
+      </HealthChartCard>
+    ),
     macros: (
       <HealthChartCard title="Macros" icon="fa-utensils" tf={tf} setTf={setTf} dragHandle={handle}>
         {targetRow}
@@ -1925,6 +2514,12 @@ function HealthScreen({ store, setStore, go, userId }) {
     ) : null,
     glucose: (store.glucoseLogs || []).length > 0
       ? <GlucoseCard glucoseLogs={store.glucoseLogs} unit={store.settings?.glucoseUnit ?? 'mmol'} tf={tf} setTf={setTf} dragHandle={handle} />
+      : null,
+    bloodPressure: (store.bloodPressureLogs || []).length > 0
+      ? <BloodPressureCard bpLogs={store.bloodPressureLogs} tf={tf} setTf={setTf} dragHandle={handle} />
+      : null,
+    bodyTemp: (store.bodyTempLogs || []).length > 0
+      ? <BodyTempCard tempLogs={store.bodyTempLogs} unit={LB.defaultTempUnit(store.settings)} tf={tf} setTf={setTf} dragHandle={handle} />
       : null,
   };
 
@@ -1977,16 +2572,29 @@ function HealthScreen({ store, setStore, go, userId }) {
 
         {/* max-width cap so charts don't blow up on iPad. Reorderable cards —
            drag the grip to reorder; order persists per device. */}
-        <div style={{ padding: capturing ? '8px 16px 16px' : '8px 16px calc(env(safe-area-inset-bottom, 0px) + 100px)', maxWidth: 680, width: '100%', boxSizing: 'border-box', margin: '0 auto' }}>
-          <ReorderList onReorder={reorderCards} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            {cardOrder.map(id => cardEls[id] ? (
-              <div key={id} data-reorder-item="true" data-tour={`health-card-${id}`}>{cardEls[id]}</div>
-            ) : null)}
-          </ReorderList>
+        <div style={{ padding: capturing ? '8px 16px 16px' : '8px 16px env(safe-area-inset-bottom, 8px)', maxWidth: 680, width: '100%', boxSizing: 'border-box', margin: '0 auto' }}>
+          {cardOrder.every(id => !isCardVisible(id)) ? (
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, padding: '48px 16px', textAlign: 'center' }}>
+              <i className="fa-solid fa-eye-slash" style={{ fontSize: 24, color: UI.inkGhost }} />
+              <div style={{ fontSize: 13, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1.5 }}>All Health cards are hidden.</div>
+              <button onClick={() => go({ name: 'settings' })} style={{
+                background: 'transparent', border: `0.5px solid rgba(var(--accent-rgb),0.4)`,
+                borderRadius: 4, padding: '5px 14px', color: 'var(--accent)', marginTop: 4,
+                fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', cursor: 'pointer',
+                WebkitTapHighlightColor: 'transparent',
+              }}>Settings → Health → Cards</button>
+            </div>
+          ) : (
+            <ReorderList onReorder={reorderCards} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              {cardOrder.map(id => isCardVisible(id) ? (
+                <div key={id} data-reorder-item="true" data-tour={`health-card-${id}`}>{cardEls[id]}</div>
+              ) : null)}
+            </ReorderList>
+          )}
         </div>
       </div>
 
-      <DailyLogSheet open={logOpen} onClose={() => setLogOpen(false)} store={store} setStore={setStore} date={selectedDate} targets={effectiveTargets} activeCoachingSchema={activeCoachingSchema} onSetStatus={handleSetStatus} userId={userId} glucoseLogs={store.glucoseLogs || []} glucoseUnit={store.settings?.glucoseUnit ?? 'mmol'} />
+      <DailyLogSheet open={logOpen} onClose={() => setLogOpen(false)} store={store} setStore={setStore} date={selectedDate} targets={effectiveTargets} activeCoachingSchema={activeCoachingSchema} onSetStatus={handleSetStatus} userId={userId} glucoseLogs={store.glucoseLogs || []} glucoseUnit={store.settings?.glucoseUnit ?? 'mmol'} bloodPressureLogs={store.bloodPressureLogs || []} bodyTempLogs={store.bodyTempLogs || []} tempUnit={LB.defaultTempUnit(store.settings)} />
       <MacroTargetSheet open={targetOpen} onClose={() => setTargetOpen(false)} store={store} setStore={setStore} coachingMacros={coachingMacros} />
       <ExportSheet open={exportOpen} onClose={() => setExportOpen(false)} store={store} />
     </Screen>
@@ -2000,13 +2608,16 @@ function HealthClientLogs({ clientStore }) {
   const cardioLogs = clientStore?.cardioLogs || [];
   const glucoseLogs = clientStore?.glucoseLogs || [];
   const glucoseUnit = clientStore?.settings?.glucoseUnit ?? 'mmol';
+  const bloodPressureLogs = clientStore?.bloodPressureLogs || [];
+  const bodyTempLogs = clientStore?.bodyTempLogs || [];
+  const clientTempUnit = LB.defaultTempUnit(clientStore?.settings);
   // The coach may run a different weight unit than the client; always label the
   // client's weights in the client's own unit (no conversion, display-only).
   const clientUnit = clientStore?.settings?.unit === 'lbs' ? 'lbs' : 'kg';
   const [tf, setTf] = useStateH('1W');
 
   const COACH_ORDER_KEY = 'logbook-coach-health-card-order';
-  const DEFAULT_COACH_ORDER = ['week', 'today', 'weight', 'steps', 'macros', 'cardio', 'adherence', 'glucose', 'weekly'];
+  const DEFAULT_COACH_ORDER = ['week', 'today', 'weight', 'steps', 'water', 'macros', 'cardio', 'adherence', 'glucose', 'bloodPressure', 'bodyTemp', 'weekly'];
   const [cardOrder, setCardOrder] = useStateH(() => {
     let saved = [];
     try { saved = JSON.parse(localStorage.getItem(COACH_ORDER_KEY) || '[]'); } catch (_) {}
@@ -2021,7 +2632,7 @@ function HealthClientLogs({ clientStore }) {
       // rendered, not the full order array — glucose/weekly are routinely
       // absent for new coaching clients, so splicing prev directly (as this
       // used to) reordered the wrong card whenever any card was hidden.
-      const visible = prev.filter(id => cardEls[id]);
+      const visible = prev.filter(isCardVisible);
       const moved = [...visible];
       const [m] = moved.splice(from, 1);
       moved.splice(to, 0, m);
@@ -2030,6 +2641,11 @@ function HealthClientLogs({ clientStore }) {
       return next;
     });
   };
+  // Respect the CLIENT's own card-visibility preference (synced setting), not
+  // the coach's: a card the client chose to hide stays hidden in their coach's
+  // read-only view too.
+  const hiddenCards = new Set(clientStore?.settings?.hiddenHealthCards || []);
+  const isCardVisible = id => cardEls[id] && !hiddenCards.has(id);
 
   const [selectedDate, setSelectedDate] = useStateH(() => LB.todayISO());
 
@@ -2041,6 +2657,7 @@ function HealthClientLogs({ clientStore }) {
   const weekWindow = tf === '1W' ? healthMondayWeekBounds(selectedDate) : null;
   const weightSeries = useMemoH(() => healthSeriesFor(logs, windowDays, l => ({ value: l.weight }), weekWindow), [logs, tf, selectedDate]);
   const stepsSeries  = useMemoH(() => healthSeriesFor(logs, windowDays, l => ({ value: l.steps }), weekWindow), [logs, tf, selectedDate]);
+  const waterSeries  = useMemoH(() => healthSeriesFor(logs, windowDays, l => ({ value: l.waterMl }), weekWindow), [logs, tf, selectedDate]);
   const macroSeries  = useMemoH(() => healthSeriesFor(logs, windowDays, l => ({ protein: l.protein, carbs: l.carbs, fat: l.fat, fiber: l.fiber, calories: l.calories, targetCal: l.targetsSnap?.calories ?? null }), weekWindow), [logs, tf, selectedDate]);
   const adhSeries    = useMemoH(() => healthSeriesFor(logs, windowDays, l => ({ value: l.adherence }), weekWindow), [logs, tf, selectedDate]);
   const cardioSeries = useMemoH(() => healthCardioSeries(cardioLogs, windowDays, weekWindow), [cardioLogs, tf, selectedDate]);
@@ -2048,6 +2665,7 @@ function HealthClientLogs({ clientStore }) {
   const numAvg = series => { const vs = series.data.map(d => d.value).filter(v => v != null); return vs.length ? vs.reduce((s, v) => s + v, 0) / vs.length : null; };
   const weightAvg = useMemoH(() => { const a = numAvg(weightSeries); return a != null ? Math.round(a * 10) / 10 : null; }, [weightSeries]);
   const stepsAvg  = useMemoH(() => { const a = numAvg(stepsSeries);  return a != null ? Math.round(a) : null; }, [stepsSeries]);
+  const waterAvg  = useMemoH(() => numAvg(waterSeries), [waterSeries]);
   const adhAvg    = useMemoH(() => { const a = numAvg(adhSeries);    return a != null ? Math.round(a) : null; }, [adhSeries]);
   const cardioTotal = cardioSeries.data.reduce((s, d) => s + (d.value || 0), 0);
 
@@ -2080,7 +2698,7 @@ function HealthClientLogs({ clientStore }) {
     planningState: clientStore || {}, tf, today, selectedDate,
   }), [logs, clientStore?.sessions, clientStore?.cardioLogs, clientStore?.schedules, clientStore?.activeScheduleId, clientStore?.cycleStartDate, clientStore?.weekPlanStartDate, today, selectedDate, tf]);
 
-  if (!logs.length && !cardioLogs.length && !glucoseLogs.length) {
+  if (!logs.length && !cardioLogs.length && !glucoseLogs.length && !bloodPressureLogs.length && !bodyTempLogs.length) {
     return (
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, padding: 32 }}>
         <i className="fa-solid fa-heart-pulse" style={{ fontSize: 28, color: UI.inkGhost }} />
@@ -2113,6 +2731,12 @@ function HealthClientLogs({ clientStore }) {
         <HealthBarChart series={stepsSeries.data} from={stepsSeries.from} to={stepsSeries.to} format={v => v >= 1000 ? `${Math.round(v / 1000)}k` : `${v}`} />
       </HealthChartCard>
     ),
+    water: (
+      <HealthChartCard title="Water" icon="fa-glass-water" tf={tf} setTf={setTf} dragHandle={handle}
+        headline={waterAvg != null ? `${UI.waterSummaryValue(waterAvg)}${UI.waterSummaryUnit()}` : null} sub={waterAvg != null ? 'avg / day' : null}>
+        <HealthBarChart series={waterSeries.data} from={waterSeries.from} to={waterSeries.to} format={v => `${UI.waterSummaryValue(v)}${UI.waterSummaryUnit()}`} color="#4a9fe0" colorSoft="rgba(74,159,224,0.35)" />
+      </HealthChartCard>
+    ),
     macros: (
       <HealthChartCard title="Macros" icon="fa-utensils" tf={tf} setTf={setTf} dragHandle={handle}>
         <HealthMacroChart series={macroSeries.data} from={macroSeries.from} to={macroSeries.to} />
@@ -2134,11 +2758,17 @@ function HealthClientLogs({ clientStore }) {
     glucose: glucoseLogs.length > 0
       ? <GlucoseCard glucoseLogs={glucoseLogs} unit={glucoseUnit} tf={tf} setTf={setTf} dragHandle={handle} />
       : null,
+    bloodPressure: bloodPressureLogs.length > 0
+      ? <BloodPressureCard bpLogs={bloodPressureLogs} tf={tf} setTf={setTf} dragHandle={handle} />
+      : null,
+    bodyTemp: bodyTempLogs.length > 0
+      ? <BodyTempCard tempLogs={bodyTempLogs} unit={clientTempUnit} tf={tf} setTf={setTf} dragHandle={handle} />
+      : null,
     weekly: weeks.length ? (
-      <Card style={{ padding: 14 }}>
+      <Card style={{ padding: 14, borderLeft: `3px solid ${UI.gold}` }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
           {handle}
-          <span className="micro" style={{ color: UI.inkFaint }}>WEEKLY AVERAGES</span>
+          <span style={HEALTH_CARD_HEADER_STYLE}>WEEKLY AVERAGES</span>
         </div>
         <div style={{ background: UI.bgInset, borderRadius: 6, border: `0.5px solid ${UI.hair}`, overflow: 'hidden' }}>
           {weeks.map((w, i) => (
@@ -2166,11 +2796,18 @@ function HealthClientLogs({ clientStore }) {
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <HealthDateStrip store={clientStore} selectedDate={selectedDate} onSelect={setSelectedDate} onLog={null} />
       <div style={{ flex: 1, overflowY: 'auto', padding: '14px 14px 32px', maxWidth: 680, width: '100%', boxSizing: 'border-box', margin: '0 auto' }}>
-        <ReorderList onReorder={reorderCards} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          {cardOrder.map(id => cardEls[id] ? (
-            <div key={id} data-reorder-item="true">{cardEls[id]}</div>
-          ) : null)}
-        </ReorderList>
+        {cardOrder.every(id => !isCardVisible(id)) ? (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, padding: '48px 16px', textAlign: 'center' }}>
+            <i className="fa-solid fa-eye-slash" style={{ fontSize: 24, color: UI.inkGhost }} />
+            <div style={{ fontSize: 13, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1.5 }}>Your client has hidden all their Health cards.</div>
+          </div>
+        ) : (
+          <ReorderList onReorder={reorderCards} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            {cardOrder.map(id => isCardVisible(id) ? (
+              <div key={id} data-reorder-item="true">{cardEls[id]}</div>
+            ) : null)}
+          </ReorderList>
+        )}
       </div>
     </div>
   );

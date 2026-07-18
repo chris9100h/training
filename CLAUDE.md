@@ -89,6 +89,7 @@ Diese Datei enthält die verbindlichen Regeln und den Überblick; sie bewusst sc
   - `logbook-whatsnew-seen`: zuletzt gesehene `WHATS_NEW.id`
   - `logbook-health-card-order`: Reihenfolge der Health-Tab-Karten (per Gerät, kein DB-Sync)
   - `logbook-seen-signups`: vom Admin per „Got it" abgehakte Registrierungen im Account-Tab-Feed (Array von user_ids, per Gerät)
+  - `logbook-fever-nudge-declined-date`: Datum der letzten Ablehnung des „Als Sick markieren?"-Prompts nach einer Fieber-Temperaturmessung, verhindert wiederholtes Nachfragen am selben Tag (per Gerät)
 
 ## What's New / Changelog
 
@@ -156,7 +157,7 @@ Migrationen liegen in `supabase/migrations/` als nummerierte SQL-Dateien. **Die 
 - `zane_workout_templates`: Workout-Vorlagen · `zane_schedule_backups`: Auto-Snapshots der Plan-Tage
 - `zane_plan_drafts`: In-Progress-Draft des Plan-Editors für Multi-Device-Autosave (eine Zeile je User+Plan, bewusst entkoppelt von `zane_schedules`, LWW über `updated_at`, bei Save/Discard gelöscht, nicht im Backup)
 - `zane_skips`: übersprungene Trainingstage · `zane_status_periods`: Sick/Vacation/Deload-Historie
-- `zane_daily_logs`: Health-Tageslog (UNIQUE user_id+date, Sync via RPC) · `zane_glucose_logs`, `zane_cardio_logs`, `zane_cardio_plans`: Health/Cardio
+- `zane_daily_logs`: Health-Tageslog (UNIQUE user_id+date, Sync via RPC) · `zane_glucose_logs`, `zane_blood_pressure_logs`, `zane_body_temp_logs`, `zane_cardio_logs`, `zane_cardio_plans`: Health/Cardio
 - `zane_coaching` (+ `_threads`, `_notes`, `_macros`) und `zane_checkins`: Coaching; Sonderfälle Support-Tickets (id-Präfix `support_`) und Self-Coaching (`self_`) · `zane_checkin_schema_templates`: bis zu 5 gespeicherte Check-in-Schema-Vorlagen je Coach
 - `zane_user_settings`: eine Zeile je User, alle Settings
 - `zane_profiles`, `zane_app_config`, `zane_feature_grants`, `zane_push_subscriptions`, `zane_pushover_active`: Accounts, Admin-Config, Grants, Push

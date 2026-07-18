@@ -131,7 +131,8 @@ CREATE TABLE public.zane_sessions (
   is_deload boolean NOT NULL DEFAULT false,
   meso_recap jsonb,
   readiness text,
-  signal_weight text
+  signal_weight text,
+  cycle_pos integer
 );
 
 CREATE TABLE public.zane_session_entries (
@@ -265,7 +266,10 @@ CREATE TABLE public.zane_user_settings (
   vip_background text,
   deload_prompt_dismissed_at timestamp with time zone,
   sw_version text,
-  pin_all_notes boolean NOT NULL DEFAULT false
+  pin_all_notes boolean NOT NULL DEFAULT false,
+  temp_unit text,
+  hidden_health_cards jsonb,
+  fever_threshold_c numeric DEFAULT 38
 );
 
 CREATE TABLE public.zane_pushover_active (
@@ -2048,6 +2052,60 @@ CREATE POLICY "coaches read client glucose logs"
   ON zane_glucose_logs FOR SELECT TO public
   USING (EXISTS ( SELECT 1 FROM zane_coaching zc
     WHERE zc.client_id = zane_glucose_logs.user_id
+      AND zc.coach_id = (select auth.uid()) AND zc.coach_id <> zc.client_id AND zc.status = 'active' AND zc.id NOT LIKE 'support_%'));
+
+-- ── Blood pressure logs (migration 0173) ────────────────────────────────────────
+-- Multiple readings per day; systolic/diastolic in mmHg. Written directly (no diff).
+
+CREATE TABLE zane_blood_pressure_logs (
+  id         text        PRIMARY KEY,
+  user_id    uuid        NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  date       text        NOT NULL,                 -- YYYY-MM-DD
+  time       text        NOT NULL,                 -- HH:MM local
+  systolic   integer     NOT NULL,
+  diastolic  integer     NOT NULL,
+  note       text,
+  created_at timestamptz DEFAULT now()
+);
+
+CREATE INDEX zane_blood_pressure_logs_user_date ON public.zane_blood_pressure_logs USING btree (user_id, date DESC, "time" DESC);
+
+ALTER TABLE zane_blood_pressure_logs ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users manage own blood pressure logs"
+  ON zane_blood_pressure_logs FOR ALL TO public
+  USING (((select auth.uid()) = user_id)) WITH CHECK (((select auth.uid()) = user_id));
+CREATE POLICY "coaches read client blood pressure logs"
+  ON zane_blood_pressure_logs FOR SELECT TO public
+  USING (EXISTS ( SELECT 1 FROM zane_coaching zc
+    WHERE zc.client_id = zane_blood_pressure_logs.user_id
+      AND zc.coach_id = (select auth.uid()) AND zc.coach_id <> zc.client_id AND zc.status = 'active' AND zc.id NOT LIKE 'support_%'));
+
+-- ── Body temperature logs (migration 0173) ──────────────────────────────────────
+-- Multiple readings per day; value always stored in Celsius (display unit is a
+-- per-user setting, zane_user_settings.temp_unit). Written directly (no diff).
+
+CREATE TABLE zane_body_temp_logs (
+  id         text        PRIMARY KEY,
+  user_id    uuid        NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  date       text        NOT NULL,
+  time       text        NOT NULL,
+  value_c    numeric     NOT NULL,
+  note       text,
+  created_at timestamptz DEFAULT now()
+);
+
+CREATE INDEX zane_body_temp_logs_user_date ON public.zane_body_temp_logs USING btree (user_id, date DESC, "time" DESC);
+
+ALTER TABLE zane_body_temp_logs ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users manage own body temp logs"
+  ON zane_body_temp_logs FOR ALL TO public
+  USING (((select auth.uid()) = user_id)) WITH CHECK (((select auth.uid()) = user_id));
+CREATE POLICY "coaches read client body temp logs"
+  ON zane_body_temp_logs FOR SELECT TO public
+  USING (EXISTS ( SELECT 1 FROM zane_coaching zc
+    WHERE zc.client_id = zane_body_temp_logs.user_id
       AND zc.coach_id = (select auth.uid()) AND zc.coach_id <> zc.client_id AND zc.status = 'active' AND zc.id NOT LIKE 'support_%'));
 
 -- ── Support tickets (migrations 0085/0086 + archive_support_tickets) ────────────

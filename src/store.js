@@ -277,6 +277,8 @@ async function deleteAllData(userId, { keepPush = false } = {}) {
     unwrap(_supabase.from('zane_daily_logs').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_workout_templates').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_glucose_logs').delete().eq('user_id', userId)),
+    unwrap(_supabase.from('zane_blood_pressure_logs').delete().eq('user_id', userId)),
+    unwrap(_supabase.from('zane_body_temp_logs').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_meso_states').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_status_periods').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_cardio_plans').delete().eq('user_id', userId)),
@@ -402,6 +404,9 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
     show_regression: sett.showRegression ?? true,
     pin_all_notes: sett.pinAllNotes ?? false,
     glucose_unit: sett.glucoseUnit ?? 'mmol',
+    temp_unit: sett.tempUnit ?? null,
+    hidden_health_cards: sett.hiddenHealthCards ?? null,
+    fever_threshold_c: sett.feverThresholdC ?? 38,
     default_checkin_schema: sett.defaultCheckinSchema ?? null,
     vip_background: sett.vipBackground ?? null,
     active_cardio_plan_id: backup.activeCardioPlanId ?? null,
@@ -431,6 +436,8 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
     + (backup.workoutTemplates?.length ? 1 : 0)
     + (backup.checkinSchemaTemplates?.length ? 1 : 0)
     + (backup.glucoseLogs?.length ? 1 : 0)
+    + (backup.bloodPressureLogs?.length ? 1 : 0)
+    + (backup.bodyTempLogs?.length ? 1 : 0)
     + (backup.cardioPlans?.length ? 1 : 0)
     + (backup.statusPeriods?.length ? 1 : 0)
     + (backup.mesoStates?.length ? 1 : 0);
@@ -573,6 +580,27 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
         id: l.id, user_id: userId, date: l.date, time: l.time,
         value_mmol: l.valueMmol ?? null, context: l.context ?? 'other',
         note: l.note ?? null,
+      }))
+    ));
+    stepsDone++;
+  }
+  if (backup.bloodPressureLogs?.length) {
+    prog('Uploading blood pressure logs…');
+    await unwrap(_supabase.from('zane_blood_pressure_logs').upsert(
+      backup.bloodPressureLogs.map(l => ({
+        id: l.id, user_id: userId, date: l.date, time: l.time,
+        systolic: l.systolic ?? null, diastolic: l.diastolic ?? null,
+        note: l.note ?? null,
+      }))
+    ));
+    stepsDone++;
+  }
+  if (backup.bodyTempLogs?.length) {
+    prog('Uploading body temperature logs…');
+    await unwrap(_supabase.from('zane_body_temp_logs').upsert(
+      backup.bodyTempLogs.map(l => ({
+        id: l.id, user_id: userId, date: l.date, time: l.time,
+        value_c: l.valueC ?? null, note: l.note ?? null,
       }))
     ));
     stepsDone++;
@@ -783,7 +811,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     _supabase.from('zane_schedules').select('id, name, days, archived, versions, is_flex, sessions_per_week, mesocycle_weeks, mesocycle_start_rir, mesocycle_end_rir, mesocycle_rir_enabled, mesocycle_autoregulate, mesocycle_autoregulate_mode, program_type, program_data, is_template').eq('user_id', userId),
     // Session METADATA stays complete (cheap; streaks/calendar need the full
     // date list) — the legacy entries JSONB is no longer selected.
-    _supabase.from('zane_sessions').select('id, schedule_id, day_id, day_name, date, started_at, ended, duration_minutes, feel, is_bonus, is_freestyle, is_deload, meso_recap, readiness, signal_weight')
+    _supabase.from('zane_sessions').select('id, schedule_id, day_id, day_name, date, started_at, ended, duration_minutes, feel, is_bonus, is_freestyle, is_deload, meso_recap, readiness, signal_weight, cycle_pos')
       .eq('user_id', userId).order('date', { ascending: false }),
     _supabase.from('zane_user_settings').select('*').eq('user_id', userId).maybeSingle(),
     _supabase.from('zane_skips').select('id, date, day_id, day_name, skip_reason, skipped_at').eq('user_id', userId),
@@ -826,6 +854,10 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     isCoachLoad ? null : _supabase.rpc('get_user_support_chats'),
     // Blood glucose readings — multiple per day, value always in mmol/L (migration 0101)
     _supabase.from('zane_glucose_logs').select('id, date, time, value_mmol, context, note, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
+    // Blood pressure readings: multiple per day, systolic/diastolic in mmHg (migration 0173)
+    _supabase.from('zane_blood_pressure_logs').select('id, date, time, systolic, diastolic, note, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
+    // Body temperature readings: multiple per day, value always in Celsius (migration 0173)
+    _supabase.from('zane_body_temp_logs').select('id, date, time, value_c, note, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
     // Reusable workout templates (migration 0107)
     _supabase.from('zane_workout_templates').select('id, name, exercises, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
     // Mesocycle state per plan — replaces localStorage logbook-meso-state (migration 0120)
@@ -840,7 +872,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
          bestsRes, sessionStatsRes,
          coachInfoRes, coachClientsRes, unreadNotesRes, coachingRowRes, selfRowRes,
          cardioLogsRes, cardioPlansRes, dailyLogsRes, statusPeriodsRes,
-         supportTicketsRes, glucoseLogsRes, templatesRes, mesoStatesRes,
+         supportTicketsRes, glucoseLogsRes, bloodPressureLogsRes, bodyTempLogsRes, templatesRes, mesoStatesRes,
          checkinTemplatesRes, planDraftsRes] = await Promise.all(queries);
 
   // A failed request (offline, RLS, server error) also yields no data — bail
@@ -868,6 +900,8 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   if (dailyLogsRes.error) throw dailyLogsRes.error;
   if (statusPeriodsRes.error) throw statusPeriodsRes.error;
   if (glucoseLogsRes.error) throw glucoseLogsRes.error;
+  if (bloodPressureLogsRes.error) throw bloodPressureLogsRes.error;
+  if (bodyTempLogsRes.error) throw bodyTempLogsRes.error;
   if (templatesRes.error) throw templatesRes.error;
   if (mesoStatesRes.error) throw mesoStatesRes.error;
   // Coaching queries are null on coach loads (skipped) — guard with optional chaining.
@@ -980,6 +1014,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         ...(s.meso_recap   ? { mesoRecap:   s.meso_recap } : {}),
         ...(s.readiness     ? { readiness:     s.readiness } : {}),
         ...(s.signal_weight ? { signalWeight:  s.signal_weight } : {}),
+        ...(s.cycle_pos != null ? { cyclePos: s.cycle_pos } : {}),
       };
     }),
     skips: (skipsRes.data || []).map(s => ({
@@ -1023,6 +1058,16 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
       id: l.id, date: l.date, time: l.time,
       valueMmol: l.value_mmol != null ? parseFloat(l.value_mmol) : null,
       context: l.context ?? 'other', note: l.note ?? null, createdAt: l.created_at,
+    })),
+    bloodPressureLogs: (bloodPressureLogsRes?.data || []).map(l => ({
+      id: l.id, date: l.date, time: l.time,
+      systolic: l.systolic ?? null, diastolic: l.diastolic ?? null,
+      note: l.note ?? null, createdAt: l.created_at,
+    })),
+    bodyTempLogs: (bodyTempLogsRes?.data || []).map(l => ({
+      id: l.id, date: l.date, time: l.time,
+      valueC: l.value_c != null ? parseFloat(l.value_c) : null,
+      note: l.note ?? null, createdAt: l.created_at,
     })),
     workoutTemplates: (templatesRes?.data || []).map(t => ({
       id: t.id, name: t.name,
@@ -1098,6 +1143,9 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         showHealthTab: sett.show_health_tab ?? false,
         onboardingCompleted: sett.onboarding_completed ?? false,
         glucoseUnit: sett.glucose_unit ?? 'mmol',
+        tempUnit: sett.temp_unit ?? null,
+        hiddenHealthCards: sett.hidden_health_cards ?? null,
+        feverThresholdC: sett.fever_threshold_c ?? 38,
         vipBackground: sett.vip_background ?? null,
         swVersion: sett.sw_version ?? null,
       },
@@ -1326,6 +1374,11 @@ function sessionToRow(s, userId) {
   row.meso_recap = mesoRecap ?? null;
   row.readiness = readiness ?? null;
   row.signal_weight = signalWeight ?? null;
+  // A flex plan's session-to-rotation-slot mapping (migration 0176): without
+  // this, any full reload from Supabase (cleared cache after sign-out, a new
+  // device) loses track of which slot a session belongs to, since the local
+  // cache was the only place it lived before this column existed.
+  row.cycle_pos = cyclePos ?? null;
   return row;
 }
 
@@ -1578,6 +1631,9 @@ async function syncStore(prev, next, userId) {
     JSON.stringify(prev.settings?.macroTargets) !== JSON.stringify(next.settings?.macroTargets) ||
     prev.settings?.onboardingCompleted    !== next.settings?.onboardingCompleted    ||
     prev.settings?.glucoseUnit            !== next.settings?.glucoseUnit            ||
+    prev.settings?.tempUnit               !== next.settings?.tempUnit               ||
+    prev.settings?.feverThresholdC        !== next.settings?.feverThresholdC        ||
+    JSON.stringify(prev.settings?.hiddenHealthCards) !== JSON.stringify(next.settings?.hiddenHealthCards) ||
     JSON.stringify(prev.settings?.defaultCheckinSchema) !== JSON.stringify(next.settings?.defaultCheckinSchema) ||
     prev.nextReminderAt                   !== next.nextReminderAt   ||
     prev.statusMode                       !== next.statusMode       ||
@@ -1622,6 +1678,9 @@ async function syncStore(prev, next, userId) {
       show_health_tab: next.settings?.showHealthTab ?? false,
       onboarding_completed: next.settings?.onboardingCompleted ?? false,
       glucose_unit: next.settings?.glucoseUnit ?? 'mmol',
+      temp_unit: next.settings?.tempUnit ?? null,
+      fever_threshold_c: next.settings?.feverThresholdC ?? 38,
+      hidden_health_cards: next.settings?.hiddenHealthCards ?? null,
       default_checkin_schema: next.settings?.defaultCheckinSchema ?? null,
       next_reminder_at: next.nextReminderAt ?? null,
       in_progress_session_id: next.inProgress ?? null,
@@ -3186,7 +3245,11 @@ function mergeSessions(freshSessions, curSessions, inProgressId, baseSessions = 
     return {
       ...s,
       currentExIdx: mem.currentExIdx ?? 0,
-      cyclePos: mem.cyclePos ?? null,
+      // Prefer the cached value (this device's own, always correct at write
+      // time), but fall back to the server's rather than jumping straight to
+      // null: a cache from before cyclePos was persisted (migration 0176) has
+      // no cyclePos of its own, and the server may since have a real one.
+      cyclePos: mem.cyclePos ?? s.cyclePos ?? null,
       // for the active session, local entries/restStart/restDuration are authoritative
       ...(isActive ? { entries: mem.entries, restStart: mem.restStart ?? null, restDuration: mem.restDuration ?? null } : {}),
       ...(keepCachedEntries ? { entries: mem.entries } : {}),
@@ -3860,6 +3923,15 @@ function fmtDistance(meters, unit, decimals = 2) {
   if (meters == null) return '';
   return `${mToDisplay(meters, unit, decimals)} ${unit === 'mi' ? 'mi' : 'km'}`;
 }
+
+// Body temperature display unit: an explicit user choice (settings.tempUnit)
+// always wins; otherwise derive from the weight unit preference. 'lbs' (US
+// imperial) implies Fahrenheit, 'kg' and 'mixed' (UK: kg weight + mi distance)
+// both imply Celsius, since UK body-temperature readings are Celsius today.
+function defaultTempUnit(settings) {
+  if (settings?.tempUnit === 'c' || settings?.tempUnit === 'f') return settings.tempUnit;
+  return settings?.unit === 'lbs' ? 'f' : 'c';
+}
 function fmtPace(secPerKm, unit) {
   if (secPerKm == null) return '';
   const perUnit = unit === 'mi' ? secPerKm * MI_TO_M / 1000 : secPerKm;
@@ -4349,12 +4421,14 @@ async function endDeload(userId, store, setStore) {
 }
 
 async function refreshHealthLogs(userId) {
-  const [dailyRes, cardioRes, glucoseRes] = await Promise.all([
+  const [dailyRes, cardioRes, glucoseRes, bpRes, tempRes] = await Promise.all([
     _supabase.from('zane_daily_logs').select('id, date, weight, steps, calories, protein, carbs, fat, fiber, water_ml, note, off_plan_note, adherence, targets_snap, daily_coach_fields, updated_at, created_at').eq('user_id', userId).order('date', { ascending: false }),
     _supabase.from('zane_cardio_logs').select('id, date, type, duration_minutes, distance_m, pace_feeling, effort, note, session_id, created_at').eq('user_id', userId).order('date', { ascending: false }),
     _supabase.from('zane_glucose_logs').select('id, date, time, value_mmol, context, note, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
+    _supabase.from('zane_blood_pressure_logs').select('id, date, time, systolic, diastolic, note, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
+    _supabase.from('zane_body_temp_logs').select('id, date, time, value_c, note, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
   ]);
-  if (dailyRes.error || cardioRes.error) return null;
+  if (dailyRes.error || cardioRes.error || glucoseRes.error || bpRes.error || tempRes.error) return null;
   return {
     dailyLogs: (dailyRes.data || []).map(l => ({
       id: l.id, date: l.date,
@@ -4378,6 +4452,16 @@ async function refreshHealthLogs(userId) {
       id: l.id, date: l.date, time: l.time,
       valueMmol: l.value_mmol != null ? parseFloat(l.value_mmol) : null,
       context: l.context ?? 'other', note: l.note ?? null, createdAt: l.created_at,
+    })),
+    bloodPressureLogs: (bpRes?.data || []).map(l => ({
+      id: l.id, date: l.date, time: l.time,
+      systolic: l.systolic ?? null, diastolic: l.diastolic ?? null,
+      note: l.note ?? null, createdAt: l.created_at,
+    })),
+    bodyTempLogs: (tempRes?.data || []).map(l => ({
+      id: l.id, date: l.date, time: l.time,
+      valueC: l.value_c != null ? parseFloat(l.value_c) : null,
+      note: l.note ?? null, createdAt: l.created_at,
     })),
   };
 }
@@ -6217,6 +6301,7 @@ window.LB = {
   checkinWeekStart, submitCheckin, loadCheckins, deleteCheckin, loadCoachCheckinStatus, requestCheckin, setCheckinEnabled, loadCheckinSchema, saveCheckinSchema, saveDefaultCheckinSchema,
   cardioWeekPrefill, detectCardioPRs,
   cardioDistUnit, setCardioDistUnit, distToM, mToDisplay, fmtDistance, fmtPace, fmtSpeed, MI_TO_M, recentCardioTypes,
+  defaultTempUnit,
   isLoggedTrainingDay, plannedTrainingDay, isTrainingDayForDate, dayTargetFromMacros, macroAdherence, hasMacroTargets, effectiveMacroTargets, dailyLogAdherence, dailyLogsWeekPrefill, weekPerformanceSignal,
   refreshHealthLogs,
   pickGrowthRecipient, retractGrowthGrant, pickDeclineRecipient, reearnMesoWeightBoosts, revertMesoSessionBoosts, resolveMesoSeedSuggestion, mesoPausedDays, mesoRirForWeek, mesoMuscleTrainedBeforeStart, volumeAnswerAllowsBump,

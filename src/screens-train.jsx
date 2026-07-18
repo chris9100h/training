@@ -5485,9 +5485,15 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           <div style={{ fontFamily: UI.fontUi, fontSize: 13, color: UI.inkSoft, textAlign: 'center' }}>Add an exercise to get started.</div>
           <Btn onClick={() => setAddOpen(true)}>Add exercise</Btn>
         </div>
-        {/* Gate the auto-opened picker behind the readiness tap so the prompt
-            comes first (the picker is a full-screen overlay that would cover it). */}
-        {addOpen && session.readiness != null && <window.Screens.ExercisePicker store={store} setStore={setStore} onClose={() => setAddOpen(false)} onPick={doAdd} />}
+        {/* Gate the auto-opened picker behind the readiness tap so the prompt comes
+            first (the picker is a full-screen overlay that would cover it), but ONLY
+            when a prompt will actually show: the readiness mount effect above now
+            skips entirely off-autoreg (LB.mesoActive), which every freestyle session
+            is (scheduleId: null): this branch exists almost exclusively for those,
+            so gating on session.readiness alone would wait forever for a prompt
+            that's never coming, permanently hiding the picker. Mirror the effect's
+            own gate instead of a bare readiness check. */}
+        {addOpen && (!LB.mesoActive(_sch) || session.readiness != null) && <window.Screens.ExercisePicker store={store} setStore={setStore} onClose={() => setAddOpen(false)} onPick={doAdd} />}
         {readinessSheet}
         {confirmEl}
       </Screen>
@@ -6041,7 +6047,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           {mesoState && exercise && (() => {
             const flags = [];
             if (mesoState.jointFlags?.[exercise.id]) {
-              flags.push({ icon: '⚠️', msg: 'Flagged for sharp joint pain last session. Consider swapping this exercise.' });
+              flags.push({ icon: 'fa-triangle-exclamation', tone: 'danger', label: 'Joint pain', msg: 'Flagged for sharp joint pain last session. Consider swapping this exercise.' });
             }
             // Two independent swap signals with distinct voices: stimulus (low pump
             // 3 sessions running) and adherence (marked "Not my lift" 2 sessions
@@ -6050,11 +6056,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             const pumpLow = (mesoState.pumpLowCounts?.[exercise.id] || 0) >= 3;
             const disliked = (mesoState.affinity?.[exercise.id]?.streak || 0) >= 2;
             if (pumpLow && disliked) {
-              flags.push({ icon: '💡', msg: 'Flat pump and not your favorite. A variation you enjoy could hit better too, swap it whenever you like.' });
+              flags.push({ icon: 'fa-lightbulb', tone: 'accent', label: 'Stimulus + fit', msg: 'Flat pump and not your favorite. A variation you enjoy could hit better too, swap it whenever you like.' });
             } else if (pumpLow) {
-              flags.push({ icon: '💡', msg: `Pump has been flat here ${mesoState.pumpLowCounts[exercise.id]} sessions. A different variation might hit this muscle better.` });
+              flags.push({ icon: 'fa-lightbulb', tone: 'accent', label: 'Flat pump', msg: `Pump has been flat here ${mesoState.pumpLowCounts[exercise.id]} sessions. A different variation might hit this muscle better.` });
             } else if (disliked) {
-              flags.push({ icon: '💡', msg: 'You keep flagging this one to swap. Pick a variation you enjoy and you will actually stick with it.' });
+              flags.push({ icon: 'fa-lightbulb', tone: 'accent', label: 'Not clicking', msg: 'You keep flagging this one to swap. Pick a variation you enjoy and you will actually stick with it.' });
             }
             // Autoreg v2 P4: strength-stall + concrete swap (spec 6). A LIFT whose
             // e1RM has gone flat over 3 sessions at green gates (joints fine, pump ok,
@@ -6066,7 +6072,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             if (stallInfo?.stalled) {
               const swap = stallInfo.swap;
               flags.push({
-                icon: '📉',
+                icon: 'fa-arrow-trend-down', tone: 'accent', label: 'Strength stall',
                 msg: swap
                   ? 'e1RM has been flat here 3 sessions and your gates are green. The stimulus may be stale, a different movement could get it climbing again.'
                   : 'e1RM has been flat here 3 sessions and your gates are green. A different variation for this muscle could get things moving again.',
@@ -6075,23 +6081,44 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             }
             if (!flags.length) return null;
             return (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 10 }}>
-                {flags.map((f, i) => (
-                  <div key={i} style={{ background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 6, padding: '8px 12px' }}>
-                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-                      <span style={{ fontSize: 13 }}>{f.icon}</span>
-                      <span style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>{f.msg}</span>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 10 }}>
+                {flags.map((f, i) => {
+                  const rgbVar = f.tone === 'danger' ? '--danger-rgb' : '--accent-rgb';
+                  const fg = f.tone === 'danger' ? UI.danger : UI.gold;
+                  return (
+                    <div key={i} style={{
+                      background: `rgba(var(${rgbVar}),0.06)`,
+                      border: `1px solid rgba(var(${rgbVar}),0.3)`,
+                      borderRadius: 6, padding: '10px 12px',
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                        <div style={{
+                          flexShrink: 0, width: 22, height: 22, borderRadius: 4, marginTop: 1,
+                          background: `rgba(var(${rgbVar}),0.14)`,
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        }}>
+                          <i className={`fa-solid ${f.icon}`} style={{ fontSize: 10, color: fg }} />
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div className="micro" style={{ color: fg, letterSpacing: '0.1em', marginBottom: 4 }}>{f.label}</div>
+                          <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>{f.msg}</div>
+                          {f.swap && (
+                            <button onClick={() => applyStallSwap(f.swap)} style={{
+                              marginTop: 9, display: 'inline-flex', alignItems: 'center', gap: 6,
+                              padding: '7px 12px', background: `rgba(var(${rgbVar}),0.14)`,
+                              border: `1px solid rgba(var(${rgbVar}),0.45)`, borderRadius: 4,
+                              color: fg, fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700,
+                              letterSpacing: '0.04em', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+                            }}>
+                              <i className="fa-solid fa-shuffle" style={{ fontSize: 10 }} />
+                              Swap to {f.swap.name}
+                            </button>
+                          )}
+                        </div>
+                      </div>
                     </div>
-                    {f.swap && (
-                      <button onClick={() => applyStallSwap(f.swap)} style={{
-                        marginTop: 8, padding: '6px 12px', background: 'transparent',
-                        border: `1px solid rgba(var(--accent-rgb), 0.5)`, borderRadius: 4,
-                        color: UI.gold, fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600,
-                        cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
-                      }}>Swap to {f.swap.name}</button>
-                    )}
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             );
           })()}

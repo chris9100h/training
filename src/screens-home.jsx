@@ -182,12 +182,21 @@ function LoginScreen() {
         <span className="micro">ZANE TRAINING</span>
       </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '0 32px 24px', position: 'relative', zIndex: 1, marginTop: 'auto', marginBottom: 'auto' }}>
-        <img src="icons/zane-logo.png" style={{ width: '92%', maxWidth: 500, objectFit: 'contain', marginBottom: 28 }} />
+      {/* flex:1 fills the space between the header/footer rows above/below (both
+          flexShrink:0), so there's a concrete height budget to shrink into on a
+          short viewport instead of just overflowing into a scroll. justifyContent
+          centers the block within any leftover space, same as the old auto-margin
+          centering when everything already fits. */}
+      <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '0 32px 24px', position: 'relative', zIndex: 1 }}>
+        {/* The ONE flexible element: flex-shrink lets it give up height first so the
+            form below (flexShrink:0 on every other child here) always stays fully
+            visible without scrolling. flex-grow:0 keeps it at its natural 92%-width
+            size rather than ballooning to fill spare room on a tall screen. */}
+        <img src="icons/zane-logo.png" style={{ width: '92%', maxWidth: 500, objectFit: 'contain', marginBottom: 28, flex: '0 1 auto', minHeight: 0, minWidth: 0 }} />
 
         {inAppBrowser && (
           <div style={{
-            width: '100%', marginBottom: 20, padding: '10px 14px',
+            width: '100%', marginBottom: 20, padding: '10px 14px', flexShrink: 0,
             background: 'rgba(var(--accent-rgb),0.08)', border: `1px solid rgba(var(--accent-rgb),0.28)`,
             borderRadius: 6, fontFamily: UI.fontUi, fontSize: 12, color: UI.inkSoft, lineHeight: 1.55,
           }}>
@@ -198,7 +207,7 @@ function LoginScreen() {
 
         {/* Tab switcher — hidden in forgot mode */}
         {!isForgot ? (
-          <div style={{ width: '100%', display: 'grid', gridTemplateColumns: '1fr 1fr', marginBottom: 24, borderRadius: 6, overflow: 'hidden', border: `1px solid ${UI.hairStrong}` }}>
+          <div style={{ width: '100%', display: 'grid', gridTemplateColumns: '1fr 1fr', marginBottom: 24, borderRadius: 6, overflow: 'hidden', border: `1px solid ${UI.hairStrong}`, flexShrink: 0 }}>
             {['login', 'register'].map(m => (
               <button key={m} onClick={() => switchMode(m)} style={{
                 padding: '10px 0',
@@ -219,7 +228,7 @@ function LoginScreen() {
           <button onClick={() => switchMode('login')} style={{
             alignSelf: 'flex-start', background: 'none', border: 'none', cursor: 'pointer',
             color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 12, letterSpacing: '0.04em',
-            padding: '0 0 18px', display: 'flex', alignItems: 'center', gap: 6,
+            padding: '0 0 18px', display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0,
             WebkitTapHighlightColor: 'transparent',
           }}>
             <svg width="6" height="10" viewBox="0 0 6 10" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M5 1L1 5l4 4" /></svg>
@@ -237,7 +246,7 @@ function LoginScreen() {
                 submitRegister();
               }
             }}
-            style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 22 }}>
+            style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 22, flexShrink: 0 }}>
             {!isLogin && (
               <Field label="Nickname">
                 <TextInput value={name} onChange={setName} placeholder="Your nickname" autoFocus={!isLogin} autoComplete="nickname" name="name" />
@@ -324,7 +333,7 @@ function LoginScreen() {
         )}
 
         {isForgot && (
-          <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 22 }}>
+          <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 22, flexShrink: 0 }}>
             <div style={{ textAlign: 'center', marginBottom: 4 }}>
               <div style={{ fontFamily: UI.fontDisplay, fontSize: 26, color: UI.ink, marginBottom: 6 }}>Reset password</div>
               <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>
@@ -1567,9 +1576,14 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       // session for the same day from a previous pass.
       const rotStart = (store.cycleIndex || 0) - dayIdx;
       const targetPos = rotStart + selectedSlot;
-      return [...store.sessions]
-        .filter(s => s.ended && s.dayId === activeDay.id && s.cyclePos === targetPos)
-        .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''))[0] ?? null;
+      const candidates = store.sessions.filter(s => s.ended && s.dayId === activeDay.id);
+      const exact = candidates.filter(s => s.cyclePos === targetPos);
+      // cyclePos only exists on sessions synced since migration 0176: an
+      // older session (or one loaded before that migration reached this
+      // device) has cyclePos == null. Fall back to "most recently ended"
+      // among those instead of losing the match entirely.
+      const pool = exact.length ? exact : candidates.filter(s => s.cyclePos == null);
+      return [...pool].sort((a, b) => (b.ended || '').localeCompare(a.ended || ''))[0] ?? null;
     }
     const dateKey = LB.fmtISO(sessionDate);
     return [...store.sessions]
@@ -1610,6 +1624,19 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     });
     return { improvementCount: improvements, regressionCount: regressions };
   }, [doneSession, store.sessions]);
+
+  // Fallback for the flex day-strip dot when a session's cyclePos wasn't
+  // persisted (pre-migration 0176, or not yet re-synced on this device): can't
+  // place it into completedCyclePos by absolute position, so track "this
+  // dayId was trained at some point" instead. Less precise (can't tell this
+  // rotation pass from an older one) but better than the dot silently
+  // disappearing.
+  const completedFlexDayIdsNoPos = useMemo(() => {
+    if (weekdayMode || !sch || !isFlex) return null;
+    const set = new Set();
+    store.sessions.filter(s => s.ended && s.cyclePos == null && s.dayId).forEach(s => set.add(s.dayId));
+    return set;
+  }, [store.sessions, weekdayMode, sch, isFlex]);
 
   const completedCyclePos = useMemo(() => {
     if (weekdayMode || !sch) return null;
@@ -2926,10 +2953,12 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
             if (!r && isFlex) {
               // Earlier slots in the current rotation pass that have a session,
               // bounded to this pass by absolute rotation position (cyclePos) so a
-              // previous rotation's session can't mark a skipped slot done.
+              // previous rotation's session can't mark a skipped slot done. Falls
+              // back to "this dayId was ever trained" when cyclePos is missing
+              // (see completedFlexDayIdsNoPos).
               const slot = d.slotIdx ?? i;
               const rotStart = (store.cycleIndex || 0) - dayIdx;
-              isCompleted = slot < dayIdx && (completedCyclePos?.has(rotStart + slot) ?? false);
+              isCompleted = slot < dayIdx && ((completedCyclePos?.has(rotStart + slot) ?? false) || (completedFlexDayIdsNoPos?.has(d.id) ?? false));
             } else if (!r && !isFlex) {
               if (weekdayMode) {
                 const slotKey = `${d.date.getFullYear()}-${d.date.getMonth()}-${d.date.getDate()}`;
@@ -3653,6 +3682,12 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
         targets={LB.effectiveMacroTargets(store.settings?.macroTargets, coachingMacros)}
         activeCoachingSchema={coachingSchema}
         onSetStatus={handleSetStatus}
+        userId={userId}
+        glucoseLogs={store.glucoseLogs || []}
+        glucoseUnit={store.settings?.glucoseUnit ?? 'mmol'}
+        bloodPressureLogs={store.bloodPressureLogs || []}
+        bodyTempLogs={store.bodyTempLogs || []}
+        tempUnit={LB.defaultTempUnit(store.settings)}
       />
 
       </div>{/* end swipe wrapper */}

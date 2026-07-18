@@ -11,6 +11,16 @@ const _lib = { tab: 'recent', q: '', filterTags: [], filterRestCats: [], filterU
 // support ticket. Explain instead.
 const CARDIO_SYSTEM_MSG = "System exercises can't be deleted. Cardio is here to stay, always ready to drop into a plan or session.";
 
+// SessionDetailScreen screenshot export: a long session (many exercise blocks)
+// renders very tall as a single phone-width column. Above this many blocks,
+// the export switches to a wider two-column grid instead (see the `twoCol`
+// capture treatment below), roughly halving the image height. `SHOT_TWO_COL_WIDTH`
+// is picked so each column's inner content is close to the normal single-column
+// content width (accounting for the Frame card padding + column gap), not simply
+// double the phone viewport, so per-exercise wrapping doesn't get noticeably worse.
+const SHOT_TWO_COL_THRESHOLD = 8;
+const SHOT_TWO_COL_WIDTH = 840;
+
 // Accept only http(s) YouTube URLs. React does NOT block javascript: hrefs in
 // production, so we validate on save (strip otherwise) and guard again at render.
 // Returns the normalized URL string, or null if it is not a valid YouTube link.
@@ -727,13 +737,14 @@ function GoldSectionLabel({ children, style }) {
   );
 }
 
-// Shared html2canvas capture flow for SessionDetailScreen and
-// SessionCompareScreen — expand the scroll parent, draw the imperative knurl
+// Shared html2canvas capture flow for SessionDetailScreen, SessionCompareScreen,
+// and the plan poster: expand the scroll parent, draw the imperative knurl
 // canvases, wait for the watermark avatar to decode, capture, then share/
-// download the PNG and restore layout. `dodgeAvatar` (SessionDetailScreen only)
-// shortens knurl dividers and shrinks chip rows that overlap the corner
-// avatar; SessionCompareScreen's watermark is a centered full-page background
-// so dividers there always draw full width.
+// download the PNG and restore layout. `dodgeAvatar` (SessionDetailScreen's
+// single-column export only) shortens knurl dividers and shrinks chip rows
+// that overlap the corner avatar; every other watermark (SessionDetailScreen's
+// own two-column export, SessionCompareScreen, the plan poster) is a centered
+// full-page background, so dividers there always draw full width.
 async function captureNodeAsPng(node, { filename, dodgeAvatar = false, setCapturing, fitWidth = false } = {}) {
   if (!node) return { ok: false, reason: 'no-node' };
   // html2canvas is loaded on demand (not at boot) — fetch it on first use.
@@ -759,6 +770,23 @@ async function captureNodeAsPng(node, { filename, dodgeAvatar = false, setCaptur
       avatarEl.addEventListener('error', res, { once: true });
     });
     await new Promise(r => requestAnimationFrame(r));
+  }
+  // SessionDetailScreen's two-column centered watermark (marked data-shot-fill) is
+  // sized to fill as much of the capture as possible while preserving its aspect
+  // ratio, near edge-to-edge top/bottom. CSS percentage width+height on the <img>
+  // itself (even with objectFit:contain) rendered visibly stretched under
+  // html2canvas, the same class of bug SvgKnurl above already works around for its
+  // own width:'100%', so compute and set an explicit pixel size here instead,
+  // exactly like the knurl canvases below get their width imperatively.
+  const fillEl = node.querySelector('img[data-shot-fill]');
+  if (fillEl && fillEl.naturalWidth && fillEl.naturalHeight) {
+    const wrap = fillEl.parentElement;
+    const availW = wrap ? wrap.offsetWidth : 0, availH = wrap ? wrap.offsetHeight : 0;
+    const scale = Math.min((availW * 0.94) / fillEl.naturalWidth, (availH * 0.96) / fillEl.naturalHeight);
+    if (scale > 0 && isFinite(scale)) {
+      fillEl.style.width = Math.round(fillEl.naturalWidth * scale) + 'px';
+      fillEl.style.height = Math.round(fillEl.naturalHeight * scale) + 'px';
+    }
   }
   const avatarRect = (dodgeAvatar && avatarEl && avatarEl.getBoundingClientRect().height) ? avatarEl.getBoundingClientRect() : null;
   const KNURL_GAP = 14;
@@ -2790,6 +2818,12 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
   // Screenshot watermark: VIPs get their home-screen background image instead of the default ZANE mark.
   const _shotLogo = store.settings?.vipBackground || 'icons/zane-logo-2.png';
   const _shotIsCustom = _shotLogo !== 'icons/zane-logo-2.png';
+  // Centered, faint, full-page background watermark, the two-column export's own
+  // size (its actual size is computed and set in px by captureNodeAsPng's
+  // data-shot-fill handling, not by CSS here, see the comment there for why).
+  const _shotIsLight = (store.settings?.darkMode ?? 'dark') === 'light';
+  const _shotDefaultStyle = { opacity: _shotIsLight ? 0.10 : 0.06, filter: _shotIsLight ? 'grayscale(1)' : 'grayscale(1) brightness(3)' };
+  const _shotCustomStyle = { opacity: 0.13 };
   const s = store.sessions.find(x => x.id === sessionId);
   useEffectL(() => { if (!s) go({ name: 'hist' }); }, [!!s]);
   // Sessions outside the boot window carry no entries — lazy-load them into
@@ -3205,10 +3239,30 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
     s.entries.flatMap(e => store.exercises.find(x => x.id === e.exId)?.tags || []).filter(Boolean)
   )];
 
+  // A long session switches the export to a two-column grid instead of one very
+  // tall column. groupBySuperset is cheap (already called again below for the real
+  // render) and gives the true count of vertically-stacked blocks, a superset
+  // counts once, not per member. Independent of `capturing`: takeScreenshot below
+  // must decide `fitWidth` at CLICK time, while `capturing` is still false (it only
+  // flips true inside captureNodeAsPng, after the click already fired), so this
+  // can't gate on `capturing` the way `twoCol` (the render-time styling flag) does.
+  const willBeTwoCol = LB.groupBySuperset(s.entries).length >= SHOT_TWO_COL_THRESHOLD;
+  // Only while actually capturing (never in the live, single-column scrolling view).
+  const twoCol = capturing && willBeTwoCol;
+
   const takeScreenshot = () => captureNodeAsPng(captureRef.current, {
     filename: `${s.dayName}-${s.date.slice(0, 10)}.png`,
-    dodgeAvatar: true,
     setCapturing,
+    // The two-column export is intentionally wider than the phone viewport (see the
+    // `twoCol` capture treatment below); without this, html2canvas only captures
+    // whatever width fits the current window instead of the full wider layout.
+    fitWidth: willBeTwoCol,
+    // Single column keeps the small corner watermark (needs dodging so chip rows /
+    // knurl dividers don't bleed into it); the wider two-column export switches to a
+    // centered full-page mark instead (see the `twoCol` capture treatment below),
+    // which is faint enough to need no dodging, matching SessionCompareScreen / the
+    // plan poster's own precedent.
+    dodgeAvatar: !willBeTwoCol,
   });
 
   return (
@@ -3249,7 +3303,33 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
       />
       <Hairline />
 
-      <div ref={captureRef} style={{ padding: capturing ? '20px 22px 24px' : '14px 22px 28px', display: 'flex', flexDirection: 'column', gap: 18, background: UI.bg }}>
+      <div ref={captureRef} style={{
+        padding: capturing ? '20px 22px 24px' : '14px 22px 28px',
+        background: UI.bg, position: 'relative',
+        // Escape #root's phone-shaped max-width (index.html) so the wider two-column
+        // export isn't clipped: position:fixed is positioned against the viewport, not
+        // any ancestor, as long as no ancestor between here and #root sets a transform/
+        // filter/contain (none do). Same technique the plan-poster export uses, just
+        // applied to this shared live/capture node directly instead of a separate
+        // always-mounted overlay, so twoCol toggling never remounts (and re-refs) this
+        // node out from under an in-flight captureNodeAsPng call. Overrides the base
+        // position:relative above (still needed as the watermark's anchor when not
+        // twoCol; position:fixed is an equally valid anchor for it).
+        ...(twoCol ? { position: 'fixed', top: 0, left: '50%', transform: 'translateX(-50%)', width: SHOT_TWO_COL_WIDTH, zIndex: 500 } : {}),
+      }}>
+
+        {/* Two-column only: centered, faint, full-capture watermark (same recipe as
+            SessionCompareScreen / the plan poster). Needs its own stacking context
+            below the real content, which is why the content right below is wrapped
+            in a sibling zIndex:1 div. Single column keeps its small corner mark
+            further down instead (near the exercises, see dodgeAvatar above). */}
+        {twoCol && (
+          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', zIndex: 0, overflow: 'hidden' }}>
+            <img src={_shotLogo} data-shot-avatar="1" data-shot-fill="1" style={_shotIsCustom ? _shotCustomStyle : _shotDefaultStyle} />
+          </div>
+        )}
+
+        <div style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', gap: 18 }}>
 
         {/* Screenshot-only header */}
         {capturing && (
@@ -3721,7 +3801,13 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
           ) : (
             <Bezel>EXERCISES</Bezel>
           )}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginTop: 14 }}>
+          <div style={twoCol
+            // alignItems defaults to 'stretch' in a grid: both cards in a row take the
+            // ROW's full height (the taller sibling's), giving every row a clean, even
+            // bottom edge instead of each card hugging its own content height.
+            ? { display: 'grid', gridTemplateColumns: '1fr 1fr', columnGap: 20, rowGap: 14, marginTop: 14 }
+            : { display: 'flex', flexDirection: 'column', gap: 14, marginTop: 14 }
+          }>
             {(() => {
               const groups = LB.groupBySuperset(s.entries);
 
@@ -4007,25 +4093,38 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                 );
               };
 
-              return groups.map((g, gi) => (
-                <div key={gi}>
-                  {g.type === 'superset' ? (
-                    <div style={{ borderLeft: `2px solid ${UI.goldSoft}`, paddingLeft: 12 }}>
-                      <div className="micro" style={{ color: UI.gold, marginBottom: 10, letterSpacing: '0.12em' }}>{LB.supersetLabel(g.members.length)}</div>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                        {g.members.map(({ entry: e, idx: i }) => renderEntry(e, i))}
-                      </div>
+              return groups.map((g, gi) => {
+                const groupBody = g.type === 'superset' ? (
+                  <div style={{ borderLeft: `2px solid ${UI.goldSoft}`, paddingLeft: 12 }}>
+                    <div className="micro" style={{ color: UI.gold, marginBottom: 10, letterSpacing: '0.12em' }}>{LB.supersetLabel(g.members.length)}</div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                      {g.members.map(({ entry: e, idx: i }) => renderEntry(e, i))}
                     </div>
-                  ) : renderEntry(g.entry, g.idx)}
-                  {gi < groups.length - 1 && (capturing ? <KnurlCanvas style={{ marginTop: 14 }} /> : <Hairline style={{ marginTop: 14 }} />)}
-                </div>
-              ));
+                  </div>
+                ) : renderEntry(g.entry, g.idx);
+                // Two-column grid: each block gets its own bordered card instead of a
+                // between-block divider, a full-width knurl/hairline only makes sense
+                // spanning one column, not the row it visually sits in.
+                if (twoCol) {
+                  // A lone last card in an odd-count grid would otherwise sit half-width
+                  // in an empty row. Span both columns instead of leaving it orphaned.
+                  const isLastOdd = gi === groups.length - 1 && groups.length % 2 === 1;
+                  return <Frame key={gi} padding={14} style={{ minWidth: 0, ...(isLastOdd ? { gridColumn: '1 / -1' } : {}) }}>{groupBody}</Frame>;
+                }
+                return (
+                  <div key={gi}>
+                    {groupBody}
+                    {gi < groups.length - 1 && (capturing ? <KnurlCanvas style={{ marginTop: 14 }} /> : <Hairline style={{ marginTop: 14 }} />)}
+                  </div>
+                );
+              });
             })()}
           </div>
-          {capturing && (
+          {capturing && !twoCol && (
             <img src={_shotLogo} data-shot-avatar="1" style={{ position: 'absolute', bottom: 2, right: 0, width: 90, opacity: 0.5, zIndex: 1, transform: _shotIsCustom ? 'none' : 'scaleX(-1)' }} />
           )}
           {capturing && <div style={{ height: '0.5px', background: UI.gold, marginTop: 10 }} />}
+        </div>
         </div>
       </div>
 

@@ -9,6 +9,22 @@ const fmtSec = s => s < 60 ? `${s}s` : `${Math.floor(s / 60)}:${String(s % 60).p
 // Short "time since" label for the admin sign-up feed.
 const fmtAgo = (iso) => LB.timeAgo(iso, { capDays: 7 });
 
+// Health-tab card visibility toggles: id must match screens-health.jsx's
+// DEFAULT_CARD_ORDER / DEFAULT_COACH_ORDER card ids.
+const HEALTH_CARD_TOGGLES = [
+  { id: 'week', label: 'Week overview' },
+  { id: 'today', label: 'Today' },
+  { id: 'macros', label: 'Macros' },
+  { id: 'adherence', label: 'Macro adherence' },
+  { id: 'weight', label: 'Weight' },
+  { id: 'cardio', label: 'Cardio' },
+  { id: 'steps', label: 'Steps' },
+  { id: 'water', label: 'Water' },
+  { id: 'glucose', label: 'Glucose' },
+  { id: 'bloodPressure', label: 'Blood pressure' },
+  { id: 'bodyTemp', label: 'Body temperature' },
+];
+
 // Boxed input look shared by the settings sheets' plain text/password/email/
 // select inputs (password/email change, OTP, admin tools, ...). Spread and
 // override for a sheet's specific padding/fontSize/etc.
@@ -514,13 +530,16 @@ function PasskeySheet({ open, onClose }) {
 }
 
 // ─── SETTINGS ────────────────────────────────────────────────────────
-function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSupportSheet, onTestUpdateBanner }) {
+function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSupportSheet, onTestUpdateBanner, flushBeforeSignOut }) {
   const [confirmEl, confirm] = useConfirm();
   const [nickname, setNickname] = useStateSet(store.user?.name || '');
 
   // Category sheets
   const [coachingSheet, setCoachingSheet] = useStateSet(false);
   const [healthSheet, setHealthSheet] = useStateSet(false);
+  const [healthCardsSheet, setHealthCardsSheet] = useStateSet(false);
+  const [glucoseSheet, setGlucoseSheet] = useStateSet(false);
+  const [bodyTempSheet, setBodyTempSheet] = useStateSet(false);
   const [accountSheet, setAccountSheet] = useStateSet(false);
   const [trainingSheet, setTrainingSheet] = useStateSet(false);
   const [appearanceSheet, setAppearanceSheet] = useStateSet(false);
@@ -1151,7 +1170,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       catch (err) { setImporting(false); await confirm(`Import failed: ${err.message || 'Unknown error'}`, { title: 'Error', ok: 'OK' }); }
     }; input.click();
   };
-  const handleSignOut = async () => { await LB.signOut(); };
+  const handleSignOut = async () => { await flushBeforeSignOut(userId); await LB.signOut(); };
 
   const attachSupportImageFile = (file) => {
     if (!file) return;
@@ -1761,8 +1780,24 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             Pin a Health tab to the nav bar to log daily weight, steps & macros and see your trends. These daily logs also prefill your weekly coach check-in.
           </div>
 
-          <div className="micro" style={{ color: UI.inkFaint, margin: '20px 0 8px' }}>GLUCOSE</div>
-          <Row label="Blood glucose unit" first last>
+          <div style={{ marginTop: 16 }}>
+            <NavRow label="Glucose" first onTap={() => setGlucoseSheet(true)} />
+            <NavRow label="Body Temperature" onTap={() => setBodyTempSheet(true)} />
+            <NavRow label="Cards" hint={(store.settings?.hiddenHealthCards || []).length ? `${store.settings.hiddenHealthCards.length} hidden` : null} onTap={() => setHealthCardsSheet(true)} />
+            {(store.statusPeriods || []).length > 0 && (
+              <NavRow label="Sick & Vacation periods" hint={`${(store.statusPeriods || []).length}`} onTap={() => { setShowAllPeriods(false); setPeriodsSheet(true); }} />
+            )}
+          </div>
+          <div style={{ marginTop: 24 }}>
+            <Btn style={{ width: '100%' }} onClick={() => setHealthSheet(false)}>Done</Btn>
+          </div>
+        </div>
+      </SettingsSheet>
+
+      {/* ══ Health › Glucose ══ */}
+      <SettingsSheet open={glucoseSheet} onClose={() => setGlucoseSheet(false)} title="Glucose">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+          <Row label="Blood glucose unit" first>
             <div style={{ display: 'flex', gap: 0, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, overflow: 'hidden' }}>
               {['mmol', 'mgdl'].map(u => (
                 <button key={u} onClick={() => setStore(s => ({ ...s, settings: { ...s.settings, glucoseUnit: u } }))}
@@ -1775,14 +1810,86 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
               ))}
             </div>
           </Row>
-
-          {(store.statusPeriods || []).length > 0 && (
-            <div style={{ marginTop: 16 }}>
-              <NavRow label="Sick & Vacation periods" hint={`${(store.statusPeriods || []).length}`} onTap={() => { setShowAllPeriods(false); setPeriodsSheet(true); }} />
-            </div>
-          )}
           <div style={{ marginTop: 24 }}>
-            <Btn style={{ width: '100%' }} onClick={() => setHealthSheet(false)}>Done</Btn>
+            <Btn style={{ width: '100%' }} onClick={() => setGlucoseSheet(false)}>Done</Btn>
+          </div>
+        </div>
+      </SettingsSheet>
+
+      {/* ══ Health › Body Temperature ══ */}
+      <SettingsSheet open={bodyTempSheet} onClose={() => setBodyTempSheet(false)} title="Body Temperature">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4, lineHeight: 1.5 }}>
+            Defaults to °F on Imperial, °C otherwise. Override it here if that's wrong for you.
+          </div>
+          <Row label="Body temperature unit" first>
+            <div style={{ display: 'flex', gap: 0, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, overflow: 'hidden' }}>
+              {['c', 'f'].map(u => (
+                <button key={u} onClick={() => setStore(s => ({ ...s, settings: { ...s.settings, tempUnit: u } }))}
+                  style={{ padding: '5px 12px', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600,
+                    background: LB.defaultTempUnit(store.settings) === u ? 'var(--accent)' : 'transparent',
+                    color: LB.defaultTempUnit(store.settings) === u ? '#0a0805' : UI.inkSoft,
+                    border: 'none', cursor: 'pointer', transition: 'background 0.15s' }}>
+                  {u === 'c' ? '°C' : '°F'}
+                </button>
+              ))}
+            </div>
+          </Row>
+          {(() => {
+            const feverUnit = LB.defaultTempUnit(store.settings);
+            const c2f = (n) => Math.round((n * 9 / 5 + 32) * 10) / 10;
+            const f2c = (n) => (n - 32) * 5 / 9;
+            const feverC = store.settings?.feverThresholdC ?? 38;
+            const feverDisp = feverUnit === 'f' ? c2f(feverC) : feverC;
+            const feverMin = feverUnit === 'f' ? c2f(36) : 36;
+            const feverMax = feverUnit === 'f' ? c2f(42) : 42;
+            return (
+              <Row label="Sick suggestion at">
+                <Stepper value={feverDisp} step={0.1} min={feverMin} suffix={feverUnit === 'f' ? '°F' : '°C'}
+                  onChange={v => {
+                    const clamped = Math.min(feverMax, v);
+                    const newC = feverUnit === 'f' ? f2c(clamped) : clamped;
+                    setStore(s => ({ ...s, settings: { ...s.settings, feverThresholdC: Math.round(newC * 100) / 100 } }));
+                  }} />
+              </Row>
+            );
+          })()}
+          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
+            Log a body temperature at or above this, and we'll ask if you want to mark today as Sick.
+          </div>
+          <div style={{ marginTop: 24 }}>
+            <Btn style={{ width: '100%' }} onClick={() => setBodyTempSheet(false)}>Done</Btn>
+          </div>
+        </div>
+      </SettingsSheet>
+
+      {/* ══ Health Cards Sheet ══ */}
+      <SettingsSheet open={healthCardsSheet} onClose={() => setHealthCardsSheet(false)} title="Cards">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 12, lineHeight: 1.5 }}>
+            Hide cards you don't use. Drag a card's grip in the Health tab to reorder the rest.
+          </div>
+          {HEALTH_CARD_TOGGLES.map((c, i) => {
+            const hidden = (store.settings?.hiddenHealthCards || []).includes(c.id);
+            return (
+              <React.Fragment key={c.id}>
+                <Row label={c.label} first={i === 0}>
+                  <Toggle on={!hidden} onToggle={() => setStore(s => {
+                    const cur = s.settings?.hiddenHealthCards || [];
+                    const next = hidden ? cur.filter(x => x !== c.id) : [...cur, c.id];
+                    return { ...s, settings: { ...s.settings, hiddenHealthCards: next } };
+                  })} />
+                </Row>
+                {c.id === 'macros' && (
+                  <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: -4, marginBottom: 6, lineHeight: 1.5 }}>
+                    Also hides the button to set/edit your macro targets. Come back here to bring it back.
+                  </div>
+                )}
+              </React.Fragment>
+            );
+          })}
+          <div style={{ marginTop: 24 }}>
+            <Btn style={{ width: '100%' }} onClick={() => setHealthCardsSheet(false)}>Done</Btn>
           </div>
         </div>
       </SettingsSheet>
@@ -1885,7 +1992,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                 </div>
                 <button disabled={qsSwitching} onClick={async () => {
                   if (hasQsSession) { setQsSwitching(true); try { await LB.quickSwitch(otherQsEmail); window.location.reload(); } catch (e) { setQsSwitching(false); } }
-                  else { const ok = await confirm(`You'll be signed out so ${otherName} can log in.`, { title: 'Set up quick switch?', ok: 'Sign out' }); if (ok) await LB.signOut(); }
+                  else { const ok = await confirm(`You'll be signed out so ${otherName} can log in.`, { title: 'Set up quick switch?', ok: 'Sign out' }); if (ok) { await flushBeforeSignOut(userId); await LB.signOut(); } }
                 }} style={{ flex: 1, background: 'transparent', border: `0.5px solid ${hasQsSession ? UI.hair : UI.hairStrong}`, borderRadius: 6, padding: '10px 12px', textAlign: 'left', cursor: qsSwitching ? 'default' : 'pointer', WebkitTapHighlightColor: 'transparent', opacity: qsSwitching ? 0.5 : 1 }}>
                   <div className="micro" style={{ marginBottom: 4, color: hasQsSession ? UI.inkFaint : 'rgba(var(--danger-rgb),0.7)' }}>{qsSwitching ? 'Switching…' : hasQsSession ? 'Tap to switch' : 'Log in first'}</div>
                   <div style={{ fontFamily: UI.fontDisplay, fontSize: 18, color: hasQsSession ? UI.inkSoft : UI.inkFaint, lineHeight: 1.1 }}>{otherName}</div>
