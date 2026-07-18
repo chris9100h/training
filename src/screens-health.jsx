@@ -240,10 +240,14 @@ function TempScatterChart({ readings, from, to, unit }) {
 // unit setting or conversion pair here.
 
 // Two-series scatter (systolic + diastolic dots on the same y-axis, mmHg),
-// joined by a thin tie-line per reading. No reference band: unlike glucose's
-// single well-established fasting range, blood pressure classification is
-// multi-tier and context-dependent (rest, time of day, measurement position),
-// better left to the user's own doctor than baked into a fixed color band here.
+// joined by a thin tie-line per reading. Two dashed reference lines mark the
+// widely-cited "normal" upper bound (120 systolic / 80 diastolic, AHA/ESC),
+// same treatment as glucose's single fed-line marker. Deliberately NOT a full
+// color-tiered band: unlike glucose's single well-established fasting range,
+// the full blood-pressure classification (elevated / stage 1 / stage 2 / crisis)
+// is multi-tier and context-dependent (rest, time of day, measurement
+// position), better left to the user's own doctor than baked in here.
+const BP_REF_SYS = 120, BP_REF_DIA = 80;
 function BpScatterChart({ readings, from, to }) {
   const pts = (readings || []).filter(r => r.systolic != null && r.diastolic != null && r.date >= from && r.date <= to)
     .sort((a, b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time));
@@ -252,7 +256,7 @@ function BpScatterChart({ readings, from, to }) {
   const H = padTop + plotH + padBottom, plotW = W - padL - padR;
 
   const allVals = pts.flatMap(p => [p.systolic, p.diastolic]);
-  const dom = UI.chartDomain(Math.min(...allVals), Math.max(...allVals));
+  const dom = UI.chartDomain(Math.min(...allVals, BP_REF_DIA), Math.max(...allVals, BP_REF_SYS));
   const totalDays = Math.max(1, healthDayDiff(from, to));
   const xOf = d => padL + (healthDayDiff(from, d) / totalDays) * plotW;
   const yOf = v => padTop + (1 - (v - dom.min) / dom.range) * plotH;
@@ -270,6 +274,8 @@ function BpScatterChart({ readings, from, to }) {
   return (
     <ChartHover W={W} H={H} points={hoverPoints} mode="xy">
     <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display: 'block', overflow: 'visible' }}>
+      <line x1={padL} y1={yOf(BP_REF_SYS).toFixed(1)} x2={W - padR} y2={yOf(BP_REF_SYS).toFixed(1)} stroke={SYS_COLOR} strokeWidth="0.75" strokeDasharray="4 3" opacity="0.5" />
+      <line x1={padL} y1={yOf(BP_REF_DIA).toFixed(1)} x2={W - padR} y2={yOf(BP_REF_DIA).toFixed(1)} stroke={DIA_COLOR} strokeWidth="0.75" strokeDasharray="4 3" opacity="0.5" />
       {gridVals.map((v, i) => (
         <g key={i}>
           {i > 0 && <line x1={padL} y1={yOf(v).toFixed(1)} x2={W - padR} y2={yOf(v).toFixed(1)} stroke={UI.hair} strokeWidth="0.5" strokeDasharray="3 3" />}
@@ -766,19 +772,28 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
     const c = tempFromInput(tempForm.value, tUnit);
     if (c == null) return;
     const time = normEntryTime(tempForm.time) || new Date().toTimeString().slice(0, 5);
+    let ok = true;
     if (editingTempId) {
       const origEntry = (store.bodyTempLogs || []).find(l => l.id === editingTempId);
       const updated = { ...origEntry, time, valueC: c, note: tempForm.note.trim() || null };
       setStore(s => ({ ...s, bodyTempLogs: (s.bodyTempLogs || []).map(l => l.id === editingTempId ? updated : l) }));
       setEditingTempId(null); setAddingTemp(false); setTempForm(emptyTemp);
       const { error } = await LB.supabase.from('zane_body_temp_logs').update({ time, value_c: c, note: updated.note }).eq('id', editingTempId).eq('user_id', userId);
-      if (error && origEntry) setStore(s => ({ ...s, bodyTempLogs: (s.bodyTempLogs || []).map(l => l.id === editingTempId ? origEntry : l) }));
+      if (error && origEntry) { setStore(s => ({ ...s, bodyTempLogs: (s.bodyTempLogs || []).map(l => l.id === editingTempId ? origEntry : l) })); ok = false; }
     } else {
       const entry = { id: LB.uid(), date, time, valueC: c, note: tempForm.note.trim() || null, createdAt: new Date().toISOString() };
       setStore(s => ({ ...s, bodyTempLogs: [entry, ...(s.bodyTempLogs || [])] }));
       setAddingTemp(false); setTempForm(emptyTemp);
       const { error } = await LB.supabase.from('zane_body_temp_logs').insert({ id: entry.id, user_id: userId, date: entry.date, time: entry.time, value_c: entry.valueC, note: entry.note });
-      if (error) setStore(s => ({ ...s, bodyTempLogs: (s.bodyTempLogs || []).filter(l => l.id !== entry.id) }));
+      if (error) { setStore(s => ({ ...s, bodyTempLogs: (s.bodyTempLogs || []).filter(l => l.id !== entry.id) })); ok = false; }
+    }
+    // Fever nudge: only for a reading logged against TODAY (status is a
+    // "right now" concept, see dayMode above), only once (skip if already
+    // marked Sick), and only after a write that actually stuck.
+    if (ok && onSetStatus && date === todayISO && store.statusMode !== 'sick' && c >= (store.settings?.feverThresholdC ?? 38)) {
+      const disp = tempDisplay(c, tUnit);
+      const markSick = await confirm(`You logged ${disp}${tempUnitLabel(tUnit)}. Mark today as Sick?`, { title: 'Fever detected', ok: 'Mark Sick', cancel: 'Not now' });
+      if (markSick) onSetStatus('sick', null);
     }
   };
 
@@ -1926,6 +1941,7 @@ function BloodPressureCard({ bpLogs, tf, setTf, dragHandle }) {
               <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#4a9fe0', display: 'inline-block' }} />
               <span style={{ fontSize: 9, fontFamily: UI.fontUi, color: UI.inkFaint }}>Diastolic</span>
             </span>
+            <span style={{ fontSize: 9, fontFamily: UI.fontUi, color: UI.inkGhost }}>· dashed = 120/80 normal</span>
           </div>
           {sortedReadings.length > 0 && (
             <>

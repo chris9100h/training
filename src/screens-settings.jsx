@@ -536,6 +536,7 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
   // Category sheets
   const [coachingSheet, setCoachingSheet] = useStateSet(false);
   const [healthSheet, setHealthSheet] = useStateSet(false);
+  const [healthCardsSheet, setHealthCardsSheet] = useStateSet(false);
   const [accountSheet, setAccountSheet] = useStateSet(false);
   const [trainingSheet, setTrainingSheet] = useStateSet(false);
   const [appearanceSheet, setAppearanceSheet] = useStateSet(false);
@@ -1795,7 +1796,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4, lineHeight: 1.5 }}>
             Defaults to °F on Imperial, °C otherwise. Override it here if that's wrong for you.
           </div>
-          <Row label="Body temperature unit" first last>
+          <Row label="Body temperature unit" first>
             <div style={{ display: 'flex', gap: 0, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, overflow: 'hidden' }}>
               {['c', 'f'].map(u => (
                 <button key={u} onClick={() => setStore(s => ({ ...s, settings: { ...s.settings, tempUnit: u } }))}
@@ -1808,9 +1809,30 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
               ))}
             </div>
           </Row>
+          <Row label="Sick suggestion at">
+            <Stepper value={store.settings?.feverThresholdC ?? 38} step={0.1} min={36} suffix="°C"
+              onChange={v => setStore(s => ({ ...s, settings: { ...s.settings, feverThresholdC: Math.min(42, Math.round(v * 10) / 10) } }))} />
+          </Row>
+          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
+            Log a body temperature at or above this, and we'll ask if you want to mark today as Sick.
+          </div>
 
-          <div className="micro" style={{ color: UI.inkFaint, margin: '20px 0 8px' }}>CARDS</div>
-          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4, lineHeight: 1.5 }}>
+          <div style={{ marginTop: 16 }}>
+            <NavRow label="Cards" hint={(store.settings?.hiddenHealthCards || []).length ? `${store.settings.hiddenHealthCards.length} hidden` : null} onTap={() => setHealthCardsSheet(true)} />
+          </div>
+          {(store.statusPeriods || []).length > 0 && (
+            <NavRow label="Sick & Vacation periods" hint={`${(store.statusPeriods || []).length}`} onTap={() => { setShowAllPeriods(false); setPeriodsSheet(true); }} />
+          )}
+          <div style={{ marginTop: 24 }}>
+            <Btn style={{ width: '100%' }} onClick={() => setHealthSheet(false)}>Done</Btn>
+          </div>
+        </div>
+      </SettingsSheet>
+
+      {/* ══ Health Cards Sheet ══ */}
+      <SettingsSheet open={healthCardsSheet} onClose={() => setHealthCardsSheet(false)} title="Cards">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 12, lineHeight: 1.5 }}>
             Hide cards you don't use. Drag a card's grip in the Health tab to reorder the rest.
           </div>
           {HEALTH_CARD_TOGGLES.map((c, i) => {
@@ -1825,14 +1847,8 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
               </Row>
             );
           })}
-
-          {(store.statusPeriods || []).length > 0 && (
-            <div style={{ marginTop: 16 }}>
-              <NavRow label="Sick & Vacation periods" hint={`${(store.statusPeriods || []).length}`} onTap={() => { setShowAllPeriods(false); setPeriodsSheet(true); }} />
-            </div>
-          )}
           <div style={{ marginTop: 24 }}>
-            <Btn style={{ width: '100%' }} onClick={() => setHealthSheet(false)}>Done</Btn>
+            <Btn style={{ width: '100%' }} onClick={() => setHealthCardsSheet(false)}>Done</Btn>
           </div>
         </div>
       </SettingsSheet>

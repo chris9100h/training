@@ -406,6 +406,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
     glucose_unit: sett.glucoseUnit ?? 'mmol',
     temp_unit: sett.tempUnit ?? null,
     hidden_health_cards: sett.hiddenHealthCards ?? null,
+    fever_threshold_c: sett.feverThresholdC ?? 38,
     default_checkin_schema: sett.defaultCheckinSchema ?? null,
     vip_background: sett.vipBackground ?? null,
     active_cardio_plan_id: backup.activeCardioPlanId ?? null,
@@ -1141,6 +1142,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         glucoseUnit: sett.glucose_unit ?? 'mmol',
         tempUnit: sett.temp_unit ?? null,
         hiddenHealthCards: sett.hidden_health_cards ?? null,
+        feverThresholdC: sett.fever_threshold_c ?? 38,
         vipBackground: sett.vip_background ?? null,
         swVersion: sett.sw_version ?? null,
       },
@@ -1622,6 +1624,7 @@ async function syncStore(prev, next, userId) {
     prev.settings?.onboardingCompleted    !== next.settings?.onboardingCompleted    ||
     prev.settings?.glucoseUnit            !== next.settings?.glucoseUnit            ||
     prev.settings?.tempUnit               !== next.settings?.tempUnit               ||
+    prev.settings?.feverThresholdC        !== next.settings?.feverThresholdC        ||
     JSON.stringify(prev.settings?.hiddenHealthCards) !== JSON.stringify(next.settings?.hiddenHealthCards) ||
     JSON.stringify(prev.settings?.defaultCheckinSchema) !== JSON.stringify(next.settings?.defaultCheckinSchema) ||
     prev.nextReminderAt                   !== next.nextReminderAt   ||
@@ -1668,6 +1671,7 @@ async function syncStore(prev, next, userId) {
       onboarding_completed: next.settings?.onboardingCompleted ?? false,
       glucose_unit: next.settings?.glucoseUnit ?? 'mmol',
       temp_unit: next.settings?.tempUnit ?? null,
+      fever_threshold_c: next.settings?.feverThresholdC ?? 38,
       hidden_health_cards: next.settings?.hiddenHealthCards ?? null,
       default_checkin_schema: next.settings?.defaultCheckinSchema ?? null,
       next_reminder_at: next.nextReminderAt ?? null,
