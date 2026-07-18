@@ -699,6 +699,31 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
   // Snapshot of the form as it was opened, to detect unsaved edits on dismiss.
   const initialSnap = useRefH({ form: empty, coach: {}, net: false });
 
+  // Categories the user has never once filled in start collapsed, so a sheet
+  // that's grown to include glucose/BP/temp/etc. doesn't bury the fields
+  // someone actually uses under ones they don't. Computed once per open (not
+  // live-reactive), so filling one in for the first time doesn't yank the
+  // section shut mid-edit; a manual toggle always wins until the sheet
+  // re-opens.
+  const [collapsedCats, setCollapsedCats] = useStateH(new Set());
+  const toggleCat = (key) => setCollapsedCats(prev => {
+    const next = new Set(prev);
+    if (next.has(key)) next.delete(key); else next.add(key);
+    return next;
+  });
+  useEffectH(() => {
+    if (!open) return;
+    const everUsed = {
+      body: (store.dailyLogs || []).some(l => l.weight != null || l.steps != null),
+      nutrition: (store.dailyLogs || []).some(l => l.protein != null || l.carbs != null || l.fat != null || l.calories != null || l.offPlanNote),
+      hydration: (store.dailyLogs || []).some(l => l.waterMl != null),
+      glucose: (store.glucoseLogs || []).length > 0,
+      bloodPressure: (store.bloodPressureLogs || []).length > 0,
+      bodyTemp: (store.bodyTempLogs || []).length > 0,
+    };
+    setCollapsedCats(new Set(Object.keys(everUsed).filter(k => !everUsed[k])));
+  }, [open]);
+
   // ── Glucose readings for this day ──
   const glUnit = glucoseUnit || 'mmol';
   const glucoseForDay = useMemoH(
@@ -1014,6 +1039,15 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
       <input type="text" inputMode="decimal" placeholder="—" value={form[k]} onChange={e => set(k, e.target.value)} style={inputStyle} />
     </div>
   );
+  // Clickable category header: chevron + label, optional right-aligned extra
+  // content (a unit tag, a toggle) that doesn't itself trigger the collapse.
+  const catHeader = (key, label, extra) => (
+    <div onClick={() => toggleCat(key)} style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 8, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+      <i className={`fa-solid fa-chevron-${collapsedCats.has(key) ? 'right' : 'down'}`} style={{ fontSize: 8, color: UI.inkGhost, width: 8, flexShrink: 0 }} />
+      <span className="micro" style={{ color: UI.inkFaint, flex: 1 }}>{label}</span>
+      {extra}
+    </div>
+  );
 
   return (
     <Sheet open={open} onClose={requestClose} title={existing ? 'Edit Day' : 'Log Day'}>
@@ -1072,15 +1106,16 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
         </div>
       )}
 
-      <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>BODY</div>
-      <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-        {numField('weight', 'Weight', UI.unit())}
-        {numField('steps', 'Steps')}
-      </div>
+      {catHeader('body', 'BODY')}
+      {!collapsedCats.has('body') && (
+        <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+          {numField('weight', 'Weight', UI.unit())}
+          {numField('steps', 'Steps')}
+        </div>
+      )}
 
-      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 8 }}>
-        <span className="micro" style={{ color: UI.inkFaint, flex: 1 }}>NUTRITION</span>
-        <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `0.5px solid ${UI.hairStrong}` }}>
+      {catHeader('nutrition', 'NUTRITION', (
+        <div onClick={e => e.stopPropagation()} style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `0.5px solid ${UI.hairStrong}` }}>
           {[{ id: false, label: 'Total carbs' }, { id: true, label: 'Net carbs' }].map(o => (
             <button key={String(o.id)} onClick={() => setNetCarbs(o.id)} style={{
               padding: '4px 10px', cursor: 'pointer', border: 'none',
@@ -1091,55 +1126,60 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
             }}>{o.label}</button>
           ))}
         </div>
-      </div>
-      <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-        {numField('protein', 'Protein', 'g')}
-        {numField('carbs', 'Carbs', 'g')}
-        {numField('fat', 'Fat', 'g')}
-      </div>
-      {netCarbs && (
-        <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-          {numField('fiber', 'Fiber', 'g')}
-          <div style={{ flex: 1 }}>
-            <div style={labelStyle}>Net carbs (g)</div>
-            <div style={{ ...inputStyle, color: netCarbsVal != null ? UI.inkSoft : UI.inkGhost, pointerEvents: 'none', userSelect: 'none' }}>
-              {netCarbsVal != null ? netCarbsVal : '—'}
-            </div>
+      ))}
+      {!collapsedCats.has('nutrition') && (
+        <>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+            {numField('protein', 'Protein', 'g')}
+            {numField('carbs', 'Carbs', 'g')}
+            {numField('fat', 'Fat', 'g')}
           </div>
+          {netCarbs && (
+            <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+              {numField('fiber', 'Fiber', 'g')}
+              <div style={{ flex: 1 }}>
+                <div style={labelStyle}>Net carbs (g)</div>
+                <div style={{ ...inputStyle, color: netCarbsVal != null ? UI.inkSoft : UI.inkGhost, pointerEvents: 'none', userSelect: 'none' }}>
+                  {netCarbsVal != null ? netCarbsVal : '—'}
+                </div>
+              </div>
+            </div>
+          )}
+          <div style={{ marginBottom: 16 }}>
+            <div style={labelStyle}>Calories (kcal){autoCals != null && form.calories === '' ? (netCarbs ? ' · net carbs' : ' · from macros') : ''}</div>
+            <input type="text" inputMode="decimal" placeholder={autoCals != null ? String(autoCals) : '—'} value={form.calories} onChange={e => set('calories', e.target.value)} style={inputStyle} />
+          </div>
+          <div style={{ marginBottom: 16 }}>
+            <div style={labelStyle}>Off-plan note <span style={{ textTransform: 'none', fontWeight: 400, color: UI.inkGhost }}>(optional · prefills check-in)</span></div>
+            <textarea rows={2} placeholder="e.g. Birthday cake, 2 slices" value={form.offPlanNote} onChange={e => set('offPlanNote', e.target.value)} style={{ ...inputStyle, resize: 'none', fontFamily: UI.fontUi, fontSize: 14 }} />
+          </div>
+        </>
+      )}
+
+      {catHeader('hydration', 'HYDRATION')}
+      {!collapsedCats.has('hydration') && (
+        <div style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'flex-end' }}>
+          {numField('water', 'Water', UI.waterEntryUnit())}
+          {UI.waterQuickAdds().map(inc => (
+            <button key={inc} onClick={() => set('water', String((healthInt(form.water) || 0) + inc))} style={{
+              padding: '10px 12px', borderRadius: 4, border: `0.5px solid ${UI.hairStrong}`, background: UI.bgInset,
+              color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap', WebkitTapHighlightColor: 'transparent',
+            }}>+{inc}</button>
+          ))}
         </div>
       )}
-      <div style={{ marginBottom: 16 }}>
-        <div style={labelStyle}>Calories (kcal){autoCals != null && form.calories === '' ? (netCarbs ? ' · net carbs' : ' · from macros') : ''}</div>
-        <input type="text" inputMode="decimal" placeholder={autoCals != null ? String(autoCals) : '—'} value={form.calories} onChange={e => set('calories', e.target.value)} style={inputStyle} />
-      </div>
-
-      <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>HYDRATION</div>
-      <div style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'flex-end' }}>
-        {numField('water', 'Water', UI.waterEntryUnit())}
-        {UI.waterQuickAdds().map(inc => (
-          <button key={inc} onClick={() => set('water', String((healthInt(form.water) || 0) + inc))} style={{
-            padding: '10px 12px', borderRadius: 4, border: `0.5px solid ${UI.hairStrong}`, background: UI.bgInset,
-            color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap', WebkitTapHighlightColor: 'transparent',
-          }}>+{inc}</button>
-        ))}
-      </div>
 
       <div style={{ marginTop: 8, marginBottom: 10 }}>
         <div style={labelStyle}>Note (optional)</div>
         <textarea rows={2} placeholder="…" value={form.note} onChange={e => set('note', e.target.value)} style={{ ...inputStyle, resize: 'none', fontFamily: UI.fontUi, fontSize: 14 }} />
       </div>
 
-      <div style={{ marginBottom: 18 }}>
-        <div style={labelStyle}>Off-plan note <span style={{ textTransform: 'none', fontWeight: 400, color: UI.inkGhost }}>(optional · prefills check-in)</span></div>
-        <textarea rows={2} placeholder="e.g. Birthday cake, 2 slices" value={form.offPlanNote} onChange={e => set('offPlanNote', e.target.value)} style={{ ...inputStyle, resize: 'none', fontFamily: UI.fontUi, fontSize: 14 }} />
-      </div>
-
       {/* ── Glucose ── */}
       <div style={{ marginTop: 8, marginBottom: 18 }}>
-        <div style={{ display: 'flex', alignItems: 'center', marginBottom: 8 }}>
-          <span className="micro" style={{ color: UI.inkFaint, flex: 1 }}>GLUCOSE</span>
+        {catHeader('glucose', 'GLUCOSE', (
           <span style={{ fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontUi }}>{glucoseUnitLabel(glUnit)}</span>
-        </div>
+        ))}
+        {!collapsedCats.has('glucose') && <>
         {glucoseForDay.map(g => {
           const disp = glucoseDisplay(g.valueMmol, glUnit);
           const ctxColor = { fasted: 'var(--accent)', fed: '#4a9fe0', other: UI.inkSoft }[g.context] || UI.inkSoft;
@@ -1223,14 +1263,15 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
             color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 12, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
           }}>+ Add reading</button>
         )}
+        </>}
       </div>
 
       {/* ── Blood pressure ── */}
       <div style={{ marginTop: 8, marginBottom: 18 }}>
-        <div style={{ display: 'flex', alignItems: 'center', marginBottom: 8 }}>
-          <span className="micro" style={{ color: UI.inkFaint, flex: 1 }}>BLOOD PRESSURE</span>
+        {catHeader('bloodPressure', 'BLOOD PRESSURE', (
           <span style={{ fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontUi }}>mmHg</span>
-        </div>
+        ))}
+        {!collapsedCats.has('bloodPressure') && <>
         {bpForDay.map(b => {
           const isConfirm = confirmDeleteBpId === b.id;
           return (
@@ -1298,14 +1339,15 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
             color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 12, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
           }}>+ Add reading</button>
         )}
+        </>}
       </div>
 
       {/* ── Body temperature ── */}
       <div style={{ marginTop: 8, marginBottom: 18 }}>
-        <div style={{ display: 'flex', alignItems: 'center', marginBottom: 8 }}>
-          <span className="micro" style={{ color: UI.inkFaint, flex: 1 }}>BODY TEMPERATURE</span>
+        {catHeader('bodyTemp', 'BODY TEMPERATURE', (
           <span style={{ fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontUi }}>{tempUnitLabel(tUnit)}</span>
-        </div>
+        ))}
+        {!collapsedCats.has('bodyTemp') && <>
         {tempForDay.map(t => {
           const isConfirm = confirmDeleteTempId === t.id;
           return (
@@ -1369,6 +1411,7 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
             color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 12, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
           }}>+ Add reading</button>
         )}
+        </>}
       </div>
 
       {coachFields.length > 0 && (
