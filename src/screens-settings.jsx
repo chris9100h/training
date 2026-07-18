@@ -1834,10 +1834,25 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
               ))}
             </div>
           </Row>
-          <Row label="Sick suggestion at">
-            <Stepper value={store.settings?.feverThresholdC ?? 38} step={0.1} min={36} suffix="°C"
-              onChange={v => setStore(s => ({ ...s, settings: { ...s.settings, feverThresholdC: Math.min(42, Math.round(v * 10) / 10) } }))} />
-          </Row>
+          {(() => {
+            const feverUnit = LB.defaultTempUnit(store.settings);
+            const c2f = (n) => Math.round((n * 9 / 5 + 32) * 10) / 10;
+            const f2c = (n) => (n - 32) * 5 / 9;
+            const feverC = store.settings?.feverThresholdC ?? 38;
+            const feverDisp = feverUnit === 'f' ? c2f(feverC) : feverC;
+            const feverMin = feverUnit === 'f' ? c2f(36) : 36;
+            const feverMax = feverUnit === 'f' ? c2f(42) : 42;
+            return (
+              <Row label="Sick suggestion at">
+                <Stepper value={feverDisp} step={0.1} min={feverMin} suffix={feverUnit === 'f' ? '°F' : '°C'}
+                  onChange={v => {
+                    const clamped = Math.min(feverMax, v);
+                    const newC = feverUnit === 'f' ? f2c(clamped) : clamped;
+                    setStore(s => ({ ...s, settings: { ...s.settings, feverThresholdC: Math.round(newC * 100) / 100 } }));
+                  }} />
+              </Row>
+            );
+          })()}
           <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
             Log a body temperature at or above this, and we'll ask if you want to mark today as Sick.
           </div>
