@@ -460,11 +460,14 @@ const HEALTH_CARD_HEADER_STYLE = { fontFamily: UI.fontUi, fontSize: 12, fontWeig
 function HealthChartCard({ title, icon, tf, setTf, headline, sub, dragHandle, children }) {
   return (
     <Card style={{ padding: 14, borderLeft: `3px solid ${UI.gold}` }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+      {/* flexWrap + the toggle's flexShrink:0 let the TF toggle drop to its own
+          line instead of clipping when the card is narrow (2-col grid) — full-
+          width cards stay single-line since everything already fits there. */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
         {dragHandle}
         {icon && <i className={`fa-solid ${icon}`} style={{ fontSize: 11, color: UI.inkFaint }} />}
-        <span style={{ ...HEALTH_CARD_HEADER_STYLE, flex: 1 }}>{title}</span>
-        <div data-reorder-ignore="true" style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `0.5px solid ${UI.hairStrong}` }}>
+        <span style={{ ...HEALTH_CARD_HEADER_STYLE, flex: 1, minWidth: 60 }}>{title}</span>
+        <div data-reorder-ignore="true" style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `0.5px solid ${UI.hairStrong}`, flexShrink: 0 }}>
           {HEALTH_TFS.map(t => (
             <button key={t.id} onClick={() => setTf(t.id)} style={{
               padding: '2px 8px', cursor: 'pointer', border: 'none',
@@ -644,7 +647,7 @@ function HealthMacroChart({ series, from, to }) {
 
 function MacroLegend() {
   return (
-    <div style={{ display: 'flex', gap: 14, justifyContent: 'center', marginTop: 10 }}>
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, rowGap: 6, justifyContent: 'center', marginTop: 10 }}>
       {[['Protein', MACRO_COLORS.protein], ['Carbs', MACRO_COLORS.carbs], ['Fat', MACRO_COLORS.fat], ['Target', UI.ink]].map(([lbl, col]) => (
         <div key={lbl} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
           <span style={{ width: 9, height: 9, borderRadius: 4, background: col, display: 'inline-block' }} />
@@ -1941,8 +1944,10 @@ function GlucoseCard({ glucoseLogs, unit, tf, setTf, dragHandle }) {
       ) : (
         <>
           <GlucoseScatterChart readings={inWindow} from={start} to={end} unit={unit} />
-          {/* Reference legend */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 4 }}>
+          {/* Reference legend. Wraps on the narrow 2-col card width instead of
+              clipping — the 3 context dots are separate flex items with no
+              text of their own to fall back on for reflow. */}
+          <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 12, rowGap: 4, marginTop: 4 }}>
             <div style={{ height: 8, width: 28, background: 'rgba(var(--accent-rgb),0.15)', borderRadius: 4, flexShrink: 0 }} />
             <span style={{ fontSize: 9, fontFamily: UI.fontUi, color: UI.inkFaint }}>
               Normal fasting {refLow.toFixed(dec)}–{refHigh.toFixed(dec)} {unitLabel}
@@ -2523,6 +2528,22 @@ function HealthScreen({ store, setStore, go, userId }) {
       : null,
   };
 
+  // Week/Today always render full width; every other visible card pairs up into
+  // the 2-col grid below. A trailing odd card in a run of non-pinned cards also
+  // spans full width, so a reorder can never leave a dangling empty half.
+  const PINNED_FULL_WIDTH_CARDS = new Set(['week', 'today']);
+  const fullWidthCardIds = (() => {
+    const span = new Set(PINNED_FULL_WIDTH_CARDS);
+    let run = [];
+    const flushRun = () => { if (run.length % 2 === 1) span.add(run[run.length - 1]); run = []; };
+    cardOrder.filter(isCardVisible).forEach(id => {
+      if (PINNED_FULL_WIDTH_CARDS.has(id)) flushRun();
+      else run.push(id);
+    });
+    flushRun();
+    return span;
+  })();
+
   return (
     <Screen>
       <TopBar title="HEALTH" right={
@@ -2571,7 +2592,8 @@ function HealthScreen({ store, setStore, go, userId }) {
         <HealthDateStrip store={store} setStore={setStore} selectedDate={selectedDate} onSelect={setSelectedDate} onLog={() => setLogOpen(true)} targets={effectiveTargets} />
 
         {/* max-width cap so charts don't blow up on iPad. Reorderable cards —
-           drag the grip to reorder; order persists per device. */}
+           drag the grip to reorder; order persists per device. Week/Today span
+           both columns; the rest sit in a 2-col grid (fullWidthCardIds above). */}
         <div style={{ padding: capturing ? '8px 16px 16px' : '8px 16px env(safe-area-inset-bottom, 8px)', maxWidth: 680, width: '100%', boxSizing: 'border-box', margin: '0 auto' }}>
           {cardOrder.every(id => !isCardVisible(id)) ? (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, padding: '48px 16px', textAlign: 'center' }}>
@@ -2585,9 +2607,9 @@ function HealthScreen({ store, setStore, go, userId }) {
               }}>Settings → Health → Cards</button>
             </div>
           ) : (
-            <ReorderList onReorder={reorderCards} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <ReorderList onReorder={reorderCards} style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 14 }}>
               {cardOrder.map(id => isCardVisible(id) ? (
-                <div key={id} data-reorder-item="true" data-tour={`health-card-${id}`}>{cardEls[id]}</div>
+                <div key={id} data-reorder-item="true" data-tour={`health-card-${id}`} style={fullWidthCardIds.has(id) ? { gridColumn: '1 / -1' } : undefined}>{cardEls[id]}</div>
               ) : null)}
             </ReorderList>
           )}
