@@ -291,6 +291,25 @@
 // window.onerror/onunhandledrejection can't tell apart from a real app bug.
 var BENIGN_NOISE = /ResizeObserver loop|translateDisabled|ethereum/i;
 
+// One-shot: the moment React actually mounts for the first time, hide the
+// error overlay if it happens to be up. #root is guaranteed empty right now
+// (this runs before any boot code), so the only way this fires is a genuine
+// 0-children → n-children transition, and it self-destructs on that first
+// fire — a LATER runtime error's overlay (root already has children by then)
+// is untouched and stays up for the user to read/dismiss as intended. This
+// covers every trigger path (onerror/onunhandledrejection/BOOT-catch/
+// timeout) with one mechanism instead of each site managing its own poll —
+// without it, an error that fires mid-boot but self-recovers (e.g. boot()
+// fails over to fallback() and fallback() succeeds) left the overlay stuck
+// open forever over a working app.
+var earlyMountPoll = setInterval(function() {
+  if (document.getElementById('root').children.length) {
+    clearInterval(earlyMountPoll);
+    var d = document.getElementById('err');
+    if (d) d.style.display = 'none';
+  }
+}, 500);
+
 // Shared by every path that shows this overlay (below, plus the "React did
 // not mount" and BOOT-failure fallbacks further down) — a stale/broken
 // precompile cache is a common real cause, and "Dismiss" alone wouldn't fix
@@ -311,6 +330,11 @@ function makeClearCacheButton() {
         req.onsuccess = req.onerror = req.onblocked = function(){ resolve(); };
       });
     }
+    // Flags this as a deliberate cache wipe so the next boot's "React did not
+    // mount" watchdog further down gives itself more time before giving up —
+    // a wiped cache forces the guaranteed-slowest boot path (every source
+    // file is an uncached network fetch), see that setTimeout for why.
+    try { sessionStorage.setItem('zane-cold-boot', '1'); } catch (e) {}
     // reload(true)'s "force" argument is a removed, no-op legacy API in
     // modern browsers — a plain reload here can still be served stale by
     // the browser's own HTTP cache (a layer clearing CacheStorage/IndexedDB
@@ -358,10 +382,19 @@ window.onunhandledrejection = function(e) {
   if (typeof reason === 'string' && BENIGN_NOISE.test(reason)) return;
   showErrOverlay().textContent += '[PROMISE] ' + reason + '\n\n';
 };
-// Fallback: if React never mounts after 6s, show diagnostic info.
+// Fallback: if React never mounts in time, show diagnostic info.
 // If a new SW is waiting, auto-send SKIP_WAITING and reload — this breaks
 // the deadlock where a broken SW serves bad files and React never mounts,
 // which means the update banner never shows and the new SW never activates.
+// "Clear cache & reload" (this file's own button, and LB.clearCachesAndReload
+// in store.js) sets zane-cold-boot right before navigating here — a wiped
+// cache forces the guaranteed-slowest boot path (every source file including
+// Babel itself is an uncached network fetch, no precompile cache to fall
+// back on), which can legitimately take longer than a normal boot on a slow
+// connection. Read-and-clear so only the one reload right after a wipe gets
+// the longer grace period, not every subsequent load.
+var coldBoot = false;
+try { coldBoot = sessionStorage.getItem('zane-cold-boot') === '1'; sessionStorage.removeItem('zane-cold-boot'); } catch (e) {}
 setTimeout(async function() {
   if (document.getElementById('root').children.length) return;
   // If a new SW is waiting, skip it immediately and reload — breaks the deadlock
@@ -375,26 +408,22 @@ setTimeout(async function() {
       return;
     }
   } catch(e) {}
-  var d = document.getElementById('err');
-  var log = document.getElementById('err-log');
-  d.style.display = 'block';
+  // Routed through showErrOverlay() rather than toggling #err directly —
+  // it's a no-op display-wise if a BOOT/JS-ERROR overlay is already up (its
+  // own guard skips re-adding a second button), and still adds one here on
+  // a bare timeout with nothing else having fired yet.
+  var log = showErrOverlay();
   log.textContent += '[TIMEOUT] React did not mount.\n';
   log.textContent += 'window.LB: ' + typeof window.LB + '\n';
   log.textContent += 'window.supabase: ' + typeof window.supabase + '\n';
   log.textContent += 'window.Screens: ' + JSON.stringify(Object.keys(window.Screens||{})) + '\n';
   log.textContent += 'window.React: ' + typeof window.React + '\n';
   log.textContent += 'window.Screen: ' + typeof window.Screen + '\n';
-  d.appendChild(makeClearCacheButton());
-  // A slow first boot can trip the 6s timeout while the app is still coming up.
-  // Keep polling and auto-hide the overlay the moment React actually mounts, so
-  // a working (just sluggish) app isn't left buried under an opaque error screen.
-  var mountPoll = setInterval(function() {
-    if (document.getElementById('root').children.length) {
-      clearInterval(mountPoll);
-      d.style.display = 'none';
-    }
-  }, 500);
-}, 6000);
+  // A slow first boot can trip the timeout while the app is still coming up —
+  // earlyMountPoll (top of this file) auto-hides this the moment React does
+  // mount, so a working (just sluggish) app isn't left buried under an opaque
+  // error screen.
+}, coldBoot ? 15000 : 6000);
 </script>
 
 <script>
@@ -652,6 +681,23 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
     });
   }
 
+  // A wiped cache (via "Clear cache & reload") forces every one of these into
+  // an uncached network round-trip with no local fallback if it fails — one
+  // retry absorbs a single transient blip instead of aborting the whole boot
+  // and dropping to the much slower no-cache fallback() path below.
+  function fetchTextOk(url) {
+    return fetch(url).then(function (r) {
+      if (!r.ok) throw new Error('fetch ' + url + ' → ' + r.status);
+      return r.text();
+    });
+  }
+  function fetchTextRetry(url) {
+    return fetchTextOk(url).catch(function () {
+      return new Promise(function (resolve) { setTimeout(resolve, 500); })
+        .then(function () { return fetchTextOk(url); });
+    });
+  }
+
   // Append as a classic inline script so it runs synchronously and in order,
   // sharing the global scope exactly like the original text/babel scripts.
   function execute(code, filename) {
@@ -660,10 +706,16 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
     document.head.appendChild(s);
   }
 
+  // Routes through showErrOverlay() (first script block above, same page,
+  // already defined by the time this can run) instead of toggling #err
+  // directly — a bare "no button, no auto-hide" overlay here previously left
+  // the user stuck with literally no way out if fallback() then quietly
+  // mounted successfully afterward: the overlay stayed up forever, covering
+  // a now-working app.
   function showError(e) {
-    var d = document.getElementById('err');
-    var log = document.getElementById('err-log');
-    if (d && log) { d.style.display = 'block'; log.textContent += '[BOOT] ' + (e && e.message || e) + '\n'; }
+    if (typeof showErrOverlay === 'function') {
+      showErrOverlay().textContent += '[BOOT] ' + (e && e.message || e) + '\n';
+    }
   }
 
   // Last resort: transpile + run everything through Babel (no caching).
@@ -672,7 +724,7 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
     var chain = Promise.resolve();
     SOURCES.forEach(function (src) {
       chain = chain.then(function () {
-        return fetch(src).then(function (r) { return r.text(); })
+        return fetchTextRetry(src)
           .then(function (code) { return transpile(code, src); })
           .then(function (out) { execute(out, src); });
       });
@@ -683,16 +735,14 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
   function boot() {
     // Guard against rare environments where IndexedDB.open() hangs (some iOS
     // PWA states) — after the timeout we just proceed cache-less via Babel.
+    // openedDb is tracked separately from dbPromise's resolved value so it's
+    // still reachable in the close() call below even down the fallback() path.
+    var openedDb = null;
     var dbPromise = Promise.race([
       idbOpen().catch(function () { return null; }),
       new Promise(function (resolve) { setTimeout(function () { resolve(null); }, 3000); }),
-    ]);
-    var fetchAll = Promise.all(SOURCES.map(function (src) {
-      return fetch(src).then(function (r) {
-        if (!r.ok) throw new Error('fetch ' + src + ' → ' + r.status);
-        return r.text();
-      });
-    }));
+    ]).then(function (db) { openedDb = db; return db; });
+    var fetchAll = Promise.all(SOURCES.map(fetchTextRetry));
 
     // Speculative warmup: an empty (or unavailable) precompile cache means
     // this is effectively a first boot — every file below will miss and need
@@ -728,6 +778,18 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
     }).catch(function (e) {
       showError(e);
       return fallback();
+    }).then(function () {
+      // Done reading/writing the precompile cache for this page's lifetime —
+      // close the connection explicitly. Left open (as it was before), it
+      // stays alive until the tab itself unloads, and a same-page "Clear
+      // cache & reload" later on calls indexedDB.deleteDatabase on this exact
+      // database: per spec that blocks until every open connection closes,
+      // but the onblocked handler (see makeClearCacheButton above and
+      // clearPrecompileCaches in store.js) treats "blocked" as "done" and
+      // navigates away immediately regardless — leaving the actual delete to
+      // race the next page load's own idbOpen(), sometimes past the "React
+      // did not mount" watchdog. Closing here removes that race entirely.
+      if (openedDb) { try { openedDb.close(); } catch (e) {} }
     });
   }
 

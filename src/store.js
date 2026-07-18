@@ -6251,6 +6251,10 @@ async function clearPrecompileCaches() {
 // reliably gets the same fresh result an actual SW update does.
 async function clearCachesAndReload() {
   await clearPrecompileCaches();
+  // Flags this as a deliberate cache wipe so index.html's "React did not
+  // mount" watchdog gives the next boot more time before giving up — see
+  // that setTimeout for why a wiped cache legitimately boots slower.
+  try { sessionStorage.setItem('zane-cold-boot', '1'); } catch {}
   window.location.href = window.location.pathname + '?_v=' + Date.now() + window.location.hash;
 }
 
