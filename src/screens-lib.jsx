@@ -737,14 +737,13 @@ function GoldSectionLabel({ children, style }) {
   );
 }
 
-// Shared html2canvas capture flow for SessionDetailScreen and
-// SessionCompareScreen — expand the scroll parent, draw the imperative knurl
+// Shared html2canvas capture flow for SessionDetailScreen, SessionCompareScreen,
+// and the plan poster: expand the scroll parent, draw the imperative knurl
 // canvases, wait for the watermark avatar to decode, capture, then share/
-// download the PNG and restore layout. `dodgeAvatar` (SessionDetailScreen only)
-// shortens knurl dividers and shrinks chip rows that overlap the corner
-// avatar; SessionCompareScreen's watermark is a centered full-page background
-// so dividers there always draw full width.
-async function captureNodeAsPng(node, { filename, dodgeAvatar = false, setCapturing, fitWidth = false } = {}) {
+// download the PNG and restore layout. Every caller's watermark is the same
+// centered, faint, full-page background now, so knurl dividers always draw
+// full width; nothing needs to dodge it.
+async function captureNodeAsPng(node, { filename, setCapturing, fitWidth = false } = {}) {
   if (!node) return { ok: false, reason: 'no-node' };
   // html2canvas is loaded on demand (not at boot) — fetch it on first use.
   const html2canvas = await window.__ensureHtml2Canvas?.().catch(() => null);
@@ -761,8 +760,8 @@ async function captureNodeAsPng(node, { filename, dodgeAvatar = false, setCaptur
   // are guaranteed to be in the DOM now (React re-render completed within 2 RAFs).
   const avatarEl = node.querySelector('img[data-shot-avatar]');
   // The avatar is a freshly-mounted <img>; on first capture it may not have
-  // decoded within the 2 RAFs above, so its box would measure 0 and no line
-  // would be trimmed. Wait for it to load before measuring.
+  // decoded within the 2 RAFs above, so html2canvas could snapshot a blank
+  // watermark. Wait for it to load first.
   if (avatarEl && !avatarEl.complete) {
     await new Promise(res => {
       avatarEl.addEventListener('load', res, { once: true });
@@ -770,31 +769,9 @@ async function captureNodeAsPng(node, { filename, dodgeAvatar = false, setCaptur
     });
     await new Promise(r => requestAnimationFrame(r));
   }
-  const avatarRect = (dodgeAvatar && avatarEl && avatarEl.getBoundingClientRect().height) ? avatarEl.getBoundingClientRect() : null;
-  const KNURL_GAP = 14;
-  // Limit chip containers that vertically overlap the avatar so they don't
-  // bleed into it. Same gap as knurl lines.
-  if (avatarRect) {
-    node.querySelectorAll('[data-shot-chips]').forEach(el => {
-      const r = el.getBoundingClientRect();
-      if (r.bottom > avatarRect.top && r.top < avatarRect.bottom) {
-        const maxW = Math.round(avatarRect.left - r.left - KNURL_GAP);
-        if (maxW > 0 && maxW < r.width) el.style.maxWidth = maxW + 'px';
-      }
-    });
-  }
   node.querySelectorAll('canvas[data-knurl]').forEach(c => {
-    const pw = c.parentElement ? c.parentElement.offsetWidth : 320;
-    let w = pw;
-    if (avatarRect) {
-      const r = c.getBoundingClientRect();
-      // Vertical overlap with the avatar band → trim to just left of it.
-      if (r.bottom > avatarRect.top && r.top < avatarRect.bottom) {
-        w = Math.min(w, Math.round(pw - (r.right - avatarRect.left) - KNURL_GAP));
-      }
-    }
+    const w = c.parentElement ? c.parentElement.offsetWidth : 320;
     if (w <= 0) return;
-    if (w < pw) c.style.width = w + 'px';
     c.width = w; c.height = 3;
     const ctx = c.getContext('2d');
     const knurlRgb = getComputedStyle(document.documentElement).getPropertyValue('--knurl-rgb').trim() || '236,228,208';
@@ -2800,6 +2777,13 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
   // Screenshot watermark: VIPs get their home-screen background image instead of the default ZANE mark.
   const _shotLogo = store.settings?.vipBackground || 'icons/zane-logo-2.png';
   const _shotIsCustom = _shotLogo !== 'icons/zane-logo-2.png';
+  // Centered, faint, full-page background watermark, the same recipe the plan
+  // poster and SessionCompareScreen use (percentage-based width, so it scales
+  // naturally whether this capture is the normal single column or the wider
+  // two-column export).
+  const _shotIsLight = (store.settings?.darkMode ?? 'dark') === 'light';
+  const _shotDefaultStyle = { width: '75%', maxWidth: 620, opacity: _shotIsLight ? 0.10 : 0.06, filter: _shotIsLight ? 'grayscale(1)' : 'grayscale(1) brightness(3)', objectFit: 'contain' };
+  const _shotCustomStyle = { width: '80%', maxWidth: 680, opacity: 0.13, objectFit: 'contain' };
   const s = store.sessions.find(x => x.id === sessionId);
   useEffectL(() => { if (!s) go({ name: 'hist' }); }, [!!s]);
   // Sessions outside the boot window carry no entries — lazy-load them into
@@ -3228,7 +3212,6 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
 
   const takeScreenshot = () => captureNodeAsPng(captureRef.current, {
     filename: `${s.dayName}-${s.date.slice(0, 10)}.png`,
-    dodgeAvatar: true,
     setCapturing,
     // The two-column export is intentionally wider than the phone viewport (see the
     // `twoCol` capture treatment below); without this, html2canvas only captures
@@ -3276,16 +3259,30 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
 
       <div ref={captureRef} style={{
         padding: capturing ? '20px 22px 24px' : '14px 22px 28px',
-        display: 'flex', flexDirection: 'column', gap: 18, background: UI.bg,
+        background: UI.bg, position: 'relative',
         // Escape #root's phone-shaped max-width (index.html) so the wider two-column
         // export isn't clipped: position:fixed is positioned against the viewport, not
         // any ancestor, as long as no ancestor between here and #root sets a transform/
         // filter/contain (none do). Same technique the plan-poster export uses, just
         // applied to this shared live/capture node directly instead of a separate
         // always-mounted overlay, so twoCol toggling never remounts (and re-refs) this
-        // node out from under an in-flight captureNodeAsPng call.
+        // node out from under an in-flight captureNodeAsPng call. Overrides the base
+        // position:relative above (still needed as the watermark's anchor when not
+        // twoCol; position:fixed is an equally valid anchor for it).
         ...(twoCol ? { position: 'fixed', top: 0, left: '50%', transform: 'translateX(-50%)', width: SHOT_TWO_COL_WIDTH, zIndex: 500 } : {}),
       }}>
+
+        {/* Screenshot background watermark: centered, faint, full capture (same
+            recipe as SessionCompareScreen / the plan poster). Needs its own
+            stacking context below the real content, which is why the content
+            right below is wrapped in a sibling zIndex:1 div. */}
+        {capturing && (
+          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', zIndex: 0, overflow: 'hidden' }}>
+            <img src={_shotLogo} data-shot-avatar="1" style={_shotIsCustom ? _shotCustomStyle : _shotDefaultStyle} />
+          </div>
+        )}
+
+        <div style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', gap: 18 }}>
 
         {/* Screenshot-only header */}
         {capturing && (
@@ -3736,7 +3733,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
         )}
 
         {/* Exercise entries */}
-        <div style={{ position: 'relative' }}>
+        <div>
           {capturing && <div style={{ height: '0.5px', background: UI.gold, marginBottom: 14 }} />}
           {muscleGroups.length > 0 && (
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 14 }}>
@@ -3829,7 +3826,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                       {exName}{canHistory && <span style={{ fontSize: 11, color: UI.inkFaint, marginLeft: 5 }}>›</span>}
                     </div>
                   </div>
-                  <div data-shot-chips="1" style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                  <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                     {filteredSets.map((st, j) => {
                       const isWarm = !!st.warmup;
                       const prevSet = prevWorkingFor(j);
@@ -3852,7 +3849,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                             borderLeft: `2px solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.4)' : 'rgba(var(--accent-rgb),0.35)'}`,
                             paddingLeft: 9,
                           }}>
-                            <div data-shot-chips="1" style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 5, overflow: 'hidden' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 5, overflow: 'hidden' }}>
                               <IntensityBadge label="DROP" highlight={highlight} decline={decline} />
                               {drops.map((d, di) => (
                                 <React.Fragment key={di}>
@@ -3894,7 +3891,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                             borderLeft: `2px solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.4)' : 'rgba(var(--accent-rgb),0.35)'}`,
                             paddingLeft: 9,
                           }}>
-                            <div data-shot-chips="1" style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 5, overflow: 'hidden' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 5, overflow: 'hidden' }}>
                               <IntensityBadge label={isMatch ? 'MYO+' : 'MYO'} highlight={highlight} decline={decline} />
                               {drops.map((d, di) => (
                                 <React.Fragment key={di}>
@@ -3986,7 +3983,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                             borderLeft: `2px solid ${highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.4)' : 'rgba(var(--accent-rgb),0.35)'}`,
                             paddingLeft: 9,
                           }}>
-                            <div data-shot-chips="1" style={{ display: 'flex', alignItems: 'flex-end', flexWrap: 'wrap', gap: 5, overflow: 'hidden' }}>
+                            <div style={{ display: 'flex', alignItems: 'flex-end', flexWrap: 'wrap', gap: 5, overflow: 'hidden' }}>
                               <span style={{ alignSelf: 'center' }}><IntensityBadge label="AMRAP" highlight={highlight} decline={decline} /></span>
                               {drops.map((d, di) => (
                                 <React.Fragment key={di}>
@@ -4068,10 +4065,8 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
               });
             })()}
           </div>
-          {capturing && (
-            <img src={_shotLogo} data-shot-avatar="1" style={{ position: 'absolute', bottom: 2, right: 0, width: 90, opacity: 0.5, zIndex: 1, transform: _shotIsCustom ? 'none' : 'scaleX(-1)' }} />
-          )}
           {capturing && <div style={{ height: '0.5px', background: UI.gold, marginTop: 10 }} />}
+        </div>
         </div>
       </div>
 
