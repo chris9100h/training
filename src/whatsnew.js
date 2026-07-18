@@ -17,6 +17,17 @@
    Entry shape: { id: string, date: string (YYYY-MM-DD), title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.624',
+    date: '2026-07-18',
+    title: 'Health Tab Gets Some Elbow Room',
+    items: [
+      "📊 Charts now sit two-per-row (Weight, Steps, Water, Cardio, Glucose, Blood Pressure, Body Temp), so you see way more of your week without endless scrolling. Want one blown up big? Tap the little expand icon in its corner.",
+      "🎯 Macro Targets, Adherence, and the macro breakdown chart are now one unit: targets on top, the other two paired below. Hide or reorder it and all three move together, no more adherence chart left stranded without its targets.",
+      "📄 The Daily Log traded its cramped bottom sheet for a proper full page. Way more room for weight, macros, water, notes, and glucose/BP/temp readings. Tap the arrow top-left to leave (still asks before tossing unsaved changes).",
+      "⌨️ Typing in the Daily Log no longer plays hide-and-seek with the keyboard, fields stay put and visible while you fill them in.",
+    ],
+  },
+  {
     id: 'v2.615',
     date: '2026-07-18',
     title: 'A Tidier Daily Log',
