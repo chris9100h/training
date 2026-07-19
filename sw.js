@@ -223,9 +223,12 @@ self.addEventListener('fetch', e => {
           if (res.ok) {
             const clone = res.clone();
             // A photo that missed precaching (e.g. a transient 404 during
-            // install) belongs in PHOTOS_CACHE, not the short-lived versioned
-            // CACHE: otherwise it'd get wiped again on the next deploy.
-            const target = PHOTO_ASSETS.includes(e.request.url) ? PHOTOS_CACHE : CACHE;
+            // install, or one added to Background/ after this list was last
+            // synced: matched by path, not exact PHOTO_ASSETS membership, so
+            // the routing survives the catalog's normal growth) belongs in
+            // PHOTOS_CACHE, not the short-lived versioned CACHE: otherwise
+            // it'd get wiped again on the next deploy.
+            const target = url.pathname.includes('/Background/') ? PHOTOS_CACHE : CACHE;
             caches.open(target).then(c => c.put(e.request, clone));
           }
           return res;
