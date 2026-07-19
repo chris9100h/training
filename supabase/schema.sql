@@ -269,7 +269,8 @@ CREATE TABLE public.zane_user_settings (
   pin_all_notes boolean NOT NULL DEFAULT false,
   temp_unit text,
   hidden_health_cards jsonb,
-  fever_threshold_c numeric DEFAULT 38
+  fever_threshold_c numeric DEFAULT 38,
+  watermark_opacity integer
 );
 
 CREATE TABLE public.zane_pushover_active (
