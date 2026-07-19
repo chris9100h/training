@@ -2798,7 +2798,6 @@ async function testAsync(name, fn) {
     test('updateLandmarkMrv: first observation seeds the ceiling', () => {
       const out = LB.updateLandmarkMrv(null, 'Chest', 18);
       assert.strictEqual(out.landmarks.Chest.mrv, 18, 'first flag seeds mrv at the observed set count');
-      assert.strictEqual(out.landmarks.Chest.mev, 9, 'mev is a light half-of-mrv default');
       assert.strictEqual(out.version, 2, 'stamps the P3 blob version');
     });
 
@@ -2831,11 +2830,11 @@ async function testAsync(name, fn) {
       assert.strictEqual(atCeiling({ Chest: { atCeiling: true } }, {}, {}, 'Chest'), true, 'detector alone still freezes');
     });
 
-    test('backoffDeltas: reduces grown lifts by ~2, never below base, leaves base/cut lifts', () => {
-      const out = LB.backoffDeltas({ a: 3, b: 2, c: 1, d: 0, e: -1 }, 2);
-      assert.strictEqual(out.a, 1, '+3 backs off to +1');
-      assert.strictEqual(out.b, 0, '+2 backs off exactly to base (0), not below');
-      assert.strictEqual(out.c, 0, '+1 floors at base (0), never negative');
+    test('backoffDeltas: resets grown lifts to plan base, leaves base/cut lifts', () => {
+      const out = LB.backoffDeltas({ a: 3, b: 2, c: 1, d: 0, e: -1 });
+      assert.strictEqual(out.a, 0, '+3 resets to base (0)');
+      assert.strictEqual(out.b, 0, '+2 resets to base (0)');
+      assert.strictEqual(out.c, 0, '+1 resets to base (0)');
       assert.strictEqual(out.d, 0, 'a lift already at base is untouched');
       assert.strictEqual(out.e, -1, 'a cut lift is left as-is (backoff never RAISES volume)');
     });

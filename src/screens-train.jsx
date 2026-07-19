@@ -3040,9 +3040,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // decline just closes.
   // Autoreg v2 P3: the emergent block reset (spec 2.3 / 3). Fires on deload ACCEPT in
   // Auto Full only. It is what makes Auto Full a self-timed mesocycle: snapshot the
-  // block's per-muscle volume, back each grown exercise off ~2 sets (non-destructive,
-  // never below the plan base), clear the nudge, and stamp a fresh block anchor so the
-  // next block re-ramps from a backed-off start, capped per-muscle by the learned MRV.
+  // block's per-muscle volume, reset each grown exercise back to its plan base (the
+  // plan's own set count doubles as that exercise's practical MEV), clear the nudge,
+  // and stamp a fresh block anchor so the next block re-ramps from that plan-base
+  // start, capped per-muscle by the learned MRV.
   // Excluded by design: bounded Meso (weeks != null) has its own planned deload +
   // reset; Load-only (autoregLoadOnly) has fixed volume and no landmarks. Combines
   // deltas + autoregState + updatedAt into ONE meso-row write (so the staleness guard
@@ -3072,7 +3073,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       const nextAutoreg = LB.snapshotBlockStart(LB.clearDeloadNudge(cur.autoregState), todayIso, startVol);
       const newMeso = {
         ...cur,
-        deltas: LB.backoffDeltas(cur.deltas, 2),
+        deltas: LB.backoffDeltas(cur.deltas),
         autoregState: nextAutoreg,
         startedAt: now,       // fresh block anchor for flex windowing
         startDate: todayIso,  // re-anchor weekday/cycle microcycle window + week counter too

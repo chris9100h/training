@@ -5753,7 +5753,7 @@ function detectOverreach(sessions, sch, muscleOfExId, opts = {}) {
 
 // Current schema version of the autoreg_state blob (spec 9). Bumped when the
 // persisted shape changes; readers tolerate a missing/older version. v2 adds the
-// P3 landmarks ({ [muscle]: { mrv, mev, updatedAt } }) and block ({ startDate,
+// P3 landmarks ({ [muscle]: { mrv, updatedAt } }) and block ({ startDate,
 // startVolByMuscle }) keys alongside the P2 deloadNudge.
 const AUTOREG_STATE_VERSION = 2;
 // EMA smoothing factor for the learned per-muscle MRV (spec 2.3 / 10). A fresh
@@ -5933,9 +5933,9 @@ function clearDeloadNudge(autoregState) {
 // toward the observation with LANDMARK_MRV_ALPHA so a one-off rough block can only
 // nudge the remembered ceiling, never replace it (spec 2.2). Discipline (spec 4.3):
 // the CALLER only invokes this for muscles the full-signal detector flagged, so a
-// discounted/none session can never drive a learned ceiling down. MEV is a light,
-// conservative derived default here (real per-muscle MEV detection is v2, spec 10),
-// kept only so the persisted shape carries it. Returns a NEW autoreg_state, or the
+// discounted/none session can never drive a learned ceiling down. No MEV field here
+// (spec 2.3): a per-exercise plan's own set count IS the practical MEV, nothing to
+// learn or persist for it, see backoffDeltas. Returns a NEW autoreg_state, or the
 // SAME reference when there is nothing to record (invalid input), so callers can
 // skip a redundant write. Muscle/scope-keyed only (round-trips backup verbatim).
 function updateLandmarkMrv(autoregState, muscle, observedSets, opts = {}) {
@@ -5947,8 +5947,7 @@ function updateLandmarkMrv(autoregState, muscle, observedSets, opts = {}) {
   const prevMrv = (prev && typeof prev.mrv === 'number') ? prev.mrv : null;
   const nextMrv = (prevMrv == null) ? Math.round(observedSets)
     : Math.round(alpha * observedSets + (1 - alpha) * prevMrv);
-  const nextMev = Math.max(1, Math.round(nextMrv / 2));
-  landmarks[muscle] = { mrv: nextMrv, mev: nextMev, updatedAt: new Date().toISOString() };
+  landmarks[muscle] = { mrv: nextMrv, updatedAt: new Date().toISOString() };
   return { ...base, version: AUTOREG_STATE_VERSION, landmarks };
 }
 
@@ -5967,18 +5966,18 @@ function snapshotBlockStart(autoregState, startDate, startVolByMuscle) {
   };
 }
 
-// Block-start per-exercise backoff (spec 2.3 / 10: −2 sets per exercise). Non-
-// destructive: reduces a GROWN lift's set-delta by `amount` but never below the
-// plan base (delta floored at 0), and leaves at-base and cut lifts untouched so a
-// reset never silently RAISES volume. The next block re-ramps from this backed-off
-// start, capped per-muscle by the learned MRV. Keys are exId_dayId (NOT per muscle),
-// so the same exercise on two days backs off independently (correct per spec). Lives
-// in mesoState.deltas (exId-remapped on backup restore, unlike autoreg_state).
-// Returns a NEW deltas map. Pure/testable.
-function backoffDeltas(deltas, amount = 2) {
+// Block-start per-exercise backoff (spec 2.3 / 10: reset to the plan's base set
+// count, treated as that exercise's practical MEV). Non-destructive: only resets a
+// GROWN lift's set-delta to 0 (the plan base), and leaves at-base and cut lifts
+// untouched so a reset never silently RAISES volume. The next block re-ramps from
+// this plan-base start, capped per-muscle by the learned MRV. Keys are exId_dayId
+// (NOT per muscle), so the same exercise on two days backs off independently
+// (correct per spec). Lives in mesoState.deltas (exId-remapped on backup restore,
+// unlike autoreg_state). Returns a NEW deltas map. Pure/testable.
+function backoffDeltas(deltas) {
   const out = {};
   for (const [k, v] of Object.entries(deltas || {})) {
-    out[k] = (v > 0) ? Math.max(0, v - amount) : v;
+    out[k] = (v > 0) ? 0 : v;
   }
   return out;
 }
