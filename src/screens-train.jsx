@@ -4006,6 +4006,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     const workingSets = entry.sets.filter(s => !s.warmup);
     if (workingSets.length === 0) return;
     if (!workingSets.every(s => s.done || s.skipped)) return;
+    // Every working set skipped, none actually done: no performance to ask
+    // about (joint/weight-feel/pump/affinity are all about how the sets
+    // FELT). mesoRepOutcome's earn/miss gates already require s.done, so
+    // this exercise can't have earned or cut anything either way, only the
+    // question itself needs suppressing. Still marks asked so this effect
+    // doesn't keep re-checking a skipped exercise on every later set change.
+    if (!workingSets.some(s => s.done)) { askedJointRef.current.add(exId); persistMesoAsked(); return; }
     const ex = store.exercises?.find(e => e.id === exId);
     const pm = primaryMuscleForExercise(ex);
     askedJointRef.current.add(exId);
