@@ -197,29 +197,44 @@ const tempUnitLabel = unit => unit === 'f' ? '°F' : '°C';
 // scaled down since this is a low-stakes UI nag, not a synced setting).
 const FEVER_NUDGE_DECLINE_KEY = 'logbook-fever-nudge-declined-date';
 
+// "HH:MM" -> minutes since midnight, for the multi-reading-per-day scatter
+// charts' todayMode x-axis (time-of-day instead of date). Null on anything
+// unparsable rather than throwing, so a malformed/legacy time string degrades
+// to "midnight" (start of the axis) instead of breaking the whole chart.
+function timeToMinutes(t) {
+  const m = /^(\d{1,2}):(\d{2})$/.exec((t || '').trim());
+  return m ? (+m[1]) * 60 + (+m[2]) : null;
+}
+
 // Scatter chart: one point per reading, connected by a thin trend line (unlike
 // glucose, temperature has no fasted/fed context split, so its reading-to-
 // reading trend is itself the meaningful signal). No reference band: a
 // "normal" body temperature varies by measurement method and time of day, so a
 // fixed band here would overclaim precision a home reading can't guarantee.
-function TempScatterChart({ readings, from, to, unit }) {
-  const pts = (readings || []).filter(r => r.valueC != null && r.date >= from && r.date <= to)
+function TempScatterChart({ readings, from, to, unit, todayMode = false }) {
+  const pts = (readings || []).filter(r => r.valueC != null && (todayMode ? r.date === to : (r.date >= from && r.date <= to)))
     .sort((a, b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time));
-  if (!pts.length) return <HealthChartEmpty />;
+  // No separate empty box in todayMode: the card's own "No readings logged
+  // today yet" text below the (now also empty) feed list already covers it.
+  if (!pts.length) return todayMode ? null : <HealthChartEmpty />;
   const W = 320, padL = 34, padR = 12, padTop = 10, padBottom = 20, plotH = 96;
   const H = padTop + plotH + padBottom, plotW = W - padL - padR;
 
   const dispVals = pts.map(p => tempDisplay(p.valueC, unit));
   const dom = UI.chartDomain(Math.min(...dispVals), Math.max(...dispVals));
   const totalDays = Math.max(1, healthDayDiff(from, to));
-  const xOf = d => padL + (healthDayDiff(from, d) / totalDays) * plotW;
+  // todayMode: one day's worth of readings would all collapse onto the same
+  // date-based x position, so the x-axis switches to time-of-day instead.
+  const xOf = todayMode
+    ? p => padL + ((timeToMinutes(p.time) ?? 0) / 1440) * plotW
+    : p => padL + (healthDayDiff(from, p.date) / totalDays) * plotW;
   const yOf = v => padTop + (1 - (v - dom.min) / dom.range) * plotH;
   const dec = dom.range >= 4 ? 0 : 1;
   const gridVals = dom.gridVals || Array.from({ length: 4 }, (_, i) => dom.min + (dom.range / 3) * i);
   const unitLabel = tempUnitLabel(unit);
   const hoverPoints = pts.map(p => {
     const disp = tempDisplay(p.valueC, unit);
-    return { x: xOf(p.date), y: yOf(disp), date: p.date, rows: [{ value: `${disp}${unitLabel}` }], sub: p.time };
+    return { x: xOf(p), y: yOf(disp), date: p.date, rows: [{ value: `${disp}${unitLabel}` }], sub: p.time };
   });
 
   return (
@@ -233,10 +248,10 @@ function TempScatterChart({ readings, from, to, unit }) {
       ))}
       <line x1={padL} y1={padTop + plotH} x2={W - padR} y2={padTop + plotH} stroke={UI.hair} strokeWidth="0.5" />
       {pts.length >= 2 && (
-        <polyline points={pts.map(p => `${xOf(p.date).toFixed(1)},${yOf(tempDisplay(p.valueC, unit)).toFixed(1)}`).join(' ')} fill="none" stroke="var(--accent)" strokeWidth="1.5" opacity="0.5" />
+        <polyline points={pts.map(p => `${xOf(p).toFixed(1)},${yOf(tempDisplay(p.valueC, unit)).toFixed(1)}`).join(' ')} fill="none" stroke="var(--accent)" strokeWidth="1.5" opacity="0.5" />
       )}
       {pts.map((p, i) => (
-        <circle key={i} cx={xOf(p.date).toFixed(1)} cy={yOf(tempDisplay(p.valueC, unit)).toFixed(1)} r={3} fill="var(--accent)" opacity={0.85} />
+        <circle key={i} cx={xOf(p).toFixed(1)} cy={yOf(tempDisplay(p.valueC, unit)).toFixed(1)} r={3} fill="var(--accent)" opacity={0.85} />
       ))}
     </svg>
     </ChartHover>
@@ -256,22 +271,28 @@ function TempScatterChart({ readings, from, to, unit }) {
 // is multi-tier and context-dependent (rest, time of day, measurement
 // position), better left to the user's own doctor than baked in here.
 const BP_REF_SYS = 120, BP_REF_DIA = 80;
-function BpScatterChart({ readings, from, to }) {
-  const pts = (readings || []).filter(r => r.systolic != null && r.diastolic != null && r.date >= from && r.date <= to)
+function BpScatterChart({ readings, from, to, todayMode = false }) {
+  const pts = (readings || []).filter(r => r.systolic != null && r.diastolic != null && (todayMode ? r.date === to : (r.date >= from && r.date <= to)))
     .sort((a, b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time));
-  if (!pts.length) return <HealthChartEmpty />;
+  // No separate empty box in todayMode: the card's own "No readings logged
+  // today yet" text below the (now also empty) feed list already covers it.
+  if (!pts.length) return todayMode ? null : <HealthChartEmpty />;
   const W = 320, padL = 34, padR = 12, padTop = 10, padBottom = 20, plotH = 96;
   const H = padTop + plotH + padBottom, plotW = W - padL - padR;
 
   const allVals = pts.flatMap(p => [p.systolic, p.diastolic]);
   const dom = UI.chartDomain(Math.min(...allVals, BP_REF_DIA), Math.max(...allVals, BP_REF_SYS));
   const totalDays = Math.max(1, healthDayDiff(from, to));
-  const xOf = d => padL + (healthDayDiff(from, d) / totalDays) * plotW;
+  // todayMode: one day's worth of readings would all collapse onto the same
+  // date-based x position, so the x-axis switches to time-of-day instead.
+  const xOf = todayMode
+    ? p => padL + ((timeToMinutes(p.time) ?? 0) / 1440) * plotW
+    : p => padL + (healthDayDiff(from, p.date) / totalDays) * plotW;
   const yOf = v => padTop + (1 - (v - dom.min) / dom.range) * plotH;
   const gridVals = dom.gridVals || Array.from({ length: 4 }, (_, i) => dom.min + (dom.range / 3) * i);
   const SYS_COLOR = 'var(--accent)', DIA_COLOR = '#4a9fe0';
   const hoverPoints = pts.map(p => ({
-    x: xOf(p.date), y: yOf(p.systolic), date: p.date,
+    x: xOf(p), y: yOf(p.systolic), date: p.date,
     rows: [
       { label: 'SYS', value: `${p.systolic} mmHg`, color: SYS_COLOR },
       { label: 'DIA', value: `${p.diastolic} mmHg`, color: DIA_COLOR },
@@ -293,9 +314,9 @@ function BpScatterChart({ readings, from, to }) {
       <line x1={padL} y1={padTop + plotH} x2={W - padR} y2={padTop + plotH} stroke={UI.hair} strokeWidth="0.5" />
       {pts.map((p, i) => (
         <React.Fragment key={i}>
-          <line x1={xOf(p.date).toFixed(1)} y1={yOf(p.systolic).toFixed(1)} x2={xOf(p.date).toFixed(1)} y2={yOf(p.diastolic).toFixed(1)} stroke={UI.hair} strokeWidth="1" />
-          <circle cx={xOf(p.date).toFixed(1)} cy={yOf(p.systolic).toFixed(1)} r={3} fill={SYS_COLOR} opacity={0.85} />
-          <circle cx={xOf(p.date).toFixed(1)} cy={yOf(p.diastolic).toFixed(1)} r={3} fill={DIA_COLOR} opacity={0.85} />
+          <line x1={xOf(p).toFixed(1)} y1={yOf(p.systolic).toFixed(1)} x2={xOf(p).toFixed(1)} y2={yOf(p.diastolic).toFixed(1)} stroke={UI.hair} strokeWidth="1" />
+          <circle cx={xOf(p).toFixed(1)} cy={yOf(p.systolic).toFixed(1)} r={3} fill={SYS_COLOR} opacity={0.85} />
+          <circle cx={xOf(p).toFixed(1)} cy={yOf(p.diastolic).toFixed(1)} r={3} fill={DIA_COLOR} opacity={0.85} />
         </React.Fragment>
       ))}
     </svg>
@@ -305,10 +326,12 @@ function BpScatterChart({ readings, from, to }) {
 
 // Scatter chart: one point per reading, coloured by context, with a reference
 // band for the fasting normal range (3.9–5.6 mmol/L).
-function GlucoseScatterChart({ readings, from, to, unit }) {
-  const pts = (readings || []).filter(r => r.valueMmol != null && r.date >= from && r.date <= to)
+function GlucoseScatterChart({ readings, from, to, unit, todayMode = false }) {
+  const pts = (readings || []).filter(r => r.valueMmol != null && (todayMode ? r.date === to : (r.date >= from && r.date <= to)))
     .sort((a, b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time));
-  if (!pts.length) return <HealthChartEmpty />;
+  // No separate empty box in todayMode: the card's own "No readings logged
+  // today yet" text below the (now also empty) feed list already covers it.
+  if (!pts.length) return todayMode ? null : <HealthChartEmpty />;
   const W = 320, padL = 42, padR = 12, padTop = 10, padBottom = 20, plotH = 96;
   const H = padTop + plotH + padBottom, plotW = W - padL - padR;
 
@@ -320,7 +343,11 @@ function GlucoseScatterChart({ readings, from, to, unit }) {
   const rawMax = Math.max(...dispVals, refFed);
   const dom = UI.chartDomain(rawMin, rawMax);
   const totalDays = Math.max(1, healthDayDiff(from, to));
-  const xOf = d => padL + (healthDayDiff(from, d) / totalDays) * plotW;
+  // todayMode: one day's worth of readings would all collapse onto the same
+  // date-based x position, so the x-axis switches to time-of-day instead.
+  const xOf = todayMode
+    ? p => padL + ((timeToMinutes(p.time) ?? 0) / 1440) * plotW
+    : p => padL + (healthDayDiff(from, p.date) / totalDays) * plotW;
   const yOf = v => padTop + (1 - (v - dom.min) / dom.range) * plotH;
   const dec = dom.range >= (unit === 'mgdl' ? 40 : 2) ? 0 : 1;
   const gridVals = Array.from({ length: 4 }, (_, i) => dom.min + (dom.range / 3) * i);
@@ -331,7 +358,7 @@ function GlucoseScatterChart({ readings, from, to, unit }) {
   const hoverPoints = pts.map(p => {
     const disp = glucoseDisplay(p.valueMmol, unit);
     return {
-      x: xOf(p.date), y: yOf(disp), date: p.date, color: CTX_COLORS[p.context] || UI.inkSoft,
+      x: xOf(p), y: yOf(disp), date: p.date, color: CTX_COLORS[p.context] || UI.inkSoft,
       rows: [{ value: `${disp} ${unitLabel}`, color: CTX_COLORS[p.context] || UI.inkSoft }],
       sub: [CTX_LABELS[p.context] || p.context, p.time].filter(Boolean).join(' · '),
     };
@@ -354,7 +381,7 @@ function GlucoseScatterChart({ readings, from, to, unit }) {
       <line x1={padL} y1={padTop + plotH} x2={W - padR} y2={padTop + plotH} stroke={UI.hair} strokeWidth="0.5" />
       {pts.map((p, i) => {
         const disp = glucoseDisplay(p.valueMmol, unit);
-        return <circle key={i} cx={xOf(p.date).toFixed(1)} cy={yOf(disp).toFixed(1)} r={3}
+        return <circle key={i} cx={xOf(p).toFixed(1)} cy={yOf(disp).toFixed(1)} r={3}
           fill={CTX_COLORS[p.context] || UI.inkSoft} opacity={0.85} />;
       })}
     </svg>
@@ -2015,7 +2042,7 @@ function GlucoseCard({ glucoseLogs, unit, tf, setTf, dragHandle, onExpand, compa
         <HealthChartEmpty label="No glucose readings in this range" />
       ) : (
         <>
-          <GlucoseScatterChart readings={inWindow} from={start} to={end} unit={unit} />
+          <GlucoseScatterChart readings={inWindow} from={start} to={end} unit={unit} todayMode={todayOnly} />
           {/* Reference legend + readings feed only in the full (expanded) view,
               compact (2-col grid) shows just the chart, so this card's height
               matches its plain-chart neighbours instead of towering over them. */}
@@ -2106,7 +2133,7 @@ function BloodPressureCard({ bpLogs, tf, setTf, dragHandle, onExpand, compact = 
         <HealthChartEmpty label="No blood pressure readings in this range" />
       ) : (
         <>
-          <BpScatterChart readings={inWindow} from={start} to={end} />
+          <BpScatterChart readings={inWindow} from={start} to={end} todayMode={todayOnly} />
           {/* Legend + readings feed only in the full (expanded) view, compact
               (2-col grid) shows just the chart, matching plain-chart neighbours. */}
           {!compact && (
@@ -2184,7 +2211,7 @@ function BodyTempCard({ tempLogs, unit, tf, setTf, dragHandle, onExpand, compact
         <HealthChartEmpty label="No temperature readings in this range" />
       ) : (
         <>
-          <TempScatterChart readings={inWindow} from={start} to={end} unit={unit} />
+          <TempScatterChart readings={inWindow} from={start} to={end} unit={unit} todayMode={todayOnly} />
           {/* Readings feed only in the full (expanded) view, compact (2-col
               grid) shows just the chart, matching plain-chart neighbours. */}
           {!compact && (
