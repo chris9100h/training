@@ -5814,13 +5814,21 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           </div>
           <span className="micro" style={{ color: UI.inkFaint, marginTop: 6, letterSpacing: '0.12em' }}>{progressionUnlocked.exName}</span>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 24, width: '100%', maxWidth: 260 }}>
-            <Btn onClick={() => { progressionPendingRef.current = false; setProgressionUnlocked(null); }} style={{ width: '100%' }}>Hell yeah</Btn>
+            <Btn onClick={() => {
+              // Recorded on BOTH answers, not just Decline: the session detail
+              // screen shows a toggleable chip for every bump this session had
+              // an opinion on (SessionDetailScreen's renderEntry), matching the
+              // Meso "Changes earned" chip. Keyed by exId_occ, not bare exId: a
+              // repeated exercise's two occurrences in one session (superset,
+              // straight set + back-off block) must not cross-contaminate.
+              const key = progressionUnlocked.exId + '_' + progressionUnlocked.occ;
+              updateSession(sess => ({ ...sess, progressionBumps: { ...sess.progressionBumps, [key]: { name: progressionUnlocked.exName, currentKg: progressionUnlocked.currentKg, nextKg: progressionUnlocked.nextKg, declined: false } } }));
+              progressionPendingRef.current = false;
+              setProgressionUnlocked(null);
+            }} style={{ width: '100%' }}>Hell yeah</Btn>
             <Btn kind="ghost" onClick={() => {
-              // Keyed by exId_occ, not bare exId: a repeated exercise's two
-              // occurrences in one session (superset, straight set + back-off
-              // block) must not cross-contaminate each other's decline.
-              const declineKey = progressionUnlocked.exId + '_' + progressionUnlocked.occ;
-              updateSession(sess => ({ ...sess, progressionDeclines: { ...sess.progressionDeclines, [declineKey]: true } }));
+              const key = progressionUnlocked.exId + '_' + progressionUnlocked.occ;
+              updateSession(sess => ({ ...sess, progressionBumps: { ...sess.progressionBumps, [key]: { name: progressionUnlocked.exName, currentKg: progressionUnlocked.currentKg, nextKg: progressionUnlocked.nextKg, declined: true } } }));
               progressionPendingRef.current = false;
               setProgressionUnlocked(null);
             }} style={{ width: '100%' }}>Decline</Btn>

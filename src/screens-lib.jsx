@@ -3177,21 +3177,25 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
     });
   };
 
-  // Undo a Smart Progression decline recorded on THIS session (session-local,
-  // never synced, see store.js sessionToRow). Only exposed for a misclick's
-  // most likely window: no LATER session has already trained the same
-  // exercise on this day, since progressionSuggestion only ever consults the
-  // MOST RECENT session for a given exId/dayId (recentSessionsForExercise):
-  // once a later one exists, this session's flag no longer feeds any seed and
-  // toggling it here would be a no-op the user could mistake for a fix.
-  const toggleProgressionDecline = (key) => {
+  // Toggle a Smart Progression bump's declined flag, recorded on THIS session
+  // (session-local, never synced, see store.js sessionToRow) the moment the
+  // "PROGRESSION UNLOCKED" toast is answered, either way (Hell yeah or
+  // Decline). Bidirectional, same as the Meso "Changes earned" chip: an
+  // accepted bump can be declined after the fact and vice versa, any number
+  // of times, not just a one-shot undo. Only exposed while it would still
+  // matter: no LATER session has already trained the same exercise on this
+  // day, since progressionSuggestion only ever consults the MOST RECENT
+  // session for a given exId/dayId (recentSessionsForExercise), once a later
+  // one exists, this session's flag no longer feeds any seed and toggling it
+  // here would be a no-op the user could mistake for a fix.
+  const toggleProgressionBump = (key) => {
     setStore(st => ({
       ...st,
       sessions: st.sessions.map(x => {
         if (x.id !== s.id) return x;
-        const next = { ...(x.progressionDeclines || {}) };
-        delete next[key];
-        return { ...x, progressionDeclines: next };
+        const cur = x.progressionBumps?.[key];
+        if (!cur) return x;
+        return { ...x, progressionBumps: { ...x.progressionBumps, [key]: { ...cur, declined: !cur.declined } } };
       }),
     }));
   };
@@ -3924,11 +3928,11 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                 const canHistory = !!s.dayId;
                 // occ mirrors the live write side exactly (session.entries index-based
                 // count of prior same-exId entries), so this matches whichever
-                // occurrence's toast actually wrote the decline.
+                // occurrence's toast actually wrote the bump.
                 const occ = e.exId ? s.entries.slice(0, i).filter(x => x.exId === e.exId).length : 0;
-                const progDeclineKey = e.exId ? e.exId + '_' + occ : null;
-                const progDeclined = !!(progDeclineKey && s.progressionDeclines?.[progDeclineKey]);
-                const progDeclineEditable = progDeclined && !!s.ended &&
+                const progBumpKey = e.exId ? e.exId + '_' + occ : null;
+                const progBump = progBumpKey ? s.progressionBumps?.[progBumpKey] : null;
+                const progBumpEditable = !!progBump && !!s.ended &&
                   !LB.laterSessionTrainsExId(store.sessions, e.exId, s.dayId, s.ended, s.id, s.scheduleId);
                 return (
                 <div key={i}
@@ -3936,21 +3940,24 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                   style={{ cursor: canHistory ? 'pointer' : 'default', WebkitTapHighlightColor: 'transparent' }}
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8, gap: 8 }}>
-                    <div className="display" style={{ fontSize: 17, color: UI.ink, lineHeight: 1.1, ...(progDeclined ? { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } : {}) }}>
+                    <div className="display" style={{ fontSize: 17, color: UI.ink, lineHeight: 1.1, ...(progBump ? { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } : {}) }}>
                       {exName}{canHistory && <span style={{ fontSize: 11, color: UI.inkFaint, marginLeft: 5 }}>›</span>}
                     </div>
-                    {progDeclined && (progDeclineEditable && !capturing ? (
-                      <button
-                        onClick={(ev) => { ev.stopPropagation(); toggleProgressionDecline(progDeclineKey); }}
-                        style={{ fontFamily: UI.fontUi, fontSize: 9.5, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: UI.inkFaint, background: 'rgba(var(--knurl-rgb),0.08)', border: `1px solid ${UI.hair}`, borderRadius: 4, padding: '3px 7px', whiteSpace: 'nowrap', flexShrink: 0, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}
-                      >
-                        Bump declined · undo
-                      </button>
-                    ) : (
-                      <span style={{ fontFamily: UI.fontUi, fontSize: 9.5, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: UI.inkFaint, flexShrink: 0 }}>
-                        Bump declined
-                      </span>
-                    ))}
+                    {progBump && (() => {
+                      // Same visual language as the Meso "Changes earned" chip
+                      // (deltaChip in the recap sheet below): accepted looks like
+                      // an earned +kg pill, declined is muted/struck-through. A
+                      // real toggle either way, not a one-shot undo.
+                      const label = progBump.declined ? 'Declined' : `+${progBump.nextKg - progBump.currentKg} ${UI.unit()}`;
+                      const chipStyle = progBump.declined
+                        ? { fontFamily: UI.fontNum, fontSize: 12, fontWeight: 700, color: UI.inkFaint, background: 'rgba(var(--knurl-rgb),0.08)', border: `1px solid ${UI.hair}`, borderRadius: 4, padding: '3px 8px', whiteSpace: 'nowrap', textDecoration: 'line-through', flexShrink: 0 }
+                        : { fontFamily: UI.fontNum, fontSize: 12, fontWeight: 700, color: 'var(--accent)', background: 'rgba(var(--accent-rgb),0.10)', border: '1px solid rgba(var(--accent-rgb),0.28)', borderRadius: 4, padding: '3px 8px', whiteSpace: 'nowrap', flexShrink: 0 };
+                      return progBumpEditable && !capturing ? (
+                        <button onClick={(ev) => { ev.stopPropagation(); toggleProgressionBump(progBumpKey); }} style={{ ...chipStyle, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>{label}</button>
+                      ) : (
+                        <span style={chipStyle}>{label}</span>
+                      );
+                    })()}
                   </div>
                   <div data-shot-chips="1" style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                     {filteredSets.map((st, j) => {

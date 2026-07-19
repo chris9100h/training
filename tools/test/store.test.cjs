@@ -2440,7 +2440,7 @@ async function testAsync(name, fn) {
           { exId: 'leg', sets: [{ kg: 100, reps: 10, warmup: false }] },
           { exId: 'leg', sets: [{ kg: 50, reps: 10, warmup: false }] },
         ],
-        progressionDeclines: { leg_0: true },
+        progressionBumps: { leg_0: { name: 'Leg Press', currentKg: 100, nextKg: 102.5, declined: true } },
       }],
     };
     const ref = { entry: { sets: [{ kg: 100, reps: 10, warmup: false }] } };
@@ -2457,12 +2457,30 @@ async function testAsync(name, fn) {
       sessions: [{
         ended: '2026-07-01T10:00:00Z', dayId: 'd1', isDeload: false,
         entries: [{ exId: 'leg', sets: [{ kg: 100, reps: 10, warmup: false }] }],
-        progressionDeclines: {},
+        progressionBumps: {},
       }],
     };
     const ref = { entry: { sets: [{ kg: 100, reps: 10, warmup: false }] } };
     const sugg = LB.progressionSuggestion(store, 'leg', 'd1', 5, null, ref, null, null, 0);
     assert.ok(sugg && sugg.kg > 100, 'undeclined bump still fires');
+  });
+  test('progressionSuggestion: an explicitly accepted bump (declined:false) is not suppressed', () => {
+    // Hell yeah now writes a record too (session detail's toggle chip needs
+    // something to show for an accepted bump, not just declines), so an
+    // accepted entry must be treated the same as no entry at all.
+    const store = {
+      settings: { smartProgression: true },
+      exercises: [{ id: 'leg', name: 'Leg Press' }],
+      schedules: [],
+      sessions: [{
+        ended: '2026-07-01T10:00:00Z', dayId: 'd1', isDeload: false,
+        entries: [{ exId: 'leg', sets: [{ kg: 100, reps: 10, warmup: false }] }],
+        progressionBumps: { leg_0: { name: 'Leg Press', currentKg: 97.5, nextKg: 100, declined: false } },
+      }],
+    };
+    const ref = { entry: { sets: [{ kg: 100, reps: 10, warmup: false }] } };
+    const sugg = LB.progressionSuggestion(store, 'leg', 'd1', 5, null, ref, null, null, 0);
+    assert.ok(sugg && sugg.kg > 100, 'accepted bump does not block the next one');
   });
 
   test('build531Plan: catalog names resolve, 4 days, program_data stamped, assistance uncapped', () => {

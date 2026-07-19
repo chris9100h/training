@@ -1377,13 +1377,13 @@ function sessionToRow(s, userId) {
   // the reporting RPCs read from them (migration 0058). The legacy JSONB column
   // keeps its default '[]' on insert and is left untouched on update.
   // agg* are read-only server aggregates attached at load time — never synced.
-  // progressionDeclines has no zane_sessions column (deliberately no schema
+  // progressionBumps has no zane_sessions column (deliberately no schema
   // change, see progressionSuggestion): it stays purely in the local cache
   // (saveToLocal/mergeSessions), same treatment as currentExIdx/restStart/
   // restDuration below. Leaving it in `rest` would spread an unknown column
   // into the upsert and fail the whole write.
   // eslint-disable-next-line no-unused-vars
-  const { currentExIdx, cyclePos, restStart, restDuration, scheduleId, dayId, dayName, startedAt, durationMinutes, feel, entries, aggVolume, aggDoneSets, aggExercises, isBonus, isFreestyle, isDeload, mesoRecap, readiness, signalWeight, progressionDeclines, ...rest } = s;
+  const { currentExIdx, cyclePos, restStart, restDuration, scheduleId, dayId, dayName, startedAt, durationMinutes, feel, entries, aggVolume, aggDoneSets, aggExercises, isBonus, isFreestyle, isDeload, mesoRecap, readiness, signalWeight, progressionBumps, ...rest } = s;
   const row = { ...rest, schedule_id: scheduleId, day_id: dayId, day_name: dayName, user_id: userId };
   if (startedAt != null) row.started_at = startedAt;
   if (durationMinutes != null) row.duration_minutes = durationMinutes;
@@ -3271,11 +3271,11 @@ function mergeSessions(freshSessions, curSessions, inProgressId, baseSessions = 
       // null: a cache from before cyclePos was persisted (migration 0176) has
       // no cyclePos of its own, and the server may since have a real one.
       cyclePos: mem.cyclePos ?? s.cyclePos ?? null,
-      // progressionDeclines never syncs to the server (no zane_sessions
+      // progressionBumps never syncs to the server (no zane_sessions
       // column, see sessionToRow), so the fresh/server side of the merge
       // never has it: carry the cached value forward the same way, otherwise a
-      // reload right after declining would silently forget it.
-      ...(mem.progressionDeclines ? { progressionDeclines: mem.progressionDeclines } : {}),
+      // reload right after answering the toast would silently forget it.
+      ...(mem.progressionBumps ? { progressionBumps: mem.progressionBumps } : {}),
       // for the active session, local entries/restStart/restDuration are authoritative
       ...(isActive ? { entries: mem.entries, restStart: mem.restStart ?? null, restDuration: mem.restDuration ?? null } : {}),
       ...(keepCachedEntries ? { entries: mem.entries } : {}),
@@ -3510,20 +3510,22 @@ function progressionSuggestion(store, exId, dayId, plannedReps, plannedRepsPerSe
   const cappedKg = maxKg ? Math.min(newKg, maxKg) : newKg;
   if (cappedKg <= refKg) return null;
 
-  // The user can decline an earned bump in the "PROGRESSION UNLOCKED" toast
-  // (screens-train.jsx); the decline lives on the session that earned it,
-  // keyed by exId_occ (session.progressionDeclines[exId + '_' + occ]) so a
-  // repeated exercise's two occurrences in one session (superset, straight
-  // set + back-off block) never cross-contaminate: declining occurrence 0's
-  // bump must not silently swallow occurrence 1's separately-earned one. A
-  // suppressed session naturally "un-declines" if deleted, no separate
-  // reconciliation needed. Checked last, only once every earlier gate has
-  // already agreed a bump is actually about to be granted: this function
-  // runs on every set logged (completeSet's refOverride fast path), and
-  // recentSessionsForExercise scans/sorts the user's full session history,
-  // a cost worth paying only on the rare path where it changes the outcome.
+  // The user answers the "PROGRESSION UNLOCKED" toast (screens-train.jsx)
+  // with Hell yeah or Decline; either answer lives on the session that
+  // earned it (session.progressionBumps[exId_occ] = { declined, ... }),
+  // toggleable afterward from the session detail screen, keyed by exId_occ
+  // (not bare exId) so a repeated exercise's two occurrences in one session
+  // (superset, straight set + back-off block) never cross-contaminate:
+  // declining occurrence 0's bump must not silently swallow occurrence 1's
+  // separately-earned one. A suppressed session naturally "un-declines" if
+  // deleted, no separate reconciliation needed. Checked last, only once
+  // every earlier gate has already agreed a bump is actually about to be
+  // granted: this function runs on every set logged (completeSet's
+  // refOverride fast path), and recentSessionsForExercise scans/sorts the
+  // user's full session history, a cost worth paying only on the rare path
+  // where it changes the outcome.
   const [mostRecentSession] = recentSessionsForExercise(store, exId, dayId, 1, occ);
-  if (mostRecentSession?.session.progressionDeclines?.[exId + '_' + occ]) return null;
+  if (mostRecentSession?.session.progressionBumps?.[exId + '_' + occ]?.declined) return null;
 
   const baseRepsFirst = plannedRepsPerSet?.[0] ?? plannedReps;
   return { kg: cappedKg, reps: baseRepsFirst ?? null };
