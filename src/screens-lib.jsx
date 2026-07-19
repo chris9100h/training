@@ -3934,13 +3934,25 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                 const progBump = progBumpKey ? s.progressionBumps?.[progBumpKey] : null;
                 const progBumpEditable = !!progBump && !!s.ended &&
                   !LB.laterSessionTrainsExId(store.sessions, e.exId, s.dayId, s.ended, s.id, s.scheduleId);
+                // Meso's own earned-weight-bump chip, mirrored out here from the
+                // "Changes earned" list below (same source data, same toggle),
+                // for the same reason: findable right on the exercise, not
+                // buried in a sheet. Meso keys a bump by exId_dayId only, not
+                // occurrence, so a repeated exercise's two rows in one session
+                // necessarily share the same chip/toggle state, unlike SP's
+                // occ-aware progBump above.
+                const mesoBumpKey = e.exId ? e.exId + '_' + s.dayId : null;
+                const mesoGain = mesoBumpKey ? (s.mesoRecap?.gains || []).find(g => g.key === mesoBumpKey && g.weightDelta > 0) : null;
+                const mesoDeclined = !!mesoGain && !!sessionMeso?.weightBoostDeclines?.[mesoBumpKey];
+                const mesoBumpEditable = !!mesoGain && fbEditable;
+                const anyBump = !!progBump || !!mesoGain;
                 return (
                 <div key={i}
                   onClick={() => canHistory && go({ name: 'exerciseHistory', exId: e.exId, dayId: s.dayId, exName, back: { name: 'session', sessionId: s.id } })}
                   style={{ cursor: canHistory ? 'pointer' : 'default', WebkitTapHighlightColor: 'transparent' }}
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8, gap: 8 }}>
-                    <div className="display" style={{ fontSize: 17, color: UI.ink, lineHeight: 1.1, ...(progBump && !capturing ? { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } : {}) }}>
+                    <div className="display" style={{ fontSize: 17, color: UI.ink, lineHeight: 1.1, ...(anyBump && !capturing ? { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } : {}) }}>
                       {exName}{canHistory && <span style={{ fontSize: 11, color: UI.inkFaint, marginLeft: 5 }}>›</span>}
                     </div>
                     {progBump && !capturing && (() => {
@@ -3960,6 +3972,23 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                         : { fontFamily: UI.fontNum, fontSize: 12, fontWeight: 700, color: 'var(--accent)', background: 'rgba(var(--accent-rgb),0.10)', border: '1px solid rgba(var(--accent-rgb),0.28)', borderRadius: 4, padding: '3px 8px', whiteSpace: 'nowrap', flexShrink: 0 };
                       return progBumpEditable ? (
                         <button onClick={(ev) => { ev.stopPropagation(); toggleProgressionBump(progBumpKey); }} style={{ ...chipStyle, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>{label}</button>
+                      ) : (
+                        <span style={chipStyle}>{label}</span>
+                      );
+                    })()}
+                    {mesoGain && !capturing && (() => {
+                      // Mirrors the "Changes earned" chip in the Feedback Recap
+                      // sheet below exactly: same source data (s.mesoRecap.gains
+                      // for the earned amount, sessionMeso.weightBoostDeclines
+                      // for live declined state), same toggleGainDecline handler,
+                      // same fbEditable gate. Hidden during capture for the same
+                      // forward-looking-value reason as the SP chip above.
+                      const label = mesoDeclined ? 'Declined' : `+${mesoGain.weightDelta} ${s.mesoRecap.unit || UI.unit()}`;
+                      const chipStyle = mesoDeclined
+                        ? { fontFamily: UI.fontNum, fontSize: 12, fontWeight: 700, color: UI.inkFaint, background: 'rgba(var(--knurl-rgb),0.08)', border: `1px solid ${UI.hair}`, borderRadius: 4, padding: '3px 8px', whiteSpace: 'nowrap', textDecoration: 'line-through', flexShrink: 0 }
+                        : { fontFamily: UI.fontNum, fontSize: 12, fontWeight: 700, color: 'var(--accent)', background: 'rgba(var(--accent-rgb),0.10)', border: '1px solid rgba(var(--accent-rgb),0.28)', borderRadius: 4, padding: '3px 8px', whiteSpace: 'nowrap', flexShrink: 0 };
+                      return mesoBumpEditable ? (
+                        <button onClick={(ev) => { ev.stopPropagation(); toggleGainDecline(mesoBumpKey); }} style={{ ...chipStyle, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>{label}</button>
                       ) : (
                         <span style={chipStyle}>{label}</span>
                       );
