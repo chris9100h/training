@@ -803,6 +803,19 @@ function mapEntryRows(entryRows) {
   }));
 }
 
+// The Macros/Adherence/Targets Health cards merged into one composite
+// 'macroGroup' card; isCardVisible (screens-health.jsx, both the user's own
+// tab and the coach's read-only client view) only ever checks the array for
+// 'macroGroup', so a pre-merge id surviving in a loaded/restored settings row
+// would silently un-hide a card the user had explicitly hidden. Normalized
+// here (the single place every load/restore path funnels through) rather
+// than at each read site, and deduped so a stale id can never double-count
+// against Settings' "N hidden" count. Pure/idempotent.
+function normalizeHiddenHealthCards(arr) {
+  if (!arr) return arr ?? null;
+  return [...new Set(arr.map(id => (id === 'macros' || id === 'adherence') ? 'macroGroup' : id))];
+}
+
 async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   const isCoachLoad = !!_opts.coachLoad;
   const histCutoff = historyWindowCutoffISO();
@@ -1146,7 +1159,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         onboardingCompleted: sett.onboarding_completed ?? false,
         glucoseUnit: sett.glucose_unit ?? 'mmol',
         tempUnit: sett.temp_unit ?? null,
-        hiddenHealthCards: sett.hidden_health_cards ?? null,
+        hiddenHealthCards: normalizeHiddenHealthCards(sett.hidden_health_cards),
         feverThresholdC: sett.fever_threshold_c ?? 38,
         vipBackground: sett.vip_background ?? null,
         swVersion: sett.sw_version ?? null,
@@ -3459,21 +3472,6 @@ function progressionSuggestion(store, exId, dayId, plannedReps, plannedRepsPerSe
   if (!progressionEnabled(store, plannedRepsMax, progressionOffset)) return null;
   if (is531MainLift(store, exId, dayId)) return null; // 5/3/1 main lifts climb via the Training Max, not Smart Progression
 
-  // The user can decline an earned bump in the "PROGRESSION UNLOCKED" toast
-  // (screens-train.jsx); the decline lives on the session that earned it,
-  // keyed by exId_occ (session.progressionDeclines[exId + '_' + occ]) so a
-  // repeated exercise's two occurrences in one session (superset, straight
-  // set + back-off block) never cross-contaminate: declining occurrence 0's
-  // bump must not silently swallow occurrence 1's separately-earned one. A
-  // suppressed session naturally "un-declines" if deleted, no separate
-  // reconciliation needed. Checked independently of refOverride/ref below
-  // (bestEntryFromSetLists always anchors the suggested kg on perSession[0],
-  // the most recent session, even when reps are blended in from an earlier
-  // one, so the most recent session's own answer is what decides this). A
-  // later session earning a NEW bump asks again from scratch, no cooldown.
-  const [mostRecentSession] = recentSessionsForExercise(store, exId, dayId, 1, occ);
-  if (mostRecentSession?.session.progressionDeclines?.[exId + '_' + occ]) return null;
-
   const ex = findExercise(store, exId);
   const catCfg = ex?.equipment ? (store.settings?.equipmentConfig?.[ex.equipment] ?? {}) : {};
   const increment = catCfg.increment ?? 2.5;
@@ -3511,6 +3509,21 @@ function progressionSuggestion(store, exId, dayId, plannedReps, plannedRepsPerSe
   const newKg = Math.round((refKg + increment) * 100) / 100;
   const cappedKg = maxKg ? Math.min(newKg, maxKg) : newKg;
   if (cappedKg <= refKg) return null;
+
+  // The user can decline an earned bump in the "PROGRESSION UNLOCKED" toast
+  // (screens-train.jsx); the decline lives on the session that earned it,
+  // keyed by exId_occ (session.progressionDeclines[exId + '_' + occ]) so a
+  // repeated exercise's two occurrences in one session (superset, straight
+  // set + back-off block) never cross-contaminate: declining occurrence 0's
+  // bump must not silently swallow occurrence 1's separately-earned one. A
+  // suppressed session naturally "un-declines" if deleted, no separate
+  // reconciliation needed. Checked last, only once every earlier gate has
+  // already agreed a bump is actually about to be granted: this function
+  // runs on every set logged (completeSet's refOverride fast path), and
+  // recentSessionsForExercise scans/sorts the user's full session history,
+  // a cost worth paying only on the rare path where it changes the outcome.
+  const [mostRecentSession] = recentSessionsForExercise(store, exId, dayId, 1, occ);
+  if (mostRecentSession?.session.progressionDeclines?.[exId + '_' + occ]) return null;
 
   const baseRepsFirst = plannedRepsPerSet?.[0] ?? plannedReps;
   return { kg: cappedKg, reps: baseRepsFirst ?? null };
@@ -5344,6 +5357,14 @@ function recomputeMesoRepMissCut(mesoState, earnInputs, repMissBase, oldSignal, 
 // normal Smart Progression is unaffected. Pure/testable; `last` is a
 // { entry: { sets } } reference.
 function resolveMesoSeedSuggestion(suggestion, weightBoost, last, mesoActive, noPriorFeedback = false, repFloor = null, declined = false) {
+  // declined is authoritative on its own, checked before weightBoost is even
+  // looked at: today's only callers already null weightBoost when declined,
+  // but the function itself (not caller discipline) needs to own "declined
+  // implies withheld" as an invariant, since that's the entire reason declined
+  // exists as its own named parameter rather than being folded into weightBoost.
+  // A raw earned weightBoost passed alongside declined=true (e.g. a future
+  // caller that stops pre-nulling) must still hold the weight, not apply it.
+  if (declined && mesoActive) return null;
   if (weightBoost != null) {
     const cutWins = weightBoost < 0; // a rep-miss cut is authoritative, never let an up-suggestion swallow it
     if ((cutWins || !suggestion) && last) {
@@ -5358,15 +5379,11 @@ function resolveMesoSeedSuggestion(suggestion, weightBoost, last, mesoActive, no
     }
     return suggestion;
   }
-  // weightBoost==null is ambiguous by itself: it means either "never earned"
-  // (noPriorFeedback's carve-out is meant for this) or "earned, then declined"
-  // (the caller collapses a declined boost to null too). completions only
-  // advances at the END of a meso block, so noPriorFeedback stays true for
-  // EVERY session of the first block's week 1, not just its first one: a
-  // decline recorded on that week's 2nd/3rd session would otherwise fall
-  // through this veto and let Smart Progression quietly overrule it. declined
-  // forces the veto regardless of noPriorFeedback so a decline always holds.
-  if (mesoActive && suggestion && (declined || !noPriorFeedback)) return null; // feedback withheld the boost → veto the Smart Progression bump
+  // A null weightBoost with declined already false at this point means
+  // genuinely "never earned": noPriorFeedback's carve-out (the first meso
+  // block's week 1, before there's any prior feedback to defer to) lets
+  // Smart Progression through instead of freezing the weight.
+  if (mesoActive && suggestion && !noPriorFeedback) return null; // feedback withheld the boost → veto the Smart Progression bump
   return suggestion;
 }
 
@@ -6375,7 +6392,7 @@ async function clearPrecompileCaches() {
 async function clearCachesAndReload() {
   await clearPrecompileCaches();
   // Flags this as a deliberate cache wipe so index.html's "React did not
-  // mount" watchdog gives the next boot more time before giving up — see
+  // mount" watchdog gives the next boot more time before giving up, see
   // that setTimeout for why a wiped cache legitimately boots slower.
   try { sessionStorage.setItem('zane-cold-boot', '1'); } catch {}
   window.location.href = window.location.pathname + '?_v=' + Date.now() + window.location.hash;
@@ -6410,7 +6427,7 @@ window.LB = {
   subscribeWebPush, unsubscribeWebPush, getWebPushSubscription,
   QS_EMAILS, hasQuickSwitchSession, quickSwitch, saveQsName, getQsName,
   signIn, signUp, signOut, signInWithPasskey, registerPasskey, listPasskeys, deletePasskey, resetPassword, deleteAllData, exportBackup, backupToBlob, readBackupText, importFromBackup, validateBackup,
-  loadFromSupabase, syncStore, mergeSessions, withCarriedWindowEntries, historyWindowCutoffISO,
+  loadFromSupabase, syncStore, mergeSessions, withCarriedWindowEntries, historyWindowCutoffISO, normalizeHiddenHealthCards,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
   uid, todayISO, fmtISO, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, is531MainLift, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, healScheduleWeekdays, buildPlanSkeleton, instantiateProgram, is531Plan, round531, tmFrom531, tmBump531, weeks531, week531, fiveThreeOneSets, build531Plan, add531MainLift, current531Week, current531Cycle, compute531CycleBumps, resolve531CycleEnd, suggest531Tm, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, mesoActive, autoregLoadOnly, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, realignCycleForToday, todayCycleStripIndex,
   effReps, fmtDuration, e1rm, isImprovement, isDecline, bestE1rmForExercise, bestAssistLoad, bestTimeForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, buildTimeSeedSets, latestBodyweight, bodyweightForDate, exerciseLogMode, isAssisted, shouldPullBodyweight, systemExerciseToRow, inferCurrentExIdx, calcBlended,

@@ -897,6 +897,23 @@ async function testAsync(name, fn) {
     assert.strictEqual(JSON.stringify(LB.reearnMesoWeightBoosts(undefined, undefined, undefined)), '{}');
   });
 
+  // ── normalizeHiddenHealthCards (macros/adherence merged into macroGroup) ──
+  test('normalizeHiddenHealthCards: pre-merge ids map to macroGroup', () => {
+    assert.strictEqual(JSON.stringify(LB.normalizeHiddenHealthCards(['macros'])), '["macroGroup"]');
+    assert.strictEqual(JSON.stringify(LB.normalizeHiddenHealthCards(['adherence'])), '["macroGroup"]');
+  });
+  test('normalizeHiddenHealthCards: both old ids collapse to one entry, no duplicate', () => {
+    assert.strictEqual(JSON.stringify(LB.normalizeHiddenHealthCards(['macros', 'adherence'])), '["macroGroup"]');
+  });
+  test('normalizeHiddenHealthCards: other ids and an already-migrated macroGroup pass through untouched', () => {
+    assert.strictEqual(JSON.stringify(LB.normalizeHiddenHealthCards(['weight', 'macroGroup', 'steps'])), '["weight","macroGroup","steps"]');
+  });
+  test('normalizeHiddenHealthCards: null/undefined/empty inputs are safe', () => {
+    assert.strictEqual(LB.normalizeHiddenHealthCards(null), null);
+    assert.strictEqual(LB.normalizeHiddenHealthCards(undefined), null);
+    assert.strictEqual(JSON.stringify(LB.normalizeHiddenHealthCards([])), '[]');
+  });
+
   // ── clearMesoWeightBoostDeclines (a decline never outlives the session that set it) ──
   test('clearMesoWeightBoostDeclines: a declined key re-earned/re-evaluated this session is cleared', () => {
     const out = LB.clearMesoWeightBoostDeclines({ bench_d1: true }, ['bench_d1']);
@@ -1441,6 +1458,13 @@ async function testAsync(name, fn) {
     const sp = { kg: 102.5, reps: 8 };
     assert.strictEqual(LB.resolveMesoSeedSuggestion(sp, null, seedLast, true, true, null, true), null, 'declined=true vetoes despite noPriorFeedback');
     assert.strictEqual(LB.resolveMesoSeedSuggestion(sp, null, seedLast, true, true, null, false), sp, 'declined=false (never earned) is unaffected, same as before');
+  });
+  test('resolveMesoSeedSuggestion: declined vetoes even if a caller passes the raw earned weightBoost instead of nulling it', () => {
+    // The function must own "declined implies withheld" itself, not rely on
+    // every caller pre-nulling weightBoost when declined is true. A future
+    // caller that stops pre-nulling must not silently re-apply a declined bump.
+    const sp = { kg: 102.5, reps: 8 };
+    assert.strictEqual(LB.resolveMesoSeedSuggestion(sp, 2.5, seedLast, true, false, null, true), null, 'raw earned weightBoost still vetoed when declined=true');
   });
   test('resolveMesoSeedSuggestion: off a meso plan Smart Progression is untouched', () => {
     const sp = { kg: 102.5, reps: 8 };

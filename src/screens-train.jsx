@@ -2480,14 +2480,17 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // beep/auto-open side effect moved to the restExpired setTimeout below.
 
   const [flashSet, setFlashSet] = useStateT(null);
-  // setIdx whose locked (done/skipped) weight or reps field was just tapped —
-  // shows a brief "tap ✓/× to unlock" hint instead of silently doing nothing,
-  // since the checkbox that actually unlocks it is easy to miss.
+  // { exIdx, setIdx } of the locked (done/skipped) weight or reps field just
+  // tapped, shows a brief "tap ✓/× to unlock" hint instead of silently doing
+  // nothing, since the checkbox that actually unlocks it is easy to miss.
+  // Carries exIdx (not just setIdx) so navigating to a different exercise
+  // within the 2200ms window can't light up that exercise's same-index row,
+  // mirroring the lpTarget/wsTarget exIdx+setIdx pattern used elsewhere here.
   const [lockHint, setLockHint] = useStateT(null);
   const lockHintTimerRef = useRefT(null);
-  const showLockHint = setIdx => {
+  const showLockHint = (exIdxAtTap, setIdx) => {
     clearTimeout(lockHintTimerRef.current);
-    setLockHint(setIdx);
+    setLockHint({ exIdx: exIdxAtTap, setIdx });
     lockHintTimerRef.current = setTimeout(() => setLockHint(null), 2200);
   };
   const [improvedSet, setImprovedSet] = useStateT(false);
@@ -2533,8 +2536,19 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // flush effect near the joint-feedback effect below opens it once every
   // feedback sheet has actually closed.
   const finishOpenPendingRef = useRefT(false);
+  // requestFinishOpen is also called from setTimeout callbacks scheduled well
+  // before the meso feedback sheets open (finishSetNavigation fires them from
+  // the same render that completeSet marks a set done, before the joint-
+  // feedback effect below has had a chance to run), reading the plain
+  // mesoJointOpen/mesoSorenessOpen/mesoVolumeOpen state variables there would
+  // close over that earlier render's (pre-open) values and never see the
+  // sheet that's actually open by the time the timeout fires. mesoSheetOpenRef
+  // is kept in sync by the effect right after those three state declarations,
+  // so a deferred call always reads the CURRENT open state, not a stale one.
+  const mesoSheetOpenRef = useRefT({ joint: false, soreness: false, volume: false });
   const requestFinishOpen = () => {
-    if (mesoJointOpen || mesoSorenessOpen || mesoVolumeOpen) { finishOpenPendingRef.current = true; return; }
+    const m = mesoSheetOpenRef.current;
+    if (m.joint || m.soreness || m.volume) { finishOpenPendingRef.current = true; return; }
     setFinishOpen(true);
   };
   const [finishStep, setFinishStep] = useStateT('confirm');
@@ -3125,6 +3139,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const [mesoJointMuscle, setMesoJointMuscle] = useStateT(null);
   const mesoJointExIdxRef = useRefT(null);
   const [mesoVolumeOpen, setMesoVolumeOpen] = useStateT(false);
+  // Kept in sync for requestFinishOpen (see mesoSheetOpenRef above), which is
+  // also called from setTimeout callbacks that can fire after this render's
+  // closure is stale but before this effect has had a chance to run again.
+  useEffectT(() => {
+    mesoSheetOpenRef.current = { joint: mesoJointOpen, soreness: mesoSorenessOpen, volume: mesoVolumeOpen };
+  }, [mesoJointOpen, mesoSorenessOpen, mesoVolumeOpen]);
   const [mesoVolumeMusc, setMesoVolumeMusc] = useStateT(null);
   const [mesoVolumeExIds, setMesoVolumeExIds] = useStateT([]); // exId+dayId pairs for delta
   const [mesoVolumeAnswer, setMesoVolumeAnswer] = useStateT(null);
@@ -6606,11 +6626,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                       gap: 8, alignItems: 'center',
                       padding: '10px 6px',
                       position: 'relative', zIndex: 1,
-                      // Full brightness while the lock hint is up — the row's own
+                      // Full brightness while the lock hint is up: the row's own
                       // dim-when-done/skipped opacity was muting the unlock ring
                       // pulse on the checkbox below it (opacity on a parent dims
                       // its whole subtree, box-shadow rings included).
-                      opacity: lockHint === i ? 1 : (s.done || s.skipped ? (isWarmupRow ? 0.3 : 0.4) : 1),
+                      opacity: (lockHint?.exIdx === exIdx && lockHint?.setIdx === i) ? 1 : (s.done || s.skipped ? (isWarmupRow ? 0.3 : 0.4) : 1),
                       animation: flashSet === i ? 'rowFlash 1.4s ease forwards' : 'none',
                     }}>
                       <div style={{
@@ -6660,7 +6680,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                         done={s.done || s.skipped}
                         style={setInputStyle(s.done || s.skipped, isCurrent)}
                         onActivate={() => activateKb(i, 'kg')}
-                        onDisabledTap={() => showLockHint(i)}
+                        onDisabledTap={() => showLockHint(exIdx, i)}
                         kbRaw={kbRaw}
                         isKbActive={kbField?.setIdx === i && kbField?.field === 'kg'}
                         onChange={kg => updateSession(sess => ({
@@ -6691,11 +6711,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
                       {!isIntensityActive && !isCheckbox && !isTime && (isUnilateral ? (
                         <>
-                          <KbCell text={kbField?.setIdx === i && kbField?.field === 'repsL' ? kbRaw : (s.repsL ?? '')} placeholder="L" disabled={s.done || s.skipped} onActivate={() => activateKb(i, 'repsL')} onDisabledTap={() => showLockHint(i)} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), ...(kbField?.setIdx === i && kbField?.field === 'repsL' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }} />
-                          <KbCell text={kbField?.setIdx === i && kbField?.field === 'repsR' ? kbRaw : (s.repsR ?? '')} placeholder="R" disabled={s.done || s.skipped} onActivate={() => activateKb(i, 'repsR')} onDisabledTap={() => showLockHint(i)} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), ...(kbField?.setIdx === i && kbField?.field === 'repsR' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }} />
+                          <KbCell text={kbField?.setIdx === i && kbField?.field === 'repsL' ? kbRaw : (s.repsL ?? '')} placeholder="L" disabled={s.done || s.skipped} onActivate={() => activateKb(i, 'repsL')} onDisabledTap={() => showLockHint(exIdx, i)} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), ...(kbField?.setIdx === i && kbField?.field === 'repsL' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }} />
+                          <KbCell text={kbField?.setIdx === i && kbField?.field === 'repsR' ? kbRaw : (s.repsR ?? '')} placeholder="R" disabled={s.done || s.skipped} onActivate={() => activateKb(i, 'repsR')} onDisabledTap={() => showLockHint(exIdx, i)} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), ...(kbField?.setIdx === i && kbField?.field === 'repsR' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }} />
                         </>
                       ) : (
-                        <KbCell text={kbField?.setIdx === i && kbField?.field === 'reps' ? kbRaw : (s.reps ?? '')} placeholder={repPlaceholder} disabled={s.done || s.skipped} onActivate={() => activateKb(i, 'reps')} onDisabledTap={() => showLockHint(i)} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), ...(kbField?.setIdx === i && kbField?.field === 'reps' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }} />
+                        <KbCell text={kbField?.setIdx === i && kbField?.field === 'reps' ? kbRaw : (s.reps ?? '')} placeholder={repPlaceholder} disabled={s.done || s.skipped} onActivate={() => activateKb(i, 'reps')} onDisabledTap={() => showLockHint(exIdx, i)} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), ...(kbField?.setIdx === i && kbField?.field === 'reps' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }} />
                       ))}
 
                       {!isIntensityActive && !isLpActive && !isWsActive && <button
@@ -6739,7 +6759,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                           // right alongside the "Tap ✓/× to unlock" hint. Needs the
                           // row's own dim opacity lifted above (see data-kb-row) or
                           // this reads as barely-there instead of "much more visible".
-                          animation: lockHint === i && (s.done || s.skipped) ? 'unlockRingPulse 0.9s ease-in-out infinite' : 'none',
+                          animation: (lockHint?.exIdx === exIdx && lockHint?.setIdx === i) && (s.done || s.skipped) ? 'unlockRingPulse 0.9s ease-in-out infinite' : 'none',
                         }}>{s.skipped ? '×' : '✓'}</button>}
 
                     </div>
@@ -6750,7 +6770,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                       GO ALL OUT, as many reps as you can
                     </div>
                   )}
-                  {lockHint === i && (s.done || s.skipped) && (
+                  {(lockHint?.exIdx === exIdx && lockHint?.setIdx === i) && (s.done || s.skipped) && (
                     <div className="micro-gold" style={{ position: 'relative', zIndex: 1, textAlign: 'center', padding: '0 6px 8px', letterSpacing: '0.14em', lineHeight: 1.4 }}>
                       Tap {s.skipped ? '×' : '✓'} to unlock
                     </div>
@@ -8755,11 +8775,19 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                 {item.weightDelta > 0 && !item.declined && (
                   <button
                     onClick={() => {
-                      if (!mesoState || !item.key) return;
-                      const next = { ...mesoState, weightBoostDeclines: { ...(mesoState.weightBoostDeclines || {}), [item.key]: true } };
-                      setMesoStateLocal(next);
-                      saveMesoStateToStorage(next);
-                      flushMesoStateToStore(next);
+                      if (!item.key) return;
+                      // Functional update (mirrors saveMesoState's own pattern above):
+                      // two Decline taps on different rows in the same event batch
+                      // must each build on the OTHER's write, not both read the same
+                      // pre-decline mesoState closure and have the second clobber
+                      // the first's decline in state/localStorage/the store.
+                      setMesoStateLocal(prev => {
+                        if (!prev) return prev;
+                        const next = { ...prev, weightBoostDeclines: { ...(prev.weightBoostDeclines || {}), [item.key]: true } };
+                        saveMesoStateToStorage(next);
+                        flushMesoStateToStore(next);
+                        return next;
+                      });
                       setMesoGainItems(prev => prev.map((g, gi) => gi === i ? { ...g, declined: true } : g));
                     }}
                     style={{
