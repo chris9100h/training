@@ -99,7 +99,7 @@ self.addEventListener('install', e => {
       )
     ).then(() =>
       // PHOTOS_CACHE is stable across deploys (activate() never wipes it), so
-      // once it's populated there's nothing to do here — re-fetching ~7MB of
+      // once it's populated there's nothing to do here: re-fetching ~7MB of
       // unchanged photos on every install would defeat the whole point.
       caches.has(PHOTOS_CACHE).then(exists => {
         if (exists) return;
@@ -117,7 +117,7 @@ self.addEventListener('activate', e => {
   e.waitUntil(
     caches.keys().then(keys =>
       // PHOTOS_CACHE is versioned independently of CACHE (see its
-      // declaration above) — never swept here alongside old app-shell caches.
+      // declaration above), never swept here alongside old app-shell caches.
       Promise.all(keys.filter(k => k !== CACHE && k !== PHOTOS_CACHE).map(k => caches.delete(k)))
     ).then(() => self.clients.claim())
   );
@@ -224,7 +224,7 @@ self.addEventListener('fetch', e => {
             const clone = res.clone();
             // A photo that missed precaching (e.g. a transient 404 during
             // install) belongs in PHOTOS_CACHE, not the short-lived versioned
-            // CACHE — otherwise it'd get wiped again on the next deploy.
+            // CACHE: otherwise it'd get wiped again on the next deploy.
             const target = PHOTO_ASSETS.includes(e.request.url) ? PHOTOS_CACHE : CACHE;
             caches.open(target).then(c => c.put(e.request, clone));
           }

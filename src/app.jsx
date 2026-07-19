@@ -1060,9 +1060,42 @@ function App() {
 
 
   // was removed — the local store is the single source of truth for a session.)
+  //
+  // activeCoachClients feeds the two coach-status realtime listeners below
+  // (client training-status / check-in pushes) added to the same channel.
+  // Keyed separately as coachClientsKey (stable string of coachingId:clientId
+  // pairs) so the effect only tears down and re-subscribes when the actual
+  // set of active clients changes (invite accepted/ended), not on every
+  // store update: reloadCoachingState always returns a fresh asCoach array
+  // reference even when its contents are unchanged.
+  // Excludes support_-prefixed pseudo-coaching entries (admin support tickets,
+  // status forced 'active' forever, see store.js's isNoteFromClient/
+  // unreadCoachingNotes for the same established filter): without this the
+  // admin account's list grows roughly one entry per registered user with an
+  // open ticket, churning coachClientsKey (and the whole channel resubscribe)
+  // on every unrelated support chat, and realistically risking the 100-id
+  // in.() filter cap this isn't meant to hit.
+  const activeCoachClients = React.useMemo(() => (
+    (store?.coaching?.asCoach || [])
+      .filter(c => c.status === 'active' && c.clientId && c.id && !c.id.startsWith('support_'))
+      .map(c => ({ clientId: c.clientId, coachingId: c.id }))
+  ), [store?.coaching?.asCoach]);
+  const coachClientsKey = activeCoachClients.map(c => `${c.coachingId}:${c.clientId}`).sort().join(',');
+  // Set by the isCoachActive poll effect below to whatever its current
+  // `poll` closure is; read here (lazily, at event time) so the realtime
+  // listener can trigger a re-poll without a second status-aggregation path.
+  const pollFnRef = useRefA(null);
   useEffectA(() => {
     if (!userId) return;
-    return LB.subscribeToChanges(
+    // A burst of realtime events (several clients finishing sets around the
+    // same time, or one client's settings row updating repeatedly) should
+    // still only trigger one re-poll, not one per event.
+    let debounceTimer = null;
+    const triggerPoll = () => {
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => { pollFnRef.current?.(); }, 400);
+    };
+    const unsubscribe = LB.subscribeToChanges(
       userId,
       (note) => {
         setStore(s => {
@@ -1113,8 +1146,11 @@ function App() {
           setStore(s => s ? { ...s, coaching } : s);
         }).catch(() => {});
       },
+      activeCoachClients,
+      triggerPoll,
     );
-  }, [userId]);
+    return () => { clearTimeout(debounceTimer); unsubscribe(); };
+  }, [userId, coachClientsKey]);
 
   // Sync to Supabase + save to localStorage on every store change.
   // A failed sync leaves syncBase unchanged so the pending diff is retried later.
@@ -1247,13 +1283,16 @@ function App() {
     store?.inProgress,
   ]);
 
-  // Poll live client training status + check-in status so the coaching badge
-  // updates even when the tab is closed.
+  // Live client training status + check-in status, driving the coaching
+  // badge. Primary updates come from the realtime listeners wired into the
+  // subscribeToChanges effect above (via pollFnRef/triggerPoll); this
+  // interval is only the fallback for a dropped/reconnecting channel, so it
+  // can be slow, it's a safety net.
   const isCoachActive = phase === 'ready' && (store?.coaching?.asCoach || []).some(c => c.status === 'active');
   const prevAnyLiveRef = useRefA(false);
   const prevPendingRef = useRefA(0);
   useEffectA(() => {
-    if (!isCoachActive) return;
+    if (!isCoachActive) { pollFnRef.current = null; return; }
     const poll = () => {
       Promise.all([LB.loadCoachClientsStatus(), LB.loadCoachCheckinStatus()])
         .then(([statusData, checkinData]) => {
@@ -1274,9 +1313,10 @@ function App() {
         })
         .catch(() => {});
     };
+    pollFnRef.current = poll;
     poll();
-    const iv = setInterval(poll, 5000);
-    return () => clearInterval(iv);
+    const iv = setInterval(poll, 60000);
+    return () => { clearInterval(iv); pollFnRef.current = null; };
   }, [isCoachActive]);
 
   // Exposed globally so Settings → How to… can launch any tour.

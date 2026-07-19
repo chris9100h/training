@@ -5,9 +5,9 @@
 -- realtime publication so the client can react to pushed changes instead,
 -- with the 5s poll kept only as an infrequent fallback (client-side change).
 --
--- RLS coach-read policies already exist on both tables — zane_user_settings:
--- "coach can read client settings" (zane_is_coach_of(user_id)); zane_checkins:
--- "checkins_coach_read" — so Realtime's RLS-scoped delivery already restricts
+-- RLS coach-read policies already exist on both tables (zane_user_settings:
+-- "coach can read client settings" via zane_is_coach_of(user_id); zane_checkins:
+-- "checkins_coach_read"), so Realtime's RLS-scoped delivery already restricts
 -- a coach to their own active clients' rows, no new policy needed here.
 ALTER PUBLICATION supabase_realtime ADD TABLE zane_user_settings;
 ALTER PUBLICATION supabase_realtime ADD TABLE zane_checkins;

@@ -1806,7 +1806,7 @@ ALTER PUBLICATION supabase_realtime ADD TABLE zane_coaching;
 ALTER PUBLICATION supabase_realtime ADD TABLE zane_coaching_notes;
 
 -- Coach "client training now" / "check-in pending" badges push instead of
--- polling on their own (migration 0177) — RLS coach-read policies already
+-- polling on their own (migration 0177): RLS coach-read policies already
 -- scope delivery to a coach's own active clients, see that migration.
 ALTER PUBLICATION supabase_realtime ADD TABLE zane_user_settings;
 ALTER PUBLICATION supabase_realtime ADD TABLE zane_checkins;

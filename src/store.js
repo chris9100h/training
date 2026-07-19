@@ -3327,19 +3327,36 @@ function clearLocal(userId) {
 
 let _realtimeChannel = null;
 
-// Realtime: coaching invites (zane_coaching) and coaching messages
-// (zane_coaching_notes). Live workout sync across a user's own devices was
-// removed — the local store is the single source of truth for a session, and
-// coaches watch a client's live session via polling (get_active_session_detail),
-// not this channel.
-function subscribeToChanges(userId, onCoachingNote, onCoachingInvite) {
+// Realtime: coaching invites (zane_coaching), coaching messages
+// (zane_coaching_notes), and, when the caller is an active coach, client
+// training-status/check-in pushes (zane_user_settings, zane_checkins).
+// Live workout *set* sync across a user's own devices was removed: the
+// local store is the single source of truth for a session. But a coach's
+// "is my client training right now / do they have a pending check-in" badge
+// (app.jsx isCoachActive effect) now updates from these last two listeners
+// instead of a tight poll; polling stays only as an infrequent fallback.
+//
+// coachClients: optional array of { clientId, coachingId } for this user's
+// currently-active coaching relationships (only meaningful when the caller
+// coaches someone). Pass [] / omit when not an active coach: the two
+// coach-status listeners are then skipped entirely rather than attached
+// with an empty/invalid filter.
+// onCoachStatusChange: fired (no payload, callers just re-poll) for any
+// UPDATE on a watched client's zane_user_settings row or any change on a
+// watched coaching relationship's zane_checkins rows. Aggregation
+// (anyLive / pendingCheckinsCount) intentionally stays in app.jsx; this
+// function is thin plumbing only.
+function subscribeToChanges(userId, onCoachingNote, onCoachingInvite, coachClients, onCoachStatusChange) {
   const mapNote = n => ({
     id: n.id, coachingId: n.coaching_id, authorId: n.author_id,
     type: n.type, entityId: n.entity_id, entityName: n.entity_name,
     threadId: n.thread_id, body: n.body, createdAt: n.created_at,
     attachments: n.attachments || null,
   });
-  _realtimeChannel = _supabase
+  const clientIds = [...new Set((coachClients || []).map(c => c.clientId).filter(Boolean))];
+  const coachingIds = [...new Set((coachClients || []).map(c => c.coachingId).filter(Boolean))];
+
+  let channel = _supabase
     .channel(`rt-${userId}`)
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'zane_coaching_notes' }, p => {
       if (p.new.author_id !== userId) onCoachingNote?.(mapNote(p.new));
@@ -3349,8 +3366,44 @@ function subscribeToChanges(userId, onCoachingNote, onCoachingInvite) {
     })
     .on('postgres_changes', { event: '*', schema: 'public', table: 'zane_coaching', filter: `coach_id=eq.${userId}` }, p => {
       onCoachingInvite?.(p.eventType, p.old?.id ?? p.new?.id ?? null, p.new ?? null);
-    })
-    .subscribe();
+    });
+
+  // Realtime's postgres_changes `in.(...)` filter does support a list of
+  // values (Postgres `= ANY`, confirmed against current Supabase docs), but
+  // caps at 100 values. A coach past that (implausible for a real coaching
+  // relationship, but the admin account's asCoach also carries one
+  // pseudo-entry per open support ticket, filtered out by the caller before
+  // this list is built) drops the filter and leans on the RLS policies from
+  // migration 0177 ("coach can read client settings" / "checkins_coach_read")
+  // which already scope reads to this coach's own active clients: Realtime
+  // evaluates postgres_changes INSERT/UPDATE reads through RLS regardless, so
+  // an unfiltered listener is still provably scoped for those, just less
+  // precise. DELETE is the one exception (Supabase can't filter or RLS-scope
+  // DELETE for postgres_changes, since the row is already gone), which is
+  // exactly why zane_checkins only listens for INSERT/UPDATE below, never '*'
+  // or DELETE: an unfiltered/unscoped DELETE listener would fire for every
+  // coach watching any client, for any other coach's client's deleted row.
+  if (clientIds.length > 0) {
+    const filter = clientIds.length <= 100 ? `user_id=in.(${clientIds.join(',')})` : undefined;
+    channel = channel.on('postgres_changes', {
+      event: 'UPDATE', schema: 'public', table: 'zane_user_settings',
+      ...(filter ? { filter } : {}),
+    }, () => onCoachStatusChange?.());
+  }
+  if (coachingIds.length > 0) {
+    const filter = coachingIds.length <= 100 ? `coaching_id=in.(${coachingIds.join(',')})` : undefined;
+    channel = channel
+      .on('postgres_changes', {
+        event: 'INSERT', schema: 'public', table: 'zane_checkins',
+        ...(filter ? { filter } : {}),
+      }, () => onCoachStatusChange?.())
+      .on('postgres_changes', {
+        event: 'UPDATE', schema: 'public', table: 'zane_checkins',
+        ...(filter ? { filter } : {}),
+      }, () => onCoachStatusChange?.());
+  }
+
+  _realtimeChannel = channel.subscribe();
   return () => { _supabase.removeChannel(_realtimeChannel); _realtimeChannel = null; };
 }
 
