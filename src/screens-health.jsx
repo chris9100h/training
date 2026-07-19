@@ -10,6 +10,12 @@ const { useState: useStateH, useEffect: useEffectH, useMemo: useMemoH, useRef: u
 // ─── helpers ────────────────────────────────────────────────────────────────
 
 const HEALTH_TFS = [{ id: '1W', days: 7 }, { id: '1M', days: 30 }, { id: '3M', days: 90 }];
+// 1D only makes sense on cards you might log more than once a day (Glucose/
+// BP/Body Temp), so it's a separate options list passed just to those, not
+// added to HEALTH_TFS itself (every other card shares that one as-is). Those
+// three cards also run their own local tf, independent of the shared one
+// HealthScreen hands the single-daily-value cards.
+const HEALTH_TFS_TODAY = [...HEALTH_TFS, { id: '1D', days: 1 }];
 
 // Whole-day difference between two 'YYYY-MM-DD' dates (b − a), noon-anchored to
 // dodge DST/midnight shifts.
@@ -497,7 +503,7 @@ const HEALTH_CARD_HEADER_STYLE = { fontFamily: UI.fontUi, fontSize: 12, fontWeig
 
 // Section wrapper: title + 1W/1M/3M toggle + subtitle. `dragHandle` renders a
 // reorder grip at the start of the header when the card is in a reorder list.
-function HealthChartCard({ title, icon, tf, setTf, headline, sub, dragHandle, onExpand, children }) {
+function HealthChartCard({ title, icon, tf, setTf, tfOptions = HEALTH_TFS, headline, sub, dragHandle, onExpand, children }) {
   return (
     <Card style={{ padding: 14, borderLeft: `3px solid ${UI.gold}` }}>
       {/* flexWrap + the toggle's flexShrink:0 let the TF toggle drop to its own
@@ -517,7 +523,7 @@ function HealthChartCard({ title, icon, tf, setTf, headline, sub, dragHandle, on
           </button>
         )}
         <div data-reorder-ignore="true" style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `0.5px solid ${UI.hairStrong}`, flexShrink: 0 }}>
-          {HEALTH_TFS.map(t => (
+          {tfOptions.map(t => (
             <button key={t.id} onClick={() => setTf(t.id)} style={{
               padding: '2px 8px', cursor: 'pointer', border: 'none',
               background: tf === t.id ? 'var(--accent)' : 'transparent',
@@ -1987,32 +1993,19 @@ function HealthDateStrip({ store, setStore, selectedDate, onSelect, onLog, targe
   );
 }
 
-// Shared "Today" filter pill for the readings feed on the multi-reading-per-day
-// cards (Glucose/BP/Body Temp). Local to each card, not the shared tf window
-// (1W/1M/3M): narrowing to today only makes sense for a card you might log
-// several times a day, so it stays off the single-daily-value cards entirely.
-function todayToggleStyle(active) {
-  return {
-    padding: '3px 9px', borderRadius: 4, cursor: 'pointer',
-    background: active ? 'var(--accent)' : 'transparent',
-    border: `1px solid ${active ? 'var(--accent)' : UI.hairStrong}`,
-    color: active ? '#0a0805' : UI.inkFaint,
-    fontFamily: UI.fontUi, fontSize: 9, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
-    WebkitTapHighlightColor: 'transparent',
-  };
-}
-
 // ─── Glucose card ─────────────────────────────────────────────────────────────
 
-function GlucoseCard({ glucoseLogs, unit, tf, setTf, dragHandle, onExpand, compact = false }) {
+function GlucoseCard({ glucoseLogs, unit, dragHandle, onExpand, compact = false }) {
   const today = LB.todayISO();
-  const tfDays = id => (HEALTH_TFS.find(t => t.id === id) || HEALTH_TFS[0]).days;
+  // Own tf, independent of the shared one HealthScreen hands the single-
+  // daily-value cards: 1D (HEALTH_TFS_TODAY) only makes sense here.
+  const [tf, setTf] = useStateH('1W');
+  const tfDays = id => (HEALTH_TFS_TODAY.find(t => t.id === id) || HEALTH_TFS_TODAY[0]).days;
   const { start, end } = healthWindow(tfDays(tf));
   const unitLabel = glucoseUnitLabel(unit);
   const refLow  = unit === 'mgdl' ? Math.round(GLUCOSE_REF_LOW  * GLUCOSE_FACTOR) : GLUCOSE_REF_LOW;
   const refHigh = unit === 'mgdl' ? Math.round(GLUCOSE_REF_HIGH * GLUCOSE_FACTOR) : GLUCOSE_REF_HIGH;
   const dec = unit === 'mgdl' ? 0 : 1;
-  const [todayOnly, setTodayOnly] = useStateH(false);
 
   const inWindow = useMemoH(
     () => (glucoseLogs || []).filter(l => l.date >= start && l.date <= end),
@@ -2030,19 +2023,16 @@ function GlucoseCard({ glucoseLogs, unit, tf, setTf, dragHandle, onExpand, compa
     [...inWindow].sort((a, b) => b.date.localeCompare(a.date) || b.time.localeCompare(a.time)).slice(0, 30),
     [inWindow]
   );
-  // The Today toggle only narrows the FEED list, the chart above keeps
-  // showing the full tf window for trend context.
-  const feedReadings = todayOnly ? sortedReadings.filter(n => n.date === today) : sortedReadings;
   const CTX_COLORS = { fasted: 'var(--accent)', fed: '#4a9fe0', other: UI.inkSoft };
 
   return (
-    <HealthChartCard title="Glucose" icon="fa-droplet" tf={tf} setTf={setTf}
+    <HealthChartCard title="Glucose" icon="fa-droplet" tf={tf} setTf={setTf} tfOptions={HEALTH_TFS_TODAY}
       headline={latestDisp != null ? String(latestDisp) : null} sub={latestDisp != null ? unitLabel : null} dragHandle={dragHandle} onExpand={onExpand}>
       {!inWindow.length ? (
-        <HealthChartEmpty label="No glucose readings in this range" />
+        <HealthChartEmpty label={tf === '1D' ? 'No glucose readings logged today yet' : 'No glucose readings in this range'} />
       ) : (
         <>
-          <GlucoseScatterChart readings={inWindow} from={start} to={end} unit={unit} todayMode={todayOnly} />
+          <GlucoseScatterChart readings={inWindow} from={start} to={end} unit={unit} todayMode={tf === '1D'} />
           {/* Reference legend + readings feed only in the full (expanded) view,
               compact (2-col grid) shows just the chart, so this card's height
               matches its plain-chart neighbours instead of towering over them. */}
@@ -2072,15 +2062,11 @@ function GlucoseCard({ glucoseLogs, unit, tf, setTf, dragHandle, onExpand, compa
               Normal postprandial &lt;{(unit === 'mgdl' ? Math.round(GLUCOSE_REF_FED * GLUCOSE_FACTOR) : GLUCOSE_REF_FED).toFixed(dec)} {unitLabel} (2h after meal)
             </span>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 }}>
-            <span className="micro" style={{ color: UI.inkFaint }}>Readings</span>
-            <button onClick={() => setTodayOnly(o => !o)} style={todayToggleStyle(todayOnly)}>Today</button>
-          </div>
-          {feedReadings.length > 0 ? (
+          {sortedReadings.length > 0 && (
             <>
               <div style={{ height: '0.5px', background: UI.hair, margin: '8px 0' }} />
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {feedReadings.map(n => (
+                {sortedReadings.map(n => (
                   <div key={n.id} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
                     <span style={{ width: 7, height: 7, borderRadius: '50%', background: CTX_COLORS[n.context] || UI.inkSoft, display: 'inline-block', flexShrink: 0, marginTop: 2 }} />
                     <div style={{ flex: 1, minWidth: 0 }}>
@@ -2092,8 +2078,6 @@ function GlucoseCard({ glucoseLogs, unit, tf, setTf, dragHandle, onExpand, compa
                 ))}
               </div>
             </>
-          ) : todayOnly && (
-            <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkGhost, padding: '8px 0 2px' }}>No readings logged today yet.</div>
           )}
           </>
           )}
@@ -2105,11 +2089,13 @@ function GlucoseCard({ glucoseLogs, unit, tf, setTf, dragHandle, onExpand, compa
 
 // ─── Blood pressure card ────────────────────────────────────────────────────
 
-function BloodPressureCard({ bpLogs, tf, setTf, dragHandle, onExpand, compact = false }) {
+function BloodPressureCard({ bpLogs, dragHandle, onExpand, compact = false }) {
   const today = LB.todayISO();
-  const tfDays = id => (HEALTH_TFS.find(t => t.id === id) || HEALTH_TFS[0]).days;
+  // Own tf, independent of the shared one HealthScreen hands the single-
+  // daily-value cards: 1D (HEALTH_TFS_TODAY) only makes sense here.
+  const [tf, setTf] = useStateH('1W');
+  const tfDays = id => (HEALTH_TFS_TODAY.find(t => t.id === id) || HEALTH_TFS_TODAY[0]).days;
   const { start, end } = healthWindow(tfDays(tf));
-  const [todayOnly, setTodayOnly] = useStateH(false);
 
   const inWindow = useMemoH(
     () => (bpLogs || []).filter(l => l.date >= start && l.date <= end),
@@ -2124,16 +2110,15 @@ function BloodPressureCard({ bpLogs, tf, setTf, dragHandle, onExpand, compact = 
     [...inWindow].sort((a, b) => b.date.localeCompare(a.date) || b.time.localeCompare(a.time)).slice(0, 30),
     [inWindow]
   );
-  const feedReadings = todayOnly ? sortedReadings.filter(n => n.date === today) : sortedReadings;
 
   return (
-    <HealthChartCard title="BP" icon="fa-heart-pulse" tf={tf} setTf={setTf}
+    <HealthChartCard title="BP" icon="fa-heart-pulse" tf={tf} setTf={setTf} tfOptions={HEALTH_TFS_TODAY}
       headline={latest ? `${latest.systolic}/${latest.diastolic}` : null} sub={latest ? 'mmHg' : null} dragHandle={dragHandle} onExpand={onExpand}>
       {!inWindow.length ? (
-        <HealthChartEmpty label="No blood pressure readings in this range" />
+        <HealthChartEmpty label={tf === '1D' ? 'No blood pressure readings logged today yet' : 'No blood pressure readings in this range'} />
       ) : (
         <>
-          <BpScatterChart readings={inWindow} from={start} to={end} todayMode={todayOnly} />
+          <BpScatterChart readings={inWindow} from={start} to={end} todayMode={tf === '1D'} />
           {/* Legend + readings feed only in the full (expanded) view, compact
               (2-col grid) shows just the chart, matching plain-chart neighbours. */}
           {!compact && (
@@ -2149,15 +2134,11 @@ function BloodPressureCard({ bpLogs, tf, setTf, dragHandle, onExpand, compact = 
             </span>
             <span style={{ fontSize: 9, fontFamily: UI.fontUi, color: UI.inkGhost }}>· dashed = 120/80 normal</span>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 }}>
-            <span className="micro" style={{ color: UI.inkFaint }}>Readings</span>
-            <button onClick={() => setTodayOnly(o => !o)} style={todayToggleStyle(todayOnly)}>Today</button>
-          </div>
-          {feedReadings.length > 0 ? (
+          {sortedReadings.length > 0 && (
             <>
               <div style={{ height: '0.5px', background: UI.hair, margin: '8px 0' }} />
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {feedReadings.map(n => (
+                {sortedReadings.map(n => (
                   <div key={n.id} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 9, fontFamily: UI.fontUi, color: UI.inkGhost }}>{healthFmtDate(n.date, { day: 'numeric', month: 'short' })} · {n.time}</div>
@@ -2168,8 +2149,6 @@ function BloodPressureCard({ bpLogs, tf, setTf, dragHandle, onExpand, compact = 
                 ))}
               </div>
             </>
-          ) : todayOnly && (
-            <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkGhost, padding: '8px 0 2px' }}>No readings logged today yet.</div>
           )}
           </>
           )}
@@ -2181,12 +2160,14 @@ function BloodPressureCard({ bpLogs, tf, setTf, dragHandle, onExpand, compact = 
 
 // ─── Body temperature card ──────────────────────────────────────────────────
 
-function BodyTempCard({ tempLogs, unit, tf, setTf, dragHandle, onExpand, compact = false }) {
+function BodyTempCard({ tempLogs, unit, dragHandle, onExpand, compact = false }) {
   const today = LB.todayISO();
-  const tfDays = id => (HEALTH_TFS.find(t => t.id === id) || HEALTH_TFS[0]).days;
+  // Own tf, independent of the shared one HealthScreen hands the single-
+  // daily-value cards: 1D (HEALTH_TFS_TODAY) only makes sense here.
+  const [tf, setTf] = useStateH('1W');
+  const tfDays = id => (HEALTH_TFS_TODAY.find(t => t.id === id) || HEALTH_TFS_TODAY[0]).days;
   const { start, end } = healthWindow(tfDays(tf));
   const unitLabel = tempUnitLabel(unit);
-  const [todayOnly, setTodayOnly] = useStateH(false);
 
   const inWindow = useMemoH(
     () => (tempLogs || []).filter(l => l.date >= start && l.date <= end),
@@ -2202,42 +2183,31 @@ function BodyTempCard({ tempLogs, unit, tf, setTf, dragHandle, onExpand, compact
     [...inWindow].sort((a, b) => b.date.localeCompare(a.date) || b.time.localeCompare(a.time)).slice(0, 30),
     [inWindow]
   );
-  const feedReadings = todayOnly ? sortedReadings.filter(n => n.date === today) : sortedReadings;
 
   return (
-    <HealthChartCard title="Body Temp" icon="fa-temperature-half" tf={tf} setTf={setTf}
+    <HealthChartCard title="Body Temp" icon="fa-temperature-half" tf={tf} setTf={setTf} tfOptions={HEALTH_TFS_TODAY}
       headline={latestDisp != null ? String(latestDisp) : null} sub={latestDisp != null ? unitLabel : null} dragHandle={dragHandle} onExpand={onExpand}>
       {!inWindow.length ? (
-        <HealthChartEmpty label="No temperature readings in this range" />
+        <HealthChartEmpty label={tf === '1D' ? 'No temperature readings logged today yet' : 'No temperature readings in this range'} />
       ) : (
         <>
-          <TempScatterChart readings={inWindow} from={start} to={end} unit={unit} todayMode={todayOnly} />
+          <TempScatterChart readings={inWindow} from={start} to={end} unit={unit} todayMode={tf === '1D'} />
           {/* Readings feed only in the full (expanded) view, compact (2-col
               grid) shows just the chart, matching plain-chart neighbours. */}
-          {!compact && (
+          {!compact && sortedReadings.length > 0 && (
             <>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 6 }}>
-                <span className="micro" style={{ color: UI.inkFaint }}>Readings</span>
-                <button onClick={() => setTodayOnly(o => !o)} style={todayToggleStyle(todayOnly)}>Today</button>
-              </div>
-              {feedReadings.length > 0 ? (
-                <>
-                  <div style={{ height: '0.5px', background: UI.hair, margin: '8px 0' }} />
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                    {feedReadings.map(n => (
-                      <div key={n.id} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: 9, fontFamily: UI.fontUi, color: UI.inkGhost }}>{healthFmtDate(n.date, { day: 'numeric', month: 'short' })} · {n.time}</div>
-                          {n.note && <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.4, marginTop: 1 }}>{n.note}</div>}
-                        </div>
-                        <span className="num" style={{ flexShrink: 0, fontSize: 11, color: UI.inkFaint }}>{tempDisplay(n.valueC, unit)}{unitLabel}</span>
-                      </div>
-                    ))}
+              <div style={{ height: '0.5px', background: UI.hair, margin: '8px 0' }} />
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {sortedReadings.map(n => (
+                  <div key={n.id} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 9, fontFamily: UI.fontUi, color: UI.inkGhost }}>{healthFmtDate(n.date, { day: 'numeric', month: 'short' })} · {n.time}</div>
+                      {n.note && <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.4, marginTop: 1 }}>{n.note}</div>}
+                    </div>
+                    <span className="num" style={{ flexShrink: 0, fontSize: 11, color: UI.inkFaint }}>{tempDisplay(n.valueC, unit)}{unitLabel}</span>
                   </div>
-                </>
-              ) : todayOnly && (
-                <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkGhost, padding: '8px 0 2px' }}>No readings logged today yet.</div>
-              )}
+                ))}
+              </div>
             </>
           )}
         </>
@@ -2692,13 +2662,13 @@ function HealthScreen({ store, setStore, go, userId }) {
     // compact: hides the reference legend + readings feed so these match the
     // plain-chart cards' height in the grid, full detail is one expand tap away.
     glucose: (store.glucoseLogs || []).length > 0
-      ? <GlucoseCard glucoseLogs={store.glucoseLogs} unit={store.settings?.glucoseUnit ?? 'mmol'} tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('glucose')} compact />
+      ? <GlucoseCard glucoseLogs={store.glucoseLogs} unit={store.settings?.glucoseUnit ?? 'mmol'} dragHandle={handle} onExpand={expandBtn('glucose')} compact />
       : null,
     bloodPressure: (store.bloodPressureLogs || []).length > 0
-      ? <BloodPressureCard bpLogs={store.bloodPressureLogs} tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('bloodPressure')} compact />
+      ? <BloodPressureCard bpLogs={store.bloodPressureLogs} dragHandle={handle} onExpand={expandBtn('bloodPressure')} compact />
       : null,
     bodyTemp: (store.bodyTempLogs || []).length > 0
-      ? <BodyTempCard tempLogs={store.bodyTempLogs} unit={LB.defaultTempUnit(store.settings)} tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('bodyTemp')} compact />
+      ? <BodyTempCard tempLogs={store.bodyTempLogs} unit={LB.defaultTempUnit(store.settings)} dragHandle={handle} onExpand={expandBtn('bodyTemp')} compact />
       : null,
   };
 
@@ -2981,13 +2951,13 @@ function HealthClientLogs({ clientStore }) {
     // compact: hides the reference legend + readings feed so these match the
     // plain-chart cards' height in the grid, full detail is one expand tap away.
     glucose: glucoseLogs.length > 0
-      ? <GlucoseCard glucoseLogs={glucoseLogs} unit={glucoseUnit} tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('glucose')} compact />
+      ? <GlucoseCard glucoseLogs={glucoseLogs} unit={glucoseUnit} dragHandle={handle} onExpand={expandBtn('glucose')} compact />
       : null,
     bloodPressure: bloodPressureLogs.length > 0
-      ? <BloodPressureCard bpLogs={bloodPressureLogs} tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('bloodPressure')} compact />
+      ? <BloodPressureCard bpLogs={bloodPressureLogs} dragHandle={handle} onExpand={expandBtn('bloodPressure')} compact />
       : null,
     bodyTemp: bodyTempLogs.length > 0
-      ? <BodyTempCard tempLogs={bodyTempLogs} unit={clientTempUnit} tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('bodyTemp')} compact />
+      ? <BodyTempCard tempLogs={bodyTempLogs} unit={clientTempUnit} dragHandle={handle} onExpand={expandBtn('bodyTemp')} compact />
       : null,
     // Dense table, doesn't fit the 2-col grid, always full width (fullWidthCardIds).
     weekly: weeks.length ? (
