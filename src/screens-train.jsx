@@ -1233,7 +1233,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           const nextAfterGroup = lastGroupIdx + 1 < session.entries.length ? session.entries[lastGroupIdx + 1] : null;
           if (advanceFocus && nextAfterGroup) pendingFocusRef.current = firstOpenWorkingFocus(nextAfterGroup, noTechnique);
           setTimeout(() => {
-            if (lastGroupIdx + 1 >= session.entries.length) setFinishOpen(true);
+            if (lastGroupIdx + 1 >= session.entries.length) requestFinishOpen();
             else updateSession(sess => ({ ...sess, currentExIdx: lastGroupIdx + 1 }));
           }, Math.max(600, overlayHoldMs));
         } else {
@@ -2027,7 +2027,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const navigate = (dir) => {
     const newIdx = exIdx + dir;
     if (newIdx < 0) return;
-    if (newIdx >= session.entries.length) { setFinishOpen(true); return; }
+    if (newIdx >= session.entries.length) { requestFinishOpen(); return; }
     // Stepping back is browsing, not progression: mute the exercise-start
     // prompts. Forward nav leaves the flag clear so they fire on arrival.
     if (dir < 0) peekManualRef.current = true;
@@ -2063,7 +2063,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     persistRestStart(Date.now(), restDef);
     const lastGroupIdx = Math.max(...session.entries.map((e, i) => e.supersetGroup === group ? i : -1));
     setTimeout(() => {
-      if (lastGroupIdx + 1 >= session.entries.length) setFinishOpen(true);
+      if (lastGroupIdx + 1 >= session.entries.length) requestFinishOpen();
       else updateSession(sess => ({ ...sess, currentExIdx: lastGroupIdx + 1 }));
     }, 600);
     return true;
@@ -2524,6 +2524,18 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const [readinessSel, setReadinessSel] = useStateT(null);
   const [readinessReentry, setReadinessReentry] = useStateT(false);
   const [finishOpen, setFinishOpen] = useStateT(false);
+  // Set instead of calling setFinishOpen(true) directly wherever finishing the
+  // last exercise might open "End session?": if a meso feedback sheet
+  // (joint/soreness/volume) for that exercise is still open at that moment,
+  // opening "End session?" underneath it stacked both sheets at once (same
+  // z-index, whichever is declared later in the JSX just painted on top). The
+  // flush effect near the joint-feedback effect below opens it once every
+  // feedback sheet has actually closed.
+  const finishOpenPendingRef = useRefT(false);
+  const requestFinishOpen = () => {
+    if (mesoJointOpen || mesoSorenessOpen || mesoVolumeOpen) { finishOpenPendingRef.current = true; return; }
+    setFinishOpen(true);
+  };
   const [finishStep, setFinishStep] = useStateT('confirm');
   const [pendingFeel, setPendingFeel] = useStateT(null);
   const [freestyleName, setFreestyleName] = useStateT('');
@@ -3989,6 +4001,17 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // `done` left the signature unchanged on a skip, so the joint/pump/volume
     // sheet never fired and its boost gates / volume feedback were skipped.
   }, [exIdx, entry?.sets?.map(s => s.done ? 1 : s.skipped ? 2 : 0).join(','), !!mesoState, session.readiness]);
+
+  // Flushes a requestFinishOpen() call that deferred because a meso feedback
+  // sheet was open at the time (see finishOpenPendingRef above); re-runs as
+  // each sheet closes, same "retry on dependency change" pattern as the
+  // soreness/pinned-note effects above.
+  useEffectT(() => {
+    if (!finishOpenPendingRef.current) return;
+    if (mesoJointOpen || mesoSorenessOpen || mesoVolumeOpen) return;
+    finishOpenPendingRef.current = false;
+    setFinishOpen(true);
+  }, [mesoJointOpen, mesoSorenessOpen, mesoVolumeOpen]);
 
   const tempoTimerRef = useRefT(null);
   const audioCtxRef = useRefT(null);

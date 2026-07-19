@@ -1438,8 +1438,13 @@ function App() {
           runs after inProgress has already cleared. Otherwise the banner pops the
           moment a session ends and updating skips the summary (and its share
           image). It shows once the user leaves that screen (justFinished clears).
+          route.name !== 'train' additionally covers the gap in between: finish()
+          clears inProgress synchronously but can stay on route 'train' for a
+          while longer (the meso gains sheet, mesocycle-complete confirms, etc.)
+          before it navigates to the justFinished session route, and neither of
+          the two checks above sees that in-between window on its own.
           forceShowUpdateBanner (Settings "Test update banner") deliberately bypasses this. */}
-      {(forceShowUpdateBanner || (updateAvailable && !store?.inProgress && !(route?.name === 'session' && route?.justFinished) && !onboardingState)) && <UpdateBanner onUpdate={applyUpdate} />}
+      {(forceShowUpdateBanner || (updateAvailable && !store?.inProgress && route?.name !== 'train' && !(route?.name === 'session' && route?.justFinished) && !onboardingState)) && <UpdateBanner onUpdate={applyUpdate} />}
       {autoCloseNotify && <AutoCloseBanner notify={autoCloseNotify} onDismiss={() => setAutoCloseNotify(null)} />}
       {whatsNew && <WhatsNewModal entries={whatsNew} onDismiss={dismissWhatsNew} />}
       {store && <window.Screens.CoachingPendingBanner store={store} setStore={setStore} userId={userId} />}
