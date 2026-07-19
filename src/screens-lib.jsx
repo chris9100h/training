@@ -3940,19 +3940,25 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                   style={{ cursor: canHistory ? 'pointer' : 'default', WebkitTapHighlightColor: 'transparent' }}
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8, gap: 8 }}>
-                    <div className="display" style={{ fontSize: 17, color: UI.ink, lineHeight: 1.1, ...(progBump ? { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } : {}) }}>
+                    <div className="display" style={{ fontSize: 17, color: UI.ink, lineHeight: 1.1, ...(progBump && !capturing ? { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } : {}) }}>
                       {exName}{canHistory && <span style={{ fontSize: 11, color: UI.inkFaint, marginLeft: 5 }}>›</span>}
                     </div>
-                    {progBump && (() => {
-                      // Same visual language as the Meso "Changes earned" chip
-                      // (deltaChip in the recap sheet below): accepted looks like
-                      // an earned +kg pill, declined is muted/struck-through. A
-                      // real toggle either way, not a one-shot undo.
+                    {progBump && !capturing && (() => {
+                      // Hidden (not just made inert) during screenshot capture: it
+                      // shows a FORWARD-looking change (what happens next session),
+                      // not what this session's own logged sets show, so next to
+                      // e.g. three sets all at the same weight it reads as a
+                      // labeling error to anyone viewing the shared image without
+                      // app context. Same visual language as the Meso "Changes
+                      // earned" chip (deltaChip in the recap sheet below) for the
+                      // live in-app view: accepted looks like an earned +kg pill,
+                      // declined is muted/struck-through. A real toggle either way,
+                      // not a one-shot undo.
                       const label = progBump.declined ? 'Declined' : `+${progBump.nextKg - progBump.currentKg} ${UI.unit()}`;
                       const chipStyle = progBump.declined
                         ? { fontFamily: UI.fontNum, fontSize: 12, fontWeight: 700, color: UI.inkFaint, background: 'rgba(var(--knurl-rgb),0.08)', border: `1px solid ${UI.hair}`, borderRadius: 4, padding: '3px 8px', whiteSpace: 'nowrap', textDecoration: 'line-through', flexShrink: 0 }
                         : { fontFamily: UI.fontNum, fontSize: 12, fontWeight: 700, color: 'var(--accent)', background: 'rgba(var(--accent-rgb),0.10)', border: '1px solid rgba(var(--accent-rgb),0.28)', borderRadius: 4, padding: '3px 8px', whiteSpace: 'nowrap', flexShrink: 0 };
-                      return progBumpEditable && !capturing ? (
+                      return progBumpEditable ? (
                         <button onClick={(ev) => { ev.stopPropagation(); toggleProgressionBump(progBumpKey); }} style={{ ...chipStyle, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>{label}</button>
                       ) : (
                         <span style={chipStyle}>{label}</span>
