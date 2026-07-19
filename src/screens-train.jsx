@@ -8539,7 +8539,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         </Btn>
         </>) : (<>
         <div style={{ fontSize: 13.5, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 4, lineHeight: 1.45 }}>How did that feel?</div>
-        <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: 1.4 }}>Joints · weight · pump · how you feel about this lift</div>
+        <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: 1.4 }}>Joints · weight · pump · affinity</div>
         <Btn onClick={() => handleJointAnswer('none', 'just_right', 'moderate', 'ok')} style={{ width: '100%' }}>On point</Btn>
         <Btn kind="ghost" onClick={() => { setMesoJointSel('none'); setMesoJointWeightSel('just_right'); setMesoJointPumpSel('moderate'); setMesoJointAffinitySel(mesoJointAffinitySel ?? 'ok'); setMesoJointExpanded(true); }} style={{ width: '100%', marginTop: 8 }}>Flag a detail</Btn>
         </>)}
