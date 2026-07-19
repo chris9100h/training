@@ -17,6 +17,17 @@
    Entry shape: { id: string, date: string (YYYY-MM-DD), title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.632',
+    date: '2026-07-19',
+    title: 'Second-Guess Your Bumps, Anytime',
+    items: [
+      "🔄 Changed your mind on a bump? Fixable now. Open a finished session and every exercise with a Smart Progression or Autoregulation bump shows a small chip, tap it to flip between accepted and declined.",
+      "🤐 Skip an exercise entirely and Autoregulation stops asking how it felt. Makes sense when you think about it: nothing happened, nothing to report on.",
+      "✅ The \"How do you feel today?\" check-in now needs an actual answer. Confirm used to quietly default to Normal if you tapped through without picking, not anymore, Fresh/Normal/Rough first, then Confirm.",
+      "🪜 Fixed the rep target shown mid-set on Autoregulation/Mesocycle plans: it now correctly steps down set to set (say 10 → 9 → 8 for a 3-set 8-10 range) instead of demanding the top number on every single set.",
+    ],
+  },
+  {
     id: 'v2.629',
     date: '2026-07-19',
     title: 'Decline The Bump',
