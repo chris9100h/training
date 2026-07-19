@@ -12,10 +12,11 @@ const { useState: useStateH, useEffect: useEffectH, useMemo: useMemoH, useRef: u
 const HEALTH_TFS = [{ id: '1W', days: 7 }, { id: '1M', days: 30 }, { id: '3M', days: 90 }];
 // 1D only makes sense on cards you might log more than once a day (Glucose/
 // BP/Body Temp), so it's a separate options list passed just to those, not
-// added to HEALTH_TFS itself (every other card shares that one as-is). Those
-// three cards also run their own local tf, independent of the shared one
-// HealthScreen hands the single-daily-value cards.
-const HEALTH_TFS_TODAY = [...HEALTH_TFS, { id: '1D', days: 1 }];
+// added to HEALTH_TFS itself (every other card shares that one as-is). 1W/1M/
+// 3M on those three cards still drive (and follow) the SAME shared tf state
+// as every other card; 1D is a local-only overlay on top that never touches
+// the shared value, see GlucoseCard/BloodPressureCard/BodyTempCard.
+const HEALTH_TFS_TODAY = [{ id: '1D', days: 1 }, ...HEALTH_TFS];
 
 // Whole-day difference between two 'YYYY-MM-DD' dates (b − a), noon-anchored to
 // dodge DST/midnight shifts.
@@ -1995,11 +1996,20 @@ function HealthDateStrip({ store, setStore, selectedDate, onSelect, onLog, targe
 
 // ─── Glucose card ─────────────────────────────────────────────────────────────
 
-function GlucoseCard({ glucoseLogs, unit, dragHandle, onExpand, compact = false }) {
+function GlucoseCard({ glucoseLogs, unit, tf: sharedTf, setTf: setSharedTf, dragHandle, onExpand, compact = false }) {
   const today = LB.todayISO();
-  // Own tf, independent of the shared one HealthScreen hands the single-
-  // daily-value cards: 1D (HEALTH_TFS_TODAY) only makes sense here.
-  const [tf, setTf] = useStateH('1W');
+  // 1D is a local-only overlay on top of the shared tf every card (including
+  // this one for 1W/1M/3M) participates in: picking 1D here never touches
+  // the shared value, so the other cards stay put; picking 1W/1M/3M here
+  // both clears the overlay and drives the shared value, same as any other
+  // card's tf buttons always have.
+  const [showToday, setShowToday] = useStateH(false);
+  const tf = showToday ? '1D' : sharedTf;
+  const setTf = id => {
+    if (id === '1D') { setShowToday(true); return; }
+    setShowToday(false);
+    setSharedTf(id);
+  };
   const tfDays = id => (HEALTH_TFS_TODAY.find(t => t.id === id) || HEALTH_TFS_TODAY[0]).days;
   const { start, end } = healthWindow(tfDays(tf));
   const unitLabel = glucoseUnitLabel(unit);
@@ -2089,11 +2099,20 @@ function GlucoseCard({ glucoseLogs, unit, dragHandle, onExpand, compact = false 
 
 // ─── Blood pressure card ────────────────────────────────────────────────────
 
-function BloodPressureCard({ bpLogs, dragHandle, onExpand, compact = false }) {
+function BloodPressureCard({ bpLogs, tf: sharedTf, setTf: setSharedTf, dragHandle, onExpand, compact = false }) {
   const today = LB.todayISO();
-  // Own tf, independent of the shared one HealthScreen hands the single-
-  // daily-value cards: 1D (HEALTH_TFS_TODAY) only makes sense here.
-  const [tf, setTf] = useStateH('1W');
+  // 1D is a local-only overlay on top of the shared tf every card (including
+  // this one for 1W/1M/3M) participates in: picking 1D here never touches
+  // the shared value, so the other cards stay put; picking 1W/1M/3M here
+  // both clears the overlay and drives the shared value, same as any other
+  // card's tf buttons always have.
+  const [showToday, setShowToday] = useStateH(false);
+  const tf = showToday ? '1D' : sharedTf;
+  const setTf = id => {
+    if (id === '1D') { setShowToday(true); return; }
+    setShowToday(false);
+    setSharedTf(id);
+  };
   const tfDays = id => (HEALTH_TFS_TODAY.find(t => t.id === id) || HEALTH_TFS_TODAY[0]).days;
   const { start, end } = healthWindow(tfDays(tf));
 
@@ -2160,11 +2179,20 @@ function BloodPressureCard({ bpLogs, dragHandle, onExpand, compact = false }) {
 
 // ─── Body temperature card ──────────────────────────────────────────────────
 
-function BodyTempCard({ tempLogs, unit, dragHandle, onExpand, compact = false }) {
+function BodyTempCard({ tempLogs, unit, tf: sharedTf, setTf: setSharedTf, dragHandle, onExpand, compact = false }) {
   const today = LB.todayISO();
-  // Own tf, independent of the shared one HealthScreen hands the single-
-  // daily-value cards: 1D (HEALTH_TFS_TODAY) only makes sense here.
-  const [tf, setTf] = useStateH('1W');
+  // 1D is a local-only overlay on top of the shared tf every card (including
+  // this one for 1W/1M/3M) participates in: picking 1D here never touches
+  // the shared value, so the other cards stay put; picking 1W/1M/3M here
+  // both clears the overlay and drives the shared value, same as any other
+  // card's tf buttons always have.
+  const [showToday, setShowToday] = useStateH(false);
+  const tf = showToday ? '1D' : sharedTf;
+  const setTf = id => {
+    if (id === '1D') { setShowToday(true); return; }
+    setShowToday(false);
+    setSharedTf(id);
+  };
   const tfDays = id => (HEALTH_TFS_TODAY.find(t => t.id === id) || HEALTH_TFS_TODAY[0]).days;
   const { start, end } = healthWindow(tfDays(tf));
   const unitLabel = tempUnitLabel(unit);
@@ -2662,13 +2690,13 @@ function HealthScreen({ store, setStore, go, userId }) {
     // compact: hides the reference legend + readings feed so these match the
     // plain-chart cards' height in the grid, full detail is one expand tap away.
     glucose: (store.glucoseLogs || []).length > 0
-      ? <GlucoseCard glucoseLogs={store.glucoseLogs} unit={store.settings?.glucoseUnit ?? 'mmol'} dragHandle={handle} onExpand={expandBtn('glucose')} compact />
+      ? <GlucoseCard glucoseLogs={store.glucoseLogs} unit={store.settings?.glucoseUnit ?? 'mmol'} tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('glucose')} compact />
       : null,
     bloodPressure: (store.bloodPressureLogs || []).length > 0
-      ? <BloodPressureCard bpLogs={store.bloodPressureLogs} dragHandle={handle} onExpand={expandBtn('bloodPressure')} compact />
+      ? <BloodPressureCard bpLogs={store.bloodPressureLogs} tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('bloodPressure')} compact />
       : null,
     bodyTemp: (store.bodyTempLogs || []).length > 0
-      ? <BodyTempCard tempLogs={store.bodyTempLogs} unit={LB.defaultTempUnit(store.settings)} dragHandle={handle} onExpand={expandBtn('bodyTemp')} compact />
+      ? <BodyTempCard tempLogs={store.bodyTempLogs} unit={LB.defaultTempUnit(store.settings)} tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('bodyTemp')} compact />
       : null,
   };
 
@@ -2951,13 +2979,13 @@ function HealthClientLogs({ clientStore }) {
     // compact: hides the reference legend + readings feed so these match the
     // plain-chart cards' height in the grid, full detail is one expand tap away.
     glucose: glucoseLogs.length > 0
-      ? <GlucoseCard glucoseLogs={glucoseLogs} unit={glucoseUnit} dragHandle={handle} onExpand={expandBtn('glucose')} compact />
+      ? <GlucoseCard glucoseLogs={glucoseLogs} unit={glucoseUnit} tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('glucose')} compact />
       : null,
     bloodPressure: bloodPressureLogs.length > 0
-      ? <BloodPressureCard bpLogs={bloodPressureLogs} dragHandle={handle} onExpand={expandBtn('bloodPressure')} compact />
+      ? <BloodPressureCard bpLogs={bloodPressureLogs} tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('bloodPressure')} compact />
       : null,
     bodyTemp: bodyTempLogs.length > 0
-      ? <BodyTempCard tempLogs={bodyTempLogs} unit={clientTempUnit} dragHandle={handle} onExpand={expandBtn('bodyTemp')} compact />
+      ? <BodyTempCard tempLogs={bodyTempLogs} unit={clientTempUnit} tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('bodyTemp')} compact />
       : null,
     // Dense table, doesn't fit the 2-col grid, always full width (fullWidthCardIds).
     weekly: weeks.length ? (
