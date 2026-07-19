@@ -17,6 +17,17 @@
    Entry shape: { id: string, date: string (YYYY-MM-DD), title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.629',
+    date: '2026-07-19',
+    title: 'Decline The Bump',
+    items: [
+      "💪 Hit your reps but don't want the extra weight? Now you get a real say. Whenever Smart Progression unlocks a bump, the toast asks \"Hell yeah\" or \"Decline\" instead of just handing it to you. On Autoregulation/Mesocycle plans, the same choice shows up per exercise on the \"Next session\" screen after you finish.",
+      "🎯 Built for exactly the lateral raise problem: the smallest available jump can be plenty on a big compound lift, but brutal on a small isolation move where it wrecks your form before it wrecks your ego. Now you don't have to choose between leaving gains on the table and grinding out ugly reps.",
+      "🔁 Declining isn't a permanent \"never again\", it's a one-time answer. Earn the same bump later and you'll be asked fresh, every time, no memory, no cooldown.",
+      "↩️ Fat-fingered it? Fixable. Open that session later: on Autoregulation, Feedback Recap → Changes earned, tap the chip to flip it back. On Smart Progression, the exercise shows a small \"Bump declined\" badge with an undo tap, as long as you haven't trained it again since.",
+    ],
+  },
+  {
     id: 'v2.624',
     date: '2026-07-18',
     title: 'Health Tab Gets Some Elbow Room',
