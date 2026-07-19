@@ -5071,7 +5071,12 @@ function applyMesoFeedbackEdit(mesoState, raw, edit, ctx) {
 // (all per exId, every mode) AND (load-only) not-still-sore. A rep-miss CUT (a negative
 // existing boost) is rep-driven, not feedback-driven, so it is preserved untouched.
 // earnInputs = this session's exercises [{ exId, key, muscle, allHit, increment }].
-// Pure: returns new mesoState.
+// Also clears any decline marker for a key re-evaluated here, mirroring
+// computeMesoGains' live pairing of reearnMesoWeightBoosts with
+// clearMesoWeightBoostDeclines: a post-hoc feedback edit that changes whether/how
+// much a key earns must not leave a stale decline behind (the live session's own
+// decline, if any, is a per-instance answer to what was earned live, not to
+// whatever the edit later recomputes). Pure: returns new mesoState.
 function reearnMesoBoostsFromAnswers(mesoState, answers, earnInputs, loadOnly) {
   const gates = mesoGateSetsFromAnswers(answers, loadOnly);
   const wb = mesoState.weightBoosts || {};
@@ -5094,7 +5099,11 @@ function reearnMesoBoostsFromAnswers(mesoState, answers, earnInputs, loadOnly) {
     if (loadOnly && e.muscle && gates.soreBlock.has(e.muscle)) continue;
     earned[e.key] = e.increment;
   }
-  return { ...mesoState, weightBoosts: reearnMesoWeightBoosts(wb, sessionKeys, earned) };
+  return {
+    ...mesoState,
+    weightBoosts: reearnMesoWeightBoosts(wb, sessionKeys, earned),
+    weightBoostDeclines: clearMesoWeightBoostDeclines(mesoState.weightBoostDeclines, sessionKeys),
+  };
 }
 
 // Recompute the recap "changes earned" rows (name + weightDelta + setDelta per

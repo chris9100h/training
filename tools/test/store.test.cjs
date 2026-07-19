@@ -1231,6 +1231,22 @@ async function testAsync(name, fn) {
     const out = LB.reearnMesoBoostsFromAnswers({ weightBoosts: {} }, passAnswers, earnInputs, false);
     assert.strictEqual(out.weightBoosts.e1_d1, 2.5);
   });
+  test('reearnMesoBoostsFromAnswers: a post-hoc edit clears a stale decline on the re-evaluated key', () => {
+    // The user declined e1_d1's boost in the live session (weightBoostDeclines set),
+    // then later edits that session's feedback answers. The re-earn must clear the
+    // stale decline too, mirroring computeMesoGains' live pairing of
+    // reearnMesoWeightBoosts with clearMesoWeightBoostDeclines: an edit that changes
+    // whether/how much a key earns can't leave an old per-instance answer stuck.
+    const prev = { weightBoosts: { e1_d1: 2.5 }, weightBoostDeclines: { e1_d1: true } };
+    const out = LB.reearnMesoBoostsFromAnswers(prev, passAnswers, earnInputs, false);
+    assert.ok(!('e1_d1' in out.weightBoostDeclines), 'decline cleared on re-evaluation, whether it re-earned or not');
+  });
+  test('reearnMesoBoostsFromAnswers: a decline for a key NOT in this edit\'s earnInputs is left alone', () => {
+    const prev = { weightBoosts: { e1_d1: 2.5, e2_d1: 2.5 }, weightBoostDeclines: { e1_d1: true, e2_d1: true } };
+    const out = LB.reearnMesoBoostsFromAnswers(prev, passAnswers, earnInputs, false); // earnInputs only covers e1_d1
+    assert.ok(!('e1_d1' in out.weightBoostDeclines), 'e1_d1 was re-evaluated, decline cleared');
+    assert.strictEqual(out.weightBoostDeclines.e2_d1, true, 'e2_d1 untouched, not part of this edit');
+  });
   test('reearnMesoBoostsFromAnswers: a too-heavy weight-feel drops the boost (Volume+Load, per exId)', () => {
     const ans = { joint: { e1: { answer: 'none', pump: 'amazing', weight: 'too_much' } }, volume: { chest: { muscle: 'chest', exIds: ['e1'], volume: 'just_right' } }, soreness: {} };
     const out = LB.reearnMesoBoostsFromAnswers({ weightBoosts: { e1_d1: 2.5 } }, ans, earnInputs, false);
