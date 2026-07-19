@@ -349,7 +349,7 @@ function AutoregGuideScreen({ store, go, mode: modeProp, back }) {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 11 }}>
               <AGStat k="Learned ceiling" v="Per muscle" s="Your MRV is stored per muscle, not per exercise, and averaged across blocks. A single bad week moves it a little, so it settles on your real ceiling over time." />
               <AGStat k="Self-timed block" v="Recovery, not a number" vColor={UI.gold} s="A block ends when you hit the ceiling, not on a fixed date. Take the deload and the app starts a fresh block right there." />
-              <AGStat k="Reset & re-ramp" v="Back off, build again" s="On that reset each exercise drops straight back to your plan's starting set count (never lower), then set adds climb again, capped by the same learned ceiling." />
+              <AGStat k="Reset & re-ramp" v="Back off, build again" s="On that reset each exercise drops back to its current floor, not zero. That floor starts at your plan's set count and drifts with your learned ceiling over blocks instead of staying frozen there forever, then set adds climb again, capped by the same ceiling." />
             </div>
             <div style={{ ...cardStyle, borderLeft: `3px solid ${UI.gold}`, marginTop: 16 }}>
               <AGKick color={UI.gold}>Per mode</AGKick>
@@ -647,7 +647,7 @@ function AutoregGuideScreen({ store, go, mode: modeProp, back }) {
               {!isC && (
                 <div style={{ ...cardStyle, borderLeft: `3px solid ${UI.gold}` }}>
                   <h3 className="display" style={h3}>3 · Overreach-driven</h3>
-                  <p style={{ fontSize: 14, color: UI.inkSoft, margin: 0 }}>When a muscle hits its learned volume ceiling (see the Landmarks section), the finish screen offers a deload right then, with the reason spelled out. Take it and the block resets: each lift drops back to your plan's starting set count and a fresh block re-ramps. It is a suggestion: wave it off and keep training.</p>
+                  <p style={{ fontSize: 14, color: UI.inkSoft, margin: 0 }}>When a muscle hits its learned volume ceiling (see the Landmarks section), the finish screen offers a deload right then, with the reason spelled out. Take it and the block resets: each lift drops back to its current floor (starts at your plan's set count, then drifts up or down with your learned ceiling over time, never mid-block) and a fresh block re-ramps. It is a suggestion: wave it off and keep training.</p>
                 </div>
               )}
             </div>

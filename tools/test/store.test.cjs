@@ -2798,7 +2798,7 @@ async function testAsync(name, fn) {
     test('updateLandmarkMrv: first observation seeds the ceiling', () => {
       const out = LB.updateLandmarkMrv(null, 'Chest', 18);
       assert.strictEqual(out.landmarks.Chest.mrv, 18, 'first flag seeds mrv at the observed set count');
-      assert.strictEqual(out.version, 2, 'stamps the P3 blob version');
+      assert.strictEqual(out.version, 3, 'stamps the P3 blob version');
     });
 
     test('updateLandmarkMrv: a single low spike does NOT fully drop a learned ceiling', () => {
@@ -2845,6 +2845,112 @@ async function testAsync(name, fn) {
       assert.strictEqual(out.landmarks.Chest.mrv, 20, 'landmarks persist across the block snapshot');
       assert.strictEqual(out.block.startDate, '2026-07-16', 'records the new block start date');
       assert.strictEqual(out.block.startVolByMuscle.Chest, 12, 'records per-muscle start volume');
+    });
+
+    test('snapshotBlockStart: also snapshots startMrvByMuscle from current landmarks', () => {
+      const withLm = LB.updateLandmarkMrv(null, 'Chest', 20);
+      const out = LB.snapshotBlockStart(withLm, '2026-07-19', { Chest: 12 });
+      assert.strictEqual(out.block.startMrvByMuscle.Chest, 20);
+    });
+
+    test('muscleRosterKeys: same exercise on two days yields two independent keys', () => {
+      const sch = { days: [{ id: 'd1', items: [{ exId: 'bench' }] }, { id: 'd2', items: [{ exId: 'bench' }] }] };
+      const muscleOf = (id) => (id === 'bench' ? 'Chest' : null);
+      const keys = LB.muscleRosterKeys(sch, 'Chest', muscleOf);
+      // JSON.stringify, not deepStrictEqual: the returned array lives in the vm
+      // realm, so its prototype differs from this file's (same as the rest of
+      // this suite avoids it).
+      assert.strictEqual(JSON.stringify(keys), JSON.stringify(['bench_d1', 'bench_d2']));
+    });
+
+    test('muscleRosterKeys: a muscle with no current exercises returns an empty roster', () => {
+      const sch = { days: [{ id: 'd1', items: [{ exId: 'squat' }] }] };
+      const muscleOf = (id) => (id === 'squat' ? 'Quads' : null);
+      assert.strictEqual(LB.muscleRosterKeys(sch, 'Chest', muscleOf).length, 0);
+    });
+
+    test('muscleRosterKeys: a cardio/muscle-less item is excluded via muscleOfExId returning null', () => {
+      const sch = { days: [{ id: 'd1', items: [{ exId: 'bench' }, { exId: 'cardio1' }] }] };
+      const muscleOf = (id) => (id === 'bench' ? 'Chest' : null); // cardio1 has no tags -> null
+      assert.strictEqual(JSON.stringify(LB.muscleRosterKeys(sch, 'Chest', muscleOf)), JSON.stringify(['bench_d1']));
+    });
+
+    test('updateMevFloors: MRV grew since block start -> mevFloor grows by the delta', () => {
+      const withMrv = LB.updateLandmarkMrv(null, 'Chest', 20); // mrv 20
+      const st = { ...withMrv, block: { startMrvByMuscle: { Chest: 16 } } }; // block started at 16
+      const out = LB.updateMevFloors(st);
+      assert.strictEqual(out.landmarks.Chest.mevFloor, 4, 'grew by 20 - 16');
+    });
+
+    test('updateMevFloors: MRV shrank since block start -> mevFloor shrinks by the delta', () => {
+      const withMrv = LB.updateLandmarkMrv(null, 'Chest', 14);
+      const st = { ...withMrv, landmarks: { Chest: { ...withMrv.landmarks.Chest, mevFloor: 5 } }, block: { startMrvByMuscle: { Chest: 20 } } };
+      const out = LB.updateMevFloors(st);
+      assert.strictEqual(out.landmarks.Chest.mevFloor, 0, '5 + (14 - 20) clamps at 0, does not go negative');
+    });
+
+    test('updateMevFloors: a shrink larger than the banked floor is floored at 0, not negative', () => {
+      const withMrv = LB.updateLandmarkMrv(null, 'Chest', 10);
+      const st = { ...withMrv, landmarks: { Chest: { ...withMrv.landmarks.Chest, mevFloor: 1 } }, block: { startMrvByMuscle: { Chest: 20 } } };
+      assert.strictEqual(LB.updateMevFloors(st).landmarks.Chest.mevFloor, 0);
+    });
+
+    test('updateMevFloors: first-ever block for a muscle (no prior snapshot) makes no floor change', () => {
+      const withMrv = LB.updateLandmarkMrv(null, 'Chest', 18); // fresh landmark, no block.startMrvByMuscle yet
+      const out = LB.updateMevFloors(withMrv);
+      assert.strictEqual(out.landmarks.Chest.mevFloor, 0, 'no baseline to diff against yet');
+    });
+
+    test('redistributeMevFloors: total sets redistributed equals the banked floor', () => {
+      const sch = { days: [{ id: 'd1', items: [{ exId: 'a' }, { exId: 'b' }] }] };
+      const muscleOf = (id) => 'Chest';
+      const autoregState = { landmarks: { Chest: { mrv: 20, mevFloor: 3 } } };
+      const { deltas } = LB.redistributeMevFloors(autoregState, sch, muscleOf, {}, {});
+      const total = (deltas.a_d1 || 0) + (deltas.b_d1 || 0);
+      assert.strictEqual(total, 3);
+    });
+
+    test('redistributeMevFloors: rotates fairly across the roster (least-loaded-first)', () => {
+      const sch = { days: [{ id: 'd1', items: [{ exId: 'a' }, { exId: 'b' }] }] };
+      const muscleOf = () => 'Chest';
+      const autoregState = { landmarks: { Chest: { mrv: 20, mevFloor: 3 } } };
+      const { deltas } = LB.redistributeMevFloors(autoregState, sch, muscleOf, {}, {});
+      assert.ok(Math.abs((deltas.a_d1 || 0) - (deltas.b_d1 || 0)) <= 1, '3 sets over 2 exercises splits 2/1, never 3/0');
+    });
+
+    test('redistributeMevFloors: growthCounts absorbs the grant so the next earned pick avoids the topped-up lift', () => {
+      const sch = { days: [{ id: 'd1', items: [{ exId: 'a' }, { exId: 'b' }] }] };
+      const muscleOf = () => 'Chest';
+      // A single floor set so the grant is unambiguous (an even split across
+      // both exercises would tie growthCounts and make "who's less loaded"
+      // undefined).
+      const autoregState = { landmarks: { Chest: { mrv: 20, mevFloor: 1 } } };
+      const { growthCounts } = LB.redistributeMevFloors(autoregState, sch, muscleOf, {}, {});
+      const next = LB.pickGrowthRecipient(['a_d1', 'b_d1'], growthCounts, null);
+      // the lift that did NOT absorb the floor grant should win the next earned pick
+      const loaded = (growthCounts.a_d1 || 0) >= (growthCounts.b_d1 || 0) ? 'a_d1' : 'b_d1';
+      const unloaded = loaded === 'a_d1' ? 'b_d1' : 'a_d1';
+      assert.strictEqual(next.recipientKey, unloaded);
+    });
+
+    test('redistributeMevFloors: composes on top of an already-backed-off deltas map without disturbing cuts', () => {
+      const sch = { days: [{ id: 'd1', items: [{ exId: 'a' }] }] };
+      const muscleOf = () => 'Chest';
+      const autoregState = { landmarks: { Chest: { mrv: 20, mevFloor: 2 } } };
+      const backedOff = LB.backoffDeltas({ a_d1: 3, other_d2: -1 }); // {a_d1: 0, other_d2: -1}
+      const { deltas } = LB.redistributeMevFloors(autoregState, sch, muscleOf, backedOff, {});
+      assert.strictEqual(deltas.a_d1, 2, 'floor grants land on top of the backed-off base');
+      assert.strictEqual(deltas.other_d2, -1, 'an unrelated cut outside the roster is untouched');
+    });
+
+    test('redistributeMevFloors: an empty roster leaves deltas/growthCounts untouched, banks the floor', () => {
+      const sch = { days: [{ id: 'd1', items: [{ exId: 'squat' }] }] }; // no Chest exercises currently
+      const muscleOf = (id) => (id === 'squat' ? 'Quads' : null);
+      const autoregState = { landmarks: { Chest: { mrv: 20, mevFloor: 5 } } };
+      const { deltas, growthCounts } = LB.redistributeMevFloors(autoregState, sch, muscleOf, { x: 1 }, { y: 2 });
+      // JSON.stringify, not deepStrictEqual: see the muscleRosterKeys tests above.
+      assert.strictEqual(JSON.stringify(deltas), JSON.stringify({ x: 1 }));
+      assert.strictEqual(JSON.stringify(growthCounts), JSON.stringify({ y: 2 }));
     });
   }
 
@@ -3212,7 +3318,7 @@ async function testAsync(name, fn) {
       const st = LB.recordDeloadDecline(null, 4);
       assert.strictEqual(st.deloadNudge.block.cooldownUntil, 7);
       assert.strictEqual(st.deloadNudge.block.escalation, 1);
-      assert.strictEqual(st.version, 2, 'stamps the current P3 blob version');
+      assert.strictEqual(st.version, 3, 'stamps the current P3 blob version');
       assert.ok(st.deloadNudge.block.declinedAt, 'stamps declinedAt');
     });
     test('recordDeloadDecline: a second decline bumps escalation and re-arms the cooldown', () => {

@@ -3040,10 +3040,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // decline just closes.
   // Autoreg v2 P3: the emergent block reset (spec 2.3 / 3). Fires on deload ACCEPT in
   // Auto Full only. It is what makes Auto Full a self-timed mesocycle: snapshot the
-  // block's per-muscle volume, reset each grown exercise back to its plan base (the
-  // plan's own set count doubles as that exercise's practical MEV), clear the nudge,
-  // and stamp a fresh block anchor so the next block re-ramps from that plan-base
-  // start, capped per-muscle by the learned MRV.
+  // block's per-muscle volume, reset each grown exercise back to its plan base plus
+  // its current learned MEV floor (a per-muscle floor that tracks MRV growth/shrink
+  // across blocks instead of pinning forever to the plan's original number, see
+  // updateMevFloors/redistributeMevFloors), clear the nudge, and stamp a fresh block
+  // anchor so the next block re-ramps from that floor, capped per-muscle by the
+  // learned MRV.
   // Excluded by design: bounded Meso (weeks != null) has its own planned deload +
   // reset; Load-only (autoregLoadOnly) has fixed volume and no landmarks. Combines
   // deltas + autoregState + updatedAt into ONE meso-row write (so the staleness guard
@@ -3069,11 +3071,23 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         startCycleIndex: cur.startCycleIndex, cycleIndex: s.cycleIndex,
         statusPeriods: s.statusPeriods, cycleStartDate: s.cycleStartDate,
       });
-      // clearDeloadNudge first (the block is resetting), then snapshot the new block.
-      const nextAutoreg = LB.snapshotBlockStart(LB.clearDeloadNudge(cur.autoregState), todayIso, startVol);
+      // Autoreg v2 P3: the MEV floor tracks this block's MRV movement (grow or
+      // shrink) BEFORE the new block-start snapshot overwrites the baseline it
+      // just diffed against.
+      const withFloors = LB.updateMevFloors(cur.autoregState);
+      // clearDeloadNudge first (the block is resetting), then snapshot the new
+      // block (start volume + start MRV baseline for the NEXT reset's floor diff).
+      const nextAutoreg = LB.snapshotBlockStart(LB.clearDeloadNudge(withFloors), todayIso, startVol);
+      // Backoff first (wipes every grown delta, floor-derived or earned alike,
+      // back to plan base), THEN re-grant each muscle's full current floor across
+      // its CURRENT roster, so an exercise swap since the last reset self-heals.
+      const backedOff = LB.backoffDeltas(cur.deltas);
+      const { deltas: nextDeltas, growthCounts: nextGrowthCounts } =
+        LB.redistributeMevFloors(nextAutoreg, mesoSch, muscleOfExId, backedOff, cur.growthCounts);
       const newMeso = {
         ...cur,
-        deltas: LB.backoffDeltas(cur.deltas),
+        deltas: nextDeltas,
+        growthCounts: nextGrowthCounts,
         autoregState: nextAutoreg,
         startedAt: now,       // fresh block anchor for flex windowing
         startDate: todayIso,  // re-anchor weekday/cycle microcycle window + week counter too

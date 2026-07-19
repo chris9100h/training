@@ -5754,8 +5754,10 @@ function detectOverreach(sessions, sch, muscleOfExId, opts = {}) {
 // Current schema version of the autoreg_state blob (spec 9). Bumped when the
 // persisted shape changes; readers tolerate a missing/older version. v2 adds the
 // P3 landmarks ({ [muscle]: { mrv, updatedAt } }) and block ({ startDate,
-// startVolByMuscle }) keys alongside the P2 deloadNudge.
-const AUTOREG_STATE_VERSION = 2;
+// startVolByMuscle }) keys alongside the P2 deloadNudge. v3 adds
+// landmarks[muscle].mevFloor and block.startMrvByMuscle, the MEV floor that
+// tracks MRV growth/shrink across blocks instead of pinning to the plan base.
+const AUTOREG_STATE_VERSION = 3;
 // EMA smoothing factor for the learned per-muscle MRV (spec 2.3 / 10). A fresh
 // observation moves the ceiling by only this fraction, so a single overreaching
 // spike can never crater a muscle's learned ceiling (spec 2.2 "no learning from one
@@ -5959,10 +5961,14 @@ function updateLandmarkMrv(autoregState, muscle, observedSets, opts = {}) {
 // autoreg_state.
 function snapshotBlockStart(autoregState, startDate, startVolByMuscle) {
   const base = (autoregState && typeof autoregState === 'object') ? autoregState : {};
+  const startMrvByMuscle = {};
+  for (const [muscle, lm] of Object.entries(base.landmarks || {})) {
+    if (lm && typeof lm.mrv === 'number') startMrvByMuscle[muscle] = lm.mrv;
+  }
   return {
     ...base,
     version: AUTOREG_STATE_VERSION,
-    block: { startDate: startDate || null, startVolByMuscle: startVolByMuscle || {} },
+    block: { startDate: startDate || null, startVolByMuscle: startVolByMuscle || {}, startMrvByMuscle },
   };
 }
 
@@ -5980,6 +5986,96 @@ function backoffDeltas(deltas) {
     out[k] = (v > 0) ? 0 : v;
   }
   return out;
+}
+
+// ── Autoreg v2 P3: MEV floor tracks MRV growth/shrink across blocks (pure) ──
+
+// All exId_dayId keys of `muscle`'s exercises in the CURRENT schedule: walks
+// sch.days/items directly. All three plan types (weekday/flex/cycle) share
+// this exact static days/items shape (only session WINDOWING differs, see
+// microcycleSetsByMuscle), so no plan-type branching is needed here. The same
+// exId on two different days yields two independent keys (matches deltas'
+// existing per-day independence). muscleOfExId returning null for a
+// cardio/muscle-less item naturally excludes it. Returns [] when the muscle
+// currently has no exercises in the plan; caller treats that as "nothing to
+// redistribute right now", not an error. Pure/testable.
+function muscleRosterKeys(sch, muscle, muscleOfExId) {
+  const keys = [];
+  if (!sch || !muscle || typeof muscleOfExId !== 'function') return keys;
+  for (const d of (sch.days || [])) {
+    if (!d || d.id == null) continue;
+    for (const it of (d.items || [])) {
+      if (!it || !it.exId) continue;
+      if (muscleOfExId(it.exId) === muscle) keys.push(it.exId + '_' + d.id);
+    }
+  }
+  return keys;
+}
+
+// Advance every landmarked muscle's mevFloor by how far its MRV moved across
+// the block that is now ending: mirrors MRV in both directions (grows when MRV
+// rose since block.startMrvByMuscle, shrinks, never below 0 total, when MRV
+// fell). First-ever block for a muscle (no prior snapshot yet): delta 0, no
+// floor change ("MEV in block 1 is whatever the plan says, then the first MRV
+// gets learned"). Reads the OLD block.startMrvByMuscle, so this MUST run
+// before snapshotBlockStart overwrites it with the new one. A shrink is
+// non-destructive mid-block by construction, not special-cased: this only
+// runs at reset time, and redistributeMevFloors always re-grants the FULL
+// current total from scratch (see below), so a lower floor simply hands out
+// fewer sets at the NEXT reset, it never claws back a delta a lift is
+// currently using mid-block. Returns a NEW autoreg_state, or the SAME
+// reference when there are no landmarks yet. Pure/testable.
+function updateMevFloors(autoregState) {
+  const base = (autoregState && typeof autoregState === 'object') ? autoregState : {};
+  const landmarks = base.landmarks || {};
+  const muscles = Object.keys(landmarks);
+  if (!muscles.length) return autoregState || null;
+  const startMrv = (base.block && base.block.startMrvByMuscle) || {};
+  const nextLandmarks = { ...landmarks };
+  for (const muscle of muscles) {
+    const lm = landmarks[muscle];
+    if (!lm || typeof lm.mrv !== 'number') continue;
+    const prevStart = startMrv[muscle];
+    const delta = (typeof prevStart === 'number') ? (lm.mrv - prevStart) : 0;
+    nextLandmarks[muscle] = { ...lm, mevFloor: Math.max(0, (lm.mevFloor || 0) + delta) };
+  }
+  return { ...base, version: AUTOREG_STATE_VERSION, landmarks: nextLandmarks };
+}
+
+// Re-grant every landmarked muscle's FULL current mevFloor (not just this
+// block's delta: backoffDeltas already wiped any previously-granted floor
+// sets along with everything else, so the whole banked total is re-earned
+// from scratch every reset, which also self-heals an exercise swap since the
+// roster is read fresh) across that muscle's CURRENT roster (muscleRosterKeys),
+// one pickGrowthRecipient call per set so the same least-loaded-first fairness
+// rotation earned growth uses also governs the floor grant, threading
+// growthCounts through each call exactly like handleSorenessAnswer/
+// handleVolumeAnswer's double-call pattern already does. growthCounts absorbs
+// the grant so a lift that just received floor sets doesn't also jump the
+// queue for the next real earned grant. A muscle whose roster is currently
+// empty is skipped: its mevFloor stays banked in autoregState untouched,
+// ready to redistribute once an exercise for that muscle reappears; not an
+// error. `deltas` is the caller's ALREADY-backed-off map (call backoffDeltas
+// first, unchanged), this only ADDS floor grants on top. Returns NEW
+// { deltas, growthCounts }. Pure/testable.
+function redistributeMevFloors(autoregState, sch, muscleOfExId, deltas, growthCounts) {
+  let outDeltas = { ...(deltas || {}) };
+  let outGrowth = { ...(growthCounts || {}) };
+  const landmarks = (autoregState && autoregState.landmarks) || {};
+  if (!sch || typeof muscleOfExId !== 'function') return { deltas: outDeltas, growthCounts: outGrowth };
+  for (const muscle of Object.keys(landmarks)) {
+    const lm = landmarks[muscle];
+    const floorSets = Math.max(0, Math.round((lm && lm.mevFloor) || 0));
+    if (!floorSets) continue;
+    const roster = muscleRosterKeys(sch, muscle, muscleOfExId);
+    if (!roster.length) continue; // banked, nowhere to put it this reset
+    for (let i = 0; i < floorSets; i++) {
+      const picked = pickGrowthRecipient(roster, outGrowth, null);
+      outGrowth = picked.growthCounts;
+      if (picked.recipientKey != null) outDeltas[picked.recipientKey] = (outDeltas[picked.recipientKey] || 0) + 1;
+    }
+  }
+  return { deltas: outDeltas, growthCounts: outGrowth };
 }
 
 // ── Autoreg v2 P4: strength-stall detection + concrete swap + re-entry ramp ──
@@ -6456,7 +6552,7 @@ window.LB = {
   pickGrowthRecipient, retractGrowthGrant, pickDeclineRecipient, reearnMesoWeightBoosts, clearMesoWeightBoostDeclines, revertMesoSessionBoosts, resolveMesoSeedSuggestion, mesoPausedDays, mesoRirForWeek, mesoMuscleTrainedBeforeStart, volumeAnswerAllowsBump,
   microcycleSetsByMuscle, detectOverreach,
   blockStartTs, blockSessions, buildBlockRecap, deloadNudgeDecision, recordDeloadDecline, clearDeloadNudge,
-  updateLandmarkMrv, snapshotBlockStart, backoffDeltas,
+  updateLandmarkMrv, snapshotBlockStart, backoffDeltas, muscleRosterKeys, updateMevFloors, redistributeMevFloors,
   detectStall, suggestSwap, reentryRamp,
   mesoGateSetsFromAnswers, isMesoSessionEditable, applyMesoFeedbackEdit, reearnMesoBoostsFromAnswers, mesoRecapGainsFromEdit, recomputeMesoRepMissCut, remapMesoAnswersExId, deriveSignalWeight, remapMesoRecapRawForSwap, remapMesoStateExId, mesoRowHasExId, laterSessionTrainsExId,
   mesoSetTarget, mesoEarnTarget, mesoRepOutcome, reshapeSetsUnilateral,
