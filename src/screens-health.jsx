@@ -1960,6 +1960,21 @@ function HealthDateStrip({ store, setStore, selectedDate, onSelect, onLog, targe
   );
 }
 
+// Shared "Today" filter pill for the readings feed on the multi-reading-per-day
+// cards (Glucose/BP/Body Temp). Local to each card, not the shared tf window
+// (1W/1M/3M): narrowing to today only makes sense for a card you might log
+// several times a day, so it stays off the single-daily-value cards entirely.
+function todayToggleStyle(active) {
+  return {
+    padding: '3px 9px', borderRadius: 4, cursor: 'pointer',
+    background: active ? 'var(--accent)' : 'transparent',
+    border: `1px solid ${active ? 'var(--accent)' : UI.hairStrong}`,
+    color: active ? '#0a0805' : UI.inkFaint,
+    fontFamily: UI.fontUi, fontSize: 9, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
+    WebkitTapHighlightColor: 'transparent',
+  };
+}
+
 // ─── Glucose card ─────────────────────────────────────────────────────────────
 
 function GlucoseCard({ glucoseLogs, unit, tf, setTf, dragHandle, onExpand, compact = false }) {
@@ -1970,6 +1985,7 @@ function GlucoseCard({ glucoseLogs, unit, tf, setTf, dragHandle, onExpand, compa
   const refLow  = unit === 'mgdl' ? Math.round(GLUCOSE_REF_LOW  * GLUCOSE_FACTOR) : GLUCOSE_REF_LOW;
   const refHigh = unit === 'mgdl' ? Math.round(GLUCOSE_REF_HIGH * GLUCOSE_FACTOR) : GLUCOSE_REF_HIGH;
   const dec = unit === 'mgdl' ? 0 : 1;
+  const [todayOnly, setTodayOnly] = useStateH(false);
 
   const inWindow = useMemoH(
     () => (glucoseLogs || []).filter(l => l.date >= start && l.date <= end),
@@ -1987,6 +2003,9 @@ function GlucoseCard({ glucoseLogs, unit, tf, setTf, dragHandle, onExpand, compa
     [...inWindow].sort((a, b) => b.date.localeCompare(a.date) || b.time.localeCompare(a.time)).slice(0, 30),
     [inWindow]
   );
+  // The Today toggle only narrows the FEED list, the chart above keeps
+  // showing the full tf window for trend context.
+  const feedReadings = todayOnly ? sortedReadings.filter(n => n.date === today) : sortedReadings;
   const CTX_COLORS = { fasted: 'var(--accent)', fed: '#4a9fe0', other: UI.inkSoft };
 
   return (
@@ -2026,11 +2045,15 @@ function GlucoseCard({ glucoseLogs, unit, tf, setTf, dragHandle, onExpand, compa
               Normal postprandial &lt;{(unit === 'mgdl' ? Math.round(GLUCOSE_REF_FED * GLUCOSE_FACTOR) : GLUCOSE_REF_FED).toFixed(dec)} {unitLabel} (2h after meal)
             </span>
           </div>
-          {sortedReadings.length > 0 && (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 }}>
+            <span className="micro" style={{ color: UI.inkFaint }}>Readings</span>
+            <button onClick={() => setTodayOnly(o => !o)} style={todayToggleStyle(todayOnly)}>Today</button>
+          </div>
+          {feedReadings.length > 0 ? (
             <>
               <div style={{ height: '0.5px', background: UI.hair, margin: '8px 0' }} />
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {sortedReadings.map(n => (
+                {feedReadings.map(n => (
                   <div key={n.id} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
                     <span style={{ width: 7, height: 7, borderRadius: '50%', background: CTX_COLORS[n.context] || UI.inkSoft, display: 'inline-block', flexShrink: 0, marginTop: 2 }} />
                     <div style={{ flex: 1, minWidth: 0 }}>
@@ -2042,6 +2065,8 @@ function GlucoseCard({ glucoseLogs, unit, tf, setTf, dragHandle, onExpand, compa
                 ))}
               </div>
             </>
+          ) : todayOnly && (
+            <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkGhost, padding: '8px 0 2px' }}>No readings logged today yet.</div>
           )}
           </>
           )}
@@ -2057,6 +2082,7 @@ function BloodPressureCard({ bpLogs, tf, setTf, dragHandle, onExpand, compact = 
   const today = LB.todayISO();
   const tfDays = id => (HEALTH_TFS.find(t => t.id === id) || HEALTH_TFS[0]).days;
   const { start, end } = healthWindow(tfDays(tf));
+  const [todayOnly, setTodayOnly] = useStateH(false);
 
   const inWindow = useMemoH(
     () => (bpLogs || []).filter(l => l.date >= start && l.date <= end),
@@ -2071,6 +2097,7 @@ function BloodPressureCard({ bpLogs, tf, setTf, dragHandle, onExpand, compact = 
     [...inWindow].sort((a, b) => b.date.localeCompare(a.date) || b.time.localeCompare(a.time)).slice(0, 30),
     [inWindow]
   );
+  const feedReadings = todayOnly ? sortedReadings.filter(n => n.date === today) : sortedReadings;
 
   return (
     <HealthChartCard title="BP" icon="fa-heart-pulse" tf={tf} setTf={setTf}
@@ -2095,11 +2122,15 @@ function BloodPressureCard({ bpLogs, tf, setTf, dragHandle, onExpand, compact = 
             </span>
             <span style={{ fontSize: 9, fontFamily: UI.fontUi, color: UI.inkGhost }}>· dashed = 120/80 normal</span>
           </div>
-          {sortedReadings.length > 0 && (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 }}>
+            <span className="micro" style={{ color: UI.inkFaint }}>Readings</span>
+            <button onClick={() => setTodayOnly(o => !o)} style={todayToggleStyle(todayOnly)}>Today</button>
+          </div>
+          {feedReadings.length > 0 ? (
             <>
               <div style={{ height: '0.5px', background: UI.hair, margin: '8px 0' }} />
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {sortedReadings.map(n => (
+                {feedReadings.map(n => (
                   <div key={n.id} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 9, fontFamily: UI.fontUi, color: UI.inkGhost }}>{healthFmtDate(n.date, { day: 'numeric', month: 'short' })} · {n.time}</div>
@@ -2110,6 +2141,8 @@ function BloodPressureCard({ bpLogs, tf, setTf, dragHandle, onExpand, compact = 
                 ))}
               </div>
             </>
+          ) : todayOnly && (
+            <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkGhost, padding: '8px 0 2px' }}>No readings logged today yet.</div>
           )}
           </>
           )}
@@ -2126,6 +2159,7 @@ function BodyTempCard({ tempLogs, unit, tf, setTf, dragHandle, onExpand, compact
   const tfDays = id => (HEALTH_TFS.find(t => t.id === id) || HEALTH_TFS[0]).days;
   const { start, end } = healthWindow(tfDays(tf));
   const unitLabel = tempUnitLabel(unit);
+  const [todayOnly, setTodayOnly] = useStateH(false);
 
   const inWindow = useMemoH(
     () => (tempLogs || []).filter(l => l.date >= start && l.date <= end),
@@ -2141,6 +2175,7 @@ function BodyTempCard({ tempLogs, unit, tf, setTf, dragHandle, onExpand, compact
     [...inWindow].sort((a, b) => b.date.localeCompare(a.date) || b.time.localeCompare(a.time)).slice(0, 30),
     [inWindow]
   );
+  const feedReadings = todayOnly ? sortedReadings.filter(n => n.date === today) : sortedReadings;
 
   return (
     <HealthChartCard title="Body Temp" icon="fa-temperature-half" tf={tf} setTf={setTf}
@@ -2152,20 +2187,30 @@ function BodyTempCard({ tempLogs, unit, tf, setTf, dragHandle, onExpand, compact
           <TempScatterChart readings={inWindow} from={start} to={end} unit={unit} />
           {/* Readings feed only in the full (expanded) view, compact (2-col
               grid) shows just the chart, matching plain-chart neighbours. */}
-          {!compact && sortedReadings.length > 0 && (
+          {!compact && (
             <>
-              <div style={{ height: '0.5px', background: UI.hair, margin: '8px 0' }} />
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {sortedReadings.map(n => (
-                  <div key={n.id} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 9, fontFamily: UI.fontUi, color: UI.inkGhost }}>{healthFmtDate(n.date, { day: 'numeric', month: 'short' })} · {n.time}</div>
-                      {n.note && <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.4, marginTop: 1 }}>{n.note}</div>}
-                    </div>
-                    <span className="num" style={{ flexShrink: 0, fontSize: 11, color: UI.inkFaint }}>{tempDisplay(n.valueC, unit)}{unitLabel}</span>
-                  </div>
-                ))}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 6 }}>
+                <span className="micro" style={{ color: UI.inkFaint }}>Readings</span>
+                <button onClick={() => setTodayOnly(o => !o)} style={todayToggleStyle(todayOnly)}>Today</button>
               </div>
+              {feedReadings.length > 0 ? (
+                <>
+                  <div style={{ height: '0.5px', background: UI.hair, margin: '8px 0' }} />
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {feedReadings.map(n => (
+                      <div key={n.id} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 9, fontFamily: UI.fontUi, color: UI.inkGhost }}>{healthFmtDate(n.date, { day: 'numeric', month: 'short' })} · {n.time}</div>
+                          {n.note && <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.4, marginTop: 1 }}>{n.note}</div>}
+                        </div>
+                        <span className="num" style={{ flexShrink: 0, fontSize: 11, color: UI.inkFaint }}>{tempDisplay(n.valueC, unit)}{unitLabel}</span>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              ) : todayOnly && (
+                <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkGhost, padding: '8px 0 2px' }}>No readings logged today yet.</div>
+              )}
             </>
           )}
         </>
