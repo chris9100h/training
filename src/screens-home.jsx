@@ -1183,7 +1183,16 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
   const trainBg = store.settings?.vipBackground || 'icons/zane-logo.png';
   const isCustomBg = trainBg !== 'icons/zane-logo.png';
   const isLightMode = (store.settings?.darkMode ?? 'dark') === 'light';
-  const defaultLogoStyle = { width: '85%', maxWidth: 320, opacity: isLightMode ? 0.14 : 0.04, filter: isLightMode ? 'grayscale(1)' : 'grayscale(1) brightness(3)', objectFit: 'contain' };
+  // watermarkOpacity (Settings -> Appearance slider) is a flat 0-100 override
+  // applied identically to the logo or a VIP image, in any theme, once the
+  // user has touched the slider. Unset (null, every existing user until they
+  // open that sheet) falls back to these same per-theme/per-image defaults,
+  // unchanged from before the setting existed.
+  const watermarkOpacityOverride = store.settings?.watermarkOpacity;
+  const watermarkOpacity = watermarkOpacityOverride != null
+    ? watermarkOpacityOverride / 100
+    : (isCustomBg ? 0.16 : (isLightMode ? 0.14 : 0.04));
+  const defaultLogoStyle = { width: '85%', maxWidth: 320, opacity: watermarkOpacity, filter: isLightMode ? 'grayscale(1)' : 'grayscale(1) brightness(3)', objectFit: 'contain' };
   const today = LB.todaysDay(store);
   const sch = today?.schedule;
   const hasPlans = (store.schedules?.length || 0) > 0;
@@ -2295,6 +2304,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       ? (mesoCurrentWeek(resolvedMeso, store) === 1 && (resolvedMeso.completions ?? 0) === 0)
       : false;
     const mesoBoosts = resolvedMeso?.weightBoosts ?? null;
+    const mesoDeclines = resolvedMeso?.weightBoostDeclines ?? null;
     // occ counter: the Nth appearance of an exercise in the day seeds from the
     // Nth occurrence of past sessions, so a repeated exercise's slots don't share
     // one reference (see bestRecentEntry).
@@ -2351,10 +2361,16 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       // set count stays authored) — this also neutralizes any deltas left over
       // from a prior "Volume + Load" run without wiping the mesoState.
       const itAdj = (typeof applyMesoSetDeltaFromState === 'function' && !LB.autoregLoadOnly(sch)) ? applyMesoSetDeltaFromState(it, dayId, resolvedMeso) : it;
-      const weightBoost = mesoBoosts?.[it.exId + '_' + dayId] ?? null;
+      // A declined boost is withheld exactly like an un-earned one (falls through
+      // to resolveMesoSeedSuggestion's veto branch, weight holds). declined is
+      // passed through separately too (not just collapsed into weightBoost=null)
+      // so the veto still applies even during week 1's noPriorFeedback carve-out.
+      const boostKey = it.exId + '_' + dayId;
+      const declined = !!mesoDeclines?.[boostKey];
+      const weightBoost = declined ? null : (mesoBoosts?.[boostKey] ?? null);
       // On an autoregulating plan the feedback engine owns the weight: apply an
       // earned boost, but a withheld one vetoes Smart Progression (see helper).
-      const suggestionFinal = LB.resolveMesoSeedSuggestion(suggestion, weightBoost, last, LB.mesoActive(sch), mesoNoPriorFeedback, (it.repsPerSet?.[0] ?? it.reps ?? null));
+      const suggestionFinal = LB.resolveMesoSeedSuggestion(suggestion, weightBoost, last, LB.mesoActive(sch), mesoNoPriorFeedback, (it.repsPerSet?.[0] ?? it.reps ?? null), declined);
       const seedSets = LB.buildSeedSets(itAdj, last, suggestionFinal, isUnilateral, store, bodyweightKg);
       return {
         exId: it.exId, name: ex?.name || '?',
@@ -2710,7 +2726,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       {/* Background watermark — VIP image from store.settings.vipBackground or default ZANE logo */}
       <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', zIndex: 0, overflow: 'hidden' }}>
         <img src={trainBg} style={isCustomBg
-          ? { width: '92%', maxWidth: 360, opacity: 0.16, objectFit: 'contain' }
+          ? { width: '92%', maxWidth: 360, opacity: watermarkOpacity, objectFit: 'contain' }
           : defaultLogoStyle} />
       </div>
 
@@ -3672,8 +3688,8 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
         </div>
       </Sheet>
 
-      {/* Daily log sheet */}
-      <DailyLogSheet
+      {/* Daily log, full page */}
+      <DailyLogScreen
         open={dailyLogOpen}
         onClose={() => setDailyLogOpen(false)}
         store={store}

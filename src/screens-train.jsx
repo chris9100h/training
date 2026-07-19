@@ -216,7 +216,7 @@ const _log = () => {};
 window._log = _log;
 // ─────────────────────────────────────────────────────────────────────────────
 
-function KgInput({ value, onChange, done, style, onActivate, kbRaw, isKbActive }) {
+function KgInput({ value, onChange, done, style, onActivate, kbRaw, isKbActive, onDisabledTap }) {
   const fmt = v => v != null ? String(v).replace('.', ',') : '';
   const [raw, setRaw] = useStateT(() => fmt(value));
   const focused = useRefT(false);
@@ -229,6 +229,7 @@ function KgInput({ value, onChange, done, style, onActivate, kbRaw, isKbActive }
         placeholder="—"
         disabled={done}
         onActivate={onActivate}
+        onDisabledTap={onDisabledTap}
         style={{ ...style, ...(isKbActive ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }}
       />
     );
@@ -259,11 +260,11 @@ function KgInput({ value, onChange, done, style, onActivate, kbRaw, isKbActive }
 // <input>, so iOS never attaches its AutoFill / QuickType accessory bar — these
 // fields take no native text entry (tapping opens the custom keyboard), so a
 // native control is never needed and only invites the autofill suggestion pill.
-function KbCell({ text, placeholder, style, disabled, onActivate }) {
+function KbCell({ text, placeholder, style, disabled, onActivate, onDisabledTap }) {
   const empty = text == null || text === '';
   return (
     <div
-      onPointerDown={e => { e.preventDefault(); e.stopPropagation(); if (!disabled) onActivate?.(); }}
+      onPointerDown={e => { e.preventDefault(); e.stopPropagation(); if (disabled) { onDisabledTap?.(); return; } onActivate?.(); }}
       style={{
         ...style,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -1102,6 +1103,20 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // deload gate blocks their unlock.
     if (store.statusMode === 'deload' || session.isDeload || is531DeloadSession) return null;
     const perSet = entry?.plannedRepsPerSet;
+    // On a Meso/autoreg plan, mirror mesoEarnTarget exactly, the mechanism
+    // that actually grants the bump every session via computeMesoGains:
+    // staggered top-of-range down to the floor across the working sets on a
+    // Range item (e.g. 10-9-8 for 3 sets of an 8-10 range), not a flat
+    // ceiling on every set. The flat ceiling below is Smart Progression's OWN,
+    // separate (and stricter) requirement, only ever a week-1 fallback (see
+    // resolveMesoSeedSuggestion) when Meso's own ladder hasn't already earned
+    // something, so showing it here on later sets would overstate what they
+    // actually need to clear the bar Meso itself is grading against.
+    if (mesoState) {
+      const nWorking = entry?.sets?.filter(st => !st.warmup).length ?? 1;
+      const target = LB.mesoEarnTarget(workingSetIdx, nWorking, entry?.plannedReps ?? 0, perSet, entry?.plannedRepsMax);
+      return target > 0 ? target : null;
+    }
     const perSetVal = perSet && perSet.length > 1
       ? (perSet[workingSetIdx] ?? perSet[perSet.length - 1])
       : null;
@@ -1232,7 +1247,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           const nextAfterGroup = lastGroupIdx + 1 < session.entries.length ? session.entries[lastGroupIdx + 1] : null;
           if (advanceFocus && nextAfterGroup) pendingFocusRef.current = firstOpenWorkingFocus(nextAfterGroup, noTechnique);
           setTimeout(() => {
-            if (lastGroupIdx + 1 >= session.entries.length) setFinishOpen(true);
+            if (lastGroupIdx + 1 >= session.entries.length) requestFinishOpen();
             else updateSession(sess => ({ ...sess, currentExIdx: lastGroupIdx + 1 }));
           }, Math.max(600, overlayHoldMs));
         } else {
@@ -1567,7 +1582,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       if (refKg == null) return null;
       const newKg = Math.round((refKg + increment) * 100) / 100;
       const nextKg = catCfg.maxKg ? Math.min(newKg, catCfg.maxKg) : newKg;
-      return nextKg > refKg ? { exName: entry.name, currentKg: refKg, nextKg } : null;
+      return nextKg > refKg ? { exId: entry.exId, occ, exName: entry.name, currentKg: refKg, nextKg } : null;
     })();
 
     // Overlay precedence (one per completed set): PROGRESSION UNLOCKED > NEW
@@ -1589,16 +1604,17 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // on to.)
     let overlayHoldMs = 0;
     if (progressionResult) {
-      overlayHoldMs = PROGRESSION_NAV_DELAY_MS; // swap mid-overlay; the show/hide timers below keep their own 800ms + 4000ms
+      overlayHoldMs = PROGRESSION_NAV_DELAY_MS; // swap mid-overlay; the show timer below still delays 800ms
       // The overlay only fires on non-autoregulating plans (meso/auto plans
       // suppress it above), so there's no meso recovery sheet to compete with
       // here. A pinned note on the next exercise CAN still fire on the upcoming
       // navigation, so flag the celebration as pending to hold that note behind
-      // it until it clears (see the pinned-note trigger).
+      // it until it clears (see the pinned-note trigger). The overlay now
+      // requires an explicit Hell yeah / Decline tap (no auto-dismiss), so
+      // progressionPendingRef stays true until the user answers.
       progressionPendingRef.current = true;
       setTimeout(() => {
         setProgressionUnlocked(progressionResult);
-        setTimeout(() => { progressionPendingRef.current = false; setProgressionUnlocked(null); }, 4000);
       }, 800);
     } else if (!entry.sets[setIdx]?.warmup && !isDeloadSession) {
       const completed = entry.sets[setIdx];
@@ -2026,7 +2042,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const navigate = (dir) => {
     const newIdx = exIdx + dir;
     if (newIdx < 0) return;
-    if (newIdx >= session.entries.length) { setFinishOpen(true); return; }
+    if (newIdx >= session.entries.length) { requestFinishOpen(); return; }
     // Stepping back is browsing, not progression: mute the exercise-start
     // prompts. Forward nav leaves the flag clear so they fire on arrival.
     if (dir < 0) peekManualRef.current = true;
@@ -2062,7 +2078,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     persistRestStart(Date.now(), restDef);
     const lastGroupIdx = Math.max(...session.entries.map((e, i) => e.supersetGroup === group ? i : -1));
     setTimeout(() => {
-      if (lastGroupIdx + 1 >= session.entries.length) setFinishOpen(true);
+      if (lastGroupIdx + 1 >= session.entries.length) requestFinishOpen();
       else updateSession(sess => ({ ...sess, currentExIdx: lastGroupIdx + 1 }));
     }, 600);
     return true;
@@ -2478,6 +2494,19 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // beep/auto-open side effect moved to the restExpired setTimeout below.
 
   const [flashSet, setFlashSet] = useStateT(null);
+  // { exIdx, setIdx } of the locked (done/skipped) weight or reps field just
+  // tapped, shows a brief "tap ✓/× to unlock" hint instead of silently doing
+  // nothing, since the checkbox that actually unlocks it is easy to miss.
+  // Carries exIdx (not just setIdx) so navigating to a different exercise
+  // within the 2200ms window can't light up that exercise's same-index row,
+  // mirroring the lpTarget/wsTarget exIdx+setIdx pattern used elsewhere here.
+  const [lockHint, setLockHint] = useStateT(null);
+  const lockHintTimerRef = useRefT(null);
+  const showLockHint = (exIdxAtTap, setIdx) => {
+    clearTimeout(lockHintTimerRef.current);
+    setLockHint({ exIdx: exIdxAtTap, setIdx });
+    lockHintTimerRef.current = setTimeout(() => setLockHint(null), 2200);
+  };
   const [improvedSet, setImprovedSet] = useStateT(false);
   const [regressionSet, setRegressionSet] = useStateT(false);
   const [newBestSet, setNewBestSet] = useStateT(false);
@@ -2513,6 +2542,29 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const [readinessSel, setReadinessSel] = useStateT(null);
   const [readinessReentry, setReadinessReentry] = useStateT(false);
   const [finishOpen, setFinishOpen] = useStateT(false);
+  // Set instead of calling setFinishOpen(true) directly wherever finishing the
+  // last exercise might open "End session?": if a meso feedback sheet
+  // (joint/soreness/volume) for that exercise is still open at that moment,
+  // opening "End session?" underneath it stacked both sheets at once (same
+  // z-index, whichever is declared later in the JSX just painted on top). The
+  // flush effect near the joint-feedback effect below opens it once every
+  // feedback sheet has actually closed.
+  const finishOpenPendingRef = useRefT(false);
+  // requestFinishOpen is also called from setTimeout callbacks scheduled well
+  // before the meso feedback sheets open (finishSetNavigation fires them from
+  // the same render that completeSet marks a set done, before the joint-
+  // feedback effect below has had a chance to run), reading the plain
+  // mesoJointOpen/mesoSorenessOpen/mesoVolumeOpen state variables there would
+  // close over that earlier render's (pre-open) values and never see the
+  // sheet that's actually open by the time the timeout fires. mesoSheetOpenRef
+  // is kept in sync by the effect right after those three state declarations,
+  // so a deferred call always reads the CURRENT open state, not a stale one.
+  const mesoSheetOpenRef = useRefT({ joint: false, soreness: false, volume: false });
+  const requestFinishOpen = () => {
+    const m = mesoSheetOpenRef.current;
+    if (m.joint || m.soreness || m.volume) { finishOpenPendingRef.current = true; return; }
+    setFinishOpen(true);
+  };
   const [finishStep, setFinishStep] = useStateT('confirm');
   const [pendingFeel, setPendingFeel] = useStateT(null);
   const [freestyleName, setFreestyleName] = useStateT('');
@@ -2988,9 +3040,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // decline just closes.
   // Autoreg v2 P3: the emergent block reset (spec 2.3 / 3). Fires on deload ACCEPT in
   // Auto Full only. It is what makes Auto Full a self-timed mesocycle: snapshot the
-  // block's per-muscle volume, back each grown exercise off ~2 sets (non-destructive,
-  // never below the plan base), clear the nudge, and stamp a fresh block anchor so the
-  // next block re-ramps from a backed-off start, capped per-muscle by the learned MRV.
+  // block's per-muscle volume, reset each grown exercise back to its plan base plus
+  // its current learned MEV floor (a per-muscle floor that tracks MRV growth/shrink
+  // across blocks instead of pinning forever to the plan's original number, see
+  // updateMevFloors/redistributeMevFloors), clear the nudge, and stamp a fresh block
+  // anchor so the next block re-ramps from that floor, capped per-muscle by the
+  // learned MRV.
   // Excluded by design: bounded Meso (weeks != null) has its own planned deload +
   // reset; Load-only (autoregLoadOnly) has fixed volume and no landmarks. Combines
   // deltas + autoregState + updatedAt into ONE meso-row write (so the staleness guard
@@ -3016,11 +3071,23 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         startCycleIndex: cur.startCycleIndex, cycleIndex: s.cycleIndex,
         statusPeriods: s.statusPeriods, cycleStartDate: s.cycleStartDate,
       });
-      // clearDeloadNudge first (the block is resetting), then snapshot the new block.
-      const nextAutoreg = LB.snapshotBlockStart(LB.clearDeloadNudge(cur.autoregState), todayIso, startVol);
+      // Autoreg v2 P3: the MEV floor tracks this block's MRV movement (grow or
+      // shrink) BEFORE the new block-start snapshot overwrites the baseline it
+      // just diffed against.
+      const withFloors = LB.updateMevFloors(cur.autoregState);
+      // clearDeloadNudge first (the block is resetting), then snapshot the new
+      // block (start volume + start MRV baseline for the NEXT reset's floor diff).
+      const nextAutoreg = LB.snapshotBlockStart(LB.clearDeloadNudge(withFloors), todayIso, startVol);
+      // Backoff first (wipes every grown delta, floor-derived or earned alike,
+      // back to plan base), THEN re-grant each muscle's full current floor across
+      // its CURRENT roster, so an exercise swap since the last reset self-heals.
+      const backedOff = LB.backoffDeltas(cur.deltas);
+      const { deltas: nextDeltas, growthCounts: nextGrowthCounts } =
+        LB.redistributeMevFloors(nextAutoreg, mesoSch, muscleOfExId, backedOff, cur.growthCounts);
       const newMeso = {
         ...cur,
-        deltas: LB.backoffDeltas(cur.deltas, 2),
+        deltas: nextDeltas,
+        growthCounts: nextGrowthCounts,
         autoregState: nextAutoreg,
         startedAt: now,       // fresh block anchor for flex windowing
         startDate: todayIso,  // re-anchor weekday/cycle microcycle window + week counter too
@@ -3101,6 +3168,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const [mesoJointMuscle, setMesoJointMuscle] = useStateT(null);
   const mesoJointExIdxRef = useRefT(null);
   const [mesoVolumeOpen, setMesoVolumeOpen] = useStateT(false);
+  // Kept in sync for requestFinishOpen (see mesoSheetOpenRef above), which is
+  // also called from setTimeout callbacks that can fire after this render's
+  // closure is stale but before this effect has had a chance to run again.
+  useEffectT(() => {
+    mesoSheetOpenRef.current = { joint: mesoJointOpen, soreness: mesoSorenessOpen, volume: mesoVolumeOpen };
+  }, [mesoJointOpen, mesoSorenessOpen, mesoVolumeOpen]);
   const [mesoVolumeMusc, setMesoVolumeMusc] = useStateT(null);
   const [mesoVolumeExIds, setMesoVolumeExIds] = useStateT([]); // exId+dayId pairs for delta
   const [mesoVolumeAnswer, setMesoVolumeAnswer] = useStateT(null);
@@ -3677,8 +3750,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       general: g.generalRows.map(r => ({ title: r.title, sub: r.sub })),
       joint: g.jointRows.map(r => ({ title: r.title, sub: r.sub, sel: r.sel, weight: r.weight, pump: r.pump, affinity: r.affinity })),
     })).filter(g => g.general.length || g.joint.length);
+    // key carried through so the session detail screen can toggle a positive
+    // weightDelta's decline after the fact (LB.weightBoostDeclines lookup).
     const gainRows = (gains || []).map(g => ({
-      name: g.name, weightDelta: g.weightDelta || 0, setDelta: g.setDelta || 0,
+      name: g.name, key: g.key || null, weightDelta: g.weightDelta || 0, setDelta: g.setDelta || 0,
     })).filter(g => g.weightDelta || g.setDelta);
     // Nothing to remember: no feedback answered and no bump/cut earned.
     if (!groups.length && !gainRows.length) return null;
@@ -3733,7 +3808,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
     // Set changes recorded during feedback (positive = gain, negative = reduction)
     for (const [key, { name, delta }] of Object.entries(mesoSessionSetGainsRef.current)) {
-      if (!gainMap[key]) gainMap[key] = { name, setDelta: 0, weightDelta: 0 };
+      if (!gainMap[key]) gainMap[key] = { name, setDelta: 0, weightDelta: 0, key };
       gainMap[key].setDelta += (delta ?? 1);
     }
 
@@ -3795,7 +3870,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             // Two misses in a row: the weight itself is too heavy for this rep
             // target. Cut it back one increment for next session and re-arm.
             weightBoostMap[key] = -increment;
-            if (!gainMap[key]) gainMap[key] = { name: e.name, setDelta: 0, weightDelta: 0 };
+            if (!gainMap[key]) gainMap[key] = { name: e.name, setDelta: 0, weightDelta: 0, key };
             gainMap[key].weightDelta = -increment;
             repMissCounts[key] = 0;
           } else {
@@ -3818,7 +3893,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       if (LB.autoregLoadOnly(mesoSch) && muscle && mesoSoreBlockRef.current.has(muscle)) continue;
 
       weightBoostMap[key] = increment;
-      if (!gainMap[key]) gainMap[key] = { name: e.name, setDelta: 0, weightDelta: 0 };
+      if (!gainMap[key]) gainMap[key] = { name: e.name, setDelta: 0, weightDelta: 0, key };
       gainMap[key].weightDelta = increment;
     }
 
@@ -3833,16 +3908,20 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // EARN persist: only a 'none' session (deload) keeps the old map untouched.
     // 'discounted' falls through and CAN still earn a boost (a PR on a tired day
     // is real, spec 4.3); 'full' is the normal re-earn.
+    const sessionKeys = session.entries.filter(e => !e.isCardio).map(e => e.exId + '_' + session.dayId);
     const newWeightBoosts = signalWeight === 'none'
       ? (mesoState.weightBoosts || {})
-      : LB.reearnMesoWeightBoosts(
-          mesoState.weightBoosts,
-          session.entries.filter(e => !e.isCardio).map(e => e.exId + '_' + session.dayId),
-          weightBoostMap,
-        );
+      : LB.reearnMesoWeightBoosts(mesoState.weightBoosts, sessionKeys, weightBoostMap);
+    // Declines are per-session-instance: a key being re-earned/re-evaluated this
+    // session must start undeclined again, same deload guard as weightBoosts above
+    // (a deload session collects no feedback, so it must not clear declines either).
+    const newWeightBoostDeclines = signalWeight === 'none'
+      ? (mesoState.weightBoostDeclines || {})
+      : LB.clearMesoWeightBoostDeclines(mesoState.weightBoostDeclines, sessionKeys);
     const withBoosts = {
       ...mesoState,
       weightBoosts: newWeightBoosts,
+      weightBoostDeclines: newWeightBoostDeclines,
       // Freeze the miss streak for anything but a full session (discounted and
       // none both leave it as-is), matching the streak guard above.
       repMissCounts: signalWeight !== 'full' ? (mesoState.repMissCounts || {}) : repMissCounts,
@@ -3956,6 +4035,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     const workingSets = entry.sets.filter(s => !s.warmup);
     if (workingSets.length === 0) return;
     if (!workingSets.every(s => s.done || s.skipped)) return;
+    // Every working set skipped, none actually done: no performance to ask
+    // about (joint/weight-feel/pump/affinity are all about how the sets
+    // FELT). mesoRepOutcome's earn/miss gates already require s.done, so
+    // this exercise can't have earned or cut anything either way, only the
+    // question itself needs suppressing. Still marks asked so this effect
+    // doesn't keep re-checking a skipped exercise on every later set change.
+    if (!workingSets.some(s => s.done)) { askedJointRef.current.add(exId); persistMesoAsked(); return; }
     const ex = store.exercises?.find(e => e.id === exId);
     const pm = primaryMuscleForExercise(ex);
     askedJointRef.current.add(exId);
@@ -3978,6 +4064,17 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // `done` left the signature unchanged on a skip, so the joint/pump/volume
     // sheet never fired and its boost gates / volume feedback were skipped.
   }, [exIdx, entry?.sets?.map(s => s.done ? 1 : s.skipped ? 2 : 0).join(','), !!mesoState, session.readiness]);
+
+  // Flushes a requestFinishOpen() call that deferred because a meso feedback
+  // sheet was open at the time (see finishOpenPendingRef above); re-runs as
+  // each sheet closes, same "retry on dependency change" pattern as the
+  // soreness/pinned-note effects above.
+  useEffectT(() => {
+    if (!finishOpenPendingRef.current) return;
+    if (mesoJointOpen || mesoSorenessOpen || mesoVolumeOpen) return;
+    finishOpenPendingRef.current = false;
+    setFinishOpen(true);
+  }, [mesoJointOpen, mesoSorenessOpen, mesoVolumeOpen]);
 
   const tempoTimerRef = useRefT(null);
   const audioCtxRef = useRefT(null);
@@ -5439,7 +5536,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // so an ad-hoc empty session gets the prompt too. A tap SELECTS an option (accent
   // highlight); the Confirm button commits it, so a mis-tap is correctable first.
   const readinessSheet = (
-    <Sheet open={readinessOpen} onClose={() => chooseReadiness(readinessSel || 'normal')} title="How do you feel today?">
+    <Sheet open={readinessOpen} onClose={() => {}} title="How do you feel today?">
       <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: readinessReentry ? 12 : 20, lineHeight: 1.5 }}>
         Pick today's baseline, then Confirm. It only nudges the suggestion, you can always push to your limit.
       </div>
@@ -5467,7 +5564,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           </button>
         );
       })}
-      <Btn onClick={() => chooseReadiness(readinessSel || 'normal')} style={{ width: '100%', marginTop: 12 }}>Confirm</Btn>
+      <Btn onClick={() => chooseReadiness(readinessSel)} disabled={readinessSel == null} style={{ width: '100%', marginTop: 12, opacity: readinessSel == null ? 0.4 : 1 }}>Confirm</Btn>
     </Sheet>
   );
 
@@ -5728,16 +5825,21 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         document.body
       )}
 
-      {/* Progression unlocked overlay */}
+      {/* Progression unlocked overlay. Requires an explicit answer (no
+          backdrop-dismiss, no auto-fade): same principle as the readiness
+          sheet, an earned weight bump either gets confirmed or declined by
+          the user, it never resolves itself silently. */}
       {progressionUnlocked && ReactDOM.createPortal(
-        <div onClick={() => { progressionPendingRef.current = false; setProgressionUnlocked(null); }} style={{
+        <div style={{
           position: 'fixed', top: 'env(safe-area-inset-top, 0px)', left: 0, right: 0, bottom: 0, zIndex: 160,
           background: 'var(--bg-body)',
-          animation: 'improvedFade 4s ease forwards',
           display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
           gap: 8,
         }}>
-          <div style={{ animation: 'improvedBorderPulse 0.8s ease-in-out infinite', position: 'absolute', inset: 0 }} />
+          {/* Positioned elements paint above static ones regardless of DOM order,
+              so this decorative ring (transparent, border-only) would otherwise
+              sit on top of the buttons below and swallow every tap. */}
+          <div style={{ animation: 'improvedBorderPulse 0.8s ease-in-out infinite', position: 'absolute', inset: 0, pointerEvents: 'none' }} />
           <span style={{ fontFamily: UI.fontDisplay, fontSize: 64, color: UI.gold, fontWeight: 900, lineHeight: 1, textShadow: '0 0 30px rgba(var(--accent-rgb),0.9), 0 0 70px rgba(var(--accent-rgb),0.5)' }}>↑</span>
           <span style={{ fontFamily: UI.fontUi, fontSize: 18, color: UI.gold, fontWeight: 900, letterSpacing: '0.22em', textShadow: '0 0 15px rgba(var(--accent-rgb),1), 0 0 40px rgba(var(--accent-rgb),0.8)' }}>PROGRESSION UNLOCKED</span>
           <span style={{ fontFamily: UI.fontDisplay, fontSize: 22, color: UI.ink, fontWeight: 700, marginTop: 4 }}>You've earned the next load.</span>
@@ -5747,6 +5849,26 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             <span className="num" style={{ fontSize: 28, color: UI.gold, fontWeight: 700, textShadow: '0 0 20px rgba(var(--accent-rgb),0.8)' }}>{progressionUnlocked.nextKg}{UI.unit()}</span>
           </div>
           <span className="micro" style={{ color: UI.inkFaint, marginTop: 6, letterSpacing: '0.12em' }}>{progressionUnlocked.exName}</span>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 24, width: '100%', maxWidth: 260 }}>
+            <Btn onClick={() => {
+              // Recorded on BOTH answers, not just Decline: the session detail
+              // screen shows a toggleable chip for every bump this session had
+              // an opinion on (SessionDetailScreen's renderEntry), matching the
+              // Meso "Changes earned" chip. Keyed by exId_occ, not bare exId: a
+              // repeated exercise's two occurrences in one session (superset,
+              // straight set + back-off block) must not cross-contaminate.
+              const key = progressionUnlocked.exId + '_' + progressionUnlocked.occ;
+              updateSession(sess => ({ ...sess, progressionBumps: { ...sess.progressionBumps, [key]: { name: progressionUnlocked.exName, currentKg: progressionUnlocked.currentKg, nextKg: progressionUnlocked.nextKg, declined: false } } }));
+              progressionPendingRef.current = false;
+              setProgressionUnlocked(null);
+            }} style={{ width: '100%' }}>Hell yeah</Btn>
+            <Btn kind="ghost" onClick={() => {
+              const key = progressionUnlocked.exId + '_' + progressionUnlocked.occ;
+              updateSession(sess => ({ ...sess, progressionBumps: { ...sess.progressionBumps, [key]: { name: progressionUnlocked.exName, currentKg: progressionUnlocked.currentKg, nextKg: progressionUnlocked.nextKg, declined: true } } }));
+              progressionPendingRef.current = false;
+              setProgressionUnlocked(null);
+            }} style={{ width: '100%' }}>Decline</Btn>
+          </div>
         </div>,
         document.body
       )}
@@ -6548,7 +6670,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                       gap: 8, alignItems: 'center',
                       padding: '10px 6px',
                       position: 'relative', zIndex: 1,
-                      opacity: s.done || s.skipped ? (isWarmupRow ? 0.3 : 0.4) : 1,
+                      // Full brightness while the lock hint is up: the row's own
+                      // dim-when-done/skipped opacity was muting the unlock ring
+                      // pulse on the checkbox below it (opacity on a parent dims
+                      // its whole subtree, box-shadow rings included).
+                      opacity: (lockHint?.exIdx === exIdx && lockHint?.setIdx === i) ? 1 : (s.done || s.skipped ? (isWarmupRow ? 0.3 : 0.4) : 1),
                       animation: flashSet === i ? 'rowFlash 1.4s ease forwards' : 'none',
                     }}>
                       <div style={{
@@ -6598,6 +6724,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                         done={s.done || s.skipped}
                         style={setInputStyle(s.done || s.skipped, isCurrent)}
                         onActivate={() => activateKb(i, 'kg')}
+                        onDisabledTap={() => showLockHint(exIdx, i)}
                         kbRaw={kbRaw}
                         isKbActive={kbField?.setIdx === i && kbField?.field === 'kg'}
                         onChange={kg => updateSession(sess => ({
@@ -6628,11 +6755,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
                       {!isIntensityActive && !isCheckbox && !isTime && (isUnilateral ? (
                         <>
-                          <KbCell text={kbField?.setIdx === i && kbField?.field === 'repsL' ? kbRaw : (s.repsL ?? '')} placeholder="L" disabled={s.done || s.skipped} onActivate={() => activateKb(i, 'repsL')} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), ...(kbField?.setIdx === i && kbField?.field === 'repsL' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }} />
-                          <KbCell text={kbField?.setIdx === i && kbField?.field === 'repsR' ? kbRaw : (s.repsR ?? '')} placeholder="R" disabled={s.done || s.skipped} onActivate={() => activateKb(i, 'repsR')} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), ...(kbField?.setIdx === i && kbField?.field === 'repsR' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }} />
+                          <KbCell text={kbField?.setIdx === i && kbField?.field === 'repsL' ? kbRaw : (s.repsL ?? '')} placeholder="L" disabled={s.done || s.skipped} onActivate={() => activateKb(i, 'repsL')} onDisabledTap={() => showLockHint(exIdx, i)} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), ...(kbField?.setIdx === i && kbField?.field === 'repsL' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }} />
+                          <KbCell text={kbField?.setIdx === i && kbField?.field === 'repsR' ? kbRaw : (s.repsR ?? '')} placeholder="R" disabled={s.done || s.skipped} onActivate={() => activateKb(i, 'repsR')} onDisabledTap={() => showLockHint(exIdx, i)} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), ...(kbField?.setIdx === i && kbField?.field === 'repsR' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }} />
                         </>
                       ) : (
-                        <KbCell text={kbField?.setIdx === i && kbField?.field === 'reps' ? kbRaw : (s.reps ?? '')} placeholder={repPlaceholder} disabled={s.done || s.skipped} onActivate={() => activateKb(i, 'reps')} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), ...(kbField?.setIdx === i && kbField?.field === 'reps' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }} />
+                        <KbCell text={kbField?.setIdx === i && kbField?.field === 'reps' ? kbRaw : (s.reps ?? '')} placeholder={repPlaceholder} disabled={s.done || s.skipped} onActivate={() => activateKb(i, 'reps')} onDisabledTap={() => showLockHint(exIdx, i)} style={{ ...setInputStyle(s.done || s.skipped, isCurrent), ...(kbField?.setIdx === i && kbField?.field === 'reps' ? { boxShadow: `inset 0 -2px 0 var(--accent)` } : {}) }} />
                       ))}
 
                       {!isIntensityActive && !isLpActive && !isWsActive && <button
@@ -6672,6 +6799,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                           opacity: !s.done && !s.skipped && !isNoWeightReps && ((!isBodyweight && s.kg == null) || (isUnilateral ? (s.repsL == null || s.repsR == null) : s.reps == null)) ? 0.35 : 1,
                           flexShrink: 0, justifySelf: 'center',
                           WebkitTapHighlightColor: 'transparent',
+                          // Points straight at the control that unlocks this row,
+                          // right alongside the "Tap ✓/× to unlock" hint. Needs the
+                          // row's own dim opacity lifted above (see data-kb-row) or
+                          // this reads as barely-there instead of "much more visible".
+                          animation: (lockHint?.exIdx === exIdx && lockHint?.setIdx === i) && (s.done || s.skipped) ? 'unlockRingPulse 0.9s ease-in-out infinite' : 'none',
                         }}>{s.skipped ? '×' : '✓'}</button>}
 
                     </div>
@@ -6680,6 +6812,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   {amrapArmed && (
                     <div className="micro-gold" style={{ position: 'relative', zIndex: 1, textAlign: 'center', padding: '0 6px 8px', letterSpacing: '0.14em', lineHeight: 1.4 }}>
                       GO ALL OUT, as many reps as you can
+                    </div>
+                  )}
+                  {(lockHint?.exIdx === exIdx && lockHint?.setIdx === i) && (s.done || s.skipped) && (
+                    <div className="micro-gold" style={{ position: 'relative', zIndex: 1, textAlign: 'center', padding: '0 6px 8px', letterSpacing: '0.14em', lineHeight: 1.4 }}>
+                      Tap {s.skipped ? '×' : '✓'} to unlock
                     </div>
                   )}
                   </div>
@@ -8512,9 +8649,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           {mesoEditingRef.current.joint ? 'Save changes' : 'Confirm'}
         </Btn>
         </>) : (<>
-        <div style={{ fontSize: 13.5, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: 1.45 }}>How did that feel?</div>
+        <div style={{ fontSize: 13.5, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 4, lineHeight: 1.45 }}>How did that feel?</div>
+        <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: 1.4 }}>Joints · weight · pump · affinity</div>
         <Btn onClick={() => handleJointAnswer('none', 'just_right', 'moderate', 'ok')} style={{ width: '100%' }}>On point</Btn>
-        <Btn kind="ghost" onClick={() => { setMesoJointSel('none'); setMesoJointWeightSel('just_right'); setMesoJointPumpSel('moderate'); setMesoJointExpanded(true); }} style={{ width: '100%', marginTop: 8 }}>Flag a detail</Btn>
+        <Btn kind="ghost" onClick={() => { setMesoJointSel('none'); setMesoJointWeightSel('just_right'); setMesoJointPumpSel('moderate'); setMesoJointAffinitySel(mesoJointAffinitySel ?? 'ok'); setMesoJointExpanded(true); }} style={{ width: '100%', marginTop: 8 }}>Flag a detail</Btn>
         </>)}
       </Sheet>
 
@@ -8668,9 +8806,42 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   </span>
                 )}
                 {item.weightDelta !== 0 && (
-                  <span style={{ fontFamily: UI.fontNum, fontSize: 12, fontWeight: 700, color: item.weightDelta > 0 ? 'var(--accent)' : 'rgba(var(--danger-rgb),0.9)' }}>
-                    {item.weightDelta > 0 ? '+' : ''}{item.weightDelta} {UI.unit()}
-                  </span>
+                  item.declined ? (
+                    <span style={{ fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.06em', textTransform: 'uppercase', color: UI.inkGhost }}>Declined</span>
+                  ) : (
+                    <span style={{ fontFamily: UI.fontNum, fontSize: 12, fontWeight: 700, color: item.weightDelta > 0 ? 'var(--accent)' : 'rgba(var(--danger-rgb),0.9)' }}>
+                      {item.weightDelta > 0 ? '+' : ''}{item.weightDelta} {UI.unit()}
+                    </span>
+                  )
+                )}
+                {/* Only a positive bump can be declined: a rep-miss cut (weightDelta < 0)
+                    is a safety measure, not an offer, so it gets no decline control. */}
+                {item.weightDelta > 0 && !item.declined && (
+                  <button
+                    onClick={() => {
+                      if (!item.key) return;
+                      // Functional update (mirrors saveMesoState's own pattern above):
+                      // two Decline taps on different rows in the same event batch
+                      // must each build on the OTHER's write, not both read the same
+                      // pre-decline mesoState closure and have the second clobber
+                      // the first's decline in state/localStorage/the store.
+                      setMesoStateLocal(prev => {
+                        if (!prev) return prev;
+                        const next = { ...prev, weightBoostDeclines: { ...(prev.weightBoostDeclines || {}), [item.key]: true } };
+                        saveMesoStateToStorage(next);
+                        flushMesoStateToStore(next);
+                        return next;
+                      });
+                      setMesoGainItems(prev => prev.map((g, gi) => gi === i ? { ...g, declined: true } : g));
+                    }}
+                    style={{
+                      background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+                      fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.04em', textTransform: 'uppercase',
+                      color: UI.inkFaint,
+                    }}
+                  >
+                    Decline
+                  </button>
                 )}
               </div>
             </div>

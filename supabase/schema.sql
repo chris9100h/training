@@ -269,7 +269,8 @@ CREATE TABLE public.zane_user_settings (
   pin_all_notes boolean NOT NULL DEFAULT false,
   temp_unit text,
   hidden_health_cards jsonb,
-  fever_threshold_c numeric DEFAULT 38
+  fever_threshold_c numeric DEFAULT 38,
+  watermark_opacity integer
 );
 
 CREATE TABLE public.zane_pushover_active (
@@ -1805,6 +1806,12 @@ GRANT EXECUTE ON FUNCTION public.get_support_chats() TO authenticated;
 ALTER PUBLICATION supabase_realtime ADD TABLE zane_coaching;
 ALTER PUBLICATION supabase_realtime ADD TABLE zane_coaching_notes;
 
+-- Coach "client training now" / "check-in pending" badges push instead of
+-- polling on their own (migration 0177): RLS coach-read policies already
+-- scope delivery to a coach's own active clients, see that migration.
+ALTER PUBLICATION supabase_realtime ADD TABLE zane_user_settings;
+ALTER PUBLICATION supabase_realtime ADD TABLE zane_checkins;
+
 -- ── Cardio plans (migration 0094) ──────────────────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS zane_cardio_plans (
@@ -1922,6 +1929,7 @@ CREATE TABLE zane_meso_states (
   joint_flags        jsonb       NOT NULL DEFAULT '{}',
   pump_low_counts    jsonb       NOT NULL DEFAULT '{}',
   weight_boosts      jsonb       NOT NULL DEFAULT '{}',
+  weight_boost_declines jsonb    NOT NULL DEFAULT '{}',  -- user-declined earned bumps, exId_dayId keyed (Migration 0178)
   growth_counts      jsonb       NOT NULL DEFAULT '{}',
   rep_miss_counts    jsonb       NOT NULL DEFAULT '{}',
   affinity           jsonb       NOT NULL DEFAULT '{}',  -- per-exId { v, streak } exercise affinity (Migration 0169)
@@ -1956,8 +1964,9 @@ CREATE OR REPLACE FUNCTION public.sync_meso_states_batch(p_states jsonb)
 AS $function$
   INSERT INTO zane_meso_states (
     id, user_id, schedule_id, weeks, start_date, start_cycle_index, started_at,
-    deltas, joint_flags, pump_low_counts, weight_boosts, growth_counts,
-    rep_miss_counts, affinity, autoreg_state, completions, pending_meso2, updated_at
+    deltas, joint_flags, pump_low_counts, weight_boosts, weight_boost_declines,
+    growth_counts, rep_miss_counts, affinity, autoreg_state, completions,
+    pending_meso2, updated_at
   )
   SELECT
     m->>'id',
@@ -1971,6 +1980,7 @@ AS $function$
     COALESCE(m->'joint_flags', '{}'::jsonb),
     COALESCE(m->'pump_low_counts', '{}'::jsonb),
     COALESCE(m->'weight_boosts', '{}'::jsonb),
+    COALESCE(m->'weight_boost_declines', '{}'::jsonb),
     COALESCE(m->'growth_counts', '{}'::jsonb),
     COALESCE(m->'rep_miss_counts', '{}'::jsonb),
     COALESCE(m->'affinity', '{}'::jsonb),
@@ -1980,21 +1990,22 @@ AS $function$
     COALESCE((m->>'updated_at')::timestamptz, now())
   FROM jsonb_array_elements(p_states) AS m
   ON CONFLICT (id) DO UPDATE SET
-    weeks             = EXCLUDED.weeks,
-    start_date        = EXCLUDED.start_date,
-    start_cycle_index = EXCLUDED.start_cycle_index,
-    started_at        = COALESCE(EXCLUDED.started_at, zane_meso_states.started_at),
-    deltas            = EXCLUDED.deltas,
-    joint_flags       = EXCLUDED.joint_flags,
-    pump_low_counts   = EXCLUDED.pump_low_counts,
-    weight_boosts     = EXCLUDED.weight_boosts,
-    growth_counts     = EXCLUDED.growth_counts,
-    rep_miss_counts   = EXCLUDED.rep_miss_counts,
-    affinity          = EXCLUDED.affinity,
-    autoreg_state     = COALESCE(NULLIF(EXCLUDED.autoreg_state, 'null'::jsonb), zane_meso_states.autoreg_state),
-    completions       = EXCLUDED.completions,
-    pending_meso2     = EXCLUDED.pending_meso2,
-    updated_at        = EXCLUDED.updated_at
+    weeks                 = EXCLUDED.weeks,
+    start_date            = EXCLUDED.start_date,
+    start_cycle_index     = EXCLUDED.start_cycle_index,
+    started_at            = COALESCE(EXCLUDED.started_at, zane_meso_states.started_at),
+    deltas                = EXCLUDED.deltas,
+    joint_flags           = EXCLUDED.joint_flags,
+    pump_low_counts       = EXCLUDED.pump_low_counts,
+    weight_boosts         = EXCLUDED.weight_boosts,
+    weight_boost_declines = EXCLUDED.weight_boost_declines,
+    growth_counts         = EXCLUDED.growth_counts,
+    rep_miss_counts       = EXCLUDED.rep_miss_counts,
+    affinity              = EXCLUDED.affinity,
+    autoreg_state         = COALESCE(NULLIF(EXCLUDED.autoreg_state, 'null'::jsonb), zane_meso_states.autoreg_state),
+    completions           = EXCLUDED.completions,
+    pending_meso2         = EXCLUDED.pending_meso2,
+    updated_at            = EXCLUDED.updated_at
   WHERE zane_meso_states.updated_at < EXCLUDED.updated_at;
 $function$;
 

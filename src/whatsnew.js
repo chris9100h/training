@@ -17,6 +17,39 @@
    Entry shape: { id: string, date: string (YYYY-MM-DD), title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.632',
+    date: '2026-07-19',
+    title: 'Second-Guess Your Bumps, Anytime',
+    items: [
+      "🔄 Changed your mind on a bump? Fixable now. Open a finished session and every exercise with a Smart Progression or Autoregulation bump shows a small chip, tap it to flip between accepted and declined.",
+      "🤐 Skip an exercise entirely and Autoregulation stops asking how it felt. Makes sense when you think about it: nothing happened, nothing to report on.",
+      "✅ The \"How do you feel today?\" check-in now needs an actual answer. Confirm used to quietly default to Normal if you tapped through without picking, not anymore, Fresh/Normal/Rough first, then Confirm.",
+      "🪜 Fixed the rep target shown mid-set on Autoregulation/Mesocycle plans: it now correctly steps down set to set (say 10 → 9 → 8 for a 3-set 8-10 range) instead of demanding the top number on every single set.",
+    ],
+  },
+  {
+    id: 'v2.629',
+    date: '2026-07-19',
+    title: 'Decline The Bump',
+    items: [
+      "💪 Hit your reps but don't want the extra weight? Now you get a real say. Whenever Smart Progression unlocks a bump, the toast asks \"Hell yeah\" or \"Decline\" instead of just handing it to you. On Autoregulation/Mesocycle plans, the same choice shows up per exercise on the \"Next session\" screen after you finish.",
+      "🎯 Built for exactly the lateral raise problem: the smallest available jump can be plenty on a big compound lift, but brutal on a small isolation move where it wrecks your form before it wrecks your ego. Now you don't have to choose between leaving gains on the table and grinding out ugly reps.",
+      "🔁 Declining isn't a permanent \"never again\", it's a one-time answer. Earn the same bump later and you'll be asked fresh, every time, no memory, no cooldown.",
+      "↩️ Fat-fingered it? Fixable. Open that session later: on Autoregulation, Feedback Recap → Changes earned, tap the chip to flip it back. On Smart Progression, the exercise shows a small \"Bump declined\" badge with an undo tap, as long as you haven't trained it again since.",
+    ],
+  },
+  {
+    id: 'v2.624',
+    date: '2026-07-18',
+    title: 'Health Tab Gets Some Elbow Room',
+    items: [
+      "📊 Charts now sit two-per-row (Weight, Steps, Water, Cardio, Glucose, Blood Pressure, Body Temp), so you see way more of your week without endless scrolling. Want one blown up big? Tap the little expand icon in its corner.",
+      "🎯 Macro Targets, Adherence, and the macro breakdown chart are now one unit: targets on top, the other two paired below. Hide or reorder it and all three move together, no more adherence chart left stranded without its targets.",
+      "📄 The Daily Log traded its cramped bottom sheet for a proper full page. Way more room for weight, macros, water, notes, and glucose/BP/temp readings. Tap the arrow top-left to leave (still asks before tossing unsaved changes).",
+      "⌨️ Typing in the Daily Log no longer plays hide-and-seek with the keyboard, fields stay put and visible while you fill them in.",
+    ],
+  },
+  {
     id: 'v2.615',
     date: '2026-07-18',
     title: 'A Tidier Daily Log',

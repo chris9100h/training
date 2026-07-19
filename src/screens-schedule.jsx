@@ -1047,6 +1047,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
     ? (mesoCurrentWeek(resolvedMeso, store) === 1 && (resolvedMeso.completions ?? 0) === 0)
     : false;
   const mesoBoosts = resolvedMeso?.weightBoosts ?? null;
+  const mesoDeclines = resolvedMeso?.weightBoostDeclines ?? null;
 
   const exerciseList = isEmptyNamed ? (
     <BracketFrame style={{ textAlign: 'center', padding: 36 }}>
@@ -1087,11 +1088,18 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
         // Load-only autoregulate plans never apply set deltas (mirrors the real
         // seeding in screens-home.jsx so this preview agrees with it).
         const itAdj = (typeof applyMesoSetDeltaFromState === 'function' && !LB.autoregLoadOnly(sch)) ? applyMesoSetDeltaFromState(it, day.id, resolvedMeso) : it;
-        const weightBoost = mesoBoosts?.[it.exId + '_' + day.id] ?? null;
+        // A declined boost is withheld exactly like an un-earned one (falls
+        // through to resolveMesoSeedSuggestion's veto branch, weight holds).
+        // declined is passed through separately too (not just collapsed into
+        // weightBoost=null) so the veto still applies during week 1's
+        // noPriorFeedback carve-out (mirrors screens-home.jsx).
+        const boostKey = it.exId + '_' + day.id;
+        const declined = !!mesoDeclines?.[boostKey];
+        const weightBoost = declined ? null : (mesoBoosts?.[boostKey] ?? null);
         // Mirror the real session-start (screens-home.jsx): on an autoregulating
         // plan the feedback engine owns the weight, so an earned boost applies
         // and a withheld one vetoes Smart Progression (see LB.resolveMesoSeedSuggestion).
-        const suggestionFinal = LB.resolveMesoSeedSuggestion(suggestion, weightBoost, last, LB.mesoActive(sch), mesoNoPriorFeedback, (it.repsPerSet?.[0] ?? it.reps ?? null));
+        const suggestionFinal = LB.resolveMesoSeedSuggestion(suggestion, weightBoost, last, LB.mesoActive(sch), mesoNoPriorFeedback, (it.repsPerSet?.[0] ?? it.reps ?? null), declined);
         // 5/3/1 main lift: seed the current week's wave prescription instead of
         // echoing last-session weights (buildSeedSets is not 5/3/1-aware). Mirrors
         // the session-start builder in screens-home.jsx.

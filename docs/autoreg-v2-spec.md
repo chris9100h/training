@@ -8,7 +8,8 @@ nach `docs/internals.md` bzw. `docs/database.md`.
 
 Heute ist die Volumen-Logik reaktiv und gedächtnislos: "still sore" schneidet
 einen Satz, "not enough" legt einen drauf, ohne Decke. Ergebnis: Sägezahn statt
-Konvergenz. Ziel: von **reaktiv** zu **verstehend** (MEV/MRV pro Muskel gemerkt),
+Konvergenz. Ziel: von **reaktiv** zu **verstehend** (MRV pro Muskel gelernt, MEV
+startet aus der Plan-Vorgabe und wandert als mevFloor lose mit der MRV mit),
 und zwar in **allen drei Modi**, nicht nur im wochenbegrenzten Meso.
 
 **Leitsatz, der die Modus-Frage löst:**
@@ -46,7 +47,7 @@ Volumen ist der Sinn von B). B bekommt alles andere.
 
 ### 2.1 Mikrozyklus-Buchhaltung: harte Sätze pro Muskel
 
-Neu, das Fundament. Heute rechnet alles pro `exId_dayId`; MEV/MRV sind
+Neu, das Fundament. Heute rechnet alles pro `exId_dayId`; die MRV-Decke ist
 **Volumen pro Muskel pro Mikrozyklus** über alle Tage.
 
 - **Fenster = ein Mikrozyklus, nach Plan-Struktur** (NICHT fix 7 Tage):
@@ -102,21 +103,44 @@ selbst abklingen, ziehen den Detektor zurück (war evtl. nur Schlaf/Stress).
 Output pro Muskel: `{ atCeiling: bool, since, evidence: [...] }`. `evidence` sind
 menschenlesbare Strings (siehe §8), die direkt in Recap/Nudge wandern.
 
-### 2.3 Landmarks: MRV-Cap (pro Muskel) + Block-Backoff (pro Übung)
+### 2.3 Landmarks: MRV-Cap (pro Muskel, gelernt) + Block-Backoff (pro Übung, MEV-Floor lernt mit)
 
 Wichtige Trennung nach Rücksprache:
-- **MRV[muscle] = Decke, PRO MUSKEL.** Muss pro Muskel sein: Brust erholt sich als
-  Ganzes, egal über wie viele Übungen die Sätze laufen. Pro Übung gedacht hätte jede
-  Brustübung ihre eigene Decke und das Gesamtvolumen explodiert. Wert = die
-  Mikrozyklus-Satzzahl, bei der die Signatur zuschlug, **EMA-geglättet** über Blöcke.
-- **Block-Backoff = PRO ÜBUNG.** Kein echtes MEV in v1 (echtes MEV liegt weit unter
-  MRV, grob halb, und ist pro Muskel; das ist v2-Wissenschaft). Stattdessen
-  pragmatisch: beim Blockstart zieht **jede Übung ~2 Sätze** von ihrem zuletzt
-  erreichten Volumen ab, danach baut die normale Satz-drauf-Logik wieder hoch,
-  **gedeckelt von der per-Muskel-MRV.** Decke korrekt (pro Muskel), Stellschraube
-  wie gehabt (pro Übung).
+- **MRV[muscle] = Decke, PRO MUSKEL, GELERNT.** Muss pro Muskel sein: Brust erholt
+  sich als Ganzes, egal über wie viele Übungen die Sätze laufen. Pro Übung gedacht
+  hätte jede Brustübung ihre eigene Decke und das Gesamtvolumen explodiert. Wert =
+  die Mikrozyklus-Satzzahl, bei der die Signatur zuschlug, **EMA-geglättet** über
+  Blöcke. Muss gelernt werden, keine Plan-Vorgabe kennt die individuelle
+  Erholungsfähigkeit im Voraus.
+- **Block-Backoff = PRO ÜBUNG, Reset auf Plan-Vorgabe + gelernten MEV-Floor.**
+  Die Plan-Vorgabe (Satzzahl der Übung im Plan, bevor die Earn-Ladder draufbaut)
+  ist der Startwert für die praktische MEV in Block 1: wer einen Plan schreibt,
+  unterschreitet selten absichtlich das Minimum für Fortschritt. Ab Block 2 kommt
+  ein **`mevFloor`, PRO MUSKEL, GELERNT** dazu: bei jedem Reset wird verglichen,
+  wie weit sich die MRV des Muskels seit dem Start des gerade endenden Blocks
+  bewegt hat (`block.startMrvByMuscle` als Baseline), und `mevFloor` bewegt sich
+  **in dieselbe Richtung mit**, gedeckelt bei 0 insgesamt (nie negativ). Damit
+  bleibt MEV nicht für immer am Tag-1-Planwert eingefroren, sondern wandert lose
+  mit der MRV mit, so wie die Praxis es nahelegt (wächst die Erholungsfähigkeit
+  eines Muskels, verschiebt sich sein sinnvolles Minimum tendenziell mit).
+  Nicht-destruktiv mitten im Block: eine sinkende MRV kürzt nie aktiv einen
+  Satz, der gerade in Benutzung ist, sie senkt nur, wie viel beim **nächsten**
+  Reset neu verteilt wird. Beim Blockstart fällt jede gewachsene Übung auf
+  Plan-Vorgabe zurück (Delta → 0), danach wird der **volle aktuelle
+  `mevFloor`** des Muskels über dessen Übungen im Plan neu verteilt (nicht nur
+  das Delta seit dem letzten Reset, der Reset löscht ja jedes Mal alles, die
+  komplette Summe muss also jedes Mal neu vergeben werden), über dieselbe
+  Fairness-Rotation, die auch Earned-Growth verteilt (`pickGrowthRecipient`,
+  least-loaded-first). Das heilt auch einen Übungstausch zwischen zwei Blöcken
+  automatisch: die Verteilung liest den Muskel-Übungs-Bestand jedes Mal frisch
+  aus dem aktuellen Plan. Hat ein Muskel gerade keine Übung im Plan, bleibt sein
+  `mevFloor` einfach gebankt, bis wieder eine da ist, kein Fehlerfall. Danach
+  baut die normale Satz-drauf-Logik wieder hoch, **gedeckelt von der
+  per-Muskel-MRV.**
 
-Persistiert, versioniert (§9). Überlebt das History-Windowing (liegt im `mesoState`).
+Persistiert (MRV **und** mevFloor, beide als Landmark je Muskel; dazu
+`block.startMrvByMuscle` als Reset-Baseline), versioniert (§9). Überlebt das
+History-Windowing (liegt im `mesoState`).
 
 ## 3. Blockgrenze & Reset (die Mode-Policy)
 
@@ -124,9 +148,9 @@ Persistiert, versioniert (§9). Überlebt das History-Windowing (liegt im `mesoS
   Schlägt der Detektor **vor** der Peak-Woche an, wird **früh gecappt** (Volumen
   halten statt aufs geplante Peak-Volumen hochziehen); der geplante Deload kommt eh.
 - **Auto Full (A):** Grenze **erkannt.** MRV-Signatur → **Deload vorschlagen** →
-  bei Annahme Block-Backoff (§2.3, −2 Sätze/Übung) + neuer Ramp bis zur per-Muskel-
-  MRV. Das macht Auto Full zum **selbst-getakteten Mesozyklus:** Blocklänge = deine
-  Erholung, nicht eine Zahl.
+  bei Annahme Block-Backoff (§2.3, Reset auf Plan-Vorgabe + gelernten mevFloor)
+  + neuer Ramp bis zur per-Muskel-MRV. Das macht Auto Full zum **selbst-getakteten Mesozyklus:**
+  Blocklänge = deine Erholung, nicht eine Zahl.
 - **Auto Load-only (B):** Volumen fix, also kein Volumen-Reset. Derselbe Detektor
   hält/senkt die **Last** und schlägt einen Deload vor.
 
@@ -248,11 +272,12 @@ Intelligenz wie Willkür an. Beispiele:
 - **`zane_meso_states`** (pro User+Plan): neue Spalte `autoreg_state jsonb`, ein
   versionierter Blob:
   ```
-  { version, landmarks: { [muscle]: { mrv, mev, updatedAt } },
-    overreach: { [muscle]: { streak, firstSeenSets, lastAt } },
-    block: { startDate, startVolByMuscle },
+  { version, landmarks: { [muscle]: { mrv, mevFloor, updatedAt } },
+    block: { startDate, startVolByMuscle, startMrvByMuscle },
     deloadNudge: { [scope]: { declinedAt, cooldownUntil, escalation } } }
   ```
+  (`overreach` ist NIE Teil dieses Blobs: der Detektor ist zustandslos und wird
+  bei jedem Aufruf frisch aus der Session-Historie neu berechnet, siehe §2.2.)
 - **`zane_sessions`**: `readiness text`, `signal_weight text`.
 - **`store.js` (4 Stellen, Pflicht):** `loadFromSupabase`-Mapping, `syncStore`-Diff,
   `upsert`, `importFromBackup`. Meso-State und diese Session-Felder sind
@@ -272,7 +297,9 @@ Intelligenz wie Willkür an. Beispiele:
 - Stall: **3** Sessions ohne e1RM-Fortschritt bei grünen Gates.
 - Readiness "Rough": **+1 RIR als Vorschlag, kein Satz-Kappen**, durch Leistung
   überschreibbar (App schlägt vor, drosselt nicht).
-- Block-Backoff: **−2 Sätze pro Übung** am Blockstart; Decke (MRV) pro Muskel.
+- Block-Backoff: **Reset auf Plan-Vorgabe + gelernten mevFloor pro Übung** am
+  Blockstart; Decke (MRV) pro Muskel, gelernt; mevFloor pro Muskel, spiegelt
+  MRV-Bewegung (§2.3).
 - Buchhaltungs-Fenster: ein Mikrozyklus nach Plan-Struktur (§2.1).
 
 - Wiedereinstieg: ab **7** Pausentagen; systemischer Ease-in über **1 Mikrozyklus**,
@@ -284,7 +311,8 @@ Intelligenz wie Willkür an. Beispiele:
 
 **Später (nicht v1-blockierend):**
 - MRV-EMA-Glättungsfaktor (Startwert im Bau festlegen, dann tunen).
-- Echte MEV-Erkennung pro Muskel (v2).
+- ~~Echtes gelerntes MEV pro Muskel (v2)~~: erledigt, siehe §2.3 (mevFloor
+  spiegelt die MRV-Bewegung statt eines unabhängigen Detektors).
 
 ## 11. Bau-Phasen (jede einzeln lieferbar + testbar)
 
@@ -296,9 +324,10 @@ Intelligenz wie Willkür an. Beispiele:
   die Grund-Intelligenz in **allen drei** Modi. Noch kein Cross-Block-Gedächtnis.
 - **P2: Recap (zwei Rahmungen) + Anti-Nag.** Nutzt P1s Detektor; der Decline-Recap
   hängt an P1.
-- **P3: Landmarks + emergente Blöcke + MEV-Reset.** Persistiert MEV/MRV, Reset an
-  der Grenze, emergenter Deload → Reset für die Auto-Modi. Erst ab hier wird Auto
-  Full zum selbst-getakteten Meso.
+- **P3: Landmarks + emergente Blöcke + lernender MEV-Floor.** Persistiert die
+  gelernte MRV und den mitwandernden mevFloor pro Muskel, Reset an der Grenze
+  auf Plan-Vorgabe + aktuellen Floor, emergenter Deload → Reset für die
+  Auto-Modi. Erst ab hier wird Auto Full zum selbst-getakteten Meso.
 - **P4: Stall + konkreter Swap, Wiedereinstiegs-Ramp.**
 
 P1 ist der Dreh- und Angelpunkt: sobald der Detektor auf der Mikrozyklus-

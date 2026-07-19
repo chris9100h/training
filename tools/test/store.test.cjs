@@ -897,6 +897,42 @@ async function testAsync(name, fn) {
     assert.strictEqual(JSON.stringify(LB.reearnMesoWeightBoosts(undefined, undefined, undefined)), '{}');
   });
 
+  // ── normalizeHiddenHealthCards (macros/adherence merged into macroGroup) ──
+  test('normalizeHiddenHealthCards: pre-merge ids map to macroGroup', () => {
+    assert.strictEqual(JSON.stringify(LB.normalizeHiddenHealthCards(['macros'])), '["macroGroup"]');
+    assert.strictEqual(JSON.stringify(LB.normalizeHiddenHealthCards(['adherence'])), '["macroGroup"]');
+  });
+  test('normalizeHiddenHealthCards: both old ids collapse to one entry, no duplicate', () => {
+    assert.strictEqual(JSON.stringify(LB.normalizeHiddenHealthCards(['macros', 'adherence'])), '["macroGroup"]');
+  });
+  test('normalizeHiddenHealthCards: other ids and an already-migrated macroGroup pass through untouched', () => {
+    assert.strictEqual(JSON.stringify(LB.normalizeHiddenHealthCards(['weight', 'macroGroup', 'steps'])), '["weight","macroGroup","steps"]');
+  });
+  test('normalizeHiddenHealthCards: null/undefined/empty inputs are safe', () => {
+    assert.strictEqual(LB.normalizeHiddenHealthCards(null), null);
+    assert.strictEqual(LB.normalizeHiddenHealthCards(undefined), null);
+    assert.strictEqual(JSON.stringify(LB.normalizeHiddenHealthCards([])), '[]');
+  });
+
+  // ── clearMesoWeightBoostDeclines (a decline never outlives the session that set it) ──
+  test('clearMesoWeightBoostDeclines: a declined key re-earned/re-evaluated this session is cleared', () => {
+    const out = LB.clearMesoWeightBoostDeclines({ bench_d1: true }, ['bench_d1']);
+    assert.ok(!('bench_d1' in out), 'stale decline must be removed');
+  });
+  test('clearMesoWeightBoostDeclines: a key not touched this session keeps its decline', () => {
+    const out = LB.clearMesoWeightBoostDeclines({ bench_d1: true, squat_d2: true }, ['bench_d1']);
+    assert.ok(!('bench_d1' in out), 'this session\'s key cleared');
+    assert.strictEqual(out.squat_d2, true, 'other day\'s decline untouched');
+  });
+  test('clearMesoWeightBoostDeclines: nothing to clear returns the same reference', () => {
+    const prev = { squat_d2: true };
+    assert.strictEqual(LB.clearMesoWeightBoostDeclines(prev, ['bench_d1']), prev, 'no-op keeps identity');
+  });
+  test('clearMesoWeightBoostDeclines: null/empty inputs are safe', () => {
+    assert.strictEqual(JSON.stringify(LB.clearMesoWeightBoostDeclines(null, [])), '{}');
+    assert.strictEqual(JSON.stringify(LB.clearMesoWeightBoostDeclines(undefined, undefined)), '{}');
+  });
+
   // ── revertMesoSessionBoosts (delete a meso session → drop its orphaned boost) ──
   const mesoStateWB = { weightBoosts: { tri_d1: 2.5, chest_d1: 5, tri_d2: 2.5 }, repMissCounts: { tri_d1: 1 } };
   const delSess = { id: 'A', dayId: 'd1', ended: '2026-07-15T10:00:00Z', entries: [{ exId: 'tri' }, { exId: 'chest' }] };
@@ -1212,6 +1248,22 @@ async function testAsync(name, fn) {
     const out = LB.reearnMesoBoostsFromAnswers({ weightBoosts: {} }, passAnswers, earnInputs, false);
     assert.strictEqual(out.weightBoosts.e1_d1, 2.5);
   });
+  test('reearnMesoBoostsFromAnswers: a post-hoc edit clears a stale decline on the re-evaluated key', () => {
+    // The user declined e1_d1's boost in the live session (weightBoostDeclines set),
+    // then later edits that session's feedback answers. The re-earn must clear the
+    // stale decline too, mirroring computeMesoGains' live pairing of
+    // reearnMesoWeightBoosts with clearMesoWeightBoostDeclines: an edit that changes
+    // whether/how much a key earns can't leave an old per-instance answer stuck.
+    const prev = { weightBoosts: { e1_d1: 2.5 }, weightBoostDeclines: { e1_d1: true } };
+    const out = LB.reearnMesoBoostsFromAnswers(prev, passAnswers, earnInputs, false);
+    assert.ok(!('e1_d1' in out.weightBoostDeclines), 'decline cleared on re-evaluation, whether it re-earned or not');
+  });
+  test('reearnMesoBoostsFromAnswers: a decline for a key NOT in this edit\'s earnInputs is left alone', () => {
+    const prev = { weightBoosts: { e1_d1: 2.5, e2_d1: 2.5 }, weightBoostDeclines: { e1_d1: true, e2_d1: true } };
+    const out = LB.reearnMesoBoostsFromAnswers(prev, passAnswers, earnInputs, false); // earnInputs only covers e1_d1
+    assert.ok(!('e1_d1' in out.weightBoostDeclines), 'e1_d1 was re-evaluated, decline cleared');
+    assert.strictEqual(out.weightBoostDeclines.e2_d1, true, 'e2_d1 untouched, not part of this edit');
+  });
   test('reearnMesoBoostsFromAnswers: a too-heavy weight-feel drops the boost (Volume+Load, per exId)', () => {
     const ans = { joint: { e1: { answer: 'none', pump: 'amazing', weight: 'too_much' } }, volume: { chest: { muscle: 'chest', exIds: ['e1'], volume: 'just_right' } }, soreness: {} };
     const out = LB.reearnMesoBoostsFromAnswers({ weightBoosts: { e1_d1: 2.5 } }, ans, earnInputs, false);
@@ -1374,7 +1426,9 @@ async function testAsync(name, fn) {
   test('mesoRecapGainsFromEdit: combines set deltas and weight deltas per exercise', () => {
     const answers = { soreness: {}, joint: {}, volume: { chest: { muscle: 'chest', exIds: ['e1'], contrib: { e1_d1: 1 } } } };
     const gains = LB.mesoRecapGainsFromEdit(answers, { e1_d1: 2.5 }, [{ exId: 'e1', key: 'e1_d1', name: 'Bench' }], 'd1');
-    assert.strictEqual(JSON.stringify(gains), JSON.stringify([{ name: 'Bench', weightDelta: 2.5, setDelta: 1 }]));
+    // key carried through so the session detail's "Changes earned" list can
+    // toggle a positive weightDelta's decline after the fact.
+    assert.strictEqual(JSON.stringify(gains), JSON.stringify([{ name: 'Bench', key: 'e1_d1', weightDelta: 2.5, setDelta: 1 }]));
   });
 
   // ── resolveMesoSeedSuggestion (feedback owns weight on a meso plan) ──
@@ -1395,6 +1449,22 @@ async function testAsync(name, fn) {
   test('resolveMesoSeedSuggestion: first block week 1 (no prior feedback) lets Smart Progression through', () => {
     const sp = { kg: 102.5, reps: 8 };
     assert.strictEqual(LB.resolveMesoSeedSuggestion(sp, null, seedLast, true, true), sp);
+  });
+  test('resolveMesoSeedSuggestion: a decline still vetoes even during week 1\'s no-prior-feedback carve-out', () => {
+    // completions only advances at the end of a meso BLOCK, so noPriorFeedback
+    // stays true for every session of the first block's week 1, not just its
+    // first one. A decline recorded on a later week-1 session must still hold,
+    // not fall through the noPriorFeedback carve-out meant for "never earned".
+    const sp = { kg: 102.5, reps: 8 };
+    assert.strictEqual(LB.resolveMesoSeedSuggestion(sp, null, seedLast, true, true, null, true), null, 'declined=true vetoes despite noPriorFeedback');
+    assert.strictEqual(LB.resolveMesoSeedSuggestion(sp, null, seedLast, true, true, null, false), sp, 'declined=false (never earned) is unaffected, same as before');
+  });
+  test('resolveMesoSeedSuggestion: declined vetoes even if a caller passes the raw earned weightBoost instead of nulling it', () => {
+    // The function must own "declined implies withheld" itself, not rely on
+    // every caller pre-nulling weightBoost when declined is true. A future
+    // caller that stops pre-nulling must not silently re-apply a declined bump.
+    const sp = { kg: 102.5, reps: 8 };
+    assert.strictEqual(LB.resolveMesoSeedSuggestion(sp, 2.5, seedLast, true, false, null, true), null, 'raw earned weightBoost still vetoed when declined=true');
   });
   test('resolveMesoSeedSuggestion: off a meso plan Smart Progression is untouched', () => {
     const sp = { kg: 102.5, reps: 8 };
@@ -2354,6 +2424,65 @@ async function testAsync(name, fn) {
     assert.ok(sugg && sugg.kg > 100, 'assistance on the 531 day still progresses');
   });
 
+  test('progressionSuggestion: a declined bump is suppressed for its own occurrence only, a sibling occurrence is unaffected', () => {
+    // "leg" appears twice on day d1 (e.g. straight set + back-off block); only
+    // occurrence 0's earned bump was declined, occurrence 1 earned its own and
+    // was never asked, so it must still progress independently (no cross-
+    // contamination between two occurrences of the same exercise, see the
+    // matching occ-keying in recentSessionsForExercise).
+    const store = {
+      settings: { smartProgression: true },
+      exercises: [{ id: 'leg', name: 'Leg Press' }],
+      schedules: [],
+      sessions: [{
+        ended: '2026-07-01T10:00:00Z', dayId: 'd1', isDeload: false,
+        entries: [
+          { exId: 'leg', sets: [{ kg: 100, reps: 10, warmup: false }] },
+          { exId: 'leg', sets: [{ kg: 50, reps: 10, warmup: false }] },
+        ],
+        progressionBumps: { leg_0: { name: 'Leg Press', currentKg: 100, nextKg: 102.5, declined: true } },
+      }],
+    };
+    const ref = { entry: { sets: [{ kg: 100, reps: 10, warmup: false }] } };
+    assert.strictEqual(LB.progressionSuggestion(store, 'leg', 'd1', 5, null, ref, null, null, 0), null, 'occurrence 0 was declined');
+    const sugg = LB.progressionSuggestion(store, 'leg', 'd1', 5, null, ref, null, null, 1);
+    assert.ok(sugg && sugg.kg > 100, 'occurrence 1 was never declined, still progresses');
+  });
+
+  test('progressionSuggestion: no decline recorded, bump goes through normally', () => {
+    const store = {
+      settings: { smartProgression: true },
+      exercises: [{ id: 'leg', name: 'Leg Press' }],
+      schedules: [],
+      sessions: [{
+        ended: '2026-07-01T10:00:00Z', dayId: 'd1', isDeload: false,
+        entries: [{ exId: 'leg', sets: [{ kg: 100, reps: 10, warmup: false }] }],
+        progressionBumps: {},
+      }],
+    };
+    const ref = { entry: { sets: [{ kg: 100, reps: 10, warmup: false }] } };
+    const sugg = LB.progressionSuggestion(store, 'leg', 'd1', 5, null, ref, null, null, 0);
+    assert.ok(sugg && sugg.kg > 100, 'undeclined bump still fires');
+  });
+  test('progressionSuggestion: an explicitly accepted bump (declined:false) is not suppressed', () => {
+    // Hell yeah now writes a record too (session detail's toggle chip needs
+    // something to show for an accepted bump, not just declines), so an
+    // accepted entry must be treated the same as no entry at all.
+    const store = {
+      settings: { smartProgression: true },
+      exercises: [{ id: 'leg', name: 'Leg Press' }],
+      schedules: [],
+      sessions: [{
+        ended: '2026-07-01T10:00:00Z', dayId: 'd1', isDeload: false,
+        entries: [{ exId: 'leg', sets: [{ kg: 100, reps: 10, warmup: false }] }],
+        progressionBumps: { leg_0: { name: 'Leg Press', currentKg: 97.5, nextKg: 100, declined: false } },
+      }],
+    };
+    const ref = { entry: { sets: [{ kg: 100, reps: 10, warmup: false }] } };
+    const sugg = LB.progressionSuggestion(store, 'leg', 'd1', 5, null, ref, null, null, 0);
+    assert.ok(sugg && sugg.kg > 100, 'accepted bump does not block the next one');
+  });
+
   test('build531Plan: catalog names resolve, 4 days, program_data stamped, assistance uncapped', () => {
     const FTO = _catWin.FIVE_THREE_ONE;
     assert.ok(FTO && Array.isArray(FTO.lifts) && FTO.lifts.length === 4, 'FIVE_THREE_ONE has 4 lifts');
@@ -2669,8 +2798,7 @@ async function testAsync(name, fn) {
     test('updateLandmarkMrv: first observation seeds the ceiling', () => {
       const out = LB.updateLandmarkMrv(null, 'Chest', 18);
       assert.strictEqual(out.landmarks.Chest.mrv, 18, 'first flag seeds mrv at the observed set count');
-      assert.strictEqual(out.landmarks.Chest.mev, 9, 'mev is a light half-of-mrv default');
-      assert.strictEqual(out.version, 2, 'stamps the P3 blob version');
+      assert.strictEqual(out.version, 3, 'stamps the P3 blob version');
     });
 
     test('updateLandmarkMrv: a single low spike does NOT fully drop a learned ceiling', () => {
@@ -2702,11 +2830,11 @@ async function testAsync(name, fn) {
       assert.strictEqual(atCeiling({ Chest: { atCeiling: true } }, {}, {}, 'Chest'), true, 'detector alone still freezes');
     });
 
-    test('backoffDeltas: reduces grown lifts by ~2, never below base, leaves base/cut lifts', () => {
-      const out = LB.backoffDeltas({ a: 3, b: 2, c: 1, d: 0, e: -1 }, 2);
-      assert.strictEqual(out.a, 1, '+3 backs off to +1');
-      assert.strictEqual(out.b, 0, '+2 backs off exactly to base (0), not below');
-      assert.strictEqual(out.c, 0, '+1 floors at base (0), never negative');
+    test('backoffDeltas: resets grown lifts to plan base, leaves base/cut lifts', () => {
+      const out = LB.backoffDeltas({ a: 3, b: 2, c: 1, d: 0, e: -1 });
+      assert.strictEqual(out.a, 0, '+3 resets to base (0)');
+      assert.strictEqual(out.b, 0, '+2 resets to base (0)');
+      assert.strictEqual(out.c, 0, '+1 resets to base (0)');
       assert.strictEqual(out.d, 0, 'a lift already at base is untouched');
       assert.strictEqual(out.e, -1, 'a cut lift is left as-is (backoff never RAISES volume)');
     });
@@ -2717,6 +2845,112 @@ async function testAsync(name, fn) {
       assert.strictEqual(out.landmarks.Chest.mrv, 20, 'landmarks persist across the block snapshot');
       assert.strictEqual(out.block.startDate, '2026-07-16', 'records the new block start date');
       assert.strictEqual(out.block.startVolByMuscle.Chest, 12, 'records per-muscle start volume');
+    });
+
+    test('snapshotBlockStart: also snapshots startMrvByMuscle from current landmarks', () => {
+      const withLm = LB.updateLandmarkMrv(null, 'Chest', 20);
+      const out = LB.snapshotBlockStart(withLm, '2026-07-19', { Chest: 12 });
+      assert.strictEqual(out.block.startMrvByMuscle.Chest, 20);
+    });
+
+    test('muscleRosterKeys: same exercise on two days yields two independent keys', () => {
+      const sch = { days: [{ id: 'd1', items: [{ exId: 'bench' }] }, { id: 'd2', items: [{ exId: 'bench' }] }] };
+      const muscleOf = (id) => (id === 'bench' ? 'Chest' : null);
+      const keys = LB.muscleRosterKeys(sch, 'Chest', muscleOf);
+      // JSON.stringify, not deepStrictEqual: the returned array lives in the vm
+      // realm, so its prototype differs from this file's (same as the rest of
+      // this suite avoids it).
+      assert.strictEqual(JSON.stringify(keys), JSON.stringify(['bench_d1', 'bench_d2']));
+    });
+
+    test('muscleRosterKeys: a muscle with no current exercises returns an empty roster', () => {
+      const sch = { days: [{ id: 'd1', items: [{ exId: 'squat' }] }] };
+      const muscleOf = (id) => (id === 'squat' ? 'Quads' : null);
+      assert.strictEqual(LB.muscleRosterKeys(sch, 'Chest', muscleOf).length, 0);
+    });
+
+    test('muscleRosterKeys: a cardio/muscle-less item is excluded via muscleOfExId returning null', () => {
+      const sch = { days: [{ id: 'd1', items: [{ exId: 'bench' }, { exId: 'cardio1' }] }] };
+      const muscleOf = (id) => (id === 'bench' ? 'Chest' : null); // cardio1 has no tags -> null
+      assert.strictEqual(JSON.stringify(LB.muscleRosterKeys(sch, 'Chest', muscleOf)), JSON.stringify(['bench_d1']));
+    });
+
+    test('updateMevFloors: MRV grew since block start -> mevFloor grows by the delta', () => {
+      const withMrv = LB.updateLandmarkMrv(null, 'Chest', 20); // mrv 20
+      const st = { ...withMrv, block: { startMrvByMuscle: { Chest: 16 } } }; // block started at 16
+      const out = LB.updateMevFloors(st);
+      assert.strictEqual(out.landmarks.Chest.mevFloor, 4, 'grew by 20 - 16');
+    });
+
+    test('updateMevFloors: MRV shrank since block start -> mevFloor shrinks by the delta', () => {
+      const withMrv = LB.updateLandmarkMrv(null, 'Chest', 14);
+      const st = { ...withMrv, landmarks: { Chest: { ...withMrv.landmarks.Chest, mevFloor: 5 } }, block: { startMrvByMuscle: { Chest: 20 } } };
+      const out = LB.updateMevFloors(st);
+      assert.strictEqual(out.landmarks.Chest.mevFloor, 0, '5 + (14 - 20) clamps at 0, does not go negative');
+    });
+
+    test('updateMevFloors: a shrink larger than the banked floor is floored at 0, not negative', () => {
+      const withMrv = LB.updateLandmarkMrv(null, 'Chest', 10);
+      const st = { ...withMrv, landmarks: { Chest: { ...withMrv.landmarks.Chest, mevFloor: 1 } }, block: { startMrvByMuscle: { Chest: 20 } } };
+      assert.strictEqual(LB.updateMevFloors(st).landmarks.Chest.mevFloor, 0);
+    });
+
+    test('updateMevFloors: first-ever block for a muscle (no prior snapshot) makes no floor change', () => {
+      const withMrv = LB.updateLandmarkMrv(null, 'Chest', 18); // fresh landmark, no block.startMrvByMuscle yet
+      const out = LB.updateMevFloors(withMrv);
+      assert.strictEqual(out.landmarks.Chest.mevFloor, 0, 'no baseline to diff against yet');
+    });
+
+    test('redistributeMevFloors: total sets redistributed equals the banked floor', () => {
+      const sch = { days: [{ id: 'd1', items: [{ exId: 'a' }, { exId: 'b' }] }] };
+      const muscleOf = (id) => 'Chest';
+      const autoregState = { landmarks: { Chest: { mrv: 20, mevFloor: 3 } } };
+      const { deltas } = LB.redistributeMevFloors(autoregState, sch, muscleOf, {}, {});
+      const total = (deltas.a_d1 || 0) + (deltas.b_d1 || 0);
+      assert.strictEqual(total, 3);
+    });
+
+    test('redistributeMevFloors: rotates fairly across the roster (least-loaded-first)', () => {
+      const sch = { days: [{ id: 'd1', items: [{ exId: 'a' }, { exId: 'b' }] }] };
+      const muscleOf = () => 'Chest';
+      const autoregState = { landmarks: { Chest: { mrv: 20, mevFloor: 3 } } };
+      const { deltas } = LB.redistributeMevFloors(autoregState, sch, muscleOf, {}, {});
+      assert.ok(Math.abs((deltas.a_d1 || 0) - (deltas.b_d1 || 0)) <= 1, '3 sets over 2 exercises splits 2/1, never 3/0');
+    });
+
+    test('redistributeMevFloors: growthCounts absorbs the grant so the next earned pick avoids the topped-up lift', () => {
+      const sch = { days: [{ id: 'd1', items: [{ exId: 'a' }, { exId: 'b' }] }] };
+      const muscleOf = () => 'Chest';
+      // A single floor set so the grant is unambiguous (an even split across
+      // both exercises would tie growthCounts and make "who's less loaded"
+      // undefined).
+      const autoregState = { landmarks: { Chest: { mrv: 20, mevFloor: 1 } } };
+      const { growthCounts } = LB.redistributeMevFloors(autoregState, sch, muscleOf, {}, {});
+      const next = LB.pickGrowthRecipient(['a_d1', 'b_d1'], growthCounts, null);
+      // the lift that did NOT absorb the floor grant should win the next earned pick
+      const loaded = (growthCounts.a_d1 || 0) >= (growthCounts.b_d1 || 0) ? 'a_d1' : 'b_d1';
+      const unloaded = loaded === 'a_d1' ? 'b_d1' : 'a_d1';
+      assert.strictEqual(next.recipientKey, unloaded);
+    });
+
+    test('redistributeMevFloors: composes on top of an already-backed-off deltas map without disturbing cuts', () => {
+      const sch = { days: [{ id: 'd1', items: [{ exId: 'a' }] }] };
+      const muscleOf = () => 'Chest';
+      const autoregState = { landmarks: { Chest: { mrv: 20, mevFloor: 2 } } };
+      const backedOff = LB.backoffDeltas({ a_d1: 3, other_d2: -1 }); // {a_d1: 0, other_d2: -1}
+      const { deltas } = LB.redistributeMevFloors(autoregState, sch, muscleOf, backedOff, {});
+      assert.strictEqual(deltas.a_d1, 2, 'floor grants land on top of the backed-off base');
+      assert.strictEqual(deltas.other_d2, -1, 'an unrelated cut outside the roster is untouched');
+    });
+
+    test('redistributeMevFloors: an empty roster leaves deltas/growthCounts untouched, banks the floor', () => {
+      const sch = { days: [{ id: 'd1', items: [{ exId: 'squat' }] }] }; // no Chest exercises currently
+      const muscleOf = (id) => (id === 'squat' ? 'Quads' : null);
+      const autoregState = { landmarks: { Chest: { mrv: 20, mevFloor: 5 } } };
+      const { deltas, growthCounts } = LB.redistributeMevFloors(autoregState, sch, muscleOf, { x: 1 }, { y: 2 });
+      // JSON.stringify, not deepStrictEqual: see the muscleRosterKeys tests above.
+      assert.strictEqual(JSON.stringify(deltas), JSON.stringify({ x: 1 }));
+      assert.strictEqual(JSON.stringify(growthCounts), JSON.stringify({ y: 2 }));
     });
   }
 
@@ -3084,7 +3318,7 @@ async function testAsync(name, fn) {
       const st = LB.recordDeloadDecline(null, 4);
       assert.strictEqual(st.deloadNudge.block.cooldownUntil, 7);
       assert.strictEqual(st.deloadNudge.block.escalation, 1);
-      assert.strictEqual(st.version, 2, 'stamps the current P3 blob version');
+      assert.strictEqual(st.version, 3, 'stamps the current P3 blob version');
       assert.ok(st.deloadNudge.block.declinedAt, 'stamps declinedAt');
     });
     test('recordDeloadDecline: a second decline bumps escalation and re-arms the cooldown', () => {

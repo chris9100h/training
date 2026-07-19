@@ -14,8 +14,7 @@ const fmtAgo = (iso) => LB.timeAgo(iso, { capDays: 7 });
 const HEALTH_CARD_TOGGLES = [
   { id: 'week', label: 'Week overview' },
   { id: 'today', label: 'Today' },
-  { id: 'macros', label: 'Macros' },
-  { id: 'adherence', label: 'Macro adherence' },
+  { id: 'macroGroup', label: 'Macros' },
   { id: 'weight', label: 'Weight' },
   { id: 'cardio', label: 'Cardio' },
   { id: 'steps', label: 'Steps' },
@@ -662,6 +661,17 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
   const [reminderTime, setReminderTime] = useStateSet(() => store.settings?.reminderTime ?? '07:00');
   const [cycleWeekView, setCycleWeekView] = useStateSet(() => store.settings?.cycleWeekView ?? localStorage.getItem('logbook-cycle-week-view') === 'true');
   const [darkMode, setDarkMode] = useStateSet(() => store.settings?.darkMode ?? localStorage.getItem('logbook-dark-mode') ?? 'dark');
+  // Starts wherever the watermark is ALREADY sitting today (the same
+  // per-theme/per-image defaults screens-home.jsx falls back to when
+  // watermarkOpacity is unset), so the slider doesn't jump to an arbitrary
+  // position the first time this sheet opens. Moving it makes the choice
+  // explicit and portable across themes/devices from then on.
+  const [watermarkOpacityPct, setWatermarkOpacityPct] = useStateSet(() => {
+    const explicit = store.settings?.watermarkOpacity;
+    if (explicit != null) return explicit;
+    if (store.settings?.vipBackground) return 16;
+    return (store.settings?.darkMode ?? 'dark') === 'light' ? 14 : 4;
+  });
   const [showWarmupInSummary, setShowWarmupInSummary] = useStateSet(() => store.settings?.showWarmupInSummary ?? true);
   const [unitPickerOpen, setUnitPickerOpen] = useStateSet(false);
 const [adminSheet, setAdminSheet] = useStateSet(false);
@@ -1880,7 +1890,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                     return { ...s, settings: { ...s.settings, hiddenHealthCards: next } };
                   })} />
                 </Row>
-                {c.id === 'macros' && (
+                {c.id === 'macroGroup' && (
                   <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: -4, marginBottom: 6, lineHeight: 1.5 }}>
                     Also hides the button to set/edit your macro targets. Come back here to bring it back.
                   </div>
@@ -2198,6 +2208,21 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                 </button>
               );
             })}
+          </div>
+          <div className="knurl" style={{ marginBottom: 14 }} />
+          <div className="micro" style={{ marginBottom: 10 }}>Watermark opacity</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+            <input type="range" min="0" max="100" step="1" value={watermarkOpacityPct}
+              onChange={e => {
+                const v = +e.target.value;
+                setWatermarkOpacityPct(v);
+                setStore(s => ({ ...s, settings: { ...s.settings, watermarkOpacity: v } }));
+              }}
+              style={{ flex: 1, accentColor: 'var(--accent)' }} />
+            <span className="num" style={{ fontSize: 13, color: UI.inkSoft, minWidth: 32, textAlign: 'right' }}>{watermarkOpacityPct}%</span>
+          </div>
+          <div style={{ fontFamily: UI.fontUi, fontSize: 10.5, color: UI.inkGhost, marginBottom: 14, lineHeight: 1.4 }}>
+            How visible the logo (or your VIP background) is behind the Home screen.
           </div>
           <Row label="Week view in cycle mode" first>
             <Toggle on={cycleWeekView} onToggle={() => { const n = !cycleWeekView; setCycleWeekView(n); localStorage.setItem('logbook-cycle-week-view', String(n)); setStore(s => ({ ...s, settings: { ...s.settings, cycleWeekView: n } })); }} />

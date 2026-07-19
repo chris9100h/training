@@ -10,6 +10,13 @@ const { useState: useStateH, useEffect: useEffectH, useMemo: useMemoH, useRef: u
 // ─── helpers ────────────────────────────────────────────────────────────────
 
 const HEALTH_TFS = [{ id: '1W', days: 7 }, { id: '1M', days: 30 }, { id: '3M', days: 90 }];
+// 1D only makes sense on cards you might log more than once a day (Glucose/
+// BP/Body Temp), so it's a separate options list passed just to those, not
+// added to HEALTH_TFS itself (every other card shares that one as-is). 1W/1M/
+// 3M on those three cards still drive (and follow) the SAME shared tf state
+// as every other card; 1D is a local-only overlay on top that never touches
+// the shared value, see GlucoseCard/BloodPressureCard/BodyTempCard.
+const HEALTH_TFS_TODAY = [{ id: '1D', days: 1 }, ...HEALTH_TFS];
 
 // Whole-day difference between two 'YYYY-MM-DD' dates (b − a), noon-anchored to
 // dodge DST/midnight shifts.
@@ -197,29 +204,44 @@ const tempUnitLabel = unit => unit === 'f' ? '°F' : '°C';
 // scaled down since this is a low-stakes UI nag, not a synced setting).
 const FEVER_NUDGE_DECLINE_KEY = 'logbook-fever-nudge-declined-date';
 
+// "HH:MM" -> minutes since midnight, for the multi-reading-per-day scatter
+// charts' todayMode x-axis (time-of-day instead of date). Null on anything
+// unparsable rather than throwing, so a malformed/legacy time string degrades
+// to "midnight" (start of the axis) instead of breaking the whole chart.
+function timeToMinutes(t) {
+  const m = /^(\d{1,2}):(\d{2})$/.exec((t || '').trim());
+  return m ? (+m[1]) * 60 + (+m[2]) : null;
+}
+
 // Scatter chart: one point per reading, connected by a thin trend line (unlike
 // glucose, temperature has no fasted/fed context split, so its reading-to-
 // reading trend is itself the meaningful signal). No reference band: a
 // "normal" body temperature varies by measurement method and time of day, so a
 // fixed band here would overclaim precision a home reading can't guarantee.
-function TempScatterChart({ readings, from, to, unit }) {
-  const pts = (readings || []).filter(r => r.valueC != null && r.date >= from && r.date <= to)
+function TempScatterChart({ readings, from, to, unit, todayMode = false }) {
+  const pts = (readings || []).filter(r => r.valueC != null && (todayMode ? r.date === to : (r.date >= from && r.date <= to)))
     .sort((a, b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time));
-  if (!pts.length) return <HealthChartEmpty />;
+  // No separate empty box in todayMode: the card's own "No readings logged
+  // today yet" text below the (now also empty) feed list already covers it.
+  if (!pts.length) return todayMode ? null : <HealthChartEmpty />;
   const W = 320, padL = 34, padR = 12, padTop = 10, padBottom = 20, plotH = 96;
   const H = padTop + plotH + padBottom, plotW = W - padL - padR;
 
   const dispVals = pts.map(p => tempDisplay(p.valueC, unit));
   const dom = UI.chartDomain(Math.min(...dispVals), Math.max(...dispVals));
   const totalDays = Math.max(1, healthDayDiff(from, to));
-  const xOf = d => padL + (healthDayDiff(from, d) / totalDays) * plotW;
+  // todayMode: one day's worth of readings would all collapse onto the same
+  // date-based x position, so the x-axis switches to time-of-day instead.
+  const xOf = todayMode
+    ? p => padL + ((timeToMinutes(p.time) ?? 0) / 1440) * plotW
+    : p => padL + (healthDayDiff(from, p.date) / totalDays) * plotW;
   const yOf = v => padTop + (1 - (v - dom.min) / dom.range) * plotH;
   const dec = dom.range >= 4 ? 0 : 1;
   const gridVals = dom.gridVals || Array.from({ length: 4 }, (_, i) => dom.min + (dom.range / 3) * i);
   const unitLabel = tempUnitLabel(unit);
   const hoverPoints = pts.map(p => {
     const disp = tempDisplay(p.valueC, unit);
-    return { x: xOf(p.date), y: yOf(disp), date: p.date, rows: [{ value: `${disp}${unitLabel}` }], sub: p.time };
+    return { x: xOf(p), y: yOf(disp), date: p.date, rows: [{ value: `${disp}${unitLabel}` }], sub: p.time };
   });
 
   return (
@@ -233,10 +255,10 @@ function TempScatterChart({ readings, from, to, unit }) {
       ))}
       <line x1={padL} y1={padTop + plotH} x2={W - padR} y2={padTop + plotH} stroke={UI.hair} strokeWidth="0.5" />
       {pts.length >= 2 && (
-        <polyline points={pts.map(p => `${xOf(p.date).toFixed(1)},${yOf(tempDisplay(p.valueC, unit)).toFixed(1)}`).join(' ')} fill="none" stroke="var(--accent)" strokeWidth="1.5" opacity="0.5" />
+        <polyline points={pts.map(p => `${xOf(p).toFixed(1)},${yOf(tempDisplay(p.valueC, unit)).toFixed(1)}`).join(' ')} fill="none" stroke="var(--accent)" strokeWidth="1.5" opacity="0.5" />
       )}
       {pts.map((p, i) => (
-        <circle key={i} cx={xOf(p.date).toFixed(1)} cy={yOf(tempDisplay(p.valueC, unit)).toFixed(1)} r={3} fill="var(--accent)" opacity={0.85} />
+        <circle key={i} cx={xOf(p).toFixed(1)} cy={yOf(tempDisplay(p.valueC, unit)).toFixed(1)} r={3} fill="var(--accent)" opacity={0.85} />
       ))}
     </svg>
     </ChartHover>
@@ -256,22 +278,28 @@ function TempScatterChart({ readings, from, to, unit }) {
 // is multi-tier and context-dependent (rest, time of day, measurement
 // position), better left to the user's own doctor than baked in here.
 const BP_REF_SYS = 120, BP_REF_DIA = 80;
-function BpScatterChart({ readings, from, to }) {
-  const pts = (readings || []).filter(r => r.systolic != null && r.diastolic != null && r.date >= from && r.date <= to)
+function BpScatterChart({ readings, from, to, todayMode = false }) {
+  const pts = (readings || []).filter(r => r.systolic != null && r.diastolic != null && (todayMode ? r.date === to : (r.date >= from && r.date <= to)))
     .sort((a, b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time));
-  if (!pts.length) return <HealthChartEmpty />;
+  // No separate empty box in todayMode: the card's own "No readings logged
+  // today yet" text below the (now also empty) feed list already covers it.
+  if (!pts.length) return todayMode ? null : <HealthChartEmpty />;
   const W = 320, padL = 34, padR = 12, padTop = 10, padBottom = 20, plotH = 96;
   const H = padTop + plotH + padBottom, plotW = W - padL - padR;
 
   const allVals = pts.flatMap(p => [p.systolic, p.diastolic]);
   const dom = UI.chartDomain(Math.min(...allVals, BP_REF_DIA), Math.max(...allVals, BP_REF_SYS));
   const totalDays = Math.max(1, healthDayDiff(from, to));
-  const xOf = d => padL + (healthDayDiff(from, d) / totalDays) * plotW;
+  // todayMode: one day's worth of readings would all collapse onto the same
+  // date-based x position, so the x-axis switches to time-of-day instead.
+  const xOf = todayMode
+    ? p => padL + ((timeToMinutes(p.time) ?? 0) / 1440) * plotW
+    : p => padL + (healthDayDiff(from, p.date) / totalDays) * plotW;
   const yOf = v => padTop + (1 - (v - dom.min) / dom.range) * plotH;
   const gridVals = dom.gridVals || Array.from({ length: 4 }, (_, i) => dom.min + (dom.range / 3) * i);
   const SYS_COLOR = 'var(--accent)', DIA_COLOR = '#4a9fe0';
   const hoverPoints = pts.map(p => ({
-    x: xOf(p.date), y: yOf(p.systolic), date: p.date,
+    x: xOf(p), y: yOf(p.systolic), date: p.date,
     rows: [
       { label: 'SYS', value: `${p.systolic} mmHg`, color: SYS_COLOR },
       { label: 'DIA', value: `${p.diastolic} mmHg`, color: DIA_COLOR },
@@ -293,9 +321,9 @@ function BpScatterChart({ readings, from, to }) {
       <line x1={padL} y1={padTop + plotH} x2={W - padR} y2={padTop + plotH} stroke={UI.hair} strokeWidth="0.5" />
       {pts.map((p, i) => (
         <React.Fragment key={i}>
-          <line x1={xOf(p.date).toFixed(1)} y1={yOf(p.systolic).toFixed(1)} x2={xOf(p.date).toFixed(1)} y2={yOf(p.diastolic).toFixed(1)} stroke={UI.hair} strokeWidth="1" />
-          <circle cx={xOf(p.date).toFixed(1)} cy={yOf(p.systolic).toFixed(1)} r={3} fill={SYS_COLOR} opacity={0.85} />
-          <circle cx={xOf(p.date).toFixed(1)} cy={yOf(p.diastolic).toFixed(1)} r={3} fill={DIA_COLOR} opacity={0.85} />
+          <line x1={xOf(p).toFixed(1)} y1={yOf(p.systolic).toFixed(1)} x2={xOf(p).toFixed(1)} y2={yOf(p.diastolic).toFixed(1)} stroke={UI.hair} strokeWidth="1" />
+          <circle cx={xOf(p).toFixed(1)} cy={yOf(p.systolic).toFixed(1)} r={3} fill={SYS_COLOR} opacity={0.85} />
+          <circle cx={xOf(p).toFixed(1)} cy={yOf(p.diastolic).toFixed(1)} r={3} fill={DIA_COLOR} opacity={0.85} />
         </React.Fragment>
       ))}
     </svg>
@@ -305,10 +333,12 @@ function BpScatterChart({ readings, from, to }) {
 
 // Scatter chart: one point per reading, coloured by context, with a reference
 // band for the fasting normal range (3.9–5.6 mmol/L).
-function GlucoseScatterChart({ readings, from, to, unit }) {
-  const pts = (readings || []).filter(r => r.valueMmol != null && r.date >= from && r.date <= to)
+function GlucoseScatterChart({ readings, from, to, unit, todayMode = false }) {
+  const pts = (readings || []).filter(r => r.valueMmol != null && (todayMode ? r.date === to : (r.date >= from && r.date <= to)))
     .sort((a, b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time));
-  if (!pts.length) return <HealthChartEmpty />;
+  // No separate empty box in todayMode: the card's own "No readings logged
+  // today yet" text below the (now also empty) feed list already covers it.
+  if (!pts.length) return todayMode ? null : <HealthChartEmpty />;
   const W = 320, padL = 42, padR = 12, padTop = 10, padBottom = 20, plotH = 96;
   const H = padTop + plotH + padBottom, plotW = W - padL - padR;
 
@@ -320,7 +350,11 @@ function GlucoseScatterChart({ readings, from, to, unit }) {
   const rawMax = Math.max(...dispVals, refFed);
   const dom = UI.chartDomain(rawMin, rawMax);
   const totalDays = Math.max(1, healthDayDiff(from, to));
-  const xOf = d => padL + (healthDayDiff(from, d) / totalDays) * plotW;
+  // todayMode: one day's worth of readings would all collapse onto the same
+  // date-based x position, so the x-axis switches to time-of-day instead.
+  const xOf = todayMode
+    ? p => padL + ((timeToMinutes(p.time) ?? 0) / 1440) * plotW
+    : p => padL + (healthDayDiff(from, p.date) / totalDays) * plotW;
   const yOf = v => padTop + (1 - (v - dom.min) / dom.range) * plotH;
   const dec = dom.range >= (unit === 'mgdl' ? 40 : 2) ? 0 : 1;
   const gridVals = Array.from({ length: 4 }, (_, i) => dom.min + (dom.range / 3) * i);
@@ -331,7 +365,7 @@ function GlucoseScatterChart({ readings, from, to, unit }) {
   const hoverPoints = pts.map(p => {
     const disp = glucoseDisplay(p.valueMmol, unit);
     return {
-      x: xOf(p.date), y: yOf(disp), date: p.date, color: CTX_COLORS[p.context] || UI.inkSoft,
+      x: xOf(p), y: yOf(disp), date: p.date, color: CTX_COLORS[p.context] || UI.inkSoft,
       rows: [{ value: `${disp} ${unitLabel}`, color: CTX_COLORS[p.context] || UI.inkSoft }],
       sub: [CTX_LABELS[p.context] || p.context, p.time].filter(Boolean).join(' · '),
     };
@@ -354,7 +388,7 @@ function GlucoseScatterChart({ readings, from, to, unit }) {
       <line x1={padL} y1={padTop + plotH} x2={W - padR} y2={padTop + plotH} stroke={UI.hair} strokeWidth="0.5" />
       {pts.map((p, i) => {
         const disp = glucoseDisplay(p.valueMmol, unit);
-        return <circle key={i} cx={xOf(p.date).toFixed(1)} cy={yOf(disp).toFixed(1)} r={3}
+        return <circle key={i} cx={xOf(p).toFixed(1)} cy={yOf(disp).toFixed(1)} r={3}
           fill={CTX_COLORS[p.context] || UI.inkSoft} opacity={0.85} />;
       })}
     </svg>
@@ -383,9 +417,22 @@ function HealthChartEmpty({ label }) {
 //   points: [{ x, y, date:'YYYY-MM-DD', rows:[{label?, value, color?}], sub? }]
 //   mode:   'x' (nearest by column, for lines/bars) | 'xy' (2D, for scatter)
 const CHART_PLOT_TOP = 10, CHART_PLOT_H = 96; // padTop / plotH, shared by every chart
+
+// Whether the current chart is squeezed into the Health tab's 2-col grid, as
+// opposed to shown full-width via a card's expand button. Context instead of
+// a prop threaded through every chart component + HealthChartCard: the grid
+// and the expand sheet render the exact same card element (the expand sheet
+// just clones it, see expandableCards in HealthScreen), and cloneElement is
+// shallow, so a prop set on that outer clone never reaches the chart nested
+// inside it. The grid wraps itself in Provider value={true}; the expand sheet
+// is a sibling of the grid, not a descendant, so it never sees that override
+// and stays at the default (false) below, no explicit "expanded" wrap needed.
+const ChartCompactContext = React.createContext(false);
+
 function ChartHover({ W, H, points, children, mode = 'x', markerColor = 'var(--accent)' }) {
   const wrapRef = useRefH(null);
   const [active, setActive] = useStateH(null);
+  const compact = React.useContext(ChartCompactContext);
 
   const pick = (clientX, clientY) => {
     const el = wrapRef.current;
@@ -426,7 +473,7 @@ function ChartHover({ W, H, points, children, mode = 'x', markerColor = 'var(--a
       style={{ position: 'relative', touchAction: 'pan-y', cursor: points.length ? 'crosshair' : 'default' }}
       onPointerMove={onPoint} onPointerUp={clear} onPointerLeave={clear} onPointerCancel={clear}>
       {children}
-      {!p && points.length > 0 && (
+      {!p && !compact && points.length > 0 && (
         <div style={{ position: 'absolute', top: 2, right: 4, pointerEvents: 'none' }}>
           <span className="micro" style={{ color: UI.inkGhost, letterSpacing: '0.08em' }}>Drag to inspect</span>
         </div>
@@ -457,15 +504,27 @@ const HEALTH_CARD_HEADER_STYLE = { fontFamily: UI.fontUi, fontSize: 12, fontWeig
 
 // Section wrapper: title + 1W/1M/3M toggle + subtitle. `dragHandle` renders a
 // reorder grip at the start of the header when the card is in a reorder list.
-function HealthChartCard({ title, icon, tf, setTf, headline, sub, dragHandle, children }) {
+function HealthChartCard({ title, icon, tf, setTf, tfOptions = HEALTH_TFS, headline, sub, dragHandle, onExpand, children }) {
   return (
     <Card style={{ padding: 14, borderLeft: `3px solid ${UI.gold}` }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+      {/* flexWrap + the toggle's flexShrink:0 let the TF toggle drop to its own
+          line instead of clipping when the card is narrow (2-col grid), full-
+          width cards stay single-line since everything already fits there. */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
         {dragHandle}
         {icon && <i className={`fa-solid ${icon}`} style={{ fontSize: 11, color: UI.inkFaint }} />}
-        <span style={{ ...HEALTH_CARD_HEADER_STYLE, flex: 1 }}>{title}</span>
-        <div data-reorder-ignore="true" style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `0.5px solid ${UI.hairStrong}` }}>
-          {HEALTH_TFS.map(t => (
+        <span style={{ ...HEALTH_CARD_HEADER_STYLE, flex: 1, minWidth: 60 }}>{title}</span>
+        {onExpand && (
+          <button data-reorder-ignore="true" onClick={onExpand} aria-label="Expand" style={{
+            background: 'transparent', border: 'none', padding: 2, cursor: 'pointer',
+            color: UI.inkFaint, display: 'flex', alignItems: 'center', flexShrink: 0,
+            WebkitTapHighlightColor: 'transparent',
+          }}>
+            <i className="fa-solid fa-expand" style={{ fontSize: 11 }} />
+          </button>
+        )}
+        <div data-reorder-ignore="true" style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `0.5px solid ${UI.hairStrong}`, flexShrink: 0 }}>
+          {tfOptions.map(t => (
             <button key={t.id} onClick={() => setTf(t.id)} style={{
               padding: '2px 8px', cursor: 'pointer', border: 'none',
               background: tf === t.id ? 'var(--accent)' : 'transparent',
@@ -644,7 +703,7 @@ function HealthMacroChart({ series, from, to }) {
 
 function MacroLegend() {
   return (
-    <div style={{ display: 'flex', gap: 14, justifyContent: 'center', marginTop: 10 }}>
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, rowGap: 6, justifyContent: 'center', marginTop: 10 }}>
       {[['Protein', MACRO_COLORS.protein], ['Carbs', MACRO_COLORS.carbs], ['Fat', MACRO_COLORS.fat], ['Target', UI.ink]].map(([lbl, col]) => (
         <div key={lbl} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
           <span style={{ width: 9, height: 9, borderRadius: 4, background: col, display: 'inline-block' }} />
@@ -655,12 +714,12 @@ function MacroLegend() {
   );
 }
 
-// ─── Daily log sheet ──────────────────────────────────────────────────────────
+// ─── Daily log screen ─────────────────────────────────────────────────────────
 
 // One card per category: clickable chevron header, optional right-aligned
 // extra content (a unit tag, a toggle) that doesn't itself trigger the
 // collapse, and its fields below when expanded. Defined at module scope
-// (not inside DailyLogSheet) so its function identity is stable across
+// (not inside DailyLogScreen) so its function identity is stable across
 // renders: an inline definition would make React remount the whole
 // subtree (killing input focus/keyboard) on every keystroke.
 function CatSection({ label, extra, collapsed, onToggle, children }) {
@@ -676,7 +735,7 @@ function CatSection({ label, extra, collapsed, onToggle, children }) {
   );
 }
 
-function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCoachingSchema, onSetStatus, userId, glucoseLogs, glucoseUnit, bloodPressureLogs, bodyTempLogs, tempUnit }) {
+function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeCoachingSchema, onSetStatus, userId, glucoseLogs, glucoseUnit, bloodPressureLogs, bodyTempLogs, tempUnit }) {
   // Always-current store snapshot: saveTemp's fever nudge awaits a Supabase
   // write and then a user-interaction-gated confirm dialog, both arbitrarily
   // long, so it re-reads statusMode from this ref (not the closed-over
@@ -1064,8 +1123,20 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
     </div>
   );
 
+  // Full page (not a Sheet): the form has 15+ fields across several sections
+  // plus the glucose/BP/temp add-forms, a bottom sheet's ~88dvh cap made it
+  // cramped. position:fixed so it takes over the whole viewport regardless of
+  // where it's mounted (HealthScreen or HomeScreen's Quick Actions both render
+  // it locally, gated on their own open state, same as the Sheet it replaces,
+  // it isn't wired into the app's go()/route system). zIndex:100 matches
+  // Sheet's own backdrop convention, so it still sits under the confirm dialog
+  // (useConfirm's Sheet, portaled to document.body, same z-index but later in
+  // the DOM so it paints on top).
+  if (!open) return null;
   return (
-    <Sheet open={open} onClose={requestClose} title={existing ? 'Edit Day' : 'Log Day'}>
+    <Screen style={{ position: 'fixed', inset: 0, zIndex: 100, animation: 'sheet-up 0.22s ease' }}>
+      <TopBar title={existing ? 'Edit Day' : 'Log Day'} onBack={requestClose} />
+      <div style={{ padding: '18px 22px calc(env(safe-area-inset-bottom, 8px) + 22px)' }}>
       {confirmEl}
       <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 14 }}>
         {healthFmtDate(date, { weekday: 'long', day: 'numeric', month: 'long' })}
@@ -1264,7 +1335,13 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
             </div>
           </div>
         ) : (
-          <button onClick={() => { setAddingGlucose(true); setEditingGlucoseId(null); }} style={{
+          <button onClick={() => {
+            // Pre-filled with now, not left blank: you measure and log in the
+            // same breath, so defaulting to "right now" saves a step, still
+            // freely editable if you're logging a reading from earlier.
+            setGlForm({ ...emptyGl, time: new Date().toTimeString().slice(0, 5) });
+            setAddingGlucose(true); setEditingGlucoseId(null);
+          }} style={{
             width: '100%', padding: '9px', background: UI.bgInset, border: `0.5px dashed ${UI.hairStrong}`, borderRadius: 6,
             color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 12, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
           }}>+ Add reading</button>
@@ -1336,7 +1413,13 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
             </div>
           </div>
         ) : (
-          <button onClick={() => { setAddingBp(true); setEditingBpId(null); }} style={{
+          <button onClick={() => {
+            // Pre-filled with now, not left blank: you measure and log in the
+            // same breath, so defaulting to "right now" saves a step, still
+            // freely editable if you're logging a reading from earlier.
+            setBpForm({ ...emptyBp, time: new Date().toTimeString().slice(0, 5) });
+            setAddingBp(true); setEditingBpId(null);
+          }} style={{
             width: '100%', padding: '9px', background: UI.bgInset, border: `0.5px dashed ${UI.hairStrong}`, borderRadius: 6,
             color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 12, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
           }}>+ Add reading</button>
@@ -1404,7 +1487,13 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
             </div>
           </div>
         ) : (
-          <button onClick={() => { setAddingTemp(true); setEditingTempId(null); }} style={{
+          <button onClick={() => {
+            // Pre-filled with now, not left blank: you measure and log in the
+            // same breath, so defaulting to "right now" saves a step, still
+            // freely editable if you're logging a reading from earlier.
+            setTempForm({ ...emptyTemp, time: new Date().toTimeString().slice(0, 5) });
+            setAddingTemp(true); setEditingTempId(null);
+          }} style={{
             width: '100%', padding: '9px', background: UI.bgInset, border: `0.5px dashed ${UI.hairStrong}`, borderRadius: 6,
             color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 12, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
           }}>+ Add reading</button>
@@ -1436,7 +1525,8 @@ function DailyLogSheet({ open, onClose, store, setStore, date, targets, activeCo
         )}
         <Btn onClick={save} disabled={!canSave} style={{ flex: 2 }}>{existing ? 'Save' : 'Log'}</Btn>
       </div>
-    </Sheet>
+      </div>
+    </Screen>
   );
 }
 
@@ -1906,9 +1996,21 @@ function HealthDateStrip({ store, setStore, selectedDate, onSelect, onLog, targe
 
 // ─── Glucose card ─────────────────────────────────────────────────────────────
 
-function GlucoseCard({ glucoseLogs, unit, tf, setTf, dragHandle }) {
+function GlucoseCard({ glucoseLogs, unit, tf: sharedTf, setTf: setSharedTf, dragHandle, onExpand, compact = false }) {
   const today = LB.todayISO();
-  const tfDays = id => (HEALTH_TFS.find(t => t.id === id) || HEALTH_TFS[0]).days;
+  // 1D is a local-only overlay on top of the shared tf every card (including
+  // this one for 1W/1M/3M) participates in: picking 1D here never touches
+  // the shared value, so the other cards stay put; picking 1W/1M/3M here
+  // both clears the overlay and drives the shared value, same as any other
+  // card's tf buttons always have.
+  const [showToday, setShowToday] = useStateH(false);
+  const tf = showToday ? '1D' : sharedTf;
+  const setTf = id => {
+    if (id === '1D') { setShowToday(true); return; }
+    setShowToday(false);
+    setSharedTf(id);
+  };
+  const tfDays = id => (HEALTH_TFS_TODAY.find(t => t.id === id) || HEALTH_TFS_TODAY[0]).days;
   const { start, end } = healthWindow(tfDays(tf));
   const unitLabel = glucoseUnitLabel(unit);
   const refLow  = unit === 'mgdl' ? Math.round(GLUCOSE_REF_LOW  * GLUCOSE_FACTOR) : GLUCOSE_REF_LOW;
@@ -1934,15 +2036,22 @@ function GlucoseCard({ glucoseLogs, unit, tf, setTf, dragHandle }) {
   const CTX_COLORS = { fasted: 'var(--accent)', fed: '#4a9fe0', other: UI.inkSoft };
 
   return (
-    <HealthChartCard title="Glucose" icon="fa-droplet" tf={tf} setTf={setTf}
-      headline={latestDisp != null ? String(latestDisp) : null} sub={latestDisp != null ? unitLabel : null} dragHandle={dragHandle}>
+    <HealthChartCard title="Glucose" icon="fa-droplet" tf={tf} setTf={setTf} tfOptions={HEALTH_TFS_TODAY}
+      headline={latestDisp != null ? String(latestDisp) : null} sub={latestDisp != null ? unitLabel : null} dragHandle={dragHandle} onExpand={onExpand}>
       {!inWindow.length ? (
-        <HealthChartEmpty label="No glucose readings in this range" />
+        <HealthChartEmpty label={tf === '1D' ? 'No glucose readings logged today yet' : 'No glucose readings in this range'} />
       ) : (
         <>
-          <GlucoseScatterChart readings={inWindow} from={start} to={end} unit={unit} />
-          {/* Reference legend */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 4 }}>
+          <GlucoseScatterChart readings={inWindow} from={start} to={end} unit={unit} todayMode={tf === '1D'} />
+          {/* Reference legend + readings feed only in the full (expanded) view,
+              compact (2-col grid) shows just the chart, so this card's height
+              matches its plain-chart neighbours instead of towering over them. */}
+          {!compact && (
+          <>
+          {/* Wraps on the narrow 2-col card width instead of clipping: the 3
+              context dots are separate flex items with no text of their own
+              to fall back on for reflow. */}
+          <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 12, rowGap: 4, marginTop: 4 }}>
             <div style={{ height: 8, width: 28, background: 'rgba(var(--accent-rgb),0.15)', borderRadius: 4, flexShrink: 0 }} />
             <span style={{ fontSize: 9, fontFamily: UI.fontUi, color: UI.inkFaint }}>
               Normal fasting {refLow.toFixed(dec)}–{refHigh.toFixed(dec)} {unitLabel}
@@ -1980,6 +2089,8 @@ function GlucoseCard({ glucoseLogs, unit, tf, setTf, dragHandle }) {
               </div>
             </>
           )}
+          </>
+          )}
         </>
       )}
     </HealthChartCard>
@@ -1988,9 +2099,21 @@ function GlucoseCard({ glucoseLogs, unit, tf, setTf, dragHandle }) {
 
 // ─── Blood pressure card ────────────────────────────────────────────────────
 
-function BloodPressureCard({ bpLogs, tf, setTf, dragHandle }) {
+function BloodPressureCard({ bpLogs, tf: sharedTf, setTf: setSharedTf, dragHandle, onExpand, compact = false }) {
   const today = LB.todayISO();
-  const tfDays = id => (HEALTH_TFS.find(t => t.id === id) || HEALTH_TFS[0]).days;
+  // 1D is a local-only overlay on top of the shared tf every card (including
+  // this one for 1W/1M/3M) participates in: picking 1D here never touches
+  // the shared value, so the other cards stay put; picking 1W/1M/3M here
+  // both clears the overlay and drives the shared value, same as any other
+  // card's tf buttons always have.
+  const [showToday, setShowToday] = useStateH(false);
+  const tf = showToday ? '1D' : sharedTf;
+  const setTf = id => {
+    if (id === '1D') { setShowToday(true); return; }
+    setShowToday(false);
+    setSharedTf(id);
+  };
+  const tfDays = id => (HEALTH_TFS_TODAY.find(t => t.id === id) || HEALTH_TFS_TODAY[0]).days;
   const { start, end } = healthWindow(tfDays(tf));
 
   const inWindow = useMemoH(
@@ -2008,13 +2131,17 @@ function BloodPressureCard({ bpLogs, tf, setTf, dragHandle }) {
   );
 
   return (
-    <HealthChartCard title="Blood Pressure" icon="fa-heart-pulse" tf={tf} setTf={setTf}
-      headline={latest ? `${latest.systolic}/${latest.diastolic}` : null} sub={latest ? 'mmHg' : null} dragHandle={dragHandle}>
+    <HealthChartCard title="BP" icon="fa-heart-pulse" tf={tf} setTf={setTf} tfOptions={HEALTH_TFS_TODAY}
+      headline={latest ? `${latest.systolic}/${latest.diastolic}` : null} sub={latest ? 'mmHg' : null} dragHandle={dragHandle} onExpand={onExpand}>
       {!inWindow.length ? (
-        <HealthChartEmpty label="No blood pressure readings in this range" />
+        <HealthChartEmpty label={tf === '1D' ? 'No blood pressure readings logged today yet' : 'No blood pressure readings in this range'} />
       ) : (
         <>
-          <BpScatterChart readings={inWindow} from={start} to={end} />
+          <BpScatterChart readings={inWindow} from={start} to={end} todayMode={tf === '1D'} />
+          {/* Legend + readings feed only in the full (expanded) view, compact
+              (2-col grid) shows just the chart, matching plain-chart neighbours. */}
+          {!compact && (
+          <>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 6 }}>
             <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
               <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--accent)', display: 'inline-block' }} />
@@ -2042,6 +2169,8 @@ function BloodPressureCard({ bpLogs, tf, setTf, dragHandle }) {
               </div>
             </>
           )}
+          </>
+          )}
         </>
       )}
     </HealthChartCard>
@@ -2050,9 +2179,21 @@ function BloodPressureCard({ bpLogs, tf, setTf, dragHandle }) {
 
 // ─── Body temperature card ──────────────────────────────────────────────────
 
-function BodyTempCard({ tempLogs, unit, tf, setTf, dragHandle }) {
+function BodyTempCard({ tempLogs, unit, tf: sharedTf, setTf: setSharedTf, dragHandle, onExpand, compact = false }) {
   const today = LB.todayISO();
-  const tfDays = id => (HEALTH_TFS.find(t => t.id === id) || HEALTH_TFS[0]).days;
+  // 1D is a local-only overlay on top of the shared tf every card (including
+  // this one for 1W/1M/3M) participates in: picking 1D here never touches
+  // the shared value, so the other cards stay put; picking 1W/1M/3M here
+  // both clears the overlay and drives the shared value, same as any other
+  // card's tf buttons always have.
+  const [showToday, setShowToday] = useStateH(false);
+  const tf = showToday ? '1D' : sharedTf;
+  const setTf = id => {
+    if (id === '1D') { setShowToday(true); return; }
+    setShowToday(false);
+    setSharedTf(id);
+  };
+  const tfDays = id => (HEALTH_TFS_TODAY.find(t => t.id === id) || HEALTH_TFS_TODAY[0]).days;
   const { start, end } = healthWindow(tfDays(tf));
   const unitLabel = tempUnitLabel(unit);
 
@@ -2072,14 +2213,16 @@ function BodyTempCard({ tempLogs, unit, tf, setTf, dragHandle }) {
   );
 
   return (
-    <HealthChartCard title="Body Temperature" icon="fa-temperature-half" tf={tf} setTf={setTf}
-      headline={latestDisp != null ? String(latestDisp) : null} sub={latestDisp != null ? unitLabel : null} dragHandle={dragHandle}>
+    <HealthChartCard title="Body Temp" icon="fa-temperature-half" tf={tf} setTf={setTf} tfOptions={HEALTH_TFS_TODAY}
+      headline={latestDisp != null ? String(latestDisp) : null} sub={latestDisp != null ? unitLabel : null} dragHandle={dragHandle} onExpand={onExpand}>
       {!inWindow.length ? (
-        <HealthChartEmpty label="No temperature readings in this range" />
+        <HealthChartEmpty label={tf === '1D' ? 'No temperature readings logged today yet' : 'No temperature readings in this range'} />
       ) : (
         <>
-          <TempScatterChart readings={inWindow} from={start} to={end} unit={unit} />
-          {sortedReadings.length > 0 && (
+          <TempScatterChart readings={inWindow} from={start} to={end} unit={unit} todayMode={tf === '1D'} />
+          {/* Readings feed only in the full (expanded) view, compact (2-col
+              grid) shows just the chart, matching plain-chart neighbours. */}
+          {!compact && sortedReadings.length > 0 && (
             <>
               <div style={{ height: '0.5px', background: UI.hair, margin: '8px 0' }} />
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -2112,6 +2255,9 @@ function HealthScreen({ store, setStore, go, userId }) {
   const [tf, setTf] = useStateH('1W');
   const [capturing, setCapturing] = useStateH(false);
   const [exportOpen, setExportOpen] = useStateH(false);
+  // Which card is blown up in the expand sheet (id into expandableCards below),
+  // null when closed. Only charts squeezed by the 2-col grid offer this.
+  const [expandedCardId, setExpandedCardId] = useStateH(null);
   const captureRef = useRefH(null);
 
   const takeScreenshot = async () => {
@@ -2222,7 +2368,7 @@ function HealthScreen({ store, setStore, go, userId }) {
   }, [coachingId]);
 
   // Load the check-in schema for the active coaching relationship (real coach
-  // or self-coaching) so DailyLogSheet can show coach-configured daily fields.
+  // or self-coaching) so DailyLogScreen can show coach-configured daily fields.
   const [activeCoachingSchema, setActiveCoachingSchema] = useStateH(null);
   const activeClientCoachingId =
     (store.coaching?.asClient?.status === 'active' ? store.coaching?.asClient?.id : null)
@@ -2346,7 +2492,10 @@ function HealthScreen({ store, setStore, go, userId }) {
   // Reorderable card order, persisted per device. Missing ids (e.g. after a new
   // card ships) are inserted at their default position, not appended at the end.
   const CARD_ORDER_KEY = 'logbook-health-card-order';
-  const DEFAULT_CARD_ORDER = ['week', 'today', 'macros', 'adherence', 'weight', 'cardio', 'steps', 'water', 'glucose', 'bloodPressure', 'bodyTemp'];
+  // Macros/Adherence/Targets move, hide, and show as one unit, id 'macroGroup',
+  // see its cardEls entry below, since hiding just one of the three orphans the
+  // others (e.g. an adherence chart with no targets to compare against).
+  const DEFAULT_CARD_ORDER = ['week', 'today', 'macroGroup', 'weight', 'cardio', 'steps', 'water', 'glucose', 'bloodPressure', 'bodyTemp'];
   const [cardOrder, setCardOrder] = useStateH(() => {
     let saved = [];
     try { saved = JSON.parse(localStorage.getItem(CARD_ORDER_KEY) || '[]'); } catch (_) {}
@@ -2472,56 +2621,97 @@ function HealthScreen({ store, setStore, go, userId }) {
       return t >= start && t <= end;
     });
   })();
+  // Opens a chart full-width in a sheet, offered only on charts the 2-col grid
+  // below actually squeezes to half-width (see the onExpand wiring per card and
+  // expandableCards further down, which the sheet renders from by this id).
+  const expandBtn = id => () => setExpandedCardId(id);
+
+  // The 3 macro cards live together in the macroGroup composite below (target
+  // kcal/P/C/F, adherence trend, macro breakdown) so hide/move/reorder always
+  // treats them as one unit, leaving one behind orphans the other two (an
+  // adherence trend with no targets to compare against isn't useful alone).
+  const macroTargetsCard = (
+    <HealthChartCard title="Macro Targets" icon="fa-list-check" tf={tf} setTf={setTf} dragHandle={handle}>
+      {targetRow}
+    </HealthChartCard>
+  );
+  const macroAdherenceCard = (
+    <HealthChartCard title="Adherence" icon="fa-bullseye" tf={tf} setTf={setTf} onExpand={expandBtn('macroAdherence')}
+      headline={adhAvg != null ? `${Math.round(adhAvg)}%` : null} sub={adhAvg != null ? 'avg' : null}>
+      <HealthLineChart series={adhSeries.data} from={adhSeries.from} to={adhSeries.to} format={v => `${Math.round(v)}%`} yMin={0} yMax={100} />
+    </HealthChartCard>
+  );
+  const macrosCard = (
+    <HealthChartCard title="Macros" icon="fa-utensils" tf={tf} setTf={setTf} onExpand={expandBtn('macros')}>
+      <HealthMacroChart series={macroSeries.data} from={macroSeries.from} to={macroSeries.to} />
+      <MacroLegend />
+    </HealthChartCard>
+  );
+
   const cardEls = {
     week: <HealthWeekCard stats={weekStats} dragHandle={handle} targets={effectiveTargets} tf={tf} setTf={setTf} />,
     today: <HealthMetricsCard log={selectedLog} dateLabel={dayLabel} isToday={selectedDate === today} onJumpToday={() => setSelectedDate(today)} dragHandle={handle} trained={trainedSelected} hasCardio={cardioSelected} dayTarget={selectedDayTarget} isStatusDay={selectedIsStatusDay} />,
+    // Targets on top (full width, needs the room for the P/C/F chip row), then
+    // Adherence + the macro breakdown paired below it, always full-width as a
+    // whole, see fullWidthCardIds.
+    macroGroup: (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        {macroTargetsCard}
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 14 }}>
+          {macroAdherenceCard}
+          {macrosCard}
+        </div>
+      </div>
+    ),
     weight: (
-      <HealthChartCard title="Weight" icon="fa-weight-scale" tf={tf} setTf={setTf} dragHandle={handle}
+      <HealthChartCard title="Weight" icon="fa-weight-scale" tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('weight')}
         headline={weightAvg != null ? `${weightAvg}${UI.unit()}` : null} sub={weightAvg != null ? 'avg' : null}>
         <HealthLineChart series={weightSeries.data} from={weightSeries.from} to={weightSeries.to} format={v => `${v}${UI.unit()}`} step={UI.unit() === 'lbs' ? 5 : 2.5} />
       </HealthChartCard>
     ),
     steps: (
-      <HealthChartCard title="Steps" icon="fa-shoe-prints" tf={tf} setTf={setTf} dragHandle={handle}
+      <HealthChartCard title="Steps" icon="fa-shoe-prints" tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('steps')}
         headline={stepsAvg != null ? Math.round(stepsAvg).toLocaleString() : null} sub={stepsAvg != null ? 'avg / day' : null}>
         <HealthBarChart series={stepsSeries.data} from={stepsSeries.from} to={stepsSeries.to} format={v => v >= 1000 ? `${Math.round(v / 1000)}k` : `${v}`} />
       </HealthChartCard>
     ),
     water: (
-      <HealthChartCard title="Water" icon="fa-glass-water" tf={tf} setTf={setTf} dragHandle={handle}
+      <HealthChartCard title="Water" icon="fa-glass-water" tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('water')}
         headline={waterAvg != null ? `${UI.waterSummaryValue(waterAvg)}${UI.waterSummaryUnit()}` : null} sub={waterAvg != null ? 'avg / day' : null}>
         <HealthBarChart series={waterSeries.data} from={waterSeries.from} to={waterSeries.to} format={v => `${UI.waterSummaryValue(v)}${UI.waterSummaryUnit()}`} color="#4a9fe0" colorSoft="rgba(74,159,224,0.35)" />
       </HealthChartCard>
     ),
-    macros: (
-      <HealthChartCard title="Macros" icon="fa-utensils" tf={tf} setTf={setTf} dragHandle={handle}>
-        {targetRow}
-        <HealthMacroChart series={macroSeries.data} from={macroSeries.from} to={macroSeries.to} />
-        <MacroLegend />
-      </HealthChartCard>
-    ),
     cardio: (
-      <HealthChartCard title="Cardio" icon="fa-person-running" tf={tf} setTf={setTf} dragHandle={handle}
+      <HealthChartCard title="Cardio" icon="fa-person-running" tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('cardio')}
         headline={cardioTotal ? cardioTotal : null} sub={cardioTotal ? 'min total' : null}>
         <HealthBarChart series={cardioSeries.data} from={cardioSeries.from} to={cardioSeries.to} format={v => `${Math.round(v)}`} />
       </HealthChartCard>
     ),
-    adherence: effectiveTargets ? (
-      <HealthChartCard title="Macro Adherence" icon="fa-bullseye" tf={tf} setTf={setTf} dragHandle={handle}
-        headline={adhAvg != null ? `${Math.round(adhAvg)}%` : null} sub={adhAvg != null ? 'avg' : null}>
-        <HealthLineChart series={adhSeries.data} from={adhSeries.from} to={adhSeries.to} format={v => `${Math.round(v)}%`} yMin={0} yMax={100} />
-      </HealthChartCard>
-    ) : null,
+    // compact: hides the reference legend + readings feed so these match the
+    // plain-chart cards' height in the grid, full detail is one expand tap away.
     glucose: (store.glucoseLogs || []).length > 0
-      ? <GlucoseCard glucoseLogs={store.glucoseLogs} unit={store.settings?.glucoseUnit ?? 'mmol'} tf={tf} setTf={setTf} dragHandle={handle} />
+      ? <GlucoseCard glucoseLogs={store.glucoseLogs} unit={store.settings?.glucoseUnit ?? 'mmol'} tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('glucose')} compact />
       : null,
     bloodPressure: (store.bloodPressureLogs || []).length > 0
-      ? <BloodPressureCard bpLogs={store.bloodPressureLogs} tf={tf} setTf={setTf} dragHandle={handle} />
+      ? <BloodPressureCard bpLogs={store.bloodPressureLogs} tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('bloodPressure')} compact />
       : null,
     bodyTemp: (store.bodyTempLogs || []).length > 0
-      ? <BodyTempCard tempLogs={store.bodyTempLogs} unit={LB.defaultTempUnit(store.settings)} tf={tf} setTf={setTf} dragHandle={handle} />
+      ? <BodyTempCard tempLogs={store.bodyTempLogs} unit={LB.defaultTempUnit(store.settings)} tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('bodyTemp')} compact />
       : null,
   };
+
+  // Sheet lookup for expandedCardId, every id any onExpand above can set.
+  // Cloned with dragHandle/onExpand stripped: the expand sheet isn't inside a
+  // reorder list (grip would be inert) and re-expanding itself is meaningless.
+  const expandableCards = { weight: cardEls.weight, steps: cardEls.steps, water: cardEls.water, cardio: cardEls.cardio,
+    macroAdherence: macroAdherenceCard, macros: macrosCard,
+    glucose: cardEls.glucose, bloodPressure: cardEls.bloodPressure, bodyTemp: cardEls.bodyTemp };
+
+  // Only Week/Today/the macro group ever span full width. Everything else
+  // stays in the 2-col grid no matter what, a card left alone at the end of
+  // an odd run just leaves the other half of its row empty instead of
+  // stretching to fill it.
+  const fullWidthCardIds = new Set(['week', 'today', 'macroGroup']);
 
   return (
     <Screen>
@@ -2571,7 +2761,8 @@ function HealthScreen({ store, setStore, go, userId }) {
         <HealthDateStrip store={store} setStore={setStore} selectedDate={selectedDate} onSelect={setSelectedDate} onLog={() => setLogOpen(true)} targets={effectiveTargets} />
 
         {/* max-width cap so charts don't blow up on iPad. Reorderable cards —
-           drag the grip to reorder; order persists per device. */}
+           drag the grip to reorder; order persists per device. Week/Today span
+           both columns; the rest sit in a 2-col grid (fullWidthCardIds above). */}
         <div style={{ padding: capturing ? '8px 16px 16px' : '8px 16px env(safe-area-inset-bottom, 8px)', maxWidth: 680, width: '100%', boxSizing: 'border-box', margin: '0 auto' }}>
           {cardOrder.every(id => !isCardVisible(id)) ? (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, padding: '48px 16px', textAlign: 'center' }}>
@@ -2585,16 +2776,25 @@ function HealthScreen({ store, setStore, go, userId }) {
               }}>Settings → Health → Cards</button>
             </div>
           ) : (
-            <ReorderList onReorder={reorderCards} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-              {cardOrder.map(id => isCardVisible(id) ? (
-                <div key={id} data-reorder-item="true" data-tour={`health-card-${id}`}>{cardEls[id]}</div>
-              ) : null)}
-            </ReorderList>
+            // Grid-squeezed charts hide their "Drag to inspect" hint (ChartCompactContext);
+            // the expand sheet below isn't a descendant of this provider, so it keeps showing it.
+            <ChartCompactContext.Provider value={true}>
+              <ReorderList onReorder={reorderCards} style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 14 }}>
+                {cardOrder.map(id => isCardVisible(id) ? (
+                  <div key={id} data-reorder-item="true" data-tour={`health-card-${id}`} style={fullWidthCardIds.has(id) ? { gridColumn: '1 / -1' } : undefined}>{cardEls[id]}</div>
+                ) : null)}
+              </ReorderList>
+            </ChartCompactContext.Provider>
           )}
         </div>
       </div>
 
-      <DailyLogSheet open={logOpen} onClose={() => setLogOpen(false)} store={store} setStore={setStore} date={selectedDate} targets={effectiveTargets} activeCoachingSchema={activeCoachingSchema} onSetStatus={handleSetStatus} userId={userId} glucoseLogs={store.glucoseLogs || []} glucoseUnit={store.settings?.glucoseUnit ?? 'mmol'} bloodPressureLogs={store.bloodPressureLogs || []} bodyTempLogs={store.bodyTempLogs || []} tempUnit={LB.defaultTempUnit(store.settings)} />
+      <Sheet open={!!expandedCardId} onClose={() => setExpandedCardId(null)}>
+        {expandedCardId && expandableCards[expandedCardId] &&
+          React.cloneElement(expandableCards[expandedCardId], { dragHandle: null, onExpand: null, compact: false })}
+      </Sheet>
+
+      <DailyLogScreen open={logOpen} onClose={() => setLogOpen(false)} store={store} setStore={setStore} date={selectedDate} targets={effectiveTargets} activeCoachingSchema={activeCoachingSchema} onSetStatus={handleSetStatus} userId={userId} glucoseLogs={store.glucoseLogs || []} glucoseUnit={store.settings?.glucoseUnit ?? 'mmol'} bloodPressureLogs={store.bloodPressureLogs || []} bodyTempLogs={store.bodyTempLogs || []} tempUnit={LB.defaultTempUnit(store.settings)} />
       <MacroTargetSheet open={targetOpen} onClose={() => setTargetOpen(false)} store={store} setStore={setStore} coachingMacros={coachingMacros} />
       <ExportSheet open={exportOpen} onClose={() => setExportOpen(false)} store={store} />
     </Screen>
@@ -2615,9 +2815,15 @@ function HealthClientLogs({ clientStore }) {
   // client's weights in the client's own unit (no conversion, display-only).
   const clientUnit = clientStore?.settings?.unit === 'lbs' ? 'lbs' : 'kg';
   const [tf, setTf] = useStateH('1W');
+  // Which card is blown up in the expand sheet (id into expandableCards below),
+  // null when closed. Only charts squeezed by the 2-col grid offer this.
+  const [expandedCardId, setExpandedCardId] = useStateH(null);
 
   const COACH_ORDER_KEY = 'logbook-coach-health-card-order';
-  const DEFAULT_COACH_ORDER = ['week', 'today', 'weight', 'steps', 'water', 'macros', 'cardio', 'adherence', 'glucose', 'bloodPressure', 'bodyTemp', 'weekly'];
+  // Macros/Adherence move, hide, and show as one unit, id 'macroGroup', see its
+  // cardEls entry below, same grouping as the client's own Health tab, and
+  // required for hiddenHealthCards (client setting) to hide it correctly here too.
+  const DEFAULT_COACH_ORDER = ['week', 'today', 'macroGroup', 'weight', 'cardio', 'steps', 'water', 'glucose', 'bloodPressure', 'bodyTemp', 'weekly'];
   const [cardOrder, setCardOrder] = useStateH(() => {
     let saved = [];
     try { saved = JSON.parse(localStorage.getItem(COACH_ORDER_KEY) || '[]'); } catch (_) {}
@@ -2713,57 +2919,75 @@ function HealthClientLogs({ clientStore }) {
   const dayLabel = selectedDate === today ? 'Today' : healthFmtDate(selectedDate, { weekday: 'short', day: 'numeric', month: 'short' });
 
   const handle = <DragHandle style={{ width: 20, height: 22, marginLeft: -4, cursor: 'grab' }} />;
+  // Opens a chart full-width in a sheet, offered only on charts the 2-col grid
+  // below actually squeezes to half-width (see expandableCards further down).
+  const expandBtn = id => () => setExpandedCardId(id);
+
+  // Macros + Adherence live together in the macroGroup composite below so
+  // hide/move/reorder always treats them as one unit (mirrors the client's own
+  // Health tab). No Targets sub-card: this read-only view never fetches macro
+  // targets (that lives in the coach's separate Nutrition tab).
+  const macrosCard = (
+    <HealthChartCard title="Macros" icon="fa-utensils" tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('macros')}>
+      <HealthMacroChart series={macroSeries.data} from={macroSeries.from} to={macroSeries.to} />
+      <MacroLegend />
+    </HealthChartCard>
+  );
+  const adherenceCard = (
+    <HealthChartCard title="Adherence" icon="fa-bullseye" tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('adherence')}
+      headline={adhAvg != null ? `${adhAvg}%` : null} sub={adhAvg != null ? 'avg' : null}>
+      <HealthLineChart series={adhSeries.data} from={adhSeries.from} to={adhSeries.to} format={v => `${Math.round(v)}%`} yMin={0} yMax={100} />
+    </HealthChartCard>
+  );
+
   const cardEls = {
     week: <HealthWeekCard stats={weekStats} dragHandle={handle} targets={null} tf={tf} setTf={setTf} weightUnit={clientUnit} />,
     today: (
       <HealthMetricsCard log={selectedLog} dateLabel={dayLabel} isToday={selectedDate === today} onJumpToday={() => setSelectedDate(today)}
         dragHandle={handle} trained={trainedSelected} hasCardio={cardioSelected} dayTarget={null} weightUnit={clientUnit} />
     ),
+    macroGroup: (
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 14 }}>
+        {adherenceCard}
+        {macrosCard}
+      </div>
+    ),
     weight: (
-      <HealthChartCard title="Weight" icon="fa-weight-scale" tf={tf} setTf={setTf} dragHandle={handle}
+      <HealthChartCard title="Weight" icon="fa-weight-scale" tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('weight')}
         headline={weightAvg != null ? `${weightAvg}${clientUnit}` : null} sub={weightAvg != null ? 'avg' : null}>
         <HealthLineChart series={weightSeries.data} from={weightSeries.from} to={weightSeries.to} format={v => `${v}${clientUnit}`} step={clientUnit === 'lbs' ? 5 : 2.5} />
       </HealthChartCard>
     ),
     steps: (
-      <HealthChartCard title="Steps" icon="fa-shoe-prints" tf={tf} setTf={setTf} dragHandle={handle}
+      <HealthChartCard title="Steps" icon="fa-shoe-prints" tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('steps')}
         headline={stepsAvg != null ? stepsAvg.toLocaleString() : null} sub={stepsAvg != null ? 'avg / day' : null}>
         <HealthBarChart series={stepsSeries.data} from={stepsSeries.from} to={stepsSeries.to} format={v => v >= 1000 ? `${Math.round(v / 1000)}k` : `${v}`} />
       </HealthChartCard>
     ),
     water: (
-      <HealthChartCard title="Water" icon="fa-glass-water" tf={tf} setTf={setTf} dragHandle={handle}
+      <HealthChartCard title="Water" icon="fa-glass-water" tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('water')}
         headline={waterAvg != null ? `${UI.waterSummaryValue(waterAvg)}${UI.waterSummaryUnit()}` : null} sub={waterAvg != null ? 'avg / day' : null}>
         <HealthBarChart series={waterSeries.data} from={waterSeries.from} to={waterSeries.to} format={v => `${UI.waterSummaryValue(v)}${UI.waterSummaryUnit()}`} color="#4a9fe0" colorSoft="rgba(74,159,224,0.35)" />
       </HealthChartCard>
     ),
-    macros: (
-      <HealthChartCard title="Macros" icon="fa-utensils" tf={tf} setTf={setTf} dragHandle={handle}>
-        <HealthMacroChart series={macroSeries.data} from={macroSeries.from} to={macroSeries.to} />
-        <MacroLegend />
-      </HealthChartCard>
-    ),
     cardio: (
-      <HealthChartCard title="Cardio" icon="fa-person-running" tf={tf} setTf={setTf} dragHandle={handle}
+      <HealthChartCard title="Cardio" icon="fa-person-running" tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('cardio')}
         headline={cardioTotal || null} sub={cardioTotal ? 'min total' : null}>
         <HealthBarChart series={cardioSeries.data} from={cardioSeries.from} to={cardioSeries.to} format={v => `${Math.round(v)}`} />
       </HealthChartCard>
     ),
-    adherence: (
-      <HealthChartCard title="Macro Adherence" icon="fa-bullseye" tf={tf} setTf={setTf} dragHandle={handle}
-        headline={adhAvg != null ? `${adhAvg}%` : null} sub={adhAvg != null ? 'avg' : null}>
-        <HealthLineChart series={adhSeries.data} from={adhSeries.from} to={adhSeries.to} format={v => `${Math.round(v)}%`} yMin={0} yMax={100} />
-      </HealthChartCard>
-    ),
+    // compact: hides the reference legend + readings feed so these match the
+    // plain-chart cards' height in the grid, full detail is one expand tap away.
     glucose: glucoseLogs.length > 0
-      ? <GlucoseCard glucoseLogs={glucoseLogs} unit={glucoseUnit} tf={tf} setTf={setTf} dragHandle={handle} />
+      ? <GlucoseCard glucoseLogs={glucoseLogs} unit={glucoseUnit} tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('glucose')} compact />
       : null,
     bloodPressure: bloodPressureLogs.length > 0
-      ? <BloodPressureCard bpLogs={bloodPressureLogs} tf={tf} setTf={setTf} dragHandle={handle} />
+      ? <BloodPressureCard bpLogs={bloodPressureLogs} tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('bloodPressure')} compact />
       : null,
     bodyTemp: bodyTempLogs.length > 0
-      ? <BodyTempCard tempLogs={bodyTempLogs} unit={clientTempUnit} tf={tf} setTf={setTf} dragHandle={handle} />
+      ? <BodyTempCard tempLogs={bodyTempLogs} unit={clientTempUnit} tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('bodyTemp')} compact />
       : null,
+    // Dense table, doesn't fit the 2-col grid, always full width (fullWidthCardIds).
     weekly: weeks.length ? (
       <Card style={{ padding: 14, borderLeft: `3px solid ${UI.gold}` }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
@@ -2792,6 +3016,18 @@ function HealthClientLogs({ clientStore }) {
     ) : null,
   };
 
+  // Sheet lookup for expandedCardId, every id any onExpand above can set.
+  // Cloned with dragHandle/onExpand stripped: the expand sheet isn't inside a
+  // reorder list (grip would be inert) and re-expanding itself is meaningless.
+  const expandableCards = { weight: cardEls.weight, steps: cardEls.steps, water: cardEls.water, cardio: cardEls.cardio,
+    adherence: adherenceCard, macros: macrosCard,
+    glucose: cardEls.glucose, bloodPressure: cardEls.bloodPressure, bodyTemp: cardEls.bodyTemp };
+
+  // Only Week/Today/the macro group/Weekly Averages ever span full width.
+  // Everything else stays in the 2-col grid no matter what, matches the
+  // client's own Health tab exactly (see HealthScreen's fullWidthCardIds).
+  const fullWidthCardIds = new Set(['week', 'today', 'macroGroup', 'weekly']);
+
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <HealthDateStrip store={clientStore} selectedDate={selectedDate} onSelect={setSelectedDate} onLog={null} />
@@ -2802,13 +3038,22 @@ function HealthClientLogs({ clientStore }) {
             <div style={{ fontSize: 13, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1.5 }}>Your client has hidden all their Health cards.</div>
           </div>
         ) : (
-          <ReorderList onReorder={reorderCards} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            {cardOrder.map(id => isCardVisible(id) ? (
-              <div key={id} data-reorder-item="true">{cardEls[id]}</div>
-            ) : null)}
-          </ReorderList>
+          // Grid-squeezed charts hide their "Drag to inspect" hint (ChartCompactContext);
+          // the expand sheet below isn't a descendant of this provider, so it keeps showing it.
+          <ChartCompactContext.Provider value={true}>
+            <ReorderList onReorder={reorderCards} style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 14 }}>
+              {cardOrder.map(id => isCardVisible(id) ? (
+                <div key={id} data-reorder-item="true" style={fullWidthCardIds.has(id) ? { gridColumn: '1 / -1' } : undefined}>{cardEls[id]}</div>
+              ) : null)}
+            </ReorderList>
+          </ChartCompactContext.Provider>
         )}
       </div>
+
+      <Sheet open={!!expandedCardId} onClose={() => setExpandedCardId(null)}>
+        {expandedCardId && expandableCards[expandedCardId] &&
+          React.cloneElement(expandableCards[expandedCardId], { dragHandle: null, onExpand: null, compact: false })}
+      </Sheet>
     </div>
   );
 }
