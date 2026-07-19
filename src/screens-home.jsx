@@ -2295,6 +2295,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       ? (mesoCurrentWeek(resolvedMeso, store) === 1 && (resolvedMeso.completions ?? 0) === 0)
       : false;
     const mesoBoosts = resolvedMeso?.weightBoosts ?? null;
+    const mesoDeclines = resolvedMeso?.weightBoostDeclines ?? null;
     // occ counter: the Nth appearance of an exercise in the day seeds from the
     // Nth occurrence of past sessions, so a repeated exercise's slots don't share
     // one reference (see bestRecentEntry).
@@ -2351,10 +2352,16 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
       // set count stays authored) — this also neutralizes any deltas left over
       // from a prior "Volume + Load" run without wiping the mesoState.
       const itAdj = (typeof applyMesoSetDeltaFromState === 'function' && !LB.autoregLoadOnly(sch)) ? applyMesoSetDeltaFromState(it, dayId, resolvedMeso) : it;
-      const weightBoost = mesoBoosts?.[it.exId + '_' + dayId] ?? null;
+      // A declined boost is withheld exactly like an un-earned one (falls through
+      // to resolveMesoSeedSuggestion's veto branch, weight holds). declined is
+      // passed through separately too (not just collapsed into weightBoost=null)
+      // so the veto still applies even during week 1's noPriorFeedback carve-out.
+      const boostKey = it.exId + '_' + dayId;
+      const declined = !!mesoDeclines?.[boostKey];
+      const weightBoost = declined ? null : (mesoBoosts?.[boostKey] ?? null);
       // On an autoregulating plan the feedback engine owns the weight: apply an
       // earned boost, but a withheld one vetoes Smart Progression (see helper).
-      const suggestionFinal = LB.resolveMesoSeedSuggestion(suggestion, weightBoost, last, LB.mesoActive(sch), mesoNoPriorFeedback, (it.repsPerSet?.[0] ?? it.reps ?? null));
+      const suggestionFinal = LB.resolveMesoSeedSuggestion(suggestion, weightBoost, last, LB.mesoActive(sch), mesoNoPriorFeedback, (it.repsPerSet?.[0] ?? it.reps ?? null), declined);
       const seedSets = LB.buildSeedSets(itAdj, last, suggestionFinal, isUnilateral, store, bodyweightKg);
       return {
         exId: it.exId, name: ex?.name || '?',

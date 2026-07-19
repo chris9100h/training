@@ -897,6 +897,25 @@ async function testAsync(name, fn) {
     assert.strictEqual(JSON.stringify(LB.reearnMesoWeightBoosts(undefined, undefined, undefined)), '{}');
   });
 
+  // ── clearMesoWeightBoostDeclines (a decline never outlives the session that set it) ──
+  test('clearMesoWeightBoostDeclines: a declined key re-earned/re-evaluated this session is cleared', () => {
+    const out = LB.clearMesoWeightBoostDeclines({ bench_d1: true }, ['bench_d1']);
+    assert.ok(!('bench_d1' in out), 'stale decline must be removed');
+  });
+  test('clearMesoWeightBoostDeclines: a key not touched this session keeps its decline', () => {
+    const out = LB.clearMesoWeightBoostDeclines({ bench_d1: true, squat_d2: true }, ['bench_d1']);
+    assert.ok(!('bench_d1' in out), 'this session\'s key cleared');
+    assert.strictEqual(out.squat_d2, true, 'other day\'s decline untouched');
+  });
+  test('clearMesoWeightBoostDeclines: nothing to clear returns the same reference', () => {
+    const prev = { squat_d2: true };
+    assert.strictEqual(LB.clearMesoWeightBoostDeclines(prev, ['bench_d1']), prev, 'no-op keeps identity');
+  });
+  test('clearMesoWeightBoostDeclines: null/empty inputs are safe', () => {
+    assert.strictEqual(JSON.stringify(LB.clearMesoWeightBoostDeclines(null, [])), '{}');
+    assert.strictEqual(JSON.stringify(LB.clearMesoWeightBoostDeclines(undefined, undefined)), '{}');
+  });
+
   // ── revertMesoSessionBoosts (delete a meso session → drop its orphaned boost) ──
   const mesoStateWB = { weightBoosts: { tri_d1: 2.5, chest_d1: 5, tri_d2: 2.5 }, repMissCounts: { tri_d1: 1 } };
   const delSess = { id: 'A', dayId: 'd1', ended: '2026-07-15T10:00:00Z', entries: [{ exId: 'tri' }, { exId: 'chest' }] };
@@ -1395,6 +1414,15 @@ async function testAsync(name, fn) {
   test('resolveMesoSeedSuggestion: first block week 1 (no prior feedback) lets Smart Progression through', () => {
     const sp = { kg: 102.5, reps: 8 };
     assert.strictEqual(LB.resolveMesoSeedSuggestion(sp, null, seedLast, true, true), sp);
+  });
+  test('resolveMesoSeedSuggestion: a decline still vetoes even during week 1\'s no-prior-feedback carve-out', () => {
+    // completions only advances at the end of a meso BLOCK, so noPriorFeedback
+    // stays true for every session of the first block's week 1, not just its
+    // first one. A decline recorded on a later week-1 session must still hold,
+    // not fall through the noPriorFeedback carve-out meant for "never earned".
+    const sp = { kg: 102.5, reps: 8 };
+    assert.strictEqual(LB.resolveMesoSeedSuggestion(sp, null, seedLast, true, true, null, true), null, 'declined=true vetoes despite noPriorFeedback');
+    assert.strictEqual(LB.resolveMesoSeedSuggestion(sp, null, seedLast, true, true, null, false), sp, 'declined=false (never earned) is unaffected, same as before');
   });
   test('resolveMesoSeedSuggestion: off a meso plan Smart Progression is untouched', () => {
     const sp = { kg: 102.5, reps: 8 };
@@ -2352,6 +2380,47 @@ async function testAsync(name, fn) {
     assert.strictEqual(LB.progressionSuggestion(store, 'sq', 'd1', 5, null, ref, null, null), null, 'main lift never gets a Smart Progression bump');
     const sugg = LB.progressionSuggestion(store, 'leg', 'd1', 5, null, ref, null, null);
     assert.ok(sugg && sugg.kg > 100, 'assistance on the 531 day still progresses');
+  });
+
+  test('progressionSuggestion: a declined bump is suppressed for its own occurrence only, a sibling occurrence is unaffected', () => {
+    // "leg" appears twice on day d1 (e.g. straight set + back-off block); only
+    // occurrence 0's earned bump was declined, occurrence 1 earned its own and
+    // was never asked, so it must still progress independently (no cross-
+    // contamination between two occurrences of the same exercise, see the
+    // matching occ-keying in recentSessionsForExercise).
+    const store = {
+      settings: { smartProgression: true },
+      exercises: [{ id: 'leg', name: 'Leg Press' }],
+      schedules: [],
+      sessions: [{
+        ended: '2026-07-01T10:00:00Z', dayId: 'd1', isDeload: false,
+        entries: [
+          { exId: 'leg', sets: [{ kg: 100, reps: 10, warmup: false }] },
+          { exId: 'leg', sets: [{ kg: 50, reps: 10, warmup: false }] },
+        ],
+        progressionDeclines: { leg_0: true },
+      }],
+    };
+    const ref = { entry: { sets: [{ kg: 100, reps: 10, warmup: false }] } };
+    assert.strictEqual(LB.progressionSuggestion(store, 'leg', 'd1', 5, null, ref, null, null, 0), null, 'occurrence 0 was declined');
+    const sugg = LB.progressionSuggestion(store, 'leg', 'd1', 5, null, ref, null, null, 1);
+    assert.ok(sugg && sugg.kg > 100, 'occurrence 1 was never declined, still progresses');
+  });
+
+  test('progressionSuggestion: no decline recorded, bump goes through normally', () => {
+    const store = {
+      settings: { smartProgression: true },
+      exercises: [{ id: 'leg', name: 'Leg Press' }],
+      schedules: [],
+      sessions: [{
+        ended: '2026-07-01T10:00:00Z', dayId: 'd1', isDeload: false,
+        entries: [{ exId: 'leg', sets: [{ kg: 100, reps: 10, warmup: false }] }],
+        progressionDeclines: {},
+      }],
+    };
+    const ref = { entry: { sets: [{ kg: 100, reps: 10, warmup: false }] } };
+    const sugg = LB.progressionSuggestion(store, 'leg', 'd1', 5, null, ref, null, null, 0);
+    assert.ok(sugg && sugg.kg > 100, 'undeclined bump still fires');
   });
 
   test('build531Plan: catalog names resolve, 4 days, program_data stamped, assistance uncapped', () => {

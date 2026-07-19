@@ -641,6 +641,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
         weeks: m.weeks, start_date: m.startDate ?? null,
         start_cycle_index: m.startCycleIndex ?? 0, started_at: m.startedAt ?? null,
         deltas: remapExDayKeyed(m.deltas), weight_boosts: remapExDayKeyed(m.weightBoosts),
+        weight_boost_declines: remapExDayKeyed(m.weightBoostDeclines),
         joint_flags: remapExKeyed(m.jointFlags), pump_low_counts: remapExKeyed(m.pumpLowCounts),
         growth_counts: remapExDayKeyed(m.growthCounts), rep_miss_counts: remapExDayKeyed(m.repMissCounts),
         affinity: remapExKeyed(m.affinity),
@@ -861,7 +862,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     // Reusable workout templates (migration 0107)
     _supabase.from('zane_workout_templates').select('id, name, exercises, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
     // Mesocycle state per plan — replaces localStorage logbook-meso-state (migration 0120)
-    _supabase.from('zane_meso_states').select('id, schedule_id, weeks, start_date, start_cycle_index, started_at, deltas, joint_flags, pump_low_counts, weight_boosts, growth_counts, rep_miss_counts, affinity, autoreg_state, completions, pending_meso2, updated_at').eq('user_id', userId),
+    _supabase.from('zane_meso_states').select('id, schedule_id, weeks, start_date, start_cycle_index, started_at, deltas, joint_flags, pump_low_counts, weight_boosts, weight_boost_declines, growth_counts, rep_miss_counts, affinity, autoreg_state, completions, pending_meso2, updated_at').eq('user_id', userId),
     // Coach's own saved check-in schema templates: irrelevant when loading a
     // CLIENT's store as a coach, these belong to the acting coach, not the client.
     isCoachLoad ? null : _supabase.from('zane_checkin_schema_templates').select('id, name, schema, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
@@ -1085,6 +1086,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
       startedAt: m.started_at ?? null,
       deltas: m.deltas ?? {}, jointFlags: m.joint_flags ?? {},
       pumpLowCounts: m.pump_low_counts ?? {}, weightBoosts: m.weight_boosts ?? {},
+      weightBoostDeclines: m.weight_boost_declines ?? {},
       growthCounts: m.growth_counts ?? {}, repMissCounts: m.rep_miss_counts ?? {},
       affinity: m.affinity ?? {},
       autoregState: m.autoreg_state ?? null,
@@ -1362,8 +1364,13 @@ function sessionToRow(s, userId) {
   // the reporting RPCs read from them (migration 0058). The legacy JSONB column
   // keeps its default '[]' on insert and is left untouched on update.
   // agg* are read-only server aggregates attached at load time — never synced.
+  // progressionDeclines has no zane_sessions column (deliberately no schema
+  // change, see progressionSuggestion): it stays purely in the local cache
+  // (saveToLocal/mergeSessions), same treatment as currentExIdx/restStart/
+  // restDuration below. Leaving it in `rest` would spread an unknown column
+  // into the upsert and fail the whole write.
   // eslint-disable-next-line no-unused-vars
-  const { currentExIdx, cyclePos, restStart, restDuration, scheduleId, dayId, dayName, startedAt, durationMinutes, feel, entries, aggVolume, aggDoneSets, aggExercises, isBonus, isFreestyle, isDeload, mesoRecap, readiness, signalWeight, ...rest } = s;
+  const { currentExIdx, cyclePos, restStart, restDuration, scheduleId, dayId, dayName, startedAt, durationMinutes, feel, entries, aggVolume, aggDoneSets, aggExercises, isBonus, isFreestyle, isDeload, mesoRecap, readiness, signalWeight, progressionDeclines, ...rest } = s;
   const row = { ...rest, schedule_id: scheduleId, day_id: dayId, day_name: dayName, user_id: userId };
   if (startedAt != null) row.started_at = startedAt;
   if (durationMinutes != null) row.duration_minutes = durationMinutes;
@@ -1536,6 +1543,7 @@ async function syncStore(prev, next, userId) {
       started_at: m.startedAt ?? null,
       deltas: m.deltas ?? {}, joint_flags: m.jointFlags ?? {},
       pump_low_counts: m.pumpLowCounts ?? {}, weight_boosts: m.weightBoosts ?? {},
+      weight_boost_declines: m.weightBoostDeclines ?? {},
       growth_counts: m.growthCounts ?? {}, rep_miss_counts: m.repMissCounts ?? {},
       affinity: m.affinity ?? {},
       autoreg_state: m.autoregState ?? null,
@@ -2194,7 +2202,7 @@ function lastSessionForExercise(state, exId, dayId = null, occ = 0) {
 // Deload sessions are excluded so a deliberately light week never seeds the next
 // session's weights or skews progression/regression.
 function recentSessionsForExercise(state, exId, dayId = null, limit = 3, occ = 0) {
-  const sessions = state.sessions
+  const sessions = (state.sessions || [])
     .filter(s => s.ended && !s.isDeload && (dayId == null || s.dayId === dayId))
     .slice()
     .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''));
@@ -3250,6 +3258,11 @@ function mergeSessions(freshSessions, curSessions, inProgressId, baseSessions = 
       // null: a cache from before cyclePos was persisted (migration 0176) has
       // no cyclePos of its own, and the server may since have a real one.
       cyclePos: mem.cyclePos ?? s.cyclePos ?? null,
+      // progressionDeclines never syncs to the server (no zane_sessions
+      // column, see sessionToRow), so the fresh/server side of the merge
+      // never has it: carry the cached value forward the same way, otherwise a
+      // reload right after declining would silently forget it.
+      ...(mem.progressionDeclines ? { progressionDeclines: mem.progressionDeclines } : {}),
       // for the active session, local entries/restStart/restDuration are authoritative
       ...(isActive ? { entries: mem.entries, restStart: mem.restStart ?? null, restDuration: mem.restDuration ?? null } : {}),
       ...(keepCachedEntries ? { entries: mem.entries } : {}),
@@ -3445,6 +3458,22 @@ function progressionCeilingFor(store, base, plannedRepsMax, progressionOffset) {
 function progressionSuggestion(store, exId, dayId, plannedReps, plannedRepsPerSet, refOverride, plannedRepsMax, progressionOffset, occ = 0) {
   if (!progressionEnabled(store, plannedRepsMax, progressionOffset)) return null;
   if (is531MainLift(store, exId, dayId)) return null; // 5/3/1 main lifts climb via the Training Max, not Smart Progression
+
+  // The user can decline an earned bump in the "PROGRESSION UNLOCKED" toast
+  // (screens-train.jsx); the decline lives on the session that earned it,
+  // keyed by exId_occ (session.progressionDeclines[exId + '_' + occ]) so a
+  // repeated exercise's two occurrences in one session (superset, straight
+  // set + back-off block) never cross-contaminate: declining occurrence 0's
+  // bump must not silently swallow occurrence 1's separately-earned one. A
+  // suppressed session naturally "un-declines" if deleted, no separate
+  // reconciliation needed. Checked independently of refOverride/ref below
+  // (bestEntryFromSetLists always anchors the suggested kg on perSession[0],
+  // the most recent session, even when reps are blended in from an earlier
+  // one, so the most recent session's own answer is what decides this). A
+  // later session earning a NEW bump asks again from scratch, no cooldown.
+  const [mostRecentSession] = recentSessionsForExercise(store, exId, dayId, 1, occ);
+  if (mostRecentSession?.session.progressionDeclines?.[exId + '_' + occ]) return null;
+
   const ex = findExercise(store, exId);
   const catCfg = ex?.equipment ? (store.settings?.equipmentConfig?.[ex.equipment] ?? {}) : {};
   const increment = catCfg.increment ?? 2.5;
@@ -4730,6 +4759,19 @@ function reearnMesoWeightBoosts(prevBoosts, sessionKeys, earnedBoosts) {
   return { ...next, ...(earnedBoosts || {}) };
 }
 
+// Companion to reearnMesoWeightBoosts, called the same way at the same site:
+// clears any decline marker for a key this session just re-earned/re-evaluated,
+// so a decline never silently survives past the one session it was set in:
+// the NEXT time that key earns a boost, it starts undeclined and the user is
+// asked again ("Decline" is a per-instance answer, never a standing cooldown).
+// Pure/testable; returns the SAME reference when nothing changed.
+function clearMesoWeightBoostDeclines(prevDeclines, sessionKeys) {
+  const next = { ...(prevDeclines || {}) };
+  let changed = false;
+  for (const k of (sessionKeys || [])) { if (k in next) { delete next[k]; changed = true; } }
+  return changed ? next : (prevDeclines || {});
+}
+
 // Rolling back the meso weight levers when a finished session is DELETED. The
 // weight boost / rep-miss counts a session earned live on in the meso state
 // after the session row is gone, so a re-log (the usual "delete, then log again
@@ -4763,14 +4805,19 @@ function revertMesoSessionBoosts(mesoState, deletedSession, remainingSessions) {
     .map(e => e.exId + '_' + dayId));
   if (!keys.size) return mesoState;
   const wb = { ...(mesoState.weightBoosts || {}) };
+  const wbd = { ...(mesoState.weightBoostDeclines || {}) };
   const rmc = { ...(mesoState.repMissCounts || {}) };
   let changed = false;
   for (const k of keys) {
     if (k in wb) { delete wb[k]; changed = true; }
+    // A decline is tied to the boost it declined: if that boost's key is being
+    // rolled back (this session owned it and no later one retrained), the
+    // decline is stale too, whether or not the key survived in wb above.
+    if (k in wbd) { delete wbd[k]; changed = true; }
     if (k in rmc) { delete rmc[k]; changed = true; }
   }
   if (!changed) return mesoState;
-  return { ...mesoState, weightBoosts: wb, repMissCounts: rmc };
+  return { ...mesoState, weightBoosts: wb, weightBoostDeclines: wbd, repMissCounts: rmc };
 }
 
 // ── Post-hoc meso feedback editing ────────────────────────────────────────────
@@ -5158,9 +5205,10 @@ function remapMesoRecapRawForSwap(raw, oldExId, newExId, dayId, newName) {
 }
 
 // Move the exId-keyed meso ROW levers on a swap-correction: exId_dayId levers
-// (weightBoosts / repMissCounts / deltas / growthCounts) from oldExId_dayId -> newExId_dayId,
-// and bare-exId levers (jointFlags / pumpLowCounts / affinity) from oldExId -> newExId. Never
-// clobbers an existing target key (the caller only invokes this when the new exId has no
+// (weightBoosts / weightBoostDeclines / repMissCounts / deltas / growthCounts)
+// from oldExId_dayId -> newExId_dayId, and bare-exId levers (jointFlags /
+// pumpLowCounts / affinity) from oldExId -> newExId. Never clobbers an
+// existing target key (the caller only invokes this when the new exId has no
 // lever, but this guards anyway). Pure; returns a new state or the SAME reference.
 function remapMesoStateExId(mesoState, oldExId, newExId, dayId) {
   if (!mesoState || !oldExId || !newExId || oldExId === newExId) return mesoState;
@@ -5174,7 +5222,7 @@ function remapMesoStateExId(mesoState, oldExId, newExId, dayId) {
       out[field] = n; changed = true;
     }
   };
-  ['weightBoosts', 'repMissCounts', 'deltas', 'growthCounts'].forEach(f => move(f, oldKey, newKey));
+  ['weightBoosts', 'weightBoostDeclines', 'repMissCounts', 'deltas', 'growthCounts'].forEach(f => move(f, oldKey, newKey));
   ['jointFlags', 'pumpLowCounts', 'affinity'].forEach(f => move(f, oldExId, newExId));
   return changed ? out : mesoState;
 }
@@ -5184,7 +5232,7 @@ function remapMesoStateExId(mesoState, oldExId, newExId, dayId) {
 function mesoRowHasExId(mesoState, exId, dayId) {
   if (!mesoState || !exId) return false;
   const k = exId + '_' + dayId;
-  return ['weightBoosts', 'repMissCounts', 'deltas', 'growthCounts'].some(f => mesoState[f] && (k in mesoState[f]))
+  return ['weightBoosts', 'weightBoostDeclines', 'repMissCounts', 'deltas', 'growthCounts'].some(f => mesoState[f] && (k in mesoState[f]))
     || ['jointFlags', 'pumpLowCounts', 'affinity'].some(f => mesoState[f] && (exId in mesoState[f]));
 }
 
@@ -5286,7 +5334,7 @@ function recomputeMesoRepMissCut(mesoState, earnInputs, repMissBase, oldSignal, 
 // Off a meso plan (mesoActive false) the suggestion is returned untouched, so
 // normal Smart Progression is unaffected. Pure/testable; `last` is a
 // { entry: { sets } } reference.
-function resolveMesoSeedSuggestion(suggestion, weightBoost, last, mesoActive, noPriorFeedback = false, repFloor = null) {
+function resolveMesoSeedSuggestion(suggestion, weightBoost, last, mesoActive, noPriorFeedback = false, repFloor = null, declined = false) {
   if (weightBoost != null) {
     const cutWins = weightBoost < 0; // a rep-miss cut is authoritative, never let an up-suggestion swallow it
     if ((cutWins || !suggestion) && last) {
@@ -5301,7 +5349,15 @@ function resolveMesoSeedSuggestion(suggestion, weightBoost, last, mesoActive, no
     }
     return suggestion;
   }
-  if (mesoActive && suggestion && !noPriorFeedback) return null; // feedback withheld the boost → veto the Smart Progression bump
+  // weightBoost==null is ambiguous by itself: it means either "never earned"
+  // (noPriorFeedback's carve-out is meant for this) or "earned, then declined"
+  // (the caller collapses a declined boost to null too). completions only
+  // advances at the END of a meso block, so noPriorFeedback stays true for
+  // EVERY session of the first block's week 1, not just its first one: a
+  // decline recorded on that week's 2nd/3rd session would otherwise fall
+  // through this veto and let Smart Progression quietly overrule it. declined
+  // forces the veto regardless of noPriorFeedback so a decline always holds.
+  if (mesoActive && suggestion && (declined || !noPriorFeedback)) return null; // feedback withheld the boost → veto the Smart Progression bump
   return suggestion;
 }
 
@@ -6366,7 +6422,7 @@ window.LB = {
   defaultTempUnit,
   isLoggedTrainingDay, plannedTrainingDay, isTrainingDayForDate, dayTargetFromMacros, macroAdherence, hasMacroTargets, effectiveMacroTargets, dailyLogAdherence, dailyLogsWeekPrefill, weekPerformanceSignal,
   refreshHealthLogs,
-  pickGrowthRecipient, retractGrowthGrant, pickDeclineRecipient, reearnMesoWeightBoosts, revertMesoSessionBoosts, resolveMesoSeedSuggestion, mesoPausedDays, mesoRirForWeek, mesoMuscleTrainedBeforeStart, volumeAnswerAllowsBump,
+  pickGrowthRecipient, retractGrowthGrant, pickDeclineRecipient, reearnMesoWeightBoosts, clearMesoWeightBoostDeclines, revertMesoSessionBoosts, resolveMesoSeedSuggestion, mesoPausedDays, mesoRirForWeek, mesoMuscleTrainedBeforeStart, volumeAnswerAllowsBump,
   microcycleSetsByMuscle, detectOverreach,
   blockStartTs, blockSessions, buildBlockRecap, deloadNudgeDecision, recordDeloadDecline, clearDeloadNudge,
   updateLandmarkMrv, snapshotBlockStart, backoffDeltas,

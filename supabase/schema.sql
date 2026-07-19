@@ -1928,6 +1928,7 @@ CREATE TABLE zane_meso_states (
   joint_flags        jsonb       NOT NULL DEFAULT '{}',
   pump_low_counts    jsonb       NOT NULL DEFAULT '{}',
   weight_boosts      jsonb       NOT NULL DEFAULT '{}',
+  weight_boost_declines jsonb    NOT NULL DEFAULT '{}',  -- user-declined earned bumps, exId_dayId keyed (Migration 0178)
   growth_counts      jsonb       NOT NULL DEFAULT '{}',
   rep_miss_counts    jsonb       NOT NULL DEFAULT '{}',
   affinity           jsonb       NOT NULL DEFAULT '{}',  -- per-exId { v, streak } exercise affinity (Migration 0169)

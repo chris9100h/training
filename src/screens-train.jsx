@@ -1568,7 +1568,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       if (refKg == null) return null;
       const newKg = Math.round((refKg + increment) * 100) / 100;
       const nextKg = catCfg.maxKg ? Math.min(newKg, catCfg.maxKg) : newKg;
-      return nextKg > refKg ? { exName: entry.name, currentKg: refKg, nextKg } : null;
+      return nextKg > refKg ? { exId: entry.exId, occ, exName: entry.name, currentKg: refKg, nextKg } : null;
     })();
 
     // Overlay precedence (one per completed set): PROGRESSION UNLOCKED > NEW
@@ -1590,16 +1590,17 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // on to.)
     let overlayHoldMs = 0;
     if (progressionResult) {
-      overlayHoldMs = PROGRESSION_NAV_DELAY_MS; // swap mid-overlay; the show/hide timers below keep their own 800ms + 4000ms
+      overlayHoldMs = PROGRESSION_NAV_DELAY_MS; // swap mid-overlay; the show timer below still delays 800ms
       // The overlay only fires on non-autoregulating plans (meso/auto plans
       // suppress it above), so there's no meso recovery sheet to compete with
       // here. A pinned note on the next exercise CAN still fire on the upcoming
       // navigation, so flag the celebration as pending to hold that note behind
-      // it until it clears (see the pinned-note trigger).
+      // it until it clears (see the pinned-note trigger). The overlay now
+      // requires an explicit Hell yeah / Decline tap (no auto-dismiss), so
+      // progressionPendingRef stays true until the user answers.
       progressionPendingRef.current = true;
       setTimeout(() => {
         setProgressionUnlocked(progressionResult);
-        setTimeout(() => { progressionPendingRef.current = false; setProgressionUnlocked(null); }, 4000);
       }, 800);
     } else if (!entry.sets[setIdx]?.warmup && !isDeloadSession) {
       const completed = entry.sets[setIdx];
@@ -3756,7 +3757,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
     // Set changes recorded during feedback (positive = gain, negative = reduction)
     for (const [key, { name, delta }] of Object.entries(mesoSessionSetGainsRef.current)) {
-      if (!gainMap[key]) gainMap[key] = { name, setDelta: 0, weightDelta: 0 };
+      if (!gainMap[key]) gainMap[key] = { name, setDelta: 0, weightDelta: 0, key };
       gainMap[key].setDelta += (delta ?? 1);
     }
 
@@ -3818,7 +3819,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             // Two misses in a row: the weight itself is too heavy for this rep
             // target. Cut it back one increment for next session and re-arm.
             weightBoostMap[key] = -increment;
-            if (!gainMap[key]) gainMap[key] = { name: e.name, setDelta: 0, weightDelta: 0 };
+            if (!gainMap[key]) gainMap[key] = { name: e.name, setDelta: 0, weightDelta: 0, key };
             gainMap[key].weightDelta = -increment;
             repMissCounts[key] = 0;
           } else {
@@ -3841,7 +3842,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       if (LB.autoregLoadOnly(mesoSch) && muscle && mesoSoreBlockRef.current.has(muscle)) continue;
 
       weightBoostMap[key] = increment;
-      if (!gainMap[key]) gainMap[key] = { name: e.name, setDelta: 0, weightDelta: 0 };
+      if (!gainMap[key]) gainMap[key] = { name: e.name, setDelta: 0, weightDelta: 0, key };
       gainMap[key].weightDelta = increment;
     }
 
@@ -3856,16 +3857,20 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // EARN persist: only a 'none' session (deload) keeps the old map untouched.
     // 'discounted' falls through and CAN still earn a boost (a PR on a tired day
     // is real, spec 4.3); 'full' is the normal re-earn.
+    const sessionKeys = session.entries.filter(e => !e.isCardio).map(e => e.exId + '_' + session.dayId);
     const newWeightBoosts = signalWeight === 'none'
       ? (mesoState.weightBoosts || {})
-      : LB.reearnMesoWeightBoosts(
-          mesoState.weightBoosts,
-          session.entries.filter(e => !e.isCardio).map(e => e.exId + '_' + session.dayId),
-          weightBoostMap,
-        );
+      : LB.reearnMesoWeightBoosts(mesoState.weightBoosts, sessionKeys, weightBoostMap);
+    // Declines are per-session-instance: a key being re-earned/re-evaluated this
+    // session must start undeclined again, same deload guard as weightBoosts above
+    // (a deload session collects no feedback, so it must not clear declines either).
+    const newWeightBoostDeclines = signalWeight === 'none'
+      ? (mesoState.weightBoostDeclines || {})
+      : LB.clearMesoWeightBoostDeclines(mesoState.weightBoostDeclines, sessionKeys);
     const withBoosts = {
       ...mesoState,
       weightBoosts: newWeightBoosts,
+      weightBoostDeclines: newWeightBoostDeclines,
       // Freeze the miss streak for anything but a full session (discounted and
       // none both leave it as-is), matching the streak guard above.
       repMissCounts: signalWeight !== 'full' ? (mesoState.repMissCounts || {}) : repMissCounts,
@@ -5762,12 +5767,14 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         document.body
       )}
 
-      {/* Progression unlocked overlay */}
+      {/* Progression unlocked overlay. Requires an explicit answer (no
+          backdrop-dismiss, no auto-fade): same principle as the readiness
+          sheet, an earned weight bump either gets confirmed or declined by
+          the user, it never resolves itself silently. */}
       {progressionUnlocked && ReactDOM.createPortal(
-        <div onClick={() => { progressionPendingRef.current = false; setProgressionUnlocked(null); }} style={{
+        <div style={{
           position: 'fixed', top: 'env(safe-area-inset-top, 0px)', left: 0, right: 0, bottom: 0, zIndex: 160,
           background: 'var(--bg-body)',
-          animation: 'improvedFade 4s ease forwards',
           display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
           gap: 8,
         }}>
@@ -5781,6 +5788,18 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             <span className="num" style={{ fontSize: 28, color: UI.gold, fontWeight: 700, textShadow: '0 0 20px rgba(var(--accent-rgb),0.8)' }}>{progressionUnlocked.nextKg}{UI.unit()}</span>
           </div>
           <span className="micro" style={{ color: UI.inkFaint, marginTop: 6, letterSpacing: '0.12em' }}>{progressionUnlocked.exName}</span>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 24, width: '100%', maxWidth: 260 }}>
+            <Btn onClick={() => { progressionPendingRef.current = false; setProgressionUnlocked(null); }} style={{ width: '100%' }}>Hell yeah</Btn>
+            <Btn kind="ghost" onClick={() => {
+              // Keyed by exId_occ, not bare exId: a repeated exercise's two
+              // occurrences in one session (superset, straight set + back-off
+              // block) must not cross-contaminate each other's decline.
+              const declineKey = progressionUnlocked.exId + '_' + progressionUnlocked.occ;
+              updateSession(sess => ({ ...sess, progressionDeclines: { ...sess.progressionDeclines, [declineKey]: true } }));
+              progressionPendingRef.current = false;
+              setProgressionUnlocked(null);
+            }} style={{ width: '100%' }}>Decline</Btn>
+          </div>
         </div>,
         document.body
       )}
@@ -8718,9 +8737,34 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   </span>
                 )}
                 {item.weightDelta !== 0 && (
-                  <span style={{ fontFamily: UI.fontNum, fontSize: 12, fontWeight: 700, color: item.weightDelta > 0 ? 'var(--accent)' : 'rgba(var(--danger-rgb),0.9)' }}>
-                    {item.weightDelta > 0 ? '+' : ''}{item.weightDelta} {UI.unit()}
-                  </span>
+                  item.declined ? (
+                    <span style={{ fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.06em', textTransform: 'uppercase', color: UI.inkGhost }}>Declined</span>
+                  ) : (
+                    <span style={{ fontFamily: UI.fontNum, fontSize: 12, fontWeight: 700, color: item.weightDelta > 0 ? 'var(--accent)' : 'rgba(var(--danger-rgb),0.9)' }}>
+                      {item.weightDelta > 0 ? '+' : ''}{item.weightDelta} {UI.unit()}
+                    </span>
+                  )
+                )}
+                {/* Only a positive bump can be declined: a rep-miss cut (weightDelta < 0)
+                    is a safety measure, not an offer, so it gets no decline control. */}
+                {item.weightDelta > 0 && !item.declined && (
+                  <button
+                    onClick={() => {
+                      if (!mesoState || !item.key) return;
+                      const next = { ...mesoState, weightBoostDeclines: { ...(mesoState.weightBoostDeclines || {}), [item.key]: true } };
+                      setMesoStateLocal(next);
+                      saveMesoStateToStorage(next);
+                      flushMesoStateToStore(next);
+                      setMesoGainItems(prev => prev.map((g, gi) => gi === i ? { ...g, declined: true } : g));
+                    }}
+                    style={{
+                      background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+                      fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.04em', textTransform: 'uppercase',
+                      color: UI.inkFaint,
+                    }}
+                  >
+                    Decline
+                  </button>
                 )}
               </div>
             </div>
