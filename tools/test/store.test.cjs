@@ -1409,7 +1409,9 @@ async function testAsync(name, fn) {
   test('mesoRecapGainsFromEdit: combines set deltas and weight deltas per exercise', () => {
     const answers = { soreness: {}, joint: {}, volume: { chest: { muscle: 'chest', exIds: ['e1'], contrib: { e1_d1: 1 } } } };
     const gains = LB.mesoRecapGainsFromEdit(answers, { e1_d1: 2.5 }, [{ exId: 'e1', key: 'e1_d1', name: 'Bench' }], 'd1');
-    assert.strictEqual(JSON.stringify(gains), JSON.stringify([{ name: 'Bench', weightDelta: 2.5, setDelta: 1 }]));
+    // key carried through so the session detail's "Changes earned" list can
+    // toggle a positive weightDelta's decline after the fact.
+    assert.strictEqual(JSON.stringify(gains), JSON.stringify([{ name: 'Bench', key: 'e1_d1', weightDelta: 2.5, setDelta: 1 }]));
   });
 
   // ── resolveMesoSeedSuggestion (feedback owns weight on a meso plan) ──

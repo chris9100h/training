@@ -3155,6 +3155,47 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
     setFbEdit(null);
   };
 
+  // Toggle a single earned weight boost's decline from the recap's "Changes
+  // earned" list, after the fact. Only offered while fbEditable (this session
+  // is still the plan's top-of-stack session, same gate saveFeedbackEdit
+  // already trusts for rewriting weightBoosts wholesale) so a misclick has a
+  // way back without needing the mid-session toast again a week later, and so
+  // toggling here can never land on a key a later session has already moved
+  // on from. Same freshest-row-inside-the-updater pattern as saveFeedbackEdit.
+  const toggleGainDecline = (key) => {
+    if (!fbEditable || !key) return;
+    setStore(st => {
+      const cur = (st.mesoStates || []).find(m => m.id === sessionMeso.id) || sessionMeso;
+      const prevDeclines = cur.weightBoostDeclines || {};
+      const nextDeclines = { ...prevDeclines };
+      if (nextDeclines[key]) delete nextDeclines[key]; else nextDeclines[key] = true;
+      const composedMeso = { ...cur, weightBoostDeclines: nextDeclines, updatedAt: new Date().toISOString() };
+      if (typeof MESO_KEY === 'string') {
+        try { localStorage.setItem(MESO_KEY + '-' + s.scheduleId, JSON.stringify(composedMeso)); } catch {}
+      }
+      return { ...st, mesoStates: (st.mesoStates || []).map(m => m.id === sessionMeso.id ? composedMeso : m) };
+    });
+  };
+
+  // Undo a Smart Progression decline recorded on THIS session (session-local,
+  // never synced, see store.js sessionToRow). Only exposed for a misclick's
+  // most likely window: no LATER session has already trained the same
+  // exercise on this day, since progressionSuggestion only ever consults the
+  // MOST RECENT session for a given exId/dayId (recentSessionsForExercise):
+  // once a later one exists, this session's flag no longer feeds any seed and
+  // toggling it here would be a no-op the user could mistake for a fix.
+  const toggleProgressionDecline = (key) => {
+    setStore(st => ({
+      ...st,
+      sessions: st.sessions.map(x => {
+        if (x.id !== s.id) return x;
+        const next = { ...(x.progressionDeclines || {}) };
+        delete next[key];
+        return { ...x, progressionDeclines: next };
+      }),
+    }));
+  };
+
   // Deload sessions are deliberately light — comparing against one as "last
   // time" would show every set as a fabricated "improvement" purely because
   // it beats the artificially-reduced deload weights. store.js already
@@ -3646,7 +3687,22 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                           </div>
                           <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0 }}>
                             {item.setDelta !== 0 && <span style={deltaChip(item.setDelta > 0)}>{item.setDelta > 0 ? '+' : ''}{item.setDelta} set</span>}
-                            {item.weightDelta !== 0 && <span style={deltaChip(item.weightDelta > 0)}>{item.weightDelta > 0 ? '+' : ''}{item.weightDelta} {s.mesoRecap.unit || UI.unit()}</span>}
+                            {item.weightDelta !== 0 && (() => {
+                              // Only a positive weightDelta is ever declinable (set deltas and rep-miss
+                              // cuts are out of scope), and only while fbEditable, so this can never
+                              // toggle a key a later session has already moved past.
+                              const declinable = item.weightDelta > 0 && !!item.key;
+                              const declined = declinable && !!sessionMeso?.weightBoostDeclines?.[item.key];
+                              const label = declined ? 'Declined' : `${item.weightDelta > 0 ? '+' : ''}${item.weightDelta} ${s.mesoRecap.unit || UI.unit()}`;
+                              const chipStyle = declined
+                                ? { fontFamily: UI.fontNum, fontSize: 12, fontWeight: 700, color: UI.inkFaint, background: 'rgba(var(--knurl-rgb),0.08)', border: `1px solid ${UI.hair}`, borderRadius: 4, padding: '3px 8px', whiteSpace: 'nowrap', textDecoration: 'line-through' }
+                                : deltaChip(item.weightDelta > 0);
+                              return declinable && fbEditable ? (
+                                <button onClick={() => toggleGainDecline(item.key)} style={{ ...chipStyle, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>{label}</button>
+                              ) : (
+                                <span style={chipStyle}>{label}</span>
+                              );
+                            })()}
                           </div>
                         </div>
                       );
@@ -3866,15 +3922,35 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                   return wIdx >= 0 ? prevWorking[wIdx] : undefined;
                 };
                 const canHistory = !!s.dayId;
+                // occ mirrors the live write side exactly (session.entries index-based
+                // count of prior same-exId entries), so this matches whichever
+                // occurrence's toast actually wrote the decline.
+                const occ = e.exId ? s.entries.slice(0, i).filter(x => x.exId === e.exId).length : 0;
+                const progDeclineKey = e.exId ? e.exId + '_' + occ : null;
+                const progDeclined = !!(progDeclineKey && s.progressionDeclines?.[progDeclineKey]);
+                const progDeclineEditable = progDeclined && !!s.ended &&
+                  !LB.laterSessionTrainsExId(store.sessions, e.exId, s.dayId, s.ended, s.id, s.scheduleId);
                 return (
                 <div key={i}
                   onClick={() => canHistory && go({ name: 'exerciseHistory', exId: e.exId, dayId: s.dayId, exName, back: { name: 'session', sessionId: s.id } })}
                   style={{ cursor: canHistory ? 'pointer' : 'default', WebkitTapHighlightColor: 'transparent' }}
                 >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
-                    <div className="display" style={{ fontSize: 17, color: UI.ink, lineHeight: 1.1 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8, gap: 8 }}>
+                    <div className="display" style={{ fontSize: 17, color: UI.ink, lineHeight: 1.1, ...(progDeclined ? { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } : {}) }}>
                       {exName}{canHistory && <span style={{ fontSize: 11, color: UI.inkFaint, marginLeft: 5 }}>›</span>}
                     </div>
+                    {progDeclined && (progDeclineEditable && !capturing ? (
+                      <button
+                        onClick={(ev) => { ev.stopPropagation(); toggleProgressionDecline(progDeclineKey); }}
+                        style={{ fontFamily: UI.fontUi, fontSize: 9.5, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: UI.inkFaint, background: 'rgba(var(--knurl-rgb),0.08)', border: `1px solid ${UI.hair}`, borderRadius: 4, padding: '3px 7px', whiteSpace: 'nowrap', flexShrink: 0, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}
+                      >
+                        Bump declined · undo
+                      </button>
+                    ) : (
+                      <span style={{ fontFamily: UI.fontUi, fontSize: 9.5, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: UI.inkFaint, flexShrink: 0 }}>
+                        Bump declined
+                      </span>
+                    ))}
                   </div>
                   <div data-shot-chips="1" style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                     {filteredSets.map((st, j) => {

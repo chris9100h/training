@@ -5126,7 +5126,7 @@ function mesoRecapGainsFromEdit(answers, weightBoosts, earnInputs, dayId) {
   keys.forEach(k => {
     const setDelta = setDeltaByKey[k] || 0;
     const weightDelta = weightByKey[k] || 0;
-    if (setDelta || weightDelta) gains.push({ name: nameByKey[k] || '?', weightDelta, setDelta });
+    if (setDelta || weightDelta) gains.push({ name: nameByKey[k] || '?', key: k, weightDelta, setDelta });
   });
   return gains;
 }

@@ -3701,8 +3701,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       general: g.generalRows.map(r => ({ title: r.title, sub: r.sub })),
       joint: g.jointRows.map(r => ({ title: r.title, sub: r.sub, sel: r.sel, weight: r.weight, pump: r.pump, affinity: r.affinity })),
     })).filter(g => g.general.length || g.joint.length);
+    // key carried through so the session detail screen can toggle a positive
+    // weightDelta's decline after the fact (LB.weightBoostDeclines lookup).
     const gainRows = (gains || []).map(g => ({
-      name: g.name, weightDelta: g.weightDelta || 0, setDelta: g.setDelta || 0,
+      name: g.name, key: g.key || null, weightDelta: g.weightDelta || 0, setDelta: g.setDelta || 0,
     })).filter(g => g.weightDelta || g.setDelta);
     // Nothing to remember: no feedback answered and no bump/cut earned.
     if (!groups.length && !gainRows.length) return null;
