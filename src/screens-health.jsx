@@ -392,7 +392,7 @@ const CHART_PLOT_TOP = 10, CHART_PLOT_H = 96; // padTop / plotH, shared by every
 // shallow, so a prop set on that outer clone never reaches the chart nested
 // inside it. The grid wraps itself in Provider value={true}; the expand sheet
 // is a sibling of the grid, not a descendant, so it never sees that override
-// and stays at the default (false) below — no explicit "expanded" wrap needed.
+// and stays at the default (false) below, no explicit "expanded" wrap needed.
 const ChartCompactContext = React.createContext(false);
 
 function ChartHover({ W, H, points, children, mode = 'x', markerColor = 'var(--accent)' }) {
@@ -474,7 +474,7 @@ function HealthChartCard({ title, icon, tf, setTf, headline, sub, dragHandle, on
   return (
     <Card style={{ padding: 14, borderLeft: `3px solid ${UI.gold}` }}>
       {/* flexWrap + the toggle's flexShrink:0 let the TF toggle drop to its own
-          line instead of clipping when the card is narrow (2-col grid) — full-
+          line instead of clipping when the card is narrow (2-col grid), full-
           width cards stay single-line since everything already fits there. */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
         {dragHandle}
@@ -1093,7 +1093,7 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
   // plus the glucose/BP/temp add-forms, a bottom sheet's ~88dvh cap made it
   // cramped. position:fixed so it takes over the whole viewport regardless of
   // where it's mounted (HealthScreen or HomeScreen's Quick Actions both render
-  // it locally, gated on their own open state, same as the Sheet it replaces —
+  // it locally, gated on their own open state, same as the Sheet it replaces,
   // it isn't wired into the app's go()/route system). zIndex:100 matches
   // Sheet's own backdrop convention, so it still sits under the confirm dialog
   // (useConfirm's Sheet, portaled to document.body, same z-index but later in
@@ -1979,12 +1979,12 @@ function GlucoseCard({ glucoseLogs, unit, tf, setTf, dragHandle, onExpand, compa
       ) : (
         <>
           <GlucoseScatterChart readings={inWindow} from={start} to={end} unit={unit} />
-          {/* Reference legend + readings feed only in the full (expanded) view —
+          {/* Reference legend + readings feed only in the full (expanded) view,
               compact (2-col grid) shows just the chart, so this card's height
               matches its plain-chart neighbours instead of towering over them. */}
           {!compact && (
           <>
-          {/* Wraps on the narrow 2-col card width instead of clipping — the 3
+          {/* Wraps on the narrow 2-col card width instead of clipping: the 3
               context dots are separate flex items with no text of their own
               to fall back on for reflow. */}
           <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 12, rowGap: 4, marginTop: 4 }}>
@@ -2062,7 +2062,7 @@ function BloodPressureCard({ bpLogs, tf, setTf, dragHandle, onExpand, compact = 
       ) : (
         <>
           <BpScatterChart readings={inWindow} from={start} to={end} />
-          {/* Legend + readings feed only in the full (expanded) view — compact
+          {/* Legend + readings feed only in the full (expanded) view, compact
               (2-col grid) shows just the chart, matching plain-chart neighbours. */}
           {!compact && (
           <>
@@ -2132,7 +2132,7 @@ function BodyTempCard({ tempLogs, unit, tf, setTf, dragHandle, onExpand, compact
       ) : (
         <>
           <TempScatterChart readings={inWindow} from={start} to={end} unit={unit} />
-          {/* Readings feed only in the full (expanded) view — compact (2-col
+          {/* Readings feed only in the full (expanded) view, compact (2-col
               grid) shows just the chart, matching plain-chart neighbours. */}
           {!compact && sortedReadings.length > 0 && (
             <>
@@ -2404,8 +2404,8 @@ function HealthScreen({ store, setStore, go, userId }) {
   // Reorderable card order, persisted per device. Missing ids (e.g. after a new
   // card ships) are inserted at their default position, not appended at the end.
   const CARD_ORDER_KEY = 'logbook-health-card-order';
-  // Macros/Adherence/Targets move, hide, and show as one unit — id 'macroGroup',
-  // see its cardEls entry below — since hiding just one of the three orphans the
+  // Macros/Adherence/Targets move, hide, and show as one unit, id 'macroGroup',
+  // see its cardEls entry below, since hiding just one of the three orphans the
   // others (e.g. an adherence chart with no targets to compare against).
   const DEFAULT_CARD_ORDER = ['week', 'today', 'macroGroup', 'weight', 'cardio', 'steps', 'water', 'glucose', 'bloodPressure', 'bodyTemp'];
   const [cardOrder, setCardOrder] = useStateH(() => {
@@ -2533,14 +2533,14 @@ function HealthScreen({ store, setStore, go, userId }) {
       return t >= start && t <= end;
     });
   })();
-  // Opens a chart full-width in a sheet — offered only on charts the 2-col grid
+  // Opens a chart full-width in a sheet, offered only on charts the 2-col grid
   // below actually squeezes to half-width (see the onExpand wiring per card and
   // expandableCards further down, which the sheet renders from by this id).
   const expandBtn = id => () => setExpandedCardId(id);
 
   // The 3 macro cards live together in the macroGroup composite below (target
   // kcal/P/C/F, adherence trend, macro breakdown) so hide/move/reorder always
-  // treats them as one unit — leaving one behind orphans the other two (an
+  // treats them as one unit, leaving one behind orphans the other two (an
   // adherence trend with no targets to compare against isn't useful alone).
   const macroTargetsCard = (
     <HealthChartCard title="Macro Targets" icon="fa-list-check" tf={tf} setTf={setTf} dragHandle={handle}>
@@ -2564,7 +2564,7 @@ function HealthScreen({ store, setStore, go, userId }) {
     week: <HealthWeekCard stats={weekStats} dragHandle={handle} targets={effectiveTargets} tf={tf} setTf={setTf} />,
     today: <HealthMetricsCard log={selectedLog} dateLabel={dayLabel} isToday={selectedDate === today} onJumpToday={() => setSelectedDate(today)} dragHandle={handle} trained={trainedSelected} hasCardio={cardioSelected} dayTarget={selectedDayTarget} isStatusDay={selectedIsStatusDay} />,
     // Targets on top (full width, needs the room for the P/C/F chip row), then
-    // Adherence + the macro breakdown paired below it — always full-width as a
+    // Adherence + the macro breakdown paired below it, always full-width as a
     // whole, see fullWidthCardIds.
     macroGroup: (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -2600,7 +2600,7 @@ function HealthScreen({ store, setStore, go, userId }) {
       </HealthChartCard>
     ),
     // compact: hides the reference legend + readings feed so these match the
-    // plain-chart cards' height in the grid — full detail is one expand tap away.
+    // plain-chart cards' height in the grid, full detail is one expand tap away.
     glucose: (store.glucoseLogs || []).length > 0
       ? <GlucoseCard glucoseLogs={store.glucoseLogs} unit={store.settings?.glucoseUnit ?? 'mmol'} tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('glucose')} compact />
       : null,
@@ -2612,7 +2612,7 @@ function HealthScreen({ store, setStore, go, userId }) {
       : null,
   };
 
-  // Sheet lookup for expandedCardId — every id any onExpand above can set.
+  // Sheet lookup for expandedCardId, every id any onExpand above can set.
   // Cloned with dragHandle/onExpand stripped: the expand sheet isn't inside a
   // reorder list (grip would be inert) and re-expanding itself is meaningless.
   const expandableCards = { weight: cardEls.weight, steps: cardEls.steps, water: cardEls.water, cardio: cardEls.cardio,
@@ -2620,7 +2620,7 @@ function HealthScreen({ store, setStore, go, userId }) {
     glucose: cardEls.glucose, bloodPressure: cardEls.bloodPressure, bodyTemp: cardEls.bodyTemp };
 
   // Only Week/Today/the macro group ever span full width. Everything else
-  // stays in the 2-col grid no matter what — a card left alone at the end of
+  // stays in the 2-col grid no matter what, a card left alone at the end of
   // an odd run just leaves the other half of its row empty instead of
   // stretching to fill it.
   const fullWidthCardIds = new Set(['week', 'today', 'macroGroup']);
@@ -2688,7 +2688,7 @@ function HealthScreen({ store, setStore, go, userId }) {
               }}>Settings → Health → Cards</button>
             </div>
           ) : (
-            // Grid-squeezed charts hide their "Drag to inspect" hint (ChartCompactContext) —
+            // Grid-squeezed charts hide their "Drag to inspect" hint (ChartCompactContext);
             // the expand sheet below isn't a descendant of this provider, so it keeps showing it.
             <ChartCompactContext.Provider value={true}>
               <ReorderList onReorder={reorderCards} style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 14 }}>
@@ -2732,8 +2732,8 @@ function HealthClientLogs({ clientStore }) {
   const [expandedCardId, setExpandedCardId] = useStateH(null);
 
   const COACH_ORDER_KEY = 'logbook-coach-health-card-order';
-  // Macros/Adherence move, hide, and show as one unit — id 'macroGroup', see its
-  // cardEls entry below — same grouping as the client's own Health tab, and
+  // Macros/Adherence move, hide, and show as one unit, id 'macroGroup', see its
+  // cardEls entry below, same grouping as the client's own Health tab, and
   // required for hiddenHealthCards (client setting) to hide it correctly here too.
   const DEFAULT_COACH_ORDER = ['week', 'today', 'macroGroup', 'weight', 'cardio', 'steps', 'water', 'glucose', 'bloodPressure', 'bodyTemp', 'weekly'];
   const [cardOrder, setCardOrder] = useStateH(() => {
@@ -2831,7 +2831,7 @@ function HealthClientLogs({ clientStore }) {
   const dayLabel = selectedDate === today ? 'Today' : healthFmtDate(selectedDate, { weekday: 'short', day: 'numeric', month: 'short' });
 
   const handle = <DragHandle style={{ width: 20, height: 22, marginLeft: -4, cursor: 'grab' }} />;
-  // Opens a chart full-width in a sheet — offered only on charts the 2-col grid
+  // Opens a chart full-width in a sheet, offered only on charts the 2-col grid
   // below actually squeezes to half-width (see expandableCards further down).
   const expandBtn = id => () => setExpandedCardId(id);
 
@@ -2889,7 +2889,7 @@ function HealthClientLogs({ clientStore }) {
       </HealthChartCard>
     ),
     // compact: hides the reference legend + readings feed so these match the
-    // plain-chart cards' height in the grid — full detail is one expand tap away.
+    // plain-chart cards' height in the grid, full detail is one expand tap away.
     glucose: glucoseLogs.length > 0
       ? <GlucoseCard glucoseLogs={glucoseLogs} unit={glucoseUnit} tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('glucose')} compact />
       : null,
@@ -2899,7 +2899,7 @@ function HealthClientLogs({ clientStore }) {
     bodyTemp: bodyTempLogs.length > 0
       ? <BodyTempCard tempLogs={bodyTempLogs} unit={clientTempUnit} tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('bodyTemp')} compact />
       : null,
-    // Dense table, doesn't fit the 2-col grid — always full width (fullWidthCardIds).
+    // Dense table, doesn't fit the 2-col grid, always full width (fullWidthCardIds).
     weekly: weeks.length ? (
       <Card style={{ padding: 14, borderLeft: `3px solid ${UI.gold}` }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
@@ -2928,7 +2928,7 @@ function HealthClientLogs({ clientStore }) {
     ) : null,
   };
 
-  // Sheet lookup for expandedCardId — every id any onExpand above can set.
+  // Sheet lookup for expandedCardId, every id any onExpand above can set.
   // Cloned with dragHandle/onExpand stripped: the expand sheet isn't inside a
   // reorder list (grip would be inert) and re-expanding itself is meaningless.
   const expandableCards = { weight: cardEls.weight, steps: cardEls.steps, water: cardEls.water, cardio: cardEls.cardio,
@@ -2936,7 +2936,7 @@ function HealthClientLogs({ clientStore }) {
     glucose: cardEls.glucose, bloodPressure: cardEls.bloodPressure, bodyTemp: cardEls.bodyTemp };
 
   // Only Week/Today/the macro group/Weekly Averages ever span full width.
-  // Everything else stays in the 2-col grid no matter what — matches the
+  // Everything else stays in the 2-col grid no matter what, matches the
   // client's own Health tab exactly (see HealthScreen's fullWidthCardIds).
   const fullWidthCardIds = new Set(['week', 'today', 'macroGroup', 'weekly']);
 
@@ -2950,7 +2950,7 @@ function HealthClientLogs({ clientStore }) {
             <div style={{ fontSize: 13, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1.5 }}>Your client has hidden all their Health cards.</div>
           </div>
         ) : (
-          // Grid-squeezed charts hide their "Drag to inspect" hint (ChartCompactContext) —
+          // Grid-squeezed charts hide their "Drag to inspect" hint (ChartCompactContext);
           // the expand sheet below isn't a descendant of this provider, so it keeps showing it.
           <ChartCompactContext.Provider value={true}>
             <ReorderList onReorder={reorderCards} style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 14 }}>

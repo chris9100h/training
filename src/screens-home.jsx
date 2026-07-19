@@ -3679,7 +3679,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
         </div>
       </Sheet>
 
-      {/* Daily log — full page */}
+      {/* Daily log, full page */}
       <DailyLogScreen
         open={dailyLogOpen}
         onClose={() => setDailyLogOpen(false)}
