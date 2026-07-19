@@ -1301,7 +1301,13 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
             </div>
           </div>
         ) : (
-          <button onClick={() => { setAddingGlucose(true); setEditingGlucoseId(null); }} style={{
+          <button onClick={() => {
+            // Pre-filled with now, not left blank: you measure and log in the
+            // same breath, so defaulting to "right now" saves a step, still
+            // freely editable if you're logging a reading from earlier.
+            setGlForm({ ...emptyGl, time: new Date().toTimeString().slice(0, 5) });
+            setAddingGlucose(true); setEditingGlucoseId(null);
+          }} style={{
             width: '100%', padding: '9px', background: UI.bgInset, border: `0.5px dashed ${UI.hairStrong}`, borderRadius: 6,
             color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 12, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
           }}>+ Add reading</button>
@@ -1373,7 +1379,13 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
             </div>
           </div>
         ) : (
-          <button onClick={() => { setAddingBp(true); setEditingBpId(null); }} style={{
+          <button onClick={() => {
+            // Pre-filled with now, not left blank: you measure and log in the
+            // same breath, so defaulting to "right now" saves a step, still
+            // freely editable if you're logging a reading from earlier.
+            setBpForm({ ...emptyBp, time: new Date().toTimeString().slice(0, 5) });
+            setAddingBp(true); setEditingBpId(null);
+          }} style={{
             width: '100%', padding: '9px', background: UI.bgInset, border: `0.5px dashed ${UI.hairStrong}`, borderRadius: 6,
             color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 12, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
           }}>+ Add reading</button>
@@ -1441,7 +1453,13 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
             </div>
           </div>
         ) : (
-          <button onClick={() => { setAddingTemp(true); setEditingTempId(null); }} style={{
+          <button onClick={() => {
+            // Pre-filled with now, not left blank: you measure and log in the
+            // same breath, so defaulting to "right now" saves a step, still
+            // freely editable if you're logging a reading from earlier.
+            setTempForm({ ...emptyTemp, time: new Date().toTimeString().slice(0, 5) });
+            setAddingTemp(true); setEditingTempId(null);
+          }} style={{
             width: '100%', padding: '9px', background: UI.bgInset, border: `0.5px dashed ${UI.hairStrong}`, borderRadius: 6,
             color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 12, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
           }}>+ Add reading</button>
