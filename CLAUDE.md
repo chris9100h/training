@@ -96,11 +96,12 @@ Diese Datei enthält die verbindlichen Regeln und den Überblick; sie bewusst sc
 - **Historie in `src/whatsnew.js`:** `window.WHATS_NEW`, ein Array von Einträgen `{ id, date, title, items: [...] }`, **neueste zuerst** (`date` im Format `YYYY-MM-DD`). Leeres Array = es wird nichts angezeigt.
 - **Anzeige:** Sobald die App nach einem Update `ready` ist, zeigt `WhatsNewModal` alle noch nicht gesehenen Einträge gebündelt in **einer** Karte. Tracking pro Gerät via localStorage `logbook-whatsnew-seen` (beim Schließen wird die `id` des neuesten Eintrags gespeichert). Neue Nutzer / erster Lauf ohne gespeicherte id sehen nur den neuesten Eintrag, nicht die ganze Historie.
 - **Workflow: nur auf ausdrückliche Nutzeranfrage** eine Ankündigung einspielen, niemals ungefragt. Dann:
-  1. Neuen Eintrag **oben** ins Array einfügen, mit neuer, eindeutiger `id` (typischerweise im Gleichschritt mit der kommenden SW-Cache-Version, z.B. `'v2.066'`) und einem **`date`** (Publikationstag, Format `YYYY-MM-DD`). Das `date`-Feld ist ab sofort Pflicht: jeder Eintrag trägt es.
-  2. **Alte Einträge nie entfernen** (Historie für Rückkehrer).
-  3. SW-Cache-Version in `sw.js` wie üblich bumpen (deployt das Update).
-  4. **Texte gut schreiben, das ist der Punkt der Funktion:** klar und nutzerorientiert erklären, *was* neu ist, *welchen Nutzen* es bringt, *wie* man es benutzt. Knackige `items`, kein Tech-Jargon, keine internen Begriffe (Tabellen, Funktionsnamen). Lieber 2-4 starke Punkte als eine lange Liste.
-  5. **Ton: technisch korrekt, aber light-hearted und etwas witzig.** Lockere Sprache, ein Augenzwinkern, gern ein passendes Emoji oder ein kleiner Vergleich. Die Fakten müssen trotzdem stimmen: nichts versprechen, was das Feature nicht tut, keine impliziten Falschaussagen.
+  1. **Erst Entwurf im Chat zeigen, auf Freigabe warten.** Noch nicht in `whatsnew.js` schreiben (oder falls als Zwischenschritt schon geschrieben: nicht committen/pushen/bumpen). Titel + Items als Text posten, erst nach OK des Nutzers weitermachen.
+  2. Neuen Eintrag **oben** ins Array einfügen, mit neuer, eindeutiger `id` (typischerweise im Gleichschritt mit der kommenden SW-Cache-Version, z.B. `'v2.066'`) und einem **`date`** (Publikationstag, Format `YYYY-MM-DD`). Das `date`-Feld ist ab sofort Pflicht: jeder Eintrag trägt es.
+  3. **Alte Einträge nie entfernen** (Historie für Rückkehrer).
+  4. SW-Cache-Version in `sw.js` wie üblich bumpen (deployt das Update).
+  5. **Texte gut schreiben, das ist der Punkt der Funktion:** klar und nutzerorientiert erklären, *was* neu ist, *welchen Nutzen* es bringt, *wie* man es benutzt. Knackige `items`, kein Tech-Jargon, keine internen Begriffe (Tabellen, Funktionsnamen). Lieber 2-4 starke Punkte als eine lange Liste.
+  6. **Ton: technisch korrekt, aber light-hearted und etwas witzig.** Lockere Sprache, ein Augenzwinkern, gern ein passendes Emoji oder ein kleiner Vergleich. Die Fakten müssen trotzdem stimmen: nichts versprechen, was das Feature nicht tut, keine impliziten Falschaussagen.
 - `whatsnew.js` ist plain JS (kein JSX): normales `<script>` in `index.html` (nicht über den Precompile-Loader), in `ASSETS` von `sw.js` für Offline gelistet (beides bereits eingerichtet).
 
 ## Feature Map
