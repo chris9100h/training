@@ -5535,7 +5535,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           </button>
         );
       })}
-      <Btn onClick={() => chooseReadiness(readinessSel || 'normal')} style={{ width: '100%', marginTop: 12 }}>Confirm</Btn>
+      <Btn onClick={() => chooseReadiness(readinessSel)} disabled={readinessSel == null} style={{ width: '100%', marginTop: 12, opacity: readinessSel == null ? 0.4 : 1 }}>Confirm</Btn>
     </Sheet>
   );
 
