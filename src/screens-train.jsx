@@ -1103,6 +1103,20 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // deload gate blocks their unlock.
     if (store.statusMode === 'deload' || session.isDeload || is531DeloadSession) return null;
     const perSet = entry?.plannedRepsPerSet;
+    // On a Meso/autoreg plan, mirror mesoEarnTarget exactly, the mechanism
+    // that actually grants the bump every session via computeMesoGains:
+    // staggered top-of-range down to the floor across the working sets on a
+    // Range item (e.g. 10-9-8 for 3 sets of an 8-10 range), not a flat
+    // ceiling on every set. The flat ceiling below is Smart Progression's OWN,
+    // separate (and stricter) requirement, only ever a week-1 fallback (see
+    // resolveMesoSeedSuggestion) when Meso's own ladder hasn't already earned
+    // something, so showing it here on later sets would overstate what they
+    // actually need to clear the bar Meso itself is grading against.
+    if (mesoState) {
+      const nWorking = entry?.sets?.filter(st => !st.warmup).length ?? 1;
+      const target = LB.mesoEarnTarget(workingSetIdx, nWorking, entry?.plannedReps ?? 0, perSet, entry?.plannedRepsMax);
+      return target > 0 ? target : null;
+    }
     const perSetVal = perSet && perSet.length > 1
       ? (perSet[workingSetIdx] ?? perSet[perSet.length - 1])
       : null;
