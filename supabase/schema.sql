@@ -1963,8 +1963,9 @@ CREATE OR REPLACE FUNCTION public.sync_meso_states_batch(p_states jsonb)
 AS $function$
   INSERT INTO zane_meso_states (
     id, user_id, schedule_id, weeks, start_date, start_cycle_index, started_at,
-    deltas, joint_flags, pump_low_counts, weight_boosts, growth_counts,
-    rep_miss_counts, affinity, autoreg_state, completions, pending_meso2, updated_at
+    deltas, joint_flags, pump_low_counts, weight_boosts, weight_boost_declines,
+    growth_counts, rep_miss_counts, affinity, autoreg_state, completions,
+    pending_meso2, updated_at
   )
   SELECT
     m->>'id',
@@ -1978,6 +1979,7 @@ AS $function$
     COALESCE(m->'joint_flags', '{}'::jsonb),
     COALESCE(m->'pump_low_counts', '{}'::jsonb),
     COALESCE(m->'weight_boosts', '{}'::jsonb),
+    COALESCE(m->'weight_boost_declines', '{}'::jsonb),
     COALESCE(m->'growth_counts', '{}'::jsonb),
     COALESCE(m->'rep_miss_counts', '{}'::jsonb),
     COALESCE(m->'affinity', '{}'::jsonb),
@@ -1987,21 +1989,22 @@ AS $function$
     COALESCE((m->>'updated_at')::timestamptz, now())
   FROM jsonb_array_elements(p_states) AS m
   ON CONFLICT (id) DO UPDATE SET
-    weeks             = EXCLUDED.weeks,
-    start_date        = EXCLUDED.start_date,
-    start_cycle_index = EXCLUDED.start_cycle_index,
-    started_at        = COALESCE(EXCLUDED.started_at, zane_meso_states.started_at),
-    deltas            = EXCLUDED.deltas,
-    joint_flags       = EXCLUDED.joint_flags,
-    pump_low_counts   = EXCLUDED.pump_low_counts,
-    weight_boosts     = EXCLUDED.weight_boosts,
-    growth_counts     = EXCLUDED.growth_counts,
-    rep_miss_counts   = EXCLUDED.rep_miss_counts,
-    affinity          = EXCLUDED.affinity,
-    autoreg_state     = COALESCE(NULLIF(EXCLUDED.autoreg_state, 'null'::jsonb), zane_meso_states.autoreg_state),
-    completions       = EXCLUDED.completions,
-    pending_meso2     = EXCLUDED.pending_meso2,
-    updated_at        = EXCLUDED.updated_at
+    weeks                 = EXCLUDED.weeks,
+    start_date            = EXCLUDED.start_date,
+    start_cycle_index     = EXCLUDED.start_cycle_index,
+    started_at            = COALESCE(EXCLUDED.started_at, zane_meso_states.started_at),
+    deltas                = EXCLUDED.deltas,
+    joint_flags           = EXCLUDED.joint_flags,
+    pump_low_counts       = EXCLUDED.pump_low_counts,
+    weight_boosts         = EXCLUDED.weight_boosts,
+    weight_boost_declines = EXCLUDED.weight_boost_declines,
+    growth_counts         = EXCLUDED.growth_counts,
+    rep_miss_counts       = EXCLUDED.rep_miss_counts,
+    affinity              = EXCLUDED.affinity,
+    autoreg_state         = COALESCE(NULLIF(EXCLUDED.autoreg_state, 'null'::jsonb), zane_meso_states.autoreg_state),
+    completions           = EXCLUDED.completions,
+    pending_meso2         = EXCLUDED.pending_meso2,
+    updated_at            = EXCLUDED.updated_at
   WHERE zane_meso_states.updated_at < EXCLUDED.updated_at;
 $function$;
 
