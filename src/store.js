@@ -6208,11 +6208,16 @@ function techniqueRounds(st, { exName } = {}) {
 // Reads the active Service Worker cache version ("zane-vX.XXX" → "vX.XXX"),
 // or null if unavailable. Used both to report a device's version to the
 // admin (app.jsx) and to display it locally (screens-home.jsx's login screen).
+// Matches 'zane-v' specifically (not just 'zane-') so the unversioned
+// 'zane-photos-v1' cache (sw.js, decorative background photos, bumped
+// independently of the app shell) can never be mistaken for the app-shell
+// cache: caches.keys() order isn't guaranteed, and 'zane-photos-v1' doesn't
+// start with 'zane-v' ('zane-p...'), so it's excluded by construction.
 async function detectCacheVersion() {
   if (!('caches' in window)) return null;
   try {
     const keys = await caches.keys();
-    const name = keys.find(k => k.startsWith('zane-'));
+    const name = keys.find(k => k.startsWith('zane-v'));
     return name ? name.replace('zane-', '') : null;
   } catch (_) { return null; }
 }

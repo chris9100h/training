@@ -645,7 +645,13 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
     });
   }
   function idbPut(db, key, val) {
-    try { db.transaction(STORE, 'readwrite').objectStore(STORE).put(val, key); } catch (e) {}
+    try {
+      var r = db.transaction(STORE, 'readwrite').objectStore(STORE).put(val, key);
+      r.onerror = function (e) {
+        console.warn('idbPut: failed to write cache entry for key', key, r.error);
+        e.preventDefault();
+      };
+    } catch (e) { console.warn('idbPut: failed to write cache entry for key', key, e); }
   }
   function idbCount(db) {
     return new Promise(function (resolve) {

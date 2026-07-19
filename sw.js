@@ -1,4 +1,10 @@
 const CACHE = 'zane-v2.626';
+// Decorative background photos live in their own cache, deliberately decoupled
+// from CACHE's version. CACHE bumps on every deploy (often several times a
+// day); PHOTOS_CACHE only bumps by hand when the photo files themselves
+// change, so a routine deploy never re-downloads ~7MB of unchanged images.
+// activate() below intentionally never deletes this cache.
+const PHOTOS_CACHE = 'zane-photos-v1';
 const CDN_HOSTS = ['unpkg.com', 'cdnjs.cloudflare.com', 'fonts.googleapis.com', 'fonts.gstatic.com'];
 // Works at any base path (e.g. /training/ on GitHub Pages, / on custom domain)
 const BASE = self.registration.scope.replace(/\/$/, '');
@@ -38,7 +44,8 @@ const ASSETS = [
 
 // Decorative background photos + their index. Purely cosmetic, and their file
 // names/extensions drift (e.g. .png vs .PNG on case-sensitive hosting), so a
-// single 404 here must NOT abort the whole SW install. Precached best-effort.
+// single 404 here must NOT abort the whole SW install. Precached best-effort
+// into PHOTOS_CACHE (see above), not the versioned CACHE.
 const PHOTO_ASSETS = [
   BASE + '/Background/Appy.png',
   BASE + '/Background/phoenix.png',
@@ -86,11 +93,22 @@ self.addEventListener('install', e => {
   e.waitUntil(
     caches.open(CACHE).then(c =>
       precacheAll(c, ASSETS).then(() =>
-        Promise.allSettled([].concat(
-          PHOTO_ASSETS.map(u => fetch(u, { cache: 'no-store' }).then(res => { if (res.ok) return c.put(u, res); }).catch(() => {})),
+        Promise.allSettled(
           CDN_ASSETS.map(u => fetch(new Request(u, { mode: 'cors', cache: 'no-store' })).then(res => { if (res.ok) return c.put(u, res); }).catch(() => {}))
-        ))
+        )
       )
+    ).then(() =>
+      // PHOTOS_CACHE is stable across deploys (activate() never wipes it), so
+      // once it's populated there's nothing to do here — re-fetching ~7MB of
+      // unchanged photos on every install would defeat the whole point.
+      caches.has(PHOTOS_CACHE).then(exists => {
+        if (exists) return;
+        return caches.open(PHOTOS_CACHE).then(c =>
+          Promise.allSettled(
+            PHOTO_ASSETS.map(u => fetch(u, { cache: 'no-store' }).then(res => { if (res.ok) return c.put(u, res); }).catch(() => {}))
+          )
+        );
+      })
     )
   );
 });
@@ -98,7 +116,9 @@ self.addEventListener('install', e => {
 self.addEventListener('activate', e => {
   e.waitUntil(
     caches.keys().then(keys =>
-      Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))
+      // PHOTOS_CACHE is versioned independently of CACHE (see its
+      // declaration above) — never swept here alongside old app-shell caches.
+      Promise.all(keys.filter(k => k !== CACHE && k !== PHOTOS_CACHE).map(k => caches.delete(k)))
     ).then(() => self.clients.claim())
   );
 });
@@ -202,7 +222,11 @@ self.addEventListener('fetch', e => {
         const network = fetch(e.request, { cache: 'no-store' }).then(res => {
           if (res.ok) {
             const clone = res.clone();
-            caches.open(CACHE).then(c => c.put(e.request, clone));
+            // A photo that missed precaching (e.g. a transient 404 during
+            // install) belongs in PHOTOS_CACHE, not the short-lived versioned
+            // CACHE — otherwise it'd get wiped again on the next deploy.
+            const target = PHOTO_ASSETS.includes(e.request.url) ? PHOTOS_CACHE : CACHE;
+            caches.open(target).then(c => c.put(e.request, clone));
           }
           return res;
         }).catch(() => cached || offlineResponse());
