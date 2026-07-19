@@ -100,7 +100,7 @@ const docSections = new Map();
 
 // Realtime publication: expected zane_ members. Foreign (non-zane) tables in
 // the same database are reported as info only.
-const EXPECTED_REALTIME = new Set(['zane_coaching', 'zane_coaching_notes']);
+const EXPECTED_REALTIME = new Set(['zane_coaching', 'zane_coaching_notes', 'zane_user_settings', 'zane_checkins']);
 
 // Functions where anon EXECUTE is intentional (documented in docs/database.md,
 // "Grant-Fallen"). Every other function must have anon_exec === false.
