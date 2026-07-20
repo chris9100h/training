@@ -356,7 +356,7 @@ function WaterScreen({ store, setStore, go, userId }) {
         {/* Other drinks: coffee preset spans the full row, user drinks below */}
         <div>
           <Bezel style={{ marginBottom: 10 }}>Other drinks</Bezel>
-          <button onClick={openCoffee} style={{ ...wtDrinkTile, width: '100%' }}>
+          <button onClick={openCoffee} style={{ ...wtDrinkTile, width: '100%', justifyContent: 'center' }}>
             <span style={wtDrinkIcon}><i className="fa-solid fa-mug-hot" style={{ fontSize: 15 }} /></span>
             <div style={{ textAlign: 'center', minWidth: 0 }}>
               <div style={wtDrinkName}>Coffee</div>
@@ -368,7 +368,7 @@ function WaterScreen({ store, setStore, go, userId }) {
               {drinks.map((d, i) => (
                 <button key={i} onClick={() => addWithConfirm(d.ml, d.name, 'other')} style={wtDrinkTile}>
                   <span style={wtDrinkIcon}><i className={`fa-solid ${d.icon || WT_DEFAULT_DRINK_ICON}`} style={{ fontSize: 15 }} /></span>
-                  <div style={{ textAlign: 'center', minWidth: 0 }}>
+                  <div style={{ textAlign: 'left', minWidth: 0 }}>
                     <div style={wtDrinkName}>{d.name}</div>
                     <div style={wtDrinkMeta}>{d.ml} ml</div>
                   </div>
@@ -732,7 +732,7 @@ const wtTile = {
   background: UI.bgInset, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
 };
 const wtDrinkTile = {
-  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, padding: 12, borderRadius: 6,
+  display: 'flex', alignItems: 'center', gap: 10, padding: 12, borderRadius: 6,
   border: `1px solid ${UI.hairStrong}`, background: UI.bgInset, cursor: 'pointer',
   WebkitTapHighlightColor: 'transparent', overflow: 'hidden',
 };
