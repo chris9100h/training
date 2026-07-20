@@ -69,8 +69,12 @@
        accent color in the palette, all of which are mid-to-bright; only
        paper's muted grey accent is dark enough to need a light ink instead. */
     --accent-ink: #0a0805;
-    --accent-faint: rgba(var(--accent-rgb),0.10);
-    --accent-soft: rgba(var(--accent-rgb),0.30);
+    /* Multiplier on --accent-faint/--accent-soft below, same idea as
+       --knurl-opacity: a theme (paper) can richen these shared tint/border
+       tokens without every one of their many call sites changing. */
+    --accent-tint-boost: 1;
+    --accent-faint: rgba(var(--accent-rgb),calc(0.10 * var(--accent-tint-boost)));
+    --accent-soft: rgba(var(--accent-rgb),calc(0.30 * var(--accent-tint-boost)));
     --danger: #c87469;
     --danger-rgb: 200,116,105;
     --ok: #8fb069;
@@ -539,6 +543,11 @@ window.DARK_MODES = {
     // light canvas in a way the same border never was on a dark one.
     hair: 'rgba(20,20,20,0.30)', hairStrong: 'rgba(20,20,20,0.55)', hairWidth: '1px',
     knurlRgb: '50,70,120', knurlOpacity: 2.4,
+    // Richens --accent-faint/--accent-soft (Card's accent border, badge
+    // fills, ...): those stay formula-derived from --accent-rgb, so this is
+    // the only lever paper has to make them less washed-out without touching
+    // every one of their call sites individually.
+    accentTintBoost: 1.6,
     surfaceTint:     'rgba(20,20,20,0.035)',
     surfaceTintSm:   'rgba(20,20,20,0.05)',
     surfaceTintMd:   'rgba(20,20,20,0.07)',
@@ -581,6 +590,7 @@ window.applyDarkMode = function(key) {
   s.setProperty('--hair-width', m.hairWidth || '0.5px');
   s.setProperty('--knurl-rgb', m.knurlRgb || '236,228,208');
   s.setProperty('--knurl-opacity', m.knurlOpacity || 1);
+  s.setProperty('--accent-tint-boost', m.accentTintBoost || 1);
   s.setProperty('--bg-texture', m.bgTexture || 'none');
   s.setProperty('--surface-tint',      m.surfaceTint     || t.surfaceTint);
   s.setProperty('--surface-tint-sm',   m.surfaceTintSm   || t.surfaceTintSm);
