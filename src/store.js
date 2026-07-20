@@ -1780,16 +1780,8 @@ async function syncStore(prev, next, userId) {
       status_mode_since: next.statusModeSince ?? null,
       deload_prompt_dismissed_at: next.deloadPromptDismissedAt ?? null,
       sw_version: next.settings?.swVersion ?? null,
-      water_goal_ml: next.settings?.waterGoalMl ?? 2000,
-      water_start_time: next.settings?.waterStartTime ?? '08:00',
-      water_end_time: next.settings?.waterEndTime ?? '22:00',
       water_bottles_today: next.settings?.waterBottlesToday ?? 0,
       water_bottles_date: next.settings?.waterBottlesDate ?? null,
-      water_drinks: next.settings?.waterDrinks ?? null,
-      water_coffee_sizes: next.settings?.waterCoffeeSizes ?? null,
-      water_bottle_enabled: next.settings?.waterBottleEnabled ?? true,
-      water_bottle_ml: next.settings?.waterBottleMl ?? 1500,
-      water_reminder_enabled: next.settings?.waterReminderEnabled ?? false,
       tz_offset_minutes: next.settings?.tzOffsetMinutes ?? null,
     };
     // Plan-position / active-plan fields are action-advanced and prone to a
@@ -1804,6 +1796,21 @@ async function syncStore(prev, next, userId) {
     if (prev.cycleStartDate    !== next.cycleStartDate)    settingsRow.cycle_start_date     = next.cycleStartDate ?? null;
     if (prev.weekPlanStartDate !== next.weekPlanStartDate) settingsRow.week_plan_start_date = next.weekPlanStartDate ?? null;
     if (prev.lastAdvancedDate  !== next.lastAdvancedDate)  settingsRow.last_advanced_date   = next.lastAdvancedDate ?? null;
+    // Water tracker config gets the SAME gated treatment as the plan-position
+    // fields above, for the same reason: it must propagate across devices
+    // (app.jsx's boot-merge WATER_SYNC_KEYS gives the READ side this
+    // guarantee already), so the WRITE side must not undo it. Without this
+    // gate, syncing an unrelated setting change on a device that booted
+    // before another device set e.g. a new water goal would upsert this
+    // device's stale cached goal over the fresher server value.
+    if (prev.settings?.waterGoalMl        !== next.settings?.waterGoalMl)        settingsRow.water_goal_ml         = next.settings?.waterGoalMl ?? 2000;
+    if (prev.settings?.waterStartTime     !== next.settings?.waterStartTime)     settingsRow.water_start_time      = next.settings?.waterStartTime ?? '08:00';
+    if (prev.settings?.waterEndTime       !== next.settings?.waterEndTime)       settingsRow.water_end_time        = next.settings?.waterEndTime ?? '22:00';
+    if (prev.settings?.waterReminderEnabled !== next.settings?.waterReminderEnabled) settingsRow.water_reminder_enabled = next.settings?.waterReminderEnabled ?? false;
+    if (prev.settings?.waterBottleEnabled !== next.settings?.waterBottleEnabled) settingsRow.water_bottle_enabled  = next.settings?.waterBottleEnabled ?? true;
+    if (prev.settings?.waterBottleMl      !== next.settings?.waterBottleMl)      settingsRow.water_bottle_ml       = next.settings?.waterBottleMl ?? 1500;
+    if (JSON.stringify(prev.settings?.waterDrinks) !== JSON.stringify(next.settings?.waterDrinks)) settingsRow.water_drinks = next.settings?.waterDrinks ?? null;
+    if (JSON.stringify(prev.settings?.waterCoffeeSizes) !== JSON.stringify(next.settings?.waterCoffeeSizes)) settingsRow.water_coffee_sizes = next.settings?.waterCoffeeSizes ?? null;
     ops.push(_supabase.from('zane_user_settings').upsert(settingsRow));
   }
 

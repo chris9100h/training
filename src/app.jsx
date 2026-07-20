@@ -839,12 +839,17 @@ function App() {
             // devices (set a goal on the phone, see it on the desktop). Same
             // base-aware rule as the plan-position fields above: keep this
             // device's value only when it changed it since base (an unsynced
-            // local edit), otherwise take the server's. Bottle counters are
-            // deliberately NOT in this list — they are day-scoped device state.
+            // local edit), otherwise take the server's. No base (legacy cache)
+            // -> keep cur, matching the plan-position fields' own fallback and
+            // every other no-base fallback in this merge (fixed: this used to
+            // read `base && (...)`, which is falsy when base is null/undefined
+            // and so took the server value on a no-base boot instead of cur,
+            // the opposite of the intended rule). Bottle counters are
+            // deliberately NOT in this list, they are day-scoped device state.
             const WATER_SYNC_KEYS = ['waterGoalMl', 'waterStartTime', 'waterEndTime', 'waterReminderEnabled', 'waterDrinks', 'waterCoffeeSizes', 'waterBottleEnabled', 'waterBottleMl'];
             const mergedSettings = { ...fresh.settings, ...cur.settings, ...(fresh.settings.unit == null ? { unit: null } : {}) };
             for (const k of WATER_SYNC_KEYS) {
-              const localUnsynced = base && JSON.stringify(cur.settings?.[k]) !== JSON.stringify(base.settings?.[k]);
+              const localUnsynced = !base || JSON.stringify(cur.settings?.[k]) !== JSON.stringify(base.settings?.[k]);
               if (!localUnsynced) mergedSettings[k] = fresh.settings?.[k];
             }
             merged = {
@@ -1370,7 +1375,7 @@ function App() {
   const tabRoutes = ['home', 'plan', 'lib', 'cardio-plans', 'hist', 'health', 'water', 'coaching'];
   const showTab = tabRoutes.includes(route.name);
   // Library and cardio-plans live under the merged "Plan" tab; the water tracker
-  // lives under the Health tab — keep the right tab lit for each.
+  // lives under the Health tab: keep the right tab lit for each.
   const tabActive = (route.name === 'lib' || route.name === 'cardio-plans') ? 'plan'
     : (route.name === 'water') ? 'health'
     : route.name;

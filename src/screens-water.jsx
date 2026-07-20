@@ -1,4 +1,4 @@
-/* Water Tracker screen — a full hydration tracker ported from the standalone
+/* Water Tracker screen: a full hydration tracker ported from the standalone
    Wasser Tracker app into Zane. Per-entry logging (quick water amounts, a
    configurable coffee preset, user-defined drinks, custom entries), a live
    activity ring, an expected-vs-actual day chart, a derived win streak, an
@@ -108,8 +108,14 @@ function WaterRing({ percent, size = 128 }) {
 
 // ─── Expected vs actual, over the day ───────────────────────────────
 function WaterDayChart({ entries, goalMl, startTime, endTime }) {
-  const startH = Math.floor(wtHhmmToDecimal(startTime));
-  const endH = Math.ceil(wtHhmmToDecimal(endTime));
+  let startH = Math.floor(wtHhmmToDecimal(startTime));
+  let endH = Math.ceil(wtHhmmToDecimal(endTime));
+  // An overnight/reversed window (startH >= endH) has no valid ramp: the tick
+  // loop below would never run, leaving `actual` empty and crashing on
+  // `actual[actual.length-1]`. saveGoalWindow guards against saving one, but
+  // fall back defensively here too (a merge combining two devices' otherwise
+  // valid windows, or data edited directly, could still produce one).
+  if (endH <= startH) { startH = 8; endH = 22; }
   const span = Math.max(1, endH - startH);
   const W = 320, padL = 40, padR = 12, padTop = 10, padBottom = 20, plotH = 96;
   const H = padTop + plotH + padBottom, plotW = W - padL - padR;
@@ -213,27 +219,33 @@ function WaterScreen({ store, setStore, go, userId }) {
     return [log, ...(s.dailyLogs || []).filter(l => l.id !== log.id && l.date !== today)];
   }
 
-  function doAdd(amountMl, name, category) {
+  async function doAdd(amountMl, name, category) {
     const entry = { id: LB.uid(), date: today, time: wtNowHHMM(), amountMl: parseInt(amountMl, 10), name: name || null, category: category || null, createdAt: new Date().toISOString() };
     const prevTotal = total;
     setStore(s => {
       const nextLogs = [entry, ...(s.waterLogs || [])];
       return { ...s, waterLogs: nextLogs, dailyLogs: patchDaily(s, nextLogs.filter(l => l.date === today)) };
     });
+    // useConfirm() holds only one dialog at a time, so the goal-reached and
+    // bottle-empty prompts (both possibly triggered by the same add) must be
+    // sequenced, not fired independently: awaiting the goal dialog here
+    // means the bottle prompt below only opens once the user has actually
+    // seen and dismissed it, instead of silently replacing it mid-display.
+    let goalDialogShown = false;
     if (prevTotal < goalMl && prevTotal + entry.amountMl >= goalMl) {
       const seen = localStorage.getItem(WT_CELEBRATED_KEY);
       if (seen !== today) {
         localStorage.setItem(WT_CELEBRATED_KEY, today);
-        confirm(`You hit your ${wtAmt(goalMl)} ${wtUnit()} goal. Stay hydrated.`, { title: 'Goal reached', ok: 'Keep going', cancel: null });
+        goalDialogShown = true;
+        await confirm(`You hit your ${wtAmt(goalMl)} ${wtUnit()} goal. Stay hydrated.`, { title: 'Goal reached', ok: 'Keep going', cancel: null });
       }
     }
     if (!category && bottleEnabled) {
       const nextPlain = plainToday + entry.amountMl;
       if (Math.max(0, nextPlain - bottlesToday * bottleMl) >= bottleMl) {
-        setTimeout(async () => {
-          const ok = await confirm(`You have logged ${bottleMl} ml of water via the quick amounts. Count an emptied bottle?`, { title: 'Bottle empty?', ok: 'Yes, empty', cancel: 'Not yet' });
-          if (ok) setStore(s => ({ ...s, settings: { ...s.settings, waterBottlesToday: ((s.settings?.waterBottlesDate === today ? s.settings?.waterBottlesToday : 0) || 0) + 1, waterBottlesDate: today } }));
-        }, 300);
+        if (!goalDialogShown) await new Promise(r => setTimeout(r, 300));
+        const ok = await confirm(`You have logged ${bottleMl} ml of water via the quick amounts. Count an emptied bottle?`, { title: 'Bottle empty?', ok: 'Yes, empty', cancel: 'Not yet' });
+        if (ok) setStore(s => ({ ...s, settings: { ...s.settings, waterBottlesToday: ((s.settings?.waterBottlesDate === today ? s.settings?.waterBottlesToday : 0) || 0) + 1, waterBottlesDate: today } }));
       }
     }
   }
@@ -269,7 +281,7 @@ function WaterScreen({ store, setStore, go, userId }) {
   const submitCustom = () => {
     const amount = parseInt(customMl, 10);
     if (!amount || isNaN(amount) || amount <= 0) return;
-    const ml = UI.waterInFloz() ? UI.flozToMl(amount) : amount;
+    const ml = UI.waterEntryToMl(amount);
     setCustomOpen(false);
     addWithConfirm(ml, customName.trim() || null, 'custom');
     setCustomMl(''); setCustomName('');
@@ -543,8 +555,14 @@ function WaterSettingsBody({ settings, patchSettings, go, onClose, onConfigureDr
 
   const saveGoalWindow = () => {
     const entry = parseInt(goal, 10);
-    const ml = entry > 0 ? (UI.waterInFloz() ? UI.flozToMl(entry) : entry) : 2000;
-    patchSettings({ waterGoalMl: ml, waterStartTime: start, waterEndTime: end });
+    const ml = entry > 0 ? UI.waterEntryToMl(entry) : 2000;
+    // An overnight/reversed window (start hour >= end hour) has no valid ramp:
+    // WaterDayChart's tick loop never runs and the day-total math divides by a
+    // non-positive span. Clamp end to at least an hour past start instead of
+    // silently saving something that crashes the Water screen on next open.
+    const validEnd = wtHhmmToDecimal(end) > wtHhmmToDecimal(start) ? end : '23:59';
+    if (validEnd !== end) setEnd(validEnd);
+    patchSettings({ waterGoalMl: ml, waterStartTime: start, waterEndTime: validEnd });
   };
 
   return (
@@ -611,16 +629,16 @@ function WaterDrinksConfigBody({ settings, patchSettings, onClose }) {
   const [cMl, setCMl] = useStateW('');
 
   const addDrink = () => {
-    const ml = parseInt(drinkMl, 10);
-    if (!drinkName.trim() || !ml || ml <= 0 || drinks.length >= WT_MAX_DRINKS) return;
-    patchSettings({ waterDrinks: [...drinks, { name: drinkName.trim(), ml, icon: drinkIcon }] });
+    const entry = parseInt(drinkMl, 10);
+    if (!drinkName.trim() || !entry || entry <= 0 || drinks.length >= WT_MAX_DRINKS) return;
+    patchSettings({ waterDrinks: [...drinks, { name: drinkName.trim(), ml: UI.waterEntryToMl(entry), icon: drinkIcon }] });
     setDrinkName(''); setDrinkMl(''); setDrinkIcon(WT_DEFAULT_DRINK_ICON);
   };
   const removeDrink = (i) => patchSettings({ waterDrinks: drinks.filter((_, idx) => idx !== i) });
   const addCoffee = () => {
-    const ml = parseInt(cMl, 10);
-    if (!cLabel.trim() || !ml || ml <= 0 || coffee.length >= WT_MAX_COFFEE) return;
-    patchSettings({ waterCoffeeSizes: [...coffee, { label: cLabel.trim(), ml }] });
+    const entry = parseInt(cMl, 10);
+    if (!cLabel.trim() || !entry || entry <= 0 || coffee.length >= WT_MAX_COFFEE) return;
+    patchSettings({ waterCoffeeSizes: [...coffee, { label: cLabel.trim(), ml: UI.waterEntryToMl(entry) }] });
     setCLabel(''); setCMl('');
   };
   const removeCoffee = (i) => patchSettings({ waterCoffeeSizes: coffee.filter((_, idx) => idx !== i) });
@@ -634,7 +652,7 @@ function WaterDrinksConfigBody({ settings, patchSettings, onClose }) {
         {drinksLeft > 0 ? `Add up to ${drinksLeft} custom drink${drinksLeft === 1 ? '' : 's'}.` : 'You have added the maximum of 6 drinks.'}
       </div>
       {drinks.map((d, i) => (
-        <WaterConfigRow key={i} left={d.name} right={`${d.ml} ml`} icon={d.icon || WT_DEFAULT_DRINK_ICON} onRemove={() => removeDrink(i)} />
+        <WaterConfigRow key={i} left={d.name} right={`${wtAmt(d.ml)} ${wtUnit()}`} icon={d.icon || WT_DEFAULT_DRINK_ICON} onRemove={() => removeDrink(i)} />
       ))}
       {drinksLeft > 0 && (
         <div style={{ marginTop: 4, marginBottom: 20 }}>
@@ -657,7 +675,7 @@ function WaterDrinksConfigBody({ settings, patchSettings, onClose }) {
           <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
             <div style={{ flex: 2 }}><TextInput value={drinkName} onChange={setDrinkName} placeholder="Name" /></div>
             <div style={{ flex: 1 }}>
-              <input value={drinkMl} onChange={e => setDrinkMl(e.target.value.replace(/[^0-9]/g, ''))} type="text" inputMode="numeric" placeholder="ml" style={wtInput} />
+              <input value={drinkMl} onChange={e => setDrinkMl(e.target.value.replace(/[^0-9]/g, ''))} type="text" inputMode="numeric" placeholder={wtUnit()} style={wtInput} />
             </div>
             <Btn onClick={addDrink} style={{ flexShrink: 0, minHeight: 40, padding: '10px 16px' }}>Add</Btn>
           </div>
@@ -668,13 +686,13 @@ function WaterDrinksConfigBody({ settings, patchSettings, onClose }) {
       <Bezel style={{ marginBottom: 12 }}>Coffee sizes</Bezel>
       <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 10 }}>Your own sizes in the coffee button.</div>
       {coffee.map((s, i) => (
-        <WaterConfigRow key={i} left={s.label} right={`${s.ml} ml`} onRemove={() => removeCoffee(i)} />
+        <WaterConfigRow key={i} left={s.label} right={`${wtAmt(s.ml)} ${wtUnit()}`} onRemove={() => removeCoffee(i)} />
       ))}
       {coffee.length < WT_MAX_COFFEE && (
         <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', marginTop: 4, marginBottom: 20 }}>
           <div style={{ flex: 2 }}><TextInput value={cLabel} onChange={setCLabel} placeholder="Label" /></div>
           <div style={{ flex: 1 }}>
-            <input value={cMl} onChange={e => setCMl(e.target.value.replace(/[^0-9]/g, ''))} type="text" inputMode="numeric" placeholder="ml" style={wtInput} />
+            <input value={cMl} onChange={e => setCMl(e.target.value.replace(/[^0-9]/g, ''))} type="text" inputMode="numeric" placeholder={wtUnit()} style={wtInput} />
           </div>
           <Btn onClick={addCoffee} style={{ flexShrink: 0, minHeight: 40, padding: '10px 16px' }}>Add</Btn>
         </div>
@@ -713,7 +731,7 @@ function WaterStatsBody({ store, goalMl }) {
   const coffeeLabels = (store.settings?.waterCoffeeSizes || []).map(s => s.label);
 
   const range = useMemoW(() => {
-    if (period === 'custom') return (from > to) ? { from: to, to } : { from, to };
+    if (period === 'custom') return (from > to) ? { from: to, to: from } : { from, to };
     return { from: wtDateStr(-(period - 1)), to: wtDateStr(0) };
   }, [period, from, to]);
 
@@ -779,7 +797,7 @@ function WaterStatsBody({ store, goalMl }) {
         {statCard('Goal days', `${s.goalDays}`, 'days')}
         {statCard('Days logged', `${s.withData}`, 'days')}
         {statCard('Avg / day', `${s.avg}`, 'ml')}
-        {statCard('Top drink', s.fav || '—', s.fav ? `${s.favN}x` : null)}
+        {statCard('Top drink', s.fav || 'None', s.fav ? `${s.favN}x` : null)}
       </div>
       {(Object.keys(s.drinks).length > 0 || s.milk > 0) && (
         <Card style={{ padding: 14 }}>

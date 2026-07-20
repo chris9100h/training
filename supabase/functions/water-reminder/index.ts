@@ -62,6 +62,11 @@ async function sendReminders() {
   const r = await dbFetch(
     'zane_user_settings?water_reminder_enabled=eq.true&push_enabled=eq.true&select=user_id,pushover_user_key,use_pushover,water_goal_ml,water_start_time,water_end_time,water_last_push_at,tz_offset_minutes'
   );
+  // A non-2xx PostgREST response is still valid JSON (an error object, not an
+  // array), so `.json().catch(...)` alone never catches it: `rows` would be
+  // that object and the for-of below would throw "not iterable". Bail out
+  // loudly instead of taking down the whole cron invocation silently.
+  if (!r.ok) { console.error(`[water-reminder] settings query failed: ${r.status} ${await r.text().catch(() => '')}`); return; }
   const rows: Row[] = await r.json().catch(() => []);
   const now = Date.now();
 
@@ -85,7 +90,11 @@ async function sendReminders() {
     const expected = Math.round(goal * (localH - start) / (end - start));
 
     // Today's logged water (the client mirrors the day's sum into water_ml).
+    // A failed fetch must NOT read as "0 ml logged" — that would fire a false
+    // "you're behind" push at a user who already hit their goal, so skip this
+    // user's check entirely rather than guessing on bad data.
     const dRes = await dbFetch(`zane_daily_logs?user_id=eq.${row.user_id}&date=eq.${localDate}&select=water_ml`);
+    if (!dRes.ok) { console.error(`[water-reminder] daily log query failed for ${row.user_id}: ${dRes.status}`); continue; }
     const dRows: { water_ml: number | null }[] = await dRes.json().catch(() => []);
     const actual = dRows[0]?.water_ml ?? 0;
 
