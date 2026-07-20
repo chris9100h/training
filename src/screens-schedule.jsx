@@ -765,6 +765,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
   const _shotIsLight = ['light', 'paper'].includes(store.settings?.darkMode ?? 'dark');
   const _shotDefaultStyle = { width: '75%', maxWidth: 620, opacity: _shotIsLight ? 0.10 : 0.06, filter: _shotIsLight ? 'grayscale(1)' : 'grayscale(1) brightness(3)', objectFit: 'contain' };
   const _shotCustomStyle = { width: '80%', maxWidth: 680, opacity: 0.13, objectFit: 'contain' };
+  const _shotIsPaper = (store.settings?.darkMode ?? 'dark') === 'paper';
   const takeScreenshot = async () => {
     const res = await captureNodeAsPng(captureRef.current, {
       filename: `${sch.name.replace(/[^a-z0-9]/gi, '-').toLowerCase()}-plan.png`,
@@ -1351,6 +1352,10 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
           vertical, to make that width reachable by hand while previewing. */}
       <div style={{ position: 'fixed', inset: 0, zIndex: 500, background: UI.bg, overflow: 'auto', display: capturing ? 'block' : 'none' }}>
           <div ref={captureRef} style={{ padding: '26px 28px 32px', width: 960, margin: '0 auto', position: 'relative' }}>
+
+            {/* Paper theme: the live CSS grid never survives html2canvas, so
+                redraw it with an SVG pattern instead (see SvgPaperGrid). */}
+            {_shotIsPaper && <SvgPaperGrid />}
 
             {/* Screenshot background watermark: centered, faint, full poster
                 (SessionCompareScreen's own recipe). Needs its own stacking

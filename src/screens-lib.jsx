@@ -717,6 +717,27 @@ function SvgKnurl({ style }) {
   );
 }
 
+// Paper theme's grid canvas (see index.html's --bg-texture) doesn't survive
+// html2canvas: repeating-linear-gradient background-images are silently
+// dropped from the export (verified against the exact CDN build the app
+// loads, html2canvas 1.4.1). An SVG <pattern> renders fine there, so
+// screenshot mode gets its own grid via this component instead of CSS.
+// Absolutely positioned inset:0 — the caller must be position:relative (or
+// :fixed) for that to resolve against the right box.
+function SvgPaperGrid({ style }) {
+  const knurlRgb = getComputedStyle(document.documentElement).getPropertyValue('--knurl-rgb').trim() || '236,228,208';
+  return (
+    <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', zIndex: 0, pointerEvents: 'none', ...style }}>
+      <defs>
+        <pattern id="paperGridPattern" width="22" height="22" patternUnits="userSpaceOnUse">
+          <path d="M 22 0 L 0 0 0 22" fill="none" stroke={`rgba(${knurlRgb},0.16)`} strokeWidth="1" />
+        </pattern>
+      </defs>
+      <rect width="100%" height="100%" fill="url(#paperGridPattern)" />
+    </svg>
+  );
+}
+
 // Canvas placeholder for between-exercise knurl dividers in screenshot mode.
 // takeScreenshot draws into these imperatively right before html2canvas runs,
 // so timing is guaranteed regardless of when React flushes the re-render. Lines
@@ -2824,6 +2845,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
   const _shotIsLight = ['light', 'paper'].includes(store.settings?.darkMode ?? 'dark');
   const _shotDefaultStyle = { opacity: _shotIsLight ? 0.10 : 0.06, filter: _shotIsLight ? 'grayscale(1)' : 'grayscale(1) brightness(3)' };
   const _shotCustomStyle = { opacity: 0.13 };
+  const _shotIsPaper = (store.settings?.darkMode ?? 'dark') === 'paper';
   const s = store.sessions.find(x => x.id === sessionId);
   useEffectL(() => { if (!s) go({ name: 'hist' }); }, [!!s]);
   // Sessions outside the boot window carry no entries — lazy-load them into
@@ -3350,10 +3372,9 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
 
       <div ref={captureRef} style={{
         padding: capturing ? '20px 22px 24px' : '14px 22px 28px',
-        // No grid texture while capturing: html2canvas re-implements CSS
-        // rendering rather than using the browser's own, and doesn't reliably
-        // support calc() inside rgba() var()s, so the exported PNG stays a
-        // flat fill instead of risking a broken/blank background.
+        // The CSS grid (--bg-texture) never survives html2canvas — always off
+        // while capturing, SvgPaperGrid below draws the paper-theme grid for
+        // the export instead (works for html2canvas, unlike the CSS version).
         backgroundColor: UI.bg, backgroundImage: capturing ? 'none' : 'var(--bg-texture)', position: 'relative',
         // Escape #root's phone-shaped max-width (index.html) so the wider two-column
         // export isn't clipped: position:fixed is positioned against the viewport, not
@@ -3366,6 +3387,8 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
         // twoCol; position:fixed is an equally valid anchor for it).
         ...(twoCol ? { position: 'fixed', top: 0, left: '50%', transform: 'translateX(-50%)', width: SHOT_TWO_COL_WIDTH, zIndex: 500 } : {}),
       }}>
+
+        {capturing && _shotIsPaper && <SvgPaperGrid />}
 
         {/* Two-column only: centered, faint, full-capture watermark (same recipe as
             SessionCompareScreen / the plan poster). Needs its own stacking context
@@ -5036,6 +5059,7 @@ function SessionCompareScreen({ store, setStore, go, sessionId, compareId, back 
   const _shotIsLight = ['light', 'paper'].includes(store.settings?.darkMode ?? 'dark');
   const _shotDefaultStyle = { width: '85%', maxWidth: 320, opacity: _shotIsLight ? 0.14 : 0.04, filter: _shotIsLight ? 'grayscale(1)' : 'grayscale(1) brightness(3)', objectFit: 'contain' };
   const _shotCustomStyle = { width: '92%', maxWidth: 360, opacity: 0.16, objectFit: 'contain' };
+  const _shotIsPaper = (store.settings?.darkMode ?? 'dark') === 'paper';
   const s = store.sessions.find(x => x.id === sessionId);
   const candidates = s ? sameDaySessions(store.sessions, s) : [];
   // Default comparison should look backward in time — comparing an older
@@ -5111,10 +5135,12 @@ function SessionCompareScreen({ store, setStore, go, sessionId, compareId, back 
 
       <div ref={captureRef} style={{
         padding: capturing ? '20px 22px 24px' : '14px 22px 28px', position: 'relative',
-        // See SessionDetailScreen's captureRef div: no grid while capturing,
-        // html2canvas doesn't reliably render calc()-in-rgba() custom properties.
+        // See SessionDetailScreen's captureRef div: the CSS grid never
+        // survives html2canvas, SvgPaperGrid below replaces it for the export.
         backgroundColor: UI.bg, backgroundImage: capturing ? 'none' : 'var(--bg-texture)',
       }}>
+
+        {capturing && _shotIsPaper && <SvgPaperGrid />}
 
         {/* Screenshot background watermark — centered, faint, full document (HomeScreen-style) */}
         {capturing && (

@@ -418,10 +418,14 @@ function WaterScreen({ store, setStore, go, userId }) {
 
       {/* No background of its own while live (the Screen canvas behind it,
           texture included, shows through). While capturing, an explicit solid
-          fill blocks that canvas out so the exported PNG never picks up the
-          paper grid, belt-and-suspenders alongside captureNodeAsPng's own
-          html2canvas backgroundColor option. */}
-      <div ref={captureRef} style={{ padding: capturing ? '14px 22px 16px' : '14px 22px calc(env(safe-area-inset-bottom, 8px) + 24px)', display: 'flex', flexDirection: 'column', gap: 16, ...(capturing && { backgroundColor: UI.bg }) }}>
+          fill blocks that canvas out (the CSS grid never survives
+          html2canvas), and on paper theme SvgPaperGrid redraws the grid in a
+          way html2canvas actually renders. */}
+      <div ref={captureRef} style={{ padding: capturing ? '14px 22px 16px' : '14px 22px calc(env(safe-area-inset-bottom, 8px) + 24px)', display: 'flex', flexDirection: 'column', gap: 16, position: 'relative', ...(capturing && { backgroundColor: UI.bg }) }}>
+        {/* Negative z-index: this div's flex children are plain (non-positioned),
+            which paint above a z-index:0 absolute sibling regardless of DOM
+            order, so the grid needs to sit behind that baseline instead. */}
+        {capturing && store.settings?.darkMode === 'paper' && <SvgPaperGrid style={{ zIndex: -1 }} />}
         {/* Hero */}
         <BracketFrame gold style={{ padding: 20 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 18 }}>
