@@ -22,13 +22,10 @@ const WT_MAX_DRINKS = 6;                  // user-defined "other drinks" cap
 const WT_MAX_COFFEE = 8;                  // coffee-size cap
 const WT_CELEBRATED_KEY = 'logbook-water-celebrated'; // per-device day guard for the success dialog
 
-// Coffee stays a preset (size + milk flow); these are the built-in size defaults
-// used until the user configures their own in settings.
-const WT_COFFEE_SIZES_DEFAULT = [
-  { label: 'Espresso', ml: 40 }, { label: 'Double', ml: 80 }, { label: 'Black', ml: 100 },
-  { label: 'Barista', ml: 120 }, { label: 'Gran Lungo', ml: 150 }, { label: 'TGW', ml: 200 },
-  { label: 'Mug', ml: 230 },
-];
+// Coffee stays a preset button (size + milk flow), but there are NO built-in
+// size presets: everyone configures their own sizes in the water settings (for
+// privacy and consistency with the user-defined drinks). Empty until added.
+const WT_COFFEE_SIZES_DEFAULT = [];
 const WT_MILK_OPTS = [20, 40, 60, 80, 100, 0];
 const WT_CUSTOM_PRESETS_ML = [100, 150, 200, 300, 330, 400, 750, 1000];
 
@@ -144,6 +141,7 @@ function WaterScreen({ store, setStore, go, userId }) {
   const [coffeeStep, setCoffeeStep] = useStateW('size');
   const [coffeeSel, setCoffeeSel] = useStateW(null); // { label, ml }
   const [statsOpen, setStatsOpen] = useStateW(false);
+  const [drinksConfigOpen, setDrinksConfigOpen] = useStateW(false);
 
   const settings = store.settings || {};
   const goalMl = settings.waterGoalMl || 2000;
@@ -425,7 +423,13 @@ function WaterScreen({ store, setStore, go, userId }) {
 
       {/* ── Settings sheet ── */}
       <Sheet open={settingsOpen} onClose={() => setSettingsOpen(false)} title="Water settings" titleColor="var(--accent)">
-        <WaterSettingsBody settings={settings} patchSettings={patchSettings} go={go} onClose={() => setSettingsOpen(false)} />
+        <WaterSettingsBody settings={settings} patchSettings={patchSettings} go={go} onClose={() => setSettingsOpen(false)} onConfigureDrinks={() => setDrinksConfigOpen(true)} />
+      </Sheet>
+
+      {/* ── Drinks & coffee config sub-sheet (kept out of the main sheet to
+          avoid clutter) ── */}
+      <Sheet open={drinksConfigOpen} onClose={() => setDrinksConfigOpen(false)} title="Drinks & coffee" titleColor="var(--accent)">
+        <WaterDrinksConfigBody settings={settings} patchSettings={patchSettings} onClose={() => setDrinksConfigOpen(false)} />
       </Sheet>
 
       {/* ── Custom entry sheet ── */}
@@ -451,13 +455,20 @@ function WaterScreen({ store, setStore, go, userId }) {
       {/* ── Coffee sheet ── */}
       <Sheet open={coffeeOpen} onClose={() => setCoffeeOpen(false)} title={coffeeStep === 'size' ? 'Which coffee?' : 'Milk?'} titleColor="var(--accent)">
         {coffeeStep === 'size' ? (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 }}>
-            {coffeeSizes.map((s, i) => (
-              <button key={i} onClick={() => { setCoffeeSel(s); setCoffeeStep('milk'); }} style={wtPillOpt}>
-                {s.label}<span style={{ fontSize: 10, color: UI.inkFaint, display: 'block', marginTop: 2 }}>{s.ml} ml</span>
-              </button>
-            ))}
-          </div>
+          coffeeSizes.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '4px 0' }}>
+              <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: 1.5 }}>No coffee sizes yet. Add your own in the water settings.</div>
+              <Btn onClick={() => { setCoffeeOpen(false); setSettingsOpen(true); }} style={{ width: '100%' }}>Open settings</Btn>
+            </div>
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 }}>
+              {coffeeSizes.map((s, i) => (
+                <button key={i} onClick={() => { setCoffeeSel(s); setCoffeeStep('milk'); }} style={wtPillOpt}>
+                  {s.label}<span style={{ fontSize: 10, color: UI.inkFaint, display: 'block', marginTop: 2 }}>{s.ml} ml</span>
+                </button>
+              ))}
+            </div>
+          )
         ) : (
           <div>
             <div style={{ fontSize: 12, color: UI.inkSoft, marginBottom: 14, fontFamily: UI.fontUi }}>Base {coffeeSel ? coffeeSel.ml : 0} ml. How much milk?</div>
@@ -491,45 +502,24 @@ function WaterBreakdownRow({ icon, name, value }) {
 }
 
 // Settings body: goal, window, bottle tracker, reminders, custom drinks, coffee sizes.
-function WaterSettingsBody({ settings, patchSettings, go, onClose }) {
+function WaterSettingsBody({ settings, patchSettings, go, onClose, onConfigureDrinks }) {
   const [goal, setGoal] = useStateW(String(UI.waterToEntry(settings.waterGoalMl || 2000)));
   const [start, setStart] = useStateW(settings.waterStartTime || '08:00');
   const [end, setEnd] = useStateW(settings.waterEndTime || '22:00');
   const timeColorScheme = settings.darkMode === 'light' ? 'light' : 'dark';
   const timeStyle = { ...wtInput, colorScheme: timeColorScheme };
 
-  const drinks = Array.isArray(settings.waterDrinks) ? settings.waterDrinks : [];
-  const coffee = (settings.waterCoffeeSizes && settings.waterCoffeeSizes.length) ? settings.waterCoffeeSizes : WT_COFFEE_SIZES_DEFAULT;
   const bottleEnabled = settings.waterBottleEnabled !== false;
   const reminderOn = !!settings.waterReminderEnabled;
   const pushOn = !!settings.pushEnabled;
-
-  const [drinkName, setDrinkName] = useStateW('');
-  const [drinkMl, setDrinkMl] = useStateW('');
-  const [cLabel, setCLabel] = useStateW('');
-  const [cMl, setCMl] = useStateW('');
+  const drinkCount = (Array.isArray(settings.waterDrinks) ? settings.waterDrinks.length : 0)
+    + ((settings.waterCoffeeSizes && settings.waterCoffeeSizes.length) ? settings.waterCoffeeSizes.length : 0);
 
   const saveGoalWindow = () => {
     const entry = parseInt(goal, 10);
     const ml = entry > 0 ? (UI.waterInFloz() ? UI.flozToMl(entry) : entry) : 2000;
     patchSettings({ waterGoalMl: ml, waterStartTime: start, waterEndTime: end });
   };
-  const addDrink = () => {
-    const ml = parseInt(drinkMl, 10);
-    if (!drinkName.trim() || !ml || ml <= 0 || drinks.length >= WT_MAX_DRINKS) return;
-    patchSettings({ waterDrinks: [...drinks, { name: drinkName.trim(), ml }] });
-    setDrinkName(''); setDrinkMl('');
-  };
-  const removeDrink = (i) => patchSettings({ waterDrinks: drinks.filter((_, idx) => idx !== i) });
-  const addCoffee = () => {
-    const ml = parseInt(cMl, 10);
-    if (!cLabel.trim() || !ml || ml <= 0 || coffee.length >= WT_MAX_COFFEE) return;
-    patchSettings({ waterCoffeeSizes: [...coffee, { label: cLabel.trim(), ml }] });
-    setCLabel(''); setCMl('');
-  };
-  const removeCoffee = (i) => patchSettings({ waterCoffeeSizes: coffee.filter((_, idx) => idx !== i) });
-
-  const drinksLeft = WT_MAX_DRINKS - drinks.length;
 
   return (
     <div>
@@ -569,6 +559,48 @@ function WaterSettingsBody({ settings, patchSettings, go, onClose }) {
         Uses your existing notification channel (Web Push or Pushover). Sent during your daily window.
       </div>
 
+      {/* Other drinks & coffee live in their own sub-sheet to keep this one tidy */}
+      <Bezel style={{ marginBottom: 12 }}>Drinks</Bezel>
+      <button onClick={onConfigureDrinks} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', padding: '13px 12px', background: UI.bgInset, border: `1px solid ${UI.hair}`, borderRadius: 6, cursor: 'pointer', marginBottom: 20, WebkitTapHighlightColor: 'transparent' }}>
+        <span style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi }}>Other drinks & coffee</span>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi }}>{drinkCount > 0 ? `${drinkCount} set` : 'Configure'}</span>
+          <ChevronRight color={UI.inkFaint} />
+        </span>
+      </button>
+
+      <Btn onClick={() => { saveGoalWindow(); onClose(); }} style={{ width: '100%', marginTop: 4 }}>Done</Btn>
+    </div>
+  );
+}
+
+// Sub-sheet body: manage the up-to-6 custom drinks and the coffee sizes.
+function WaterDrinksConfigBody({ settings, patchSettings, onClose }) {
+  const drinks = Array.isArray(settings.waterDrinks) ? settings.waterDrinks : [];
+  const coffee = (settings.waterCoffeeSizes && settings.waterCoffeeSizes.length) ? settings.waterCoffeeSizes : WT_COFFEE_SIZES_DEFAULT;
+  const [drinkName, setDrinkName] = useStateW('');
+  const [drinkMl, setDrinkMl] = useStateW('');
+  const [cLabel, setCLabel] = useStateW('');
+  const [cMl, setCMl] = useStateW('');
+
+  const addDrink = () => {
+    const ml = parseInt(drinkMl, 10);
+    if (!drinkName.trim() || !ml || ml <= 0 || drinks.length >= WT_MAX_DRINKS) return;
+    patchSettings({ waterDrinks: [...drinks, { name: drinkName.trim(), ml }] });
+    setDrinkName(''); setDrinkMl('');
+  };
+  const removeDrink = (i) => patchSettings({ waterDrinks: drinks.filter((_, idx) => idx !== i) });
+  const addCoffee = () => {
+    const ml = parseInt(cMl, 10);
+    if (!cLabel.trim() || !ml || ml <= 0 || coffee.length >= WT_MAX_COFFEE) return;
+    patchSettings({ waterCoffeeSizes: [...coffee, { label: cLabel.trim(), ml }] });
+    setCLabel(''); setCMl('');
+  };
+  const removeCoffee = (i) => patchSettings({ waterCoffeeSizes: coffee.filter((_, idx) => idx !== i) });
+  const drinksLeft = WT_MAX_DRINKS - drinks.length;
+
+  return (
+    <div>
       {/* Custom drinks */}
       <Bezel style={{ marginBottom: 12 }}>Other drinks</Bezel>
       <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 10 }}>
@@ -589,7 +621,7 @@ function WaterSettingsBody({ settings, patchSettings, go, onClose }) {
 
       {/* Coffee sizes */}
       <Bezel style={{ marginBottom: 12 }}>Coffee sizes</Bezel>
-      <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 10 }}>Your sizes in the coffee button.</div>
+      <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 10 }}>Your own sizes in the coffee button.</div>
       {coffee.map((s, i) => (
         <WaterConfigRow key={i} left={s.label} right={`${s.ml} ml`} onRemove={() => removeCoffee(i)} />
       ))}
@@ -603,7 +635,7 @@ function WaterSettingsBody({ settings, patchSettings, go, onClose }) {
         </div>
       )}
 
-      <Btn onClick={() => { saveGoalWindow(); onClose(); }} style={{ width: '100%', marginTop: 4 }}>Done</Btn>
+      <Btn onClick={onClose} style={{ width: '100%', marginTop: 4 }}>Done</Btn>
     </div>
   );
 }
