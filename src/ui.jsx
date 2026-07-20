@@ -216,13 +216,18 @@ function TabBar({ active, routeName, onChange, sidebar = false, currentUser = nu
   // Two-dot "there's a second view here" indicator, shown under the Health
   // slot's label at all times (not just once you've found the water
   // tracker): a lit dot for the side you'd land on, a faint ring for the
-  // other. Every tab reserves the same slot height (see the height:4
-  // placeholder at both call sites) so only Health grows dots, no tab
-  // bar row shifts height depending on which tab you're looking at.
+  // other. This sits below the gold key plate (which only spans the icon),
+  // on the same plain bar background the label itself sits on, so it takes
+  // the label's own on/off contrast (gold and glowing when this tab is the
+  // active one, muted otherwise) rather than the icon's dark-on-gold-plate
+  // treatment. Every tab reserves the same slot height (see the height:4
+  // placeholder at both call sites) so only Health growing dots never
+  // shifts the bar's height.
   const healthDots = (on, isWaterSlot) => {
-    const lit = on ? '#0a0805' : 'var(--accent)';
-    const dim = on ? 'rgba(10,8,5,0.35)' : UI.hairStrong;
-    const dotStyle = filled => ({ width: 3, height: 3, borderRadius: '50%', boxSizing: 'border-box', background: filled ? lit : 'transparent', border: filled ? 'none' : `1px solid ${dim}` });
+    const lit = on ? UI.gold : UI.inkFaint;
+    const dim = on ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong;
+    const glow = on ? '0 0 4px rgba(var(--accent-rgb),0.7)' : 'none';
+    const dotStyle = filled => ({ width: 3, height: 3, borderRadius: '50%', boxSizing: 'border-box', background: filled ? lit : 'transparent', border: filled ? 'none' : `1px solid ${dim}`, boxShadow: filled ? glow : 'none' });
     return (
       <div style={{ display: 'flex', gap: 3 }}>
         <span style={dotStyle(!isWaterSlot)} />
