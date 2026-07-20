@@ -168,8 +168,8 @@ function WaterScreen({ store, setStore, go, userId }) {
   const goalMl = settings.waterGoalMl || 2000;
   const startTime = settings.waterStartTime || '08:00';
   const endTime = settings.waterEndTime || '22:00';
-  const drinks = Array.isArray(settings.waterDrinks) ? settings.waterDrinks : [];
-  const coffeeSizes = (settings.waterCoffeeSizes && settings.waterCoffeeSizes.length) ? settings.waterCoffeeSizes : WT_COFFEE_SIZES_DEFAULT;
+  const drinks = (Array.isArray(settings.waterDrinks) ? settings.waterDrinks : []).slice().sort((a, b) => (a.ml || 0) - (b.ml || 0));
+  const coffeeSizes = ((settings.waterCoffeeSizes && settings.waterCoffeeSizes.length) ? settings.waterCoffeeSizes : WT_COFFEE_SIZES_DEFAULT).slice().sort((a, b) => (a.ml || 0) - (b.ml || 0));
   const bottleEnabled = settings.waterBottleEnabled !== false;
   const bottleMl = settings.waterBottleMl || 1500;
   const today = wtDateStr(0);
@@ -597,8 +597,8 @@ function WaterSettingsBody({ settings, patchSettings, go, onClose, onConfigureDr
 
 // Sub-sheet body: manage the up-to-6 custom drinks and the coffee sizes.
 function WaterDrinksConfigBody({ settings, patchSettings, onClose }) {
-  const drinks = Array.isArray(settings.waterDrinks) ? settings.waterDrinks : [];
-  const coffee = (settings.waterCoffeeSizes && settings.waterCoffeeSizes.length) ? settings.waterCoffeeSizes : WT_COFFEE_SIZES_DEFAULT;
+  const drinks = (Array.isArray(settings.waterDrinks) ? settings.waterDrinks : []).slice().sort((a, b) => (a.ml || 0) - (b.ml || 0));
+  const coffee = ((settings.waterCoffeeSizes && settings.waterCoffeeSizes.length) ? settings.waterCoffeeSizes : WT_COFFEE_SIZES_DEFAULT).slice().sort((a, b) => (a.ml || 0) - (b.ml || 0));
   const [drinkName, setDrinkName] = useStateW('');
   const [drinkMl, setDrinkMl] = useStateW('');
   const [drinkIcon, setDrinkIcon] = useStateW(WT_DEFAULT_DRINK_ICON);
