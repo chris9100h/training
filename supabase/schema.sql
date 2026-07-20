@@ -270,7 +270,19 @@ CREATE TABLE public.zane_user_settings (
   temp_unit text,
   hidden_health_cards jsonb,
   fever_threshold_c numeric DEFAULT 38,
-  watermark_opacity integer
+  watermark_opacity integer,
+  water_goal_ml integer DEFAULT 2000,
+  water_start_time text DEFAULT '08:00'::text,
+  water_end_time text DEFAULT '22:00'::text,
+  water_bottles_today integer DEFAULT 0,
+  water_bottles_date text,
+  water_drinks jsonb,
+  water_bottle_enabled boolean NOT NULL DEFAULT true,
+  water_bottle_ml integer DEFAULT 1500,
+  water_coffee_sizes jsonb,
+  water_reminder_enabled boolean NOT NULL DEFAULT false,
+  water_last_push_at timestamp with time zone,
+  tz_offset_minutes integer
 );
 
 CREATE TABLE public.zane_pushover_active (
@@ -2118,6 +2130,96 @@ CREATE POLICY "coaches read client body temp logs"
   USING (EXISTS ( SELECT 1 FROM zane_coaching zc
     WHERE zc.client_id = zane_body_temp_logs.user_id
       AND zc.coach_id = (select auth.uid()) AND zc.coach_id <> zc.client_id AND zc.status = 'active' AND zc.id NOT LIKE 'support_%'));
+
+-- ── Water logs (migration 0180) ─────────────────────────────────────────────────
+-- Multiple entries per day; amount always in ml. category is null for plain water,
+-- 'other' for named drinks, 'custom' for free entries. The day's summed amount_ml
+-- is written back into zane_daily_logs.water_ml by the client. Written directly.
+
+CREATE TABLE zane_water_logs (
+  id         text        PRIMARY KEY,
+  user_id    uuid        NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  date       text        NOT NULL,                 -- YYYY-MM-DD
+  time       text        NOT NULL,                 -- HH:MM local
+  amount_ml  integer     NOT NULL,
+  name       text,
+  category   text,                                 -- null = plain water | 'other' | 'custom' | 'summary'
+  breakdown  jsonb,                                -- collapsed-day drink breakdown, only set on category = 'summary'
+  created_at timestamptz DEFAULT now()
+);
+
+CREATE INDEX zane_water_logs_user_date ON public.zane_water_logs USING btree (user_id, date DESC, "time" DESC);
+
+ALTER TABLE zane_water_logs ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users manage own water logs"
+  ON zane_water_logs FOR ALL TO public
+  USING (((select auth.uid()) = user_id)) WITH CHECK (((select auth.uid()) = user_id));
+CREATE POLICY "coaches read client water logs"
+  ON zane_water_logs FOR SELECT TO public
+  USING (EXISTS ( SELECT 1 FROM zane_coaching zc
+    WHERE zc.client_id = zane_water_logs.user_id
+      AND zc.coach_id = (select auth.uid()) AND zc.coach_id <> zc.client_id AND zc.status = 'active' AND zc.id NOT LIKE 'support_%'));
+
+-- Nightly (hourly-checked) per-user collapse of past-day water_logs rows into
+-- one summary row; see migration 0183 for the full rationale. Scheduled via
+-- pg_cron ('water-log-collapse', not tracked in this snapshot like other cron
+-- jobs), internal-only (no grant to authenticated).
+CREATE OR REPLACE FUNCTION public.collapse_water_logs()
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  r RECORD;
+  v_total integer;
+  v_milk integer;
+  v_drinks jsonb;
+  v_id text;
+BEGIN
+  FOR r IN
+    SELECT wl.user_id, wl.date
+    FROM zane_water_logs wl
+    LEFT JOIN zane_user_settings us ON us.user_id = wl.user_id
+    WHERE wl.date < to_char(
+      (now() AT TIME ZONE 'UTC') + make_interval(mins => COALESCE(us.tz_offset_minutes, 0)),
+      'YYYY-MM-DD'
+    )
+    GROUP BY wl.user_id, wl.date
+    HAVING count(*) > 1
+  LOOP
+    SELECT
+      sum(amount_ml)::int,
+      sum(CASE WHEN category = 'other' THEN
+        COALESCE((regexp_match(name, '\+\s*(\d+)ml Milk', 'i'))[1]::int, 0)
+      ELSE 0 END)::int
+    INTO v_total, v_milk
+    FROM zane_water_logs
+    WHERE user_id = r.user_id AND date = r.date;
+
+    SELECT COALESCE(jsonb_object_agg(base_name, cnt), '{}'::jsonb) INTO v_drinks
+    FROM (
+      SELECT
+        COALESCE(NULLIF(trim(regexp_replace(name, '\s*\+\s*\d+ml Milk', '', 'i')), ''), 'Other') AS base_name,
+        count(*)::int AS cnt
+      FROM zane_water_logs
+      WHERE user_id = r.user_id AND date = r.date AND category = 'other'
+      GROUP BY base_name
+    ) t;
+
+    v_id := gen_random_uuid()::text;
+
+    DELETE FROM zane_water_logs WHERE user_id = r.user_id AND date = r.date;
+
+    INSERT INTO zane_water_logs (id, user_id, date, "time", amount_ml, name, category, breakdown)
+    VALUES (v_id, r.user_id, r.date, '00:00', v_total, NULL, 'summary',
+      jsonb_build_object('drinks', v_drinks, 'milk', v_milk));
+  END LOOP;
+END;
+$$;
+
+REVOKE EXECUTE ON FUNCTION public.collapse_water_logs() FROM PUBLIC;
 
 -- ── Support tickets (migrations 0085/0086 + archive_support_tickets) ────────────
 -- A support ticket is a zane_coaching row with id LIKE 'support_%' between the

@@ -1095,7 +1095,6 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // own kbAdjust reads the equipment increment directly for the +/- keys.
   const stretchShowWeight = !isNoWeightReps && !isBodyweight;
   const progressionTargetForSet = (workingSetIdx) => {
-    if (!LB.progressionEnabled(store, entry?.plannedRepsMax, entry?.plannedProgressionOffset)) return null;
     // Progression itself is suppressed during deload (see completeSet's
     // isDeloadSession guard): showing the "≥X reps · next weight" hint anyway
     // would promise an unlock that can never actually fire. The 5/3/1 built-in
@@ -1107,8 +1106,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // that actually grants the bump every session via computeMesoGains:
     // staggered top-of-range down to the floor across the working sets on a
     // Range item (e.g. 10-9-8 for 3 sets of an 8-10 range), not a flat
-    // ceiling on every set. The flat ceiling below is Smart Progression's OWN,
-    // separate (and stricter) requirement, only ever a week-1 fallback (see
+    // ceiling on every set. computeMesoGains's mesoRepOutcome call never reads
+    // progressionOffset, so this branch must not be gated behind
+    // progressionEnabled() either: a per-exercise Smart Progression override
+    // has no bearing on whether Meso itself grants the bump, so it must not
+    // silently hide the hint that tells the user what Meso is grading
+    // against. The flat ceiling below is Smart Progression's OWN, separate
+    // (and stricter) requirement, only ever a week-1 fallback (see
     // resolveMesoSeedSuggestion) when Meso's own ladder hasn't already earned
     // something, so showing it here on later sets would overstate what they
     // actually need to clear the bar Meso itself is grading against.
@@ -1117,6 +1121,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       const target = LB.mesoEarnTarget(workingSetIdx, nWorking, entry?.plannedReps ?? 0, perSet, entry?.plannedRepsMax);
       return target > 0 ? target : null;
     }
+    if (!LB.progressionEnabled(store, entry?.plannedRepsMax, entry?.plannedProgressionOffset)) return null;
     const perSetVal = perSet && perSet.length > 1
       ? (perSet[workingSetIdx] ?? perSet[perSet.length - 1])
       : null;
@@ -4302,10 +4307,24 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           // Repair bulk-entry gaps: any gap < 45s between consecutive set completions
           // indicates the set was logged retroactively rather than in real time.
           // Replace those gaps with restDefault + 60s so the pace bar stays meaningful.
+          // The same repair applies to the opposite anomaly: a gap over 30 minutes
+          // means the session sat abandoned/in-progress for a real-world stretch
+          // (picked back up later, or eventually force-closed by auto-close-sessions)
+          // rather than being trained through live, so that set's updated_at is not
+          // a real elapsed-time data point either. Left unrepaired, an abandoned
+          // session's tail sets inflate "expected time to reach set N" to whatever
+          // the abandonment gap was (hours or days), making the live pace bar
+          // compare against a nonsense target (e.g. "7203m ahead").
           if (timeline.length > 1) {
             const syntheticGap = (store.settings?.restDefault || 120) + 60;
+            const MAX_PLAUSIBLE_GAP_SEC = 30 * 60;
             const gaps = timeline.map((t, i) => i === 0 ? t : t - timeline[i - 1]);
-            const repaired = gaps.map(g => g < 45 ? syntheticGap : g);
+            // gaps[0] is session-start-to-first-set, not a gap between two logged
+            // sets, so a long warm-up/setup before the first working set is a
+            // real, legitimate elapsed time, not an abandoned-session artifact.
+            // Only indices 1+ (actual inter-set gaps) get the >30min repair; the
+            // pre-existing <45s (bulk-entry) repair still applies to every index.
+            const repaired = gaps.map((g, i) => (g < 45 || (i > 0 && g > MAX_PLAUSIBLE_GAP_SEC)) ? syntheticGap : g);
             timeline = repaired.reduce((acc, g, i) => { acc.push(i === 0 ? g : acc[i - 1] + g); return acc; }, []);
           }
           if (!timeline.length) timeline = null;
@@ -6588,7 +6607,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   <span className="micro" style={{ color: UI.inkFaint, textAlign: 'center' }}>R</span>
                 </>
               ) : (
-                <span className="micro" style={{ color: UI.inkFaint, textAlign: 'center' }}>{LB.progressionEnabled(store, entry?.plannedRepsMax, entry?.plannedProgressionOffset) ? 'Reps (min)' : 'Reps'}</span>
+                <span className="micro" style={{ color: UI.inkFaint, textAlign: 'center' }}>{entry?.plannedRepsMax != null ? 'Reps (min)' : 'Reps'}</span>
               )}
               <div />
             </div>

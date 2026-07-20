@@ -184,18 +184,61 @@ const TAB_ICONS = {
       <path d="M3 12h3l2-5 3 10 2.5-7L18 12h3"/>
     </svg>
   ),
+  water: (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 3c3.5 4.2 6 8.1 6 11a6 6 0 1 1-12 0c0-2.9 2.5-6.8 6-11z"/>
+    </svg>
+  ),
 };
 
-function TabBar({ active, onChange, sidebar = false, currentUser = null, showCoaching = false, coachingBadge = null, showHealth = false }) {
+function TabBar({ active, routeName, onChange, sidebar = false, currentUser = null, showCoaching = false, coachingBadge = null, showHealth = false }) {
   const tabs = [
     { id: 'home', label: 'Train' },
     { id: 'plan', label: 'Plan' },
     { id: 'hist', label: 'History' },
     ...(showHealth ? [{ id: 'health', label: 'Health' }] : []),
     ...(showCoaching ? [{ id: 'coaching', label: 'Coaching' }] : []),
-  ];
+  ].map(t => {
+    const isWaterSlot = t.id === 'health' && routeName === 'water';
+    return { ...t, isWaterSlot, iconKey: isWaterSlot ? 'water' : t.id, label: isWaterSlot ? 'Water' : t.label };
+  });
   const idx = tabs.findIndex(t => t.id === active);
   const [switchModal, setSwitchModal] = React.useState(false);
+  // Health and its water tracker share one tab slot (routeName === 'water'
+  // still lights up as 'health', see tabActive in app.jsx). Tapping the slot
+  // while already on Health steps forward into the water tracker; tapping it
+  // while on the water tracker falls through to the plain onChange('health')
+  // below, i.e. steps back, since that path was never a no-op to begin with.
+  const handleTabClick = (id) => {
+    if (id === 'health' && routeName === 'health') {
+      onChange('water');
+      return;
+    }
+    onChange(id);
+  };
+  // Two-dot "there's a second view here" indicator, shown under the Health
+  // slot's label at all times (not just once you've found the water
+  // tracker): a lit dot for the side you're currently viewing (Health or
+  // Water), a faint ring for the other, matching how a pagination dot pair
+  // reads elsewhere. This sits below the gold key plate (which only spans the icon),
+  // on the same plain bar background the label itself sits on, so it takes
+  // the label's own on/off contrast (gold and glowing when this tab is the
+  // active one, muted otherwise) rather than the icon's dark-on-gold-plate
+  // treatment. Every tab reserves the same slot height (see the height:4
+  // placeholder at both call sites) so only Health growing dots never
+  // shifts the bar's height.
+  const healthDots = (on, isWaterSlot) => {
+    const lit = on ? UI.gold : UI.inkFaint;
+    const dim = on ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong;
+    const glow = on ? '0 0 4px rgba(var(--accent-rgb),0.7)' : 'none';
+    const dotStyle = filled => ({ width: 3, height: 3, borderRadius: '50%', boxSizing: 'border-box', background: filled ? lit : 'transparent', border: filled ? 'none' : `1px solid ${dim}`, boxShadow: filled ? glow : 'none' });
+    return (
+      <div style={{ display: 'flex', gap: 3 }}>
+        <span style={dotStyle(!isWaterSlot)} />
+        <span style={dotStyle(isWaterSlot)} />
+      </div>
+    );
+  };
 
   if (sidebar) {
     const currentEmail = currentUser?.email || '';
@@ -233,8 +276,9 @@ function TabBar({ active, onChange, sidebar = false, currentUser = null, showCoa
             {tabs.map(t => {
               const on = t.id === active;
               const badge = t.id === 'coaching' ? coachingBadge : null;
+              const { isWaterSlot, iconKey, label } = t;
               return (
-                <button key={t.id} data-tour={`tab-${t.id}`} onClick={() => onChange(t.id)} style={{
+                <button key={t.id} data-tour={`tab-${t.id}`} onClick={() => handleTabClick(t.id)} style={{
                   display: 'flex',
                   flexDirection: 'column',
                   alignItems: 'center',
@@ -257,7 +301,7 @@ function TabBar({ active, onChange, sidebar = false, currentUser = null, showCoa
                   WebkitTapHighlightColor: 'transparent',
                 }}>
                   <div style={{ position: 'relative', transform: 'scale(1.4)', display: 'inline-flex', margin: '0 0 2px' }}>
-                    {TAB_ICONS[t.id]}
+                    {TAB_ICONS[iconKey]}
                     {badge?.live && (
                       <div style={{ position: 'absolute', top: -2, right: -2, width: 7, height: 7, borderRadius: '50%', background: 'var(--accent)', animation: 'pulseDot 1.5s ease-in-out infinite', border: '1.5px solid var(--bg)' }} />
                     )}
@@ -267,7 +311,8 @@ function TabBar({ active, onChange, sidebar = false, currentUser = null, showCoa
                       </div>
                     )}
                   </div>
-                  <span>{t.label}</span>
+                  <span>{label}</span>
+                  <div style={{ height: 4, display: 'flex', alignItems: 'center' }}>{t.id === 'health' && healthDots(on, isWaterSlot)}</div>
                 </button>
               );
             })}
@@ -466,8 +511,9 @@ function TabBar({ active, onChange, sidebar = false, currentUser = null, showCoa
           {tabs.map(t => {
             const on = t.id === active;
             const badge = t.id === 'coaching' ? coachingBadge : null;
+            const { isWaterSlot, iconKey, label } = t;
             return (
-              <button key={t.id} data-tour={`tab-${t.id}`} onClick={() => onChange(t.id)} style={{
+              <button key={t.id} data-tour={`tab-${t.id}`} onClick={() => handleTabClick(t.id)} style={{
                 flex: 1, minWidth: 0, background: 'transparent', border: 'none', cursor: 'pointer',
                 padding: `${PAD_TOP}px 4px 2px`,
                 display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5,
@@ -494,7 +540,7 @@ function TabBar({ active, onChange, sidebar = false, currentUser = null, showCoa
                     ? 'color 0.12s ease 0.25s, transform 0.25s cubic-bezier(0.34,1.4,0.64,1)'
                     : 'color 0.15s, transform 0.25s cubic-bezier(0.34,1.4,0.64,1)',
                 }}>
-                  {React.cloneElement(TAB_ICONS[t.id], { width: ICON_SZ, height: ICON_SZ })}
+                  {React.cloneElement(TAB_ICONS[iconKey], { width: ICON_SZ, height: ICON_SZ })}
                   {badge?.live && (
                     <div style={{ position: 'absolute', top: 5, right: 4, width: 8, height: 8, borderRadius: '50%', background: on ? '#0a0805' : 'var(--accent)', animation: 'pulseDot 1.5s ease-in-out infinite', border: `1.5px solid ${on ? 'var(--accent)' : 'var(--bg)'}` }} />
                   )}
@@ -506,7 +552,8 @@ function TabBar({ active, onChange, sidebar = false, currentUser = null, showCoa
                 </div>
                 {/* -0.14em cancels the trailing letter-spacing after the last
                     glyph so the visible text is pixel-centred under the plate. */}
-                <span style={{ marginRight: '-0.14em' }}>{t.label}</span>
+                <span style={{ marginRight: '-0.14em' }}>{label}</span>
+                <div style={{ height: 4, display: 'flex', alignItems: 'center' }}>{t.id === 'health' && healthDots(on, isWaterSlot)}</div>
               </button>
             );
           })}

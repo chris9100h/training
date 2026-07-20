@@ -429,7 +429,7 @@ const CHART_PLOT_TOP = 10, CHART_PLOT_H = 96; // padTop / plotH, shared by every
 // and stays at the default (false) below, no explicit "expanded" wrap needed.
 const ChartCompactContext = React.createContext(false);
 
-function ChartHover({ W, H, points, children, mode = 'x', markerColor = 'var(--accent)' }) {
+function ChartHover({ W, H, points, children, mode = 'x', markerColor = 'var(--accent)', hideHint = false }) {
   const wrapRef = useRefH(null);
   const [active, setActive] = useStateH(null);
   const compact = React.useContext(ChartCompactContext);
@@ -473,7 +473,7 @@ function ChartHover({ W, H, points, children, mode = 'x', markerColor = 'var(--a
       style={{ position: 'relative', touchAction: 'pan-y', cursor: points.length ? 'crosshair' : 'default' }}
       onPointerMove={onPoint} onPointerUp={clear} onPointerLeave={clear} onPointerCancel={clear}>
       {children}
-      {!p && !compact && points.length > 0 && (
+      {!p && !compact && !hideHint && points.length > 0 && (
         <div style={{ position: 'absolute', top: 2, right: 4, pointerEvents: 'none' }}>
           <span className="micro" style={{ color: UI.inkGhost, letterSpacing: '0.08em' }}>Drag to inspect</span>
         </div>
@@ -504,9 +504,14 @@ const HEALTH_CARD_HEADER_STYLE = { fontFamily: UI.fontUi, fontSize: 12, fontWeig
 
 // Section wrapper: title + 1W/1M/3M toggle + subtitle. `dragHandle` renders a
 // reorder grip at the start of the header when the card is in a reorder list.
-function HealthChartCard({ title, icon, tf, setTf, tfOptions = HEALTH_TFS, headline, sub, dragHandle, onExpand, children }) {
+function HealthChartCard({ title, icon, tf, setTf, tfOptions = HEALTH_TFS, headline, sub, dragHandle, onExpand, onOpen, children }) {
   return (
-    <Card style={{ padding: 14, borderLeft: `3px solid ${UI.gold}` }}>
+    // height:100% so cards sharing a 2-col grid row match the tallest sibling
+    // (a card without a headline/sub row, e.g. no data in range, would otherwise
+    // end its visible border early since the grid item stretches but a plain
+    // block child does not). No-op outside the grid: an undefined containing-
+    // block height resolves height:100% back to auto (the expand sheet).
+    <Card style={{ padding: 14, borderLeft: `3px solid ${UI.gold}`, height: '100%' }}>
       {/* flexWrap + the toggle's flexShrink:0 let the TF toggle drop to its own
           line instead of clipping when the card is narrow (2-col grid), full-
           width cards stay single-line since everything already fits there. */}
@@ -514,6 +519,15 @@ function HealthChartCard({ title, icon, tf, setTf, tfOptions = HEALTH_TFS, headl
         {dragHandle}
         {icon && <i className={`fa-solid ${icon}`} style={{ fontSize: 11, color: UI.inkFaint }} />}
         <span style={{ ...HEALTH_CARD_HEADER_STYLE, flex: 1, minWidth: 60 }}>{title}</span>
+        {onOpen && (
+          <button data-reorder-ignore="true" onClick={onOpen} aria-label="Open tracker" style={{
+            background: 'transparent', border: 'none', padding: 2, cursor: 'pointer',
+            color: UI.gold, display: 'flex', alignItems: 'center', flexShrink: 0,
+            WebkitTapHighlightColor: 'transparent',
+          }}>
+            <i className="fa-solid fa-arrow-up-right-from-square" style={{ fontSize: 11 }} />
+          </button>
+        )}
         {onExpand && (
           <button data-reorder-ignore="true" onClick={onExpand} aria-label="Expand" style={{
             background: 'transparent', border: 'none', padding: 2, cursor: 'pointer',
@@ -744,6 +758,20 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
   const storeRef = useRefH(store);
   storeRef.current = store;
   const existing = useMemoH(() => (store.dailyLogs || []).find(l => l.date === date), [store.dailyLogs, date]);
+  // The water tracker owns TODAY's total once it has any entry for today: it
+  // recomputes and overwrites water_ml on its own every time a drink is
+  // logged, so a manual edit here would silently vanish on the next one. Only
+  // today can still be overwritten this way (the tracker has no UI to add or
+  // edit an entry for a past day), so a past day's water field never locks
+  // even if it happens to have old tracker entries. Locked until the user
+  // explicitly opts to override for this session (see requestWaterUnlock
+  // below); a day with no tracker entries stays plain.
+  const waterHasTrackerEntries = useMemoH(
+    () => date === LB.todayISO() && (store.waterLogs || []).some(l => l.date === date),
+    [store.waterLogs, date],
+  );
+  const [waterUnlocked, setWaterUnlocked] = useStateH(false);
+  const waterLocked = waterHasTrackerEntries && !waterUnlocked;
   const todayISO = LB.todayISO();
   const dayStatusPeriod = useMemoH(() => {
     const ts = new Date(date + 'T12:00:00').getTime();
@@ -994,6 +1022,7 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
 
   useEffectH(() => {
     if (!open) return;
+    setWaterUnlocked(false);
     const net = existing?.fiber != null ? true : !!store.settings?.netCarbs;
     setNetCarbs(net);
     // Blank the calories field when the saved value matches what the saved
@@ -1082,7 +1111,11 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
       weight: healthNum(form.weight),
       steps: healthInt(form.steps),
       calories, protein, carbs, fat, fiber,
-      waterMl: healthInt(form.water) != null ? UI.waterEntryToMl(healthInt(form.water)) : null,
+      // Belt and suspenders: the locked field has no real input to type into
+      // (see the HYDRATION section below), but save() itself never trusts
+      // form.water while locked either, so nothing can persist an override
+      // the user never confirmed through requestWaterUnlock.
+      waterMl: waterLocked ? (existing?.waterMl ?? null) : (healthInt(form.water) != null ? UI.waterEntryToMl(healthInt(form.water)) : null),
       note: form.note.trim() || null,
       adherence, targetsSnap,
       offPlanNote: form.offPlanNote.trim() || null,
@@ -1110,6 +1143,14 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
     onClose();
   };
 
+  const requestWaterUnlock = async () => {
+    const ok = await confirm(
+      "This day already has entries in the Water Tracker. Editing it here will be overwritten the next time you log a drink there.",
+      { title: 'Overwrite water tracker?', ok: 'Continue', cancel: 'Cancel' }
+    );
+    if (ok) setWaterUnlocked(true);
+  };
+
   const inputStyle = {
     width: '100%', boxSizing: 'border-box', background: UI.bgInset,
     border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4,
@@ -1122,6 +1163,7 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
       <input type="text" inputMode="decimal" placeholder="—" value={form[k]} onChange={e => set(k, e.target.value)} style={inputStyle} />
     </div>
   );
+  const waterQuickAddTileStyle = { padding: '10px 12px', borderRadius: 4, border: `0.5px solid ${UI.hairStrong}`, background: UI.bgInset, color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 12, whiteSpace: 'nowrap' };
 
   // Full page (not a Sheet): the form has 15+ fields across several sections
   // plus the glucose/BP/temp add-forms, a bottom sheet's ~88dvh cap made it
@@ -1239,15 +1281,35 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
       </CatSection>
 
       <CatSection label="HYDRATION" collapsed={collapsedCats.has('hydration')} onToggle={() => toggleCat('hydration')}>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
-          {numField('water', 'Water', UI.waterEntryUnit())}
-          {UI.waterQuickAdds().map(inc => (
-            <button key={inc} onClick={() => set('water', String((healthInt(form.water) || 0) + inc))} style={{
-              padding: '10px 12px', borderRadius: 4, border: `0.5px solid ${UI.hairStrong}`, background: UI.bgInset,
-              color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap', WebkitTapHighlightColor: 'transparent',
-            }}>+{inc}</button>
+        {/* Locked renders a plain (non-focusable, non-editable) div in place
+            of numField's <input>, not just a greyed-out copy of it: opacity
+            and pointerEvents:none only block mouse/touch, keyboard Tab focus
+            would still land in a real <input> and let it be typed into and
+            saved with no unlock confirmation ever shown. No input element at
+            all is the only way that's actually impossible. */}
+        {/* Locked: the row itself is clickable (its own tap target, not just the
+            hint line below), since none of its children are real inputs/buttons
+            while locked (plain divs only), a click on any of them just bubbles up
+            here, nothing to lose by letting the whole row respond. */}
+        <div onClick={waterLocked ? requestWaterUnlock : undefined} style={{ display: 'flex', gap: 8, alignItems: 'flex-end', opacity: waterLocked ? 0.45 : 1, cursor: waterLocked ? 'pointer' : 'default' }}>
+          <div style={{ flex: 1 }}>
+            <div style={labelStyle}>Water{UI.waterEntryUnit() ? ` (${UI.waterEntryUnit()})` : ''}</div>
+            {waterLocked
+              ? <div style={inputStyle}>{form.water || '—'}</div>
+              : <input type="text" inputMode="decimal" placeholder="—" value={form.water} onChange={e => set('water', e.target.value)} style={inputStyle} />}
+          </div>
+          {UI.waterQuickAdds().map(inc => waterLocked ? (
+            <div key={inc} style={waterQuickAddTileStyle}>+{inc}</div>
+          ) : (
+            <button key={inc} onClick={() => set('water', String((healthInt(form.water) || 0) + inc))} style={{ ...waterQuickAddTileStyle, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>+{inc}</button>
           ))}
         </div>
+        {waterLocked && (
+          <button onClick={requestWaterUnlock} style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 5, background: 'none', border: 'none', padding: '4px 0', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+            <i className="fa-solid fa-lock" style={{ fontSize: 9, color: UI.inkGhost }} />
+            <span style={{ fontSize: 10, fontFamily: UI.fontUi, color: UI.inkGhost }}>Managed by the Water Tracker, tap to override</span>
+          </button>
+        )}
       </CatSection>
 
       <CatSection label="NOTE" collapsed={collapsedCats.has('note')} onToggle={() => toggleCat('note')}>
@@ -2244,6 +2306,121 @@ function BodyTempCard({ tempLogs, unit, tf: sharedTf, setTf: setSharedTf, dragHa
   );
 }
 
+// ─── Water card ─────────────────────────────────────────────────────────────
+// Only the 1D (today) view needs per-entry detail (multiple drinks a day is
+// the whole point of the tracker); 1W/1M/3M stay the existing daily-total bar
+// chart fed by dailyLogs.waterMl, unchanged.
+
+function WaterEntryChart({ entries }) {
+  // Bucketed by hour, not one bar per raw entry: a few drinks logged close
+  // together would otherwise draw overlapping or near-touching bars, which
+  // reads as noise rather than a timeline. One bar per hour, height = that
+  // hour's total; the feed list right below still shows every entry.
+  const byHour = new Map();
+  (entries || []).forEach(e => {
+    const h = Math.floor((timeToMinutes(e.time) ?? 0) / 60);
+    const cur = byHour.get(h) || { h, amountMl: 0, count: 0, date: e.date };
+    cur.amountMl += e.amountMl || 0;
+    cur.count += 1;
+    byHour.set(h, cur);
+  });
+  const pts = [...byHour.values()].sort((a, b) => a.h - b.h);
+  if (!pts.length) return null;
+  const W = 320, padL = 38, padR = 12, padTop = 10, padBottom = 20, plotH = 96;
+  const H = padTop + plotH + padBottom, plotW = W - padL - padR;
+  const dom = UI.chartDomain(0, Math.max(...pts.map(p => p.amountMl)), { min: 0 });
+  const bw = 10;
+  const xOf = p => padL + ((p.h + 0.5) / 24) * plotW;
+  const yOf = v => padTop + (1 - (v - dom.min) / dom.range) * plotH;
+  const gridVals = Array.from({ length: 4 }, (_, i) => dom.min + (dom.range / 3) * i);
+  const hoverPoints = pts.map(p => {
+    const hourLabel = `${String(p.h).padStart(2, '0')}:00`;
+    return {
+      x: xOf(p), y: yOf(p.amountMl), date: p.date,
+      rows: [{ value: `${UI.waterToEntry(p.amountMl)} ${UI.waterEntryUnit()}` }],
+      sub: p.count > 1 ? `${hourLabel} · ${p.count} drinks` : hourLabel,
+    };
+  });
+
+  return (
+    <ChartHover W={W} H={H} points={hoverPoints} markerColor="#4a9fe0">
+    <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display: 'block', overflow: 'visible' }}>
+      {gridVals.map((v, i) => (
+        <g key={i}>
+          {i > 0 && <line x1={padL} y1={yOf(v).toFixed(1)} x2={W - padR} y2={yOf(v).toFixed(1)} stroke={UI.hair} strokeWidth="0.5" strokeDasharray="3 3" />}
+          <text x={padL - 5} y={(yOf(v) + 3).toFixed(1)} textAnchor="end" fontSize="8" fontFamily={UI.fontNum} fill={UI.inkFaint}>{UI.waterToEntry(v)}</text>
+        </g>
+      ))}
+      <line x1={padL} y1={padTop + plotH} x2={W - padR} y2={padTop + plotH} stroke={UI.hair} strokeWidth="0.5" />
+      {pts.map((p, i) => {
+        const y = yOf(p.amountMl);
+        const h = (padTop + plotH) - y;
+        return <rect key={i} x={(xOf(p) - bw / 2).toFixed(1)} y={y.toFixed(1)} width={bw} height={Math.max(0, h).toFixed(1)} rx="1" fill="#4a9fe0" />;
+      })}
+    </svg>
+    </ChartHover>
+  );
+}
+
+function WaterCard({ waterSeries, waterAvg, waterLogs, tf: sharedTf, setTf: setSharedTf, dragHandle, onExpand, onOpen, compact = false }) {
+  const today = LB.todayISO();
+  // 1D is a local-only overlay on top of the shared tf every card (including
+  // this one for 1W/1M/3M) participates in, same pattern as Glucose/BP/Temp.
+  const [showToday, setShowToday] = useStateH(false);
+  const tf = showToday ? '1D' : sharedTf;
+  const setTf = id => {
+    if (id === '1D') { setShowToday(true); return; }
+    setShowToday(false);
+    setSharedTf(id);
+  };
+
+  const todayEntries = useMemoH(
+    () => (waterLogs || []).filter(l => l.date === today).sort((a, b) => b.time.localeCompare(a.time)),
+    [waterLogs, today]
+  );
+  const todayTotal = todayEntries.reduce((s, l) => s + (l.amountMl || 0), 0);
+
+  const headline = tf === '1D'
+    ? (todayEntries.length ? `${UI.waterSummaryValue(todayTotal)}${UI.waterSummaryUnit()}` : null)
+    : (waterAvg != null ? `${UI.waterSummaryValue(waterAvg)}${UI.waterSummaryUnit()}` : null);
+  const sub = tf === '1D' ? (todayEntries.length ? 'today' : null) : (waterAvg != null ? 'avg / day' : null);
+
+  return (
+    <HealthChartCard title="Water" icon="fa-glass-water" tf={tf} setTf={setTf} tfOptions={HEALTH_TFS_TODAY}
+      headline={headline} sub={sub} dragHandle={dragHandle} onExpand={onExpand} onOpen={onOpen}>
+      {tf === '1D' ? (
+        !todayEntries.length ? (
+          <HealthChartEmpty label="No water logged today yet" />
+        ) : (
+          <>
+            <WaterEntryChart entries={todayEntries} />
+            {/* Readings feed only in the full (expanded) view, compact (2-col
+                grid) shows just the chart, matching Glucose/BP/Temp. */}
+            {!compact && (
+              <>
+                <div style={{ height: '0.5px', background: UI.hair, margin: '8px 0' }} />
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {todayEntries.map(n => (
+                    <div key={n.id} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 9, fontFamily: UI.fontUi, color: UI.inkGhost }}>{n.time}</div>
+                        {n.name && <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.4, marginTop: 1 }}>{n.name}</div>}
+                      </div>
+                      <span className="num" style={{ flexShrink: 0, fontSize: 11, color: UI.inkFaint }}>{UI.waterToEntry(n.amountMl)} {UI.waterEntryUnit()}</span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </>
+        )
+      ) : (
+        <HealthBarChart series={waterSeries.data} from={waterSeries.from} to={waterSeries.to} format={v => `${UI.waterSummaryValue(v)}${UI.waterSummaryUnit()}`} color="#4a9fe0" colorSoft="rgba(74,159,224,0.35)" />
+      )}
+    </HealthChartCard>
+  );
+}
+
 // ─── HealthScreen ─────────────────────────────────────────────────────────────
 
 function HealthScreen({ store, setStore, go, userId }) {
@@ -2676,10 +2853,7 @@ function HealthScreen({ store, setStore, go, userId }) {
       </HealthChartCard>
     ),
     water: (
-      <HealthChartCard title="Water" icon="fa-glass-water" tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('water')}
-        headline={waterAvg != null ? `${UI.waterSummaryValue(waterAvg)}${UI.waterSummaryUnit()}` : null} sub={waterAvg != null ? 'avg / day' : null}>
-        <HealthBarChart series={waterSeries.data} from={waterSeries.from} to={waterSeries.to} format={v => `${UI.waterSummaryValue(v)}${UI.waterSummaryUnit()}`} color="#4a9fe0" colorSoft="rgba(74,159,224,0.35)" />
-      </HealthChartCard>
+      <WaterCard waterSeries={waterSeries} waterAvg={waterAvg} waterLogs={store.waterLogs} tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('water')} onOpen={() => go({ name: 'water' })} compact />
     ),
     cardio: (
       <HealthChartCard title="Cardio" icon="fa-person-running" tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('cardio')}
@@ -2806,6 +2980,7 @@ function HealthScreen({ store, setStore, go, userId }) {
 function HealthClientLogs({ clientStore }) {
   const logs = clientStore?.dailyLogs || [];
   const cardioLogs = clientStore?.cardioLogs || [];
+  const waterLogs = clientStore?.waterLogs || [];
   const glucoseLogs = clientStore?.glucoseLogs || [];
   const glucoseUnit = clientStore?.settings?.glucoseUnit ?? 'mmol';
   const bloodPressureLogs = clientStore?.bloodPressureLogs || [];
@@ -2965,10 +3140,7 @@ function HealthClientLogs({ clientStore }) {
       </HealthChartCard>
     ),
     water: (
-      <HealthChartCard title="Water" icon="fa-glass-water" tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('water')}
-        headline={waterAvg != null ? `${UI.waterSummaryValue(waterAvg)}${UI.waterSummaryUnit()}` : null} sub={waterAvg != null ? 'avg / day' : null}>
-        <HealthBarChart series={waterSeries.data} from={waterSeries.from} to={waterSeries.to} format={v => `${UI.waterSummaryValue(v)}${UI.waterSummaryUnit()}`} color="#4a9fe0" colorSoft="rgba(74,159,224,0.35)" />
-      </HealthChartCard>
+      <WaterCard waterSeries={waterSeries} waterAvg={waterAvg} waterLogs={waterLogs} tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('water')} compact />
     ),
     cardio: (
       <HealthChartCard title="Cardio" icon="fa-person-running" tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('cardio')}

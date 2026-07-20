@@ -275,6 +275,7 @@ async function deleteAllData(userId, { keepPush = false } = {}) {
     unwrap(_supabase.from('zane_skips').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_cardio_logs').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_daily_logs').delete().eq('user_id', userId)),
+    unwrap(_supabase.from('zane_water_logs').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_workout_templates').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_glucose_logs').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_blood_pressure_logs').delete().eq('user_id', userId)),
@@ -414,6 +415,16 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
     status_mode: backup.statusMode ?? null,
     status_mode_since: backup.statusModeSince ?? null,
     deload_prompt_dismissed_at: backup.deloadPromptDismissedAt ?? null,
+    water_goal_ml: sett.waterGoalMl ?? 2000,
+    water_start_time: sett.waterStartTime ?? '08:00',
+    water_end_time: sett.waterEndTime ?? '22:00',
+    water_bottles_today: sett.waterBottlesToday ?? 0,
+    water_bottles_date: sett.waterBottlesDate ?? null,
+    water_drinks: sett.waterDrinks ?? null,
+    water_coffee_sizes: sett.waterCoffeeSizes ?? null,
+    water_bottle_enabled: sett.waterBottleEnabled ?? true,
+    water_bottle_ml: sett.waterBottleMl ?? 1500,
+    water_reminder_enabled: sett.waterReminderEnabled ?? false,
   };
 
   // Pre-count chunks upfront so the UI can show accurate progress.
@@ -434,6 +445,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
     + (backup.skips?.length ? 1 : 0)
     + (backup.cardioLogs?.length ? 1 : 0)
     + (backup.dailyLogs?.length ? 1 : 0)
+    + (backup.waterLogs?.length ? 1 : 0)
     + (backup.workoutTemplates?.length ? 1 : 0)
     + (backup.checkinSchemaTemplates?.length ? 1 : 0)
     + (backup.glucoseLogs?.length ? 1 : 0)
@@ -550,6 +562,17 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
         off_plan_note: l.offPlanNote ?? null,
         adherence: l.adherence ?? null, targets_snap: l.targetsSnap ?? null,
         daily_coach_fields: l.coachFields ?? null,
+      }))
+    ));
+    stepsDone++;
+  }
+  if (backup.waterLogs?.length) {
+    prog('Uploading water logs…');
+    await unwrap(_supabase.from('zane_water_logs').upsert(
+      backup.waterLogs.map(l => ({
+        id: l.id, user_id: userId, date: l.date, time: l.time,
+        amount_ml: l.amountMl, name: l.name ?? null, category: l.category ?? null,
+        breakdown: l.breakdown ?? null,
       }))
     ));
     stepsDone++;
@@ -882,13 +905,16 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     isCoachLoad ? null : _supabase.from('zane_checkin_schema_templates').select('id, name, schema, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
     // Plan-editor drafts (migration 0162): in-progress autosave, own store only.
     isCoachLoad ? null : _supabase.from('zane_plan_drafts').select('schedule_id, draft, updated_at').eq('user_id', userId),
+    // Water tracker per-entry logs (migration 0180): multiple entries per day,
+    // all records for the user. Coach reads a client's via coach-of-client RLS.
+    _supabase.from('zane_water_logs').select('id, date, time, amount_ml, name, category, breakdown, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
   ];
   const [profileRes, exRes, schRes, sessRes, settRes, skipsRes, entriesRes,
          bestsRes, sessionStatsRes,
          coachInfoRes, coachClientsRes, unreadNotesRes, coachingRowRes, selfRowRes,
          cardioLogsRes, cardioPlansRes, dailyLogsRes, statusPeriodsRes,
          supportTicketsRes, glucoseLogsRes, bloodPressureLogsRes, bodyTempLogsRes, templatesRes, mesoStatesRes,
-         checkinTemplatesRes, planDraftsRes] = await Promise.all(queries);
+         checkinTemplatesRes, planDraftsRes, waterLogsRes] = await Promise.all(queries);
 
   // A failed request (offline, RLS, server error) also yields no data — bail
   // out so the caller can surface an error instead of mistaking this for a
@@ -919,6 +945,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   if (bodyTempLogsRes.error) throw bodyTempLogsRes.error;
   if (templatesRes.error) throw templatesRes.error;
   if (mesoStatesRes.error) throw mesoStatesRes.error;
+  if (waterLogsRes.error) throw waterLogsRes.error;
   // Coaching queries are null on coach loads (skipped) — guard with optional chaining.
   if (coachInfoRes?.error) throw coachInfoRes.error;
   if (coachClientsRes?.error) throw coachClientsRes.error;
@@ -1069,6 +1096,14 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     statusPeriods: (statusPeriodsRes?.data || []).map(p => ({
       id: p.id, mode: p.mode, startedAt: p.started_at, endedAt: p.ended_at ?? null,
     })),
+    // Water tracker per-entry logs (migration 0180). One entry = one logged drink,
+    // except category = 'summary' (migration 0183), a whole past day collapsed
+    // by the nightly cron into one row, breakdown carries its drink tally.
+    waterLogs: (waterLogsRes?.data || []).map(l => ({
+      id: l.id, date: l.date, time: l.time,
+      amountMl: l.amount_ml ?? 0, name: l.name ?? null,
+      category: l.category ?? null, breakdown: l.breakdown ?? null, createdAt: l.created_at,
+    })),
     glucoseLogs: (glucoseLogsRes?.data || []).map(l => ({
       id: l.id, date: l.date, time: l.time,
       valueMmol: l.value_mmol != null ? parseFloat(l.value_mmol) : null,
@@ -1165,6 +1200,17 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         watermarkOpacity: sett.watermark_opacity ?? null,
         vipBackground: sett.vip_background ?? null,
         swVersion: sett.sw_version ?? null,
+        waterGoalMl: sett.water_goal_ml ?? 2000,
+        waterStartTime: sett.water_start_time ?? '08:00',
+        waterEndTime: sett.water_end_time ?? '22:00',
+        waterBottlesToday: sett.water_bottles_today ?? 0,
+        waterBottlesDate: sett.water_bottles_date ?? null,
+        waterDrinks: Array.isArray(sett.water_drinks) ? sett.water_drinks : [],
+        waterCoffeeSizes: Array.isArray(sett.water_coffee_sizes) ? sett.water_coffee_sizes : null,
+        waterBottleEnabled: sett.water_bottle_enabled ?? true,
+        waterBottleMl: sett.water_bottle_ml ?? 1500,
+        waterReminderEnabled: sett.water_reminder_enabled ?? false,
+        tzOffsetMinutes: sett.tz_offset_minutes ?? null,
       },
     nextReminderAt: sett.next_reminder_at ?? null,
     coaching: isCoachLoad ? undefined : {
@@ -1501,6 +1547,20 @@ async function syncStore(prev, next, userId) {
     if (removed.length) ops.push(_supabase.from('zane_cardio_logs').delete().in('id', removed.map(l => l.id)));
   }
 
+  if (prev.waterLogs !== next.waterLogs) {
+    const upsert = (next.waterLogs || []).filter(l => {
+      const p = (prev.waterLogs || []).find(x => x.id === l.id);
+      return !p || JSON.stringify(p) !== JSON.stringify(l);
+    });
+    const removed = (prev.waterLogs || []).filter(l => !(next.waterLogs || []).find(x => x.id === l.id));
+    if (upsert.length) ops.push(_supabase.from('zane_water_logs').upsert(upsert.map(l => ({
+      id: l.id, user_id: userId, date: l.date, time: l.time,
+      amount_ml: l.amountMl, name: l.name ?? null, category: l.category ?? null,
+      breakdown: l.breakdown ?? null,
+    }))));
+    if (removed.length) ops.push(_supabase.from('zane_water_logs').delete().in('id', removed.map(l => l.id)));
+  }
+
   if (prev.cardioPlans !== next.cardioPlans) {
     const upsert = (next.cardioPlans || []).filter(p => {
       const old = (prev.cardioPlans || []).find(x => x.id === p.id);
@@ -1664,6 +1724,17 @@ async function syncStore(prev, next, userId) {
     prev.statusModeSince                  !== next.statusModeSince  ||
     prev.deloadPromptDismissedAt          !== next.deloadPromptDismissedAt ||
     prev.activeCardioPlanId               !== next.activeCardioPlanId     ||
+    prev.settings?.waterGoalMl            !== next.settings?.waterGoalMl       ||
+    prev.settings?.waterStartTime         !== next.settings?.waterStartTime    ||
+    prev.settings?.waterEndTime           !== next.settings?.waterEndTime      ||
+    prev.settings?.waterBottlesToday      !== next.settings?.waterBottlesToday ||
+    prev.settings?.waterBottlesDate       !== next.settings?.waterBottlesDate  ||
+    JSON.stringify(prev.settings?.waterDrinks) !== JSON.stringify(next.settings?.waterDrinks) ||
+    JSON.stringify(prev.settings?.waterCoffeeSizes) !== JSON.stringify(next.settings?.waterCoffeeSizes) ||
+    prev.settings?.waterBottleEnabled     !== next.settings?.waterBottleEnabled ||
+    prev.settings?.waterBottleMl          !== next.settings?.waterBottleMl      ||
+    prev.settings?.waterReminderEnabled   !== next.settings?.waterReminderEnabled ||
+    prev.settings?.tzOffsetMinutes        !== next.settings?.tzOffsetMinutes    ||
     prev.settings?.swVersion              !== next.settings?.swVersion;
 
   if (settingsChanged) {
@@ -1713,6 +1784,9 @@ async function syncStore(prev, next, userId) {
       status_mode_since: next.statusModeSince ?? null,
       deload_prompt_dismissed_at: next.deloadPromptDismissedAt ?? null,
       sw_version: next.settings?.swVersion ?? null,
+      water_bottles_today: next.settings?.waterBottlesToday ?? 0,
+      water_bottles_date: next.settings?.waterBottlesDate ?? null,
+      tz_offset_minutes: next.settings?.tzOffsetMinutes ?? null,
     };
     // Plan-position / active-plan fields are action-advanced and prone to a
     // multi-device clobber: on a whole-row upsert a device syncing an unrelated
@@ -1726,6 +1800,21 @@ async function syncStore(prev, next, userId) {
     if (prev.cycleStartDate    !== next.cycleStartDate)    settingsRow.cycle_start_date     = next.cycleStartDate ?? null;
     if (prev.weekPlanStartDate !== next.weekPlanStartDate) settingsRow.week_plan_start_date = next.weekPlanStartDate ?? null;
     if (prev.lastAdvancedDate  !== next.lastAdvancedDate)  settingsRow.last_advanced_date   = next.lastAdvancedDate ?? null;
+    // Water tracker config gets the SAME gated treatment as the plan-position
+    // fields above, for the same reason: it must propagate across devices
+    // (app.jsx's boot-merge WATER_SYNC_KEYS gives the READ side this
+    // guarantee already), so the WRITE side must not undo it. Without this
+    // gate, syncing an unrelated setting change on a device that booted
+    // before another device set e.g. a new water goal would upsert this
+    // device's stale cached goal over the fresher server value.
+    if (prev.settings?.waterGoalMl        !== next.settings?.waterGoalMl)        settingsRow.water_goal_ml         = next.settings?.waterGoalMl ?? 2000;
+    if (prev.settings?.waterStartTime     !== next.settings?.waterStartTime)     settingsRow.water_start_time      = next.settings?.waterStartTime ?? '08:00';
+    if (prev.settings?.waterEndTime       !== next.settings?.waterEndTime)       settingsRow.water_end_time        = next.settings?.waterEndTime ?? '22:00';
+    if (prev.settings?.waterReminderEnabled !== next.settings?.waterReminderEnabled) settingsRow.water_reminder_enabled = next.settings?.waterReminderEnabled ?? false;
+    if (prev.settings?.waterBottleEnabled !== next.settings?.waterBottleEnabled) settingsRow.water_bottle_enabled  = next.settings?.waterBottleEnabled ?? true;
+    if (prev.settings?.waterBottleMl      !== next.settings?.waterBottleMl)      settingsRow.water_bottle_ml       = next.settings?.waterBottleMl ?? 1500;
+    if (JSON.stringify(prev.settings?.waterDrinks) !== JSON.stringify(next.settings?.waterDrinks)) settingsRow.water_drinks = next.settings?.waterDrinks ?? null;
+    if (JSON.stringify(prev.settings?.waterCoffeeSizes) !== JSON.stringify(next.settings?.waterCoffeeSizes)) settingsRow.water_coffee_sizes = next.settings?.waterCoffeeSizes ?? null;
     ops.push(_supabase.from('zane_user_settings').upsert(settingsRow));
   }
 
@@ -4522,14 +4611,15 @@ async function endDeload(userId, store, setStore) {
 }
 
 async function refreshHealthLogs(userId) {
-  const [dailyRes, cardioRes, glucoseRes, bpRes, tempRes] = await Promise.all([
+  const [dailyRes, cardioRes, glucoseRes, bpRes, tempRes, waterRes] = await Promise.all([
     _supabase.from('zane_daily_logs').select('id, date, weight, steps, calories, protein, carbs, fat, fiber, water_ml, note, off_plan_note, adherence, targets_snap, daily_coach_fields, updated_at, created_at').eq('user_id', userId).order('date', { ascending: false }),
     _supabase.from('zane_cardio_logs').select('id, date, type, duration_minutes, distance_m, pace_feeling, effort, note, session_id, created_at').eq('user_id', userId).order('date', { ascending: false }),
     _supabase.from('zane_glucose_logs').select('id, date, time, value_mmol, context, note, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
     _supabase.from('zane_blood_pressure_logs').select('id, date, time, systolic, diastolic, note, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
     _supabase.from('zane_body_temp_logs').select('id, date, time, value_c, note, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
+    _supabase.from('zane_water_logs').select('id, date, time, amount_ml, name, category, breakdown, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
   ]);
-  if (dailyRes.error || cardioRes.error || glucoseRes.error || bpRes.error || tempRes.error) return null;
+  if (dailyRes.error || cardioRes.error || glucoseRes.error || bpRes.error || tempRes.error || waterRes.error) return null;
   return {
     dailyLogs: (dailyRes.data || []).map(l => ({
       id: l.id, date: l.date,
@@ -4563,6 +4653,11 @@ async function refreshHealthLogs(userId) {
       id: l.id, date: l.date, time: l.time,
       valueC: l.value_c != null ? parseFloat(l.value_c) : null,
       note: l.note ?? null, createdAt: l.created_at,
+    })),
+    waterLogs: (waterRes?.data || []).map(l => ({
+      id: l.id, date: l.date, time: l.time,
+      amountMl: l.amount_ml ?? 0, name: l.name ?? null,
+      category: l.category ?? null, breakdown: l.breakdown ?? null, createdAt: l.created_at,
     })),
   };
 }

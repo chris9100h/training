@@ -17,6 +17,18 @@
    Entry shape: { id: string, date: string (YYYY-MM-DD), title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.635',
+    date: '2026-07-20',
+    title: 'Meet The Water Tracker',
+    items: [
+      "💧 A whole new Water Tracker: quick-tap common amounts, log coffee your way (your own sizes, plus milk), or add up to 6 custom drinks with their own icon, all toward a daily goal you set.",
+      "📈 Watch today stack up against target on a live chart, drag through any hour (including right now), then dig into streaks, totals and a drink-by-drink breakdown in Stats (7, 30, 90 days or your own range).",
+      "🍾 Bottle refills count themselves once you tell it your bottle size, and an optional push nudge lets you know if you're falling behind.",
+      "⚡ Tap the Health tab a second time to jump straight to Water (its icon swaps to a droplet so you know you're there). Already logged water there today? The Daily Log field locks itself so a stray edit can't quietly get overwritten.",
+      "🐌 Also fixed: under certain circumstances, the pace bar used to insist you're 7000+ minutes ahead of last time. Impressive, but no.",
+    ],
+  },
+  {
     id: 'v2.632',
     date: '2026-07-19',
     title: 'Second-Guess Your Bumps, Anytime',
