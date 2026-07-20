@@ -829,9 +829,14 @@ function WaterDrinksConfigBody({ settings, patchSettings, onClose }) {
             <div style={{ flex: 1 }}>
               <input value={drinkMl} onChange={e => setDrinkMl(e.target.value.replace(/[^0-9]/g, ''))} type="text" inputMode="numeric" placeholder={wtUnit()} style={wtInput} />
             </div>
-            {editIdx != null && <Btn kind="ghost" onClick={resetDrinkForm} style={{ flexShrink: 0, minHeight: 40, padding: '10px 14px' }}>Cancel</Btn>}
-            <Btn onClick={saveDrink} style={{ flexShrink: 0, minHeight: 40, padding: '10px 16px' }}>{editIdx != null ? 'Save' : 'Add'}</Btn>
+            {editIdx == null && <Btn onClick={saveDrink} style={{ flexShrink: 0, minHeight: 40, padding: '10px 16px' }}>Add</Btn>}
           </div>
+          {editIdx != null && (
+            <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+              <Btn kind="ghost" onClick={resetDrinkForm} style={{ flex: 1, minHeight: 40 }}>Cancel</Btn>
+              <Btn onClick={saveDrink} style={{ flex: 1, minHeight: 40 }}>Save</Btn>
+            </div>
+          )}
         </div>
       )}
 
