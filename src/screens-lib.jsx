@@ -2821,7 +2821,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
   // Centered, faint, full-page background watermark, the two-column export's own
   // size (its actual size is computed and set in px by captureNodeAsPng's
   // data-shot-fill handling, not by CSS here, see the comment there for why).
-  const _shotIsLight = (store.settings?.darkMode ?? 'dark') === 'light';
+  const _shotIsLight = ['light', 'paper'].includes(store.settings?.darkMode ?? 'dark');
   const _shotDefaultStyle = { opacity: _shotIsLight ? 0.10 : 0.06, filter: _shotIsLight ? 'grayscale(1)' : 'grayscale(1) brightness(3)' };
   const _shotCustomStyle = { opacity: 0.13 };
   const s = store.sessions.find(x => x.id === sessionId);
@@ -5033,7 +5033,7 @@ function SessionCompareScreen({ store, setStore, go, sessionId, compareId, back 
   // get their custom image, everyone else the faint centered ZANE mark.
   const _shotLogo = store.settings?.vipBackground || 'icons/zane-logo.png';
   const _shotIsCustom = _shotLogo !== 'icons/zane-logo.png';
-  const _shotIsLight = (store.settings?.darkMode ?? 'dark') === 'light';
+  const _shotIsLight = ['light', 'paper'].includes(store.settings?.darkMode ?? 'dark');
   const _shotDefaultStyle = { width: '85%', maxWidth: 320, opacity: _shotIsLight ? 0.14 : 0.04, filter: _shotIsLight ? 'grayscale(1)' : 'grayscale(1) brightness(3)', objectFit: 'contain' };
   const _shotCustomStyle = { width: '92%', maxWidth: 360, opacity: 0.16, objectFit: 'contain' };
   const s = store.sessions.find(x => x.id === sessionId);

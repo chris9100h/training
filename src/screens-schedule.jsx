@@ -762,7 +762,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
   // translucent surface tint instead of a solid fill for the same reason.
   const _shotLogo = store.settings?.vipBackground || 'icons/zane-logo.png';
   const _shotIsCustom = _shotLogo !== 'icons/zane-logo.png';
-  const _shotIsLight = (store.settings?.darkMode ?? 'dark') === 'light';
+  const _shotIsLight = ['light', 'paper'].includes(store.settings?.darkMode ?? 'dark');
   const _shotDefaultStyle = { width: '75%', maxWidth: 620, opacity: _shotIsLight ? 0.10 : 0.06, filter: _shotIsLight ? 'grayscale(1)' : 'grayscale(1) brightness(3)', objectFit: 'contain' };
   const _shotCustomStyle = { width: '80%', maxWidth: 680, opacity: 0.13, objectFit: 'contain' };
   const takeScreenshot = async () => {
