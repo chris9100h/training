@@ -420,6 +420,11 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
     water_end_time: sett.waterEndTime ?? '22:00',
     water_bottles_today: sett.waterBottlesToday ?? 0,
     water_bottles_date: sett.waterBottlesDate ?? null,
+    water_drinks: sett.waterDrinks ?? null,
+    water_coffee_sizes: sett.waterCoffeeSizes ?? null,
+    water_bottle_enabled: sett.waterBottleEnabled ?? true,
+    water_bottle_ml: sett.waterBottleMl ?? 1500,
+    water_reminder_enabled: sett.waterReminderEnabled ?? false,
   };
 
   // Pre-count chunks upfront so the UI can show accurate progress.
@@ -1197,6 +1202,12 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         waterEndTime: sett.water_end_time ?? '22:00',
         waterBottlesToday: sett.water_bottles_today ?? 0,
         waterBottlesDate: sett.water_bottles_date ?? null,
+        waterDrinks: Array.isArray(sett.water_drinks) ? sett.water_drinks : [],
+        waterCoffeeSizes: Array.isArray(sett.water_coffee_sizes) ? sett.water_coffee_sizes : null,
+        waterBottleEnabled: sett.water_bottle_enabled ?? true,
+        waterBottleMl: sett.water_bottle_ml ?? 1500,
+        waterReminderEnabled: sett.water_reminder_enabled ?? false,
+        tzOffsetMinutes: sett.tz_offset_minutes ?? null,
       },
     nextReminderAt: sett.next_reminder_at ?? null,
     coaching: isCoachLoad ? undefined : {
@@ -1714,6 +1725,12 @@ async function syncStore(prev, next, userId) {
     prev.settings?.waterEndTime           !== next.settings?.waterEndTime      ||
     prev.settings?.waterBottlesToday      !== next.settings?.waterBottlesToday ||
     prev.settings?.waterBottlesDate       !== next.settings?.waterBottlesDate  ||
+    JSON.stringify(prev.settings?.waterDrinks) !== JSON.stringify(next.settings?.waterDrinks) ||
+    JSON.stringify(prev.settings?.waterCoffeeSizes) !== JSON.stringify(next.settings?.waterCoffeeSizes) ||
+    prev.settings?.waterBottleEnabled     !== next.settings?.waterBottleEnabled ||
+    prev.settings?.waterBottleMl          !== next.settings?.waterBottleMl      ||
+    prev.settings?.waterReminderEnabled   !== next.settings?.waterReminderEnabled ||
+    prev.settings?.tzOffsetMinutes        !== next.settings?.tzOffsetMinutes    ||
     prev.settings?.swVersion              !== next.settings?.swVersion;
 
   if (settingsChanged) {
@@ -1768,6 +1785,12 @@ async function syncStore(prev, next, userId) {
       water_end_time: next.settings?.waterEndTime ?? '22:00',
       water_bottles_today: next.settings?.waterBottlesToday ?? 0,
       water_bottles_date: next.settings?.waterBottlesDate ?? null,
+      water_drinks: next.settings?.waterDrinks ?? null,
+      water_coffee_sizes: next.settings?.waterCoffeeSizes ?? null,
+      water_bottle_enabled: next.settings?.waterBottleEnabled ?? true,
+      water_bottle_ml: next.settings?.waterBottleMl ?? 1500,
+      water_reminder_enabled: next.settings?.waterReminderEnabled ?? false,
+      tz_offset_minutes: next.settings?.tzOffsetMinutes ?? null,
     };
     // Plan-position / active-plan fields are action-advanced and prone to a
     // multi-device clobber: on a whole-row upsert a device syncing an unrelated

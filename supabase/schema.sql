@@ -275,7 +275,14 @@ CREATE TABLE public.zane_user_settings (
   water_start_time text DEFAULT '08:00'::text,
   water_end_time text DEFAULT '22:00'::text,
   water_bottles_today integer DEFAULT 0,
-  water_bottles_date text
+  water_bottles_date text,
+  water_drinks jsonb,
+  water_bottle_enabled boolean NOT NULL DEFAULT true,
+  water_bottle_ml integer DEFAULT 1500,
+  water_coffee_sizes jsonb,
+  water_reminder_enabled boolean NOT NULL DEFAULT false,
+  water_last_push_at timestamp with time zone,
+  tz_offset_minutes integer
 );
 
 CREATE TABLE public.zane_pushover_active (

@@ -66,7 +66,9 @@ const PER_TABLE_ALLOW = {
   // sw_version: internal client marker. auto_close_notify / manual_calories: not
   // part of the store model (never loaded/synced), so nothing to round-trip; add
   // them to loadFromSupabase + the store if they ever become real settings.
-  zane_user_settings: new Set(['sw_version', 'auto_close_notify', 'manual_calories']),
+  // tz_offset_minutes: environment-derived, auto-set by the client on load.
+  // water_last_push_at: server-written throttle for the water reminder cron.
+  zane_user_settings: new Set(['sw_version', 'auto_close_notify', 'manual_calories', 'tz_offset_minutes', 'water_last_push_at']),
   zane_profiles: new Set(['approved']),        // admin-controlled, not user-restorable
 };
 const allowed = (table, col) =>

@@ -835,13 +835,25 @@ function App() {
             // Scalar state: the local cache is authoritative — it always holds
             // the most recent state on this device, including unsynced offline
             // edits. For items with IDs we use an ID-based merge instead.
+            // Water tracker config is an exception: it must propagate across
+            // devices (set a goal on the phone, see it on the desktop). Same
+            // base-aware rule as the plan-position fields above: keep this
+            // device's value only when it changed it since base (an unsynced
+            // local edit), otherwise take the server's. Bottle counters are
+            // deliberately NOT in this list — they are day-scoped device state.
+            const WATER_SYNC_KEYS = ['waterGoalMl', 'waterStartTime', 'waterEndTime', 'waterReminderEnabled', 'waterDrinks', 'waterCoffeeSizes', 'waterBottleEnabled', 'waterBottleMl'];
+            const mergedSettings = { ...fresh.settings, ...cur.settings, ...(fresh.settings.unit == null ? { unit: null } : {}) };
+            for (const k of WATER_SYNC_KEYS) {
+              const localUnsynced = base && JSON.stringify(cur.settings?.[k]) !== JSON.stringify(base.settings?.[k]);
+              if (!localUnsynced) mergedSettings[k] = fresh.settings?.[k];
+            }
             merged = {
               ...fresh,
               // Local cache is authoritative for scalar settings (preserves
               // offline edits) — except a server-side unit of null (admin reset
               // / not chosen) must win so the picker re-fires, since the cache
-              // still holds the old kg/lbs value.
-              settings: { ...fresh.settings, ...cur.settings, ...(fresh.settings.unit == null ? { unit: null } : {}) },
+              // still holds the old kg/lbs value; and the water config above.
+              settings: mergedSettings,
               activeScheduleId: planPosSrc.activeScheduleId,
               cycleIndex: planPosSrc.cycleIndex,
               cycleStartDate: planPosSrc.cycleStartDate,
