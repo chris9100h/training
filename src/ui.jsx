@@ -184,9 +184,14 @@ const TAB_ICONS = {
       <path d="M3 12h3l2-5 3 10 2.5-7L18 12h3"/>
     </svg>
   ),
+  water: (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 3c3.5 4.2 6 8.1 6 11a6 6 0 1 1-12 0c0-2.9 2.5-6.8 6-11z"/>
+    </svg>
+  ),
 };
 
-function TabBar({ active, onChange, sidebar = false, currentUser = null, showCoaching = false, coachingBadge = null, showHealth = false }) {
+function TabBar({ active, routeName, onChange, sidebar = false, currentUser = null, showCoaching = false, coachingBadge = null, showHealth = false }) {
   const tabs = [
     { id: 'home', label: 'Train' },
     { id: 'plan', label: 'Plan' },
@@ -196,6 +201,21 @@ function TabBar({ active, onChange, sidebar = false, currentUser = null, showCoa
   ];
   const idx = tabs.findIndex(t => t.id === active);
   const [switchModal, setSwitchModal] = React.useState(false);
+  // Two quick taps on Health jump straight to the water tracker (parked
+  // under the Health slot, see tabActive in app.jsx). Tracked in a ref, not
+  // state, so detection never triggers a render of its own: the single-tap
+  // path stays exactly as fast as before, no wait-and-see delay added.
+  const lastHealthTapRef = React.useRef(0);
+  const handleTabClick = (id) => {
+    const now = Date.now();
+    if (id === 'health' && now - lastHealthTapRef.current < 400) {
+      lastHealthTapRef.current = 0;
+      onChange('water');
+      return;
+    }
+    lastHealthTapRef.current = id === 'health' ? now : 0;
+    onChange(id);
+  };
 
   if (sidebar) {
     const currentEmail = currentUser?.email || '';
@@ -233,8 +253,11 @@ function TabBar({ active, onChange, sidebar = false, currentUser = null, showCoa
             {tabs.map(t => {
               const on = t.id === active;
               const badge = t.id === 'coaching' ? coachingBadge : null;
+              const isWaterSlot = t.id === 'health' && routeName === 'water';
+              const iconKey = isWaterSlot ? 'water' : t.id;
+              const label = isWaterSlot ? 'Water' : t.label;
               return (
-                <button key={t.id} data-tour={`tab-${t.id}`} onClick={() => onChange(t.id)} style={{
+                <button key={t.id} data-tour={`tab-${t.id}`} onClick={() => handleTabClick(t.id)} style={{
                   display: 'flex',
                   flexDirection: 'column',
                   alignItems: 'center',
@@ -257,7 +280,7 @@ function TabBar({ active, onChange, sidebar = false, currentUser = null, showCoa
                   WebkitTapHighlightColor: 'transparent',
                 }}>
                   <div style={{ position: 'relative', transform: 'scale(1.4)', display: 'inline-flex', margin: '0 0 2px' }}>
-                    {TAB_ICONS[t.id]}
+                    {TAB_ICONS[iconKey]}
                     {badge?.live && (
                       <div style={{ position: 'absolute', top: -2, right: -2, width: 7, height: 7, borderRadius: '50%', background: 'var(--accent)', animation: 'pulseDot 1.5s ease-in-out infinite', border: '1.5px solid var(--bg)' }} />
                     )}
@@ -267,7 +290,7 @@ function TabBar({ active, onChange, sidebar = false, currentUser = null, showCoa
                       </div>
                     )}
                   </div>
-                  <span>{t.label}</span>
+                  <span>{label}</span>
                 </button>
               );
             })}
@@ -466,8 +489,11 @@ function TabBar({ active, onChange, sidebar = false, currentUser = null, showCoa
           {tabs.map(t => {
             const on = t.id === active;
             const badge = t.id === 'coaching' ? coachingBadge : null;
+            const isWaterSlot = t.id === 'health' && routeName === 'water';
+            const iconKey = isWaterSlot ? 'water' : t.id;
+            const label = isWaterSlot ? 'Water' : t.label;
             return (
-              <button key={t.id} data-tour={`tab-${t.id}`} onClick={() => onChange(t.id)} style={{
+              <button key={t.id} data-tour={`tab-${t.id}`} onClick={() => handleTabClick(t.id)} style={{
                 flex: 1, minWidth: 0, background: 'transparent', border: 'none', cursor: 'pointer',
                 padding: `${PAD_TOP}px 4px 2px`,
                 display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5,
@@ -494,7 +520,7 @@ function TabBar({ active, onChange, sidebar = false, currentUser = null, showCoa
                     ? 'color 0.12s ease 0.25s, transform 0.25s cubic-bezier(0.34,1.4,0.64,1)'
                     : 'color 0.15s, transform 0.25s cubic-bezier(0.34,1.4,0.64,1)',
                 }}>
-                  {React.cloneElement(TAB_ICONS[t.id], { width: ICON_SZ, height: ICON_SZ })}
+                  {React.cloneElement(TAB_ICONS[iconKey], { width: ICON_SZ, height: ICON_SZ })}
                   {badge?.live && (
                     <div style={{ position: 'absolute', top: 5, right: 4, width: 8, height: 8, borderRadius: '50%', background: on ? '#0a0805' : 'var(--accent)', animation: 'pulseDot 1.5s ease-in-out infinite', border: `1.5px solid ${on ? 'var(--accent)' : 'var(--bg)'}` }} />
                   )}
@@ -506,7 +532,7 @@ function TabBar({ active, onChange, sidebar = false, currentUser = null, showCoa
                 </div>
                 {/* -0.14em cancels the trailing letter-spacing after the last
                     glyph so the visible text is pixel-centred under the plate. */}
-                <span style={{ marginRight: '-0.14em' }}>{t.label}</span>
+                <span style={{ marginRight: '-0.14em' }}>{label}</span>
               </button>
             );
           })}

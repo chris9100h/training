@@ -1442,7 +1442,7 @@ function App() {
   // non-tab route (e.g. plan → schedule-new) flips between them on iPad.
   const layout = (isPad && showTab) ? (
     <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
-      <TabBar active={tabActive} onChange={(t) => go({ name: t })} sidebar currentUser={{ email: store?.user?.email || '', name: store?.user?.name || '' }} showCoaching={showCoaching} coachingBadge={coachingBadge} showHealth={showHealth} />
+      <TabBar active={tabActive} routeName={route.name} onChange={(t) => go({ name: t })} sidebar currentUser={{ email: store?.user?.email || '', name: store?.user?.name || '' }} showCoaching={showCoaching} coachingBadge={coachingBadge} showHealth={showHealth} />
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <ErrorBoundary key={route.name} onGoHome={() => go({ name: 'home' })}>
           {screen}
@@ -1454,7 +1454,7 @@ function App() {
       <ErrorBoundary key={route.name} onGoHome={() => go({ name: 'home' })}>
         {screen}
       </ErrorBoundary>
-      {showTab && <TabBar active={tabActive} onChange={(t) => go({ name: t })} showCoaching={showCoaching} coachingBadge={coachingBadge} showHealth={showHealth} />}
+      {showTab && <TabBar active={tabActive} routeName={route.name} onChange={(t) => go({ name: t })} showCoaching={showCoaching} coachingBadge={coachingBadge} showHealth={showHealth} />}
     </>
   );
 
