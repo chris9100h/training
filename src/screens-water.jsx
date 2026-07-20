@@ -353,7 +353,7 @@ function WaterScreen({ store, setStore, go, userId }) {
         </div>
       } />
 
-      <div style={{ padding: '14px 22px 90px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div style={{ padding: '14px 22px calc(env(safe-area-inset-bottom, 8px) + 24px)', display: 'flex', flexDirection: 'column', gap: 16 }}>
         {/* Hero */}
         <BracketFrame gold style={{ padding: 20 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 18 }}>
