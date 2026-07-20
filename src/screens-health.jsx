@@ -2915,7 +2915,7 @@ function HealthScreen({ store, setStore, go, userId }) {
         <div onClick={() => { setSelectedDate(today); setLogOpen(true); }} style={{
           margin: '0 16px 12px',
           padding: '10px 14px',
-          background: 'rgba(var(--accent-rgb), 0.08)',
+          background: 'rgba(var(--accent-rgb), 0.16)',
           border: `0.5px solid rgba(var(--accent-rgb), 0.3)`,
           borderRadius: 6,
           display: 'flex', alignItems: 'center', gap: 10,

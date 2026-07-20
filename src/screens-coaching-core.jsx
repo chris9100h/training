@@ -207,7 +207,7 @@ function CoachingUnreadBanner({ store, userId, onOpen }) {
       onClick={onOpen}
       style={{
         display: 'flex', alignItems: 'center', gap: 12,
-        background: `rgba(var(--accent-rgb), 0.08)`,
+        background: `rgba(var(--accent-rgb), 0.16)`,
         border: `0.5px solid rgba(var(--accent-rgb), 0.35)`,
         borderRadius: 6, padding: '10px 14px', cursor: 'pointer',
       }}
@@ -513,7 +513,7 @@ function ThreadList({ coachingId, userId, otherName, unreadNotes, setStore, canD
               </button>
             </div>
           ) : (
-            <button onClick={() => setCreating(true)} style={{ width: '100%', padding: '11px 0', borderRadius: 6, border: `0.5px solid rgba(var(--accent-rgb), 0.3)`, background: `rgba(var(--accent-rgb), 0.06)`, color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, letterSpacing: '0.04em', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+            <button onClick={() => setCreating(true)} style={{ width: '100%', padding: '11px 0', borderRadius: 6, border: `0.5px solid rgba(var(--accent-rgb), 0.3)`, background: `rgba(var(--accent-rgb), 0.13)`, color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, letterSpacing: '0.04em', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
               <i className="fa-solid fa-plus" style={{ fontSize: 11 }} />
               New Thread
             </button>
