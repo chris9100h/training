@@ -17,6 +17,17 @@
    Entry shape: { id: string, date: string (YYYY-MM-DD), title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.637',
+    date: '2026-07-20',
+    title: 'Notebook Mode: Meet Paper',
+    items: [
+      "📝 New theme: Paper. Light grid canvas, dark ink, zero cream, it's basically your old pen-and-paper log, just faster and it never runs out of pages.",
+      "🎨 Grab it under Settings → Appearance → Theme, right next to Dark, OLED and Light. Switch back anytime, no commitment issues here.",
+      "✏️ Your accent color quiets down to a soft pencil grey while you're on Paper, so nothing clashes with the grid, everything still reads like it was actually written down.",
+      "📸 Shows up in your session screenshots too, share a workout and it looks like a torn-out notebook page, not a random UI crop.",
+    ],
+  },
+  {
     id: 'v2.635',
     date: '2026-07-20',
     title: 'Meet The Water Tracker',
