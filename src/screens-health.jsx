@@ -1287,7 +1287,11 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
             would still land in a real <input> and let it be typed into and
             saved with no unlock confirmation ever shown. No input element at
             all is the only way that's actually impossible. */}
-        <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', opacity: waterLocked ? 0.45 : 1, pointerEvents: waterLocked ? 'none' : 'auto' }}>
+        {/* Locked: the row itself is clickable (its own tap target, not just the
+            hint line below), since none of its children are real inputs/buttons
+            while locked (plain divs only), a click on any of them just bubbles up
+            here, nothing to lose by letting the whole row respond. */}
+        <div onClick={waterLocked ? requestWaterUnlock : undefined} style={{ display: 'flex', gap: 8, alignItems: 'flex-end', opacity: waterLocked ? 0.45 : 1, cursor: waterLocked ? 'pointer' : 'default' }}>
           <div style={{ flex: 1 }}>
             <div style={labelStyle}>Water{UI.waterEntryUnit() ? ` (${UI.waterEntryUnit()})` : ''}</div>
             {waterLocked
@@ -1301,7 +1305,7 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
           ))}
         </div>
         {waterLocked && (
-          <button onClick={requestWaterUnlock} style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 5, background: 'none', border: 'none', padding: 0, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+          <button onClick={requestWaterUnlock} style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 5, background: 'none', border: 'none', padding: '4px 0', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
             <i className="fa-solid fa-lock" style={{ fontSize: 9, color: UI.inkGhost }} />
             <span style={{ fontSize: 10, fontFamily: UI.fontUi, color: UI.inkGhost }}>Managed by the Water Tracker, tap to override</span>
           </button>
