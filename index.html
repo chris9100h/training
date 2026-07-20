@@ -60,6 +60,11 @@
     --accent-light: #e5c97e;
     --accent-deep: #8b6f3d;
     --accent-rgb: 201,169,97;
+    /* Text/icon color for anything painted directly on a solid --accent fill
+       (badges, toggles, primary buttons). Near-black reads fine on every
+       accent color in the palette, all of which are mid-to-bright; only
+       paper's muted grey accent is dark enough to need a light ink instead. */
+    --accent-ink: #0a0805;
     --accent-faint: rgba(var(--accent-rgb),0.10);
     --accent-soft: rgba(var(--accent-rgb),0.30);
     --danger: #c87469;
@@ -468,6 +473,14 @@ window.applyAccentColor = function(key) {
   s.setProperty('--accent-light', ov ? ov.accentLight : c.light);
   s.setProperty('--accent-deep', ov ? ov.accentDeep : c.deep);
   s.setProperty('--accent-rgb', ov ? ov.accentRgb : c.rgb);
+  s.setProperty('--accent-ink', (ov && ov.accentInk) || '#0a0805');
+  // Always the user's real chosen color, never muted by a theme override.
+  // For the rare element that's deliberately dark/immersive regardless of
+  // theme (e.g. a full-screen rest-timer countdown on a fixed near-black
+  // backdrop), muting to paper's grey would make it low-contrast there for
+  // no reason: that backdrop was never theme-reactive in the first place.
+  s.setProperty('--accent-raw', c.hex);
+  s.setProperty('--accent-raw-rgb', c.rgb);
 };
 window.applyAccentColor(localStorage.getItem('logbook-accent-color') || 'gold');
 </script>
@@ -535,7 +548,10 @@ window.DARK_MODES = {
     // multiplier there reads as a wall of dark squares instead of a texture.
     bgTexture: 'repeating-linear-gradient(0deg, rgba(var(--knurl-rgb),0.16) 0px, rgba(var(--knurl-rgb),0.16) 1px, transparent 1px, transparent 22px), repeating-linear-gradient(90deg, rgba(var(--knurl-rgb),0.16) 0px, rgba(var(--knurl-rgb),0.16) 1px, transparent 1px, transparent 22px)',
     // Mutes the user's chosen accent color to pencil-grey (see applyAccentColor).
-    accent: '#4b5563', accentLight: '#6b7280', accentDeep: '#333c46', accentRgb: '75,85,99',
+    // accentInk pairs with it: near-black text/icons read poorly on this dark
+    // slate fill (unlike every other theme's bright/mid accent), so anything
+    // painted on top of --accent switches to a near-white ink here instead.
+    accent: '#4b5563', accentLight: '#6b7280', accentDeep: '#333c46', accentRgb: '75,85,99', accentInk: '#f5f5f5',
   },
 };
 window.applyDarkMode = function(key) {

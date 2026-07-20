@@ -114,7 +114,10 @@ function NavRow({ label, hint, onTap, first = false, accent = false }) {
   );
 }
 
-const accentBtn = { background: 'rgba(var(--accent-rgb),0.10)', border: '0.5px solid rgba(var(--accent-rgb),0.22)', color: 'var(--accent)', padding: '5px 14px', borderRadius: 6, cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', WebkitTapHighlightColor: 'transparent', flexShrink: 0 };
+// Alpha bumped from the original 0.10/0.22 — plenty visible against a vivid
+// accent color, but on paper's muted grey accent those read as barely-there
+// against bg-raised. Higher alpha keeps a normal accent legible too.
+const accentBtn = { background: 'rgba(var(--accent-rgb),0.16)', border: '1px solid rgba(var(--accent-rgb),0.4)', color: 'var(--accent)', padding: '5px 14px', borderRadius: 6, cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', WebkitTapHighlightColor: 'transparent', flexShrink: 0 };
 
 const isIosDevice = /iPhone|iPad|iPod/.test(navigator.userAgent) ||
   (/Mac/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
@@ -313,7 +316,7 @@ function ChangelogSheet({ open, onClose }) {
 
   const rowBtn = { width: '100%', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '12px 0', WebkitTapHighlightColor: 'transparent' };
   const chevron = () => <svg width="5" height="9" viewBox="0 0 6 10" fill="none" stroke={UI.inkFaint} strokeWidth="1.3" strokeLinecap="round"><path d="M1 1l4 4-4 4" /></svg>;
-  const badge = (n) => <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--accent)', background: 'rgba(var(--accent-rgb),0.12)', borderRadius: 999, padding: '1px 8px', fontFamily: UI.fontUi }}>{n}</span>;
+  const badge = (n) => <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--accent)', background: 'rgba(var(--accent-rgb),0.16)', border: `1px solid rgba(var(--accent-rgb),0.4)`, borderRadius: 999, padding: '1px 8px', fontFamily: UI.fontUi }}>{n}</span>;
   const titleRow = (entry) => (
     <button onClick={() => setSelected(entry)} style={rowBtn}>
       <span style={{ fontSize: 15, fontWeight: 500, color: UI.ink, fontFamily: UI.fontUi, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{entry.title}</span>
@@ -1637,7 +1640,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           <Btn onClick={() => setSupportSheet(true)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
             Support Center
             {store.supportUnread > 0 && (
-              <span style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%', background: '#0a0805', flexShrink: 0, animation: 'pulseDot 1.5s ease-in-out infinite' }} />
+              <span style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%', background: 'var(--accent-ink)', flexShrink: 0, animation: 'pulseDot 1.5s ease-in-out infinite' }} />
             )}
           </Btn>
         )}
@@ -1747,7 +1750,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                   <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
                     <input value={newGrantEmail} onChange={e => setNewGrantEmail(e.target.value)} onKeyDown={e => e.key === 'Enter' && addGrant()} placeholder="email@example.com"
                       style={{ flex: 1, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '7px 10px', color: UI.ink, fontFamily: UI.fontUi, fontSize: 13, outline: 'none' }} />
-                    <button onClick={addGrant} disabled={!newGrantEmail.includes('@')} style={{ padding: '7px 14px', borderRadius: 4, border: 'none', cursor: 'pointer', background: newGrantEmail.includes('@') ? UI.gold : UI.bgInset, color: newGrantEmail.includes('@') ? '#0a0805' : UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600 }}>Add</button>
+                    <button onClick={addGrant} disabled={!newGrantEmail.includes('@')} style={{ padding: '7px 14px', borderRadius: 4, border: 'none', cursor: 'pointer', background: newGrantEmail.includes('@') ? UI.gold : UI.bgInset, color: newGrantEmail.includes('@') ? 'var(--accent-ink)' : UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600 }}>Add</button>
                   </div>
                 </div>
               )}
@@ -1814,7 +1817,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                 <button key={u} onClick={() => setStore(s => ({ ...s, settings: { ...s.settings, glucoseUnit: u } }))}
                   style={{ padding: '5px 12px', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600,
                     background: (store.settings?.glucoseUnit ?? 'mmol') === u ? 'var(--accent)' : 'transparent',
-                    color: (store.settings?.glucoseUnit ?? 'mmol') === u ? '#0a0805' : UI.inkSoft,
+                    color: (store.settings?.glucoseUnit ?? 'mmol') === u ? 'var(--accent-ink)' : UI.inkSoft,
                     border: 'none', cursor: 'pointer', transition: 'background 0.15s' }}>
                   {u === 'mmol' ? 'mmol/L' : 'mg/dL'}
                 </button>
@@ -1839,7 +1842,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                 <button key={u} onClick={() => setStore(s => ({ ...s, settings: { ...s.settings, tempUnit: u } }))}
                   style={{ padding: '5px 12px', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600,
                     background: LB.defaultTempUnit(store.settings) === u ? 'var(--accent)' : 'transparent',
-                    color: LB.defaultTempUnit(store.settings) === u ? '#0a0805' : UI.inkSoft,
+                    color: LB.defaultTempUnit(store.settings) === u ? 'var(--accent-ink)' : UI.inkSoft,
                     border: 'none', cursor: 'pointer', transition: 'background 0.15s' }}>
                   {u === 'c' ? '°C' : '°F'}
                 </button>
@@ -2287,7 +2290,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                   <button key={u} onClick={() => setImportSourceUnit(u)} style={{
                     padding: '3px 10px', borderRadius: 4, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600,
                     background: importSourceUnit === u ? 'var(--accent)' : UI.bgInset,
-                    color: importSourceUnit === u ? '#0a0805' : UI.inkSoft,
+                    color: importSourceUnit === u ? 'var(--accent-ink)' : UI.inkSoft,
                   }}>{u.toUpperCase()}</button>
                 ))}
               </div>
@@ -2441,7 +2444,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             <button key={u} onClick={() => setPlateInvTab(i)} style={{
               flex: 1, padding: '8px 0', borderRadius: 4, border: 'none', cursor: 'pointer',
               background: plateInvTab === i ? 'var(--accent)' : 'transparent',
-              color: plateInvTab === i ? '#0a0805' : UI.inkFaint,
+              color: plateInvTab === i ? 'var(--accent-ink)' : UI.inkFaint,
               fontFamily: UI.fontUi, fontSize: 12, letterSpacing: '0.06em',
               fontWeight: plateInvTab === i ? 600 : 400, transition: 'all 0.15s',
             }}>{u.toUpperCase()}</button>
@@ -3458,7 +3461,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           {reminderEnabled && (
             <Row label="Notify at">
               <input type="time" value={reminderTime} onChange={e => updateReminderTime(e.target.value)}
-                style={{ background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '5px 10px', color: UI.ink, fontFamily: UI.fontUi, fontSize: 13, outline: 'none', colorScheme: 'dark' }} />
+                style={{ background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '5px 10px', color: UI.ink, fontFamily: UI.fontUi, fontSize: 13, outline: 'none', colorScheme: ['light', 'paper'].includes(store.settings?.darkMode ?? 'dark') ? 'light' : 'dark' }} />
             </Row>
           )}
           {reminderEnabled && store.nextReminderAt && (() => {

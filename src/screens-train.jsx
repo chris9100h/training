@@ -447,7 +447,7 @@ function PlateCalcSheet({ open, onClose, initialWeight, availablePlates }) {
           <button key={i} onClick={() => setTab(i)} style={{
             flex: 1, padding: '8px 0', borderRadius: 4, border: 'none', cursor: 'pointer',
             background: tab === i ? 'var(--accent)' : 'transparent',
-            color: tab === i ? '#0a0805' : UI.inkFaint,
+            color: tab === i ? 'var(--accent-ink)' : UI.inkFaint,
             fontFamily: UI.fontUi, fontSize: 12, letterSpacing: '0.06em',
             fontWeight: tab === i ? 600 : 400,
             boxShadow: 'none',
@@ -529,7 +529,7 @@ function PlateCalcSheet({ open, onClose, initialWeight, availablePlates }) {
             padding: '3px 9px', borderRadius: 6, cursor: 'pointer',
             background: 'linear-gradient(180deg, var(--accent-light), var(--accent))',
             border: `0.5px solid var(--accent-deep)`,
-            color: '#0a0805', fontFamily: UI.fontNum, fontSize: 10, letterSpacing: '0.06em',
+            color: 'var(--accent-ink)', fontFamily: UI.fontNum, fontSize: 10, letterSpacing: '0.06em',
             fontWeight: 700, boxShadow: '0 2px 8px rgba(var(--accent-rgb),0.45)',
           }}>
             +{correctionDelta} {UI.unit()}
@@ -605,7 +605,7 @@ function CustomKeyboard({ visible, field, onType, onBackspace, onAdjust, onConfi
             ...base, gridColumn: 4, gridRow: '1 / span 4', fontSize: 20, fontWeight: 700,
             ...(confirmDisabled
               ? { background: 'var(--bg-inset)', color: 'var(--ink-faint)', borderColor: 'var(--hair)', cursor: 'default' }
-              : { background: 'linear-gradient(180deg, var(--accent-light), var(--accent))', color: '#0a0805', borderColor: 'var(--accent-deep)' }),
+              : { background: 'linear-gradient(180deg, var(--accent-light), var(--accent))', color: 'var(--accent-ink)', borderColor: 'var(--accent-deep)' }),
           }}
         >✓</button>
 
@@ -717,8 +717,12 @@ function RestGauge({ restStart, restDef, variant }) {
     </>);
   }
   // warmup overlay
+  // A blurred glow reads as light bleeding outward on a dark backdrop, but as
+  // a dark smudge on paper's light one — read live rather than threading a
+  // theme prop through every RestGauge caller, same trick SvgKnurl uses.
+  const isPaperGauge = getComputedStyle(document.documentElement).getPropertyValue('--bg-texture').trim() !== 'none';
   return (<>
-    <div className="num" style={{ fontSize: 88, fontWeight: 300, letterSpacing: '-0.03em', lineHeight: 1, color: gaugeColor, textShadow: overrun ? '0 0 40px rgba(var(--danger-rgb),0.55), 0 0 80px rgba(var(--danger-rgb),0.25)' : '0 0 40px rgba(var(--accent-rgb),0.55), 0 0 80px rgba(var(--accent-rgb),0.25)', animation: 'timerPulse 1.6s ease-in-out infinite' }}>{mmss}</div>
+    <div className="num" style={{ fontSize: 88, fontWeight: 300, letterSpacing: '-0.03em', lineHeight: 1, color: gaugeColor, textShadow: isPaperGauge ? 'none' : (overrun ? '0 0 40px rgba(var(--danger-rgb),0.55), 0 0 80px rgba(var(--danger-rgb),0.25)' : '0 0 40px rgba(var(--accent-rgb),0.55), 0 0 80px rgba(var(--accent-rgb),0.25)'), animation: 'timerPulse 1.6s ease-in-out infinite' }}>{mmss}</div>
     <div style={{ height: 2, background: UI.hair, borderRadius: 4, overflow: 'hidden', marginTop: 22, width: 180 }}>
       <div style={{ height: '100%', width: `${pct}%`, background: gaugeColor, transition: 'width 0.25s linear' }} />
     </div>
@@ -735,9 +739,13 @@ function TimeCountdown({ startedAt, total }) {
   const pct = total > 0 ? Math.min(100, (el / total) * 100) : 100;
   return (
     <div style={{ textAlign: 'center' }}>
-      <div className="num" style={{ fontSize: 92, fontWeight: 300, letterSpacing: '-0.03em', lineHeight: 1, color: UI.gold, textShadow: '0 0 40px rgba(var(--accent-rgb),0.55), 0 0 80px rgba(var(--accent-rgb),0.25)', animation: remaining <= 3 ? 'timerPulse 0.7s ease-in-out infinite' : 'none' }}>{LB.fmtDuration(Math.ceil(remaining))}</div>
+      {/* This overlay's backdrop (see the fixed rgba(8,6,3,0.92) scrim it sits
+          on) is deliberately dark in every theme, so it needs the user's raw
+          accent color, not paper's muted grey which would go low-contrast
+          against that near-black backdrop for no reason. */}
+      <div className="num" style={{ fontSize: 92, fontWeight: 300, letterSpacing: '-0.03em', lineHeight: 1, color: 'var(--accent-raw)', textShadow: '0 0 40px rgba(var(--accent-raw-rgb),0.55), 0 0 80px rgba(var(--accent-raw-rgb),0.25)', animation: remaining <= 3 ? 'timerPulse 0.7s ease-in-out infinite' : 'none' }}>{LB.fmtDuration(Math.ceil(remaining))}</div>
       <div style={{ height: 3, background: UI.hair, borderRadius: 4, overflow: 'hidden', marginTop: 24, width: 220, marginLeft: 'auto', marginRight: 'auto' }}>
-        <div style={{ height: '100%', width: `${100 - pct}%`, background: UI.gold, transition: 'width 0.25s linear' }} />
+        <div style={{ height: '100%', width: `${100 - pct}%`, background: 'var(--accent-raw)', transition: 'width 0.25s linear' }} />
       </div>
     </div>
   );
@@ -6576,7 +6584,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   <button onClick={() => startCountdown(bgSetIdx, heroSet.timeSec)} disabled={!(heroSet.timeSec > 0)} style={{
                     width: '80%', minHeight: 46, borderRadius: 6, border: `1px solid var(--accent-deep)`,
                     background: `linear-gradient(180deg, var(--accent-light), var(--accent))`,
-                    color: '#0a0805', cursor: 'pointer',
+                    color: 'var(--accent-ink)', cursor: 'pointer',
                     fontFamily: UI.fontUi, fontWeight: 700, fontSize: 14, letterSpacing: '0.16em',
                     boxShadow: '0 8px 30px rgba(var(--accent-rgb),0.30)', WebkitTapHighlightColor: 'transparent',
                   }}>GO</button>
@@ -6766,7 +6774,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                         style={{
                           minWidth: 54, height: 42, borderRadius: 6, border: `1px solid var(--accent-deep)`,
                           background: (s.done || s.skipped) ? 'transparent' : `linear-gradient(180deg, var(--accent-light), var(--accent))`,
-                          color: (s.done || s.skipped) ? UI.inkFaint : '#0a0805', cursor: 'pointer',
+                          color: (s.done || s.skipped) ? UI.inkFaint : 'var(--accent-ink)', cursor: 'pointer',
                           fontFamily: UI.fontUi, fontWeight: 700, fontSize: 12, letterSpacing: '0.14em',
                           WebkitTapHighlightColor: 'transparent', justifySelf: 'center',
                           opacity: (s.done || s.skipped) ? 0.35 : 1,
@@ -6814,7 +6822,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                           background: s.done ? UI.gold : 'transparent',
                           display: 'flex', alignItems: 'center', justifyContent: 'center',
                           fontSize: s.skipped ? 12 : 14, fontWeight: 700,
-                          color: s.skipped ? UI.inkFaint : s.done ? '#0a0805' : 'transparent',
+                          color: s.skipped ? UI.inkFaint : s.done ? 'var(--accent-ink)' : 'transparent',
                           opacity: !s.done && !s.skipped && !isNoWeightReps && ((!isBodyweight && s.kg == null) || (isUnilateral ? (s.repsL == null || s.repsR == null) : s.reps == null)) ? 0.35 : 1,
                           flexShrink: 0, justifySelf: 'center',
                           WebkitTapHighlightColor: 'transparent',
@@ -8419,7 +8427,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                       width: '100%', minHeight: 46,
                       background: `linear-gradient(180deg, var(--accent-light), var(--accent))`,
                       border: `1px solid var(--accent-deep)`,
-                      color: '#0a0805', borderRadius: 6,
+                      color: 'var(--accent-ink)', borderRadius: 6,
                       fontFamily: UI.fontUi, fontWeight: 700, fontSize: 13, letterSpacing: '0.14em',
                       cursor: 'pointer', boxShadow: '0 8px 30px rgba(var(--accent-rgb),0.30)',
                       WebkitTapHighlightColor: 'transparent',
@@ -8487,7 +8495,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             padding: '18px 56px',
             background: `linear-gradient(180deg, var(--accent-light), var(--accent))`,
             border: `1px solid var(--accent-deep)`,
-            color: '#0a0805', borderRadius: 6,
+            color: 'var(--accent-ink)', borderRadius: 6,
             fontFamily: UI.fontUi, fontWeight: 700, fontSize: 13, letterSpacing: '0.14em',
             cursor: 'pointer',
             boxShadow: '0 8px 40px rgba(var(--accent-rgb),0.40)',

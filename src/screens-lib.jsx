@@ -384,7 +384,7 @@ function LibraryScreen({ store, setStore, go, userId }) {
                   fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase',
                   display: 'flex', alignItems: 'center', gap: 5,
                 }}>
-                  Filter{activeCount > 0 && <span style={{ background: UI.gold, color: '#0a0805', borderRadius: '50%', width: 14, height: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, fontWeight: 700 }}>{activeCount}</span>}
+                  Filter{activeCount > 0 && <span style={{ background: UI.gold, color: 'var(--accent-ink)', borderRadius: '50%', width: 14, height: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, fontWeight: 700 }}>{activeCount}</span>}
                 </button>
               </div>
             </>
@@ -2487,7 +2487,7 @@ function HistoryScreen({ store, setStore, go, userId, initialTab }) {
           fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase',
           display: 'flex', alignItems: 'center', gap: 5, WebkitTapHighlightColor: 'transparent',
         }}>
-          Filter{filterCount > 0 && <span style={{ background: UI.gold, color: '#0a0805', borderRadius: '50%', width: 14, height: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, fontWeight: 700 }}>{filterCount}</span>}
+          Filter{filterCount > 0 && <span style={{ background: UI.gold, color: 'var(--accent-ink)', borderRadius: '50%', width: 14, height: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, fontWeight: 700 }}>{filterCount}</span>}
         </button>
       ) : null} />
       <SubTabBar
@@ -2690,7 +2690,7 @@ function HistoryScreen({ store, setStore, go, userId, initialTab }) {
           border: `1px solid ${active ? UI.gold : UI.hairStrong}`,
           borderRadius: 4, color: active ? UI.gold : UI.ink,
           fontFamily: UI.fontUi, fontSize: 13, padding: '10px 36px 10px 12px',
-          cursor: 'pointer', outline: 'none', colorScheme: 'dark',
+          cursor: 'pointer', outline: 'none', colorScheme: ['light', 'paper'].includes(store.settings?.darkMode ?? 'dark') ? 'light' : 'dark',
         });
         const selWrap = { position: 'relative' };
         const selChevron = { position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', fontSize: 10, color: UI.inkFaint };
@@ -2757,16 +2757,30 @@ function HistoryScreen({ store, setStore, go, userId, initialTab }) {
 }
 
 // ─── FEEL ────────────────────────────────────────────────────────────
+// color: tuned for a dark canvas. colorLight: same hue, deep enough to stay
+// readable on light/paper's near-white surfaces (the bright set drops well
+// under WCAG AA there).
 const FEEL_LEVELS = [
-  { key: 'easy',      label: 'EASY',      color: '#38bdf8' },
-  { key: 'good',      label: 'GOOD',      color: '#4ade80' },
-  { key: 'hard',      label: 'HARD',      color: '#facc15' },
-  { key: 'very_hard', label: 'VERY HARD', color: '#f97316' },
-  { key: 'max',       label: 'MAX',       color: '#ef4444' },
+  { key: 'easy',      label: 'EASY',      color: '#38bdf8', colorLight: '#0369a1' },
+  { key: 'good',      label: 'GOOD',      color: '#4ade80', colorLight: '#15803d' },
+  { key: 'hard',      label: 'HARD',      color: '#facc15', colorLight: '#a16207' },
+  { key: 'very_hard', label: 'VERY HARD', color: '#f97316', colorLight: '#c2410c' },
+  { key: 'max',       label: 'MAX',       color: '#ef4444', colorLight: '#b91c1c' },
 ];
 
+// Generic light-canvas detector (works for 'light', 'paper', or any future
+// light theme) — perceived luminance of the live --bg-rgb, no theme-name
+// checks to keep in sync.
+function isLightCanvasActive() {
+  const parts = (getComputedStyle(document.documentElement).getPropertyValue('--bg-rgb') || '').trim().split(',').map(Number);
+  if (parts.length !== 3 || parts.some(isNaN)) return false;
+  return (0.2126 * parts[0] + 0.7152 * parts[1] + 0.0722 * parts[2]) > 140;
+}
+function feelColorOf(f) {
+  return f ? (isLightCanvasActive() ? f.colorLight : f.color) : UI.inkFaint;
+}
 function feelColor(key) {
-  return FEEL_LEVELS.find(f => f.key === key)?.color ?? UI.inkFaint;
+  return feelColorOf(FEEL_LEVELS.find(f => f.key === key));
 }
 function feelLabel(key) {
   return FEEL_LEVELS.find(f => f.key === key)?.label ?? null;
@@ -2785,14 +2799,15 @@ function FeelSelector({ value, onChange }) {
     <div style={{ display: 'flex', gap: 6 }}>
       {FEEL_LEVELS.map(f => {
         const active = value === f.key;
+        const fc = feelColorOf(f);
         return (
           <button key={f.key} onClick={() => onChange(active ? null : f.key)}
             style={{
               flex: 1, padding: '9px 2px', borderRadius: 4, cursor: 'pointer',
               display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5,
-              border: `1px solid ${active ? f.color : UI.hairStrong}`,
-              background: active ? `${f.color}22` : 'transparent',
-              color: active ? f.color : UI.inkSoft,
+              border: `1px solid ${active ? fc : UI.hairStrong}`,
+              background: active ? `${fc}22` : 'transparent',
+              color: active ? fc : UI.inkSoft,
               fontFamily: UI.fontUi, fontSize: 9, fontWeight: active ? 600 : 400,
               letterSpacing: '0.07em', WebkitTapHighlightColor: 'transparent',
             }}>

@@ -602,8 +602,10 @@ function CardioPROverlay({ pr, onDone }) {
       display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6,
     }}>
       <div style={{ position: 'absolute', inset: 0, animation: 'improvedBorderPulse 0.7s ease-in-out infinite' }} />
-      <span style={{ fontFamily: UI.fontDisplay, fontSize: 72, color: UI.gold, fontWeight: 900, lineHeight: 1, textShadow: '0 0 30px rgba(var(--accent-rgb),1), 0 0 70px rgba(var(--accent-rgb),0.6)' }}>{isBest ? '★' : '↑'}</span>
-      <span style={{ fontFamily: UI.fontUi, fontSize: 28, color: UI.gold, fontWeight: 900, letterSpacing: '0.2em', textShadow: '0 0 15px rgba(var(--accent-rgb),1), 0 0 40px rgba(var(--accent-rgb),0.8)' }}>{isBest ? 'NEW BEST' : 'IMPROVEMENT'}</span>
+      {/* Glow reads as light bleeding outward on the usual dark bg-body, but as
+          a dark smudge on paper's light one, so skip it there. */}
+      <span style={{ fontFamily: UI.fontDisplay, fontSize: 72, color: UI.gold, fontWeight: 900, lineHeight: 1, textShadow: isLightCanvasActive() ? 'none' : '0 0 30px rgba(var(--accent-rgb),1), 0 0 70px rgba(var(--accent-rgb),0.6)' }}>{isBest ? '★' : '↑'}</span>
+      <span style={{ fontFamily: UI.fontUi, fontSize: 28, color: UI.gold, fontWeight: 900, letterSpacing: '0.2em', textShadow: isLightCanvasActive() ? 'none' : '0 0 15px rgba(var(--accent-rgb),1), 0 0 40px rgba(var(--accent-rgb),0.8)' }}>{isBest ? 'NEW BEST' : 'IMPROVEMENT'}</span>
       {pr.type && <span style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkSoft, fontWeight: 700, letterSpacing: '0.28em', textTransform: 'uppercase' }}>{pr.type}</span>}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 20, minWidth: 220 }}>
         {pr.items.map(it => {
@@ -721,7 +723,7 @@ function CardioQuickLogSheet({ open, onClose, store, setStore, userId, editLog, 
       <div style={{ marginBottom: 14 }}>
         <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.07em' }}>Date</div>
         <div style={{ display: 'flex' }}>
-          <input type="date" value={form.date} max={todayStr} onChange={e => set('date', e.target.value)} style={{ ...inputStyle, flex: 1, minWidth: 0, colorScheme: 'dark' }} />
+          <input type="date" value={form.date} max={todayStr} onChange={e => set('date', e.target.value)} style={{ ...inputStyle, flex: 1, minWidth: 0, colorScheme: ['light', 'paper'].includes(store.settings?.darkMode ?? 'dark') ? 'light' : 'dark' }} />
         </div>
       </div>
 
@@ -2841,7 +2843,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
             <button onClick={() => go({ name: 'train', sessionId: store.inProgress })} style={{
               flexShrink: 0, padding: '6px 14px', borderRadius: 4,
               background: UI.gold, border: 'none', cursor: 'pointer',
-              fontSize: 12, fontWeight: 600, fontFamily: UI.fontUi, color: '#0a0805',
+              fontSize: 12, fontWeight: 600, fontFamily: UI.fontUi, color: 'var(--accent-ink)',
               letterSpacing: '0.08em',
             }}>Continue →</button>
           </div>
@@ -3235,8 +3237,8 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                       display: 'flex', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10,
                       WebkitTapHighlightColor: 'transparent',
                     }}>
-                      <i className="fa-solid fa-dumbbell" style={{ fontSize: 13, color: 'rgba(10,8,5,0.55)' }} />
-                      <span style={{ color: 'rgba(10,8,5,0.75)', letterSpacing: '0.18em', fontWeight: 700, fontSize: 13, fontFamily: UI.fontUi }}>
+                      <i className="fa-solid fa-dumbbell" style={{ fontSize: 13, color: 'var(--accent-ink)', opacity: 0.55 }} />
+                      <span style={{ color: 'var(--accent-ink)', opacity: 0.75, letterSpacing: '0.18em', fontWeight: 700, fontSize: 13, fontFamily: UI.fontUi }}>
                         {isFlex && !isViewingToday ? 'CATCH UP' : (isFlex || isViewingToday || isFutureSlot ? 'START WORKOUT' : 'LOG SESSION')}
                       </span>
                     </button>

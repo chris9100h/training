@@ -38,7 +38,7 @@ function CoachingBannerGroup({ store, setStore, userId, go }) {
       <i className="fa-solid fa-headset" style={{ color: 'var(--accent)', fontSize: 14 }} />
       <span style={{ flex: 1, textAlign: 'left', fontSize: 13, color: UI.ink }}>{label}</span>
       <span style={{
-        background: 'var(--accent)', color: '#0a0805', borderRadius: 999,
+        background: 'var(--accent)', color: 'var(--accent-ink)', borderRadius: 999,
         fontSize: 11, fontWeight: 700, minWidth: 18, height: 18,
         display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px',
       }}>{count}</span>
@@ -264,7 +264,7 @@ function CoachingTabCoachView({ store, setStore, userId, go, hideTopBar = false 
           <button
             onClick={handleInvite}
             disabled={inviting || !inviteEmail.trim()}
-            style={{ width: '100%', padding: '13px', borderRadius: 6, border: 'none', background: 'var(--accent)', color: '#0a0805', fontFamily: UI.fontUi, fontSize: 14, fontWeight: 700, cursor: inviting || !inviteEmail.trim() ? 'not-allowed' : 'pointer', opacity: inviting || !inviteEmail.trim() ? 0.5 : 1 }}
+            style={{ width: '100%', padding: '13px', borderRadius: 6, border: 'none', background: 'var(--accent)', color: 'var(--accent-ink)', fontFamily: UI.fontUi, fontSize: 14, fontWeight: 700, cursor: inviting || !inviteEmail.trim() ? 'not-allowed' : 'pointer', opacity: inviting || !inviteEmail.trim() ? 0.5 : 1 }}
           >
             {inviting ? 'Sending…' : 'Send Invite'}
           </button>
@@ -431,7 +431,7 @@ function CoachingTabClientCard({ client, inProgress, statusMode, unreadCount, ch
       )}
       {!isPending && unreadCount > 0 && (
         <div style={{ minWidth: 20, height: 20, borderRadius: '50%', background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-          <span style={{ fontSize: 10, fontFamily: UI.fontUi, fontWeight: 700, color: '#0a0805' }}>{unreadCount > 9 ? '9+' : unreadCount}</span>
+          <span style={{ fontSize: 10, fontFamily: UI.fontUi, fontWeight: 700, color: 'var(--accent-ink)' }}>{unreadCount > 9 ? '9+' : unreadCount}</span>
         </div>
       )}
       {!isPending && <ChevronRight />}
@@ -464,7 +464,7 @@ function MarkerRow({ label, value, onChange, readOnly }) {
             style={{
               flex: 1, padding: '6px 0', borderRadius: 4, border: 'none', cursor: readOnly ? 'default' : 'pointer',
               background: value === n ? 'var(--accent)' : value != null && n <= value ? `rgba(var(--accent-rgb),0.18)` : UI.bgInset,
-              color: value === n ? '#0a0805' : n <= 3 ? 'var(--accent)' : n <= 6 ? UI.inkSoft : UI.inkFaint,
+              color: value === n ? 'var(--accent-ink)' : n <= 3 ? 'var(--accent)' : n <= 6 ? UI.inkSoft : UI.inkFaint,
               fontSize: 10, fontFamily: UI.fontUi, fontWeight: value === n ? 700 : 400,
               transition: 'background 0.1s',
             }}
@@ -996,7 +996,7 @@ function FieldWidget({ field, value, onChange, distUnit, setDistUnit, inputStyle
     const stepLabel = field.hint ? `${lbl} (${field.hint})` : lbl;
     const dir = field.direction;
     const btnColor = (n) => {
-      if (value === n) return '#0a0805';
+      if (value === n) return 'var(--accent-ink)';
       if (dir === 'lower_better') return n <= min + Math.floor((max - min) * 0.3) ? 'var(--accent)' : n >= min + Math.ceil((max - min) * 0.7) ? 'rgba(var(--danger-rgb),0.7)' : UI.inkSoft;
       if (dir === 'higher_better') return n >= min + Math.ceil((max - min) * 0.7) ? 'var(--accent)' : n <= min + Math.floor((max - min) * 0.3) ? 'rgba(var(--danger-rgb),0.7)' : UI.inkSoft;
       return n <= min + Math.floor((max - min) * 0.3) ? 'var(--accent)' : n <= min + Math.floor((max - min) * 0.6) ? UI.inkSoft : UI.inkFaint;
@@ -1457,7 +1457,7 @@ function CheckInRequestModal({ coaching }) {
           onClick={handleOk}
           style={{
             width: '100%', padding: 14, background: 'var(--accent)', border: 'none',
-            borderRadius: 6, fontSize: 15, fontWeight: 700, color: '#0a0805',
+            borderRadius: 6, fontSize: 15, fontWeight: 700, color: 'var(--accent-ink)',
             fontFamily: UI.fontUi, cursor: 'pointer', letterSpacing: '0.05em',
           }}
         >

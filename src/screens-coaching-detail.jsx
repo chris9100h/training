@@ -860,7 +860,7 @@ function CheckInSchemaBuilder({ coachingId, initial, coachDefault, onSave, onSav
           Cancel
         </button>
         <button onClick={submitTemplateName} disabled={!templateNameDraft.trim() || templateCapReached}
-          style={{ flex: 1, background: 'var(--accent)', border: 'none', borderRadius: 6, padding: '11px', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 700, color: '#0a0805', cursor: 'pointer', opacity: (templateNameDraft.trim() && !templateCapReached) ? 1 : 0.5 }}>
+          style={{ flex: 1, background: 'var(--accent)', border: 'none', borderRadius: 6, padding: '11px', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 700, color: 'var(--accent-ink)', cursor: 'pointer', opacity: (templateNameDraft.trim() && !templateCapReached) ? 1 : 0.5 }}>
           Save
         </button>
       </div>
@@ -918,7 +918,7 @@ function CheckInSchemaBuilder({ coachingId, initial, coachDefault, onSave, onSav
   );
   const doneBtn = (onClick, disabled) => (
     <button onClick={onClick} disabled={disabled}
-      style={{ background: 'var(--accent)', border: 'none', borderRadius: 6, padding: '7px 16px', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, color: '#0a0805', cursor: 'pointer', opacity: disabled ? 0.4 : 1 }}>
+      style={{ background: 'var(--accent)', border: 'none', borderRadius: 6, padding: '7px 16px', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, color: 'var(--accent-ink)', cursor: 'pointer', opacity: disabled ? 0.4 : 1 }}>
       Done
     </button>
   );
@@ -1110,7 +1110,7 @@ function CheckInSchemaBuilder({ coachingId, initial, coachDefault, onSave, onSav
                   {renderHelpBtn('options')}
                 </div>
                 <button onClick={() => set('options', [...fd.options, { value: '', label: '' }])}
-                  style={{ background: 'var(--accent)', border: 'none', borderRadius: 4, padding: '4px 10px', fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, color: '#0a0805', cursor: 'pointer' }}>
+                  style={{ background: 'var(--accent)', border: 'none', borderRadius: 4, padding: '4px 10px', fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, color: 'var(--accent-ink)', cursor: 'pointer' }}>
                   + ADD
                 </button>
               </div>
@@ -1345,7 +1345,7 @@ function CheckInSchemaBuilder({ coachingId, initial, coachDefault, onSave, onSav
               <>
                 <div style={{ fontSize: 12, fontWeight: 700, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 2 }}>Apply changes to</div>
                 <button onClick={() => setAllClientsConfirm(true)}
-                  style={{ background: 'var(--accent)', border: 'none', borderRadius: 6, padding: '13px 16px', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 700, color: '#0a0805', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left', width: '100%' }}>
+                  style={{ background: 'var(--accent)', border: 'none', borderRadius: 6, padding: '13px 16px', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 700, color: 'var(--accent-ink)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left', width: '100%' }}>
                   <i className="fa-solid fa-users" style={{ fontSize: 14, flexShrink: 0 }} />
                   <span style={{ flex: 1 }}>All clients</span>
                   <span style={{ fontSize: 11, fontWeight: 400, opacity: 0.75 }}>New default for everyone</span>
@@ -1406,7 +1406,7 @@ function CheckInSchemaBuilder({ coachingId, initial, coachDefault, onSave, onSav
           Reset
         </button>
         <button onClick={() => onSaveForAll ? setSavePicker(true) : handleSave()} disabled={saving}
-          style={{ background: 'var(--accent)', border: 'none', borderRadius: 6, padding: '7px 16px', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, color: '#0a0805', cursor: 'pointer', opacity: saving ? 0.6 : 1 }}>
+          style={{ background: 'var(--accent)', border: 'none', borderRadius: 6, padding: '7px 16px', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, color: 'var(--accent-ink)', cursor: 'pointer', opacity: saving ? 0.6 : 1 }}>
           {saving ? 'Saving…' : 'Save'}
         </button>
       </div>

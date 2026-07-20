@@ -896,7 +896,7 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
             <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>DUE DATE</div>
             <div style={{ width: '100%', overflow: 'hidden', borderRadius: 4 }}>
               <input type="date" value={goalDue} min={LB.todayISO()} onChange={e => setGoalDue(e.target.value)}
-                style={{ ...inputStyle, colorScheme: 'dark' }} />
+                style={{ ...inputStyle, colorScheme: ['light', 'paper'].includes(store.settings?.darkMode ?? 'dark') ? 'light' : 'dark' }} />
             </div>
           </div>
 

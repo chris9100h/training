@@ -104,7 +104,7 @@ function AutoCloseBanner({ notify, onDismiss }) {
           borderRadius: 6, border: 'none', cursor: 'pointer',
           background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)',
           boxShadow: '0 8px 24px rgba(var(--accent-rgb),0.4)',
-          color: '#0a0805', fontFamily: UI.fontUi, fontSize: 15, fontWeight: 700,
+          color: 'var(--accent-ink)', fontFamily: UI.fontUi, fontSize: 15, fontWeight: 700,
           letterSpacing: '0.06em', WebkitTapHighlightColor: 'transparent',
         }}>
           GOT IT
@@ -155,7 +155,7 @@ function UpdateBanner({ onUpdate }) {
           borderRadius: 6, border: 'none', cursor: 'pointer',
           background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)',
           boxShadow: '0 8px 24px rgba(var(--accent-rgb),0.4)',
-          color: '#0a0805', fontFamily: UI.fontUi, fontSize: 15, fontWeight: 700,
+          color: 'var(--accent-ink)', fontFamily: UI.fontUi, fontSize: 15, fontWeight: 700,
           letterSpacing: '0.06em',
         }}>
           UPDATE NOW
@@ -209,7 +209,7 @@ function WhatsNewModal({ entries, onDismiss }) {
           borderRadius: 6, border: 'none', cursor: 'pointer',
           background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)',
           boxShadow: '0 8px 24px rgba(var(--accent-rgb),0.4)',
-          color: '#0a0805', fontFamily: UI.fontUi, fontSize: 15, fontWeight: 700,
+          color: 'var(--accent-ink)', fontFamily: UI.fontUi, fontSize: 15, fontWeight: 700,
           letterSpacing: '0.06em', WebkitTapHighlightColor: 'transparent',
         }}>
           GOT IT

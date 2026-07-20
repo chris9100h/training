@@ -287,9 +287,14 @@ function TabBar({ active, routeName, onChange, sidebar = false, currentUser = nu
                   padding: '22px 16px',
                   borderRadius: 6,
                   background: on
-                    ? `rgba(var(--accent-rgb),0.12)`
+                    ? `rgba(var(--accent-rgb),0.22)`
                     : 'var(--surface-tint-sm)',
-                  border: `1px solid ${on ? UI.goldSoft : UI.hairStrong}`,
+                  // Full-strength accent border (not the 30%-alpha goldSoft) so
+                  // the active tab still reads as more prominent than an
+                  // inactive one on paper, where --accent is a mid-dark grey
+                  // rather than a vivid color and would otherwise lose to
+                  // hairStrong/inkSoft's own darkness.
+                  border: `1px solid ${on ? UI.gold : UI.hairStrong}`,
                   color: on ? UI.gold : UI.inkSoft,
                   fontFamily: UI.fontDisplay,
                   fontSize: 18,
@@ -307,7 +312,7 @@ function TabBar({ active, routeName, onChange, sidebar = false, currentUser = nu
                     )}
                     {!badge?.live && badge?.count > 0 && (
                       <div style={{ position: 'absolute', top: -4, right: -6, minWidth: 14, height: 14, borderRadius: '50%', background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1.5px solid var(--bg)' }}>
-                        <span style={{ fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, color: '#0a0805', lineHeight: 1 }}>{badge.count > 9 ? '9+' : badge.count}</span>
+                        <span style={{ fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, color: 'var(--accent-ink)', lineHeight: 1 }}>{badge.count > 9 ? '9+' : badge.count}</span>
                       </div>
                     )}
                   </div>
@@ -488,7 +493,10 @@ function TabBar({ active, routeName, onChange, sidebar = false, currentUser = nu
               width: KEY, height: KEY, borderRadius: 6,
               background: 'linear-gradient(180deg, var(--accent-light), var(--accent))',
               border: '1px solid var(--accent-deep)',
-              boxShadow: '0 5px 16px rgba(var(--accent-rgb),0.35), inset 0 1px 0 rgba(255,240,200,0.45)',
+              // Neutral white highlight, not tinted warm-cream: that read as a
+              // yellow smudge once paper mutes --accent to grey. White reads
+              // as a plausible glossy sheen on every accent color, muted or not.
+              boxShadow: '0 5px 16px rgba(var(--accent-rgb),0.35), inset 0 1px 0 rgba(255,255,255,0.45)',
               transition: 'left 0.35s cubic-bezier(0.4, 0, 0.2, 1)',
               pointerEvents: 'none',
               zIndex: 0,
@@ -530,7 +538,7 @@ function TabBar({ active, routeName, onChange, sidebar = false, currentUser = nu
                 <div style={{
                   position: 'relative', width: KEY, height: ICON_H,
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  color: on ? '#0a0805' : UI.inkFaint,
+                  color: on ? 'var(--accent-ink)' : UI.inkFaint,
                   transform: on ? 'scale(1.2)' : 'scale(1)',
                   // Delay the darkening so the glyph only turns near-black once
                   // the gold plate has slid underneath it (plate is 0.35s) —
@@ -542,11 +550,11 @@ function TabBar({ active, routeName, onChange, sidebar = false, currentUser = nu
                 }}>
                   {React.cloneElement(TAB_ICONS[iconKey], { width: ICON_SZ, height: ICON_SZ })}
                   {badge?.live && (
-                    <div style={{ position: 'absolute', top: 5, right: 4, width: 8, height: 8, borderRadius: '50%', background: on ? '#0a0805' : 'var(--accent)', animation: 'pulseDot 1.5s ease-in-out infinite', border: `1.5px solid ${on ? 'var(--accent)' : 'var(--bg)'}` }} />
+                    <div style={{ position: 'absolute', top: 5, right: 4, width: 8, height: 8, borderRadius: '50%', background: on ? 'var(--accent-ink)' : 'var(--accent)', animation: 'pulseDot 1.5s ease-in-out infinite', border: `1.5px solid ${on ? 'var(--accent)' : 'var(--bg)'}` }} />
                   )}
                   {!badge?.live && badge?.count > 0 && (
-                    <div style={{ position: 'absolute', top: 1, right: -2, minWidth: 16, height: 16, borderRadius: '50%', background: on ? '#0a0805' : 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: `1.5px solid ${on ? 'var(--accent)' : 'var(--bg)'}`, padding: '0 3px' }}>
-                      <span style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, color: on ? 'var(--accent)' : '#0a0805', lineHeight: 1 }}>{badge.count > 9 ? '9+' : badge.count}</span>
+                    <div style={{ position: 'absolute', top: 1, right: -2, minWidth: 16, height: 16, borderRadius: '50%', background: on ? 'var(--accent-ink)' : 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: `1.5px solid ${on ? 'var(--accent)' : 'var(--bg)'}`, padding: '0 3px' }}>
+                      <span style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, color: on ? 'var(--accent)' : 'var(--accent-ink)', lineHeight: 1 }}>{badge.count > 9 ? '9+' : badge.count}</span>
                     </div>
                   )}
                 </div>
@@ -566,7 +574,7 @@ function TabBar({ active, routeName, onChange, sidebar = false, currentUser = nu
 // ─── Buttons ────────────────────────────────────────────────────────
 const btnPrimary = {
   background: `linear-gradient(180deg, var(--accent-light), var(--accent))`,
-  color: '#0a0805',
+  color: 'var(--accent-ink)',
   border: '1px solid var(--accent-deep)',
   borderRadius: 6,
   padding: '14px 24px', minHeight: 48,
@@ -681,7 +689,7 @@ function Pill({ children, gold = false, style = {}, ...rest }) {
 function Toggle({ on, onToggle }) {
   return (
     <div onClick={onToggle} style={{ width: 44, height: 26, borderRadius: 13, cursor: 'pointer', flexShrink: 0, background: on ? 'var(--accent)' : UI.bgInset, border: `0.5px solid ${on ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong}`, position: 'relative', transition: 'background 0.18s', WebkitTapHighlightColor: 'transparent' }}>
-      <div style={{ position: 'absolute', top: 3, left: on ? 21 : 3, width: 18, height: 18, borderRadius: '50%', background: on ? '#0a0805' : UI.inkFaint, transition: 'left 0.18s' }} />
+      <div style={{ position: 'absolute', top: 3, left: on ? 21 : 3, width: 18, height: 18, borderRadius: '50%', background: on ? 'var(--accent-ink)' : UI.inkFaint, transition: 'left 0.18s' }} />
     </div>
   );
 }

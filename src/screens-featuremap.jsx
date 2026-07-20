@@ -23,6 +23,11 @@ const FM_ADMIN_EMAIL = 'office@btc-prime.biz';
 // Coach accent tint (deliberately distinct from the app accent). Single source
 // so it is not hardcoded at each use site.
 const FM_COACH_TINT = '#4aab97';
+// #4aab97 is tuned for a dark canvas — deep enough on light/paper instead,
+// same reasoning as the health charts' DIA_COLOR.
+function fmCoachTint() {
+  return isLightCanvasActive() ? '#1f7a68' : FM_COACH_TINT;
+}
 
 const FM_ROLES = {
   user:  { label: 'Lifter', color: 'var(--accent)' },
@@ -441,8 +446,8 @@ function FeatureMapScreen({ store, go }) {
             {[{ id: 'all', label: 'All' }, { id: 'user', label: 'Lifters' }, { id: 'coach', label: 'Coaches' }].map((t, i) => (
               <button key={t.id} onClick={() => setRole(t.id)} style={{
                 padding: '7px 14px', border: 'none', borderLeft: i ? `1px solid ${UI.hair}` : 'none', cursor: 'pointer',
-                background: roleFilter === t.id ? (t.id === 'coach' ? FM_COACH_TINT : UI.gold) : 'transparent',
-                color: roleFilter === t.id ? '#0a0805' : UI.inkSoft,
+                background: roleFilter === t.id ? (t.id === 'coach' ? fmCoachTint() : UI.gold) : 'transparent',
+                color: roleFilter === t.id ? (t.id === 'coach' ? (isLightCanvasActive() ? '#f5f5f5' : '#0a0805') : 'var(--accent-ink)') : UI.inkSoft,
                 fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
               }}>{t.label}</button>
             ))}
@@ -547,7 +552,8 @@ function FeatureMapScreen({ store, go }) {
 
 function FeatureCard({ card, isAdmin, onEdit, onToggleHide, onDelete }) {
   const [open, setOpen] = useStateFM(false);
-  const role = FM_ROLES[card.role] || FM_ROLES.user;
+  const role = { ...(FM_ROLES[card.role] || FM_ROLES.user) };
+  if (card.role === 'coach') role.color = fmCoachTint();
   const muted = card.hidden;
   return (
     <div data-reorder-item="true" style={{ position: 'relative', background: UI.bgCard, border: `1px solid ${UI.hair}`, borderRadius: 8, overflow: 'hidden', opacity: muted ? 0.55 : 1 }}>
@@ -673,7 +679,7 @@ function FeatureEditor({ draft, busy, onChange, onClose, onSave, onRevert }) {
 function FeaturePublishSheet({ changes, busy, onClose, onDiscard, onDiscardAll, onPublish }) {
   const [confirmAll, setConfirmAll] = useStateFM(false);
   const [confirmPub, setConfirmPub] = useStateFM(false);
-  const tagColor = (t) => (t === 'Removed' || t === 'Hidden') ? UI.danger : (t === 'Reordered') ? FM_COACH_TINT : 'var(--accent)';
+  const tagColor = (t) => (t === 'Removed' || t === 'Hidden') ? UI.danger : (t === 'Reordered') ? fmCoachTint() : 'var(--accent)';
   const n = changes.length;
   return (
     <Sheet open={true} onClose={onClose} title={'Review & publish'} accent>

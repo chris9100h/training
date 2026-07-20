@@ -255,7 +255,7 @@ function TempScatterChart({ readings, from, to, unit, todayMode = false }) {
       ))}
       <line x1={padL} y1={padTop + plotH} x2={W - padR} y2={padTop + plotH} stroke={UI.hair} strokeWidth="0.5" />
       {pts.length >= 2 && (
-        <polyline points={pts.map(p => `${xOf(p).toFixed(1)},${yOf(tempDisplay(p.valueC, unit)).toFixed(1)}`).join(' ')} fill="none" stroke="var(--accent)" strokeWidth="1.5" opacity="0.5" />
+        <polyline points={pts.map(p => `${xOf(p).toFixed(1)},${yOf(tempDisplay(p.valueC, unit)).toFixed(1)}`).join(' ')} fill="none" stroke="var(--accent)" strokeWidth="1.5" opacity={isLightCanvasActive() ? 0.8 : 0.5} />
       )}
       {pts.map((p, i) => (
         <circle key={i} cx={xOf(p).toFixed(1)} cy={yOf(tempDisplay(p.valueC, unit)).toFixed(1)} r={3} fill="var(--accent)" opacity={0.85} />
@@ -297,7 +297,9 @@ function BpScatterChart({ readings, from, to, todayMode = false }) {
     : p => padL + (healthDayDiff(from, p.date) / totalDays) * plotW;
   const yOf = v => padTop + (1 - (v - dom.min) / dom.range) * plotH;
   const gridVals = dom.gridVals || Array.from({ length: 4 }, (_, i) => dom.min + (dom.range / 3) * i);
-  const SYS_COLOR = 'var(--accent)', DIA_COLOR = '#4a9fe0';
+  // DIA_COLOR was a flat hex tuned for a dark canvas; on light/paper it drops
+  // well under WCAG AA, so pick a deeper shade of the same blue there instead.
+  const SYS_COLOR = 'var(--accent)', DIA_COLOR = isLightCanvasActive() ? '#0369a1' : '#4a9fe0';
   const hoverPoints = pts.map(p => ({
     x: xOf(p), y: yOf(p.systolic), date: p.date,
     rows: [
@@ -310,8 +312,8 @@ function BpScatterChart({ readings, from, to, todayMode = false }) {
   return (
     <ChartHover W={W} H={H} points={hoverPoints} mode="xy">
     <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display: 'block', overflow: 'visible' }}>
-      <line x1={padL} y1={yOf(BP_REF_SYS).toFixed(1)} x2={W - padR} y2={yOf(BP_REF_SYS).toFixed(1)} stroke={SYS_COLOR} strokeWidth="0.75" strokeDasharray="4 3" opacity="0.5" />
-      <line x1={padL} y1={yOf(BP_REF_DIA).toFixed(1)} x2={W - padR} y2={yOf(BP_REF_DIA).toFixed(1)} stroke={DIA_COLOR} strokeWidth="0.75" strokeDasharray="4 3" opacity="0.5" />
+      <line x1={padL} y1={yOf(BP_REF_SYS).toFixed(1)} x2={W - padR} y2={yOf(BP_REF_SYS).toFixed(1)} stroke={SYS_COLOR} strokeWidth="0.75" strokeDasharray="4 3" opacity={isLightCanvasActive() ? 0.75 : 0.5} />
+      <line x1={padL} y1={yOf(BP_REF_DIA).toFixed(1)} x2={W - padR} y2={yOf(BP_REF_DIA).toFixed(1)} stroke={DIA_COLOR} strokeWidth="0.75" strokeDasharray="4 3" opacity={isLightCanvasActive() ? 0.75 : 0.5} />
       {gridVals.map((v, i) => (
         <g key={i}>
           {i > 0 && <line x1={padL} y1={yOf(v).toFixed(1)} x2={W - padR} y2={yOf(v).toFixed(1)} stroke={UI.hair} strokeWidth="0.5" strokeDasharray="3 3" />}
@@ -376,7 +378,7 @@ function GlucoseScatterChart({ readings, from, to, unit, todayMode = false }) {
     <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display: 'block', overflow: 'visible' }}>
       {/* fasted reference band */}
       <rect x={padL} y={yOf(refHigh).toFixed(1)} width={plotW} height={(yOf(refLow) - yOf(refHigh)).toFixed(1)}
-        fill="rgba(var(--accent-rgb),0.07)" />
+        fill={`rgba(var(--accent-rgb),${isLightCanvasActive() ? 0.16 : 0.07})`} />
       {/* fed upper reference line */}
       <line x1={padL} y1={fedY} x2={W - padR} y2={fedY} stroke="#4a9fe0" strokeWidth="0.75" strokeDasharray="4 3" opacity="0.5" />
       {gridVals.map((v, i) => (
@@ -542,7 +544,7 @@ function HealthChartCard({ title, icon, tf, setTf, tfOptions = HEALTH_TFS, headl
             <button key={t.id} onClick={() => setTf(t.id)} style={{
               padding: '2px 8px', cursor: 'pointer', border: 'none',
               background: tf === t.id ? 'var(--accent)' : 'transparent',
-              color: tf === t.id ? '#0a0805' : UI.inkFaint,
+              color: tf === t.id ? 'var(--accent-ink)' : UI.inkFaint,
               fontFamily: UI.fontUi, fontSize: 9, fontWeight: 600, letterSpacing: '0.06em',
               WebkitTapHighlightColor: 'transparent',
             }}>{t.id}</button>
@@ -1197,9 +1199,9 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
                   display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5,
                   WebkitTapHighlightColor: 'transparent', transition: 'background 0.15s',
                 }}>
-                  {icon && <i className={`fa-solid ${icon}`} style={{ fontSize: 13, color: active ? '#0a0805' : UI.inkFaint }} />}
-                  {!icon && <i className="fa-solid fa-circle-check" style={{ fontSize: 13, color: active ? '#0a0805' : UI.inkFaint }} />}
-                  <span style={{ fontFamily: UI.fontUi, fontSize: 10, fontWeight: 600, letterSpacing: '0.07em', textTransform: 'uppercase', color: active ? '#0a0805' : UI.inkFaint }}>{label}</span>
+                  {icon && <i className={`fa-solid ${icon}`} style={{ fontSize: 13, color: active ? 'var(--accent-ink)' : UI.inkFaint }} />}
+                  {!icon && <i className="fa-solid fa-circle-check" style={{ fontSize: 13, color: active ? 'var(--accent-ink)' : UI.inkFaint }} />}
+                  <span style={{ fontFamily: UI.fontUi, fontSize: 10, fontWeight: 600, letterSpacing: '0.07em', textTransform: 'uppercase', color: active ? 'var(--accent-ink)' : UI.inkFaint }}>{label}</span>
                 </button>
               );
             })}
@@ -1247,7 +1249,7 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
             <button key={String(o.id)} onClick={() => setNetCarbs(o.id)} style={{
               padding: '4px 10px', cursor: 'pointer', border: 'none',
               background: netCarbs === o.id ? 'var(--accent)' : 'transparent',
-              color: netCarbs === o.id ? '#0a0805' : UI.inkFaint,
+              color: netCarbs === o.id ? 'var(--accent-ink)' : UI.inkFaint,
               fontFamily: UI.fontUi, fontSize: 9, fontWeight: 600, letterSpacing: '0.05em',
               WebkitTapHighlightColor: 'transparent',
             }}>{o.label}</button>
@@ -1380,7 +1382,7 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
                     flex: 1, padding: '6px 4px', cursor: 'pointer', borderRadius: 4,
                     border: `0.5px solid ${glForm.context === c ? 'var(--accent)' : UI.hairStrong}`,
                     background: glForm.context === c ? 'var(--accent)' : 'transparent',
-                    color: glForm.context === c ? '#0a0805' : UI.inkFaint,
+                    color: glForm.context === c ? 'var(--accent-ink)' : UI.inkFaint,
                     fontFamily: UI.fontUi, fontSize: 10, fontWeight: 600, letterSpacing: '0.05em',
                     WebkitTapHighlightColor: 'transparent',
                   }}>{GLUCOSE_CTX_LABELS[c]}</button>
@@ -1822,7 +1824,7 @@ function HealthWeekCard({ stats, dragHandle, targets, tf, setTf, weightUnit }) {
         <button key={t.id} onClick={() => setTf(t.id)} style={{
           padding: '2px 8px', cursor: 'pointer', border: 'none',
           background: tf === t.id ? 'var(--accent)' : 'transparent',
-          color: tf === t.id ? '#0a0805' : UI.inkFaint,
+          color: tf === t.id ? 'var(--accent-ink)' : UI.inkFaint,
           fontFamily: UI.fontUi, fontSize: 9, fontWeight: 600, letterSpacing: '0.06em',
           WebkitTapHighlightColor: 'transparent',
         }}>{t.id}</button>
@@ -2030,7 +2032,7 @@ function HealthDateStrip({ store, setStore, selectedDate, onSelect, onLog, targe
                 <button key={type} onClick={() => setFlexDayType(type)} title={label} style={{
                   padding: '0 14px', border: 'none', borderLeft: i > 0 ? `1px solid ${UI.hairStrong}` : 'none',
                   background: active ? 'var(--accent)' : 'transparent',
-                  color: active ? '#0a0805' : UI.inkFaint, cursor: 'pointer',
+                  color: active ? 'var(--accent-ink)' : UI.inkFaint, cursor: 'pointer',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                   WebkitTapHighlightColor: 'transparent', transition: 'background 0.15s',
                 }}>
@@ -2044,7 +2046,7 @@ function HealthDateStrip({ store, setStore, selectedDate, onSelect, onLog, targe
         {onLog && <button data-tour="health-log-btn" onClick={onLog} style={{
           height: 34, borderRadius: 4, border: 'none',
           background: 'linear-gradient(180deg, var(--accent-light), var(--accent))',
-          color: '#0a0805', cursor: 'pointer', padding: '0 14px',
+          color: 'var(--accent-ink)', cursor: 'pointer', padding: '0 14px',
           fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, letterSpacing: '0.06em',
           flexShrink: 0, display: 'flex', alignItems: 'center', gap: 5,
           WebkitTapHighlightColor: 'transparent',
@@ -2114,7 +2116,7 @@ function GlucoseCard({ glucoseLogs, unit, tf: sharedTf, setTf: setSharedTf, drag
               context dots are separate flex items with no text of their own
               to fall back on for reflow. */}
           <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 12, rowGap: 4, marginTop: 4 }}>
-            <div style={{ height: 8, width: 28, background: 'rgba(var(--accent-rgb),0.15)', borderRadius: 4, flexShrink: 0 }} />
+            <div style={{ height: 8, width: 28, background: `rgba(var(--accent-rgb),${isLightCanvasActive() ? 0.3 : 0.15})`, borderRadius: 4, flexShrink: 0 }} />
             <span style={{ fontSize: 9, fontFamily: UI.fontUi, color: UI.inkFaint }}>
               Normal fasting {refLow.toFixed(dec)}–{refHigh.toFixed(dec)} {unitLabel}
             </span>
@@ -3331,7 +3333,11 @@ function ExportSheet({ open, onClose, store }) {
       const cardio = cardioByDay();
       const sessions = sessionsByDay();
       const unit = (store.settings?.unit === 'lbs') ? 'lbs' : 'kg';
-      const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#c9a961';
+      // This export builds its own fixed dark card design regardless of the
+      // live app theme (cardBg/inkText/etc below are all hardcoded too), so
+      // it needs the user's raw accent color, not paper's muted grey which
+      // would go low-contrast against this always-dark card.
+      const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent-raw').trim() || '#c9a961';
       const cardBg  = '#201e2c';
       const inkText = '#e5e2ef';
       const inkSoft = '#9b97a8';
@@ -3439,7 +3445,7 @@ function ExportSheet({ open, onClose, store }) {
               <button key={p.days} onClick={() => applyPreset(p.days)} style={{
                 flex: 1, padding: '7px 4px', borderRadius: 4, border: `0.5px solid ${UI.hairStrong}`,
                 background: from === healthShiftISO(today, -(p.days - 1)) && to === today ? 'var(--accent)' : UI.bgInset,
-                color: from === healthShiftISO(today, -(p.days - 1)) && to === today ? '#0a0805' : UI.inkSoft,
+                color: from === healthShiftISO(today, -(p.days - 1)) && to === today ? 'var(--accent-ink)' : UI.inkSoft,
                 fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, cursor: 'pointer',
                 WebkitTapHighlightColor: 'transparent',
               }}>{p.label}</button>
@@ -3481,7 +3487,7 @@ function ExportSheet({ open, onClose, store }) {
             width: '100%', padding: '13px 0', borderRadius: 6, border: 'none',
             background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)',
             boxShadow: '0 6px 20px rgba(var(--accent-rgb),0.35)',
-            color: '#0a0805', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 700, cursor: exporting ? 'default' : 'pointer',
+            color: 'var(--accent-ink)', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 700, cursor: exporting ? 'default' : 'pointer',
             display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
             WebkitTapHighlightColor: 'transparent',
             opacity: exporting ? 0.6 : 1,

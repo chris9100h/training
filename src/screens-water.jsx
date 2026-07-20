@@ -153,7 +153,7 @@ function WaterRing({ percent, size = 128 }) {
       </svg>
       <div style={{
         position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
-        fontFamily: UI.fontNum, fontSize: 26, fontWeight: 600, color: WT_BLUE, fontVariantNumeric: 'tabular-nums',
+        fontFamily: UI.fontNum, fontSize: 26, fontWeight: 600, color: isLightCanvasActive() ? '#0369a1' : WT_BLUE, fontVariantNumeric: 'tabular-nums',
       }}>{percent}%</div>
     </div>
   );
@@ -558,7 +558,7 @@ function WaterScreen({ store, setStore, go, userId }) {
               {[...todayEntries].sort((a, b) => wtHhmmToDecimal(b.time) - wtHhmmToDecimal(a.time)).map(e => (
                 <div key={e.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 12px', background: UI.bgInset, border: `1px solid ${UI.hair}`, borderRadius: 6 }}>
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, minWidth: 0 }}>
-                    <span className="num" style={{ fontSize: 12, color: WT_BLUE }}>{e.time}</span>
+                    <span className="num" style={{ fontSize: 12, color: isLightCanvasActive() ? '#0369a1' : WT_BLUE }}>{e.time}</span>
                     <span className="num" style={{ fontSize: 14, fontWeight: 600, color: UI.ink }}>+{e.amountMl} ml</span>
                     {e.name && <span style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{e.name}</span>}
                   </div>
@@ -653,7 +653,7 @@ function WaterBreakdownRow({ icon, name, value, color }) {
       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, color: UI.ink }}>
         <i className={`fa-solid ${icon}`} style={{ fontSize: 12, color: color || UI.inkFaint, width: 16, textAlign: 'center' }} />{name}
       </span>
-      <span className="num" style={{ color: color || WT_BLUE, fontWeight: 600 }}>{value}</span>
+      <span className="num" style={{ color: color || (isLightCanvasActive() ? '#0369a1' : WT_BLUE), fontWeight: 600 }}>{value}</span>
     </div>
   );
 }
@@ -664,7 +664,7 @@ function WaterSettingsBody({ settings, patchSettings, go, onClose, onConfigureDr
   const [start, setStart] = useStateW(settings.waterStartTime || '08:00');
   const [end, setEnd] = useStateW(settings.waterEndTime || '22:00');
   const [bottleMlDraft, setBottleMlDraft] = useStateW(String(settings.waterBottleMl || 1500));
-  const timeColorScheme = settings.darkMode === 'light' ? 'light' : 'dark';
+  const timeColorScheme = ['light', 'paper'].includes(settings.darkMode ?? 'dark') ? 'light' : 'dark';
   const timeStyle = { ...wtInput, colorScheme: timeColorScheme };
 
   const bottleEnabled = settings.waterBottleEnabled !== false;
@@ -911,7 +911,7 @@ function WaterStatsBody({ store, goalMl }) {
   const [period, setPeriod] = useStateW(30);
   const [from, setFrom] = useStateW(wtDateStr(-29));
   const [to, setTo] = useStateW(wtDateStr(0));
-  const timeColorScheme = store.settings?.darkMode === 'light' ? 'light' : 'dark';
+  const timeColorScheme = ['light', 'paper'].includes(store.settings?.darkMode ?? 'dark') ? 'light' : 'dark';
   const coffeeLabels = (store.settings?.waterCoffeeSizes || []).map(s => s.label);
 
   const range = useMemoW(() => {
@@ -940,7 +940,7 @@ function WaterStatsBody({ store, goalMl }) {
     <button onClick={() => setPeriod(id)} style={{
       flex: 1, padding: '7px 0', border: 'none', cursor: 'pointer',
       background: period === id ? 'var(--accent)' : 'transparent',
-      color: period === id ? '#0a0805' : UI.inkFaint,
+      color: period === id ? 'var(--accent-ink)' : UI.inkFaint,
       fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.04em', WebkitTapHighlightColor: 'transparent',
     }}>{label}</button>
   );

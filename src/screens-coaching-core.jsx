@@ -171,7 +171,7 @@ function CoachingPendingBanner({ store, setStore, userId }) {
           <button
             disabled={loading}
             onClick={() => respond(true)}
-            style={{ width: '100%', padding: '14px 0', borderRadius: 8, border: 'none', cursor: loading ? 'default' : 'pointer', background: 'var(--accent)', color: '#0a0805', fontFamily: UI.fontUi, fontSize: 14, fontWeight: 700, letterSpacing: '0.08em', opacity: loading ? 0.6 : 1 }}
+            style={{ width: '100%', padding: '14px 0', borderRadius: 8, border: 'none', cursor: loading ? 'default' : 'pointer', background: 'var(--accent)', color: 'var(--accent-ink)', fontFamily: UI.fontUi, fontSize: 14, fontWeight: 700, letterSpacing: '0.08em', opacity: loading ? 0.6 : 1 }}
           >
             ACCEPT
           </button>
@@ -336,7 +336,7 @@ function ChatThread({ thread, coachingId, userId, otherName, unreadNotes, onBack
                   <img key={ai} src={a.url} alt={a.name || 'image'} onClick={() => setLightboxSrc(a.url)}
                     style={{ maxWidth: '100%', maxHeight: 300, borderRadius: 4, display: 'block', marginBottom: n.body ? 8 : 0, cursor: 'pointer' }} />
                 ))}
-                {n.body && <div style={{ fontSize: 13, color: isMe ? '#0a0805' : UI.ink, fontFamily: UI.fontUi, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{n.body}</div>}
+                {n.body && <div style={{ fontSize: 13, color: isMe ? 'var(--accent-ink)' : UI.ink, fontFamily: UI.fontUi, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{n.body}</div>}
               </div>
               <div style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi, margin: '3px 4px 0' }}>
                 {isMe ? 'You' : otherName} · {fmtRelative(n.createdAt)}
@@ -368,7 +368,7 @@ function ChatThread({ thread, coachingId, userId, otherName, unreadNotes, onBack
             placeholder="Message…"
             style={{ flex: 1, background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 6, padding: '10px 16px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, outline: 'none' }}
           />
-          <button onClick={send} disabled={sending || (!body.trim() && !imageFile)} style={{ width: 40, height: 40, borderRadius: 6, border: (body.trim() || imageFile) && !sending ? 'none' : `0.5px solid ${UI.hair}`, background: (body.trim() || imageFile) && !sending ? 'var(--accent)' : 'transparent', color: (body.trim() || imageFile) && !sending ? '#0a0805' : UI.inkFaint, cursor: sending || (!body.trim() && !imageFile) ? 'default' : 'pointer', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'background 0.2s, color 0.2s, border 0.2s' }}>
+          <button onClick={send} disabled={sending || (!body.trim() && !imageFile)} style={{ width: 40, height: 40, borderRadius: 6, border: (body.trim() || imageFile) && !sending ? 'none' : `0.5px solid ${UI.hair}`, background: (body.trim() || imageFile) && !sending ? 'var(--accent)' : 'transparent', color: (body.trim() || imageFile) && !sending ? 'var(--accent-ink)' : UI.inkFaint, cursor: sending || (!body.trim() && !imageFile) ? 'default' : 'pointer', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'background 0.2s, color 0.2s, border 0.2s' }}>
             {sending ? <span style={{ fontFamily: UI.fontUi, fontSize: 14 }}>…</span> : <i className="fa-solid fa-arrow-up" style={{ fontSize: 15 }} />}
           </button>
         </div>
@@ -480,7 +480,7 @@ function ThreadList({ coachingId, userId, otherName, unreadNotes, setStore, canD
                 <div style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>{t.name}</div>
               </div>
               {unread > 0 && (
-                <div style={{ background: 'var(--accent)', color: '#0a0805', borderRadius: 6, fontSize: 10, fontFamily: UI.fontUi, fontWeight: 700, padding: '2px 7px', minWidth: 18, textAlign: 'center', flexShrink: 0 }}>
+                <div style={{ background: 'var(--accent)', color: 'var(--accent-ink)', borderRadius: 6, fontSize: 10, fontFamily: UI.fontUi, fontWeight: 700, padding: '2px 7px', minWidth: 18, textAlign: 'center', flexShrink: 0 }}>
                   {unread}
                 </div>
               )}
@@ -508,7 +508,7 @@ function ThreadList({ coachingId, userId, otherName, unreadNotes, setStore, canD
                 placeholder="Thread name (e.g. Nutrition, Goals…)"
                 style={{ flex: 1, background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 6, padding: '10px 16px', fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, outline: 'none' }}
               />
-              <button onClick={create} disabled={saving || !newName.trim()} style={{ padding: '10px 18px', borderRadius: 6, border: newName.trim() && !saving ? 'none' : `0.5px solid ${UI.hair}`, background: newName.trim() && !saving ? 'var(--accent)' : 'transparent', color: newName.trim() && !saving ? '#0a0805' : UI.inkFaint, fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, letterSpacing: '0.06em', cursor: saving || !newName.trim() ? 'default' : 'pointer', flexShrink: 0, transition: 'background 0.2s, color 0.2s, border 0.2s' }}>
+              <button onClick={create} disabled={saving || !newName.trim()} style={{ padding: '10px 18px', borderRadius: 6, border: newName.trim() && !saving ? 'none' : `0.5px solid ${UI.hair}`, background: newName.trim() && !saving ? 'var(--accent)' : 'transparent', color: newName.trim() && !saving ? 'var(--accent-ink)' : UI.inkFaint, fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, letterSpacing: '0.06em', cursor: saving || !newName.trim() ? 'default' : 'pointer', flexShrink: 0, transition: 'background 0.2s, color 0.2s, border 0.2s' }}>
                 {saving ? '…' : 'CREATE'}
               </button>
             </div>
@@ -630,7 +630,7 @@ function CoachingSettingsSection({ store, setStore, userId, go }) {
               <i className="fa-solid fa-comment" style={{ fontSize: 12, color: 'var(--accent)' }} />
               <span style={{ flex: 1, fontSize: 13, color: UI.ink, fontFamily: UI.fontUi }}>Messages</span>
               {(store.coaching?.unreadNotes?.length > 0) && (
-                <div style={{ background: 'var(--accent)', color: '#0a0805', borderRadius: 6, fontSize: 10, fontFamily: UI.fontUi, fontWeight: 700, padding: '1px 7px', minWidth: 18, textAlign: 'center' }}>
+                <div style={{ background: 'var(--accent)', color: 'var(--accent-ink)', borderRadius: 6, fontSize: 10, fontFamily: UI.fontUi, fontWeight: 700, padding: '1px 7px', minWidth: 18, textAlign: 'center' }}>
                   {store.coaching.unreadNotes.length}
                 </div>
               )}
@@ -685,7 +685,7 @@ function CoachingSettingsSection({ store, setStore, userId, go }) {
         <button
           onClick={handleInvite}
           disabled={inviting || !inviteEmail.trim()}
-          style={{ padding: '10px 16px', borderRadius: 8, border: 'none', background: 'var(--accent)', color: '#0a0805', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, cursor: inviting || !inviteEmail.trim() ? 'default' : 'pointer', opacity: inviting || !inviteEmail.trim() ? 0.5 : 1 }}
+          style={{ padding: '10px 16px', borderRadius: 8, border: 'none', background: 'var(--accent)', color: 'var(--accent-ink)', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, cursor: inviting || !inviteEmail.trim() ? 'default' : 'pointer', opacity: inviting || !inviteEmail.trim() ? 0.5 : 1 }}
         >
           {inviting ? '…' : 'INVITE'}
         </button>

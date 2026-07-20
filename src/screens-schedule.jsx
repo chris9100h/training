@@ -272,7 +272,7 @@ function PlanScreen({ store, setStore, go, userId, openNewPlan }) {
                     );
                   })()}
                   {s.mesocycle_weeks && !mesoPending && mesoCompletions > 0 && (
-                    <span style={{ fontFamily: UI.fontNum, fontSize: 10, fontWeight: 700, color: UI.gold, background: 'rgba(var(--accent-rgb),0.15)', borderRadius: 4, padding: '2px 6px', letterSpacing: '0.05em' }}>
+                    <span style={{ fontFamily: UI.fontNum, fontSize: 10, fontWeight: 700, color: UI.gold, background: 'rgba(var(--accent-rgb),0.15)', border: `1px solid ${UI.goldSoft}`, borderRadius: 4, padding: '2px 6px', letterSpacing: '0.05em' }}>
                       MESO {mesoCompletions + 1}
                     </span>
                   )}
@@ -285,7 +285,7 @@ function PlanScreen({ store, setStore, go, userId, openNewPlan }) {
                       </span>
                     );
                   })() : (
-                    <span style={{ fontFamily: UI.fontNum, fontSize: 10, fontWeight: 700, color: UI.gold, background: 'rgba(var(--accent-rgb),0.15)', borderRadius: 4, padding: '2px 6px', letterSpacing: '0.05em' }}>
+                    <span style={{ fontFamily: UI.fontNum, fontSize: 10, fontWeight: 700, color: UI.gold, background: 'rgba(var(--accent-rgb),0.15)', border: `1px solid ${UI.goldSoft}`, borderRadius: 4, padding: '2px 6px', letterSpacing: '0.05em' }}>
                       {LB.autoregLoadOnly(s) ? 'AUTO · LOAD' : 'AUTO'}
                     </span>
                   ))}
@@ -2361,7 +2361,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
               </svg>
               <div style={{ flex: 1, textAlign: 'center' }}>
                 <div style={{ fontFamily: UI.fontUi, fontSize: 11, letterSpacing: '0.08em', textTransform: 'uppercase', color: summary ? UI.gold : UI.inkSoft, fontWeight: 600, marginBottom: summary ? 3 : 0 }}>Options</div>
-                {summary && <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: hellCycle ? 'rgba(255,140,70,1)' : UI.ink, fontWeight: hellCycle ? 600 : 400 }}>{summary}</div>}
+                {summary && <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: hellCycle ? (['light', 'paper'].includes(store.settings?.darkMode ?? 'dark') ? '#b8390a' : 'rgba(255,140,70,1)') : UI.ink, fontWeight: hellCycle ? 600 : 400 }}>{summary}</div>}
               </div>
               <svg width="8" height="14" viewBox="0 0 8 14" fill="none" stroke={UI.inkFaint} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M2 2l5 5-5 5"/>
@@ -2772,7 +2772,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
                 borderRadius: 4, padding: '10px 12px', cursor: 'pointer', textAlign: 'left',
               }}>
                 <div style={{ width: 44, height: 26, borderRadius: 13, flexShrink: 0, position: 'relative', background: isFlex ? UI.gold : UI.hairStrong, border: `0.5px solid ${isFlex ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong}`, transition: 'background 0.15s' }}>
-                  <div style={{ position: 'absolute', top: 3, left: isFlex ? 21 : 3, width: 20, height: 20, borderRadius: '50%', background: isFlex ? '#0a0805' : '#fff', transition: 'left 0.15s' }} />
+                  <div style={{ position: 'absolute', top: 3, left: isFlex ? 21 : 3, width: 20, height: 20, borderRadius: '50%', background: isFlex ? 'var(--accent-ink)' : '#fff', transition: 'left 0.15s' }} />
                 </div>
                 <div style={{ flex: 1 }}>
                   <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.ink, fontWeight: 600 }}>Advance only when I train</div>
@@ -2801,7 +2801,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
                 }}>
                   <button onClick={toggle} style={{ flexShrink: 0, background: 'none', border: 'none', padding: 0, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
                     <div style={{ width: 44, height: 26, borderRadius: 13, position: 'relative', background: hasGoal ? UI.gold : UI.hairStrong, border: `0.5px solid ${hasGoal ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong}`, transition: 'background 0.15s' }}>
-                      <div style={{ position: 'absolute', top: 3, left: hasGoal ? 21 : 3, width: 20, height: 20, borderRadius: '50%', background: hasGoal ? '#0a0805' : '#fff', transition: 'left 0.15s' }} />
+                      <div style={{ position: 'absolute', top: 3, left: hasGoal ? 21 : 3, width: 20, height: 20, borderRadius: '50%', background: hasGoal ? 'var(--accent-ink)' : '#fff', transition: 'left 0.15s' }} />
                     </div>
                   </button>
                   <div style={{ flex: 1 }}>
@@ -2851,7 +2851,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
             const toggleUI = (on, onClick) => (
               <button onClick={onClick} style={{ flexShrink: 0, background: 'none', border: 'none', padding: 0, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
                 <div style={{ width: 44, height: 26, borderRadius: 13, position: 'relative', background: on ? UI.gold : UI.hairStrong, border: `0.5px solid ${on ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong}`, transition: 'background 0.15s' }}>
-                  <div style={{ position: 'absolute', top: 3, left: on ? 21 : 3, width: 20, height: 20, borderRadius: '50%', background: on ? '#0a0805' : '#fff', transition: 'left 0.15s' }} />
+                  <div style={{ position: 'absolute', top: 3, left: on ? 21 : 3, width: 20, height: 20, borderRadius: '50%', background: on ? 'var(--accent-ink)' : '#fff', transition: 'left 0.15s' }} />
                 </div>
               </button>
             );
@@ -4559,7 +4559,7 @@ function PlanWizard({ store, setStore, go }) {
             <span className="micro" style={{ color: mesoRirOn ? UI.gold : UI.inkFaint, flex: 1 }}>RIR TAPER</span>
             <button onClick={() => setMesoRirOn(o => !o)} style={{ flexShrink: 0, background: 'none', border: 'none', padding: 0, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
               <div style={{ width: 44, height: 26, borderRadius: 13, position: 'relative', background: mesoRirOn ? UI.gold : UI.hairStrong, border: `0.5px solid ${mesoRirOn ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong}`, transition: 'background 0.15s' }}>
-                <div style={{ position: 'absolute', top: 3, left: mesoRirOn ? 21 : 3, width: 20, height: 20, borderRadius: '50%', background: mesoRirOn ? '#0a0805' : '#fff', transition: 'left 0.15s' }} />
+                <div style={{ position: 'absolute', top: 3, left: mesoRirOn ? 21 : 3, width: 20, height: 20, borderRadius: '50%', background: mesoRirOn ? 'var(--accent-ink)' : '#fff', transition: 'left 0.15s' }} />
               </div>
             </button>
           </div>
@@ -4688,7 +4688,7 @@ function PlanWizard({ store, setStore, go }) {
         {dayFlash && (
           <div style={{ position: 'absolute', inset: 0, borderRadius: 8, background: 'rgba(0,0,0,0.62)', display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}>
             <div style={{ width: 88, height: 88, borderRadius: '50%', background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 12px 40px rgba(0,0,0,0.6)' }}>
-              <i className="fa-solid fa-check" style={{ fontSize: 40, color: '#0a0805' }} />
+              <i className="fa-solid fa-check" style={{ fontSize: 40, color: 'var(--accent-ink)' }} />
             </div>
           </div>
         )}
