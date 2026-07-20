@@ -3432,6 +3432,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
           return (
             <div>
               {actionBtn(() => { setQuickActionsOpen(false); setDailyLogOpen(true); }, 'fa-calendar-day', 'Daily Log', 'Weight, macros, water & steps')}
+              {store.settings?.showHealthTab && actionBtn(() => { setQuickActionsOpen(false); go({ name: 'water' }); }, 'fa-glass-water', 'Water Tracker', 'Log drinks, hit your daily goal')}
               {actionBtn(() => { setQuickActionsOpen(false); setWorkoutSubOpen(true); }, 'fa-dumbbell', 'Workout', sch ? 'From plan or freestyle' : 'Open training — add exercises on the fly')}
               {allMissedDays.length > 0 && actionBtn(
                 () => {
@@ -3446,7 +3447,6 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                   : `${allMissedDays.length} unlogged sessions`,
               )}
               {actionBtn(() => { setQuickActionsOpen(false); setCardioPopoverOpen(true); }, 'fa-person-running', 'Cardio', 'Start live or log manually')}
-              {store.settings?.showHealthTab && actionBtn(() => { setQuickActionsOpen(false); go({ name: 'water' }); }, 'fa-glass-water', 'Water Tracker', 'Log drinks, hit your daily goal')}
               {checkinDue && (asClient?.status === 'active' || asSelf) && actionBtn(
                 () => {
                   setQuickActionsOpen(false);
