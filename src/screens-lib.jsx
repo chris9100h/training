@@ -2686,7 +2686,7 @@ function HistoryScreen({ store, setStore, go, userId, initialTab }) {
       {filtersOpen && (() => {
         const selSt = (active) => ({
           width: '100%', appearance: 'none', WebkitAppearance: 'none',
-          background: active ? 'rgba(var(--accent-rgb),0.08)' : 'transparent',
+          background: active ? 'rgba(var(--accent-rgb),0.16)' : 'transparent',
           border: `1px solid ${active ? UI.gold : UI.hairStrong}`,
           borderRadius: 4, color: active ? UI.gold : UI.ink,
           fontFamily: UI.fontUi, fontSize: 13, padding: '10px 36px 10px 12px',
@@ -4740,7 +4740,7 @@ function SessionEditSheet({ session, duration, exercises, store, setStore, onClo
               return (
                 <div style={{
                   padding: '10px 16px',
-                  background: st.technique ? 'rgba(var(--accent-rgb),0.06)' : 'transparent',
+                  background: st.technique ? 'rgba(var(--accent-rgb),0.13)' : 'transparent',
                   opacity: st.skipped ? 0.5 : st.warmup ? 0.7 : 1,
                 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -4978,7 +4978,7 @@ function TechniqueBlock({ st, highlight = false, decline = false }) {
   if (!st || !st.technique) return null;
   const railColor = highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.4)' : 'rgba(var(--accent-rgb),0.35)';
   const badgeColor = highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.85)' : UI.inkFaint;
-  const badgeBg = highlight ? UI.goldFaint : decline ? 'rgba(var(--danger-rgb),0.08)' : 'rgba(var(--accent-rgb),0.08)';
+  const badgeBg = highlight ? UI.goldFaint : decline ? 'rgba(var(--danger-rgb),0.08)' : 'rgba(var(--accent-rgb),0.16)';
   const badgeBorder = highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : 'rgba(var(--accent-rgb),0.25)';
   const chipColor = highlight ? UI.goldLight : decline ? 'rgba(var(--danger-rgb),0.85)' : UI.ink;
   const chipBorder = highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : UI.hairStrong;
@@ -5608,7 +5608,7 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
             <button key={i} onClick={() => { setExIdx(i); setFollowLive(i === liveIdx); }} style={{
               flexShrink: 0, padding: '6px 12px', borderRadius: 4,
               border: `${isCurrent ? '1.5px' : '1px'} solid ${isCurrent ? UI.gold : allDone ? UI.goldSoft : UI.hair}`,
-              background: isCurrent ? UI.goldFaint : allDone ? 'rgba(var(--accent-rgb),0.06)' : 'transparent',
+              background: isCurrent ? UI.goldFaint : allDone ? 'rgba(var(--accent-rgb),0.13)' : 'transparent',
               color: isCurrent ? UI.gold : allDone ? UI.goldSoft : UI.inkSoft,
               fontFamily: UI.fontUi, fontSize: 12, fontWeight: isCurrent ? 600 : 400,
               letterSpacing: '0.06em', cursor: 'pointer',
@@ -5672,7 +5672,7 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
                 <div style={{ padding: '12px 0', opacity: done ? 1 : 0.35, transition: 'opacity 0.3s' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                     <span className="num" style={{ fontSize: 11, color: done ? UI.gold : UI.inkFaint }}>{i + 1}</span>
-                    <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkFaint, background: 'rgba(var(--accent-rgb),0.08)', border: `0.5px solid rgba(var(--accent-rgb),0.25)`, borderRadius: 4, padding: '2px 6px' }}>DROP SET</span>
+                    <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkFaint, background: 'rgba(var(--accent-rgb),0.16)', border: `0.5px solid rgba(var(--accent-rgb),0.25)`, borderRadius: 4, padding: '2px 6px' }}>DROP SET</span>
                     <div style={{ marginLeft: 'auto' }}>
                       {done ? <svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke={UI.gold} strokeWidth="1.8"><path d="M2 6l2.5 2.5L10 3"/></svg>
                              : <div style={{ width: 13, height: 13, borderRadius: '50%', border: `1px solid ${UI.hair}` }} />}
@@ -5701,7 +5701,7 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
                   <div style={{ padding: '12px 0', opacity: done ? 1 : 0.35, transition: 'opacity 0.3s' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                       <span className="num" style={{ fontSize: 11, color: done ? UI.gold : UI.inkFaint }}>{i + 1}</span>
-                      <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkFaint, background: 'rgba(var(--accent-rgb),0.08)', border: `0.5px solid rgba(var(--accent-rgb),0.25)`, borderRadius: 4, padding: '2px 6px' }}>{isMatch ? 'MYO MATCH' : 'MYO-REPS'}</span>
+                      <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkFaint, background: 'rgba(var(--accent-rgb),0.16)', border: `0.5px solid rgba(var(--accent-rgb),0.25)`, borderRadius: 4, padding: '2px 6px' }}>{isMatch ? 'MYO MATCH' : 'MYO-REPS'}</span>
                       {total > 0 && <span className="num" style={{ fontSize: 10, color: UI.inkFaint }}>{total} total</span>}
                       <div style={{ marginLeft: 'auto' }}>
                         {done ? <svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke={UI.gold} strokeWidth="1.8"><path d="M2 6l2.5 2.5L10 3"/></svg>
@@ -5736,7 +5736,7 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
                 <div style={{ padding: '12px 0', opacity: done ? 1 : 0.35, transition: 'opacity 0.3s' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                     <span className="num" style={{ fontSize: 11, color: done ? UI.gold : UI.inkFaint }}>{i + 1}</span>
-                    <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkFaint, background: 'rgba(var(--accent-rgb),0.08)', border: `0.5px solid rgba(var(--accent-rgb),0.25)`, borderRadius: 4, padding: '2px 6px' }}>AMRAP</span>
+                    <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkFaint, background: 'rgba(var(--accent-rgb),0.16)', border: `0.5px solid rgba(var(--accent-rgb),0.25)`, borderRadius: 4, padding: '2px 6px' }}>AMRAP</span>
                     <div style={{ marginLeft: 'auto' }}>
                       {done ? <svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke={UI.gold} strokeWidth="1.8"><path d="M2 6l2.5 2.5L10 3"/></svg>
                              : <div style={{ width: 13, height: 13, borderRadius: '50%', border: `1px solid ${UI.hair}` }} />}
@@ -5770,7 +5770,7 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
                   <div style={{ padding: '12px 0', opacity: done ? 1 : 0.35, transition: 'opacity 0.3s' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                       <span className="num" style={{ fontSize: 11, color: done ? UI.gold : UI.inkFaint }}>{i + 1}</span>
-                      <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkFaint, background: 'rgba(var(--accent-rgb),0.08)', border: `0.5px solid rgba(var(--accent-rgb),0.25)`, borderRadius: 4, padding: '2px 6px' }}>PARTIALS</span>
+                      <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkFaint, background: 'rgba(var(--accent-rgb),0.16)', border: `0.5px solid rgba(var(--accent-rgb),0.25)`, borderRadius: 4, padding: '2px 6px' }}>PARTIALS</span>
                       <div style={{ marginLeft: 'auto' }}>
                         {done ? <svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke={UI.gold} strokeWidth="1.8"><path d="M2 6l2.5 2.5L10 3"/></svg>
                                : <div style={{ width: 13, height: 13, borderRadius: '50%', border: `1px solid ${UI.hair}` }} />}
@@ -5796,7 +5796,7 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
                   <div style={{ padding: '12px 0', opacity: done ? 1 : 0.35, transition: 'opacity 0.3s' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                       <span className="num" style={{ fontSize: 11, color: done ? UI.gold : UI.inkFaint }}>{i + 1}</span>
-                      <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkFaint, background: 'rgba(var(--accent-rgb),0.08)', border: `0.5px solid rgba(var(--accent-rgb),0.25)`, borderRadius: 4, padding: '2px 6px' }}>STRETCH</span>
+                      <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkFaint, background: 'rgba(var(--accent-rgb),0.16)', border: `0.5px solid rgba(var(--accent-rgb),0.25)`, borderRadius: 4, padding: '2px 6px' }}>STRETCH</span>
                       <div style={{ marginLeft: 'auto' }}>
                         {done ? <svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke={UI.gold} strokeWidth="1.8"><path d="M2 6l2.5 2.5L10 3"/></svg>
                                : <div style={{ width: 13, height: 13, borderRadius: '50%', border: `1px solid ${UI.hair}` }} />}

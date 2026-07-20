@@ -197,7 +197,7 @@ function LoginScreen() {
         {inAppBrowser && (
           <div style={{
             width: '100%', marginBottom: 20, padding: '10px 14px', flexShrink: 0,
-            background: 'rgba(var(--accent-rgb),0.08)', border: `1px solid rgba(var(--accent-rgb),0.28)`,
+            background: 'rgba(var(--accent-rgb),0.16)', border: `1px solid rgba(var(--accent-rgb),0.28)`,
             borderRadius: 6, fontFamily: UI.fontUi, fontSize: 12, color: UI.inkSoft, lineHeight: 1.55,
           }}>
             <i className="fa-solid fa-circle-info" style={{ color: 'var(--accent)', marginRight: 6 }} />
@@ -2872,7 +2872,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
               // the (now-frozen, possibly beyond-failure) meso RIR target.
               if (isViewingToday && store.statusMode === 'deload') {
                 return (
-                  <span style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase', color: UI.gold, background: 'rgba(var(--accent-rgb),0.1)', border: `0.5px solid rgba(var(--accent-rgb),0.4)`, borderRadius: 4, padding: '2px 8px' }}>
+                  <span style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase', color: UI.gold, background: 'rgba(var(--accent-rgb),0.18)', border: `0.5px solid rgba(var(--accent-rgb),0.4)`, borderRadius: 4, padding: '2px 8px' }}>
                     MESO · DELOAD
                   </span>
                 );
@@ -2932,13 +2932,13 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                     );
                   }
                   return (
-                    <span style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase', color: UI.gold, background: 'rgba(var(--accent-rgb),0.1)', border: `0.5px solid rgba(var(--accent-rgb),0.4)`, borderRadius: 4, padding: '2px 8px' }}>
+                    <span style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase', color: UI.gold, background: 'rgba(var(--accent-rgb),0.18)', border: `0.5px solid rgba(var(--accent-rgb),0.4)`, borderRadius: 4, padding: '2px 8px' }}>
                       {LB.autoregLoadOnly(sch) ? 'AUTO · LOAD' : 'AUTO'}
                     </span>
                   );
                 })()}
                 {deloadHintActive && (
-                  <span title="A muscle is at its ceiling. A deload is available whenever you want it." style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase', color: UI.gold, background: 'rgba(var(--accent-rgb),0.1)', border: `0.5px solid rgba(var(--accent-rgb),0.4)`, borderRadius: 4, padding: '2px 8px' }}>
+                  <span title="A muscle is at its ceiling. A deload is available whenever you want it." style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase', color: UI.gold, background: 'rgba(var(--accent-rgb),0.18)', border: `0.5px solid rgba(var(--accent-rgb),0.4)`, borderRadius: 4, padding: '2px 8px' }}>
                     Deload ready
                   </span>
                 )}
@@ -3010,7 +3010,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                 onClick={() => (weekdayMode || cycleWeekView) ? setSelectedWd(i) : setSelectedSlot(i)}
                 style={{
                   flex: 1, padding: '10px 4px 8px', textAlign: 'center',
-                  background: isSelected ? UI.goldFaint : isCompleted ? UI.goldFaint : isMissed ? 'rgba(var(--danger-rgb),0.08)' : isStatusDay ? 'rgba(var(--accent-rgb),0.06)' : isSkipped ? 'var(--neutral-tint)' : 'transparent',
+                  background: isSelected ? UI.goldFaint : isCompleted ? UI.goldFaint : isMissed ? 'rgba(var(--danger-rgb),0.08)' : isStatusDay ? 'rgba(var(--accent-rgb),0.13)' : isSkipped ? 'var(--neutral-tint)' : 'transparent',
                   border: `${isSelected ? '2px' : '0.5px'} solid ${isSelected ? UI.gold : isCompleted ? UI.goldSoft : isMissed ? 'rgba(var(--danger-rgb),0.4)' : isStatusDay ? 'rgba(var(--accent-rgb),0.25)' : isSkipped ? 'var(--neutral-border-sm)' : d.isToday ? UI.hairStrong : UI.hair}`,
                   borderRadius: 4, cursor: 'pointer',
                   minHeight: 56,
@@ -3058,7 +3058,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
               return (
                 <div key={i} style={{
                   flex: seg.count, height: 16, borderRadius: 4,
-                  background: isActive ? UI.goldFaint : 'rgba(var(--accent-rgb),0.06)',
+                  background: isActive ? UI.goldFaint : 'rgba(var(--accent-rgb),0.13)',
                   border: `0.5px solid ${isActive ? UI.goldSoft : UI.hair}`,
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                 }}>

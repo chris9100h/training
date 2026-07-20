@@ -296,7 +296,7 @@ function Finisher({ partials, onPartials, stretch, onStretch, defaultKg, showWei
     }}>+ FINISHER</button>
   );
   const addChip = (label, onClick) => (
-    <button onClick={onClick} style={{ background: 'rgba(var(--accent-rgb),0.08)', border: '1px solid rgba(var(--accent-rgb),0.35)', borderRadius: 4, color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.06em', padding: '5px 9px', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>{label}</button>
+    <button onClick={onClick} style={{ background: 'rgba(var(--accent-rgb),0.16)', border: '1px solid rgba(var(--accent-rgb),0.35)', borderRadius: 4, color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.06em', padding: '5px 9px', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>{label}</button>
   );
   return (
     <div style={{ padding: '2px 0 8px' }}>
@@ -6072,7 +6072,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                 flexShrink: 0, maxWidth: 110,
                 padding: '5px 11px 4px', borderRadius: 4,
                 border: `1px solid ${active ? UI.gold : done ? UI.goldSoft : UI.hairStrong}`,
-                background: active ? UI.goldFaint : done ? 'rgba(var(--accent-rgb),0.05)' : 'transparent',
+                background: active ? UI.goldFaint : done ? 'rgba(var(--accent-rgb),0.11)' : 'transparent',
                 cursor: 'pointer',
                 WebkitTapHighlightColor: 'transparent',
                 transition: 'all 0.15s',
@@ -6168,7 +6168,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             const est = topDone ? LB.e1rm(topDone.kg, topDone.reps) : null;
             const sugg = est ? LB.suggest531Tm(est, main.tm, main.kind, u) : null;
             return (
-              <div style={{ marginTop: 10, padding: '10px 12px', background: 'rgba(var(--accent-rgb),0.06)', border: `1px solid ${UI.goldSoft}`, borderRadius: 6 }}>
+              <div style={{ marginTop: 10, padding: '10px 12px', background: 'rgba(var(--accent-rgb),0.13)', border: `1px solid ${UI.goldSoft}`, borderRadius: 6 }}>
                 <div className="micro-gold" style={{ marginBottom: 7 }}>5/3/1 · {deloadActive ? 'DELOAD' : `WEEK ${week}${week === 4 ? ' · DELOAD' : ''}`} · TM {main.tm}{u}</div>
                 <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
                   {wave.map((ws, i) => (
@@ -6908,7 +6908,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                             <button onClick={() => {
                               setLpStretch({ kg: stretchShowWeight ? (s.kg ?? null) : null, timeSec: 30 });
                               setTimeout(() => activateStretchKb('lp', null, stretchShowWeight ? 'kg' : 'sec'), 150);
-                            }} style={{ background: 'rgba(var(--accent-rgb),0.08)', border: '1px solid rgba(var(--accent-rgb),0.35)', borderRadius: 4, color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.06em', padding: '5px 9px', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>+ Weighted stretch</button>
+                            }} style={{ background: 'rgba(var(--accent-rgb),0.16)', border: '1px solid rgba(var(--accent-rgb),0.35)', borderRadius: 4, color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.06em', padding: '5px 9px', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>+ Weighted stretch</button>
                           </div>
                         )}
                         <div style={{ padding: '0 4px 10px' }}>
@@ -6939,7 +6939,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                     const kgActive = kbField?.setIdx === 'stretch' && kbField?.target === 'ws' && kbField?.field === 'kg';
                     const secActive = kbField?.setIdx === 'stretch' && kbField?.target === 'ws' && kbField?.field === 'sec';
                     return (
-                      <div data-stretch-box="ws" style={{ background: 'rgba(var(--accent-rgb),0.05)', borderRadius: 6, margin: '2px 0 6px' }}>
+                      <div data-stretch-box="ws" style={{ background: 'rgba(var(--accent-rgb),0.11)', borderRadius: 6, margin: '2px 0 6px' }}>
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 6px 2px' }}>
                           <span className="micro-gold">WEIGHTED STRETCH</span>
                           <button onClick={() => {
@@ -7100,7 +7100,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           {!isCardio && !isTime && !isCheckbox && (
             <button className="intensity-glow" onClick={() => setIntensityOpen(true)} style={{
               width: '100%', marginTop: 6, padding: '8px 0',
-              background: 'rgba(var(--accent-rgb),0.08)',
+              background: 'rgba(var(--accent-rgb),0.16)',
               border: '1px solid rgba(var(--accent-rgb),0.5)',
               borderRadius: 6, cursor: 'pointer',
               color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700,
@@ -7289,7 +7289,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                 .filter(e => e.remaining > 0);
               if (!incomplete.length) return null;
               return (
-                <div style={{ background: 'rgba(var(--accent-rgb),0.08)', border: `1px solid rgba(var(--accent-rgb),0.3)`, borderRadius: 6, padding: '10px 12px', marginBottom: 14 }}>
+                <div style={{ background: 'rgba(var(--accent-rgb),0.16)', border: `1px solid rgba(var(--accent-rgb),0.3)`, borderRadius: 6, padding: '10px 12px', marginBottom: 14 }}>
                   <div className="label" style={{ color: 'var(--accent)', marginBottom: 8 }}>Incomplete sets</div>
                   {incomplete.map(e => (
                     <div key={e.name} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, paddingBottom: 4 }}>
@@ -7345,7 +7345,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               if (elapsedMin < 20) {
                 return <Btn className="intensity-glow" onClick={onAddEx} style={{ width: '100%', marginBottom: 8 }}>+ Add another exercise</Btn>;
               } else if (elapsedMin < 45) {
-                return <Btn kind="ghost" onClick={onAddEx} style={{ width: '100%', marginBottom: 8, border: '1px solid rgba(var(--accent-rgb),0.6)', background: 'rgba(var(--accent-rgb),0.07)' }}>+ Add another exercise</Btn>;
+                return <Btn kind="ghost" onClick={onAddEx} style={{ width: '100%', marginBottom: 8, border: '1px solid rgba(var(--accent-rgb),0.6)', background: 'rgba(var(--accent-rgb),0.14)' }}>+ Add another exercise</Btn>;
               }
             }
             return <Btn kind="ghost" onClick={onAddEx} style={{ width: '100%', marginBottom: 8 }}>+ Add another exercise</Btn>;
@@ -7502,7 +7502,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           const myoMatchTarget = nearestDoneMyoBefore(entry.sets, myoMatchAnchorIdx);
           const btnBase = (active) => ({
             width: '100%', textAlign: 'left', cursor: active ? 'pointer' : 'default',
-            background: active ? 'rgba(var(--accent-rgb),0.07)' : UI.bgInset,
+            background: active ? 'rgba(var(--accent-rgb),0.14)' : UI.bgInset,
             border: `1px solid ${active ? 'rgba(var(--accent-rgb),0.35)' : UI.hair}`,
             borderRadius: 6, padding: '14px 16px',
             display: 'flex', alignItems: 'center', gap: 14,
@@ -7696,7 +7696,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   <div style={{ display: 'grid', gridTemplateColumns: '28px 1fr 72px 56px 28px', gap: 8, alignItems: 'center', padding: '5px 4px' }}>
                     <div style={{
                       width: 24, height: 24, borderRadius: 4, flexShrink: 0,
-                      background: 'rgba(var(--accent-rgb),0.08)',
+                      background: 'rgba(var(--accent-rgb),0.16)',
                       outline: `1px solid rgba(var(--accent-rgb),0.3)`,
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
                       fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, color: UI.gold,
@@ -7801,7 +7801,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                     <div style={{ display: 'grid', gridTemplateColumns: '28px 1fr 72px 56px 28px', gap: 8, alignItems: 'center' }}>
                       <div style={{
                         width: 24, height: 24, borderRadius: 4, flexShrink: 0,
-                        background: 'rgba(var(--accent-rgb),0.08)',
+                        background: 'rgba(var(--accent-rgb),0.16)',
                         outline: `1px solid rgba(var(--accent-rgb),0.3)`,
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
                         color: UI.gold,
@@ -7944,7 +7944,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                     <div style={{ display: 'grid', gridTemplateColumns: '28px 1fr 72px 56px 28px', gap: 8, alignItems: 'center', padding: '5px 4px' }}>
                       <div style={{
                         width: 24, height: 24, borderRadius: 4, flexShrink: 0,
-                        background: 'rgba(var(--accent-rgb),0.08)',
+                        background: 'rgba(var(--accent-rgb),0.16)',
                         outline: `1px solid rgba(var(--accent-rgb),0.3)`,
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
                         fontFamily: UI.fontUi, fontSize: isActiv ? 9 : 10, fontWeight: 700, color: UI.gold,
@@ -8900,7 +8900,7 @@ const chainTitleStyle = { fontFamily: UI.fontDisplay, fontSize: 22, fontWeight: 
 
 function setInputStyle(done, current) {
   return {
-    background: done ? 'transparent' : current ? 'rgba(var(--accent-rgb),0.06)' : UI.bgInset,
+    background: done ? 'transparent' : current ? 'rgba(var(--accent-rgb),0.13)' : UI.bgInset,
     border: `1px solid ${done ? 'transparent' : current ? UI.goldSoft : UI.hair}`,
     borderRadius: 4, outline: 'none',
     color: done ? UI.inkSoft : UI.ink,

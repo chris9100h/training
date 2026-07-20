@@ -1291,7 +1291,7 @@ function ClientPlanTab({ store, setStore, clientStore, setClientStore, clientId,
       <div style={{ display: 'flex', gap: 8, marginBottom: 16, justifyContent: 'flex-end' }}>
         <button
           onClick={() => go({ name: 'coaching-new-plan', coachingId, clientId, clientName: name })}
-          style={{ padding: '7px 14px', borderRadius: 6, border: `0.5px solid rgba(var(--accent-rgb),0.3)`, background: `rgba(var(--accent-rgb),0.06)`, color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
+          style={{ padding: '7px 14px', borderRadius: 6, border: `0.5px solid rgba(var(--accent-rgb),0.3)`, background: `rgba(var(--accent-rgb),0.13)`, color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
         >
           <i className="fa-solid fa-plus" style={{ fontSize: 9 }} />
           NEW PLAN
@@ -1866,7 +1866,7 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
             const act = CARDIO_ACTIVITY_MAP[log.type] || { label: log.type ? log.type.charAt(0).toUpperCase() + log.type.slice(1) : 'Cardio', icon: 'fa-person-running' };
             return (
               <div key={log.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderBottom: `0.5px solid ${UI.hair}` }}>
-                <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'rgba(var(--accent-rgb),0.08)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'rgba(var(--accent-rgb),0.16)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                   <i className={`fa-solid ${act.icon}`} style={{ fontSize: 13, color: UI.gold }} />
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>

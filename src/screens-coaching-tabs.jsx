@@ -381,7 +381,7 @@ function CoachingTabClientCard({ client, inProgress, statusMode, unreadCount, ch
       style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 16px', background: UI.bgInset, borderRadius: 8, border: `0.5px solid ${borderColor}`, cursor: isPending ? 'default' : 'pointer', position: 'relative', overflow: 'hidden', opacity: isPending ? 0.75 : 1 }}
     >
       {inProgress && (
-        <div style={{ position: 'absolute', inset: 0, background: `rgba(var(--accent-rgb),0.04)`, pointerEvents: 'none' }} />
+        <div style={{ position: 'absolute', inset: 0, background: `rgba(var(--accent-rgb),0.10)`, pointerEvents: 'none' }} />
       )}
       <div style={{ width: 44, height: 44, borderRadius: '50%', background: UI.bgRaised, border: `0.5px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, position: 'relative' }}>
         <span style={{ fontFamily: UI.fontUi, fontSize: 18, color: UI.inkSoft, fontWeight: 700 }}>{(client.clientName || client.clientEmail || '?')[0].toUpperCase()}</span>
@@ -1151,7 +1151,7 @@ function CheckInForm({ coachingId, clientId, userId, weekStart, existing, prefil
   return (
     <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '16px 14px 40px', display: 'flex', flexDirection: 'column', gap: 20 }}>
       {(prefill || dailyPrefill || perfPrefill != null) && !existing && (
-        <div style={{ fontSize: 10, color: 'var(--accent)', fontFamily: UI.fontUi, padding: '6px 10px', background: `rgba(var(--accent-rgb),0.08)`, borderRadius: 6, border: `0.5px solid rgba(var(--accent-rgb),0.2)` }}>
+        <div style={{ fontSize: 10, color: 'var(--accent)', fontFamily: UI.fontUi, padding: '6px 10px', background: `rgba(var(--accent-rgb),0.16)`, borderRadius: 6, border: `0.5px solid rgba(var(--accent-rgb),0.2)` }}>
           {dailyPrefill
             ? `Prefilled from your daily logs${prefill ? ' & cardio' : ''} this week, review before submitting`
             : prefill
@@ -1334,7 +1334,7 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
               would wrongly hide the preview whenever last week was checked in. */}
           {checkinEnabled && !canSubmitToday && previewResponses && (
             <button onClick={() => setPreviewOpen(v => !v)}
-              style={{ flex: 1, background: previewOpen ? `rgba(var(--accent-rgb),0.1)` : `rgba(var(--accent-rgb),0.05)`, border: `0.5px solid rgba(var(--accent-rgb),0.25)`, borderRadius: 6, padding: '12px 14px', cursor: 'pointer', color: previewOpen ? 'var(--accent)' : UI.inkSoft, fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600 }}>
+              style={{ flex: 1, background: previewOpen ? `rgba(var(--accent-rgb),0.18)` : `rgba(var(--accent-rgb),0.11)`, border: `0.5px solid rgba(var(--accent-rgb),0.25)`, borderRadius: 6, padding: '12px 14px', cursor: 'pointer', color: previewOpen ? 'var(--accent)' : UI.inkSoft, fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600 }}>
               {previewOpen ? 'Close preview' : 'Preview this week'}
             </button>
           )}

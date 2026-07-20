@@ -488,7 +488,7 @@ function PasskeySheet({ open, onClose }) {
         </div>
 
         {(error || successMsg) && (
-          <div style={{ fontSize: 12, color: error ? UI.danger : UI.gold, fontFamily: UI.fontUi, marginBottom: 12, padding: '8px 12px', background: error ? 'rgba(var(--danger-rgb),0.06)' : 'rgba(var(--accent-rgb),0.08)', borderRadius: 6 }}>
+          <div style={{ fontSize: 12, color: error ? UI.danger : UI.gold, fontFamily: UI.fontUi, marginBottom: 12, padding: '8px 12px', background: error ? 'rgba(var(--danger-rgb),0.06)' : 'rgba(var(--accent-rgb),0.16)', borderRadius: 6 }}>
             {error || successMsg}
           </div>
         )}
@@ -1663,7 +1663,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
               background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '13px 14px',
               WebkitTapHighlightColor: 'transparent', font: 'inherit', color: UI.ink,
             }}>
-              <span style={{ width: 34, height: 34, borderRadius: 6, background: 'rgba(var(--accent-rgb),0.1)', border: `0.5px solid ${UI.hairStrong}`, display: 'grid', placeItems: 'center', flexShrink: 0 }}>
+              <span style={{ width: 34, height: 34, borderRadius: 6, background: 'rgba(var(--accent-rgb),0.18)', border: `0.5px solid ${UI.hairStrong}`, display: 'grid', placeItems: 'center', flexShrink: 0 }}>
                 <i className={`fa-solid ${g.icon}`} style={{ fontSize: 14, color: UI.gold }} />
               </span>
               <span style={{ flex: 1, minWidth: 0 }}>
@@ -2000,7 +2000,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             <>
               <div className="micro" style={{ marginBottom: 10 }}>Quick switch</div>
               <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
-                <div style={{ flex: 1, background: `linear-gradient(135deg, rgba(var(--accent-rgb),0.10), rgba(var(--accent-rgb),0.03))`, border: `0.5px solid ${UI.goldSoft}`, borderRadius: 6, padding: '10px 12px' }}>
+                <div style={{ flex: 1, background: `linear-gradient(135deg, rgba(var(--accent-rgb),0.18), rgba(var(--accent-rgb),0.08))`, border: `0.5px solid ${UI.goldSoft}`, borderRadius: 6, padding: '10px 12px' }}>
                   <div className="micro-gold" style={{ marginBottom: 4 }}>Active</div>
                   <div style={{ fontFamily: UI.fontDisplay, fontSize: 18, color: UI.ink, lineHeight: 1.1 }}>{currentName}</div>
                 </div>
@@ -2066,7 +2066,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                 )}
               </div>
               {pwMsg && (
-                <div style={{ fontSize: 12, color: pwMsg.ok ? 'var(--accent)' : UI.danger, fontFamily: UI.fontUi, padding: '8px 12px', background: pwMsg.ok ? 'rgba(var(--accent-rgb),0.08)' : 'rgba(var(--danger-rgb),0.08)', borderRadius: 6 }}>
+                <div style={{ fontSize: 12, color: pwMsg.ok ? 'var(--accent)' : UI.danger, fontFamily: UI.fontUi, padding: '8px 12px', background: pwMsg.ok ? 'rgba(var(--accent-rgb),0.16)' : 'rgba(var(--danger-rgb),0.08)', borderRadius: 6 }}>
                   {pwMsg.text}
                 </div>
               )}
@@ -2093,7 +2093,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                 <input type="email" value={emailNew} onChange={e => setEmailNew(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleChangeEmail()} placeholder="new@example.com" style={iStyle} autoComplete="email" autoCapitalize="none" spellCheck={false} />
               </div>
               {emailMsg && (
-                <div style={{ fontSize: 12, color: emailMsg.ok ? 'var(--accent)' : UI.danger, fontFamily: UI.fontUi, padding: '8px 12px', background: emailMsg.ok ? 'rgba(var(--accent-rgb),0.08)' : 'rgba(var(--danger-rgb),0.08)', borderRadius: 6, lineHeight: 1.55 }}>
+                <div style={{ fontSize: 12, color: emailMsg.ok ? 'var(--accent)' : UI.danger, fontFamily: UI.fontUi, padding: '8px 12px', background: emailMsg.ok ? 'rgba(var(--accent-rgb),0.16)' : 'rgba(var(--danger-rgb),0.08)', borderRadius: 6, lineHeight: 1.55 }}>
                   {emailMsg.text}
                 </div>
               )}
@@ -2574,7 +2574,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             }}
           />
           {broadcastMsg && (
-            <div style={{ fontSize: 12, color: broadcastMsg.ok ? 'var(--accent)' : UI.danger, fontFamily: UI.fontUi, padding: '8px 12px', background: broadcastMsg.ok ? 'rgba(var(--accent-rgb),0.08)' : 'rgba(var(--danger-rgb),0.08)', borderRadius: 6 }}>
+            <div style={{ fontSize: 12, color: broadcastMsg.ok ? 'var(--accent)' : UI.danger, fontFamily: UI.fontUi, padding: '8px 12px', background: broadcastMsg.ok ? 'rgba(var(--accent-rgb),0.16)' : 'rgba(var(--danger-rgb),0.08)', borderRadius: 6 }}>
               {broadcastMsg.text}
             </div>
           )}
@@ -2626,7 +2626,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                   ))}
                 </select>
                 {vipBgMsg && (
-                  <div style={{ fontSize: 12, color: vipBgMsg.ok ? 'var(--accent)' : UI.danger, fontFamily: UI.fontUi, padding: '8px 12px', background: vipBgMsg.ok ? 'rgba(var(--accent-rgb),0.08)' : 'rgba(var(--danger-rgb),0.08)', borderRadius: 6 }}>
+                  <div style={{ fontSize: 12, color: vipBgMsg.ok ? 'var(--accent)' : UI.danger, fontFamily: UI.fontUi, padding: '8px 12px', background: vipBgMsg.ok ? 'rgba(var(--accent-rgb),0.16)' : 'rgba(var(--danger-rgb),0.08)', borderRadius: 6 }}>
                     {vipBgMsg.text}
                   </div>
                 )}
@@ -2723,7 +2723,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                         <button key={c.key} onClick={() => setSupportCategoryDraft(c.key)} style={{
                           flex: 1, padding: '8px 4px', borderRadius: 6, cursor: 'pointer',
                           border: `0.5px solid ${supportCategoryDraft === c.key ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong}`,
-                          background: supportCategoryDraft === c.key ? 'rgba(var(--accent-rgb),0.1)' : UI.bgInset,
+                          background: supportCategoryDraft === c.key ? 'rgba(var(--accent-rgb),0.18)' : UI.bgInset,
                           color: supportCategoryDraft === c.key ? 'var(--accent)' : UI.inkFaint,
                           fontFamily: UI.fontUi, fontSize: 10, fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase',
                           WebkitTapHighlightColor: 'transparent', textAlign: 'center',
@@ -2908,7 +2908,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
               { key: 'resolved',    label: 'Resolved' },
             ];
             const sColor = { open: UI.danger, in_progress: UI.inkFaint, resolved: 'var(--accent)' };
-            const sBg    = { open: 'rgba(var(--danger-rgb),0.12)', in_progress: UI.bgInset, resolved: 'rgba(var(--accent-rgb),0.1)' };
+            const sBg    = { open: 'rgba(var(--danger-rgb),0.12)', in_progress: UI.bgInset, resolved: 'rgba(var(--accent-rgb),0.18)' };
             const currentStatus = supportInbox.find(t => t.coaching_id === supportTicket.coachingId)?.support_status || supportTicket.status || 'open';
             return (
               <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
@@ -3027,7 +3027,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                   <button key={f.key} onClick={() => setSupportCatFilter(f.key)} style={{
                     padding: '5px 14px', borderRadius: 999, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
                     border: `0.5px solid ${supportCatFilter === f.key ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong}`,
-                    background: supportCatFilter === f.key ? 'rgba(var(--accent-rgb),0.1)' : 'transparent',
+                    background: supportCatFilter === f.key ? 'rgba(var(--accent-rgb),0.18)' : 'transparent',
                     color: supportCatFilter === f.key ? 'var(--accent)' : UI.inkFaint,
                     fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600,
                   }}>{f.label}</button>
@@ -3200,7 +3200,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                   }}
                 />
                 {adminEmailMsg && (
-                  <div style={{ fontSize: 12, color: adminEmailMsg.ok ? 'var(--accent)' : UI.danger, fontFamily: UI.fontUi, padding: '8px 12px', background: adminEmailMsg.ok ? 'rgba(var(--accent-rgb),0.08)' : 'rgba(var(--danger-rgb),0.08)', borderRadius: 6 }}>
+                  <div style={{ fontSize: 12, color: adminEmailMsg.ok ? 'var(--accent)' : UI.danger, fontFamily: UI.fontUi, padding: '8px 12px', background: adminEmailMsg.ok ? 'rgba(var(--accent-rgb),0.16)' : 'rgba(var(--danger-rgb),0.08)', borderRadius: 6 }}>
                     {adminEmailMsg.text}
                   </div>
                 )}
@@ -3318,7 +3318,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       <SettingsSheet open={pushSheet} onClose={() => setPushSheet(false)} title="Push notifications">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginBottom: 8 }}>
           {isIosDevice && !pushEnabled && !iosDisclaimerSeen && (
-            <div style={{ background: 'rgba(var(--accent-rgb),0.07)', border: '0.5px solid rgba(var(--accent-rgb),0.2)', borderRadius: 6, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={{ background: 'rgba(var(--accent-rgb),0.14)', border: '0.5px solid rgba(var(--accent-rgb),0.2)', borderRadius: 6, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 10 }}>
               <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.55 }}>
                 Push notifications on iPhone and iPad require Zane to be installed as an app on your home screen. For instructions, see <span style={{ color: 'var(--accent)' }}>Guides → How to… → Install as app</span>.
               </div>

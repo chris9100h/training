@@ -1177,7 +1177,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
     return (
       <button onClick={() => setProgress531Open(true)} style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, width: '100%',
-        background: `rgba(var(--accent-rgb),0.06)`, border: `1px solid ${UI.goldSoft}`,
+        background: `rgba(var(--accent-rgb),0.13)`, border: `1px solid ${UI.goldSoft}`,
         borderRadius: 8, padding: '13px 16px', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
       }}>
         <span style={{ fontFamily: UI.fontUi, fontSize: 12, letterSpacing: '0.08em', textTransform: 'uppercase', color: UI.gold, fontWeight: 600 }}>Show 5/3/1 progress</span>
@@ -2347,7 +2347,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
           return (
             <button onClick={() => setModifiersOpen(true)} style={{
               display: 'flex', alignItems: 'center', gap: 12, width: '100%',
-              background: hellCycle ? 'rgba(210,45,0,0.10)' : (summary ? `rgba(var(--accent-rgb),0.06)` : UI.bgRaised),
+              background: hellCycle ? 'rgba(210,45,0,0.10)' : (summary ? `rgba(var(--accent-rgb),0.13)` : UI.bgRaised),
               border: `1px solid ${hellCycle ? 'rgba(255,120,40,0.6)' : (summary ? UI.goldSoft : UI.hairStrong)}`,
               borderRadius: 6, padding: '13px 16px', cursor: 'pointer', textAlign: 'left',
               WebkitTapHighlightColor: 'transparent',
@@ -2491,7 +2491,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
           return (
             <button onClick={() => setTmEditOpen(true)} style={{
               display: 'flex', alignItems: 'center', gap: 12, width: '100%',
-              background: `rgba(var(--accent-rgb),0.06)`, border: `1px solid ${UI.goldSoft}`,
+              background: `rgba(var(--accent-rgb),0.13)`, border: `1px solid ${UI.goldSoft}`,
               borderRadius: 6, padding: '13px 16px', cursor: 'pointer', textAlign: 'left',
               WebkitTapHighlightColor: 'transparent',
             }}>

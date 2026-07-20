@@ -1565,7 +1565,7 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
       </CatSection>
 
       {coachFields.length > 0 && (
-        <div style={{ marginBottom: 18, padding: '14px 14px', borderRadius: 6, background: `rgba(var(--accent-rgb),0.05)`, border: `0.5px solid rgba(var(--accent-rgb),0.2)` }}>
+        <div style={{ marginBottom: 18, padding: '14px 14px', borderRadius: 6, background: `rgba(var(--accent-rgb),0.11)`, border: `0.5px solid rgba(var(--accent-rgb),0.2)` }}>
           <div className="micro-gold" style={{ marginBottom: 12 }}>YOUR COACH WANTS TO KNOW</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             {layoutRows(coachFields).map((row, ri) => (
@@ -1663,7 +1663,7 @@ function MacroTargetSheet({ open, onClose, store, setStore, coachingMacros }) {
   return (
     <Sheet open={open} onClose={requestClose} title="Macro Targets">
       {coachHasMacros && (
-        <div style={{ fontSize: 11, color: 'var(--accent)', fontFamily: UI.fontUi, padding: '6px 10px', background: `rgba(var(--accent-rgb),0.08)`, borderRadius: 6, border: `0.5px solid rgba(var(--accent-rgb),0.2)`, marginBottom: 14 }}>
+        <div style={{ fontSize: 11, color: 'var(--accent)', fontFamily: UI.fontUi, padding: '6px 10px', background: `rgba(var(--accent-rgb),0.16)`, borderRadius: 6, border: `0.5px solid rgba(var(--accent-rgb),0.2)`, marginBottom: 14 }}>
           Your coaching macros are active and take priority. These personal targets apply only if the coaching macros are removed.
         </div>
       )}

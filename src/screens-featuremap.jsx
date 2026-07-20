@@ -483,7 +483,7 @@ function FeatureMapScreen({ store, go }) {
           return (
             <section key={g.meta.id} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, paddingTop: 6 }}>
-                <div style={{ width: 34, height: 34, borderRadius: 6, flexShrink: 0, display: 'grid', placeItems: 'center', border: `1px solid ${UI.hairStrong}`, background: 'rgba(var(--accent-rgb),0.08)', color: 'var(--accent)' }}>
+                <div style={{ width: 34, height: 34, borderRadius: 6, flexShrink: 0, display: 'grid', placeItems: 'center', border: `1px solid ${UI.hairStrong}`, background: 'rgba(var(--accent-rgb),0.16)', color: 'var(--accent)' }}>
                   <i className={`fa-solid ${g.meta.icon}`} style={{ fontSize: 15 }} />
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>

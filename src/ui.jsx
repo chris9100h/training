@@ -615,7 +615,7 @@ function Card({ children, accent = false, style = {}, ...rest }) {
   return (
     <div {...rest} style={{
       background: accent
-        ? `rgba(var(--accent-rgb),0.06)`
+        ? `rgba(var(--accent-rgb),0.13)`
         : 'var(--surface-tint)',
       border: `1px solid ${accent ? UI.goldSoft : UI.hairStrong}`,
       borderRadius: 6,
@@ -1004,7 +1004,7 @@ function Frame({ children, accent = false, style = {}, padding = 18, onClick }) 
   return (
     <div onClick={onClick} style={{
       background: accent
-        ? `rgba(var(--accent-rgb),0.06)`
+        ? `rgba(var(--accent-rgb),0.13)`
         : 'var(--surface-tint)',
       border: `1px solid ${accent ? UI.goldSoft : UI.hairStrong}`,
       borderRadius: 6,

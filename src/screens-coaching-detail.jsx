@@ -662,7 +662,7 @@ function CheckInSchemaBuilder({ coachingId, initial, coachDefault, onSave, onSav
     </button>
   );
   const renderHelp = (key) => helpTip === key ? (
-    <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5, padding: '7px 10px', background: 'rgba(var(--accent-rgb),0.08)', borderRadius: 6, marginTop: 4, marginBottom: 4 }}>
+    <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5, padding: '7px 10px', background: 'rgba(var(--accent-rgb),0.16)', borderRadius: 6, marginTop: 4, marginBottom: 4 }}>
       {HELP[key]}
     </div>
   ) : null;
@@ -1024,7 +1024,7 @@ function CheckInSchemaBuilder({ coachingId, initial, coachDefault, onSave, onSav
           </div>
 
           {['integer', 'decimal', 'stepper'].includes(fd.type) && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '12px 14px', borderRadius: 6, background: fd.show_in_health_log ? `rgba(var(--accent-rgb),0.06)` : UI.bgInset, border: `0.5px solid ${fd.show_in_health_log ? `rgba(var(--accent-rgb),0.25)` : UI.hair}` }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '12px 14px', borderRadius: 6, background: fd.show_in_health_log ? `rgba(var(--accent-rgb),0.13)` : UI.bgInset, border: `0.5px solid ${fd.show_in_health_log ? `rgba(var(--accent-rgb),0.25)` : UI.hair}` }}>
               <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
                 <div style={{ flex: 1 }}>
                   <div style={{ ...lbl, marginBottom: 3 }}>Track daily in health log</div>
@@ -1130,7 +1130,7 @@ function CheckInSchemaBuilder({ coachingId, initial, coachDefault, onSave, onSav
                 {!fd.options.length && <div style={{ fontSize: 12, color: UI.inkGhost, fontFamily: UI.fontUi, textAlign: 'center', padding: '8px 0' }}>No options yet, tap + ADD</div>}
               </div>
               {fd.direction && fd.options.length > 0 && (
-                <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5, marginTop: 8, padding: '7px 10px', background: 'rgba(var(--accent-rgb),0.08)', borderRadius: 6, display: 'flex', alignItems: 'center', gap: 7 }}>
+                <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5, marginTop: 8, padding: '7px 10px', background: 'rgba(var(--accent-rgb),0.16)', borderRadius: 6, display: 'flex', alignItems: 'center', gap: 7 }}>
                   <i className={`fa-solid ${fd.direction === 'higher_better' ? 'fa-arrow-up' : 'fa-arrow-down'}`} style={{ color: 'var(--accent)', fontSize: 12, flexShrink: 0 }} />
                   <span>{fd.direction === 'higher_better'
                     ? 'Higher counts as better, order from worst (top) to best (bottom).'
@@ -1271,7 +1271,7 @@ function CheckInSchemaBuilder({ coachingId, initial, coachDefault, onSave, onSav
             <div style={{ marginTop: 4, display: 'flex', flexDirection: 'column', gap: 8 }}>{renderNamePrompt()}</div>
           ) : (
             <button onClick={() => setNamingTemplate('current')} disabled={templateCapReached}
-              style={{ marginTop: 4, background: 'rgba(var(--accent-rgb),0.08)', border: `0.5px solid rgba(var(--accent-rgb),0.3)`, borderRadius: 6, padding: '11px 14px', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, color: 'var(--accent)', cursor: 'pointer', opacity: templateCapReached ? 0.5 : 1, display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'center' }}>
+              style={{ marginTop: 4, background: 'rgba(var(--accent-rgb),0.16)', border: `0.5px solid rgba(var(--accent-rgb),0.3)`, borderRadius: 6, padding: '11px 14px', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, color: 'var(--accent)', cursor: 'pointer', opacity: templateCapReached ? 0.5 : 1, display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'center' }}>
               <i className="fa-solid fa-plus" style={{ fontSize: 11 }} />
               {templateCapReached ? 'Limit reached, delete one to save another' : 'Save current form as template'}
             </button>
@@ -1364,7 +1364,7 @@ function CheckInSchemaBuilder({ coachingId, initial, coachDefault, onSave, onSav
                 </div>
                 {onSaveTemplate && (
                   <button onClick={() => setNamingTemplate('previous')} disabled={templateCapReached}
-                    style={{ background: 'rgba(var(--accent-rgb),0.1)', border: `0.5px solid rgba(var(--accent-rgb),0.4)`, borderRadius: 6, padding: '13px 16px', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 700, color: 'var(--accent)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left', width: '100%', opacity: templateCapReached ? 0.5 : 1 }}>
+                    style={{ background: 'rgba(var(--accent-rgb),0.18)', border: `0.5px solid rgba(var(--accent-rgb),0.4)`, borderRadius: 6, padding: '13px 16px', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 700, color: 'var(--accent)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left', width: '100%', opacity: templateCapReached ? 0.5 : 1 }}>
                     <i className="fa-solid fa-bookmark" style={{ fontSize: 13, flexShrink: 0 }} />
                     <span style={{ flex: 1 }}>{templateCapReached ? 'Template limit reached (5/5)' : 'Save previous form as template, then continue'}</span>
                   </button>

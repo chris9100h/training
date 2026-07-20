@@ -473,7 +473,7 @@ function ThreadList({ coachingId, userId, otherName, unreadNotes, setStore, canD
           const unread = unreadByThread[t.id] || 0;
           return (
             <div key={t.id} onClick={() => setSelected(t)} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', borderBottom: `0.5px solid ${UI.hair}`, cursor: 'pointer' }}>
-              <div style={{ width: 40, height: 40, borderRadius: 8, background: `rgba(var(--accent-rgb),0.08)`, border: `0.5px solid rgba(var(--accent-rgb),0.2)`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <div style={{ width: 40, height: 40, borderRadius: 8, background: `rgba(var(--accent-rgb),0.16)`, border: `0.5px solid rgba(var(--accent-rgb),0.2)`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                 <i className="fa-solid fa-comment" style={{ fontSize: 14, color: 'var(--accent)' }} />
               </div>
               <div style={{ flex: 1 }}>
