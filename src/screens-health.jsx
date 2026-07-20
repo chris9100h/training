@@ -2258,6 +2258,109 @@ function BodyTempCard({ tempLogs, unit, tf: sharedTf, setTf: setSharedTf, dragHa
   );
 }
 
+// ─── Water card ─────────────────────────────────────────────────────────────
+// Only the 1D (today) view needs per-entry detail (multiple drinks a day is
+// the whole point of the tracker); 1W/1M/3M stay the existing daily-total bar
+// chart fed by dailyLogs.waterMl, unchanged.
+
+function WaterEntryChart({ entries }) {
+  // One bar per entry, positioned by time of day. Bar height is that entry's
+  // own amount (what was actually poured then), not a running total, so it
+  // reads the same way as the feed list right below it.
+  const pts = (entries || []).slice().sort((a, b) => a.time.localeCompare(b.time));
+  if (!pts.length) return null;
+  const W = 320, padL = 38, padR = 12, padTop = 10, padBottom = 20, plotH = 96;
+  const H = padTop + plotH + padBottom, plotW = W - padL - padR;
+  const dom = UI.chartDomain(0, Math.max(...pts.map(p => p.amountMl)), { min: 0 });
+  const bw = 10;
+  const xOf = p => padL + ((timeToMinutes(p.time) ?? 0) / 1440) * plotW;
+  const yOf = v => padTop + (1 - (v - dom.min) / dom.range) * plotH;
+  const gridVals = Array.from({ length: 4 }, (_, i) => dom.min + (dom.range / 3) * i);
+  const hoverPoints = pts.map(p => ({
+    x: xOf(p), y: yOf(p.amountMl), date: p.date,
+    rows: [{ value: `${UI.waterToEntry(p.amountMl)} ${UI.waterEntryUnit()}` }],
+    sub: [p.name, p.time].filter(Boolean).join(' · '),
+  }));
+
+  return (
+    <ChartHover W={W} H={H} points={hoverPoints}>
+    <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display: 'block', overflow: 'visible' }}>
+      {gridVals.map((v, i) => (
+        <g key={i}>
+          {i > 0 && <line x1={padL} y1={yOf(v).toFixed(1)} x2={W - padR} y2={yOf(v).toFixed(1)} stroke={UI.hair} strokeWidth="0.5" strokeDasharray="3 3" />}
+          <text x={padL - 5} y={(yOf(v) + 3).toFixed(1)} textAnchor="end" fontSize="8" fontFamily={UI.fontNum} fill={UI.inkFaint}>{UI.waterToEntry(v)}</text>
+        </g>
+      ))}
+      <line x1={padL} y1={padTop + plotH} x2={W - padR} y2={padTop + plotH} stroke={UI.hair} strokeWidth="0.5" />
+      {pts.map((p, i) => {
+        const y = yOf(p.amountMl);
+        const h = (padTop + plotH) - y;
+        return <rect key={i} x={(xOf(p) - bw / 2).toFixed(1)} y={y.toFixed(1)} width={bw} height={Math.max(0, h).toFixed(1)} rx="1" fill="#4a9fe0" />;
+      })}
+    </svg>
+    </ChartHover>
+  );
+}
+
+function WaterCard({ waterSeries, waterAvg, waterLogs, tf: sharedTf, setTf: setSharedTf, dragHandle, onExpand, onOpen, compact = false }) {
+  const today = LB.todayISO();
+  // 1D is a local-only overlay on top of the shared tf every card (including
+  // this one for 1W/1M/3M) participates in, same pattern as Glucose/BP/Temp.
+  const [showToday, setShowToday] = useStateH(false);
+  const tf = showToday ? '1D' : sharedTf;
+  const setTf = id => {
+    if (id === '1D') { setShowToday(true); return; }
+    setShowToday(false);
+    setSharedTf(id);
+  };
+
+  const todayEntries = useMemoH(
+    () => (waterLogs || []).filter(l => l.date === today).sort((a, b) => b.time.localeCompare(a.time)),
+    [waterLogs, today]
+  );
+  const todayTotal = todayEntries.reduce((s, l) => s + (l.amountMl || 0), 0);
+
+  const headline = tf === '1D'
+    ? (todayEntries.length ? `${UI.waterSummaryValue(todayTotal)}${UI.waterSummaryUnit()}` : null)
+    : (waterAvg != null ? `${UI.waterSummaryValue(waterAvg)}${UI.waterSummaryUnit()}` : null);
+  const sub = tf === '1D' ? (todayEntries.length ? 'today' : null) : (waterAvg != null ? 'avg / day' : null);
+
+  return (
+    <HealthChartCard title="Water" icon="fa-glass-water" tf={tf} setTf={setTf} tfOptions={HEALTH_TFS_TODAY}
+      headline={headline} sub={sub} dragHandle={dragHandle} onExpand={onExpand} onOpen={onOpen}>
+      {tf === '1D' ? (
+        !todayEntries.length ? (
+          <HealthChartEmpty label="No water logged today yet" />
+        ) : (
+          <>
+            <WaterEntryChart entries={todayEntries} />
+            {/* Readings feed only in the full (expanded) view, compact (2-col
+                grid) shows just the chart, matching Glucose/BP/Temp. */}
+            {!compact && (
+              <>
+                <div style={{ height: '0.5px', background: UI.hair, margin: '8px 0' }} />
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {todayEntries.map(n => (
+                    <div key={n.id} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 9, fontFamily: UI.fontUi, color: UI.inkGhost }}>{n.time}</div>
+                        {n.name && <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.4, marginTop: 1 }}>{n.name}</div>}
+                      </div>
+                      <span className="num" style={{ flexShrink: 0, fontSize: 11, color: UI.inkFaint }}>{UI.waterToEntry(n.amountMl)} {UI.waterEntryUnit()}</span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </>
+        )
+      ) : (
+        <HealthBarChart series={waterSeries.data} from={waterSeries.from} to={waterSeries.to} format={v => `${UI.waterSummaryValue(v)}${UI.waterSummaryUnit()}`} color="#4a9fe0" colorSoft="rgba(74,159,224,0.35)" />
+      )}
+    </HealthChartCard>
+  );
+}
+
 // ─── HealthScreen ─────────────────────────────────────────────────────────────
 
 function HealthScreen({ store, setStore, go, userId }) {
@@ -2690,10 +2793,7 @@ function HealthScreen({ store, setStore, go, userId }) {
       </HealthChartCard>
     ),
     water: (
-      <HealthChartCard title="Water" icon="fa-glass-water" tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('water')} onOpen={() => go({ name: 'water' })}
-        headline={waterAvg != null ? `${UI.waterSummaryValue(waterAvg)}${UI.waterSummaryUnit()}` : null} sub={waterAvg != null ? 'avg / day' : null}>
-        <HealthBarChart series={waterSeries.data} from={waterSeries.from} to={waterSeries.to} format={v => `${UI.waterSummaryValue(v)}${UI.waterSummaryUnit()}`} color="#4a9fe0" colorSoft="rgba(74,159,224,0.35)" />
-      </HealthChartCard>
+      <WaterCard waterSeries={waterSeries} waterAvg={waterAvg} waterLogs={store.waterLogs} tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('water')} onOpen={() => go({ name: 'water' })} compact />
     ),
     cardio: (
       <HealthChartCard title="Cardio" icon="fa-person-running" tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('cardio')}
@@ -2820,6 +2920,7 @@ function HealthScreen({ store, setStore, go, userId }) {
 function HealthClientLogs({ clientStore }) {
   const logs = clientStore?.dailyLogs || [];
   const cardioLogs = clientStore?.cardioLogs || [];
+  const waterLogs = clientStore?.waterLogs || [];
   const glucoseLogs = clientStore?.glucoseLogs || [];
   const glucoseUnit = clientStore?.settings?.glucoseUnit ?? 'mmol';
   const bloodPressureLogs = clientStore?.bloodPressureLogs || [];
@@ -2979,10 +3080,7 @@ function HealthClientLogs({ clientStore }) {
       </HealthChartCard>
     ),
     water: (
-      <HealthChartCard title="Water" icon="fa-glass-water" tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('water')}
-        headline={waterAvg != null ? `${UI.waterSummaryValue(waterAvg)}${UI.waterSummaryUnit()}` : null} sub={waterAvg != null ? 'avg / day' : null}>
-        <HealthBarChart series={waterSeries.data} from={waterSeries.from} to={waterSeries.to} format={v => `${UI.waterSummaryValue(v)}${UI.waterSummaryUnit()}`} color="#4a9fe0" colorSoft="rgba(74,159,224,0.35)" />
-      </HealthChartCard>
+      <WaterCard waterSeries={waterSeries} waterAvg={waterAvg} waterLogs={waterLogs} tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('water')} compact />
     ),
     cardio: (
       <HealthChartCard title="Cardio" icon="fa-person-running" tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('cardio')}
