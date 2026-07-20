@@ -443,14 +443,18 @@ function WaterScreen({ store, setStore, go, userId }) {
       </div>
 
       {/* ── Settings sheet ── */}
+      {/* The drinks-config sub-sheet is a PUSH, not a stack: opening it closes
+          the settings sheet and closing it reopens settings. Two Sheets open at
+          once each run their own visualViewport keyboard handler, and both fire
+          scrollIntoView on the focused field, which makes the view jump wildly
+          on focus. One sheet open at a time keeps input focus calm. */}
       <Sheet open={settingsOpen} onClose={() => setSettingsOpen(false)} title="Water settings" titleColor="var(--accent)">
-        <WaterSettingsBody settings={settings} patchSettings={patchSettings} go={go} onClose={() => setSettingsOpen(false)} onConfigureDrinks={() => setDrinksConfigOpen(true)} />
+        <WaterSettingsBody settings={settings} patchSettings={patchSettings} go={go} onClose={() => setSettingsOpen(false)} onConfigureDrinks={() => { setSettingsOpen(false); setDrinksConfigOpen(true); }} />
       </Sheet>
 
-      {/* ── Drinks & coffee config sub-sheet (kept out of the main sheet to
-          avoid clutter) ── */}
-      <Sheet open={drinksConfigOpen} onClose={() => setDrinksConfigOpen(false)} title="Drinks & coffee" titleColor="var(--accent)">
-        <WaterDrinksConfigBody settings={settings} patchSettings={patchSettings} onClose={() => setDrinksConfigOpen(false)} />
+      {/* ── Drinks & coffee config sub-sheet (own sheet to keep settings tidy) ── */}
+      <Sheet open={drinksConfigOpen} onClose={() => { setDrinksConfigOpen(false); setSettingsOpen(true); }} title="Drinks & coffee" titleColor="var(--accent)">
+        <WaterDrinksConfigBody settings={settings} patchSettings={patchSettings} onClose={() => { setDrinksConfigOpen(false); setSettingsOpen(true); }} />
       </Sheet>
 
       {/* ── Custom entry sheet ── */}
