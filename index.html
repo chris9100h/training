@@ -41,6 +41,9 @@
     /* Full background-image value for the theme's canvas (Screen component).
        'none' for every theme except paper, which sets a graph-paper grid. */
     --bg-texture: none;
+    /* Multiplier on every knurl/guilloche alpha stop below, so a theme (paper)
+       can make the texture read darker without every consumer changing. */
+    --knurl-opacity: 1;
     /* Surface tints — cream-on-dark defaults; overridden in light mode */
     --surface-tint:      rgba(236,228,208,0.02);
     --surface-tint-sm:   rgba(236,228,208,0.03);
@@ -141,12 +144,12 @@
     background-image:
       repeating-linear-gradient(
         45deg,
-        rgba(var(--knurl-rgb),0.018) 0px, rgba(var(--knurl-rgb),0.018) 1px,
+        rgba(var(--knurl-rgb),calc(0.018 * var(--knurl-opacity))) 0px, rgba(var(--knurl-rgb),calc(0.018 * var(--knurl-opacity))) 1px,
         transparent 1px, transparent 10px
       ),
       repeating-linear-gradient(
         -45deg,
-        rgba(var(--knurl-rgb),0.018) 0px, rgba(var(--knurl-rgb),0.018) 1px,
+        rgba(var(--knurl-rgb),calc(0.018 * var(--knurl-opacity))) 0px, rgba(var(--knurl-rgb),calc(0.018 * var(--knurl-opacity))) 1px,
         transparent 1px, transparent 10px
       );
   }
@@ -154,7 +157,7 @@
     background-image: repeating-linear-gradient(
       0deg,
       transparent 0, transparent 5px,
-      rgba(var(--knurl-rgb),0.025) 5px, rgba(var(--knurl-rgb),0.025) 6px
+      rgba(var(--knurl-rgb),calc(0.025 * var(--knurl-opacity))) 5px, rgba(var(--knurl-rgb),calc(0.025 * var(--knurl-opacity))) 6px
     );
   }
 
@@ -277,7 +280,7 @@
     flex-shrink: 0;
     background: repeating-linear-gradient(
       -60deg,
-      rgba(var(--knurl-rgb),0.20) 0px, rgba(var(--knurl-rgb),0.20) 1.5px,
+      rgba(var(--knurl-rgb),calc(0.20 * var(--knurl-opacity))) 0px, rgba(var(--knurl-rgb),calc(0.20 * var(--knurl-opacity))) 1.5px,
       transparent 1.5px, transparent 6px
     );
   }
@@ -514,7 +517,7 @@ window.DARK_MODES = {
   paper: {
     bg: '#eff0f2', bgRaised: '#f9fafb', bgInset: '#e2e4e8', bgBody: '#e7e8eb', bgRgb: '239,240,242',
     ink: '#141414', inkSoft: 'rgba(20,20,20,0.82)', inkFaint: 'rgba(20,20,20,0.62)', inkGhost: 'rgba(20,20,20,0.40)',
-    hair: 'rgba(20,20,20,0.16)', hairStrong: 'rgba(20,20,20,0.34)', knurlRgb: '70,95,150',
+    hair: 'rgba(20,20,20,0.16)', hairStrong: 'rgba(20,20,20,0.34)', knurlRgb: '50,70,120', knurlOpacity: 2.4,
     surfaceTint:     'rgba(20,20,20,0.035)',
     surfaceTintSm:   'rgba(20,20,20,0.05)',
     surfaceTintMd:   'rgba(20,20,20,0.07)',
@@ -526,7 +529,7 @@ window.DARK_MODES = {
     neutralTint:     'rgba(20,20,20,0.07)',
     neutralBorderSm: 'rgba(20,20,20,0.18)',
     successText:     '#2e6b30',
-    bgTexture: 'repeating-linear-gradient(0deg, rgba(var(--knurl-rgb),0.16) 0px, rgba(var(--knurl-rgb),0.16) 1px, transparent 1px, transparent 22px), repeating-linear-gradient(90deg, rgba(var(--knurl-rgb),0.16) 0px, rgba(var(--knurl-rgb),0.16) 1px, transparent 1px, transparent 22px)',
+    bgTexture: 'repeating-linear-gradient(0deg, rgba(var(--knurl-rgb),calc(0.16 * var(--knurl-opacity))) 0px, rgba(var(--knurl-rgb),calc(0.16 * var(--knurl-opacity))) 1px, transparent 1px, transparent 22px), repeating-linear-gradient(90deg, rgba(var(--knurl-rgb),calc(0.16 * var(--knurl-opacity))) 0px, rgba(var(--knurl-rgb),calc(0.16 * var(--knurl-opacity))) 1px, transparent 1px, transparent 22px)',
     // Mutes the user's chosen accent color to pencil-grey (see applyAccentColor).
     accent: '#4b5563', accentLight: '#6b7280', accentDeep: '#333c46', accentRgb: '75,85,99',
   },
@@ -548,6 +551,7 @@ window.applyDarkMode = function(key) {
   s.setProperty('--hair', m.hair || _DARK_HAIR);
   s.setProperty('--hair-strong', m.hairStrong || _DARK_HAIR_STRONG);
   s.setProperty('--knurl-rgb', m.knurlRgb || '236,228,208');
+  s.setProperty('--knurl-opacity', m.knurlOpacity || 1);
   s.setProperty('--bg-texture', m.bgTexture || 'none');
   s.setProperty('--surface-tint',      m.surfaceTint     || t.surfaceTint);
   s.setProperty('--surface-tint-sm',   m.surfaceTintSm   || t.surfaceTintSm);
