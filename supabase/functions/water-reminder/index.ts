@@ -50,6 +50,7 @@ function hhmmToDecimal(t: string): number {
 interface Row {
   user_id: string;
   pushover_user_key: string | null;
+  use_pushover: boolean | null;
   water_goal_ml: number | null;
   water_start_time: string | null;
   water_end_time: string | null;
@@ -59,7 +60,7 @@ interface Row {
 
 async function sendReminders() {
   const r = await dbFetch(
-    'zane_user_settings?water_reminder_enabled=eq.true&push_enabled=eq.true&select=user_id,pushover_user_key,water_goal_ml,water_start_time,water_end_time,water_last_push_at,tz_offset_minutes'
+    'zane_user_settings?water_reminder_enabled=eq.true&push_enabled=eq.true&select=user_id,pushover_user_key,use_pushover,water_goal_ml,water_start_time,water_end_time,water_last_push_at,tz_offset_minutes'
   );
   const rows: Row[] = await r.json().catch(() => []);
   const now = Date.now();
@@ -94,7 +95,12 @@ async function sendReminders() {
     const title = 'Zane · Hydration';
     const message = `You're behind on water. Time for about ${missing} ml. 💧`;
 
-    if (row.pushover_user_key) {
+    // Respect the user's channel choice: when Pushover is enabled (use_pushover
+    // and a key set) send only Pushover, otherwise send native Web Push. This
+    // matches the use_pushover "instead of Web Push" semantics used elsewhere,
+    // so the user never gets the same nudge on both channels.
+    const viaPushover = !!row.use_pushover && !!row.pushover_user_key;
+    if (viaPushover) {
       try {
         const res = await fetch('https://api.pushover.net/1/messages.json', {
           method: 'POST',
@@ -105,9 +111,9 @@ async function sendReminders() {
       } catch (e) {
         console.error(`[water-reminder] pushover error for ${row.user_id}:`, e);
       }
+    } else {
+      await sendWebPush(row.user_id, title, message);
     }
-
-    await sendWebPush(row.user_id, title, message);
 
     await dbFetch(`zane_user_settings?user_id=eq.${row.user_id}`, {
       method: 'PATCH',
