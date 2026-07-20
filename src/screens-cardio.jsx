@@ -588,7 +588,7 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
               <button key={a.id} onClick={() => { setActivityType(a.id); setShowCustom(false); }} style={{
                 padding: '14px 10px', borderRadius: 6, cursor: 'pointer',
                 border: `1px solid ${activityType === a.id ? 'var(--accent)' : UI.hairStrong}`,
-                background: activityType === a.id ? 'rgba(var(--accent-rgb),0.18)' : UI.bgInset,
+                background: activityType === a.id ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
                 display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8,
                 WebkitTapHighlightColor: 'transparent',
               }}>
@@ -599,7 +599,7 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
             <button onClick={() => setShowCustom(v => !v)} style={{
               padding: '14px 10px', borderRadius: 6, cursor: 'pointer',
               border: `1px solid ${(showCustom || isCustomSel) ? 'var(--accent)' : UI.hairStrong}`,
-              background: (showCustom || isCustomSel) ? 'rgba(var(--accent-rgb),0.18)' : UI.bgInset,
+              background: (showCustom || isCustomSel) ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
               display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8,
               WebkitTapHighlightColor: 'transparent',
             }}>
@@ -620,7 +620,7 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
                   <button key={t} onClick={() => { setActivityType(t); setShowCustom(false); }} style={{
                     padding: '10px 14px', borderRadius: 6, cursor: 'pointer', textAlign: 'center',
                     border: `1px solid ${activityType === t ? 'var(--accent)' : UI.hairStrong}`,
-                    background: activityType === t ? 'rgba(var(--accent-rgb),0.18)' : UI.bgInset,
+                    background: activityType === t ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
                     fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600,
                     color: activityType === t ? 'var(--accent)' : UI.ink,
                     WebkitTapHighlightColor: 'transparent',
@@ -645,7 +645,7 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
           <button key={m.id} onClick={() => setMode(m.id)} style={{
             padding: '14px 16px', borderRadius: 6, cursor: 'pointer', textAlign: 'left',
             border: `1px solid ${mode === m.id ? 'var(--accent)' : UI.hairStrong}`,
-            background: mode === m.id ? 'rgba(var(--accent-rgb),0.16)' : UI.bgInset,
+            background: mode === m.id ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
             display: 'flex', gap: 14, alignItems: 'flex-start',
             WebkitTapHighlightColor: 'transparent',
           }}>
@@ -685,7 +685,7 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
               }} style={{
                 flex: 1, paddingTop: 10, paddingBottom: 10, borderRadius: 6, cursor: 'pointer',
                 border: `1px solid ${days[k] ? 'var(--accent)' : UI.hairStrong}`,
-                background: days[k] ? 'rgba(var(--accent-rgb),0.12)' : UI.bgInset,
+                background: days[k] ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
                 fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.04em',
                 color: days[k] ? 'var(--accent)' : UI.inkSoft,
                 WebkitTapHighlightColor: 'transparent',
@@ -695,7 +695,7 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
           <button onClick={() => setUseTargets(v => !v)} style={{
             padding: '12px 14px', borderRadius: 6, cursor: 'pointer', textAlign: 'left',
             border: `1px solid ${useTargets ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong}`,
-            background: useTargets ? 'rgba(var(--accent-rgb),0.14)' : UI.bgInset,
+            background: useTargets ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
             display: 'flex', alignItems: 'center', gap: 12,
             WebkitTapHighlightColor: 'transparent',
           }}>
@@ -794,7 +794,7 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
               }} style={{
                 flex: 1, padding: '9px 8px', borderRadius: 6, cursor: on ? 'default' : 'pointer',
                 border: `1px solid ${on ? 'var(--accent)' : UI.hairStrong}`,
-                background: on ? 'rgba(var(--accent-rgb),0.18)' : UI.bgInset,
+                background: on ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
                 fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700, letterSpacing: '0.04em',
                 color: on ? 'var(--accent)' : UI.inkSoft, WebkitTapHighlightColor: 'transparent',
               }}>{o.label}</button>
@@ -839,7 +839,7 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
                 <button key={gt.id} onClick={() => setGoal(g => ({ ...g, type: gt.id }))} style={{
                   flex: 1, padding: '10px 8px', borderRadius: 6, cursor: 'pointer', textAlign: 'center',
                   border: `1px solid ${goal.type === gt.id ? 'var(--accent)' : UI.hairStrong}`,
-                  background: goal.type === gt.id ? 'rgba(var(--accent-rgb),0.18)' : UI.bgInset,
+                  background: goal.type === gt.id ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
                   WebkitTapHighlightColor: 'transparent',
                 }}>
                   <div style={{ fontSize: 11, fontWeight: 700, color: goal.type === gt.id ? 'var(--accent)' : UI.ink, fontFamily: UI.fontUi }}>{gt.label}</div>
@@ -915,7 +915,7 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
                 <button key={k} onClick={() => setDays(d => ({ ...d, [k]: !d[k] }))} style={{
                   flex: 1, paddingTop: 10, paddingBottom: 10, borderRadius: 6, cursor: 'pointer',
                   border: `1px solid ${days[k] ? 'var(--accent)' : UI.hairStrong}`,
-                  background: days[k] ? 'rgba(var(--accent-rgb),0.12)' : UI.bgInset,
+                  background: days[k] ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
                   fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.04em',
                   color: days[k] ? 'var(--accent)' : UI.inkSoft,
                   WebkitTapHighlightColor: 'transparent',
@@ -1015,7 +1015,7 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
               <div key={i} style={{
                 display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                 padding: '10px 14px', borderRadius: 6,
-                background: isGoal ? 'rgba(var(--accent-rgb),0.16)' : UI.bgInset,
+                background: isGoal ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
                 border: `0.5px solid ${isGoal ? 'rgba(var(--accent-rgb),0.3)' : UI.hair}`,
               }}>
                 <div>

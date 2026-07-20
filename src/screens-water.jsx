@@ -755,7 +755,7 @@ function WaterSettingsBody({ settings, patchSettings, go, onClose, onConfigureDr
 function wtSwatchBtnStyle(sel) {
   return {
     display: 'grid', placeItems: 'center', borderRadius: 6, cursor: 'pointer',
-    background: sel ? 'rgba(var(--accent-rgb),0.14)' : UI.bgInset,
+    background: sel ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
     border: `0.5px solid ${sel ? 'rgba(var(--accent-rgb),0.5)' : UI.hair}`,
     WebkitTapHighlightColor: 'transparent',
   };
@@ -886,7 +886,7 @@ function WaterConfigRow({ left, right, onRemove, onEdit, icon, color, active }) 
   return (
     <div onClick={onEdit} style={{
       display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 12px',
-      background: active ? 'rgba(var(--accent-rgb),0.10)' : UI.bgInset,
+      background: active ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
       border: `1px solid ${active ? 'rgba(var(--accent-rgb),0.35)' : UI.hair}`, borderRadius: 6, marginBottom: 6,
       cursor: onEdit ? 'pointer' : 'default', WebkitTapHighlightColor: 'transparent',
     }}>

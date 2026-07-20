@@ -649,7 +649,7 @@ const EQUIPMENT_TYPES = [
 const pickChipStyle = (on) => ({
   padding: '9px 13px', borderRadius: 4, cursor: 'pointer',
   border: `1px solid ${on ? 'var(--accent)' : UI.hairStrong}`,
-  background: on ? 'rgba(var(--accent-rgb),0.12)' : UI.bgInset,
+  background: on ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
   color: on ? 'var(--accent)' : UI.inkSoft,
   fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, lineHeight: 1.1,
   WebkitTapHighlightColor: 'transparent',
@@ -1030,7 +1030,7 @@ function ExerciseWizard({ step, setStep, onClose, isDirty, store,
     <button key={key} onClick={onClick} style={{
       width: '100%', display: 'flex', alignItems: 'center', gap: 12, textAlign: 'left',
       padding: '12px 14px', borderRadius: 6, cursor: 'pointer',
-      background: active ? 'rgba(var(--accent-rgb),0.10)' : UI.bgInset,
+      background: active ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
       border: `1px solid ${active ? 'var(--accent)' : UI.hairStrong}`,
       WebkitTapHighlightColor: 'transparent', transition: 'border-color 0.12s, background 0.12s',
     }}>
@@ -3784,7 +3784,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                 return (
                   <button key={opt.key} onClick={() => setFbEdit(e => ({ ...e, sel: opt.key }))} style={{
                     width: '100%', marginBottom: 8, padding: '12px 14px',
-                    background: sel ? 'rgba(var(--accent-rgb),0.12)' : UI.bgInset,
+                    background: sel ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
                     border: `1px solid ${sel ? 'var(--accent)' : UI.hairStrong}`, borderRadius: 6, cursor: 'pointer', textAlign: 'left', WebkitTapHighlightColor: 'transparent',
                   }}>
                     <div style={{ fontFamily: UI.fontUi, fontSize: 13, color: sel ? 'var(--accent)' : UI.ink, fontWeight: 600 }}>{opt.label}</div>
@@ -3803,7 +3803,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                 return (
                   <button key={opt.key} onClick={() => setFbEdit(e => ({ ...e, sel: opt.key }))} style={{
                     width: '100%', marginBottom: 8, padding: '12px 14px',
-                    background: sel ? 'rgba(var(--accent-rgb),0.12)' : UI.bgInset,
+                    background: sel ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
                     border: `1px solid ${sel ? 'var(--accent)' : UI.hairStrong}`, borderRadius: 6, cursor: 'pointer', textAlign: 'left', WebkitTapHighlightColor: 'transparent',
                   }}>
                     <div style={{ fontFamily: UI.fontUi, fontSize: 13, color: sel ? 'var(--accent)' : UI.ink, fontWeight: 600 }}>{opt.label}</div>
@@ -3870,7 +3870,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                   const sel = fbEdit.volume === key;
                   return (
                     <button key={key} onClick={() => setFbEdit(e => ({ ...e, volume: key }))} style={{
-                      width: '100%', padding: '10px 14px', background: sel ? 'rgba(var(--accent-rgb),0.12)' : UI.bgInset,
+                      width: '100%', padding: '10px 14px', background: sel ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
                       border: `1px solid ${sel ? 'var(--accent)' : UI.hairStrong}`, borderRadius: 6, cursor: 'pointer', textAlign: 'left', WebkitTapHighlightColor: 'transparent',
                     }}>
                       <div style={{ fontFamily: UI.fontUi, fontSize: 13, color: sel ? 'var(--accent)' : UI.ink, fontWeight: 600 }}>{mesoVolumeLbl(false)[key]}</div>

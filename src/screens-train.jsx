@@ -5581,8 +5581,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         return (
           <button key={opt.key} onClick={() => setReadinessSel(opt.key)} style={{
             width: '100%', marginBottom: 8, padding: '14px 16px',
-            background: sel ? 'rgba(var(--accent-rgb),0.12)' : UI.bgInset,
-            border: `1px solid ${sel ? 'var(--accent)' : UI.hairStrong}`,
+            background: sel ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
+            border: `${sel ? '2px' : '1px'} solid ${sel ? 'var(--accent)' : UI.hairStrong}`,
             borderRadius: 6, cursor: 'pointer', textAlign: 'left',
             WebkitTapHighlightColor: 'transparent',
           }}>
@@ -7502,7 +7502,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           const myoMatchTarget = nearestDoneMyoBefore(entry.sets, myoMatchAnchorIdx);
           const btnBase = (active) => ({
             width: '100%', textAlign: 'left', cursor: active ? 'pointer' : 'default',
-            background: active ? 'rgba(var(--accent-rgb),0.14)' : UI.bgInset,
+            background: active ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
             border: `1px solid ${active ? 'rgba(var(--accent-rgb),0.35)' : UI.hair}`,
             borderRadius: 6, padding: '14px 16px',
             display: 'flex', alignItems: 'center', gap: 14,
@@ -8905,7 +8905,7 @@ const chainTitleStyle = { fontFamily: UI.fontDisplay, fontSize: 22, fontWeight: 
 
 function setInputStyle(done, current) {
   return {
-    background: done ? 'transparent' : current ? 'rgba(var(--accent-rgb),0.13)' : UI.bgInset,
+    background: done ? 'transparent' : current ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
     border: `1px solid ${done ? 'transparent' : current ? UI.goldSoft : UI.hair}`,
     borderRadius: 4, outline: 'none',
     color: done ? UI.inkSoft : UI.ink,

@@ -2723,7 +2723,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                         <button key={c.key} onClick={() => setSupportCategoryDraft(c.key)} style={{
                           flex: 1, padding: '8px 4px', borderRadius: 6, cursor: 'pointer',
                           border: `0.5px solid ${supportCategoryDraft === c.key ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong}`,
-                          background: supportCategoryDraft === c.key ? 'rgba(var(--accent-rgb),0.18)' : UI.bgInset,
+                          background: supportCategoryDraft === c.key ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
                           color: supportCategoryDraft === c.key ? 'var(--accent)' : UI.inkFaint,
                           fontFamily: UI.fontUi, fontSize: 10, fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase',
                           WebkitTapHighlightColor: 'transparent', textAlign: 'center',
@@ -2747,7 +2747,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                     <textarea value={supportDraft} onChange={e => setSupportDraft(e.target.value)}
                       onPaste={onPasteSupportMessage}
                       placeholder="Describe your request…" rows={4} style={{ ...iStyle, flex: 1 }} />
-                    <label style={{ cursor: 'pointer', flexShrink: 0, width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 6, background: supportImageFile ? 'rgba(var(--accent-rgb),0.15)' : UI.bgInset, border: `0.5px solid ${supportImageFile ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong}`, color: supportImageFile ? 'var(--accent)' : UI.inkFaint }}>
+                    <label style={{ cursor: 'pointer', flexShrink: 0, width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 6, background: supportImageFile ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset, border: `0.5px solid ${supportImageFile ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong}`, color: supportImageFile ? 'var(--accent)' : UI.inkFaint }}>
                       <input type="file" accept="image/*" style={{ display: 'none' }} onChange={handleImagePick} />
                       <i className="fa-solid fa-image" style={{ fontSize: 15 }} />
                     </label>
@@ -2824,7 +2824,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                         placeholder="Write a message…" rows={3} style={{ ...iStyle, flex: 1 }}
                         onPaste={onPasteSupportMessage}
                         onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleSupportSend(); }} />
-                      <label style={{ cursor: 'pointer', flexShrink: 0, width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 6, background: supportImageFile ? 'rgba(var(--accent-rgb),0.15)' : UI.bgInset, border: `0.5px solid ${supportImageFile ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong}`, color: supportImageFile ? 'var(--accent)' : UI.inkFaint }}>
+                      <label style={{ cursor: 'pointer', flexShrink: 0, width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 6, background: supportImageFile ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset, border: `0.5px solid ${supportImageFile ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong}`, color: supportImageFile ? 'var(--accent)' : UI.inkFaint }}>
                         <input type="file" accept="image/*" style={{ display: 'none' }} onChange={handleImagePick} />
                         <i className="fa-solid fa-image" style={{ fontSize: 15 }} />
                       </label>
@@ -2908,7 +2908,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
               { key: 'resolved',    label: 'Resolved' },
             ];
             const sColor = { open: UI.danger, in_progress: UI.inkFaint, resolved: 'var(--accent)' };
-            const sBg    = { open: 'rgba(var(--danger-rgb),0.12)', in_progress: UI.bgInset, resolved: 'rgba(var(--accent-rgb),0.18)' };
+            const sBg    = { open: 'rgba(var(--danger-rgb),0.18)', in_progress: UI.bgInset, resolved: 'rgba(var(--accent-rgb),0.22)' };
             const currentStatus = supportInbox.find(t => t.coaching_id === supportTicket.coachingId)?.support_status || supportTicket.status || 'open';
             return (
               <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
@@ -2982,7 +2982,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                       onPaste={onPasteAdminMessage}
                       onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleAdminReply(); }}
                     />
-                    <label style={{ cursor: 'pointer', flexShrink: 0, width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 6, background: adminImageFile ? 'rgba(var(--accent-rgb),0.15)' : UI.bgInset, border: `0.5px solid ${adminImageFile ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong}`, color: adminImageFile ? 'var(--accent)' : UI.inkFaint }}>
+                    <label style={{ cursor: 'pointer', flexShrink: 0, width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 6, background: adminImageFile ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset, border: `0.5px solid ${adminImageFile ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong}`, color: adminImageFile ? 'var(--accent)' : UI.inkFaint }}>
                       <input type="file" accept="image/*" style={{ display: 'none' }} onChange={handleAdminImagePick} />
                       <i className="fa-solid fa-image" style={{ fontSize: 15 }} />
                     </label>

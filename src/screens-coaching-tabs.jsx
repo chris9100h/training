@@ -1054,13 +1054,13 @@ function FieldWidget({ field, value, onChange, distUnit, setDistUnit, inputStyle
         <div style={{ display: 'flex', gap: 6 }}>
           {options.map(opt => {
             const sel = value === opt.value;
-            const bg = sel ? opt.color === 'accent' ? `rgba(var(--accent-rgb),0.2)` : opt.color === 'danger' ? `rgba(var(--danger-rgb),0.15)` : UI.bgRaised : UI.bgInset;
+            const bg = sel ? opt.color === 'accent' ? `rgba(var(--accent-rgb),0.28)` : opt.color === 'danger' ? `rgba(var(--danger-rgb),0.22)` : UI.bgRaised : UI.bgInset;
             const fg = sel ? opt.color === 'accent' ? 'var(--accent)' : opt.color === 'danger' ? 'rgba(var(--danger-rgb),0.85)' : UI.ink : UI.inkFaint;
             return (
               <button key={opt.value} onClick={() => onChange(sel ? null : opt.value)}
                 style={{ flex: 1, padding: '9px 4px', borderRadius: 6, cursor: 'pointer', background: bg, color: fg,
                   fontFamily: UI.fontUi, fontSize: 10, fontWeight: sel ? 700 : 400, letterSpacing: '0.04em',
-                  border: `0.5px solid ${sel ? 'currentColor' : UI.hairStrong}` }}>
+                  border: `${sel ? '1.5px' : '0.5px'} solid ${sel ? 'currentColor' : UI.hairStrong}` }}>
                 {opt.label}
               </button>
             );

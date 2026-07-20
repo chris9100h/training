@@ -637,7 +637,7 @@ function TourVisualDrag() {
         <div key={ex} style={{
           display: 'flex', alignItems: 'center', gap: 8,
           padding: '8px 10px',
-          background: i === 1 ? 'rgba(var(--accent-rgb),0.16)' : UI.bgInset,
+          background: i === 1 ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
           border: `1px solid ${i === 1 ? 'rgba(var(--accent-rgb),0.3)' : UI.hairStrong}`,
           borderRadius: 4, opacity: i === 1 ? 0.6 : 1,
         }}>
@@ -846,7 +846,7 @@ function TourVisualTrainWarmup() {
       <div style={{ display: 'flex', justifyContent: 'center', gap: 10 }}>
         {[0, 1, 2].map(i => (
           <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
-            <div style={{ width: 24, height: 24, borderRadius: '50%', background: i === 0 ? 'var(--accent)' : i === 1 ? `rgba(var(--accent-rgb),0.2)` : UI.bgInset, border: `1.5px solid ${i === 0 ? 'var(--accent)' : i === 1 ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <div style={{ width: 24, height: 24, borderRadius: '50%', background: i === 0 ? 'var(--accent)' : i === 1 ? `rgba(var(--accent-rgb),0.28)` : UI.bgInset, border: `1.5px solid ${i === 0 ? 'var(--accent)' : i === 1 ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               {i === 0 && <i className="fa-solid fa-check" style={{ fontSize: 8, color: 'var(--accent-ink)' }} />}
             </div>
             <span style={{ fontSize: 7, fontFamily: UI.fontUi, color: i === 0 ? 'var(--accent)' : UI.inkGhost, fontWeight: 700 }}>W{i + 1}</span>
@@ -1121,7 +1121,7 @@ function TourVisualTrainMeso() {
             {c.opts.map((o, i) => (
               <span key={o} style={{
                 fontSize: 9, fontFamily: UI.fontUi, padding: '4px 8px', borderRadius: 4,
-                background: i === 1 ? 'rgba(var(--accent-rgb),0.14)' : UI.bgInset,
+                background: i === 1 ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
                 border: `0.5px solid ${i === 1 ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong}`,
                 color: i === 1 ? 'var(--accent)' : UI.inkFaint,
               }}>{o}</span>
@@ -1387,7 +1387,7 @@ function TourVisualCardioIntro() {
       {modes.map((m, i) => (
         <div key={m.label} style={{
           flex: 1, padding: '14px 10px', borderRadius: 6, textAlign: 'center',
-          background: i === 1 ? 'rgba(var(--accent-rgb),0.16)' : UI.bgInset,
+          background: i === 1 ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
           border: `0.5px solid ${i === 1 ? 'rgba(var(--accent-rgb),0.35)' : UI.hairStrong}`,
         }}>
           <i className={`fa-solid ${m.icon}`} style={{ fontSize: 18, color: i === 1 ? 'var(--accent)' : UI.inkFaint }} />
@@ -1409,7 +1409,7 @@ function TourVisualCardioActivity() {
       {activities.map((a, i) => (
         <div key={a.label} style={{
           display: 'flex', alignItems: 'center', gap: 8, padding: '10px 11px', borderRadius: 6,
-          background: i === 0 ? 'rgba(var(--accent-rgb),0.18)' : UI.bgInset,
+          background: i === 0 ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
           border: `0.5px solid ${i === 0 ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong}`,
         }}>
           <i className={`fa-solid ${a.icon}`} style={{ fontSize: 13, color: i === 0 ? 'var(--accent)' : UI.inkFaint }} />
@@ -1581,7 +1581,7 @@ function TourVisualCustomIntro() {
   return (
     <div style={{ display: 'flex', gap: 7 }}>
       {items.map((ic, i) => (
-        <div key={ic} style={{ flex: 1, textAlign: 'center', padding: '13px 4px', borderRadius: 6, background: i === 0 ? 'rgba(var(--accent-rgb),0.18)' : UI.bgInset, border: `0.5px solid ${i === 0 ? 'rgba(var(--accent-rgb),0.35)' : UI.hairStrong}` }}>
+        <div key={ic} style={{ flex: 1, textAlign: 'center', padding: '13px 4px', borderRadius: 6, background: i === 0 ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset, border: `0.5px solid ${i === 0 ? 'rgba(var(--accent-rgb),0.35)' : UI.hairStrong}` }}>
           <i className={`fa-solid ${ic}`} style={{ fontSize: 15, color: i === 0 ? 'var(--accent)' : UI.inkFaint }} />
         </div>
       ))}
@@ -1691,7 +1691,7 @@ function TourVisualCoachRoles() {
       {tabs.map((t, i) => (
         <div key={i} style={{
           flex: 1, padding: '9px 4px', borderRadius: 6, textAlign: 'center',
-          background: t.active ? 'rgba(var(--accent-rgb),0.10)' : UI.bgInset,
+          background: t.active ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
           border: `0.5px solid ${t.active ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong}`,
           display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5,
         }}>

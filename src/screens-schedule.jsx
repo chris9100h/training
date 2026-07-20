@@ -2887,7 +2887,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
                             <button key={o.key} onClick={() => setDraft(d => ({ ...d, mesocycle_autoregulate_mode: o.key === 'load' ? 'load' : null }))} style={{
                               flex: 1, padding: '9px 8px', borderRadius: 6, cursor: 'pointer',
                               fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, textAlign: 'center',
-                              background: on ? 'rgba(var(--accent-rgb),0.12)' : UI.bgInset,
+                              background: on ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
                               color: on ? 'var(--accent)' : UI.inkFaint,
                               border: `1px solid ${on ? 'var(--accent)' : UI.hairStrong}`, WebkitTapHighlightColor: 'transparent',
                             }}>{o.label}</button>
@@ -4331,7 +4331,7 @@ function PlanWizard({ store, setStore, go }) {
     <button key={key} onClick={onClick} style={{
       width: '100%', display: 'flex', alignItems: 'center', gap: 12, textAlign: 'left',
       padding: '12px 14px', borderRadius: 6, cursor: 'pointer',
-      background: active ? 'rgba(var(--accent-rgb),0.10)' : UI.bgInset,
+      background: active ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
       border: `1px solid ${active ? 'var(--accent)' : UI.hairStrong}`,
       WebkitTapHighlightColor: 'transparent', transition: 'border-color 0.12s, background 0.12s',
     }}>
@@ -4414,7 +4414,7 @@ function PlanWizard({ store, setStore, go }) {
       const on = customDays[dayIdx]?.name === dt;
       return <button key={dt} onClick={() => pickDay(dt)}
         style={{ padding: '13px 6px', borderRadius: 6, cursor: 'pointer', textAlign: 'center', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, letterSpacing: '0.04em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-          background: on ? 'rgba(var(--accent-rgb),0.12)' : UI.bgInset, color: on ? 'var(--accent)' : UI.inkFaint,
+          background: on ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset, color: on ? 'var(--accent)' : UI.inkFaint,
           border: `1px solid ${on ? 'var(--accent)' : UI.hairStrong}`, WebkitTapHighlightColor: 'transparent' }}>{dt}</button>;
     };
     const customChip = (dt) => {
@@ -4508,7 +4508,7 @@ function PlanWizard({ store, setStore, go }) {
           };
           return <button key={w} onClick={toggleWeekday}
             style={{ padding: '12px 6px', borderRadius: 6, cursor: 'pointer', textAlign: 'center', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600,
-              background: on ? 'rgba(var(--accent-rgb),0.12)' : UI.bgInset, color: on ? 'var(--accent)' : UI.inkFaint,
+              background: on ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset, color: on ? 'var(--accent)' : UI.inkFaint,
               border: `1px solid ${on ? 'var(--accent)' : UI.hairStrong}`, WebkitTapHighlightColor: 'transparent' }}>{w}</button>;
         })}
       </div>
@@ -4534,7 +4534,7 @@ function PlanWizard({ store, setStore, go }) {
                 <button key={o.key} onClick={() => setAutoregMode(o.key)} style={{
                   flex: 1, padding: '10px 8px', borderRadius: 6, cursor: 'pointer',
                   fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, textAlign: 'center',
-                  background: on ? 'rgba(var(--accent-rgb),0.12)' : UI.bgInset,
+                  background: on ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
                   color: on ? 'var(--accent)' : UI.inkFaint,
                   border: `1px solid ${on ? 'var(--accent)' : UI.hairStrong}`, WebkitTapHighlightColor: 'transparent',
                 }}>{o.label}</button>
@@ -4608,7 +4608,7 @@ function PlanWizard({ store, setStore, go }) {
           const sel = importSel.has(d.key);
           return <button key={d.key} onClick={() => setImportSel(s => { const n = new Set(s); if (n.has(d.key)) n.delete(d.key); else n.add(d.key); return n; })}
             style={{ display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left', padding: '11px 12px', borderRadius: 6, cursor: 'pointer',
-              background: sel ? 'rgba(var(--accent-rgb),0.10)' : UI.bgInset, border: `1px solid ${sel ? 'var(--accent)' : UI.hairStrong}`, WebkitTapHighlightColor: 'transparent' }}>
+              background: sel ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset, border: `1px solid ${sel ? 'var(--accent)' : UI.hairStrong}`, WebkitTapHighlightColor: 'transparent' }}>
             <i className={`fa-solid ${sel ? 'fa-circle-check' : 'fa-circle'}`} style={{ fontSize: 16, color: sel ? 'var(--accent)' : UI.inkFaint, flexShrink: 0 }} />
             <span style={{ flex: 1, minWidth: 0 }}>
               <span style={{ display: 'block', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, color: sel ? 'var(--accent)' : UI.ink, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{d.name}</span>

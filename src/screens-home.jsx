@@ -968,7 +968,7 @@ function CardioFinishFlow({ open, durationMin, store, setStore, onClose, onPR })
           <button key={n} onClick={() => pick('paceFeeling', Number(n))} style={{
             flex: 1, padding: '10px 2px', borderRadius: 8, cursor: 'pointer',
             border: `0.5px solid ${form.paceFeeling === Number(n) ? 'var(--accent)' : UI.hairStrong}`,
-            background: form.paceFeeling === Number(n) ? 'rgba(var(--accent-rgb),0.18)' : UI.bgInset,
+            background: form.paceFeeling === Number(n) ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
             display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, WebkitTapHighlightColor: 'transparent',
           }}>
             <span className="num" style={{ fontSize: 14, color: form.paceFeeling === Number(n) ? 'var(--accent)' : UI.inkSoft }}>{n}</span>
@@ -983,7 +983,7 @@ function CardioFinishFlow({ open, durationMin, store, setStore, onClose, onPR })
           <button key={n} onClick={() => pick('effort', n)} style={{
             flex: 1, padding: '10px 0', borderRadius: 6, cursor: 'pointer',
             border: `0.5px solid ${form.effort === n ? 'var(--accent)' : UI.hairStrong}`,
-            background: form.effort === n ? 'rgba(var(--accent-rgb),0.18)' : UI.bgInset, WebkitTapHighlightColor: 'transparent',
+            background: form.effort === n ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset, WebkitTapHighlightColor: 'transparent',
           }}>
             <span className="num" style={{ fontSize: 12, color: form.effort === n ? 'var(--accent)' : UI.inkSoft }}>{n}</span>
           </button>
