@@ -346,27 +346,29 @@ function WaterScreen({ store, setStore, go, userId }) {
           </Card>
         )}
 
-        {/* Other drinks: coffee preset + user-defined drinks */}
+        {/* Other drinks: coffee preset spans the full row, user drinks below */}
         <div>
           <Bezel style={{ marginBottom: 10 }}>Other drinks</Bezel>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 }}>
-            <button onClick={openCoffee} style={wtDrinkTile}>
-              <span style={wtDrinkIcon}><i className="fa-solid fa-mug-hot" style={{ fontSize: 15 }} /></span>
-              <div style={{ textAlign: 'left', minWidth: 0 }}>
-                <div style={wtDrinkName}>Coffee</div>
-                <div style={wtDrinkMeta}>size + milk</div>
-              </div>
-            </button>
-            {drinks.map((d, i) => (
-              <button key={i} onClick={() => addWithConfirm(d.ml, d.name, 'other')} style={wtDrinkTile}>
-                <span style={wtDrinkIcon}><i className="fa-solid fa-glass-water" style={{ fontSize: 15 }} /></span>
-                <div style={{ textAlign: 'left', minWidth: 0 }}>
-                  <div style={wtDrinkName}>{d.name}</div>
-                  <div style={wtDrinkMeta}>{d.ml} ml</div>
-                </div>
-              </button>
-            ))}
-          </div>
+          <button onClick={openCoffee} style={{ ...wtDrinkTile, width: '100%' }}>
+            <span style={wtDrinkIcon}><i className="fa-solid fa-mug-hot" style={{ fontSize: 15 }} /></span>
+            <div style={{ textAlign: 'left', minWidth: 0 }}>
+              <div style={wtDrinkName}>Coffee</div>
+              <div style={wtDrinkMeta}>size + milk</div>
+            </div>
+          </button>
+          {drinks.length > 0 && (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8, marginTop: 8 }}>
+              {drinks.map((d, i) => (
+                <button key={i} onClick={() => addWithConfirm(d.ml, d.name, 'other')} style={wtDrinkTile}>
+                  <span style={wtDrinkIcon}><i className="fa-solid fa-glass-water" style={{ fontSize: 15 }} /></span>
+                  <div style={{ textAlign: 'left', minWidth: 0 }}>
+                    <div style={wtDrinkName}>{d.name}</div>
+                    <div style={wtDrinkMeta}>{d.ml} ml</div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
           {drinks.length === 0 && (
             <button onClick={() => setSettingsOpen(true)} style={{ marginTop: 8, width: '100%', textAlign: 'center', fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, background: 'transparent', border: 'none', cursor: 'pointer', padding: 4 }}>
               Add your own drinks in settings
