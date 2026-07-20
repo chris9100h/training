@@ -544,6 +544,7 @@ function WaterSettingsBody({ settings, patchSettings, go, onClose, onConfigureDr
   const [goal, setGoal] = useStateW(String(UI.waterToEntry(settings.waterGoalMl || 2000)));
   const [start, setStart] = useStateW(settings.waterStartTime || '08:00');
   const [end, setEnd] = useStateW(settings.waterEndTime || '22:00');
+  const [bottleMlDraft, setBottleMlDraft] = useStateW(String(settings.waterBottleMl || 1500));
   const timeColorScheme = settings.darkMode === 'light' ? 'light' : 'dark';
   const timeStyle = { ...wtInput, colorScheme: timeColorScheme };
 
@@ -565,6 +566,16 @@ function WaterSettingsBody({ settings, patchSettings, go, onClose, onConfigureDr
     patchSettings({ waterGoalMl: ml, waterStartTime: start, waterEndTime: validEnd });
   };
 
+  const saveBottleMl = () => {
+    // Commit on blur, like the goal field: committing on every keystroke would
+    // write waterBottleMl:0 into synced settings the instant the field is
+    // cleared to retype it (parseInt('') is NaN, || 0 -> 0).
+    const parsed = parseInt(bottleMlDraft, 10);
+    const ml = parsed > 0 ? parsed : (settings.waterBottleMl || 1500);
+    setBottleMlDraft(String(ml));
+    patchSettings({ waterBottleMl: ml });
+  };
+
   return (
     <div>
       {/* Goal + window */}
@@ -584,7 +595,7 @@ function WaterSettingsBody({ settings, patchSettings, go, onClose, onConfigureDr
       </div>
       {bottleEnabled && (
         <Field label="Bottle size (ml)" style={{ marginBottom: 20 }}>
-          <input value={String(settings.waterBottleMl || 1500)} onChange={e => patchSettings({ waterBottleMl: parseInt(e.target.value.replace(/[^0-9]/g, ''), 10) || 0 })} type="text" inputMode="numeric" style={wtInput} />
+          <input value={bottleMlDraft} onChange={e => setBottleMlDraft(e.target.value.replace(/[^0-9]/g, ''))} onBlur={saveBottleMl} type="text" inputMode="numeric" style={wtInput} />
         </Field>
       )}
 
