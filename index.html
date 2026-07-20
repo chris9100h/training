@@ -529,7 +529,11 @@ window.DARK_MODES = {
     neutralTint:     'rgba(20,20,20,0.07)',
     neutralBorderSm: 'rgba(20,20,20,0.18)',
     successText:     '#2e6b30',
-    bgTexture: 'repeating-linear-gradient(0deg, rgba(var(--knurl-rgb),calc(0.16 * var(--knurl-opacity))) 0px, rgba(var(--knurl-rgb),calc(0.16 * var(--knurl-opacity))) 1px, transparent 1px, transparent 22px), repeating-linear-gradient(90deg, rgba(var(--knurl-rgb),calc(0.16 * var(--knurl-opacity))) 0px, rgba(var(--knurl-rgb),calc(0.16 * var(--knurl-opacity))) 1px, transparent 1px, transparent 22px)',
+    // Deliberately NOT multiplied by knurlOpacity: that multiplier is tuned
+    // for small accents (.knurl dividers, guilloche), which only ever cover a
+    // few px. The grid tiles across an entire scrolling screen, so the same
+    // multiplier there reads as a wall of dark squares instead of a texture.
+    bgTexture: 'repeating-linear-gradient(0deg, rgba(var(--knurl-rgb),0.16) 0px, rgba(var(--knurl-rgb),0.16) 1px, transparent 1px, transparent 22px), repeating-linear-gradient(90deg, rgba(var(--knurl-rgb),0.16) 0px, rgba(var(--knurl-rgb),0.16) 1px, transparent 1px, transparent 22px)',
     // Mutes the user's chosen accent color to pencil-grey (see applyAccentColor).
     accent: '#4b5563', accentLight: '#6b7280', accentDeep: '#333c46', accentRgb: '75,85,99',
   },
