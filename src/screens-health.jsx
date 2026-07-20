@@ -506,7 +506,12 @@ const HEALTH_CARD_HEADER_STYLE = { fontFamily: UI.fontUi, fontSize: 12, fontWeig
 // reorder grip at the start of the header when the card is in a reorder list.
 function HealthChartCard({ title, icon, tf, setTf, tfOptions = HEALTH_TFS, headline, sub, dragHandle, onExpand, onOpen, children }) {
   return (
-    <Card style={{ padding: 14, borderLeft: `3px solid ${UI.gold}` }}>
+    // height:100% so cards sharing a 2-col grid row match the tallest sibling
+    // (a card without a headline/sub row, e.g. no data in range, would otherwise
+    // end its visible border early since the grid item stretches but a plain
+    // block child does not). No-op outside the grid: an undefined containing-
+    // block height resolves height:100% back to auto (the expand sheet).
+    <Card style={{ padding: 14, borderLeft: `3px solid ${UI.gold}`, height: '100%' }}>
       {/* flexWrap + the toggle's flexShrink:0 let the TF toggle drop to its own
           line instead of clipping when the card is narrow (2-col grid), full-
           width cards stay single-line since everything already fits there. */}
