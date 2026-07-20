@@ -758,12 +758,18 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
   const storeRef = useRefH(store);
   storeRef.current = store;
   const existing = useMemoH(() => (store.dailyLogs || []).find(l => l.date === date), [store.dailyLogs, date]);
-  // The water tracker owns this day's total once it has any entry for it: it
+  // The water tracker owns TODAY's total once it has any entry for today: it
   // recomputes and overwrites water_ml on its own every time a drink is
-  // logged, so a manual edit here would silently vanish on the next one.
-  // Locked until the user explicitly opts to override for this session (see
-  // requestWaterUnlock below); a day with no tracker entries stays plain.
-  const waterHasTrackerEntries = useMemoH(() => (store.waterLogs || []).some(l => l.date === date), [store.waterLogs, date]);
+  // logged, so a manual edit here would silently vanish on the next one. Only
+  // today can still be overwritten this way (the tracker has no UI to add or
+  // edit an entry for a past day), so a past day's water field never locks
+  // even if it happens to have old tracker entries. Locked until the user
+  // explicitly opts to override for this session (see requestWaterUnlock
+  // below); a day with no tracker entries stays plain.
+  const waterHasTrackerEntries = useMemoH(
+    () => date === LB.todayISO() && (store.waterLogs || []).some(l => l.date === date),
+    [store.waterLogs, date],
+  );
   const [waterUnlocked, setWaterUnlocked] = useStateH(false);
   const waterLocked = waterHasTrackerEntries && !waterUnlocked;
   const todayISO = LB.todayISO();
@@ -1105,7 +1111,11 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
       weight: healthNum(form.weight),
       steps: healthInt(form.steps),
       calories, protein, carbs, fat, fiber,
-      waterMl: healthInt(form.water) != null ? UI.waterEntryToMl(healthInt(form.water)) : null,
+      // Belt and suspenders: the locked field has no real input to type into
+      // (see the HYDRATION section below), but save() itself never trusts
+      // form.water while locked either, so nothing can persist an override
+      // the user never confirmed through requestWaterUnlock.
+      waterMl: waterLocked ? (existing?.waterMl ?? null) : (healthInt(form.water) != null ? UI.waterEntryToMl(healthInt(form.water)) : null),
       note: form.note.trim() || null,
       adherence, targetsSnap,
       offPlanNote: form.offPlanNote.trim() || null,
@@ -1153,6 +1163,7 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
       <input type="text" inputMode="decimal" placeholder="—" value={form[k]} onChange={e => set(k, e.target.value)} style={inputStyle} />
     </div>
   );
+  const waterQuickAddTileStyle = { padding: '10px 12px', borderRadius: 4, border: `0.5px solid ${UI.hairStrong}`, background: UI.bgInset, color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 12, whiteSpace: 'nowrap' };
 
   // Full page (not a Sheet): the form has 15+ fields across several sections
   // plus the glucose/BP/temp add-forms, a bottom sheet's ~88dvh cap made it
@@ -1270,36 +1281,30 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
       </CatSection>
 
       <CatSection label="HYDRATION" collapsed={collapsedCats.has('hydration')} onToggle={() => toggleCat('hydration')}>
-        {waterLocked ? (
-          // Greyed out and inert (pointerEvents:none on the whole row), a
-          // single button underneath it catches the tap and asks before
-          // unlocking, rather than letting a stray tap silently edit a value
-          // the water tracker will just overwrite again on its next entry.
-          <button onClick={requestWaterUnlock} style={{ width: '100%', textAlign: 'left', background: 'none', border: 'none', padding: 0, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
-            <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', opacity: 0.45, pointerEvents: 'none' }}>
-              {numField('water', 'Water', UI.waterEntryUnit())}
-              {UI.waterQuickAdds().map(inc => (
-                <div key={inc} style={{
-                  padding: '10px 12px', borderRadius: 4, border: `0.5px solid ${UI.hairStrong}`, background: UI.bgInset,
-                  color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 12, whiteSpace: 'nowrap',
-                }}>+{inc}</div>
-              ))}
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 6 }}>
-              <i className="fa-solid fa-lock" style={{ fontSize: 9, color: UI.inkGhost }} />
-              <span style={{ fontSize: 10, fontFamily: UI.fontUi, color: UI.inkGhost }}>Managed by the Water Tracker, tap to override</span>
-            </div>
-          </button>
-        ) : (
-          <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
-            {numField('water', 'Water', UI.waterEntryUnit())}
-            {UI.waterQuickAdds().map(inc => (
-              <button key={inc} onClick={() => set('water', String((healthInt(form.water) || 0) + inc))} style={{
-                padding: '10px 12px', borderRadius: 4, border: `0.5px solid ${UI.hairStrong}`, background: UI.bgInset,
-                color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap', WebkitTapHighlightColor: 'transparent',
-              }}>+{inc}</button>
-            ))}
+        {/* Locked renders a plain (non-focusable, non-editable) div in place
+            of numField's <input>, not just a greyed-out copy of it: opacity
+            and pointerEvents:none only block mouse/touch, keyboard Tab focus
+            would still land in a real <input> and let it be typed into and
+            saved with no unlock confirmation ever shown. No input element at
+            all is the only way that's actually impossible. */}
+        <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', opacity: waterLocked ? 0.45 : 1, pointerEvents: waterLocked ? 'none' : 'auto' }}>
+          <div style={{ flex: 1 }}>
+            <div style={labelStyle}>Water{UI.waterEntryUnit() ? ` (${UI.waterEntryUnit()})` : ''}</div>
+            {waterLocked
+              ? <div style={inputStyle}>{form.water || '—'}</div>
+              : <input type="text" inputMode="decimal" placeholder="—" value={form.water} onChange={e => set('water', e.target.value)} style={inputStyle} />}
           </div>
+          {UI.waterQuickAdds().map(inc => waterLocked ? (
+            <div key={inc} style={waterQuickAddTileStyle}>+{inc}</div>
+          ) : (
+            <button key={inc} onClick={() => set('water', String((healthInt(form.water) || 0) + inc))} style={{ ...waterQuickAddTileStyle, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>+{inc}</button>
+          ))}
+        </div>
+        {waterLocked && (
+          <button onClick={requestWaterUnlock} style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 5, background: 'none', border: 'none', padding: 0, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+            <i className="fa-solid fa-lock" style={{ fontSize: 9, color: UI.inkGhost }} />
+            <span style={{ fontSize: 10, fontFamily: UI.fontUi, color: UI.inkGhost }}>Managed by the Water Tracker, tap to override</span>
+          </button>
         )}
       </CatSection>
 
@@ -2334,7 +2339,7 @@ function WaterEntryChart({ entries }) {
   });
 
   return (
-    <ChartHover W={W} H={H} points={hoverPoints}>
+    <ChartHover W={W} H={H} points={hoverPoints} markerColor="#4a9fe0">
     <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display: 'block', overflow: 'visible' }}>
       {gridVals.map((v, i) => (
         <g key={i}>

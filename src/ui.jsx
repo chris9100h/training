@@ -198,7 +198,10 @@ function TabBar({ active, routeName, onChange, sidebar = false, currentUser = nu
     { id: 'hist', label: 'History' },
     ...(showHealth ? [{ id: 'health', label: 'Health' }] : []),
     ...(showCoaching ? [{ id: 'coaching', label: 'Coaching' }] : []),
-  ];
+  ].map(t => {
+    const isWaterSlot = t.id === 'health' && routeName === 'water';
+    return { ...t, isWaterSlot, iconKey: isWaterSlot ? 'water' : t.id, label: isWaterSlot ? 'Water' : t.label };
+  });
   const idx = tabs.findIndex(t => t.id === active);
   const [switchModal, setSwitchModal] = React.useState(false);
   // Health and its water tracker share one tab slot (routeName === 'water'
@@ -215,8 +218,9 @@ function TabBar({ active, routeName, onChange, sidebar = false, currentUser = nu
   };
   // Two-dot "there's a second view here" indicator, shown under the Health
   // slot's label at all times (not just once you've found the water
-  // tracker): a lit dot for the side you'd land on, a faint ring for the
-  // other. This sits below the gold key plate (which only spans the icon),
+  // tracker): a lit dot for the side you're currently viewing (Health or
+  // Water), a faint ring for the other, matching how a pagination dot pair
+  // reads elsewhere. This sits below the gold key plate (which only spans the icon),
   // on the same plain bar background the label itself sits on, so it takes
   // the label's own on/off contrast (gold and glowing when this tab is the
   // active one, muted otherwise) rather than the icon's dark-on-gold-plate
@@ -272,9 +276,7 @@ function TabBar({ active, routeName, onChange, sidebar = false, currentUser = nu
             {tabs.map(t => {
               const on = t.id === active;
               const badge = t.id === 'coaching' ? coachingBadge : null;
-              const isWaterSlot = t.id === 'health' && routeName === 'water';
-              const iconKey = isWaterSlot ? 'water' : t.id;
-              const label = isWaterSlot ? 'Water' : t.label;
+              const { isWaterSlot, iconKey, label } = t;
               return (
                 <button key={t.id} data-tour={`tab-${t.id}`} onClick={() => handleTabClick(t.id)} style={{
                   display: 'flex',
@@ -509,9 +511,7 @@ function TabBar({ active, routeName, onChange, sidebar = false, currentUser = nu
           {tabs.map(t => {
             const on = t.id === active;
             const badge = t.id === 'coaching' ? coachingBadge : null;
-            const isWaterSlot = t.id === 'health' && routeName === 'water';
-            const iconKey = isWaterSlot ? 'water' : t.id;
-            const label = isWaterSlot ? 'Water' : t.label;
+            const { isWaterSlot, iconKey, label } = t;
             return (
               <button key={t.id} data-tour={`tab-${t.id}`} onClick={() => handleTabClick(t.id)} style={{
                 flex: 1, minWidth: 0, background: 'transparent', border: 'none', cursor: 'pointer',

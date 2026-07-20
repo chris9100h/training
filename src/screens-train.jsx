@@ -4319,7 +4319,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             const syntheticGap = (store.settings?.restDefault || 120) + 60;
             const MAX_PLAUSIBLE_GAP_SEC = 30 * 60;
             const gaps = timeline.map((t, i) => i === 0 ? t : t - timeline[i - 1]);
-            const repaired = gaps.map(g => (g < 45 || g > MAX_PLAUSIBLE_GAP_SEC) ? syntheticGap : g);
+            // gaps[0] is session-start-to-first-set, not a gap between two logged
+            // sets, so a long warm-up/setup before the first working set is a
+            // real, legitimate elapsed time, not an abandoned-session artifact.
+            // Only indices 1+ (actual inter-set gaps) get the >30min repair; the
+            // pre-existing <45s (bulk-entry) repair still applies to every index.
+            const repaired = gaps.map((g, i) => (g < 45 || (i > 0 && g > MAX_PLAUSIBLE_GAP_SEC)) ? syntheticGap : g);
             timeline = repaired.reduce((acc, g, i) => { acc.push(i === 0 ? g : acc[i - 1] + g); return acc; }, []);
           }
           if (!timeline.length) timeline = null;

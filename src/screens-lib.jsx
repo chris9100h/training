@@ -3611,6 +3611,12 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
           const collapseSub = { fontFamily: UI.fontUi, fontSize: 11.5, color: UI.inkSoft, marginTop: 5 };
           const countPill = { fontFamily: UI.fontNum, fontSize: 12, fontWeight: 700, color: 'var(--accent)', background: 'rgba(var(--accent-rgb),0.10)', border: '1px solid rgba(var(--accent-rgb),0.28)', borderRadius: 999, padding: '2px 9px', flexShrink: 0 };
           const chevStyle = { fontSize: 14, color: UI.inkFaint, flexShrink: 0 };
+          const groupHeader = label => (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+              <span style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--accent)', flexShrink: 0 }} />
+              <span style={{ fontFamily: UI.fontDisplay, fontSize: 19, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: UI.ink, lineHeight: 1 }}>{label}</span>
+            </div>
+          );
           return (
             <Sheet open={recapOpen} onClose={() => setRecapOpen(false)} title="Feedback recap">
               <div className="micro-gold" style={{ marginTop: -6, marginBottom: 16 }}>{modeLabel}</div>
@@ -3632,19 +3638,13 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                           so it is not cosmetic. Tap-to-fix only on the still-editable session. */}
                       {s.readiness != null && (
                         <div style={{ background: 'rgba(var(--knurl-rgb),0.03)', border: `1px solid ${UI.hair}`, borderRadius: 6, padding: '13px 14px 6px', marginBottom: 8 }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-                            <span style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--accent)', flexShrink: 0 }} />
-                            <span style={{ fontFamily: UI.fontDisplay, fontSize: 19, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: UI.ink, lineHeight: 1 }}>Session</span>
-                          </div>
+                          {groupHeader('Session')}
                           {fbRow({ type: 'readiness', subject: sessionId, name: 'Readiness', sub: MESO_READINESS_LBL[s.readiness] || s.readiness, sel: s.readiness }, 'readiness', false)}
                         </div>
                       )}
                       {groups.map((g, gi) => (
                         <div key={gi} style={{ background: 'rgba(var(--knurl-rgb),0.03)', border: `1px solid ${UI.hair}`, borderRadius: 6, padding: '13px 14px 10px', marginBottom: gi < groups.length - 1 ? 8 : 0 }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-                            <span style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--accent)', flexShrink: 0 }} />
-                            <span style={{ fontFamily: UI.fontDisplay, fontSize: 19, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: UI.ink, lineHeight: 1 }}>{g.muscle}</span>
-                          </div>
+                          {groupHeader(g.muscle)}
                           {g.general.length > 0 && (<>
                             <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>General feedback</div>
                             <div className="knurl" style={{ marginBottom: 4 }} />

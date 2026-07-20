@@ -86,6 +86,27 @@ function wtExpectedMl(goalMl, startTime, endTime) {
   return Math.round(goalMl * (nowDec - s) / (e - s));
 }
 
+// Groups "other"-category entries by base drink name for a breakdown display:
+// strips the "+ Nml Milk" suffix into a separate milk total, keeps each coffee
+// size and each custom drink under its own name (not collapsed into a generic
+// "Coffee"), and resolves an icon (the coffee-button icon for a coffee size,
+// the user's own pick for a custom drink, a default fallback otherwise).
+// `coffeeLabels` is a plain array of coffee-size label strings.
+function wtGroupOtherDrinks(entries, coffeeLabels, drinksList) {
+  const grouped = {}; let milk = 0;
+  entries.forEach(e => {
+    if (e.category !== 'other') return;
+    const mm = e.name ? e.name.match(/\+\s*(\d+)ml Milk/i) : null;
+    if (mm) milk += parseInt(mm[1], 10);
+    const baseName = (e.name || 'Other').replace(/\s*\+\s*\d+ml Milk/i, '');
+    const isCoffee = coffeeLabels.includes(baseName);
+    const icon = isCoffee ? 'fa-mug-hot' : (drinksList.find(d => d.name === baseName)?.icon || WT_DEFAULT_DRINK_ICON);
+    if (!grouped[baseName]) grouped[baseName] = { count: 0, icon };
+    grouped[baseName].count++;
+  });
+  return { grouped, milk };
+}
+
 // ─── Activity ring ──────────────────────────────────────────────────
 function WaterRing({ percent, size = 128 }) {
   const r = 50, circ = 2 * Math.PI * r;
@@ -122,6 +143,7 @@ function WaterDayChart({ entries, goalMl, startTime, endTime }) {
   const yMax = Math.max(goalMl, entries.reduce((a, e) => a + e.amountMl, 0)) * 1.05 || goalMl || 1;
   const xOf = h => padL + ((h - startH) / span) * plotW;
   const yOf = v => padTop + (1 - Math.min(v, yMax) / yMax) * plotH;
+  const expectedAt = h => goalMl * (h - startH) / span;
 
   const ticks = [];
   for (let h = startH; h <= endH; h++) ticks.push(h);
@@ -131,7 +153,7 @@ function WaterDayChart({ entries, goalMl, startTime, endTime }) {
     while (idx < sorted.length && wtHhmmToDecimal(sorted[idx].time) <= h) run += sorted[idx++].amountMl;
     return { h, v: run };
   });
-  const expLine = ticks.map(h => `${xOf(h).toFixed(1)},${yOf(goalMl * (h - startH) / span).toFixed(1)}`).join(' ');
+  const expLine = ticks.map(h => `${xOf(h).toFixed(1)},${yOf(expectedAt(h)).toFixed(1)}`).join(' ');
   const actLine = actual.map(p => `${xOf(p.h).toFixed(1)},${yOf(p.v).toFixed(1)}`).join(' ');
   const base = (padTop + plotH).toFixed(1);
   const now = new Date();
@@ -147,7 +169,7 @@ function WaterDayChart({ entries, goalMl, startTime, endTime }) {
   const hoverPoints = actual.map(p => ({
     x: xOf(p.h), y: yOf(p.v), date: wtDateStr(0), sub: `${String(p.h).padStart(2, '0')}:00`,
     rows: [
-      { label: 'Target', value: `${wtAmt(goalMl * (p.h - startH) / span)} ${wtUnit()}`, color: UI.gold },
+      { label: 'Target', value: `${wtAmt(expectedAt(p.h))} ${wtUnit()}`, color: UI.gold },
       { label: 'Actual', value: `${wtAmt(p.v)} ${wtUnit()}`, color: WT_BLUE },
     ],
   }));
@@ -158,7 +180,7 @@ function WaterDayChart({ entries, goalMl, startTime, endTime }) {
     x: xOf(nowDec), y: yOf(actualAtNow), date: wtDateStr(0),
     sub: `Now · ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`,
     rows: [
-      { label: 'Target', value: `${wtAmt(goalMl * (nowDec - startH) / span)} ${wtUnit()}`, color: UI.gold },
+      { label: 'Target', value: `${wtAmt(expectedAt(nowDec))} ${wtUnit()}`, color: UI.gold },
       { label: 'Actual', value: `${wtAmt(actualAtNow)} ${wtUnit()}`, color: WT_BLUE },
     ],
   });
@@ -302,47 +324,19 @@ function WaterScreen({ store, setStore, go, userId }) {
 
   // Screenshot mode: hides everything interactive (quick-add tiles, the
   // drinks grid, delete buttons) so the capture is just today's hero, day
-  // chart, breakdown and entry list, the parts worth sharing. Mirrors
-  // HealthScreen's takeScreenshot (same lazy html2canvas loader, same
-  // scroll-parent unclamp so the whole capture renders even though it's
-  // taller than the visible viewport, same mobile-share/desktop-download split).
+  // chart, breakdown and entry list, the parts worth sharing. Reuses the
+  // shared captureNodeAsPng flow (screens-lib.jsx, same one the plan poster
+  // and session share use) instead of a bespoke copy, so a failed capture
+  // (html2canvas unavailable, encode failure) surfaces a real error instead
+  // of silently no-op'ing.
   async function takeScreenshot() {
     if (!captureRef.current) return;
-    const html2canvas = await window.__ensureHtml2Canvas?.().catch(() => null);
-    if (!html2canvas) return;
-    setCapturing(true);
-    const scrollParent = captureRef.current.parentElement;
-    const saved = { overflow: scrollParent.style.overflow, height: scrollParent.style.height, minHeight: scrollParent.style.minHeight };
-    scrollParent.style.overflow = 'visible';
-    scrollParent.style.height = 'auto';
-    scrollParent.style.minHeight = 'auto';
-    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
-    try {
-      const el = captureRef.current;
-      const canvas = await html2canvas(el, {
-        backgroundColor: getComputedStyle(document.documentElement).getPropertyValue('--bg').trim() || '#1a1820',
-        scale: 2, useCORS: true, logging: false,
-        height: el.scrollHeight, windowHeight: el.scrollHeight,
-      });
-      canvas.toBlob(async (blob) => {
-        const filename = `water-${today}.png`;
-        const file = new File([blob], filename, { type: 'image/png' });
-        const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-        if (isMobile && navigator.share && navigator.canShare?.({ files: [file] })) {
-          try { await navigator.share({ files: [file] }); } catch (_) {}
-        } else {
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url; a.download = filename; document.body.appendChild(a); a.click();
-          document.body.removeChild(a);
-          setTimeout(() => URL.revokeObjectURL(url), 1000);
-        }
-      }, 'image/png');
-    } finally {
-      scrollParent.style.overflow = saved.overflow;
-      scrollParent.style.height = saved.height;
-      scrollParent.style.minHeight = saved.minHeight;
-      setCapturing(false);
+    const res = await captureNodeAsPng(captureRef.current, { filename: `water-${today}.png`, setCapturing });
+    if (!res?.ok) {
+      await confirm(res?.reason === 'unavailable'
+        ? 'Could not build the image. Check your connection and try again.'
+        : 'Could not build the image. Please try again.',
+        { title: 'Export failed', ok: 'OK', cancel: null });
     }
   }
 
@@ -368,22 +362,8 @@ function WaterScreen({ store, setStore, go, userId }) {
   };
 
   const breakdown = useMemoW(() => {
-    const grouped = {}; let milk = 0, custom = 0;
-    todayEntries.forEach(e => {
-      if (e.category === 'custom') { custom += e.amountMl; return; }
-      if (e.category !== 'other') return;
-      const mm = e.name ? e.name.match(/\+\s*(\d+)ml Milk/i) : null;
-      if (mm) milk += parseInt(mm[1], 10);
-      // Each coffee size and each custom drink keeps its own name (not
-      // collapsed into a generic "Coffee"), and carries the icon the user
-      // actually picked for it (custom drinks) or the coffee-button icon
-      // (a coffee size, which has no per-size icon of its own).
-      const baseName = (e.name || 'Other').replace(/\s*\+\s*\d+ml Milk/i, '');
-      const isCoffee = coffeeSizes.some(s => s.label === baseName);
-      const icon = isCoffee ? 'fa-mug-hot' : (drinks.find(d => d.name === baseName)?.icon || WT_DEFAULT_DRINK_ICON);
-      if (!grouped[baseName]) grouped[baseName] = { count: 0, icon };
-      grouped[baseName].count++;
-    });
+    const custom = todayEntries.filter(e => e.category === 'custom').reduce((sum, e) => sum + e.amountMl, 0);
+    const { grouped, milk } = wtGroupOtherDrinks(todayEntries, coffeeSizes.map(s => s.label), drinks);
     return { grouped, milk, custom };
   }, [todayEntries, coffeeSizes, drinks]);
 
@@ -855,20 +835,8 @@ function WaterStatsBody({ store, goalMl }) {
     let best = 0, cur = 0;
     days.forEach(d => { if (d.value >= goalMl) { cur++; best = Math.max(best, cur); } else cur = 0; });
     const waterDrinksList = store.settings?.waterDrinks || [];
-    const drinks = {}; let milk = 0;
-    (store.waterLogs || []).forEach(e => {
-      if (e.date < range.from || e.date > range.to || e.category !== 'other') return;
-      const mm = e.name ? e.name.match(/\+\s*(\d+)ml Milk/i) : null;
-      if (mm) milk += parseInt(mm[1], 10);
-      // Keep each coffee size and each custom drink under its own name (not
-      // collapsed into a generic "Coffee"), with the icon the user actually
-      // picked for it (custom drinks) or the coffee-button icon (a coffee size).
-      const baseName = (e.name || 'Other').replace(/\s*\+\s*\d+ml Milk/i, '');
-      const isCoffee = coffeeLabels.includes(baseName);
-      const icon = isCoffee ? 'fa-mug-hot' : (waterDrinksList.find(d => d.name === baseName)?.icon || WT_DEFAULT_DRINK_ICON);
-      if (!drinks[baseName]) drinks[baseName] = { count: 0, icon };
-      drinks[baseName].count++;
-    });
+    const entriesInRange = (store.waterLogs || []).filter(e => e.date >= range.from && e.date <= range.to);
+    const { grouped: drinks, milk } = wtGroupOtherDrinks(entriesInRange, coffeeLabels, waterDrinksList);
     const top = Object.entries(drinks).sort((a, b) => b[1].count - a[1].count)[0];
     return { days, withData: withData.length, goalDays: goalDays.length, avg, rate, best, drinks, milk, fav: top ? top[0] : null, favN: top ? top[1].count : 0 };
   }, [store.dailyLogs, store.waterLogs, store.settings?.waterDrinks, range, goalMl, coffeeLabels]);
