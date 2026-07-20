@@ -51,7 +51,9 @@ const WT_DRINK_COLORS = [
 ];
 
 function wtHexToRgba(hex, alpha) {
-  const n = parseInt(hex.replace('#', ''), 16);
+  let h = (hex || '').replace('#', '');
+  if (h.length === 3) h = h.split('').map(ch => ch + ch).join('');
+  const n = parseInt(h, 16) || 0;
   return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${alpha})`;
 }
 
@@ -630,7 +632,7 @@ function WaterBreakdownRow({ icon, name, value, color }) {
       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, color: UI.ink }}>
         <i className={`fa-solid ${icon}`} style={{ fontSize: 12, color: color || UI.inkFaint, width: 16, textAlign: 'center' }} />{name}
       </span>
-      <span className="num" style={{ color: WT_BLUE, fontWeight: 600 }}>{value}</span>
+      <span className="num" style={{ color: color || WT_BLUE, fontWeight: 600 }}>{value}</span>
     </div>
   );
 }
@@ -725,6 +727,19 @@ function WaterSettingsBody({ settings, patchSettings, go, onClose, onConfigureDr
   );
 }
 
+// Shared selected/unselected chrome for a swatch button in the icon or color
+// grid below (background tint + border), so the two grids can't drift out of
+// visual sync. Padding and the icon-only glyph tint stay per-call-site since
+// an icon glyph gets tinted by selection and a color dot must not be.
+function wtSwatchBtnStyle(sel) {
+  return {
+    display: 'grid', placeItems: 'center', borderRadius: 6, cursor: 'pointer',
+    background: sel ? 'rgba(var(--accent-rgb),0.14)' : UI.bgInset,
+    border: `0.5px solid ${sel ? 'rgba(var(--accent-rgb),0.5)' : UI.hair}`,
+    WebkitTapHighlightColor: 'transparent',
+  };
+}
+
 // Sub-sheet body: manage the up-to-6 custom drinks and the coffee sizes.
 function WaterDrinksConfigBody({ settings, patchSettings, onClose }) {
   const drinks = (Array.isArray(settings.waterDrinks) ? settings.waterDrinks : []).slice().sort((a, b) => (a.ml || 0) - (b.ml || 0));
@@ -770,10 +785,7 @@ function WaterDrinksConfigBody({ settings, patchSettings, onClose }) {
               const sel = drinkIcon === ic;
               return (
                 <button key={ic} onClick={() => setDrinkIcon(ic)} aria-label={ic.replace('fa-', '')} style={{
-                  display: 'grid', placeItems: 'center', padding: '10px 0', borderRadius: 6, cursor: 'pointer',
-                  background: sel ? 'rgba(var(--accent-rgb),0.14)' : UI.bgInset,
-                  border: `0.5px solid ${sel ? 'rgba(var(--accent-rgb),0.5)' : UI.hair}`,
-                  color: sel ? 'var(--accent)' : UI.inkSoft, WebkitTapHighlightColor: 'transparent',
+                  ...wtSwatchBtnStyle(sel), padding: '10px 0', color: sel ? 'var(--accent)' : UI.inkSoft,
                 }}>
                   <i className={`fa-solid ${ic}`} style={{ fontSize: 16 }} />
                 </button>
@@ -785,12 +797,7 @@ function WaterDrinksConfigBody({ settings, patchSettings, onClose }) {
             {WT_DRINK_COLORS.map(c => {
               const sel = drinkColor === c;
               return (
-                <button key={c} onClick={() => setDrinkColor(c)} aria-label={`Color ${c}`} style={{
-                  display: 'grid', placeItems: 'center', padding: '8px 0', borderRadius: 6, cursor: 'pointer',
-                  background: sel ? 'rgba(var(--accent-rgb),0.14)' : UI.bgInset,
-                  border: `0.5px solid ${sel ? 'rgba(var(--accent-rgb),0.5)' : UI.hair}`,
-                  WebkitTapHighlightColor: 'transparent',
-                }}>
+                <button key={c} onClick={() => setDrinkColor(c)} aria-label={`Color ${c}`} style={{ ...wtSwatchBtnStyle(sel), padding: '8px 0' }}>
                   <span style={{ width: 18, height: 18, borderRadius: '50%', background: c }} />
                 </button>
               );
