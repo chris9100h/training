@@ -484,7 +484,7 @@ function ChartHover({ W, H, points, children, mode = 'x', markerColor = 'var(--a
         <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
           <div style={{ position: 'absolute', left: leftPct + '%', top: (CHART_PLOT_TOP / H) * 100 + '%', height: (CHART_PLOT_H / H) * 100 + '%', width: 1, background: UI.hairStrong, transform: 'translateX(-0.5px)' }} />
           <div style={{ position: 'absolute', left: leftPct + '%', top: topPct + '%', width: 8, height: 8, borderRadius: '50%', background: p.color || markerColor, border: `2px solid ${UI.bgRaised}`, boxShadow: `0 0 0 1.5px ${p.color || markerColor}`, transform: 'translate(-50%, -50%)' }} />
-          <div style={{ position: 'absolute', left: leftPct + '%', top: topPct + '%', transform: `translate(${tx}, ${ty})`, background: UI.bgRaised, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '5px 8px', boxShadow: '0 4px 14px rgba(0,0,0,0.45)', whiteSpace: 'nowrap', zIndex: 5 }}>
+          <div style={{ position: 'absolute', left: leftPct + '%', top: topPct + '%', transform: `translate(${tx}, ${ty})`, background: UI.bgRaised, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, padding: '5px 8px', boxShadow: '0 4px 14px rgba(0,0,0,0.45)', whiteSpace: 'nowrap', zIndex: 5 }}>
             <div className="micro" style={{ color: UI.inkFaint, marginBottom: 2 }}>{healthFmtDate(p.date)}</div>
             {p.rows.map((r, i) => (
               <div key={i} style={{ display: 'flex', alignItems: 'baseline', gap: 6, fontFamily: UI.fontNum, fontSize: 12, lineHeight: 1.35 }}>
@@ -539,7 +539,7 @@ function HealthChartCard({ title, icon, tf, setTf, tfOptions = HEALTH_TFS, headl
             <i className="fa-solid fa-expand" style={{ fontSize: 11 }} />
           </button>
         )}
-        <div data-reorder-ignore="true" style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `0.5px solid ${UI.hairStrong}`, flexShrink: 0 }}>
+        <div data-reorder-ignore="true" style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}`, flexShrink: 0 }}>
           {tfOptions.map(t => (
             <button key={t.id} onClick={() => setTf(t.id)} style={{
               padding: '2px 8px', cursor: 'pointer', border: 'none',
@@ -1155,7 +1155,7 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
 
   const inputStyle = {
     width: '100%', boxSizing: 'border-box', background: UI.bgInset,
-    border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4,
+    border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4,
     padding: '10px 12px', fontFamily: UI.fontNum, fontSize: 15, color: UI.ink, outline: 'none',
   };
   const labelStyle = { fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.07em' };
@@ -1165,7 +1165,7 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
       <input type="text" inputMode="decimal" placeholder="—" value={form[k]} onChange={e => set(k, e.target.value)} style={inputStyle} />
     </div>
   );
-  const waterQuickAddTileStyle = { padding: '10px 12px', borderRadius: 4, border: `0.5px solid ${UI.hairStrong}`, background: UI.bgInset, color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 12, whiteSpace: 'nowrap' };
+  const waterQuickAddTileStyle = { padding: '10px 12px', borderRadius: 4, border: `var(--hair-width) solid ${UI.hairStrong}`, background: UI.bgInset, color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 12, whiteSpace: 'nowrap' };
 
   // Full page (not a Sheet): the form has 15+ fields across several sections
   // plus the glucose/BP/temp add-forms, a bottom sheet's ~88dvh cap made it
@@ -1188,13 +1188,13 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
 
       {onSetStatus && (
         <div style={{ marginBottom: 18 }}>
-          <div style={{ display: 'flex', borderRadius: 6, overflow: 'hidden', border: `0.5px solid ${UI.hairStrong}` }}>
+          <div style={{ display: 'flex', borderRadius: 6, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}` }}>
             {[{ mode: 'sick', label: 'Sick', icon: 'fa-bed-pulse' }, { mode: null, label: 'Normal', icon: null }, { mode: 'vacation', label: 'Vacation', icon: 'fa-umbrella-beach' }].map(({ mode, label, icon }, i) => {
               const active = dayMode === mode;
               return (
                 <button key={String(mode)} onClick={() => onSetStatus(mode, date < todayISO ? date : null)} style={{
                   flex: 1, padding: '12px 4px', cursor: 'pointer', border: 'none',
-                  borderLeft: i > 0 ? `0.5px solid ${UI.hairStrong}` : 'none',
+                  borderLeft: i > 0 ? `var(--hair-width) solid ${UI.hairStrong}` : 'none',
                   background: active ? 'var(--accent)' : 'transparent',
                   display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5,
                   WebkitTapHighlightColor: 'transparent', transition: 'background 0.15s',
@@ -1244,7 +1244,7 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
       </CatSection>
 
       <CatSection label="NUTRITION" collapsed={collapsedCats.has('nutrition')} onToggle={() => toggleCat('nutrition')} extra={
-        <div onClick={e => e.stopPropagation()} style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `0.5px solid ${UI.hairStrong}` }}>
+        <div onClick={e => e.stopPropagation()} style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}` }}>
           {[{ id: false, label: 'Total carbs' }, { id: true, label: 'Net carbs' }].map(o => (
             <button key={String(o.id)} onClick={() => setNetCarbs(o.id)} style={{
               padding: '4px 10px', cursor: 'pointer', border: 'none',
@@ -1326,7 +1326,7 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
           const ctxColor = { fasted: 'var(--accent)', fed: '#4a9fe0', other: UI.inkSoft }[g.context] || UI.inkSoft;
           const isConfirm = confirmDeleteGlId === g.id;
           return (
-            <div key={g.id} style={{ background: UI.bgInset, borderRadius: 6, marginBottom: 6, border: `0.5px solid ${UI.hairStrong}`, overflow: 'hidden' }}>
+            <div key={g.id} style={{ background: UI.bgInset, borderRadius: 6, marginBottom: 6, border: `var(--hair-width) solid ${UI.hairStrong}`, overflow: 'hidden' }}>
               <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '8px 10px' }}>
                 <span style={{ fontFamily: UI.fontUi, fontSize: 9, color: UI.inkFaint, minWidth: 32, paddingTop: 1 }}>{g.time}</span>
                 <div style={{ flex: 1 }}>
@@ -1342,18 +1342,18 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
                 <button onClick={() => setConfirmDeleteGlId(isConfirm ? null : g.id)} style={{ background: 'none', border: 'none', color: UI.inkGhost, fontSize: 14, cursor: 'pointer', padding: '0 2px', lineHeight: 1 }}>×</button>
               </div>
               {isConfirm && (
-                <div style={{ display: 'flex', gap: 0, borderTop: `0.5px solid ${UI.hairStrong}` }}>
+                <div style={{ display: 'flex', gap: 0, borderTop: `var(--hair-width) solid ${UI.hairStrong}` }}>
                   <button onClick={() => setConfirmDeleteGlId(null)} style={{ flex: 1, padding: '7px', background: 'none', border: 'none', cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 11, color: UI.inkSoft }}>Cancel</button>
-                  <button onClick={() => deleteGlucose(g.id)} style={{ flex: 1, padding: '7px', background: 'none', border: 'none', borderLeft: `0.5px solid ${UI.hairStrong}`, cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700, color: UI.danger }}>Delete</button>
+                  <button onClick={() => deleteGlucose(g.id)} style={{ flex: 1, padding: '7px', background: 'none', border: 'none', borderLeft: `var(--hair-width) solid ${UI.hairStrong}`, cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700, color: UI.danger }}>Delete</button>
                 </div>
               )}
             </div>
           );
         })}
         {addingGlucose ? (
-          <div style={{ background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '12px 10px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, padding: '12px 10px', display: 'flex', flexDirection: 'column', gap: 8 }}>
             {(() => {
-              const glInputSt = { background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '7px 10px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, outline: 'none', width: '100%', boxSizing: 'border-box' };
+              const glInputSt = { background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4, padding: '7px 10px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, outline: 'none', width: '100%', boxSizing: 'border-box' };
               return (
                 <div style={{ display: 'flex', gap: 8 }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
@@ -1418,7 +1418,7 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
         {bpForDay.map(b => {
           const isConfirm = confirmDeleteBpId === b.id;
           return (
-            <div key={b.id} style={{ background: UI.bgInset, borderRadius: 6, marginBottom: 6, border: `0.5px solid ${UI.hairStrong}`, overflow: 'hidden' }}>
+            <div key={b.id} style={{ background: UI.bgInset, borderRadius: 6, marginBottom: 6, border: `var(--hair-width) solid ${UI.hairStrong}`, overflow: 'hidden' }}>
               <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '8px 10px' }}>
                 <span style={{ fontFamily: UI.fontUi, fontSize: 9, color: UI.inkFaint, minWidth: 32, paddingTop: 1 }}>{b.time}</span>
                 <div style={{ flex: 1 }}>
@@ -1431,18 +1431,18 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
                 <button onClick={() => setConfirmDeleteBpId(isConfirm ? null : b.id)} style={{ background: 'none', border: 'none', color: UI.inkGhost, fontSize: 14, cursor: 'pointer', padding: '0 2px', lineHeight: 1 }}>×</button>
               </div>
               {isConfirm && (
-                <div style={{ display: 'flex', gap: 0, borderTop: `0.5px solid ${UI.hairStrong}` }}>
+                <div style={{ display: 'flex', gap: 0, borderTop: `var(--hair-width) solid ${UI.hairStrong}` }}>
                   <button onClick={() => setConfirmDeleteBpId(null)} style={{ flex: 1, padding: '7px', background: 'none', border: 'none', cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 11, color: UI.inkSoft }}>Cancel</button>
-                  <button onClick={() => deleteBp(b.id)} style={{ flex: 1, padding: '7px', background: 'none', border: 'none', borderLeft: `0.5px solid ${UI.hairStrong}`, cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700, color: UI.danger }}>Delete</button>
+                  <button onClick={() => deleteBp(b.id)} style={{ flex: 1, padding: '7px', background: 'none', border: 'none', borderLeft: `var(--hair-width) solid ${UI.hairStrong}`, cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700, color: UI.danger }}>Delete</button>
                 </div>
               )}
             </div>
           );
         })}
         {addingBp ? (
-          <div style={{ background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '12px 10px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, padding: '12px 10px', display: 'flex', flexDirection: 'column', gap: 8 }}>
             {(() => {
-              const bpInputSt = { background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '7px 10px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, outline: 'none', width: '100%', boxSizing: 'border-box' };
+              const bpInputSt = { background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4, padding: '7px 10px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, outline: 'none', width: '100%', boxSizing: 'border-box' };
               return (
                 <div style={{ display: 'flex', gap: 8 }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
@@ -1496,7 +1496,7 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
         {tempForDay.map(t => {
           const isConfirm = confirmDeleteTempId === t.id;
           return (
-            <div key={t.id} style={{ background: UI.bgInset, borderRadius: 6, marginBottom: 6, border: `0.5px solid ${UI.hairStrong}`, overflow: 'hidden' }}>
+            <div key={t.id} style={{ background: UI.bgInset, borderRadius: 6, marginBottom: 6, border: `var(--hair-width) solid ${UI.hairStrong}`, overflow: 'hidden' }}>
               <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '8px 10px' }}>
                 <span style={{ fontFamily: UI.fontUi, fontSize: 9, color: UI.inkFaint, minWidth: 32, paddingTop: 1 }}>{t.time}</span>
                 <div style={{ flex: 1 }}>
@@ -1509,18 +1509,18 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
                 <button onClick={() => setConfirmDeleteTempId(isConfirm ? null : t.id)} style={{ background: 'none', border: 'none', color: UI.inkGhost, fontSize: 14, cursor: 'pointer', padding: '0 2px', lineHeight: 1 }}>×</button>
               </div>
               {isConfirm && (
-                <div style={{ display: 'flex', gap: 0, borderTop: `0.5px solid ${UI.hairStrong}` }}>
+                <div style={{ display: 'flex', gap: 0, borderTop: `var(--hair-width) solid ${UI.hairStrong}` }}>
                   <button onClick={() => setConfirmDeleteTempId(null)} style={{ flex: 1, padding: '7px', background: 'none', border: 'none', cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 11, color: UI.inkSoft }}>Cancel</button>
-                  <button onClick={() => deleteTemp(t.id)} style={{ flex: 1, padding: '7px', background: 'none', border: 'none', borderLeft: `0.5px solid ${UI.hairStrong}`, cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700, color: UI.danger }}>Delete</button>
+                  <button onClick={() => deleteTemp(t.id)} style={{ flex: 1, padding: '7px', background: 'none', border: 'none', borderLeft: `var(--hair-width) solid ${UI.hairStrong}`, cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700, color: UI.danger }}>Delete</button>
                 </div>
               )}
             </div>
           );
         })}
         {addingTemp ? (
-          <div style={{ background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '12px 10px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, padding: '12px 10px', display: 'flex', flexDirection: 'column', gap: 8 }}>
             {(() => {
-              const tInputSt = { background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '7px 10px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, outline: 'none', width: '100%', boxSizing: 'border-box' };
+              const tInputSt = { background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4, padding: '7px 10px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, outline: 'none', width: '100%', boxSizing: 'border-box' };
               return (
                 <div style={{ display: 'flex', gap: 8 }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
@@ -1642,7 +1642,7 @@ function MacroTargetSheet({ open, onClose, store, setStore, coachingMacros }) {
     onClose();
   };
 
-  const inputStyle = { width: '100%', boxSizing: 'border-box', background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '9px 10px', fontFamily: UI.fontNum, fontSize: 15, color: UI.ink, outline: 'none' };
+  const inputStyle = { width: '100%', boxSizing: 'border-box', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4, padding: '9px 10px', fontFamily: UI.fontNum, fontSize: 15, color: UI.ink, outline: 'none' };
   const num = (k, lbl) => (
     <div style={{ flex: 1 }}>
       <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>{lbl}</div>
@@ -1745,7 +1745,7 @@ function HealthMetricsCard({ log, dateLabel, isToday, onJumpToday, dragHandle, t
         {stat('Fat', log?.fat != null ? log.fat : null, 'g')}
       </div>
       {dayTarget && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0 12px', marginTop: 6, paddingTop: 6, borderTop: `0.5px solid ${UI.hair}` }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0 12px', marginTop: 6, paddingTop: 6, borderTop: `var(--hair-width) solid ${UI.hair}` }}>
           {[dayTarget.protein, dayTarget.carbs, dayTarget.fat].map((v, i) => (
             <div key={i} style={{ textAlign: 'center' }}>
               <span className="num" style={{ fontSize: 10, color: UI.inkGhost }}>{v != null ? v : '—'}<span style={{ fontSize: 8 }}>g</span></span>
@@ -1754,13 +1754,13 @@ function HealthMetricsCard({ log, dateLabel, isToday, onJumpToday, dragHandle, t
         </div>
       )}
       {log?.offPlanNote && (
-        <div style={{ marginTop: 14, paddingTop: 14, borderTop: `0.5px solid ${UI.hair}` }}>
+        <div style={{ marginTop: 14, paddingTop: 14, borderTop: `var(--hair-width) solid ${UI.hair}` }}>
           <div className="micro" style={{ color: UI.inkFaint, marginBottom: 5 }}>OFF-PLAN</div>
           <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{log.offPlanNote}</div>
         </div>
       )}
       {log?.note && (
-        <div style={{ marginTop: 14, paddingTop: 14, borderTop: `0.5px solid ${UI.hair}` }}>
+        <div style={{ marginTop: 14, paddingTop: 14, borderTop: `var(--hair-width) solid ${UI.hair}` }}>
           <div className="micro" style={{ color: UI.inkFaint, marginBottom: 5 }}>NOTE</div>
           <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{log.note}</div>
         </div>
@@ -1819,7 +1819,7 @@ function HealthWeekCard({ stats, dragHandle, targets, tf, setTf, weightUnit }) {
   );
 
   const tfToggle = setTf ? (
-    <div data-reorder-ignore="true" style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `0.5px solid ${UI.hairStrong}` }}>
+    <div data-reorder-ignore="true" style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}` }}>
       {HEALTH_TFS.map(t => (
         <button key={t.id} onClick={() => setTf(t.id)} style={{
           padding: '2px 8px', cursor: 'pointer', border: 'none',
@@ -2736,7 +2736,7 @@ function HealthScreen({ store, setStore, go, userId }) {
     ? `AVG TARGET · ${tf === '1M' ? 'LAST 30 DAYS' : 'LAST 3 MONTHS'}`
     : `DAILY TARGETS${fromCoach ? (selfCoachedMacros ? ' · FROM YOUR PLAN' : ' · FROM COACH') : ''}`;
   const targetRow = (
-    <div style={{ background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 6, padding: '8px 12px', marginBottom: 12 }}>
+    <div style={{ background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6, padding: '8px 12px', marginBottom: 12 }}>
       <div style={{ display: 'flex', alignItems: 'center', marginBottom: effectiveTargets ? 2 : 0 }}>
         <span className="micro" style={{ color: UI.inkFaint, flex: 1 }}>{targetLabel}</span>
         <button data-reorder-ignore="true" onClick={() => setTargetOpen(true)} style={{
@@ -2772,7 +2772,7 @@ function HealthScreen({ store, setStore, go, userId }) {
         </div>
       )}
       {coachHasMacros && (
-        <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1.4, marginTop: 8, paddingTop: 8, borderTop: `0.5px solid ${UI.hair}` }}>
+        <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1.4, marginTop: 8, paddingTop: 8, borderTop: `var(--hair-width) solid ${UI.hair}` }}>
           {selfCoachedMacros
             ? 'These come from your active plan and take priority. Personal targets you set apply only without them.'
             : 'These come from your coaching plan and take priority. Personal targets you set apply only without coaching macros.'}
@@ -3168,9 +3168,9 @@ function HealthClientLogs({ clientStore }) {
           {handle}
           <span style={HEALTH_CARD_HEADER_STYLE}>WEEKLY AVERAGES</span>
         </div>
-        <div style={{ background: UI.bgInset, borderRadius: 6, border: `0.5px solid ${UI.hair}`, overflow: 'hidden' }}>
+        <div style={{ background: UI.bgInset, borderRadius: 6, border: `var(--hair-width) solid ${UI.hair}`, overflow: 'hidden' }}>
           {weeks.map((w, i) => (
-            <div key={w.ws} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', borderTop: i ? `0.5px solid ${UI.hair}` : 'none' }}>
+            <div key={w.ws} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', borderTop: i ? `var(--hair-width) solid ${UI.hair}` : 'none' }}>
               <div style={{ width: 58, flexShrink: 0, fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi }}>{healthFmtDate(w.ws, { day: 'numeric', month: 'short' })}</div>
               <div style={{ flex: 1, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                 {w.weight != null && <span className="num" style={{ fontSize: 11, color: UI.inkSoft }}>{w.weight} {clientUnit}</span>}
@@ -3443,7 +3443,7 @@ function ExportSheet({ open, onClose, store }) {
           <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
             {presets.map(p => (
               <button key={p.days} onClick={() => applyPreset(p.days)} style={{
-                flex: 1, padding: '7px 4px', borderRadius: 4, border: `0.5px solid ${UI.hairStrong}`,
+                flex: 1, padding: '7px 4px', borderRadius: 4, border: `var(--hair-width) solid ${UI.hairStrong}`,
                 background: from === healthShiftISO(today, -(p.days - 1)) && to === today ? 'var(--accent)' : UI.bgInset,
                 color: from === healthShiftISO(today, -(p.days - 1)) && to === today ? 'var(--accent-ink)' : UI.inkSoft,
                 fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, cursor: 'pointer',
@@ -3456,14 +3456,14 @@ function ExportSheet({ open, onClose, store }) {
               <div className="label" style={{ color: UI.inkFaint, marginBottom: 4 }}>FROM</div>
               <input type="date" value={from} max={to}
                 onChange={e => e.target.value && setFrom(e.target.value)}
-                style={{ width: '100%', padding: '8px 10px', borderRadius: 4, border: `0.5px solid ${UI.hairStrong}`, background: UI.bgInset, color: UI.ink, fontFamily: UI.fontNum, fontSize: 13, outline: 'none' }} />
+                style={{ width: '100%', padding: '8px 10px', borderRadius: 4, border: `var(--hair-width) solid ${UI.hairStrong}`, background: UI.bgInset, color: UI.ink, fontFamily: UI.fontNum, fontSize: 13, outline: 'none' }} />
             </div>
             <div style={{ color: UI.inkFaint, fontSize: 11, paddingTop: 16 }}>→</div>
             <div style={{ flex: 1 }}>
               <div className="label" style={{ color: UI.inkFaint, marginBottom: 4 }}>TO</div>
               <input type="date" value={to} min={from} max={today}
                 onChange={e => e.target.value && setTo(e.target.value)}
-                style={{ width: '100%', padding: '8px 10px', borderRadius: 4, border: `0.5px solid ${UI.hairStrong}`, background: UI.bgInset, color: UI.ink, fontFamily: UI.fontNum, fontSize: 13, outline: 'none' }} />
+                style={{ width: '100%', padding: '8px 10px', borderRadius: 4, border: `var(--hair-width) solid ${UI.hairStrong}`, background: UI.bgInset, color: UI.ink, fontFamily: UI.fontNum, fontSize: 13, outline: 'none' }} />
             </div>
           </div>
           {(() => {
@@ -3474,7 +3474,7 @@ function ExportSheet({ open, onClose, store }) {
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           <button onClick={doExportCSV} disabled={!!exporting} style={{
-            width: '100%', padding: '13px 0', borderRadius: 6, border: `0.5px solid ${UI.hairStrong}`,
+            width: '100%', padding: '13px 0', borderRadius: 6, border: `var(--hair-width) solid ${UI.hairStrong}`,
             background: UI.bgInset, color: exporting ? UI.inkGhost : UI.ink,
             fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, cursor: exporting ? 'default' : 'pointer',
             display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,

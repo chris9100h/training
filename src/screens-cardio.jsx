@@ -287,7 +287,7 @@ function CardioPlanDetailSheet({ plan, store, setStore, activeCardioPlanId, toda
 
         {/* Goal summary */}
         {plan.mode === 'goal' && plan.goal && (
-          <div style={{ padding: '10px 14px', background: UI.bgInset, borderRadius: 6, border: `0.5px solid ${UI.hair}` }}>
+          <div style={{ padding: '10px 14px', background: UI.bgInset, borderRadius: 6, border: `var(--hair-width) solid ${UI.hair}` }}>
             <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>GOAL</div>
             <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>
               {plan.goal.type === 'duration'
@@ -573,7 +573,7 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
 
   const inputStyle = {
     width: '100%', boxSizing: 'border-box', padding: '10px 12px',
-    background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4,
+    background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4,
     fontFamily: UI.fontUi, fontSize: 15, color: UI.ink, outline: 'none',
   };
 
@@ -729,10 +729,10 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
         const isDist = t.target_type !== 'duration';
         const dispDist = t.distance_m ? LB.mToDisplay(t.distance_m, du) : '';
         return (
-          <div key={keyId} style={{ padding: 12, background: UI.bgInset, borderRadius: 6, border: `0.5px solid ${UI.hair}`, ...(span ? { gridColumn: '1 / -1' } : {}) }}>
+          <div key={keyId} style={{ padding: 12, background: UI.bgInset, borderRadius: 6, border: `var(--hair-width) solid ${UI.hair}`, ...(span ? { gridColumn: '1 / -1' } : {}) }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
               <span style={{ fontSize: 13, fontWeight: 700, color: UI.inkSoft, fontFamily: UI.fontUi }}>{label}</span>
-              <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `0.5px solid ${UI.hairStrong}` }}>
+              <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}` }}>
                 {['distance','duration'].map(tt => {
                   const active = isDist ? tt === 'distance' : tt === 'duration';
                   return (

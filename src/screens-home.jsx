@@ -529,7 +529,7 @@ function RecentBannerDay({ banner, setStore, onOpenSkipSheet, onLog }) {
   const dateLabel = daysAgo === 1 ? 'YESTERDAY' : `${daysAgo}D AGO`;
   if (skip) {
     return (
-      <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 8 }}>
+      <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 8 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div className="micro" style={{ marginBottom: 3 }}>{dayName} · {dateLabel}</div>
           <span style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, letterSpacing: '0.04em', background: `rgba(var(--bg-rgb),0.5)`, border: `1px solid ${UI.hairStrong}`, borderRadius: 4, padding: '2px 8px', display: 'inline-block' }}>
@@ -712,7 +712,7 @@ function CardioQuickLogSheet({ open, onClose, store, setStore, userId, editLog, 
 
   const inputStyle = {
     width: '100%', boxSizing: 'border-box', background: UI.bgInset,
-    border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4,
+    border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4,
     padding: '10px 12px', fontFamily: UI.fontUi, fontSize: 14,
     color: UI.ink, outline: 'none',
   };
@@ -760,7 +760,7 @@ function CardioQuickLogSheet({ open, onClose, store, setStore, userId, editLog, 
         <div style={{ flex: 1 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
             <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, textTransform: 'uppercase', letterSpacing: '0.07em' }}>Distance</span>
-            <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `0.5px solid ${UI.hairStrong}` }}>
+            <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}` }}>
               {['km', 'mi'].map(u => (
                 <button key={u} onClick={() => setDistUnit(u)} style={{
                   padding: '2px 7px', cursor: 'pointer', border: 'none',
@@ -918,7 +918,7 @@ function CardioFinishFlow({ open, durationMin, store, setStore, onClose, onPR })
 
   const inputStyle = {
     width: '100%', boxSizing: 'border-box', background: UI.bgInset,
-    border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4,
+    border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4,
     padding: '10px 12px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, outline: 'none',
   };
 
@@ -948,7 +948,7 @@ function CardioFinishFlow({ open, durationMin, store, setStore, onClose, onPR })
     if (step === 2) return (
       <>
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
-          <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `0.5px solid ${UI.hairStrong}` }}>
+          <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}` }}>
             {['km', 'mi'].map(u => (
               <button key={u} onClick={() => setDistUnit(u)} style={{
                 padding: '2px 9px', cursor: 'pointer', border: 'none',
@@ -2890,7 +2890,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                   ? (() => { const d = new Date(m.startDate + 'T12:00:00'); return `${d.getDate().toString().padStart(2,'0')}.${(d.getMonth()+1).toString().padStart(2,'0')}`; })()
                   : 'D1';
                 return (
-                  <span style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase', color: UI.inkFaint, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '2px 8px' }}>
+                  <span style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase', color: UI.inkFaint, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4, padding: '2px 8px' }}>
                     {mesoLabel} · starts {startLabel}
                   </span>
                 );
@@ -2900,7 +2900,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
               const rir = (LB.mesoRirEnabled(sch) && typeof mesoRirForWeek === 'function') ? mesoRirForWeek(week, weeks, sch.mesocycle_start_rir ?? 3, sch.mesocycle_end_rir ?? 0) : null;
               const unit = weekdayMode ? 'W' : 'C';
               return (
-                <span style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase', color: UI.inkSoft, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '2px 8px' }}>
+                <span style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase', color: UI.inkSoft, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4, padding: '2px 8px' }}>
                   {mesoLabel} {unit}{week}/{weeks}{rir != null ? ` · ${rir} RIR` : ''}
                 </span>
               );
@@ -2926,7 +2926,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                       ? (() => { const d = new Date(m.startDate + 'T12:00:00'); return `${d.getDate().toString().padStart(2,'0')}.${(d.getMonth()+1).toString().padStart(2,'0')}`; })()
                       : null;
                     return (
-                      <span style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase', color: UI.inkFaint, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '2px 8px' }}>
+                      <span style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase', color: UI.inkFaint, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4, padding: '2px 8px' }}>
                         {startLabel ? `AUTO · starts ${startLabel}` : 'AUTO · pending'}
                       </span>
                     );
@@ -3119,7 +3119,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                 </span>
                 {isViewingToday && (
                   <button onClick={handleClearStatus} style={{
-                    background: 'transparent', border: `0.5px solid ${UI.hairStrong}`,
+                    background: 'transparent', border: `var(--hair-width) solid ${UI.hairStrong}`,
                     borderRadius: 4, padding: '2px 8px', cursor: 'pointer',
                     fontFamily: UI.fontUi, fontSize: 9, fontWeight: 600, letterSpacing: '0.06em',
                     color: UI.inkFaint, WebkitTapHighlightColor: 'transparent',
@@ -3155,7 +3155,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                   return (
                     <span key={i} style={{
                       flexShrink: 0, fontSize: 10, fontFamily: UI.fontUi, color: UI.inkFaint,
-                      background: UI.bgInset, border: `0.5px solid ${UI.hair}`,
+                      background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`,
                       borderRadius: 4, padding: '3px 7px', whiteSpace: 'nowrap',
                     }}>
                       {(ex?.name || '?').toUpperCase()}
@@ -3319,7 +3319,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 18 }}>
                 {recentCardio.map(l => (
-                  <div key={l.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 12px', background: UI.bgInset, borderRadius: 8, border: `0.5px solid ${UI.hair}` }}>
+                  <div key={l.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 12px', background: UI.bgInset, borderRadius: 8, border: `var(--hair-width) solid ${UI.hair}` }}>
                     <i className="fa-solid fa-person-running" style={{ fontSize: 11, color: UI.inkFaint, width: 12 }} />
                     <span style={{ flex: 1, fontSize: 12, color: UI.ink, fontFamily: UI.fontUi, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{l.type || '—'}</span>
                     <span className="num" style={{ fontSize: 12, color: UI.gold, flexShrink: 0 }}>{l.durationMinutes}<span style={{ color: UI.inkFaint, fontSize: 9 }}>min</span></span>
@@ -3420,7 +3420,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
           const actionBtn = (onClick, icon, label, sub) => (
             <button onClick={onClick} style={{
               width: '100%', display: 'flex', alignItems: 'center', gap: 14,
-              padding: '12px 14px', background: UI.bgInset, border: `0.5px solid ${UI.hair}`,
+              padding: '12px 14px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`,
               borderRadius: 6, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
               marginBottom: 8,
             }}>
@@ -3480,7 +3480,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                 await LB.clearCachesAndReload();
               }} style={{
                 width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
-                padding: '12px 14px', background: UI.bgInset, border: `0.5px solid ${UI.hair}`,
+                padding: '12px 14px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`,
                 borderRadius: 6, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
               }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -3502,7 +3502,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
           go({ name: 'coaching-client', coachingId: asSelf.id, clientId: userId, clientName: store.user.name, initialTab: 'checkins', isSelf: true, backRoute: 'home' });
         const navCheckinCoach = () =>
           go({ name: 'coaching', initialClientTab: 'checkin' });
-        const btnStyle = { width: '100%', display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 6, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' };
+        const btnStyle = { width: '100%', display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' };
         return (
           <Sheet open={checkinPickerOpen} onClose={() => setCheckinPickerOpen(false)} title="Which check-in?" titleColor="var(--accent)">
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -3537,7 +3537,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
           {sch && (
             <button onClick={() => { setWorkoutSubOpen(false); setBonusDayPickerOpen(true); }} style={{
               width: '100%', display: 'flex', alignItems: 'center', gap: 12,
-              padding: '12px 14px', background: UI.bgInset, border: `0.5px solid ${UI.hair}`,
+              padding: '12px 14px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`,
               borderRadius: 6, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
             }}>
               <div style={{ flex: 1, textAlign: 'left' }}>
@@ -3549,7 +3549,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
           )}
           <button onClick={() => { setWorkoutSubOpen(false); setFreestyleSubOpen(true); }} style={{
             width: '100%', display: 'flex', alignItems: 'center', gap: 12,
-            padding: '12px 14px', background: UI.bgInset, border: `0.5px solid ${UI.hair}`,
+            padding: '12px 14px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`,
             borderRadius: 6, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
           }}>
             <div style={{ flex: 1, textAlign: 'left' }}>
@@ -3566,7 +3566,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <button onClick={startFreestyleSession} style={{
             width: '100%', display: 'flex', alignItems: 'center', gap: 12,
-            padding: '12px 14px', background: UI.bgInset, border: `0.5px solid ${UI.hair}`,
+            padding: '12px 14px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`,
             borderRadius: 6, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
           }}>
             <div style={{ flex: 1, textAlign: 'left' }}>
@@ -3581,7 +3581,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
               {(store.workoutTemplates || []).map(t => (
                 <div key={t.id} style={{
                   display: 'flex', alignItems: 'stretch', gap: 0,
-                  background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 6, overflow: 'hidden',
+                  background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6, overflow: 'hidden',
                 }}>
                   <button onClick={() => { setFreestyleSubOpen(false); setTemplatePreview(t); }} style={{
                     flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
@@ -3596,7 +3596,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                     setStore(s => ({ ...s, workoutTemplates: (s.workoutTemplates || []).filter(x => x.id !== t.id) }));
                   }} aria-label="Delete template" style={{
                     flexShrink: 0, width: 44, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    background: 'transparent', border: 'none', borderLeft: `0.5px solid ${UI.hair}`,
+                    background: 'transparent', border: 'none', borderLeft: `var(--hair-width) solid ${UI.hair}`,
                     color: 'rgba(var(--danger-rgb),0.7)', cursor: 'pointer',
                   }}>
                     <i className="fa-solid fa-trash" style={{ fontSize: 12 }} />
@@ -3617,7 +3617,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
           {(sch?.days || []).filter(d => d.items?.length > 0).map(d => (
             <button key={d.id} onClick={() => { setBonusDayPickerOpen(false); setDayPreview(d); }} style={{
               width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              padding: '12px 14px', background: UI.bgInset, border: `0.5px solid ${UI.hair}`,
+              padding: '12px 14px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`,
               borderRadius: 6, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
             }}>
               <span style={{ fontSize: 14, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi }}>{d.name}</span>
@@ -3681,7 +3681,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
           {allMissedDays.map(m => (
             <button key={m.dateKey} onClick={() => startBacklogSession(m)} style={{
               width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              padding: '12px 14px', background: UI.bgInset, border: `0.5px solid ${UI.hair}`,
+              padding: '12px 14px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`,
               borderRadius: 6, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
             }}>
               <span style={{ fontSize: 14, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi }}>{m.dayName}</span>

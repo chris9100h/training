@@ -283,9 +283,9 @@ function CoachingTabCoachView({ store, setStore, userId, go, hideTopBar = false 
               <div
                 key={c.id}
                 onClick={() => handleEnd(c)}
-                style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', background: UI.bgInset, borderRadius: 8, border: `0.5px solid ${UI.hair}`, cursor: ending === c.id ? 'wait' : 'pointer' }}
+                style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', background: UI.bgInset, borderRadius: 8, border: `var(--hair-width) solid ${UI.hair}`, cursor: ending === c.id ? 'wait' : 'pointer' }}
               >
-                <div style={{ width: 36, height: 36, borderRadius: '50%', background: UI.bgRaised, border: `0.5px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <div style={{ width: 36, height: 36, borderRadius: '50%', background: UI.bgRaised, border: `var(--hair-width) solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                   <span style={{ fontFamily: UI.fontUi, fontSize: 15, color: UI.inkSoft, fontWeight: 700 }}>{(c.clientName || c.clientEmail || '?')[0].toUpperCase()}</span>
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
@@ -383,7 +383,7 @@ function CoachingTabClientCard({ client, inProgress, statusMode, unreadCount, ch
       {inProgress && (
         <div style={{ position: 'absolute', inset: 0, background: `rgba(var(--accent-rgb),0.10)`, pointerEvents: 'none' }} />
       )}
-      <div style={{ width: 44, height: 44, borderRadius: '50%', background: UI.bgRaised, border: `0.5px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, position: 'relative' }}>
+      <div style={{ width: 44, height: 44, borderRadius: '50%', background: UI.bgRaised, border: `var(--hair-width) solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, position: 'relative' }}>
         <span style={{ fontFamily: UI.fontUi, fontSize: 18, color: UI.inkSoft, fontWeight: 700 }}>{(client.clientName || client.clientEmail || '?')[0].toUpperCase()}</span>
         {inProgress && (
           <div style={{ position: 'absolute', top: 0, right: 0, width: 12, height: 12, borderRadius: 6, background: 'var(--accent)', border: '2px solid var(--bg)', animation: 'pulseDot 1.5s ease-in-out infinite' }} />
@@ -423,7 +423,7 @@ function CoachingTabClientCard({ client, inProgress, statusMode, unreadCount, ch
       {showCheckinNew && !isPending && (
         <button
           onClick={handleDismissCheckin}
-          style={{ background: 'transparent', border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '5px 8px', cursor: 'pointer', flexShrink: 0, display: 'flex', alignItems: 'center', gap: 4, WebkitTapHighlightColor: 'transparent' }}
+          style={{ background: 'transparent', border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4, padding: '5px 8px', cursor: 'pointer', flexShrink: 0, display: 'flex', alignItems: 'center', gap: 4, WebkitTapHighlightColor: 'transparent' }}
         >
           <i className="fa-solid fa-check" style={{ fontSize: 10, color: UI.inkFaint }} />
           <span style={{ fontSize: 9, fontFamily: UI.fontUi, letterSpacing: '0.06em', color: UI.inkFaint, textTransform: 'uppercase' }}>Dismiss</span>
@@ -659,7 +659,7 @@ function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false
   };
 
   return (
-    <div ref={cardRef} style={embedded ? { overflow: 'hidden' } : { background: UI.bgInset, borderRadius: 8, border: `0.5px solid ${UI.hair}`, overflow: 'hidden' }}>
+    <div ref={cardRef} style={embedded ? { overflow: 'hidden' } : { background: UI.bgInset, borderRadius: 8, border: `var(--hair-width) solid ${UI.hair}`, overflow: 'hidden' }}>
       <button
         onClick={() => setOpen(o => !o)}
         style={{ width: '100%', display: 'flex', alignItems: 'center', padding: '14px 16px', background: 'none', border: 'none', cursor: 'pointer', WebkitTapHighlightColor: 'transparent', gap: 12 }}
@@ -703,7 +703,7 @@ function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false
                 blocks.push(
                   <div key={`s-${items[0].key}`}>
                     {items.map(f => (
-                      <div key={f.key} style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderBottom: `0.5px solid ${UI.hair}` }}>
+                      <div key={f.key} style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderBottom: `var(--hair-width) solid ${UI.hair}` }}>
                         <span style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi }}>{f.label}</span>
                         <span className="num" style={{ fontSize: 12, color: stepperColor(f, responses[f.key]) }}>{responses[f.key]}/{f.max ?? 10}</span>
                       </div>
@@ -732,7 +732,7 @@ function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false
             // Insert planned avg card right after the last macro pill block (before any text fields).
             if (showPlanRow && lastMacroPillBlockIdx >= 0) {
               const planRow = (
-                <div key="plan-row" style={{ background: UI.bgRaised, borderRadius: 6, border: `0.5px solid ${UI.hair}`, padding: '8px 10px' }}>
+                <div key="plan-row" style={{ background: UI.bgRaised, borderRadius: 6, border: `var(--hair-width) solid ${UI.hair}`, padding: '8px 10px' }}>
                   <div style={{ fontSize: 9, color: 'var(--accent)', fontFamily: UI.fontUi, letterSpacing: '0.07em', textTransform: 'uppercase', fontWeight: 700, textAlign: 'center', marginBottom: 6 }}>Planned avg</div>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0 6px' }}>
                     {[{v: planCal, u: 'kcal'}, {v: planProt, u: 'g'}, {v: planCarb, u: 'g'}, {v: planFat, u: 'g'}].map(({v, u}, i) => (
@@ -771,7 +771,7 @@ function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false
           )}
 
           {/* Actions row — export always visible, edit/delete when handlers are present */}
-          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', paddingTop: 12, borderTop: `0.5px solid ${UI.hair}` }}>
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', paddingTop: 12, borderTop: `var(--hair-width) solid ${UI.hair}` }}>
             {onDelete && (
               <button onClick={onDelete}
                 style={{ background: confirmingDelete ? 'rgba(var(--danger-rgb),0.12)' : UI.bgRaised, border: `0.5px solid ${confirmingDelete ? 'rgba(var(--danger-rgb),0.5)' : UI.hairStrong}`, borderRadius: 6, padding: '8px 16px', fontSize: 12, color: confirmingDelete ? 'rgba(var(--danger-rgb),0.9)' : UI.inkFaint, fontFamily: UI.fontUi, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
@@ -785,15 +785,15 @@ function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false
             {exportMode === 'pick' ? (
               <>
                 <button onClick={() => setExportMode(null)}
-                  style={{ background: UI.bgRaised, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '8px 14px', fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>Cancel</button>
+                  style={{ background: UI.bgRaised, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, padding: '8px 14px', fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>Cancel</button>
                 <button onClick={doExportText}
-                  style={{ background: UI.bgRaised, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '8px 14px', fontSize: 12, color: UI.ink, fontFamily: UI.fontUi, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>Text</button>
+                  style={{ background: UI.bgRaised, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, padding: '8px 14px', fontSize: 12, color: UI.ink, fontFamily: UI.fontUi, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>Text</button>
                 <button onClick={doExportImage}
-                  style={{ background: UI.bgRaised, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '8px 14px', fontSize: 12, color: UI.ink, fontFamily: UI.fontUi, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>Image</button>
+                  style={{ background: UI.bgRaised, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, padding: '8px 14px', fontSize: 12, color: UI.ink, fontFamily: UI.fontUi, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>Image</button>
               </>
             ) : (
               <button onClick={() => setExportMode('pick')} disabled={exportMode === 'exporting'}
-                style={{ background: UI.bgRaised, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '8px 14px', fontSize: 12, color: exportMode === 'exporting' ? UI.inkFaint : UI.ink, fontFamily: UI.fontUi, cursor: exportMode === 'exporting' ? 'default' : 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+                style={{ background: UI.bgRaised, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, padding: '8px 14px', fontSize: 12, color: exportMode === 'exporting' ? UI.inkFaint : UI.ink, fontFamily: UI.fontUi, cursor: exportMode === 'exporting' ? 'default' : 'pointer', WebkitTapHighlightColor: 'transparent' }}>
                 {exportMode === 'exporting' ? '…' : <i className="fa-solid fa-share-from-square" />}
               </button>
             )}
@@ -815,7 +815,7 @@ function StatPill({ label, value, delta, deltaStr, deltaDir, arrowOnly }) {
   })();
   const arrow = delta == null ? null : delta === 0 ? '→' : (deltaDir === 'lower_better' ? (delta < 0 ? '↑' : '↓') : (delta > 0 ? '↑' : '↓'));
   return (
-    <div style={{ background: UI.bgRaised, borderRadius: 6, padding: '7px 10px', border: `0.5px solid ${UI.hair}` }}>
+    <div style={{ background: UI.bgRaised, borderRadius: 6, padding: '7px 10px', border: `var(--hair-width) solid ${UI.hair}` }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 5 }}>
         <div className="num" style={{ fontSize: 15, color: UI.ink, fontWeight: 300 }}>{value}</div>
         {delta != null && arrowOnly && <div style={{ fontSize: 11, color: deltaColor }}>{arrow}</div>}
@@ -906,7 +906,7 @@ function FieldWidget({ field, value, onChange, distUnit, setDistUnit, inputStyle
     return (
       <>
         <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4 }}>{lbl}</div>
-        <div style={{ ...inputStyle, background: UI.bgRaised, border: `0.5px solid ${UI.hair}`, color: has ? 'var(--accent)' : UI.inkGhost, fontFamily: UI.fontNum, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ ...inputStyle, background: UI.bgRaised, border: `var(--hair-width) solid ${UI.hair}`, color: has ? 'var(--accent)' : UI.inkGhost, fontFamily: UI.fontNum, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <span>{has ? value : '—'}{has && field.type === 'percent' ? '%' : ''}</span>
           <span style={{ fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.06em' }}>FROM LOGS</span>
         </div>
@@ -929,7 +929,7 @@ function FieldWidget({ field, value, onChange, distUnit, setDistUnit, inputStyle
       <>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
           <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi }}>{field.label + req}</span>
-          <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `0.5px solid ${UI.hairStrong}` }}>
+          <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}` }}>
             {['km', 'mi'].map(u => (
               <button key={u} onClick={() => {
                 const n = parseFloat(String(value || '').replace(',', '.'));
@@ -1242,7 +1242,7 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
     return (
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, padding: 32 }}>
         <div style={{ fontSize: 13, color: 'rgba(var(--danger-rgb),0.8)', fontFamily: UI.fontUi, textAlign: 'center' }}>Couldn't load check-ins.</div>
-        <button onClick={() => { setLoadErr(false); load(); }} style={{ background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '8px 16px', cursor: 'pointer', color: UI.ink, fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600 }}>Retry</button>
+        <button onClick={() => { setLoadErr(false); load(); }} style={{ background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, padding: '8px 16px', cursor: 'pointer', color: UI.ink, fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600 }}>Retry</button>
       </div>
     );
   }
@@ -1348,7 +1348,7 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
           )}
           {isSelf && (
             <button onClick={() => setBuilderOpen(true)}
-              style={{ background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '11px 13px', cursor: 'pointer', color: UI.inkFaint, fontSize: 15, lineHeight: 1, flexShrink: 0 }}>
+              style={{ background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, padding: '11px 13px', cursor: 'pointer', color: UI.inkFaint, fontSize: 15, lineHeight: 1, flexShrink: 0 }}>
               <i className="fa-solid fa-sliders" />
             </button>
           )}
@@ -1379,7 +1379,7 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
         {checkins.length > 0 && <div className="knurl" style={{ margin: '4px 0' }} />}
 
         {!checkinEnabled && (
-          <div style={{ background: UI.bgInset, borderRadius: 8, padding: '11px 14px', border: `0.5px solid ${UI.hair}` }}>
+          <div style={{ background: UI.bgInset, borderRadius: 8, padding: '11px 14px', border: `var(--hair-width) solid ${UI.hair}` }}>
             <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi }}>Check-ins are currently paused by your coach.</div>
           </div>
         )}
@@ -1388,7 +1388,7 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
         ) : null}
 
         {past.length > 0 && (
-          <div style={{ background: UI.bgInset, borderRadius: 8, border: `0.5px solid ${UI.hair}`, overflow: 'hidden' }}>
+          <div style={{ background: UI.bgInset, borderRadius: 8, border: `var(--hair-width) solid ${UI.hair}`, overflow: 'hidden' }}>
             <button
               onClick={() => setPastOpen(o => !o)}
               style={{ width: '100%', display: 'flex', alignItems: 'center', padding: '14px 16px', background: 'none', border: 'none', cursor: 'pointer', WebkitTapHighlightColor: 'transparent', gap: 12 }}
@@ -1404,7 +1404,7 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
             {pastOpen && (
               <div style={{ paddingLeft: 16 }}>
                 {past.map(ci => (
-                  <div key={ci.id} style={{ borderTop: `0.5px solid ${UI.hair}` }}>
+                  <div key={ci.id} style={{ borderTop: `var(--hair-width) solid ${UI.hair}` }}>
                     <CheckInCard ci={ci} prevCi={past[past.indexOf(ci) + 1]} schema={resolvedSchema} embedded onEdit={checkinEnabled ? () => setEditTarget(ci) : undefined} onDelete={checkinEnabled ? () => handleDelete(ci) : undefined} confirmingDelete={confirmDelete === ci.id} coachingMacrosHistory={coachingMacrosHistory} />
                   </div>
                 ))}
@@ -1520,7 +1520,7 @@ function CoachingTabClientView({ store, setStore, userId, go, hideTopBar = false
       {confirmEl}
       <CheckInRequestModal coaching={coaching} />
       {!hideTopBar && <TopBar title="Coaching" />}
-      <div style={{ display: 'flex', alignItems: 'center', padding: '12px 16px', background: UI.bgInset, borderBottom: `0.5px solid ${UI.hair}`, flexShrink: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'center', padding: '12px 16px', background: UI.bgInset, borderBottom: `var(--hair-width) solid ${UI.hair}`, flexShrink: 0 }}>
         <div style={{ flex: 1 }} />
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <div style={{ width: 40, height: 40, borderRadius: 6, background: `rgba(var(--accent-rgb),0.15)`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
@@ -1538,7 +1538,7 @@ function CoachingTabClientView({ store, setStore, userId, go, hideTopBar = false
           </button>
         </div>
       </div>
-      <div style={{ display: 'flex', borderBottom: `0.5px solid ${UI.hair}`, background: UI.bg, flexShrink: 0 }}>
+      <div style={{ display: 'flex', borderBottom: `var(--hair-width) solid ${UI.hair}`, background: UI.bg, flexShrink: 0 }}>
         {[{ id: 'messages', label: 'Messages', icon: 'fa-comment' }, { id: 'nutrition', label: 'Nutrition', icon: 'fa-utensils' }, { id: 'checkin', label: 'Check-in', icon: 'fa-clipboard-list' }].map(t => (
           <button
             key={t.id}
@@ -1599,7 +1599,7 @@ function ClientNutritionReadView({ coachingId }) {
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, padding: 32 }}>
         <i className="fa-solid fa-utensils" style={{ fontSize: 28, color: UI.inkGhost }} />
         <div style={{ fontSize: 13, color: 'rgba(var(--danger-rgb),0.8)', fontFamily: UI.fontUi, textAlign: 'center' }}>Couldn't load macro targets.</div>
-        <button onClick={load} style={{ background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '8px 16px', cursor: 'pointer', color: UI.ink, fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600 }}>Retry</button>
+        <button onClick={load} style={{ background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, padding: '8px 16px', cursor: 'pointer', color: UI.ink, fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600 }}>Retry</button>
       </div>
     );
   }
@@ -1614,7 +1614,7 @@ function ClientNutritionReadView({ coachingId }) {
   }
 
   const MacroDay = ({ label, calories, protein, carbs, fat }) => (
-    <div style={{ background: UI.bgInset, borderRadius: 8, padding: '16px 18px', border: `0.5px solid ${UI.hair}` }}>
+    <div style={{ background: UI.bgInset, borderRadius: 8, padding: '16px 18px', border: `var(--hair-width) solid ${UI.hair}` }}>
       <div className="micro-gold" style={{ marginBottom: 12 }}>{label}</div>
       {calories != null && (
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 4, marginBottom: 14 }}>
@@ -1624,7 +1624,7 @@ function ClientNutritionReadView({ coachingId }) {
       )}
       <div style={{ display: 'flex', gap: 10 }}>
         {[{ label: 'Protein', value: protein }, { label: 'Carbs', value: carbs }, { label: 'Fat', value: fat }].map(m => (
-          <div key={m.label} style={{ flex: 1, background: UI.bgRaised, borderRadius: 6, padding: '10px 8px', textAlign: 'center', border: `0.5px solid ${UI.hair}` }}>
+          <div key={m.label} style={{ flex: 1, background: UI.bgRaised, borderRadius: 6, padding: '10px 8px', textAlign: 'center', border: `var(--hair-width) solid ${UI.hair}` }}>
             <div className="num" style={{ fontSize: 20, color: UI.ink, fontWeight: 300 }}>{m.value != null ? m.value : '—'}</div>
             <div style={{ fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.08em', marginTop: 2 }}>g {m.label}</div>
           </div>

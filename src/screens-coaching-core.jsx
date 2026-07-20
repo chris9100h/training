@@ -316,8 +316,8 @@ function ChatThread({ thread, coachingId, userId, otherName, unreadNotes, onBack
 
   return (
     <>
-      <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10, padding: '8px 16px 8px', borderBottom: `0.5px solid ${UI.hair}` }}>
-        <button onClick={onBack} style={{ width: 32, height: 32, borderRadius: 6, border: `0.5px solid ${UI.hair}`, background: UI.bgRaised, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+      <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10, padding: '8px 16px 8px', borderBottom: `var(--hair-width) solid ${UI.hair}` }}>
+        <button onClick={onBack} style={{ width: 32, height: 32, borderRadius: 6, border: `var(--hair-width) solid ${UI.hair}`, background: UI.bgRaised, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
           <i className="fa-solid fa-chevron-left" style={{ fontSize: 12, color: UI.inkSoft }} />
         </button>
         <div style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>{thread.name}</div>
@@ -331,7 +331,7 @@ function ChatThread({ thread, coachingId, userId, otherName, unreadNotes, onBack
           const isMe = n.authorId === userId;
           return (
             <div key={n.id} style={{ display: 'flex', flexDirection: 'column', alignItems: isMe ? 'flex-end' : 'flex-start' }}>
-              <div style={{ maxWidth: '80%', background: isMe ? 'var(--accent)' : UI.bgElevated, borderRadius: isMe ? '8px 8px 4px 8px' : '8px 8px 8px 4px', padding: '9px 12px', border: isMe ? 'none' : `0.5px solid ${UI.hairStrong}` }}>
+              <div style={{ maxWidth: '80%', background: isMe ? 'var(--accent)' : UI.bgElevated, borderRadius: isMe ? '8px 8px 4px 8px' : '8px 8px 8px 4px', padding: '9px 12px', border: isMe ? 'none' : `var(--hair-width) solid ${UI.hairStrong}` }}>
                 {(n.attachments || []).map((a, ai) => (
                   <img key={ai} src={a.url} alt={a.name || 'image'} onClick={() => setLightboxSrc(a.url)}
                     style={{ maxWidth: '100%', maxHeight: 300, borderRadius: 4, display: 'block', marginBottom: n.body ? 8 : 0, cursor: 'pointer' }} />
@@ -346,17 +346,17 @@ function ChatThread({ thread, coachingId, userId, otherName, unreadNotes, onBack
         })}
         <div ref={bottomRef} />
       </div>
-      <div style={{ flexShrink: 0, borderTop: `0.5px solid ${UI.hair}`, background: 'transparent' }}>
+      <div style={{ flexShrink: 0, borderTop: `var(--hair-width) solid ${UI.hair}`, background: 'transparent' }}>
         {imagePreview && (
           <div style={{ padding: '10px 16px 0', display: 'flex' }}>
             <div style={{ position: 'relative', display: 'inline-block' }}>
-              <img src={imagePreview} alt="preview" style={{ maxHeight: 80, maxWidth: 120, borderRadius: 4, display: 'block', border: `0.5px solid ${UI.hairStrong}` }} />
+              <img src={imagePreview} alt="preview" style={{ maxHeight: 80, maxWidth: 120, borderRadius: 4, display: 'block', border: `var(--hair-width) solid ${UI.hairStrong}` }} />
               <button onClick={() => { setImageFile(null); setImagePreview(null); }} style={{ position: 'absolute', top: -6, right: -6, width: 20, height: 20, borderRadius: '50%', border: 'none', background: UI.danger, color: '#fff', cursor: 'pointer', fontSize: 12, lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>×</button>
             </div>
           </div>
         )}
         <div style={{ padding: '10px 16px', display: 'flex', gap: 8, alignItems: 'center' }}>
-          <label style={{ width: 40, height: 40, borderRadius: 6, border: `0.5px solid ${UI.hair}`, background: UI.bgInset, cursor: 'pointer', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: UI.inkSoft }}>
+          <label style={{ width: 40, height: 40, borderRadius: 6, border: `var(--hair-width) solid ${UI.hair}`, background: UI.bgInset, cursor: 'pointer', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: UI.inkSoft }}>
             <i className="fa-solid fa-image" style={{ fontSize: 15 }} />
             <input type="file" accept="image/*" onChange={pickImage} style={{ display: 'none' }} />
           </label>
@@ -366,9 +366,9 @@ function ChatThread({ thread, coachingId, userId, otherName, unreadNotes, onBack
             onKeyDown={e => e.key === 'Enter' && !e.shiftKey && send()}
             onPaste={onPasteMessage}
             placeholder="Message…"
-            style={{ flex: 1, background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 6, padding: '10px 16px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, outline: 'none' }}
+            style={{ flex: 1, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6, padding: '10px 16px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, outline: 'none' }}
           />
-          <button onClick={send} disabled={sending || (!body.trim() && !imageFile)} style={{ width: 40, height: 40, borderRadius: 6, border: (body.trim() || imageFile) && !sending ? 'none' : `0.5px solid ${UI.hair}`, background: (body.trim() || imageFile) && !sending ? 'var(--accent)' : 'transparent', color: (body.trim() || imageFile) && !sending ? 'var(--accent-ink)' : UI.inkFaint, cursor: sending || (!body.trim() && !imageFile) ? 'default' : 'pointer', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'background 0.2s, color 0.2s, border 0.2s' }}>
+          <button onClick={send} disabled={sending || (!body.trim() && !imageFile)} style={{ width: 40, height: 40, borderRadius: 6, border: (body.trim() || imageFile) && !sending ? 'none' : `var(--hair-width) solid ${UI.hair}`, background: (body.trim() || imageFile) && !sending ? 'var(--accent)' : 'transparent', color: (body.trim() || imageFile) && !sending ? 'var(--accent-ink)' : UI.inkFaint, cursor: sending || (!body.trim() && !imageFile) ? 'default' : 'pointer', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'background 0.2s, color 0.2s, border 0.2s' }}>
             {sending ? <span style={{ fontFamily: UI.fontUi, fontSize: 14 }}>…</span> : <i className="fa-solid fa-arrow-up" style={{ fontSize: 15 }} />}
           </button>
         </div>
@@ -472,7 +472,7 @@ function ThreadList({ coachingId, userId, otherName, unreadNotes, setStore, canD
         ) : threads.map(t => {
           const unread = unreadByThread[t.id] || 0;
           return (
-            <div key={t.id} onClick={() => setSelected(t)} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', borderBottom: `0.5px solid ${UI.hair}`, cursor: 'pointer' }}>
+            <div key={t.id} onClick={() => setSelected(t)} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', borderBottom: `var(--hair-width) solid ${UI.hair}`, cursor: 'pointer' }}>
               <div style={{ width: 40, height: 40, borderRadius: 8, background: `rgba(var(--accent-rgb),0.16)`, border: `0.5px solid rgba(var(--accent-rgb),0.2)`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                 <i className="fa-solid fa-comment" style={{ fontSize: 14, color: 'var(--accent)' }} />
               </div>
@@ -496,7 +496,7 @@ function ThreadList({ coachingId, userId, otherName, unreadNotes, setStore, canD
           );
         })}
       </div>
-      <div style={{ flexShrink: 0, borderTop: `0.5px solid ${UI.hair}`, background: 'transparent' }}>
+      <div style={{ flexShrink: 0, borderTop: `var(--hair-width) solid ${UI.hair}`, background: 'transparent' }}>
         <div style={{ padding: '10px 16px' }}>
           {creating ? (
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -506,9 +506,9 @@ function ThreadList({ coachingId, userId, otherName, unreadNotes, setStore, canD
                 onChange={e => setNewName(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter') create(); if (e.key === 'Escape') { setCreating(false); setNewName(''); } }}
                 placeholder="Thread name (e.g. Nutrition, Goals…)"
-                style={{ flex: 1, background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 6, padding: '10px 16px', fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, outline: 'none' }}
+                style={{ flex: 1, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6, padding: '10px 16px', fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, outline: 'none' }}
               />
-              <button onClick={create} disabled={saving || !newName.trim()} style={{ padding: '10px 18px', borderRadius: 6, border: newName.trim() && !saving ? 'none' : `0.5px solid ${UI.hair}`, background: newName.trim() && !saving ? 'var(--accent)' : 'transparent', color: newName.trim() && !saving ? 'var(--accent-ink)' : UI.inkFaint, fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, letterSpacing: '0.06em', cursor: saving || !newName.trim() ? 'default' : 'pointer', flexShrink: 0, transition: 'background 0.2s, color 0.2s, border 0.2s' }}>
+              <button onClick={create} disabled={saving || !newName.trim()} style={{ padding: '10px 18px', borderRadius: 6, border: newName.trim() && !saving ? 'none' : `var(--hair-width) solid ${UI.hair}`, background: newName.trim() && !saving ? 'var(--accent)' : 'transparent', color: newName.trim() && !saving ? 'var(--accent-ink)' : UI.inkFaint, fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, letterSpacing: '0.06em', cursor: saving || !newName.trim() ? 'default' : 'pointer', flexShrink: 0, transition: 'background 0.2s, color 0.2s, border 0.2s' }}>
                 {saving ? '…' : 'CREATE'}
               </button>
             </div>
@@ -608,7 +608,7 @@ function CoachingSettingsSection({ store, setStore, userId, go }) {
       {/* As client */}
       <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8, marginTop: 4 }}>MY COACH</div>
       {asClient ? (
-        <div style={{ background: UI.bgInset, borderRadius: 8, border: `0.5px solid ${UI.hair}`, marginBottom: 14, overflow: 'hidden' }}>
+        <div style={{ background: UI.bgInset, borderRadius: 8, border: `var(--hair-width) solid ${UI.hair}`, marginBottom: 14, overflow: 'hidden' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px' }}>
             <div style={{ width: 36, height: 36, borderRadius: '50%', background: `rgba(var(--accent-rgb),0.15)`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
               <i className="fa-solid fa-user" style={{ fontSize: 14, color: 'var(--accent)' }} />
@@ -625,7 +625,7 @@ function CoachingSettingsSection({ store, setStore, userId, go }) {
           {asClient.status === 'active' && (
             <div
               onClick={() => setThreadOpen(true)}
-              style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderTop: `0.5px solid ${UI.hair}`, cursor: 'pointer' }}
+              style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderTop: `var(--hair-width) solid ${UI.hair}`, cursor: 'pointer' }}
             >
               <i className="fa-solid fa-comment" style={{ fontSize: 12, color: 'var(--accent)' }} />
               <span style={{ flex: 1, fontSize: 13, color: UI.ink, fontFamily: UI.fontUi }}>Messages</span>
@@ -639,7 +639,7 @@ function CoachingSettingsSection({ store, setStore, userId, go }) {
           )}
         </div>
       ) : (
-        <div style={{ padding: '12px 14px', background: UI.bgInset, borderRadius: 8, border: `0.5px solid ${UI.hair}`, marginBottom: 14, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>
+        <div style={{ padding: '12px 14px', background: UI.bgInset, borderRadius: 8, border: `var(--hair-width) solid ${UI.hair}`, marginBottom: 14, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>
           No coach assigned.
         </div>
       )}
@@ -650,10 +650,10 @@ function CoachingSettingsSection({ store, setStore, userId, go }) {
       {asCoach.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 14 }}>
           {asCoach.map(c => (
-            <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', background: UI.bgInset, borderRadius: 8, border: `0.5px solid ${UI.hair}`, cursor: c.status === 'active' ? 'pointer' : 'default' }}
+            <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', background: UI.bgInset, borderRadius: 8, border: `var(--hair-width) solid ${UI.hair}`, cursor: c.status === 'active' ? 'pointer' : 'default' }}
               onClick={() => c.status === 'active' && go({ name: 'coaching-client', coachingId: c.id, clientId: c.clientId, clientName: c.clientName })}
             >
-              <div style={{ width: 32, height: 32, borderRadius: '50%', background: UI.bgRaised, border: `0.5px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <div style={{ width: 32, height: 32, borderRadius: '50%', background: UI.bgRaised, border: `var(--hair-width) solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                 <span style={{ fontFamily: UI.fontUi, fontSize: 13, color: UI.inkSoft, fontWeight: 700 }}>{(c.clientName || '?')[0].toUpperCase()}</span>
               </div>
               <div style={{ flex: 1 }}>
@@ -723,9 +723,9 @@ function ClientCard({ client, go }) {
   return (
     <div
       onClick={() => go({ name: 'coaching-client', coachingId: client.id, clientId: client.clientId, clientName: client.clientName })}
-      style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 16px', background: UI.bgInset, borderRadius: 8, border: `0.5px solid ${UI.hair}`, cursor: 'pointer' }}
+      style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 16px', background: UI.bgInset, borderRadius: 8, border: `var(--hair-width) solid ${UI.hair}`, cursor: 'pointer' }}
     >
-      <div style={{ width: 44, height: 44, borderRadius: '50%', background: UI.bgRaised, border: `0.5px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+      <div style={{ width: 44, height: 44, borderRadius: '50%', background: UI.bgRaised, border: `var(--hair-width) solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
         <span style={{ fontFamily: UI.fontUi, fontSize: 18, color: UI.inkSoft, fontWeight: 700 }}>{(client.clientName || '?')[0].toUpperCase()}</span>
       </div>
       <div style={{ flex: 1 }}>

@@ -55,7 +55,7 @@ function AGDir({ kind, children }) {
 function AGChip({ children }) {
   return (
     <span style={{ fontFamily: UI.fontNum, fontSize: 11, fontWeight: 600, color: UI.ink,
-      background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4,
+      background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4,
       padding: '3px 8px', whiteSpace: 'nowrap' }}>{children}</span>
   );
 }
@@ -68,8 +68,8 @@ function AGKick({ children, color }) {
 // A panel with a titled header row (for the four questions).
 function AGPanel({ idx, title, when, children }) {
   return (
-    <div style={{ background: UI.bgRaised, border: `0.5px solid ${UI.hair}`, borderRadius: 8, overflow: 'hidden' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '13px 16px', borderBottom: `0.5px solid ${UI.hair}`, background: agTint(UI.gold, 5) }}>
+    <div style={{ background: UI.bgRaised, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 8, overflow: 'hidden' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '13px 16px', borderBottom: `var(--hair-width) solid ${UI.hair}`, background: agTint(UI.gold, 5) }}>
         {idx != null && <span style={{ fontFamily: UI.fontNum, fontSize: 12, fontWeight: 700, color: UI.bg, background: UI.gold, width: 24, height: 24, borderRadius: 6, display: 'grid', placeItems: 'center', flex: 'none' }}>{idx}</span>}
         <span className="display" style={{ fontSize: 19, letterSpacing: '.01em' }}>{title}</span>
         {when && <span style={{ marginLeft: 'auto', fontFamily: UI.fontNum, fontSize: 9.5, letterSpacing: '.1em', textTransform: 'uppercase', color: UI.inkFaint, textAlign: 'right', lineHeight: 1.35 }}>{when}</span>}
@@ -89,7 +89,7 @@ function AGPanel({ idx, title, when, children }) {
 function AGOpt({ chip, dirs, children, cell }) {
   if (cell) {
     return (
-      <div style={{ background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 6, padding: '10px 12px', height: '100%' }}>
+      <div style={{ background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6, padding: '10px 12px', height: '100%' }}>
         <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 7, marginBottom: 6 }}>
           <AGChip>{chip}</AGChip>
           {dirs}
@@ -99,7 +99,7 @@ function AGOpt({ chip, dirs, children, cell }) {
     );
   }
   return (
-    <div style={{ padding: '12px 0', borderTop: `0.5px solid ${UI.hair}` }}>
+    <div style={{ padding: '12px 0', borderTop: `var(--hair-width) solid ${UI.hair}` }}>
       <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginBottom: 6 }}>
         <AGChip>{chip}</AGChip>
         {dirs}
@@ -116,7 +116,7 @@ function AGOpt({ chip, dirs, children, cell }) {
 
 function AGStat({ k, v, vColor, s }) {
   return (
-    <div style={{ background: UI.bgRaised, border: `0.5px solid ${UI.hair}`, borderRadius: 8, padding: '14px 15px' }}>
+    <div style={{ background: UI.bgRaised, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 8, padding: '14px 15px' }}>
       <AGKick>{k}</AGKick>
       <div className="display" style={{ fontSize: 20, marginTop: 4, color: vColor || UI.ink, lineHeight: 1.05 }}>{v}</div>
       <div style={{ fontSize: 12, color: UI.inkSoft, marginTop: 5, lineHeight: 1.4 }}>{s}</div>
@@ -186,12 +186,12 @@ function AutoregGuideScreen({ store, go, mode: modeProp, back }) {
   const isC = M === 'C', isB = M === 'B', isA = M === 'A';
   const backTo = () => go(back && back.name ? back : { name: 'settings' });
 
-  const cardStyle = { background: UI.bgRaised, border: `0.5px solid ${UI.hair}`, borderRadius: 8, padding: 18 };
+  const cardStyle = { background: UI.bgRaised, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 8, padding: 18 };
   const h3 = { fontSize: 18, marginBottom: 7 };
 
   // shared: section wrapper
   const Section = ({ children, style }) => (
-    <div style={{ padding: '30px 0', borderTop: `0.5px solid ${UI.hair}`, ...style }}>
+    <div style={{ padding: '30px 0', borderTop: `var(--hair-width) solid ${UI.hair}`, ...style }}>
       <div style={{ maxWidth: 940, margin: '0 auto', padding: '0 4px' }}>{children}</div>
     </div>
   );
@@ -223,7 +223,7 @@ function AutoregGuideScreen({ store, go, mode: modeProp, back }) {
                   <div className="display" style={{ fontSize: 21, margin: '4px 0 8px', color: on ? UI.gold : UI.ink, lineHeight: 1 }}>{meta.nm}</div>
                   <div style={{ fontSize: 12.5, color: UI.inkSoft, lineHeight: 1.42 }}>{meta.d}</div>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 11 }}>
-                    {meta.pills.map(p => <span key={p} style={{ fontFamily: UI.fontNum, fontSize: 9, letterSpacing: '.04em', textTransform: 'uppercase', color: UI.inkSoft, background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 4, padding: '3px 6px' }}>{p}</span>)}
+                    {meta.pills.map(p => <span key={p} style={{ fontFamily: UI.fontNum, fontSize: 9, letterSpacing: '.04em', textTransform: 'uppercase', color: UI.inkSoft, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 4, padding: '3px 6px' }}>{p}</span>)}
                   </div>
                 </button>
               );
@@ -263,7 +263,7 @@ function AutoregGuideScreen({ store, go, mode: modeProp, back }) {
                 ['Stage 3', 'Two dials', isB ? 'Sets stay put, weight earns or cuts.' : 'Sets rotate, weight earns or cuts.'],
                 ['Stage 4', 'Next session', 'Seeded automatically: new set counts, new weight, reps reset on a jump.'],
               ].map(([n, h, l]) => (
-                <div key={n} style={{ background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 8, padding: '12px 13px' }}>
+                <div key={n} style={{ background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 8, padding: '12px 13px' }}>
                   <div style={{ fontFamily: UI.fontNum, fontSize: 9, letterSpacing: '.13em', textTransform: 'uppercase', color: UI.gold }}>{n}</div>
                   <div className="display" style={{ fontSize: 15, margin: '3px 0 6px' }}>{h}</div>
                   <div style={{ fontSize: 12, color: UI.inkSoft, lineHeight: 1.4 }}>{l}</div>
@@ -273,7 +273,7 @@ function AutoregGuideScreen({ store, go, mode: modeProp, back }) {
             <AGKick>Signal map: which dial each answer moves</AGKick>
             <div style={{ marginTop: 10, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: 8 }}>
               {agSignals(M).map((row, i) => (
-                <div key={i} style={{ background: UI.bgRaised, border: `0.5px solid ${UI.hair}`, borderRadius: 8, padding: '12px 13px' }}>
+                <div key={i} style={{ background: UI.bgRaised, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 8, padding: '12px 13px' }}>
                   <div style={{ fontSize: 13, fontWeight: 600, color: UI.ink, marginBottom: 10 }}>{row.sig}</div>
                   {[['Sets', row.sets], ['Weight', row.wt]].map(([lab, el]) => (
                     <div key={lab} style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: lab === 'Weight' ? 7 : 0 }}>
@@ -514,7 +514,7 @@ function AutoregGuideScreen({ store, go, mode: modeProp, back }) {
                   <AGKick>Chest day, empty start. Four grants in a row: Soreness "Never", then 3x "Not enough"</AGKick>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px,1fr))', gap: 9, marginTop: 10 }}>
                     {[['Bench Press', 'Main lift', 2, 5], ['Incline DB', 'Accessory', 1, 4], ['Cable Fly', 'Accessory', 1, 4]].map(([nm, tp, g, s]) => (
-                      <div key={nm} style={{ background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 6, padding: '12px 13px' }}>
+                      <div key={nm} style={{ background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6, padding: '12px 13px' }}>
                         <div style={{ fontWeight: 700, fontSize: 13.5 }}>{nm}</div>
                         <div style={{ fontFamily: UI.fontNum, fontSize: 9, letterSpacing: '.1em', textTransform: 'uppercase', color: UI.gold }}>{tp}</div>
                         <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 7, fontFamily: UI.fontNum, fontSize: 12, color: UI.inkSoft }}><span>Grants</span><span style={{ color: UI.ink, fontWeight: 600 }}>{g}</span></div>
@@ -565,7 +565,7 @@ function AutoregGuideScreen({ store, go, mode: modeProp, back }) {
                     ['4 · Weight feel', 'Anything but "Too heavy" ("Hard" still counts).'],
                     ...(isB ? [['5 · Soreness', 'Muscle is not "Still sore".']] : []),
                   ].map(([t, d]) => (
-                    <div key={t} style={{ background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 6, padding: '12px 13px' }}>
+                    <div key={t} style={{ background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6, padding: '12px 13px' }}>
                       <div style={{ fontFamily: UI.fontNum, fontSize: 10.5, letterSpacing: '.1em', textTransform: 'uppercase', color: UI.ok, marginBottom: 5 }}>{t}</div>
                       <div style={{ fontSize: 12.5, color: UI.inkSoft }}>{d}</div>
                     </div>
@@ -684,9 +684,9 @@ function AutoregGuideScreen({ store, go, mode: modeProp, back }) {
           {/* ── 09 cheat sheet ── */}
           <Section>
             <AGSecHead n="09 / Reference" title="Cheat sheet" sub="Range 8 to 12, 3 sets, step 2.5 kg / 5 lbs. What you log, what comes out." />
-            <div style={{ overflowX: 'auto', border: `0.5px solid ${UI.hair}`, borderRadius: 8 }}>
+            <div style={{ overflowX: 'auto', border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 8 }}>
               <table style={{ borderCollapse: 'collapse', width: '100%', minWidth: 460, fontSize: 13 }}>
-                <thead><tr>{['What happens', 'Reps 1/2/3', 'Result', 'Next seed'].map(h => <th key={h} style={{ textAlign: 'left', padding: '10px 13px', borderBottom: `0.5px solid ${UI.hair}`, background: UI.bgInset, fontFamily: UI.fontNum, fontSize: 10, letterSpacing: '.1em', textTransform: 'uppercase', color: UI.inkFaint, fontWeight: 600 }}>{h}</th>)}</tr></thead>
+                <thead><tr>{['What happens', 'Reps 1/2/3', 'Result', 'Next seed'].map(h => <th key={h} style={{ textAlign: 'left', padding: '10px 13px', borderBottom: `var(--hair-width) solid ${UI.hair}`, background: UI.bgInset, fontFamily: UI.fontNum, fontSize: 10, letterSpacing: '.1em', textTransform: 'uppercase', color: UI.inkFaint, fontWeight: 600 }}>{h}</th>)}</tr></thead>
                 <tbody>
                   {[
                     ['Fully earned', '12 / 10 / 8', ['bump +2.5, lights green', UI.ok], 'weight +2.5, reps → 8'],
@@ -696,10 +696,10 @@ function AutoregGuideScreen({ store, go, mode: modeProp, back }) {
                     ['Only the last set fails', '12 / 10 / 6', ['last set exempt, no bump', UI.inkFaint], 'weight + reps hold'],
                   ].map((r, i) => (
                     <tr key={i}>
-                      <td style={{ padding: '10px 13px', borderBottom: `0.5px solid ${UI.hair}`, color: UI.inkSoft }}>{r[0]}</td>
-                      <td style={{ padding: '10px 13px', borderBottom: `0.5px solid ${UI.hair}`, fontFamily: UI.fontNum, color: UI.ink, whiteSpace: 'nowrap' }}>{r[1]}</td>
-                      <td style={{ padding: '10px 13px', borderBottom: `0.5px solid ${UI.hair}`, color: r[2][1], fontWeight: 600 }}>{r[2][0]}</td>
-                      <td style={{ padding: '10px 13px', borderBottom: `0.5px solid ${UI.hair}`, fontFamily: UI.fontNum, color: UI.inkSoft, whiteSpace: 'nowrap' }}>{r[3]}</td>
+                      <td style={{ padding: '10px 13px', borderBottom: `var(--hair-width) solid ${UI.hair}`, color: UI.inkSoft }}>{r[0]}</td>
+                      <td style={{ padding: '10px 13px', borderBottom: `var(--hair-width) solid ${UI.hair}`, fontFamily: UI.fontNum, color: UI.ink, whiteSpace: 'nowrap' }}>{r[1]}</td>
+                      <td style={{ padding: '10px 13px', borderBottom: `var(--hair-width) solid ${UI.hair}`, color: r[2][1], fontWeight: 600 }}>{r[2][0]}</td>
+                      <td style={{ padding: '10px 13px', borderBottom: `var(--hair-width) solid ${UI.hair}`, fontFamily: UI.fontNum, color: UI.inkSoft, whiteSpace: 'nowrap' }}>{r[3]}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -722,7 +722,7 @@ function AutoregGuideScreen({ store, go, mode: modeProp, back }) {
 
       <button onClick={scrollToTop} aria-label="Back to top" title="Back to top" style={{
         position: 'fixed', right: 16, bottom: 'calc(env(safe-area-inset-bottom, 10px) + 18px)', zIndex: 40,
-        width: 44, height: 44, borderRadius: '50%', border: `0.5px solid ${UI.hairStrong}`,
+        width: 44, height: 44, borderRadius: '50%', border: `var(--hair-width) solid ${UI.hairStrong}`,
         background: UI.bgRaised, color: UI.gold, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
         boxShadow: '0 8px 22px -8px rgba(0,0,0,0.65)', display: 'grid', placeItems: 'center',
         opacity: showTop ? 1 : 0, transform: showTop ? 'translateY(0)' : 'translateY(8px)',

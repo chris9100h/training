@@ -345,7 +345,7 @@ function LibraryScreen({ store, setStore, go, userId }) {
       />
 
       {/* Tab strip */}
-      <div style={{ display: 'flex', padding: '0 22px', borderBottom: `0.5px solid ${UI.hair}`, flexShrink: 0, marginTop: 8 }}>
+      <div style={{ display: 'flex', padding: '0 22px', borderBottom: `var(--hair-width) solid ${UI.hair}`, flexShrink: 0, marginTop: 8 }}>
         {[['recent','Recent'],['all','My exercises'],['db','Database']].map(([id,label]) => (
           <button key={id} onClick={() => setTab(id)} style={{
             flex: 1, background: 'transparent', border: 'none',
@@ -542,7 +542,7 @@ function LibraryScreen({ store, setStore, go, userId }) {
             width: sidebar ? 'calc(100% - 220px)' : '100%',
             maxWidth: sidebar ? 'none' : 440,
             padding: '12px 22px',
-            background: 'rgba(var(--bg-rgb),0.92)', borderTop: `0.5px solid ${UI.hair}`,
+            background: 'rgba(var(--bg-rgb),0.92)', borderTop: `var(--hair-width) solid ${UI.hair}`,
             backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
             display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
             zIndex: 15,
@@ -1285,7 +1285,7 @@ function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = ''
             rows={3}
             style={{
               width: '100%', boxSizing: 'border-box', background: 'transparent',
-              border: 'none', borderBottom: `0.5px solid ${UI.hairStrong}`,
+              border: 'none', borderBottom: `var(--hair-width) solid ${UI.hairStrong}`,
               padding: '6px 0', color: UI.ink, fontFamily: UI.fontUi, fontSize: 14,
               resize: 'none', outline: 'none',
             }}
@@ -1583,7 +1583,7 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
                 rows={3}
                 style={{
                   width: '100%', boxSizing: 'border-box', background: 'transparent',
-                  border: 'none', borderBottom: `0.5px solid ${UI.hairStrong}`,
+                  border: 'none', borderBottom: `var(--hair-width) solid ${UI.hairStrong}`,
                   padding: '6px 0', color: UI.ink, fontFamily: UI.fontUi, fontSize: 14,
                   resize: 'none', outline: 'none',
                 }}
@@ -1621,7 +1621,7 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
             style={{
               display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
               padding: '11px 12px', borderRadius: 6, textDecoration: 'none',
-              border: `0.5px solid ${UI.hairStrong}`, background: UI.bgRaised,
+              border: `var(--hair-width) solid ${UI.hairStrong}`, background: UI.bgRaised,
               color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 12,
               letterSpacing: '0.1em', textTransform: 'uppercase',
             }}>
@@ -1794,7 +1794,7 @@ function CardioLineChart({ points, label, formatVal, yMin, yMax }) {
   const pathD = xy.map(([x, y], i) => `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`).join(' ');
   const fmtDate = d => new Date(d).toLocaleDateString('en', { month: 'short', day: 'numeric' });
   return (
-    <div style={{ background: UI.bgInset, borderRadius: 6, padding: '10px 12px', border: `0.5px solid ${UI.hair}` }}>
+    <div style={{ background: UI.bgInset, borderRadius: 6, padding: '10px 12px', border: `var(--hair-width) solid ${UI.hair}` }}>
       <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>{label}</div>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 5, marginBottom: 2 }}>
         <span className="num" style={{ fontSize: 17, color: UI.gold }}>{formatVal(vals.reduce((s, v) => s + v, 0) / vals.length)}</span>
@@ -1939,7 +1939,7 @@ function WorkoutEffortSheet({ dayId, dayName, sessions, exercises, dailyLogs, on
 
   const content = (
     <div style={{ position: 'fixed', top: 0, right: 0, bottom: 0, left: 0, zIndex: 400, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', alignItems: 'center', background: 'rgba(0,0,0,0.55)' }} onClick={onClose}>
-      <div style={{ background: UI.bg, borderRadius: '6px 6px 0 0', borderTop: `0.5px solid ${UI.hairStrong}`, width: '100%', maxWidth: 480, maxHeight: '80vh', display: 'flex', flexDirection: 'column' }} onClick={e => e.stopPropagation()}>
+      <div style={{ background: UI.bg, borderRadius: '6px 6px 0 0', borderTop: `var(--hair-width) solid ${UI.hairStrong}`, width: '100%', maxWidth: 480, maxHeight: '80vh', display: 'flex', flexDirection: 'column' }} onClick={e => e.stopPropagation()}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '20px 20px 0', flexShrink: 0 }}>
           <span style={{ fontSize: 13, fontWeight: 700, color: UI.ink, fontFamily: UI.fontUi, textTransform: 'uppercase', letterSpacing: '0.08em' }}>{dayName}</span>
           <button onClick={onClose} style={{ background: 'none', border: 'none', color: UI.inkFaint, cursor: 'pointer', padding: 4, fontSize: 18, lineHeight: 1 }}>
@@ -2563,7 +2563,7 @@ function HistoryScreen({ store, setStore, go, userId, initialTab }) {
                         >
                           {s.dayName}
                           {s.isBonus && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.gold, background: 'rgba(var(--accent-rgb), 0.12)', border: `0.5px solid rgba(var(--accent-rgb), 0.3)`, borderRadius: 4, padding: '3px 6px' }}>BONUS</span>}
-                          {s.isDeload && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkSoft, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '3px 6px' }}>DELOAD</span>}
+                          {s.isDeload && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkSoft, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4, padding: '3px 6px' }}>DELOAD</span>}
                           {/* Ran under autoregulation / a mesocycle (mesoRecap captures the mode
                               at the time, so the badge stays right even if the plan changed since). */}
                           {s.mesoRecap && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.gold, background: 'rgba(var(--accent-rgb), 0.12)', border: `0.5px solid rgba(var(--accent-rgb), 0.3)`, borderRadius: 4, padding: '3px 6px' }}>{s.mesoRecap.meso ? 'MESO' : 'AUTO'}</span>}
@@ -2628,7 +2628,7 @@ function HistoryScreen({ store, setStore, go, userId, initialTab }) {
                   const l = item.log;
                   return (
                     <React.Fragment key={l.id}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 0', borderBottom: `0.5px solid ${UI.hair}` }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 0', borderBottom: `var(--hair-width) solid ${UI.hair}` }}>
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>
                             {LB.parseDate(l.date).toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'short' }).toUpperCase()}
@@ -3355,7 +3355,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, lineHeight: 1 }}>
             {s.dayName}
             {s.isBonus && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.gold, background: 'rgba(var(--accent-rgb), 0.12)', border: `0.5px solid rgba(var(--accent-rgb), 0.3)`, borderRadius: 4, padding: '3px 6px', textTransform: 'uppercase' }}>BONUS</span>}
-            {s.isDeload && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkSoft, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '3px 6px', textTransform: 'uppercase' }}>DELOAD</span>}
+            {s.isDeload && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkSoft, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4, padding: '3px 6px', textTransform: 'uppercase' }}>DELOAD</span>}
           </span>
         }
         onBack={() => go(justFinished ? { name: 'home' } : (back || { name: 'hist' }))}
@@ -3430,7 +3430,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                 <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
                   <div className="display" style={{ fontSize: 26 }}>{s.dayName}</div>
                   {s.isBonus && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.gold, background: 'rgba(var(--accent-rgb), 0.12)', border: `0.5px solid rgba(var(--accent-rgb), 0.3)`, borderRadius: 4, padding: '3px 6px' }}>BONUS</span>}
-                  {s.isDeload && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkSoft, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '3px 6px' }}>DELOAD</span>}
+                  {s.isDeload && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkSoft, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4, padding: '3px 6px' }}>DELOAD</span>}
                 </div>
               </div>
               <div className="micro-gold" style={{ letterSpacing: '0.18em', marginTop: 2 }}>ZANE</div>
@@ -3455,7 +3455,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                   ].map((st, k, arr) => (
                     <div key={st.label} style={{
                       flex: 1,
-                      borderRight: k < arr.length - 1 ? `0.5px solid ${UI.hair}` : 'none',
+                      borderRight: k < arr.length - 1 ? `var(--hair-width) solid ${UI.hair}` : 'none',
                       padding: '0 4px',
                     }}>
                       <div className="num" style={{ fontSize: 18, color: st.gold ? UI.gold : UI.ink, lineHeight: 1 }}>{st.value}</div>
@@ -3524,7 +3524,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
         {capturing && (
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', marginTop: -8 }}>
             {[['DURATION', duration != null ? `${duration} min` : '—', false], ['VOLUME', `${Math.round(vol).toLocaleString('en-US')} ${UI.unit()}`, true], ['SETS', LB.doneSetCount(s), false]].map(([label, value, gold], idx) => (
-              <div key={label} style={{ padding: '6px 12px', borderRight: idx < 2 ? `0.5px solid ${UI.hair}` : 'none', textAlign: 'center' }}>
+              <div key={label} style={{ padding: '6px 12px', borderRight: idx < 2 ? `var(--hair-width) solid ${UI.hair}` : 'none', textAlign: 'center' }}>
                 <div className="micro" style={{ color: UI.inkFaint, marginBottom: 3 }}>{label}</div>
                 <div className="num" style={{ fontSize: 16, color: gold ? UI.gold : UI.ink }}>{value}</div>
               </div>
@@ -3647,7 +3647,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
             borderRadius: 4, padding: '3px 8px', whiteSpace: 'nowrap',
           });
           const gains = s.mesoRecap.gains || [];
-          const collapseCard = { background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 8, overflow: 'hidden', marginBottom: 12 };
+          const collapseCard = { background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 8, overflow: 'hidden', marginBottom: 12 };
           const collapseHead = { width: '100%', display: 'flex', alignItems: 'center', gap: 12, padding: '16px', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left', WebkitTapHighlightColor: 'transparent' };
           const collapseTitle = { fontSize: 22, letterSpacing: '0.03em', color: UI.ink, lineHeight: 1 };
           const collapseSub = { fontFamily: UI.fontUi, fontSize: 11.5, color: UI.inkSoft, marginTop: 5 };
@@ -3890,7 +3890,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 14 }}>
               {muscleGroups.map(tag => (
                 <span key={tag} className="micro" style={{
-                  color: UI.inkFaint, border: `0.5px solid ${UI.hair}`,
+                  color: UI.inkFaint, border: `var(--hair-width) solid ${UI.hair}`,
                   borderRadius: 4, padding: '2px 8px',
                 }}>{tag}</span>
               ))}
@@ -5259,7 +5259,7 @@ function SessionCompareScreen({ store, setStore, go, sessionId, compareId, back 
                       <div key={si} style={{
                         display: 'grid', gridTemplateColumns: '20px 1fr 100px 18px',
                         alignItems: currIsTechnique ? 'start' : 'center', gap: 10, padding: '6px 0',
-                        borderBottom: !isLastSet ? `0.5px solid ${UI.hair}` : 'none',
+                        borderBottom: !isLastSet ? `var(--hair-width) solid ${UI.hair}` : 'none',
                       }}>
                         <span className="num" style={{ fontSize: 11, color: UI.inkFaint }}>{si + 1}</span>
                         {currIsTechnique ? (
@@ -5313,7 +5313,7 @@ function SessionCompareScreen({ store, setStore, go, sessionId, compareId, back 
               <button key={c.id} onClick={() => { setPickerOpen(false); go({ name: 'compare', sessionId, compareId: c.id, back }); }} style={{
                 display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                 padding: '13px 2px', background: 'none', border: 'none', cursor: 'pointer',
-                borderBottom: `0.5px solid ${UI.hair}`, textAlign: 'left', WebkitTapHighlightColor: 'transparent',
+                borderBottom: `var(--hair-width) solid ${UI.hair}`, textAlign: 'left', WebkitTapHighlightColor: 'transparent',
               }}>
                 <span className="num" style={{ fontSize: 14, color: active ? 'var(--accent)' : UI.ink }}>
                   {fmtDate(c.date, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}
@@ -5343,7 +5343,7 @@ function ComparisonScreen({ session, onDismiss, go, userName }) {
   return (
     <Screen scroll={false} style={{ position: 'relative' }}>
       <TopBar title={userName} onBack={() => go({ name: 'settings' })} />
-      <div style={{ flexShrink: 0, padding: '12px 22px', borderBottom: `0.5px solid ${UI.hair}` }}>
+      <div style={{ flexShrink: 0, padding: '12px 22px', borderBottom: `var(--hair-width) solid ${UI.hair}` }}>
         <div className="micro" style={{ color: UI.inkFaint, marginBottom: 2 }}>
           {session.day_name} · COMPLETE
         </div>
@@ -5411,7 +5411,7 @@ function ComparisonScreen({ session, onDismiss, go, userName }) {
                   <div key={si} style={{
                     display: 'grid', gridTemplateColumns: '20px 1fr 100px 18px',
                     alignItems: 'center', gap: 10, padding: '6px 0',
-                    borderBottom: si < maxLen - 1 ? `0.5px solid ${UI.hair}` : 'none',
+                    borderBottom: si < maxLen - 1 ? `var(--hair-width) solid ${UI.hair}` : 'none',
                   }}>
                     <span className="num" style={{ fontSize: 11, color: UI.inkFaint }}>{si + 1}</span>
                     <span className="num" style={{ fontSize: 14, color: curr && (!curr.skipped || curr.done) ? UI.ink : UI.inkFaint }}>
@@ -5441,7 +5441,7 @@ function ComparisonScreen({ session, onDismiss, go, userName }) {
         })()}
       </div>
 
-      <div style={{ flexShrink: 0, padding: '14px 22px', paddingBottom: `calc(14px + env(safe-area-inset-bottom, 0px))`, borderTop: `0.5px solid ${UI.hair}` }}>
+      <div style={{ flexShrink: 0, padding: '14px 22px', paddingBottom: `calc(14px + env(safe-area-inset-bottom, 0px))`, borderTop: `var(--hair-width) solid ${UI.hair}` }}>
         <Btn onClick={onDismiss}>Got it</Btn>
       </div>
     </Screen>
@@ -5557,7 +5557,7 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
       <div style={{
         flexShrink: 0,
         padding: `calc(env(safe-area-inset-top, 0px) + 14px) 22px 14px`,
-        borderBottom: `0.5px solid ${UI.hair}`,
+        borderBottom: `var(--hair-width) solid ${UI.hair}`,
         position: 'sticky', top: 0, zIndex: 5,
         background: 'rgba(var(--bg-rgb),0.9)',
         backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
@@ -5596,7 +5596,7 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
       {/* Exercise chips */}
       <div ref={chipRowRef} style={{
         flexShrink: 0, display: 'flex', gap: 6, overflowX: 'auto',
-        padding: '10px 16px', borderBottom: `0.5px solid ${UI.hair}`,
+        padding: '10px 16px', borderBottom: `var(--hair-width) solid ${UI.hair}`,
         scrollbarWidth: 'none', WebkitOverflowScrolling: 'touch',
       }}>
         {entries.map((e, i) => {
@@ -5647,13 +5647,13 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
             {(entry.category || entry.equipment || entry.movementType) && (
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 8 }}>
                 {entry.category && (
-                  <span style={{ fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase', color: UI.inkFaint, background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 4, padding: '2px 7px' }}>{entry.category}</span>
+                  <span style={{ fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase', color: UI.inkFaint, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 4, padding: '2px 7px' }}>{entry.category}</span>
                 )}
                 {entry.equipment && (
-                  <span style={{ fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase', color: UI.inkFaint, background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 4, padding: '2px 7px' }}>{entry.equipment}</span>
+                  <span style={{ fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase', color: UI.inkFaint, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 4, padding: '2px 7px' }}>{entry.equipment}</span>
                 )}
                 {entry.movementType && (
-                  <span style={{ fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase', color: UI.inkFaint, background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 4, padding: '2px 7px' }}>{entry.movementType}</span>
+                  <span style={{ fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase', color: UI.inkFaint, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 4, padding: '2px 7px' }}>{entry.movementType}</span>
                 )}
               </div>
             )}

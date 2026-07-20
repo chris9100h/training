@@ -28,13 +28,13 @@ const HEALTH_CARD_TOGGLES = [
 // select inputs (password/email change, OTP, admin tools, ...). Spread and
 // override for a sheet's specific padding/fontSize/etc.
 const SETTINGS_INPUT_STYLE = {
-  background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4,
+  background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4,
   padding: '10px 14px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink,
   outline: 'none', width: '100%', boxSizing: 'border-box',
 };
 // Same look, larger radius, for the multi-line support-ticket textareas.
 const SETTINGS_TEXTAREA_STYLE = {
-  width: '100%', background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`,
+  width: '100%', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`,
   borderRadius: 6, padding: '10px 12px', color: UI.ink, fontFamily: UI.fontUi,
   fontSize: 14, outline: 'none', resize: 'none', boxSizing: 'border-box', lineHeight: 1.5,
 };
@@ -50,7 +50,7 @@ function AdminTicketRow({ t, archived = false, catLabel, onClick }) {
       style={{
         width: '100%',
         background: archived ? UI.bgInset : UI.bgRaised,
-        border: `0.5px solid ${UI.hair}`,
+        border: `var(--hair-width) solid ${UI.hair}`,
         borderLeft: `3px solid ${archived ? UI.inkGhost : (statusColor[t.support_status] || UI.hairStrong)}`,
         borderRadius: 8, cursor: 'pointer', textAlign: 'left', padding: '12px 14px', marginBottom: 8,
         WebkitTapHighlightColor: 'transparent', display: 'flex', flexDirection: 'column',
@@ -131,7 +131,7 @@ function FullSheet({ open, onClose, title, children }) {
   if (!open) return null;
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 200, background: UI.bg, display: 'flex', flexDirection: 'column', paddingTop: 'env(safe-area-inset-top, 0px)' }}>
-      <div style={{ display: 'flex', alignItems: 'center', padding: '14px 20px', borderBottom: `0.5px solid ${UI.hair}`, flexShrink: 0, background: UI.bgRaised }}>
+      <div style={{ display: 'flex', alignItems: 'center', padding: '14px 20px', borderBottom: `var(--hair-width) solid ${UI.hair}`, flexShrink: 0, background: UI.bgRaised }}>
         <div style={{ flex: 1, fontFamily: UI.fontDisplay, fontSize: 22, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--accent)' }}>{title}</div>
         <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 8, color: UI.inkFaint, WebkitTapHighlightColor: 'transparent', display: 'flex', alignItems: 'center' }}>
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
@@ -1621,7 +1621,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
         )}
       </div>
       </div>
-      <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 8, padding: '16px 20px', paddingBottom: 'calc(env(safe-area-inset-bottom, 8px) + 16px)', borderTop: `0.5px solid ${UI.hair}`, background: UI.bg }}>
+      <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 8, padding: '16px 20px', paddingBottom: 'calc(env(safe-area-inset-bottom, 8px) + 16px)', borderTop: `var(--hair-width) solid ${UI.hair}`, background: UI.bg }}>
         <Btn kind="ghost" onClick={() => LB.clearCachesAndReload()}>Clear cache &amp; reload</Btn>
         <Btn kind="ghost" className="intensity-glow" onClick={() => setGuidesSheet(true)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
           Guides
@@ -1660,10 +1660,10 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           ].map(g => (
             <button key={g.title} onClick={() => { setGuidesSheet(false); if (g.sheet === 'howto') setHowToSheet(true); else go({ name: g.route }); }} style={{
               display: 'flex', alignItems: 'center', gap: 12, width: '100%', textAlign: 'left', cursor: 'pointer',
-              background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '13px 14px',
+              background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, padding: '13px 14px',
               WebkitTapHighlightColor: 'transparent', font: 'inherit', color: UI.ink,
             }}>
-              <span style={{ width: 34, height: 34, borderRadius: 6, background: 'rgba(var(--accent-rgb),0.18)', border: `0.5px solid ${UI.hairStrong}`, display: 'grid', placeItems: 'center', flexShrink: 0 }}>
+              <span style={{ width: 34, height: 34, borderRadius: 6, background: 'rgba(var(--accent-rgb),0.18)', border: `var(--hair-width) solid ${UI.hairStrong}`, display: 'grid', placeItems: 'center', flexShrink: 0 }}>
                 <i className={`fa-solid ${g.icon}`} style={{ fontSize: 14, color: UI.gold }} />
               </span>
               <span style={{ flex: 1, minWidth: 0 }}>
@@ -1703,7 +1703,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                     const finishedStr = finishedMin != null ? (finishedMin < 60 ? `${finishedMin}m ago` : `${Math.round(finishedMin / 60)}h ago`) : 'done';
                     return (
                       <div key={s.session_id} onClick={() => go({ name: 'spectator', targetUserId: s.user_id, userName: s.user_name, sessionId: s.session_id })}
-                        style={{ display: 'grid', gridTemplateColumns: '12px 1fr 1fr 1fr', alignItems: 'center', gap: 10, padding: '9px 0', borderTop: i > 0 ? `0.5px solid ${UI.hair}` : 'none', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+                        style={{ display: 'grid', gridTemplateColumns: '12px 1fr 1fr 1fr', alignItems: 'center', gap: 10, padding: '9px 0', borderTop: i > 0 ? `var(--hair-width) solid ${UI.hair}` : 'none', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
                         <div style={{ width: 5, height: 5, borderRadius: '50%', background: UI.inkFaint }} />
                         <span style={{ fontSize: 13, color: UI.inkSoft, fontWeight: 500, fontFamily: UI.fontUi }}>{s.user_name}</span>
                         <span className="display-it" style={{ fontSize: 13, color: UI.inkFaint, textAlign: 'center' }}>{s.day_name}</span>
@@ -1718,7 +1718,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                   const remMin = blended?.remainingMin ?? null; const ratio = blended?.progress ?? null; const finishing = remMin === 0;
                   return (
                     <div key={s.session_id || i} onClick={() => go({ name: 'spectator', targetUserId: s.user_id, userName: s.user_name })}
-                      style={{ display: 'grid', gridTemplateColumns: '12px 1fr 1fr 1fr', alignItems: 'center', gap: 10, padding: '9px 0', borderTop: i > 0 ? `0.5px solid ${UI.hair}` : 'none', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+                      style={{ display: 'grid', gridTemplateColumns: '12px 1fr 1fr 1fr', alignItems: 'center', gap: 10, padding: '9px 0', borderTop: i > 0 ? `var(--hair-width) solid ${UI.hair}` : 'none', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
                       <div style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--accent)', animation: 'pulseDot 1.4s ease-in-out infinite' }} />
                       <span style={{ fontSize: 13, color: UI.ink, fontWeight: 500, fontFamily: UI.fontUi }}>{s.user_name}</span>
                       <span className="display-it" style={{ fontSize: 13, color: UI.inkSoft, textAlign: 'center' }}>{s.day_name}</span>
@@ -1738,18 +1738,18 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                 })
               }
               {isAdmin && (
-                <div style={{ marginTop: 16, paddingTop: 16, borderTop: `0.5px solid ${UI.hair}` }}>
+                <div style={{ marginTop: 16, paddingTop: 16, borderTop: `var(--hair-width) solid ${UI.hair}` }}>
                   <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>ACCESS</div>
                   {activeGrants.length === 0 && <div className="micro" style={{ color: UI.inkGhost, marginBottom: 8 }}>No other users have access yet.</div>}
                   {activeGrants.map(email => (
-                    <div key={email} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 0', borderBottom: `0.5px solid ${UI.hair}` }}>
+                    <div key={email} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 0', borderBottom: `var(--hair-width) solid ${UI.hair}` }}>
                       <span style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi }}>{email}</span>
                       <button onClick={() => removeGrant(email)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: UI.danger, fontSize: 18, lineHeight: 1, padding: '0 2px' }}>×</button>
                     </div>
                   ))}
                   <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
                     <input value={newGrantEmail} onChange={e => setNewGrantEmail(e.target.value)} onKeyDown={e => e.key === 'Enter' && addGrant()} placeholder="email@example.com"
-                      style={{ flex: 1, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '7px 10px', color: UI.ink, fontFamily: UI.fontUi, fontSize: 13, outline: 'none' }} />
+                      style={{ flex: 1, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4, padding: '7px 10px', color: UI.ink, fontFamily: UI.fontUi, fontSize: 13, outline: 'none' }} />
                     <button onClick={addGrant} disabled={!newGrantEmail.includes('@')} style={{ padding: '7px 14px', borderRadius: 4, border: 'none', cursor: 'pointer', background: newGrantEmail.includes('@') ? UI.gold : UI.bgInset, color: newGrantEmail.includes('@') ? 'var(--accent-ink)' : UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600 }}>Add</button>
                   </div>
                 </div>
@@ -1812,7 +1812,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       <SettingsSheet open={glucoseSheet} onClose={() => setGlucoseSheet(false)} title="Glucose">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
           <Row label="Blood glucose unit" first>
-            <div style={{ display: 'flex', gap: 0, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, overflow: 'hidden' }}>
+            <div style={{ display: 'flex', gap: 0, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, overflow: 'hidden' }}>
               {['mmol', 'mgdl'].map(u => (
                 <button key={u} onClick={() => setStore(s => ({ ...s, settings: { ...s.settings, glucoseUnit: u } }))}
                   style={{ padding: '5px 12px', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600,
@@ -1837,7 +1837,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             Defaults to °F on Imperial, °C otherwise. Override it here if that's wrong for you.
           </div>
           <Row label="Body temperature unit" first>
-            <div style={{ display: 'flex', gap: 0, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, overflow: 'hidden' }}>
+            <div style={{ display: 'flex', gap: 0, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, overflow: 'hidden' }}>
               {['c', 'f'].map(u => (
                 <button key={u} onClick={() => setStore(s => ({ ...s, settings: { ...s.settings, tempUnit: u } }))}
                   style={{ padding: '5px 12px', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600,
@@ -1970,7 +1970,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                     </div>
                     {confirmDeletePeriodId === p.id && (
                       <div style={{ display: 'flex', gap: 8, paddingBottom: 14 }}>
-                        <button onClick={() => setConfirmDeletePeriodId(null)} style={{ flex: 1, padding: '11px', background: UI.bgRaised, border: `0.5px solid ${UI.hair}`, borderRadius: 6, cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, color: UI.inkFaint, WebkitTapHighlightColor: 'transparent' }}>Cancel</button>
+                        <button onClick={() => setConfirmDeletePeriodId(null)} style={{ flex: 1, padding: '11px', background: UI.bgRaised, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6, cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, color: UI.inkFaint, WebkitTapHighlightColor: 'transparent' }}>Cancel</button>
                         <button onClick={() => deletePeriod(p.id)} style={{ flex: 1, padding: '11px', background: 'rgba(var(--danger-rgb),0.12)', border: '0.5px solid rgba(var(--danger-rgb),0.4)', borderRadius: 6, cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, color: UI.danger, WebkitTapHighlightColor: 'transparent' }}>Delete</button>
                       </div>
                     )}
@@ -1978,7 +1978,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                 );
               })}
               {!showAllPeriods && allPeriods.length > PREVIEW && (
-                <button onClick={() => setShowAllPeriods(true)} style={{ width: '100%', marginTop: 8, padding: '7px 0', background: 'none', border: `0.5px solid ${UI.hair}`, borderRadius: 4, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11, cursor: 'pointer', WebkitTapHighlightColor: 'transparent', letterSpacing: '0.04em' }}>
+                <button onClick={() => setShowAllPeriods(true)} style={{ width: '100%', marginTop: 8, padding: '7px 0', background: 'none', border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 4, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11, cursor: 'pointer', WebkitTapHighlightColor: 'transparent', letterSpacing: '0.04em' }}>
                   Show all ({allPeriods.length})
                 </button>
               )}
@@ -2410,7 +2410,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       {/* ══ Equipment config sheet ══ */}
       <SettingsSheet open={progConfigOpen} onClose={() => setProgConfigOpen(false)} title="Equipment setup">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginBottom: 20 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 80px 72px', gap: 8, padding: '0 4px 8px', borderBottom: `0.5px solid ${UI.hair}` }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 80px 72px', gap: 8, padding: '0 4px 8px', borderBottom: `var(--hair-width) solid ${UI.hair}` }}>
             <span className="micro">Equipment</span>
             <span className="micro" style={{ textAlign: 'center' }}>Increment</span>
             <span className="micro" style={{ textAlign: 'center' }}>Max {UI.unit()}</span>
@@ -2419,7 +2419,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             const cfg = store.settings?.equipmentConfig?.[key] ?? {};
             const setField = (field, val) => setStore(s => ({ ...s, settings: { ...s.settings, equipmentConfig: { ...s.settings?.equipmentConfig, [key]: { ...(s.settings?.equipmentConfig?.[key] ?? {}), [field]: val } } } }));
             return (
-              <div key={key} style={{ display: 'grid', gridTemplateColumns: '1fr 80px 72px', gap: 8, alignItems: 'center', padding: '10px 4px', borderBottom: `0.5px solid ${UI.hair}` }}>
+              <div key={key} style={{ display: 'grid', gridTemplateColumns: '1fr 80px 72px', gap: 8, alignItems: 'center', padding: '10px 4px', borderBottom: `var(--hair-width) solid ${UI.hair}` }}>
                 <span style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi }}>{label}</span>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 4, background: UI.bgInset, borderRadius: 4, padding: '6px 8px', border: `1px solid ${UI.hair}` }}>
                   <NumInput value={cfg.increment ?? null} placeholder="—" onChange={v => setField('increment', v)} style={{ fontSize: 13, width: '100%' }} />
@@ -2543,7 +2543,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                 <NavRow label="Message all users" onTap={() => { setBroadcastMsg(null); setBroadcastSheet(true); }} />
                 <NavRow label="Update tools" onTap={() => setUpdateToolsSheet(true)} />
               </Frame>
-              <div style={{ borderTop: `0.5px solid ${UI.hair}`, paddingTop: 16 }}>
+              <div style={{ borderTop: `var(--hair-width) solid ${UI.hair}`, paddingTop: 16 }}>
                 <Btn onClick={() => setSupportInboxSheet(true)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, width: '100%', fontSize: 15, padding: '14px 16px' }}>
                   Support inbox
                   {adminUnread > 0 && (
@@ -2569,7 +2569,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             rows={5}
             style={{
               width: '100%', boxSizing: 'border-box', resize: 'vertical',
-              background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4,
+              background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4,
               padding: '10px 12px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, outline: 'none',
             }}
           />
@@ -2654,12 +2654,12 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
               {vipBgList.map((row, i) => {
                 const opt = opts.find(o => o.key === row.bg_key);
                 return (
-                  <div key={row.email} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '10px 0', borderTop: i > 0 ? `0.5px solid ${UI.hair}` : 'none' }}>
+                  <div key={row.email} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '10px 0', borderTop: i > 0 ? `var(--hair-width) solid ${UI.hair}` : 'none' }}>
                     <div style={{ minWidth: 0 }}>
                       <div style={{ fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.email}</div>
                       <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 1 }}>{opt?.label || row.bg_key}</div>
                     </div>
-                    <button onClick={() => { setVipBgEmail(row.email); setVipBgKey(''); setVipBgMsg(null); setVipBgListSheet(false); }} style={{ background: 'none', border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '4px 10px', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11, cursor: 'pointer', flexShrink: 0, WebkitTapHighlightColor: 'transparent' }}>
+                    <button onClick={() => { setVipBgEmail(row.email); setVipBgKey(''); setVipBgMsg(null); setVipBgListSheet(false); }} style={{ background: 'none', border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4, padding: '4px 10px', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11, cursor: 'pointer', flexShrink: 0, WebkitTapHighlightColor: 'transparent' }}>
                       Clear
                     </button>
                   </div>
@@ -2736,7 +2736,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                   </div>
                 </div>
                 {/* sticky compose at bottom */}
-                <div style={{ flexShrink: 0, borderTop: `0.5px solid ${UI.hair}`, padding: '14px 20px', paddingBottom: 'calc(env(safe-area-inset-bottom, 8px) + 14px)', display: 'flex', flexDirection: 'column', gap: 8, background: UI.bgRaised }}>
+                <div style={{ flexShrink: 0, borderTop: `var(--hair-width) solid ${UI.hair}`, padding: '14px 20px', paddingBottom: 'calc(env(safe-area-inset-bottom, 8px) + 14px)', display: 'flex', flexDirection: 'column', gap: 8, background: UI.bgRaised }}>
                   {supportImagePreview && (
                     <div style={{ position: 'relative', display: 'inline-block', alignSelf: 'flex-start' }}>
                       <img src={supportImagePreview} alt="" style={{ maxHeight: 100, maxWidth: 160, borderRadius: 6, display: 'block', objectFit: 'cover' }} />
@@ -2767,7 +2767,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             return (
               <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
                 {/* Header row */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 20px', borderBottom: `0.5px solid ${UI.hair}`, flexShrink: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 20px', borderBottom: `var(--hair-width) solid ${UI.hair}`, flexShrink: 0 }}>
                   <button onClick={() => { setSupportView('list'); setSupportActiveTicketId(null); setSupportDraft(''); }}
                     style={{ background: 'none', border: 'none', cursor: 'pointer', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13, padding: 0, flexShrink: 0, WebkitTapHighlightColor: 'transparent' }}>
                     ← Back
@@ -2812,7 +2812,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                 </div>
                 {/* Compose — sticks to bottom */}
                 {activeTicket?.status !== 'resolved' ? (
-                  <div style={{ flexShrink: 0, borderTop: `0.5px solid ${UI.hair}`, padding: '14px 20px', paddingBottom: 'calc(env(safe-area-inset-bottom, 8px) + 14px)', display: 'flex', flexDirection: 'column', gap: 8, background: UI.bgRaised }}>
+                  <div style={{ flexShrink: 0, borderTop: `var(--hair-width) solid ${UI.hair}`, padding: '14px 20px', paddingBottom: 'calc(env(safe-area-inset-bottom, 8px) + 14px)', display: 'flex', flexDirection: 'column', gap: 8, background: UI.bgRaised }}>
                     {supportImagePreview && (
                       <div style={{ position: 'relative', display: 'inline-block', alignSelf: 'flex-start' }}>
                         <img src={supportImagePreview} alt="" style={{ maxHeight: 100, maxWidth: 160, borderRadius: 6, display: 'block', objectFit: 'cover' }} />
@@ -2834,7 +2834,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                     </Btn>
                   </div>
                 ) : (
-                  <div style={{ flexShrink: 0, borderTop: `0.5px solid ${UI.hair}`, padding: '14px 20px', fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, textAlign: 'center', lineHeight: 1.5 }}>
+                  <div style={{ flexShrink: 0, borderTop: `var(--hair-width) solid ${UI.hair}`, padding: '14px 20px', fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, textAlign: 'center', lineHeight: 1.5 }}>
                     This ticket is resolved. Go back to open a new one.
                   </div>
                 )}
@@ -2851,7 +2851,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           const renderTicket = t => (
             <button key={t.coachingId}
               onClick={() => { setSupportActiveTicketId(t.coachingId); setSupportView('thread'); }}
-              style={{ width: '100%', background: UI.bgRaised, border: `0.5px solid ${UI.hair}`, borderLeft: `3px solid ${statusBorder[t.status] || UI.hairStrong}`, borderRadius: 8, padding: '11px 14px', textAlign: 'left', cursor: 'pointer', WebkitTapHighlightColor: 'transparent', display: 'flex', flexDirection: 'column', gap: 5 }}>
+              style={{ width: '100%', background: UI.bgRaised, border: `var(--hair-width) solid ${UI.hair}`, borderLeft: `3px solid ${statusBorder[t.status] || UI.hairStrong}`, borderRadius: 8, padding: '11px 14px', textAlign: 'left', cursor: 'pointer', WebkitTapHighlightColor: 'transparent', display: 'flex', flexDirection: 'column', gap: 5 }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   <span className="micro" style={{ color: statusBorder[t.status] || UI.inkFaint }}>{statusLabel[t.status] || t.status}</span>
@@ -2913,7 +2913,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             return (
               <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
                 {/* Back + meta */}
-                <div style={{ padding: '12px 20px', borderBottom: `0.5px solid ${UI.hair}`, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{ padding: '12px 20px', borderBottom: `var(--hair-width) solid ${UI.hair}`, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10 }}>
                   <button onClick={() => { setSupportTicket(null); setSupportAdminDraft(''); }}
                     style={{ background: 'none', border: 'none', cursor: 'pointer', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13, padding: 0, flexShrink: 0, WebkitTapHighlightColor: 'transparent' }}>
                     ← Back
@@ -2922,7 +2922,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                   {supportTicket.category && <span className="micro" style={{ color: UI.inkFaint }}>· {CATS[supportTicket.category] || supportTicket.category}</span>}
                 </div>
                 {/* Status picker */}
-                <div style={{ display: 'flex', gap: 6, padding: '12px 20px', flexShrink: 0, borderBottom: `0.5px solid ${UI.hair}` }}>
+                <div style={{ display: 'flex', gap: 6, padding: '12px 20px', flexShrink: 0, borderBottom: `var(--hair-width) solid ${UI.hair}` }}>
                   {STATUSES.map(s => (
                     <button key={s.key} onClick={() => handleSetSupportStatus(supportTicket.coachingId, s.key)} style={{
                       flex: 1, padding: '7px 4px', borderRadius: 6, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
@@ -2969,7 +2969,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                   <div ref={adminBottomRef} />
                 </div>
                 {/* Compose — sticks to bottom */}
-                <div style={{ flexShrink: 0, borderTop: `0.5px solid ${UI.hair}`, padding: '14px 20px', paddingBottom: 'calc(env(safe-area-inset-bottom, 8px) + 14px)', display: 'flex', flexDirection: 'column', gap: 8, background: UI.bgRaised }}>
+                <div style={{ flexShrink: 0, borderTop: `var(--hair-width) solid ${UI.hair}`, padding: '14px 20px', paddingBottom: 'calc(env(safe-area-inset-bottom, 8px) + 14px)', display: 'flex', flexDirection: 'column', gap: 8, background: UI.bgRaised }}>
                   {adminImagePreview && (
                     <div style={{ position: 'relative', display: 'inline-block', alignSelf: 'flex-start' }}>
                       <img src={adminImagePreview} alt="" style={{ maxHeight: 100, maxWidth: 160, borderRadius: 6, display: 'block', objectFit: 'cover' }} />
@@ -3044,7 +3044,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                   onClick={() => setSupportTicket({ coachingId: t.coaching_id, clientName: t.client_name, clientEmail: t.client_email, category: t.support_category, status: t.support_status })} />
               ))}
               {/* ── Archived section ── */}
-              <div style={{ borderTop: `0.5px solid ${UI.hair}`, marginTop: 4, paddingTop: 12 }}>
+              <div style={{ borderTop: `var(--hair-width) solid ${UI.hair}`, marginTop: 4, paddingTop: 12 }}>
                 <button onClick={async () => {
                   if (showArchived) { setShowArchived(false); return; }
                   setShowArchived(true);
@@ -3106,7 +3106,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                 value={allUsersSearch}
                 onChange={e => setAllUsersSearch(e.target.value)}
                 placeholder="Search by name or email…"
-                style={{ background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '10px 12px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, outline: 'none', width: '100%', boxSizing: 'border-box' }}
+                style={{ background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4, padding: '10px 12px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, outline: 'none', width: '100%', boxSizing: 'border-box' }}
               />
               <Frame style={{ padding: '0 14px' }}>
                 <Row label="New sign-ups only" first>
@@ -3141,8 +3141,8 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                     const isCurrent = swVersion && u.sw_version === swVersion;
                     const isNew = !seenSignups.has(u.user_id);
                     return (
-                      <div key={u.user_id} onClick={() => openUserDetail(u)} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 0', borderTop: i > 0 ? `0.5px solid ${UI.hair}` : 'none', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
-                        <div style={{ width: 34, height: 34, borderRadius: '50%', background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                      <div key={u.user_id} onClick={() => openUserDetail(u)} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 0', borderTop: i > 0 ? `var(--hair-width) solid ${UI.hair}` : 'none', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+                        <div style={{ width: 34, height: 34, borderRadius: '50%', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                           <span style={{ fontFamily: UI.fontUi, fontSize: 14, fontWeight: 700, color: UI.inkSoft }}>{(u.name || u.email || '?')[0].toUpperCase()}</span>
                         </div>
                         <div style={{ flex: 1, minWidth: 0 }}>
@@ -3186,7 +3186,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                   value={adminEmailSubject}
                   onChange={e => setAdminEmailSubject(e.target.value)}
                   placeholder="Subject"
-                  style={{ background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '10px 12px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, outline: 'none', width: '100%', boxSizing: 'border-box' }}
+                  style={{ background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4, padding: '10px 12px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, outline: 'none', width: '100%', boxSizing: 'border-box' }}
                 />
                 <textarea
                   value={adminEmailBody}
@@ -3195,7 +3195,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                   rows={5}
                   style={{
                     width: '100%', boxSizing: 'border-box', resize: 'vertical',
-                    background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4,
+                    background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4,
                     padding: '10px 12px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, outline: 'none',
                   }}
                 />
@@ -3216,7 +3216,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                     const isActive = p.id === adminUserDetail.activeScheduleId;
                     return (
                       <button key={p.id} onClick={() => { setAdminPlanDetail(p); setAdminPlanDetailSheet(true); }}
-                        style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 0', borderTop: i > 0 ? `0.5px solid ${UI.hair}` : 'none', background: 'none', border: 'none', width: '100%', textAlign: 'left', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+                        style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 0', borderTop: i > 0 ? `var(--hair-width) solid ${UI.hair}` : 'none', background: 'none', border: 'none', width: '100%', textAlign: 'left', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                             <span style={{ fontSize: 13, color: p.archived ? UI.inkFaint : UI.ink, fontFamily: UI.fontUi, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</span>
@@ -3283,7 +3283,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                     <div className="display" style={{ fontSize: 30, color: isRest ? UI.inkSoft : UI.ink, fontStyle: isRest ? 'italic' : 'normal', lineHeight: 1.05, letterSpacing: '-0.01em' }}>{day.name}</div>
                   </div>
                   {isRest ? (
-                    <div style={{ background: UI.bgRaised, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: 36, textAlign: 'center' }}>
+                    <div style={{ background: UI.bgRaised, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, padding: 36, textAlign: 'center' }}>
                       <div className="display-it" style={{ fontSize: 32, color: UI.inkSoft, fontWeight: 300, marginBottom: 6 }}>Recover.</div>
                       <div style={{ fontSize: 13, color: UI.inkFaint }}>Recovery is part of the plan.</div>
                     </div>
@@ -3291,7 +3291,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                     const isUni = it.unilateral || it.movement_type === 'unilateral';
                     const isMob = it.movement_type === 'mobility';
                     return (
-                      <div key={it.exId || k} style={{ background: UI.bgRaised, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '12px 16px' }}>
+                      <div key={it.exId || k} style={{ background: UI.bgRaised, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, padding: '12px 16px' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
                           <div style={{ flex: 1, minWidth: 0 }}>
                             <span style={{ fontSize: 15, color: UI.ink, fontFamily: UI.fontUi }}>
@@ -3461,7 +3461,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           {reminderEnabled && (
             <Row label="Notify at">
               <input type="time" value={reminderTime} onChange={e => updateReminderTime(e.target.value)}
-                style={{ background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '5px 10px', color: UI.ink, fontFamily: UI.fontUi, fontSize: 13, outline: 'none', colorScheme: ['light', 'paper'].includes(store.settings?.darkMode ?? 'dark') ? 'light' : 'dark' }} />
+                style={{ background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4, padding: '5px 10px', color: UI.ink, fontFamily: UI.fontUi, fontSize: 13, outline: 'none', colorScheme: ['light', 'paper'].includes(store.settings?.darkMode ?? 'dark') ? 'light' : 'dark' }} />
             </Row>
           )}
           {reminderEnabled && store.nextReminderAt && (() => {

@@ -24,7 +24,7 @@ function MiniSheet({ zIndex = 300, dim = true, onClose, style, title, titleColor
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', background: dim ? 'rgba(0,0,0,0.5)' : 'transparent' }}
       onClick={onClose}>
-      <div style={{ background: UI.bg, borderRadius: '8px 8px 0 0', borderTop: `0.5px solid ${UI.hairStrong}`, padding: '22px 22px calc(22px + env(safe-area-inset-bottom, 0px))', ...style }}
+      <div style={{ background: UI.bg, borderRadius: '8px 8px 0 0', borderTop: `var(--hair-width) solid ${UI.hairStrong}`, padding: '22px 22px calc(22px + env(safe-area-inset-bottom, 0px))', ...style }}
         onClick={e => e.stopPropagation()}>
         {/* Same 28px title block the Sheet primitive renders (ui.jsx), so a MiniSheet
             heading stays locked to the canonical title spec instead of being hand-copied. */}
@@ -1436,7 +1436,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
       {isPad ? (
         <div style={{ flex: 1, minHeight: 0, display: 'flex', overflow: 'hidden' }}>
           {/* Left sidebar: plan actions + vertical day chips */}
-          <div style={{ width: 210, flexShrink: 0, display: 'flex', flexDirection: 'column', borderRight: `0.5px solid ${UI.hair}`, overflow: 'hidden' }}>
+          <div style={{ width: 210, flexShrink: 0, display: 'flex', flexDirection: 'column', borderRight: `var(--hair-width) solid ${UI.hair}`, overflow: 'hidden' }}>
             {fromPlan && (
               <div style={{ flexShrink: 0, padding: '14px 14px 10px', display: 'flex', flexDirection: 'column', gap: 6 }}>
                 {planActions}
@@ -1585,7 +1585,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
             {(store.coaching?.asCoach || []).filter(c => c.status === 'active').map(c => (
               <button key={c.id} onClick={() => { setPushError(''); setPushTarget(c); }} disabled={pushBusy} style={{
                 width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                padding: '12px 14px', background: UI.bgInset, border: `0.5px solid ${UI.hair}`,
+                padding: '12px 14px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`,
                 borderRadius: 6, cursor: pushBusy ? 'default' : 'pointer', opacity: pushBusy ? 0.6 : 1,
                 WebkitTapHighlightColor: 'transparent',
               }}>
@@ -1825,7 +1825,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
               </div>
 
               {/* Restore button */}
-              <div style={{ padding: '12px 22px calc(16px + env(safe-area-inset-bottom, 0px))', borderTop: `0.5px solid ${UI.hairStrong}`, flexShrink: 0 }}>
+              <div style={{ padding: '12px 22px calc(16px + env(safe-area-inset-bottom, 0px))', borderTop: `var(--hair-width) solid ${UI.hairStrong}`, flexShrink: 0 }}>
                 <Btn onClick={() => { closePreview(); restoreBackup(previewBackup); }} style={{ width: '100%', textAlign: 'center', justifyContent: 'center' }}>Restore this backup</Btn>
               </div>
           </MiniSheet>
@@ -4695,7 +4695,7 @@ function PlanWizard({ store, setStore, go }) {
       </div>
       {wizInfoOpen && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(0,0,0,0.74)', backdropFilter: 'blur(14px)', WebkitBackdropFilter: 'blur(14px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }} onClick={e => { if (e.target === e.currentTarget) setWizInfoOpen(false); }}>
-          <div style={{ background: UI.bgRaised, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 8, padding: 18, width: '100%', maxWidth: 460, maxHeight: '82vh', overflowY: 'auto', overscrollBehavior: 'contain' }}>
+          <div style={{ background: UI.bgRaised, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 8, padding: 18, width: '100%', maxWidth: 460, maxHeight: '82vh', overflowY: 'auto', overscrollBehavior: 'contain' }}>
             <div style={{ fontFamily: UI.fontDisplay, fontSize: 22, color: 'var(--accent)', fontWeight: 400, textTransform: 'uppercase', letterSpacing: '0.02em', marginBottom: 14 }}>Progression</div>
             <ProgressionInfoBody />
             <Btn kind="ghost" onClick={() => { setWizInfoOpen(false); setWizGuideOpen(true); }} style={{ width: '100%', marginTop: 16 }}>See the full guide</Btn>
@@ -4793,7 +4793,7 @@ function StructuredProgramsScreen({ store, setStore, go }) {
             <span style={{ fontSize: 12.5, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.45 }}>{window.FIVE_THREE_ONE.blurb}</span>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 2 }}>
               {window.FIVE_THREE_ONE.lifts.map((l, i) => (
-                <span key={i} className="micro" style={{ color: UI.inkFaint, background: UI.bgRaised, border: `0.5px solid ${UI.hair}`, borderRadius: 4, padding: '3px 6px', textTransform: 'none', letterSpacing: '0.02em' }}>{l.ex}</span>
+                <span key={i} className="micro" style={{ color: UI.inkFaint, background: UI.bgRaised, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 4, padding: '3px 6px', textTransform: 'none', letterSpacing: '0.02em' }}>{l.ex}</span>
               ))}
             </div>
           </button>
@@ -4831,7 +4831,7 @@ function ProgramTemplatesScreen({ store, setStore, go }) {
             <span style={{ fontSize: 12.5, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.45 }}>{p.blurb}</span>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 2 }}>
               {p.days.map((d, i) => (
-                <span key={i} className="micro" style={{ color: UI.inkFaint, background: UI.bgRaised, border: `0.5px solid ${UI.hair}`, borderRadius: 4, padding: '3px 6px', textTransform: 'none', letterSpacing: '0.02em' }}>{d.name}</span>
+                <span key={i} className="micro" style={{ color: UI.inkFaint, background: UI.bgRaised, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 4, padding: '3px 6px', textTransform: 'none', letterSpacing: '0.02em' }}>{d.name}</span>
               ))}
             </div>
           </button>
@@ -5075,7 +5075,7 @@ function FiveThreeOneSetupScreen({ store, setStore, go, userId }) {
                 <div className="micro" style={{ color: UI.inkFaint }}>Assistance</div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
                   {(assist[l.kind] || []).map(ref => (
-                    <span key={ref} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: UI.bgRaised, border: `0.5px solid ${UI.hair}`, borderRadius: 4, padding: '4px 8px', fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi }}>
+                    <span key={ref} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: UI.bgRaised, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 4, padding: '4px 8px', fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi }}>
                       {displayName(ref)}
                       <button onClick={() => removeAssist(l.kind, ref)} aria-label="Remove" style={{ background: 'none', border: 'none', color: UI.inkFaint, cursor: 'pointer', padding: 0, fontSize: 15, lineHeight: 1 }}>×</button>
                     </span>
@@ -5116,7 +5116,7 @@ function FiveThreeOneSetupScreen({ store, setStore, go, userId }) {
                 <div className="micro" style={{ color: UI.inkFaint }}>Assistance</div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
                   {(x.assistance || []).map(ref => (
-                    <span key={ref} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: UI.bgRaised, border: `0.5px solid ${UI.hair}`, borderRadius: 4, padding: '4px 8px', fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi }}>
+                    <span key={ref} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: UI.bgRaised, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 4, padding: '4px 8px', fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi }}>
                       {displayName(ref)}
                       <button onClick={() => removeExtraAssist(x.id, ref)} aria-label="Remove" style={{ background: 'none', border: 'none', color: UI.inkFaint, cursor: 'pointer', padding: 0, fontSize: 15, lineHeight: 1 }}>×</button>
                     </span>

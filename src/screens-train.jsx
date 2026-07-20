@@ -5903,7 +5903,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       {/* Outlier confirmation (reps / kg / both) */}
       {outlierConfirm && ReactDOM.createPortal(
         <div style={{ position: 'fixed', inset: 0, zIndex: 500, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', alignItems: 'center', background: 'rgba(0,0,0,0.55)' }}>
-          <div style={{ background: UI.bg, borderRadius: '6px 6px 0 0', borderTop: `0.5px solid ${UI.hairStrong}`, width: '100%', maxWidth: 480, padding: '20px 20px 44px' }}>
+          <div style={{ background: UI.bg, borderRadius: '6px 6px 0 0', borderTop: `var(--hair-width) solid ${UI.hairStrong}`, width: '100%', maxWidth: 480, padding: '20px 20px 44px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
               <i className="fa-solid fa-triangle-exclamation" style={{ color: UI.gold, fontSize: 14 }} />
               <span style={{ fontWeight: 700, fontFamily: UI.fontUi, fontSize: 14, color: UI.ink }}>{(() => {
@@ -6046,7 +6046,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             <span style={{ fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.12em', color: 'var(--accent)', background: 'rgba(var(--accent-rgb),0.12)', border: `0.5px solid ${UI.goldSoft}`, borderRadius: 4, padding: '1px 6px' }}>DELOAD · 50%</span>
           )}
           {mesoState && mesoWeek != null && mesoState.weeks != null && (
-            <span style={{ fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkSoft, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '1px 6px' }}>
+            <span style={{ fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkSoft, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4, padding: '1px 6px' }}>
               {isWeekdayMode ? 'W' : 'C'}{mesoWeek}/{mesoState.weeks}
             </span>
           )}
@@ -6134,7 +6134,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                 style={{
                   flexShrink: 0, width: 38, height: 38, borderRadius: 6,
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  border: `0.5px solid ${UI.hairStrong}`, background: UI.bgRaised,
+                  border: `var(--hair-width) solid ${UI.hairStrong}`, background: UI.bgRaised,
                   color: '#FF0000', textDecoration: 'none',
                 }}>
                 <i className="fa-brands fa-youtube" style={{ fontSize: 18 }} />
@@ -6307,7 +6307,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                     type="text" value={cardioForm.type}
                     onChange={e => setCardioForm(f => ({ ...f, type: e.target.value }))}
                     placeholder="e.g. Running, Cycling…"
-                    style={{ width: '100%', boxSizing: 'border-box', background: 'transparent', border: 'none', borderBottom: `0.5px solid ${UI.hairStrong}`, padding: '6px 0', color: UI.ink, fontFamily: UI.fontUi, fontSize: 13, outline: 'none' }}
+                    style={{ width: '100%', boxSizing: 'border-box', background: 'transparent', border: 'none', borderBottom: `var(--hair-width) solid ${UI.hairStrong}`, padding: '6px 0', color: UI.ink, fontFamily: UI.fontUi, fontSize: 13, outline: 'none' }}
                   />
                   {cardioTypeChips.length > 0 && (
                     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
@@ -6332,7 +6332,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                     type="text" inputMode="numeric" value={cardioForm.duration}
                     onChange={e => setCardioForm(f => ({ ...f, duration: e.target.value }))}
                     placeholder="e.g. 30"
-                    style={{ width: '100%', boxSizing: 'border-box', background: 'transparent', border: 'none', borderBottom: `0.5px solid ${UI.hairStrong}`, padding: '6px 0', color: UI.ink, fontFamily: UI.fontNum, fontSize: 22, outline: 'none' }}
+                    style={{ width: '100%', boxSizing: 'border-box', background: 'transparent', border: 'none', borderBottom: `var(--hair-width) solid ${UI.hairStrong}`, padding: '6px 0', color: UI.ink, fontFamily: UI.fontNum, fontSize: 22, outline: 'none' }}
                   />
                 </div>
 
@@ -6350,7 +6350,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                     type="text" inputMode="decimal" value={cardioForm.distance}
                     onChange={e => setCardioForm(f => ({ ...f, distance: e.target.value }))}
                     placeholder={`0.00 ${cardioForm.distUnit}`}
-                    style={{ width: '100%', boxSizing: 'border-box', background: 'transparent', border: 'none', borderBottom: `0.5px solid ${UI.hairStrong}`, padding: '6px 0', color: UI.ink, fontFamily: UI.fontNum, fontSize: 22, outline: 'none' }}
+                    style={{ width: '100%', boxSizing: 'border-box', background: 'transparent', border: 'none', borderBottom: `var(--hair-width) solid ${UI.hairStrong}`, padding: '6px 0', color: UI.ink, fontFamily: UI.fontNum, fontSize: 22, outline: 'none' }}
                   />
                 </div>
 
@@ -7779,7 +7779,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                 const isKgA = kbField?.setIdx === 'av' && kbField?.dropIdx === di && kbField?.field === 'kg';
                 const isRepsA = kbField?.setIdx === 'av' && kbField?.dropIdx === di && kbField?.field === 'reps';
                 return (
-                  <div key={di} data-av-row={di} style={{ padding: '6px 4px', borderBottom: di < avDrops.length - 1 ? `0.5px solid ${UI.hair}` : 'none' }}>
+                  <div key={di} data-av-row={di} style={{ padding: '6px 4px', borderBottom: di < avDrops.length - 1 ? `var(--hair-width) solid ${UI.hair}` : 'none' }}>
                     <input
                       type="text"
                       enterKeyHint="done"
@@ -8454,7 +8454,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               ))}
             </div>
             {entry.note ? (
-              <div style={{ marginTop: 12, padding: '10px 14px', background: UI.bgInset, borderRadius: 6, border: `0.5px solid ${UI.hairStrong}` }}>
+              <div style={{ marginTop: 12, padding: '10px 14px', background: UI.bgInset, borderRadius: 6, border: `var(--hair-width) solid ${UI.hairStrong}` }}>
                 <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1.5 }}>{entry.note}</div>
               </div>
             ) : null}

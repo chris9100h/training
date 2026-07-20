@@ -587,7 +587,7 @@ function FeatureCard({ card, isAdmin, onEdit, onToggleHide, onDelete }) {
             </ul>
           )}
           {isAdmin && (
-            <div data-reorder-ignore="true" style={{ display: 'flex', gap: 8, marginTop: 12, paddingTop: 10, borderTop: `0.5px solid ${UI.hair}`, flexWrap: 'wrap' }}>
+            <div data-reorder-ignore="true" style={{ display: 'flex', gap: 8, marginTop: 12, paddingTop: 10, borderTop: `var(--hair-width) solid ${UI.hair}`, flexWrap: 'wrap' }}>
               <button onClick={onEdit} style={{ ...fmIconBtn(false), width: 'auto', padding: '0 10px' }} title="Edit"><i className="fa-solid fa-pen" /> <span style={{ fontFamily: UI.fontUi, fontSize: 11, marginLeft: 4 }}>Edit</span></button>
               {card.isCustom
                 ? <button onClick={onDelete} style={{ ...fmIconBtn(false), width: 'auto', padding: '0 10px', color: UI.danger }} title="Delete custom card"><i className="fa-solid fa-trash" /> <span style={{ fontFamily: UI.fontUi, fontSize: 11, marginLeft: 4 }}>Delete</span></button>
