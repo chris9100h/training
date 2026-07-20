@@ -504,7 +504,7 @@ const HEALTH_CARD_HEADER_STYLE = { fontFamily: UI.fontUi, fontSize: 12, fontWeig
 
 // Section wrapper: title + 1W/1M/3M toggle + subtitle. `dragHandle` renders a
 // reorder grip at the start of the header when the card is in a reorder list.
-function HealthChartCard({ title, icon, tf, setTf, tfOptions = HEALTH_TFS, headline, sub, dragHandle, onExpand, children }) {
+function HealthChartCard({ title, icon, tf, setTf, tfOptions = HEALTH_TFS, headline, sub, dragHandle, onExpand, onOpen, children }) {
   return (
     <Card style={{ padding: 14, borderLeft: `3px solid ${UI.gold}` }}>
       {/* flexWrap + the toggle's flexShrink:0 let the TF toggle drop to its own
@@ -514,6 +514,15 @@ function HealthChartCard({ title, icon, tf, setTf, tfOptions = HEALTH_TFS, headl
         {dragHandle}
         {icon && <i className={`fa-solid ${icon}`} style={{ fontSize: 11, color: UI.inkFaint }} />}
         <span style={{ ...HEALTH_CARD_HEADER_STYLE, flex: 1, minWidth: 60 }}>{title}</span>
+        {onOpen && (
+          <button data-reorder-ignore="true" onClick={onOpen} aria-label="Open tracker" style={{
+            background: 'transparent', border: 'none', padding: 2, cursor: 'pointer',
+            color: UI.gold, display: 'flex', alignItems: 'center', flexShrink: 0,
+            WebkitTapHighlightColor: 'transparent',
+          }}>
+            <i className="fa-solid fa-arrow-up-right-from-square" style={{ fontSize: 11 }} />
+          </button>
+        )}
         {onExpand && (
           <button data-reorder-ignore="true" onClick={onExpand} aria-label="Expand" style={{
             background: 'transparent', border: 'none', padding: 2, cursor: 'pointer',
@@ -2676,7 +2685,7 @@ function HealthScreen({ store, setStore, go, userId }) {
       </HealthChartCard>
     ),
     water: (
-      <HealthChartCard title="Water" icon="fa-glass-water" tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('water')}
+      <HealthChartCard title="Water" icon="fa-glass-water" tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('water')} onOpen={() => go({ name: 'water' })}
         headline={waterAvg != null ? `${UI.waterSummaryValue(waterAvg)}${UI.waterSummaryUnit()}` : null} sub={waterAvg != null ? 'avg / day' : null}>
         <HealthBarChart series={waterSeries.data} from={waterSeries.from} to={waterSeries.to} format={v => `${UI.waterSummaryValue(v)}${UI.waterSummaryUnit()}`} color="#4a9fe0" colorSoft="rgba(74,159,224,0.35)" />
       </HealthChartCard>

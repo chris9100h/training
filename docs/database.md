@@ -256,6 +256,12 @@ Sonderfälle und RLS:
 - `id` (text), `user_id` (uuid), `date` (text, YYYY-MM-DD), `time` (text, HH:MM, lokale Uhrzeit der Messung), `value_c` (numeric: immer in Celsius gespeichert; Anzeige-Einheit ist ein per-User-Setting), `note` (text, nullable), `created_at` (timestamptz)
 - Store field: `store.bodyTempLogs`. Mehrere Messungen pro Tag möglich. Wird direkt via Supabase aus der Body-Temperature-Sektion des DailyLogScreen geschrieben (kein syncStore-Diff), strukturell identisch zu `zane_glucose_logs`. Migration 0173.
 
+### `zane_water_logs`
+
+- `id` (text), `user_id` (uuid), `date` (text, YYYY-MM-DD), `time` (text, HH:MM, lokale Uhrzeit des Eintrags), `amount_ml` (int: immer in ml gespeichert, Anzeige via `UI.water*`-Helper), `name` (text, nullable: Getränkename), `category` (text, nullable: `null` = reines Wasser, `'other'` = benanntes Getränk, `'custom'` = freier Eintrag), `created_at` (timestamptz)
+- Store field: `store.waterLogs`. Mehrere Einträge pro Tag (ein Eintrag = ein geloggtes Getränk), Basis des Water-Trackers (`WaterScreen`). Als Store-Collection über den syncStore-Diff gesynct (wie `zane_cardio_logs`), inklusive Boot-Merge/Anti-Resurrection. Bei jeder Mutation schreibt der Client die Tagessumme aller Einträge zurück in `zane_daily_logs.water_ml`, damit Health-Water-Karte und Coaching-`hydration_ml` eine einzige Quelle behalten. Strukturell an `zane_glucose_logs` angelehnt. Migration 0180.
+- RLS: eigene Zeilen + Coach-of-Client-Reads (inline-EXISTS wie glucose/bp/temp).
+
 ### `zane_cardio_logs`
 
 - `id` (text), `user_id` (uuid), `date` (text, YYYY-MM-DD), `type` (text, nullable), `duration_minutes` (int), `distance_m` (numeric, nullable), `pace_feeling` (int 1-6, nullable), `effort` (int 1-10, nullable), `note` (text, nullable), `created_at` (timestamptz)
@@ -316,6 +322,7 @@ Weitere Spalten:
 - `use_pushover` (boolean, default false): wenn true und ein `pushover_user_key` gesetzt ist, gehen Rest-Timer-Notifications via Pushover statt Web Push. Store field `usePushover`. Migration 0081.
 - `auto_close_notify` (jsonb, nullable): `{ dayName, date, durationMinutes }`, von der Edge Function geschrieben, von der App beim ersten Lesen gecleart.
 - `macro_targets` (jsonb, nullable): persönliche Health-Tab-Targets `{ proteinTraining, carbsTraining, fatTraining, caloriesTraining, proteinRest, carbsRest, fatRest, caloriesRest }`. Store field `macroTargets`.
+- Water-Tracker-Config (Migration 0180): `water_goal_ml` (int, default 2000, Store `waterGoalMl`), `water_start_time` (text, default '08:00', Store `waterStartTime`), `water_end_time` (text, default '22:00', Store `waterEndTime`), `water_bottles_today` (int, default 0, Store `waterBottlesToday`) und `water_bottles_date` (text, nullable, Store `waterBottlesDate`): Ziel plus Tages-Zeitfenster für die Soll-Kurve und die "aktuelle Flasche"-Zählung (per Tag zurückgesetzt). Alle vier Store-Stellen wie üblich.
 - `show_health_tab` (boolean, default false): pinnt den Health-Tab. Store field `showHealthTab`.
 - `onboarding_completed` (boolean, default false): gesetzt nach Welcome-Tour oder erster Session. Store field `onboardingCompleted`.
 - `net_carbs` (boolean, default false): Health-Tab-Carb-Modus, Net-Carb-Tracking ergänzt ein Fiber-Feld. Store field `netCarbs`. Migration 0073.

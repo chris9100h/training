@@ -37,7 +37,7 @@ const BACKUP_ENUM = [
   'zane_user_settings', 'zane_skips', 'zane_cardio_logs', 'zane_daily_logs',
   'zane_workout_templates', 'zane_glucose_logs', 'zane_cardio_plans',
   'zane_status_periods', 'zane_meso_states', 'zane_checkin_schema_templates',
-  'zane_blood_pressure_logs', 'zane_body_temp_logs',
+  'zane_blood_pressure_logs', 'zane_body_temp_logs', 'zane_water_logs',
 ];
 // Tables restored by spreading the whole store row (…s). Their column coverage is
 // governed by what loadFromSupabase SELECTs, so they are export-checked only.
@@ -124,6 +124,7 @@ function captureImportedColumns() {
     skips: [{}], cardioLogs: [{}], dailyLogs: [{}], workoutTemplates: [{}],
     glucoseLogs: [{}], cardioPlans: [{}], statusPeriods: [{}], mesoStates: [{}],
     checkinSchemaTemplates: [{}], bloodPressureLogs: [{}], bodyTempLogs: [{}],
+    waterLogs: [{}],
     activeScheduleId: null, cycleIndex: 0, customDayTypes: [],
   };
   return LB.importFromBackup(backup, 'u1', () => {}).then(() => written);

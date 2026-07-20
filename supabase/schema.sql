@@ -270,7 +270,12 @@ CREATE TABLE public.zane_user_settings (
   temp_unit text,
   hidden_health_cards jsonb,
   fever_threshold_c numeric DEFAULT 38,
-  watermark_opacity integer
+  watermark_opacity integer,
+  water_goal_ml integer DEFAULT 2000,
+  water_start_time text DEFAULT '08:00'::text,
+  water_end_time text DEFAULT '22:00'::text,
+  water_bottles_today integer DEFAULT 0,
+  water_bottles_date text
 );
 
 CREATE TABLE public.zane_pushover_active (
@@ -2117,6 +2122,35 @@ CREATE POLICY "coaches read client body temp logs"
   ON zane_body_temp_logs FOR SELECT TO public
   USING (EXISTS ( SELECT 1 FROM zane_coaching zc
     WHERE zc.client_id = zane_body_temp_logs.user_id
+      AND zc.coach_id = (select auth.uid()) AND zc.coach_id <> zc.client_id AND zc.status = 'active' AND zc.id NOT LIKE 'support_%'));
+
+-- ── Water logs (migration 0180) ─────────────────────────────────────────────────
+-- Multiple entries per day; amount always in ml. category is null for plain water,
+-- 'other' for named drinks, 'custom' for free entries. The day's summed amount_ml
+-- is written back into zane_daily_logs.water_ml by the client. Written directly.
+
+CREATE TABLE zane_water_logs (
+  id         text        PRIMARY KEY,
+  user_id    uuid        NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  date       text        NOT NULL,                 -- YYYY-MM-DD
+  time       text        NOT NULL,                 -- HH:MM local
+  amount_ml  integer     NOT NULL,
+  name       text,
+  category   text,                                 -- null = plain water | 'other' | 'custom'
+  created_at timestamptz DEFAULT now()
+);
+
+CREATE INDEX zane_water_logs_user_date ON public.zane_water_logs USING btree (user_id, date DESC, "time" DESC);
+
+ALTER TABLE zane_water_logs ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users manage own water logs"
+  ON zane_water_logs FOR ALL TO public
+  USING (((select auth.uid()) = user_id)) WITH CHECK (((select auth.uid()) = user_id));
+CREATE POLICY "coaches read client water logs"
+  ON zane_water_logs FOR SELECT TO public
+  USING (EXISTS ( SELECT 1 FROM zane_coaching zc
+    WHERE zc.client_id = zane_water_logs.user_id
       AND zc.coach_id = (select auth.uid()) AND zc.coach_id <> zc.client_id AND zc.status = 'active' AND zc.id NOT LIKE 'support_%'));
 
 -- ── Support tickets (migrations 0085/0086 + archive_support_tickets) ────────────

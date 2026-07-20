@@ -401,6 +401,7 @@ function App() {
           const serverGlucoseIds  = new Set((fresh.glucoseLogs || []).map(l => l.id));
           const serverBpIds       = new Set((fresh.bloodPressureLogs || []).map(l => l.id));
           const serverTempIds     = new Set((fresh.bodyTempLogs || []).map(l => l.id));
+          const serverWaterIds    = new Set((fresh.waterLogs || []).map(l => l.id));
           // Daily logs are one-per-date: also drop a local row whose date the
           // server already has (a divergent id from a pre-RPC multi-device write).
           const localOnlyDaily   = (s.dailyLogs   || []).filter(l => !serverDailyIds.has(l.id) && !serverDailyDates.has(l.date));
@@ -408,6 +409,7 @@ function App() {
           const localOnlyGlucose = (s.glucoseLogs || []).filter(l => !serverGlucoseIds.has(l.id));
           const localOnlyBp      = (s.bloodPressureLogs || []).filter(l => !serverBpIds.has(l.id));
           const localOnlyTemp    = (s.bodyTempLogs || []).filter(l => !serverTempIds.has(l.id));
+          const localOnlyWater   = (s.waterLogs || []).filter(l => !serverWaterIds.has(l.id));
           // For ids on both sides keep the local row when it carries an unsynced
           // edit (id in the persisted base AND local differs from base) so a
           // background refresh doesn't clobber a health edit made offline.
@@ -426,11 +428,13 @@ function App() {
           const delGlucose = delDel(base?.glucoseLogs, s.glucoseLogs);
           const delBp      = delDel(base?.bloodPressureLogs, s.bloodPressureLogs);
           const delTemp    = delDel(base?.bodyTempLogs, s.bodyTempLogs);
+          const delWater   = delDel(base?.waterLogs, s.waterLogs);
           const nextDaily   = [...localOnlyDaily,   ...LB.mergeCollectionById(fresh.dailyLogs, s.dailyLogs, base?.dailyLogs, delDaily)];
           const nextCardio  = [...localOnlyCardio,  ...LB.mergeCollectionById(fresh.cardioLogs, s.cardioLogs, base?.cardioLogs, delCardio)];
           const nextGlucose = [...localOnlyGlucose, ...LB.mergeCollectionById(fresh.glucoseLogs || [], s.glucoseLogs, base?.glucoseLogs, delGlucose)];
           const nextBp      = [...localOnlyBp,      ...LB.mergeCollectionById(fresh.bloodPressureLogs || [], s.bloodPressureLogs, base?.bloodPressureLogs, delBp)];
           const nextTemp    = [...localOnlyTemp,    ...LB.mergeCollectionById(fresh.bodyTempLogs || [], s.bodyTempLogs, base?.bodyTempLogs, delTemp)];
+          const nextWater   = [...localOnlyWater,   ...LB.mergeCollectionById(fresh.waterLogs || [], s.waterLogs, base?.waterLogs, delWater)];
           // refreshHealthLogs re-maps every row into a fresh object, so these
           // merged arrays are new references even when nothing actually changed —
           // which forced a full re-render of the active screen on EVERY
@@ -444,13 +448,15 @@ function App() {
           const gSame = sameLogs(nextGlucose, s.glucoseLogs);
           const bpSame = sameLogs(nextBp, s.bloodPressureLogs);
           const tSame = sameLogs(nextTemp, s.bodyTempLogs);
-          if (dSame && cSame && gSame && bpSame && tSame) return s;
+          const wSame = sameLogs(nextWater, s.waterLogs);
+          if (dSame && cSame && gSame && bpSame && tSame && wSame) return s;
           return { ...s,
             dailyLogs:   dSame ? s.dailyLogs : nextDaily,
             cardioLogs:  cSame ? s.cardioLogs : nextCardio,
             glucoseLogs: gSame ? s.glucoseLogs : nextGlucose,
             bloodPressureLogs: bpSame ? s.bloodPressureLogs : nextBp,
             bodyTempLogs: tSame ? s.bodyTempLogs : nextTemp,
+            waterLogs: wSame ? s.waterLogs : nextWater,
           };
         });
       }).catch(() => {});
@@ -734,6 +740,9 @@ function App() {
             const serverCardioIds = new Set((fresh.cardioLogs || []).map(l => l.id));
             const baseCardioIds = base ? new Set((base.cardioLogs || []).map(l => l.id)) : null;
             const localOnlyCardioLogs = (cur.cardioLogs || []).filter(x => !serverCardioIds.has(x.id) && !baseCardioIds?.has(x.id));
+            const serverWaterIds = new Set((fresh.waterLogs || []).map(l => l.id));
+            const baseWaterIds = base ? new Set((base.waterLogs || []).map(l => l.id)) : null;
+            const localOnlyWaterLogs = (cur.waterLogs || []).filter(x => !serverWaterIds.has(x.id) && !baseWaterIds?.has(x.id));
             // Templates and cardio plans need the same resurrection guard as
             // exercises/schedules — previously missing here entirely, so a
             // template saved (or a cardio plan created) offline before the
@@ -762,6 +771,8 @@ function App() {
             const delDailyIds = baseDailyIds ? new Set([...baseDailyIds].filter(id => !curDailyIdSet.has(id))) : null;
             const curCardioIdSet = new Set((cur.cardioLogs || []).map(l => l.id));
             const delCardioIds = baseCardioIds ? new Set([...baseCardioIds].filter(id => !curCardioIdSet.has(id))) : null;
+            const curWaterIdSet = new Set((cur.waterLogs || []).map(l => l.id));
+            const delWaterIds = baseWaterIds ? new Set([...baseWaterIds].filter(id => !curWaterIdSet.has(id))) : null;
             const curTplIdSet = new Set((cur.workoutTemplates || []).map(t => t.id));
             const delTplIds = baseTplIds ? new Set([...baseTplIds].filter(id => !curTplIdSet.has(id))) : null;
             const curCheckinTplIdSet = new Set((cur.checkinSchemaTemplates || []).map(t => t.id));
@@ -843,6 +854,7 @@ function App() {
               skips: [...localOnlySkips, ...(fresh.skips || []).filter(s => !delSkipIds?.has(s.id))],
               dailyLogs: [...localOnlyDailyLogs, ...mergeById(fresh.dailyLogs, cur.dailyLogs, base?.dailyLogs, delDailyIds)],
               cardioLogs: [...localOnlyCardioLogs, ...mergeById(fresh.cardioLogs, cur.cardioLogs, base?.cardioLogs, delCardioIds)],
+              waterLogs: [...localOnlyWaterLogs, ...mergeById(fresh.waterLogs, cur.waterLogs, base?.waterLogs, delWaterIds)],
               workoutTemplates: [...localOnlyTemplates, ...(fresh.workoutTemplates || []).filter(t => !delTplIds?.has(t.id))],
               checkinSchemaTemplates: [...localOnlyCheckinTemplates, ...(fresh.checkinSchemaTemplates || []).filter(t => !delCheckinTplIds?.has(t.id))],
               cardioPlans: [...localOnlyCardioPlans, ...(fresh.cardioPlans || []).filter(p => !delCardioPlanIds?.has(p.id))],
@@ -1343,10 +1355,13 @@ function App() {
   const onRetrySync = () => { setStorageFull(false); flushSync(userId); };
 
   const props = { store, setStore, go, userId, syncStatus, storageFull, onRetrySync, flushBeforeSignOut };
-  const tabRoutes = ['home', 'plan', 'lib', 'cardio-plans', 'hist', 'health', 'coaching'];
+  const tabRoutes = ['home', 'plan', 'lib', 'cardio-plans', 'hist', 'health', 'water', 'coaching'];
   const showTab = tabRoutes.includes(route.name);
-  // Library and cardio-plans live under the merged "Plan" tab — keep that tab lit.
-  const tabActive = (route.name === 'lib' || route.name === 'cardio-plans') ? 'plan' : route.name;
+  // Library and cardio-plans live under the merged "Plan" tab; the water tracker
+  // lives under the Health tab — keep the right tab lit for each.
+  const tabActive = (route.name === 'lib' || route.name === 'cardio-plans') ? 'plan'
+    : (route.name === 'water') ? 'health'
+    : route.name;
 
   const showCoaching = !!(
     store?.settings?.showCoachingTab ||
@@ -1376,6 +1391,7 @@ function App() {
     case 'exercise':      screen = <window.Screens.ExerciseDetailScreen key={route.exId} {...props} exId={route.exId} back={route.back} editQueue={route.editQueue || []} editQueueTotal={route.editQueueTotal || 0} autoEdit={!!route.autoEdit} />; break;
     case 'hist':          screen = <window.Screens.HistoryScreen {...props} initialTab={route.initialTab} />; break;
     case 'health':        screen = <window.Screens.HealthScreen {...props} />; break;
+    case 'water':         screen = <window.Screens.WaterScreen {...props} />; break;
     case 'session':          screen = <window.Screens.SessionDetailScreen {...props} sessionId={route.sessionId} justFinished={route.justFinished} back={route.back} />; break;
     case 'compare':          screen = <window.Screens.SessionCompareScreen {...props} sessionId={route.sessionId} compareId={route.compareId} back={route.back} />; break;
     case 'exerciseHistory':  screen = <window.Screens.ExerciseHistoryScreen {...props} exId={route.exId} dayId={route.dayId} exName={route.exName} back={route.back} />; break;
