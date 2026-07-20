@@ -38,6 +38,22 @@ const WT_DRINK_ICONS = [
   'fa-droplet', 'fa-martini-glass',
 ];
 const WT_DEFAULT_DRINK_ICON = 'fa-glass-water';
+// Coffee's own fixed tint (was blue like everything else here, but blue reads
+// as "this is water" in this screen, which coffee obviously is not).
+const WT_COFFEE_BROWN = '#8a6240';
+const WT_DEFAULT_DRINK_COLOR = '#c9a961';
+// Curated swatch palette for a custom drink's icon tint. Independent of the
+// user's live accent color, same reasoning as WT_BLUE above: a theme change
+// should never reshuffle a drink someone already picked a color for.
+const WT_DRINK_COLORS = [
+  WT_DEFAULT_DRINK_COLOR, '#c47828', '#d9733a', '#c96060', '#c9699a', '#9b6dd4',
+  '#6272d4', '#4aab97', '#7ab05a', WT_COFFEE_BROWN, '#8a8578', '#5b9bd5',
+];
+
+function wtHexToRgba(hex, alpha) {
+  const n = parseInt(hex.replace('#', ''), 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${alpha})`;
+}
 
 function wtDateStr(offset = 0) {
   const d = new Date();
@@ -89,8 +105,8 @@ function wtExpectedMl(goalMl, startTime, endTime) {
 // Groups "other"-category entries by base drink name for a breakdown display:
 // strips the "+ Nml Milk" suffix into a separate milk total, keeps each coffee
 // size and each custom drink under its own name (not collapsed into a generic
-// "Coffee"), and resolves an icon (the coffee-button icon for a coffee size,
-// the user's own pick for a custom drink, a default fallback otherwise).
+// "Coffee"), and resolves an icon and color (coffee's fixed brown for a coffee
+// size, the user's own pick for a custom drink, a default fallback otherwise).
 // `coffeeLabels` is a plain array of coffee-size label strings.
 function wtGroupOtherDrinks(entries, coffeeLabels, drinksList) {
   const grouped = {}; let milk = 0;
@@ -100,8 +116,10 @@ function wtGroupOtherDrinks(entries, coffeeLabels, drinksList) {
     if (mm) milk += parseInt(mm[1], 10);
     const baseName = (e.name || 'Other').replace(/\s*\+\s*\d+ml Milk/i, '');
     const isCoffee = coffeeLabels.includes(baseName);
-    const icon = isCoffee ? 'fa-mug-hot' : (drinksList.find(d => d.name === baseName)?.icon || WT_DEFAULT_DRINK_ICON);
-    if (!grouped[baseName]) grouped[baseName] = { count: 0, icon };
+    const drinkCfg = drinksList.find(d => d.name === baseName);
+    const icon = isCoffee ? 'fa-mug-hot' : (drinkCfg?.icon || WT_DEFAULT_DRINK_ICON);
+    const color = isCoffee ? WT_COFFEE_BROWN : (drinkCfg?.color || WT_DEFAULT_DRINK_COLOR);
+    if (!grouped[baseName]) grouped[baseName] = { count: 0, icon, color };
     grouped[baseName].count++;
   });
   return { grouped, milk };
@@ -455,7 +473,7 @@ function WaterScreen({ store, setStore, go, userId }) {
         <div>
           <Bezel style={{ marginBottom: 10 }}>Other drinks</Bezel>
           <button onClick={openCoffee} style={{ ...wtDrinkTile, width: '100%', justifyContent: 'center' }}>
-            <span style={wtDrinkIcon}><i className="fa-solid fa-mug-hot" style={{ fontSize: 15 }} /></span>
+            <span style={wtDrinkIconStyle(WT_COFFEE_BROWN)}><i className="fa-solid fa-mug-hot" style={{ fontSize: 15 }} /></span>
             <div style={{ textAlign: 'center', minWidth: 0 }}>
               <div style={wtDrinkName}>Coffee</div>
               <div style={wtDrinkMeta}>size + milk</div>
@@ -465,7 +483,7 @@ function WaterScreen({ store, setStore, go, userId }) {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8, marginTop: 8 }}>
               {drinks.map((d, i) => (
                 <button key={i} onClick={() => addWithConfirm(d.ml, d.name, 'other')} style={wtDrinkTile}>
-                  <span style={wtDrinkIcon}><i className={`fa-solid ${d.icon || WT_DEFAULT_DRINK_ICON}`} style={{ fontSize: 15 }} /></span>
+                  <span style={wtDrinkIconStyle(d.color || WT_DEFAULT_DRINK_COLOR)}><i className={`fa-solid ${d.icon || WT_DEFAULT_DRINK_ICON}`} style={{ fontSize: 15 }} /></span>
                   <div style={{ textAlign: 'left', minWidth: 0 }}>
                     <div style={wtDrinkName}>{d.name}</div>
                     <div style={wtDrinkMeta}>{d.ml} ml</div>
@@ -500,7 +518,7 @@ function WaterScreen({ store, setStore, go, userId }) {
             <div className="micro" style={{ color: UI.inkFaint, marginBottom: 10 }}>Other drinks today</div>
             {bottleEnabled && bottlesToday > 0 && <WaterBreakdownRow icon="fa-bottle-water" name="Bottles" value={`${bottlesToday}x`} />}
             {Object.entries(breakdown.grouped).sort((a, b) => b[1].count - a[1].count).map(([name, g]) => (
-              <WaterBreakdownRow key={name} icon={g.icon} name={name} value={`${g.count}x`} />
+              <WaterBreakdownRow key={name} icon={g.icon} name={name} value={`${g.count}x`} color={g.color} />
             ))}
             {breakdown.milk > 0 && <WaterBreakdownRow icon="fa-cow" name="Milk" value={`${breakdown.milk} ml`} />}
             {breakdown.custom > 0 && <WaterBreakdownRow icon="fa-pen" name="Custom entries" value={`${breakdown.custom} ml`} />}
@@ -606,11 +624,11 @@ function WaterScreen({ store, setStore, go, userId }) {
   );
 }
 
-function WaterBreakdownRow({ icon, name, value }) {
+function WaterBreakdownRow({ icon, name, value, color }) {
   return (
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', fontSize: 13, fontFamily: UI.fontUi }}>
       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, color: UI.ink }}>
-        <i className={`fa-solid ${icon}`} style={{ fontSize: 12, color: UI.inkFaint, width: 16, textAlign: 'center' }} />{name}
+        <i className={`fa-solid ${icon}`} style={{ fontSize: 12, color: color || UI.inkFaint, width: 16, textAlign: 'center' }} />{name}
       </span>
       <span className="num" style={{ color: WT_BLUE, fontWeight: 600 }}>{value}</span>
     </div>
@@ -714,14 +732,15 @@ function WaterDrinksConfigBody({ settings, patchSettings, onClose }) {
   const [drinkName, setDrinkName] = useStateW('');
   const [drinkMl, setDrinkMl] = useStateW('');
   const [drinkIcon, setDrinkIcon] = useStateW(WT_DEFAULT_DRINK_ICON);
+  const [drinkColor, setDrinkColor] = useStateW(WT_DEFAULT_DRINK_COLOR);
   const [cLabel, setCLabel] = useStateW('');
   const [cMl, setCMl] = useStateW('');
 
   const addDrink = () => {
     const entry = parseInt(drinkMl, 10);
     if (!drinkName.trim() || !entry || entry <= 0 || drinks.length >= WT_MAX_DRINKS) return;
-    patchSettings({ waterDrinks: [...drinks, { name: drinkName.trim(), ml: UI.waterEntryToMl(entry), icon: drinkIcon }] });
-    setDrinkName(''); setDrinkMl(''); setDrinkIcon(WT_DEFAULT_DRINK_ICON);
+    patchSettings({ waterDrinks: [...drinks, { name: drinkName.trim(), ml: UI.waterEntryToMl(entry), icon: drinkIcon, color: drinkColor }] });
+    setDrinkName(''); setDrinkMl(''); setDrinkIcon(WT_DEFAULT_DRINK_ICON); setDrinkColor(WT_DEFAULT_DRINK_COLOR);
   };
   const removeDrink = (i) => patchSettings({ waterDrinks: drinks.filter((_, idx) => idx !== i) });
   const addCoffee = () => {
@@ -741,7 +760,7 @@ function WaterDrinksConfigBody({ settings, patchSettings, onClose }) {
         {drinksLeft > 0 ? `Add up to ${drinksLeft} custom drink${drinksLeft === 1 ? '' : 's'}.` : 'You have added the maximum of 6 drinks.'}
       </div>
       {drinks.map((d, i) => (
-        <WaterConfigRow key={i} left={d.name} right={`${wtAmt(d.ml)} ${wtUnit()}`} icon={d.icon || WT_DEFAULT_DRINK_ICON} onRemove={() => removeDrink(i)} />
+        <WaterConfigRow key={i} left={d.name} right={`${wtAmt(d.ml)} ${wtUnit()}`} icon={d.icon || WT_DEFAULT_DRINK_ICON} color={d.color || WT_DEFAULT_DRINK_COLOR} onRemove={() => removeDrink(i)} />
       ))}
       {drinksLeft > 0 && (
         <div style={{ marginTop: 4, marginBottom: 20 }}>
@@ -757,6 +776,22 @@ function WaterDrinksConfigBody({ settings, patchSettings, onClose }) {
                   color: sel ? 'var(--accent)' : UI.inkSoft, WebkitTapHighlightColor: 'transparent',
                 }}>
                   <i className={`fa-solid ${ic}`} style={{ fontSize: 16 }} />
+                </button>
+              );
+            })}
+          </div>
+          <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>Color</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 6, marginBottom: 10 }}>
+            {WT_DRINK_COLORS.map(c => {
+              const sel = drinkColor === c;
+              return (
+                <button key={c} onClick={() => setDrinkColor(c)} aria-label={`Color ${c}`} style={{
+                  display: 'grid', placeItems: 'center', padding: '8px 0', borderRadius: 6, cursor: 'pointer',
+                  background: sel ? 'rgba(var(--accent-rgb),0.14)' : UI.bgInset,
+                  border: `0.5px solid ${sel ? 'rgba(var(--accent-rgb),0.5)' : UI.hair}`,
+                  WebkitTapHighlightColor: 'transparent',
+                }}>
+                  <span style={{ width: 18, height: 18, borderRadius: '50%', background: c }} />
                 </button>
               );
             })}
@@ -792,11 +827,11 @@ function WaterDrinksConfigBody({ settings, patchSettings, onClose }) {
   );
 }
 
-function WaterConfigRow({ left, right, onRemove, icon }) {
+function WaterConfigRow({ left, right, onRemove, icon, color }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 12px', background: UI.bgInset, border: `1px solid ${UI.hair}`, borderRadius: 6, marginBottom: 6 }}>
       <span style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, display: 'inline-flex', alignItems: 'center', gap: 10 }}>
-        {icon && <i className={`fa-solid ${icon}`} style={{ fontSize: 13, color: WT_BLUE, width: 16, textAlign: 'center' }} />}
+        {icon && <i className={`fa-solid ${icon}`} style={{ fontSize: 13, color: color || WT_DEFAULT_DRINK_COLOR, width: 16, textAlign: 'center' }} />}
         {left}
       </span>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -886,7 +921,7 @@ function WaterStatsBody({ store, goalMl }) {
         <Card style={{ padding: 14 }}>
           <div className="micro" style={{ color: UI.inkFaint, marginBottom: 10 }}>Other drinks this period</div>
           {Object.entries(s.drinks).sort((a, b) => b[1].count - a[1].count).map(([name, g]) => (
-            <WaterBreakdownRow key={name} icon={g.icon} name={name} value={`${g.count}x`} />
+            <WaterBreakdownRow key={name} icon={g.icon} name={name} value={`${g.count}x`} color={g.color} />
           ))}
           {s.milk > 0 && <WaterBreakdownRow icon="fa-cow" name="Milk" value={`${s.milk} ml`} />}
         </Card>
@@ -913,9 +948,13 @@ const wtDrinkTile = {
   WebkitTapHighlightColor: 'transparent', overflow: 'hidden',
 };
 const wtDrinkIcon = {
-  width: 34, height: 34, borderRadius: 6, background: WT_BLUE_FAINT,
-  border: `1px solid ${WT_BLUE_SOFT}`, display: 'grid', placeItems: 'center', color: WT_BLUE, flexShrink: 0,
+  width: 34, height: 34, borderRadius: 6, display: 'grid', placeItems: 'center', flexShrink: 0,
 };
+// Same faint/soft alpha steps WT_BLUE_FAINT/WT_BLUE_SOFT used, just built from
+// whatever color this particular drink (or coffee) was assigned.
+function wtDrinkIconStyle(color) {
+  return { ...wtDrinkIcon, background: wtHexToRgba(color, 0.12), border: `1px solid ${wtHexToRgba(color, 0.35)}`, color };
+}
 const wtDrinkName = { fontSize: 13, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' };
 const wtDrinkMeta = { fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 1 };
 const wtInput = {
