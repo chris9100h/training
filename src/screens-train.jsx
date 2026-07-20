@@ -4307,10 +4307,19 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           // Repair bulk-entry gaps: any gap < 45s between consecutive set completions
           // indicates the set was logged retroactively rather than in real time.
           // Replace those gaps with restDefault + 60s so the pace bar stays meaningful.
+          // The same repair applies to the opposite anomaly: a gap over 30 minutes
+          // means the session sat abandoned/in-progress for a real-world stretch
+          // (picked back up later, or eventually force-closed by auto-close-sessions)
+          // rather than being trained through live, so that set's updated_at is not
+          // a real elapsed-time data point either. Left unrepaired, an abandoned
+          // session's tail sets inflate "expected time to reach set N" to whatever
+          // the abandonment gap was (hours or days), making the live pace bar
+          // compare against a nonsense target (e.g. "7203m ahead").
           if (timeline.length > 1) {
             const syntheticGap = (store.settings?.restDefault || 120) + 60;
+            const MAX_PLAUSIBLE_GAP_SEC = 30 * 60;
             const gaps = timeline.map((t, i) => i === 0 ? t : t - timeline[i - 1]);
-            const repaired = gaps.map(g => g < 45 ? syntheticGap : g);
+            const repaired = gaps.map(g => (g < 45 || g > MAX_PLAUSIBLE_GAP_SEC) ? syntheticGap : g);
             timeline = repaired.reduce((acc, g, i) => { acc.push(i === 0 ? g : acc[i - 1] + g); return acc; }, []);
           }
           if (!timeline.length) timeline = null;
