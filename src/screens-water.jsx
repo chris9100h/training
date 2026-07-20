@@ -138,8 +138,10 @@ function WaterDayChart({ entries, goalMl, startTime, endTime }) {
   const nowDec = Math.max(startH, Math.min(endH, now.getHours() + now.getMinutes() / 60));
   const gridVals = [0, 0.5, 1].map(f => goalMl * f);
   // Drag-to-inspect points, one per hourly tick (the chart's native
-  // granularity). Anchored to the actual line (matches markerColor below),
-  // Target sits alongside it as a second row so both series read at a glance.
+  // granularity), plus the exact "now" instant below so the dashed now-line
+  // itself is a reachable target too (it rarely sits on a whole hour).
+  // Anchored to the actual line (matches markerColor below), Target sits
+  // alongside it as a second row so both series read at a glance.
   // No hint text: hideHint suppresses ChartHover's own "Drag to inspect"
   // label, which is redundant on a screen this small.
   const hoverPoints = actual.map(p => ({
@@ -149,6 +151,17 @@ function WaterDayChart({ entries, goalMl, startTime, endTime }) {
       { label: 'Actual', value: `${wtAmt(p.v)} ${wtUnit()}`, color: WT_BLUE },
     ],
   }));
+  // Same clamped threshold the dashed line uses, so this point sits exactly
+  // on it: real logged total up to right now, not an interpolated guess.
+  const actualAtNow = sorted.reduce((a, e) => a + (wtHhmmToDecimal(e.time) <= nowDec ? e.amountMl : 0), 0);
+  hoverPoints.push({
+    x: xOf(nowDec), y: yOf(actualAtNow), date: wtDateStr(0),
+    sub: `Now · ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`,
+    rows: [
+      { label: 'Target', value: `${wtAmt(goalMl * (nowDec - startH) / span)} ${wtUnit()}`, color: UI.gold },
+      { label: 'Actual', value: `${wtAmt(actualAtNow)} ${wtUnit()}`, color: WT_BLUE },
+    ],
+  });
 
   return (
     <ChartHover W={W} H={H} points={hoverPoints} markerColor={WT_BLUE} hideHint>
