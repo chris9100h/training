@@ -748,16 +748,35 @@ function WaterDrinksConfigBody({ settings, patchSettings, onClose }) {
   const [drinkMl, setDrinkMl] = useStateW('');
   const [drinkIcon, setDrinkIcon] = useStateW(WT_DEFAULT_DRINK_ICON);
   const [drinkColor, setDrinkColor] = useStateW(WT_DEFAULT_DRINK_COLOR);
+  // Index into the sorted `drinks` array below, null while adding a new one.
+  const [editIdx, setEditIdx] = useStateW(null);
   const [cLabel, setCLabel] = useStateW('');
   const [cMl, setCMl] = useStateW('');
 
-  const addDrink = () => {
-    const entry = parseInt(drinkMl, 10);
-    if (!drinkName.trim() || !entry || entry <= 0 || drinks.length >= WT_MAX_DRINKS) return;
-    patchSettings({ waterDrinks: [...drinks, { name: drinkName.trim(), ml: UI.waterEntryToMl(entry), icon: drinkIcon, color: drinkColor }] });
-    setDrinkName(''); setDrinkMl(''); setDrinkIcon(WT_DEFAULT_DRINK_ICON); setDrinkColor(WT_DEFAULT_DRINK_COLOR);
+  const resetDrinkForm = () => {
+    setDrinkName(''); setDrinkMl(''); setDrinkIcon(WT_DEFAULT_DRINK_ICON); setDrinkColor(WT_DEFAULT_DRINK_COLOR); setEditIdx(null);
   };
-  const removeDrink = (i) => patchSettings({ waterDrinks: drinks.filter((_, idx) => idx !== i) });
+  const startEditDrink = (i) => {
+    const d = drinks[i];
+    setDrinkName(d.name); setDrinkMl(String(UI.waterToEntry(d.ml))); setDrinkIcon(d.icon || WT_DEFAULT_DRINK_ICON); setDrinkColor(d.color || WT_DEFAULT_DRINK_COLOR);
+    setEditIdx(i);
+  };
+  const saveDrink = () => {
+    const entry = parseInt(drinkMl, 10);
+    if (!drinkName.trim() || !entry || entry <= 0) return;
+    const next = { name: drinkName.trim(), ml: UI.waterEntryToMl(entry), icon: drinkIcon, color: drinkColor };
+    if (editIdx != null) {
+      patchSettings({ waterDrinks: drinks.map((d, idx) => idx === editIdx ? next : d) });
+    } else {
+      if (drinks.length >= WT_MAX_DRINKS) return;
+      patchSettings({ waterDrinks: [...drinks, next] });
+    }
+    resetDrinkForm();
+  };
+  const removeDrink = (i) => {
+    patchSettings({ waterDrinks: drinks.filter((_, idx) => idx !== i) });
+    if (editIdx === i) resetDrinkForm();
+  };
   const addCoffee = () => {
     const entry = parseInt(cMl, 10);
     if (!cLabel.trim() || !entry || entry <= 0 || coffee.length >= WT_MAX_COFFEE) return;
@@ -772,12 +791,14 @@ function WaterDrinksConfigBody({ settings, patchSettings, onClose }) {
       {/* Custom drinks */}
       <Bezel style={{ marginBottom: 12 }}>Other drinks</Bezel>
       <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 10 }}>
-        {drinksLeft > 0 ? `Add up to ${drinksLeft} custom drink${drinksLeft === 1 ? '' : 's'}.` : 'You have added the maximum of 6 drinks.'}
+        {editIdx != null ? 'Tap the row again, or another one, to change your edit.'
+          : drinksLeft > 0 ? `Add up to ${drinksLeft} custom drink${drinksLeft === 1 ? '' : 's'}. Tap one to edit it.`
+          : 'You have added the maximum of 6 drinks. Tap one to edit it.'}
       </div>
       {drinks.map((d, i) => (
-        <WaterConfigRow key={i} left={d.name} right={`${wtAmt(d.ml)} ${wtUnit()}`} icon={d.icon || WT_DEFAULT_DRINK_ICON} color={d.color || WT_DEFAULT_DRINK_COLOR} onRemove={() => removeDrink(i)} />
+        <WaterConfigRow key={i} left={d.name} right={`${wtAmt(d.ml)} ${wtUnit()}`} icon={d.icon || WT_DEFAULT_DRINK_ICON} color={d.color || WT_DEFAULT_DRINK_COLOR} active={editIdx === i} onEdit={() => (editIdx === i ? resetDrinkForm() : startEditDrink(i))} onRemove={() => removeDrink(i)} />
       ))}
-      {drinksLeft > 0 && (
+      {(drinksLeft > 0 || editIdx != null) && (
         <div style={{ marginTop: 4, marginBottom: 20 }}>
           <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>Icon</div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 6, marginBottom: 10 }}>
@@ -808,7 +829,8 @@ function WaterDrinksConfigBody({ settings, patchSettings, onClose }) {
             <div style={{ flex: 1 }}>
               <input value={drinkMl} onChange={e => setDrinkMl(e.target.value.replace(/[^0-9]/g, ''))} type="text" inputMode="numeric" placeholder={wtUnit()} style={wtInput} />
             </div>
-            <Btn onClick={addDrink} style={{ flexShrink: 0, minHeight: 40, padding: '10px 16px' }}>Add</Btn>
+            {editIdx != null && <Btn kind="ghost" onClick={resetDrinkForm} style={{ flexShrink: 0, minHeight: 40, padding: '10px 14px' }}>Cancel</Btn>}
+            <Btn onClick={saveDrink} style={{ flexShrink: 0, minHeight: 40, padding: '10px 16px' }}>{editIdx != null ? 'Save' : 'Add'}</Btn>
           </div>
         </div>
       )}
@@ -834,16 +856,21 @@ function WaterDrinksConfigBody({ settings, patchSettings, onClose }) {
   );
 }
 
-function WaterConfigRow({ left, right, onRemove, icon, color }) {
+function WaterConfigRow({ left, right, onRemove, onEdit, icon, color, active }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 12px', background: UI.bgInset, border: `1px solid ${UI.hair}`, borderRadius: 6, marginBottom: 6 }}>
+    <div onClick={onEdit} style={{
+      display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 12px',
+      background: active ? 'rgba(var(--accent-rgb),0.10)' : UI.bgInset,
+      border: `1px solid ${active ? 'rgba(var(--accent-rgb),0.35)' : UI.hair}`, borderRadius: 6, marginBottom: 6,
+      cursor: onEdit ? 'pointer' : 'default', WebkitTapHighlightColor: 'transparent',
+    }}>
       <span style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, display: 'inline-flex', alignItems: 'center', gap: 10 }}>
         {icon && <i className={`fa-solid ${icon}`} style={{ fontSize: 13, color: color || WT_DEFAULT_DRINK_COLOR, width: 16, textAlign: 'center' }} />}
         {left}
       </span>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
         <span className="num" style={{ fontSize: 12, color: UI.inkSoft }}>{right}</span>
-        <button onClick={onRemove} aria-label="Remove" style={{ background: 'transparent', border: 'none', color: UI.inkFaint, cursor: 'pointer', padding: 4, WebkitTapHighlightColor: 'transparent' }}>
+        <button onClick={e => { e.stopPropagation(); onRemove(); }} aria-label="Remove" style={{ background: 'transparent', border: 'none', color: UI.inkFaint, cursor: 'pointer', padding: 4, WebkitTapHighlightColor: 'transparent' }}>
           <i className="fa-solid fa-trash" style={{ fontSize: 12 }} />
         </button>
       </div>
