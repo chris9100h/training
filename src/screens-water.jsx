@@ -10,7 +10,7 @@
    one source of truth. Display units go through the existing UI.water* helpers,
    so imperial (lbs) users automatically see fl oz. */
 
-const { useState: useStateW, useEffect: useEffectW, useMemo: useMemoW } = React;
+const { useState: useStateW, useEffect: useEffectW, useMemo: useMemoW, useRef: useRefW } = React;
 
 // Water-semantic blue, decoupled from the user's accent (the Health tab already
 // treats water as blue). Brand/interactive chrome still uses var(--accent*).
@@ -197,6 +197,8 @@ function WaterScreen({ store, setStore, go, userId }) {
   const [coffeeSel, setCoffeeSel] = useStateW(null); // { label, ml }
   const [statsOpen, setStatsOpen] = useStateW(false);
   const [drinksConfigOpen, setDrinksConfigOpen] = useStateW(false);
+  const [capturing, setCapturing] = useStateW(false);
+  const captureRef = useRefW(null);
 
   const settings = store.settings || {};
   const goalMl = settings.waterGoalMl || 2000;
@@ -298,6 +300,52 @@ function WaterScreen({ store, setStore, go, userId }) {
     });
   }
 
+  // Screenshot mode: hides everything interactive (quick-add tiles, the
+  // drinks grid, delete buttons) so the capture is just today's hero, day
+  // chart, breakdown and entry list, the parts worth sharing. Mirrors
+  // HealthScreen's takeScreenshot (same lazy html2canvas loader, same
+  // scroll-parent unclamp so the whole capture renders even though it's
+  // taller than the visible viewport, same mobile-share/desktop-download split).
+  async function takeScreenshot() {
+    if (!captureRef.current) return;
+    const html2canvas = await window.__ensureHtml2Canvas?.().catch(() => null);
+    if (!html2canvas) return;
+    setCapturing(true);
+    const scrollParent = captureRef.current.parentElement;
+    const saved = { overflow: scrollParent.style.overflow, height: scrollParent.style.height, minHeight: scrollParent.style.minHeight };
+    scrollParent.style.overflow = 'visible';
+    scrollParent.style.height = 'auto';
+    scrollParent.style.minHeight = 'auto';
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+    try {
+      const el = captureRef.current;
+      const canvas = await html2canvas(el, {
+        backgroundColor: getComputedStyle(document.documentElement).getPropertyValue('--bg').trim() || '#1a1820',
+        scale: 2, useCORS: true, logging: false,
+        height: el.scrollHeight, windowHeight: el.scrollHeight,
+      });
+      canvas.toBlob(async (blob) => {
+        const filename = `water-${today}.png`;
+        const file = new File([blob], filename, { type: 'image/png' });
+        const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+        if (isMobile && navigator.share && navigator.canShare?.({ files: [file] })) {
+          try { await navigator.share({ files: [file] }); } catch (_) {}
+        } else {
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url; a.download = filename; document.body.appendChild(a); a.click();
+          document.body.removeChild(a);
+          setTimeout(() => URL.revokeObjectURL(url), 1000);
+        }
+      }, 'image/png');
+    } finally {
+      scrollParent.style.overflow = saved.overflow;
+      scrollParent.style.height = saved.height;
+      scrollParent.style.minHeight = saved.minHeight;
+      setCapturing(false);
+    }
+  }
+
   const tiles = UI.waterInFloz()
     ? [8, 16, 24, 32].map(oz => ({ label: String(oz), ml: UI.flozToMl(oz) }))
     : [250, 500, 1000, 1500].map(ml => ({ label: String(ml), ml }));
@@ -344,6 +392,9 @@ function WaterScreen({ store, setStore, go, userId }) {
       {confirmEl}
       <TopBar title="Water" sub="Hydration" onBack={() => go({ name: 'home' })} right={
         <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={takeScreenshot} disabled={capturing} aria-label="Screenshot" style={{ ...wtIconBtn, cursor: capturing ? 'default' : 'pointer', color: capturing ? UI.inkGhost : UI.inkSoft }}>
+            {capturing ? <span style={{ fontFamily: UI.fontUi, fontSize: 10 }}>…</span> : <i className="fa-solid fa-camera" style={{ fontSize: 15 }} />}
+          </button>
           <button onClick={() => setStatsOpen(true)} aria-label="Stats" style={wtIconBtn}>
             <i className="fa-solid fa-chart-column" style={{ fontSize: 15 }} />
           </button>
@@ -353,7 +404,7 @@ function WaterScreen({ store, setStore, go, userId }) {
         </div>
       } />
 
-      <div style={{ padding: '14px 22px calc(env(safe-area-inset-bottom, 8px) + 24px)', display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div ref={captureRef} style={{ padding: capturing ? '14px 22px 16px' : '14px 22px calc(env(safe-area-inset-bottom, 8px) + 24px)', display: 'flex', flexDirection: 'column', gap: 16 }}>
         {/* Hero */}
         <BracketFrame gold style={{ padding: 20 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 18 }}>
@@ -387,7 +438,8 @@ function WaterScreen({ store, setStore, go, userId }) {
           <div style={{ textAlign: 'center', fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi }}>On track. Keep sipping.</div>
         ) : null}
 
-        {/* Quick amounts */}
+        {/* Quick amounts (interactive, hidden while capturing) */}
+        {!capturing && (
         <div>
           <Bezel style={{ marginBottom: 10 }}>Amounts</Bezel>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
@@ -400,6 +452,7 @@ function WaterScreen({ store, setStore, go, userId }) {
             ))}
           </div>
         </div>
+        )}
 
         {/* Current bottle */}
         {bottleEnabled && pendingBottle > 0 && (
@@ -416,7 +469,9 @@ function WaterScreen({ store, setStore, go, userId }) {
           </Card>
         )}
 
-        {/* Other drinks: coffee preset spans the full row, user drinks below */}
+        {/* Other drinks: coffee preset spans the full row, user drinks below
+            (interactive add buttons, hidden while capturing) */}
+        {!capturing && (
         <div>
           <Bezel style={{ marginBottom: 10 }}>Other drinks</Bezel>
           <button onClick={openCoffee} style={{ ...wtDrinkTile, width: '100%', justifyContent: 'center' }}>
@@ -445,10 +500,13 @@ function WaterScreen({ store, setStore, go, userId }) {
             </button>
           )}
         </div>
+        )}
 
+        {!capturing && (
         <Btn kind="ghost" onClick={() => { setCustomMl(''); setCustomName(''); setCustomOpen(true); }} style={{ width: '100%' }}>
           <i className="fa-solid fa-plus" style={{ marginRight: 8 }} /> Custom entry
         </Btn>
+        )}
 
         {/* Day chart */}
         <Card style={{ padding: 14 }}>
@@ -483,9 +541,11 @@ function WaterScreen({ store, setStore, go, userId }) {
                     <span className="num" style={{ fontSize: 14, fontWeight: 600, color: UI.ink }}>+{e.amountMl} ml</span>
                     {e.name && <span style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{e.name}</span>}
                   </div>
-                  <button onClick={() => deleteEntry(e)} aria-label="Delete" style={{ background: 'transparent', border: 'none', color: UI.inkFaint, cursor: 'pointer', padding: 6, WebkitTapHighlightColor: 'transparent' }}>
-                    <i className="fa-solid fa-trash" style={{ fontSize: 12 }} />
-                  </button>
+                  {!capturing && (
+                    <button onClick={() => deleteEntry(e)} aria-label="Delete" style={{ background: 'transparent', border: 'none', color: UI.inkFaint, cursor: 'pointer', padding: 6, WebkitTapHighlightColor: 'transparent' }}>
+                      <i className="fa-solid fa-trash" style={{ fontSize: 12 }} />
+                    </button>
+                  )}
                 </div>
               ))}
             </div>
