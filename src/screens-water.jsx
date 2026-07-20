@@ -137,8 +137,16 @@ function WaterDayChart({ entries, goalMl, startTime, endTime }) {
   const now = new Date();
   const nowDec = Math.max(startH, Math.min(endH, now.getHours() + now.getMinutes() / 60));
   const gridVals = [0, 0.5, 1].map(f => goalMl * f);
+  // Drag-to-inspect points, one per hourly tick (the chart's native
+  // granularity). No hint text: hideHint suppresses ChartHover's own
+  // "Drag to inspect" label, which is redundant on a screen this small.
+  const hoverPoints = actual.map(p => ({
+    x: xOf(p.h), y: yOf(p.v), date: wtDateStr(0),
+    rows: [{ label: `${String(p.h).padStart(2, '0')}:00`, value: `${wtAmt(p.v)} ${wtUnit()}` }],
+  }));
 
   return (
+    <ChartHover W={W} H={H} points={hoverPoints} markerColor={WT_BLUE} hideHint>
     <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display: 'block', overflow: 'visible' }}>
       {gridVals.map((v, i) => (
         <g key={i}>
@@ -155,6 +163,7 @@ function WaterDayChart({ entries, goalMl, startTime, endTime }) {
       <polygon points={`${xOf(startH).toFixed(1)},${base} ${actLine} ${xOf(actual[actual.length - 1].h).toFixed(1)},${base}`} fill={WT_BLUE_FAINT} />
       <polyline points={actLine} fill="none" stroke={WT_BLUE} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
     </svg>
+    </ChartHover>
   );
 }
 

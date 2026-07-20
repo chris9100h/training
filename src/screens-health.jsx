@@ -429,7 +429,7 @@ const CHART_PLOT_TOP = 10, CHART_PLOT_H = 96; // padTop / plotH, shared by every
 // and stays at the default (false) below, no explicit "expanded" wrap needed.
 const ChartCompactContext = React.createContext(false);
 
-function ChartHover({ W, H, points, children, mode = 'x', markerColor = 'var(--accent)' }) {
+function ChartHover({ W, H, points, children, mode = 'x', markerColor = 'var(--accent)', hideHint = false }) {
   const wrapRef = useRefH(null);
   const [active, setActive] = useStateH(null);
   const compact = React.useContext(ChartCompactContext);
@@ -473,7 +473,7 @@ function ChartHover({ W, H, points, children, mode = 'x', markerColor = 'var(--a
       style={{ position: 'relative', touchAction: 'pan-y', cursor: points.length ? 'crosshair' : 'default' }}
       onPointerMove={onPoint} onPointerUp={clear} onPointerLeave={clear} onPointerCancel={clear}>
       {children}
-      {!p && !compact && points.length > 0 && (
+      {!p && !compact && !hideHint && points.length > 0 && (
         <div style={{ position: 'absolute', top: 2, right: 4, pointerEvents: 'none' }}>
           <span className="micro" style={{ color: UI.inkGhost, letterSpacing: '0.08em' }}>Drag to inspect</span>
         </div>
