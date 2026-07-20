@@ -3350,7 +3350,11 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
 
       <div ref={captureRef} style={{
         padding: capturing ? '20px 22px 24px' : '14px 22px 28px',
-        background: UI.bg, position: 'relative',
+        // No grid texture while capturing: html2canvas re-implements CSS
+        // rendering rather than using the browser's own, and doesn't reliably
+        // support calc() inside rgba() var()s, so the exported PNG stays a
+        // flat fill instead of risking a broken/blank background.
+        backgroundColor: UI.bg, backgroundImage: capturing ? 'none' : 'var(--bg-texture)', position: 'relative',
         // Escape #root's phone-shaped max-width (index.html) so the wider two-column
         // export isn't clipped: position:fixed is positioned against the viewport, not
         // any ancestor, as long as no ancestor between here and #root sets a transform/
@@ -5105,7 +5109,12 @@ function SessionCompareScreen({ store, setStore, go, sessionId, compareId, back 
       />
       <Hairline />
 
-      <div ref={captureRef} style={{ padding: capturing ? '20px 22px 24px' : '14px 22px 28px', background: UI.bg, position: 'relative' }}>
+      <div ref={captureRef} style={{
+        padding: capturing ? '20px 22px 24px' : '14px 22px 28px', position: 'relative',
+        // See SessionDetailScreen's captureRef div: no grid while capturing,
+        // html2canvas doesn't reliably render calc()-in-rgba() custom properties.
+        backgroundColor: UI.bg, backgroundImage: capturing ? 'none' : 'var(--bg-texture)',
+      }}>
 
         {/* Screenshot background watermark — centered, faint, full document (HomeScreen-style) */}
         {capturing && (
