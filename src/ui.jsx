@@ -213,6 +213,23 @@ function TabBar({ active, routeName, onChange, sidebar = false, currentUser = nu
     }
     onChange(id);
   };
+  // Two-dot "there's a second view here" indicator, shown under the Health
+  // slot's label at all times (not just once you've found the water
+  // tracker): a lit dot for the side you'd land on, a faint ring for the
+  // other. Every tab reserves the same slot height (see the height:4
+  // placeholder at both call sites) so only Health grows dots, no tab
+  // bar row shifts height depending on which tab you're looking at.
+  const healthDots = (on, isWaterSlot) => {
+    const lit = on ? '#0a0805' : 'var(--accent)';
+    const dim = on ? 'rgba(10,8,5,0.35)' : UI.hairStrong;
+    const dotStyle = filled => ({ width: 3, height: 3, borderRadius: '50%', boxSizing: 'border-box', background: filled ? lit : 'transparent', border: filled ? 'none' : `1px solid ${dim}` });
+    return (
+      <div style={{ display: 'flex', gap: 3 }}>
+        <span style={dotStyle(!isWaterSlot)} />
+        <span style={dotStyle(isWaterSlot)} />
+      </div>
+    );
+  };
 
   if (sidebar) {
     const currentEmail = currentUser?.email || '';
@@ -288,6 +305,7 @@ function TabBar({ active, routeName, onChange, sidebar = false, currentUser = nu
                     )}
                   </div>
                   <span>{label}</span>
+                  <div style={{ height: 4, display: 'flex', alignItems: 'center' }}>{t.id === 'health' && healthDots(on, isWaterSlot)}</div>
                 </button>
               );
             })}
@@ -530,6 +548,7 @@ function TabBar({ active, routeName, onChange, sidebar = false, currentUser = nu
                 {/* -0.14em cancels the trailing letter-spacing after the last
                     glyph so the visible text is pixel-centred under the plate. */}
                 <span style={{ marginRight: '-0.14em' }}>{label}</span>
+                <div style={{ height: 4, display: 'flex', alignItems: 'center' }}>{t.id === 'health' && healthDots(on, isWaterSlot)}</div>
               </button>
             );
           })}
