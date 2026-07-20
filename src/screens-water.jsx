@@ -138,11 +138,16 @@ function WaterDayChart({ entries, goalMl, startTime, endTime }) {
   const nowDec = Math.max(startH, Math.min(endH, now.getHours() + now.getMinutes() / 60));
   const gridVals = [0, 0.5, 1].map(f => goalMl * f);
   // Drag-to-inspect points, one per hourly tick (the chart's native
-  // granularity). No hint text: hideHint suppresses ChartHover's own
-  // "Drag to inspect" label, which is redundant on a screen this small.
+  // granularity). Anchored to the actual line (matches markerColor below),
+  // Target sits alongside it as a second row so both series read at a glance.
+  // No hint text: hideHint suppresses ChartHover's own "Drag to inspect"
+  // label, which is redundant on a screen this small.
   const hoverPoints = actual.map(p => ({
-    x: xOf(p.h), y: yOf(p.v), date: wtDateStr(0),
-    rows: [{ label: `${String(p.h).padStart(2, '0')}:00`, value: `${wtAmt(p.v)} ${wtUnit()}` }],
+    x: xOf(p.h), y: yOf(p.v), date: wtDateStr(0), sub: `${String(p.h).padStart(2, '0')}:00`,
+    rows: [
+      { label: 'Target', value: `${wtAmt(goalMl * (p.h - startH) / span)} ${wtUnit()}`, color: UI.gold },
+      { label: 'Actual', value: `${wtAmt(p.v)} ${wtUnit()}`, color: WT_BLUE },
+    ],
   }));
 
   return (
