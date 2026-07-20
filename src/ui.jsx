@@ -201,19 +201,16 @@ function TabBar({ active, routeName, onChange, sidebar = false, currentUser = nu
   ];
   const idx = tabs.findIndex(t => t.id === active);
   const [switchModal, setSwitchModal] = React.useState(false);
-  // Two quick taps on Health jump straight to the water tracker (parked
-  // under the Health slot, see tabActive in app.jsx). Tracked in a ref, not
-  // state, so detection never triggers a render of its own: the single-tap
-  // path stays exactly as fast as before, no wait-and-see delay added.
-  const lastHealthTapRef = React.useRef(0);
+  // Health and its water tracker share one tab slot (routeName === 'water'
+  // still lights up as 'health', see tabActive in app.jsx). Tapping the slot
+  // while already on Health steps forward into the water tracker; tapping it
+  // while on the water tracker falls through to the plain onChange('health')
+  // below, i.e. steps back, since that path was never a no-op to begin with.
   const handleTabClick = (id) => {
-    const now = Date.now();
-    if (id === 'health' && now - lastHealthTapRef.current < 400) {
-      lastHealthTapRef.current = 0;
+    if (id === 'health' && routeName === 'health') {
       onChange('water');
       return;
     }
-    lastHealthTapRef.current = id === 'health' ? now : 0;
     onChange(id);
   };
 
