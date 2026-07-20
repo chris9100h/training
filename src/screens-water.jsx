@@ -28,13 +28,14 @@ const WT_CELEBRATED_KEY = 'logbook-water-celebrated'; // per-device day guard fo
 const WT_COFFEE_SIZES_DEFAULT = [];
 const WT_MILK_OPTS = [20, 40, 60, 80, 100, 0];
 const WT_CUSTOM_PRESETS_ML = [100, 150, 200, 300, 330, 400, 750, 1000];
-// Icons a user can pick for a custom drink (FA6 free solid), same idea as the
-// coach check-in schema editor's icon picker.
+// Drink-specific icons a user can pick for a custom drink (FA6 free solid).
+// fa-blender is the shake/smoothie icon; fa-jar suits a protein shaker.
 const WT_DRINK_ICONS = [
-  'fa-glass-water', 'fa-bottle-water', 'fa-mug-hot', 'fa-mug-saucer',
-  'fa-wine-bottle', 'fa-wine-glass', 'fa-martini-glass', 'fa-beer-mug-empty',
-  'fa-champagne-glasses', 'fa-blender', 'fa-jar', 'fa-flask',
-  'fa-bolt', 'fa-droplet', 'fa-lemon', 'fa-leaf', 'fa-fire', 'fa-cube',
+  'fa-glass-water', 'fa-glass-water-droplet', 'fa-bottle-water', 'fa-bottle-droplet',
+  'fa-blender', 'fa-jar', 'fa-mug-hot', 'fa-mug-saucer',
+  'fa-wine-glass', 'fa-wine-bottle', 'fa-martini-glass-citrus', 'fa-whiskey-glass',
+  'fa-champagne-glasses', 'fa-beer-mug-empty', 'fa-bolt', 'fa-lemon',
+  'fa-droplet', 'fa-martini-glass',
 ];
 const WT_DEFAULT_DRINK_ICON = 'fa-glass-water';
 
