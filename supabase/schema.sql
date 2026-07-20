@@ -2143,7 +2143,8 @@ CREATE TABLE zane_water_logs (
   time       text        NOT NULL,                 -- HH:MM local
   amount_ml  integer     NOT NULL,
   name       text,
-  category   text,                                 -- null = plain water | 'other' | 'custom'
+  category   text,                                 -- null = plain water | 'other' | 'custom' | 'summary'
+  breakdown  jsonb,                                -- collapsed-day drink breakdown, only set on category = 'summary'
   created_at timestamptz DEFAULT now()
 );
 
@@ -2159,6 +2160,66 @@ CREATE POLICY "coaches read client water logs"
   USING (EXISTS ( SELECT 1 FROM zane_coaching zc
     WHERE zc.client_id = zane_water_logs.user_id
       AND zc.coach_id = (select auth.uid()) AND zc.coach_id <> zc.client_id AND zc.status = 'active' AND zc.id NOT LIKE 'support_%'));
+
+-- Nightly (hourly-checked) per-user collapse of past-day water_logs rows into
+-- one summary row; see migration 0183 for the full rationale. Scheduled via
+-- pg_cron ('water-log-collapse', not tracked in this snapshot like other cron
+-- jobs), internal-only (no grant to authenticated).
+CREATE OR REPLACE FUNCTION public.collapse_water_logs()
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  r RECORD;
+  v_total integer;
+  v_milk integer;
+  v_drinks jsonb;
+  v_id text;
+BEGIN
+  FOR r IN
+    SELECT wl.user_id, wl.date
+    FROM zane_water_logs wl
+    LEFT JOIN zane_user_settings us ON us.user_id = wl.user_id
+    WHERE wl.date < to_char(
+      (now() AT TIME ZONE 'UTC') + make_interval(mins => COALESCE(us.tz_offset_minutes, 0)),
+      'YYYY-MM-DD'
+    )
+    GROUP BY wl.user_id, wl.date
+    HAVING count(*) > 1
+  LOOP
+    SELECT
+      sum(amount_ml)::int,
+      sum(CASE WHEN category = 'other' THEN
+        COALESCE((regexp_match(name, '\+\s*(\d+)ml Milk', 'i'))[1]::int, 0)
+      ELSE 0 END)::int
+    INTO v_total, v_milk
+    FROM zane_water_logs
+    WHERE user_id = r.user_id AND date = r.date;
+
+    SELECT COALESCE(jsonb_object_agg(base_name, cnt), '{}'::jsonb) INTO v_drinks
+    FROM (
+      SELECT
+        COALESCE(NULLIF(trim(regexp_replace(name, '\s*\+\s*\d+ml Milk', '', 'i')), ''), 'Other') AS base_name,
+        count(*)::int AS cnt
+      FROM zane_water_logs
+      WHERE user_id = r.user_id AND date = r.date AND category = 'other'
+      GROUP BY base_name
+    ) t;
+
+    v_id := gen_random_uuid()::text;
+
+    DELETE FROM zane_water_logs WHERE user_id = r.user_id AND date = r.date;
+
+    INSERT INTO zane_water_logs (id, user_id, date, "time", amount_ml, name, category, breakdown)
+    VALUES (v_id, r.user_id, r.date, '00:00', v_total, NULL, 'summary',
+      jsonb_build_object('drinks', v_drinks, 'milk', v_milk));
+  END LOOP;
+END;
+$$;
+
+REVOKE EXECUTE ON FUNCTION public.collapse_water_logs() FROM PUBLIC;
 
 -- ── Support tickets (migrations 0085/0086 + archive_support_tickets) ────────────
 -- A support ticket is a zane_coaching row with id LIKE 'support_%' between the

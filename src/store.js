@@ -572,6 +572,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
       backup.waterLogs.map(l => ({
         id: l.id, user_id: userId, date: l.date, time: l.time,
         amount_ml: l.amountMl, name: l.name ?? null, category: l.category ?? null,
+        breakdown: l.breakdown ?? null,
       }))
     ));
     stepsDone++;
@@ -906,7 +907,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     isCoachLoad ? null : _supabase.from('zane_plan_drafts').select('schedule_id, draft, updated_at').eq('user_id', userId),
     // Water tracker per-entry logs (migration 0180): multiple entries per day,
     // all records for the user. Coach reads a client's via coach-of-client RLS.
-    _supabase.from('zane_water_logs').select('id, date, time, amount_ml, name, category, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
+    _supabase.from('zane_water_logs').select('id, date, time, amount_ml, name, category, breakdown, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
   ];
   const [profileRes, exRes, schRes, sessRes, settRes, skipsRes, entriesRes,
          bestsRes, sessionStatsRes,
@@ -1095,11 +1096,13 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     statusPeriods: (statusPeriodsRes?.data || []).map(p => ({
       id: p.id, mode: p.mode, startedAt: p.started_at, endedAt: p.ended_at ?? null,
     })),
-    // Water tracker per-entry logs (migration 0180). One entry = one logged drink.
+    // Water tracker per-entry logs (migration 0180). One entry = one logged drink,
+    // except category = 'summary' (migration 0183), a whole past day collapsed
+    // by the nightly cron into one row, breakdown carries its drink tally.
     waterLogs: (waterLogsRes?.data || []).map(l => ({
       id: l.id, date: l.date, time: l.time,
       amountMl: l.amount_ml ?? 0, name: l.name ?? null,
-      category: l.category ?? null, createdAt: l.created_at,
+      category: l.category ?? null, breakdown: l.breakdown ?? null, createdAt: l.created_at,
     })),
     glucoseLogs: (glucoseLogsRes?.data || []).map(l => ({
       id: l.id, date: l.date, time: l.time,
@@ -1553,6 +1556,7 @@ async function syncStore(prev, next, userId) {
     if (upsert.length) ops.push(_supabase.from('zane_water_logs').upsert(upsert.map(l => ({
       id: l.id, user_id: userId, date: l.date, time: l.time,
       amount_ml: l.amountMl, name: l.name ?? null, category: l.category ?? null,
+      breakdown: l.breakdown ?? null,
     }))));
     if (removed.length) ops.push(_supabase.from('zane_water_logs').delete().in('id', removed.map(l => l.id)));
   }
@@ -4613,7 +4617,7 @@ async function refreshHealthLogs(userId) {
     _supabase.from('zane_glucose_logs').select('id, date, time, value_mmol, context, note, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
     _supabase.from('zane_blood_pressure_logs').select('id, date, time, systolic, diastolic, note, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
     _supabase.from('zane_body_temp_logs').select('id, date, time, value_c, note, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
-    _supabase.from('zane_water_logs').select('id, date, time, amount_ml, name, category, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
+    _supabase.from('zane_water_logs').select('id, date, time, amount_ml, name, category, breakdown, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
   ]);
   if (dailyRes.error || cardioRes.error || glucoseRes.error || bpRes.error || tempRes.error || waterRes.error) return null;
   return {
@@ -4653,7 +4657,7 @@ async function refreshHealthLogs(userId) {
     waterLogs: (waterRes?.data || []).map(l => ({
       id: l.id, date: l.date, time: l.time,
       amountMl: l.amount_ml ?? 0, name: l.name ?? null,
-      category: l.category ?? null, createdAt: l.created_at,
+      category: l.category ?? null, breakdown: l.breakdown ?? null, createdAt: l.created_at,
     })),
   };
 }

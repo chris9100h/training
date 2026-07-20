@@ -109,20 +109,32 @@ function wtExpectedMl(goalMl, startTime, endTime) {
 // size and each custom drink under its own name (not collapsed into a generic
 // "Coffee"), and resolves an icon and color (coffee's fixed brown for a coffee
 // size, the user's own pick for a custom drink, a default fallback otherwise).
-// `coffeeLabels` is a plain array of coffee-size label strings.
+// `coffeeLabels` is a plain array of coffee-size label strings. A past day
+// collapsed by the nightly cron (migration 0183) has no raw entries left, only
+// one category = 'summary' row with a pre-grouped breakdown.drinks/milk; that
+// gets folded in the same way instead of parsed from a name, so a multi-day
+// stats range keeps showing the drink breakdown even past "today".
 function wtGroupOtherDrinks(entries, coffeeLabels, drinksList) {
   const grouped = {}; let milk = 0;
-  entries.forEach(e => {
-    if (e.category !== 'other') return;
-    const mm = e.name ? e.name.match(/\+\s*(\d+)ml Milk/i) : null;
-    if (mm) milk += parseInt(mm[1], 10);
-    const baseName = (e.name || 'Other').replace(/\s*\+\s*\d+ml Milk/i, '');
+  const addDrink = (baseName, count) => {
     const isCoffee = coffeeLabels.includes(baseName);
     const drinkCfg = drinksList.find(d => d.name === baseName);
     const icon = isCoffee ? 'fa-mug-hot' : (drinkCfg?.icon || WT_DEFAULT_DRINK_ICON);
     const color = isCoffee ? WT_COFFEE_BROWN : (drinkCfg?.color || WT_DEFAULT_DRINK_COLOR);
     if (!grouped[baseName]) grouped[baseName] = { count: 0, icon, color };
-    grouped[baseName].count++;
+    grouped[baseName].count += count;
+  };
+  entries.forEach(e => {
+    if (e.category === 'summary') {
+      Object.entries(e.breakdown?.drinks || {}).forEach(([baseName, count]) => addDrink(baseName, count));
+      milk += e.breakdown?.milk || 0;
+      return;
+    }
+    if (e.category !== 'other') return;
+    const mm = e.name ? e.name.match(/\+\s*(\d+)ml Milk/i) : null;
+    if (mm) milk += parseInt(mm[1], 10);
+    const baseName = (e.name || 'Other').replace(/\s*\+\s*\d+ml Milk/i, '');
+    addDrink(baseName, 1);
   });
   return { grouped, milk };
 }
