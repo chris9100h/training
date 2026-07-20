@@ -38,6 +38,9 @@
     /* RGB triple used by decorative textures (knurl, guilloche). Flipped to a
        dark value in light mode so the hash marks stay visible on a pale bg. */
     --knurl-rgb: 236,228,208;
+    /* Full background-image value for the theme's canvas (Screen component).
+       'none' for every theme except paper, which sets a graph-paper grid. */
+    --bg-texture: none;
     /* Surface tints — cream-on-dark defaults; overridden in light mode */
     --surface-tint:      rgba(236,228,208,0.02);
     --surface-tint-sm:   rgba(236,228,208,0.03);
@@ -498,6 +501,26 @@ window.DARK_MODES = {
     neutralBorderSm: 'rgba(31,27,22,0.20)',
     successText:     '#2e7a30',
   },
+  // Parchment canvas + blue-black ink + a faint blue quad-ruled grid, like a
+  // real notebook page. knurlRgb drives the grid lines (see bgTexture) as
+  // well as the guilloche textures used elsewhere.
+  paper: {
+    bg: '#f7f2e7', bgRaised: '#fffdf7', bgInset: '#efe6d2', bgBody: '#eee4cf', bgRgb: '247,242,231',
+    ink: '#25324a', inkSoft: 'rgba(37,50,74,0.66)', inkFaint: 'rgba(37,50,74,0.42)', inkGhost: 'rgba(37,50,74,0.16)',
+    hair: 'rgba(37,50,74,0.16)', hairStrong: 'rgba(37,50,74,0.34)', knurlRgb: '70,95,150',
+    surfaceTint:     'rgba(37,50,74,0.035)',
+    surfaceTintSm:   'rgba(37,50,74,0.05)',
+    surfaceTintMd:   'rgba(37,50,74,0.07)',
+    surfaceTintLg:   'rgba(37,50,74,0.09)',
+    rootGlow:        'rgba(37,50,74,0.15)',
+    overlayTint:     'rgba(37,50,74,0.04)',
+    successTintXs:   'rgba(58,110,58,0.10)',
+    successBorder:   'rgba(58,110,58,0.36)',
+    neutralTint:     'rgba(37,50,74,0.07)',
+    neutralBorderSm: 'rgba(37,50,74,0.18)',
+    successText:     '#2e6b30',
+    bgTexture: 'repeating-linear-gradient(0deg, rgba(var(--knurl-rgb),0.16) 0px, rgba(var(--knurl-rgb),0.16) 1px, transparent 1px, transparent 22px), repeating-linear-gradient(90deg, rgba(var(--knurl-rgb),0.16) 0px, rgba(var(--knurl-rgb),0.16) 1px, transparent 1px, transparent 22px)',
+  },
 };
 window.applyDarkMode = function(key) {
   var m = window.DARK_MODES[key] || window.DARK_MODES.dark;
@@ -515,6 +538,7 @@ window.applyDarkMode = function(key) {
   s.setProperty('--hair', m.hair || _DARK_HAIR);
   s.setProperty('--hair-strong', m.hairStrong || _DARK_HAIR_STRONG);
   s.setProperty('--knurl-rgb', m.knurlRgb || '236,228,208');
+  s.setProperty('--bg-texture', m.bgTexture || 'none');
   s.setProperty('--surface-tint',      m.surfaceTint     || t.surfaceTint);
   s.setProperty('--surface-tint-sm',   m.surfaceTintSm   || t.surfaceTintSm);
   s.setProperty('--surface-tint-md',   m.surfaceTintMd   || t.surfaceTintMd);

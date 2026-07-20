@@ -40,7 +40,7 @@ function Screen({ children, scroll = true, style = {} }) {
   return (
     <div style={{
       width: '100%', flex: 1, minHeight: 0,
-      background: UI.bg, color: UI.ink, fontFamily: UI.fontUi,
+      backgroundColor: UI.bg, backgroundImage: 'var(--bg-texture)', color: UI.ink, fontFamily: UI.fontUi,
       display: 'flex', flexDirection: 'column',
       overflow: scroll ? 'auto' : 'hidden',
       ...style,

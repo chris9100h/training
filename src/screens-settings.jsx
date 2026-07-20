@@ -2229,7 +2229,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           </Row>
           <Row label="Theme">
             <div style={{ display: 'flex', gap: 4 }}>
-              {[['dark', 'Dark'], ['black', 'OLED'], ['light', 'Light']].map(([key, label]) => (
+              {[['dark', 'Dark'], ['black', 'OLED'], ['light', 'Light'], ['paper', 'Paper']].map(([key, label]) => (
                 <button key={key} onClick={() => { setDarkMode(key); localStorage.setItem('logbook-dark-mode', key); window.applyDarkMode(key); setStore(s => ({ ...s, settings: { ...s.settings, darkMode: key } })); }} style={{
                   padding: '6px 11px', borderRadius: 4, cursor: 'pointer',
                   background: darkMode === key ? UI.goldFaint : UI.bgInset,
