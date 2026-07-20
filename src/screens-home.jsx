@@ -1183,16 +1183,19 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
   const trainBg = store.settings?.vipBackground || 'icons/zane-logo.png';
   const isCustomBg = trainBg !== 'icons/zane-logo.png';
   const isLightMode = (store.settings?.darkMode ?? 'dark') === 'light';
+  const isPaperMode = (store.settings?.darkMode ?? 'dark') === 'paper';
   // watermarkOpacity (Settings -> Appearance slider) is a flat 0-100 override
   // applied identically to the logo or a VIP image, in any theme, once the
   // user has touched the slider. Unset (null, every existing user until they
   // open that sheet) falls back to these same per-theme/per-image defaults,
-  // unchanged from before the setting existed.
+  // unchanged from before the setting existed. Paper gets its own default
+  // (16%, same as a custom VIP image) rather than sharing light's 14%: its
+  // grid canvas needs a touch more mark to stay visible against it.
   const watermarkOpacityOverride = store.settings?.watermarkOpacity;
   const watermarkOpacity = watermarkOpacityOverride != null
     ? watermarkOpacityOverride / 100
-    : (isCustomBg ? 0.16 : (isLightMode ? 0.14 : 0.04));
-  const defaultLogoStyle = { width: '85%', maxWidth: 320, opacity: watermarkOpacity, filter: isLightMode ? 'grayscale(1)' : 'grayscale(1) brightness(3)', objectFit: 'contain' };
+    : (isCustomBg || isPaperMode ? 0.16 : (isLightMode ? 0.14 : 0.04));
+  const defaultLogoStyle = { width: '85%', maxWidth: 320, opacity: watermarkOpacity, filter: (isLightMode || isPaperMode) ? 'grayscale(1)' : 'grayscale(1) brightness(3)', objectFit: 'contain' };
   const today = LB.todaysDay(store);
   const sch = today?.schedule;
   const hasPlans = (store.schedules?.length || 0) > 0;

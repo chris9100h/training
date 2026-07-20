@@ -670,7 +670,8 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
     const explicit = store.settings?.watermarkOpacity;
     if (explicit != null) return explicit;
     if (store.settings?.vipBackground) return 16;
-    return (store.settings?.darkMode ?? 'dark') === 'light' ? 14 : 4;
+    const mode = store.settings?.darkMode ?? 'dark';
+    return mode === 'paper' ? 16 : mode === 'light' ? 14 : 4;
   });
   const [showWarmupInSummary, setShowWarmupInSummary] = useStateSet(() => store.settings?.showWarmupInSummary ?? true);
   const [unitPickerOpen, setUnitPickerOpen] = useStateSet(false);
