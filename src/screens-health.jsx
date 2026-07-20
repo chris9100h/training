@@ -2264,23 +2264,35 @@ function BodyTempCard({ tempLogs, unit, tf: sharedTf, setTf: setSharedTf, dragHa
 // chart fed by dailyLogs.waterMl, unchanged.
 
 function WaterEntryChart({ entries }) {
-  // One bar per entry, positioned by time of day. Bar height is that entry's
-  // own amount (what was actually poured then), not a running total, so it
-  // reads the same way as the feed list right below it.
-  const pts = (entries || []).slice().sort((a, b) => a.time.localeCompare(b.time));
+  // Bucketed by hour, not one bar per raw entry: a few drinks logged close
+  // together would otherwise draw overlapping or near-touching bars, which
+  // reads as noise rather than a timeline. One bar per hour, height = that
+  // hour's total; the feed list right below still shows every entry.
+  const byHour = new Map();
+  (entries || []).forEach(e => {
+    const h = Math.floor((timeToMinutes(e.time) ?? 0) / 60);
+    const cur = byHour.get(h) || { h, amountMl: 0, count: 0, date: e.date };
+    cur.amountMl += e.amountMl || 0;
+    cur.count += 1;
+    byHour.set(h, cur);
+  });
+  const pts = [...byHour.values()].sort((a, b) => a.h - b.h);
   if (!pts.length) return null;
   const W = 320, padL = 38, padR = 12, padTop = 10, padBottom = 20, plotH = 96;
   const H = padTop + plotH + padBottom, plotW = W - padL - padR;
   const dom = UI.chartDomain(0, Math.max(...pts.map(p => p.amountMl)), { min: 0 });
   const bw = 10;
-  const xOf = p => padL + ((timeToMinutes(p.time) ?? 0) / 1440) * plotW;
+  const xOf = p => padL + ((p.h + 0.5) / 24) * plotW;
   const yOf = v => padTop + (1 - (v - dom.min) / dom.range) * plotH;
   const gridVals = Array.from({ length: 4 }, (_, i) => dom.min + (dom.range / 3) * i);
-  const hoverPoints = pts.map(p => ({
-    x: xOf(p), y: yOf(p.amountMl), date: p.date,
-    rows: [{ value: `${UI.waterToEntry(p.amountMl)} ${UI.waterEntryUnit()}` }],
-    sub: [p.name, p.time].filter(Boolean).join(' · '),
-  }));
+  const hoverPoints = pts.map(p => {
+    const hourLabel = `${String(p.h).padStart(2, '0')}:00`;
+    return {
+      x: xOf(p), y: yOf(p.amountMl), date: p.date,
+      rows: [{ value: `${UI.waterToEntry(p.amountMl)} ${UI.waterEntryUnit()}` }],
+      sub: p.count > 1 ? `${hourLabel} · ${p.count} drinks` : hourLabel,
+    };
+  });
 
   return (
     <ChartHover W={W} H={H} points={hoverPoints}>
