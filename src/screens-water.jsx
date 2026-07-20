@@ -299,12 +299,18 @@ function WaterScreen({ store, setStore, go, userId }) {
       if (e.category !== 'other') return;
       const mm = e.name ? e.name.match(/\+\s*(\d+)ml Milk/i) : null;
       if (mm) milk += parseInt(mm[1], 10);
+      // Each coffee size and each custom drink keeps its own name (not
+      // collapsed into a generic "Coffee"), and carries the icon the user
+      // actually picked for it (custom drinks) or the coffee-button icon
+      // (a coffee size, which has no per-size icon of its own).
       const baseName = (e.name || 'Other').replace(/\s*\+\s*\d+ml Milk/i, '');
-      const key = coffeeSizes.some(s => s.label === baseName) ? 'Coffee' : baseName;
-      grouped[key] = (grouped[key] || 0) + 1;
+      const isCoffee = coffeeSizes.some(s => s.label === baseName);
+      const icon = isCoffee ? 'fa-mug-hot' : (drinks.find(d => d.name === baseName)?.icon || WT_DEFAULT_DRINK_ICON);
+      if (!grouped[baseName]) grouped[baseName] = { count: 0, icon };
+      grouped[baseName].count++;
     });
     return { grouped, milk, custom };
-  }, [todayEntries, coffeeSizes]);
+  }, [todayEntries, coffeeSizes, drinks]);
 
   return (
     <Screen>
@@ -428,8 +434,8 @@ function WaterScreen({ store, setStore, go, userId }) {
           <Card style={{ padding: 14 }}>
             <div className="micro" style={{ color: UI.inkFaint, marginBottom: 10 }}>Other drinks today</div>
             {bottleEnabled && bottlesToday > 0 && <WaterBreakdownRow icon="fa-bottle-water" name="Bottles" value={`${bottlesToday}x`} />}
-            {Object.entries(breakdown.grouped).sort((a, b) => b[1] - a[1]).map(([name, count]) => (
-              <WaterBreakdownRow key={name} icon="fa-mug-hot" name={name} value={`${count}x`} />
+            {Object.entries(breakdown.grouped).sort((a, b) => b[1].count - a[1].count).map(([name, g]) => (
+              <WaterBreakdownRow key={name} icon={g.icon} name={name} value={`${g.count}x`} />
             ))}
             {breakdown.milk > 0 && <WaterBreakdownRow icon="fa-cow" name="Milk" value={`${breakdown.milk} ml`} />}
             {breakdown.custom > 0 && <WaterBreakdownRow icon="fa-pen" name="Custom entries" value={`${breakdown.custom} ml`} />}
@@ -761,18 +767,24 @@ function WaterStatsBody({ store, goalMl }) {
     const rate = days.length ? Math.round((goalDays.length / days.length) * 100) : 0;
     let best = 0, cur = 0;
     days.forEach(d => { if (d.value >= goalMl) { cur++; best = Math.max(best, cur); } else cur = 0; });
+    const waterDrinksList = store.settings?.waterDrinks || [];
     const drinks = {}; let milk = 0;
     (store.waterLogs || []).forEach(e => {
       if (e.date < range.from || e.date > range.to || e.category !== 'other') return;
       const mm = e.name ? e.name.match(/\+\s*(\d+)ml Milk/i) : null;
       if (mm) milk += parseInt(mm[1], 10);
+      // Keep each coffee size and each custom drink under its own name (not
+      // collapsed into a generic "Coffee"), with the icon the user actually
+      // picked for it (custom drinks) or the coffee-button icon (a coffee size).
       const baseName = (e.name || 'Other').replace(/\s*\+\s*\d+ml Milk/i, '');
-      const key = coffeeLabels.includes(baseName) ? 'Coffee' : baseName;
-      drinks[key] = (drinks[key] || 0) + 1;
+      const isCoffee = coffeeLabels.includes(baseName);
+      const icon = isCoffee ? 'fa-mug-hot' : (waterDrinksList.find(d => d.name === baseName)?.icon || WT_DEFAULT_DRINK_ICON);
+      if (!drinks[baseName]) drinks[baseName] = { count: 0, icon };
+      drinks[baseName].count++;
     });
-    const top = Object.entries(drinks).sort((a, b) => b[1] - a[1])[0];
-    return { days, withData: withData.length, goalDays: goalDays.length, avg, rate, best, drinks, milk, fav: top ? top[0] : null, favN: top ? top[1] : 0 };
-  }, [store.dailyLogs, store.waterLogs, range, goalMl, coffeeLabels]);
+    const top = Object.entries(drinks).sort((a, b) => b[1].count - a[1].count)[0];
+    return { days, withData: withData.length, goalDays: goalDays.length, avg, rate, best, drinks, milk, fav: top ? top[0] : null, favN: top ? top[1].count : 0 };
+  }, [store.dailyLogs, store.waterLogs, store.settings?.waterDrinks, range, goalMl, coffeeLabels]);
 
   const segBtn = (id, label) => (
     <button onClick={() => setPeriod(id)} style={{
@@ -818,8 +830,8 @@ function WaterStatsBody({ store, goalMl }) {
       {(Object.keys(s.drinks).length > 0 || s.milk > 0) && (
         <Card style={{ padding: 14 }}>
           <div className="micro" style={{ color: UI.inkFaint, marginBottom: 10 }}>Other drinks this period</div>
-          {Object.entries(s.drinks).sort((a, b) => b[1] - a[1]).map(([name, count]) => (
-            <WaterBreakdownRow key={name} icon={name === 'Coffee' ? 'fa-mug-hot' : 'fa-glass-water'} name={name} value={`${count}x`} />
+          {Object.entries(s.drinks).sort((a, b) => b[1].count - a[1].count).map(([name, g]) => (
+            <WaterBreakdownRow key={name} icon={g.icon} name={name} value={`${g.count}x`} />
           ))}
           {s.milk > 0 && <WaterBreakdownRow icon="fa-cow" name="Milk" value={`${s.milk} ml`} />}
         </Card>
