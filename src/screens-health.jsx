@@ -758,6 +758,14 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
   const storeRef = useRefH(store);
   storeRef.current = store;
   const existing = useMemoH(() => (store.dailyLogs || []).find(l => l.date === date), [store.dailyLogs, date]);
+  // The water tracker owns this day's total once it has any entry for it: it
+  // recomputes and overwrites water_ml on its own every time a drink is
+  // logged, so a manual edit here would silently vanish on the next one.
+  // Locked until the user explicitly opts to override for this session (see
+  // requestWaterUnlock below); a day with no tracker entries stays plain.
+  const waterHasTrackerEntries = useMemoH(() => (store.waterLogs || []).some(l => l.date === date), [store.waterLogs, date]);
+  const [waterUnlocked, setWaterUnlocked] = useStateH(false);
+  const waterLocked = waterHasTrackerEntries && !waterUnlocked;
   const todayISO = LB.todayISO();
   const dayStatusPeriod = useMemoH(() => {
     const ts = new Date(date + 'T12:00:00').getTime();
@@ -1008,6 +1016,7 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
 
   useEffectH(() => {
     if (!open) return;
+    setWaterUnlocked(false);
     const net = existing?.fiber != null ? true : !!store.settings?.netCarbs;
     setNetCarbs(net);
     // Blank the calories field when the saved value matches what the saved
@@ -1122,6 +1131,14 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
     if (!await confirm("Delete this day's log? Weight, macros, steps and water for this day are removed.", { title: 'Delete day?', ok: 'Delete', danger: true })) return;
     setStore(s => ({ ...s, dailyLogs: (s.dailyLogs || []).filter(l => l.id !== existing.id) }));
     onClose();
+  };
+
+  const requestWaterUnlock = async () => {
+    const ok = await confirm(
+      "This day already has entries in the Water Tracker. Editing it here will be overwritten the next time you log a drink there.",
+      { title: 'Overwrite water tracker?', ok: 'Continue', cancel: 'Cancel' }
+    );
+    if (ok) setWaterUnlocked(true);
   };
 
   const inputStyle = {
@@ -1253,15 +1270,37 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
       </CatSection>
 
       <CatSection label="HYDRATION" collapsed={collapsedCats.has('hydration')} onToggle={() => toggleCat('hydration')}>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
-          {numField('water', 'Water', UI.waterEntryUnit())}
-          {UI.waterQuickAdds().map(inc => (
-            <button key={inc} onClick={() => set('water', String((healthInt(form.water) || 0) + inc))} style={{
-              padding: '10px 12px', borderRadius: 4, border: `0.5px solid ${UI.hairStrong}`, background: UI.bgInset,
-              color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap', WebkitTapHighlightColor: 'transparent',
-            }}>+{inc}</button>
-          ))}
-        </div>
+        {waterLocked ? (
+          // Greyed out and inert (pointerEvents:none on the whole row), a
+          // single button underneath it catches the tap and asks before
+          // unlocking, rather than letting a stray tap silently edit a value
+          // the water tracker will just overwrite again on its next entry.
+          <button onClick={requestWaterUnlock} style={{ width: '100%', textAlign: 'left', background: 'none', border: 'none', padding: 0, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', opacity: 0.45, pointerEvents: 'none' }}>
+              {numField('water', 'Water', UI.waterEntryUnit())}
+              {UI.waterQuickAdds().map(inc => (
+                <div key={inc} style={{
+                  padding: '10px 12px', borderRadius: 4, border: `0.5px solid ${UI.hairStrong}`, background: UI.bgInset,
+                  color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 12, whiteSpace: 'nowrap',
+                }}>+{inc}</div>
+              ))}
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 6 }}>
+              <i className="fa-solid fa-lock" style={{ fontSize: 9, color: UI.inkGhost }} />
+              <span style={{ fontSize: 10, fontFamily: UI.fontUi, color: UI.inkGhost }}>Managed by the Water Tracker, tap to override</span>
+            </div>
+          </button>
+        ) : (
+          <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+            {numField('water', 'Water', UI.waterEntryUnit())}
+            {UI.waterQuickAdds().map(inc => (
+              <button key={inc} onClick={() => set('water', String((healthInt(form.water) || 0) + inc))} style={{
+                padding: '10px 12px', borderRadius: 4, border: `0.5px solid ${UI.hairStrong}`, background: UI.bgInset,
+                color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap', WebkitTapHighlightColor: 'transparent',
+              }}>+{inc}</button>
+            ))}
+          </div>
+        )}
       </CatSection>
 
       <CatSection label="NOTE" collapsed={collapsedCats.has('note')} onToggle={() => toggleCat('note')}>
