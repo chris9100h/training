@@ -462,8 +462,9 @@ function MarkerRow({ label, value, onChange, readOnly }) {
             key={n}
             onClick={() => !readOnly && onChange(n)}
             style={{
-              flex: 1, padding: '6px 0', borderRadius: 4, border: 'none', cursor: readOnly ? 'default' : 'pointer',
-              background: value === n ? 'var(--accent)' : value != null && n <= value ? `rgba(var(--accent-rgb),0.18)` : UI.bgInset,
+              flex: 1, padding: '6px 0', borderRadius: 4, cursor: readOnly ? 'default' : 'pointer',
+              border: `1px solid ${value != null && n <= value && value !== n ? 'rgba(var(--accent-rgb),0.5)' : 'transparent'}`,
+              background: value === n ? 'var(--accent)' : value != null && n <= value ? `rgba(var(--accent-rgb),0.3)` : UI.bgInset,
               color: value === n ? 'var(--accent-ink)' : n <= 3 ? 'var(--accent)' : n <= 6 ? UI.inkSoft : UI.inkFaint,
               fontSize: 10, fontFamily: UI.fontUi, fontWeight: value === n ? 700 : 400,
               transition: 'background 0.1s',
@@ -1010,8 +1011,9 @@ function FieldWidget({ field, value, onChange, distUnit, setDistUnit, inputStyle
         <div style={{ display: 'flex', gap: 6 }}>
           {nums.map(n => (
             <button key={n} onClick={() => onChange(value === n ? null : n)}
-              style={{ flex: 1, padding: '8px 0', borderRadius: 4, border: 'none', cursor: 'pointer',
-                background: value === n ? 'var(--accent)' : value != null && n <= value ? `rgba(var(--accent-rgb),0.18)` : UI.bgInset,
+              style={{ flex: 1, padding: '8px 0', borderRadius: 4, cursor: 'pointer',
+                border: `1px solid ${value != null && n <= value && value !== n ? 'rgba(var(--accent-rgb),0.5)' : 'transparent'}`,
+                background: value === n ? 'var(--accent)' : value != null && n <= value ? `rgba(var(--accent-rgb),0.3)` : UI.bgInset,
                 color: btnColor(n),
                 fontSize: 10, fontFamily: UI.fontUi, fontWeight: value === n ? 700 : 400, transition: 'background 0.1s' }}>
               {n}
@@ -1035,8 +1037,8 @@ function FieldWidget({ field, value, onChange, distUnit, setDistUnit, inputStyle
             {options.map(opt => (
               <button key={opt.value} onClick={() => onChange(value === opt.value ? null : opt.value)}
                 style={{ flex: 1, padding: '7px 2px', borderRadius: 4, cursor: 'pointer',
-                  border: `0.5px solid ${value === opt.value ? 'var(--accent)' : UI.hairStrong}`,
-                  background: value === opt.value ? `rgba(var(--accent-rgb),0.18)` : UI.bgInset,
+                  border: `${value === opt.value ? '1.5px' : '0.5px'} solid ${value === opt.value ? 'var(--accent)' : UI.hairStrong}`,
+                  background: value === opt.value ? `rgba(var(--accent-rgb),0.24)` : UI.bgInset,
                   display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
                 <span className="num" style={{ fontSize: 13, color: value === opt.value ? 'var(--accent)' : UI.inkSoft }}>{opt.value}</span>
                 <span style={{ fontSize: 8, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.04em' }}>{opt.label}</span>
@@ -1340,7 +1342,7 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
           )}
           {previewResponses && canSubmitToday && new Date().getDay() !== 1 && (
             <button onClick={() => setPreviewOpen(v => !v)}
-              style={{ background: previewOpen ? `rgba(var(--accent-rgb),0.12)` : UI.bgInset, border: `0.5px solid ${previewOpen ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong}`, borderRadius: 6, padding: '11px 13px', cursor: 'pointer', color: previewOpen ? 'var(--accent)' : UI.inkFaint, fontSize: 15, lineHeight: 1, flexShrink: 0 }}>
+              style={{ background: previewOpen ? `rgba(var(--accent-rgb),0.22)` : UI.bgInset, border: `${previewOpen ? '1.5px' : '0.5px'} solid ${previewOpen ? 'var(--accent)' : UI.hairStrong}`, borderRadius: 6, padding: '11px 13px', cursor: 'pointer', color: previewOpen ? 'var(--accent)' : UI.inkFaint, fontSize: 15, lineHeight: 1, flexShrink: 0 }}>
               <i className="fa-solid fa-eye" />
             </button>
           )}

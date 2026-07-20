@@ -786,8 +786,8 @@ function CardioQuickLogSheet({ open, onClose, store, setStore, userId, editLog, 
           {[['1','Easy'],['2','Light'],['3','Steady'],['4','Solid'],['5','Hard'],['6','Max']].map(([n, lbl]) => (
             <button key={n} onClick={() => set('paceFeeling', form.paceFeeling === Number(n) ? null : Number(n))} style={{
               flex: 1, padding: '7px 2px', borderRadius: 8, cursor: 'pointer',
-              border: `0.5px solid ${form.paceFeeling === Number(n) ? 'var(--accent)' : UI.hairStrong}`,
-              background: form.paceFeeling === Number(n) ? `rgba(var(--accent-rgb),0.18)` : UI.bgInset,
+              border: `${form.paceFeeling === Number(n) ? '1.5px' : '0.5px'} solid ${form.paceFeeling === Number(n) ? 'var(--accent)' : UI.hairStrong}`,
+              background: form.paceFeeling === Number(n) ? `rgba(var(--accent-rgb),0.24)` : UI.bgInset,
               display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
               WebkitTapHighlightColor: 'transparent',
             }}>
@@ -808,8 +808,8 @@ function CardioQuickLogSheet({ open, onClose, store, setStore, userId, editLog, 
           {[1,2,3,4,5,6,7,8,9,10].map(n => (
             <button key={n} onClick={() => set('effort', form.effort === n ? null : n)} style={{
               flex: 1, padding: '7px 0', borderRadius: 6, cursor: 'pointer',
-              border: `0.5px solid ${form.effort === n ? 'var(--accent)' : UI.hairStrong}`,
-              background: form.effort === n ? `rgba(var(--accent-rgb),0.18)` : UI.bgInset,
+              border: `${form.effort === n ? '1.5px' : '0.5px'} solid ${form.effort === n ? 'var(--accent)' : UI.hairStrong}`,
+              background: form.effort === n ? `rgba(var(--accent-rgb),0.24)` : UI.bgInset,
               WebkitTapHighlightColor: 'transparent',
             }}>
               <span className="num" style={{ fontSize: 11, color: form.effort === n ? 'var(--accent)' : UI.inkSoft }}>{n}</span>

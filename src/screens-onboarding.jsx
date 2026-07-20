@@ -814,7 +814,7 @@ function TourVisualTrainOverview() {
             <div style={{ width: 20, height: 20, borderRadius: 4, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, color: UI.inkGhost }}>{s.label}</div>
             <div className="num" style={{ fontSize: 12, color: s.active ? 'var(--accent)' : UI.ink }}>{`80 ${UI.unit()}`}</div>
             <div className="num" style={{ fontSize: 12, color: s.active ? 'var(--accent)' : UI.inkSoft }}>8</div>
-            <div style={{ width: 26, height: 26, borderRadius: 4, background: s.done ? 'var(--accent)' : s.active ? `rgba(var(--accent-rgb),0.12)` : UI.bgInset, border: `1.5px solid ${(s.done || s.active) ? 'var(--accent)' : UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: s.active ? `0 0 0 3px rgba(var(--accent-rgb),0.15)` : 'none' }}>
+            <div style={{ width: 26, height: 26, borderRadius: 4, background: s.done ? 'var(--accent)' : s.active ? `rgba(var(--accent-rgb),0.24)` : UI.bgInset, border: `1.5px solid ${(s.done || s.active) ? 'var(--accent)' : UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: s.active ? `0 0 0 3px rgba(var(--accent-rgb),0.15)` : 'none' }}>
               {s.done && <i className="fa-solid fa-check" style={{ fontSize: 9, color: 'var(--accent-ink)' }} />}
             </div>
             <div style={{ width: 20, height: 20, borderRadius: 4, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: UI.inkFaint, fontSize: 14, lineHeight: 1 }}>−</div>
@@ -877,7 +877,7 @@ function TourVisualTrainLogSet() {
           <div style={{ width: 20, height: 20, borderRadius: 4, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, color: UI.inkGhost }}>{s.label}</div>
           <div className="num" style={{ fontSize: 13, color: s.active ? 'var(--accent)' : UI.ink }}>80.0</div>
           <div className="num" style={{ fontSize: 13, color: s.active ? 'var(--accent)' : UI.inkSoft }}>8</div>
-          <div style={{ width: 28, height: 28, borderRadius: 4, background: s.done ? 'var(--accent)' : s.active ? `rgba(var(--accent-rgb),0.12)` : UI.bgInset, border: `1.5px solid ${(s.done || s.active) ? 'var(--accent)' : UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: s.active ? `0 0 0 3px rgba(var(--accent-rgb),0.15)` : 'none' }}>
+          <div style={{ width: 28, height: 28, borderRadius: 4, background: s.done ? 'var(--accent)' : s.active ? `rgba(var(--accent-rgb),0.24)` : UI.bgInset, border: `1.5px solid ${(s.done || s.active) ? 'var(--accent)' : UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: s.active ? `0 0 0 3px rgba(var(--accent-rgb),0.15)` : 'none' }}>
             {s.done ? <i className="fa-solid fa-check" style={{ fontSize: 10, color: 'var(--accent-ink)' }} /> : s.active ? <i className="fa-solid fa-check" style={{ fontSize: 10, color: 'var(--accent)' }} /> : null}
           </div>
           <div style={{ width: 20, height: 20, borderRadius: 4, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: UI.inkFaint, fontSize: 14, lineHeight: 1 }}>−</div>

@@ -1024,7 +1024,7 @@ function CheckInSchemaBuilder({ coachingId, initial, coachDefault, onSave, onSav
           </div>
 
           {['integer', 'decimal', 'stepper'].includes(fd.type) && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '12px 14px', borderRadius: 6, background: fd.show_in_health_log ? `rgba(var(--accent-rgb),0.13)` : UI.bgInset, border: `0.5px solid ${fd.show_in_health_log ? `rgba(var(--accent-rgb),0.25)` : UI.hair}` }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '12px 14px', borderRadius: 6, background: fd.show_in_health_log ? `rgba(var(--accent-rgb),0.22)` : UI.bgInset, border: `${fd.show_in_health_log ? '1.5px' : '0.5px'} solid ${fd.show_in_health_log ? 'var(--accent)' : UI.hair}` }}>
               <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
                 <div style={{ flex: 1 }}>
                   <div style={{ ...lbl, marginBottom: 3 }}>Track daily in health log</div>

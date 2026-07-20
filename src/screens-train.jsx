@@ -8577,8 +8577,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           return (
             <button key={opt.key} onClick={() => setMesoSorenessSel(opt.key)} style={{
               width: '100%', marginBottom: 8, padding: '12px 14px',
-              background: sel ? `rgba(var(--accent-rgb),0.12)` : UI.bgInset,
-              border: `1px solid ${sel ? 'var(--accent)' : UI.hairStrong}`,
+              // A low-alpha accent tint over the sheet's bg-raised landed
+              // almost exactly on UI.bgInset's own grey on paper (both cool
+              // greys, barely 2 units apart) — selected vs. unselected was
+              // nearly indistinguishable. Stronger fill + a thicker border
+              // (same recipe as the Home day strip's selected cell) instead.
+              background: sel ? `rgba(var(--accent-rgb),0.22)` : UI.bgInset,
+              border: `${sel ? '2px' : '1px'} solid ${sel ? 'var(--accent)' : UI.hairStrong}`,
               borderRadius: 6, cursor: 'pointer', textAlign: 'left',
               WebkitTapHighlightColor: 'transparent',
             }}>
@@ -8694,8 +8699,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             return (
               <button key={key} onClick={() => setMesoVolumeAnswer(key)} style={{
                 width: '100%', padding: '10px 14px',
-                background: sel ? `rgba(var(--accent-rgb),0.12)` : UI.bgInset,
-                border: `1px solid ${sel ? 'var(--accent)' : UI.hairStrong}`,
+                background: sel ? `rgba(var(--accent-rgb),0.22)` : UI.bgInset,
+                border: `${sel ? '2px' : '1px'} solid ${sel ? 'var(--accent)' : UI.hairStrong}`,
                 borderRadius: 6, cursor: 'pointer', textAlign: 'left',
                 WebkitTapHighlightColor: 'transparent',
               }}>
