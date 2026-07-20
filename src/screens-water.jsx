@@ -28,6 +28,15 @@ const WT_CELEBRATED_KEY = 'logbook-water-celebrated'; // per-device day guard fo
 const WT_COFFEE_SIZES_DEFAULT = [];
 const WT_MILK_OPTS = [20, 40, 60, 80, 100, 0];
 const WT_CUSTOM_PRESETS_ML = [100, 150, 200, 300, 330, 400, 750, 1000];
+// Icons a user can pick for a custom drink (FA6 free solid), same idea as the
+// coach check-in schema editor's icon picker.
+const WT_DRINK_ICONS = [
+  'fa-glass-water', 'fa-bottle-water', 'fa-mug-hot', 'fa-mug-saucer',
+  'fa-wine-bottle', 'fa-wine-glass', 'fa-martini-glass', 'fa-beer-mug-empty',
+  'fa-champagne-glasses', 'fa-blender', 'fa-jar', 'fa-flask',
+  'fa-bolt', 'fa-droplet', 'fa-lemon', 'fa-leaf', 'fa-fire', 'fa-cube',
+];
+const WT_DEFAULT_DRINK_ICON = 'fa-glass-water';
 
 function wtDateStr(offset = 0) {
   const d = new Date();
@@ -270,7 +279,7 @@ function WaterScreen({ store, setStore, go, userId }) {
   return (
     <Screen>
       {confirmEl}
-      <TopBar title="Water" sub="Hydration" onBack={() => go({ name: 'health' })} right={
+      <TopBar title="Water" sub="Hydration" onBack={() => go({ name: 'home' })} right={
         <div style={{ display: 'flex', gap: 8 }}>
           <button onClick={() => setStatsOpen(true)} aria-label="Stats" style={wtIconBtn}>
             <i className="fa-solid fa-chart-column" style={{ fontSize: 15 }} />
@@ -349,7 +358,7 @@ function WaterScreen({ store, setStore, go, userId }) {
           <Bezel style={{ marginBottom: 10 }}>Other drinks</Bezel>
           <button onClick={openCoffee} style={{ ...wtDrinkTile, width: '100%' }}>
             <span style={wtDrinkIcon}><i className="fa-solid fa-mug-hot" style={{ fontSize: 15 }} /></span>
-            <div style={{ textAlign: 'left', minWidth: 0 }}>
+            <div style={{ textAlign: 'center', minWidth: 0 }}>
               <div style={wtDrinkName}>Coffee</div>
               <div style={wtDrinkMeta}>size + milk</div>
             </div>
@@ -358,8 +367,8 @@ function WaterScreen({ store, setStore, go, userId }) {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8, marginTop: 8 }}>
               {drinks.map((d, i) => (
                 <button key={i} onClick={() => addWithConfirm(d.ml, d.name, 'other')} style={wtDrinkTile}>
-                  <span style={wtDrinkIcon}><i className="fa-solid fa-glass-water" style={{ fontSize: 15 }} /></span>
-                  <div style={{ textAlign: 'left', minWidth: 0 }}>
+                  <span style={wtDrinkIcon}><i className={`fa-solid ${d.icon || WT_DEFAULT_DRINK_ICON}`} style={{ fontSize: 15 }} /></span>
+                  <div style={{ textAlign: 'center', minWidth: 0 }}>
                     <div style={wtDrinkName}>{d.name}</div>
                     <div style={wtDrinkMeta}>{d.ml} ml</div>
                   </div>
@@ -580,14 +589,15 @@ function WaterDrinksConfigBody({ settings, patchSettings, onClose }) {
   const coffee = (settings.waterCoffeeSizes && settings.waterCoffeeSizes.length) ? settings.waterCoffeeSizes : WT_COFFEE_SIZES_DEFAULT;
   const [drinkName, setDrinkName] = useStateW('');
   const [drinkMl, setDrinkMl] = useStateW('');
+  const [drinkIcon, setDrinkIcon] = useStateW(WT_DEFAULT_DRINK_ICON);
   const [cLabel, setCLabel] = useStateW('');
   const [cMl, setCMl] = useStateW('');
 
   const addDrink = () => {
     const ml = parseInt(drinkMl, 10);
     if (!drinkName.trim() || !ml || ml <= 0 || drinks.length >= WT_MAX_DRINKS) return;
-    patchSettings({ waterDrinks: [...drinks, { name: drinkName.trim(), ml }] });
-    setDrinkName(''); setDrinkMl('');
+    patchSettings({ waterDrinks: [...drinks, { name: drinkName.trim(), ml, icon: drinkIcon }] });
+    setDrinkName(''); setDrinkMl(''); setDrinkIcon(WT_DEFAULT_DRINK_ICON);
   };
   const removeDrink = (i) => patchSettings({ waterDrinks: drinks.filter((_, idx) => idx !== i) });
   const addCoffee = () => {
@@ -607,15 +617,33 @@ function WaterDrinksConfigBody({ settings, patchSettings, onClose }) {
         {drinksLeft > 0 ? `Add up to ${drinksLeft} custom drink${drinksLeft === 1 ? '' : 's'}.` : 'You have added the maximum of 6 drinks.'}
       </div>
       {drinks.map((d, i) => (
-        <WaterConfigRow key={i} left={d.name} right={`${d.ml} ml`} onRemove={() => removeDrink(i)} />
+        <WaterConfigRow key={i} left={d.name} right={`${d.ml} ml`} icon={d.icon || WT_DEFAULT_DRINK_ICON} onRemove={() => removeDrink(i)} />
       ))}
       {drinksLeft > 0 && (
-        <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', marginTop: 4, marginBottom: 20 }}>
-          <div style={{ flex: 2 }}><TextInput value={drinkName} onChange={setDrinkName} placeholder="Name" /></div>
-          <div style={{ flex: 1 }}>
-            <input value={drinkMl} onChange={e => setDrinkMl(e.target.value.replace(/[^0-9]/g, ''))} type="text" inputMode="numeric" placeholder="ml" style={wtInput} />
+        <div style={{ marginTop: 4, marginBottom: 20 }}>
+          <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>Icon</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 6, marginBottom: 10 }}>
+            {WT_DRINK_ICONS.map(ic => {
+              const sel = drinkIcon === ic;
+              return (
+                <button key={ic} onClick={() => setDrinkIcon(ic)} aria-label={ic.replace('fa-', '')} style={{
+                  display: 'grid', placeItems: 'center', padding: '10px 0', borderRadius: 6, cursor: 'pointer',
+                  background: sel ? 'rgba(var(--accent-rgb),0.14)' : UI.bgInset,
+                  border: `0.5px solid ${sel ? 'rgba(var(--accent-rgb),0.5)' : UI.hair}`,
+                  color: sel ? 'var(--accent)' : UI.inkSoft, WebkitTapHighlightColor: 'transparent',
+                }}>
+                  <i className={`fa-solid ${ic}`} style={{ fontSize: 16 }} />
+                </button>
+              );
+            })}
           </div>
-          <Btn onClick={addDrink} style={{ flexShrink: 0, minHeight: 40, padding: '10px 16px' }}>Add</Btn>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+            <div style={{ flex: 2 }}><TextInput value={drinkName} onChange={setDrinkName} placeholder="Name" /></div>
+            <div style={{ flex: 1 }}>
+              <input value={drinkMl} onChange={e => setDrinkMl(e.target.value.replace(/[^0-9]/g, ''))} type="text" inputMode="numeric" placeholder="ml" style={wtInput} />
+            </div>
+            <Btn onClick={addDrink} style={{ flexShrink: 0, minHeight: 40, padding: '10px 16px' }}>Add</Btn>
+          </div>
         </div>
       )}
 
@@ -640,10 +668,13 @@ function WaterDrinksConfigBody({ settings, patchSettings, onClose }) {
   );
 }
 
-function WaterConfigRow({ left, right, onRemove }) {
+function WaterConfigRow({ left, right, onRemove, icon }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 12px', background: UI.bgInset, border: `1px solid ${UI.hair}`, borderRadius: 6, marginBottom: 6 }}>
-      <span style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi }}>{left}</span>
+      <span style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, display: 'inline-flex', alignItems: 'center', gap: 10 }}>
+        {icon && <i className={`fa-solid ${icon}`} style={{ fontSize: 13, color: WT_BLUE, width: 16, textAlign: 'center' }} />}
+        {left}
+      </span>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
         <span className="num" style={{ fontSize: 12, color: UI.inkSoft }}>{right}</span>
         <button onClick={onRemove} aria-label="Remove" style={{ background: 'transparent', border: 'none', color: UI.inkFaint, cursor: 'pointer', padding: 4, WebkitTapHighlightColor: 'transparent' }}>
@@ -701,7 +732,7 @@ const wtTile = {
   background: UI.bgInset, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
 };
 const wtDrinkTile = {
-  display: 'flex', alignItems: 'center', gap: 10, padding: 12, borderRadius: 6,
+  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, padding: 12, borderRadius: 6,
   border: `1px solid ${UI.hairStrong}`, background: UI.bgInset, cursor: 'pointer',
   WebkitTapHighlightColor: 'transparent', overflow: 'hidden',
 };
