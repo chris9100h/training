@@ -475,8 +475,9 @@ function WaterScreen({ store, setStore, go, userId }) {
         </div>
         )}
 
-        {/* Current bottle */}
-        {bottleEnabled && pendingBottle > 0 && (
+        {/* Current bottle (hidden while capturing: nobody sharing a screenshot
+            wants their exact bottle fill state broadcast) */}
+        {!capturing && bottleEnabled && pendingBottle > 0 && (
           <Card style={{ padding: '12px 14px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
               <span style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
@@ -535,8 +536,9 @@ function WaterScreen({ store, setStore, go, userId }) {
           <WaterDayChart entries={todayEntries} goalMl={goalMl} startTime={startTime} endTime={endTime} />
         </Card>
 
-        {/* Breakdown */}
-        {(Object.keys(breakdown.grouped).length > 0 || breakdown.milk > 0 || breakdown.custom > 0 || bottlesToday > 0) && (
+        {/* Breakdown (hidden while capturing: a shared screenshot is meant to
+            show the day's progress, not a full drink-by-drink inventory) */}
+        {!capturing && (Object.keys(breakdown.grouped).length > 0 || breakdown.milk > 0 || breakdown.custom > 0 || bottlesToday > 0) && (
           <Card style={{ padding: 14 }}>
             <div className="micro" style={{ color: UI.inkFaint, marginBottom: 10 }}>Other drinks today</div>
             {bottleEnabled && bottlesToday > 0 && <WaterBreakdownRow icon="fa-bottle-water" name="Bottles" value={`${bottlesToday}x`} />}
@@ -548,7 +550,9 @@ function WaterScreen({ store, setStore, go, userId }) {
           </Card>
         )}
 
-        {/* Today's log */}
+        {/* Today's log (hidden while capturing: a shared screenshot is the
+            day's totals, not a timestamped log of every single drink) */}
+        {!capturing && (
         <div>
           <Bezel style={{ marginBottom: 10 }}>Today's entries ({todayEntries.length})</Bezel>
           {todayEntries.length === 0 ? (
@@ -562,16 +566,15 @@ function WaterScreen({ store, setStore, go, userId }) {
                     <span className="num" style={{ fontSize: 14, fontWeight: 600, color: UI.ink }}>+{e.amountMl} ml</span>
                     {e.name && <span style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{e.name}</span>}
                   </div>
-                  {!capturing && (
-                    <button onClick={() => deleteEntry(e)} aria-label="Delete" style={{ background: 'transparent', border: 'none', color: UI.inkFaint, cursor: 'pointer', padding: 6, WebkitTapHighlightColor: 'transparent' }}>
-                      <i className="fa-solid fa-trash" style={{ fontSize: 12 }} />
-                    </button>
-                  )}
+                  <button onClick={() => deleteEntry(e)} aria-label="Delete" style={{ background: 'transparent', border: 'none', color: UI.inkFaint, cursor: 'pointer', padding: 6, WebkitTapHighlightColor: 'transparent' }}>
+                    <i className="fa-solid fa-trash" style={{ fontSize: 12 }} />
+                  </button>
                 </div>
               ))}
             </div>
           )}
         </div>
+        )}
       </div>
 
       {/* ── Settings sheet ── */}
