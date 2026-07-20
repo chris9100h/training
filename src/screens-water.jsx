@@ -242,10 +242,15 @@ function WaterScreen({ store, setStore, go, userId }) {
     }
     if (!category && bottleEnabled) {
       const nextPlain = plainToday + entry.amountMl;
-      if (Math.max(0, nextPlain - bottlesToday * bottleMl) >= bottleMl) {
+      // How many whole bottles' worth were newly crossed by THIS add, not just
+      // whether one was crossed: a small configured bottle size (smaller than
+      // the largest quick-amount tile) lets a single add cross more than one.
+      const crossed = Math.floor(Math.max(0, nextPlain - bottlesToday * bottleMl) / bottleMl);
+      if (crossed >= 1) {
         if (!goalDialogShown) await new Promise(r => setTimeout(r, 300));
-        const ok = await confirm(`You have logged ${bottleMl} ml of water via the quick amounts. Count an emptied bottle?`, { title: 'Bottle empty?', ok: 'Yes, empty', cancel: 'Not yet' });
-        if (ok) setStore(s => ({ ...s, settings: { ...s.settings, waterBottlesToday: ((s.settings?.waterBottlesDate === today ? s.settings?.waterBottlesToday : 0) || 0) + 1, waterBottlesDate: today } }));
+        const label = crossed > 1 ? `${crossed} bottles` : 'a bottle';
+        const ok = await confirm(`You have logged enough water for ${label} via the quick amounts. Count ${crossed > 1 ? 'them' : 'it'} as emptied?`, { title: 'Bottle empty?', ok: crossed > 1 ? 'Yes, all empty' : 'Yes, empty', cancel: 'Not yet' });
+        if (ok) setStore(s => ({ ...s, settings: { ...s.settings, waterBottlesToday: ((s.settings?.waterBottlesDate === today ? s.settings?.waterBottlesToday : 0) || 0) + crossed, waterBottlesDate: today } }));
       }
     }
   }
