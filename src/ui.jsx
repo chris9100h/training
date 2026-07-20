@@ -789,7 +789,7 @@ function Sheet({ open, onClose, title, titleColor, children, keyboardHeight = 0,
         {accent && <div className="intensity-glow" style={{ position: 'absolute', inset: 0, borderRadius: cardLike ? 6 : '6px 6px 0 0', pointerEvents: 'none' }} />}
         <div onClick={e => e.stopPropagation()} style={{
           width: '100%', boxSizing: 'border-box',
-          background: UI.bgRaised,
+          backgroundColor: UI.bgRaised, backgroundImage: 'var(--bg-texture)',
           borderRadius: cardLike ? 6 : '6px 6px 0 0',
           border: `1px solid ${edgeColor}`,
           ...(!cardLike && { borderBottom: 'none' }),
