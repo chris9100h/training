@@ -3632,8 +3632,10 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                           so it is not cosmetic. Tap-to-fix only on the still-editable session. */}
                       {s.readiness != null && (
                         <div style={{ background: 'rgba(var(--knurl-rgb),0.03)', border: `1px solid ${UI.hair}`, borderRadius: 6, padding: '13px 14px 6px', marginBottom: 8 }}>
-                          <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>Session</div>
-                          <div className="knurl" style={{ marginBottom: 4 }} />
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                            <span style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--accent)', flexShrink: 0 }} />
+                            <span style={{ fontFamily: UI.fontDisplay, fontSize: 19, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: UI.ink, lineHeight: 1 }}>Session</span>
+                          </div>
                           {fbRow({ type: 'readiness', subject: sessionId, name: 'Readiness', sub: MESO_READINESS_LBL[s.readiness] || s.readiness, sel: s.readiness }, 'readiness', false)}
                         </div>
                       )}
