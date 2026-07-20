@@ -454,11 +454,17 @@ window.ACCENT_PALETTE = {
 };
 window.applyAccentColor = function(key) {
   var c = window.ACCENT_PALETTE[key] || window.ACCENT_PALETTE.gold;
+  // Some themes (paper) mute the chosen accent to a neutral tone instead of
+  // showing it at full color, e.g. so "today"/"completed" markers read as
+  // pencil-grey on a notebook page rather than a gold highlighter streak.
+  var mode = window.DARK_MODES && window.DARK_MODES[window.__currentDarkMode];
+  var ov = mode && mode.accent ? mode : null;
+  window.__accentColorKey = key;
   var s = document.documentElement.style;
-  s.setProperty('--accent', c.hex);
-  s.setProperty('--accent-light', c.light);
-  s.setProperty('--accent-deep', c.deep);
-  s.setProperty('--accent-rgb', c.rgb);
+  s.setProperty('--accent', ov ? ov.accent : c.hex);
+  s.setProperty('--accent-light', ov ? ov.accentLight : c.light);
+  s.setProperty('--accent-deep', ov ? ov.accentDeep : c.deep);
+  s.setProperty('--accent-rgb', ov ? ov.accentRgb : c.rgb);
 };
 window.applyAccentColor(localStorage.getItem('logbook-accent-color') || 'gold');
 </script>
@@ -501,29 +507,33 @@ window.DARK_MODES = {
     neutralBorderSm: 'rgba(31,27,22,0.20)',
     successText:     '#2e7a30',
   },
-  // Parchment canvas + blue-black ink + a faint blue quad-ruled grid, like a
+  // Grey canvas + near-black ink + a faint blue quad-ruled grid, like a
   // real notebook page. knurlRgb drives the grid lines (see bgTexture) as
-  // well as the guilloche textures used elsewhere.
+  // well as the guilloche textures used elsewhere; kept blue on purpose
+  // (ruled-paper look) even though ink itself is neutral, not blue-black.
   paper: {
     bg: '#eff0f2', bgRaised: '#f9fafb', bgInset: '#e2e4e8', bgBody: '#e7e8eb', bgRgb: '239,240,242',
-    ink: '#25324a', inkSoft: 'rgba(37,50,74,0.66)', inkFaint: 'rgba(37,50,74,0.42)', inkGhost: 'rgba(37,50,74,0.16)',
-    hair: 'rgba(37,50,74,0.16)', hairStrong: 'rgba(37,50,74,0.34)', knurlRgb: '70,95,150',
-    surfaceTint:     'rgba(37,50,74,0.035)',
-    surfaceTintSm:   'rgba(37,50,74,0.05)',
-    surfaceTintMd:   'rgba(37,50,74,0.07)',
-    surfaceTintLg:   'rgba(37,50,74,0.09)',
-    rootGlow:        'rgba(37,50,74,0.15)',
-    overlayTint:     'rgba(37,50,74,0.04)',
+    ink: '#141414', inkSoft: 'rgba(20,20,20,0.66)', inkFaint: 'rgba(20,20,20,0.42)', inkGhost: 'rgba(20,20,20,0.16)',
+    hair: 'rgba(20,20,20,0.16)', hairStrong: 'rgba(20,20,20,0.34)', knurlRgb: '70,95,150',
+    surfaceTint:     'rgba(20,20,20,0.035)',
+    surfaceTintSm:   'rgba(20,20,20,0.05)',
+    surfaceTintMd:   'rgba(20,20,20,0.07)',
+    surfaceTintLg:   'rgba(20,20,20,0.09)',
+    rootGlow:        'rgba(20,20,20,0.15)',
+    overlayTint:     'rgba(20,20,20,0.04)',
     successTintXs:   'rgba(58,110,58,0.10)',
     successBorder:   'rgba(58,110,58,0.36)',
-    neutralTint:     'rgba(37,50,74,0.07)',
-    neutralBorderSm: 'rgba(37,50,74,0.18)',
+    neutralTint:     'rgba(20,20,20,0.07)',
+    neutralBorderSm: 'rgba(20,20,20,0.18)',
     successText:     '#2e6b30',
     bgTexture: 'repeating-linear-gradient(0deg, rgba(var(--knurl-rgb),0.16) 0px, rgba(var(--knurl-rgb),0.16) 1px, transparent 1px, transparent 22px), repeating-linear-gradient(90deg, rgba(var(--knurl-rgb),0.16) 0px, rgba(var(--knurl-rgb),0.16) 1px, transparent 1px, transparent 22px)',
+    // Mutes the user's chosen accent color to pencil-grey (see applyAccentColor).
+    accent: '#4b5563', accentLight: '#6b7280', accentDeep: '#333c46', accentRgb: '75,85,99',
   },
 };
 window.applyDarkMode = function(key) {
   var m = window.DARK_MODES[key] || window.DARK_MODES.dark;
+  window.__currentDarkMode = key;
   var t = _DARK_TINTS;
   var s = document.documentElement.style;
   s.setProperty('--bg', m.bg);
@@ -550,6 +560,9 @@ window.applyDarkMode = function(key) {
   s.setProperty('--neutral-tint',      m.neutralTint     || t.neutralTint);
   s.setProperty('--neutral-border-sm', m.neutralBorderSm || t.neutralBorderSm);
   s.setProperty('--success-text',      m.successText     || t.successText);
+  // Re-derive --accent*: picks up this theme's mute-to-grey override if it
+  // has one (paper), or clears a previous theme's override otherwise.
+  window.applyAccentColor(window.__accentColorKey || localStorage.getItem('logbook-accent-color') || 'gold');
   var tc = document.querySelector('meta[name="theme-color"]');
   if (tc) tc.content = m.bg;
 };
