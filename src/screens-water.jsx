@@ -416,7 +416,12 @@ function WaterScreen({ store, setStore, go, userId }) {
         </div>
       } />
 
-      <div ref={captureRef} style={{ padding: capturing ? '14px 22px 16px' : '14px 22px calc(env(safe-area-inset-bottom, 8px) + 24px)', display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {/* No background of its own while live (the Screen canvas behind it,
+          texture included, shows through). While capturing, an explicit solid
+          fill blocks that canvas out so the exported PNG never picks up the
+          paper grid, belt-and-suspenders alongside captureNodeAsPng's own
+          html2canvas backgroundColor option. */}
+      <div ref={captureRef} style={{ padding: capturing ? '14px 22px 16px' : '14px 22px calc(env(safe-area-inset-bottom, 8px) + 24px)', display: 'flex', flexDirection: 'column', gap: 16, ...(capturing && { backgroundColor: UI.bg }) }}>
         {/* Hero */}
         <BracketFrame gold style={{ padding: 20 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 18 }}>
