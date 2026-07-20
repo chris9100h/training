@@ -51,6 +51,18 @@ function wtHhmmToDecimal(t) {
   const [h, m] = (t || '0:0').split(':').map(Number);
   return (h || 0) + (m || 0) / 60;
 }
+// Inclusive list of local YYYY-MM-DD strings from `from` to `to` (capped so a
+// silly custom range can't build an unbounded array).
+function wtDateRange(from, to) {
+  const out = [];
+  const cur = new Date(from + 'T12:00:00'), end = new Date(to + 'T12:00:00');
+  let guard = 0;
+  while (cur <= end && guard < 1000) {
+    out.push(`${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2, '0')}-${String(cur.getDate()).padStart(2, '0')}`);
+    cur.setDate(cur.getDate() + 1); guard++;
+  }
+  return out;
+}
 function wtAmt(ml) { return `${UI.waterToEntry(ml)}`; }
 function wtUnit() { return UI.waterEntryUnit(); }
 
@@ -685,36 +697,94 @@ function WaterConfigRow({ left, right, onRemove, icon }) {
   );
 }
 
-// Stats body: 30-day water totals with drag-to-inspect bars (reuses the Health
-// bar chart so the scrubber and target line match the rest of the app).
+// Stats body: 7/30/90/custom water history with drag-to-inspect bars (reuses the
+// Health bar chart), KPIs, and a per-period other-drinks breakdown. Totals come
+// from the daily logs, the drink breakdown from the per-entry water logs.
 function WaterStatsBody({ store, goalMl }) {
-  const days = useMemoW(() => {
+  const [period, setPeriod] = useStateW(30);
+  const [from, setFrom] = useStateW(wtDateStr(-29));
+  const [to, setTo] = useStateW(wtDateStr(0));
+  const timeColorScheme = store.settings?.darkMode === 'light' ? 'light' : 'dark';
+  const coffeeLabels = (store.settings?.waterCoffeeSizes || []).map(s => s.label);
+
+  const range = useMemoW(() => {
+    if (period === 'custom') return (from > to) ? { from: to, to } : { from, to };
+    return { from: wtDateStr(-(period - 1)), to: wtDateStr(0) };
+  }, [period, from, to]);
+
+  const s = useMemoW(() => {
     const byDate = {};
     (store.dailyLogs || []).forEach(l => { if (l.waterMl != null) byDate[l.date] = l.waterMl; });
-    const out = [];
-    for (let i = 29; i >= 0; i--) { const d = wtDateStr(-i); out.push({ date: d, value: byDate[d] || 0 }); }
-    return out;
-  }, [store.dailyLogs]);
-  const withData = days.filter(d => d.value > 0);
-  const met = days.filter(d => d.value >= goalMl);
-  const avg = withData.length ? Math.round(withData.reduce((a, d) => a + d.value, 0) / withData.length) : 0;
-  const rate = withData.length ? Math.round((met.length / withData.length) * 100) : 0;
-  const best = wtStreak(store.dailyLogs, goalMl);
+    const days = wtDateRange(range.from, range.to).map(d => ({ date: d, value: byDate[d] || 0 }));
+    const withData = days.filter(d => d.value > 0);
+    const goalDays = days.filter(d => d.value >= goalMl);
+    const avg = withData.length ? Math.round(withData.reduce((a, d) => a + d.value, 0) / withData.length) : 0;
+    const rate = days.length ? Math.round((goalDays.length / days.length) * 100) : 0;
+    let best = 0, cur = 0;
+    days.forEach(d => { if (d.value >= goalMl) { cur++; best = Math.max(best, cur); } else cur = 0; });
+    const drinks = {}; let milk = 0;
+    (store.waterLogs || []).forEach(e => {
+      if (e.date < range.from || e.date > range.to || e.category !== 'other') return;
+      const mm = e.name ? e.name.match(/\+\s*(\d+)ml Milk/i) : null;
+      if (mm) milk += parseInt(mm[1], 10);
+      const baseName = (e.name || 'Other').replace(/\s*\+\s*\d+ml Milk/i, '');
+      const key = coffeeLabels.includes(baseName) ? 'Coffee' : baseName;
+      drinks[key] = (drinks[key] || 0) + 1;
+    });
+    const top = Object.entries(drinks).sort((a, b) => b[1] - a[1])[0];
+    return { days, withData: withData.length, goalDays: goalDays.length, avg, rate, best, drinks, milk, fav: top ? top[0] : null, favN: top ? top[1] : 0 };
+  }, [store.dailyLogs, store.waterLogs, range, goalMl, coffeeLabels]);
+
+  const segBtn = (id, label) => (
+    <button onClick={() => setPeriod(id)} style={{
+      flex: 1, padding: '7px 0', border: 'none', cursor: 'pointer',
+      background: period === id ? 'var(--accent)' : 'transparent',
+      color: period === id ? '#0a0805' : UI.inkFaint,
+      fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.04em', WebkitTapHighlightColor: 'transparent',
+    }}>{label}</button>
+  );
+  const statCard = (label, value, sub) => (
+    <div style={{ background: UI.bgInset, border: `1px solid ${UI.hair}`, borderRadius: 6, padding: '11px 12px', minWidth: 0 }}>
+      <div style={{ fontSize: 9, letterSpacing: '0.1em', textTransform: 'uppercase', color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 5 }}>{label}</div>
+      <div className="num" style={{ fontSize: 19, color: UI.ink, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+        {value}{sub && <span style={{ fontSize: 10, color: UI.inkFaint, marginLeft: 4, fontFamily: UI.fontUi }}>{sub}</span>}
+      </div>
+    </div>
+  );
 
   return (
     <div>
-      <div className="micro" style={{ color: UI.inkFaint, marginBottom: 10 }}>Last 30 days</div>
+      <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `1px solid ${UI.hairStrong}`, marginBottom: 14 }}>
+        {segBtn(7, '7D')}{segBtn(30, '30D')}{segBtn(90, '90D')}{segBtn('custom', 'Custom')}
+      </div>
+      {period === 'custom' && (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 16 }}>
+          <Field label="From"><input type="date" value={from} onChange={e => setFrom(e.target.value)} style={{ ...wtInput, colorScheme: timeColorScheme }} /></Field>
+          <Field label="To"><input type="date" value={to} onChange={e => setTo(e.target.value)} style={{ ...wtInput, colorScheme: timeColorScheme }} /></Field>
+        </div>
+      )}
       <div style={{ marginBottom: 20 }}>
-        <HealthBarChart series={days} from={days[0].date} to={days[days.length - 1].date}
+        <HealthBarChart series={s.days} from={range.from} to={range.to}
           format={v => `${UI.waterSummaryValue(v)}${UI.waterSummaryUnit()}`} target={goalMl}
           color={WT_BLUE} colorSoft={WT_BLUE_SOFT} />
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-        <div style={{ display: 'flex', justifyContent: 'center' }}><SubDial label="Current streak" value={`${best}`} sub="days" gold /></div>
-        <div style={{ display: 'flex', justifyContent: 'center' }}><SubDial label="Goal hit" value={`${rate}%`} /></div>
-        <div style={{ display: 'flex', justifyContent: 'center' }}><SubDial label="Avg / day" value={`${avg}`} sub="ml" /></div>
-        <div style={{ display: 'flex', justifyContent: 'center' }}><SubDial label="Days logged" value={`${withData.length}`} sub="days" /></div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 20 }}>
+        {statCard('Best streak', `🔥 ${s.best}`, 'days')}
+        {statCard('Goal hit', `${s.rate}`, '%')}
+        {statCard('Goal days', `${s.goalDays}`, 'days')}
+        {statCard('Days logged', `${s.withData}`, 'days')}
+        {statCard('Avg / day', `${s.avg}`, 'ml')}
+        {statCard('Top drink', s.fav || '—', s.fav ? `${s.favN}x` : null)}
       </div>
+      {(Object.keys(s.drinks).length > 0 || s.milk > 0) && (
+        <Card style={{ padding: 14 }}>
+          <div className="micro" style={{ color: UI.inkFaint, marginBottom: 10 }}>Other drinks this period</div>
+          {Object.entries(s.drinks).sort((a, b) => b[1] - a[1]).map(([name, count]) => (
+            <WaterBreakdownRow key={name} icon={name === 'Coffee' ? 'fa-mug-hot' : 'fa-glass-water'} name={name} value={`${count}x`} />
+          ))}
+          {s.milk > 0 && <WaterBreakdownRow icon="fa-cow" name="Milk" value={`${s.milk} ml`} />}
+        </Card>
+      )}
     </div>
   );
 }
