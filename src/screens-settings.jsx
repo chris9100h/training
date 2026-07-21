@@ -563,7 +563,6 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
   const [plateInvTab, setPlateInvTab] = useStateSet(() => UI.unit() === 'lbs' ? 1 : 0);
   const [progDisclaimer, setProgDisclaimer] = useStateSet(false);
   const [activeSessions, setActiveSessions] = useStateSet([]);
-  const [qsSwitching, setQsSwitching] = useStateSet(false);
   const [activeGrants, setActiveGrants] = useStateSet([]);
   const [newGrantEmail, setNewGrantEmail] = useStateSet('');
   const [pendingUsers, setPendingUsers] = useStateSet([]);
@@ -1512,14 +1511,6 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     await LB.deleteAllData(userId); await LB.signOut();
   };
 
-  // QS
-  const currentEmail = store.user?.email || '';
-  const otherQsEmail = LB.QS_EMAILS.find(e => e !== currentEmail);
-  const isQsUser = LB.QS_EMAILS.includes(currentEmail) && !!otherQsEmail;
-  const hasQsSession = isQsUser ? LB.hasQuickSwitchSession(otherQsEmail) : false;
-  const currentName = store.user?.name || currentEmail.split('@')[0];
-  const otherName = isQsUser ? (LB.getQsName(otherQsEmail) || otherQsEmail.split('@')[0]) : '';
-
   // Coaching derived values
   const hasCoaching = !!((store.coaching?.asCoach || []).filter(c => c.status === 'active').length > 0 || store.coaching?.asClient?.status === 'active');
   const selfOn = !!store.settings?.beYourOwnCoach;
@@ -2000,26 +1991,6 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       {/* ══ Account Sheet ══ */}
       <SettingsSheet open={accountSheet} onClose={() => setAccountSheet(false)} title="Account">
         <div>
-          {isQsUser && (
-            <>
-              <div className="micro" style={{ marginBottom: 10 }}>Quick switch</div>
-              <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
-                <div style={{ flex: 1, background: `linear-gradient(135deg, rgba(var(--accent-rgb),0.18), rgba(var(--accent-rgb),0.08))`, border: `0.5px solid ${UI.goldSoft}`, borderRadius: 6, padding: '10px 12px' }}>
-                  <div className="micro-gold" style={{ marginBottom: 4 }}>Active</div>
-                  <div style={{ fontFamily: UI.fontDisplay, fontSize: 18, color: UI.ink, lineHeight: 1.1 }}>{currentName}</div>
-                </div>
-                <button disabled={qsSwitching} onClick={async () => {
-                  if (hasQsSession) { setQsSwitching(true); try { await LB.quickSwitch(otherQsEmail); window.location.reload(); } catch (e) { setQsSwitching(false); } }
-                  else { const ok = await confirm(`You'll be signed out so ${otherName} can log in.`, { title: 'Set up quick switch?', ok: 'Sign out' }); if (ok) { await flushBeforeSignOut(userId); await LB.signOut(); } }
-                }} style={{ flex: 1, background: 'transparent', border: `0.5px solid ${hasQsSession ? UI.hair : UI.hairStrong}`, borderRadius: 6, padding: '10px 12px', textAlign: 'left', cursor: qsSwitching ? 'default' : 'pointer', WebkitTapHighlightColor: 'transparent', opacity: qsSwitching ? 0.5 : 1 }}>
-                  <div className="micro" style={{ marginBottom: 4, color: hasQsSession ? UI.inkFaint : 'rgba(var(--danger-rgb),0.7)' }}>{qsSwitching ? 'Switching…' : hasQsSession ? 'Tap to switch' : 'Log in first'}</div>
-                  <div style={{ fontFamily: UI.fontDisplay, fontSize: 18, color: hasQsSession ? UI.inkSoft : UI.inkFaint, lineHeight: 1.1 }}>{otherName}</div>
-                </button>
-              </div>
-              <Hairline style={{ marginBottom: 14 }} />
-            </>
-          )}
-          {''}
           <Row label="Push notifications" first>
             <button style={accentBtn} onClick={() => setPushSheet(true)}>Configure</button>
           </Row>

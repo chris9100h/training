@@ -146,66 +146,6 @@ function nextCycleD1ISOFromSchedule(schedule, cycleStartDate) {
   return nextCycleD1ISO(cycleStartDate, (schedule?.days || []).length);
 }
 
-// ─── QUICK SWITCH ────────────────────────────────────────────────────────
-
-const QS_EMAILS = ['office@btc-prime.biz', 'anja.knamm@gmail.com'];
-
-function _qsKey(email) { return `zane-qs-${email}`; }
-
-function _persistQsSession(session, email) {
-  if (!email || !session?.access_token || !session?.refresh_token) return;
-  if (!QS_EMAILS.includes(email)) return;
-  try {
-    const existing = localStorage.getItem(_qsKey(email));
-    const name = existing ? (JSON.parse(existing).name || null) : null;
-    localStorage.setItem(_qsKey(email), JSON.stringify({
-      access_token: session.access_token,
-      refresh_token: session.refresh_token,
-      ...(name ? { name } : {}),
-    }));
-  } catch (_) {}
-}
-
-// Auto-save session on every sign-in and token refresh so quick switch stays current
-_supabase.auth.onAuthStateChange((event, session) => {
-  if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && session?.user?.email) {
-    _persistQsSession(session, session.user.email);
-  }
-});
-
-function saveQsName(email, name) {
-  if (!email || !name || !QS_EMAILS.includes(email)) return;
-  try {
-    const raw = localStorage.getItem(_qsKey(email));
-    if (!raw) return;
-    const data = JSON.parse(raw);
-    data.name = name;
-    localStorage.setItem(_qsKey(email), JSON.stringify(data));
-  } catch (_) {}
-}
-
-function getQsName(email) {
-  try {
-    const raw = localStorage.getItem(_qsKey(email));
-    return raw ? (JSON.parse(raw).name || null) : null;
-  } catch (_) { return null; }
-}
-
-function hasQuickSwitchSession(email) {
-  try { return !!localStorage.getItem(_qsKey(email)); } catch (_) { return false; }
-}
-
-async function quickSwitch(targetEmail) {
-  const raw = localStorage.getItem(_qsKey(targetEmail));
-  if (!raw) throw new Error('No saved session for ' + targetEmail);
-  const { access_token, refresh_token } = JSON.parse(raw);
-  const { error } = await _supabase.auth.setSession({ access_token, refresh_token });
-  if (error) {
-    localStorage.removeItem(_qsKey(targetEmail)); // remove stale tokens
-    throw error;
-  }
-}
-
 // ─── AUTH ────────────────────────────────────────────────────────────────
 
 async function signIn(email, password) {
@@ -6650,7 +6590,6 @@ window.LB = {
   clearPrecompileCaches, clearCachesAndReload,
   SUPABASE_URL, SUPABASE_ANON_KEY, PUSHOVER_URL, WEB_PUSH_URL, fnFetch,
   subscribeWebPush, unsubscribeWebPush, getWebPushSubscription,
-  QS_EMAILS, hasQuickSwitchSession, quickSwitch, saveQsName, getQsName,
   signIn, signUp, signOut, signInWithPasskey, registerPasskey, listPasskeys, deletePasskey, resetPassword, deleteAllData, exportBackup, backupToBlob, readBackupText, importFromBackup, validateBackup,
   loadFromSupabase, syncStore, mergeSessions, withCarriedWindowEntries, historyWindowCutoffISO, normalizeHiddenHealthCards,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,

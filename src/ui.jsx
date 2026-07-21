@@ -196,7 +196,7 @@ const TAB_ICONS = {
   ),
 };
 
-function TabBar({ active, routeName, onChange, sidebar = false, currentUser = null, showCoaching = false, coachingBadge = null, showHealth = false }) {
+function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = false, coachingBadge = null, showHealth = false }) {
   const tabs = [
     { id: 'home', label: 'Train' },
     { id: 'plan', label: 'Plan' },
@@ -208,7 +208,6 @@ function TabBar({ active, routeName, onChange, sidebar = false, currentUser = nu
     return { ...t, isWaterSlot, iconKey: isWaterSlot ? 'water' : t.id, label: isWaterSlot ? 'Water' : t.label };
   });
   const idx = tabs.findIndex(t => t.id === active);
-  const [switchModal, setSwitchModal] = React.useState(false);
   // Health and its water tracker share one tab slot (routeName === 'water'
   // still lights up as 'health', see tabActive in app.jsx). Tapping the slot
   // while already on Health steps forward into the water tracker; tapping it
@@ -246,22 +245,8 @@ function TabBar({ active, routeName, onChange, sidebar = false, currentUser = nu
   };
 
   if (sidebar) {
-    const currentEmail = currentUser?.email || '';
-    const currentName  = currentUser?.name  || currentEmail.split('@')[0] || '—';
-    const qs           = window.LB || {};
-    const qsIcon = (email, size = 26) => {
-      if (email === 'office@btc-prime.biz') return <i className="fa-solid fa-dumbbell" style={{ fontSize: size }} />;
-      if (email === 'anja.knamm@gmail.com') return <span style={{ fontSize: size + 2, lineHeight: 1 }}>🩷</span>;
-      return null;
-    };
-    const otherEmail   = (qs.QS_EMAILS || []).find(e => e !== currentEmail);
-    const isQsUser     = (qs.QS_EMAILS || []).includes(currentEmail);
-    const hasOther     = otherEmail ? (qs.hasQuickSwitchSession?.(otherEmail) ?? false) : false;
-    const otherName    = otherEmail ? (qs.getQsName?.(otherEmail) || otherEmail.split('@')[0]) : '';
-
     return (
-      <>
-        <div style={{
+      <div style={{
           width: 220,
           flexShrink: 0,
           display: 'flex',
@@ -327,111 +312,7 @@ function TabBar({ active, routeName, onChange, sidebar = false, currentUser = nu
               );
             })}
           </div>
-          {isQsUser && otherEmail && (
-            <div style={{ padding: '0 14px' }}>
-              <div className="knurl" style={{ marginBottom: 12 }} />
-              <button onClick={() => setSwitchModal(true)} style={{
-                display: 'flex', alignItems: 'center', gap: 12,
-                width: '100%', padding: '12px 14px', borderRadius: 6,
-                background: 'var(--surface-tint-sm)',
-                border: `1px solid ${UI.hairStrong}`,
-                cursor: 'pointer',
-                WebkitTapHighlightColor: 'transparent',
-              }}>
-                <div style={{
-                  width: 38, height: 38, borderRadius: 4, flexShrink: 0,
-                  background: `rgba(var(--accent-rgb),0.12)`,
-                  border: `1px solid ${UI.goldSoft}`,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontFamily: UI.fontDisplay, fontSize: 18, color: UI.gold, fontWeight: 700,
-                }}>
-                  {qsIcon(currentEmail, 16) ?? currentName[0]?.toUpperCase()}
-                </div>
-                <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {currentName}
-                  </div>
-                  <div className="micro" style={{ marginTop: 2 }}>Switch User</div>
-                </div>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={UI.inkFaint} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
-                  <path d="M3 8h14M3 8l4-4M3 8l4 4M21 16H7M21 16l-4-4M21 16l-4 4"/>
-                </svg>
-              </button>
-            </div>
-          )}
         </div>
-
-        {/* zIndex 200: same tier this dialog always used (above the sidebar's
-            own z-10 and the mobile dock's z-20), preserved via Sheet's zIndex
-            prop so this migration doesn't quietly change stacking order. */}
-        <Sheet open={!!(switchModal && isQsUser && otherEmail)} onClose={() => setSwitchModal(false)} title="Switch User" center zIndex={200}>
-              <div style={{ display: 'flex', gap: 12 }}>
-                <div style={{
-                  flex: 1,
-                  background: `rgba(var(--accent-rgb),0.10)`,
-                  border: `1px solid ${UI.goldSoft}`,
-                  borderRadius: 6,
-                  padding: '28px 20px',
-                  display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14,
-                }}>
-                  <div style={{
-                    width: 64, height: 64, borderRadius: 4,
-                    background: `rgba(var(--accent-rgb),0.15)`,
-                    border: `1px solid ${UI.goldSoft}`,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontFamily: UI.fontDisplay, fontSize: 32, color: UI.gold, fontWeight: 700,
-                  }}>
-                    {qsIcon(currentEmail) ?? currentName[0]?.toUpperCase()}
-                  </div>
-                  <div style={{ textAlign: 'center' }}>
-                    <div style={{ fontFamily: UI.fontDisplay, fontSize: 24, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: UI.ink, lineHeight: 1.1, marginBottom: 8 }}>{currentName}</div>
-                    <div className="micro-gold">Active</div>
-                  </div>
-                </div>
-                <button
-                  onClick={async () => {
-                    if (!hasOther) return;
-                    setSwitchModal(false);
-                    try {
-                      await qs.quickSwitch(otherEmail);
-                      window.location.reload();
-                    } catch (e) {
-                      console.error('Quick switch failed', e);
-                    }
-                  }}
-                  style={{
-                    flex: 1,
-                    background: hasOther ? 'var(--surface-tint-md)' : 'transparent',
-                    border: `1px solid ${hasOther ? UI.hairStrong : UI.hair}`,
-                    borderRadius: 6,
-                    padding: '28px 20px',
-                    display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14,
-                    cursor: hasOther ? 'pointer' : 'default',
-                    WebkitTapHighlightColor: 'transparent',
-                    opacity: hasOther ? 1 : 0.4,
-                    transition: 'background 0.15s',
-                  }}
-                >
-                  <div style={{
-                    width: 64, height: 64, borderRadius: 4,
-                    background: 'var(--surface-tint-lg)',
-                    border: `1px solid ${UI.hairStrong}`,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontFamily: UI.fontDisplay, fontSize: 32, color: UI.inkSoft, fontWeight: 700,
-                  }}>
-                    {qsIcon(otherEmail) ?? otherName[0]?.toUpperCase()}
-                  </div>
-                  <div style={{ textAlign: 'center' }}>
-                    <div style={{ fontFamily: UI.fontDisplay, fontSize: 24, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: hasOther ? UI.inkSoft : UI.inkFaint, lineHeight: 1.1, marginBottom: 8 }}>{otherName}</div>
-                    <div className="micro" style={{ color: hasOther ? UI.inkFaint : 'rgba(var(--danger-rgb),0.7)' }}>
-                      {hasOther ? 'Tap to switch' : 'Set up in Settings'}
-                    </div>
-                  </div>
-                </button>
-              </div>
-              <button onClick={() => setSwitchModal(false)} style={{ ...btnPrimary, width: '100%', marginTop: 18 }}>Cancel</button>
-        </Sheet>
-      </>
     );
   }
 

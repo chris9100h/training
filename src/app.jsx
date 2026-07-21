@@ -311,12 +311,6 @@ function App() {
   useEffectA(() => { phaseRef.current = phase; }, [phase]);
   useEffectA(() => { routeRef.current = route; }, [route]);
 
-  useEffectA(() => {
-    if (store?.user?.email && store?.user?.name) {
-      LB.saveQsName(store.user.email, store.user.name);
-    }
-  }, [store?.user?.email, store?.user?.name]);
-
   // Boot-time admin support unread count
   useEffectA(() => {
     if (store?.user?.email !== 'office@btc-prime.biz') return;
@@ -930,8 +924,8 @@ function App() {
         unitPicked.current = false; // re-arm unit watcher for the new account
         recoveryInProgress.current = false; // clear so loadData can complete after a password reset
         // Cancel any pending retry from the previous account so it can't fire
-        // with the old uid after a quick account switch, and drop its stale
-        // pending state.
+        // with the old uid after an in-session account switch, and drop its
+        // stale pending state.
         clearTimeout(retryTimer.current);
         pendingStore.current = null;
         setUserId(session.user.id);
@@ -1449,7 +1443,7 @@ function App() {
   // non-tab route (e.g. plan → schedule-new) flips between them on iPad.
   const layout = (isPad && showTab) ? (
     <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
-      <TabBar active={tabActive} routeName={route.name} onChange={(t) => go({ name: t })} sidebar currentUser={{ email: store?.user?.email || '', name: store?.user?.name || '' }} showCoaching={showCoaching} coachingBadge={coachingBadge} showHealth={showHealth} />
+      <TabBar active={tabActive} routeName={route.name} onChange={(t) => go({ name: t })} sidebar showCoaching={showCoaching} coachingBadge={coachingBadge} showHealth={showHealth} />
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <ErrorBoundary key={route.name} onGoHome={() => go({ name: 'home' })}>
           {screen}
