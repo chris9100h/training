@@ -550,12 +550,14 @@ window.DARK_MODES = {
     // light canvas in a way the same border never was on a dark one.
     hair: 'rgba(20,20,20,0.30)', hairStrong: 'rgba(20,20,20,0.55)', hairWidth: '1px',
     knurlRgb: '50,70,120', knurlOpacity: 5,
-    // A soft off-white halo (bgRaised's own tone, not pure white) so plain
-    // text sitting directly on the grid reads like it's resting on a faint,
-    // invisible card instead of getting cut through by ruled lines. The tight
-    // 2px stop is doubled to read as a near-solid ring right at the glyph
-    // edge; the wider stops taper it into a gentle lift, not a glow.
-    textLift: '0 0 2px rgba(249,250,251,0.95), 0 0 2px rgba(249,250,251,0.95), 0 0 5px rgba(249,250,251,0.8), 0 0 9px rgba(249,250,251,0.55)',
+    // A solid-ish off-white halo (bgRaised's own tone, not pure white) so
+    // plain text sitting directly on the grid reads like it's resting on a
+    // faint, invisible card instead of getting cut through by ruled lines.
+    // Several full-alpha stops stacked at 1-3px build up a near-opaque ring
+    // right at the glyph edge (a single soft blur reads as too weak once
+    // it's gone through a phone screenshot/compression pass); the widest
+    // stops taper it into a gentle lift beyond that, not a glow.
+    textLift: '0 0 1px #f9fafb, 0 0 1px #f9fafb, 0 0 2px #f9fafb, 0 0 2px #f9fafb, 0 0 3px #f9fafb, 0 0 4px rgba(249,250,251,0.95), 0 0 7px rgba(249,250,251,0.85), 0 0 11px rgba(249,250,251,0.65)',
     // Richens --accent-faint/--accent-soft (Card's accent border, badge
     // fills, ...): those stay formula-derived from --accent-rgb, so this is
     // the only lever paper has to make them less washed-out without touching
