@@ -652,8 +652,8 @@ window.DARK_MODES = {
   black: { bg: '#07060a', bgRaised: '#100d0b', bgInset: '#1a1611', bgBody: '#050409', bgRgb: '7,6,10', inkFaint: 'rgba(236,228,208,0.34)', inkGhost: 'rgba(236,228,208,0.14)' },
   light: {
     bg: '#f2ede4', bgRaised: '#eae3d6', bgInset: '#e2dacb', bgBody: '#e8e1d4', bgRgb: '242,237,228',
-    ink: '#1f1b16', inkSoft: 'rgba(31,27,22,0.66)', inkFaint: 'rgba(31,27,22,0.62)', inkGhost: 'rgba(31,27,22,0.55)',
-    hair: 'rgba(31,27,22,0.20)', hairStrong: 'rgba(31,27,22,0.42)', knurlRgb: '31,27,22',
+    ink: '#1f1b16', inkSoft: 'rgba(31,27,22,0.80)', inkFaint: 'rgba(31,27,22,0.62)', inkGhost: 'rgba(31,27,22,0.55)',
+    hair: 'rgba(31,27,22,0.20)', hairStrong: 'rgba(31,27,22,0.60)', knurlRgb: '31,27,22',
     // The default --danger (#c87469) is a pale coral tuned for dark
     // backgrounds; against this theme's light canvas it drops well under
     // WCAG AA contrast (~3:1), which is why a "ghost" danger button (Sign
@@ -687,7 +687,7 @@ window.DARK_MODES = {
   // (ruled-paper look) even though ink itself is neutral, not blue-black.
   paper: {
     bg: '#eff0f2', bgRaised: '#f9fafb', bgInset: '#e2e4e8', bgBody: '#e7e8eb', bgRgb: '239,240,242',
-    ink: '#141414', inkSoft: 'rgba(20,20,20,0.82)', inkFaint: 'rgba(20,20,20,0.72)', inkGhost: 'rgba(20,20,20,0.60)',
+    ink: '#141414', inkSoft: 'rgba(20,20,20,0.82)', inkFaint: 'rgba(20,20,20,0.72)', inkGhost: 'rgba(20,20,20,0.68)',
     // Same fix as light's danger override (see there): the default coral
     // is tuned for dark backgrounds and nearly vanishes here (~3:1 contrast),
     // most visibly on the "ghost" danger buttons (Sign out, Delete plan, ...).
@@ -698,7 +698,7 @@ window.DARK_MODES = {
     // Darker AND (via hairWidth below) wider than every other theme's
     // hairline: a thin, faint border reads as "barely there" against paper's
     // light canvas in a way the same border never was on a dark one.
-    hair: 'rgba(20,20,20,0.30)', hairStrong: 'rgba(20,20,20,0.55)', hairWidth: '1px',
+    hair: 'rgba(20,20,20,0.48)', hairStrong: 'rgba(20,20,20,0.55)', hairWidth: '1px',
     knurlRgb: '50,70,120', knurlOpacity: 5,
     // A solid-ish off-white halo (bgRaised's own tone, not pure white) so
     // plain text sitting directly on the grid reads like it's resting on a
