@@ -555,9 +555,11 @@ window.DARK_MODES = {
     // faint, invisible card instead of getting cut through by ruled lines.
     // Several full-alpha stops stacked at 1-3px build up a near-opaque ring
     // right at the glyph edge (a single soft blur reads as too weak once
-    // it's gone through a phone screenshot/compression pass); the widest
-    // stops taper it into a gentle lift beyond that, not a glow.
-    textLift: '0 0 1px #f9fafb, 0 0 1px #f9fafb, 0 0 2px #f9fafb, 0 0 2px #f9fafb, 0 0 3px #f9fafb, 0 0 3px #f9fafb, 0 0 4px #f9fafb, 0 0 6px #f9fafb, 0 0 10px rgba(249,250,251,0.95), 0 0 16px rgba(249,250,251,0.8)',
+    // it's gone through a phone screenshot/compression pass); kept
+    // deliberately short-reaching (max 8px) rather than a wide glow — large
+    // display text (e.g. Home's day name over the watermark) would otherwise
+    // wash out whatever decorative art sits behind it, not just grid lines.
+    textLift: '0 0 1px #f9fafb, 0 0 1px #f9fafb, 0 0 2px #f9fafb, 0 0 2px #f9fafb, 0 0 3px #f9fafb, 0 0 5px rgba(249,250,251,0.9), 0 0 8px rgba(249,250,251,0.6)',
     // Richens --accent-faint/--accent-soft (Card's accent border, badge
     // fills, ...): those stay formula-derived from --accent-rgb, so this is
     // the only lever paper has to make them less washed-out without touching
