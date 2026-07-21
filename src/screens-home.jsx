@@ -3236,6 +3236,10 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                       animation: 'pulseGold 3.5s ease-out infinite',
                       display: 'flex', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10,
                       WebkitTapHighlightColor: 'transparent',
+                      // Solid fill of its own — the inherited grid-lift (paper only,
+                      // via the button/input/select/textarea UA-reset fix) would
+                      // muddy the already-translucent accent-ink label on top of it.
+                      textShadow: 'none',
                     }}>
                       <i className="fa-solid fa-dumbbell" style={{ fontSize: 13, color: 'var(--accent-ink)', opacity: 0.55 }} />
                       <span style={{ color: 'var(--accent-ink)', opacity: 0.75, letterSpacing: '0.18em', fontWeight: 700, fontSize: 13, fontFamily: UI.fontUi }}>
