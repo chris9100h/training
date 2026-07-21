@@ -43,6 +43,11 @@ function Screen({ children, scroll = true, style = {} }) {
       backgroundColor: UI.bg, backgroundImage: 'var(--bg-texture)', color: UI.ink, fontFamily: UI.fontUi,
       display: 'flex', flexDirection: 'column',
       overflow: scroll ? 'auto' : 'hidden',
+      // Inherits to every descendant (text-shadow is an inherited CSS
+      // property) except where a surface with its own background — Card,
+      // Sheet, a solid-fill Btn — resets it back to 'none'. 'none' outside
+      // paper, so this is a no-op everywhere else.
+      textShadow: 'var(--text-lift)',
       ...style,
     }}>{children}</div>
   );
@@ -583,6 +588,9 @@ const btnPrimary = {
   cursor: 'pointer',
   boxShadow: '0 6px 20px rgba(var(--accent-rgb),0.30)',
   WebkitTapHighlightColor: 'transparent',
+  // Solid fill of its own — the inherited grid-lift (paper only) would
+  // muddy already-high-contrast accent-ink text on top of it.
+  textShadow: 'none',
 };
 
 const btnGhost = {
@@ -620,6 +628,10 @@ function Card({ children, accent = false, style = {}, ...rest }) {
       border: `1px solid ${accent ? UI.goldSoft : UI.hairStrong}`,
       borderRadius: 6,
       padding: 16,
+      // Card already has its own (semi-)opaque background, so the grid-lift
+      // inherited from Screen (paper only, 'none' elsewhere) would just look
+      // muddy layered on top of it — reset back to nothing in here.
+      textShadow: 'none',
       ...style,
     }}>{children}</div>
   );
@@ -800,6 +812,9 @@ function Sheet({ open, onClose, title, titleColor, children, keyboardHeight = 0,
           backgroundColor: UI.bgRaised, backgroundImage: 'var(--bg-texture)',
           borderRadius: cardLike ? 6 : '6px 6px 0 0',
           border: `1px solid ${edgeColor}`,
+          // The panel has its own opaque background — reset the grid-lift
+          // (paper only) a parent Screen may have applied, same as Card.
+          textShadow: 'none',
           ...(!cardLike && { borderBottom: 'none' }),
           // Floating above the keyboard, every edge needs to read as a real
           // boundary on its own — the bottom-sheet variant gets that for free
