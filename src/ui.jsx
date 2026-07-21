@@ -1117,7 +1117,7 @@ function ScreenHead({ ref_, title, sub, right, onBack, style = {} }) {
   );
 }
 
-function NumInput({ value, onChange, placeholder = '—', disabled, style = {} }) {
+function NumInput({ value, onChange, placeholder = 'Default', disabled, style = {}, positiveOnly }) {
   const [raw, setRaw] = React.useState(value != null ? String(value).replace('.', ',') : '');
   const focused = React.useRef(false);
   React.useEffect(() => { if (!focused.current) setRaw(value != null ? String(value).replace('.', ',') : ''); }, [value]);
@@ -1128,13 +1128,17 @@ function NumInput({ value, onChange, placeholder = '—', disabled, style = {} }
       onFocus={e => { focused.current = true; e.target.select(); }}
       onBlur={() => {
         focused.current = false;
-        const n = raw === '' ? null : parseFloat(raw.replace(',', '.'));
-        setRaw(n != null && !isNaN(n) ? String(n).replace('.', ',') : '');
+        // Re-derive raw from the committed value, not from a fresh parse of
+        // raw itself: onChange below only ever commits accepted input, so
+        // this guarantees the display can never show something (blank, a
+        // rejected in-progress edit) other than what's actually stored.
+        setRaw(value != null ? String(value).replace('.', ',') : '');
       }}
       onChange={e => {
         setRaw(e.target.value);
         const n = e.target.value === '' ? null : parseFloat(e.target.value.replace(',', '.'));
-        if (e.target.value === '' || !isNaN(n)) onChange(n ?? null);
+        const accepted = e.target.value === '' || (!isNaN(n) && (!positiveOnly || n > 0));
+        if (accepted) onChange(n ?? null);
       }}
       style={{
         background: 'transparent', border: 'none', outline: 'none',

@@ -1576,13 +1576,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       if (LB.is531MainLift(store, entry.exId, session.dayId)) return null; // 5/3/1 main lifts climb via the Training Max, never the Smart Progression toast
       if (!LB.progressionEnabled(store, entry?.plannedRepsMax, entry?.plannedProgressionOffset)) return null;
       if (!updatedSets.filter(s => !s.warmup).every(s => s.done || s.skipped)) return null;
-      const catCfg = exercise?.equipment ? (store.settings?.equipmentConfig?.[exercise.equipment] ?? {}) : {};
-      // Mirror progressionSuggestion's fallback (store.js) — that's what actually
+      const catCfg = LB.equipmentCfgFor(store, exercise);
+      // Mirror progressionSuggestion's fallback (store.js): that's what actually
       // seeds next session's weight, so the toast must fire under the same
       // condition, not silently stay quiet just because no increment was configured.
-      const increment = LB.incrementForExercise(store, exercise, 2.5);
+      const increment = LB.incrementForExercise(store, exercise, 2.5, catCfg);
       // Index by true working-set position (warm-ups stripped, nothing else)
-      // so progressionTargetForSet(i) lines up correctly — filtering skipped/
+      // so progressionTargetForSet(i) lines up correctly: filtering skipped/
       // no-kg sets out before indexing (as this used to) shifts every later
       // set's target one slot whenever an earlier set was skipped, mirroring
       // the same bug store.js's progressionSuggestion had.

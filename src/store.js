@@ -3557,6 +3557,10 @@ function progressionCeilingFor(store, base, plannedRepsMax, progressionOffset) {
   if (progressionOffset != null) return (base ?? 0) + progressionOffset;
   return (base ?? 0) + (store.settings?.progressionRangeTop ?? 4);
 }
+function equipmentCfgFor(store, ex) {
+  return ex?.equipment ? (store.settings?.equipmentConfig?.[ex.equipment] ?? {}) : {};
+}
+
 // The kg/lb step for a single Smart Progression / Meso weight bump on this
 // exercise. Precedence: an explicit per-exercise progression_increment
 // override (exercises keep raw snake_case field names, no camelCase mapping
@@ -3566,10 +3570,21 @@ function progressionCeilingFor(store, base, plannedRepsMax, progressionOffset) {
 // unit-aware 2.5/5 for Meso/Autoreg): preserved as-is per caller, not
 // unified here, so this only adds the override, it doesn't change anyone's
 // existing default behavior.
-function incrementForExercise(store, ex, fallback) {
-  if (ex?.progression_increment != null) return ex.progression_increment;
-  const catCfg = ex?.equipment ? (store.settings?.equipmentConfig?.[ex.equipment] ?? {}) : {};
-  return catCfg.increment ?? fallback;
+// Both the override and the category config require a strictly positive
+// value; 0 or negative is treated as unset and falls through the chain.
+// A step size of 0/negative isn't just "a small bump": computeMesoGains
+// (screens-train.jsx) writes it straight into weightBoostMap, and
+// resolveMesoSeedSuggestion reads that value's SIGN to decide whether a
+// session earned a bump or hit a rep-miss cut, so a negative increment
+// flips earns into cuts and cuts into bumps. It also sizes the outlier
+// "possible mistype" tolerance band (loggedKg < refKg - increment * 5),
+// which 0/negative collapses or inverts into near-constant false alarms.
+// A caller may pass a pre-computed catCfg (from equipmentCfgFor) to avoid
+// resolving the same equipment-config lookup twice when it also needs
+// catCfg.maxKg.
+function incrementForExercise(store, ex, fallback, catCfg = equipmentCfgFor(store, ex)) {
+  if (ex?.progression_increment > 0) return ex.progression_increment;
+  return catCfg.increment > 0 ? catCfg.increment : fallback;
 }
 
 // Returns { kg, reps } suggestion when all last sets hit top of rep range, null otherwise.
@@ -3580,8 +3595,8 @@ function progressionSuggestion(store, exId, dayId, plannedReps, plannedRepsPerSe
   if (is531MainLift(store, exId, dayId)) return null; // 5/3/1 main lifts climb via the Training Max, not Smart Progression
 
   const ex = findExercise(store, exId);
-  const catCfg = ex?.equipment ? (store.settings?.equipmentConfig?.[ex.equipment] ?? {}) : {};
-  const increment = incrementForExercise(store, ex, 2.5);
+  const catCfg = equipmentCfgFor(store, ex);
+  const increment = incrementForExercise(store, ex, 2.5, catCfg);
   const maxKg = catCfg.maxKg ?? null;
 
   // Anchor on the best recent performance at the current weight, not just the
@@ -6639,7 +6654,7 @@ window.LB = {
   signIn, signUp, signOut, signInWithPasskey, registerPasskey, listPasskeys, deletePasskey, resetPassword, deleteAllData, exportBackup, backupToBlob, readBackupText, importFromBackup, validateBackup,
   loadFromSupabase, syncStore, mergeSessions, withCarriedWindowEntries, historyWindowCutoffISO, normalizeHiddenHealthCards,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
-  uid, todayISO, fmtISO, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, incrementForExercise, is531MainLift, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, healScheduleWeekdays, buildPlanSkeleton, instantiateProgram, is531Plan, round531, tmFrom531, tmBump531, weeks531, week531, fiveThreeOneSets, build531Plan, add531MainLift, current531Week, current531Cycle, compute531CycleBumps, resolve531CycleEnd, suggest531Tm, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, mesoActive, autoregLoadOnly, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, realignCycleForToday, todayCycleStripIndex,
+  uid, todayISO, fmtISO, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, incrementForExercise, equipmentCfgFor, is531MainLift, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, healScheduleWeekdays, buildPlanSkeleton, instantiateProgram, is531Plan, round531, tmFrom531, tmBump531, weeks531, week531, fiveThreeOneSets, build531Plan, add531MainLift, current531Week, current531Cycle, compute531CycleBumps, resolve531CycleEnd, suggest531Tm, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, mesoActive, autoregLoadOnly, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, realignCycleForToday, todayCycleStripIndex,
   effReps, fmtDuration, e1rm, isImprovement, isDecline, bestE1rmForExercise, bestAssistLoad, bestTimeForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, buildTimeSeedSets, latestBodyweight, bodyweightForDate, exerciseLogMode, isAssisted, shouldPullBodyweight, systemExerciseToRow, inferCurrentExIdx, calcBlended,
   refreshExerciseBests, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries,
   computeNextReminderAt,

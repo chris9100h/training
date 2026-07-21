@@ -2502,10 +2502,25 @@ async function testAsync(name, fn) {
     assert.strictEqual(LB.incrementForExercise(store, ex, 2.5), 0.5);
   });
 
-  test('incrementForExercise: an override of exactly 0 is a real value, not treated as unset', () => {
+  test('incrementForExercise: an override of exactly 0 or negative is treated as unset, never applied literally', () => {
     const store = { settings: { equipmentConfig: { machine: { increment: 1.25 } } } };
-    const ex = { id: 'leg', equipment: 'machine', progression_increment: 0 };
-    assert.strictEqual(LB.incrementForExercise(store, ex, 2.5), 0);
+    assert.strictEqual(LB.incrementForExercise(store, { id: 'leg', equipment: 'machine', progression_increment: 0 }, 2.5), 1.25, 'a 0 override falls through to the equipment config, it can never mean "bump by 0"');
+    assert.strictEqual(LB.incrementForExercise(store, { id: 'leg', equipment: 'machine', progression_increment: -1 }, 2.5), 1.25, 'a negative override falls through too, it would otherwise invert the Meso earn/cut sign convention');
+  });
+
+  test('incrementForExercise: an equipment-category increment of 0 or negative is also treated as unset', () => {
+    const store = { settings: { equipmentConfig: { machine: { increment: 0 } } } };
+    const ex = { id: 'leg', equipment: 'machine' };
+    assert.strictEqual(LB.incrementForExercise(store, ex, 2.5), 2.5);
+    store.settings.equipmentConfig.machine.increment = -3;
+    assert.strictEqual(LB.incrementForExercise(store, ex, 2.5), 2.5);
+  });
+
+  test('incrementForExercise: a caller-supplied catCfg is used instead of re-deriving it, and still honors the same >0 rule', () => {
+    const store = { settings: { equipmentConfig: { machine: { increment: 99 } } } }; // must be ignored: caller passed its own catCfg
+    const ex = { id: 'leg', equipment: 'machine' };
+    assert.strictEqual(LB.incrementForExercise(store, ex, 2.5, { increment: 4 }), 4);
+    assert.strictEqual(LB.incrementForExercise(store, ex, 2.5, { increment: 0 }), 2.5);
   });
 
   test('progressionSuggestion: a per-exercise progression_increment override changes the suggested bump size', () => {
@@ -2518,6 +2533,18 @@ async function testAsync(name, fn) {
     const sugg = LB.progressionSuggestion(store, 'leg', 'd1', 5, null, ref, null, null, 0);
     assert.ok(sugg, 'bump still fires');
     assert.strictEqual(sugg.kg, 101, 'uses the 1kg per-exercise override, not the 5kg equipment default');
+  });
+
+  test('progressionSuggestion: a 0 or negative progression_increment override falls back to the equipment config instead of permanently silencing the bump', () => {
+    const store = {
+      settings: { smartProgression: true, equipmentConfig: { machine: { increment: 5 } } },
+      exercises: [{ id: 'leg', name: 'Leg Press', equipment: 'machine', progression_increment: 0 }],
+      schedules: [],
+    };
+    const ref = { entry: { sets: [{ kg: 100, reps: 10, warmup: false }] } };
+    const sugg = LB.progressionSuggestion(store, 'leg', 'd1', 5, null, ref, null, null, 0);
+    assert.ok(sugg, 'bump still fires using the equipment-config increment, not silently disabled forever');
+    assert.strictEqual(sugg.kg, 105);
   });
 
   test('build531Plan: catalog names resolve, 4 days, program_data stamped, assistance uncapped', () => {
