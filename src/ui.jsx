@@ -926,7 +926,11 @@ const ICON_CALENDAR = (
 );
 
 // ─── useConfirm ─────────────────────────────────────────────────────
-function useConfirm() {
+// zIndex: lets a caller whose own UI already sits above the ordinary z-100
+// tier (e.g. a wizard's z-9998 overlay) keep its confirm dialog on top of
+// itself too — otherwise this hook's Sheet (portaled to document.body, but
+// still z-100) can render hidden behind the caller's own higher overlay.
+function useConfirm(zIndex = 100) {
   const [state, setState] = React.useState(null);
   // requireText: when set, the user must type this phrase (case-insensitive) to
   // unlock the confirm button — a deliberate friction gate for irreversible,
@@ -944,7 +948,7 @@ function useConfirm() {
   // Portal into document.body so the confirm sheet always sits above any other
   // Sheet (both zIndex: 100) regardless of where confirmEl is placed in the tree.
   const el = state && ReactDOM.createPortal(
-    <Sheet open={true} onClose={state.preventBackdropClose ? null : () => close(false)}>
+    <Sheet open={true} onClose={state.preventBackdropClose ? null : () => close(false)} zIndex={zIndex}>
       <div style={{ fontFamily: UI.fontDisplay, fontSize: 26, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: UI.ink, marginBottom: 10, textAlign: 'center' }}>{state.title}</div>
       <div style={{ fontSize: 14, color: UI.inkSoft, marginBottom: state.requireText ? 16 : 22, lineHeight: 1.5, textAlign: 'center' }}>{state.message}</div>
       {state.requireText && (

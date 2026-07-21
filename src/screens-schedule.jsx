@@ -1601,7 +1601,12 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
       )}
 
       {pushTarget && (
-        <MiniSheet zIndex={400} onClose={() => { if (!pushBusy) { setPushTarget(null); setPushError(''); } }}>
+        // dim=false: pushOpen (underneath, MiniSheet default zIndex 300) stays
+        // mounted and already dimmed the page — without this, its own default
+        // dim=true stacked a second rgba(0,0,0,0.5) layer on top, visibly darker
+        // than every other nested MiniSheet in this file (previewBackup/
+        // restoreFromSheet both already set dim=false for the same reason).
+        <MiniSheet zIndex={400} dim={false} onClose={() => { if (!pushBusy) { setPushTarget(null); setPushError(''); } }}>
           <div className="label" style={{ color: UI.inkFaint, marginBottom: 4 }}>{pushTarget.clientName.toUpperCase()}</div>
           <div className="micro" style={{ color: UI.inkFaint, marginBottom: 18, lineHeight: 1.5, letterSpacing: '0.06em', textTransform: 'none' }}>
             Activate "{sch.name}" for them right away, or just add it to their plan list and talk it through first?
@@ -4187,7 +4192,10 @@ function computePlanSteps({ type, presetKey, customCount, weekdayCount }) {
 function PlanWizard({ store, setStore, go }) {
   const [step, setStep] = useStateS('name');
   const [confirming, setConfirming] = useStateS(false);
-  const [confirm531El, confirm531] = useConfirm();
+  // zIndex 9999: +1 over this wizard's own overlay (9998, see overlayBase
+  // below), so a 5/3/1-conversion confirm triggered mid-import can't render
+  // hidden behind the wizard, leaving an awaited promise nothing can resolve.
+  const [confirm531El, confirm531] = useConfirm(9999);
   const [name, setName] = useStateS('');
   const [type, setType] = useStateS(null);            // 'cycle' | 'weekday' | 'flex'
   const [presetKey, setPresetKey] = useStateS(null);  // SPLIT_PRESETS key | 'custom'
@@ -4700,18 +4708,18 @@ function PlanWizard({ store, setStore, go }) {
           </div>
         )}
       </div>
-      {wizInfoOpen && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(0,0,0,0.74)', backdropFilter: 'blur(14px)', WebkitBackdropFilter: 'blur(14px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }} onClick={e => { if (e.target === e.currentTarget) setWizInfoOpen(false); }}>
-          <div style={{ background: UI.bgRaised, backgroundImage: 'var(--bg-texture)', border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 8, padding: 18, width: '100%', maxWidth: 460, maxHeight: '82vh', overflowY: 'auto', overscrollBehavior: 'contain' }}>
-            <div style={{ fontFamily: UI.fontDisplay, fontSize: 22, color: 'var(--accent)', fontWeight: 400, textTransform: 'uppercase', letterSpacing: '0.02em', marginBottom: 14 }}>Progression</div>
-            <ProgressionInfoBody />
-            <Btn kind="ghost" onClick={() => { setWizInfoOpen(false); setWizGuideOpen(true); }} style={{ width: '100%', marginTop: 16 }}>See the full guide</Btn>
-            <Btn onClick={() => setWizInfoOpen(false)} style={{ width: '100%', marginTop: 8 }}>Got it</Btn>
-          </div>
-        </div>
-      )}
+      {/* zIndex 9999: exactly +1 over this wizard's own overlay (9998), so it
+          reliably paints on top of its own host regardless of DOM order. */}
+      <Sheet open={!!wizInfoOpen} onClose={() => setWizInfoOpen(false)} title="Progression" center zIndex={9999}>
+        <ProgressionInfoBody />
+        <Btn kind="ghost" onClick={() => { setWizInfoOpen(false); setWizGuideOpen(true); }} style={{ width: '100%', marginTop: 16 }}>See the full guide</Btn>
+        <Btn onClick={() => setWizInfoOpen(false)} style={{ width: '100%', marginTop: 8 }}>Got it</Btn>
+      </Sheet>
       {wizGuideOpen && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 10000, background: UI.bg, backgroundImage: 'var(--bg-texture)', display: 'flex', flexDirection: 'column', paddingTop: 'env(safe-area-inset-top, 0px)' }}>
+        // No paddingTop here: AutoregGuideScreen's own Screen->TopBar already
+        // reserves env(safe-area-inset-top) (ui.jsx TopBar), so adding it here
+        // too stacked an extra blank strip above the title on notch devices.
+        <div style={{ position: 'fixed', inset: 0, zIndex: 10000, background: UI.bg, backgroundImage: 'var(--bg-texture)', display: 'flex', flexDirection: 'column' }}>
           <window.Screens.AutoregGuideScreen store={store} go={() => setWizGuideOpen(false)} back={{ name: 'wizard' }}
             mode={planMode === 'meso' ? 'C' : (planMode === 'autoregulate' ? (autoregMode === 'load' ? 'B' : 'A') : 'A')} />
         </div>
@@ -4750,28 +4758,18 @@ function NewPlanPickerModal({ onClose, go }) {
       <i className="fa-solid fa-chevron-right" style={{ fontSize: 11, color: UI.inkFaint, flexShrink: 0 }} />
     </button>
   );
+  // zIndex 9998: this app-level tier (shared with PlanWizard/AutoCloseBanner)
+  // guarantees it beats the normal screen and WhatsNewModal (9997); nothing
+  // at this call site is ever open underneath it to worry about beating.
   return (
-    <div onClick={onClose} style={{
-      position: 'fixed', inset: 0, zIndex: 9998, background: 'rgba(0,0,0,0.72)',
-      backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)',
-      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 32,
-    }}>
-      <div onClick={e => e.stopPropagation()} style={{
-        width: '100%', maxWidth: 340, background: UI.bgRaised, backgroundImage: 'var(--bg-texture)', border: `1px solid ${UI.hairStrong}`,
-        borderRadius: 6, padding: '28px 24px', display: 'flex', flexDirection: 'column', gap: 16,
-        boxShadow: '0 32px 80px rgba(0,0,0,0.6)', animation: 'fadeUp 0.3s ease',
-      }}>
-        <div>
-          <div style={{ fontFamily: UI.fontDisplay, fontSize: 22, color: 'var(--accent)', fontWeight: 400, marginBottom: 8, textTransform: 'uppercase' }}>New plan</div>
-          <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>Start from a full program, a ready-made split, or build your own.</div>
-        </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {opt('fa-trophy', 'Programs', 'Structured and self-progressing', () => { onClose(); go({ name: 'schedule-programs' }); }, true)}
-          {opt('fa-layer-group', 'Templates', 'Ready-made splits to make your own', () => { onClose(); go({ name: 'schedule-templates' }); })}
-          {opt('fa-sliders', 'Custom', 'Build it from scratch', () => { onClose(); go({ name: 'schedule-new' }); })}
-        </div>
+    <Sheet open onClose={onClose} title="New plan" center zIndex={9998}>
+      <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5, marginTop: -8, marginBottom: 8 }}>Start from a full program, a ready-made split, or build your own.</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {opt('fa-trophy', 'Programs', 'Structured and self-progressing', () => { onClose(); go({ name: 'schedule-programs' }); }, true)}
+        {opt('fa-layer-group', 'Templates', 'Ready-made splits to make your own', () => { onClose(); go({ name: 'schedule-templates' }); })}
+        {opt('fa-sliders', 'Custom', 'Build it from scratch', () => { onClose(); go({ name: 'schedule-new' }); })}
       </div>
-    </div>
+    </Sheet>
   );
 }
 

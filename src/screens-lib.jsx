@@ -1939,42 +1939,35 @@ function WorkoutEffortSheet({ dayId, dayName, sessions, exercises, dailyLogs, on
     </div>
   );
 
+  // zIndex 400: same tier this popup always used (above ordinary Sheets/
+  // the account-switcher, below the lightbox), preserved explicitly since
+  // Sheet's own default (100) would drop it below either of those.
   const content = (
-    <div style={{ position: 'fixed', top: 0, right: 0, bottom: 0, left: 0, zIndex: 400, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', alignItems: 'center', background: 'rgba(0,0,0,0.55)' }} onClick={onClose}>
-      <div style={{ background: UI.bg, backgroundImage: 'var(--bg-texture)', borderRadius: '6px 6px 0 0', borderTop: `var(--hair-width) solid ${UI.hairStrong}`, width: '100%', maxWidth: 480, maxHeight: '80vh', display: 'flex', flexDirection: 'column' }} onClick={e => e.stopPropagation()}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '20px 20px 0', flexShrink: 0 }}>
-          <span style={{ fontSize: 13, fontWeight: 700, color: UI.ink, fontFamily: UI.fontUi, textTransform: 'uppercase', letterSpacing: '0.08em' }}>{dayName}</span>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', color: UI.inkFaint, cursor: 'pointer', padding: 4, fontSize: 18, lineHeight: 1 }}>
-            <i className="fa-solid fa-xmark" />
-          </button>
+    <Sheet open onClose={onClose} title={dayName} zIndex={400}>
+      {sectionLabel('fa-gauge-high', 'EFFORT OVER TIME')}
+      {effortPts.length > 0
+        ? renderLine(effortPts, effortGridLines, v => FEEL_LBL[v])
+        : <div style={{ textAlign: 'center', padding: '12px 0 4px', fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi }}>No effort ratings yet</div>
+      }
+      {effortPts.length > 0 && (
+        <div style={{ marginTop: 6, textAlign: 'center' }}>
+          <span className="micro" style={{ color: UI.inkFaint }}>{effortPts.length} SESSION{effortPts.length !== 1 ? 'S' : ''} WITH EFFORT RATING</span>
         </div>
-        <div style={{ overflowY: 'auto', padding: '20px 20px 44px' }}>
-          {sectionLabel('fa-gauge-high', 'EFFORT OVER TIME')}
-          {effortPts.length > 0
-            ? renderLine(effortPts, effortGridLines, v => FEEL_LBL[v])
-            : <div style={{ textAlign: 'center', padding: '12px 0 4px', fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi }}>No effort ratings yet</div>
-          }
-          {effortPts.length > 0 && (
-            <div style={{ marginTop: 6, textAlign: 'center' }}>
-              <span className="micro" style={{ color: UI.inkFaint }}>{effortPts.length} SESSION{effortPts.length !== 1 ? 'S' : ''} WITH EFFORT RATING</span>
-            </div>
-          )}
+      )}
 
-          <div style={{ height: 0.5, background: UI.hair, margin: '20px 0' }} />
+      <div style={{ height: 0.5, background: UI.hair, margin: '20px 0' }} />
 
-          {sectionLabel('fa-dumbbell', 'VOLUME OVER TIME')}
-          {volumePts.length > 0
-            ? renderLine(volumePts, volGridLines, fmtVol)
-            : <div style={{ textAlign: 'center', padding: '12px 0 4px', fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi }}>No volume data</div>
-          }
-          {volumePts.length > 0 && (
-            <div style={{ marginTop: 6, textAlign: 'center' }}>
-              <span className="micro" style={{ color: UI.inkFaint }}>{volumePts.length} SESSION{volumePts.length !== 1 ? 'S' : ''} · {UI.unit().toUpperCase()}</span>
-            </div>
-          )}
+      {sectionLabel('fa-dumbbell', 'VOLUME OVER TIME')}
+      {volumePts.length > 0
+        ? renderLine(volumePts, volGridLines, fmtVol)
+        : <div style={{ textAlign: 'center', padding: '12px 0 4px', fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi }}>No volume data</div>
+      }
+      {volumePts.length > 0 && (
+        <div style={{ marginTop: 6, textAlign: 'center' }}>
+          <span className="micro" style={{ color: UI.inkFaint }}>{volumePts.length} SESSION{volumePts.length !== 1 ? 'S' : ''} · {UI.unit().toUpperCase()}</span>
         </div>
-      </div>
-    </div>
+      )}
+    </Sheet>
   );
   return ReactDOM.createPortal(content, document.body);
 }

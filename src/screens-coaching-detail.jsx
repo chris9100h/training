@@ -37,47 +37,39 @@ function LineChartSheet({ label, icon, entries, format, invertColor, yMin, yMax,
   const pts = entries.map((e, i) => `${xOf(i).toFixed(1)},${yOf(e.value).toFixed(1)}`).join(' ');
   const base = (padTop + plotH).toFixed(1);
 
+  // zIndex 400: same tier this popup always used (above ordinary Sheets/
+  // the account-switcher, below the lightbox; also above CheckInSchemaBuilder's
+  // own z-350 overlay, since this can open from its Preview step).
   const content = (
-    <div style={{ position: 'fixed', top: 0, right: 0, bottom: 0, left: 0, zIndex: 400, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', alignItems: 'center', background: 'rgba(0,0,0,0.55)' }} onClick={onClose}>
-      <div style={{ background: UI.bg, backgroundImage: 'var(--bg-texture)', borderRadius: '6px 6px 0 0', padding: '20px 20px 44px', borderTop: `var(--hair-width) solid ${UI.hairStrong}`, width: '100%', maxWidth: 480 }} onClick={e => e.stopPropagation()}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 22 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <i className={`fa-solid ${icon}`} style={{ fontSize: 13, color: 'var(--accent)' }} />
-            <span style={{ fontSize: 13, fontWeight: 700, color: UI.ink, fontFamily: UI.fontUi, textTransform: 'uppercase', letterSpacing: '0.08em' }}>{label}</span>
-          </div>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', color: UI.inkFaint, cursor: 'pointer', padding: 4, fontSize: 18, lineHeight: 1 }}>
-            <i className="fa-solid fa-xmark" />
-          </button>
-        </div>
-        {n < 2 ? (
-          <div style={{ textAlign: 'center', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 12, padding: '24px 0' }}>Need at least 2 check-ins for a trend.</div>
-        ) : (
-          <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display: 'block', overflow: 'visible' }}>
-            {gridVals.map((v, i) => (
-              <g key={`g${i}`}>
-                {i > 0 && <line x1={padL} y1={yOf(v).toFixed(1)} x2={W - padR} y2={yOf(v).toFixed(1)} stroke={UI.hair} strokeWidth="0.5" strokeDasharray="3 3" />}
-                <text x={padL - 5} y={(yOf(v) + 3).toFixed(1)} textAnchor="end" fontSize="8" fontFamily={UI.fontNum} fill={UI.inkFaint}>{format(Number(v.toFixed(dec)))}</text>
+    <Sheet open onClose={onClose} title={label} zIndex={400}>
+      {n < 2 ? (
+        <div style={{ textAlign: 'center', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 12, padding: '24px 0' }}>Need at least 2 check-ins for a trend.</div>
+      ) : (
+        <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display: 'block', overflow: 'visible' }}>
+          {gridVals.map((v, i) => (
+            <g key={`g${i}`}>
+              {i > 0 && <line x1={padL} y1={yOf(v).toFixed(1)} x2={W - padR} y2={yOf(v).toFixed(1)} stroke={UI.hair} strokeWidth="0.5" strokeDasharray="3 3" />}
+              <text x={padL - 5} y={(yOf(v) + 3).toFixed(1)} textAnchor="end" fontSize="8" fontFamily={UI.fontNum} fill={UI.inkFaint}>{format(Number(v.toFixed(dec)))}</text>
+            </g>
+          ))}
+          <line x1={padL} y1={padTop} x2={padL} y2={padTop + plotH} stroke={UI.hair} strokeWidth="0.5" />
+          <line x1={padL} y1={padTop + plotH} x2={W - padR} y2={padTop + plotH} stroke={UI.hair} strokeWidth="0.5" />
+          <polygon points={`${xOf(0).toFixed(1)},${base} ${pts} ${xOf(n-1).toFixed(1)},${base}`} fill={`rgba(var(--accent-rgb),0.12)`} />
+          <polyline points={pts} fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+          {entries.map((e, i) => {
+            const cx = xOf(i).toFixed(1);
+            const cy = yOf(e.value).toFixed(1);
+            const anchor = i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle';
+            return (
+              <g key={i}>
+                <circle cx={cx} cy={cy} r={i === n - 1 ? '3' : '2'} fill="var(--accent)" />
+                {showLabel(i) && <text x={cx} y={(padTop + plotH + 16).toFixed(1)} textAnchor={anchor} fontSize="8" fontFamily={UI.fontUi} fill={UI.inkFaint}>{fmtD(e.weekStart)}</text>}
               </g>
-            ))}
-            <line x1={padL} y1={padTop} x2={padL} y2={padTop + plotH} stroke={UI.hair} strokeWidth="0.5" />
-            <line x1={padL} y1={padTop + plotH} x2={W - padR} y2={padTop + plotH} stroke={UI.hair} strokeWidth="0.5" />
-            <polygon points={`${xOf(0).toFixed(1)},${base} ${pts} ${xOf(n-1).toFixed(1)},${base}`} fill={`rgba(var(--accent-rgb),0.12)`} />
-            <polyline points={pts} fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
-            {entries.map((e, i) => {
-              const cx = xOf(i).toFixed(1);
-              const cy = yOf(e.value).toFixed(1);
-              const anchor = i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle';
-              return (
-                <g key={i}>
-                  <circle cx={cx} cy={cy} r={i === n - 1 ? '3' : '2'} fill="var(--accent)" />
-                  {showLabel(i) && <text x={cx} y={(padTop + plotH + 16).toFixed(1)} textAnchor={anchor} fontSize="8" fontFamily={UI.fontUi} fill={UI.inkFaint}>{fmtD(e.weekStart)}</text>}
-                </g>
-              );
-            })}
-          </svg>
-        )}
-      </div>
-    </div>
+            );
+          })}
+        </svg>
+      )}
+    </Sheet>
   );
   return ReactDOM.createPortal(content, document.body);
 }
@@ -1336,48 +1328,46 @@ function CheckInSchemaBuilder({ coachingId, initial, coachDefault, onSave, onSav
   const hasMissingDefaults = missingDefaultsBySection().length > 0;
   return (
     <div style={overlayStyle}>
-      {savePicker && (
-        <div onClick={() => { setSavePicker(false); setAllClientsConfirm(false); setNamingTemplate(null); setTemplateNameDraft(''); }}
-          style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 10, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
-          <div onClick={e => e.stopPropagation()}
-            style={{ background: UI.bg, backgroundImage: 'var(--bg-texture)', borderRadius: '8px 8px 0 0', borderTop: `var(--hair-width) solid ${UI.hairStrong}`, padding: '20px 16px', paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 20px)', display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {!allClientsConfirm ? (
-              <>
-                <div style={{ fontSize: 12, fontWeight: 700, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 2 }}>Apply changes to</div>
-                <button onClick={() => setAllClientsConfirm(true)}
-                  style={{ background: 'var(--accent)', border: 'none', borderRadius: 6, textShadow: 'none', padding: '13px 16px', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 700, color: 'var(--accent-ink)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left', width: '100%' }}>
-                  <i className="fa-solid fa-users" style={{ fontSize: 14, flexShrink: 0 }} />
-                  <span style={{ flex: 1 }}>All clients</span>
-                  <span style={{ fontSize: 11, fontWeight: 400, opacity: 0.75 }}>New default for everyone</span>
-                </button>
-                <button onClick={() => { setSavePicker(false); handleSave(); }}
-                  style={{ background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, textShadow: 'none', padding: '13px 16px', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, color: UI.ink, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left', width: '100%' }}>
-                  <i className="fa-solid fa-person" style={{ fontSize: 14, flexShrink: 0 }} />
-                  <span style={{ flex: 1 }}>This client only</span>
-                  <span style={{ fontSize: 11, fontWeight: 400, color: UI.inkSoft }}>Override for this client</span>
-                </button>
-              </>
-            ) : namingTemplate ? renderNamePrompt() : (
-              <>
-                <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>
-                  This replaces the check-in form for every client with your current edits. Their previous form won't be kept unless you save it as a template first.
-                </div>
-                {onSaveTemplate && (
-                  <button onClick={() => setNamingTemplate('previous')} disabled={templateCapReached}
-                    style={{ background: 'rgba(var(--accent-rgb),0.18)', border: `0.5px solid rgba(var(--accent-rgb),0.4)`, borderRadius: 6, padding: '13px 16px', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 700, color: 'var(--accent)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left', width: '100%', opacity: templateCapReached ? 0.5 : 1 }}>
-                    <i className="fa-solid fa-bookmark" style={{ fontSize: 13, flexShrink: 0 }} />
-                    <span style={{ flex: 1 }}>{templateCapReached ? 'Template limit reached (5/5)' : 'Save previous form as template, then continue'}</span>
-                  </button>
-                )}
-                <button onClick={() => { setSavePicker(false); setAllClientsConfirm(false); handleSaveForAll(); }}
-                  style={{ background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, textShadow: 'none', padding: '13px 16px', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, color: UI.ink, cursor: 'pointer', textAlign: 'left', width: '100%' }}>
-                  Continue without saving
-                </button>
-              </>
+      {/* No zIndex override needed: Sheet's default (100) already clears
+          this view's own header/list content, and this can't co-occur with
+          LineChartSheet (z-400, only reachable from the Preview step, not
+          this list step) or anything else at the same time. */}
+      <Sheet open={!!savePicker} onClose={() => { setSavePicker(false); setAllClientsConfirm(false); setNamingTemplate(null); setTemplateNameDraft(''); }}>
+        {!allClientsConfirm ? (
+          <>
+            <div style={{ fontSize: 12, fontWeight: 700, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 2 }}>Apply changes to</div>
+            <button onClick={() => setAllClientsConfirm(true)}
+              style={{ background: 'var(--accent)', border: 'none', borderRadius: 6, textShadow: 'none', padding: '13px 16px', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 700, color: 'var(--accent-ink)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left', width: '100%' }}>
+              <i className="fa-solid fa-users" style={{ fontSize: 14, flexShrink: 0 }} />
+              <span style={{ flex: 1 }}>All clients</span>
+              <span style={{ fontSize: 11, fontWeight: 400, opacity: 0.75 }}>New default for everyone</span>
+            </button>
+            <button onClick={() => { setSavePicker(false); handleSave(); }}
+              style={{ background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, textShadow: 'none', padding: '13px 16px', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, color: UI.ink, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left', width: '100%' }}>
+              <i className="fa-solid fa-person" style={{ fontSize: 14, flexShrink: 0 }} />
+              <span style={{ flex: 1 }}>This client only</span>
+              <span style={{ fontSize: 11, fontWeight: 400, color: UI.inkSoft }}>Override for this client</span>
+            </button>
+          </>
+        ) : namingTemplate ? renderNamePrompt() : (
+          <>
+            <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>
+              This replaces the check-in form for every client with your current edits. Their previous form won't be kept unless you save it as a template first.
+            </div>
+            {onSaveTemplate && (
+              <button onClick={() => setNamingTemplate('previous')} disabled={templateCapReached}
+                style={{ background: 'rgba(var(--accent-rgb),0.18)', border: `0.5px solid rgba(var(--accent-rgb),0.4)`, borderRadius: 6, padding: '13px 16px', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 700, color: 'var(--accent)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left', width: '100%', opacity: templateCapReached ? 0.5 : 1 }}>
+                <i className="fa-solid fa-bookmark" style={{ fontSize: 13, flexShrink: 0 }} />
+                <span style={{ flex: 1 }}>{templateCapReached ? 'Template limit reached (5/5)' : 'Save previous form as template, then continue'}</span>
+              </button>
             )}
-          </div>
-        </div>
-      )}
+            <button onClick={() => { setSavePicker(false); setAllClientsConfirm(false); handleSaveForAll(); }}
+              style={{ background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, textShadow: 'none', padding: '13px 16px', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, color: UI.ink, cursor: 'pointer', textAlign: 'left', width: '100%' }}>
+              Continue without saving
+            </button>
+          </>
+        )}
+      </Sheet>
       <div style={headerStyle}>
         <button onClick={onClose} style={{ background: 'none', border: 'none', padding: '4px 8px 4px 0', cursor: 'pointer', color: UI.inkFaint, fontSize: 18, lineHeight: 1 }}>
           <i className="fa-solid fa-xmark" />

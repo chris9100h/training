@@ -21,7 +21,7 @@ function nearestDoneMyoBefore(sets, idx) {
 
 // ─── Mesocycle helpers ─────────────────────────────────────────────────────────
 const MESO_KEY = 'logbook-meso-state';
-const MESO_MUSCLE_PRIORITY = ['Back','Quads','Chest','Glutes','Hamstrings','Shoulders','Calves','Abs','Triceps','Biceps','Forearms'];
+const MESO_MUSCLE_PRIORITY = ['Back','Quads','Chest','Glutes','Hamstrings','Ab/Adductors','Shoulders','Calves','Abs','Triceps','Biceps','Forearms'];
 
 function primaryMuscleForExercise(ex) {
   if (!ex?.tags?.length) return null;
