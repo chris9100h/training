@@ -8536,6 +8536,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             boxShadow: '0 8px 40px rgba(var(--accent-rgb),0.40)',
             animation: 'pulseGold 2.2s ease-in-out infinite',
             WebkitTapHighlightColor: 'transparent',
+            textShadow: 'none',
           }}>Start now →</button>
         </div>
       )}
@@ -8737,6 +8738,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                 background: sel ? `rgba(var(--accent-rgb),0.22)` : UI.bgInset,
                 border: `${sel ? '2px' : '1px'} solid ${sel ? 'var(--accent)' : UI.hairStrong}`,
                 borderRadius: 6, cursor: 'pointer', textAlign: 'left',
+                textShadow: 'none',
                 WebkitTapHighlightColor: 'transparent',
               }}>
                 <div style={{ fontFamily: UI.fontUi, fontSize: 13, color: sel ? 'var(--accent)' : UI.ink, fontWeight: 600 }}>{WORKLOAD_LABELS[key]}</div>
@@ -8768,6 +8770,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             width: '100%', marginBottom: 8, padding: '12px 14px',
             background: UI.bgInset, border: `1px solid ${UI.hairStrong}`,
             borderRadius: 6, cursor: 'pointer', textAlign: 'left',
+            textShadow: 'none',
             display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10,
             WebkitTapHighlightColor: 'transparent',
           }}>
@@ -8795,6 +8798,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               width: '100%', marginBottom: 8, padding: '12px 14px',
               background: UI.bgInset, border: `1px solid ${UI.hairStrong}`,
               borderRadius: 6, cursor: 'pointer', textAlign: 'left',
+              textShadow: 'none',
               display: structured ? 'block' : 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10,
               WebkitTapHighlightColor: 'transparent',
             }}>
