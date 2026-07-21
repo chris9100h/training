@@ -130,6 +130,16 @@
     html, body { background: var(--bg); }
   }
   * { box-sizing: border-box; }
+  /* Form controls don't inherit text-shadow from ancestors by default (a
+     browser UA-stylesheet quirk, confirmed via computed-style inspection:
+     a plain div inherits --text-lift fine, a <button> wrapping the exact
+     same text computes text-shadow: none regardless of nesting depth).
+     Every plain-text nav row in the app (NavRow and its many lookalikes)
+     is a <button>, so paper's grid-lift silently never reached them. Force
+     it back to a normal inherited property; any component with its own
+     explicit textShadow (btnPrimary, Card, Sheet, ...) still wins over this
+     since inline styles always beat an element-selector rule. */
+  button, input, select, textarea { text-shadow: inherit; }
   /* Autoreg guide (screens-autoreg-guide.jsx), section 03 feedback options:
      two columns on a phone, three on a wide screen. A media query (not CSS
      auto-fit) so a narrow phone reliably keeps two columns instead of dropping
