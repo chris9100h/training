@@ -374,6 +374,7 @@ function TabBar({ active, routeName, onChange, sidebar = false, currentUser = nu
             <div onClick={e => e.stopPropagation()} style={{
               width: '100%', maxWidth: 520,
               background: UI.bgRaised,
+              backgroundImage: 'var(--bg-texture)',
               border: `1px solid ${UI.hairStrong}`,
               borderRadius: 4,
               padding: '32px 28px 22px',

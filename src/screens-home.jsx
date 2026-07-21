@@ -3763,6 +3763,7 @@ function UnitPromptModal({ onDone }) {
       <div style={{
         width: '100%', maxWidth: 320,
         background: UI.bgRaised,
+        backgroundImage: 'var(--bg-texture)',
         border: `1px solid ${UI.hairStrong}`,
         borderRadius: 6,
         padding: '28px 24px',

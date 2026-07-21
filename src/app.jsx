@@ -74,6 +74,7 @@ function AutoCloseBanner({ notify, onDismiss }) {
       <div style={{
         width: '100%', maxWidth: 320,
         background: UI.bgRaised,
+        backgroundImage: 'var(--bg-texture)',
         border: `1px solid ${UI.hairStrong}`,
         borderRadius: 6,
         padding: '32px 28px',
@@ -126,6 +127,7 @@ function UpdateBanner({ onUpdate }) {
       <div style={{
         width: '100%', maxWidth: 320,
         background: UI.bgRaised,
+        backgroundImage: 'var(--bg-texture)',
         border: `1px solid ${UI.goldSoft}`,
         borderRadius: 6,
         padding: '32px 28px',
@@ -177,6 +179,7 @@ function WhatsNewModal({ entries, onDismiss }) {
       <div style={{
         width: '100%', maxWidth: 340, maxHeight: '82vh',
         background: UI.bgRaised,
+        backgroundImage: 'var(--bg-texture)',
         border: `1px solid ${UI.goldSoft}`,
         borderRadius: 6,
         padding: '28px 26px',

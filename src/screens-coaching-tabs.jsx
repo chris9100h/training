@@ -1445,7 +1445,7 @@ function CheckInRequestModal({ coaching }) {
       display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
     }}>
       <div style={{
-        background: UI.bg, border: `1px solid ${UI.hairStrong}`,
+        background: UI.bg, backgroundImage: 'var(--bg-texture)', border: `1px solid ${UI.hairStrong}`,
         borderRadius: 8, padding: 28, maxWidth: 380, width: '100%',
       }}>
         <div className="micro-gold" style={{ marginBottom: 10, letterSpacing: '0.15em' }}>WEEKLY CHECK-IN</div>

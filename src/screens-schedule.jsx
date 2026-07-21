@@ -24,7 +24,7 @@ function MiniSheet({ zIndex = 300, dim = true, onClose, style, title, titleColor
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', background: dim ? 'rgba(0,0,0,0.5)' : 'transparent' }}
       onClick={onClose}>
-      <div style={{ background: UI.bg, borderRadius: '8px 8px 0 0', borderTop: `var(--hair-width) solid ${UI.hairStrong}`, padding: '22px 22px calc(22px + env(safe-area-inset-bottom, 0px))', ...style }}
+      <div style={{ background: UI.bg, backgroundImage: 'var(--bg-texture)', borderRadius: '8px 8px 0 0', borderTop: `var(--hair-width) solid ${UI.hairStrong}`, padding: '22px 22px calc(22px + env(safe-area-inset-bottom, 0px))', ...style }}
         onClick={e => e.stopPropagation()}>
         {/* Same 28px title block the Sheet primitive renders (ui.jsx), so a MiniSheet
             heading stays locked to the canonical title spec instead of being hand-copied. */}
@@ -4649,7 +4649,7 @@ function PlanWizard({ store, setStore, go }) {
   return (
     <div style={overlayStyle} onClick={e => { if (e.target === e.currentTarget) requestExit(); }}>
       {confirm531El}
-      <div style={{ position: 'relative', width: '100%', maxWidth: 360, maxHeight: '86vh', overflowY: 'auto', background: UI.bgRaised, border: `1px solid ${UI.hairStrong}`, borderRadius: 8, padding: '20px 20px 22px', display: 'flex', flexDirection: 'column', gap: 18, boxShadow: '0 32px 80px rgba(0,0,0,0.6)', animation: 'fadeUp 0.3s ease' }}>
+      <div style={{ position: 'relative', width: '100%', maxWidth: 360, maxHeight: '86vh', overflowY: 'auto', background: UI.bgRaised, backgroundImage: 'var(--bg-texture)', border: `1px solid ${UI.hairStrong}`, borderRadius: 8, padding: '20px 20px 22px', display: 'flex', flexDirection: 'column', gap: 18, boxShadow: '0 32px 80px rgba(0,0,0,0.6)', animation: 'fadeUp 0.3s ease' }}>
         {confirming ? (
           <>
             <div style={{ fontFamily: UI.fontDisplay, fontSize: 22, color: UI.ink, fontWeight: 700, textTransform: 'uppercase' }}>Discard plan?</div>
@@ -4695,7 +4695,7 @@ function PlanWizard({ store, setStore, go }) {
       </div>
       {wizInfoOpen && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(0,0,0,0.74)', backdropFilter: 'blur(14px)', WebkitBackdropFilter: 'blur(14px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }} onClick={e => { if (e.target === e.currentTarget) setWizInfoOpen(false); }}>
-          <div style={{ background: UI.bgRaised, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 8, padding: 18, width: '100%', maxWidth: 460, maxHeight: '82vh', overflowY: 'auto', overscrollBehavior: 'contain' }}>
+          <div style={{ background: UI.bgRaised, backgroundImage: 'var(--bg-texture)', border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 8, padding: 18, width: '100%', maxWidth: 460, maxHeight: '82vh', overflowY: 'auto', overscrollBehavior: 'contain' }}>
             <div style={{ fontFamily: UI.fontDisplay, fontSize: 22, color: 'var(--accent)', fontWeight: 400, textTransform: 'uppercase', letterSpacing: '0.02em', marginBottom: 14 }}>Progression</div>
             <ProgressionInfoBody />
             <Btn kind="ghost" onClick={() => { setWizInfoOpen(false); setWizGuideOpen(true); }} style={{ width: '100%', marginTop: 16 }}>See the full guide</Btn>
@@ -4704,7 +4704,7 @@ function PlanWizard({ store, setStore, go }) {
         </div>
       )}
       {wizGuideOpen && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 10000, background: UI.bg, display: 'flex', flexDirection: 'column', paddingTop: 'env(safe-area-inset-top, 0px)' }}>
+        <div style={{ position: 'fixed', inset: 0, zIndex: 10000, background: UI.bg, backgroundImage: 'var(--bg-texture)', display: 'flex', flexDirection: 'column', paddingTop: 'env(safe-area-inset-top, 0px)' }}>
           <window.Screens.AutoregGuideScreen store={store} go={() => setWizGuideOpen(false)} back={{ name: 'wizard' }}
             mode={planMode === 'meso' ? 'C' : (planMode === 'autoregulate' ? (autoregMode === 'load' ? 'B' : 'A') : 'A')} />
         </div>
@@ -4749,7 +4749,7 @@ function NewPlanPickerModal({ onClose, go }) {
       display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 32,
     }}>
       <div onClick={e => e.stopPropagation()} style={{
-        width: '100%', maxWidth: 340, background: UI.bgRaised, border: `1px solid ${UI.hairStrong}`,
+        width: '100%', maxWidth: 340, background: UI.bgRaised, backgroundImage: 'var(--bg-texture)', border: `1px solid ${UI.hairStrong}`,
         borderRadius: 6, padding: '28px 24px', display: 'flex', flexDirection: 'column', gap: 16,
         boxShadow: '0 32px 80px rgba(0,0,0,0.6)', animation: 'fadeUp 0.3s ease',
       }}>

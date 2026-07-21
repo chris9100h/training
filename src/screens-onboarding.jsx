@@ -2420,6 +2420,7 @@ function OnboardingPrompt({ onStart, onSkip }) {
       <div style={{
         width: '100%', maxWidth: 320,
         background: UI.bgRaised,
+        backgroundImage: 'var(--bg-texture)',
         border: `1px solid ${UI.goldSoft}`,
         borderRadius: 6,
         padding: '32px 28px',
@@ -2497,6 +2498,7 @@ function TourCrashCard({ onClose }) {
     }}>
       <div style={{
         width: '100%', maxWidth: 320, background: UI.bgRaised,
+        backgroundImage: 'var(--bg-texture)',
         border: `1px solid ${UI.hairStrong}`, borderRadius: 6, padding: '24px 22px',
         display: 'flex', flexDirection: 'column', gap: 14, textAlign: 'center',
       }}>
@@ -2632,7 +2634,7 @@ function OnboardingTourInner({ tourKey, onDone }) {
     }}>
       <div style={{
         width: '100%', maxWidth: 360, maxHeight: '100%',
-        background: UI.bgRaised, border: `1px solid ${UI.hairStrong}`, borderRadius: 8,
+        background: UI.bgRaised, backgroundImage: 'var(--bg-texture)', border: `1px solid ${UI.hairStrong}`, borderRadius: 8,
         boxShadow: '0 24px 64px rgba(0,0,0,0.55), 0 0 0 0.5px rgba(var(--accent-rgb),0.12)',
         display: 'flex', flexDirection: 'column', overflow: 'hidden', animation: 'fadeUp 0.25s ease',
       }}>

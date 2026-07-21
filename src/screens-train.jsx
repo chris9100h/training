@@ -5923,7 +5923,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       {/* Outlier confirmation (reps / kg / both) */}
       {outlierConfirm && ReactDOM.createPortal(
         <div style={{ position: 'fixed', inset: 0, zIndex: 500, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', alignItems: 'center', background: 'rgba(0,0,0,0.55)' }}>
-          <div style={{ background: UI.bg, borderRadius: '6px 6px 0 0', borderTop: `var(--hair-width) solid ${UI.hairStrong}`, width: '100%', maxWidth: 480, padding: '20px 20px 44px' }}>
+          <div style={{ background: UI.bg, backgroundImage: 'var(--bg-texture)', borderRadius: '6px 6px 0 0', borderTop: `var(--hair-width) solid ${UI.hairStrong}`, width: '100%', maxWidth: 480, padding: '20px 20px 44px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
               <i className="fa-solid fa-triangle-exclamation" style={{ color: UI.gold, fontSize: 14 }} />
               <span style={{ fontWeight: 700, fontFamily: UI.fontUi, fontSize: 14, color: UI.ink }}>{(() => {
@@ -8386,6 +8386,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           <div style={{
             position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 61,
             background: 'var(--bg, #080603)',
+            backgroundImage: 'var(--bg-texture)',
             borderRadius: '8px 8px 0 0',
             boxShadow: `0 -1px 0 ${UI.hairStrong}, 0 -24px 60px rgba(0,0,0,0.7)`,
             padding: `18px 22px calc(env(safe-area-inset-bottom, 0px) + 24px)`,
