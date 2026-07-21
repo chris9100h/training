@@ -847,8 +847,8 @@ function AdherenceChart({ weeks }) {
           <g key={i}>
             <rect x={x} y={0} width={barW} height={H} rx={2} style={{ fill: UI.bgRaised }} />
             {h > 0 && <rect x={x} y={H - h} width={barW} height={h} rx={2} fill={color} />}
-            {w.pct > 0 && <text x={x + barW / 2} y={H - h - 3} textAnchor="middle" fontSize={7} style={{ fill: color, fontFamily: UI.fontUi }}>{w.pct}%</text>}
-            <text x={x + barW / 2} y={H + 13} textAnchor="middle" fontSize={7} style={{ fill: UI.inkGhost, fontFamily: UI.fontUi }}>{labelText}</text>
+            {w.pct > 0 && <text filter="url(#chart-text-lift)" x={x + barW / 2} y={H - h - 3} textAnchor="middle" fontSize={7} style={{ fill: color, fontFamily: UI.fontUi }}>{w.pct}%</text>}
+            <text filter="url(#chart-text-lift)" x={x + barW / 2} y={H + 13} textAnchor="middle" fontSize={7} style={{ fill: UI.inkGhost, fontFamily: UI.fontUi }}>{labelText}</text>
           </g>
         );
       })}
@@ -961,7 +961,7 @@ function RollingVolumeChart({ sessions, planStartDate, clientStore }) {
           return (
             <g key={i}>
               <line x1={PAD_L} y1={y} x2={VW - PAD_R} y2={y} stroke={UI.hair} strokeWidth="0.5" strokeDasharray="3 3" />
-              <text x={PAD_L - 4} y={y + 3.5} textAnchor="end" fontSize="8" fontFamily="JetBrains Mono, monospace" fill={UI.inkFaint}>{fmtY(v)}</text>
+              <text filter="url(#chart-text-lift)" x={PAD_L - 4} y={y + 3.5} textAnchor="end" fontSize="8" fontFamily="JetBrains Mono, monospace" fill={UI.inkFaint}>{fmtY(v)}</text>
             </g>
           );
         })}
@@ -971,7 +971,7 @@ function RollingVolumeChart({ sessions, planStartDate, clientStore }) {
           <circle key={i} cx={px(i).toFixed(1)} cy={py(p.avg).toFixed(1)} r={i === 0 || i === n - 1 ? 3 : 2} fill="var(--accent)" />
         ))}
         {labelIdxs.map(i => (
-          <text key={i} x={px(i).toFixed(1)} y={VH - 4} textAnchor={i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle'} fontSize={7} style={{ fill: UI.inkGhost, fontFamily: UI.fontUi }}>{points[i].label}</text>
+          <text filter="url(#chart-text-lift)" key={i} x={px(i).toFixed(1)} y={VH - 4} textAnchor={i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle'} fontSize={7} style={{ fill: UI.inkGhost, fontFamily: UI.fontUi }}>{points[i].label}</text>
         ))}
       </svg>
       {listGroups.slice(0, showCount).map((g, i, arr) => (
@@ -1043,8 +1043,8 @@ function SessionsWeekChart({ sessions, planStartDate }) {
           <g key={i}>
             <rect x={x} y={0} width={barW} height={H} rx={2} style={{ fill: UI.bgRaised }} />
             {h > 0 && <rect x={x} y={H - h} width={barW} height={h} rx={2} fill="var(--accent)" />}
-            {w.count > 0 && <text x={x + barW / 2} y={H - h - 3} textAnchor="middle" fontSize={7} style={{ fill: 'var(--accent)', fontFamily: UI.fontUi }}>{w.count}</text>}
-            {labelIdxs.has(i) && <text x={x + barW / 2} y={H + 13} textAnchor="middle" fontSize={7} style={{ fill: UI.inkGhost, fontFamily: UI.fontUi }}>{w.label}</text>}
+            {w.count > 0 && <text filter="url(#chart-text-lift)" x={x + barW / 2} y={H - h - 3} textAnchor="middle" fontSize={7} style={{ fill: 'var(--accent)', fontFamily: UI.fontUi }}>{w.count}</text>}
+            {labelIdxs.has(i) && <text filter="url(#chart-text-lift)" x={x + barW / 2} y={H + 13} textAnchor="middle" fontSize={7} style={{ fill: UI.inkGhost, fontFamily: UI.fontUi }}>{w.label}</text>}
           </g>
         );
       })}
@@ -1535,7 +1535,7 @@ function InlineExHistory({ exId, dayId, exName, sessions, exercises, onBack, uni
             {gridVals.map((v, i) => { const y = yPos(v); return (
               <g key={i}>
                 <line x1={PAD_L} y1={y} x2={VW - PAD_R} y2={y} stroke={UI.hair} strokeWidth="0.5" strokeDasharray="3 3" />
-                <text x={PAD_L - 5} y={y + 3.5} textAnchor="end" fontSize="8" fontFamily="JetBrains Mono, monospace" fill={UI.inkFaint}>{isTimeEx ? LB.fmtDuration(Math.round(v)) : Math.round(v)}</text>
+                <text filter="url(#chart-text-lift)" x={PAD_L - 5} y={y + 3.5} textAnchor="end" fontSize="8" fontFamily="JetBrains Mono, monospace" fill={UI.inkFaint}>{isTimeEx ? LB.fmtDuration(Math.round(v)) : Math.round(v)}</text>
               </g>
             ); })}
             {Array.from({ length: maxSets }, (_, si) => {
@@ -1550,7 +1550,7 @@ function InlineExHistory({ exId, dayId, exName, sessions, exercises, onBack, uni
               );
             })}
             {labelIdxs.map(xi => (
-              <text key={xi} x={xPos(xi)} y={VH - 4} textAnchor="middle" fontSize="7.5" fontFamily="JetBrains Mono, monospace" fill={UI.inkFaint}>{fmtD(exSessions[xi].ended)}</text>
+              <text filter="url(#chart-text-lift)" key={xi} x={xPos(xi)} y={VH - 4} textAnchor="middle" fontSize="7.5" fontFamily="JetBrains Mono, monospace" fill={UI.inkFaint}>{fmtD(exSessions[xi].ended)}</text>
             ))}
           </svg>
           {listSessions.slice(0, showCount).map((sess, i, arr) => (

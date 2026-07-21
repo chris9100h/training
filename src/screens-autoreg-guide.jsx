@@ -605,11 +605,11 @@ function AutoregGuideScreen({ store, go, mode: modeProp, back }) {
                     <polyline points="55,45 120,85 185,85 250,125 315,160" fill="none" stroke={UI.gold} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
                     {[[55, 45, 3], [120, 85, 2], [185, 85, 2], [250, 125, 1], [315, 160, 0]].map(([x, y, v]) => (
                       <g key={x}><circle cx={x} cy={y} r="4.5" fill={UI.gold} stroke={UI.bg} strokeWidth="2" />
-                        <text x={x} y={y - 10} textAnchor="middle" fill={UI.ink} style={{ fontFamily: UI.fontNum, fontSize: 11, fontWeight: 700 }}>{v}</text></g>
+                        <text filter="url(#chart-text-lift)" x={x} y={y - 10} textAnchor="middle" fill={UI.ink} style={{ fontFamily: UI.fontNum, fontSize: 11, fontWeight: 700 }}>{v}</text></g>
                     ))}
-                    {['W1', 'W2', 'W3', 'W4', 'W5'].map((w, i) => <text key={w} x={55 + i * 65} y="176" textAnchor="middle" fill={UI.inkFaint} style={{ fontFamily: UI.fontNum, fontSize: 10 }}>{w}</text>)}
-                    <text x="4" y="45" fill={UI.inkFaint} style={{ fontFamily: UI.fontNum, fontSize: 10 }}>easy</text>
-                    <text x="2" y="160" fill={UI.inkFaint} style={{ fontFamily: UI.fontNum, fontSize: 10 }}>fail</text>
+                    {['W1', 'W2', 'W3', 'W4', 'W5'].map((w, i) => <text filter="url(#chart-text-lift)" key={w} x={55 + i * 65} y="176" textAnchor="middle" fill={UI.inkFaint} style={{ fontFamily: UI.fontNum, fontSize: 10 }}>{w}</text>)}
+                    <text filter="url(#chart-text-lift)" x="4" y="45" fill={UI.inkFaint} style={{ fontFamily: UI.fontNum, fontSize: 10 }}>easy</text>
+                    <text filter="url(#chart-text-lift)" x="2" y="160" fill={UI.inkFaint} style={{ fontFamily: UI.fontNum, fontSize: 10 }}>fail</text>
                   </svg>
                   <p style={{ fontSize: 12, color: UI.inkSoft, margin: '8px 0 0' }}>RIR is reps in reserve. The target drops linearly and rounds to whole numbers (so weeks 2 and 3 can share a value). A negative end value prescribes lengthened partials past failure.</p>
                 </div>

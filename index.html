@@ -55,6 +55,13 @@
        the ruled lines to stay readable; a surface that already has its own
        background doesn't need it and would just look muddy. */
     --text-lift: none;
+    /* Same idea as --text-lift, but for SVG chart <text> labels: CSS
+       text-shadow does not paint on SVG text at all in this browser (verified
+       directly: the computed value inherits fine, nothing renders), so those
+       need the SVG-native equivalent (a feDropShadow filter, see #chart-text-lift
+       below) instead, driven by this opacity rather than a text-shadow string.
+       0 (invisible) for every theme except paper. */
+    --chart-text-lift-opacity: 0;
     /* Surface tints — cream-on-dark defaults; overridden in light mode */
     --surface-tint:      rgba(236,228,208,0.02);
     --surface-tint-sm:   rgba(236,228,208,0.03);
@@ -314,10 +321,29 @@
       transparent 1.5px, transparent 6px
     );
   }
+
+  /* Drives #chart-text-lift below (feDropShadow's flood-opacity IS a
+     CSS-styleable property, unlike stdDeviation, so opacity is the one knob
+     themed per --chart-text-lift-opacity; the blur radius stays a fixed,
+     always-small value since it's invisible anyway whenever opacity is 0). */
+  #chart-text-lift feDropShadow { flood-opacity: var(--chart-text-lift-opacity); }
 </style>
 </head>
 <body>
 <div id="root"></div>
+<!-- Global, zero-size SVG defs: any <text filter="url(#chart-text-lift)">
+     anywhere in the app can reference this one filter (SVG filter refs work
+     document-wide, not just within their own <svg>). Paper-only grid-lift
+     for chart labels, see --chart-text-lift-opacity: 'plain text on the
+     paper grid needs lifting' also applies to axis/value labels drawn as SVG
+     text, which (verified directly) silently ignores CSS text-shadow. -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <filter id="chart-text-lift" x="-60%" y="-60%" width="220%" height="220%">
+      <feDropShadow dx="0" dy="0" stdDeviation="1.4" flood-color="#f9fafb" />
+    </filter>
+  </defs>
+</svg>
 <div id="err" style="display:none;position:fixed;inset:0;background:#07060a;color:#c87469;font-family:monospace;font-size:13px;padding:24px;overflow:auto;z-index:9999">
   <div id="err-log" style="white-space:pre-wrap"></div>
 </div>
@@ -570,6 +596,10 @@ window.DARK_MODES = {
     // display text (e.g. Home's day name over the watermark) would otherwise
     // wash out whatever decorative art sits behind it, not just grid lines.
     textLift: '0 0 1px #f9fafb, 0 0 1px #f9fafb, 0 0 2px #f9fafb, 0 0 2px #f9fafb, 0 0 3px #f9fafb, 0 0 5px rgba(249,250,251,0.9), 0 0 8px rgba(249,250,251,0.6)',
+    // SVG-native equivalent of textLift for chart <text> labels (see
+    // --chart-text-lift-opacity above). 0.95, not 1: the softer edge reads
+    // closer to the CSS text-lift's stacked-stops look than a hard cutoff.
+    chartTextLiftOpacity: 0.95,
     // Richens --accent-faint/--accent-soft (Card's accent border, badge
     // fills, ...): those stay formula-derived from --accent-rgb, so this is
     // the only lever paper has to make them less washed-out without touching
@@ -618,6 +648,7 @@ window.applyDarkMode = function(key) {
   s.setProperty('--knurl-rgb', m.knurlRgb || '236,228,208');
   s.setProperty('--knurl-opacity', m.knurlOpacity || 1);
   s.setProperty('--text-lift', m.textLift || 'none');
+  s.setProperty('--chart-text-lift-opacity', m.chartTextLiftOpacity || 0);
   s.setProperty('--accent-tint-boost', m.accentTintBoost || 1);
   s.setProperty('--bg-texture', m.bgTexture || 'none');
   s.setProperty('--surface-tint',      m.surfaceTint     || t.surfaceTint);

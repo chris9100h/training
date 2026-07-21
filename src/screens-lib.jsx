@@ -1762,7 +1762,7 @@ function ProgressChart({ points, title, fmtVal }) {
         {gridVals.map((v, i) => (
           <g key={`g${i}`}>
             {i > 0 && <line x1={padL} y1={yOf(v).toFixed(1)} x2={w - padR} y2={yOf(v).toFixed(1)} stroke={UI.hair} strokeWidth="0.5" strokeDasharray="3 3" />}
-            <text x={padL - 5} y={(yOf(v) + 3).toFixed(1)} textAnchor="end" fontSize="8" fill={UI.inkFaint} fontFamily={UI.fontNum}>{axisVal(v, i === 3)}</text>
+            <text filter="url(#chart-text-lift)" x={padL - 5} y={(yOf(v) + 3).toFixed(1)} textAnchor="end" fontSize="8" fill={UI.inkFaint} fontFamily={UI.fontNum}>{axisVal(v, i === 3)}</text>
           </g>
         ))}
         <line x1={padL} y1={padT} x2={padL} y2={h - padB} stroke={UI.hair} strokeWidth="0.5" />
@@ -1772,8 +1772,8 @@ function ProgressChart({ points, title, fmtVal }) {
           <circle key={i} cx={x} cy={y} r="2" fill={UI.gold} />
         ))}
         {points.length > 1 && <>
-          <text x={padL} y={h - 6} textAnchor="start" fontSize="8" fill={UI.inkFaint} fontFamily={UI.fontUi}>{fmtDate(points[0].date)}</text>
-          <text x={w - padR} y={h - 6} textAnchor="end" fontSize="8" fill={UI.inkFaint} fontFamily={UI.fontUi}>{fmtDate(points[points.length - 1].date)}</text>
+          <text filter="url(#chart-text-lift)" x={padL} y={h - 6} textAnchor="start" fontSize="8" fill={UI.inkFaint} fontFamily={UI.fontUi}>{fmtDate(points[0].date)}</text>
+          <text filter="url(#chart-text-lift)" x={w - padR} y={h - 6} textAnchor="end" fontSize="8" fill={UI.inkFaint} fontFamily={UI.fontUi}>{fmtDate(points[points.length - 1].date)}</text>
         </>}
       </svg>
     </div>
@@ -1807,12 +1807,12 @@ function CardioLineChart({ points, label, formatVal, yMin, yMax }) {
         <line x1={padL} y1={h - padB} x2={w - padR} y2={h - padB} stroke={UI.hair} strokeWidth="0.5" />
         <line x1={padL} y1={yOf(max).toFixed(1)} x2={w - padR} y2={yOf(max).toFixed(1)} stroke={UI.hair} strokeWidth="0.5" strokeDasharray="2 2" />
         {max > min && <line x1={padL} y1={yOf(min).toFixed(1)} x2={w - padR} y2={yOf(min).toFixed(1)} stroke={UI.hair} strokeWidth="0.5" strokeDasharray="2 2" />}
-        <text x={padL - 4} y={(yOf(max) + 2.5).toFixed(1)} textAnchor="end" fontSize="7" fill={UI.inkFaint} fontFamily={UI.fontUi}>{formatVal(max)}</text>
-        {max > min && (yOf(min) - yOf(max)) >= 10 && <text x={padL - 4} y={(yOf(min) + 2.5).toFixed(1)} textAnchor="end" fontSize="7" fill={UI.inkFaint} fontFamily={UI.fontUi}>{formatVal(min)}</text>}
+        <text filter="url(#chart-text-lift)" x={padL - 4} y={(yOf(max) + 2.5).toFixed(1)} textAnchor="end" fontSize="7" fill={UI.inkFaint} fontFamily={UI.fontUi}>{formatVal(max)}</text>
+        {max > min && (yOf(min) - yOf(max)) >= 10 && <text filter="url(#chart-text-lift)" x={padL - 4} y={(yOf(min) + 2.5).toFixed(1)} textAnchor="end" fontSize="7" fill={UI.inkFaint} fontFamily={UI.fontUi}>{formatVal(min)}</text>}
         <path d={pathD} fill="none" stroke={UI.gold} strokeWidth="1.2" opacity="0.7" />
         {xy.map(([x, y], i) => <circle key={i} cx={x} cy={y} r={xy.length > 60 ? 0 : 1.5} fill={UI.gold} />)}
-        <text x={padL} y={h - 4} textAnchor="start" fontSize="7" fill={UI.inkFaint} fontFamily={UI.fontUi}>{fmtDate(points[0].date)}</text>
-        <text x={w - padR} y={h - 4} textAnchor="end" fontSize="7" fill={UI.inkFaint} fontFamily={UI.fontUi}>{fmtDate(points[points.length - 1].date)}</text>
+        <text filter="url(#chart-text-lift)" x={padL} y={h - 4} textAnchor="start" fontSize="7" fill={UI.inkFaint} fontFamily={UI.fontUi}>{fmtDate(points[0].date)}</text>
+        <text filter="url(#chart-text-lift)" x={w - padR} y={h - 4} textAnchor="end" fontSize="7" fill={UI.inkFaint} fontFamily={UI.fontUi}>{fmtDate(points[points.length - 1].date)}</text>
       </svg>
     </div>
   );
@@ -1904,7 +1904,7 @@ function WorkoutEffortSheet({ dayId, dayName, sessions, exercises, dailyLogs, on
         {gridLines.map((lvl, gi) => (
           <g key={gi}>
             <line x1={padL} y1={yOf(lvl).toFixed(1)} x2={W - padR} y2={yOf(lvl).toFixed(1)} stroke={UI.hair} strokeWidth="0.5" strokeDasharray="3 3" />
-            <text x={padL - 6} y={(yOf(lvl) + 3).toFixed(1)} textAnchor="end" fontSize="8" fontFamily={UI.fontUi} fill={UI.inkFaint}>{fmtY(lvl)}</text>
+            <text filter="url(#chart-text-lift)" x={padL - 6} y={(yOf(lvl) + 3).toFixed(1)} textAnchor="end" fontSize="8" fontFamily={UI.fontUi} fill={UI.inkFaint}>{fmtY(lvl)}</text>
           </g>
         ))}
         <line x1={padL} y1={padTop} x2={padL} y2={padTop + plotH} stroke={UI.hair} strokeWidth="0.5" />
@@ -1917,7 +1917,7 @@ function WorkoutEffortSheet({ dayId, dayName, sessions, exercises, dailyLogs, on
           return (
             <g key={i}>
               <circle cx={cx} cy={cy} r={i === n - 1 ? '3.5' : '2.5'} fill="var(--accent)" />
-              {showLbl(i) && <text x={cx} y={(padTop + plotH + 18).toFixed(1)} textAnchor={anchor} fontSize="8" fontFamily={UI.fontUi} fill={UI.inkFaint}>{fmtDate(p.date)}</text>}
+              {showLbl(i) && <text filter="url(#chart-text-lift)" x={cx} y={(padTop + plotH + 18).toFixed(1)} textAnchor={anchor} fontSize="8" fontFamily={UI.fontUi} fill={UI.inkFaint}>{fmtDate(p.date)}</text>}
             </g>
           );
         })}
@@ -6170,7 +6170,7 @@ function ExerciseHistoryScreen({ store, go, exId, dayId, exName, back, userId })
               return (
                 <g key={i}>
                   <line x1={PAD_L} y1={y} x2={VW - PAD_R} y2={y} stroke={UI.hair} strokeWidth="0.5" strokeDasharray="3 3" />
-                  <text x={PAD_L - 5} y={y + 3.5} textAnchor="end" fontSize="8" fontFamily="JetBrains Mono, monospace" fill={UI.inkFaint}>
+                  <text filter="url(#chart-text-lift)" x={PAD_L - 5} y={y + 3.5} textAnchor="end" fontSize="8" fontFamily="JetBrains Mono, monospace" fill={UI.inkFaint}>
                     {isTimeEx ? LB.fmtDuration(v) : Math.round(v)}
                   </text>
                 </g>
@@ -6200,7 +6200,7 @@ function ExerciseHistoryScreen({ store, go, exId, dayId, exName, back, userId })
 
             {/* X-axis date labels */}
             {labelIdxs.map(xi => (
-              <text key={xi} x={xPos(xi)} y={VH - 4} textAnchor="middle" fontSize="7.5"
+              <text filter="url(#chart-text-lift)" key={xi} x={xPos(xi)} y={VH - 4} textAnchor="middle" fontSize="7.5"
                 fontFamily="JetBrains Mono, monospace" fill={UI.inkFaint}>
                 {fmtDate(allSessions[xi].ended)}
               </text>
