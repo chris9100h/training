@@ -600,6 +600,15 @@ window.applyAccentColor = function(key) {
   s.setProperty('--accent-deep', ov ? ov.accentDeep : c.deep);
   s.setProperty('--accent-rgb', ov ? ov.accentRgb : c.rgb);
   s.setProperty('--accent-ink', (ov && ov.accentInk) || '#0a0805');
+  // Same mute as --accent above, same reason: a red Sign out/Delete button
+  // would be the one spot of color left on an otherwise all-grey/black
+  // muted-Paper screen. Literal fallback (not the _DARK_DANGER constant,
+  // defined later in a script block that hasn't run yet on the very first
+  // boot-time call below) so this stays safe regardless of load order.
+  var realDanger = (mode && mode.danger) || '#c87469';
+  var realDangerRgb = (mode && mode.dangerRgb) || '200,116,105';
+  s.setProperty('--danger', ov ? ov.accent : realDanger);
+  s.setProperty('--danger-rgb', ov ? ov.accentRgb : realDangerRgb);
   // Always the user's real chosen color, never muted by a theme override.
   // For the rare element that's deliberately dark/immersive regardless of
   // theme (e.g. a full-screen rest-timer countdown on a fixed near-black
