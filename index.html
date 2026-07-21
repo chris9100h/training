@@ -122,6 +122,12 @@
     margin: 0 auto;
     width: 100%; max-width: 440px;
     background: var(--bg);
+    /* Peeks through around the floating TabBar dock's rounded corners and
+       on overscroll bounce, a flat surface with no blur (unlike TopBar/
+       TabBar's own frosted-glass backgrounds, which deliberately stay
+       ungridded so a crisp pattern doesn't fight the blur), so it gets the
+       same paper grid treatment as every other flat surface. */
+    background-image: var(--bg-texture);
     box-shadow: 0 0 0 1px var(--root-glow);
     display: flex; flex-direction: column;
     overflow: hidden;
