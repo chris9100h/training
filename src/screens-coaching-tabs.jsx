@@ -466,7 +466,7 @@ function MarkerRow({ label, value, onChange, readOnly }) {
               border: `1px solid ${value != null && n <= value && value !== n ? 'rgba(var(--accent-rgb),0.5)' : 'transparent'}`,
               background: value === n ? 'var(--accent)' : value != null && n <= value ? `rgba(var(--accent-rgb),0.3)` : UI.bgInset,
               color: value === n ? 'var(--accent-ink)' : n <= 3 ? 'var(--accent)' : n <= 6 ? UI.inkSoft : UI.inkFaint,
-              textShadow: 'none',
+              textShadow: value === n ? 'none' : value != null && n <= value ? 'var(--text-lift)' : 'none',
               fontSize: 10, fontFamily: UI.fontUi, fontWeight: value === n ? 700 : 400,
               transition: 'background 0.1s',
             }}
@@ -942,7 +942,7 @@ function FieldWidget({ field, value, onChange, distUnit, setDistUnit, inputStyle
               }} style={{ padding: '2px 7px', cursor: 'pointer', border: 'none',
                 background: distUnit === u ? 'var(--accent)' : 'transparent',
                 color: distUnit === u ? UI.bg : UI.inkFaint,
-                textShadow: 'none',
+                textShadow: distUnit === u ? 'none' : 'var(--text-lift)',
                 fontFamily: UI.fontUi, fontSize: 9, fontWeight: 600, letterSpacing: '0.06em',
                 WebkitTapHighlightColor: 'transparent' }}>
               {u}
@@ -1017,7 +1017,7 @@ function FieldWidget({ field, value, onChange, distUnit, setDistUnit, inputStyle
                 border: `1px solid ${value != null && n <= value && value !== n ? 'rgba(var(--accent-rgb),0.5)' : 'transparent'}`,
                 background: value === n ? 'var(--accent)' : value != null && n <= value ? `rgba(var(--accent-rgb),0.3)` : UI.bgInset,
                 color: btnColor(n),
-                textShadow: 'none',
+                textShadow: value === n ? 'none' : value != null && n <= value ? 'var(--text-lift)' : 'none',
                 fontSize: 10, fontFamily: UI.fontUi, fontWeight: value === n ? 700 : 400, transition: 'background 0.1s' }}>
               {n}
             </button>
@@ -1063,7 +1063,7 @@ function FieldWidget({ field, value, onChange, distUnit, setDistUnit, inputStyle
             return (
               <button key={opt.value} onClick={() => onChange(sel ? null : opt.value)}
                 style={{ flex: 1, padding: '9px 4px', borderRadius: 6, cursor: 'pointer', background: bg, color: fg,
-                  textShadow: 'none',
+                  textShadow: sel && (opt.color === 'accent' || opt.color === 'danger') ? 'var(--text-lift)' : 'none',
                   fontFamily: UI.fontUi, fontSize: 10, fontWeight: sel ? 700 : 400, letterSpacing: '0.04em',
                   border: `${sel ? '1.5px' : '0.5px'} solid ${sel ? 'currentColor' : UI.hairStrong}` }}>
                 {opt.label}
@@ -1341,13 +1341,13 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
               would wrongly hide the preview whenever last week was checked in. */}
           {checkinEnabled && !canSubmitToday && previewResponses && (
             <button onClick={() => setPreviewOpen(v => !v)}
-              style={{ flex: 1, background: previewOpen ? `rgba(var(--accent-rgb),0.18)` : `rgba(var(--accent-rgb),0.11)`, border: `0.5px solid rgba(var(--accent-rgb),0.25)`, borderRadius: 6, textShadow: 'none', padding: '12px 14px', cursor: 'pointer', color: previewOpen ? 'var(--accent)' : UI.inkSoft, fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600 }}>
+              style={{ flex: 1, background: previewOpen ? `rgba(var(--accent-rgb),0.18)` : `rgba(var(--accent-rgb),0.11)`, border: `0.5px solid rgba(var(--accent-rgb),0.25)`, borderRadius: 6, textShadow: 'var(--text-lift)', padding: '12px 14px', cursor: 'pointer', color: previewOpen ? 'var(--accent)' : UI.inkSoft, fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600 }}>
               {previewOpen ? 'Close preview' : 'Preview this week'}
             </button>
           )}
           {previewResponses && canSubmitToday && new Date().getDay() !== 1 && (
             <button onClick={() => setPreviewOpen(v => !v)}
-              style={{ background: previewOpen ? `rgba(var(--accent-rgb),0.22)` : UI.bgInset, border: `${previewOpen ? '1.5px' : '0.5px'} solid ${previewOpen ? 'var(--accent)' : UI.hairStrong}`, borderRadius: 6, textShadow: 'none', padding: '11px 13px', cursor: 'pointer', color: previewOpen ? 'var(--accent)' : UI.inkFaint, fontSize: 15, lineHeight: 1, flexShrink: 0 }}>
+              style={{ background: previewOpen ? `rgba(var(--accent-rgb),0.22)` : UI.bgInset, border: `${previewOpen ? '1.5px' : '0.5px'} solid ${previewOpen ? 'var(--accent)' : UI.hairStrong}`, borderRadius: 6, textShadow: previewOpen ? 'var(--text-lift)' : 'none', padding: '11px 13px', cursor: 'pointer', color: previewOpen ? 'var(--accent)' : UI.inkFaint, fontSize: 15, lineHeight: 1, flexShrink: 0 }}>
               <i className="fa-solid fa-eye" />
             </button>
           )}

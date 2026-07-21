@@ -545,7 +545,7 @@ function HealthChartCard({ title, icon, tf, setTf, tfOptions = HEALTH_TFS, headl
               padding: '2px 8px', cursor: 'pointer', border: 'none',
               background: tf === t.id ? 'var(--accent)' : 'transparent',
               color: tf === t.id ? 'var(--accent-ink)' : UI.inkFaint,
-              textShadow: 'none',
+              textShadow: tf === t.id ? 'none' : 'var(--text-lift)',
               fontFamily: UI.fontUi, fontSize: 9, fontWeight: 600, letterSpacing: '0.06em',
               WebkitTapHighlightColor: 'transparent',
             }}>{t.id}</button>
@@ -1197,7 +1197,7 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
                   flex: 1, padding: '12px 4px', cursor: 'pointer', border: 'none',
                   borderLeft: i > 0 ? `var(--hair-width) solid ${UI.hairStrong}` : 'none',
                   background: active ? 'var(--accent)' : 'transparent',
-                  textShadow: 'none',
+                  textShadow: active ? 'none' : 'var(--text-lift)',
                   display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5,
                   WebkitTapHighlightColor: 'transparent', transition: 'background 0.15s',
                 }}>
@@ -1252,7 +1252,7 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
               padding: '4px 10px', cursor: 'pointer', border: 'none',
               background: netCarbs === o.id ? 'var(--accent)' : 'transparent',
               color: netCarbs === o.id ? 'var(--accent-ink)' : UI.inkFaint,
-              textShadow: 'none',
+              textShadow: netCarbs === o.id ? 'none' : 'var(--text-lift)',
               fontFamily: UI.fontUi, fontSize: 9, fontWeight: 600, letterSpacing: '0.05em',
               WebkitTapHighlightColor: 'transparent',
             }}>{o.label}</button>
@@ -2038,7 +2038,7 @@ function HealthDateStrip({ store, setStore, selectedDate, onSelect, onLog, targe
                   padding: '0 14px', border: 'none', borderLeft: i > 0 ? `1px solid ${UI.hairStrong}` : 'none',
                   background: active ? 'var(--accent)' : 'transparent',
                   color: active ? 'var(--accent-ink)' : UI.inkFaint, cursor: 'pointer',
-                  textShadow: 'none',
+                  textShadow: active ? 'none' : 'var(--text-lift)',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                   WebkitTapHighlightColor: 'transparent', transition: 'background 0.15s',
                 }}>

@@ -944,7 +944,7 @@ function WaterStatsBody({ store, goalMl }) {
       flex: 1, padding: '7px 0', border: 'none', cursor: 'pointer',
       background: period === id ? 'var(--accent)' : 'transparent',
       color: period === id ? 'var(--accent-ink)' : UI.inkFaint,
-      textShadow: 'none',
+      textShadow: period === id ? 'none' : 'var(--text-lift)',
       fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.04em', WebkitTapHighlightColor: 'transparent',
     }}>{label}</button>
   );

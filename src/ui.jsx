@@ -794,7 +794,7 @@ function Sheet({ open, onClose, title, titleColor, children, keyboardHeight = 0,
             shadow escapes freely. Its own box-shadow (not the panel's,
             which needs a separate static one for elevation) also avoids
             fighting over the same property while animating. */}
-        {accent && <div className="intensity-glow" style={{ position: 'absolute', inset: 0, borderRadius: cardLike ? 6 : '6px 6px 0 0', pointerEvents: 'none' }} />}
+        {accent && <div className="intensity-glow-raw" style={{ position: 'absolute', inset: 0, borderRadius: cardLike ? 6 : '6px 6px 0 0', pointerEvents: 'none' }} />}
         <div onClick={e => e.stopPropagation()} style={{
           width: '100%', boxSizing: 'border-box',
           backgroundColor: UI.bgRaised, backgroundImage: 'var(--bg-texture)',

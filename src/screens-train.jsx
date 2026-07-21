@@ -722,9 +722,9 @@ function RestGauge({ restStart, restDef, variant }) {
   }
   // warmup overlay
   // A blurred glow reads as light bleeding outward on a dark backdrop, but as
-  // a dark smudge on paper's light one — read live rather than threading a
-  // theme prop through every RestGauge caller, same trick SvgKnurl uses.
-  const isPaperGauge = getComputedStyle(document.documentElement).getPropertyValue('--bg-texture').trim() !== 'none';
+  // a dark smudge on a light canvas theme (light or paper). Read live rather
+  // than threading a theme prop through every RestGauge caller, same trick SvgKnurl uses.
+  const isPaperGauge = isLightCanvasActive();
   return (<>
     <div className="num" style={{ fontSize: 88, fontWeight: 300, letterSpacing: '-0.03em', lineHeight: 1, color: gaugeColor, textShadow: isPaperGauge ? 'none' : (overrun ? '0 0 40px rgba(var(--danger-rgb),0.55), 0 0 80px rgba(var(--danger-rgb),0.25)' : '0 0 40px rgba(var(--accent-rgb),0.55), 0 0 80px rgba(var(--accent-rgb),0.25)'), animation: 'timerPulse 1.6s ease-in-out infinite' }}>{mmss}</div>
     <div style={{ height: 2, background: UI.hair, borderRadius: 4, overflow: 'hidden', marginTop: 22, width: 180 }}>
@@ -3705,7 +3705,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     padding: '12px 8px', borderRadius: 6, cursor: 'pointer', textAlign: 'center', WebkitTapHighlightColor: 'transparent',
     background: sel ? `rgba(var(${TONE_RGB[tone]}),0.14)` : UI.bgInset,
     border: `1px solid ${sel ? `rgba(var(${TONE_RGB[tone]}),0.7)` : UI.hairStrong}`,
-    textShadow: 'none',
+    textShadow: sel ? 'var(--text-lift)' : 'none',
     ...(extra || {}),
   });
   const toneLbl = (tone, sel) => ({ fontFamily: UI.fontUi, fontSize: 13, fontWeight: sel ? 700 : 600, color: sel ? TONE_COL[tone] : UI.ink });
@@ -5609,7 +5609,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             background: sel ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
             border: `${sel ? '2px' : '1px'} solid ${sel ? 'var(--accent)' : UI.hairStrong}`,
             borderRadius: 6, cursor: 'pointer', textAlign: 'left',
-            textShadow: 'none',
+            textShadow: sel ? 'var(--text-lift)' : 'none',
             WebkitTapHighlightColor: 'transparent',
           }}>
             <div style={{ fontFamily: UI.fontUi, fontSize: 14, color: sel ? 'var(--accent)' : UI.ink, fontWeight: 600 }}>{opt.label}</div>
@@ -6808,7 +6808,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                           fontFamily: UI.fontUi, fontWeight: 700, fontSize: 12, letterSpacing: '0.14em',
                           WebkitTapHighlightColor: 'transparent', justifySelf: 'center',
                           opacity: (s.done || s.skipped) ? 0.35 : 1,
-                          textShadow: 'none',
+                          textShadow: (s.done || s.skipped) ? 'var(--text-lift)' : 'none',
                         }}>GO</button>}
 
                       {!isIntensityActive && !isCheckbox && !isTime && (isUnilateral ? (
@@ -7540,7 +7540,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             background: active ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
             border: `1px solid ${active ? 'rgba(var(--accent-rgb),0.35)' : UI.hair}`,
             borderRadius: 6, padding: '14px 16px',
-            textShadow: 'none',
+            textShadow: active ? 'var(--text-lift)' : 'none',
             display: 'flex', alignItems: 'center', gap: 14,
             opacity: active ? 1 : 0.45,
             WebkitTapHighlightColor: 'transparent',
