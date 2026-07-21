@@ -1470,8 +1470,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       if (!isNoWeightReps && !LB.isAssisted(exercise)) {
         refKg = suggestion ? (suggestion.kg ?? null) : (prevSet ? prevSet.kg : null);
         if (refKg != null && refKg > 0) {
-          const catCfg = exercise?.equipment ? (store.settings?.equipmentConfig?.[exercise.equipment] ?? {}) : {};
-          increment = catCfg.increment ?? 2.5;
+          increment = LB.incrementForExercise(store, exercise, 2.5);
           loggedKg = session.entries[exIdx]?.sets[setIdx]?.kg ?? null;
           if (kb?.field === 'kg' && kb?.setIdx === setIdx) {
             const num = parseFloat((rawRef || '').replace(',', '.'));
@@ -1581,7 +1580,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       // Mirror progressionSuggestion's fallback (store.js) — that's what actually
       // seeds next session's weight, so the toast must fire under the same
       // condition, not silently stay quiet just because no increment was configured.
-      const increment = catCfg.increment ?? 2.5;
+      const increment = LB.incrementForExercise(store, exercise, 2.5);
       // Index by true working-set position (warm-ups stripped, nothing else)
       // so progressionTargetForSet(i) lines up correctly — filtering skipped/
       // no-kg sets out before indexing (as this used to) shifts every later
@@ -3885,8 +3884,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       // See LB.mesoRepOutcome for the exact per-set/range-aware rules.
       const { allHit, earlyMiss } = LB.mesoRepOutcome(workingSets, planReps, planRepsPerSet, planRepsMax);
 
-      const catCfg = ex?.equipment ? (store.settings?.equipmentConfig?.[ex.equipment] ?? {}) : {};
-      const increment = catCfg.increment ?? (unit === 'lbs' ? 5 : 2.5);
+      const increment = LB.incrementForExercise(store, ex, unit === 'lbs' ? 5 : 2.5);
 
       // Only a 'full' session advances the rep-miss cut. 'discounted'/'none'
       // freeze the streak: a rough day or deload must never push toward a cut

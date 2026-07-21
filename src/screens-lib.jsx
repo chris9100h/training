@@ -1335,6 +1335,7 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
   const [editPullBodyweight, setEditPullBodyweight] = useStateL(autoEdit ? !!ex.pull_bodyweight : false);
   const [editEquipment, setEditEquipment] = useStateL(autoEdit ? (ex.equipment || null) : null);
   const [editYoutubeUrl, setEditYoutubeUrl] = useStateL(autoEdit ? (ex.youtube_url || '') : '');
+  const [editProgressionIncrement, setEditProgressionIncrement] = useStateL(autoEdit ? (ex.progression_increment ?? null) : null);
   const [noteVal, setNoteVal] = useStateL(autoEdit ? (ex.note || '') : '');
   const [editNotePinned, setEditNotePinned] = useStateL(autoEdit ? !!ex.note_pinned : false);
   const [showSizeInfoEdit, setShowSizeInfoEdit] = useStateL(false);
@@ -1357,14 +1358,14 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
     }
   };
 
-  const startEdit = () => { setEditName(ex.name); setEditTags([...(ex.tags || [])]); setEditCategory(ex.category || null); setEditMovementType(ex.movement_type ?? (ex.unilateral ? 'unilateral' : 'bilateral')); setEditLogMode(LB.exerciseLogMode(ex)); setEditPullBodyweight(!!ex.pull_bodyweight); setEditEquipment(ex.equipment || null); setEditYoutubeUrl(ex.youtube_url || ''); setNoteVal(ex.note || ''); setEditNotePinned(!!ex.note_pinned); setEditMode(true); };
+  const startEdit = () => { setEditName(ex.name); setEditTags([...(ex.tags || [])]); setEditCategory(ex.category || null); setEditMovementType(ex.movement_type ?? (ex.unilateral ? 'unilateral' : 'bilateral')); setEditLogMode(LB.exerciseLogMode(ex)); setEditPullBodyweight(!!ex.pull_bodyweight); setEditEquipment(ex.equipment || null); setEditYoutubeUrl(ex.youtube_url || ''); setNoteVal(ex.note || ''); setEditNotePinned(!!ex.note_pinned); setEditProgressionIncrement(ex.progression_increment ?? null); setEditMode(true); };
   const cancelEdit = () => { if (autoEdit) advanceQueue(); else setEditMode(false); };
   const saveEdit = () => {
     if (!editName.trim()) return;
     setStore(s => {
       const effLogMode = loggingPickerVisible(editEquipment, editMovementType) ? editLogMode : 'weight';
       const exercises = s.exercises.map(e => e.id === exId
-        ? { ...e, name: editName.trim(), tags: editTags, category: editCategory || null, unilateral: editMovementType === 'unilateral', movement_type: editMovementType, no_weight_reps: effLogMode !== 'weight', log_mode: effLogMode, pull_bodyweight: (editEquipment === 'bodyweight' && effLogMode === 'weight' ? editPullBodyweight : false), equipment: editEquipment || null, note: noteVal.trim(), note_pinned: noteVal.trim() ? editNotePinned : false, youtube_url: sanitizeYoutubeUrl(editYoutubeUrl) }
+        ? { ...e, name: editName.trim(), tags: editTags, category: editCategory || null, unilateral: editMovementType === 'unilateral', movement_type: editMovementType, no_weight_reps: effLogMode !== 'weight', log_mode: effLogMode, pull_bodyweight: (editEquipment === 'bodyweight' && effLogMode === 'weight' ? editPullBodyweight : false), equipment: editEquipment || null, note: noteVal.trim(), note_pinned: noteVal.trim() ? editNotePinned : false, youtube_url: sanitizeYoutubeUrl(editYoutubeUrl), progression_increment: editProgressionIncrement }
         : e);
       return { ...s, exercises };
     });
@@ -1576,6 +1577,15 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
               pullBodyweight={editPullBodyweight} onPullBodyweight={setEditPullBodyweight}
               hasLoggedWeight={LB.latestBodyweight(store) != null}
             />
+            <Field label="Progression increment (optional)">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: UI.bgInset, borderRadius: 4, padding: '10px 12px', border: `1px solid ${UI.hair}` }}>
+                <NumInput value={editProgressionIncrement} placeholder="Default" onChange={setEditProgressionIncrement} style={{ fontSize: 14 }} />
+                <span className="micro" style={{ flexShrink: 0 }}>{UI.unit()}</span>
+              </div>
+              <div style={{ fontFamily: UI.fontUi, fontSize: 10.5, color: UI.inkGhost, marginTop: 6, lineHeight: 1.4 }}>
+                How much weight Smart Progression and Meso bumps add for this exercise. Leave blank to use the equipment default from Settings.
+              </div>
+            </Field>
             <Field label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><i className="fa-brands fa-youtube" style={{ color: '#FF0000', fontSize: 12 }} />Form video</span>}>
               <TextInput value={editYoutubeUrl} onChange={setEditYoutubeUrl} placeholder="YouTube link (optional)" />
             </Field>
@@ -3063,8 +3073,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
       const outcome = LB.mesoRepOutcome(workingSets, e.plannedReps ?? null, e.plannedRepsPerSet, e.plannedRepsMax ?? null);
       const allHit = attempted && outcome.allHit;
       const earlyMiss = attempted && outcome.earlyMiss; // feeds the rep-miss cut recompute
-      const catCfg = ex?.equipment ? (store.settings?.equipmentConfig?.[ex.equipment] ?? {}) : {};
-      const increment = catCfg.increment ?? (unit === 'lbs' ? 5 : 2.5);
+      const increment = LB.incrementForExercise(store, ex, unit === 'lbs' ? 5 : 2.5);
       out.push({ exId: e.exId, key: e.exId + '_' + s.dayId, muscle, allHit, earlyMiss, attempted, increment, name: e.name });
     });
     return out;

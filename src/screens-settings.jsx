@@ -2465,7 +2465,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             );
           })}
         </div>
-        <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.6, marginBottom: 16 }}>Set equipment categories on exercises in the exercise library. Individual overrides can be set per exercise.</div>
+        <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.6, marginBottom: 16 }}>Set equipment categories on exercises in the exercise library. Need one exercise to step differently from the rest of its category? Set a Progression increment on that exercise's Edit screen to override this.</div>
         <Btn style={{ width: '100%' }} onClick={() => setProgConfigOpen(false)}>Done</Btn>
       </SettingsSheet>
 

@@ -2483,6 +2483,43 @@ async function testAsync(name, fn) {
     assert.ok(sugg && sugg.kg > 100, 'accepted bump does not block the next one');
   });
 
+  test('incrementForExercise: no override, no equipment config -> the caller fallback', () => {
+    const store = { settings: {} };
+    const ex = { id: 'leg', equipment: 'machine' };
+    assert.strictEqual(LB.incrementForExercise(store, ex, 2.5), 2.5);
+    assert.strictEqual(LB.incrementForExercise(store, ex, 5), 5, 'each caller keeps its own fallback');
+  });
+
+  test('incrementForExercise: no per-exercise override -> falls back to the equipment-category config', () => {
+    const store = { settings: { equipmentConfig: { machine: { increment: 1.25 } } } };
+    const ex = { id: 'leg', equipment: 'machine' };
+    assert.strictEqual(LB.incrementForExercise(store, ex, 2.5), 1.25);
+  });
+
+  test('incrementForExercise: a set per-exercise override wins over the equipment config and the fallback', () => {
+    const store = { settings: { equipmentConfig: { machine: { increment: 1.25 } } } };
+    const ex = { id: 'leg', equipment: 'machine', progression_increment: 0.5 };
+    assert.strictEqual(LB.incrementForExercise(store, ex, 2.5), 0.5);
+  });
+
+  test('incrementForExercise: an override of exactly 0 is a real value, not treated as unset', () => {
+    const store = { settings: { equipmentConfig: { machine: { increment: 1.25 } } } };
+    const ex = { id: 'leg', equipment: 'machine', progression_increment: 0 };
+    assert.strictEqual(LB.incrementForExercise(store, ex, 2.5), 0);
+  });
+
+  test('progressionSuggestion: a per-exercise progression_increment override changes the suggested bump size', () => {
+    const store = {
+      settings: { smartProgression: true, equipmentConfig: { machine: { increment: 5 } } },
+      exercises: [{ id: 'leg', name: 'Leg Press', equipment: 'machine', progression_increment: 1 }],
+      schedules: [],
+    };
+    const ref = { entry: { sets: [{ kg: 100, reps: 10, warmup: false }] } };
+    const sugg = LB.progressionSuggestion(store, 'leg', 'd1', 5, null, ref, null, null, 0);
+    assert.ok(sugg, 'bump still fires');
+    assert.strictEqual(sugg.kg, 101, 'uses the 1kg per-exercise override, not the 5kg equipment default');
+  });
+
   test('build531Plan: catalog names resolve, 4 days, program_data stamped, assistance uncapped', () => {
     const FTO = _catWin.FIVE_THREE_ONE;
     assert.ok(FTO && Array.isArray(FTO.lifts) && FTO.lifts.length === 4, 'FIVE_THREE_ONE has 4 lifts');

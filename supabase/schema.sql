@@ -91,7 +91,8 @@ CREATE TABLE public.zane_exercises (
   log_mode text,
   pull_bodyweight boolean NOT NULL DEFAULT false,
   youtube_url text,
-  note_pinned boolean NOT NULL DEFAULT false
+  note_pinned boolean NOT NULL DEFAULT false,
+  progression_increment numeric
 );
 
 CREATE TABLE public.zane_schedules (
