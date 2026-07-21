@@ -3444,6 +3444,17 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     const muscle = mesoJointMuscle;
     if (!mesoState || !exId) return;
 
+    // Marked "asked" here, on actually answering, not when the sheet opened:
+    // opening it only shows the question, it doesn't record anything. Marking
+    // it earlier let an abandoned-but-open sheet (backgrounded/reloaded mid-
+    // session, e.g. an iOS PWA reclaim during a rest period) latch as "asked"
+    // into the persisted set with no answer behind it — on remount the trigger
+    // effect below permanently skipped re-asking, so the exercise silently
+    // never got a chance to earn (or decline) anything for the rest of that
+    // session, with no trace in the recap at all.
+    askedJointRef.current.add(exId);
+    persistMesoAsked();
+
     if (answer === 'none') mesoJointFineRef.current.add(exId); else mesoJointFineRef.current.delete(exId);
 
     const record = mesoAnswersRef.current.joint[exId] || { exId };
@@ -4043,6 +4054,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     if (!mesoState || !entry || isCardio || isMesoDeloadSession) return;
     if (session.readiness == null) return; // readiness is always the first prompt of a session
     if (mesoWeek == null) return; // pending period — meso not yet started
+    // A second exercise becoming eligible while another's sheet is still open
+    // must defer rather than reopen/overwrite it (same "defer + retry on
+    // dependency change" pattern as the soreness effect above): mesoJointOpen
+    // is a dependency below, so this re-runs the instant the open sheet closes.
+    if (mesoJointOpen) return;
     const exId = entry.exId;
     if (askedJointRef.current.has(exId)) return;
     const workingSets = entry.sets.filter(s => !s.warmup);
@@ -4052,13 +4068,17 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // about (joint/weight-feel/pump/affinity are all about how the sets
     // FELT). mesoRepOutcome's earn/miss gates already require s.done, so
     // this exercise can't have earned or cut anything either way, only the
-    // question itself needs suppressing. Still marks asked so this effect
-    // doesn't keep re-checking a skipped exercise on every later set change.
+    // question itself needs suppressing. Still marks asked (no sheet ever
+    // shown, nothing to answer, so marking it here rather than in
+    // handleJointAnswer is correct) so this effect doesn't keep re-checking a
+    // skipped exercise on every later set change.
     if (!workingSets.some(s => s.done)) { askedJointRef.current.add(exId); persistMesoAsked(); return; }
     const ex = store.exercises?.find(e => e.id === exId);
     const pm = primaryMuscleForExercise(ex);
-    askedJointRef.current.add(exId);
-    persistMesoAsked();
+    // NOT marked "asked" here anymore — see handleJointAnswer, which marks it
+    // only once the user actually answers, so an abandoned/unanswered sheet
+    // (backgrounded mid-session, app reload) is re-eligible on the next visit
+    // instead of silently and permanently skipping this exercise.
     mesoJointExIdxRef.current = exIdx;
     setMesoJointExId(exId);
     setMesoJointExName(entry.name);
@@ -4076,7 +4096,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // set (skipped, not done) must still re-run this effect. Keying only on
     // `done` left the signature unchanged on a skip, so the joint/pump/volume
     // sheet never fired and its boost gates / volume feedback were skipped.
-  }, [exIdx, entry?.sets?.map(s => s.done ? 1 : s.skipped ? 2 : 0).join(','), !!mesoState, session.readiness]);
+  }, [exIdx, entry?.sets?.map(s => s.done ? 1 : s.skipped ? 2 : 0).join(','), !!mesoState, session.readiness, mesoJointOpen]);
 
   // Flushes a requestFinishOpen() call that deferred because a meso feedback
   // sheet was open at the time (see finishOpenPendingRef above); re-runs as
