@@ -17,6 +17,16 @@
    Entry shape: { id: string, date: string (YYYY-MM-DD), title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.638',
+    date: '2026-07-21',
+    title: 'Paper mode, sharpened ✏️',
+    items: [
+      "📝 Paper mode wrapped up its cutting phase: text stays sharp everywhere now, numbers, buttons, charts, all of it, no more grid lines slicing through your gains.",
+      "🎨 New: Full accent color in Paper. By default, Paper mutes your accent color to a calm pencil-grey. If you'd rather see your real color shine through even there, flip it on in Settings → Appearance.",
+      "🩸 Red got a glow-up: less bubblegum, more blood red.",
+    ],
+  },
+  {
     id: 'v2.637',
     date: '2026-07-20',
     title: 'Notebook Mode: Meet Paper',
