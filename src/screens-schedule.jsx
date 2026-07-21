@@ -2527,7 +2527,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
           <Btn kind="ghost" onClick={toggleArchive} style={{ flex: 1, fontSize: 12, color: UI.inkSoft, borderColor: UI.hairStrong }}>
             {draft.archived ? 'Unarchive' : 'Archive plan'}
           </Btn>
-          <Btn kind="ghost" onClick={deleteSch} style={{ flex: 1, fontSize: 12, color: UI.danger, borderColor: 'rgba(var(--danger-rgb),0.25)' }}>Delete plan</Btn>
+          <Btn kind="ghost" onClick={deleteSch} style={{ flex: 1, fontSize: 12, color: UI.danger, borderColor: 'rgba(var(--danger-rgb),calc(0.25 * var(--danger-border-boost)))' }}>Delete plan</Btn>
         </div>
       </div>
 

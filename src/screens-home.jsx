@@ -873,7 +873,7 @@ function CardioLiveSheet({ open, onFinish, onCancel }) {
         <div className="micro" style={{ color: UI.inkFaint }}>Recording…</div>
       </div>
       <Btn onClick={finish} style={{ width: '100%', marginBottom: 8 }}>Finish &amp; log</Btn>
-      <Btn kind="ghost" onClick={cancel} style={{ width: '100%', color: UI.danger, borderColor: 'rgba(var(--danger-rgb),0.2)' }}>Cancel</Btn>
+      <Btn kind="ghost" onClick={cancel} style={{ width: '100%', color: UI.danger, borderColor: 'rgba(var(--danger-rgb),calc(0.2 * var(--danger-border-boost)))' }}>Cancel</Btn>
     </Sheet>
   );
 }

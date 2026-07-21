@@ -420,7 +420,7 @@ function LibraryScreen({ store, setStore, go, userId }) {
                   {ex.tags?.map(t => <Pill key={t}>{t}</Pill>)}
                   {ex.category && <Pill style={{ color: UI.inkSoft, borderColor: UI.hair }}>{ex.category.charAt(0).toUpperCase() + ex.category.slice(1)}</Pill>}
                   {ex.unilateral && <Pill style={{ color: UI.inkSoft, borderColor: UI.hair }}>Unilateral</Pill>}
-                  {ex.equipment ? <Pill style={{ color: UI.inkFaint, borderColor: UI.hair, fontSize: 8 }}>{EQUIPMENT_TYPES.find(t => t.key === ex.equipment)?.label ?? ex.equipment}</Pill> : <Pill style={{ color: 'rgba(var(--danger-rgb),0.5)', borderColor: 'rgba(var(--danger-rgb),0.2)', fontSize: 8 }}>Unspecified</Pill>}
+                  {ex.equipment ? <Pill style={{ color: UI.inkFaint, borderColor: UI.hair, fontSize: 8 }}>{EQUIPMENT_TYPES.find(t => t.key === ex.equipment)?.label ?? ex.equipment}</Pill> : <Pill style={{ color: 'rgba(var(--danger-rgb),0.5)', borderColor: 'rgba(var(--danger-rgb),calc(0.2 * var(--danger-border-boost)))', fontSize: 8 }}>Unspecified</Pill>}
                   {planExIds.has(ex.id) && <span style={{ color: UI.inkFaint, fontSize: 9, letterSpacing: '0.05em' }}>◆</span>}
                 </div>
               </div>
@@ -461,7 +461,7 @@ function LibraryScreen({ store, setStore, go, userId }) {
                   {e.tags?.map(t => <Pill key={t}>{t}</Pill>)}
                   {e.category && <Pill style={{ color: UI.inkSoft, borderColor: UI.hair }}>{e.category.charAt(0).toUpperCase() + e.category.slice(1)}</Pill>}
                   {e.unilateral && <Pill style={{ color: UI.inkSoft, borderColor: UI.hair }}>Unilateral</Pill>}
-                  {e.equipment ? <Pill style={{ color: UI.inkFaint, borderColor: UI.hair, fontSize: 8 }}>{EQUIPMENT_TYPES.find(t => t.key === e.equipment)?.label ?? e.equipment}</Pill> : <Pill style={{ color: 'rgba(var(--danger-rgb),0.5)', borderColor: 'rgba(var(--danger-rgb),0.2)', fontSize: 8 }}>Unspecified</Pill>}
+                  {e.equipment ? <Pill style={{ color: UI.inkFaint, borderColor: UI.hair, fontSize: 8 }}>{EQUIPMENT_TYPES.find(t => t.key === e.equipment)?.label ?? e.equipment}</Pill> : <Pill style={{ color: 'rgba(var(--danger-rgb),0.5)', borderColor: 'rgba(var(--danger-rgb),calc(0.2 * var(--danger-border-boost)))', fontSize: 8 }}>Unspecified</Pill>}
                   {planExIds.has(e.id) && <span style={{ color: UI.inkFaint, fontSize: 9, letterSpacing: '0.05em' }}>◆</span>}
                 </div>
               </div>
@@ -505,7 +505,7 @@ function LibraryScreen({ store, setStore, go, userId }) {
                   {e.tags?.map(t => <Pill key={t}>{t}</Pill>)}
                   {e.category && <Pill style={{ color: UI.inkSoft, borderColor: UI.hair }}>{e.category.charAt(0).toUpperCase() + e.category.slice(1)}</Pill>}
                   {e.unilateral && <Pill style={{ color: UI.inkSoft, borderColor: UI.hair }}>Unilateral</Pill>}
-                  {e.equipment ? <Pill style={{ color: UI.inkFaint, borderColor: UI.hair, fontSize: 8 }}>{EQUIPMENT_TYPES.find(t => t.key === e.equipment)?.label ?? e.equipment}</Pill> : <Pill style={{ color: 'rgba(var(--danger-rgb),0.5)', borderColor: 'rgba(var(--danger-rgb),0.2)', fontSize: 8 }}>Unspecified</Pill>}
+                  {e.equipment ? <Pill style={{ color: UI.inkFaint, borderColor: UI.hair, fontSize: 8 }}>{EQUIPMENT_TYPES.find(t => t.key === e.equipment)?.label ?? e.equipment}</Pill> : <Pill style={{ color: 'rgba(var(--danger-rgb),0.5)', borderColor: 'rgba(var(--danger-rgb),calc(0.2 * var(--danger-border-boost)))', fontSize: 8 }}>Unspecified</Pill>}
                   {planExNamesLower.has(e.name.toUpperCase()) && <span style={{ color: UI.inkFaint, fontSize: 9, letterSpacing: '0.05em' }}>◆</span>}
                 </div>
               </div>
@@ -559,7 +559,7 @@ function LibraryScreen({ store, setStore, go, userId }) {
             </Btn>
             <Btn kind="ghost" onClick={deleteSelected}
               disabled={selected.size === 0}
-              style={{ color: UI.danger, borderColor: 'rgba(var(--danger-rgb),0.25)', opacity: selected.size === 0 ? 0.4 : 1, minHeight: 36, padding: '6px 14px', fontSize: 11 }}>
+              style={{ color: UI.danger, borderColor: 'rgba(var(--danger-rgb),calc(0.25 * var(--danger-border-boost)))', opacity: selected.size === 0 ? 0.4 : 1, minHeight: 36, padding: '6px 14px', fontSize: 11 }}>
               Delete
             </Btn>
           </div>

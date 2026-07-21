@@ -1648,7 +1648,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             )}
           </Btn>
         )}
-        <Btn kind="ghost" onClick={handleSignOut} style={{ color: UI.danger, borderColor: 'rgba(var(--danger-rgb),0.2)' }}>Sign out</Btn>
+        <Btn kind="ghost" onClick={handleSignOut} style={{ color: UI.danger, borderColor: 'rgba(var(--danger-rgb),calc(0.2 * var(--danger-border-boost)))' }}>Sign out</Btn>
         <div className="micro" style={{ textAlign: 'center', marginTop: 4 }}>Zane · {swVersion || '…'} · Data in Supabase</div>
       </div>
 
@@ -2293,7 +2293,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             <Btn kind="ghost" onClick={() => exportData()} style={{ flex: 1 }}>Export JSON</Btn>
             <Btn kind="ghost" onClick={() => setImportSheet(true)} disabled={importing} style={{ flex: 1 }}>{importing ? 'Importing…' : 'Import JSON'}</Btn>
           </div>
-          <Btn kind="ghost" onClick={handleDeleteAll} style={{ color: UI.danger, borderColor: 'rgba(var(--danger-rgb),0.2)' }}>Delete all data</Btn>
+          <Btn kind="ghost" onClick={handleDeleteAll} style={{ color: UI.danger, borderColor: 'rgba(var(--danger-rgb),calc(0.2 * var(--danger-border-boost)))' }}>Delete all data</Btn>
         </div>
       </SettingsSheet>
 
@@ -3037,7 +3037,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                       </Btn>
                     </div>
                   ) : (
-                    <Btn kind="ghost" onClick={() => setConfirmDeleteTicket(true)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7, color: 'rgba(var(--danger-rgb),0.7)', borderColor: 'rgba(var(--danger-rgb),0.25)' }}>
+                    <Btn kind="ghost" onClick={() => setConfirmDeleteTicket(true)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7, color: 'rgba(var(--danger-rgb),0.7)', borderColor: 'rgba(var(--danger-rgb),calc(0.25 * var(--danger-border-boost)))' }}>
                       <i className="fa-solid fa-trash" style={{ fontSize: 12 }} /> Delete ticket
                     </Btn>
                   )}

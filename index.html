@@ -95,6 +95,7 @@
     --accent-soft: rgba(var(--accent-rgb),calc(0.30 * var(--accent-tint-boost)));
     --danger: #c87469;
     --danger-rgb: 200,116,105;
+    --danger-border-boost: 1;
     --ok: #8fb069;
     --ok-rgb: 143,176,105;
     --warn: #d97706;
@@ -644,6 +645,15 @@ window.DARK_MODES = {
     // out, Delete plan, ...) all but disappears here. Darker, more
     // saturated red instead (~5.7:1 against this bg).
     danger: '#a3392c', dangerRgb: '163,57,44',
+    // The border itself is a low-alpha rgba(var(--danger-rgb),X) at every
+    // call site (0.2-0.4 depending on how prominent that action is): fine
+    // against a dark bg, but at that alpha even the darker danger red above
+    // still blends to within ~20-25 RGB units of a light bg, reading as
+    // basically invisible. Same lever as --accent-tint-boost (right above):
+    // callers do rgba(var(--danger-rgb),calc(X * var(--danger-border-boost)))
+    // so this scales every site's border up together without hand-tuning
+    // each one, and dark/black stay untouched at the default boost of 1.
+    dangerBorderBoost: 1.8,
     surfaceTint:     'rgba(31,27,22,0.05)',
     surfaceTintSm:   'rgba(31,27,22,0.07)',
     surfaceTintMd:   'rgba(31,27,22,0.09)',
@@ -667,6 +677,9 @@ window.DARK_MODES = {
     // is tuned for dark backgrounds and nearly vanishes here (~3:1 contrast),
     // most visibly on the "ghost" danger buttons (Sign out, Delete plan, ...).
     danger: '#a3392c', dangerRgb: '163,57,44',
+    // Same border-alpha fix as light (see there): a low-alpha border stays
+    // near-invisible against a light bg no matter how dark the base red is.
+    dangerBorderBoost: 1.8,
     // Darker AND (via hairWidth below) wider than every other theme's
     // hairline: a thin, faint border reads as "barely there" against paper's
     // light canvas in a way the same border never was on a dark one.
@@ -740,6 +753,7 @@ window.applyDarkMode = function(key) {
   s.setProperty('--hair-strong', m.hairStrong || _DARK_HAIR_STRONG);
   s.setProperty('--danger', m.danger || _DARK_DANGER);
   s.setProperty('--danger-rgb', m.dangerRgb || _DARK_DANGER_RGB);
+  s.setProperty('--danger-border-boost', m.dangerBorderBoost || 1);
   s.setProperty('--hair-width', m.hairWidth || '0.5px');
   s.setProperty('--range-track', m.rangeTrack || 'var(--hair-strong)');
   s.setProperty('--knurl-rgb', m.knurlRgb || '236,228,208');
