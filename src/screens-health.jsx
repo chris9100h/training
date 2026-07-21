@@ -545,6 +545,7 @@ function HealthChartCard({ title, icon, tf, setTf, tfOptions = HEALTH_TFS, headl
               padding: '2px 8px', cursor: 'pointer', border: 'none',
               background: tf === t.id ? 'var(--accent)' : 'transparent',
               color: tf === t.id ? 'var(--accent-ink)' : UI.inkFaint,
+              textShadow: 'none',
               fontFamily: UI.fontUi, fontSize: 9, fontWeight: 600, letterSpacing: '0.06em',
               WebkitTapHighlightColor: 'transparent',
             }}>{t.id}</button>
@@ -1196,6 +1197,7 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
                   flex: 1, padding: '12px 4px', cursor: 'pointer', border: 'none',
                   borderLeft: i > 0 ? `var(--hair-width) solid ${UI.hairStrong}` : 'none',
                   background: active ? 'var(--accent)' : 'transparent',
+                  textShadow: 'none',
                   display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5,
                   WebkitTapHighlightColor: 'transparent', transition: 'background 0.15s',
                 }}>
@@ -1250,6 +1252,7 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
               padding: '4px 10px', cursor: 'pointer', border: 'none',
               background: netCarbs === o.id ? 'var(--accent)' : 'transparent',
               color: netCarbs === o.id ? 'var(--accent-ink)' : UI.inkFaint,
+              textShadow: 'none',
               fontFamily: UI.fontUi, fontSize: 9, fontWeight: 600, letterSpacing: '0.05em',
               WebkitTapHighlightColor: 'transparent',
             }}>{o.label}</button>
@@ -1383,6 +1386,7 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
                     border: `0.5px solid ${glForm.context === c ? 'var(--accent)' : UI.hairStrong}`,
                     background: glForm.context === c ? 'var(--accent)' : 'transparent',
                     color: glForm.context === c ? 'var(--accent-ink)' : UI.inkFaint,
+                    textShadow: 'none',
                     fontFamily: UI.fontUi, fontSize: 10, fontWeight: 600, letterSpacing: '0.05em',
                     WebkitTapHighlightColor: 'transparent',
                   }}>{GLUCOSE_CTX_LABELS[c]}</button>
@@ -1407,7 +1411,7 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
             setAddingGlucose(true); setEditingGlucoseId(null);
           }} style={{
             width: '100%', padding: '9px', background: UI.bgInset, border: `0.5px dashed ${UI.hairStrong}`, borderRadius: 6,
-            color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 12, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+            color: UI.inkFaint, textShadow: 'none', fontFamily: UI.fontUi, fontSize: 12, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
           }}>+ Add reading</button>
         )}
       </CatSection>
@@ -1485,7 +1489,7 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
             setAddingBp(true); setEditingBpId(null);
           }} style={{
             width: '100%', padding: '9px', background: UI.bgInset, border: `0.5px dashed ${UI.hairStrong}`, borderRadius: 6,
-            color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 12, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+            color: UI.inkFaint, textShadow: 'none', fontFamily: UI.fontUi, fontSize: 12, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
           }}>+ Add reading</button>
         )}
       </CatSection>
@@ -1559,7 +1563,7 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
             setAddingTemp(true); setEditingTempId(null);
           }} style={{
             width: '100%', padding: '9px', background: UI.bgInset, border: `0.5px dashed ${UI.hairStrong}`, borderRadius: 6,
-            color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 12, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+            color: UI.inkFaint, textShadow: 'none', fontFamily: UI.fontUi, fontSize: 12, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
           }}>+ Add reading</button>
         )}
       </CatSection>
@@ -1825,6 +1829,7 @@ function HealthWeekCard({ stats, dragHandle, targets, tf, setTf, weightUnit }) {
           padding: '2px 8px', cursor: 'pointer', border: 'none',
           background: tf === t.id ? 'var(--accent)' : 'transparent',
           color: tf === t.id ? 'var(--accent-ink)' : UI.inkFaint,
+          textShadow: 'none',
           fontFamily: UI.fontUi, fontSize: 9, fontWeight: 600, letterSpacing: '0.06em',
           WebkitTapHighlightColor: 'transparent',
         }}>{t.id}</button>
@@ -2033,6 +2038,7 @@ function HealthDateStrip({ store, setStore, selectedDate, onSelect, onLog, targe
                   padding: '0 14px', border: 'none', borderLeft: i > 0 ? `1px solid ${UI.hairStrong}` : 'none',
                   background: active ? 'var(--accent)' : 'transparent',
                   color: active ? 'var(--accent-ink)' : UI.inkFaint, cursor: 'pointer',
+                  textShadow: 'none',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                   WebkitTapHighlightColor: 'transparent', transition: 'background 0.15s',
                 }}>
@@ -2047,6 +2053,7 @@ function HealthDateStrip({ store, setStore, selectedDate, onSelect, onLog, targe
           height: 34, borderRadius: 4, border: 'none',
           background: 'linear-gradient(180deg, var(--accent-light), var(--accent))',
           color: 'var(--accent-ink)', cursor: 'pointer', padding: '0 14px',
+          textShadow: 'none',
           fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, letterSpacing: '0.06em',
           flexShrink: 0, display: 'flex', alignItems: 'center', gap: 5,
           WebkitTapHighlightColor: 'transparent',
@@ -3446,6 +3453,7 @@ function ExportSheet({ open, onClose, store }) {
                 flex: 1, padding: '7px 4px', borderRadius: 4, border: `var(--hair-width) solid ${UI.hairStrong}`,
                 background: from === healthShiftISO(today, -(p.days - 1)) && to === today ? 'var(--accent)' : UI.bgInset,
                 color: from === healthShiftISO(today, -(p.days - 1)) && to === today ? 'var(--accent-ink)' : UI.inkSoft,
+                textShadow: 'none',
                 fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, cursor: 'pointer',
                 WebkitTapHighlightColor: 'transparent',
               }}>{p.label}</button>
@@ -3476,6 +3484,7 @@ function ExportSheet({ open, onClose, store }) {
           <button onClick={doExportCSV} disabled={!!exporting} style={{
             width: '100%', padding: '13px 0', borderRadius: 6, border: `var(--hair-width) solid ${UI.hairStrong}`,
             background: UI.bgInset, color: exporting ? UI.inkGhost : UI.ink,
+            textShadow: 'none',
             fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, cursor: exporting ? 'default' : 'pointer',
             display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
             WebkitTapHighlightColor: 'transparent',
@@ -3487,7 +3496,8 @@ function ExportSheet({ open, onClose, store }) {
             width: '100%', padding: '13px 0', borderRadius: 6, border: 'none',
             background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)',
             boxShadow: '0 6px 20px rgba(var(--accent-rgb),0.35)',
-            color: 'var(--accent-ink)', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 700, cursor: exporting ? 'default' : 'pointer',
+            color: 'var(--accent-ink)', textShadow: 'none',
+            fontFamily: UI.fontUi, fontSize: 13, fontWeight: 700, cursor: exporting ? 'default' : 'pointer',
             display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
             WebkitTapHighlightColor: 'transparent',
             opacity: exporting ? 0.6 : 1,

@@ -447,6 +447,7 @@ function FeatureMapScreen({ store, go }) {
               <button key={t.id} onClick={() => setRole(t.id)} style={{
                 padding: '7px 14px', border: 'none', borderLeft: i ? `1px solid ${UI.hair}` : 'none', cursor: 'pointer',
                 background: roleFilter === t.id ? (t.id === 'coach' ? fmCoachTint() : UI.gold) : 'transparent',
+                textShadow: 'none',
                 color: roleFilter === t.id ? (t.id === 'coach' ? (isLightCanvasActive() ? '#f5f5f5' : '#0a0805') : 'var(--accent-ink)') : UI.inkSoft,
                 fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
               }}>{t.label}</button>
@@ -540,6 +541,7 @@ function FeatureMapScreen({ store, go }) {
         bottom: 'calc(16px + env(safe-area-inset-bottom, 0px))',
         width: 46, height: 46, borderRadius: '50%',
         border: `1px solid ${UI.hairStrong}`, background: UI.bgCard, color: 'var(--accent)',
+        textShadow: 'none',
         cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
         boxShadow: '0 8px 24px rgba(0,0,0,0.4)', WebkitTapHighlightColor: 'transparent',
         opacity: 0, pointerEvents: 'none', transition: 'opacity 0.2s ease',

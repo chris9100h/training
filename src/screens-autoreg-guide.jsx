@@ -216,7 +216,7 @@ function AutoregGuideScreen({ store, go, mode: modeProp, back }) {
                   aria-pressed={on}
                   style={{ textAlign: 'left', cursor: 'pointer', font: 'inherit', color: UI.ink, position: 'relative', overflow: 'hidden',
                     background: UI.bgRaised, border: `1px solid ${on ? UI.gold : UI.hair}`, borderRadius: 8, padding: '16px 16px 14px',
-                    boxShadow: on ? `0 0 0 1px ${UI.gold}` : 'none', transition: 'border-color .15s' }}>
+                    boxShadow: on ? `0 0 0 1px ${UI.gold}` : 'none', textShadow: 'none', transition: 'border-color .15s' }}>
                   <span style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 3, background: UI.gold, opacity: on ? 1 : 0 }} />
                   <div style={{ position: 'absolute', top: 13, right: 13, width: 16, height: 16, borderRadius: '50%', border: `2px solid ${on ? UI.gold : UI.hairStrong}`, background: on ? `radial-gradient(circle, ${UI.gold} 0 40%, transparent 46%)` : 'transparent' }} />
                   <div style={{ fontFamily: UI.fontNum, fontSize: 9.5, letterSpacing: '.13em', textTransform: 'uppercase', color: UI.inkFaint }}>{meta.tag}</div>
@@ -724,7 +724,7 @@ function AutoregGuideScreen({ store, go, mode: modeProp, back }) {
         position: 'fixed', right: 16, bottom: 'calc(env(safe-area-inset-bottom, 10px) + 18px)', zIndex: 40,
         width: 44, height: 44, borderRadius: '50%', border: `var(--hair-width) solid ${UI.hairStrong}`,
         background: UI.bgRaised, color: UI.gold, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
-        boxShadow: '0 8px 22px -8px rgba(0,0,0,0.65)', display: 'grid', placeItems: 'center',
+        boxShadow: '0 8px 22px -8px rgba(0,0,0,0.65)', textShadow: 'none', display: 'grid', placeItems: 'center',
         opacity: showTop ? 1 : 0, transform: showTop ? 'translateY(0)' : 'translateY(8px)',
         pointerEvents: showTop ? 'auto' : 'none', transition: 'opacity .2s ease, transform .2s ease',
       }}>

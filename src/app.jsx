@@ -48,7 +48,7 @@ class ErrorBoundary extends React.Component {
             </div>
             <button
               onClick={() => { this.setState({ error: null }); this.props.onGoHome?.(); }}
-              style={{ background: UI.gold, color: '#0a0a0a', border: 'none', borderRadius: 8, padding: '8px 18px', fontSize: 13, fontWeight: 600, fontFamily: UI.fontUi, cursor: 'pointer' }}
+              style={{ background: UI.gold, color: '#0a0a0a', border: 'none', borderRadius: 8, padding: '8px 18px', fontSize: 13, fontWeight: 600, fontFamily: UI.fontUi, cursor: 'pointer', textShadow: 'none' }}
             >
               Back to home
             </button>
@@ -106,7 +106,7 @@ function AutoCloseBanner({ notify, onDismiss }) {
           background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)',
           boxShadow: '0 8px 24px rgba(var(--accent-rgb),0.4)',
           color: 'var(--accent-ink)', fontFamily: UI.fontUi, fontSize: 15, fontWeight: 700,
-          letterSpacing: '0.06em', WebkitTapHighlightColor: 'transparent',
+          letterSpacing: '0.06em', WebkitTapHighlightColor: 'transparent', textShadow: 'none',
         }}>
           GOT IT
         </button>
@@ -158,7 +158,7 @@ function UpdateBanner({ onUpdate }) {
           background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)',
           boxShadow: '0 8px 24px rgba(var(--accent-rgb),0.4)',
           color: 'var(--accent-ink)', fontFamily: UI.fontUi, fontSize: 15, fontWeight: 700,
-          letterSpacing: '0.06em',
+          letterSpacing: '0.06em', textShadow: 'none',
         }}>
           UPDATE NOW
         </button>
@@ -213,7 +213,7 @@ function WhatsNewModal({ entries, onDismiss }) {
           background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)',
           boxShadow: '0 8px 24px rgba(var(--accent-rgb),0.4)',
           color: 'var(--accent-ink)', fontFamily: UI.fontUi, fontSize: 15, fontWeight: 700,
-          letterSpacing: '0.06em', WebkitTapHighlightColor: 'transparent',
+          letterSpacing: '0.06em', WebkitTapHighlightColor: 'transparent', textShadow: 'none',
         }}>
           GOT IT
         </button>
@@ -256,7 +256,7 @@ function ErrorScreen({ onRetry }) {
           background: UI.gold, color: '#0a0a0a',
           border: 'none', borderRadius: 4,
           padding: '8px 18px', fontSize: 13, fontWeight: 600,
-          fontFamily: UI.fontUi, cursor: 'pointer',
+          fontFamily: UI.fontUi, cursor: 'pointer', textShadow: 'none',
         }}>
           Retry
         </button>

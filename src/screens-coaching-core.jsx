@@ -171,7 +171,7 @@ function CoachingPendingBanner({ store, setStore, userId }) {
           <button
             disabled={loading}
             onClick={() => respond(true)}
-            style={{ width: '100%', padding: '14px 0', borderRadius: 8, border: 'none', cursor: loading ? 'default' : 'pointer', background: 'var(--accent)', color: 'var(--accent-ink)', fontFamily: UI.fontUi, fontSize: 14, fontWeight: 700, letterSpacing: '0.08em', opacity: loading ? 0.6 : 1 }}
+            style={{ width: '100%', padding: '14px 0', borderRadius: 8, border: 'none', cursor: loading ? 'default' : 'pointer', background: 'var(--accent)', color: 'var(--accent-ink)', textShadow: 'none', fontFamily: UI.fontUi, fontSize: 14, fontWeight: 700, letterSpacing: '0.08em', opacity: loading ? 0.6 : 1 }}
           >
             ACCEPT
           </button>
@@ -317,7 +317,7 @@ function ChatThread({ thread, coachingId, userId, otherName, unreadNotes, onBack
   return (
     <>
       <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10, padding: '8px 16px 8px', borderBottom: `var(--hair-width) solid ${UI.hair}` }}>
-        <button onClick={onBack} style={{ width: 32, height: 32, borderRadius: 6, border: `var(--hair-width) solid ${UI.hair}`, background: UI.bgRaised, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+        <button onClick={onBack} style={{ width: 32, height: 32, borderRadius: 6, border: `var(--hair-width) solid ${UI.hair}`, background: UI.bgRaised, textShadow: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
           <i className="fa-solid fa-chevron-left" style={{ fontSize: 12, color: UI.inkSoft }} />
         </button>
         <div style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>{thread.name}</div>
@@ -351,7 +351,7 @@ function ChatThread({ thread, coachingId, userId, otherName, unreadNotes, onBack
           <div style={{ padding: '10px 16px 0', display: 'flex' }}>
             <div style={{ position: 'relative', display: 'inline-block' }}>
               <img src={imagePreview} alt="preview" style={{ maxHeight: 80, maxWidth: 120, borderRadius: 4, display: 'block', border: `var(--hair-width) solid ${UI.hairStrong}` }} />
-              <button onClick={() => { setImageFile(null); setImagePreview(null); }} style={{ position: 'absolute', top: -6, right: -6, width: 20, height: 20, borderRadius: '50%', border: 'none', background: UI.danger, color: '#fff', cursor: 'pointer', fontSize: 12, lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>×</button>
+              <button onClick={() => { setImageFile(null); setImagePreview(null); }} style={{ position: 'absolute', top: -6, right: -6, width: 20, height: 20, borderRadius: '50%', border: 'none', background: UI.danger, color: '#fff', textShadow: 'none', cursor: 'pointer', fontSize: 12, lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>×</button>
             </div>
           </div>
         )}
@@ -368,7 +368,7 @@ function ChatThread({ thread, coachingId, userId, otherName, unreadNotes, onBack
             placeholder="Message…"
             style={{ flex: 1, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6, padding: '10px 16px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, outline: 'none' }}
           />
-          <button onClick={send} disabled={sending || (!body.trim() && !imageFile)} style={{ width: 40, height: 40, borderRadius: 6, border: (body.trim() || imageFile) && !sending ? 'none' : `var(--hair-width) solid ${UI.hair}`, background: (body.trim() || imageFile) && !sending ? 'var(--accent)' : 'transparent', color: (body.trim() || imageFile) && !sending ? 'var(--accent-ink)' : UI.inkFaint, cursor: sending || (!body.trim() && !imageFile) ? 'default' : 'pointer', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'background 0.2s, color 0.2s, border 0.2s' }}>
+          <button onClick={send} disabled={sending || (!body.trim() && !imageFile)} style={{ width: 40, height: 40, borderRadius: 6, border: (body.trim() || imageFile) && !sending ? 'none' : `var(--hair-width) solid ${UI.hair}`, background: (body.trim() || imageFile) && !sending ? 'var(--accent)' : 'transparent', color: (body.trim() || imageFile) && !sending ? 'var(--accent-ink)' : UI.inkFaint, textShadow: 'none', cursor: sending || (!body.trim() && !imageFile) ? 'default' : 'pointer', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'background 0.2s, color 0.2s, border 0.2s' }}>
             {sending ? <span style={{ fontFamily: UI.fontUi, fontSize: 14 }}>…</span> : <i className="fa-solid fa-arrow-up" style={{ fontSize: 15 }} />}
           </button>
         </div>
@@ -685,7 +685,7 @@ function CoachingSettingsSection({ store, setStore, userId, go }) {
         <button
           onClick={handleInvite}
           disabled={inviting || !inviteEmail.trim()}
-          style={{ padding: '10px 16px', borderRadius: 8, border: 'none', background: 'var(--accent)', color: 'var(--accent-ink)', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, cursor: inviting || !inviteEmail.trim() ? 'default' : 'pointer', opacity: inviting || !inviteEmail.trim() ? 0.5 : 1 }}
+          style={{ padding: '10px 16px', borderRadius: 8, border: 'none', background: 'var(--accent)', color: 'var(--accent-ink)', textShadow: 'none', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, cursor: inviting || !inviteEmail.trim() ? 'default' : 'pointer', opacity: inviting || !inviteEmail.trim() ? 0.5 : 1 }}
         >
           {inviting ? '…' : 'INVITE'}
         </button>

@@ -856,11 +856,11 @@ function CheckInSchemaBuilder({ coachingId, initial, coachDefault, onSave, onSav
         style={{ width: '100%', boxSizing: 'border-box', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4, padding: '10px 12px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, outline: 'none' }} />
       <div style={{ display: 'flex', gap: 8 }}>
         <button onClick={() => { setNamingTemplate(null); setTemplateNameDraft(''); }}
-          style={{ flex: 1, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, padding: '11px', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, color: UI.inkSoft, cursor: 'pointer' }}>
+          style={{ flex: 1, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, textShadow: 'none', padding: '11px', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, color: UI.inkSoft, cursor: 'pointer' }}>
           Cancel
         </button>
         <button onClick={submitTemplateName} disabled={!templateNameDraft.trim() || templateCapReached}
-          style={{ flex: 1, background: 'var(--accent)', border: 'none', borderRadius: 6, padding: '11px', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 700, color: 'var(--accent-ink)', cursor: 'pointer', opacity: (templateNameDraft.trim() && !templateCapReached) ? 1 : 0.5 }}>
+          style={{ flex: 1, background: 'var(--accent)', border: 'none', borderRadius: 6, textShadow: 'none', padding: '11px', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 700, color: 'var(--accent-ink)', cursor: 'pointer', opacity: (templateNameDraft.trim() && !templateCapReached) ? 1 : 0.5 }}>
           Save
         </button>
       </div>
@@ -906,7 +906,7 @@ function CheckInSchemaBuilder({ coachingId, initial, coachDefault, onSave, onSav
       {renderHelpBtn(helpKey)}
     </div>
   );
-  const segBtn = (active) => ({ flex: 1, padding: '7px 4px', borderRadius: 6, border: `0.5px solid ${active ? 'var(--accent)' : UI.hairStrong}`, background: active ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset, color: active ? 'var(--accent)' : UI.inkSoft, fontFamily: UI.fontUi, fontSize: 12, cursor: 'pointer', fontWeight: active ? 700 : 400 });
+  const segBtn = (active) => ({ flex: 1, padding: '7px 4px', borderRadius: 6, border: `0.5px solid ${active ? 'var(--accent)' : UI.hairStrong}`, background: active ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset, textShadow: 'none', color: active ? 'var(--accent)' : UI.inkSoft, fontFamily: UI.fontUi, fontSize: 12, cursor: 'pointer', fontWeight: active ? 700 : 400 });
   const renderToggle = (on, onToggle) => <Toggle on={on} onToggle={onToggle} />;
 
   const overlayStyle = { position: 'fixed', top: 0, right: 0, bottom: 0, left: 0, zIndex: 350, background: UI.bg, backgroundImage: 'var(--bg-texture)', display: 'flex', flexDirection: 'column' };
@@ -918,7 +918,7 @@ function CheckInSchemaBuilder({ coachingId, initial, coachDefault, onSave, onSav
   );
   const doneBtn = (onClick, disabled) => (
     <button onClick={onClick} disabled={disabled}
-      style={{ background: 'var(--accent)', border: 'none', borderRadius: 6, padding: '7px 16px', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, color: 'var(--accent-ink)', cursor: 'pointer', opacity: disabled ? 0.4 : 1 }}>
+      style={{ background: 'var(--accent)', border: 'none', borderRadius: 6, textShadow: 'none', padding: '7px 16px', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, color: 'var(--accent-ink)', cursor: 'pointer', opacity: disabled ? 0.4 : 1 }}>
       Done
     </button>
   );
@@ -1110,7 +1110,7 @@ function CheckInSchemaBuilder({ coachingId, initial, coachDefault, onSave, onSav
                   {renderHelpBtn('options')}
                 </div>
                 <button onClick={() => set('options', [...fd.options, { value: '', label: '' }])}
-                  style={{ background: 'var(--accent)', border: 'none', borderRadius: 4, padding: '4px 10px', fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, color: 'var(--accent-ink)', cursor: 'pointer' }}>
+                  style={{ background: 'var(--accent)', border: 'none', borderRadius: 4, textShadow: 'none', padding: '4px 10px', fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, color: 'var(--accent-ink)', cursor: 'pointer' }}>
                   + ADD
                 </button>
               </div>
@@ -1308,7 +1308,7 @@ function CheckInSchemaBuilder({ coachingId, initial, coachDefault, onSave, onSav
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   {nonMacroFields.map(f => (
                     <button key={f.key} onClick={() => addDefaultField(section, f)}
-                      style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', background: UI.bgInset, borderRadius: 6, border: `var(--hair-width) solid ${UI.hair}`, cursor: 'pointer', textAlign: 'left', WebkitTapHighlightColor: 'transparent' }}>
+                      style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', background: UI.bgInset, borderRadius: 6, border: `var(--hair-width) solid ${UI.hair}`, textShadow: 'none', cursor: 'pointer', textAlign: 'left', WebkitTapHighlightColor: 'transparent' }}>
                       {f.icon && <i className={`fa-solid ${f.icon}`} style={{ fontSize: 13, color: UI.inkGhost, flexShrink: 0, width: 16, textAlign: 'center' }} />}
                       <span style={{ flex: 1, minWidth: 0, fontSize: 13, color: UI.ink, fontFamily: UI.fontUi }}>{f.label}</span>
                       <span style={{ fontSize: 9, color: TYPE_COLOR[f.type] || UI.inkGhost, fontFamily: UI.fontUi, fontWeight: 700, background: UI.bg, borderRadius: 4, padding: '1px 5px', border: `var(--hair-width) solid ${UI.hair}`, flexShrink: 0 }}>{TYPE_LABEL[f.type] || f.type}</span>
@@ -1317,7 +1317,7 @@ function CheckInSchemaBuilder({ coachingId, initial, coachDefault, onSave, onSav
                   ))}
                   {macroFields.length > 0 && (
                     <button onClick={() => addMacroGroup(section)}
-                      style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', background: UI.bgInset, borderRadius: 6, border: `var(--hair-width) solid ${UI.hair}`, cursor: 'pointer', textAlign: 'left', WebkitTapHighlightColor: 'transparent' }}>
+                      style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', background: UI.bgInset, borderRadius: 6, border: `var(--hair-width) solid ${UI.hair}`, textShadow: 'none', cursor: 'pointer', textAlign: 'left', WebkitTapHighlightColor: 'transparent' }}>
                       <i className="fa-solid fa-fire" style={{ fontSize: 13, color: UI.inkGhost, flexShrink: 0, width: 16, textAlign: 'center' }} />
                       <span style={{ flex: 1, minWidth: 0, fontSize: 13, color: UI.ink, fontFamily: UI.fontUi }}>Macros (Cal · Protein · Carbs · Fat)</span>
                       <i className="fa-solid fa-plus" style={{ fontSize: 12, color: 'var(--accent)', flexShrink: 0 }} />
@@ -1345,13 +1345,13 @@ function CheckInSchemaBuilder({ coachingId, initial, coachDefault, onSave, onSav
               <>
                 <div style={{ fontSize: 12, fontWeight: 700, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 2 }}>Apply changes to</div>
                 <button onClick={() => setAllClientsConfirm(true)}
-                  style={{ background: 'var(--accent)', border: 'none', borderRadius: 6, padding: '13px 16px', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 700, color: 'var(--accent-ink)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left', width: '100%' }}>
+                  style={{ background: 'var(--accent)', border: 'none', borderRadius: 6, textShadow: 'none', padding: '13px 16px', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 700, color: 'var(--accent-ink)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left', width: '100%' }}>
                   <i className="fa-solid fa-users" style={{ fontSize: 14, flexShrink: 0 }} />
                   <span style={{ flex: 1 }}>All clients</span>
                   <span style={{ fontSize: 11, fontWeight: 400, opacity: 0.75 }}>New default for everyone</span>
                 </button>
                 <button onClick={() => { setSavePicker(false); handleSave(); }}
-                  style={{ background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, padding: '13px 16px', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, color: UI.ink, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left', width: '100%' }}>
+                  style={{ background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, textShadow: 'none', padding: '13px 16px', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, color: UI.ink, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left', width: '100%' }}>
                   <i className="fa-solid fa-person" style={{ fontSize: 14, flexShrink: 0 }} />
                   <span style={{ flex: 1 }}>This client only</span>
                   <span style={{ fontSize: 11, fontWeight: 400, color: UI.inkSoft }}>Override for this client</span>
@@ -1370,7 +1370,7 @@ function CheckInSchemaBuilder({ coachingId, initial, coachDefault, onSave, onSav
                   </button>
                 )}
                 <button onClick={() => { setSavePicker(false); setAllClientsConfirm(false); handleSaveForAll(); }}
-                  style={{ background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, padding: '13px 16px', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, color: UI.ink, cursor: 'pointer', textAlign: 'left', width: '100%' }}>
+                  style={{ background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, textShadow: 'none', padding: '13px 16px', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, color: UI.ink, cursor: 'pointer', textAlign: 'left', width: '100%' }}>
                   Continue without saving
                 </button>
               </>
@@ -1406,7 +1406,7 @@ function CheckInSchemaBuilder({ coachingId, initial, coachDefault, onSave, onSav
           Reset
         </button>
         <button onClick={() => onSaveForAll ? setSavePicker(true) : handleSave()} disabled={saving}
-          style={{ background: 'var(--accent)', border: 'none', borderRadius: 6, padding: '7px 16px', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, color: 'var(--accent-ink)', cursor: 'pointer', opacity: saving ? 0.6 : 1 }}>
+          style={{ background: 'var(--accent)', border: 'none', borderRadius: 6, textShadow: 'none', padding: '7px 16px', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, color: 'var(--accent-ink)', cursor: 'pointer', opacity: saving ? 0.6 : 1 }}>
           {saving ? 'Saving…' : 'Save'}
         </button>
       </div>
@@ -1582,7 +1582,7 @@ function ClientCheckInsTab({ coachingId, checkinEnabled = true, onToggle, toggli
           {toggleRow}
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, padding: 32 }}>
             <div style={{ fontSize: 13, color: 'rgba(var(--danger-rgb),0.8)', fontFamily: UI.fontUi, textAlign: 'center' }}>Couldn't load check-ins.</div>
-            <button onClick={() => { setLoadErr(false); load(); }} style={{ background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, padding: '8px 16px', cursor: 'pointer', color: UI.ink, fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600 }}>Retry</button>
+            <button onClick={() => { setLoadErr(false); load(); }} style={{ background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, textShadow: 'none', padding: '8px 16px', cursor: 'pointer', color: UI.ink, fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600 }}>Retry</button>
           </div>
         </div>
       </>

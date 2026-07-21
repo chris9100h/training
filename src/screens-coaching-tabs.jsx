@@ -264,7 +264,7 @@ function CoachingTabCoachView({ store, setStore, userId, go, hideTopBar = false 
           <button
             onClick={handleInvite}
             disabled={inviting || !inviteEmail.trim()}
-            style={{ width: '100%', padding: '13px', borderRadius: 6, border: 'none', background: 'var(--accent)', color: 'var(--accent-ink)', fontFamily: UI.fontUi, fontSize: 14, fontWeight: 700, cursor: inviting || !inviteEmail.trim() ? 'not-allowed' : 'pointer', opacity: inviting || !inviteEmail.trim() ? 0.5 : 1 }}
+            style={{ width: '100%', padding: '13px', borderRadius: 6, border: 'none', background: 'var(--accent)', color: 'var(--accent-ink)', textShadow: 'none', fontFamily: UI.fontUi, fontSize: 14, fontWeight: 700, cursor: inviting || !inviteEmail.trim() ? 'not-allowed' : 'pointer', opacity: inviting || !inviteEmail.trim() ? 0.5 : 1 }}
           >
             {inviting ? 'Sending…' : 'Send Invite'}
           </button>
@@ -466,6 +466,7 @@ function MarkerRow({ label, value, onChange, readOnly }) {
               border: `1px solid ${value != null && n <= value && value !== n ? 'rgba(var(--accent-rgb),0.5)' : 'transparent'}`,
               background: value === n ? 'var(--accent)' : value != null && n <= value ? `rgba(var(--accent-rgb),0.3)` : UI.bgInset,
               color: value === n ? 'var(--accent-ink)' : n <= 3 ? 'var(--accent)' : n <= 6 ? UI.inkSoft : UI.inkFaint,
+              textShadow: 'none',
               fontSize: 10, fontFamily: UI.fontUi, fontWeight: value === n ? 700 : 400,
               transition: 'background 0.1s',
             }}
@@ -774,7 +775,7 @@ function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false
           <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', paddingTop: 12, borderTop: `var(--hair-width) solid ${UI.hair}` }}>
             {onDelete && (
               <button onClick={onDelete}
-                style={{ background: confirmingDelete ? 'rgba(var(--danger-rgb),0.12)' : UI.bgRaised, border: `0.5px solid ${confirmingDelete ? 'rgba(var(--danger-rgb),0.5)' : UI.hairStrong}`, borderRadius: 6, padding: '8px 16px', fontSize: 12, color: confirmingDelete ? 'rgba(var(--danger-rgb),0.9)' : UI.inkFaint, fontFamily: UI.fontUi, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+                style={{ background: confirmingDelete ? 'rgba(var(--danger-rgb),0.12)' : UI.bgRaised, border: `0.5px solid ${confirmingDelete ? 'rgba(var(--danger-rgb),0.5)' : UI.hairStrong}`, borderRadius: 6, textShadow: 'none', padding: '8px 16px', fontSize: 12, color: confirmingDelete ? 'rgba(var(--danger-rgb),0.9)' : UI.inkFaint, fontFamily: UI.fontUi, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
                 {confirmingDelete ? 'Confirm?' : 'Delete'}
               </button>
             )}
@@ -785,15 +786,15 @@ function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false
             {exportMode === 'pick' ? (
               <>
                 <button onClick={() => setExportMode(null)}
-                  style={{ background: UI.bgRaised, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, padding: '8px 14px', fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>Cancel</button>
+                  style={{ background: UI.bgRaised, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, textShadow: 'none', padding: '8px 14px', fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>Cancel</button>
                 <button onClick={doExportText}
-                  style={{ background: UI.bgRaised, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, padding: '8px 14px', fontSize: 12, color: UI.ink, fontFamily: UI.fontUi, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>Text</button>
+                  style={{ background: UI.bgRaised, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, textShadow: 'none', padding: '8px 14px', fontSize: 12, color: UI.ink, fontFamily: UI.fontUi, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>Text</button>
                 <button onClick={doExportImage}
-                  style={{ background: UI.bgRaised, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, padding: '8px 14px', fontSize: 12, color: UI.ink, fontFamily: UI.fontUi, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>Image</button>
+                  style={{ background: UI.bgRaised, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, textShadow: 'none', padding: '8px 14px', fontSize: 12, color: UI.ink, fontFamily: UI.fontUi, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>Image</button>
               </>
             ) : (
               <button onClick={() => setExportMode('pick')} disabled={exportMode === 'exporting'}
-                style={{ background: UI.bgRaised, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, padding: '8px 14px', fontSize: 12, color: exportMode === 'exporting' ? UI.inkFaint : UI.ink, fontFamily: UI.fontUi, cursor: exportMode === 'exporting' ? 'default' : 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+                style={{ background: UI.bgRaised, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, textShadow: 'none', padding: '8px 14px', fontSize: 12, color: exportMode === 'exporting' ? UI.inkFaint : UI.ink, fontFamily: UI.fontUi, cursor: exportMode === 'exporting' ? 'default' : 'pointer', WebkitTapHighlightColor: 'transparent' }}>
                 {exportMode === 'exporting' ? '…' : <i className="fa-solid fa-share-from-square" />}
               </button>
             )}
@@ -941,6 +942,7 @@ function FieldWidget({ field, value, onChange, distUnit, setDistUnit, inputStyle
               }} style={{ padding: '2px 7px', cursor: 'pointer', border: 'none',
                 background: distUnit === u ? 'var(--accent)' : 'transparent',
                 color: distUnit === u ? UI.bg : UI.inkFaint,
+                textShadow: 'none',
                 fontFamily: UI.fontUi, fontSize: 9, fontWeight: 600, letterSpacing: '0.06em',
                 WebkitTapHighlightColor: 'transparent' }}>
               {u}
@@ -1015,6 +1017,7 @@ function FieldWidget({ field, value, onChange, distUnit, setDistUnit, inputStyle
                 border: `1px solid ${value != null && n <= value && value !== n ? 'rgba(var(--accent-rgb),0.5)' : 'transparent'}`,
                 background: value === n ? 'var(--accent)' : value != null && n <= value ? `rgba(var(--accent-rgb),0.3)` : UI.bgInset,
                 color: btnColor(n),
+                textShadow: 'none',
                 fontSize: 10, fontFamily: UI.fontUi, fontWeight: value === n ? 700 : 400, transition: 'background 0.1s' }}>
               {n}
             </button>
@@ -1039,6 +1042,7 @@ function FieldWidget({ field, value, onChange, distUnit, setDistUnit, inputStyle
                 style={{ flex: 1, padding: '7px 2px', borderRadius: 4, cursor: 'pointer',
                   border: `${value === opt.value ? '1.5px' : '0.5px'} solid ${value === opt.value ? 'var(--accent)' : UI.hairStrong}`,
                   background: value === opt.value ? `rgba(var(--accent-rgb),0.24)` : UI.bgInset,
+                  textShadow: 'none',
                   display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
                 <span className="num" style={{ fontSize: 13, color: value === opt.value ? 'var(--accent)' : UI.inkSoft }}>{opt.value}</span>
                 <span style={{ fontSize: 8, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.04em' }}>{opt.label}</span>
@@ -1059,6 +1063,7 @@ function FieldWidget({ field, value, onChange, distUnit, setDistUnit, inputStyle
             return (
               <button key={opt.value} onClick={() => onChange(sel ? null : opt.value)}
                 style={{ flex: 1, padding: '9px 4px', borderRadius: 6, cursor: 'pointer', background: bg, color: fg,
+                  textShadow: 'none',
                   fontFamily: UI.fontUi, fontSize: 10, fontWeight: sel ? 700 : 400, letterSpacing: '0.04em',
                   border: `${sel ? '1.5px' : '0.5px'} solid ${sel ? 'currentColor' : UI.hairStrong}` }}>
                 {opt.label}
@@ -1336,19 +1341,19 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
               would wrongly hide the preview whenever last week was checked in. */}
           {checkinEnabled && !canSubmitToday && previewResponses && (
             <button onClick={() => setPreviewOpen(v => !v)}
-              style={{ flex: 1, background: previewOpen ? `rgba(var(--accent-rgb),0.18)` : `rgba(var(--accent-rgb),0.11)`, border: `0.5px solid rgba(var(--accent-rgb),0.25)`, borderRadius: 6, padding: '12px 14px', cursor: 'pointer', color: previewOpen ? 'var(--accent)' : UI.inkSoft, fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600 }}>
+              style={{ flex: 1, background: previewOpen ? `rgba(var(--accent-rgb),0.18)` : `rgba(var(--accent-rgb),0.11)`, border: `0.5px solid rgba(var(--accent-rgb),0.25)`, borderRadius: 6, textShadow: 'none', padding: '12px 14px', cursor: 'pointer', color: previewOpen ? 'var(--accent)' : UI.inkSoft, fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600 }}>
               {previewOpen ? 'Close preview' : 'Preview this week'}
             </button>
           )}
           {previewResponses && canSubmitToday && new Date().getDay() !== 1 && (
             <button onClick={() => setPreviewOpen(v => !v)}
-              style={{ background: previewOpen ? `rgba(var(--accent-rgb),0.22)` : UI.bgInset, border: `${previewOpen ? '1.5px' : '0.5px'} solid ${previewOpen ? 'var(--accent)' : UI.hairStrong}`, borderRadius: 6, padding: '11px 13px', cursor: 'pointer', color: previewOpen ? 'var(--accent)' : UI.inkFaint, fontSize: 15, lineHeight: 1, flexShrink: 0 }}>
+              style={{ background: previewOpen ? `rgba(var(--accent-rgb),0.22)` : UI.bgInset, border: `${previewOpen ? '1.5px' : '0.5px'} solid ${previewOpen ? 'var(--accent)' : UI.hairStrong}`, borderRadius: 6, textShadow: 'none', padding: '11px 13px', cursor: 'pointer', color: previewOpen ? 'var(--accent)' : UI.inkFaint, fontSize: 15, lineHeight: 1, flexShrink: 0 }}>
               <i className="fa-solid fa-eye" />
             </button>
           )}
           {isSelf && (
             <button onClick={() => setBuilderOpen(true)}
-              style={{ background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, padding: '11px 13px', cursor: 'pointer', color: UI.inkFaint, fontSize: 15, lineHeight: 1, flexShrink: 0 }}>
+              style={{ background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, textShadow: 'none', padding: '11px 13px', cursor: 'pointer', color: UI.inkFaint, fontSize: 15, lineHeight: 1, flexShrink: 0 }}>
               <i className="fa-solid fa-sliders" />
             </button>
           )}
@@ -1459,7 +1464,7 @@ function CheckInRequestModal({ coaching }) {
           onClick={handleOk}
           style={{
             width: '100%', padding: 14, background: 'var(--accent)', border: 'none',
-            borderRadius: 6, fontSize: 15, fontWeight: 700, color: 'var(--accent-ink)',
+            borderRadius: 6, textShadow: 'none', fontSize: 15, fontWeight: 700, color: 'var(--accent-ink)',
             fontFamily: UI.fontUi, cursor: 'pointer', letterSpacing: '0.05em',
           }}
         >
@@ -1599,7 +1604,7 @@ function ClientNutritionReadView({ coachingId }) {
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, padding: 32 }}>
         <i className="fa-solid fa-utensils" style={{ fontSize: 28, color: UI.inkGhost }} />
         <div style={{ fontSize: 13, color: 'rgba(var(--danger-rgb),0.8)', fontFamily: UI.fontUi, textAlign: 'center' }}>Couldn't load macro targets.</div>
-        <button onClick={load} style={{ background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, padding: '8px 16px', cursor: 'pointer', color: UI.ink, fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600 }}>Retry</button>
+        <button onClick={load} style={{ background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, textShadow: 'none', padding: '8px 16px', cursor: 'pointer', color: UI.ink, fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600 }}>Retry</button>
       </div>
     );
   }

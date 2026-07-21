@@ -361,28 +361,10 @@ function TabBar({ active, routeName, onChange, sidebar = false, currentUser = nu
           )}
         </div>
 
-        {switchModal && isQsUser && otherEmail && (
-          <div onClick={() => setSwitchModal(false)} style={{
-            position: 'fixed', inset: 0, zIndex: 200,
-            background: 'rgba(0,0,0,0.8)',
-            backdropFilter: 'blur(10px)',
-            WebkitBackdropFilter: 'blur(10px)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            padding: 40,
-            animation: 'sheet-fade 0.15s ease',
-          }}>
-            <div onClick={e => e.stopPropagation()} style={{
-              width: '100%', maxWidth: 520,
-              background: UI.bgRaised,
-              backgroundImage: 'var(--bg-texture)',
-              border: `1px solid ${UI.hairStrong}`,
-              borderRadius: 4,
-              padding: '32px 28px 22px',
-              boxShadow: '0 40px 100px rgba(0,0,0,0.8)',
-              animation: 'fadeUp 0.22s ease',
-            }}>
-              <div className="micro" style={{ marginBottom: 8 }}>Accounts</div>
-              <div style={{ fontFamily: UI.fontDisplay, fontSize: 32, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: UI.ink, marginBottom: 24 }}>Switch User</div>
+        {/* zIndex 200: same tier this dialog always used (above the sidebar's
+            own z-10 and the mobile dock's z-20), preserved via Sheet's zIndex
+            prop so this migration doesn't quietly change stacking order. */}
+        <Sheet open={!!(switchModal && isQsUser && otherEmail)} onClose={() => setSwitchModal(false)} title="Switch User" center zIndex={200}>
               <div style={{ display: 'flex', gap: 12 }}>
                 <div style={{
                   flex: 1,
@@ -448,9 +430,7 @@ function TabBar({ active, routeName, onChange, sidebar = false, currentUser = nu
                 </button>
               </div>
               <button onClick={() => setSwitchModal(false)} style={{ ...btnPrimary, width: '100%', marginTop: 18 }}>Cancel</button>
-            </div>
-          </div>
-        )}
+        </Sheet>
       </>
     );
   }
@@ -717,7 +697,12 @@ function Toggle({ on, onToggle }) {
 // edge plus an ambient glow — reserved for sheets that represent something
 // deliberately intense (currently just the Drop Set/Myo-Reps/AMRAP
 // Variations chain sheet), not a general-purpose "make it gold" switch.
-function Sheet({ open, onClose, title, titleColor, children, keyboardHeight = 0, accent = false, center = false }) {
+// zIndex: lets a caller override the default stacking tier (100) when it
+// must guarantee winning against a specific known overlay — e.g. sitting
+// above its own parent's opaque z-9998 wizard, or beating an ordinary Sheet
+// from underneath a still-open admin Sheet. Not a general-purpose knob:
+// only reach for it when there's a concrete overlay this Sheet must clear.
+function Sheet({ open, onClose, title, titleColor, children, keyboardHeight = 0, accent = false, center = false, zIndex = 100 }) {
   const [kbHeight, setKbHeight] = React.useState(0);
   const [vvHeight, setVvHeight] = React.useState(window.innerHeight);
   React.useEffect(() => {
@@ -787,7 +772,7 @@ function Sheet({ open, onClose, title, titleColor, children, keyboardHeight = 0,
     // (bottom: 0) and reserves the gap via paddingBottom exactly as before.
     <div onClick={onClose} style={{
       position: 'fixed', top: 0, left: 0, right: 0, bottom: keyboardHeight,
-      background: 'rgba(0,0,0,0.7)', zIndex: 100,
+      background: 'rgba(0,0,0,0.7)', zIndex,
       display: 'flex', alignItems: center ? 'center' : 'flex-end', justifyContent: 'center',
       paddingBottom: (effectiveKbHeight - keyboardHeight) + (floating ? 10 : 0),
       animation: 'sheet-fade 0.18s ease',

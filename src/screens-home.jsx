@@ -488,7 +488,7 @@ function SkipReasonSheet({ modal, onClose, setStore, userId }) {
                     setStore(s => ({ ...s, skips: [...(s.skips || []), { id, date: data.dateKey, dayId: data.dayId, dayName: data.dayName, skipReason: reason, skippedAt: new Date().toISOString() }] }));
                   }
                   onClose();
-                }} style={{ background: isActive ? UI.goldFaint : UI.bgInset, border: `0.5px solid ${isActive ? UI.goldSoft : UI.hairStrong}`, borderRadius: 4, padding: '13px 16px', fontFamily: UI.fontUi, fontSize: 14, color: isActive ? UI.gold : UI.ink, textAlign: 'center', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+                }} style={{ background: isActive ? UI.goldFaint : UI.bgInset, border: `0.5px solid ${isActive ? UI.goldSoft : UI.hairStrong}`, borderRadius: 4, textShadow: 'none', padding: '13px 16px', fontFamily: UI.fontUi, fontSize: 14, color: isActive ? UI.gold : UI.ink, textAlign: 'center', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
                   {reason}
                 </button>
               );
@@ -766,6 +766,7 @@ function CardioQuickLogSheet({ open, onClose, store, setStore, userId, editLog, 
                   padding: '2px 7px', cursor: 'pointer', border: 'none',
                   background: distUnit === u ? 'var(--accent)' : 'transparent',
                   color: distUnit === u ? UI.bg : UI.inkFaint,
+                  textShadow: 'none',
                   fontFamily: UI.fontUi, fontSize: 9, fontWeight: 600, letterSpacing: '0.06em',
                   WebkitTapHighlightColor: 'transparent',
                 }}>{u}</button>
@@ -788,6 +789,7 @@ function CardioQuickLogSheet({ open, onClose, store, setStore, userId, editLog, 
               flex: 1, padding: '7px 2px', borderRadius: 8, cursor: 'pointer',
               border: `${form.paceFeeling === Number(n) ? '1.5px' : '0.5px'} solid ${form.paceFeeling === Number(n) ? 'var(--accent)' : UI.hairStrong}`,
               background: form.paceFeeling === Number(n) ? `rgba(var(--accent-rgb),0.24)` : UI.bgInset,
+              textShadow: 'none',
               display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
               WebkitTapHighlightColor: 'transparent',
             }}>
@@ -810,6 +812,7 @@ function CardioQuickLogSheet({ open, onClose, store, setStore, userId, editLog, 
               flex: 1, padding: '7px 0', borderRadius: 6, cursor: 'pointer',
               border: `${form.effort === n ? '1.5px' : '0.5px'} solid ${form.effort === n ? 'var(--accent)' : UI.hairStrong}`,
               background: form.effort === n ? `rgba(var(--accent-rgb),0.24)` : UI.bgInset,
+              textShadow: 'none',
               WebkitTapHighlightColor: 'transparent',
             }}>
               <span className="num" style={{ fontSize: 11, color: form.effort === n ? 'var(--accent)' : UI.inkSoft }}>{n}</span>
@@ -954,6 +957,7 @@ function CardioFinishFlow({ open, durationMin, store, setStore, onClose, onPR })
                 padding: '2px 9px', cursor: 'pointer', border: 'none',
                 background: distUnit === u ? 'var(--accent)' : 'transparent',
                 color: distUnit === u ? UI.bg : UI.inkFaint,
+                textShadow: 'none',
                 fontFamily: UI.fontUi, fontSize: 9, fontWeight: 600, letterSpacing: '0.06em', WebkitTapHighlightColor: 'transparent',
               }}>{u}</button>
             ))}
@@ -969,6 +973,7 @@ function CardioFinishFlow({ open, durationMin, store, setStore, onClose, onPR })
             flex: 1, padding: '10px 2px', borderRadius: 8, cursor: 'pointer',
             border: `0.5px solid ${form.paceFeeling === Number(n) ? 'var(--accent)' : UI.hairStrong}`,
             background: form.paceFeeling === Number(n) ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
+            textShadow: 'none',
             display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, WebkitTapHighlightColor: 'transparent',
           }}>
             <span className="num" style={{ fontSize: 14, color: form.paceFeeling === Number(n) ? 'var(--accent)' : UI.inkSoft }}>{n}</span>
@@ -983,7 +988,9 @@ function CardioFinishFlow({ open, durationMin, store, setStore, onClose, onPR })
           <button key={n} onClick={() => pick('effort', n)} style={{
             flex: 1, padding: '10px 0', borderRadius: 6, cursor: 'pointer',
             border: `0.5px solid ${form.effort === n ? 'var(--accent)' : UI.hairStrong}`,
-            background: form.effort === n ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset, WebkitTapHighlightColor: 'transparent',
+            background: form.effort === n ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
+            textShadow: 'none',
+            WebkitTapHighlightColor: 'transparent',
           }}>
             <span className="num" style={{ fontSize: 12, color: form.effort === n ? 'var(--accent)' : UI.inkSoft }}>{n}</span>
           </button>
@@ -2842,7 +2849,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
             }}>Cancel</button>
             <button onClick={() => go({ name: 'train', sessionId: store.inProgress })} style={{
               flexShrink: 0, padding: '6px 14px', borderRadius: 4,
-              background: UI.gold, border: 'none', cursor: 'pointer',
+              background: UI.gold, border: 'none', textShadow: 'none', cursor: 'pointer',
               fontSize: 12, fontWeight: 600, fontFamily: UI.fontUi, color: 'var(--accent-ink)',
               letterSpacing: '0.08em',
             }}>Continue →</button>

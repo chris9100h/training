@@ -1312,7 +1312,7 @@ function ClientPlanTab({ store, setStore, clientStore, setClientStore, clientId,
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <button
             onClick={() => { setImportChoiceOpen(false); importRef.current?.click(); }}
-            style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}
+            style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6, textShadow: 'none', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}
           >
             <i className="fa-solid fa-file-import" style={{ fontSize: 14, color: UI.inkSoft, width: 18, textAlign: 'center' }} />
             <div style={{ flex: 1, textAlign: 'left' }}>
@@ -1323,7 +1323,7 @@ function ClientPlanTab({ store, setStore, clientStore, setClientStore, clientId,
           </button>
           <button
             onClick={() => { setImportChoiceOpen(false); setOwnPlanPickerOpen(true); }}
-            style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}
+            style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6, textShadow: 'none', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}
           >
             <i className="fa-solid fa-clone" style={{ fontSize: 14, color: UI.inkSoft, width: 18, textAlign: 'center' }} />
             <div style={{ flex: 1, textAlign: 'left' }}>
@@ -1344,7 +1344,7 @@ function ClientPlanTab({ store, setStore, clientStore, setClientStore, clientId,
             <button key={s.id} onClick={() => importFromOwnPlan(s)} disabled={ownImportBusy} style={{
               width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
               padding: '12px 14px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`,
-              borderRadius: 6, cursor: ownImportBusy ? 'default' : 'pointer', opacity: ownImportBusy ? 0.6 : 1,
+              borderRadius: 6, textShadow: 'none', cursor: ownImportBusy ? 'default' : 'pointer', opacity: ownImportBusy ? 0.6 : 1,
               WebkitTapHighlightColor: 'transparent',
             }}>
               <div style={{ textAlign: 'left' }}>
@@ -1506,7 +1506,7 @@ function InlineExHistory({ exId, dayId, exName, sessions, exercises, onBack, uni
   return (
     <div style={{ overflowY: 'auto', flex: 1 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderBottom: `var(--hair-width) solid ${UI.hair}`, position: 'sticky', top: 0, background: UI.bg, zIndex: 1 }}>
-        <button onClick={onBack} style={{ width: 32, height: 32, borderRadius: 6, border: `var(--hair-width) solid ${UI.hair}`, background: UI.bgRaised, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+        <button onClick={onBack} style={{ width: 32, height: 32, borderRadius: 6, border: `var(--hair-width) solid ${UI.hair}`, background: UI.bgRaised, textShadow: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
           <i className="fa-solid fa-chevron-left" style={{ fontSize: 12, color: UI.inkSoft }} />
         </button>
         <div style={{ flex: 1, fontSize: 14, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>{exName}</div>
@@ -1663,7 +1663,7 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
     return (
       <div style={{ overflowY: 'auto', flex: 1 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderBottom: `var(--hair-width) solid ${UI.hair}`, position: 'sticky', top: 0, background: UI.bg, zIndex: 1 }}>
-          <button onClick={() => { setSelected(null); onClearSelected?.(); }} style={{ width: 32, height: 32, borderRadius: 6, border: `var(--hair-width) solid ${UI.hair}`, background: UI.bgRaised, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+          <button onClick={() => { setSelected(null); onClearSelected?.(); }} style={{ width: 32, height: 32, borderRadius: 6, border: `var(--hair-width) solid ${UI.hair}`, background: UI.bgRaised, textShadow: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
             <i className="fa-solid fa-chevron-left" style={{ fontSize: 12, color: UI.inkSoft }} />
           </button>
           <div style={{ flex: 1 }}>

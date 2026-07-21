@@ -589,6 +589,7 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
                 padding: '14px 10px', borderRadius: 6, cursor: 'pointer',
                 border: `1px solid ${activityType === a.id ? 'var(--accent)' : UI.hairStrong}`,
                 background: activityType === a.id ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
+                textShadow: 'none',
                 display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8,
                 WebkitTapHighlightColor: 'transparent',
               }}>
@@ -600,6 +601,7 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
               padding: '14px 10px', borderRadius: 6, cursor: 'pointer',
               border: `1px solid ${(showCustom || isCustomSel) ? 'var(--accent)' : UI.hairStrong}`,
               background: (showCustom || isCustomSel) ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
+              textShadow: 'none',
               display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8,
               WebkitTapHighlightColor: 'transparent',
             }}>
@@ -621,6 +623,7 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
                     padding: '10px 14px', borderRadius: 6, cursor: 'pointer', textAlign: 'center',
                     border: `1px solid ${activityType === t ? 'var(--accent)' : UI.hairStrong}`,
                     background: activityType === t ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
+                    textShadow: 'none',
                     fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600,
                     color: activityType === t ? 'var(--accent)' : UI.ink,
                     WebkitTapHighlightColor: 'transparent',
@@ -646,6 +649,7 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
             padding: '14px 16px', borderRadius: 6, cursor: 'pointer', textAlign: 'left',
             border: `1px solid ${mode === m.id ? 'var(--accent)' : UI.hairStrong}`,
             background: mode === m.id ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
+            textShadow: 'none',
             display: 'flex', gap: 14, alignItems: 'flex-start',
             WebkitTapHighlightColor: 'transparent',
           }}>
@@ -686,6 +690,7 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
                 flex: 1, paddingTop: 10, paddingBottom: 10, borderRadius: 6, cursor: 'pointer',
                 border: `1px solid ${days[k] ? 'var(--accent)' : UI.hairStrong}`,
                 background: days[k] ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
+                textShadow: 'none',
                 fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.04em',
                 color: days[k] ? 'var(--accent)' : UI.inkSoft,
                 WebkitTapHighlightColor: 'transparent',
@@ -696,6 +701,7 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
             padding: '12px 14px', borderRadius: 6, cursor: 'pointer', textAlign: 'left',
             border: `1px solid ${useTargets ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong}`,
             background: useTargets ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
+            textShadow: 'none',
             display: 'flex', alignItems: 'center', gap: 12,
             WebkitTapHighlightColor: 'transparent',
           }}>
@@ -739,6 +745,7 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
                     <button key={tt} onClick={() => upd({ target_type: tt })} style={{
                       padding: '4px 12px', cursor: 'pointer', border: 'none',
                       background: active ? UI.inkFaint : 'transparent',
+                      textShadow: 'none',
                       fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.08em',
                       color: active ? UI.bg : UI.inkFaint, WebkitTapHighlightColor: 'transparent',
                     }}>{tt === 'distance' ? du.toUpperCase() : 'MIN'}</button>
@@ -840,6 +847,7 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
                   flex: 1, padding: '10px 8px', borderRadius: 6, cursor: 'pointer', textAlign: 'center',
                   border: `1px solid ${goal.type === gt.id ? 'var(--accent)' : UI.hairStrong}`,
                   background: goal.type === gt.id ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
+                  textShadow: 'none',
                   WebkitTapHighlightColor: 'transparent',
                 }}>
                   <div style={{ fontSize: 11, fontWeight: 700, color: goal.type === gt.id ? 'var(--accent)' : UI.ink, fontFamily: UI.fontUi }}>{gt.label}</div>
@@ -916,6 +924,7 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
                   flex: 1, paddingTop: 10, paddingBottom: 10, borderRadius: 6, cursor: 'pointer',
                   border: `1px solid ${days[k] ? 'var(--accent)' : UI.hairStrong}`,
                   background: days[k] ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
+                  textShadow: 'none',
                   fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.04em',
                   color: days[k] ? 'var(--accent)' : UI.inkSoft,
                   WebkitTapHighlightColor: 'transparent',

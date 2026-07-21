@@ -12,6 +12,34 @@ den passenden Abschnitt lesen; die verbindlichen Grundregeln stehen in CLAUDE.md
 - Ändert sich `PRESETS`/`PRESET_TAG` im Loader, muss `tools/check-syntax.cjs` mit denselben Presets nachgezogen werden.
 - **Neue `.jsx`-Datei:** in `SOURCES` im Loader (`index.html`, in Ausführungsreihenfolge) und `ASSETS` in `sw.js` eintragen; ein eigenes `<script>`-Tag gibt es nicht (der Loader lädt sie). Der Content-Hash invalidiert den Cache bei jeder Änderung automatisch.
 
+## Modal-/Overlay-Landschaft (`Sheet` vs. die Custom-Overlays)
+
+Ein Audit (2026-07) hat jedes `position:'fixed'`-Overlay im Code auf sein exaktes Verhalten geprüft (Backdrop-Dismiss, z-Index, Animation, Portal, Keyboard-Avoidance), um zu klären, welche sich verlustfrei auf die gemeinsame `Sheet`-Komponente (`ui.jsx`) migrieren lassen. Ergebnis: **nur ein Teil passt zu `Sheet`**, der Rest hat bewusste, teils sicherheitsrelevante Abweichungen. Damit das nicht wieder aufgerollt werden muss, hier die vollständige Landkarte:
+
+- **`Sheet`-Familie** (bereits migriert oder nativ `Sheet`): `WorkoutEffortSheet` (`screens-lib.jsx`), `LineChartSheet` (`screens-coaching-detail.jsx`), `savePicker` in `CheckInSchemaBuilder` (`screens-coaching-detail.jsx`), TabBar „Switch User" (`ui.jsx`), `wizInfoOpen`/„Progression"-Popup und `NewPlanPickerModal` (`screens-schedule.jsx`), plus die schon lange über `Sheet` laufenden Settings-/Exercise-/Cardio-Sheets. `Sheet` hat seit diesem Audit einen **`zIndex`-Prop** (Default 100), extra für Fälle, die eine bestimmte Stacking-Stufe treffen müssen (z.B. „+1 über meinem eigenen z-9998-Overlay-Parent"). Bei der Migration bewusst vereinheitlicht (kein Funktionsverlust, nur Kosmetik-Angleichung an den Rest der App): individuelle Header (Icon+Label, zweizeilige Eyebrow-Titel) wurden auf `Sheet`s einfachen `title`-String reduziert, redundante explizite Schließen-Buttons entfernt (Backdrop-Tap deckt das Gleiche ab).
+
+- **Gruppe A, „System-Alert/Gate"** (bewusst **kein** `Sheet`, 10 Stellen): `AutoCloseBanner`/`UpdateBanner`/`WhatsNewModal` (`app.jsx`), `CoachingPendingBanner` (`screens-coaching-core.jsx`), `CheckInRequestModal` (`screens-coaching-tabs.jsx`), `UnitPromptModal` (`screens-home.jsx`), `OnboardingPrompt`/Tour-Step-Karten (`screens-onboarding.jsx`), Outlier-Confirmation/Warmup-Overlay (`screens-train.jsx`). Gemeinsam: **kein** Backdrop-Dismiss (oft absichtlich, z.B. verhindert `UnitPromptModal` dauerhaft `settings.unit === null`, `UpdateBanner` hat gar keinen Abbrechen-Weg, `CoachingPendingBanner` erzwingt eine explizite Accept/Decline-Entscheidung), eigene, bewusst gestaffelte z-Index-Stufen (siehe Tabelle unten), `fadeUp`-Animation statt `sheet-up`/`sheet-fade`, kein Drag-Handle. Ein `Sheet`-Wrapper würde bei jeder dieser Stellen ungefragt Backdrop-Dismiss einführen, teils ein echter Korrektheitsbug.
+
+- **Gruppe B, „Geführter Wizard mit Dirty-Check"** (bewusst **kein** `Sheet`, 2 Stellen, laut eigenem Code-Kommentar bewusst dupliziert): `ExerciseWizard` (`screens-lib.jsx`), `PlanWizard` (`screens-schedule.jsx`). Backdrop-Tap fragt bei ungespeicherten Änderungen erst „verwerfen?" statt sofort zu schließen, eigene Fortschrittsleiste, eigenes `visualViewport`-Keyboard-Handling. Die beiden teilen sich bereits dieselbe Shell (Kopie, kein Import-System), wären ein sinnvolles Ziel für eine **eigene** `WizardOverlay`-Komponente, aber nicht für `Sheet`.
+
+- **Gruppe D, „eigentlich gar kein Dialog"** (4 Stellen): `FullSheet` (`screens-settings.jsx`, Vollbild-Chat-Layout ohne Backdrop-Konzept), `wizGuideOpen` (`screens-schedule.jsx`, Vollbild-Seite mit eigener `TopBar`), `CheckInSchemaBuilder`s `overlayStyle` (`screens-coaching-detail.jsx`, 7 sich gegenseitig ausschließende Wizard-Views, kein einzelnes „onClose"-Konzept), Warmup-Overlay (`screens-train.jsx`, reiner Ableitungs-State ohne open/close-Boolean). Strukturell keine Sheets, sondern eigene Seiten/Wizard-Schritte.
+
+- **`MiniSheet`** (`screens-schedule.jsx`, ~11 Aufrufer): bleibt bewusst **eigenständig**, kein `Sheet`-Wrapper. Der `dim`-Prop (Backdrop überspringen, wenn ein darunterliegendes MiniSheet schon abdunkelt, für Stacks wie Versions→Backups→Preview→Datepicker) hat keine `Sheet`-Entsprechung und ist zu eigenständig/riskant, um sie nachzubauen. `MiniSheet` ist aber selbst bereits ein sauberer, einziger geteilter Baustein für seine 11 Aufrufer, das „23 verschiedene Klassen"-Problem betrifft es nicht.
+
+**z-Index-Stufen der App** (durchs Audit aufgedeckt, informell aber konsistent verwendet, bei neuen Overlays daran halten):
+| Stufe | Bedeutung | Beispiele |
+|---|---|---|
+| 0-100 | normale In-Screen-Overlays, `Sheet`-Default | `Sheet` (100), `ImageLightbox` (500), Screen-lokale Takeover (60-500) |
+| 200-400 | „muss über einem bestimmten offenen Sheet/Screen liegen" | Account-Switch (200), Chart-Popups (400) |
+| 9000 | „wichtig, aber überspringbar" Vollbild-Prompt | `CoachingPendingBanner`, Check-in-Nudge |
+| 9997/9998/9999 | App-Root-Triage (WhatsNew/AutoClose/Update, in genau dieser Prioritätsreihenfolge) | `app.jsx`-Banner, plus einige Screen-lokale „ungespeicherte Änderungen"-Overlays, die 9998 wiederverwenden, ohne je mit den App-Root-Bannern gleichzeitig zu rendern |
+| 10000-10002 | Onboarding-Tour (höchste Stufe, `TourExitButton` immer erreichbar) | Tour-Schritte, `TourCompleteScreen`, `TourExitButton` |
+
+**Beim Audit nebenbei gefundene, migrations-unabhängige Bugs** (siehe Commits „Fix …" um 2026-07-21 im Log, falls noch offen: hier nachschlagen statt neu suchen):
+- `PlanWizard`s `confirm531El` (ein `useConfirm`-Sheet, z-100) konnte hinter dem z-9998-Wizard-Overlay verschwinden und einen `await` hängen lassen.
+- `wizGuideOpen` addierte `env(safe-area-inset-top)` doppelt (eigener Wrapper + `AutoregGuideScreen`s eigene `TopBar`).
+- `MiniSheet`-Aufrufer `pushTarget` dimmte doppelt (eigenes `dim:true` obendrauf auf das bereits offene, dimmende `pushOpen`), abweichend vom sonst konsistenten `dim:false`-Stacking-Pattern der Nachbar-Aufrufer.
+
 ## System-Übungskatalog (`src/exercise-db.js`)
 
 Read-only Katalog `window.SYSTEM_EXERCISES`; plain JS wie `whatsnew.js` (normales `<script>` in `index.html`, in `ASSETS` von `sw.js`).
