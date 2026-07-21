@@ -585,7 +585,7 @@ function CustomKeyboard({ visible, field, onType, onBackspace, onAdjust, onConfi
       onPointerDown={e => { e.preventDefault(); e.stopPropagation(); }}
       onTouchStart={e => { e.preventDefault(); e.stopPropagation(); }}
       style={{ position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 95,
-      background: 'var(--bg)',
+      background: 'var(--bg)', backgroundImage: 'var(--bg-texture)',
       padding: `5px 8px calc(env(safe-area-inset-bottom, 0px) + 5px)`,
     }}>
       {/* knurled top edge — same grip-texture seam the rest of the kit uses,
@@ -5820,8 +5820,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
             gap: 8,
           }}>
-            <span style={{ fontFamily: UI.fontDisplay, fontSize: 80, color: UI.gold, fontWeight: 900, lineHeight: 1, textShadow: '0 0 35px rgba(var(--accent-rgb),1), 0 0 80px rgba(var(--accent-rgb),0.6)' }}>★</span>
-            <span style={{ fontFamily: UI.fontUi, fontSize: 30, color: UI.gold, fontWeight: 900, letterSpacing: '0.22em', textShadow: '0 0 18px rgba(var(--accent-rgb),1), 0 0 45px rgba(var(--accent-rgb),0.8), 0 0 90px rgba(var(--accent-rgb),0.4)' }}>NEW BEST</span>
+            {/* Glow reads as light bleeding outward on the usual dark bg-body, but as
+                a dark smudge on paper's light one, so skip it there (same rule
+                CardioPROverlay already follows, screens-home.jsx). */}
+            <span style={{ fontFamily: UI.fontDisplay, fontSize: 80, color: UI.gold, fontWeight: 900, lineHeight: 1, textShadow: isLightCanvasActive() ? 'none' : '0 0 35px rgba(var(--accent-rgb),1), 0 0 80px rgba(var(--accent-rgb),0.6)' }}>★</span>
+            <span style={{ fontFamily: UI.fontUi, fontSize: 30, color: UI.gold, fontWeight: 900, letterSpacing: '0.22em', textShadow: isLightCanvasActive() ? 'none' : '0 0 18px rgba(var(--accent-rgb),1), 0 0 45px rgba(var(--accent-rgb),0.8), 0 0 90px rgba(var(--accent-rgb),0.4)' }}>NEW BEST</span>
             <span style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.inkSoft, fontWeight: 700, letterSpacing: '0.28em' }}>PERSONAL RECORD</span>
           </div>
         </div>,
@@ -5847,8 +5850,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
             gap: 6,
           }}>
-            <span style={{ fontFamily: UI.fontDisplay, fontSize: 72, color: UI.gold, fontWeight: 900, lineHeight: 1, textShadow: '0 0 30px rgba(var(--accent-rgb),0.9), 0 0 70px rgba(var(--accent-rgb),0.5)' }}>↑</span>
-            <span style={{ fontFamily: UI.fontUi, fontSize: 28, color: UI.gold, fontWeight: 900, letterSpacing: '0.2em', textShadow: '0 0 15px rgba(var(--accent-rgb),1), 0 0 40px rgba(var(--accent-rgb),0.8), 0 0 80px rgba(var(--accent-rgb),0.4)' }}>IMPROVEMENT</span>
+            <span style={{ fontFamily: UI.fontDisplay, fontSize: 72, color: UI.gold, fontWeight: 900, lineHeight: 1, textShadow: isLightCanvasActive() ? 'none' : '0 0 30px rgba(var(--accent-rgb),0.9), 0 0 70px rgba(var(--accent-rgb),0.5)' }}>↑</span>
+            <span style={{ fontFamily: UI.fontUi, fontSize: 28, color: UI.gold, fontWeight: 900, letterSpacing: '0.2em', textShadow: isLightCanvasActive() ? 'none' : '0 0 15px rgba(var(--accent-rgb),1), 0 0 40px rgba(var(--accent-rgb),0.8), 0 0 80px rgba(var(--accent-rgb),0.4)' }}>IMPROVEMENT</span>
           </div>
         </div>,
         document.body
@@ -5871,8 +5874,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
             gap: 6,
           }}>
-            <span style={{ fontFamily: UI.fontDisplay, fontSize: 72, color: UI.danger, fontWeight: 900, lineHeight: 1, textShadow: '0 0 30px rgba(var(--danger-rgb),0.9), 0 0 70px rgba(var(--danger-rgb),0.5)' }}>↓</span>
-            <span style={{ fontFamily: UI.fontUi, fontSize: 28, color: UI.danger, fontWeight: 900, letterSpacing: '0.2em', textShadow: '0 0 15px rgba(var(--danger-rgb),1), 0 0 40px rgba(var(--danger-rgb),0.8), 0 0 80px rgba(var(--danger-rgb),0.4)' }}>REGRESSION</span>
+            <span style={{ fontFamily: UI.fontDisplay, fontSize: 72, color: UI.danger, fontWeight: 900, lineHeight: 1, textShadow: isLightCanvasActive() ? 'none' : '0 0 30px rgba(var(--danger-rgb),0.9), 0 0 70px rgba(var(--danger-rgb),0.5)' }}>↓</span>
+            <span style={{ fontFamily: UI.fontUi, fontSize: 28, color: UI.danger, fontWeight: 900, letterSpacing: '0.2em', textShadow: isLightCanvasActive() ? 'none' : '0 0 15px rgba(var(--danger-rgb),1), 0 0 40px rgba(var(--danger-rgb),0.8), 0 0 80px rgba(var(--danger-rgb),0.4)' }}>REGRESSION</span>
           </div>
         </div>,
         document.body
@@ -5893,13 +5896,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               so this decorative ring (transparent, border-only) would otherwise
               sit on top of the buttons below and swallow every tap. */}
           <div style={{ animation: 'improvedBorderPulse 0.8s ease-in-out infinite', position: 'absolute', inset: 0, pointerEvents: 'none' }} />
-          <span style={{ fontFamily: UI.fontDisplay, fontSize: 64, color: UI.gold, fontWeight: 900, lineHeight: 1, textShadow: '0 0 30px rgba(var(--accent-rgb),0.9), 0 0 70px rgba(var(--accent-rgb),0.5)' }}>↑</span>
-          <span style={{ fontFamily: UI.fontUi, fontSize: 18, color: UI.gold, fontWeight: 900, letterSpacing: '0.22em', textShadow: '0 0 15px rgba(var(--accent-rgb),1), 0 0 40px rgba(var(--accent-rgb),0.8)' }}>PROGRESSION UNLOCKED</span>
+          <span style={{ fontFamily: UI.fontDisplay, fontSize: 64, color: UI.gold, fontWeight: 900, lineHeight: 1, textShadow: isLightCanvasActive() ? 'none' : '0 0 30px rgba(var(--accent-rgb),0.9), 0 0 70px rgba(var(--accent-rgb),0.5)' }}>↑</span>
+          <span style={{ fontFamily: UI.fontUi, fontSize: 18, color: UI.gold, fontWeight: 900, letterSpacing: '0.22em', textShadow: isLightCanvasActive() ? 'none' : '0 0 15px rgba(var(--accent-rgb),1), 0 0 40px rgba(var(--accent-rgb),0.8)' }}>PROGRESSION UNLOCKED</span>
           <span style={{ fontFamily: UI.fontDisplay, fontSize: 22, color: UI.ink, fontWeight: 700, marginTop: 4 }}>You've earned the next load.</span>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 16 }}>
             <span className="num" style={{ fontSize: 22, color: UI.inkSoft }}>{progressionUnlocked.currentKg}{UI.unit()}</span>
             <span style={{ color: UI.gold, fontSize: 20, lineHeight: 1 }}>→</span>
-            <span className="num" style={{ fontSize: 28, color: UI.gold, fontWeight: 700, textShadow: '0 0 20px rgba(var(--accent-rgb),0.8)' }}>{progressionUnlocked.nextKg}{UI.unit()}</span>
+            <span className="num" style={{ fontSize: 28, color: UI.gold, fontWeight: 700, textShadow: isLightCanvasActive() ? 'none' : '0 0 20px rgba(var(--accent-rgb),0.8)' }}>{progressionUnlocked.nextKg}{UI.unit()}</span>
           </div>
           <span className="micro" style={{ color: UI.inkFaint, marginTop: 6, letterSpacing: '0.12em' }}>{progressionUnlocked.exName}</span>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 24, width: '100%', maxWidth: 260 }}>
