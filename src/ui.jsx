@@ -609,10 +609,12 @@ function Card({ children, accent = false, style = {}, ...rest }) {
       border: `1px solid ${accent ? UI.goldSoft : UI.hairStrong}`,
       borderRadius: 6,
       padding: 16,
-      // Card already has its own (semi-)opaque background, so the grid-lift
-      // inherited from Screen (paper only, 'none' elsewhere) would just look
-      // muddy layered on top of it — reset back to nothing in here.
-      textShadow: 'none',
+      // Card's own fill is translucent (surface-tint / accent-tint, both
+      // low-alpha), so a parent Screen's paper grid still shows through it
+      // (verified directly) and plain text on top still needs the same lift
+      // Screen gives its own children. 'none' outside paper, so this is a
+      // no-op on every other theme.
+      textShadow: 'var(--text-lift)',
       ...style,
     }}>{children}</div>
   );
@@ -798,9 +800,12 @@ function Sheet({ open, onClose, title, titleColor, children, keyboardHeight = 0,
           backgroundColor: UI.bgRaised, backgroundImage: 'var(--bg-texture)',
           borderRadius: cardLike ? 6 : '6px 6px 0 0',
           border: `1px solid ${edgeColor}`,
-          // The panel has its own opaque background — reset the grid-lift
-          // (paper only) a parent Screen may have applied, same as Card.
-          textShadow: 'none',
+          // The panel draws the same paper grid as Screen does (bg-texture
+          // above), so plain text sitting on it needs the same lift Screen
+          // gives its own children (verified directly: without this, the
+          // grid's ruled lines cut straight through the glyphs). 'none'
+          // outside paper, so this is a no-op on every other theme.
+          textShadow: 'var(--text-lift)',
           ...(!cardLike && { borderBottom: 'none' }),
           // Floating above the keyboard, every edge needs to read as a real
           // boundary on its own — the bottom-sheet variant gets that for free
