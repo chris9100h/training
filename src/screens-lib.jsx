@@ -1582,7 +1582,7 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
                 <NumInput value={editProgressionIncrement} placeholder="Default" onChange={setEditProgressionIncrement} style={{ fontSize: 14 }} />
                 <span className="micro" style={{ flexShrink: 0 }}>{UI.unit()}</span>
               </div>
-              <div style={{ fontFamily: UI.fontUi, fontSize: 10.5, color: UI.inkGhost, marginTop: 6, lineHeight: 1.4 }}>
+              <div style={{ fontFamily: UI.fontUi, fontSize: 10.5, color: UI.inkFaint, marginTop: 6, lineHeight: 1.4 }}>
                 How much weight Smart Progression and Meso bumps add for this exercise. Leave blank to use the equipment default from Settings.
               </div>
             </Field>

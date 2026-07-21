@@ -17,6 +17,16 @@
    Entry shape: { id: string, date: string (YYYY-MM-DD), title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.640',
+    date: '2026-07-21',
+    title: 'Progression, dialed in 📈',
+    items: [
+      "🎯 New: custom weight jumps per exercise. Smart Progression and Meso used to bump every exercise on the same equipment by the same amount, now you can override it exercise by exercise.",
+      "💪 Perfect for the outliers: lateral raises don't need the same 2.5kg jumps as your bench press just because both happen to be \"dumbbell\". Set it once, done.",
+      "⚙️ Find it in the exercise editor under \"Progression increment\". Leave it blank and nothing changes, your equipment defaults still apply.",
+    ],
+  },
+  {
     id: 'v2.638',
     date: '2026-07-21',
     title: 'Paper mode, sharpened ✏️',
