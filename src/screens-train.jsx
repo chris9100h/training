@@ -451,6 +451,7 @@ function PlateCalcSheet({ open, onClose, initialWeight, availablePlates }) {
             fontFamily: UI.fontUi, fontSize: 12, letterSpacing: '0.06em',
             fontWeight: tab === i ? 600 : 400,
             boxShadow: 'none',
+            textShadow: 'none',
             transition: 'all 0.15s',
           }}>{l}</button>
         ))}
@@ -531,6 +532,7 @@ function PlateCalcSheet({ open, onClose, initialWeight, availablePlates }) {
             border: `0.5px solid var(--accent-deep)`,
             color: 'var(--accent-ink)', fontFamily: UI.fontNum, fontSize: 10, letterSpacing: '0.06em',
             fontWeight: 700, boxShadow: '0 2px 8px rgba(var(--accent-rgb),0.45)',
+            textShadow: 'none',
           }}>
             +{correctionDelta} {UI.unit()}
           </button>
@@ -550,6 +552,7 @@ function PlateCalcSheet({ open, onClose, initialWeight, availablePlates }) {
           }} style={{
             height: 46, borderRadius: 4, border: 'none', cursor: 'pointer',
             background: 'var(--bg-raised)', boxShadow: `0 0 0 0.5px var(--hair)`,
+            textShadow: 'none',
             color: k === '⌫' ? UI.inkSoft : UI.ink,
             fontFamily: UI.fontNum, fontSize: 20, fontWeight: 400,
             WebkitTapHighlightColor: 'transparent', userSelect: 'none',
@@ -570,6 +573,7 @@ function CustomKeyboard({ visible, field, onType, onBackspace, onAdjust, onConfi
   const H = 40;
   const base = {
     background: 'var(--bg-raised)', border: `0.5px solid var(--hair)`, borderRadius: 6,
+    textShadow: 'none',
     color: 'var(--ink)', fontFamily: UI.fontNum, fontSize: 18, fontWeight: 500,
     cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
     WebkitTapHighlightColor: 'transparent', userSelect: 'none', padding: 0,
@@ -3701,6 +3705,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     padding: '12px 8px', borderRadius: 6, cursor: 'pointer', textAlign: 'center', WebkitTapHighlightColor: 'transparent',
     background: sel ? `rgba(var(${TONE_RGB[tone]}),0.14)` : UI.bgInset,
     border: `1px solid ${sel ? `rgba(var(${TONE_RGB[tone]}),0.7)` : UI.hairStrong}`,
+    textShadow: 'none',
     ...(extra || {}),
   });
   const toneLbl = (tone, sel) => ({ fontFamily: UI.fontUi, fontSize: 13, fontWeight: sel ? 700 : 600, color: sel ? TONE_COL[tone] : UI.ink });
@@ -5604,6 +5609,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             background: sel ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
             border: `${sel ? '2px' : '1px'} solid ${sel ? 'var(--accent)' : UI.hairStrong}`,
             borderRadius: 6, cursor: 'pointer', textAlign: 'left',
+            textShadow: 'none',
             WebkitTapHighlightColor: 'transparent',
           }}>
             <div style={{ fontFamily: UI.fontUi, fontSize: 14, color: sel ? 'var(--accent)' : UI.ink, fontWeight: 600 }}>{opt.label}</div>
@@ -6607,6 +6613,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                     color: 'var(--accent-ink)', cursor: 'pointer',
                     fontFamily: UI.fontUi, fontWeight: 700, fontSize: 14, letterSpacing: '0.16em',
                     boxShadow: '0 8px 30px rgba(var(--accent-rgb),0.30)', WebkitTapHighlightColor: 'transparent',
+                    textShadow: 'none',
                   }}>GO</button>
                 </div>
               )}
@@ -6798,6 +6805,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                           fontFamily: UI.fontUi, fontWeight: 700, fontSize: 12, letterSpacing: '0.14em',
                           WebkitTapHighlightColor: 'transparent', justifySelf: 'center',
                           opacity: (s.done || s.skipped) ? 0.35 : 1,
+                          textShadow: 'none',
                         }}>GO</button>}
 
                       {!isIntensityActive && !isCheckbox && !isTime && (isUnilateral ? (
@@ -6840,6 +6848,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                         style={{
                           width: 26, height: 26, borderRadius: 4, border: `1px solid ${s.skipped ? UI.inkFaint : s.done ? UI.gold : (!isNoWeightReps && ((!isBodyweight && s.kg == null) || (isUnilateral ? (s.repsL == null || s.repsR == null) : s.reps == null))) ? UI.hair : isCurrent ? UI.goldSoft : UI.hairStrong}`, cursor: 'pointer',
                           background: s.done ? UI.gold : 'transparent',
+                          textShadow: 'none',
                           display: 'flex', alignItems: 'center', justifyContent: 'center',
                           fontSize: s.skipped ? 12 : 14, fontWeight: 700,
                           color: s.skipped ? UI.inkFaint : s.done ? 'var(--accent-ink)' : 'transparent',
@@ -7258,6 +7267,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           <button onClick={() => setMesoRecapOpen(true)} style={{
             width: 44, minHeight: 44, borderRadius: 6,
             background: UI.bgRaised, border: `1px solid ${UI.hairStrong}`,
+            textShadow: 'none',
             display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
             cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
           }} aria-label="Session feedback">
@@ -7425,6 +7435,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           <button onClick={() => { setNotePicker(false); setSessionNoteOpen(true); }} style={{
             background: UI.bgInset, border: `1px solid ${UI.hair}`, borderRadius: 6,
             padding: '14px 16px', cursor: 'pointer', textAlign: 'left',
+            textShadow: 'none',
           }}>
             <div style={{ fontSize: 14, fontWeight: 600, color: UI.ink, marginBottom: 4 }}>Session note</div>
             <div style={{ fontSize: 12, color: UI.inkSoft }}>Only for this workout — e.g. how the set felt.</div>
@@ -7432,6 +7443,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           <button onClick={() => { setNotePicker(false); setExNoteVal(exercise?.note || ''); setExNotePinned(!!exercise?.note_pinned); setExNoteOpen(true); }} style={{
             background: UI.bgInset, border: `1px solid ${UI.hair}`, borderRadius: 6,
             padding: '14px 16px', cursor: 'pointer', textAlign: 'left',
+            textShadow: 'none',
           }}>
             <div style={{ fontSize: 14, fontWeight: 600, color: UI.ink, marginBottom: 4 }}>Exercise note</div>
             <div style={{ fontSize: 12, color: UI.inkSoft }}>Permanent — shown every session. Settings, technique cues.</div>
@@ -7525,6 +7537,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             background: active ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
             border: `1px solid ${active ? 'rgba(var(--accent-rgb),0.35)' : UI.hair}`,
             borderRadius: 6, padding: '14px 16px',
+            textShadow: 'none',
             display: 'flex', alignItems: 'center', gap: 14,
             opacity: active ? 1 : 0.45,
             WebkitTapHighlightColor: 'transparent',
@@ -8452,6 +8465,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                       fontFamily: UI.fontUi, fontWeight: 700, fontSize: 13, letterSpacing: '0.14em',
                       cursor: 'pointer', boxShadow: '0 8px 30px rgba(var(--accent-rgb),0.30)',
                       WebkitTapHighlightColor: 'transparent',
+                      textShadow: 'none',
                     }}>✓  Check warmup set</button>
                 </div>
               </div>

@@ -1453,6 +1453,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
                     flexShrink: 0, padding: '8px 12px 6px', borderRadius: 4,
                     border: `1px solid ${active ? selBorder : isToday ? UI.goldSoft : UI.hairStrong}`,
                     background: active ? selBg : 'transparent',
+                    textShadow: 'none',
                     cursor: 'pointer', WebkitTapHighlightColor: 'transparent', transition: 'all 0.15s',
                     display: 'flex', alignItems: 'center', gap: 8, textAlign: 'left',
                   }}>
@@ -1497,6 +1498,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
                   flexShrink: 0, maxWidth: 120, padding: '6px 12px 4px', borderRadius: 4,
                   border: `1px solid ${active ? selBorder : isToday ? UI.goldSoft : UI.hairStrong}`,
                   background: active ? selBg : 'transparent',
+                  textShadow: 'none',
                   cursor: 'pointer', WebkitTapHighlightColor: 'transparent', transition: 'all 0.15s',
                 }}>
                   <div style={{
@@ -1586,7 +1588,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
               <button key={c.id} onClick={() => { setPushError(''); setPushTarget(c); }} disabled={pushBusy} style={{
                 width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                 padding: '12px 14px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`,
-                borderRadius: 6, cursor: pushBusy ? 'default' : 'pointer', opacity: pushBusy ? 0.6 : 1,
+                borderRadius: 6, textShadow: 'none', cursor: pushBusy ? 'default' : 'pointer', opacity: pushBusy ? 0.6 : 1,
                 WebkitTapHighlightColor: 'transparent',
               }}>
                 <span style={{ fontSize: 14, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi }}>{c.clientName}</span>
@@ -2317,6 +2319,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
                 flex: 1, padding: '8px 0', border: 'none', borderRadius: 4,
                 cursor: m.active ? 'default' : 'pointer',
                 background: m.active ? UI.bgRaised : 'transparent',
+                textShadow: 'none',
                 color: m.active ? UI.ink : UI.inkFaint,
                 fontFamily: UI.fontUi, fontSize: 12, fontWeight: m.active ? 600 : 400,
                 letterSpacing: '0.06em',
@@ -2349,7 +2352,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
               display: 'flex', alignItems: 'center', gap: 12, width: '100%',
               background: hellCycle ? 'rgba(210,45,0,0.10)' : (summary ? `rgba(var(--accent-rgb),0.13)` : UI.bgRaised),
               border: `1px solid ${hellCycle ? 'rgba(255,120,40,0.6)' : (summary ? UI.goldSoft : UI.hairStrong)}`,
-              borderRadius: 6, padding: '13px 16px', cursor: 'pointer', textAlign: 'left',
+              borderRadius: 6, textShadow: 'none', padding: '13px 16px', cursor: 'pointer', textAlign: 'left',
               WebkitTapHighlightColor: 'transparent',
               ...(hellCycle ? { animation: 'hellGlow 2s ease-in-out infinite' } : {}),
             }}>
@@ -2709,7 +2712,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
             <button key={opt.key} onClick={opt.pick} style={{
               display: 'flex', alignItems: 'center', gap: 12, width: '100%',
               background: UI.bgInset, border: `1px solid ${UI.hairStrong}`,
-              borderRadius: 6, padding: '13px 14px', cursor: 'pointer', textAlign: 'left',
+              borderRadius: 6, textShadow: 'none', padding: '13px 14px', cursor: 'pointer', textAlign: 'left',
               WebkitTapHighlightColor: 'transparent',
             }}>
               <div style={{ flex: 1, minWidth: 0 }}>
@@ -2769,7 +2772,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
               <button onClick={toggleFlex} style={{
                 display: 'flex', alignItems: 'center', gap: 12, width: '100%',
                 background: UI.bgInset, border: `1px solid ${isFlex ? UI.goldSoft : UI.hairStrong}`,
-                borderRadius: 4, padding: '10px 12px', cursor: 'pointer', textAlign: 'left',
+                borderRadius: 4, textShadow: 'none', padding: '10px 12px', cursor: 'pointer', textAlign: 'left',
               }}>
                 <div style={{ width: 44, height: 26, borderRadius: 13, flexShrink: 0, position: 'relative', background: isFlex ? UI.gold : UI.hairStrong, border: `0.5px solid ${isFlex ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong}`, transition: 'background 0.15s' }}>
                   <div style={{ position: 'absolute', top: 3, left: isFlex ? 21 : 3, width: 20, height: 20, borderRadius: '50%', background: isFlex ? 'var(--accent-ink)' : '#fff', transition: 'left 0.15s' }} />
@@ -2888,6 +2891,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
                               flex: 1, padding: '9px 8px', borderRadius: 6, cursor: 'pointer',
                               fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, textAlign: 'center',
                               background: on ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
+                              textShadow: 'none',
                               color: on ? 'var(--accent)' : UI.inkFaint,
                               border: `1px solid ${on ? 'var(--accent)' : UI.hairStrong}`, WebkitTapHighlightColor: 'transparent',
                             }}>{o.label}</button>
@@ -3188,6 +3192,7 @@ function DayCopyPicker({ store, schedule, currentDayId, onClose, onCopy, multiSe
               <button key={key} onClick={() => setTab(key)} style={{
                 flex: 1, padding: '8px 0', borderRadius: 6, cursor: 'pointer',
                 background: tab === key ? UI.goldFaint : UI.bgInset,
+                textShadow: 'none',
                 border: `1px solid ${tab === key ? UI.goldSoft : UI.hairStrong}`,
                 color: tab === key ? UI.gold : UI.inkSoft,
                 fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase',
@@ -3203,7 +3208,7 @@ function DayCopyPicker({ store, schedule, currentDayId, onClose, onCopy, multiSe
               {templates.map(t => (
                 <button key={t.id} onClick={() => importTemplate(t)} style={{
                   background: UI.bgInset, border: `1px solid ${UI.hairStrong}`,
-                  borderRadius: 4, padding: '12px 14px', cursor: 'pointer',
+                  borderRadius: 4, textShadow: 'none', padding: '12px 14px', cursor: 'pointer',
                   textAlign: 'left', color: UI.ink, fontFamily: UI.fontUi, width: '100%',
                 }}
                 onMouseEnter={ev => ev.currentTarget.style.borderColor = UI.goldSoft}
@@ -3229,7 +3234,7 @@ function DayCopyPicker({ store, schedule, currentDayId, onClose, onCopy, multiSe
               return (
                 <button key={s.id} onClick={() => { setSelectedPlan(s); setSelectedIds(new Set()); }} style={{
                   background: UI.bgInset, border: `1px solid ${UI.hairStrong}`,
-                  borderRadius: 4, padding: '12px 14px', cursor: 'pointer',
+                  borderRadius: 4, textShadow: 'none', padding: '12px 14px', cursor: 'pointer',
                   textAlign: 'left', color: UI.ink, fontFamily: UI.fontUi, width: '100%',
                 }}
                 onMouseEnter={ev => ev.currentTarget.style.borderColor = UI.goldSoft}
@@ -3276,7 +3281,7 @@ function DayCopyPicker({ store, schedule, currentDayId, onClose, onCopy, multiSe
             return (
               <button key={d.id} onClick={() => onCopy(d, migrateId)} style={{
                 background: UI.bgInset, border: `1px solid ${UI.hairStrong}`,
-                borderRadius: 4, padding: '12px 14px', cursor: 'pointer',
+                borderRadius: 4, textShadow: 'none', padding: '12px 14px', cursor: 'pointer',
                 textAlign: 'left', color: UI.ink, fontFamily: UI.fontUi, width: '100%',
               }}
               onMouseEnter={ev => ev.currentTarget.style.borderColor = UI.goldSoft}
@@ -3303,7 +3308,7 @@ function DayCopyPicker({ store, schedule, currentDayId, onClose, onCopy, multiSe
             })} style={{
               background: sel ? UI.goldFaint : UI.bgInset,
               border: `1px solid ${sel ? UI.goldSoft : UI.hairStrong}`,
-              borderRadius: 4, padding: '12px 14px', cursor: 'pointer',
+              borderRadius: 4, textShadow: 'none', padding: '12px 14px', cursor: 'pointer',
               textAlign: 'left', color: UI.ink, fontFamily: UI.fontUi, width: '100%',
               display: 'flex', alignItems: 'flex-start', gap: 12,
             }}>
@@ -3843,7 +3848,7 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave, onDraftCha
       <Field label="Day type">
         <button onClick={() => setPickingType(true)} style={{
           width: '100%', textAlign: 'left', background: UI.bgInset,
-          border: `1px solid ${UI.hairStrong}`, borderRadius: 4, padding: '10px 14px',
+          border: `1px solid ${UI.hairStrong}`, borderRadius: 4, textShadow: 'none', padding: '10px 14px',
           cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           color: draft.name === 'REST' ? UI.inkFaint : UI.ink, fontSize: 15, fontWeight: 600, fontFamily: UI.fontUi,
         }}>
@@ -4332,6 +4337,7 @@ function PlanWizard({ store, setStore, go }) {
       width: '100%', display: 'flex', alignItems: 'center', gap: 12, textAlign: 'left',
       padding: '12px 14px', borderRadius: 6, cursor: 'pointer',
       background: active ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
+      textShadow: 'none',
       border: `1px solid ${active ? 'var(--accent)' : UI.hairStrong}`,
       WebkitTapHighlightColor: 'transparent', transition: 'border-color 0.12s, background 0.12s',
     }}>
@@ -4413,7 +4419,7 @@ function PlanWizard({ store, setStore, go }) {
     const stdChip = (dt) => {
       const on = customDays[dayIdx]?.name === dt;
       return <button key={dt} onClick={() => pickDay(dt)}
-        style={{ padding: '13px 6px', borderRadius: 6, cursor: 'pointer', textAlign: 'center', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, letterSpacing: '0.04em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+        style={{ padding: '13px 6px', borderRadius: 6, cursor: 'pointer', textAlign: 'center', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, letterSpacing: '0.04em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', textShadow: 'none',
           background: on ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset, color: on ? 'var(--accent)' : UI.inkFaint,
           border: `1px solid ${on ? 'var(--accent)' : UI.hairStrong}`, WebkitTapHighlightColor: 'transparent' }}>{dt}</button>;
     };
@@ -4481,7 +4487,7 @@ function PlanWizard({ store, setStore, go }) {
               background: 'transparent', color: UI.inkFaint, border: `1px dashed ${UI.hairStrong}`, WebkitTapHighlightColor: 'transparent' }}>+ Custom day type</button>}
       {!creatingDayType && importGroups.length > 0 && (
         <button onClick={() => { setImportSel(new Set()); setImportPlan(null); setImportOpen(true); }}
-          style={{ padding: '12px 6px', borderRadius: 6, cursor: 'pointer', textAlign: 'center', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, letterSpacing: '0.04em', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+          style={{ padding: '12px 6px', borderRadius: 6, cursor: 'pointer', textAlign: 'center', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, letterSpacing: '0.04em', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, textShadow: 'none',
             background: UI.bgInset, color: UI.inkSoft, border: `1px solid ${UI.hairStrong}`, WebkitTapHighlightColor: 'transparent' }}>
           <i className="fa-solid fa-file-import" style={{ fontSize: 12 }} /> Import a day from a plan
         </button>
@@ -4507,7 +4513,7 @@ function PlanWizard({ store, setStore, go }) {
             }
           };
           return <button key={w} onClick={toggleWeekday}
-            style={{ padding: '12px 6px', borderRadius: 6, cursor: 'pointer', textAlign: 'center', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600,
+            style={{ padding: '12px 6px', borderRadius: 6, cursor: 'pointer', textAlign: 'center', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, textShadow: 'none',
               background: on ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset, color: on ? 'var(--accent)' : UI.inkFaint,
               border: `1px solid ${on ? 'var(--accent)' : UI.hairStrong}`, WebkitTapHighlightColor: 'transparent' }}>{w}</button>;
         })}
@@ -4535,6 +4541,7 @@ function PlanWizard({ store, setStore, go }) {
                   flex: 1, padding: '10px 8px', borderRadius: 6, cursor: 'pointer',
                   fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, textAlign: 'center',
                   background: on ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
+                  textShadow: 'none',
                   color: on ? 'var(--accent)' : UI.inkFaint,
                   border: `1px solid ${on ? 'var(--accent)' : UI.hairStrong}`, WebkitTapHighlightColor: 'transparent',
                 }}>{o.label}</button>
@@ -4607,7 +4614,7 @@ function PlanWizard({ store, setStore, go }) {
         {importPlan.days.map(d => {
           const sel = importSel.has(d.key);
           return <button key={d.key} onClick={() => setImportSel(s => { const n = new Set(s); if (n.has(d.key)) n.delete(d.key); else n.add(d.key); return n; })}
-            style={{ display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left', padding: '11px 12px', borderRadius: 6, cursor: 'pointer',
+            style={{ display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left', padding: '11px 12px', borderRadius: 6, cursor: 'pointer', textShadow: 'none',
               background: sel ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset, border: `1px solid ${sel ? 'var(--accent)' : UI.hairStrong}`, WebkitTapHighlightColor: 'transparent' }}>
             <i className={`fa-solid ${sel ? 'fa-circle-check' : 'fa-circle'}`} style={{ fontSize: 16, color: sel ? 'var(--accent)' : UI.inkFaint, flexShrink: 0 }} />
             <span style={{ flex: 1, minWidth: 0 }}>
@@ -4630,7 +4637,7 @@ function PlanWizard({ store, setStore, go }) {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 340, overflowY: 'auto', overscrollBehavior: 'contain' }}>
         {importGroups.map(g => (
           <button key={g.id} onClick={() => { setImportPlan(g); setImportSel(new Set()); }}
-            style={{ display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left', padding: '12px 12px', borderRadius: 6, cursor: 'pointer', background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, WebkitTapHighlightColor: 'transparent' }}>
+            style={{ display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left', padding: '12px 12px', borderRadius: 6, cursor: 'pointer', background: UI.bgInset, textShadow: 'none', border: `1px solid ${UI.hairStrong}`, WebkitTapHighlightColor: 'transparent' }}>
             <span style={{ flex: 1, minWidth: 0 }}>
               <span style={{ display: 'block', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, color: UI.ink, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{g.name}</span>
               <span className="micro" style={{ color: UI.inkFaint }}>{g.days.length} day{g.days.length !== 1 ? 's' : ''}</span>
@@ -4731,6 +4738,7 @@ function NewPlanPickerModal({ onClose, go }) {
     <button onClick={onClick} style={{
       width: '100%', padding: '13px 14px', borderRadius: 6, cursor: 'pointer',
       background: UI.bgInset, border: `1px solid ${accent ? UI.goldSoft : UI.hairStrong}`, color: UI.inkSoft,
+      textShadow: 'none',
       fontFamily: UI.fontUi, textAlign: 'left', WebkitTapHighlightColor: 'transparent',
       display: 'flex', alignItems: 'center', gap: 14,
     }}>
@@ -4783,7 +4791,7 @@ function StructuredProgramsScreen({ store, setStore, go }) {
         {has531 ? (
           <button onClick={() => go({ name: 'schedule-531' })} style={{
             width: '100%', textAlign: 'left', background: UI.bgInset, border: `1px solid ${UI.goldSoft}`,
-            borderRadius: 8, padding: 14, cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 8,
+            borderRadius: 8, textShadow: 'none', padding: 14, cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 8,
             WebkitTapHighlightColor: 'transparent',
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -4821,7 +4829,7 @@ function ProgramTemplatesScreen({ store, setStore, go }) {
         {programs.map(p => (
           <button key={p.id} onClick={() => go({ name: 'plan-preview', programId: p.id })} style={{
             width: '100%', textAlign: 'left', background: UI.bgInset, border: `1px solid ${UI.hairStrong}`,
-            borderRadius: 8, padding: 14, cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 8,
+            borderRadius: 8, textShadow: 'none', padding: 14, cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 8,
             WebkitTapHighlightColor: 'transparent',
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>

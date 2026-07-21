@@ -738,7 +738,7 @@ function WaterSettingsBody({ settings, patchSettings, go, onClose, onConfigureDr
 
       {/* Other drinks & coffee live in their own sub-sheet to keep this one tidy */}
       <Bezel style={{ marginBottom: 12 }}>Drinks</Bezel>
-      <button onClick={onConfigureDrinks} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', padding: '13px 12px', background: UI.bgInset, border: `1px solid ${UI.hair}`, borderRadius: 6, cursor: 'pointer', marginBottom: 20, WebkitTapHighlightColor: 'transparent' }}>
+      <button onClick={onConfigureDrinks} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', padding: '13px 12px', background: UI.bgInset, border: `1px solid ${UI.hair}`, borderRadius: 6, textShadow: 'none', cursor: 'pointer', marginBottom: 20, WebkitTapHighlightColor: 'transparent' }}>
         <span style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi }}>Other drinks & coffee</span>
         <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi }}>{drinkCount > 0 ? `${drinkCount} set` : 'Configure'}</span>
@@ -944,6 +944,7 @@ function WaterStatsBody({ store, goalMl }) {
       flex: 1, padding: '7px 0', border: 'none', cursor: 'pointer',
       background: period === id ? 'var(--accent)' : 'transparent',
       color: period === id ? 'var(--accent-ink)' : UI.inkFaint,
+      textShadow: 'none',
       fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.04em', WebkitTapHighlightColor: 'transparent',
     }}>{label}</button>
   );
@@ -1003,11 +1004,11 @@ const wtIconBtn = {
 const wtTile = {
   display: 'flex', flexDirection: 'column', alignItems: 'center',
   padding: '14px 6px 10px', borderRadius: 6, border: `1px solid ${UI.hairStrong}`,
-  background: UI.bgInset, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+  background: UI.bgInset, textShadow: 'none', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
 };
 const wtDrinkTile = {
   display: 'flex', alignItems: 'center', gap: 10, padding: 12, borderRadius: 6,
-  border: `1px solid ${UI.hairStrong}`, background: UI.bgInset, cursor: 'pointer',
+  border: `1px solid ${UI.hairStrong}`, background: UI.bgInset, textShadow: 'none', cursor: 'pointer',
   WebkitTapHighlightColor: 'transparent', overflow: 'hidden',
 };
 const wtDrinkIcon = {
@@ -1028,12 +1029,12 @@ const wtInput = {
 const wtBigInput = { ...wtInput, fontSize: 22, padding: '12px 14px' };
 const wtPreset = {
   padding: '10px 0', borderRadius: 4, border: `1px solid ${UI.hairStrong}`, background: UI.bgInset,
-  color: UI.ink, fontFamily: UI.fontNum, fontSize: 14, fontWeight: 600, cursor: 'pointer',
+  color: UI.ink, textShadow: 'none', fontFamily: UI.fontNum, fontSize: 14, fontWeight: 600, cursor: 'pointer',
   WebkitTapHighlightColor: 'transparent',
 };
 const wtPillOpt = {
   padding: '13px 8px', borderRadius: 4, border: `1px solid ${UI.hairStrong}`, background: UI.bgInset,
-  color: UI.ink, fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, cursor: 'pointer', textAlign: 'center',
+  color: UI.ink, textShadow: 'none', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, cursor: 'pointer', textAlign: 'center',
   WebkitTapHighlightColor: 'transparent',
 };
 

@@ -2444,6 +2444,7 @@ function OnboardingPrompt({ onStart, onSkip }) {
             border: 'none', cursor: 'pointer',
             background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)',
             boxShadow: '0 8px 24px rgba(var(--accent-rgb),0.4)',
+            textShadow: 'none',
             color: 'var(--accent-ink)', fontFamily: UI.fontUi, fontSize: 15, fontWeight: 700,
             letterSpacing: '0.06em', WebkitTapHighlightColor: 'transparent',
           }}>
@@ -2509,6 +2510,7 @@ function TourCrashCard({ onClose }) {
         <button onPointerDown={close} style={{
           padding: '13px 0', borderRadius: 6, border: 'none', cursor: 'pointer',
           background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)',
+          textShadow: 'none',
           color: 'var(--accent-ink)', fontFamily: UI.fontUi, fontSize: 14, fontWeight: 700, letterSpacing: '0.06em',
           WebkitTapHighlightColor: 'transparent', touchAction: 'manipulation',
         }}>Close tour</button>
@@ -2578,6 +2580,7 @@ function TourExitButton({ onDone }) {
       top: 'calc(env(safe-area-inset-top, 0px) + 10px)', right: 12,
       width: 34, height: 34, borderRadius: '50%',
       border: '1px solid rgba(255,255,255,0.35)', background: 'rgba(0,0,0,0.55)',
+      textShadow: 'none',
       color: '#fff', fontFamily: UI.fontUi, fontSize: 15, fontWeight: 700, lineHeight: 1,
       cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
       WebkitTapHighlightColor: 'transparent', touchAction: 'manipulation',
@@ -2666,6 +2669,7 @@ function OnboardingTourInner({ tourKey, onDone }) {
             flex: 1, padding: '11px 0', borderRadius: 6, border: 'none', cursor: 'pointer',
             background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)',
             boxShadow: '0 6px 18px rgba(var(--accent-rgb),0.38)',
+            textShadow: 'none',
             color: 'var(--accent-ink)', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 700, letterSpacing: '0.08em',
             WebkitTapHighlightColor: 'transparent', touchAction: 'manipulation',
           }}>{lastCard ? 'FINISH →' : 'NEXT →'}</button>

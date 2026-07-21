@@ -3432,7 +3432,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
             <button onClick={onClick} style={{
               width: '100%', display: 'flex', alignItems: 'center', gap: 14,
               padding: '12px 14px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`,
-              borderRadius: 6, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+              borderRadius: 6, textShadow: 'none', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
               marginBottom: 8,
             }}>
               <i className={`fa-solid ${icon}`} style={{ fontSize: 20, color: 'var(--accent)', width: 22, textAlign: 'center', flexShrink: 0 }} />
@@ -3492,7 +3492,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
               }} style={{
                 width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
                 padding: '12px 14px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`,
-                borderRadius: 6, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+                borderRadius: 6, textShadow: 'none', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
               }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <i className="fa-solid fa-arrows-rotate" style={{ fontSize: 16, color: 'var(--accent)' }} />
@@ -3513,7 +3513,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
           go({ name: 'coaching-client', coachingId: asSelf.id, clientId: userId, clientName: store.user.name, initialTab: 'checkins', isSelf: true, backRoute: 'home' });
         const navCheckinCoach = () =>
           go({ name: 'coaching', initialClientTab: 'checkin' });
-        const btnStyle = { width: '100%', display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' };
+        const btnStyle = { width: '100%', display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6, textShadow: 'none', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' };
         return (
           <Sheet open={checkinPickerOpen} onClose={() => setCheckinPickerOpen(false)} title="Which check-in?" titleColor="var(--accent)">
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -3549,7 +3549,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
             <button onClick={() => { setWorkoutSubOpen(false); setBonusDayPickerOpen(true); }} style={{
               width: '100%', display: 'flex', alignItems: 'center', gap: 12,
               padding: '12px 14px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`,
-              borderRadius: 6, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+              borderRadius: 6, textShadow: 'none', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
             }}>
               <div style={{ flex: 1, textAlign: 'left' }}>
                 <div style={{ fontSize: 14, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi }}>From plan</div>
@@ -3561,7 +3561,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
           <button onClick={() => { setWorkoutSubOpen(false); setFreestyleSubOpen(true); }} style={{
             width: '100%', display: 'flex', alignItems: 'center', gap: 12,
             padding: '12px 14px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`,
-            borderRadius: 6, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+            borderRadius: 6, textShadow: 'none', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
           }}>
             <div style={{ flex: 1, textAlign: 'left' }}>
               <div style={{ fontSize: 14, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi }}>Freestyle</div>
@@ -3578,7 +3578,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
           <button onClick={startFreestyleSession} style={{
             width: '100%', display: 'flex', alignItems: 'center', gap: 12,
             padding: '12px 14px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`,
-            borderRadius: 6, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+            borderRadius: 6, textShadow: 'none', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
           }}>
             <div style={{ flex: 1, textAlign: 'left' }}>
               <div style={{ fontSize: 14, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi }}>Empty session</div>
@@ -3629,7 +3629,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
             <button key={d.id} onClick={() => { setBonusDayPickerOpen(false); setDayPreview(d); }} style={{
               width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
               padding: '12px 14px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`,
-              borderRadius: 6, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+              borderRadius: 6, textShadow: 'none', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
             }}>
               <span style={{ fontSize: 14, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi }}>{d.name}</span>
               <span className="micro" style={{ color: UI.inkFaint }}>{d.items.length} exercise{d.items.length !== 1 ? 's' : ''}</span>
@@ -3674,7 +3674,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                 width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                 padding: '12px 14px', background: UI.bgInset,
                 border: `0.5px solid ${isCurrent ? 'rgba(var(--accent-rgb),0.5)' : UI.hair}`,
-                borderRadius: 6, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+                borderRadius: 6, textShadow: 'none', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
               }}>
                 <span style={{ fontSize: 14, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi }}>{d.name}</span>
                 {isCurrent
@@ -3693,7 +3693,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
             <button key={m.dateKey} onClick={() => startBacklogSession(m)} style={{
               width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
               padding: '12px 14px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`,
-              borderRadius: 6, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+              borderRadius: 6, textShadow: 'none', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
             }}>
               <span style={{ fontSize: 14, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi }}>{m.dayName}</span>
               <span className="num" style={{ fontSize: 11, color: UI.inkFaint }}>
@@ -3795,6 +3795,7 @@ function UnitPromptModal({ onDone }) {
               background: UI.bgInset,
               border: `1px solid ${UI.hairStrong}`,
               color: UI.inkSoft,
+              textShadow: 'none',
               fontFamily: UI.fontUi, textAlign: 'center',
               WebkitTapHighlightColor: 'transparent',
               display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8,

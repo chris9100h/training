@@ -54,7 +54,7 @@ function AdminTicketRow({ t, archived = false, catLabel, onClick }) {
         borderLeft: `3px solid ${archived ? UI.inkGhost : (statusColor[t.support_status] || UI.hairStrong)}`,
         borderRadius: 8, cursor: 'pointer', textAlign: 'left', padding: '12px 14px', marginBottom: 8,
         WebkitTapHighlightColor: 'transparent', display: 'flex', flexDirection: 'column',
-        gap: archived ? 4 : 5, opacity: archived ? 0.7 : 1,
+        gap: archived ? 4 : 5, opacity: archived ? 0.7 : 1, textShadow: 'none',
       }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <span style={{ fontSize: archived ? 13 : 14, fontWeight: 600, color: archived ? UI.inkSoft : UI.ink, fontFamily: UI.fontUi, flex: 1 }}>{t.client_name || t.client_email}</span>
@@ -1661,7 +1661,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             <button key={g.title} onClick={() => { setGuidesSheet(false); if (g.sheet === 'howto') setHowToSheet(true); else go({ name: g.route }); }} style={{
               display: 'flex', alignItems: 'center', gap: 12, width: '100%', textAlign: 'left', cursor: 'pointer',
               background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, padding: '13px 14px',
-              WebkitTapHighlightColor: 'transparent', font: 'inherit', color: UI.ink,
+              WebkitTapHighlightColor: 'transparent', font: 'inherit', color: UI.ink, textShadow: 'none',
             }}>
               <span style={{ width: 34, height: 34, borderRadius: 6, background: 'rgba(var(--accent-rgb),0.18)', border: `var(--hair-width) solid ${UI.hairStrong}`, display: 'grid', placeItems: 'center', flexShrink: 0 }}>
                 <i className={`fa-solid ${g.icon}`} style={{ fontSize: 14, color: UI.gold }} />
@@ -1750,7 +1750,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                   <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
                     <input value={newGrantEmail} onChange={e => setNewGrantEmail(e.target.value)} onKeyDown={e => e.key === 'Enter' && addGrant()} placeholder="email@example.com"
                       style={{ flex: 1, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4, padding: '7px 10px', color: UI.ink, fontFamily: UI.fontUi, fontSize: 13, outline: 'none' }} />
-                    <button onClick={addGrant} disabled={!newGrantEmail.includes('@')} style={{ padding: '7px 14px', borderRadius: 4, border: 'none', cursor: 'pointer', background: newGrantEmail.includes('@') ? UI.gold : UI.bgInset, color: newGrantEmail.includes('@') ? 'var(--accent-ink)' : UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600 }}>Add</button>
+                    <button onClick={addGrant} disabled={!newGrantEmail.includes('@')} style={{ padding: '7px 14px', borderRadius: 4, border: 'none', cursor: 'pointer', background: newGrantEmail.includes('@') ? UI.gold : UI.bgInset, color: newGrantEmail.includes('@') ? 'var(--accent-ink)' : UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, textShadow: 'none' }}>Add</button>
                   </div>
                 </div>
               )}
@@ -1818,7 +1818,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                   style={{ padding: '5px 12px', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600,
                     background: (store.settings?.glucoseUnit ?? 'mmol') === u ? 'var(--accent)' : 'transparent',
                     color: (store.settings?.glucoseUnit ?? 'mmol') === u ? 'var(--accent-ink)' : UI.inkSoft,
-                    border: 'none', cursor: 'pointer', transition: 'background 0.15s' }}>
+                    border: 'none', cursor: 'pointer', transition: 'background 0.15s', textShadow: 'none' }}>
                   {u === 'mmol' ? 'mmol/L' : 'mg/dL'}
                 </button>
               ))}
@@ -1843,7 +1843,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                   style={{ padding: '5px 12px', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600,
                     background: LB.defaultTempUnit(store.settings) === u ? 'var(--accent)' : 'transparent',
                     color: LB.defaultTempUnit(store.settings) === u ? 'var(--accent-ink)' : UI.inkSoft,
-                    border: 'none', cursor: 'pointer', transition: 'background 0.15s' }}>
+                    border: 'none', cursor: 'pointer', transition: 'background 0.15s', textShadow: 'none' }}>
                   {u === 'c' ? '°C' : '°F'}
                 </button>
               ))}
@@ -1970,7 +1970,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                     </div>
                     {confirmDeletePeriodId === p.id && (
                       <div style={{ display: 'flex', gap: 8, paddingBottom: 14 }}>
-                        <button onClick={() => setConfirmDeletePeriodId(null)} style={{ flex: 1, padding: '11px', background: UI.bgRaised, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6, cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, color: UI.inkFaint, WebkitTapHighlightColor: 'transparent' }}>Cancel</button>
+                        <button onClick={() => setConfirmDeletePeriodId(null)} style={{ flex: 1, padding: '11px', background: UI.bgRaised, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6, cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, color: UI.inkFaint, WebkitTapHighlightColor: 'transparent', textShadow: 'none' }}>Cancel</button>
                         <button onClick={() => deletePeriod(p.id)} style={{ flex: 1, padding: '11px', background: 'rgba(var(--danger-rgb),0.12)', border: '0.5px solid rgba(var(--danger-rgb),0.4)', borderRadius: 6, cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, color: UI.danger, WebkitTapHighlightColor: 'transparent' }}>Delete</button>
                       </div>
                     )}
@@ -2240,6 +2240,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                   border: `1px solid ${darkMode === key ? UI.goldSoft : UI.hairStrong}`,
                   color: darkMode === key ? UI.gold : UI.inkSoft,
                   fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
+                  textShadow: 'none',
                 }}>{label}</button>
               ))}
             </div>
@@ -2291,6 +2292,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                     padding: '3px 10px', borderRadius: 4, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600,
                     background: importSourceUnit === u ? 'var(--accent)' : UI.bgInset,
                     color: importSourceUnit === u ? 'var(--accent-ink)' : UI.inkSoft,
+                    textShadow: 'none',
                   }}>{u.toUpperCase()}</button>
                 ))}
               </div>
@@ -2447,6 +2449,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
               color: plateInvTab === i ? 'var(--accent-ink)' : UI.inkFaint,
               fontFamily: UI.fontUi, fontSize: 12, letterSpacing: '0.06em',
               fontWeight: plateInvTab === i ? 600 : 400, transition: 'all 0.15s',
+              textShadow: 'none',
             }}>{u.toUpperCase()}</button>
           ))}
         </div>
@@ -2726,7 +2729,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                           background: supportCategoryDraft === c.key ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
                           color: supportCategoryDraft === c.key ? 'var(--accent)' : UI.inkFaint,
                           fontFamily: UI.fontUi, fontSize: 10, fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase',
-                          WebkitTapHighlightColor: 'transparent', textAlign: 'center',
+                          WebkitTapHighlightColor: 'transparent', textAlign: 'center', textShadow: 'none',
                         }}>
                           <i className={`fa-solid ${c.icon}`} style={{ display: 'block', fontSize: 14, marginBottom: 4 }} />
                           {c.label}
@@ -2740,7 +2743,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                   {supportImagePreview && (
                     <div style={{ position: 'relative', display: 'inline-block', alignSelf: 'flex-start' }}>
                       <img src={supportImagePreview} alt="" style={{ maxHeight: 100, maxWidth: 160, borderRadius: 6, display: 'block', objectFit: 'cover' }} />
-                      <button onClick={() => { setSupportImageFile(null); setSupportImagePreview(null); }} style={{ position: 'absolute', top: -6, right: -6, width: 20, height: 20, borderRadius: '50%', background: UI.inkSoft, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 11 }}>×</button>
+                      <button onClick={() => { setSupportImageFile(null); setSupportImagePreview(null); }} style={{ position: 'absolute', top: -6, right: -6, width: 20, height: 20, borderRadius: '50%', background: UI.inkSoft, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 11, textShadow: 'none' }}>×</button>
                     </div>
                   )}
                   <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
@@ -2816,7 +2819,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                     {supportImagePreview && (
                       <div style={{ position: 'relative', display: 'inline-block', alignSelf: 'flex-start' }}>
                         <img src={supportImagePreview} alt="" style={{ maxHeight: 100, maxWidth: 160, borderRadius: 6, display: 'block', objectFit: 'cover' }} />
-                        <button onClick={() => { setSupportImageFile(null); setSupportImagePreview(null); }} style={{ position: 'absolute', top: -6, right: -6, width: 20, height: 20, borderRadius: '50%', background: UI.inkSoft, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 11 }}>×</button>
+                        <button onClick={() => { setSupportImageFile(null); setSupportImagePreview(null); }} style={{ position: 'absolute', top: -6, right: -6, width: 20, height: 20, borderRadius: '50%', background: UI.inkSoft, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 11, textShadow: 'none' }}>×</button>
                       </div>
                     )}
                     <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
@@ -2851,7 +2854,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           const renderTicket = t => (
             <button key={t.coachingId}
               onClick={() => { setSupportActiveTicketId(t.coachingId); setSupportView('thread'); }}
-              style={{ width: '100%', background: UI.bgRaised, border: `var(--hair-width) solid ${UI.hair}`, borderLeft: `3px solid ${statusBorder[t.status] || UI.hairStrong}`, borderRadius: 8, padding: '11px 14px', textAlign: 'left', cursor: 'pointer', WebkitTapHighlightColor: 'transparent', display: 'flex', flexDirection: 'column', gap: 5 }}>
+              style={{ width: '100%', background: UI.bgRaised, border: `var(--hair-width) solid ${UI.hair}`, borderLeft: `3px solid ${statusBorder[t.status] || UI.hairStrong}`, borderRadius: 8, padding: '11px 14px', textAlign: 'left', cursor: 'pointer', WebkitTapHighlightColor: 'transparent', display: 'flex', flexDirection: 'column', gap: 5, textShadow: 'none' }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   <span className="micro" style={{ color: statusBorder[t.status] || UI.inkFaint }}>{statusLabel[t.status] || t.status}</span>
@@ -2930,6 +2933,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                       background: currentStatus === s.key ? sBg[s.key] : 'transparent',
                       color: currentStatus === s.key ? sColor[s.key] : UI.inkFaint,
                       fontFamily: UI.fontUi, fontSize: 10, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
+                      textShadow: 'none',
                     }}>{s.label}</button>
                   ))}
                 </div>
@@ -2973,7 +2977,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                   {adminImagePreview && (
                     <div style={{ position: 'relative', display: 'inline-block', alignSelf: 'flex-start' }}>
                       <img src={adminImagePreview} alt="" style={{ maxHeight: 100, maxWidth: 160, borderRadius: 6, display: 'block', objectFit: 'cover' }} />
-                      <button onClick={() => { setAdminImageFile(null); setAdminImagePreview(null); }} style={{ position: 'absolute', top: -6, right: -6, width: 20, height: 20, borderRadius: '50%', background: UI.inkSoft, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 11 }}>×</button>
+                      <button onClick={() => { setAdminImageFile(null); setAdminImagePreview(null); }} style={{ position: 'absolute', top: -6, right: -6, width: 20, height: 20, borderRadius: '50%', background: UI.inkSoft, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 11, textShadow: 'none' }}>×</button>
                     </div>
                   )}
                   <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
