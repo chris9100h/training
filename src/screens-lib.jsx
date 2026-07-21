@@ -3008,7 +3008,20 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
       (s.entries || []).forEach(e => {
         if (e.isCardio || muscleOf(e.exId) !== muscle) return;
         const jRec = a.joint && a.joint[e.exId];
-        if (!jRec || jRec.answer == null) return;
+        if (!jRec || jRec.answer == null) {
+          // Never asked, or the sheet opened but the answer never landed (e.g.
+          // backgrounded/reloaded mid-session before the "asked, not answered"
+          // fix). Still offer a row when there's a completed set to judge, so
+          // it isn't silently stuck unrated forever — same "attempted" bar the
+          // live gate itself uses, opens the same blank joint sheet as a fresh
+          // ask, and the existing re-earn machinery below is already exId-
+          // agnostic (it just reads answers.joint[exId], present or not).
+          const workingSets = (e.sets || []).filter(st => !st.warmup && !st.skipped);
+          if (workingSets.some(st => st.done)) {
+            rows.push({ type: 'joint', subject: e.exId, name: e.name, sub: 'Not rated — tap to add', sel: null });
+          }
+          return;
+        }
         // Per-exercise feedback: joint + weight-feel + pump, all edited together in the
         // joint sheet (mirrors screens-train.jsx mesoRecapGroups). Old sessions that
         // predate the per-exercise move simply carry no weight/pump here.
