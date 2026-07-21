@@ -634,35 +634,6 @@ var _DARK_HAIR         = 'rgba(236,228,208,0.10)';
 var _DARK_HAIR_STRONG  = 'rgba(236,228,208,0.18)';
 var _DARK_DANGER       = '#c87469';
 var _DARK_DANGER_RGB   = '200,116,105';
-// Grid overlay (Settings -> Appearance -> Grid), togglable independent of
-// theme: paper defaults it on (its defining look), every other theme
-// defaults it off (today's behavior), an explicit user choice then wins
-// everywhere. Both pieces below were paper-only originally, generalized
-// so any theme can render the same grid:
-//   - _GRID_TEXTURE only references var(--knurl-rgb), which applyDarkMode
-//     already sets per-theme (dark/black fall back to a light cream,
-//     light/paper set their own dark tone): no per-theme copy needed.
-//     0.16 alpha is fixed (not multiplied by --knurl-opacity, which is
-//     tuned for small accents like knurl dividers/guilloche and would
-//     read as a wall of dark squares tiled across a whole screen).
-//   - _textLiftFor(hex) builds the same halo paper always had, just
-//     driven by whichever theme's own bgRaised tone instead of paper's
-//     hardcoded #f9fafb, so dark themes get a dark halo instead of a
-//     light one bleeding into their text. Deliberately short-reaching
-//     (max 8px): a wider glow would wash out decorative art behind large
-//     display text (e.g. Home's day name over the watermark), not just
-//     grid lines.
-function _hexToRgb(hex) {
-  var n = parseInt(hex.replace('#', ''), 16);
-  return [(n >> 16) & 255, (n >> 8) & 255, n & 255].join(',');
-}
-function _textLiftFor(bgRaisedHex) {
-  var c = _hexToRgb(bgRaisedHex);
-  var solid = 'rgb(' + c + ')';
-  return '0 0 1px ' + solid + ', 0 0 1px ' + solid + ', 0 0 2px ' + solid + ', 0 0 2px ' + solid +
-    ', 0 0 3px ' + solid + ', 0 0 5px rgba(' + c + ',0.9), 0 0 8px rgba(' + c + ',0.6)';
-}
-var _GRID_TEXTURE = 'repeating-linear-gradient(0deg, rgba(var(--knurl-rgb),0.16) 0px, rgba(var(--knurl-rgb),0.16) 1px, transparent 1px, transparent 22px), repeating-linear-gradient(90deg, rgba(var(--knurl-rgb),0.16) 0px, rgba(var(--knurl-rgb),0.16) 1px, transparent 1px, transparent 22px)';
 var _DARK_TINTS = {
   surfaceTint:     'rgba(236,228,208,0.02)',
   surfaceTintSm:   'rgba(236,228,208,0.03)',
@@ -729,9 +700,20 @@ window.DARK_MODES = {
     // light canvas in a way the same border never was on a dark one.
     hair: 'rgba(20,20,20,0.48)', hairStrong: 'rgba(20,20,20,0.55)', hairWidth: '1px',
     knurlRgb: '50,70,120', knurlOpacity: 5,
-    // Grid on by default (its defining look); textLift/chartTextLiftOpacity/
-    // bgTexture are computed generically now (see _GRID_TEXTURE/_textLiftFor
-    // above applyDarkMode), not baked in per-theme here.
+    // A solid-ish off-white halo (bgRaised's own tone, not pure white) so
+    // plain text sitting directly on the grid reads like it's resting on a
+    // faint, invisible card instead of getting cut through by ruled lines.
+    // Several full-alpha stops stacked at 1-3px build up a near-opaque ring
+    // right at the glyph edge (a single soft blur reads as too weak once
+    // it's gone through a phone screenshot/compression pass); kept
+    // deliberately short-reaching (max 8px) rather than a wide glow — large
+    // display text (e.g. Home's day name over the watermark) would otherwise
+    // wash out whatever decorative art sits behind it, not just grid lines.
+    textLift: '0 0 1px #f9fafb, 0 0 1px #f9fafb, 0 0 2px #f9fafb, 0 0 2px #f9fafb, 0 0 3px #f9fafb, 0 0 5px rgba(249,250,251,0.9), 0 0 8px rgba(249,250,251,0.6)',
+    // SVG-native equivalent of textLift for chart <text> labels (see
+    // --chart-text-lift-opacity above). 0.95, not 1: the softer edge reads
+    // closer to the CSS text-lift's stacked-stops look than a hard cutoff.
+    chartTextLiftOpacity: 0.95,
     // Richens --accent-faint/--accent-soft (Card's accent border, badge
     // fills, ...): those stay formula-derived from --accent-rgb, so this is
     // the only lever paper has to make them less washed-out without touching
@@ -791,15 +773,10 @@ window.applyDarkMode = function(key) {
   s.setProperty('--range-track', m.rangeTrack || 'var(--hair-strong)');
   s.setProperty('--knurl-rgb', m.knurlRgb || '236,228,208');
   s.setProperty('--knurl-opacity', m.knurlOpacity || 1);
-  // Tri-state: an explicit user choice ('1'/'0') applies to every theme;
-  // untouched (null) falls back to today's behavior, grid on for paper only.
-  var _gridPref = localStorage.getItem('logbook-grid-enabled');
-  var gridEnabled = _gridPref === '1' ? true : _gridPref === '0' ? false : key === 'paper';
-  window.__gridEnabled = gridEnabled;
-  s.setProperty('--text-lift', gridEnabled ? _textLiftFor(m.bgRaised) : 'none');
-  s.setProperty('--chart-text-lift-opacity', gridEnabled ? 0.95 : 0);
+  s.setProperty('--text-lift', m.textLift || 'none');
+  s.setProperty('--chart-text-lift-opacity', m.chartTextLiftOpacity || 0);
   s.setProperty('--accent-tint-boost', m.accentTintBoost || 1);
-  s.setProperty('--bg-texture', gridEnabled ? _GRID_TEXTURE : 'none');
+  s.setProperty('--bg-texture', m.bgTexture || 'none');
   s.setProperty('--surface-tint',      m.surfaceTint     || t.surfaceTint);
   s.setProperty('--surface-tint-sm',   m.surfaceTintSm   || t.surfaceTintSm);
   s.setProperty('--surface-tint-md',   m.surfaceTintMd   || t.surfaceTintMd);
@@ -816,13 +793,6 @@ window.applyDarkMode = function(key) {
   window.applyAccentColor(window.__accentColorKey || localStorage.getItem('logbook-accent-color') || 'gold');
   var tc = document.querySelector('meta[name="theme-color"]');
   if (tc) tc.content = m.bg;
-};
-// Settings -> Appearance -> Grid toggle. enabled === null clears the
-// explicit choice back to the tri-state default (grid on for paper only).
-window.applyGridPreference = function(enabled) {
-  if (enabled === null) localStorage.removeItem('logbook-grid-enabled');
-  else localStorage.setItem('logbook-grid-enabled', enabled ? '1' : '0');
-  window.applyDarkMode(window.__currentDarkMode);
 };
 window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
 </script>

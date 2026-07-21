@@ -667,14 +667,6 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
   // index.html); this is the opt-out, local-only (no store field, nothing to
   // sync or back up), matching logbook-accent-color's own pattern.
   const [paperAccentEnabled, setPaperAccentEnabled] = useStateSet(() => localStorage.getItem('logbook-paper-accent-enabled') === 'true');
-  // Grid overlay (index.html's window.applyGridPreference): local-only,
-  // theme-independent. Untouched (localStorage key absent) resolves to
-  // today's default (on for paper, off elsewhere) via window.__gridEnabled,
-  // which applyDarkMode already recomputes on every theme switch, so this
-  // just mirrors that resolved value rather than tracking the raw
-  // localStorage tri-state itself.
-  const [gridEnabled, setGridEnabled] = useStateSet(() => !!window.__gridEnabled);
-  useEffectSet(() => { setGridEnabled(!!window.__gridEnabled); }, [darkMode]);
   // Starts wherever the watermark is ALREADY sitting today (the same
   // per-theme/per-image defaults screens-home.jsx falls back to when
   // watermarkOpacity is unset), so the slider doesn't jump to an arbitrary
@@ -2243,13 +2235,6 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                 }}>{label}</button>
               ))}
             </div>
-          </Row>
-          <Row label="Grid">
-            <Toggle on={gridEnabled} onToggle={() => {
-              const n = !gridEnabled;
-              setGridEnabled(n);
-              window.applyGridPreference(n);
-            }} />
           </Row>
           {darkMode === 'paper' && (
             <Row label="Full accent color in Paper">
