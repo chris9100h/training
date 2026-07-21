@@ -559,7 +559,7 @@ function LibraryScreen({ store, setStore, go, userId }) {
             </Btn>
             <Btn kind="ghost" onClick={deleteSelected}
               disabled={selected.size === 0}
-              style={{ color: UI.danger, borderColor: 'rgba(var(--danger-rgb),calc(0.25 * var(--danger-border-boost)))', opacity: selected.size === 0 ? 0.4 : 1, minHeight: 36, padding: '6px 14px', fontSize: 11 }}>
+              style={{ color: UI.danger, background: 'rgba(var(--danger-rgb),0.08)', borderColor: 'rgba(var(--danger-rgb),calc(0.25 * var(--danger-border-boost)))', opacity: selected.size === 0 ? 0.4 : 1, minHeight: 36, padding: '6px 14px', fontSize: 11 }}>
               Delete
             </Btn>
           </div>

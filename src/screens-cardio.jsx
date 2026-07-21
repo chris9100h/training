@@ -315,7 +315,7 @@ function CardioPlanDetailSheet({ plan, store, setStore, activeCardioPlanId, toda
         <Btn kind="ghost" onClick={async () => {
           if (!await confirm('Delete this cardio plan?', { ok: 'Delete', danger: true })) return;
           onDelete();
-        }} style={{ width: '100%', fontSize: 12, color: UI.danger, borderColor: 'rgba(var(--danger-rgb),calc(0.25 * var(--danger-border-boost)))' }}>Delete plan</Btn>
+        }} style={{ width: '100%', fontSize: 12, color: UI.danger, background: 'rgba(var(--danger-rgb),0.08)', borderColor: 'rgba(var(--danger-rgb),calc(0.25 * var(--danger-border-boost)))' }}>Delete plan</Btn>
       </div>
     </Sheet>
   );

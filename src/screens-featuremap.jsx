@@ -725,7 +725,7 @@ function FeaturePublishSheet({ changes, busy, onClose, onDiscard, onDiscardAll, 
             {confirmAll ? (
               <div style={{ display: 'flex', gap: 8 }}>
                 <button onClick={() => setConfirmAll(false)} style={{ ...fmPill(false), flex: 1, justifyContent: 'center', padding: '10px 0' }}>Cancel</button>
-                <button onClick={onDiscardAll} disabled={busy} style={{ ...fmPill(false), flex: 1, justifyContent: 'center', padding: '10px 0', color: UI.danger, borderColor: 'rgba(var(--danger-rgb),calc(0.4 * var(--danger-border-boost)))' }}>Discard all changes</button>
+                <button onClick={onDiscardAll} disabled={busy} style={{ ...fmPill(false), flex: 1, justifyContent: 'center', padding: '10px 0', color: UI.danger, background: 'rgba(var(--danger-rgb),0.08)', borderColor: 'rgba(var(--danger-rgb),calc(0.4 * var(--danger-border-boost)))' }}>Discard all changes</button>
               </div>
             ) : (
               <button onClick={() => setConfirmAll(true)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 12, letterSpacing: '0.04em', padding: '2px 0', alignSelf: 'center' }}>
