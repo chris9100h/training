@@ -664,6 +664,10 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
   const [reminderTime, setReminderTime] = useStateSet(() => store.settings?.reminderTime ?? '07:00');
   const [cycleWeekView, setCycleWeekView] = useStateSet(() => store.settings?.cycleWeekView ?? localStorage.getItem('logbook-cycle-week-view') === 'true');
   const [darkMode, setDarkMode] = useStateSet(() => store.settings?.darkMode ?? localStorage.getItem('logbook-dark-mode') ?? 'dark');
+  // Paper mutes the chosen accent to grey by default (applyAccentColor,
+  // index.html); this is the opt-out, local-only (no store field, nothing to
+  // sync or back up), matching logbook-accent-color's own pattern.
+  const [paperAccentEnabled, setPaperAccentEnabled] = useStateSet(() => localStorage.getItem('logbook-paper-accent-enabled') === 'true');
   // Starts wherever the watermark is ALREADY sitting today (the same
   // per-theme/per-image defaults screens-home.jsx falls back to when
   // watermarkOpacity is unset), so the slider doesn't jump to an arbitrary
@@ -2261,6 +2265,16 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
               ))}
             </div>
           </Row>
+          {darkMode === 'paper' && (
+            <Row label="Full accent color in Paper">
+              <Toggle on={paperAccentEnabled} onToggle={() => {
+                const n = !paperAccentEnabled;
+                setPaperAccentEnabled(n);
+                localStorage.setItem('logbook-paper-accent-enabled', String(n));
+                window.applyAccentColor(store.settings?.accentColor || 'gold');
+              }} />
+            </Row>
+          )}
           <Row label="Unit preference">
             <button style={accentBtn} onClick={() => setUnitPickerOpen(true)}>
               {store.settings?.unit === 'lbs' ? 'Imperial' : store.settings?.unit === 'mixed' ? 'Mixed' : 'Metric'}

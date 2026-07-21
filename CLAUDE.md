@@ -90,6 +90,7 @@ Diese Datei enthält die verbindlichen Regeln und den Überblick; sie bewusst sc
   - `logbook-health-card-order`: Reihenfolge der Health-Tab-Karten (per Gerät, kein DB-Sync)
   - `logbook-seen-signups`: vom Admin per „Got it" abgehakte Registrierungen im Account-Tab-Feed (Array von user_ids, per Gerät)
   - `logbook-fever-nudge-declined-date`: Datum der letzten Ablehnung des „Als Sick markieren?"-Prompts nach einer Fieber-Temperaturmessung, verhindert wiederholtes Nachfragen am selben Tag (per Gerät)
+  - `logbook-paper-accent-enabled`: Opt-out aus Papers Grau-Muting der Akzentfarbe (`applyAccentColor`, `index.html`), Default aus, Toggle in Settings → Appearance (nur sichtbar wenn Paper aktiv), per Gerät
 
 ## What's New / Changelog
 

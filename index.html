@@ -521,8 +521,12 @@ window.applyAccentColor = function(key) {
   // Some themes (paper) mute the chosen accent to a neutral tone instead of
   // showing it at full color, e.g. so "today"/"completed" markers read as
   // pencil-grey on a notebook page rather than a gold highlighter streak.
+  // Opt-out per device (Settings -> Appearance, paper only): the mute is a
+  // default, not mandatory, so a user who wants their real accent color even
+  // on paper can say so. Local-only preference, nothing to sync.
   var mode = window.DARK_MODES && window.DARK_MODES[window.__currentDarkMode];
-  var ov = mode && mode.accent ? mode : null;
+  var wantsPaperAccent = localStorage.getItem('logbook-paper-accent-enabled') === 'true';
+  var ov = (mode && mode.accent && !wantsPaperAccent) ? mode : null;
   window.__accentColorKey = key;
   var s = document.documentElement.style;
   s.setProperty('--accent', ov ? ov.accent : c.hex);
