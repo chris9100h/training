@@ -1,4 +1,4 @@
-const CACHE = 'zane-v2.638';
+const CACHE = 'zane-v2.639';
 // Decorative background photos live in their own cache, deliberately decoupled
 // from CACHE's version. CACHE bumps on every deploy (often several times a
 // day); PHOTOS_CACHE only bumps by hand when the photo files themselves
