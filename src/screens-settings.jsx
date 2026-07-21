@@ -2214,7 +2214,23 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             })}
           </div>
           <div className="knurl" style={{ marginBottom: 14 }} />
-          <div className="micro" style={{ marginBottom: 10 }}>Watermark opacity</div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+            <span className="micro">Watermark opacity</span>
+            {store.settings?.watermarkOpacity != null && (
+              <button onClick={() => {
+                // Clears the explicit override so it falls back to the
+                // per-theme/per-image default again (same formula the initial
+                // slider position and screens-home.jsx's render both use).
+                const def = store.settings?.vipBackground ? 16 : darkMode === 'paper' ? 16 : darkMode === 'light' ? 14 : 4;
+                setWatermarkOpacityPct(def);
+                setStore(s => ({ ...s, settings: { ...s.settings, watermarkOpacity: null } }));
+              }} style={{
+                background: 'none', border: 'none', cursor: 'pointer', padding: '2px 4px',
+                color: UI.gold, fontFamily: UI.fontUi, fontSize: 10, fontWeight: 600,
+                letterSpacing: '0.1em', textTransform: 'uppercase', WebkitTapHighlightColor: 'transparent',
+              }}>Reset</button>
+            )}
+          </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
             <input type="range" min="0" max="100" step="1" value={watermarkOpacityPct}
               onChange={e => {
