@@ -1625,7 +1625,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
         )}
       </div>
       </div>
-      <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 8, padding: '16px 20px', paddingBottom: 'calc(env(safe-area-inset-bottom, 8px) + 16px)', borderTop: `var(--hair-width) solid ${UI.hair}`, background: UI.bg }}>
+      <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 8, padding: '16px 20px', paddingBottom: 'calc(env(safe-area-inset-bottom, 8px) + 16px)', borderTop: `var(--hair-width) solid ${UI.hair}`, background: UI.bg, backgroundImage: 'var(--bg-texture)' }}>
         <Btn kind="ghost" onClick={() => LB.clearCachesAndReload()}>Clear cache &amp; reload</Btn>
         <Btn kind="ghost" className="intensity-glow" onClick={() => setGuidesSheet(true)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
           Guides
