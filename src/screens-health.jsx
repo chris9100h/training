@@ -1280,7 +1280,7 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
           <input type="text" inputMode="decimal" placeholder={autoCals != null ? String(autoCals) : '—'} value={form.calories} onChange={e => set('calories', e.target.value)} style={inputStyle} />
         </div>
         <div>
-          <div style={labelStyle}>Off-plan note <span style={{ textTransform: 'none', fontWeight: 400, color: UI.inkGhost }}>(optional · prefills check-in)</span></div>
+          <div style={labelStyle}>Off-plan note <span style={{ textTransform: 'none', fontWeight: 400, color: UI.inkFaint }}>(optional · prefills check-in)</span></div>
           <textarea rows={2} placeholder="e.g. Birthday cake, 2 slices" value={form.offPlanNote} onChange={e => set('offPlanNote', e.target.value)} style={{ ...inputStyle, resize: 'none', fontFamily: UI.fontUi, fontSize: 14 }} />
         </div>
       </CatSection>

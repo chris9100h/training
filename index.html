@@ -158,6 +158,12 @@
      explicit textShadow (btnPrimary, Card, Sheet, ...) still wins over this
      since inline styles always beat an element-selector rule. */
   button, input, select, textarea { text-shadow: inherit; }
+  /* No theme ever styled ::placeholder, so every input/textarea's hint
+     text (an autofilled example, a computed "from macros" value shown as
+     a placeholder, ...) fell back to each browser's own default fade of
+     its `color`, unrelated to the ink scale every other faint/hint text
+     in the app is tuned against. Pin it to ink-faint explicitly instead. */
+  input::placeholder, textarea::placeholder { color: var(--ink-faint); opacity: 1; }
   /* Native <input type="range"> styled via the CSS accent-color property
      (the previous approach here) leaves the UNFILLED track color up to the
      browser's own contrast heuristic against that accent-color value, with
@@ -646,7 +652,7 @@ window.DARK_MODES = {
   black: { bg: '#07060a', bgRaised: '#100d0b', bgInset: '#1a1611', bgBody: '#050409', bgRgb: '7,6,10', inkFaint: 'rgba(236,228,208,0.34)', inkGhost: 'rgba(236,228,208,0.14)' },
   light: {
     bg: '#f2ede4', bgRaised: '#eae3d6', bgInset: '#e2dacb', bgBody: '#e8e1d4', bgRgb: '242,237,228',
-    ink: '#1f1b16', inkSoft: 'rgba(31,27,22,0.66)', inkFaint: 'rgba(31,27,22,0.44)', inkGhost: 'rgba(31,27,22,0.16)',
+    ink: '#1f1b16', inkSoft: 'rgba(31,27,22,0.66)', inkFaint: 'rgba(31,27,22,0.62)', inkGhost: 'rgba(31,27,22,0.16)',
     hair: 'rgba(31,27,22,0.20)', hairStrong: 'rgba(31,27,22,0.42)', knurlRgb: '31,27,22',
     // The default --danger (#c87469) is a pale coral tuned for dark
     // backgrounds; against this theme's light canvas it drops well under
@@ -681,7 +687,7 @@ window.DARK_MODES = {
   // (ruled-paper look) even though ink itself is neutral, not blue-black.
   paper: {
     bg: '#eff0f2', bgRaised: '#f9fafb', bgInset: '#e2e4e8', bgBody: '#e7e8eb', bgRgb: '239,240,242',
-    ink: '#141414', inkSoft: 'rgba(20,20,20,0.82)', inkFaint: 'rgba(20,20,20,0.62)', inkGhost: 'rgba(20,20,20,0.40)',
+    ink: '#141414', inkSoft: 'rgba(20,20,20,0.82)', inkFaint: 'rgba(20,20,20,0.72)', inkGhost: 'rgba(20,20,20,0.40)',
     // Same fix as light's danger override (see there): the default coral
     // is tuned for dark backgrounds and nearly vanishes here (~3:1 contrast),
     // most visibly on the "ghost" danger buttons (Sign out, Delete plan, ...).
