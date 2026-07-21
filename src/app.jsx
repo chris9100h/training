@@ -187,6 +187,10 @@ function WhatsNewModal({ entries, onDismiss }) {
         overflowY: 'auto',
         boxShadow: '0 32px 80px rgba(0,0,0,0.6), 0 0 0 0.5px rgba(var(--accent-rgb),0.2)',
         animation: 'fadeUp 0.3s ease',
+        // This panel draws the same paper grid Card/Sheet do (bg-texture
+        // above), so it needs the same lift or the grid cuts straight
+        // through the title/item text. 'none' outside paper, a no-op there.
+        textShadow: 'var(--text-lift)',
       }}>
         <div className="micro-gold">WHAT'S NEW</div>
         {entries.map((entry, ei) => (
