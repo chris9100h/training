@@ -2242,7 +2242,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                 setWatermarkOpacityPct(v);
                 setStore(s => ({ ...s, settings: { ...s.settings, watermarkOpacity: v } }));
               }}
-              style={{ flex: 1, accentColor: 'var(--accent)' }} />
+              style={{ flex: 1, background: `linear-gradient(to right, var(--accent) ${watermarkOpacityPct}%, var(--range-track) ${watermarkOpacityPct}%)` }} />
             <span className="num" style={{ fontSize: 13, color: UI.inkSoft, minWidth: 32, textAlign: 'right' }}>{watermarkOpacityPct}%</span>
           </div>
           <div style={{ fontFamily: UI.fontUi, fontSize: 10.5, color: UI.inkGhost, marginBottom: 14, lineHeight: 1.4 }}>

@@ -39,6 +39,10 @@
        UI.hairStrong borders use this literal). A theme can widen it, e.g.
        paper's 0.5px hairlines were reading as barely-there. */
     --hair-width: 0.5px;
+    /* Empty-track color for input[type="range"] (see the rules below). Same
+       as --hair-strong for every theme except paper, which points this at
+       its own lighter bg-inset instead (see the paper block for why). */
+    --range-track: var(--hair-strong);
     /* RGB triple used by decorative textures (knurl, guilloche). Flipped to a
        dark value in light mode so the hash marks stay visible on a pale bg. */
     --knurl-rgb: 236,228,208;
@@ -147,6 +151,61 @@
      explicit textShadow (btnPrimary, Card, Sheet, ...) still wins over this
      since inline styles always beat an element-selector rule. */
   button, input, select, textarea { text-shadow: inherit; }
+  /* Native <input type="range"> styled via the CSS accent-color property
+     (the previous approach here) leaves the UNFILLED track color up to the
+     browser's own contrast heuristic against that accent-color value, with
+     no color-scheme declared anywhere in this app to hint it. Confirmed
+     directly: the exact same page, only the accent hex swapped (gold vs
+     copper), rendered one near-black and the other near-white, with no
+     theme change involved at all, an unpredictable per-color guess rather
+     than anything this app controls. Fully custom-style track + thumb
+     instead: the caller supplies the filled-vs-unfilled split via an inline
+     background gradient (see the watermark opacity slider), this rule set
+     just removes the native chrome and pins the thumb to the real accent
+     and the (transparent, WebKit) track background to whatever gradient the
+     caller set. */
+  input[type="range"] {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 4px;
+    border-radius: 999px;
+    outline: none;
+    cursor: pointer;
+  }
+  input[type="range"]::-webkit-slider-runnable-track {
+    -webkit-appearance: none;
+    height: 4px;
+    border-radius: 999px;
+    background: transparent;
+  }
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--accent);
+    margin-top: -7px;
+    cursor: pointer;
+  }
+  input[type="range"]::-moz-range-track {
+    height: 4px;
+    border-radius: 999px;
+    background: var(--range-track);
+  }
+  input[type="range"]::-moz-range-progress {
+    height: 4px;
+    border-radius: 999px;
+    background: var(--accent);
+  }
+  input[type="range"]::-moz-range-thumb {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--accent);
+    border: none;
+    cursor: pointer;
+  }
   /* Autoreg guide (screens-autoreg-guide.jsx), section 03 feedback options:
      two columns on a phone, three on a wide screen. A media query (not CSS
      auto-fit) so a narrow phone reliably keeps two columns instead of dropping
@@ -614,6 +673,14 @@ window.DARK_MODES = {
     // the only lever paper has to make them less washed-out without touching
     // every one of their call sites individually.
     accentTintBoost: 1.6,
+    // The empty portion of a range slider's track (see input[type="range"]
+    // rules above) defaults to --hair-strong everywhere, but paper's
+    // hairStrong is deliberately darker/bolder than every other theme's (it
+    // needs to read as a real border on the light canvas), which makes an
+    // "empty/inactive" track look like a heavy line instead of a recessed
+    // groove. Paper wants the opposite feel here, so it points at its own
+    // light bgInset tone instead.
+    rangeTrack: 'var(--bg-inset)',
     surfaceTint:     'rgba(20,20,20,0.035)',
     surfaceTintSm:   'rgba(20,20,20,0.05)',
     surfaceTintMd:   'rgba(20,20,20,0.07)',
@@ -654,6 +721,7 @@ window.applyDarkMode = function(key) {
   s.setProperty('--hair', m.hair || _DARK_HAIR);
   s.setProperty('--hair-strong', m.hairStrong || _DARK_HAIR_STRONG);
   s.setProperty('--hair-width', m.hairWidth || '0.5px');
+  s.setProperty('--range-track', m.rangeTrack || 'var(--hair-strong)');
   s.setProperty('--knurl-rgb', m.knurlRgb || '236,228,208');
   s.setProperty('--knurl-opacity', m.knurlOpacity || 1);
   s.setProperty('--text-lift', m.textLift || 'none');
