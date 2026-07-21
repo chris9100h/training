@@ -2946,6 +2946,13 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
         ...st,
         sessions: st.sessions.filter(x => x.id !== sessionId),
         cardioLogs: (st.cardioLogs || []).filter(l => l.sessionId !== sessionId),
+        // cycleIndex advances by exactly +1 when a session finishes (screens-train.jsx),
+        // but deleting one never rolled that back, leaving a permanent +1 "ghost"
+        // advance behind every deleted session. Only safe to undo when this was
+        // provably the LAST session to advance it (nothing has advanced past it
+        // since): rolling back an older deleted session would incorrectly regress
+        // a rotation position later training has already legitimately moved past.
+        ...(s.cyclePos != null && st.cycleIndex === s.cyclePos + 1 ? { cycleIndex: s.cyclePos } : {}),
       };
       if (!doMesoRollback) return base;
       const cur = (st.mesoStates || []).find(m => m.scheduleId === s.scheduleId);
