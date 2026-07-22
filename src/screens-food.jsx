@@ -280,6 +280,15 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     });
   }
 
+  // Sets the query text and, when it lands back at empty, resets the search
+  // state along with it (so a stale results list, and the "Add manually"
+  // button riding on it, don't linger for text no longer in the box). Shared
+  // by the input's onChange and the field's clear ("x") button.
+  function setQueryAndReset(v) {
+    setQuery(v);
+    if (!v.trim() && results != null) { setResults(null); setSearchError(null); }
+  }
+
   // Source the last dispatched search actually ran against, so the effect
   // below can tell an already-served filter from one the user switched to
   // mid-flight (which must still re-run once the in-flight request settles).
@@ -819,15 +828,15 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                 </div>
               )}
               <div style={{ display: 'flex', gap: 8 }}>
-                <input value={query} onChange={e => {
-                  const v = e.target.value;
-                  setQuery(v);
-                  // Clearing the box back to empty resets the search state, so
-                  // a stale results list (and the "Add manually" button that
-                  // rides on it) doesn't linger for text that's no longer there.
-                  if (!v.trim() && results != null) { setResults(null); setSearchError(null); }
-                }} onKeyDown={e => { if (e.key === 'Enter') runSearch(); }}
-                  type="text" placeholder="Search food, or scan →" style={fdInputStyle} />
+                <div style={{ position: 'relative', width: '100%' }}>
+                  <input value={query} onChange={e => setQueryAndReset(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') runSearch(); }}
+                    type="text" placeholder="Search food, or scan →" style={{ ...fdInputStyle, paddingRight: 32 }} />
+                  {query && (
+                    <button onClick={() => setQueryAndReset('')} aria-label="Clear search" style={fdClearBtn}>
+                      <i className="fa-solid fa-circle-xmark" style={{ fontSize: 15 }} />
+                    </button>
+                  )}
+                </div>
                 <button onClick={() => setScanPickerOpen(true)} aria-label="Scan barcode or nutrition label" style={fdSearchBtn}>
                   <i className="fa-solid fa-barcode" style={{ fontSize: 14 }} />
                 </button>
@@ -1234,6 +1243,11 @@ const fdInputStyle = {
   background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 4,
   color: UI.ink, fontFamily: UI.fontUi, fontSize: 14, padding: '10px 12px', width: '100%',
   WebkitAppearance: 'none', boxSizing: 'border-box',
+};
+const fdClearBtn = {
+  position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)',
+  background: 'none', border: 'none', padding: 4, cursor: 'pointer', color: UI.inkFaint,
+  display: 'flex', alignItems: 'center', justifyContent: 'center', WebkitTapHighlightColor: 'transparent',
 };
 const fdBigInput = { ...fdInputStyle, fontFamily: UI.fontNum, fontSize: 22, padding: '12px 14px' };
 const fdSearchBtn = {
