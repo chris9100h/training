@@ -923,6 +923,17 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   function deleteRecipe(recipe) {
     setStore(s => ({ ...s, foodRecipes: (s.foodRecipes || []).filter(r => r.id !== recipe.id) }));
   }
+  // Recipe items are a fixed jsonb snapshot (zane_food_recipes.items), so an
+  // ingredient added before calories-always-from-macros became the rule
+  // still carries whatever calories it was snapshotted with. Recomputing
+  // from each item's own protein/carbs/fat at every use, not just once at
+  // write time, makes an old recipe self-heal exactly like
+  // reAddFromRecent/editDraftItem already do for a single re-added item,
+  // with no separate migration needed for the jsonb blobs themselves.
+  function recipeItemsCalories(items) {
+    return Math.round((items || []).reduce((a, i) => a + (LB.caloriesFromMacros(i.protein, i.carbs, i.fat) || 0), 0));
+  }
+
   // Recipes log as ONE entry (the sum of their ingredients), not N, and at a
   // fixed amount, no scaling: the whole point is "log this exact thing I eat
   // the same way every time" in a single tap.
@@ -936,7 +947,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       const entry = {
         id: LB.uid(), date: curDate, time: entryTime(),
         foodId: null, foodName: recipe.name, brand: null, source: 'recipe',
-        quantityG: Math.round(sum('quantityG')), calories: Math.round(sum('calories')),
+        quantityG: Math.round(sum('quantityG')), calories: recipeItemsCalories(items),
         protein: fdRound1(sum('protein')), carbs: fdRound1(sum('carbs')), fat: fdRound1(sum('fat')),
         fiber: items.some(i => i.fiber != null) ? fdRound1(sum('fiber')) : null,
         createdAt: new Date().toISOString(),
@@ -954,7 +965,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   const recipeDraftTotals = useMemoFd(() => {
     if (!recipeMode) return { calories: 0, protein: 0, carbs: 0, fat: 0 };
     const sum = k => recipeMode.items.reduce((a, i) => a + (i[k] || 0), 0);
-    return { calories: Math.round(sum('calories')), protein: Math.round(sum('protein')), carbs: Math.round(sum('carbs')), fat: Math.round(sum('fat')) };
+    return { calories: recipeItemsCalories(recipeMode.items), protein: Math.round(sum('protein')), carbs: Math.round(sum('carbs')), fat: Math.round(sum('fat')) };
   }, [recipeMode]);
 
   // Shown on both add-a-food tabs (Search and Quick Add) whenever a timeline
@@ -1011,7 +1022,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                   <div key={i.id} style={fdDraftRow}>
                     <button onClick={() => editDraftItem(i)} style={fdDraftMain}>
                       <span style={{ ...fdEntryName, fontSize: 12 }}>{i.foodName}</span>
-                      <span style={fdEntryMeta}>{i.quantityG}g · {i.calories} kcal · P{Math.round(i.protein)} C{Math.round(i.carbs)} F{Math.round(i.fat)}</span>
+                      <span style={fdEntryMeta}>{i.quantityG}g · {LB.caloriesFromMacros(i.protein, i.carbs, i.fat) || 0} kcal · P{Math.round(i.protein)} C{Math.round(i.carbs)} F{Math.round(i.fat)}</span>
                     </button>
                     <button onClick={() => removeRecipeDraftItem(i.id)} aria-label="Remove" style={fdInlineDeleteBtn}>
                       <i className="fa-solid fa-trash" style={{ fontSize: 11 }} />
@@ -1274,7 +1285,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                     {recipesFiltered.map(r => {
                       const items = r.items || [];
-                      const kcal = Math.round(items.reduce((a, i) => a + (i.calories || 0), 0));
+                      const kcal = recipeItemsCalories(items);
                       const justAdded = recipeJustAddedId === r.id;
                       return (
                         <div key={r.id} style={fdQuickRowWrap}>
