@@ -3122,7 +3122,8 @@ async function testAsync(name, fn) {
     const mk = (id, ended, sets, opts = {}) => ({
       id, scheduleId: 'p', ended, date: ended.slice(0, 10), isDeload: !!opts.isDeload,
       ...(opts.signalWeight ? { signalWeight: opts.signalWeight } : {}),
-      entries: [{ exId: 'bench', sets }],
+      ...(opts.dayId != null ? { dayId: opts.dayId } : {}),
+      entries: opts.entries || [{ exId: 'bench', sets }],
       ...(opts.joint ? { mesoRecap: { raw: { answers: { joint: { bench: opts.joint } } } } } : {}),
     });
     const flat = [{ done: true, kg: 100, reps: 8 }];
@@ -3182,6 +3183,61 @@ async function testAsync(name, fn) {
       const bw = [{ done: true, reps: 12 }];
       const sessions = [mk('E0', '2026-07-07T10:00:00Z', bw), mk('E1', '2026-07-10T10:00:00Z', bw), mk('E2', '2026-07-13T10:00:00Z', bw)];
       assert.strictEqual(LB.detectStall(sessions, 'bench', muscleOf, { planId: 'p', atCeiling: () => false }).stalled, false, 'e1RM is meaningless without weight');
+    });
+
+    // Same exercise in two different day-slots (e.g. 2nd exercise, fresher, on Day A
+    // vs 3rd, more pre-fatigued, on Day B). Both slots are steadily progressing on
+    // their own terms, but Day B is consistently heavier/lower due to fatigue context.
+    // Without a dayId filter the newest-3 window can pick 1 Day A + 2 Day B sessions,
+    // where Day A's higher number sits at the OLDEST spot of the window and neither
+    // later Day B session beats it: a false stall from mixing two contexts.
+    const dayMix = [
+      mk('A1', '2026-06-01T10:00:00Z', [{ done: true, kg: 80, reps: 8 }], { dayId: 'A' }),
+      mk('A2', '2026-06-15T10:00:00Z', [{ done: true, kg: 85, reps: 8 }], { dayId: 'A' }),
+      mk('A3', '2026-07-15T10:00:00Z', [{ done: true, kg: 105, reps: 8 }], { dayId: 'A' }),
+      mk('B1', '2026-06-20T10:00:00Z', [{ done: true, kg: 60, reps: 8 }], { dayId: 'B' }),
+      mk('B2', '2026-07-18T10:00:00Z', [{ done: true, kg: 65, reps: 8 }], { dayId: 'B' }),
+      mk('B3', '2026-07-20T10:00:00Z', [{ done: true, kg: 70, reps: 8 }], { dayId: 'B' }),
+    ];
+
+    test('detectStall: pooling two day-slots without a dayId filter can read as a false stall', () => {
+      const out = LB.detectStall(dayMix, 'bench', muscleOf, { planId: 'p', atCeiling: () => false });
+      assert.strictEqual(out.stalled, true, 'the newest-3 window crosses day contexts and hides both slots\' real progress');
+    });
+
+    test('detectStall: dayId scoping clears the false stall, each day-slot is progressing on its own', () => {
+      const dayA = LB.detectStall(dayMix, 'bench', muscleOf, { planId: 'p', atCeiling: () => false, dayId: 'A' });
+      const dayB = LB.detectStall(dayMix, 'bench', muscleOf, { planId: 'p', atCeiling: () => false, dayId: 'B' });
+      assert.strictEqual(dayA.stalled, false, 'Day A alone (80 -> 85 -> 105) is steadily progressing');
+      assert.strictEqual(dayB.stalled, false, 'Day B alone (60 -> 65 -> 70) is steadily progressing too, just lighter');
+    });
+
+    // Same exercise twice in one session (top set + back-off block). occ picks a
+    // single entry per session instead of taking the best across both, so a flat,
+    // genuinely stalled top set is not masked by an unrelated, improving back-off set.
+    const occMix = [
+      mk('S1', '2026-07-01T10:00:00Z', [], { entries: [
+        { exId: 'bench', sets: [{ done: true, kg: 140, reps: 8 }] },
+        { exId: 'bench', sets: [{ done: true, kg: 100, reps: 8 }] },
+      ] }),
+      mk('S2', '2026-07-09T10:00:00Z', [], { entries: [
+        { exId: 'bench', sets: [{ done: true, kg: 140, reps: 8 }] },
+        { exId: 'bench', sets: [{ done: true, kg: 110, reps: 8 }] },
+      ] }),
+      mk('S3', '2026-07-17T10:00:00Z', [], { entries: [
+        { exId: 'bench', sets: [{ done: true, kg: 140, reps: 8 }] },
+        { exId: 'bench', sets: [{ done: true, kg: 145, reps: 8 }] },
+      ] }),
+    ];
+
+    test('detectStall: occ scoping isolates the top set, a flat top set stalls on its own', () => {
+      const out = LB.detectStall(occMix, 'bench', muscleOf, { planId: 'p', atCeiling: () => false, occ: 0 });
+      assert.strictEqual(out.stalled, true, 'the top set is flat at 140kg across all 3 sessions');
+    });
+
+    test('detectStall: occ scoping isolates the back-off set, its own improvement is not lost', () => {
+      const out = LB.detectStall(occMix, 'bench', muscleOf, { planId: 'p', atCeiling: () => false, occ: 1 });
+      assert.strictEqual(out.stalled, false, 'the back-off set climbs 100 -> 110 -> 145');
     });
   }
 

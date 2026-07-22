@@ -2864,12 +2864,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     if (!mesoState || !exercise) return null;
     const muscleOf = (id) => primaryMuscleForExercise(store.exercises?.find(x => x.id === id));
     const stall = LB.detectStall(endedSessions, exercise.id, muscleOf, {
-      planId: mesoState.scheduleId, atCeiling, exName: exercise.name,
+      planId: mesoState.scheduleId, atCeiling, exName: exercise.name, dayId: session.dayId, occ,
     });
     if (!stall.stalled) return { stalled: false, swap: null };
     const swap = LB.suggestSwap(exercise.id, store.exercises, window.SYSTEM_EXERCISES, muscleOf, { affinity: mesoState.affinity });
     return { stalled: true, swap };
-  }, [mesoState, exercise, endedSessions, store.exercises, overreach, cycleSets]);
+  }, [mesoState, exercise, endedSessions, store.exercises, overreach, cycleSets, session.dayId, occ]);
   // Holds the just-finished session's detector result (computed in finish() over
   // the sealed session) so the post-session deload offer can read the reason
   // strings after navigation. Cleared once consumed.

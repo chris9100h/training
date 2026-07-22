@@ -6162,6 +6162,17 @@ function detectStall(sessions, exId, muscleOfExId, opts = {}) {
   if (!exId || typeof muscleOfExId !== 'function') return out;
   const n = opts.n || STALL_SESSIONS;
   const planId = opts.planId ?? null;
+  // Same scoping bestRecentEntry/recentSessionsForExercise already use, for
+  // the same reason: this exercise can sit in a different slot on different
+  // days (e.g. 2nd exercise on Day A but 3rd, more pre-fatigued, on Day B),
+  // or twice in the same day (superset/back-off block). Pooling those
+  // together compares apples to oranges and can read as "no e1RM progress"
+  // even though each slot IS progressing on its own terms. dayId null keeps
+  // the old pool-everything behavior (e.g. for callers/tests that don't
+  // have a day context); the real screens-train.jsx call site always
+  // passes both.
+  const dayId = opts.dayId ?? null;
+  const occ = opts.occ ?? 0;
   const muscle = muscleOfExId(exId);
   // Muscle at its ceiling -> overreach/deload owns this, not a stalled lift (spec 6).
   if (muscle && typeof opts.atCeiling === 'function' && opts.atCeiling(muscle)) return out;
@@ -6170,14 +6181,14 @@ function detectStall(sessions, exId, muscleOfExId, opts = {}) {
   // filter: ended && !isDeload && this plan && signalWeight full). Build the best
   // e1RM per session over completed weighted working sets, effReps for unilateral.
   const qualifying = (sessions || [])
-    .filter(s => s && s.ended && !s.isDeload && (planId == null || s.scheduleId === planId) && (s.signalWeight || 'full') === 'full')
+    .filter(s => s && s.ended && !s.isDeload && (planId == null || s.scheduleId === planId) && (dayId == null || s.dayId === dayId) && (s.signalWeight || 'full') === 'full')
     .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''));
   const series = [];
   for (const s of qualifying) {
+    const entry = (s.entries || []).filter(e => e && !e.isCardio && e.exId === exId)[occ];
     let best = null;
-    for (const e of (s.entries || [])) {
-      if (!e || e.isCardio || e.exId !== exId) continue;
-      for (const st of (e.sets || [])) {
+    if (entry) {
+      for (const st of (entry.sets || [])) {
         if (!st || !st.done || st.warmup || st.skipped) continue;
         const reps = effReps(st);
         if (st.kg == null || reps == null || reps <= 0) continue; // non-weighted set -> no e1RM
