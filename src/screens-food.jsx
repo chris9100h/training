@@ -33,8 +33,18 @@ function fdNowHHMM() {
   const d = new Date();
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
-const fdInt = v => (v === '' || v == null || isNaN(parseInt(v, 10))) ? null : parseInt(v, 10);
+const fdNum = v => (v === '' || v == null || isNaN(parseFloat(v))) ? null : parseFloat(v);
 const fdRound1 = v => Math.round(v * 10) / 10;
+// Input filter for decimal numeric fields (grams, macros): keeps digits and a
+// single decimal point, normalizing a typed comma to a point first (mobile
+// keyboards in German locale emit ',' on the decimal key, and many nutrition
+// figures are fractional, e.g. a 37.5g cookie).
+function fdDecimalFilter(raw) {
+  let v = raw.replace(/,/g, '.').replace(/[^0-9.]/g, '');
+  const dot = v.indexOf('.');
+  if (dot !== -1) v = v.slice(0, dot + 1) + v.slice(dot + 1).replace(/\./g, '');
+  return v;
+}
 
 // Read a picked image file into a data URL.
 function fdReadImageFile(file) {
@@ -105,6 +115,9 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   const [searchError, setSearchError] = useStateFd(null);
   const [results, setResults] = useStateFd(null); // null = no search run yet
   const [scanOpen, setScanOpen] = useStateFd(false);
+  // "Barcode or label?" picker opened by the search box's scan button; routes
+  // to whichever capture flow the user picks.
+  const [scanPickerOpen, setScanPickerOpen] = useStateFd(false);
   const [labelScanning, setLabelScanning] = useStateFd(false);
   const [labelError, setLabelError] = useStateFd(null);
   const labelInputRef = useRefFd(null);
@@ -434,7 +447,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
 
   const qtyPreview = useMemoFd(() => {
     if (!pendingFood) return null;
-    const qty = fdInt(qtyG);
+    const qty = fdNum(qtyG);
     if (!qty || qty <= 0) return null;
     const factor = qty / 100;
     // For a scanned custom item the per-100g P/C/F come from the editable
@@ -479,20 +492,23 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       foodId: custom ? null : `${pendingFood.source}:${pendingFood.sourceId}`,
       foodName: custom ? name : pendingFood.name, brand: pendingFood.brand || null,
       source: custom ? 'custom' : pendingFood.source,
-      quantityG: fdInt(qtyG), calories: qtyPreview.calories, protein: qtyPreview.protein,
+      quantityG: fdNum(qtyG), calories: qtyPreview.calories, protein: qtyPreview.protein,
       carbs: qtyPreview.carbs, fat: qtyPreview.fat, fiber: qtyPreview.fiber,
       createdAt: new Date().toISOString(),
     };
   }
   function buildCustomEntry() {
     const name = customName.trim();
-    const cal = fdInt(customCal), p = fdInt(customP), c = fdInt(customC), f = fdInt(customF);
+    // Calories stay integer (matches the zane_food_logs.calories column), so a
+    // typed decimal is rounded; protein/carbs/fat/fiber keep full precision.
+    const calRaw = fdNum(customCal), p = fdNum(customP), c = fdNum(customC), f = fdNum(customF);
+    const cal = calRaw != null ? Math.round(calRaw) : null;
     if (!name || cal == null || p == null || c == null || f == null) return null;
     return {
       id: LB.uid(), date: curDate, time: entryTime(),
       foodId: null, foodName: name, brand: null, source: 'custom',
-      quantityG: fdInt(customG) || 100, calories: cal, protein: p, carbs: c, fat: f,
-      fiber: customFib !== '' ? fdInt(customFib) : null,
+      quantityG: fdNum(customG) || 100, calories: cal, protein: p, carbs: c, fat: f,
+      fiber: customFib !== '' ? fdNum(customFib) : null,
       createdAt: new Date().toISOString(),
     };
   }
@@ -555,7 +571,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     closeCustomSheet();
     resetCustomForm();
   }
-  const customValid = customName.trim() && fdInt(customCal) != null && fdInt(customP) != null && fdInt(customC) != null && fdInt(customF) != null;
+  const customValid = customName.trim() && fdNum(customCal) != null && fdNum(customP) != null && fdNum(customC) != null && fdNum(customF) != null;
 
   // ── Recipes ──
   function openNewRecipe() { setRecipeNameInput(''); setRecipeNameMode('new'); setRecipeNameOpen(true); }
@@ -804,34 +820,29 @@ function FoodScreen({ store, setStore, go, userId, date }) {
               )}
               <div style={{ display: 'flex', gap: 8 }}>
                 <input value={query} onChange={e => setQuery(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') runSearch(); }}
-                  type="text" placeholder="Search food or scan a barcode…" style={fdInputStyle} />
-                <button onClick={() => setScanOpen(true)} aria-label="Scan barcode" style={fdSearchBtn}>
+                  type="text" placeholder="Search food, or scan →" style={fdInputStyle} />
+                <button onClick={() => setScanPickerOpen(true)} aria-label="Scan barcode or nutrition label" style={fdSearchBtn}>
                   <i className="fa-solid fa-barcode" style={{ fontSize: 14 }} />
                 </button>
                 <button onClick={() => runSearch()} disabled={searching || !query.trim()} aria-label="Search" style={fdSearchBtn}>
                   {searching ? <span style={{ fontFamily: UI.fontUi, fontSize: 11 }}>…</span> : <i className="fa-solid fa-magnifying-glass" style={{ fontSize: 13 }} />}
                 </button>
               </div>
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 2 }}>
-                <button onClick={() => { setLabelError(null); resetCustomForm(); setCustomOpen(true); }} style={fdLinkBtn}>
-                  Can't find it? Add manually
-                </button>
-                <button onClick={() => labelInputRef.current && labelInputRef.current.click()} style={{ ...fdLinkBtn, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                  <i className="fa-solid fa-camera" style={{ fontSize: 12 }} /> Scan a nutrition label
-                </button>
-                {labelError && <div style={{ fontSize: 11, color: 'var(--danger)', fontFamily: UI.fontUi, marginTop: 2, lineHeight: 1.4 }}>{labelError}</div>}
-              </div>
+              {labelError && <div style={{ fontSize: 11, color: 'var(--danger)', fontFamily: UI.fontUi, marginTop: 8, lineHeight: 1.4 }}>{labelError}</div>}
             </div>
 
             {searchError && <div style={{ fontSize: 11, color: 'var(--danger)', fontFamily: UI.fontUi }}>{searchError}</div>}
 
+            {/* Only offered once a search has actually come up short (or the
+                user wants to add something regardless): before searching, there
+                is no way to know it isn't in the database yet. */}
             {results != null && (
               <div>
                 <Bezel style={{ marginBottom: 10 }}>Results{results.length ? ` (${results.length})` : ''}</Bezel>
                 {results.length === 0 ? (
-                  <div style={fdEmptyStyle}>No matches. Try a different search or add it manually.</div>
+                  <div style={fdEmptyStyle}>No matches. Try a different search.</div>
                 ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 10 }}>
                     {results.map(r => (
                       <button key={`${r.source}:${r.sourceId}`} onClick={() => pickResult(r)} style={fdResultRow}>
                         <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
@@ -849,6 +860,10 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                     ))}
                   </div>
                 )}
+                <button onClick={() => { setLabelError(null); resetCustomForm(); setCustomOpen(true); }} style={{ ...fdActionCard, width: '100%' }}>
+                  <i className="fa-solid fa-keyboard" style={{ fontSize: 14 }} />
+                  <span>Add manually</span>
+                </button>
               </div>
             )}
           </>
@@ -961,19 +976,19 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                 <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>Per 100 g · edit if the scan misread</div>
                 <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
                   <Field label="Protein (g)" style={{ flex: 1 }}>
-                    <input value={p100Str} onChange={e => setP100Str(e.target.value.replace(/[^0-9.]/g, ''))} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
+                    <input value={p100Str} onChange={e => setP100Str(fdDecimalFilter(e.target.value))} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
                   </Field>
                   <Field label="Carbs (g)" style={{ flex: 1 }}>
-                    <input value={c100Str} onChange={e => setC100Str(e.target.value.replace(/[^0-9.]/g, ''))} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
+                    <input value={c100Str} onChange={e => setC100Str(fdDecimalFilter(e.target.value))} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
                   </Field>
                   <Field label="Fat (g)" style={{ flex: 1 }}>
-                    <input value={f100Str} onChange={e => setF100Str(e.target.value.replace(/[^0-9.]/g, ''))} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
+                    <input value={f100Str} onChange={e => setF100Str(fdDecimalFilter(e.target.value))} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
                   </Field>
                 </div>
               </>
             )}
             <Field label={pendingFood.custom ? 'Portion (g)' : 'Amount (g)'} style={{ marginBottom: 14 }}>
-              <input value={qtyG} onChange={e => setQtyG(e.target.value.replace(/[^0-9]/g, ''))} type="text" inputMode="numeric" placeholder="g" autoFocus={!pendingFood.custom} style={fdBigInput} />
+              <input value={qtyG} onChange={e => setQtyG(fdDecimalFilter(e.target.value))} type="text" inputMode="decimal" placeholder="g" autoFocus={!pendingFood.custom} style={fdBigInput} />
             </Field>
             <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
               {[50, 100, 150, 200].map(g => (
@@ -1016,25 +1031,25 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         </Field>
         <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
           <Field label="Amount (g, optional)" style={{ flex: 1 }}>
-            <input value={customG} onChange={e => setCustomG(e.target.value.replace(/[^0-9]/g, ''))} type="text" inputMode="numeric" placeholder="g" style={fdInputStyle} />
+            <input value={customG} onChange={e => setCustomG(fdDecimalFilter(e.target.value))} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
           </Field>
           <Field label="Calories (kcal)" style={{ flex: 1 }}>
-            <input value={customCal} onChange={e => setCustomCal(e.target.value.replace(/[^0-9]/g, ''))} type="text" inputMode="numeric" placeholder="kcal" style={fdInputStyle} />
+            <input value={customCal} onChange={e => setCustomCal(fdDecimalFilter(e.target.value))} type="text" inputMode="decimal" placeholder="kcal" style={fdInputStyle} />
           </Field>
         </div>
         <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
           <Field label="Protein (g)" style={{ flex: 1 }}>
-            <input value={customP} onChange={e => setCustomP(e.target.value.replace(/[^0-9]/g, ''))} type="text" inputMode="numeric" placeholder="g" style={fdInputStyle} />
+            <input value={customP} onChange={e => setCustomP(fdDecimalFilter(e.target.value))} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
           </Field>
           <Field label="Carbs (g)" style={{ flex: 1 }}>
-            <input value={customC} onChange={e => setCustomC(e.target.value.replace(/[^0-9]/g, ''))} type="text" inputMode="numeric" placeholder="g" style={fdInputStyle} />
+            <input value={customC} onChange={e => setCustomC(fdDecimalFilter(e.target.value))} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
           </Field>
           <Field label="Fat (g)" style={{ flex: 1 }}>
-            <input value={customF} onChange={e => setCustomF(e.target.value.replace(/[^0-9]/g, ''))} type="text" inputMode="numeric" placeholder="g" style={fdInputStyle} />
+            <input value={customF} onChange={e => setCustomF(fdDecimalFilter(e.target.value))} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
           </Field>
         </div>
         <Field label="Fiber (g, optional)" style={{ marginBottom: 16 }}>
-          <input value={customFib} onChange={e => setCustomFib(e.target.value.replace(/[^0-9]/g, ''))} type="text" inputMode="numeric" placeholder="g" style={fdInputStyle} />
+          <input value={customFib} onChange={e => setCustomFib(fdDecimalFilter(e.target.value))} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
         </Field>
         {!recipeMode && (
           <button onClick={() => toggleFavorite(buildCustomEntry())} disabled={!customValid} style={fdFavBtn(!!favedId, !customValid)}>
@@ -1061,6 +1076,22 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         <div style={{ display: 'flex', gap: 8 }}>
           <Btn kind="ghost" onClick={() => setRecipeNameOpen(false)} style={{ flex: 1 }}>Cancel</Btn>
           <Btn onClick={confirmRecipeName} disabled={!recipeNameInput.trim()} style={{ flex: 2 }}>{recipeNameMode === 'rename' ? 'Save name' : 'Start adding ingredients'}</Btn>
+        </div>
+      </Sheet>
+
+      {/* ── Barcode vs. label picker (opened by the search box's scan button) ── */}
+      <Sheet open={scanPickerOpen} onClose={() => setScanPickerOpen(false)} title="Scan" titleColor="var(--accent)">
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10 }}>
+          <button onClick={() => { setScanPickerOpen(false); setScanOpen(true); }} style={fdScanChoice}>
+            <i className="fa-solid fa-barcode" style={{ fontSize: 22, color: 'var(--accent)' }} />
+            <span style={{ fontSize: 13, fontWeight: 700, color: UI.ink }}>Barcode</span>
+            <span style={{ fontSize: 10, color: UI.inkFaint, lineHeight: 1.3 }}>The code on the packaging</span>
+          </button>
+          <button onClick={() => { setScanPickerOpen(false); setLabelError(null); labelInputRef.current && labelInputRef.current.click(); }} style={fdScanChoice}>
+            <i className="fa-solid fa-camera" style={{ fontSize: 22, color: 'var(--accent)' }} />
+            <span style={{ fontSize: 13, fontWeight: 700, color: UI.ink }}>Nutrition label</span>
+            <span style={{ fontSize: 10, color: UI.inkFaint, lineHeight: 1.3 }}>Photograph the facts table</span>
+          </button>
         </div>
       </Sheet>
 
@@ -1203,9 +1234,18 @@ const fdSearchBtn = {
   background: UI.bgInset, color: UI.inkSoft, cursor: 'pointer', flexShrink: 0,
   display: 'flex', alignItems: 'center', justifyContent: 'center', WebkitTapHighlightColor: 'transparent',
 };
-const fdLinkBtn = {
-  marginTop: 8, background: 'none', border: 'none', padding: '4px 0', color: 'var(--accent)',
-  fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+const fdActionCard = {
+  flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+  padding: '11px 10px', borderRadius: 6, border: `1px solid ${UI.hairStrong}`,
+  background: UI.bgInset, color: UI.inkSoft, textShadow: 'none',
+  fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, cursor: 'pointer',
+  WebkitTapHighlightColor: 'transparent',
+};
+const fdScanChoice = {
+  display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6,
+  padding: '22px 10px', borderRadius: 6, border: `1px solid ${UI.hairStrong}`,
+  background: UI.bgInset, textShadow: 'none', textAlign: 'center', cursor: 'pointer',
+  fontFamily: UI.fontUi, WebkitTapHighlightColor: 'transparent',
 };
 const fdTopAddBtn = {
   width: 34, height: 34, borderRadius: 4, border: `1px solid ${UI.hairStrong}`,
