@@ -191,6 +191,15 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   const [addingRecipeId, setAddingRecipeId] = useStateFd(null);
   const [recipeJustAddedId, setRecipeJustAddedId] = useStateFd(null);
 
+  // Copy/move entries from the viewed day onto another one, at their
+  // original time-of-day. copyMoveIds are foodLogs ids picked from
+  // dayEntries (below); copyMoveMode decides whether the originals stay put
+  // (copy) or get removed from curDate (move) once submitted.
+  const [copyMoveOpen, setCopyMoveOpen] = useStateFd(false);
+  const [copyMoveIds, setCopyMoveIds] = useStateFd([]);
+  const [copyMoveTarget, setCopyMoveTarget] = useStateFd('');
+  const [copyMoveMode, setCopyMoveMode] = useStateFd('copy'); // 'copy' | 'move'
+
   const dayLabel = curDate === today ? 'Today' : curDate === fdShiftDate(today, -1) ? 'Yesterday' : fdFmtDate(curDate);
 
   const dayEntries = useMemoFd(
@@ -274,30 +283,34 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     return [log, ...(s.dailyLogs || []).filter(l => l.id !== log.id && l.date !== dateStr)];
   }
 
-  // Commits a real log write (not a recipe-draft stage). If this is the
-  // FIRST food-tracker entry for the date and the day already carries
-  // manually-entered macros (typed into the Health tab's daily log, never
-  // touched by the tracker), warns before letting the tracker take over,
-  // same "you're about to overwrite the other side" confirm DailyLogScreen
-  // already shows in the opposite direction (requestFoodUnlock there warns
-  // that editing a locked field gets overwritten the next time food is
-  // logged). Once the tracker owns the day (>=1 entry already), no more
-  // nagging on every add, same as the lock only fires on that transition.
-  // Returns false if the user backs out, so callers can leave their sheet
-  // open instead of closing on a log that never happened.
+  // If this would be the FIRST food-tracker entry for the date and the day
+  // already carries manually-entered macros (typed into the Health tab's
+  // daily log, never touched by the tracker), warns before letting the
+  // tracker take over, same "you're about to overwrite the other side"
+  // confirm DailyLogScreen already shows in the opposite direction
+  // (requestFoodUnlock there warns that editing a locked field gets
+  // overwritten the next time food is logged). Once the tracker owns the
+  // day (>=1 entry already), no more nagging on every add, same as the lock
+  // only fires on that transition. Shared by commitEntry (single add) and
+  // submitCopyMove (bulk copy/move onto another date). Returns false if the
+  // user backs out, so callers can leave their sheet open instead of
+  // closing on a log that never happened.
+  async function warnIfOverwritingManualMacros(dateStr) {
+    const alreadyFoodOwned = (store.foodLogs || []).some(l => l.date === dateStr);
+    if (alreadyFoodOwned) return true;
+    const existingLog = (store.dailyLogs || []).find(l => l.date === dateStr);
+    const hasManualMacros = existingLog && (existingLog.protein != null || existingLog.carbs != null || existingLog.fat != null || existingLog.calories != null);
+    if (!hasManualMacros) return true;
+    return confirm(
+      "This day already has manually-entered macros in the Health tab. Logging food here will overwrite them, and the Food Tracker will manage this day's macros from now on.",
+      { title: 'Overwrite manual macros?', ok: 'Continue', cancel: 'Cancel' }
+    );
+  }
+
+  // Commits a real log write (not a recipe-draft stage).
   async function commitEntry(entry) {
-    const alreadyFoodOwned = (store.foodLogs || []).some(l => l.date === entry.date);
-    if (!alreadyFoodOwned) {
-      const existingLog = (store.dailyLogs || []).find(l => l.date === entry.date);
-      const hasManualMacros = existingLog && (existingLog.protein != null || existingLog.carbs != null || existingLog.fat != null || existingLog.calories != null);
-      if (hasManualMacros) {
-        const ok = await confirm(
-          "This day already has manually-entered macros in the Health tab. Logging food here will overwrite them, and the Food Tracker will manage this day's macros from now on.",
-          { title: 'Overwrite manual macros?', ok: 'Continue', cancel: 'Cancel' }
-        );
-        if (!ok) return false;
-      }
-    }
+    const ok = await warnIfOverwritingManualMacros(entry.date);
+    if (!ok) return false;
     setStore(s => {
       const nextLogs = [entry, ...(s.foodLogs || [])];
       return { ...s, foodLogs: nextLogs, dailyLogs: patchDaily(s, entry.date, nextLogs.filter(l => l.date === entry.date)) };
@@ -350,6 +363,45 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       const nextLogs = (s.foodLogs || []).filter(l => l.id !== entry.id);
       return { ...s, foodLogs: nextLogs, dailyLogs: patchDaily(s, entry.date, nextLogs.filter(l => l.date === entry.date)) };
     });
+  }
+
+  function openCopyMove() {
+    setCopyMoveIds([]);
+    setCopyMoveTarget('');
+    setCopyMoveMode('copy');
+    setCopyMoveOpen(true);
+  }
+  function toggleCopyMoveId(id) {
+    setCopyMoveIds(ids => ids.includes(id) ? ids.filter(x => x !== id) : [...ids, id]);
+  }
+  // Duplicates the selected entries onto another date at their original
+  // time-of-day (copy), or does the same and also removes them from
+  // curDate (move). One combined setStore call so both dates' daily
+  // rollups patch together, same "mutate + patchDaily in one write" shape
+  // every other add/delete on this screen uses; patching curDate has to
+  // read off the store already carrying the target date's patched
+  // dailyLogs row, not the stale one from before this write, so it chains
+  // through an intermediate store rather than calling patchDaily twice off
+  // the same s.
+  async function submitCopyMove() {
+    if (!copyMoveIds.length || !copyMoveTarget || copyMoveTarget === curDate) return;
+    const ok = await warnIfOverwritingManualMacros(copyMoveTarget);
+    if (!ok) return;
+    const targetDate = copyMoveTarget, mode = copyMoveMode, ids = copyMoveIds, sourceDate = curDate;
+    setStore(s => {
+      const selected = (s.foodLogs || []).filter(l => ids.includes(l.id));
+      if (!selected.length) return s;
+      const now = new Date().toISOString();
+      const clones = selected.map(l => ({ ...l, id: LB.uid(), date: targetDate, createdAt: now }));
+      const remaining = mode === 'move' ? (s.foodLogs || []).filter(l => !ids.includes(l.id)) : (s.foodLogs || []);
+      const nextLogs = [...clones, ...remaining];
+      let dailyLogs = patchDaily(s, targetDate, nextLogs.filter(l => l.date === targetDate));
+      if (mode === 'move') {
+        dailyLogs = patchDaily({ ...s, dailyLogs }, sourceDate, nextLogs.filter(l => l.date === sourceDate));
+      }
+      return { ...s, foodLogs: nextLogs, dailyLogs };
+    });
+    setCopyMoveOpen(false);
   }
 
   // Sets the query text and, when it lands back at empty, resets the search
@@ -793,11 +845,17 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     <Screen>
       {confirmEl}
       <TopBar title="Food" sub={dayLabel} onBack={() => go({ name: 'health' })}
-        right={tab === 'quickadd' && quickTab === 'recipes' && !recipeMode && (store.foodRecipes || []).length > 0 ? (
-          <button onClick={openNewRecipe} aria-label="New recipe" style={fdTopAddBtn}>
-            <i className="fa-solid fa-plus" style={{ fontSize: 14 }} />
-          </button>
-        ) : undefined} />
+        right={
+          tab === 'quickadd' && quickTab === 'recipes' && !recipeMode && (store.foodRecipes || []).length > 0 ? (
+            <button onClick={openNewRecipe} aria-label="New recipe" style={fdTopAddBtn}>
+              <i className="fa-solid fa-plus" style={{ fontSize: 14 }} />
+            </button>
+          ) : tab === 'log' && dayEntries.length > 0 ? (
+            <button onClick={openCopyMove} aria-label="Copy or move entries" style={fdTopAddBtn}>
+              <i className="fa-solid fa-clone" style={{ fontSize: 13 }} />
+            </button>
+          ) : undefined
+        } />
 
       <SubTabBar tabs={FD_TABS} active={tab} onChange={onTabChange} />
 
@@ -1219,6 +1277,40 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         </div>
       </Sheet>
 
+      {/* ── Copy/move entries from the viewed day onto another one ── */}
+      <Sheet open={copyMoveOpen} onClose={() => setCopyMoveOpen(false)} title="Copy or move entries" titleColor="var(--accent)">
+        <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 12, lineHeight: 1.4 }}>
+          Pick entries below, they land on the new day at the same time.
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 16, maxHeight: 260, overflowY: 'auto' }}>
+          {dayEntries.map(e => {
+            const checked = copyMoveIds.includes(e.id);
+            return (
+              <button key={e.id} onClick={() => toggleCopyMoveId(e.id)} style={fdCopyMoveRow(checked)}>
+                <div style={fdCopyMoveCheck(checked)}>
+                  {checked && <i className="fa-solid fa-check" style={{ fontSize: 10, color: 'var(--accent-ink)' }} />}
+                </div>
+                <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
+                  <div style={fdEntryName}>{e.foodName}</div>
+                  <span style={fdEntryMeta}>{e.time} · {e.calories} kcal</span>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+        <Field label="To" style={{ marginBottom: 14 }}>
+          <input type="date" value={copyMoveTarget} min={minDate} max={today} onChange={e => setCopyMoveTarget(e.target.value)}
+            style={{ ...fdInputStyle, colorScheme: ['light', 'paper'].includes(store.settings?.darkMode ?? 'dark') ? 'light' : 'dark' }} />
+        </Field>
+        <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `1px solid ${UI.hairStrong}`, marginBottom: 16 }}>
+          <button onClick={() => setCopyMoveMode('copy')} style={fdSegBtn(copyMoveMode === 'copy')}>Copy</button>
+          <button onClick={() => setCopyMoveMode('move')} style={fdSegBtn(copyMoveMode === 'move')}>Move</button>
+        </div>
+        <Btn onClick={submitCopyMove} disabled={!copyMoveIds.length || !copyMoveTarget || copyMoveTarget === curDate} style={{ width: '100%' }}>
+          {copyMoveMode === 'move' ? 'Move' : 'Copy'}{copyMoveIds.length ? ` ${copyMoveIds.length}` : ''} {copyMoveIds.length === 1 ? 'entry' : 'entries'}
+        </Btn>
+      </Sheet>
+
       {/* ── Barcode vs. label picker (opened by the search box's scan button) ── */}
       <Sheet open={scanPickerOpen} onClose={() => setScanPickerOpen(false)} title="Scan" titleColor="var(--accent)">
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10 }}>
@@ -1379,6 +1471,22 @@ function fdSegBtn(active) {
     textShadow: active ? 'none' : 'var(--text-lift)',
     fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.03em',
     WebkitTapHighlightColor: 'transparent',
+  };
+}
+function fdCopyMoveRow(checked) {
+  return {
+    display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '9px 10px',
+    background: checked ? 'rgba(var(--accent-rgb),0.1)' : UI.bgInset,
+    border: `1px solid ${checked ? 'rgba(var(--accent-rgb),0.5)' : UI.hair}`,
+    borderRadius: 6, textShadow: 'none', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+  };
+}
+function fdCopyMoveCheck(checked) {
+  return {
+    flexShrink: 0, width: 18, height: 18, borderRadius: 4,
+    border: `1px solid ${checked ? 'var(--accent)' : UI.hairStrong}`,
+    background: checked ? 'var(--accent)' : 'transparent',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
   };
 }
 const fdRecipeBanner = {
