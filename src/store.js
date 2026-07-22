@@ -223,6 +223,8 @@ async function deleteAllData(userId, { keepPush = false } = {}) {
     unwrap(_supabase.from('zane_daily_logs').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_water_logs').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_food_logs').delete().eq('user_id', userId)),
+    unwrap(_supabase.from('zane_food_favorites').delete().eq('user_id', userId)),
+    unwrap(_supabase.from('zane_food_recipes').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_workout_templates').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_glucose_logs').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_blood_pressure_logs').delete().eq('user_id', userId)),
@@ -394,6 +396,8 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
     + (backup.dailyLogs?.length ? 1 : 0)
     + (backup.waterLogs?.length ? 1 : 0)
     + (backup.foodLogs?.length ? 1 : 0)
+    + (backup.foodFavorites?.length ? 1 : 0)
+    + (backup.foodRecipes?.length ? 1 : 0)
     + (backup.workoutTemplates?.length ? 1 : 0)
     + (backup.checkinSchemaTemplates?.length ? 1 : 0)
     + (backup.glucoseLogs?.length ? 1 : 0)
@@ -534,6 +538,27 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
         source: l.source ?? null, quantity_g: l.quantityG,
         calories: l.calories, protein: l.protein, carbs: l.carbs, fat: l.fat,
         fiber: l.fiber ?? null,
+      }))
+    ));
+    stepsDone++;
+  }
+  if (backup.foodFavorites?.length) {
+    prog('Uploading food favorites…');
+    await unwrap(_supabase.from('zane_food_favorites').upsert(
+      backup.foodFavorites.map(f => ({
+        id: f.id, user_id: userId, food_id: f.foodId ?? null, food_name: f.foodName,
+        brand: f.brand ?? null, source: f.source ?? null, quantity_g: f.quantityG,
+        calories: f.calories, protein: f.protein, carbs: f.carbs, fat: f.fat,
+        fiber: f.fiber ?? null,
+      }))
+    ));
+    stepsDone++;
+  }
+  if (backup.foodRecipes?.length) {
+    prog('Uploading food recipes…');
+    await unwrap(_supabase.from('zane_food_recipes').upsert(
+      backup.foodRecipes.map(r => ({
+        id: r.id, user_id: userId, name: r.name, items: r.items || [],
       }))
     ));
     stepsDone++;
@@ -872,13 +897,18 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     // Food tracker per-entry logs (migration 0186): multiple entries per day,
     // denormalized at write time. Coach reads a client's via coach-of-client RLS.
     _supabase.from('zane_food_logs').select('id, date, time, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
+    // Food tracker quick-add: user-starred foods and saved recipes (migration
+    // 0187), own store only: a coach's read-only client view has no use for
+    // another user's personal shortcuts (owner-only RLS, no coach-read policy).
+    isCoachLoad ? null : _supabase.from('zane_food_favorites').select('id, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
+    isCoachLoad ? null : _supabase.from('zane_food_recipes').select('id, name, items, created_at, updated_at').eq('user_id', userId).order('created_at', { ascending: false }),
   ];
   const [profileRes, exRes, schRes, sessRes, settRes, skipsRes, entriesRes,
          bestsRes, sessionStatsRes,
          coachInfoRes, coachClientsRes, unreadNotesRes, coachingRowRes, selfRowRes,
          cardioLogsRes, cardioPlansRes, dailyLogsRes, statusPeriodsRes,
          supportTicketsRes, glucoseLogsRes, bloodPressureLogsRes, bodyTempLogsRes, templatesRes, mesoStatesRes,
-         checkinTemplatesRes, planDraftsRes, waterLogsRes, foodLogsRes] = await Promise.all(queries);
+         checkinTemplatesRes, planDraftsRes, waterLogsRes, foodLogsRes, foodFavoritesRes, foodRecipesRes] = await Promise.all(queries);
 
   // A failed request (offline, RLS, server error) also yields no data — bail
   // out so the caller can surface an error instead of mistaking this for a
@@ -916,6 +946,8 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   if (coachClientsRes?.error) throw coachClientsRes.error;
   if (unreadNotesRes?.error) throw unreadNotesRes.error;
   if (checkinTemplatesRes?.error) throw checkinTemplatesRes.error;
+  if (foodFavoritesRes?.error) throw foodFavoritesRes.error;
+  if (foodRecipesRes?.error) throw foodRecipesRes.error;
   // coachingRowRes/selfRowRes use maybeSingle() and only drive optional banner
   // UI. There is no DB uniqueness constraint on (client_id, active), so a client
   // with >1 active coach yields a PGRST116 "multiple rows" error — do NOT throw
@@ -1078,6 +1110,16 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
       quantityG: parseFloat(l.quantity_g), calories: l.calories,
       protein: parseFloat(l.protein), carbs: parseFloat(l.carbs), fat: parseFloat(l.fat),
       fiber: l.fiber != null ? parseFloat(l.fiber) : null, createdAt: l.created_at,
+    })),
+    // Food Tracker quick-add (migration 0187), own store only.
+    foodFavorites: (foodFavoritesRes?.data || []).map(f => ({
+      id: f.id, foodId: f.food_id ?? null, foodName: f.food_name, brand: f.brand ?? null,
+      source: f.source ?? null, quantityG: parseFloat(f.quantity_g), calories: f.calories,
+      protein: parseFloat(f.protein), carbs: parseFloat(f.carbs), fat: parseFloat(f.fat),
+      fiber: f.fiber != null ? parseFloat(f.fiber) : null, createdAt: f.created_at,
+    })),
+    foodRecipes: (foodRecipesRes?.data || []).map(r => ({
+      id: r.id, name: r.name, items: r.items || [], createdAt: r.created_at, updatedAt: r.updated_at,
     })),
     glucoseLogs: (glucoseLogsRes?.data || []).map(l => ({
       id: l.id, date: l.date, time: l.time,
@@ -1580,6 +1622,32 @@ async function syncStore(prev, next, userId) {
     if (removed.length) ops.push(_supabase.from('zane_workout_templates').delete().in('id', removed.map(t => t.id)));
   }
 
+  if (prev.foodFavorites !== next.foodFavorites) {
+    const upsert = (next.foodFavorites || []).filter(f => {
+      const p = (prev.foodFavorites || []).find(x => x.id === f.id);
+      return !p || JSON.stringify(p) !== JSON.stringify(f);
+    });
+    const removed = (prev.foodFavorites || []).filter(f => !(next.foodFavorites || []).find(x => x.id === f.id));
+    if (upsert.length) ops.push(_supabase.from('zane_food_favorites').upsert(upsert.map(f => ({
+      id: f.id, user_id: userId, food_id: f.foodId ?? null, food_name: f.foodName,
+      brand: f.brand ?? null, source: f.source ?? null, quantity_g: f.quantityG,
+      calories: f.calories, protein: f.protein, carbs: f.carbs, fat: f.fat, fiber: f.fiber ?? null,
+    }))));
+    if (removed.length) ops.push(_supabase.from('zane_food_favorites').delete().in('id', removed.map(f => f.id)));
+  }
+
+  if (prev.foodRecipes !== next.foodRecipes) {
+    const upsert = (next.foodRecipes || []).filter(r => {
+      const p = (prev.foodRecipes || []).find(x => x.id === r.id);
+      return !p || JSON.stringify(p) !== JSON.stringify(r);
+    });
+    const removed = (prev.foodRecipes || []).filter(r => !(next.foodRecipes || []).find(x => x.id === r.id));
+    if (upsert.length) ops.push(_supabase.from('zane_food_recipes').upsert(upsert.map(r => ({
+      id: r.id, user_id: userId, name: r.name, items: r.items || [],
+    }))));
+    if (removed.length) ops.push(_supabase.from('zane_food_recipes').delete().in('id', removed.map(r => r.id)));
+  }
+
   if (prev.checkinSchemaTemplates !== next.checkinSchemaTemplates) {
     const upsert = (next.checkinSchemaTemplates || []).filter(t => {
       const p = (prev.checkinSchemaTemplates || []).find(x => x.id === t.id);
@@ -1870,8 +1938,8 @@ async function adminSendEmail(to, subject, message) {
 // Food tracker: search Open Food Facts + USDA FoodData Central via the
 // search-foods edge function. Results are NOT cached server-side until
 // selectFood is called on one of them (see that function's own comment).
-async function searchFoods(query) {
-  const res = await fnFetch(FOOD_SEARCH_URL, { action: 'search', query });
+async function searchFoods(query, source) {
+  const res = await fnFetch(FOOD_SEARCH_URL, { action: 'search', query, source: source || undefined });
   if (!res) return { ok: false, error: 'Network error' };
   const data = await res.json().catch(() => ({}));
   if (!res.ok) return { ok: false, error: data?.error || `Request failed (${res.status})` };

@@ -2292,6 +2292,51 @@ CREATE POLICY "coaches read client food logs"
     WHERE zc.client_id = zane_food_logs.user_id
       AND zc.coach_id = (select auth.uid()) AND zc.coach_id <> zc.client_id AND zc.status = 'active' AND zc.id NOT LIKE 'support_%'));
 
+-- ── Food Tracker quick-add (migration 0187) ─────────────────────────────────────
+-- Both simple owned collections (mirrors zane_workout_templates), no coach
+-- visibility, not part of the Health tab's live-refresh polling.
+
+CREATE TABLE zane_food_favorites (
+  id          text        PRIMARY KEY,
+  user_id     uuid        NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  food_id     text        REFERENCES public.zane_foods(id) ON DELETE SET NULL,
+  food_name   text        NOT NULL,
+  brand       text,
+  source      text,                                  -- 'off' | 'usda' | 'custom' | null
+  quantity_g  numeric     NOT NULL,
+  calories    integer     NOT NULL,
+  protein     numeric     NOT NULL,
+  carbs       numeric     NOT NULL,
+  fat         numeric     NOT NULL,
+  fiber       numeric,
+  created_at  timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX zane_food_favorites_user_idx ON public.zane_food_favorites USING btree (user_id, created_at DESC);
+
+ALTER TABLE zane_food_favorites ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "zane_food_favorites_own"
+  ON zane_food_favorites FOR ALL
+  USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+
+CREATE TABLE zane_food_recipes (
+  id          text        PRIMARY KEY,
+  user_id     uuid        NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  name        text        NOT NULL,
+  items       jsonb       NOT NULL DEFAULT '[]',
+  created_at  timestamptz NOT NULL DEFAULT now(),
+  updated_at  timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX zane_food_recipes_user_idx ON public.zane_food_recipes USING btree (user_id, created_at DESC);
+
+ALTER TABLE zane_food_recipes ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "zane_food_recipes_own"
+  ON zane_food_recipes FOR ALL
+  USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+
 -- ── Support tickets (migrations 0085/0086 + archive_support_tickets) ────────────
 -- A support ticket is a zane_coaching row with id LIKE 'support_%' between the
 -- user (client_id) and the admin (coach_id), carrying support_status/category.

@@ -2470,82 +2470,6 @@ function WaterCard({ waterSeries, waterAvg, waterLogs, tf: sharedTf, setTf: setS
   );
 }
 
-// Food's own historical trend already lives in the macroGroup composite below
-// (Macros/Adherence charts read straight off dailyLogs.calories/protein/carbs/
-// fat, which the tracker's rollup writes into), so this card doesn't repeat
-// it: just today's total and an entry-point into the tracker, same role
-// WaterCard's onOpen plays for water.
-function FoodCard({ foodLogs, dailyLogs, dragHandle, onExpand, onOpen, compact = false }) {
-  const today = LB.todayISO();
-  const todayEntries = useMemoH(
-    () => (foodLogs || []).filter(l => l.date === today).sort((a, b) => b.time.localeCompare(a.time)),
-    [foodLogs, today]
-  );
-  const todayLog = useMemoH(() => (dailyLogs || []).find(l => l.date === today), [dailyLogs, today]);
-  const kcal = todayLog?.calories ?? null;
-  const chip = (k, v) => (
-    <span style={{ fontFamily: UI.fontNum, fontSize: 11, color: UI.inkSoft }}>
-      <span style={{ color: UI.inkGhost, fontSize: 9 }}>{k}</span> {Math.round(v)}g
-    </span>
-  );
-  return (
-    <Card style={{ padding: 14, borderLeft: `3px solid ${UI.gold}`, height: '100%' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: kcal != null ? 8 : 0, flexWrap: 'wrap' }}>
-        {dragHandle}
-        <i className="fa-solid fa-utensils" style={{ fontSize: 11, color: UI.inkFaint }} />
-        <span style={{ ...HEALTH_CARD_HEADER_STYLE, flex: 1, minWidth: 60 }}>Food</span>
-        {onOpen && (
-          <button data-reorder-ignore="true" onClick={onOpen} aria-label="Open food tracker" style={{
-            background: 'transparent', border: 'none', padding: 2, cursor: 'pointer',
-            color: UI.gold, display: 'flex', alignItems: 'center', flexShrink: 0,
-            WebkitTapHighlightColor: 'transparent',
-          }}>
-            <i className="fa-solid fa-arrow-up-right-from-square" style={{ fontSize: 11 }} />
-          </button>
-        )}
-        {onExpand && (
-          <button data-reorder-ignore="true" onClick={onExpand} aria-label="Expand" style={{
-            background: 'transparent', border: 'none', padding: 2, cursor: 'pointer',
-            color: UI.inkFaint, display: 'flex', alignItems: 'center', flexShrink: 0,
-            WebkitTapHighlightColor: 'transparent',
-          }}>
-            <i className="fa-solid fa-expand" style={{ fontSize: 11 }} />
-          </button>
-        )}
-      </div>
-      {kcal != null ? (
-        <>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 8 }}>
-            <span className="num" style={{ fontSize: 22, color: UI.ink, fontWeight: 300 }}>{kcal}</span>
-            <span style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi }}>kcal today</span>
-          </div>
-          <div style={{ display: 'flex', gap: 12 }}>
-            {todayLog?.protein != null && chip('P', todayLog.protein)}
-            {todayLog?.carbs != null && chip('C', todayLog.carbs)}
-            {todayLog?.fat != null && chip('F', todayLog.fat)}
-          </div>
-          {!compact && todayEntries.length > 0 && (
-            <>
-              <div style={{ height: '0.5px', background: UI.hair, margin: '10px 0 8px' }} />
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {todayEntries.map(e => (
-                  <div key={e.id} style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
-                    <span style={{ fontSize: 9, fontFamily: UI.fontUi, color: UI.inkGhost, flexShrink: 0 }}>{e.time}</span>
-                    <span style={{ flex: 1, minWidth: 0, fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{e.foodName}</span>
-                    <span className="num" style={{ flexShrink: 0, fontSize: 11, color: UI.inkFaint }}>{e.calories} kcal</span>
-                  </div>
-                ))}
-              </div>
-            </>
-          )}
-        </>
-      ) : (
-        <div style={{ textAlign: 'center', fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, padding: '6px 0' }}>Nothing logged today yet</div>
-      )}
-    </Card>
-  );
-}
-
 // ─── HealthScreen ─────────────────────────────────────────────────────────────
 
 function HealthScreen({ store, setStore, go, userId }) {
@@ -2841,7 +2765,7 @@ function HealthScreen({ store, setStore, go, userId }) {
   // Macros/Adherence/Targets move, hide, and show as one unit, id 'macroGroup',
   // see its cardEls entry below, since hiding just one of the three orphans the
   // others (e.g. an adherence chart with no targets to compare against).
-  const DEFAULT_CARD_ORDER = ['week', 'today', 'macroGroup', 'food', 'weight', 'cardio', 'steps', 'water', 'glucose', 'bloodPressure', 'bodyTemp'];
+  const DEFAULT_CARD_ORDER = ['week', 'today', 'macroGroup', 'weight', 'cardio', 'steps', 'water', 'glucose', 'bloodPressure', 'bodyTemp'];
   const [cardOrder, setCardOrder] = useStateH(() => {
     let saved = [];
     try { saved = JSON.parse(localStorage.getItem(CARD_ORDER_KEY) || '[]'); } catch (_) {}
@@ -3009,9 +2933,6 @@ function HealthScreen({ store, setStore, go, userId }) {
         </div>
       </div>
     ),
-    food: (
-      <FoodCard foodLogs={store.foodLogs} dailyLogs={store.dailyLogs} dragHandle={handle} onExpand={expandBtn('food')} onOpen={() => go({ name: 'food' })} compact />
-    ),
     weight: (
       <HealthChartCard title="Weight" icon="fa-weight-scale" tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('weight')}
         headline={weightAvg != null ? `${weightAvg}${UI.unit()}` : null} sub={weightAvg != null ? 'avg' : null}>
@@ -3049,7 +2970,7 @@ function HealthScreen({ store, setStore, go, userId }) {
   // Sheet lookup for expandedCardId, every id any onExpand above can set.
   // Cloned with dragHandle/onExpand stripped: the expand sheet isn't inside a
   // reorder list (grip would be inert) and re-expanding itself is meaningless.
-  const expandableCards = { weight: cardEls.weight, steps: cardEls.steps, water: cardEls.water, food: cardEls.food, cardio: cardEls.cardio,
+  const expandableCards = { weight: cardEls.weight, steps: cardEls.steps, water: cardEls.water, cardio: cardEls.cardio,
     macroAdherence: macroAdherenceCard, macros: macrosCard,
     glucose: cardEls.glucose, bloodPressure: cardEls.bloodPressure, bodyTemp: cardEls.bodyTemp };
 
@@ -3153,7 +3074,6 @@ function HealthClientLogs({ clientStore }) {
   const logs = clientStore?.dailyLogs || [];
   const cardioLogs = clientStore?.cardioLogs || [];
   const waterLogs = clientStore?.waterLogs || [];
-  const foodLogs = clientStore?.foodLogs || [];
   const glucoseLogs = clientStore?.glucoseLogs || [];
   const glucoseUnit = clientStore?.settings?.glucoseUnit ?? 'mmol';
   const bloodPressureLogs = clientStore?.bloodPressureLogs || [];
@@ -3171,7 +3091,7 @@ function HealthClientLogs({ clientStore }) {
   // Macros/Adherence move, hide, and show as one unit, id 'macroGroup', see its
   // cardEls entry below, same grouping as the client's own Health tab, and
   // required for hiddenHealthCards (client setting) to hide it correctly here too.
-  const DEFAULT_COACH_ORDER = ['week', 'today', 'macroGroup', 'food', 'weight', 'cardio', 'steps', 'water', 'glucose', 'bloodPressure', 'bodyTemp', 'weekly'];
+  const DEFAULT_COACH_ORDER = ['week', 'today', 'macroGroup', 'weight', 'cardio', 'steps', 'water', 'glucose', 'bloodPressure', 'bodyTemp', 'weekly'];
   const [cardOrder, setCardOrder] = useStateH(() => {
     let saved = [];
     try { saved = JSON.parse(localStorage.getItem(COACH_ORDER_KEY) || '[]'); } catch (_) {}
@@ -3300,11 +3220,6 @@ function HealthClientLogs({ clientStore }) {
         {macrosCard}
       </div>
     ),
-    // No onOpen: this view is read-only, the coach can't jump into the
-    // client's own FoodScreen.
-    food: (
-      <FoodCard foodLogs={foodLogs} dailyLogs={logs} dragHandle={handle} onExpand={expandBtn('food')} compact />
-    ),
     weight: (
       <HealthChartCard title="Weight" icon="fa-weight-scale" tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('weight')}
         headline={weightAvg != null ? `${weightAvg}${clientUnit}` : null} sub={weightAvg != null ? 'avg' : null}>
@@ -3369,7 +3284,7 @@ function HealthClientLogs({ clientStore }) {
   // Sheet lookup for expandedCardId, every id any onExpand above can set.
   // Cloned with dragHandle/onExpand stripped: the expand sheet isn't inside a
   // reorder list (grip would be inert) and re-expanding itself is meaningless.
-  const expandableCards = { weight: cardEls.weight, steps: cardEls.steps, water: cardEls.water, food: cardEls.food, cardio: cardEls.cardio,
+  const expandableCards = { weight: cardEls.weight, steps: cardEls.steps, water: cardEls.water, cardio: cardEls.cardio,
     adherence: adherenceCard, macros: macrosCard,
     glucose: cardEls.glucose, bloodPressure: cardEls.bloodPressure, bodyTemp: cardEls.bodyTemp };
 

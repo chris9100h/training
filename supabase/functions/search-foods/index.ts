@@ -183,25 +183,84 @@ async function lookupUsdaById(fdcId: string, apiKey: string): Promise<FoodResult
 
 // ── Request handling ────────────────────────────────────────────────────────
 
-async function handleSearch(query: string) {
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// Neither OFF's nor USDA's search ranks a name that STARTS with the query
+// above one that merely contains it somewhere ("Cookies, banana" was
+// outranking "Banana, raw" for a "banana" search). Re-score locally against
+// the literal query string and drop anything with no textual relation to it
+// at all, so what the user typed is actually reflected in what comes back.
+function textScore(text: string | null, q: string): number {
+  const n = (text || '').toLowerCase();
+  if (!n) return 0;
+  if (n === q) return 100;
+  if (n.startsWith(q)) return 90;
+  const m = new RegExp(`\\b${escapeRegExp(q)}`).exec(n);
+  if (m) return Math.max(40, 70 - m.index);
+  if (n.includes(q)) return 15;
+  return 0;
+}
+function relevanceScore(item: FoodResult, query: string): number {
+  const q = query.toLowerCase().trim();
+  if (!q) return 50;
+  return Math.max(textScore(item.name, q), item.brand ? textScore(item.brand, q) * 0.6 : 0);
+}
+
+async function handleSearch(query: string, source?: string) {
   const isBarcode = /^\d{8,14}$/.test(query);
   if (isBarcode) {
     const hit = await lookupOffBarcode(query);
     return { results: hit ? [hit] : [], isBarcode: true };
   }
+  const wantOff = source !== 'usda';
+  const wantUsda = source !== 'off';
   const usdaKey = Deno.env.get('USDA_API_KEY') ?? '';
   const [offSettled, usdaSettled] = await Promise.allSettled([
-    searchOff(query),
-    usdaKey ? searchUsda(query, usdaKey) : Promise.resolve([]),
+    wantOff ? searchOff(query) : Promise.resolve([]),
+    (wantUsda && usdaKey) ? searchUsda(query, usdaKey) : Promise.resolve([]),
   ]);
   const results = [
     ...(offSettled.status === 'fulfilled' ? offSettled.value : []),
     ...(usdaSettled.status === 'fulfilled' ? usdaSettled.value : []),
-  ];
+  ]
+    .map((r) => ({ r, score: relevanceScore(r, query) }))
+    .filter((x) => x.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .map((x) => x.r);
   return { results, isBarcode: false };
 }
 
+// deno-lint-ignore no-explicit-any
+function foodRowToResult(row: any): FoodResult {
+  const num = (v: unknown) => (v == null ? null : Number(v));
+  return {
+    source: row.source, sourceId: row.source_id, name: row.name, brand: row.brand ?? null,
+    kcalPer100g: num(row.kcal_per_100g), proteinPer100g: num(row.protein_per_100g),
+    carbsPer100g: num(row.carbs_per_100g), fatPer100g: num(row.fat_per_100g),
+    fiberPer100g: num(row.fiber_per_100g), servingSizeG: num(row.serving_size_g),
+    servingLabel: row.serving_label ?? null,
+  };
+}
+
+async function fetchCachedFood(id: string): Promise<FoodResult | null> {
+  const r = await dbFetch(`zane_foods?id=eq.${encodeURIComponent(id)}&select=*`).catch(() => null);
+  if (!r?.ok) return null;
+  const rows = await r.json().catch(() => null);
+  const row = Array.isArray(rows) ? rows[0] : null;
+  return row ? foodRowToResult(row) : null;
+}
+
 async function handleSelect(source: 'off' | 'usda', sourceId: string): Promise<FoodResult | null> {
+  // A product's per-100g nutrition is static once published, so once we've
+  // verified it server-side once (below) there is no need to hit the
+  // upstream API again on every re-select. This is most of the perceived
+  // "opening a result is slow" latency, especially for repeat picks off the
+  // recent/favorites strips.
+  const cached = await fetchCachedFood(`${source}:${sourceId}`);
+  if (cached) return cached;
+
   const food = source === 'off'
     ? await lookupOffBarcode(sourceId)
     : await lookupUsdaById(sourceId, Deno.env.get('USDA_API_KEY') ?? '');
@@ -222,11 +281,20 @@ async function handleSelect(source: 'off' | 'usda', sourceId: string): Promise<F
     serving_label: food.servingLabel,
     cached_at: new Date().toISOString(),
   };
-  await dbFetch('zane_foods', {
+  const writeCache = dbFetch('zane_foods', {
     method: 'POST',
     headers: { 'Prefer': 'resolution=merge-duplicates' },
     body: JSON.stringify(row),
   }).catch((e) => console.error('[search-foods] cache upsert error:', e));
+  // Don't make the caller wait on the cache write, it isn't needed to answer
+  // this request. waitUntil (Supabase's Edge Runtime global) keeps it alive
+  // in the background past the response instead of racing the isolate
+  // shutdown; if that global isn't present the write still fires, it just
+  // isn't guaranteed to finish, a dropped write is harmless and self-heals
+  // (the next select for this id just re-fetches).
+  // deno-lint-ignore no-explicit-any
+  const rt = (globalThis as any).EdgeRuntime;
+  if (rt?.waitUntil) rt.waitUntil(writeCache);
 
   return food;
 }
@@ -250,7 +318,8 @@ Deno.serve(async (req) => {
         status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
-    const { results, isBarcode } = await handleSearch(query);
+    const source = body.source === 'off' || body.source === 'usda' ? body.source : undefined;
+    const { results, isBarcode } = await handleSearch(query, source);
     return new Response(JSON.stringify({ results, isBarcode }), {
       status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });

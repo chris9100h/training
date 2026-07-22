@@ -194,6 +194,12 @@ const TAB_ICONS = {
       <path d="M12 3c3.5 4.2 6 8.1 6 11a6 6 0 1 1-12 0c0-2.9 2.5-6.8 6-11z"/>
     </svg>
   ),
+  food: (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M7 2v6M9 2v6M7 8a2 2 0 0 0 2 2v12"/>
+      <path d="M15 2c0 3-1 5-1 5a2 2 0 0 0 2 2v13"/>
+    </svg>
+  ),
 };
 
 function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = false, coachingBadge = null, showHealth = false }) {
@@ -204,42 +210,43 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
     ...(showHealth ? [{ id: 'health', label: 'Health' }] : []),
     ...(showCoaching ? [{ id: 'coaching', label: 'Coaching' }] : []),
   ].map(t => {
-    const isWaterSlot = t.id === 'health' && routeName === 'water';
-    return { ...t, isWaterSlot, iconKey: isWaterSlot ? 'water' : t.id, label: isWaterSlot ? 'Water' : t.label };
+    const healthSlot = t.id === 'health' ? (routeName === 'water' ? 'water' : routeName === 'food' ? 'food' : 'health') : null;
+    const slotLabel = { water: 'Water', food: 'Food' }[healthSlot] || t.label;
+    return { ...t, healthSlot, iconKey: healthSlot || t.id, label: slotLabel };
   });
   const idx = tabs.findIndex(t => t.id === active);
-  // Health and its water tracker share one tab slot (routeName === 'water'
-  // still lights up as 'health', see tabActive in app.jsx). Tapping the slot
-  // while already on Health steps forward into the water tracker; tapping it
-  // while on the water tracker falls through to the plain onChange('health')
-  // below, i.e. steps back, since that path was never a no-op to begin with.
+  // Health, its water tracker and its food tracker share one tab slot
+  // (routeName === 'water'/'food' still light up as 'health', see tabActive
+  // in app.jsx). Tapping the slot steps forward through Health → Water →
+  // Food → Health; the final step falls through to the plain onChange(id)
+  // below since that path was never a no-op to begin with.
   const handleTabClick = (id) => {
-    if (id === 'health' && routeName === 'health') {
-      onChange('water');
-      return;
+    if (id === 'health') {
+      if (routeName === 'health') { onChange('water'); return; }
+      if (routeName === 'water') { onChange('food'); return; }
     }
     onChange(id);
   };
-  // Two-dot "there's a second view here" indicator, shown under the Health
-  // slot's label at all times (not just once you've found the water
-  // tracker): a lit dot for the side you're currently viewing (Health or
-  // Water), a faint ring for the other, matching how a pagination dot pair
-  // reads elsewhere. This sits below the gold key plate (which only spans the icon),
-  // on the same plain bar background the label itself sits on, so it takes
-  // the label's own on/off contrast (gold and glowing when this tab is the
-  // active one, muted otherwise) rather than the icon's dark-on-gold-plate
-  // treatment. Every tab reserves the same slot height (see the height:4
-  // placeholder at both call sites) so only Health growing dots never
-  // shifts the bar's height.
-  const healthDots = (on, isWaterSlot) => {
+  // Three-dot "there's more here" indicator, shown under the Health slot's
+  // label at all times (not just once you've found water/food): a lit dot
+  // for the side you're currently viewing, a faint ring for the other two,
+  // matching how a pagination dot row reads elsewhere. This sits below the
+  // gold key plate (which only spans the icon), on the same plain bar
+  // background the label itself sits on, so it takes the label's own on/off
+  // contrast (gold and glowing when this tab is the active one, muted
+  // otherwise) rather than the icon's dark-on-gold-plate treatment. Every tab
+  // reserves the same slot height (see the height:4 placeholder at both call
+  // sites) so only Health's growing dots never shifts the bar's height.
+  const healthDots = (on, healthSlot) => {
     const lit = on ? UI.gold : UI.inkFaint;
     const dim = on ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong;
     const glow = on ? '0 0 4px rgba(var(--accent-rgb),0.7)' : 'none';
     const dotStyle = filled => ({ width: 3, height: 3, borderRadius: '50%', boxSizing: 'border-box', background: filled ? lit : 'transparent', border: filled ? 'none' : `1px solid ${dim}`, boxShadow: filled ? glow : 'none' });
     return (
       <div style={{ display: 'flex', gap: 3 }}>
-        <span style={dotStyle(!isWaterSlot)} />
-        <span style={dotStyle(isWaterSlot)} />
+        <span style={dotStyle(healthSlot === 'health')} />
+        <span style={dotStyle(healthSlot === 'water')} />
+        <span style={dotStyle(healthSlot === 'food')} />
       </div>
     );
   };
@@ -266,7 +273,7 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
             {tabs.map(t => {
               const on = t.id === active;
               const badge = t.id === 'coaching' ? coachingBadge : null;
-              const { isWaterSlot, iconKey, label } = t;
+              const { healthSlot, iconKey, label } = t;
               return (
                 <button key={t.id} data-tour={`tab-${t.id}`} onClick={() => handleTabClick(t.id)} style={{
                   display: 'flex',
@@ -307,7 +314,7 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
                     )}
                   </div>
                   <span>{label}</span>
-                  <div style={{ height: 4, display: 'flex', alignItems: 'center' }}>{t.id === 'health' && healthDots(on, isWaterSlot)}</div>
+                  <div style={{ height: 4, display: 'flex', alignItems: 'center' }}>{t.id === 'health' && healthDots(on, healthSlot)}</div>
                 </button>
               );
             })}
@@ -386,7 +393,7 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
           {tabs.map(t => {
             const on = t.id === active;
             const badge = t.id === 'coaching' ? coachingBadge : null;
-            const { isWaterSlot, iconKey, label } = t;
+            const { healthSlot, iconKey, label } = t;
             return (
               <button key={t.id} data-tour={`tab-${t.id}`} onClick={() => handleTabClick(t.id)} style={{
                 flex: 1, minWidth: 0, background: 'transparent', border: 'none', cursor: 'pointer',
@@ -428,7 +435,7 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
                 {/* -0.14em cancels the trailing letter-spacing after the last
                     glyph so the visible text is pixel-centred under the plate. */}
                 <span style={{ marginRight: '-0.14em' }}>{label}</span>
-                <div style={{ height: 4, display: 'flex', alignItems: 'center' }}>{t.id === 'health' && healthDots(on, isWaterSlot)}</div>
+                <div style={{ height: 4, display: 'flex', alignItems: 'center' }}>{t.id === 'health' && healthDots(on, healthSlot)}</div>
               </button>
             );
           })}

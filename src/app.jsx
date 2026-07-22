@@ -753,6 +753,14 @@ function App() {
             const serverFoodIds = new Set((fresh.foodLogs || []).map(l => l.id));
             const baseFoodIds = base ? new Set((base.foodLogs || []).map(l => l.id)) : null;
             const localOnlyFoodLogs = (cur.foodLogs || []).filter(x => !serverFoodIds.has(x.id) && !baseFoodIds?.has(x.id));
+            // Food Tracker quick-add (favorites/recipes, migration 0187): same
+            // owned-list shape and guard as workoutTemplates below.
+            const serverFavIds = new Set((fresh.foodFavorites || []).map(f => f.id));
+            const baseFavIds = base ? new Set((base.foodFavorites || []).map(f => f.id)) : null;
+            const localOnlyFavorites = (cur.foodFavorites || []).filter(x => !serverFavIds.has(x.id) && !baseFavIds?.has(x.id));
+            const serverRecipeIds = new Set((fresh.foodRecipes || []).map(r => r.id));
+            const baseRecipeIds = base ? new Set((base.foodRecipes || []).map(r => r.id)) : null;
+            const localOnlyRecipes = (cur.foodRecipes || []).filter(x => !serverRecipeIds.has(x.id) && !baseRecipeIds?.has(x.id));
             // Templates and cardio plans need the same resurrection guard as
             // exercises/schedules — previously missing here entirely, so a
             // template saved (or a cardio plan created) offline before the
@@ -785,6 +793,10 @@ function App() {
             const delWaterIds = baseWaterIds ? new Set([...baseWaterIds].filter(id => !curWaterIdSet.has(id))) : null;
             const curFoodIdSet = new Set((cur.foodLogs || []).map(l => l.id));
             const delFoodIds = baseFoodIds ? new Set([...baseFoodIds].filter(id => !curFoodIdSet.has(id))) : null;
+            const curFavIdSet = new Set((cur.foodFavorites || []).map(f => f.id));
+            const delFavIds = baseFavIds ? new Set([...baseFavIds].filter(id => !curFavIdSet.has(id))) : null;
+            const curRecipeIdSet = new Set((cur.foodRecipes || []).map(r => r.id));
+            const delRecipeIds = baseRecipeIds ? new Set([...baseRecipeIds].filter(id => !curRecipeIdSet.has(id))) : null;
             const curTplIdSet = new Set((cur.workoutTemplates || []).map(t => t.id));
             const delTplIds = baseTplIds ? new Set([...baseTplIds].filter(id => !curTplIdSet.has(id))) : null;
             const curCheckinTplIdSet = new Set((cur.checkinSchemaTemplates || []).map(t => t.id));
@@ -885,6 +897,8 @@ function App() {
               cardioLogs: [...localOnlyCardioLogs, ...mergeById(fresh.cardioLogs, cur.cardioLogs, base?.cardioLogs, delCardioIds)],
               waterLogs: [...localOnlyWaterLogs, ...mergeById(fresh.waterLogs, cur.waterLogs, base?.waterLogs, delWaterIds)],
               foodLogs: [...localOnlyFoodLogs, ...mergeById(fresh.foodLogs, cur.foodLogs, base?.foodLogs, delFoodIds)],
+              foodFavorites: [...localOnlyFavorites, ...(fresh.foodFavorites || []).filter(f => !delFavIds?.has(f.id))],
+              foodRecipes: [...localOnlyRecipes, ...(fresh.foodRecipes || []).filter(r => !delRecipeIds?.has(r.id))],
               workoutTemplates: [...localOnlyTemplates, ...(fresh.workoutTemplates || []).filter(t => !delTplIds?.has(t.id))],
               checkinSchemaTemplates: [...localOnlyCheckinTemplates, ...(fresh.checkinSchemaTemplates || []).filter(t => !delCheckinTplIds?.has(t.id))],
               cardioPlans: [...localOnlyCardioPlans, ...(fresh.cardioPlans || []).filter(p => !delCardioPlanIds?.has(p.id))],

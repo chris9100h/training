@@ -287,6 +287,23 @@ Pro-User-Log-Einträge des Macro-Trackers, **zum Schreibzeitpunkt denormalisiert
 - Store field: `store.foodLogs`. Mehrere Einträge pro Tag, Basis von `FoodScreen`. Als Store-Collection über den syncStore-Diff gesynct (wie `zane_water_logs`), inklusive Boot-Merge/Anti-Resurrection. Bei jeder Mutation schreibt der Client die Tagessumme aller Einträge zurück in `zane_daily_logs.protein`/`carbs`/`fat`/`calories`/`fiber` (analog zu `water_ml`), damit Health-Macro-Karten und Coaching-Targets eine einzige Quelle behalten; das bestehende manuelle Eingabeformular bleibt als Override verfügbar (gleiches Lock/Unlock-Muster wie beim Water-Feld). "Custom Item"-Einträge (kein Datenbanktreffer) tragen direkt vom User eingetippte Makros, `food_id: null`, `source: 'custom'`.
 - RLS: eigene Zeilen + Coach-of-Client-Reads (inline-EXISTS wie water/glucose/bp/temp). Migration 0186.
 
+### `zane_food_favorites`
+
+User-markierte Lieblings-Lebensmittel im Food Tracker ("Quick Add"), gleiches Shape wie eine `zane_food_logs`-Zeile (minus `date`/`time`): ein erneutes Hinzufügen leitet daraus lokal eine Pro-100g-Rate ab (`rate = wert / quantity_g * 100`), genau wie es der Client für den Recent-Strip ohnehin schon tut, ein Favorit ist also weiter auf jede beliebige Menge skalierbar, nicht auf die Menge fixiert mit der er favorisiert wurde.
+
+- `id` (text), `user_id` (uuid), `food_id` (text, nullable, FK → `zane_foods.id` `ON DELETE SET NULL`: `null` bei favorisierten Custom Items), `food_name` (text), `brand` (text, nullable), `source` (text, nullable: `'off'|'usda'|'custom'|null`)
+- `quantity_g` (numeric), `calories` (int), `protein`/`carbs`/`fat` (numeric), `fiber` (numeric, nullable), `created_at` (timestamptz)
+- Store field: `store.foodFavorites`. Eigene, einfache User-Collection (kein Health-Tab-Live-Polling, kein Coach-Read), als Store-Collection über den syncStore-Diff gesynct + Boot-Merge/Anti-Resurrection, gleiches Muster wie `zane_workout_templates`.
+- RLS: nur eigene Zeilen (`FOR ALL USING/WITH CHECK auth.uid() = user_id`), kein Coach-Zugriff. Migration 0187.
+
+### `zane_food_recipes`
+
+Eine benannte Liste von Zutaten, die der User in einem Tap zusammen loggt (z.B. "Breakfast bowl"). `items` ist ein jsonb-Snapshot (kein Kind-Table), gleiches "strukturierter Inhalt als jsonb"-Muster wie z.B. `zane_schedules.days`/`zane_workout_templates.exercises`. Jedes Item ist geformt wie eine `zane_food_logs`-Zeile minus `date`/`time` (`{ foodId, foodName, brand, source, quantityG, calories, protein, carbs, fat, fiber }`). Hinzufügen eines Rezepts summiert alle Items und schreibt **eine** `zane_food_logs`-Zeile mit `source: 'recipe'`, `food_id: null`, keine Skalierung, das Rezept loggt exakt wie gespeichert.
+
+- `id` (text), `user_id` (uuid), `name` (text), `items` (jsonb, Default `[]`), `created_at`/`updated_at` (timestamptz)
+- Store field: `store.foodRecipes`. Gleiches Sync-/Merge-Muster wie `zane_food_favorites`.
+- RLS: nur eigene Zeilen, kein Coach-Zugriff. Migration 0187.
+
 ### `zane_cardio_logs`
 
 - `id` (text), `user_id` (uuid), `date` (text, YYYY-MM-DD), `type` (text, nullable), `duration_minutes` (int), `distance_m` (numeric, nullable), `pace_feeling` (int 1-6, nullable), `effort` (int 1-10, nullable), `note` (text, nullable), `created_at` (timestamptz)
