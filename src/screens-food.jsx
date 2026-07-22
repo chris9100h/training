@@ -200,6 +200,13 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   const [copyMoveTarget, setCopyMoveTarget] = useStateFd('');
   const [copyMoveMode, setCopyMoveMode] = useStateFd('copy'); // 'copy' | 'move'
 
+  // Editing a favorite's optional package/unit size (e.g. "1 wrap = 62g"),
+  // so relogging it can jump straight to a whole number of units instead of
+  // typing grams (see the unitG preset buttons in the quantity sheet).
+  const [editFavId, setEditFavId] = useStateFd(null);
+  const [editUnitLabel, setEditUnitLabel] = useStateFd('');
+  const [editUnitG, setEditUnitG] = useStateFd('');
+
   const dayLabel = curDate === today ? 'Today' : curDate === fdShiftDate(today, -1) ? 'Yesterday' : fdFmtDate(curDate);
 
   const dayEntries = useMemoFd(
@@ -558,6 +565,11 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       carbsPer100g: item.carbs * per100, fatPer100g: item.fat * per100,
       fiberPer100g: item.fiber != null ? item.fiber * per100 : null,
       servingSizeG: null, servingLabel: null,
+      // Set only on a favorite with a package/unit size configured (see
+      // openEditFavorite); undefined everywhere else (recent items, recipe
+      // draft ingredients), which the quantity sheet's unitG > 0 check treats
+      // the same as "no unit".
+      unitLabel: item.unitLabel, unitG: item.unitG,
     });
     setP100Str(String(fdRound1(item.protein * per100)));
     setC100Str(String(fdRound1(item.carbs * per100)));
@@ -585,6 +597,9 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         servingSizeG: null, servingLabel: null,
         // Already in the log (so already cached): don't re-cache it on re-log.
         fromCache: true,
+        // Only present on a favorite (see openEditFavorite); undefined for a
+        // plain Recent entry, same "no unit" fallback as the custom branch.
+        unitLabel: l.unitLabel, unitG: l.unitG,
       });
       setQtyG(String(l.quantityG || 100));
       setQtySheetOpen(true);
@@ -701,6 +716,30 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   }
   function removeFavorite(fav) {
     setStore(s => ({ ...s, foodFavorites: (s.foodFavorites || []).filter(f => f.id !== fav.id) }));
+  }
+
+  function openEditFavorite(fav) {
+    setEditFavId(fav.id);
+    setEditUnitLabel(fav.unitLabel || '');
+    setEditUnitG(fav.unitG != null ? String(fav.unitG) : '');
+  }
+  function closeEditFavorite() { setEditFavId(null); }
+  // Both fields set together or not at all: a unit label with no gram
+  // weight (or vice versa) can't drive the quantity sheet's presets, so
+  // saving with only one filled in just clears the unit instead of leaving
+  // a half-set one behind.
+  function saveEditFavorite() {
+    const id = editFavId;
+    const label = editUnitLabel.trim();
+    const g = fdNum(editUnitG);
+    const valid = label && g > 0;
+    setStore(s => ({
+      ...s,
+      foodFavorites: (s.foodFavorites || []).map(f => f.id === id
+        ? { ...f, unitLabel: valid ? label : null, unitG: valid ? g : null }
+        : f),
+    }));
+    closeEditFavorite();
   }
 
   async function confirmLogFood() {
@@ -1100,11 +1139,15 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                         <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
                           <div style={fdEntryName}>{f.foodName}</div>
                           {f.brand && <div style={fdEntryMeta}>{f.brand}</div>}
+                          {f.unitG > 0 && <div style={fdEntryMeta}>1 {f.unitLabel} = {f.unitG}g</div>}
                         </div>
                         <div style={{ textAlign: 'right', flexShrink: 0 }}>
                           <div className="num" style={{ fontSize: 12, color: UI.inkSoft }}>{f.calories} kcal</div>
                           <div style={fdEntryMeta}>{f.quantityG}g</div>
                         </div>
+                      </button>
+                      <button onClick={() => openEditFavorite(f)} aria-label="Edit package size" style={fdSideBtn}>
+                        <i className="fa-solid fa-pen" style={{ fontSize: 12, color: f.unitG > 0 ? 'var(--accent)' : UI.inkSoft }} />
                       </button>
                       <button onClick={() => removeFavorite(f)} aria-label="Remove favorite" style={fdSideBtn}>
                         <i className="fa-solid fa-star" style={{ fontSize: 13, color: UI.gold }} />
@@ -1188,6 +1231,15 @@ function FoodScreen({ store, setStore, go, userId, date }) {
             <Field label={pendingFood.custom ? 'Portion (g)' : 'Amount (g)'} style={{ marginBottom: 14 }}>
               <input value={qtyG} onChange={e => setQtyG(fdDecimalFilter(e.target.value))} type="text" inputMode="decimal" placeholder="g" autoFocus={!pendingFood.custom} style={fdBigInput} />
             </Field>
+            {pendingFood.unitG > 0 && (
+              <div style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+                {[1, 2, 3, 4].map(n => (
+                  <button key={`u${n}`} onClick={() => setQtyG(String(Math.round(pendingFood.unitG * n)))} style={fdPreset}>
+                    {n}× {pendingFood.unitLabel} ({Math.round(pendingFood.unitG * n)}g)
+                  </button>
+                ))}
+              </div>
+            )}
             <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
               {[50, 100, 150, 200].map(g => (
                 <button key={g} onClick={() => setQtyG(String(g))} style={fdPreset}>{g}g</button>
@@ -1309,6 +1361,23 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         <Btn onClick={submitCopyMove} disabled={!copyMoveIds.length || !copyMoveTarget || copyMoveTarget === curDate} style={{ width: '100%' }}>
           {copyMoveMode === 'move' ? 'Move' : 'Copy'}{copyMoveIds.length ? ` ${copyMoveIds.length}` : ''} {copyMoveIds.length === 1 ? 'entry' : 'entries'}
         </Btn>
+      </Sheet>
+
+      {/* ── Package size for a favorite (e.g. "1 wrap = 62g") ── */}
+      <Sheet open={!!editFavId} onClose={closeEditFavorite} title="Package size" titleColor="var(--accent)">
+        <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 14, lineHeight: 1.4 }}>
+          Set a unit size and relogging this favorite offers 1×/2×/3×/4× taps instead of typing grams.
+        </div>
+        <Field label="Unit name" style={{ marginBottom: 14 }}>
+          <TextInput value={editUnitLabel} onChange={setEditUnitLabel} placeholder="e.g. wrap, slice, scoop" />
+        </Field>
+        <Field label="Grams per unit" style={{ marginBottom: 16 }}>
+          <input value={editUnitG} onChange={e => setEditUnitG(fdDecimalFilter(e.target.value))} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
+        </Field>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <Btn kind="ghost" onClick={closeEditFavorite} style={{ flex: 1 }}>Cancel</Btn>
+          <Btn onClick={saveEditFavorite} style={{ flex: 2 }}>Save</Btn>
+        </div>
       </Sheet>
 
       {/* ── Barcode vs. label picker (opened by the search box's scan button) ── */}

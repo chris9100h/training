@@ -294,6 +294,7 @@ User-markierte Lieblings-Lebensmittel im Food Tracker ("Quick Add"), gleiches Sh
 
 - `id` (text), `user_id` (uuid), `food_id` (text, nullable, FK → `zane_foods.id` `ON DELETE SET NULL`: `null` bei favorisierten Custom Items), `food_name` (text), `brand` (text, nullable), `source` (text, nullable: `'off'|'usda'|'custom'|null`)
 - `quantity_g` (numeric), `calories` (int), `protein`/`carbs`/`fat` (numeric), `fiber` (numeric, nullable), `created_at` (timestamptz)
+- `unit_label` (text, nullable), `unit_g` (numeric, nullable): optionale Stück-/Packungsgröße (z.B. "wrap" + `62`), beide null oder beide gesetzt. Beim erneuten Hinzufügen zeigt die Mengen-Sheet dann zusätzliche `1×`/`2×`/`3×`/`4×`-Preset-Buttons, die `quantity_g` direkt auf `n * unit_g` setzen, editierbar im Favorites-Tab über den Stift-Button. Migration 0188.
 - Store field: `store.foodFavorites`. Eigene, einfache User-Collection (kein Health-Tab-Live-Polling, kein Coach-Read), als Store-Collection über den syncStore-Diff gesynct + Boot-Merge/Anti-Resurrection, gleiches Muster wie `zane_workout_templates`.
 - RLS: nur eigene Zeilen (`FOR ALL USING/WITH CHECK auth.uid() = user_id`), kein Coach-Zugriff. Migration 0187.
 
