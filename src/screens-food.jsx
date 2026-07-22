@@ -43,7 +43,8 @@ const FD_TABS = [
 ];
 const FD_SOURCE_FILTERS = [
   { id: null, label: 'All' },
-  { id: 'off', label: 'Open Food Facts' },
+  { id: 'zane', label: 'Zane' },
+  { id: 'off', label: 'OFF' },
   { id: 'usda', label: 'USDA' },
 ];
 const FD_QUICK_TABS = [
@@ -466,6 +467,11 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                   <button key={f.label} onClick={() => setSourceFilter(f.id)} style={fdSegBtn(sourceFilter === f.id)}>{f.label}</button>
                 ))}
               </div>
+              {sourceFilter === 'zane' && (
+                <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 10, lineHeight: 1.4 }}>
+                  Searches only foods already verified in Zane's own database, instant, no external lookup.
+                </div>
+              )}
               <div style={{ display: 'flex', gap: 8 }}>
                 <input value={query} onChange={e => setQuery(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') runSearch(); }}
                   type="text" placeholder="Search food or scan a barcode…" style={fdInputStyle} />

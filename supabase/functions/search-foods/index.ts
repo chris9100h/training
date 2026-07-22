@@ -209,14 +209,30 @@ function relevanceScore(item: FoodResult, query: string): number {
   return Math.max(textScore(item.name, q), item.brand ? textScore(item.brand, q) * 0.6 : 0);
 }
 
-// Marks which results already have a verified, cached zane_foods row (source
-// ids here are always plain digits, off/usda's own barcode/fdcId formats, so
-// no quoting is needed inside PostgREST's in.() list). Without this a user
-// has no way to tell a fresh upstream hit from one they (or anyone else)
-// already selected and verified before.
+// Text search over the shared zane_foods cache itself (our own, already-
+// verified DB), used two ways: as the standalone "Zane" source, and folded
+// into an "All" search so a food someone already selected reliably surfaces
+// (and sorts to the top) instead of being buried in raw OFF/USDA output.
+// The query is stripped of PostgREST's or=()/wildcard reserved chars ( ) , *
+// and then percent-encoded, so it can never break out of the ilike value.
+async function searchCache(query: string, sourceFilter?: 'off' | 'usda'): Promise<FoodResult[]> {
+  const safe = query.replace(/[(),*]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!safe) return [];
+  const pat = `*${encodeURIComponent(safe)}*`;
+  const parts = [`or=(name.ilike.${pat},brand.ilike.${pat})`, 'select=*', 'limit=25'];
+  if (sourceFilter) parts.push(`source=eq.${sourceFilter}`);
+  const r = await dbFetch(`zane_foods?${parts.join('&')}`).catch(() => null);
+  if (!r?.ok) return [];
+  const rows = await r.json().catch(() => []);
+  return (Array.isArray(rows) ? rows : []).map(foodRowToResult);
+}
+
+// Flags results already in zane_foods (used only by the barcode path, which
+// returns a single upstream hit). ids are percent-encoded so an unusual
+// upstream code can't break PostgREST's in.() list.
 async function annotateCached(results: FoodResult[]): Promise<FoodResult[]> {
   if (!results.length) return results;
-  const ids = results.map((r) => `${r.source}:${r.sourceId}`);
+  const ids = results.map((r) => encodeURIComponent(`${r.source}:${r.sourceId}`));
   const r = await dbFetch(`zane_foods?id=in.(${ids.join(',')})&select=id`).catch(() => null);
   if (!r?.ok) return results.map((x) => ({ ...x, cached: false }));
   const rows = await r.json().catch(() => []);
@@ -230,22 +246,52 @@ async function handleSearch(query: string, source?: string) {
     const hit = await lookupOffBarcode(query);
     return { results: hit ? await annotateCached([hit]) : [], isBarcode: true };
   }
+
+  // "Zane" = search our own already-verified cache only, no upstream calls.
+  // No score>0 filter here: these already matched the DB ilike on name/brand,
+  // so they are relevant by construction, score only orders them (and the
+  // ilike ran on a punctuation-stripped query, which relevanceScore against
+  // the raw query might not reproduce, so filtering on it could wrongly drop
+  // a genuine hit).
+  if (source === 'zane') {
+    const results = (await searchCache(query))
+      .map((r) => ({ r, score: relevanceScore(r, query) }))
+      .sort((a, b) => b.score - a.score)
+      .map((x) => ({ ...x.r, cached: true }));
+    return { results, isBarcode: false };
+  }
+
   const wantOff = source !== 'usda';
   const wantUsda = source !== 'off';
   const usdaKey = Deno.env.get('USDA_API_KEY') ?? '';
-  const [offSettled, usdaSettled] = await Promise.allSettled([
+  const cacheFilter = source === 'off' || source === 'usda' ? source : undefined;
+  const [offSettled, usdaSettled, cacheSettled] = await Promise.allSettled([
     wantOff ? searchOff(query) : Promise.resolve([]),
     (wantUsda && usdaKey) ? searchUsda(query, usdaKey) : Promise.resolve([]),
+    searchCache(query, cacheFilter),
   ]);
-  const scored = [
-    ...(offSettled.status === 'fulfilled' ? offSettled.value : []),
-    ...(usdaSettled.status === 'fulfilled' ? usdaSettled.value : []),
-  ]
+  const off = offSettled.status === 'fulfilled' ? offSettled.value : [];
+  const usda = usdaSettled.status === 'fulfilled' ? usdaSettled.value : [];
+  const cacheHits = cacheSettled.status === 'fulfilled' ? cacheSettled.value : [];
+
+  // Cache entries are authoritative and win on id collisions, so an item we've
+  // already verified is never shadowed by (or duplicated against) a raw
+  // upstream hit for the same product.
+  const byId = new Map<string, FoodResult>();
+  for (const r of cacheHits) byId.set(`${r.source}:${r.sourceId}`, { ...r, cached: true });
+  for (const r of [...off, ...usda]) {
+    const id = `${r.source}:${r.sourceId}`;
+    if (!byId.has(id)) byId.set(id, { ...r, cached: false });
+  }
+  const results = [...byId.values()]
     .map((r) => ({ r, score: relevanceScore(r, query) }))
-    .filter((x) => x.score > 0)
-    .sort((a, b) => b.score - a.score)
+    // Keep every cache hit (it matched the DB ilike, so it is relevant even if
+    // relevanceScore against the raw query scores it 0), plus any external hit
+    // with real textual relation to the query.
+    .filter((x) => x.r.cached || x.score > 0)
+    // Cached (already-verified) first, then by textual relevance within each group.
+    .sort((a, b) => (Number(b.r.cached) - Number(a.r.cached)) || (b.score - a.score))
     .map((x) => x.r);
-  const results = await annotateCached(scored);
   return { results, isBarcode: false };
 }
 
@@ -335,7 +381,7 @@ Deno.serve(async (req) => {
         status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
-    const source = body.source === 'off' || body.source === 'usda' ? body.source : undefined;
+    const source = ['off', 'usda', 'zane'].includes(body.source) ? body.source : undefined;
     const { results, isBarcode } = await handleSearch(query, source);
     return new Response(JSON.stringify({ results, isBarcode }), {
       status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
