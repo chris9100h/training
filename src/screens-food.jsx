@@ -888,7 +888,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                 that hour, with its entries listed underneath. */}
             <div>
               <Bezel style={{ marginBottom: 10 }}>Timeline</Bezel>
-              <div style={{ display: 'flex', flexDirection: 'column' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                 {FD_HOURS.map(h => {
                   const es = byHour[h] || [];
                   const filled = es.length > 0;
@@ -902,7 +902,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                       <div style={fdHourLabelCol}>
                         <span className="num" style={{ fontSize: 11, fontWeight: isNow ? 700 : 400, color: isNow ? 'var(--accent)' : (filled ? UI.inkSoft : UI.inkGhost) }}>{String(h).padStart(2, '0')}</span>
                       </div>
-                      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6, paddingBottom: filled ? 6 : 0 }}>
+                      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
                         {es.map(e => (
                           <div key={e.id} style={fdEntryRow}>
                             <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0, flex: 1 }}>
@@ -1445,23 +1445,23 @@ const fdDraftMain = {
   WebkitTapHighlightColor: 'transparent',
 };
 const fdEmptyStyle = { textAlign: 'center', fontSize: 12, color: UI.inkFaint, padding: '18px 0', fontFamily: UI.fontUi };
-// Timeline: an hour tick column, its entries, and an always-present add button.
-// Empty hours stay slim; hours with entries grow to fit them. The left column
-// carries a hairline "spine" so the 24 rows read as one continuous axis.
-// isNow (today's current local hour) gets an accent tint + border so "now" is
-// findable at a glance in a 24-row list.
+// Timeline: an hour tick column, its entries, and an always-present add
+// button, each hour its own bordered card (same idiom as the active-users
+// list) with its content centered vertically instead of pinned to the top.
+// isNow (today's current local hour) gets an accent border + tint so "now"
+// is findable at a glance in a 24-card list.
 function fdHourRow(filled, isNow) {
   return {
-    display: 'flex', alignItems: 'flex-start', gap: 10, borderRadius: 6,
-    borderTop: `var(--hair-width) solid ${isNow ? 'rgba(var(--accent-rgb),0.5)' : UI.hair}`,
-    background: isNow ? 'rgba(var(--accent-rgb),0.07)' : 'transparent',
-    paddingTop: filled ? 8 : 0, minHeight: 34,
+    display: 'flex', alignItems: 'center', gap: 10, borderRadius: 6,
+    border: `1px solid ${isNow ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong}`,
+    background: isNow ? 'rgba(var(--accent-rgb),0.07)' : UI.bgInset,
+    padding: filled ? '10px 10px' : '8px 10px',
   };
 }
-const fdHourLabelCol = { width: 24, flexShrink: 0, paddingTop: 9, textAlign: 'right' };
+const fdHourLabelCol = { width: 24, flexShrink: 0, textAlign: 'right' };
 function fdHourAddBtn(isNow) {
   return {
-    flexShrink: 0, width: 30, height: 30, marginTop: 4, borderRadius: 4,
+    flexShrink: 0, width: 30, height: 30, borderRadius: 4,
     border: `1px solid ${isNow ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong}`,
     background: 'transparent', color: isNow ? 'var(--accent)' : UI.inkSoft,
     cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
