@@ -129,6 +129,11 @@ function FoodScreen({ store, setStore, go, userId, date }) {
 
   const [tab, setTab] = useStateFd('log');
   const [quickTab, setQuickTab] = useStateFd('recent');
+  // Shared across Recent/Favorites/Recipes since only one shows at a time;
+  // cleared on switching sub-tabs so a filter typed in one never silently
+  // hides everything in the next.
+  const [quickQuery, setQuickQuery] = useStateFd('');
+  function onQuickTabChange(id) { setQuickTab(id); setQuickQuery(''); }
   // Hour (0-23) a timeline "+" was tapped for, so the next logged entry lands
   // at that hour instead of now. Cleared after a log, or when the user leaves
   // the timeline by tapping a main tab directly.
@@ -287,8 +292,12 @@ function FoodScreen({ store, setStore, go, userId, date }) {
 
   // Recent strip: dedupe by food_id for DB items, by food_name for custom
   // ones. store.foodLogs is already recency-ordered (server query and local
-  // prepends both put newest first), so a first-seen walk is enough.
-  const recentFoods = useMemoFd(() => {
+  // prepends both put newest first), so a first-seen walk is enough. Kept
+  // uncapped here so a search (below) can still reach further back than the
+  // unfiltered 20-item cap; recentFoods itself stays recency-ordered either
+  // way, never re-sorted, matching Favorites/Recipes' own alphabetical sort
+  // being deliberately NOT applied to Recent.
+  const recentFoodsAll = useMemoFd(() => {
     const seen = new Set();
     const out = [];
     for (const l of (store.foodLogs || [])) {
@@ -296,10 +305,28 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       if (seen.has(key)) continue;
       seen.add(key);
       out.push(l);
-      if (out.length >= 20) break;
     }
     return out;
   }, [store.foodLogs]);
+  const recentFoods = useMemoFd(() => {
+    const q = quickQuery.trim().toLowerCase();
+    if (!q) return recentFoodsAll.slice(0, 20);
+    return recentFoodsAll.filter(l => l.foodName.toLowerCase().includes(q) || (l.brand || '').toLowerCase().includes(q));
+  }, [recentFoodsAll, quickQuery]);
+  // Favorites/Recipes: alphabetical by name (unlike Recent, which stays
+  // recency-ordered), filtered by the same shared quickQuery.
+  const favoritesFiltered = useMemoFd(() => {
+    const q = quickQuery.trim().toLowerCase();
+    const list = q
+      ? (store.foodFavorites || []).filter(f => f.foodName.toLowerCase().includes(q) || (f.brand || '').toLowerCase().includes(q))
+      : (store.foodFavorites || []);
+    return [...list].sort((a, b) => a.foodName.localeCompare(b.foodName));
+  }, [store.foodFavorites, quickQuery]);
+  const recipesFiltered = useMemoFd(() => {
+    const q = quickQuery.trim().toLowerCase();
+    const list = q ? (store.foodRecipes || []).filter(r => r.name.toLowerCase().includes(q)) : (store.foodRecipes || []);
+    return [...list].sort((a, b) => a.name.localeCompare(b.name));
+  }, [store.foodRecipes, quickQuery]);
 
   const shiftDay = (delta) => setCurDate(d => {
     const next = fdShiftDate(d, delta);
@@ -534,11 +561,15 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     // Turn whatever basis the label used into per-100g/ml rates, so the
     // quantity sheet can scale the macros to any portion the user types. The
     // scanner is told to prefer the per-100 column, so basis is usually 100g;
-    // a serving-only label is converted through its stated gram weight.
+    // a serving-only label is converted through its stated gram weight. The
+    // label's own printed calories (cal) never makes it into per100: kcal100Str
+    // (see its effect above) derives calories from p100Str/c100Str/f100Str
+    // instead, same rule the search-foods edge function applies to every DB
+    // result, so a scanned label reports calories the same consistent way.
     const per100 = (label.basis === '100g' || label.basis === '100ml')
-      ? { cal, p, c, f, fib }
+      ? { p, c, f, fib }
       : (label.serving_size_g > 0)
-        ? (k => ({ cal: cal != null ? cal * k : null, p: p != null ? p * k : null, c: c != null ? c * k : null, f: f != null ? f * k : null, fib: fib != null ? fib * k : null }))(100 / label.serving_size_g)
+        ? (k => ({ p: p != null ? p * k : null, c: c != null ? c * k : null, f: f != null ? f * k : null, fib: fib != null ? fib * k : null }))(100 / label.serving_size_g)
         : null;
 
     if (per100) {
@@ -547,7 +578,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       setPendingFood({
         custom: true, fromCache: true,
         name, brand: label.brand || null,
-        kcalPer100g: per100.cal, proteinPer100g: per100.p, carbsPer100g: per100.c,
+        proteinPer100g: per100.p, carbsPer100g: per100.c,
         fatPer100g: per100.f, fiberPer100g: per100.fib,
         servingSizeG: label.serving_size_g > 0 ? label.serving_size_g : null,
         servingLabel: label.serving_label || null,
@@ -603,7 +634,10 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     setPendingFood({
       custom: true, fromCache: true,
       name: item.foodName, brand: item.brand || null,
-      kcalPer100g: item.calories * per100, proteinPer100g: item.protein * per100,
+      // No kcalPer100g here: kcal100Str (set below, see its auto-calc effect)
+      // derives calories from protein/carbs/fat instead, ignoring whatever
+      // item.calories happens to already be.
+      proteinPer100g: item.protein * per100,
       carbsPer100g: item.carbs * per100, fatPer100g: item.fat * per100,
       fiberPer100g: item.fiber != null ? item.fiber * per100 : null,
       servingSizeG: null, servingLabel: null,
@@ -634,7 +668,13 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       setPendingFood({
         source: l.source, sourceId: l.foodId.slice((l.source || '').length + 1),
         name: l.foodName, brand: l.brand || null,
-        kcalPer100g: l.calories * per100, proteinPer100g: l.protein * per100,
+        // Derived from the stored macros, not l.calories directly: always
+        // computing at read time (rather than trusting whatever calories
+        // this entry happened to be logged with) keeps a re-add correct
+        // even for an entry from before this rule existed, without needing
+        // every historical row to already be fixed.
+        kcalPer100g: LB.caloriesFromMacros(l.protein, l.carbs, l.fat) * per100,
+        proteinPer100g: l.protein * per100,
         carbsPer100g: l.carbs * per100, fatPer100g: l.fat * per100,
         fiberPer100g: l.fiber != null ? l.fiber * per100 : null,
         servingSizeG: null, servingLabel: null,
@@ -846,7 +886,10 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       setPendingFood({
         source: item.source, sourceId: item.foodId.slice((item.source || '').length + 1),
         name: item.foodName, brand: item.brand || null,
-        kcalPer100g: item.calories * per100, proteinPer100g: item.protein * per100,
+        // See reAddFromRecent: always derived from the stored macros, not
+        // item.calories directly.
+        kcalPer100g: LB.caloriesFromMacros(item.protein, item.carbs, item.fat) * per100,
+        proteinPer100g: item.protein * per100,
         carbsPer100g: item.carbs * per100, fatPer100g: item.fat * per100,
         fiberPer100g: item.fiber != null ? item.fiber * per100 : null,
         servingSizeG: null, servingLabel: null, fromCache: true,
@@ -1147,13 +1190,26 @@ function FoodScreen({ store, setStore, go, userId, date }) {
             {pendingHourBanner}
             <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `1px solid ${UI.hairStrong}` }}>
               {FD_QUICK_TABS.map(t => (
-                <button key={t.id} onClick={() => setQuickTab(t.id)} style={fdSegBtn(quickTab === t.id)}>{t.label}</button>
+                <button key={t.id} onClick={() => onQuickTabChange(t.id)} style={fdSegBtn(quickTab === t.id)}>{t.label}</button>
               ))}
             </div>
 
+            <div style={{ position: 'relative', width: '100%' }}>
+              <input value={quickQuery} onChange={e => setQuickQuery(e.target.value)} type="text"
+                placeholder={`Search ${FD_QUICK_TABS.find(t => t.id === quickTab)?.label.toLowerCase() || ''}`}
+                style={{ ...fdInputStyle, paddingRight: 32 }} />
+              {quickQuery && (
+                <button onClick={() => setQuickQuery('')} aria-label="Clear search" style={fdClearBtn}>
+                  <i className="fa-solid fa-circle-xmark" style={{ fontSize: 15 }} />
+                </button>
+              )}
+            </div>
+
             {quickTab === 'recent' && (
-              recentFoods.length === 0 ? (
+              recentFoodsAll.length === 0 ? (
                 <div style={fdEmptyStyle}>Nothing logged yet. Foods you add show up here.</div>
+              ) : recentFoods.length === 0 ? (
+                <div style={fdEmptyStyle}>No matches for "{quickQuery}".</div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                   {recentFoods.map(l => (
@@ -1175,9 +1231,11 @@ function FoodScreen({ store, setStore, go, userId, date }) {
             {quickTab === 'favorites' && (
               (store.foodFavorites || []).length === 0 ? (
                 <div style={fdEmptyStyle}>No favorites yet. Star a food while adding it to save it here.</div>
+              ) : favoritesFiltered.length === 0 ? (
+                <div style={fdEmptyStyle}>No favorites match "{quickQuery}".</div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {(store.foodFavorites || []).map(f => (
+                  {favoritesFiltered.map(f => (
                     <div key={f.id} style={fdQuickRowWrap}>
                       <button onClick={() => reAddFromRecent(f)} style={fdQuickRowInner}>
                         <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
@@ -1210,9 +1268,11 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                     <i className="fa-solid fa-plus" style={{ marginRight: 8 }} /> New recipe
                   </Btn>
                 </div>
+              ) : recipesFiltered.length === 0 ? (
+                <div style={fdEmptyStyle}>No recipes match "{quickQuery}".</div>
               ) : (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                    {(store.foodRecipes || []).map(r => {
+                    {recipesFiltered.map(r => {
                       const items = r.items || [];
                       const kcal = Math.round(items.reduce((a, i) => a + (i.calories || 0), 0));
                       const justAdded = recipeJustAddedId === r.id;

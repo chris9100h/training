@@ -92,20 +92,36 @@ function offNum(n: Record<string, unknown> | undefined, key: string): number | n
   return null;
 }
 
+// Calories are always derived from protein/carbs/fat (standard 4/4/9 kcal-
+// per-gram, total-carb basis, no fiber subtraction: this is a shared,
+// user-agnostic cache, so it can't apply any one user's net-carb
+// preference), never taken from a source's own printed/reported energy
+// value. A label's stated calories don't always cleanly equal 4P+4C+9F
+// (rounding, sugar alcohols, alcohol), so trusting them produced a number
+// that silently disagreed with the macros shown right next to it. This is
+// the single point every FoodResult's kcalPer100g flows through, whatever
+// its source (OFF, USDA, or our own zane_foods cache below), so the whole
+// app is consistent about where a calorie figure comes from.
+function caloriesFromMacros(p: number | null, c: number | null, f: number | null): number | null {
+  if (p == null && c == null && f == null) return null;
+  return Math.round((p ?? 0) * 4 + (c ?? 0) * 4 + (f ?? 0) * 9);
+}
+
 // deno-lint-ignore no-explicit-any
 function normalizeOffProduct(p: any): FoodResult | null {
   const code = p?.code ?? p?._id;
   if (!code || !p?.product_name) return null;
   const n = p.nutriments ?? {};
+  const proteinPer100g = offNum(n, 'proteins_100g');
+  const carbsPer100g = offNum(n, 'carbohydrates_100g');
+  const fatPer100g = offNum(n, 'fat_100g');
   return {
     source: 'off',
     sourceId: String(code),
     name: p.product_name,
     brand: p.brands ? String(p.brands).split(',')[0].trim() : null,
-    kcalPer100g: offNum(n, 'energy-kcal_100g'),
-    proteinPer100g: offNum(n, 'proteins_100g'),
-    carbsPer100g: offNum(n, 'carbohydrates_100g'),
-    fatPer100g: offNum(n, 'fat_100g'),
+    kcalPer100g: caloriesFromMacros(proteinPer100g, carbsPer100g, fatPer100g),
+    proteinPer100g, carbsPer100g, fatPer100g,
     fiberPer100g: offNum(n, 'fiber_100g'),
     servingSizeG: typeof p.serving_quantity === 'number' ? p.serving_quantity : null,
     servingLabel: p.serving_size ?? null,
@@ -154,15 +170,16 @@ function usdaNum(foodNutrients: any[], nutrientNumber: string): number | null {
 function normalizeUsdaFood(f: any): FoodResult | null {
   if (!f?.fdcId || !f?.description) return null;
   const nutrients = f.foodNutrients || [];
+  const proteinPer100g = usdaNum(nutrients, '203');
+  const carbsPer100g = usdaNum(nutrients, '205');
+  const fatPer100g = usdaNum(nutrients, '204');
   return {
     source: 'usda',
     sourceId: String(f.fdcId),
     name: f.description,
     brand: f.brandOwner ?? f.brandName ?? null,
-    kcalPer100g: usdaNum(nutrients, '208'),
-    proteinPer100g: usdaNum(nutrients, '203'),
-    carbsPer100g: usdaNum(nutrients, '205'),
-    fatPer100g: usdaNum(nutrients, '204'),
+    kcalPer100g: caloriesFromMacros(proteinPer100g, carbsPer100g, fatPer100g),
+    proteinPer100g, carbsPer100g, fatPer100g,
     fiberPer100g: usdaNum(nutrients, '291'),
     servingSizeG: typeof f.servingSize === 'number' && f.servingSizeUnit === 'g' ? f.servingSize : null,
     servingLabel: f.householdServingFullText ?? null,
@@ -302,10 +319,17 @@ async function handleSearch(query: string, source?: string) {
 // deno-lint-ignore no-explicit-any
 function foodRowToResult(row: any): FoodResult {
   const num = (v: unknown) => (v == null ? null : Number(v));
+  const proteinPer100g = num(row.protein_per_100g);
+  const carbsPer100g = num(row.carbs_per_100g);
+  const fatPer100g = num(row.fat_per_100g);
   return {
     source: row.source, sourceId: row.source_id, name: row.name, brand: row.brand ?? null,
-    kcalPer100g: num(row.kcal_per_100g), proteinPer100g: num(row.protein_per_100g),
-    carbsPer100g: num(row.carbs_per_100g), fatPer100g: num(row.fat_per_100g),
+    // Recomputed here too (not read from row.kcal_per_100g directly): a
+    // belt-and-suspenders guard so a cache row from before this rule
+    // existed, or from any future write path that forgets it, still comes
+    // back consistent instead of silently serving a stale stored figure.
+    kcalPer100g: caloriesFromMacros(proteinPer100g, carbsPer100g, fatPer100g),
+    proteinPer100g, carbsPer100g, fatPer100g,
     fiberPer100g: num(row.fiber_per_100g), servingSizeG: num(row.serving_size_g),
     servingLabel: row.serving_label ?? null,
   };
