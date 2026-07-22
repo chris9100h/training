@@ -868,9 +868,11 @@ function App() {
             // every other no-base fallback in this merge (fixed: this used to
             // read `base && (...)`, which is falsy when base is null/undefined
             // and so took the server value on a no-base boot instead of cur,
-            // the opposite of the intended rule). Bottle counters are
-            // deliberately NOT in this list, they are day-scoped device state.
-            const WATER_SYNC_KEYS = ['waterGoalMl', 'waterStartTime', 'waterEndTime', 'waterReminderEnabled', 'waterDrinks', 'waterCoffeeSizes', 'waterBottleEnabled', 'waterBottleMl'];
+            // the opposite of the intended rule). Bottle counters are included
+            // too: confirming "Bottle empty?" on one device must reset the
+            // progress ring and show the emptied bottle under "Other drinks
+            // today" on every device, the same as any other water stat.
+            const WATER_SYNC_KEYS = ['waterGoalMl', 'waterStartTime', 'waterEndTime', 'waterReminderEnabled', 'waterDrinks', 'waterCoffeeSizes', 'waterBottleEnabled', 'waterBottleMl', 'waterBottlesToday', 'waterBottlesDate'];
             const mergedSettings = { ...fresh.settings, ...cur.settings, ...(fresh.settings.unit == null ? { unit: null } : {}) };
             for (const k of WATER_SYNC_KEYS) {
               const localUnsynced = !base || JSON.stringify(cur.settings?.[k]) !== JSON.stringify(base.settings?.[k]);

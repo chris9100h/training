@@ -1843,8 +1843,6 @@ async function syncStore(prev, next, userId) {
       status_mode_since: next.statusModeSince ?? null,
       deload_prompt_dismissed_at: next.deloadPromptDismissedAt ?? null,
       sw_version: next.settings?.swVersion ?? null,
-      water_bottles_today: next.settings?.waterBottlesToday ?? 0,
-      water_bottles_date: next.settings?.waterBottlesDate ?? null,
       tz_offset_minutes: next.settings?.tzOffsetMinutes ?? null,
     };
     // Plan-position / active-plan fields are action-advanced and prone to a
@@ -1872,6 +1870,14 @@ async function syncStore(prev, next, userId) {
     if (prev.settings?.waterReminderEnabled !== next.settings?.waterReminderEnabled) settingsRow.water_reminder_enabled = next.settings?.waterReminderEnabled ?? false;
     if (prev.settings?.waterBottleEnabled !== next.settings?.waterBottleEnabled) settingsRow.water_bottle_enabled  = next.settings?.waterBottleEnabled ?? true;
     if (prev.settings?.waterBottleMl      !== next.settings?.waterBottleMl)      settingsRow.water_bottle_ml       = next.settings?.waterBottleMl ?? 1500;
+    // Bottle-empty counter: same gating, for the same reason. Used to be
+    // written unconditionally on every sync, so confirming "Bottle empty?" on
+    // one device got silently clobbered back to 0 the next time any OTHER
+    // device synced an unrelated change, since that device's own stale
+    // (pre-confirm) counter went out on every upsert regardless of whether
+    // it had actually changed there.
+    if (prev.settings?.waterBottlesToday  !== next.settings?.waterBottlesToday)  settingsRow.water_bottles_today   = next.settings?.waterBottlesToday ?? 0;
+    if (prev.settings?.waterBottlesDate   !== next.settings?.waterBottlesDate)   settingsRow.water_bottles_date    = next.settings?.waterBottlesDate ?? null;
     if (JSON.stringify(prev.settings?.waterDrinks) !== JSON.stringify(next.settings?.waterDrinks)) settingsRow.water_drinks = next.settings?.waterDrinks ?? null;
     if (JSON.stringify(prev.settings?.waterCoffeeSizes) !== JSON.stringify(next.settings?.waterCoffeeSizes)) settingsRow.water_coffee_sizes = next.settings?.waterCoffeeSizes ?? null;
     ops.push(_supabase.from('zane_user_settings').upsert(settingsRow));
