@@ -159,10 +159,23 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   const [editingDraftId, setEditingDraftId] = useStateFd(null);
   // Editable per-100g protein/carbs/fat for a scanned custom item, so the user
   // can correct a misread before logging. Kept as strings (decimals allowed);
-  // only used on the pendingFood.custom path.
+  // only used on the pendingFood.custom path. kcal100Str is the per-100g
+  // calorie figure alongside them: auto-derived from p100/c100/f100Str
+  // (see the effect below) unless kcal100Touched, in which case a direct
+  // edit to it wins and stops following further macro edits.
   const [p100Str, setP100Str] = useStateFd('');
   const [c100Str, setC100Str] = useStateFd('');
   const [f100Str, setF100Str] = useStateFd('');
+  const [kcal100Str, setKcal100Str] = useStateFd('');
+  const [kcal100Touched, setKcal100Touched] = useStateFd(false);
+  useEffectFd(() => {
+    if (kcal100Touched || !pendingFood?.custom) return;
+    const p = fdNum(p100Str), c = fdNum(c100Str), f = fdNum(f100Str);
+    const netCarbs = !!store.settings?.netCarbs;
+    const raw = LB.caloriesFromMacros(p, c, f, netCarbs ? pendingFood?.fiberPer100g : null);
+    setKcal100Str(raw != null ? String(Math.round(raw)) : '');
+  }, [p100Str, c100Str, f100Str, kcal100Touched, pendingFood?.custom, pendingFood?.fiberPer100g, store.settings?.netCarbs]);
+  function onKcal100Change(v) { setKcal100Touched(true); setKcal100Str(fdDecimalFilter(v)); }
 
   const [customOpen, setCustomOpen] = useStateFd(false);
   const [customName, setCustomName] = useStateFd('');
@@ -171,20 +184,23 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   const [customC, setCustomC] = useStateFd('');
   const [customF, setCustomF] = useStateFd('');
   const [customFib, setCustomFib] = useStateFd('');
-  // Calories are never typed in for a custom item, same "derive from
-  // macros" rule the rest of the app uses (e.g. MacroTargetSheet): a user
-  // guessing macros for an unsourced food has no more reason to trust a
-  // separately-typed calorie number than the P/C/F they just typed, so
-  // deriving it removes one number to enter and one way for it to
-  // disagree with the macros. Net-carb accounting matches the daily-log
-  // convention: fiber is subtracted only when settings.netCarbs is on.
-  const customCalPreview = useMemoFd(() => {
+  // Calories, same "derive from macros unless overridden" rule as
+  // kcal100Str above: auto-follows protein/carbs/fat (matching how the
+  // rest of the app derives calories, e.g. MacroTargetSheet) until the
+  // user types into the field directly, at which point their number wins
+  // and stops following further macro edits. Net-carb accounting matches
+  // the daily-log convention: fiber is subtracted only when
+  // settings.netCarbs is on.
+  const [customCal, setCustomCal] = useStateFd('');
+  const [customCalTouched, setCustomCalTouched] = useStateFd(false);
+  useEffectFd(() => {
+    if (customCalTouched) return;
     const p = fdNum(customP), c = fdNum(customC), f = fdNum(customF);
-    if (p == null && c == null && f == null) return null;
     const netCarbs = !!store.settings?.netCarbs;
     const raw = LB.caloriesFromMacros(p, c, f, netCarbs ? fdNum(customFib) : null);
-    return raw != null ? Math.round(raw) : null;
-  }, [customP, customC, customF, customFib, store.settings?.netCarbs]);
+    setCustomCal(raw != null ? String(Math.round(raw)) : '');
+  }, [customP, customC, customF, customFib, customCalTouched, store.settings?.netCarbs]);
+  function onCustomCalChange(v) { setCustomCalTouched(true); setCustomCal(fdDecimalFilter(v)); }
 
   // Recipe builder: a lightweight "mode" rather than its own sheet, so it can
   // reuse the Search tab's existing search/quantity/custom flows verbatim as
@@ -526,6 +542,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       setP100Str(per100.p != null ? String(fdRound1(per100.p)) : '');
       setC100Str(per100.c != null ? String(fdRound1(per100.c)) : '');
       setF100Str(per100.f != null ? String(fdRound1(per100.f)) : '');
+      setKcal100Touched(false);
       setFavedId(existingFavId(null, name));
       // Default portion: the printed 100 g when that is the basis (preview then
       // matches the package numbers as a read-back sanity check), else the
@@ -586,6 +603,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     setP100Str(String(fdRound1(item.protein * per100)));
     setC100Str(String(fdRound1(item.carbs * per100)));
     setF100Str(String(fdRound1(item.fat * per100)));
+    setKcal100Touched(false);
     setQtyG(String(item.quantityG || 100));
     setQtySheetOpen(true);
   }
@@ -625,30 +643,32 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     const qty = fdNum(qtyG);
     if (!qty || qty <= 0) return null;
     const factor = qty / 100;
-    // For a scanned custom item the per-100g P/C/F come from the editable
-    // fields (so a correction flows straight into the scaled totals); for a DB
-    // food they come from the fixed rates on pendingFood. Calories always stay
-    // as read from the source's own energy value, never derived from macros.
+    // For a scanned/custom item the per-100g P/C/F (and calories, see
+    // kcal100Str above) come from the editable fields, so a correction
+    // flows straight into the scaled totals; for a real DB food they come
+    // from the fixed rates on pendingFood, its own source's energy value,
+    // never derived from macros.
     const custom = !!pendingFood.custom;
     const rate = (s, key) => {
       if (!custom) return pendingFood[key] || 0;
       const n = parseFloat(s);
       return Number.isFinite(n) ? n : 0;
     };
+    const kcal100 = custom ? (fdNum(kcal100Str) || 0) : (pendingFood.kcalPer100g || 0);
     return {
-      calories: Math.round((pendingFood.kcalPer100g || 0) * factor),
+      calories: Math.round(kcal100 * factor),
       protein: fdRound1(rate(p100Str, 'proteinPer100g') * factor),
       carbs: fdRound1(rate(c100Str, 'carbsPer100g') * factor),
       fat: fdRound1(rate(f100Str, 'fatPer100g') * factor),
       fiber: pendingFood.fiberPer100g != null ? fdRound1(pendingFood.fiberPer100g * factor) : null,
     };
-  }, [pendingFood, qtyG, p100Str, c100Str, f100Str]);
+  }, [pendingFood, qtyG, p100Str, c100Str, f100Str, kcal100Str]);
 
   // A scanned custom item needs a name before it can be logged/favorited; a
   // DB food always has one, so this only ever gates the custom path.
   const qtyNameMissing = !!(pendingFood && pendingFood.custom) && !String(pendingFood.name || '').trim();
 
-  function closeQtySheet() { setQtySheetOpen(false); setPendingFood(null); setQtyG(''); setFavedId(null); setEditingDraftId(null); setP100Str(''); setC100Str(''); setF100Str(''); }
+  function closeQtySheet() { setQtySheetOpen(false); setPendingFood(null); setQtyG(''); setFavedId(null); setEditingDraftId(null); setP100Str(''); setC100Str(''); setF100Str(''); setKcal100Str(''); setKcal100Touched(false); }
   function closeCustomSheet() { setCustomOpen(false); setFavedId(null); setEditingDraftId(null); }
 
   // Build the entry the open sheet describes right now (without logging it), so
@@ -675,11 +695,12 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   function buildCustomEntry() {
     const name = customName.trim();
     const p = fdNum(customP), c = fdNum(customC), f = fdNum(customF);
-    if (!name || p == null || c == null || f == null || customCalPreview == null) return null;
+    const cal = fdNum(customCal);
+    if (!name || p == null || c == null || f == null || cal == null) return null;
     return {
       id: LB.uid(), date: curDate, time: entryTime(),
       foodId: null, foodName: name, brand: null, source: 'custom',
-      quantityG: fdNum(customG) || 100, calories: customCalPreview, protein: p, carbs: c, fat: f,
+      quantityG: fdNum(customG) || 100, calories: Math.round(cal), protein: p, carbs: c, fat: f,
       fiber: customFib !== '' ? fdNum(customFib) : null,
       createdAt: new Date().toISOString(),
     };
@@ -767,6 +788,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
 
   function resetCustomForm() {
     setCustomName(''); setCustomG(''); setCustomP(''); setCustomC(''); setCustomF(''); setCustomFib('');
+    setCustomCal(''); setCustomCalTouched(false);
     setFavedId(null); setEditingDraftId(null);
   }
 
@@ -778,7 +800,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     closeCustomSheet();
     resetCustomForm();
   }
-  const customValid = customName.trim() && fdNum(customP) != null && fdNum(customC) != null && fdNum(customF) != null;
+  const customValid = customName.trim() && fdNum(customP) != null && fdNum(customC) != null && fdNum(customF) != null && fdNum(customCal) != null;
 
   // ── Recipes ──
   function openNewRecipe() { setRecipeNameInput(''); setRecipeNameMode('new'); setRecipeNameOpen(true); }
@@ -1224,6 +1246,9 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                 </Field>
                 <Bezel style={{ marginBottom: 6 }}>Per 100 g</Bezel>
                 <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 8 }}>Edit if the scan misread.</div>
+                <Field label="Calories (kcal, from macros)" style={{ marginBottom: 10 }}>
+                  <input value={kcal100Str} onChange={e => onKcal100Change(e.target.value)} type="text" inputMode="decimal" placeholder="kcal" style={fdInputStyle} />
+                </Field>
                 <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
                   <Field label="Protein (g)" style={{ flex: 1 }}>
                     <input value={p100Str} onChange={e => setP100Str(fdDecimalFilter(e.target.value))} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
@@ -1292,10 +1317,8 @@ function FoodScreen({ store, setStore, go, userId, date }) {
           <Field label="Amount (g, optional)" style={{ flex: 1 }}>
             <input value={customG} onChange={e => setCustomG(fdDecimalFilter(e.target.value))} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
           </Field>
-          <Field label="Calories (from macros)" style={{ flex: 1 }}>
-            <div style={{ ...fdInputStyle, display: 'flex', alignItems: 'center', color: customCalPreview != null ? UI.ink : UI.inkFaint }}>
-              {customCalPreview != null ? `${customCalPreview} kcal` : '-'}
-            </div>
+          <Field label="Calories (kcal, from macros)" style={{ flex: 1 }}>
+            <input value={customCal} onChange={e => onCustomCalChange(e.target.value)} type="text" inputMode="decimal" placeholder="kcal" style={fdInputStyle} />
           </Field>
         </div>
         <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
