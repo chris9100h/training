@@ -59,6 +59,9 @@
        the ruled lines to stay readable; a surface that already has its own
        background doesn't need it and would just look muddy. */
     --text-lift: none;
+    /* Same idea as --text-lift, but for the .knurl divider bar (box-shadow,
+       not text-shadow, since it is a flat gradient strip, not text). */
+    --knurl-lift: none;
     /* Same idea as --text-lift, but for SVG chart <text> labels: CSS
        text-shadow does not paint on SVG text at all in this browser (verified
        directly: the computed value inherits fine, nothing renders), so those
@@ -392,6 +395,7 @@
   .knurl {
     height: 3px;
     flex-shrink: 0;
+    box-shadow: var(--knurl-lift);
     background: repeating-linear-gradient(
       -60deg,
       rgba(var(--knurl-rgb),calc(0.20 * var(--knurl-opacity))) 0px, rgba(var(--knurl-rgb),calc(0.20 * var(--knurl-opacity))) 1.5px,
@@ -662,6 +666,15 @@ function _textLiftFor(bgRaisedHex) {
   return '0 0 1px ' + solid + ', 0 0 1px ' + solid + ', 0 0 2px ' + solid + ', 0 0 2px ' + solid +
     ', 0 0 3px ' + solid + ', 0 0 5px rgba(' + c + ',0.9), 0 0 8px rgba(' + c + ',0.6)';
 }
+// Same halo idea as _textLiftFor, but for the .knurl divider: a flat
+// gradient bar, not text, so text-shadow does not apply to it. A box-shadow
+// halo in the theme's own bgRaised tone keeps the grid from crossing right
+// through the knurl's own diagonal hash strokes.
+function _boxLiftFor(bgRaisedHex) {
+  var c = _hexToRgb(bgRaisedHex);
+  var solid = 'rgb(' + c + ')';
+  return '0 0 0 1px ' + solid + ', 0 0 3px 1px rgba(' + c + ',0.9), 0 0 6px 2px rgba(' + c + ',0.5)';
+}
 // --grid-alpha (not a fixed 0.16): a light grid line on a near-black bg
 // reads far louder than the same alpha's dark line on a light one (paper's
 // own knurlRgb is a muted blue-grey to begin with; dark/black's default
@@ -803,6 +816,7 @@ window.applyDarkMode = function(key) {
   var gridEnabled = _gridPref === '1' ? true : _gridPref === '0' ? false : key === 'paper';
   window.__gridEnabled = gridEnabled;
   s.setProperty('--text-lift', gridEnabled ? _textLiftFor(m.bgRaised) : 'none');
+  s.setProperty('--knurl-lift', gridEnabled ? _boxLiftFor(m.bgRaised) : 'none');
   s.setProperty('--chart-text-lift-opacity', gridEnabled ? 0.95 : 0);
   s.setProperty('--accent-tint-boost', m.accentTintBoost || 1);
   s.setProperty('--bg-texture', gridEnabled ? _GRID_TEXTURE : 'none');
