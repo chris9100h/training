@@ -115,6 +115,18 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     return () => { cancelled = true; };
   }, [coachingId]);
 
+  // One-time repair for favorites created before toggleFavorite cached their
+  // food_id (see there): those never got a matching zane_foods row, so their
+  // sync has been failing its FK check on every retry ever since. Re-cache on
+  // every open, a harmless no-op for foods that are already cached.
+  useEffectFd(() => {
+    (store.foodFavorites || []).forEach(f => {
+      if (f.foodId && f.source && f.source !== 'custom') {
+        LB.cacheFood(f.source, f.foodId.slice(f.source.length + 1));
+      }
+    });
+  }, []);
+
   const [tab, setTab] = useStateFd('log');
   const [quickTab, setQuickTab] = useStateFd('recent');
   // Hour (0-23) a timeline "+" was tapped for, so the next logged entry lands
@@ -616,6 +628,15 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       };
       setFavedId(fav.id);
       setStore(s => ({ ...s, foodFavorites: [fav, ...(s.foodFavorites || [])] }));
+      // foodFavorites.food_id is a real FK into zane_foods, but that row is
+      // normally only cached once a food gets logged (see confirmLogFood).
+      // Starring a food without ever logging it would otherwise sync a
+      // favorite whose food_id points at nothing, failing its FK check on
+      // every retry forever. Trigger the same cache write here so favoriting
+      // alone is enough.
+      if (fav.foodId && pendingFood && !pendingFood.fromCache) {
+        LB.cacheFood(pendingFood.source, pendingFood.sourceId);
+      }
     }
   }
   function removeFavorite(fav) {
