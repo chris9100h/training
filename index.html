@@ -662,7 +662,12 @@ function _textLiftFor(bgRaisedHex) {
   return '0 0 1px ' + solid + ', 0 0 1px ' + solid + ', 0 0 2px ' + solid + ', 0 0 2px ' + solid +
     ', 0 0 3px ' + solid + ', 0 0 5px rgba(' + c + ',0.9), 0 0 8px rgba(' + c + ',0.6)';
 }
-var _GRID_TEXTURE = 'repeating-linear-gradient(0deg, rgba(var(--knurl-rgb),0.16) 0px, rgba(var(--knurl-rgb),0.16) 1px, transparent 1px, transparent 22px), repeating-linear-gradient(90deg, rgba(var(--knurl-rgb),0.16) 0px, rgba(var(--knurl-rgb),0.16) 1px, transparent 1px, transparent 22px)';
+// --grid-alpha (not a fixed 0.16): a light grid line on a near-black bg
+// reads far louder than the same alpha's dark line on a light one (paper's
+// own knurlRgb is a muted blue-grey to begin with; dark/black's default
+// knurlRgb is a bright cream, so identical alpha is nowhere near identical
+// weight): set per-theme below, dark/black notably lower than paper/light.
+var _GRID_TEXTURE = 'repeating-linear-gradient(0deg, rgba(var(--knurl-rgb),var(--grid-alpha)) 0px, rgba(var(--knurl-rgb),var(--grid-alpha)) 1px, transparent 1px, transparent 22px), repeating-linear-gradient(90deg, rgba(var(--knurl-rgb),var(--grid-alpha)) 0px, rgba(var(--knurl-rgb),var(--grid-alpha)) 1px, transparent 1px, transparent 22px)';
 var _DARK_TINTS = {
   surfaceTint:     'rgba(236,228,208,0.02)',
   surfaceTintSm:   'rgba(236,228,208,0.03)',
@@ -677,8 +682,8 @@ var _DARK_TINTS = {
   successText:     '#7bc47b',
 };
 window.DARK_MODES = {
-  dark:  { bg: '#1a1820', bgRaised: '#252334', bgInset: '#2f2c3c', bgBody: '#141218', bgRgb: '26,24,32', inkFaint: 'rgba(236,228,208,0.54)', inkGhost: 'rgba(236,228,208,0.24)' },
-  black: { bg: '#07060a', bgRaised: '#100d0b', bgInset: '#1a1611', bgBody: '#050409', bgRgb: '7,6,10', inkFaint: 'rgba(236,228,208,0.34)', inkGhost: 'rgba(236,228,208,0.14)' },
+  dark:  { bg: '#1a1820', bgRaised: '#252334', bgInset: '#2f2c3c', bgBody: '#141218', bgRgb: '26,24,32', inkFaint: 'rgba(236,228,208,0.54)', inkGhost: 'rgba(236,228,208,0.24)', gridAlpha: 0.045 },
+  black: { bg: '#07060a', bgRaised: '#100d0b', bgInset: '#1a1611', bgBody: '#050409', bgRgb: '7,6,10', inkFaint: 'rgba(236,228,208,0.34)', inkGhost: 'rgba(236,228,208,0.14)', gridAlpha: 0.05 },
   light: {
     bg: '#f2ede4', bgRaised: '#eae3d6', bgInset: '#e2dacb', bgBody: '#e8e1d4', bgRgb: '242,237,228',
     ink: '#1f1b16', inkSoft: 'rgba(31,27,22,0.89)', inkFaint: 'rgba(31,27,22,0.72)', inkGhost: 'rgba(31,27,22,0.61)',
@@ -791,6 +796,7 @@ window.applyDarkMode = function(key) {
   s.setProperty('--range-track', m.rangeTrack || 'var(--hair-strong)');
   s.setProperty('--knurl-rgb', m.knurlRgb || '236,228,208');
   s.setProperty('--knurl-opacity', m.knurlOpacity || 1);
+  s.setProperty('--grid-alpha', m.gridAlpha ?? 0.16);
   // Tri-state: an explicit user choice ('1'/'0') applies to every theme;
   // untouched (null) falls back to today's behavior, grid on for paper only.
   var _gridPref = localStorage.getItem('logbook-grid-enabled');
