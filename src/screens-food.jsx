@@ -819,7 +819,14 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                 </div>
               )}
               <div style={{ display: 'flex', gap: 8 }}>
-                <input value={query} onChange={e => setQuery(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') runSearch(); }}
+                <input value={query} onChange={e => {
+                  const v = e.target.value;
+                  setQuery(v);
+                  // Clearing the box back to empty resets the search state, so
+                  // a stale results list (and the "Add manually" button that
+                  // rides on it) doesn't linger for text that's no longer there.
+                  if (!v.trim() && results != null) { setResults(null); setSearchError(null); }
+                }} onKeyDown={e => { if (e.key === 'Enter') runSearch(); }}
                   type="text" placeholder="Search food, or scan →" style={fdInputStyle} />
                 <button onClick={() => setScanPickerOpen(true)} aria-label="Scan barcode or nutrition label" style={fdSearchBtn}>
                   <i className="fa-solid fa-barcode" style={{ fontSize: 14 }} />
