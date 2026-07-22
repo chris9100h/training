@@ -1986,11 +1986,11 @@ function HealthDateStrip({ store, setStore, selectedDate, onSelect, onLog, targe
                 opacity: future ? 0.35 : 1, minHeight: 56,
                 WebkitTapHighlightColor: 'transparent',
               }}>
-              <div className="num" style={{ fontSize: 9, color: sel ? UI.gold : isToday ? UI.inkSoft : UI.inkFaint }}>
+              <div className="num" style={{ fontSize: 9, color: sel ? UI.gold : isToday ? UI.inkSoft : UI.inkFaint, textShadow: 'var(--text-lift)' }}>
                 {WEEKDAYS[i]}
               </div>
               <div style={{ fontSize: 11, fontWeight: 600, marginTop: 4, letterSpacing: '0.06em',
-                color: sel ? UI.gold : has ? UI.ink : UI.inkFaint }}>
+                color: sel ? UI.gold : has ? UI.ink : UI.inkFaint, textShadow: 'var(--text-lift)' }}>
                 {new Date(d + 'T12:00:00').getDate()}
               </div>
               {/* Day-type indicator — ALWAYS shown: dumbbell = training, dot = rest.
@@ -2003,7 +2003,7 @@ function HealthDateStrip({ store, setStore, selectedDate, onSelect, onLog, targe
                   <span style={{ width: 5, height: 5, borderRadius: '50%', border: `1px solid ${sel || has ? UI.goldSoft : UI.hairStrong}`, background: 'transparent', display: 'inline-block' }} />
                 )}
                 {has && (
-                  <svg width="9" height="9" viewBox="0 0 12 12" fill="none" stroke={UI.gold} strokeWidth="2">
+                  <svg width="9" height="9" viewBox="0 0 12 12" fill="none" stroke={UI.gold} strokeWidth="2" filter="url(#chart-text-lift)">
                     <path d="M2 6l2.5 2.5L10 3"/>
                   </svg>
                 )}

@@ -3027,7 +3027,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                   borderRadius: 4, cursor: 'pointer',
                   minHeight: 56,
                 }}>
-                <div className="num" style={{ fontSize: 9, color: isSelected ? UI.gold : d.isToday ? UI.inkSoft : UI.inkFaint }}>
+                <div className="num" style={{ fontSize: 9, color: isSelected ? UI.gold : d.isToday ? UI.inkSoft : UI.inkFaint, textShadow: 'var(--text-lift)' }}>
                   {cycleWeekView && !weekdayMode ? (
                     <>
                       <div>{WEEKDAYS[d.weekday]}</div>
@@ -3037,17 +3037,17 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                     </>
                   ) : slotLabel}
                 </div>
-                <div style={{ fontSize: 11, fontWeight: 600, marginTop: 4, color: r ? UI.inkFaint : isSelected ? UI.gold : isMissed ? UI.danger : isStatusDay ? 'var(--accent)' : isSkipped ? UI.inkFaint : UI.ink, letterSpacing: '0.06em' }}>
+                <div style={{ fontSize: 11, fontWeight: 600, marginTop: 4, color: r ? UI.inkFaint : isSelected ? UI.gold : isMissed ? UI.danger : isStatusDay ? 'var(--accent)' : isSkipped ? UI.inkFaint : UI.ink, letterSpacing: '0.06em', textShadow: 'var(--text-lift)' }}>
                   {r ? '—' : d.name.slice(0, 4)}
                 </div>
                 <div style={{ height: 12, marginTop: 2, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                   {isCompleted && !isSelected && (
-                    <svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke={UI.gold} strokeWidth="1.5" style={{ display: 'block' }}>
+                    <svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke={UI.gold} strokeWidth="1.5" style={{ display: 'block' }} filter="url(#chart-text-lift)">
                       <path d="M2 6l2.5 2.5L10 3"/>
                     </svg>
                   )}
                   {isMissed && !isSelected && <div style={{ width: 4, height: 4, borderRadius: '50%', background: UI.danger }} />}
-                  {isSkipped && !isSelected && <span style={{ fontSize: 8, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1 }}>—</span>}
+                  {isSkipped && !isSelected && <span style={{ fontSize: 8, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1, textShadow: 'var(--text-lift)' }}>—</span>}
                   {isStatusDay && !isSelected && <i className={`fa-solid ${statusDayMode === 'sick' ? 'fa-bed-pulse' : 'fa-umbrella-beach'}`} style={{ fontSize: 7, color: 'var(--accent)', opacity: 0.7 }} />}
                   {isSelected && <div style={{ width: 4, height: 4, borderRadius: '50%', background: UI.gold }} />}
                 </div>
