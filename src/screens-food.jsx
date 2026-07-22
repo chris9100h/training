@@ -927,7 +927,10 @@ function FdScanner({ onClose, onDetect }) {
         scannerRef.current = scanner;
         await scanner.start(
           { facingMode: 'environment' },
-          { fps: 10, qrbox: (w) => { const bw = Math.min(300, Math.floor(w * 0.85)); return { width: bw, height: Math.floor(bw * 0.6) }; } },
+          // No qrbox: scan the whole frame (its shaded overlay is what letterboxed
+          // the view and drew brackets outside the image). The video is forced to
+          // fill the screen via CSS below, and we draw our own centered frame.
+          { fps: 10 },
           (text) => {
             const raw = String(text || '').replace(/\D/g, '');
             if (doneRef.current || !/^\d{8,14}$/.test(raw)) return;
@@ -956,8 +959,16 @@ function FdScanner({ onClose, onDetect }) {
         <button onClick={onClose} aria-label="Close scanner" style={{ background: 'rgba(255,255,255,0.15)', border: 'none', color: '#fff', width: 34, height: 34, borderRadius: 4, cursor: 'pointer', fontSize: 18, lineHeight: 1 }}>×</button>
       </div>
       <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
-        {/* html5-qrcode renders the camera + scan region into this element. */}
-        <div id={FD_SCANNER_ELEM_ID} style={{ width: '100%', height: '100%' }} />
+        {/* html5-qrcode renders the camera into this element. Force the video it
+            injects to fill the area (cover), so the preview is truly full-screen
+            instead of letterboxed at the container's width. */}
+        <style>{`#${FD_SCANNER_ELEM_ID}{position:absolute!important;inset:0!important;width:100%!important;height:100%!important;overflow:hidden;}#${FD_SCANNER_ELEM_ID} video{position:absolute!important;top:0;left:0;width:100%!important;height:100%!important;object-fit:cover!important;}`}</style>
+        <div id={FD_SCANNER_ELEM_ID} />
+        {status === 'scanning' && (
+          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}>
+            <div style={{ width: '78%', maxWidth: 320, height: 160, border: '2px solid rgba(255,255,255,0.85)', borderRadius: 12, boxShadow: '0 0 0 100vmax rgba(0,0,0,0.4)' }} />
+          </div>
+        )}
         {status === 'error' ? (
           <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, padding: 32, textAlign: 'center' }}>
             <i className="fa-solid fa-barcode" style={{ fontSize: 34, color: 'rgba(255,255,255,0.45)' }} />
