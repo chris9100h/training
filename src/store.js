@@ -201,6 +201,11 @@ async function deletePasskey(passkeyId) {
   if (error) throw error;
 }
 
+async function updatePasskey(passkeyId, friendlyName) {
+  const { error } = await _supabase.auth.passkey.update({ passkeyId, friendlyName });
+  if (error) throw error;
+}
+
 async function resetPassword(email, redirectTo) {
   const { error } = await _supabase.auth.resetPasswordForEmail(email, { redirectTo });
   if (error) throw error;
@@ -6601,7 +6606,7 @@ window.LB = {
   clearPrecompileCaches, clearCachesAndReload,
   SUPABASE_URL, SUPABASE_ANON_KEY, PUSHOVER_URL, WEB_PUSH_URL, fnFetch,
   subscribeWebPush, unsubscribeWebPush, getWebPushSubscription,
-  signIn, signUp, signOut, signInWithPasskey, registerPasskey, listPasskeys, deletePasskey, resetPassword, deleteAllData, exportBackup, backupToBlob, readBackupText, importFromBackup, validateBackup,
+  signIn, signUp, signOut, signInWithPasskey, registerPasskey, listPasskeys, deletePasskey, updatePasskey, resetPassword, deleteAllData, exportBackup, backupToBlob, readBackupText, importFromBackup, validateBackup,
   loadFromSupabase, syncStore, mergeSessions, withCarriedWindowEntries, historyWindowCutoffISO, normalizeHiddenHealthCards,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
   uid, todayISO, fmtISO, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, incrementForExercise, equipmentCfgFor, is531MainLift, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, healScheduleWeekdays, buildPlanSkeleton, instantiateProgram, is531Plan, round531, tmFrom531, tmBump531, weeks531, week531, fiveThreeOneSets, build531Plan, add531MainLift, current531Week, current531Cycle, compute531CycleBumps, resolve531CycleEnd, suggest531Tm, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, mesoActive, autoregLoadOnly, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, realignCycleForToday, todayCycleStripIndex,

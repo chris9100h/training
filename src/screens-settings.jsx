@@ -406,6 +406,9 @@ function PasskeySheet({ open, onClose }) {
   const [loadingList, setLoadingList] = useStateSet(false);
   const [adding, setAdding] = useStateSet(false);
   const [deletingId, setDeletingId] = useStateSet(null);
+  const [editingId, setEditingId] = useStateSet(null);
+  const [editName, setEditName] = useStateSet('');
+  const [renaming, setRenaming] = useStateSet(false);
   const [error, setError] = useStateSet('');
   const [successMsg, setSuccessMsg] = useStateSet('');
 
@@ -428,7 +431,7 @@ function PasskeySheet({ open, onClose }) {
 
   useEffectSet(() => {
     if (open) loadPasskeys();
-    else { setPasskeys([]); setError(''); setSuccessMsg(''); }
+    else { setPasskeys([]); setError(''); setSuccessMsg(''); setEditingId(null); setEditName(''); }
   }, [open]);
 
   const handleAdd = async () => {
@@ -458,6 +461,25 @@ function PasskeySheet({ open, onClose }) {
       flash(e.message || 'Failed to remove passkey', true);
     } finally {
       setDeletingId(null);
+    }
+  };
+
+  const startEdit = (pk) => { setEditingId(pk.id); setEditName(pk.friendly_name || ''); };
+  const cancelEdit = () => { setEditingId(null); setEditName(''); };
+
+  const handleRename = async (id) => {
+    const name = editName.trim();
+    if (!name || renaming) return;
+    setRenaming(true);
+    try {
+      await LB.updatePasskey(id, name);
+      setPasskeys(prev => prev.map(p => p.id === id ? { ...p, friendly_name: name } : p));
+      setEditingId(null); setEditName('');
+      flash('Passkey renamed');
+    } catch (e) {
+      flash(e.message || 'Failed to rename passkey', true);
+    } finally {
+      setRenaming(false);
     }
   };
 
@@ -503,25 +525,62 @@ function PasskeySheet({ open, onClose }) {
             {passkeys.map((pk, i) => (
               <React.Fragment key={pk.id}>
                 {i > 0 && <div className="knurl" />}
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 0' }}>
-                  <div>
-                    <div style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 500 }}>
-                      {pk.friendly_name || 'Passkey'}
+                {editingId === pk.id ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 0' }}>
+                    <input
+                      value={editName}
+                      onChange={e => setEditName(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter') handleRename(pk.id); if (e.key === 'Escape') cancelEdit(); }}
+                      placeholder="Passkey name"
+                      autoFocus
+                      style={{ ...SETTINGS_INPUT_STYLE, flex: 1, padding: '7px 10px', fontSize: 13 }}
+                    />
+                    <button onClick={() => handleRename(pk.id)} disabled={!editName.trim() || renaming} aria-label="Save name" style={{
+                      background: 'rgba(var(--accent-rgb),0.16)', border: '1px solid rgba(var(--accent-rgb),0.4)',
+                      color: 'var(--accent)', borderRadius: 6, width: 32, height: 32, flexShrink: 0,
+                      cursor: renaming ? 'default' : 'pointer', opacity: editName.trim() ? 1 : 0.5,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', WebkitTapHighlightColor: 'transparent',
+                    }}>
+                      <i className={`fa-solid ${renaming ? 'fa-spinner fa-spin' : 'fa-check'}`} style={{ fontSize: 13 }} />
+                    </button>
+                    <button onClick={cancelEdit} disabled={renaming} aria-label="Cancel" style={{
+                      background: 'none', border: `var(--hair-width) solid ${UI.hairStrong}`,
+                      color: UI.inkFaint, borderRadius: 6, width: 32, height: 32, flexShrink: 0,
+                      cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', WebkitTapHighlightColor: 'transparent',
+                    }}>
+                      <i className="fa-solid fa-xmark" style={{ fontSize: 13 }} />
+                    </button>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '10px 0' }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {pk.friendly_name || 'Passkey'}
+                      </div>
+                      <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>
+                        Added {fmtDate(pk.created_at)}
+                      </div>
                     </div>
-                    <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>
-                      Added {fmtDate(pk.created_at)}
+                    <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                      <button onClick={() => startEdit(pk)} disabled={!!deletingId} aria-label="Rename" style={{
+                        background: 'none', border: `var(--hair-width) solid ${UI.hairStrong}`,
+                        color: UI.inkSoft, borderRadius: 6, width: 30, height: 30,
+                        cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', WebkitTapHighlightColor: 'transparent',
+                      }}>
+                        <i className="fa-solid fa-pen" style={{ fontSize: 11 }} />
+                      </button>
+                      <button onClick={() => handleDelete(pk.id, pk.friendly_name)} disabled={!!deletingId} style={{
+                        background: 'rgba(var(--danger-rgb),0.08)', border: '0.5px solid rgba(var(--danger-rgb),0.2)',
+                        color: UI.danger, borderRadius: 6, padding: '5px 12px',
+                        fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
+                        cursor: deletingId ? 'default' : 'pointer', opacity: deletingId === pk.id ? 0.5 : 1,
+                        WebkitTapHighlightColor: 'transparent',
+                      }}>
+                        {deletingId === pk.id ? '…' : 'Remove'}
+                      </button>
                     </div>
                   </div>
-                  <button onClick={() => handleDelete(pk.id, pk.friendly_name)} disabled={!!deletingId} style={{
-                    background: 'rgba(var(--danger-rgb),0.08)', border: '0.5px solid rgba(var(--danger-rgb),0.2)',
-                    color: UI.danger, borderRadius: 6, padding: '5px 12px',
-                    fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
-                    cursor: deletingId ? 'default' : 'pointer', opacity: deletingId === pk.id ? 0.5 : 1,
-                    WebkitTapHighlightColor: 'transparent', flexShrink: 0,
-                  }}>
-                    {deletingId === pk.id ? '…' : 'Remove'}
-                  </button>
-                </div>
+                )}
               </React.Fragment>
             ))}
           </div>
