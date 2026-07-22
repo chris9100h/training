@@ -824,7 +824,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
               </div>
               {sourceFilter === 'zane' && (
                 <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 10, lineHeight: 1.4 }}>
-                  Searches only foods already verified in Zane's own database, instant, no external lookup.
+                  Searches only foods already added by you or another user before, instant, no external lookup.
                 </div>
               )}
               <div style={{ display: 'flex', gap: 8 }}>
@@ -863,7 +863,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                       <button key={`${r.source}:${r.sourceId}`} onClick={() => pickResult(r)} style={fdResultRow}>
                         <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-                            {r.cached && <i className="fa-solid fa-circle-check" style={{ fontSize: 11, color: 'var(--accent)', flexShrink: 0 }} title="Already verified and cached" />}
+                            {r.cached && <i className="fa-solid fa-circle-check" style={{ fontSize: 11, color: 'var(--accent)', flexShrink: 0 }} title="Already added by a user before" />}
                             <div style={{ ...fdEntryName, minWidth: 0 }}>{r.name}</div>
                           </div>
                           {r.brand && <div style={fdEntryMeta}>{r.brand}</div>}
