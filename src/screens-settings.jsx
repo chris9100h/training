@@ -643,6 +643,7 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
   const [allUsersNewOnly, setAllUsersNewOnly] = useStateSet(false);
   const [allUsersOnboardedOnly, setAllUsersOnboardedOnly] = useStateSet(false);
   const [allUsersOutdatedOnly, setAllUsersOutdatedOnly] = useStateSet(false);
+  const [allUsersRecentOnly, setAllUsersRecentOnly] = useStateSet(false);
   const [adminUserDetail, setAdminUserDetail] = useStateSet(null); // { userId, name, plans }
   const [adminUserDetailLoading, setAdminUserDetailLoading] = useStateSet(false);
   const [adminUserDetailSheet, setAdminUserDetailSheet] = useStateSet(false);
@@ -3155,10 +3156,12 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       <SettingsSheet open={allUsersSheet} onClose={() => setAllUsersSheet(false)} title="All users">
         {(() => {
           const q = allUsersSearch.trim().toLowerCase();
+          const recentCutoff = Date.now() - 7 * 86400000;
           const filtered = allUsers.filter(u => {
             if (allUsersNewOnly && !isNewSignup(u)) return false;
             if (allUsersOnboardedOnly && !(u.plan_count > 0)) return false;
             if (allUsersOutdatedOnly && swVersion && u.sw_version === swVersion) return false;
+            if (allUsersRecentOnly && !(u.last_workout && new Date(u.last_workout).getTime() >= recentCutoff)) return false;
             if (!q) return true;
             return (u.name || '').toLowerCase().includes(q) || (u.email || '').toLowerCase().includes(q);
           });
@@ -3190,6 +3193,9 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                 </Row>
                 <Row label="Onboarded only">
                   <Toggle on={allUsersOnboardedOnly} onToggle={() => setAllUsersOnboardedOnly(v => !v)} />
+                </Row>
+                <Row label="Trained in last 7 days">
+                  <Toggle on={allUsersRecentOnly} onToggle={() => setAllUsersRecentOnly(v => !v)} />
                 </Row>
                 <Row label="Outdated version only">
                   <Toggle on={allUsersOutdatedOnly} onToggle={() => setAllUsersOutdatedOnly(v => !v)} />
@@ -3228,7 +3234,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                             {isNew && <span className="micro" style={{ flexShrink: 0, color: UI.gold }}>NEW</span>}
                           </div>
                           <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            {u.email} · joined {fmtAgo(u.created_at)} · {u.plan_count} {u.plan_count === 1 ? 'plan' : 'plans'}
+                            {u.plan_count} {u.plan_count === 1 ? 'plan' : 'plans'} · joined {fmtAgo(u.created_at)} · last workout {u.last_workout ? fmtAgo(u.last_workout) : 'never'}
                           </div>
                         </div>
                         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 5, flexShrink: 0 }}>

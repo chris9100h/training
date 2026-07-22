@@ -765,7 +765,7 @@ $function$;
 -- client-side on plan_count/created_at/sw_version instead of needing
 -- separate RPCs per filter.
 CREATE OR REPLACE FUNCTION public.get_all_users_admin()
- RETURNS TABLE(user_id uuid, name text, email text, sw_version text, created_at timestamptz, approved boolean, plan_count int)
+ RETURNS TABLE(user_id uuid, name text, email text, sw_version text, created_at timestamptz, approved boolean, plan_count int, last_workout timestamptz)
  LANGUAGE plpgsql
  SECURITY DEFINER
  SET search_path TO 'public'
@@ -776,7 +776,7 @@ BEGIN
   END IF;
   RETURN QUERY
     SELECT p.id, p.name, u.email::text, us.sw_version, u.created_at, p.approved,
-           COALESCE(sc.plan_count, 0)::int AS plan_count
+           COALESCE(sc.plan_count, 0)::int AS plan_count, lw.last_workout
     FROM zane_profiles p
     JOIN auth.users u ON u.id = p.id
     LEFT JOIN zane_user_settings us ON us.user_id = p.id
@@ -785,9 +785,14 @@ BEGIN
       -- function's own user_id OUT parameter and fails at call time.
       SELECT s.user_id, COUNT(*) AS plan_count FROM zane_schedules s GROUP BY s.user_id
     ) sc ON sc.user_id = p.id
+    LEFT JOIN (
+      SELECT s.user_id, MAX(s.ended) AS last_workout FROM zane_sessions s WHERE s.ended IS NOT NULL GROUP BY s.user_id
+    ) lw ON lw.user_id = p.id
     ORDER BY u.created_at DESC;
 END;
 $function$;
+REVOKE EXECUTE ON FUNCTION public.get_all_users_admin() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.get_all_users_admin() TO authenticated;
 
 -- Full plan detail (all schedules, days, items with resolved exercise
 -- name/movement_type/unilateral) for one user — used by the "All users"
