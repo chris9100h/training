@@ -69,7 +69,7 @@ Return ONLY a JSON object, no prose and no markdown code fences, with exactly th
 }
 Rules:
 - Set is_nutrition_label to false if the image is not a nutrition table at all; still return the object with the other fields null.
-- If the label shows BOTH a per-serving and a per-100g (or per-100ml) column, report the PER-SERVING values and set basis to "serving". Otherwise report the per-100g / per-100ml column and set basis to "100g" or "100ml".
+- ALWAYS prefer the per-100 g (or per-100 ml) column. If the label has a per-100g / per-100ml column, report THOSE values and set basis to "100g" or "100ml", even when a per-serving column is also present. Only if the label has no per-100g / per-100ml column at all, fall back to the per-serving values and set basis to "serving".
 - serving_size_g is the grams in one serving when stated (e.g. "per 30 g"); serving_label is the human text like "1 cup (30 g)".
 - calories must be in kcal. If only kilojoules (kJ) are printed, convert with kcal = kJ / 4.184 and round.
 - carbs_g is total carbohydrate, NOT the "of which sugars" sub-line.

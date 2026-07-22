@@ -119,6 +119,12 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // recipe draft item being edited: finishEntry replaces it in place rather
   // than appending a new ingredient.
   const [editingDraftId, setEditingDraftId] = useStateFd(null);
+  // Editable per-100g protein/carbs/fat for a scanned custom item, so the user
+  // can correct a misread before logging. Kept as strings (decimals allowed);
+  // only used on the pendingFood.custom path.
+  const [p100Str, setP100Str] = useStateFd('');
+  const [c100Str, setC100Str] = useStateFd('');
+  const [f100Str, setF100Str] = useStateFd('');
 
   const [customOpen, setCustomOpen] = useStateFd(false);
   const [customName, setCustomName] = useStateFd('');
@@ -330,17 +336,46 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       setLabelError('Could not read the values. Try a clearer photo, or add it manually.');
       return;
     }
-    // Amount the prefilled macros describe: the serving grams when read per
-    // serving and stated, 100 for a per-100g/ml label, else blank for the user
-    // to fill. The custom form logs the macros as typed (no rescaling), so the
-    // amount is a label, not a multiplier.
-    let amountG = '';
-    if (label.basis === '100g' || label.basis === '100ml') amountG = '100';
-    else if (label.serving_size_g > 0) amountG = String(Math.round(label.serving_size_g));
+    // Turn whatever basis the label used into per-100g/ml rates, so the
+    // quantity sheet can scale the macros to any portion the user types. The
+    // scanner is told to prefer the per-100 column, so basis is usually 100g;
+    // a serving-only label is converted through its stated gram weight.
+    const per100 = (label.basis === '100g' || label.basis === '100ml')
+      ? { cal, p, c, f, fib }
+      : (label.serving_size_g > 0)
+        ? (k => ({ cal: cal != null ? cal * k : null, p: p != null ? p * k : null, c: c != null ? c * k : null, f: f != null ? f * k : null, fib: fib != null ? fib * k : null }))(100 / label.serving_size_g)
+        : null;
 
+    if (per100) {
+      const name = label.name || '';
+      setEditingDraftId(null);
+      setPendingFood({
+        custom: true, fromCache: true,
+        name, brand: label.brand || null,
+        kcalPer100g: per100.cal, proteinPer100g: per100.p, carbsPer100g: per100.c,
+        fatPer100g: per100.f, fiberPer100g: per100.fib,
+        servingSizeG: label.serving_size_g > 0 ? label.serving_size_g : null,
+        servingLabel: label.serving_label || null,
+      });
+      setP100Str(per100.p != null ? String(fdRound1(per100.p)) : '');
+      setC100Str(per100.c != null ? String(fdRound1(per100.c)) : '');
+      setF100Str(per100.f != null ? String(fdRound1(per100.f)) : '');
+      setFavedId(existingFavId(null, name));
+      // Default portion: the printed 100 g when that is the basis (preview then
+      // matches the package numbers as a read-back sanity check), else the
+      // stated serving. The user edits it to their actual portion and the
+      // macros scale live.
+      setQtyG((label.basis === '100g' || label.basis === '100ml') ? '100' : String(Math.round(label.serving_size_g)));
+      setQtySheetOpen(true);
+      return;
+    }
+
+    // No per-100 basis and no serving grams (a pure per-serving label with no
+    // gram weight, or an unreadable basis): fall back to the plain custom form
+    // where the user types the macros for the amount, no scaling possible.
     resetCustomForm();
     setCustomName(label.name || '');
-    setCustomG(amountG);
+    setCustomG('');
     setCustomCal(cal != null ? String(Math.round(cal)) : '');
     setCustomP(p != null ? String(Math.round(p)) : '');
     setCustomC(c != null ? String(Math.round(c)) : '');
@@ -402,16 +437,30 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     const qty = fdInt(qtyG);
     if (!qty || qty <= 0) return null;
     const factor = qty / 100;
+    // For a scanned custom item the per-100g P/C/F come from the editable
+    // fields (so a correction flows straight into the scaled totals); for a DB
+    // food they come from the fixed rates on pendingFood. Calories always stay
+    // as read from the source's own energy value, never derived from macros.
+    const custom = !!pendingFood.custom;
+    const rate = (s, key) => {
+      if (!custom) return pendingFood[key] || 0;
+      const n = parseFloat(s);
+      return Number.isFinite(n) ? n : 0;
+    };
     return {
       calories: Math.round((pendingFood.kcalPer100g || 0) * factor),
-      protein: fdRound1((pendingFood.proteinPer100g || 0) * factor),
-      carbs: fdRound1((pendingFood.carbsPer100g || 0) * factor),
-      fat: fdRound1((pendingFood.fatPer100g || 0) * factor),
+      protein: fdRound1(rate(p100Str, 'proteinPer100g') * factor),
+      carbs: fdRound1(rate(c100Str, 'carbsPer100g') * factor),
+      fat: fdRound1(rate(f100Str, 'fatPer100g') * factor),
       fiber: pendingFood.fiberPer100g != null ? fdRound1(pendingFood.fiberPer100g * factor) : null,
     };
-  }, [pendingFood, qtyG]);
+  }, [pendingFood, qtyG, p100Str, c100Str, f100Str]);
 
-  function closeQtySheet() { setQtySheetOpen(false); setPendingFood(null); setQtyG(''); setFavedId(null); setEditingDraftId(null); }
+  // A scanned custom item needs a name before it can be logged/favorited; a
+  // DB food always has one, so this only ever gates the custom path.
+  const qtyNameMissing = !!(pendingFood && pendingFood.custom) && !String(pendingFood.name || '').trim();
+
+  function closeQtySheet() { setQtySheetOpen(false); setPendingFood(null); setQtyG(''); setFavedId(null); setEditingDraftId(null); setP100Str(''); setC100Str(''); setF100Str(''); }
   function closeCustomSheet() { setCustomOpen(false); setFavedId(null); setEditingDraftId(null); }
 
   // Build the entry the open sheet describes right now (without logging it), so
@@ -419,10 +468,17 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // data. Returns null while the form is incomplete.
   function buildQtyEntry() {
     if (!pendingFood || !qtyPreview) return null;
+    // A scanned label rides through the quantity sheet as a custom item
+    // (foodId null, source 'custom'): it has per-100g rates to scale by, but
+    // no shared-cache identity, so it must never be cached or keyed by source.
+    const custom = !!pendingFood.custom;
+    const name = (pendingFood.name || '').trim();
+    if (custom && !name) return null;
     return {
       id: LB.uid(), date: curDate, time: entryTime(),
-      foodId: `${pendingFood.source}:${pendingFood.sourceId}`,
-      foodName: pendingFood.name, brand: pendingFood.brand || null, source: pendingFood.source,
+      foodId: custom ? null : `${pendingFood.source}:${pendingFood.sourceId}`,
+      foodName: custom ? name : pendingFood.name, brand: pendingFood.brand || null,
+      source: custom ? 'custom' : pendingFood.source,
       quantityG: fdInt(qtyG), calories: qtyPreview.calories, protein: qtyPreview.protein,
       carbs: qtyPreview.carbs, fat: qtyPreview.fat, fiber: qtyPreview.fiber,
       createdAt: new Date().toISOString(),
@@ -897,8 +953,27 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         {pendingFood && (
           <>
             {pendingFood.brand && <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 14 }}>{pendingFood.brand}</div>}
-            <Field label="Amount (g)" style={{ marginBottom: 14 }}>
-              <input value={qtyG} onChange={e => setQtyG(e.target.value.replace(/[^0-9]/g, ''))} type="text" inputMode="numeric" placeholder="g" autoFocus style={fdBigInput} />
+            {pendingFood.custom && (
+              <>
+                <Field label="Name" style={{ marginBottom: 14 }}>
+                  <TextInput value={pendingFood.name || ''} onChange={(v) => setPendingFood(pf => pf ? { ...pf, name: v } : pf)} placeholder="e.g. Protein bar" />
+                </Field>
+                <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>Per 100 g · edit if the scan misread</div>
+                <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+                  <Field label="Protein (g)" style={{ flex: 1 }}>
+                    <input value={p100Str} onChange={e => setP100Str(e.target.value.replace(/[^0-9.]/g, ''))} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
+                  </Field>
+                  <Field label="Carbs (g)" style={{ flex: 1 }}>
+                    <input value={c100Str} onChange={e => setC100Str(e.target.value.replace(/[^0-9.]/g, ''))} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
+                  </Field>
+                  <Field label="Fat (g)" style={{ flex: 1 }}>
+                    <input value={f100Str} onChange={e => setF100Str(e.target.value.replace(/[^0-9.]/g, ''))} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
+                  </Field>
+                </div>
+              </>
+            )}
+            <Field label={pendingFood.custom ? 'Portion (g)' : 'Amount (g)'} style={{ marginBottom: 14 }}>
+              <input value={qtyG} onChange={e => setQtyG(e.target.value.replace(/[^0-9]/g, ''))} type="text" inputMode="numeric" placeholder="g" autoFocus={!pendingFood.custom} style={fdBigInput} />
             </Field>
             <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
               {[50, 100, 150, 200].map(g => (
@@ -921,14 +996,14 @@ function FoodScreen({ store, setStore, go, userId, date }) {
               </div>
             )}
             {!recipeMode && (
-              <button onClick={() => toggleFavorite(buildQtyEntry())} disabled={!qtyPreview} style={fdFavBtn(!!favedId, !qtyPreview)}>
+              <button onClick={() => toggleFavorite(buildQtyEntry())} disabled={!qtyPreview || qtyNameMissing} style={fdFavBtn(!!favedId, !qtyPreview || qtyNameMissing)}>
                 <i className={`fa-${favedId ? 'solid' : 'regular'} fa-star`} style={{ fontSize: 14, color: favedId ? UI.gold : UI.inkSoft }} />
                 {favedId ? 'Saved to favorites' : 'Save as favorite'}
               </button>
             )}
             <div style={{ display: 'flex', gap: 8 }}>
               <Btn kind="ghost" onClick={closeQtySheet} style={{ flex: 1 }}>Cancel</Btn>
-              <Btn onClick={confirmLogFood} disabled={!qtyPreview} style={{ flex: 2 }}>{recipeMode ? (editingDraftId ? 'Update ingredient' : 'Add ingredient') : 'Add'}</Btn>
+              <Btn onClick={confirmLogFood} disabled={!qtyPreview || qtyNameMissing} style={{ flex: 2 }}>{recipeMode ? (editingDraftId ? 'Update ingredient' : 'Add ingredient') : 'Add'}</Btn>
             </div>
           </>
         )}
@@ -1072,11 +1147,6 @@ function FdScanner({ onClose, onDetect }) {
             instead of letterboxed at the container's width. */}
         <style>{`#${FD_SCANNER_ELEM_ID}{position:absolute!important;inset:0!important;width:100%!important;height:100%!important;overflow:hidden;}#${FD_SCANNER_ELEM_ID} video{position:absolute!important;top:0;left:0;width:100%!important;height:100%!important;object-fit:cover!important;}`}</style>
         <div id={FD_SCANNER_ELEM_ID} />
-        {status === 'scanning' && (
-          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}>
-            <div style={{ width: '78%', maxWidth: 320, height: 160, border: '2px solid rgba(255,255,255,0.85)', borderRadius: 12, boxShadow: '0 0 0 100vmax rgba(0,0,0,0.4)' }} />
-          </div>
-        )}
         {status === 'error' ? (
           <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, padding: 32, textAlign: 'center' }}>
             <i className="fa-solid fa-barcode" style={{ fontSize: 34, color: 'rgba(255,255,255,0.45)' }} />
