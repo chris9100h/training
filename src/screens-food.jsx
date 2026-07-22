@@ -102,6 +102,19 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   const [curDate, setCurDate] = useStateFd(date || today);
   useEffectFd(() => setCurDate(date || today), [date]);
 
+  // Coach-assigned macros, same source and priority HealthScreen uses (coach
+  // macros win over personal targets when both exist, see effectiveMacroTargets):
+  // lets the Log-tab hero show progress against the real target instead of a
+  // bare total when the user (or their coach) has one set.
+  const [coachingMacros, setCoachingMacros] = useStateFd(null);
+  const coachingId = store.coaching?.asClient?.id || store.coaching?.asSelf?.id || null;
+  useEffectFd(() => {
+    if (!coachingId) { setCoachingMacros(null); return; }
+    let cancelled = false;
+    LB.loadCoachingMacros(coachingId).then(data => { if (!cancelled) setCoachingMacros(data[0] || null); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [coachingId]);
+
   const [tab, setTab] = useStateFd('log');
   const [quickTab, setQuickTab] = useStateFd('recent');
   // Hour (0-23) a timeline "+" was tapped for, so the next logged entry lands
@@ -170,6 +183,18 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     carbs: dayEntries.reduce((a, e) => a + (e.carbs || 0), 0),
     fat: dayEntries.reduce((a, e) => a + (e.fat || 0), 0),
   }), [dayEntries]);
+
+  // The calorie target for the currently-viewed day (curDate, which can be
+  // backdated), same resolution HealthScreen uses: coach macros win over
+  // personal ones, and training/rest day pick different targets. null when
+  // nothing is set, in which case the hero just shows a bare total, no ring.
+  const macroTargets = useMemoFd(() => LB.effectiveMacroTargets(store.settings?.macroTargets, coachingMacros), [store.settings?.macroTargets, coachingMacros]);
+  const dayTarget = useMemoFd(() => {
+    const isTraining = LB.isTrainingDayForDate(store, curDate);
+    return LB.dayTargetFromMacros(macroTargets, isTraining);
+  }, [store, macroTargets, curDate]);
+  const goalCalories = dayTarget?.calories ?? (dayTarget ? LB.caloriesFromMacros(dayTarget.protein, dayTarget.carbs, dayTarget.fat) : null);
+  const heroPercent = goalCalories > 0 ? Math.min(Math.round((dayTotals.calories / goalCalories) * 100), 100) : null;
 
   // Entries bucketed by the hour of their time, for the 0-23 timeline.
   const byHour = useMemoFd(() => {
@@ -756,22 +781,32 @@ function FoodScreen({ store, setStore, go, userId, date }) {
               </button>
             </div>
 
-            {/* Totals hero: same gold-left-border "today" card signature as
-                HealthMetricsCard and every HealthChartCard on the Health tab
-                this screen lives under (screens-health.jsx), so it reads as
-                part of that same family instead of a one-off. */}
-            <Card accent style={{ padding: 16, borderLeft: `3px solid ${UI.gold}` }}>
-              <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>{dayLabel} total</div>
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-                <span className="num" style={{ fontSize: 32, fontWeight: 300, color: UI.ink }}>{dayTotals.calories}</span>
-                <span style={{ fontSize: 13, color: UI.inkFaint, fontFamily: UI.fontUi }}>kcal</span>
+            {/* Totals hero: same BracketFrame-gold + progress-ring hero Water
+                uses for its own daily total, so this reads as the same kind of
+                primary "today" surface elsewhere in the app. The ring only
+                appears once a calorie target is resolvable (personal or coach
+                macros, see goalCalories above); with no target set it's just
+                the total and the macro chips, same as before. */}
+            <BracketFrame gold style={{ padding: 20 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 18 }}>
+                <div style={{ minWidth: 0 }}>
+                  <div className="micro" style={{ color: UI.inkFaint }}>{dayLabel}</div>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginTop: 4 }}>
+                    <span className="num" style={{ fontSize: 40, fontWeight: 300, color: UI.ink, lineHeight: 1 }}>{dayTotals.calories}</span>
+                    <span style={{ fontSize: 15, color: UI.inkFaint, fontFamily: UI.fontUi }}>kcal</span>
+                  </div>
+                  {goalCalories != null && (
+                    <div style={{ fontSize: 12, color: UI.inkSoft, marginTop: 8, fontFamily: UI.fontUi }}>of {goalCalories} kcal</div>
+                  )}
+                  <div style={{ display: 'flex', gap: 14, marginTop: 12 }}>
+                    <span className="num" style={{ fontSize: 12, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 10 }}>P</span> {Math.round(dayTotals.protein)}g</span>
+                    <span className="num" style={{ fontSize: 12, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 10 }}>C</span> {Math.round(dayTotals.carbs)}g</span>
+                    <span className="num" style={{ fontSize: 12, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 10 }}>F</span> {Math.round(dayTotals.fat)}g</span>
+                  </div>
+                </div>
+                {heroPercent != null && <FdRing percent={heroPercent} />}
               </div>
-              <div style={{ display: 'flex', gap: 16, marginTop: 10 }}>
-                <span className="num" style={{ fontSize: 12, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 10 }}>P</span> {Math.round(dayTotals.protein)}g</span>
-                <span className="num" style={{ fontSize: 12, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 10 }}>C</span> {Math.round(dayTotals.carbs)}g</span>
-                <span className="num" style={{ fontSize: 12, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 10 }}>F</span> {Math.round(dayTotals.fat)}g</span>
-              </div>
-            </Card>
+            </BracketFrame>
 
             {/* Hourly timeline: every hour 0-23 has a "+" that logs at exactly
                 that hour, with its entries listed underneath. */}
@@ -1121,6 +1156,32 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       {labelScanning && <FdLabelBusy />}
       {scanOpen && <FdScanner onClose={() => setScanOpen(false)} onDetect={handleScan} />}
     </Screen>
+  );
+}
+
+// Calorie-progress ring for the Log-tab hero, same shape as WaterRing
+// (screens-water.jsx) so both daily-total heroes read as the same idiom. Uses
+// the live accent color instead of a fixed hex: unlike Water's own semantic
+// blue (deliberately decoupled from the user's accent), Food has no such
+// fixed identity, and var(--accent) already adapts per theme on its own, so
+// no light/dark special-casing is needed here the way WaterRing needs for its
+// hardcoded blue.
+function FdRing({ percent, size = 128 }) {
+  const r = 50, circ = 2 * Math.PI * r;
+  const offset = circ * (1 - Math.min(percent, 100) / 100);
+  return (
+    <div style={{ position: 'relative', width: size, height: size, flexShrink: 0 }}>
+      <svg width={size} height={size} viewBox="0 0 120 120" style={{ transform: 'rotate(-90deg)' }}>
+        <circle cx="60" cy="60" r={r} fill="none" stroke={UI.hair} strokeWidth="12" />
+        <circle cx="60" cy="60" r={r} fill="none" stroke="var(--accent)" strokeWidth="12" strokeLinecap="round"
+          strokeDasharray={circ.toFixed(1)} strokeDashoffset={offset.toFixed(1)}
+          style={{ transition: 'stroke-dashoffset 0.7s cubic-bezier(0.22,1,0.36,1)' }} />
+      </svg>
+      <div style={{
+        position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+        fontFamily: UI.fontNum, fontSize: 26, fontWeight: 600, color: 'var(--accent)', fontVariantNumeric: 'tabular-nums',
+      }}>{percent}%</div>
+    </div>
   );
 }
 
