@@ -685,7 +685,7 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
     if (explicit != null) return explicit;
     if (store.settings?.vipBackground) return 16;
     const mode = store.settings?.darkMode ?? 'dark';
-    return mode === 'paper' ? 16 : mode === 'light' ? 14 : 4;
+    return mode === 'paper' ? 16 : mode === 'light' ? 14 : (gridEnabled ? 12 : 4);
   });
   const [showWarmupInSummary, setShowWarmupInSummary] = useStateSet(() => store.settings?.showWarmupInSummary ?? true);
   const [unitPickerOpen, setUnitPickerOpen] = useStateSet(false);
@@ -2204,7 +2204,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                 // Clears the explicit override so it falls back to the
                 // per-theme/per-image default again (same formula the initial
                 // slider position and screens-home.jsx's render both use).
-                const def = store.settings?.vipBackground ? 16 : darkMode === 'paper' ? 16 : darkMode === 'light' ? 14 : 4;
+                const def = store.settings?.vipBackground ? 16 : darkMode === 'paper' ? 16 : darkMode === 'light' ? 14 : (gridEnabled ? 12 : 4);
                 setWatermarkOpacityPct(def);
                 setStore(s => ({ ...s, settings: { ...s.settings, watermarkOpacity: null } }));
               }} style={{
