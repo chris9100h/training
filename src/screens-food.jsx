@@ -39,10 +39,15 @@ const fdRound1 = v => Math.round(v * 10) / 10;
 // single decimal point, normalizing a typed comma to a point first (mobile
 // keyboards in German locale emit ',' on the decimal key, and many nutrition
 // figures are fractional, e.g. a 37.5g cookie).
+// Capped at one decimal digit (every figure in this module, typed or
+// computed, is meant to read at 1 decimal max): the food logger has no use
+// for more precision than that, and it's what let a typed value carry
+// enough digits to surface as raw floating-point noise once multiplied
+// through a scaling calculation elsewhere.
 function fdDecimalFilter(raw) {
   let v = raw.replace(/,/g, '.').replace(/[^0-9.]/g, '');
   const dot = v.indexOf('.');
-  if (dot !== -1) v = v.slice(0, dot + 1) + v.slice(dot + 1).replace(/\./g, '');
+  if (dot !== -1) v = v.slice(0, dot + 1) + v.slice(dot + 1).replace(/\./g, '').slice(0, 1);
   return v;
 }
 
@@ -1022,7 +1027,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                   <div key={i.id} style={fdDraftRow}>
                     <button onClick={() => editDraftItem(i)} style={fdDraftMain}>
                       <span style={{ ...fdEntryName, fontSize: 12 }}>{i.foodName}</span>
-                      <span style={fdEntryMeta}>{i.quantityG}g · {LB.caloriesFromMacros(i.protein, i.carbs, i.fat) || 0} kcal · P{Math.round(i.protein)} C{Math.round(i.carbs)} F{Math.round(i.fat)}</span>
+                      <span style={fdEntryMeta}>{i.quantityG}g · {Math.round(LB.caloriesFromMacros(i.protein, i.carbs, i.fat) || 0)} kcal · P{Math.round(i.protein)} C{Math.round(i.carbs)} F{Math.round(i.fat)}</span>
                     </button>
                     <button onClick={() => removeRecipeDraftItem(i.id)} aria-label="Remove" style={fdInlineDeleteBtn}>
                       <i className="fa-solid fa-trash" style={{ fontSize: 11 }} />
