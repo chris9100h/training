@@ -2004,16 +2004,11 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           <Row label="Push notifications" first>
             <button style={accentBtn} onClick={() => setPushSheet(true)}>Configure</button>
           </Row>
-          <Hairline style={{ margin: '14px 0' }} />
           {typeof window !== 'undefined' && window.PublicKeyCredential && (
-            <>
-              <NavRow label="Passkeys" onTap={() => setPasskeySheet(true)} first />
-              <Hairline style={{ margin: '14px 0' }} />
-            </>
+            <NavRow label="Passkeys" onTap={() => setPasskeySheet(true)} />
           )}
-          <NavRow label="Change password" onTap={() => { setPwMsg(null); setPwCurrent(''); setPwNew(''); setPwConfirm(''); setShowPw(false); setChangePasswordSheet(true); }} first />
-          <Hairline style={{ margin: '14px 0' }} />
-          <NavRow label="Change email" onTap={() => { setEmailMsg(null); setEmailNew(''); setChangeEmailSheet(true); }} first />
+          <NavRow label="Change password" onTap={() => { setPwMsg(null); setPwCurrent(''); setPwNew(''); setPwConfirm(''); setShowPw(false); setChangePasswordSheet(true); }} />
+          <NavRow label="Change email" onTap={() => { setEmailMsg(null); setEmailNew(''); setChangeEmailSheet(true); }} />
           <div style={{ marginTop: 24 }}>
             <Btn style={{ width: '100%' }} onClick={() => setAccountSheet(false)}>Done</Btn>
           </div>
