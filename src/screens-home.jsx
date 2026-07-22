@@ -3725,6 +3725,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
         bloodPressureLogs={store.bloodPressureLogs || []}
         bodyTempLogs={store.bodyTempLogs || []}
         tempUnit={LB.defaultTempUnit(store.settings)}
+        go={go}
       />
 
       </div>{/* end swipe wrapper */}

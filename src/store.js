@@ -7,6 +7,7 @@ const PUSHOVER_URL          = `${SUPABASE_URL}/functions/v1/pushover`;
 const WEB_PUSH_URL          = `${SUPABASE_URL}/functions/v1/web-push`;
 const COACHING_NOTIFY_URL   = `${SUPABASE_URL}/functions/v1/zane_coaching-notify`;
 const ADMIN_SEND_EMAIL_URL  = `${SUPABASE_URL}/functions/v1/admin-send-email`;
+const FOOD_SEARCH_URL       = `${SUPABASE_URL}/functions/v1/search-foods`;
 
 const VAPID_PUBLIC_KEY = 'BD14GEr1JXGYdRwx6kiqpZMTvbialpruEJnHUmcbxjOshGZvULZ10xqayRTt3iVCyTBWRIR5nsXNVSsP0YdKQDI';
 
@@ -221,6 +222,7 @@ async function deleteAllData(userId, { keepPush = false } = {}) {
     unwrap(_supabase.from('zane_cardio_logs').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_daily_logs').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_water_logs').delete().eq('user_id', userId)),
+    unwrap(_supabase.from('zane_food_logs').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_workout_templates').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_glucose_logs').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_blood_pressure_logs').delete().eq('user_id', userId)),
@@ -391,6 +393,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
     + (backup.cardioLogs?.length ? 1 : 0)
     + (backup.dailyLogs?.length ? 1 : 0)
     + (backup.waterLogs?.length ? 1 : 0)
+    + (backup.foodLogs?.length ? 1 : 0)
     + (backup.workoutTemplates?.length ? 1 : 0)
     + (backup.checkinSchemaTemplates?.length ? 1 : 0)
     + (backup.glucoseLogs?.length ? 1 : 0)
@@ -518,6 +521,19 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
         id: l.id, user_id: userId, date: l.date, time: l.time,
         amount_ml: l.amountMl, name: l.name ?? null, category: l.category ?? null,
         breakdown: l.breakdown ?? null,
+      }))
+    ));
+    stepsDone++;
+  }
+  if (backup.foodLogs?.length) {
+    prog('Uploading food logs…');
+    await unwrap(_supabase.from('zane_food_logs').upsert(
+      backup.foodLogs.map(l => ({
+        id: l.id, user_id: userId, date: l.date, time: l.time,
+        food_id: l.foodId ?? null, food_name: l.foodName, brand: l.brand ?? null,
+        source: l.source ?? null, quantity_g: l.quantityG,
+        calories: l.calories, protein: l.protein, carbs: l.carbs, fat: l.fat,
+        fiber: l.fiber ?? null,
       }))
     ));
     stepsDone++;
@@ -853,13 +869,16 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     // Water tracker per-entry logs (migration 0180): multiple entries per day,
     // all records for the user. Coach reads a client's via coach-of-client RLS.
     _supabase.from('zane_water_logs').select('id, date, time, amount_ml, name, category, breakdown, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
+    // Food tracker per-entry logs (migration 0186): multiple entries per day,
+    // denormalized at write time. Coach reads a client's via coach-of-client RLS.
+    _supabase.from('zane_food_logs').select('id, date, time, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
   ];
   const [profileRes, exRes, schRes, sessRes, settRes, skipsRes, entriesRes,
          bestsRes, sessionStatsRes,
          coachInfoRes, coachClientsRes, unreadNotesRes, coachingRowRes, selfRowRes,
          cardioLogsRes, cardioPlansRes, dailyLogsRes, statusPeriodsRes,
          supportTicketsRes, glucoseLogsRes, bloodPressureLogsRes, bodyTempLogsRes, templatesRes, mesoStatesRes,
-         checkinTemplatesRes, planDraftsRes, waterLogsRes] = await Promise.all(queries);
+         checkinTemplatesRes, planDraftsRes, waterLogsRes, foodLogsRes] = await Promise.all(queries);
 
   // A failed request (offline, RLS, server error) also yields no data — bail
   // out so the caller can surface an error instead of mistaking this for a
@@ -891,6 +910,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   if (templatesRes.error) throw templatesRes.error;
   if (mesoStatesRes.error) throw mesoStatesRes.error;
   if (waterLogsRes.error) throw waterLogsRes.error;
+  if (foodLogsRes.error) throw foodLogsRes.error;
   // Coaching queries are null on coach loads (skipped) — guard with optional chaining.
   if (coachInfoRes?.error) throw coachInfoRes.error;
   if (coachClientsRes?.error) throw coachClientsRes.error;
@@ -1048,6 +1068,16 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
       id: l.id, date: l.date, time: l.time,
       amountMl: l.amount_ml ?? 0, name: l.name ?? null,
       category: l.category ?? null, breakdown: l.breakdown ?? null, createdAt: l.created_at,
+    })),
+    // Food tracker per-entry logs (migration 0186). Denormalized at write
+    // time: name/brand/macros are copied, never re-derived from foodId.
+    // numeric columns come back as strings from PostgREST, parseFloat them.
+    foodLogs: (foodLogsRes?.data || []).map(l => ({
+      id: l.id, date: l.date, time: l.time, foodId: l.food_id ?? null,
+      foodName: l.food_name, brand: l.brand ?? null, source: l.source ?? null,
+      quantityG: parseFloat(l.quantity_g), calories: l.calories,
+      protein: parseFloat(l.protein), carbs: parseFloat(l.carbs), fat: parseFloat(l.fat),
+      fiber: l.fiber != null ? parseFloat(l.fiber) : null, createdAt: l.created_at,
     })),
     glucoseLogs: (glucoseLogsRes?.data || []).map(l => ({
       id: l.id, date: l.date, time: l.time,
@@ -1506,6 +1536,21 @@ async function syncStore(prev, next, userId) {
     if (removed.length) ops.push(_supabase.from('zane_water_logs').delete().in('id', removed.map(l => l.id)));
   }
 
+  if (prev.foodLogs !== next.foodLogs) {
+    const upsert = (next.foodLogs || []).filter(l => {
+      const p = (prev.foodLogs || []).find(x => x.id === l.id);
+      return !p || JSON.stringify(p) !== JSON.stringify(l);
+    });
+    const removed = (prev.foodLogs || []).filter(l => !(next.foodLogs || []).find(x => x.id === l.id));
+    if (upsert.length) ops.push(_supabase.from('zane_food_logs').upsert(upsert.map(l => ({
+      id: l.id, user_id: userId, date: l.date, time: l.time, food_id: l.foodId ?? null,
+      food_name: l.foodName, brand: l.brand ?? null, source: l.source ?? null,
+      quantity_g: l.quantityG, calories: l.calories, protein: l.protein,
+      carbs: l.carbs, fat: l.fat, fiber: l.fiber ?? null,
+    }))));
+    if (removed.length) ops.push(_supabase.from('zane_food_logs').delete().in('id', removed.map(l => l.id)));
+  }
+
   if (prev.cardioPlans !== next.cardioPlans) {
     const upsert = (next.cardioPlans || []).filter(p => {
       const old = (prev.cardioPlans || []).find(x => x.id === p.id);
@@ -1820,6 +1865,29 @@ async function adminSendEmail(to, subject, message) {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) return { ok: false, error: data?.error || `Request failed (${res.status})` };
   return { ok: true };
+}
+
+// Food tracker: search Open Food Facts + USDA FoodData Central via the
+// search-foods edge function. Results are NOT cached server-side until
+// selectFood is called on one of them (see that function's own comment).
+async function searchFoods(query) {
+  const res = await fnFetch(FOOD_SEARCH_URL, { action: 'search', query });
+  if (!res) return { ok: false, error: 'Network error' };
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) return { ok: false, error: data?.error || `Request failed (${res.status})` };
+  return { ok: true, results: data.results || [], isBarcode: !!data.isBarcode };
+}
+
+// Re-fetches the chosen search result server-side (never trusts client-side
+// numbers) and upserts it into the shared zane_foods cache, growing it
+// organically with only what users actually select. Returns the cached
+// food's per-100g macros so the caller can compute a logged quantity.
+async function selectFood(source, sourceId) {
+  const res = await fnFetch(FOOD_SEARCH_URL, { action: 'select', source, sourceId });
+  if (!res) return { ok: false, error: 'Network error' };
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) return { ok: false, error: data?.error || `Request failed (${res.status})` };
+  return { ok: true, food: data };
 }
 
 function findExercise(state, exId) {
@@ -4585,15 +4653,16 @@ async function endDeload(userId, store, setStore) {
 }
 
 async function refreshHealthLogs(userId) {
-  const [dailyRes, cardioRes, glucoseRes, bpRes, tempRes, waterRes] = await Promise.all([
+  const [dailyRes, cardioRes, glucoseRes, bpRes, tempRes, waterRes, foodRes] = await Promise.all([
     _supabase.from('zane_daily_logs').select('id, date, weight, steps, calories, protein, carbs, fat, fiber, water_ml, note, off_plan_note, adherence, targets_snap, daily_coach_fields, updated_at, created_at').eq('user_id', userId).order('date', { ascending: false }),
     _supabase.from('zane_cardio_logs').select('id, date, type, duration_minutes, distance_m, pace_feeling, effort, note, session_id, created_at').eq('user_id', userId).order('date', { ascending: false }),
     _supabase.from('zane_glucose_logs').select('id, date, time, value_mmol, context, note, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
     _supabase.from('zane_blood_pressure_logs').select('id, date, time, systolic, diastolic, note, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
     _supabase.from('zane_body_temp_logs').select('id, date, time, value_c, note, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
     _supabase.from('zane_water_logs').select('id, date, time, amount_ml, name, category, breakdown, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
+    _supabase.from('zane_food_logs').select('id, date, time, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
   ]);
-  if (dailyRes.error || cardioRes.error || glucoseRes.error || bpRes.error || tempRes.error || waterRes.error) return null;
+  if (dailyRes.error || cardioRes.error || glucoseRes.error || bpRes.error || tempRes.error || waterRes.error || foodRes.error) return null;
   return {
     dailyLogs: (dailyRes.data || []).map(l => ({
       id: l.id, date: l.date,
@@ -4632,6 +4701,13 @@ async function refreshHealthLogs(userId) {
       id: l.id, date: l.date, time: l.time,
       amountMl: l.amount_ml ?? 0, name: l.name ?? null,
       category: l.category ?? null, breakdown: l.breakdown ?? null, createdAt: l.created_at,
+    })),
+    foodLogs: (foodRes?.data || []).map(l => ({
+      id: l.id, date: l.date, time: l.time, foodId: l.food_id ?? null,
+      foodName: l.food_name, brand: l.brand ?? null, source: l.source ?? null,
+      quantityG: parseFloat(l.quantity_g), calories: l.calories,
+      protein: parseFloat(l.protein), carbs: parseFloat(l.carbs), fat: parseFloat(l.fat),
+      fiber: l.fiber != null ? parseFloat(l.fiber) : null, createdAt: l.created_at,
     })),
   };
 }
@@ -6613,7 +6689,7 @@ window.LB = {
   effReps, fmtDuration, e1rm, isImprovement, isDecline, bestE1rmForExercise, bestAssistLoad, bestTimeForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, buildTimeSeedSets, latestBodyweight, bodyweightForDate, exerciseLogMode, isAssisted, shouldPullBodyweight, systemExerciseToRow, inferCurrentExIdx, calcBlended,
   refreshExerciseBests, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries,
   computeNextReminderAt,
-  cancelPushover, adminSendEmail,
+  cancelPushover, adminSendEmail, searchFoods, selectFood,
   subscribeToChanges,
   openStatusPeriod, closeStatusPeriod, updateStatusPeriodStart, clearStatusMode,
   startDeload, endDeload, deloadElapsed, deloadDaysRemaining, deloadPlanDays,

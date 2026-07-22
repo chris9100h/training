@@ -15,6 +15,7 @@ const HEALTH_CARD_TOGGLES = [
   { id: 'week', label: 'Week overview' },
   { id: 'today', label: 'Today' },
   { id: 'macroGroup', label: 'Macros' },
+  { id: 'food', label: 'Food' },
   { id: 'weight', label: 'Weight' },
   { id: 'cardio', label: 'Cardio' },
   { id: 'steps', label: 'Steps' },

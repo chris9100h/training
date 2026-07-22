@@ -2227,6 +2227,71 @@ $$;
 
 REVOKE EXECUTE ON FUNCTION public.collapse_water_logs() FROM PUBLIC;
 
+-- ── Food tracker (migration 0186) ───────────────────────────────────────────────
+-- zane_foods: shared/global reference cache (Open Food Facts + USDA FoodData
+-- Central), NOT per-user data. Populated only when a user selects a search
+-- result to log (search-foods Edge Function, service-role key), keyed
+-- deterministically (source:source_id) so re-selecting upserts instead of
+-- duplicating.
+-- zane_food_logs: per-user log entries, denormalized at write time so a later
+-- refresh of a cached food never retroactively changes a historical entry.
+
+CREATE TABLE zane_foods (
+  id                text        PRIMARY KEY,          -- `${source}:${source_id}`
+  source            text        NOT NULL CHECK (source IN ('off','usda')),
+  source_id         text        NOT NULL,
+  name              text        NOT NULL,
+  brand             text,
+  kcal_per_100g     numeric,
+  protein_per_100g  numeric,
+  carbs_per_100g    numeric,
+  fat_per_100g      numeric,
+  fiber_per_100g    numeric,
+  serving_size_g    numeric,
+  serving_label     text,
+  raw               jsonb,
+  cached_at         timestamptz NOT NULL DEFAULT now(),
+  created_at        timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX zane_foods_source_idx ON public.zane_foods USING btree (source, source_id);
+
+ALTER TABLE zane_foods ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "authenticated read foods"
+  ON zane_foods FOR SELECT TO authenticated USING (true);
+
+CREATE TABLE zane_food_logs (
+  id           text        PRIMARY KEY,
+  user_id      uuid        NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  date         text        NOT NULL,                  -- YYYY-MM-DD
+  time         text        NOT NULL,                  -- HH:MM local
+  food_id      text        REFERENCES public.zane_foods(id) ON DELETE SET NULL,
+  food_name    text        NOT NULL,
+  brand        text,
+  source       text,                                  -- 'off' | 'usda' | 'custom' | null
+  quantity_g   numeric     NOT NULL,
+  calories     integer     NOT NULL,
+  protein      numeric     NOT NULL,
+  carbs        numeric     NOT NULL,
+  fat          numeric     NOT NULL,
+  fiber        numeric,
+  created_at   timestamptz DEFAULT now()
+);
+
+CREATE INDEX zane_food_logs_user_date ON public.zane_food_logs USING btree (user_id, date DESC, "time" DESC);
+
+ALTER TABLE zane_food_logs ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users manage own food logs"
+  ON zane_food_logs FOR ALL TO public
+  USING (((select auth.uid()) = user_id)) WITH CHECK (((select auth.uid()) = user_id));
+CREATE POLICY "coaches read client food logs"
+  ON zane_food_logs FOR SELECT TO public
+  USING (EXISTS ( SELECT 1 FROM zane_coaching zc
+    WHERE zc.client_id = zane_food_logs.user_id
+      AND zc.coach_id = (select auth.uid()) AND zc.coach_id <> zc.client_id AND zc.status = 'active' AND zc.id NOT LIKE 'support_%'));
+
 -- ── Support tickets (migrations 0085/0086 + archive_support_tickets) ────────────
 -- A support ticket is a zane_coaching row with id LIKE 'support_%' between the
 -- user (client_id) and the admin (coach_id), carrying support_status/category.

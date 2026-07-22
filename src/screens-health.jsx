@@ -752,7 +752,7 @@ function CatSection({ label, extra, collapsed, onToggle, children }) {
   );
 }
 
-function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeCoachingSchema, onSetStatus, userId, glucoseLogs, glucoseUnit, bloodPressureLogs, bodyTempLogs, tempUnit }) {
+function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeCoachingSchema, onSetStatus, userId, glucoseLogs, glucoseUnit, bloodPressureLogs, bodyTempLogs, tempUnit, go }) {
   // Always-current store snapshot: saveTemp's fever nudge awaits a Supabase
   // write and then a user-interaction-gated confirm dialog, both arbitrarily
   // long, so it re-reads statusMode from this ref (not the closed-over
@@ -775,6 +775,16 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
   );
   const [waterUnlocked, setWaterUnlocked] = useStateH(false);
   const waterLocked = waterHasTrackerEntries && !waterUnlocked;
+  // The Food Tracker owns protein/carbs/fat/fiber/calories for a day the
+  // moment it has any entry for that day, same "tracker owns this field"
+  // pattern as water above, but per-date rather than today-only: backdated
+  // food logging is in scope, so a past day can lock too.
+  const foodHasTrackerEntries = useMemoH(
+    () => (store.foodLogs || []).some(l => l.date === date),
+    [store.foodLogs, date],
+  );
+  const [foodUnlocked, setFoodUnlocked] = useStateH(false);
+  const foodLocked = foodHasTrackerEntries && !foodUnlocked;
   const todayISO = LB.todayISO();
   const dayStatusPeriod = useMemoH(() => {
     const ts = new Date(date + 'T12:00:00').getTime();
@@ -1026,6 +1036,7 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
   useEffectH(() => {
     if (!open) return;
     setWaterUnlocked(false);
+    setFoodUnlocked(false);
     const net = existing?.fiber != null ? true : !!store.settings?.netCarbs;
     setNetCarbs(net);
     // Blank the calories field when the saved value matches what the saved
@@ -1087,9 +1098,15 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
 
   const save = () => {
     if (!canSave) return;
-    const protein = healthInt(form.protein), carbs = healthInt(form.carbs), fat = healthInt(form.fat);
-    const fiber = netCarbs ? healthInt(form.fiber) : null;
-    const calories = form.calories !== '' ? healthInt(form.calories) : autoCals;
+    // Belt and suspenders, same reasoning as waterMl below: the locked fields
+    // render no real input while foodLocked (see the NUTRITION section), but
+    // save() itself never trusts the form for them either, so nothing can
+    // persist an override the user never confirmed through requestFoodUnlock.
+    const protein = foodLocked ? (existing?.protein ?? null) : healthInt(form.protein);
+    const carbs = foodLocked ? (existing?.carbs ?? null) : healthInt(form.carbs);
+    const fat = foodLocked ? (existing?.fat ?? null) : healthInt(form.fat);
+    const fiber = foodLocked ? (existing?.fiber ?? null) : (netCarbs ? healthInt(form.fiber) : null);
+    const calories = foodLocked ? (existing?.calories ?? null) : (form.calories !== '' ? healthInt(form.calories) : autoCals);
     // Single source of truth for the day type: a logged session wins, then a
     // flex Training|Rest override (set from the header), then cycle/week's
     // planned-day assumption (flex defaults to rest).
@@ -1154,16 +1171,26 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
     if (ok) setWaterUnlocked(true);
   };
 
+  const requestFoodUnlock = async () => {
+    const ok = await confirm(
+      "This day already has entries in the Food Tracker. Editing it here will be overwritten the next time you log food there.",
+      { title: 'Overwrite food tracker?', ok: 'Continue', cancel: 'Cancel' }
+    );
+    if (ok) setFoodUnlocked(true);
+  };
+
   const inputStyle = {
     width: '100%', boxSizing: 'border-box', background: UI.bgInset,
     border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4,
     padding: '10px 12px', fontFamily: UI.fontNum, fontSize: 15, color: UI.ink, outline: 'none',
   };
   const labelStyle = { fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.07em' };
-  const numField = (k, label, unit) => (
+  const numField = (k, label, unit, locked = false) => (
     <div style={{ flex: 1 }}>
       <div style={labelStyle}>{label}{unit ? ` (${unit})` : ''}</div>
-      <input type="text" inputMode="decimal" placeholder="—" value={form[k]} onChange={e => set(k, e.target.value)} style={inputStyle} />
+      {locked
+        ? <div onClick={requestFoodUnlock} style={{ ...inputStyle, opacity: 0.45, cursor: 'pointer' }}>{form[k] || '—'}</div>
+        : <input type="text" inputMode="decimal" placeholder="—" value={form[k]} onChange={e => set(k, e.target.value)} style={inputStyle} />}
     </div>
   );
   const waterQuickAddTileStyle = { padding: '10px 12px', borderRadius: 4, border: `var(--hair-width) solid ${UI.hairStrong}`, background: UI.bgInset, color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 12, whiteSpace: 'nowrap' };
@@ -1259,14 +1286,19 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
           ))}
         </div>
       }>
+        {go && (
+          <button onClick={() => go({ name: 'food', date })} style={{ display: 'flex', alignItems: 'center', gap: 5, background: 'none', border: 'none', padding: '0 0 10px', color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+            Log food <i className="fa-solid fa-arrow-right" style={{ fontSize: 9 }} />
+          </button>
+        )}
         <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-          {numField('protein', 'Protein', 'g')}
-          {numField('carbs', 'Carbs', 'g')}
-          {numField('fat', 'Fat', 'g')}
+          {numField('protein', 'Protein', 'g', foodLocked)}
+          {numField('carbs', 'Carbs', 'g', foodLocked)}
+          {numField('fat', 'Fat', 'g', foodLocked)}
         </div>
         {netCarbs && (
           <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-            {numField('fiber', 'Fiber', 'g')}
+            {numField('fiber', 'Fiber', 'g', foodLocked)}
             <div style={{ flex: 1 }}>
               <div style={labelStyle}>Net carbs (g)</div>
               <div style={{ ...inputStyle, color: netCarbsVal != null ? UI.inkSoft : UI.inkGhost, pointerEvents: 'none', userSelect: 'none' }}>
@@ -1277,8 +1309,16 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
         )}
         <div style={{ marginBottom: 12 }}>
           <div style={labelStyle}>Calories (kcal){autoCals != null && form.calories === '' ? (netCarbs ? ' · net carbs' : ' · from macros') : ''}</div>
-          <input type="text" inputMode="decimal" placeholder={autoCals != null ? String(autoCals) : '—'} value={form.calories} onChange={e => set('calories', e.target.value)} style={inputStyle} />
+          {foodLocked
+            ? <div onClick={requestFoodUnlock} style={{ ...inputStyle, opacity: 0.45, cursor: 'pointer' }}>{form.calories || '—'}</div>
+            : <input type="text" inputMode="decimal" placeholder={autoCals != null ? String(autoCals) : '—'} value={form.calories} onChange={e => set('calories', e.target.value)} style={inputStyle} />}
         </div>
+        {foodLocked && (
+          <button onClick={requestFoodUnlock} style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 5, background: 'none', border: 'none', padding: '4px 0', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+            <i className="fa-solid fa-lock" style={{ fontSize: 9, color: UI.inkGhost }} />
+            <span style={{ fontSize: 10, fontFamily: UI.fontUi, color: UI.inkGhost }}>Managed by the Food Tracker, tap to override</span>
+          </button>
+        )}
         <div>
           <div style={labelStyle}>Off-plan note <span style={{ textTransform: 'none', fontWeight: 400, color: UI.inkFaint }}>(optional · prefills check-in)</span></div>
           <textarea rows={2} placeholder="e.g. Birthday cake, 2 slices" value={form.offPlanNote} onChange={e => set('offPlanNote', e.target.value)} style={{ ...inputStyle, resize: 'none', fontFamily: UI.fontUi, fontSize: 14 }} />
@@ -2430,6 +2470,82 @@ function WaterCard({ waterSeries, waterAvg, waterLogs, tf: sharedTf, setTf: setS
   );
 }
 
+// Food's own historical trend already lives in the macroGroup composite below
+// (Macros/Adherence charts read straight off dailyLogs.calories/protein/carbs/
+// fat, which the tracker's rollup writes into), so this card doesn't repeat
+// it: just today's total and an entry-point into the tracker, same role
+// WaterCard's onOpen plays for water.
+function FoodCard({ foodLogs, dailyLogs, dragHandle, onExpand, onOpen, compact = false }) {
+  const today = LB.todayISO();
+  const todayEntries = useMemoH(
+    () => (foodLogs || []).filter(l => l.date === today).sort((a, b) => b.time.localeCompare(a.time)),
+    [foodLogs, today]
+  );
+  const todayLog = useMemoH(() => (dailyLogs || []).find(l => l.date === today), [dailyLogs, today]);
+  const kcal = todayLog?.calories ?? null;
+  const chip = (k, v) => (
+    <span style={{ fontFamily: UI.fontNum, fontSize: 11, color: UI.inkSoft }}>
+      <span style={{ color: UI.inkGhost, fontSize: 9 }}>{k}</span> {Math.round(v)}g
+    </span>
+  );
+  return (
+    <Card style={{ padding: 14, borderLeft: `3px solid ${UI.gold}`, height: '100%' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: kcal != null ? 8 : 0, flexWrap: 'wrap' }}>
+        {dragHandle}
+        <i className="fa-solid fa-utensils" style={{ fontSize: 11, color: UI.inkFaint }} />
+        <span style={{ ...HEALTH_CARD_HEADER_STYLE, flex: 1, minWidth: 60 }}>Food</span>
+        {onOpen && (
+          <button data-reorder-ignore="true" onClick={onOpen} aria-label="Open food tracker" style={{
+            background: 'transparent', border: 'none', padding: 2, cursor: 'pointer',
+            color: UI.gold, display: 'flex', alignItems: 'center', flexShrink: 0,
+            WebkitTapHighlightColor: 'transparent',
+          }}>
+            <i className="fa-solid fa-arrow-up-right-from-square" style={{ fontSize: 11 }} />
+          </button>
+        )}
+        {onExpand && (
+          <button data-reorder-ignore="true" onClick={onExpand} aria-label="Expand" style={{
+            background: 'transparent', border: 'none', padding: 2, cursor: 'pointer',
+            color: UI.inkFaint, display: 'flex', alignItems: 'center', flexShrink: 0,
+            WebkitTapHighlightColor: 'transparent',
+          }}>
+            <i className="fa-solid fa-expand" style={{ fontSize: 11 }} />
+          </button>
+        )}
+      </div>
+      {kcal != null ? (
+        <>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 8 }}>
+            <span className="num" style={{ fontSize: 22, color: UI.ink, fontWeight: 300 }}>{kcal}</span>
+            <span style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi }}>kcal today</span>
+          </div>
+          <div style={{ display: 'flex', gap: 12 }}>
+            {todayLog?.protein != null && chip('P', todayLog.protein)}
+            {todayLog?.carbs != null && chip('C', todayLog.carbs)}
+            {todayLog?.fat != null && chip('F', todayLog.fat)}
+          </div>
+          {!compact && todayEntries.length > 0 && (
+            <>
+              <div style={{ height: '0.5px', background: UI.hair, margin: '10px 0 8px' }} />
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {todayEntries.map(e => (
+                  <div key={e.id} style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
+                    <span style={{ fontSize: 9, fontFamily: UI.fontUi, color: UI.inkGhost, flexShrink: 0 }}>{e.time}</span>
+                    <span style={{ flex: 1, minWidth: 0, fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{e.foodName}</span>
+                    <span className="num" style={{ flexShrink: 0, fontSize: 11, color: UI.inkFaint }}>{e.calories} kcal</span>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </>
+      ) : (
+        <div style={{ textAlign: 'center', fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, padding: '6px 0' }}>Nothing logged today yet</div>
+      )}
+    </Card>
+  );
+}
+
 // ─── HealthScreen ─────────────────────────────────────────────────────────────
 
 function HealthScreen({ store, setStore, go, userId }) {
@@ -2596,6 +2712,50 @@ function HealthScreen({ store, setStore, go, userId }) {
     if (targets !== cachedTargets) setCachedTargets(targets);
   }, [targets]);
 
+  // The Food Tracker's rollup (screens-food.jsx) writes calories/protein/
+  // carbs/fat straight into a day's log but doesn't know about targets or
+  // adherence, the same division of labor DailyLogScreen.save() already has
+  // for the manual form. Reconciles adherence/targetsSnap for any date
+  // store.foodLogs touched, the exact same computation save() does
+  // (including the flex day-type override guard), whenever a food entry
+  // changes.
+  const foodTouchedDates = useMemoH(() => {
+    const set = new Set();
+    (store.foodLogs || []).forEach(l => set.add(l.date));
+    return set;
+  }, [store.foodLogs]);
+  useEffectH(() => {
+    if (!foodTouchedDates.size || !effectiveTargets) return;
+    const flexActive = LB.isFlexPlan((store.schedules || []).find(s => s.id === store.activeScheduleId));
+    setStore(s => {
+      let changed = false;
+      const nextLogs = (s.dailyLogs || []).map(log => {
+        if (!foodTouchedDates.has(log.date)) return log;
+        const dayMode = log.date === today ? (s.statusMode ?? null) : (() => {
+          const ts = new Date(log.date + 'T12:00:00').getTime();
+          const period = (s.statusPeriods || []).find(p => {
+            const start = new Date(p.startedAt).getTime();
+            const end = p.endedAt ? new Date(p.endedAt).getTime() : Date.now();
+            return ts >= start && ts <= end;
+          });
+          return period?.mode || null;
+        })();
+        const isTraining = LB.isTrainingDayForDate(s, log.date);
+        let { adherence, targetsSnap } = dayMode
+          ? { adherence: null, targetsSnap: null }
+          : LB.dailyLogAdherence(log, effectiveTargets, isTraining);
+        if (!dayMode && flexActive && !targetsSnap) {
+          const dt = log.targetsSnap?.dayType;
+          if (dt === 'training' || dt === 'rest') targetsSnap = { dayType: dt };
+        }
+        if (log.adherence === adherence && JSON.stringify(log.targetsSnap) === JSON.stringify(targetsSnap)) return log;
+        changed = true;
+        return { ...log, adherence, targetsSnap };
+      });
+      return changed ? { ...s, dailyLogs: nextLogs } : s;
+    });
+  }, [foodTouchedDates, effectiveTargets]);
+
   // Two-sided retroactive heal for a past day's saved day type:
   //  • DOWNGRADE training → rest: a training-tagged day with NO logged session
   //    was never earned. For cycle/week that's a planned training day skipped
@@ -2681,7 +2841,7 @@ function HealthScreen({ store, setStore, go, userId }) {
   // Macros/Adherence/Targets move, hide, and show as one unit, id 'macroGroup',
   // see its cardEls entry below, since hiding just one of the three orphans the
   // others (e.g. an adherence chart with no targets to compare against).
-  const DEFAULT_CARD_ORDER = ['week', 'today', 'macroGroup', 'weight', 'cardio', 'steps', 'water', 'glucose', 'bloodPressure', 'bodyTemp'];
+  const DEFAULT_CARD_ORDER = ['week', 'today', 'macroGroup', 'food', 'weight', 'cardio', 'steps', 'water', 'glucose', 'bloodPressure', 'bodyTemp'];
   const [cardOrder, setCardOrder] = useStateH(() => {
     let saved = [];
     try { saved = JSON.parse(localStorage.getItem(CARD_ORDER_KEY) || '[]'); } catch (_) {}
@@ -2849,6 +3009,9 @@ function HealthScreen({ store, setStore, go, userId }) {
         </div>
       </div>
     ),
+    food: (
+      <FoodCard foodLogs={store.foodLogs} dailyLogs={store.dailyLogs} dragHandle={handle} onExpand={expandBtn('food')} onOpen={() => go({ name: 'food' })} compact />
+    ),
     weight: (
       <HealthChartCard title="Weight" icon="fa-weight-scale" tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('weight')}
         headline={weightAvg != null ? `${weightAvg}${UI.unit()}` : null} sub={weightAvg != null ? 'avg' : null}>
@@ -2886,7 +3049,7 @@ function HealthScreen({ store, setStore, go, userId }) {
   // Sheet lookup for expandedCardId, every id any onExpand above can set.
   // Cloned with dragHandle/onExpand stripped: the expand sheet isn't inside a
   // reorder list (grip would be inert) and re-expanding itself is meaningless.
-  const expandableCards = { weight: cardEls.weight, steps: cardEls.steps, water: cardEls.water, cardio: cardEls.cardio,
+  const expandableCards = { weight: cardEls.weight, steps: cardEls.steps, water: cardEls.water, food: cardEls.food, cardio: cardEls.cardio,
     macroAdherence: macroAdherenceCard, macros: macrosCard,
     glucose: cardEls.glucose, bloodPressure: cardEls.bloodPressure, bodyTemp: cardEls.bodyTemp };
 
@@ -2977,7 +3140,7 @@ function HealthScreen({ store, setStore, go, userId }) {
           React.cloneElement(expandableCards[expandedCardId], { dragHandle: null, onExpand: null, compact: false })}
       </Sheet>
 
-      <DailyLogScreen open={logOpen} onClose={() => setLogOpen(false)} store={store} setStore={setStore} date={selectedDate} targets={effectiveTargets} activeCoachingSchema={activeCoachingSchema} onSetStatus={handleSetStatus} userId={userId} glucoseLogs={store.glucoseLogs || []} glucoseUnit={store.settings?.glucoseUnit ?? 'mmol'} bloodPressureLogs={store.bloodPressureLogs || []} bodyTempLogs={store.bodyTempLogs || []} tempUnit={LB.defaultTempUnit(store.settings)} />
+      <DailyLogScreen open={logOpen} onClose={() => setLogOpen(false)} store={store} setStore={setStore} date={selectedDate} targets={effectiveTargets} activeCoachingSchema={activeCoachingSchema} onSetStatus={handleSetStatus} userId={userId} glucoseLogs={store.glucoseLogs || []} glucoseUnit={store.settings?.glucoseUnit ?? 'mmol'} bloodPressureLogs={store.bloodPressureLogs || []} bodyTempLogs={store.bodyTempLogs || []} tempUnit={LB.defaultTempUnit(store.settings)} go={go} />
       <MacroTargetSheet open={targetOpen} onClose={() => setTargetOpen(false)} store={store} setStore={setStore} coachingMacros={coachingMacros} />
       <ExportSheet open={exportOpen} onClose={() => setExportOpen(false)} store={store} />
     </Screen>
@@ -2990,6 +3153,7 @@ function HealthClientLogs({ clientStore }) {
   const logs = clientStore?.dailyLogs || [];
   const cardioLogs = clientStore?.cardioLogs || [];
   const waterLogs = clientStore?.waterLogs || [];
+  const foodLogs = clientStore?.foodLogs || [];
   const glucoseLogs = clientStore?.glucoseLogs || [];
   const glucoseUnit = clientStore?.settings?.glucoseUnit ?? 'mmol';
   const bloodPressureLogs = clientStore?.bloodPressureLogs || [];
@@ -3007,7 +3171,7 @@ function HealthClientLogs({ clientStore }) {
   // Macros/Adherence move, hide, and show as one unit, id 'macroGroup', see its
   // cardEls entry below, same grouping as the client's own Health tab, and
   // required for hiddenHealthCards (client setting) to hide it correctly here too.
-  const DEFAULT_COACH_ORDER = ['week', 'today', 'macroGroup', 'weight', 'cardio', 'steps', 'water', 'glucose', 'bloodPressure', 'bodyTemp', 'weekly'];
+  const DEFAULT_COACH_ORDER = ['week', 'today', 'macroGroup', 'food', 'weight', 'cardio', 'steps', 'water', 'glucose', 'bloodPressure', 'bodyTemp', 'weekly'];
   const [cardOrder, setCardOrder] = useStateH(() => {
     let saved = [];
     try { saved = JSON.parse(localStorage.getItem(COACH_ORDER_KEY) || '[]'); } catch (_) {}
@@ -3136,6 +3300,11 @@ function HealthClientLogs({ clientStore }) {
         {macrosCard}
       </div>
     ),
+    // No onOpen: this view is read-only, the coach can't jump into the
+    // client's own FoodScreen.
+    food: (
+      <FoodCard foodLogs={foodLogs} dailyLogs={logs} dragHandle={handle} onExpand={expandBtn('food')} compact />
+    ),
     weight: (
       <HealthChartCard title="Weight" icon="fa-weight-scale" tf={tf} setTf={setTf} dragHandle={handle} onExpand={expandBtn('weight')}
         headline={weightAvg != null ? `${weightAvg}${clientUnit}` : null} sub={weightAvg != null ? 'avg' : null}>
@@ -3200,7 +3369,7 @@ function HealthClientLogs({ clientStore }) {
   // Sheet lookup for expandedCardId, every id any onExpand above can set.
   // Cloned with dragHandle/onExpand stripped: the expand sheet isn't inside a
   // reorder list (grip would be inert) and re-expanding itself is meaningless.
-  const expandableCards = { weight: cardEls.weight, steps: cardEls.steps, water: cardEls.water, cardio: cardEls.cardio,
+  const expandableCards = { weight: cardEls.weight, steps: cardEls.steps, water: cardEls.water, food: cardEls.food, cardio: cardEls.cardio,
     adherence: adherenceCard, macros: macrosCard,
     glucose: cardEls.glucose, bloodPressure: cardEls.bloodPressure, bodyTemp: cardEls.bodyTemp };
 

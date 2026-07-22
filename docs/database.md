@@ -264,6 +264,29 @@ Sonderfälle und RLS:
 - **Collapse (Migration 0183):** stündlicher pg_cron-Job (`water-log-collapse`) ruft `collapse_water_logs()` (SECURITY DEFINER, kein Grant an `authenticated`/`anon`) auf. Pro User und vergangenem lokalem Tag (via `tz_offset_minutes`, wie beim water-reminder-Cron) werden alle Einträge, sobald mehr als eine Zeile für diesen Tag existiert, zu **einer** Zeile zusammengefasst: `amount_ml` = Tagessumme, `time = '00:00'`, `name = null`, `category = 'summary'`, `breakdown` trägt die Getränke-Aufschlüsselung (Name → Anzahl, plus Milch-ml-Summe), damit `WaterStatsBody`s „Other drinks this period"-Breakdown auch für vergangene Zeiträume funktioniert. Grund: Uhrzeit-Granularität eines vergangenen Tages ist in der UI ohnehin nirgends einsehbar (nur „heute" zeigt Einzel-Einträge/Stundenchart), der Tagestotal steht ohnehin redundant in `zane_daily_logs.water_ml`. Ein Tag mit nur einem Eintrag bleibt unangetastet (schon „eine Zeile").
 - RLS: eigene Zeilen + Coach-of-Client-Reads (inline-EXISTS wie glucose/bp/temp).
 
+### `zane_foods`
+
+Geteilter/globaler Referenz-Cache, **keine** Per-User-Daten (einzige Tabelle in diesem Schema mit diesem Charakter). Basis des Zane-eigenen Macro-Trackers (`FoodScreen`, Migration 0186).
+
+- `id` (text, PK: `${source}:${source_id}`, z.B. `off:3017620422003`), `source` (text, CHECK `'off'|'usda'`), `source_id` (text), `name` (text), `brand` (text, nullable)
+- `kcal_per_100g`/`protein_per_100g`/`carbs_per_100g`/`fat_per_100g`/`fiber_per_100g` (numeric, nullable), `serving_size_g` (numeric, nullable), `serving_label` (text, nullable)
+- `raw` (jsonb, nullable): normalisierter Snapshot der Upstream-Antwort
+- `cached_at`/`created_at` (timestamptz)
+- Wird **nicht** bei jedem Such-Treffer befüllt, sondern nur wenn ein User ein Suchergebnis tatsächlich zum Loggen auswählt (Edge Function `search-foods`, `action: 'select'`, Service-Role-Key, holt den Datensatz serverseitig nochmal per `source`/`source_id` nach statt Client-Werten zu vertrauen). `id` ist deterministisch, ein erneutes Auswählen upsert't statt zu duplizieren, die Datenbank wächst so organisch mit den tatsächlich genutzten Lebensmitteln.
+- RLS: `SELECT` für `authenticated` (nicht-sensible Referenzdaten). Bewusst **kein** Insert/Update/Delete-Grant für `authenticated`/`anon`: einziger Writer ist die Edge Function per Service-Role-Key, RLS also für Client-Direktzugriff irrelevant, aber die fehlenden Policies verhindern, dass ein Client den Cache direkt mit erfundenen Nährwerten vergiften könnte.
+
+### `zane_food_logs`
+
+Pro-User-Log-Einträge des Macro-Trackers, **zum Schreibzeitpunkt denormalisiert** (wie `zane_water_logs`): ein späteres Refresh eines gecachten `zane_foods`-Eintrags darf einen bereits geloggten Eintrag nie rückwirkend verändern, gleiches Prinzip wie z.B. `planned_reps` auf Session-Entries.
+
+- `id` (text), `user_id` (uuid), `date` (text, YYYY-MM-DD), `time` (text, HH:MM, lokale Uhrzeit des Eintrags)
+- `food_id` (text, nullable, FK → `zane_foods.id` `ON DELETE SET NULL`: nur zur Nachverfolgung, nie für die Anzeige gelesen; `null` bei Custom Items)
+- `food_name` (text: zum Schreibzeitpunkt kopiert), `brand` (text, nullable), `source` (text, nullable: `'off'|'usda'|'custom'|null`)
+- `quantity_g` (numeric), `calories` (int: aus dem eigenen Energiewert der Quelle, nicht aus den Makros abgeleitet), `protein`/`carbs`/`fat` (numeric), `fiber` (numeric, nullable)
+- `created_at` (timestamptz)
+- Store field: `store.foodLogs`. Mehrere Einträge pro Tag, Basis von `FoodScreen`. Als Store-Collection über den syncStore-Diff gesynct (wie `zane_water_logs`), inklusive Boot-Merge/Anti-Resurrection. Bei jeder Mutation schreibt der Client die Tagessumme aller Einträge zurück in `zane_daily_logs.protein`/`carbs`/`fat`/`calories`/`fiber` (analog zu `water_ml`), damit Health-Macro-Karten und Coaching-Targets eine einzige Quelle behalten; das bestehende manuelle Eingabeformular bleibt als Override verfügbar (gleiches Lock/Unlock-Muster wie beim Water-Feld). "Custom Item"-Einträge (kein Datenbanktreffer) tragen direkt vom User eingetippte Makros, `food_id: null`, `source: 'custom'`.
+- RLS: eigene Zeilen + Coach-of-Client-Reads (inline-EXISTS wie water/glucose/bp/temp). Migration 0186.
+
 ### `zane_cardio_logs`
 
 - `id` (text), `user_id` (uuid), `date` (text, YYYY-MM-DD), `type` (text, nullable), `duration_minutes` (int), `distance_m` (numeric, nullable), `pace_feeling` (int 1-6, nullable), `effort` (int 1-10, nullable), `note` (text, nullable), `created_at` (timestamptz)
