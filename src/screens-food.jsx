@@ -195,9 +195,11 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     setQuery(''); setResults(null); setSearchError(null);
     setTab('search');
   }
-  // Main tab taps clear a pending timeline hour (the user navigated away from
-  // that intent); addAtHour uses the raw setTab so it is not cleared there.
-  function onTabChange(id) { setPendingHour(null); setTab(id); }
+  // A pending timeline hour applies to whatever the user adds next, so it must
+  // survive moving between the two "add a food" tabs (Search and Quick Add).
+  // Only stepping back to the Log tab (where the timeline itself lives, with
+  // its own per-hour "+") ends that intent.
+  function onTabChange(id) { if (id === 'log') setPendingHour(null); setTab(id); }
 
   // Terminal step shared by the search-selected and custom-item flows: commits
   // straight to the day's log, or (while building a recipe) appends to the
@@ -261,8 +263,9 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       await confirm(res.error || 'Could not load this food. Try again.', { title: 'Lookup failed', ok: 'OK', cancel: null });
       return;
     }
-    setFavedId(null); setEditingDraftId(null);
+    setEditingDraftId(null);
     setPendingFood(res.food);
+    setFavedId(existingFavId(`${res.food.source}:${res.food.sourceId}`, res.food.name));
     setQtyG(res.food.servingSizeG ? String(Math.round(res.food.servingSizeG)) : '100');
     setQtySheetOpen(true);
   }
@@ -273,7 +276,8 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // without another network round-trip. Recent (foodLogs) and Favorites
   // share this exact shape, so one function serves both strips.
   function reAddFromRecent(l) {
-    setFavedId(null); setEditingDraftId(null);
+    setEditingDraftId(null);
+    setFavedId(existingFavId(l.foodId, l.foodName));
     if (l.foodId) {
       const per100 = l.quantityG > 0 ? 100 / l.quantityG : 1;
       setPendingFood({
@@ -283,6 +287,8 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         carbsPer100g: l.carbs * per100, fatPer100g: l.fat * per100,
         fiberPer100g: l.fiber != null ? l.fiber * per100 : null,
         servingSizeG: null, servingLabel: null,
+        // Already in the log (so already cached): don't re-cache it on re-log.
+        fromCache: true,
       });
       setQtyG(String(l.quantityG || 100));
       setQtySheetOpen(true);
@@ -342,14 +348,24 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     };
   }
 
+  // Id of an existing favorite matching this food (by food_id for DB items, by
+  // name for custom ones), or null. Used to reflect the already-favorited
+  // state on open and to prevent duplicate favorites.
+  function existingFavId(foodId, foodName) {
+    const f = (store.foodFavorites || []).find(x => foodId ? x.foodId === foodId : (x.foodId == null && x.foodName === foodName));
+    return f ? f.id : null;
+  }
+
   // Immediate favorite: tapping the star saves (or, on a second tap, removes)
   // the favorite right away, independent of whether the food ends up logged.
+  // Never creates a duplicate: if the food is already a favorite, it just
+  // reflects (or removes) the existing one.
   function toggleFavorite(entry) {
     if (!entry) return;
-    if (favedId) {
-      const id = favedId;
+    const already = favedId || existingFavId(entry.foodId, entry.foodName);
+    if (already) {
       setFavedId(null);
-      setStore(s => ({ ...s, foodFavorites: (s.foodFavorites || []).filter(f => f.id !== id) }));
+      setStore(s => ({ ...s, foodFavorites: (s.foodFavorites || []).filter(f => f.id !== already) }));
     } else {
       const fav = {
         id: LB.uid(), foodId: entry.foodId, foodName: entry.foodName, brand: entry.brand,
@@ -369,6 +385,12 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     const entry = buildQtyEntry();
     if (!entry) return;
     finishEntry(entry);
+    // Only now (a real log, not a mere open) grow the shared cache, and only
+    // for a freshly-fetched DB food that wasn't already cached. Not while
+    // building a recipe (ingredients aren't standalone logs).
+    if (!recipeMode && entry.foodId && pendingFood && !pendingFood.fromCache) {
+      LB.cacheFood(pendingFood.source, pendingFood.sourceId);
+    }
     closeQtySheet();
   }
 
@@ -420,7 +442,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         kcalPer100g: item.calories * per100, proteinPer100g: item.protein * per100,
         carbsPer100g: item.carbs * per100, fatPer100g: item.fat * per100,
         fiberPer100g: item.fiber != null ? item.fiber * per100 : null,
-        servingSizeG: null, servingLabel: null,
+        servingSizeG: null, servingLabel: null, fromCache: true,
       });
       setQtyG(String(item.quantityG || 100));
       setQtySheetOpen(true);
@@ -482,10 +504,25 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     return { calories: Math.round(sum('calories')), protein: Math.round(sum('protein')), carbs: Math.round(sum('carbs')), fat: Math.round(sum('fat')) };
   }, [recipeMode]);
 
+  // Shown on both add-a-food tabs (Search and Quick Add) whenever a timeline
+  // hour is pending, so the target time is always visible and cancelable.
+  const pendingHourBanner = pendingHour != null && !recipeMode ? (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 12px', background: 'rgba(var(--accent-rgb),0.1)', border: `1px solid rgba(var(--accent-rgb),0.3)`, borderRadius: 6 }}>
+      <i className="fa-solid fa-clock" style={{ fontSize: 12, color: 'var(--accent)' }} />
+      <span style={{ flex: 1, fontSize: 12, color: UI.ink, fontFamily: UI.fontUi }}>Logging at {String(pendingHour).padStart(2, '0')}:00</span>
+      <button onClick={() => setPendingHour(null)} style={{ background: 'none', border: 'none', padding: '2px 4px', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>Now instead</button>
+    </div>
+  ) : null;
+
   return (
     <Screen>
       {confirmEl}
-      <TopBar title="Food" sub={dayLabel} onBack={() => go({ name: 'health' })} />
+      <TopBar title="Food" sub={dayLabel} onBack={() => go({ name: 'health' })}
+        right={tab === 'quickadd' && quickTab === 'recipes' && !recipeMode && (store.foodRecipes || []).length > 0 ? (
+          <button onClick={openNewRecipe} aria-label="New recipe" style={fdTopAddBtn}>
+            <i className="fa-solid fa-plus" style={{ fontSize: 14 }} />
+          </button>
+        ) : undefined} />
 
       <SubTabBar tabs={FD_TABS} active={tab} onChange={onTabChange} />
 
@@ -603,13 +640,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
 
         {tab === 'search' && (
           <>
-            {pendingHour != null && !recipeMode && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 12px', background: 'rgba(var(--accent-rgb),0.1)', border: `1px solid rgba(var(--accent-rgb),0.3)`, borderRadius: 6 }}>
-                <i className="fa-solid fa-clock" style={{ fontSize: 12, color: 'var(--accent)' }} />
-                <span style={{ flex: 1, fontSize: 12, color: UI.ink, fontFamily: UI.fontUi }}>Logging at {String(pendingHour).padStart(2, '0')}:00</span>
-                <button onClick={() => setPendingHour(null)} style={{ background: 'none', border: 'none', padding: '2px 4px', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>Now instead</button>
-              </div>
-            )}
+            {pendingHourBanner}
             <div>
               <Bezel style={{ marginBottom: 10 }}>Search</Bezel>
               <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `1px solid ${UI.hairStrong}`, marginBottom: 10 }}>
@@ -667,6 +698,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
 
         {tab === 'quickadd' && (
           <>
+            {pendingHourBanner}
             <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `1px solid ${UI.hairStrong}` }}>
               {FD_QUICK_TABS.map(t => (
                 <button key={t.id} onClick={() => setQuickTab(t.id)} style={fdSegBtn(quickTab === t.id)}>{t.label}</button>
@@ -721,12 +753,15 @@ function FoodScreen({ store, setStore, go, userId, date }) {
             )}
 
             {quickTab === 'recipes' && (
-              <>
-                <button onClick={openNewRecipe} style={fdLinkBtn}>+ New recipe</button>
-                {(store.foodRecipes || []).length === 0 ? (
+              (store.foodRecipes || []).length === 0 ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginTop: 4 }}>
                   <div style={fdEmptyStyle}>No recipes yet. Build one from a few ingredients you log together often.</div>
-                ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>
+                  <Btn onClick={openNewRecipe} style={{ width: '100%' }}>
+                    <i className="fa-solid fa-plus" style={{ marginRight: 8 }} /> New recipe
+                  </Btn>
+                </div>
+              ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                     {(store.foodRecipes || []).map(r => {
                       const items = r.items || [];
                       const kcal = Math.round(items.reduce((a, i) => a + (i.calories || 0), 0));
@@ -749,8 +784,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                       );
                     })}
                   </div>
-                )}
-              </>
+              )
             )}
           </>
         )}
@@ -897,6 +931,11 @@ const fdSearchBtn = {
 const fdLinkBtn = {
   marginTop: 8, background: 'none', border: 'none', padding: '4px 0', color: 'var(--accent)',
   fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+};
+const fdTopAddBtn = {
+  width: 34, height: 34, borderRadius: 4, border: `1px solid ${UI.hairStrong}`,
+  background: 'transparent', color: UI.inkSoft, cursor: 'pointer',
+  display: 'flex', alignItems: 'center', justifyContent: 'center', WebkitTapHighlightColor: 'transparent',
 };
 function fdFavBtn(active, disabled) {
   return {

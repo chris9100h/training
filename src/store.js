@@ -1947,15 +1947,23 @@ async function searchFoods(query, source) {
 }
 
 // Re-fetches the chosen search result server-side (never trusts client-side
-// numbers) and upserts it into the shared zane_foods cache, growing it
-// organically with only what users actually select. Returns the cached
-// food's per-100g macros so the caller can compute a logged quantity.
+// numbers) so the caller can compute a logged quantity. Does NOT cache it,
+// caching happens only when the food is actually logged (see cacheFood). The
+// returned food carries `fromCache` (was it already in zane_foods), so the
+// caller can skip the log-time cacheFood call for an already-cached item.
 async function selectFood(source, sourceId) {
   const res = await fnFetch(FOOD_SEARCH_URL, { action: 'select', source, sourceId });
   if (!res) return { ok: false, error: 'Network error' };
   const data = await res.json().catch(() => ({}));
   if (!res.ok) return { ok: false, error: data?.error || `Request failed (${res.status})` };
   return { ok: true, food: data };
+}
+
+// Fire-and-forget: adds a just-logged DB food to the shared zane_foods cache
+// (server re-fetches by id and upserts). The log itself never waits on this,
+// and a dropped call self-heals on the next log of the same food.
+function cacheFood(source, sourceId) {
+  fnFetch(FOOD_SEARCH_URL, { action: 'cache', source, sourceId });
 }
 
 function findExercise(state, exId) {
@@ -6757,7 +6765,7 @@ window.LB = {
   effReps, fmtDuration, e1rm, isImprovement, isDecline, bestE1rmForExercise, bestAssistLoad, bestTimeForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, buildTimeSeedSets, latestBodyweight, bodyweightForDate, exerciseLogMode, isAssisted, shouldPullBodyweight, systemExerciseToRow, inferCurrentExIdx, calcBlended,
   refreshExerciseBests, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries,
   computeNextReminderAt,
-  cancelPushover, adminSendEmail, searchFoods, selectFood,
+  cancelPushover, adminSendEmail, searchFoods, selectFood, cacheFood,
   subscribeToChanges,
   openStatusPeriod, closeStatusPeriod, updateStatusPeriodStart, clearStatusMode,
   startDeload, endDeload, deloadElapsed, deloadDaysRemaining, deloadPlanDays,

@@ -6,14 +6,18 @@
 // is enough to make search work; USDA is skipped silently (not a hard
 // failure) whenever the key is unset.
 //
-// action: 'search' hits both sources (Open Food Facts only for a numeric
-// barcode query, USDA has no meaningful barcode lookup) and returns
-// normalized, UNCACHED results. action: 'select' re-fetches the chosen item
-// server-side by id (never trusts client-submitted nutrition numbers) and
-// upserts it into zane_foods, the app's shared, organically-growing food
-// cache, before returning it. zane_food_logs itself is never touched here,
-// the client computes the specific-quantity macros and writes that entry
-// through the normal store/sync path once it knows the logged quantity.
+// Three actions:
+// - 'search': hits both sources (Open Food Facts only for a numeric barcode
+//   query, USDA has no meaningful barcode lookup) plus our own zane_foods
+//   cache, and returns normalized results (does not write anything).
+// - 'select': re-fetches the chosen item server-side by id (never trusts
+//   client-submitted numbers) so the client can compute a logged quantity.
+//   Does NOT write the cache, opening an item to check its macros must not
+//   grow the shared DB.
+// - 'cache': called when a food is actually logged; re-fetches by id and
+//   upserts into zane_foods, so the shared cache grows with only foods people
+//   really ate. zane_food_logs is never touched here, the client writes the
+//   logged entry through the normal store/sync path.
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -315,27 +319,35 @@ async function fetchCachedFood(id: string): Promise<FoodResult | null> {
   return row ? foodRowToResult(row) : null;
 }
 
-async function handleSelect(source: 'off' | 'usda', sourceId: string): Promise<FoodResult | null> {
-  // A product's per-100g nutrition is static once published, so once we've
-  // verified it server-side once (below) there is no need to hit the
-  // upstream API again on every re-select. This is most of the perceived
-  // "opening a result is slow" latency, especially for repeat picks off the
-  // recent/favorites strips.
+// Fetch a food's macros for display: cache-first (served from zane_foods when
+// present), else a live upstream lookup. Deliberately does NOT write the
+// cache. A food joins the shared zane_foods DB only when it is actually
+// logged (see cacheFood / action:'cache'), so merely opening an item to check
+// its macros never grows the shared cache with foods nobody ate. fromCache
+// lets the client skip the log-time cache call for an item we already had.
+async function resolveFood(source: 'off' | 'usda', sourceId: string): Promise<{ food: FoodResult | null; fromCache: boolean }> {
   const cached = await fetchCachedFood(`${source}:${sourceId}`);
-  if (cached) return cached;
-
-  // Only a live upstream lookup is left. USDA needs the key for that, but a
-  // cached USDA row was already served above, so this only blocks a
-  // genuinely-new USDA item when the key is unset (and none can even surface
-  // in search then). Checked here, not in the request handler, so serving a
-  // cached USDA food never depends on the key being present.
-  if (source === 'usda' && !Deno.env.get('USDA_API_KEY')) return null;
-
+  if (cached) return { food: cached, fromCache: true };
+  // Only a live upstream lookup is left. USDA needs the key for that; a cached
+  // USDA row was already served above, so this only blocks a genuinely-new
+  // USDA item when the key is unset (and none can even surface in search then).
+  if (source === 'usda' && !Deno.env.get('USDA_API_KEY')) return { food: null, fromCache: false };
   const food = source === 'off'
     ? await lookupOffBarcode(sourceId)
     : await lookupUsdaById(sourceId, Deno.env.get('USDA_API_KEY') ?? '');
-  if (!food) return null;
+  return { food, fromCache: false };
+}
 
+// Add a food to the shared cache, called when it is actually logged. Re-fetches
+// server-side by id (never trusts client-submitted numbers) and upserts. No-op
+// if the food is already cached, or (USDA) the key is unset.
+async function cacheFood(source: 'off' | 'usda', sourceId: string): Promise<void> {
+  if (await fetchCachedFood(`${source}:${sourceId}`)) return;
+  if (source === 'usda' && !Deno.env.get('USDA_API_KEY')) return;
+  const food = source === 'off'
+    ? await lookupOffBarcode(sourceId)
+    : await lookupUsdaById(sourceId, Deno.env.get('USDA_API_KEY') ?? '');
+  if (!food) return;
   const row = {
     id: `${food.source}:${food.sourceId}`,
     source: food.source,
@@ -351,22 +363,11 @@ async function handleSelect(source: 'off' | 'usda', sourceId: string): Promise<F
     serving_label: food.servingLabel,
     cached_at: new Date().toISOString(),
   };
-  const writeCache = dbFetch('zane_foods', {
+  await dbFetch('zane_foods', {
     method: 'POST',
     headers: { 'Prefer': 'resolution=merge-duplicates' },
     body: JSON.stringify(row),
   }).catch((e) => console.error('[search-foods] cache upsert error:', e));
-  // Don't make the caller wait on the cache write, it isn't needed to answer
-  // this request. waitUntil (Supabase's Edge Runtime global) keeps it alive
-  // in the background past the response instead of racing the isolate
-  // shutdown; if that global isn't present the write still fires, it just
-  // isn't guaranteed to finish, a dropped write is harmless and self-heals
-  // (the next select for this id just re-fetches).
-  // deno-lint-ignore no-explicit-any
-  const rt = (globalThis as any).EdgeRuntime;
-  if (rt?.waitUntil) rt.waitUntil(writeCache);
-
-  return food;
 }
 
 Deno.serve(async (req) => {
@@ -403,13 +404,29 @@ Deno.serve(async (req) => {
         status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
-    const food = await handleSelect(source, sourceId);
+    const { food, fromCache } = await resolveFood(source, sourceId);
     if (!food) {
       return new Response(JSON.stringify({ error: 'food not found' }), {
         status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
-    return new Response(JSON.stringify(food), {
+    return new Response(JSON.stringify({ ...food, fromCache }), {
+      status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
+
+  // Called when a food is actually logged, to grow the shared cache with only
+  // foods people really ate (never on a mere open/macro-check).
+  if (body?.action === 'cache') {
+    const source = body.source === 'off' || body.source === 'usda' ? body.source : null;
+    const sourceId = typeof body.sourceId === 'string' ? body.sourceId.trim() : '';
+    if (!source || !sourceId) {
+      return new Response(JSON.stringify({ error: 'missing source/sourceId' }), {
+        status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+    await cacheFood(source, sourceId);
+    return new Response(JSON.stringify({ ok: true }), {
       status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
