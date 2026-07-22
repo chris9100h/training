@@ -73,8 +73,8 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   const [searching, setSearching] = useStateFd(false);
   const [searchError, setSearchError] = useStateFd(null);
   const [results, setResults] = useStateFd(null); // null = no search run yet
+  const [scanOpen, setScanOpen] = useStateFd(false);
 
-  const [selecting, setSelecting] = useStateFd(null);
   const [qtySheetOpen, setQtySheetOpen] = useStateFd(false);
   const [pendingFood, setPendingFood] = useStateFd(null);
   const [qtyG, setQtyG] = useStateFd('');
@@ -231,8 +231,8 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // below can tell an already-served filter from one the user switched to
   // mid-flight (which must still re-run once the in-flight request settles).
   const lastSearchedSource = useRefFd(null);
-  async function runSearch() {
-    const q = query.trim();
+  async function runSearch(override) {
+    const q = (typeof override === 'string' ? override : query).trim();
     if (!q || searching) return;
     const src = sourceFilter;
     lastSearchedSource.current = src;
@@ -254,19 +254,26 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     if (results != null && query.trim() && !searching && lastSearchedSource.current !== sourceFilter) runSearch();
   }, [sourceFilter, searching]); // eslint-disable-line
 
-  async function pickResult(r) {
-    if (selecting) return;
-    setSelecting(r.sourceId);
-    const res = await LB.selectFood(r.source, r.sourceId);
-    setSelecting(null);
-    if (!res.ok || !res.food) {
-      await confirm(res.error || 'Could not load this food. Try again.', { title: 'Lookup failed', ok: 'OK', cancel: null });
-      return;
-    }
+  // A scanned barcode runs straight through the normal search (its isBarcode
+  // path does an Open Food Facts barcode lookup), so the found product shows as
+  // a result the user taps to log.
+  function handleScan(code) {
+    setScanOpen(false);
+    setQuery(code);
+    runSearch(code);
+  }
+
+  // Open straight from the search result, no server round-trip: the result
+  // already carries the macros (from the same server search response), so the
+  // quantity sheet opens instantly, just like re-adding a favorite. The
+  // authoritative cache write still happens server-side at log time (see
+  // confirmLogFood -> LB.cacheFood), so a food that isn't cached yet
+  // (r.cached false) is cached only once it's actually eaten.
+  function pickResult(r) {
     setEditingDraftId(null);
-    setPendingFood(res.food);
-    setFavedId(existingFavId(`${res.food.source}:${res.food.sourceId}`, res.food.name));
-    setQtyG(res.food.servingSizeG ? String(Math.round(res.food.servingSizeG)) : '100');
+    setPendingFood({ ...r, fromCache: !!r.cached });
+    setFavedId(existingFavId(`${r.source}:${r.sourceId}`, r.name));
+    setQtyG(r.servingSizeG ? String(Math.round(r.servingSizeG)) : '100');
     setQtySheetOpen(true);
   }
 
@@ -656,7 +663,10 @@ function FoodScreen({ store, setStore, go, userId, date }) {
               <div style={{ display: 'flex', gap: 8 }}>
                 <input value={query} onChange={e => setQuery(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') runSearch(); }}
                   type="text" placeholder="Search food or scan a barcode…" style={fdInputStyle} />
-                <button onClick={runSearch} disabled={searching || !query.trim()} aria-label="Search" style={fdSearchBtn}>
+                <button onClick={() => setScanOpen(true)} aria-label="Scan barcode" style={fdSearchBtn}>
+                  <i className="fa-solid fa-barcode" style={{ fontSize: 14 }} />
+                </button>
+                <button onClick={() => runSearch()} disabled={searching || !query.trim()} aria-label="Search" style={fdSearchBtn}>
                   {searching ? <span style={{ fontFamily: UI.fontUi, fontSize: 11 }}>…</span> : <i className="fa-solid fa-magnifying-glass" style={{ fontSize: 13 }} />}
                 </button>
               </div>
@@ -675,7 +685,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                 ) : (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                     {results.map(r => (
-                      <button key={`${r.source}:${r.sourceId}`} onClick={() => pickResult(r)} disabled={selecting === r.sourceId} style={fdResultRow}>
+                      <button key={`${r.source}:${r.sourceId}`} onClick={() => pickResult(r)} style={fdResultRow}>
                         <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
                             {r.cached && <i className="fa-solid fa-circle-check" style={{ fontSize: 11, color: 'var(--accent)', flexShrink: 0 }} title="Already verified and cached" />}
@@ -886,7 +896,81 @@ function FoodScreen({ store, setStore, go, userId, date }) {
           <Btn onClick={confirmRecipeName} disabled={!recipeNameInput.trim()} style={{ flex: 2 }}>{recipeNameMode === 'rename' ? 'Save name' : 'Start adding ingredients'}</Btn>
         </div>
       </Sheet>
+
+      {scanOpen && <FdScanner onClose={() => setScanOpen(false)} onDetect={handleScan} />}
     </Screen>
+  );
+}
+
+// Live-camera barcode scanner using the native BarcodeDetector API (no
+// dependency). Works where the API is available (Chrome / Android). Where it
+// isn't (notably iOS Safari) it shows a clear fallback pointing to manual
+// barcode entry, which the search box already handles. Owns the camera stream
+// and detection loop, and tears both down on unmount.
+function FdScanner({ onClose, onDetect }) {
+  const videoRef = useRefFd(null);
+  const [status, setStatus] = useStateFd('init'); // 'init' | 'scanning' | 'unsupported' | 'error'
+  useEffectFd(() => {
+    if (typeof window === 'undefined' || !('BarcodeDetector' in window)) { setStatus('unsupported'); return; }
+    let detector;
+    try { detector = new window.BarcodeDetector({ formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128'] }); }
+    catch (_) { setStatus('unsupported'); return; }
+    let stream = null, timer = null, cancelled = false, busy = false;
+    (async () => {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } } });
+        if (cancelled) { stream.getTracks().forEach(t => t.stop()); return; }
+        const v = videoRef.current;
+        if (v) { v.srcObject = stream; await v.play().catch(() => {}); }
+        setStatus('scanning');
+        timer = setInterval(async () => {
+          if (busy || cancelled || !videoRef.current) return;
+          busy = true;
+          try {
+            const codes = await detector.detect(videoRef.current);
+            const raw = codes && codes[0] && codes[0].rawValue ? String(codes[0].rawValue).replace(/\D/g, '') : '';
+            if (/^\d{8,14}$/.test(raw)) { cancelled = true; clearInterval(timer); onDetect(raw); }
+          } catch (_) {}
+          busy = false;
+        }, 250);
+      } catch (_) {
+        if (!cancelled) setStatus('error');
+      }
+    })();
+    return () => { cancelled = true; if (timer) clearInterval(timer); if (stream) stream.getTracks().forEach(t => t.stop()); };
+  }, []); // eslint-disable-line
+
+  const fallback = status === 'unsupported' || status === 'error';
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 200, background: '#000', display: 'flex', flexDirection: 'column', animation: 'sheet-up 0.22s ease' }}>
+      <div style={{ padding: 'calc(env(safe-area-inset-top, 0px) + 12px) 18px 12px', display: 'flex', alignItems: 'center', gap: 12 }}>
+        <span style={{ flex: 1, color: '#fff', fontFamily: UI.fontUi, fontSize: 14, fontWeight: 600 }}>Scan barcode</span>
+        <button onClick={onClose} aria-label="Close scanner" style={{ background: 'rgba(255,255,255,0.15)', border: 'none', color: '#fff', width: 34, height: 34, borderRadius: 4, cursor: 'pointer', fontSize: 18, lineHeight: 1 }}>×</button>
+      </div>
+      <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
+        {fallback ? (
+          <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, padding: 32, textAlign: 'center' }}>
+            <i className="fa-solid fa-barcode" style={{ fontSize: 34, color: 'rgba(255,255,255,0.45)' }} />
+            <div style={{ color: '#fff', fontFamily: UI.fontUi, fontSize: 13, lineHeight: 1.5, maxWidth: 300 }}>
+              {status === 'unsupported'
+                ? "This browser can't scan barcodes. Type the barcode number into the search box instead, it looks it up the same way."
+                : 'Could not open the camera. Check the camera permission, or type the barcode number into search.'}
+            </div>
+            <button onClick={onClose} style={{ marginTop: 4, background: 'var(--accent)', color: 'var(--accent-ink)', border: 'none', borderRadius: 6, padding: '11px 22px', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', cursor: 'pointer' }}>Got it</button>
+          </div>
+        ) : (
+          <>
+            <video ref={videoRef} muted playsInline style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}>
+              <div style={{ width: '74%', maxWidth: 320, height: 150, border: '2px solid rgba(255,255,255,0.85)', borderRadius: 8, boxShadow: '0 0 0 100vmax rgba(0,0,0,0.45)' }} />
+            </div>
+            <div style={{ position: 'absolute', bottom: 'calc(env(safe-area-inset-bottom, 0px) + 24px)', left: 0, right: 0, textAlign: 'center', color: 'rgba(255,255,255,0.85)', fontFamily: UI.fontUi, fontSize: 12 }}>
+              {status === 'scanning' ? 'Point the camera at a barcode' : 'Starting camera…'}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
   );
 }
 

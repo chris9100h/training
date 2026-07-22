@@ -1935,28 +1935,16 @@ async function adminSendEmail(to, subject, message) {
   return { ok: true };
 }
 
-// Food tracker: search Open Food Facts + USDA FoodData Central via the
-// search-foods edge function. Results are NOT cached server-side until
-// selectFood is called on one of them (see that function's own comment).
+// Food tracker: search Open Food Facts + USDA FoodData Central (plus our own
+// zane_foods cache) via the search-foods edge function. Results carry all the
+// macros needed to log directly, nothing is cached server-side until a food
+// is actually logged (see cacheFood).
 async function searchFoods(query, source) {
   const res = await fnFetch(FOOD_SEARCH_URL, { action: 'search', query, source: source || undefined });
   if (!res) return { ok: false, error: 'Network error' };
   const data = await res.json().catch(() => ({}));
   if (!res.ok) return { ok: false, error: data?.error || `Request failed (${res.status})` };
   return { ok: true, results: data.results || [], isBarcode: !!data.isBarcode };
-}
-
-// Re-fetches the chosen search result server-side (never trusts client-side
-// numbers) so the caller can compute a logged quantity. Does NOT cache it,
-// caching happens only when the food is actually logged (see cacheFood). The
-// returned food carries `fromCache` (was it already in zane_foods), so the
-// caller can skip the log-time cacheFood call for an already-cached item.
-async function selectFood(source, sourceId) {
-  const res = await fnFetch(FOOD_SEARCH_URL, { action: 'select', source, sourceId });
-  if (!res) return { ok: false, error: 'Network error' };
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) return { ok: false, error: data?.error || `Request failed (${res.status})` };
-  return { ok: true, food: data };
 }
 
 // Fire-and-forget: adds a just-logged DB food to the shared zane_foods cache
@@ -6765,7 +6753,7 @@ window.LB = {
   effReps, fmtDuration, e1rm, isImprovement, isDecline, bestE1rmForExercise, bestAssistLoad, bestTimeForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, buildTimeSeedSets, latestBodyweight, bodyweightForDate, exerciseLogMode, isAssisted, shouldPullBodyweight, systemExerciseToRow, inferCurrentExIdx, calcBlended,
   refreshExerciseBests, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries,
   computeNextReminderAt,
-  cancelPushover, adminSendEmail, searchFoods, selectFood, cacheFood,
+  cancelPushover, adminSendEmail, searchFoods, cacheFood,
   subscribeToChanges,
   openStatusPeriod, closeStatusPeriod, updateStatusPeriodStart, clearStatusMode,
   startDeload, endDeload, deloadElapsed, deloadDaysRemaining, deloadPlanDays,
