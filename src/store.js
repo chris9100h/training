@@ -1956,7 +1956,7 @@ function cacheFood(source, sourceId) {
 }
 
 // Reads a nutrition label from a photo (base64, no data: prefix) via the
-// scan-label edge function (Claude vision). Returns the extracted macros so
+// scan-label edge function (xAI Grok vision). Returns the extracted macros so
 // the client can prefill the Custom Item form. Scanned labels are logged as
 // per-user custom items, never written to the shared zane_foods cache.
 async function scanLabel(imageBase64, mimeType) {

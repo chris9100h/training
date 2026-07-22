@@ -5,11 +5,17 @@
 // label a single user photographed is per-user data (zane_food_logs), never a
 // vetted, shared reference the way an Open Food Facts / USDA hit is.
 //
-// Vision runs through Anthropic (Claude Haiku), which needs ANTHROPIC_API_KEY
-// set as a Supabase Edge Function secret (Project Settings -> Edge Functions
-// -> Secrets, or `supabase secrets set ANTHROPIC_API_KEY=...`). Without the
-// key the function hard-fails with a clear message (unlike search-foods, this
-// has no free fallback source).
+// Vision runs through xAI (Grok), whose API is OpenAI-compatible. Needs the
+// secret XAI_API_KEY set as a Supabase Edge Function secret (Project Settings
+// -> Edge Functions -> Secrets, or `supabase secrets set XAI_API_KEY=...`).
+// Without the key the function hard-fails with a clear message (unlike
+// search-foods, this has no free fallback source).
+//
+// The model is configurable via the optional XAI_MODEL secret (default
+// 'grok-4'), because xAI rotates and deprecates model ids quickly: if xAI
+// renames the current vision model, point XAI_MODEL at it instead of editing
+// this file. A model the API rejects surfaces xAI's own error text to the
+// client so the fix is obvious.
 //
 // One action: POST { image: <base64, no data: prefix>, mimeType?: 'image/jpeg' }
 // -> { is_nutrition_label, name, brand, basis, serving_size_g, serving_label,
@@ -23,12 +29,11 @@ const corsHeaders = {
 
 const ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImViYnV2ZHpnc3RyaHJjc2JybGV6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwMjc4ODAsImV4cCI6MjA5MTYwMzg4MH0.RyTzHiqV1TPSZtM7lgenBJbUCTjj5fCUhoWauifjlIE';
 
-// Claude Haiku: cheap, fast, accurate enough to read a printed nutrition
-// table. A compressed label photo is a fraction of a cent per scan.
-const ANTHROPIC_MODEL = 'claude-haiku-4-5';
-const ALLOWED_MIME = new Set(['image/jpeg', 'image/png', 'image/webp']);
-// Client already downscales/compresses; this only guards against abuse. base64
-// inflates bytes ~4/3, so ~8M chars is roughly a 6 MB image.
+// xAI is OpenAI-compatible; the image goes in a user message as an image_url
+// data URI, exactly like OpenAI vision.
+const XAI_URL = 'https://api.x.ai/v1/chat/completions';
+const DEFAULT_MODEL = 'grok-4';
+const ALLOWED_MIME = new Set(['image/jpeg', 'image/png']);
 const MAX_IMAGE_CHARS = 8_000_000;
 
 async function resolveUser(req: Request): Promise<string | null> {
@@ -97,6 +102,17 @@ function str(v: unknown): string | null {
   return typeof v === 'string' && v.trim() !== '' ? v.trim() : null;
 }
 
+// Best-effort short reason from an xAI error body, so a rejected model id (or
+// out-of-credit account) is visible to the user instead of a bare status code.
+function errReason(raw: string): string {
+  try {
+    const j = JSON.parse(raw);
+    const m = j?.error?.message ?? j?.error ?? j?.message;
+    if (typeof m === 'string' && m.trim()) return m.trim().slice(0, 160);
+  } catch (_) { /* not JSON */ }
+  return raw.trim().slice(0, 160);
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
@@ -106,8 +122,9 @@ Deno.serve(async (req) => {
   const userId = await resolveUser(req);
   if (!userId) return json({ error: 'unauthorized' }, 401);
 
-  const apiKey = Deno.env.get('ANTHROPIC_API_KEY') ?? '';
-  if (!apiKey) return json({ error: 'Label scanning is not set up yet (missing ANTHROPIC_API_KEY).' }, 503);
+  const apiKey = Deno.env.get('XAI_API_KEY') ?? '';
+  if (!apiKey) return json({ error: 'Label scanning is not set up yet (missing XAI_API_KEY).' }, 503);
+  const model = (Deno.env.get('XAI_MODEL') ?? '').trim() || DEFAULT_MODEL;
 
   const body = await req.json().catch(() => ({}));
   const image = typeof body?.image === 'string' ? body.image.trim() : '';
@@ -117,40 +134,46 @@ Deno.serve(async (req) => {
 
   let resp: Response | null = null;
   try {
-    resp = await fetch('https://api.anthropic.com/v1/messages', {
+    resp = await fetch(XAI_URL, {
       method: 'POST',
       headers: {
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-        'content-type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: ANTHROPIC_MODEL,
-        max_tokens: 700,
-        system: SYSTEM_PROMPT,
-        messages: [{
-          role: 'user',
-          content: [
-            { type: 'image', source: { type: 'base64', media_type: mimeType, data: image } },
-            { type: 'text', text: USER_PROMPT },
-          ],
-        }],
+        model,
+        max_tokens: 1500,
+        messages: [
+          { role: 'system', content: SYSTEM_PROMPT },
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: USER_PROMPT },
+              { type: 'image_url', image_url: { url: `data:${mimeType};base64,${image}`, detail: 'high' } },
+            ],
+          },
+        ],
       }),
     });
   } catch (e) {
-    console.error('[scan-label] anthropic fetch error:', e);
+    console.error('[scan-label] xai fetch error:', e);
     return json({ error: 'Could not reach the label reader. Try again.' }, 502);
   }
 
   if (!resp.ok) {
     const detail = await resp.text().catch(() => '');
-    console.error('[scan-label] anthropic error', resp.status, detail);
-    return json({ error: `Label reader failed (${resp.status}). Try again.` }, 502);
+    console.error('[scan-label] xai error', resp.status, detail);
+    const reason = errReason(detail);
+    return json({ error: `Label reader failed (${resp.status})${reason ? ': ' + reason : ''}` }, 502);
   }
 
   const data = await resp.json().catch(() => null);
-  const textBlock = Array.isArray(data?.content) ? data.content.find((b: { type?: string }) => b?.type === 'text') : null;
-  const parsed = extractJson(textBlock?.text ?? '');
+  const content = data?.choices?.[0]?.message?.content;
+  const text = typeof content === 'string'
+    ? content
+    // Some OpenAI-compatible servers return content as an array of parts.
+    : Array.isArray(content) ? content.map((p: { text?: string }) => p?.text ?? '').join('') : '';
+  const parsed = extractJson(text);
   if (!parsed) {
     return json({ error: 'Could not read the label. Try a clearer, straight-on photo, or add it manually.' }, 422);
   }
