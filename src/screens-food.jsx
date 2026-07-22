@@ -906,10 +906,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                         {es.map(e => (
                           <div key={e.id} style={fdEntryRow}>
                             <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0, flex: 1 }}>
-                              <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-                                <span className="num" style={{ fontSize: 10, color: 'var(--accent)' }}>{e.time}</span>
-                                <span style={fdEntryName}>{e.foodName}</span>
-                              </div>
+                              <span style={fdEntryName}>{e.foodName}</span>
                               <span style={fdEntryMeta}>
                                 {e.quantityG ? `${e.quantityG}g · ` : ''}{e.calories} kcal · P{Math.round(e.protein)} C{Math.round(e.carbs)} F{Math.round(e.fat)}
                               </span>
