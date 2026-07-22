@@ -17,6 +17,17 @@
    Entry shape: { id: string, date: string (YYYY-MM-DD), title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.644',
+    date: '2026-07-22',
+    title: 'Food tracking, unlocked 🍽️',
+    items: [
+      "🍎 Track your food right in Zane. Search a real food database (Open Food Facts + USDA), log a portion, and it flows straight into the same macros, targets, and adherence you already track, no separate app, no manual math.",
+      "📸 The fun part: scan a barcode and we'll find the product for you. No barcode? Snap a photo of the nutrition label instead and let AI read the numbers off it. Point, shoot, done.",
+      "⭐ Log the same thing a lot? Star it as a Favorite, or bundle a whole meal into a Recipe (yes, even your 8-ingredient breakfast bowl) and log it all in one tap from now on.",
+      "🕐 An hour-by-hour timeline shows exactly when you ate, and you can log for any day in the last two weeks if you forgot yesterday. Already typed macros in by hand for a day? We'll check with you before the tracker takes over, so nothing gets silently overwritten.",
+    ],
+  },
+  {
     id: 'v2.640',
     date: '2026-07-21',
     title: 'Progression, dialed in 📈',
