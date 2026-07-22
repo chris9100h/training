@@ -1300,9 +1300,6 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                         <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
                           <div style={fdEntryName}>{f.foodName}</div>
                           {f.brand && <div style={fdEntryMeta}>{f.brand}</div>}
-                          {f.units?.length > 0 && (
-                            <div style={fdEntryMeta}>{f.units.map(u => `1 ${u.label} = ${u.grams}g`).join(' · ')}</div>
-                          )}
                         </div>
                         <div style={{ textAlign: 'right', flexShrink: 0 }}>
                           <div className="num" style={{ fontSize: 12, color: UI.inkSoft }}>{f.calories} kcal</div>
