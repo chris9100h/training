@@ -756,8 +756,11 @@ function FoodScreen({ store, setStore, go, userId, date }) {
               </button>
             </div>
 
-            {/* Totals hero */}
-            <Card style={{ padding: 16 }}>
+            {/* Totals hero: same gold-left-border "today" card signature as
+                HealthMetricsCard and every HealthChartCard on the Health tab
+                this screen lives under (screens-health.jsx), so it reads as
+                part of that same family instead of a one-off. */}
+            <Card accent style={{ padding: 16, borderLeft: `3px solid ${UI.gold}` }}>
               <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>{dayLabel} total</div>
               <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
                 <span className="num" style={{ fontSize: 32, fontWeight: 300, color: UI.ink }}>{dayTotals.calories}</span>
@@ -844,10 +847,10 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                   {searching ? <span style={{ fontFamily: UI.fontUi, fontSize: 11 }}>…</span> : <i className="fa-solid fa-magnifying-glass" style={{ fontSize: 13 }} />}
                 </button>
               </div>
-              {labelError && <div style={{ fontSize: 11, color: 'var(--danger)', fontFamily: UI.fontUi, marginTop: 8, lineHeight: 1.4 }}>{labelError}</div>}
+              {labelError && <div style={{ fontSize: 11, color: UI.danger, fontFamily: UI.fontUi, marginTop: 8, lineHeight: 1.4 }}>{labelError}</div>}
             </div>
 
-            {searchError && <div style={{ fontSize: 11, color: 'var(--danger)', fontFamily: UI.fontUi }}>{searchError}</div>}
+            {searchError && <div style={{ fontSize: 11, color: UI.danger, fontFamily: UI.fontUi }}>{searchError}</div>}
 
             {/* Only offered once a search has actually come up short (or the
                 user wants to add something regardless): before searching, there
@@ -989,7 +992,8 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                 <Field label="Name" style={{ marginBottom: 14 }}>
                   <TextInput value={pendingFood.name || ''} onChange={(v) => setPendingFood(pf => pf ? { ...pf, name: v } : pf)} placeholder="e.g. Protein bar" />
                 </Field>
-                <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>Per 100 g · edit if the scan misread</div>
+                <Bezel style={{ marginBottom: 6 }}>Per 100 g</Bezel>
+                <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 8 }}>Edit if the scan misread.</div>
                 <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
                   <Field label="Protein (g)" style={{ flex: 1 }}>
                     <input value={p100Str} onChange={e => setP100Str(fdDecimalFilter(e.target.value))} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
