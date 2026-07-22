@@ -80,9 +80,9 @@ function BlockRecap({ recap, evidence = null, escalation = 0 }) {
       {recap.loadPRs.length > 0 && (<>
         <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>WHAT YOU BUILT</div>
         <div className="knurl" style={{ marginBottom: 10 }} />
-        <div style={{ marginBottom: 16 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
           {recap.loadPRs.map((g, i) => (
-            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 0', borderBottom: i < recap.loadPRs.length - 1 ? `1px solid ${UI.hair}` : 'none' }}>
+            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 10px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6 }}>
               <span style={{ fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{g.name}</span>
               <span style={{ fontFamily: UI.fontNum, fontSize: 12, fontWeight: 700, color: 'var(--accent)', flexShrink: 0, marginLeft: 10 }}>+{g.weightDelta} {u}</span>
             </div>
@@ -92,9 +92,9 @@ function BlockRecap({ recap, evidence = null, escalation = 0 }) {
       {recap.setGains.some(g => g.setDelta > 0) && (<>
         <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>MORE SETS</div>
         <div className="knurl" style={{ marginBottom: 10 }} />
-        <div style={{ marginBottom: 16 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
           {recap.setGains.filter(g => g.setDelta > 0).map((g, i, arr) => (
-            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 0', borderBottom: i < arr.length - 1 ? `1px solid ${UI.hair}` : 'none' }}>
+            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 10px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6 }}>
               <span style={{ fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{g.name}</span>
               <span style={{ fontFamily: UI.fontNum, fontSize: 12, fontWeight: 700, color: 'var(--accent)', flexShrink: 0, marginLeft: 10 }}>+{g.setDelta} set{g.setDelta > 1 ? 's' : ''}</span>
             </div>
@@ -345,7 +345,7 @@ function LibraryScreen({ store, setStore, go, userId }) {
       />
 
       {/* Tab strip */}
-      <div style={{ display: 'flex', padding: '0 22px', borderBottom: `0.5px solid ${UI.hair}`, flexShrink: 0, marginTop: 8 }}>
+      <div style={{ display: 'flex', padding: '0 22px', borderBottom: `var(--hair-width) solid ${UI.hair}`, flexShrink: 0, marginTop: 8 }}>
         {[['recent','Recent'],['all','My exercises'],['db','Database']].map(([id,label]) => (
           <button key={id} onClick={() => setTab(id)} style={{
             flex: 1, background: 'transparent', border: 'none',
@@ -384,7 +384,7 @@ function LibraryScreen({ store, setStore, go, userId }) {
                   fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase',
                   display: 'flex', alignItems: 'center', gap: 5,
                 }}>
-                  Filter{activeCount > 0 && <span style={{ background: UI.gold, color: '#0a0805', borderRadius: '50%', width: 14, height: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, fontWeight: 700 }}>{activeCount}</span>}
+                  Filter{activeCount > 0 && <span style={{ background: UI.gold, color: 'var(--accent-ink)', borderRadius: '50%', width: 14, height: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, fontWeight: 700 }}>{activeCount}</span>}
                 </button>
               </div>
             </>
@@ -420,7 +420,7 @@ function LibraryScreen({ store, setStore, go, userId }) {
                   {ex.tags?.map(t => <Pill key={t}>{t}</Pill>)}
                   {ex.category && <Pill style={{ color: UI.inkSoft, borderColor: UI.hair }}>{ex.category.charAt(0).toUpperCase() + ex.category.slice(1)}</Pill>}
                   {ex.unilateral && <Pill style={{ color: UI.inkSoft, borderColor: UI.hair }}>Unilateral</Pill>}
-                  {ex.equipment ? <Pill style={{ color: UI.inkFaint, borderColor: UI.hair, fontSize: 8 }}>{EQUIPMENT_TYPES.find(t => t.key === ex.equipment)?.label ?? ex.equipment}</Pill> : <Pill style={{ color: 'rgba(var(--danger-rgb),0.5)', borderColor: 'rgba(var(--danger-rgb),0.2)', fontSize: 8 }}>Unspecified</Pill>}
+                  {ex.equipment ? <Pill style={{ color: UI.inkFaint, borderColor: UI.hair, fontSize: 8 }}>{EQUIPMENT_TYPES.find(t => t.key === ex.equipment)?.label ?? ex.equipment}</Pill> : <Pill style={{ color: 'rgba(var(--danger-rgb),0.5)', borderColor: 'rgba(var(--danger-rgb),calc(0.2 * var(--danger-border-boost)))', fontSize: 8 }}>Unspecified</Pill>}
                   {planExIds.has(ex.id) && <span style={{ color: UI.inkFaint, fontSize: 9, letterSpacing: '0.05em' }}>◆</span>}
                 </div>
               </div>
@@ -461,7 +461,7 @@ function LibraryScreen({ store, setStore, go, userId }) {
                   {e.tags?.map(t => <Pill key={t}>{t}</Pill>)}
                   {e.category && <Pill style={{ color: UI.inkSoft, borderColor: UI.hair }}>{e.category.charAt(0).toUpperCase() + e.category.slice(1)}</Pill>}
                   {e.unilateral && <Pill style={{ color: UI.inkSoft, borderColor: UI.hair }}>Unilateral</Pill>}
-                  {e.equipment ? <Pill style={{ color: UI.inkFaint, borderColor: UI.hair, fontSize: 8 }}>{EQUIPMENT_TYPES.find(t => t.key === e.equipment)?.label ?? e.equipment}</Pill> : <Pill style={{ color: 'rgba(var(--danger-rgb),0.5)', borderColor: 'rgba(var(--danger-rgb),0.2)', fontSize: 8 }}>Unspecified</Pill>}
+                  {e.equipment ? <Pill style={{ color: UI.inkFaint, borderColor: UI.hair, fontSize: 8 }}>{EQUIPMENT_TYPES.find(t => t.key === e.equipment)?.label ?? e.equipment}</Pill> : <Pill style={{ color: 'rgba(var(--danger-rgb),0.5)', borderColor: 'rgba(var(--danger-rgb),calc(0.2 * var(--danger-border-boost)))', fontSize: 8 }}>Unspecified</Pill>}
                   {planExIds.has(e.id) && <span style={{ color: UI.inkFaint, fontSize: 9, letterSpacing: '0.05em' }}>◆</span>}
                 </div>
               </div>
@@ -505,7 +505,7 @@ function LibraryScreen({ store, setStore, go, userId }) {
                   {e.tags?.map(t => <Pill key={t}>{t}</Pill>)}
                   {e.category && <Pill style={{ color: UI.inkSoft, borderColor: UI.hair }}>{e.category.charAt(0).toUpperCase() + e.category.slice(1)}</Pill>}
                   {e.unilateral && <Pill style={{ color: UI.inkSoft, borderColor: UI.hair }}>Unilateral</Pill>}
-                  {e.equipment ? <Pill style={{ color: UI.inkFaint, borderColor: UI.hair, fontSize: 8 }}>{EQUIPMENT_TYPES.find(t => t.key === e.equipment)?.label ?? e.equipment}</Pill> : <Pill style={{ color: 'rgba(var(--danger-rgb),0.5)', borderColor: 'rgba(var(--danger-rgb),0.2)', fontSize: 8 }}>Unspecified</Pill>}
+                  {e.equipment ? <Pill style={{ color: UI.inkFaint, borderColor: UI.hair, fontSize: 8 }}>{EQUIPMENT_TYPES.find(t => t.key === e.equipment)?.label ?? e.equipment}</Pill> : <Pill style={{ color: 'rgba(var(--danger-rgb),0.5)', borderColor: 'rgba(var(--danger-rgb),calc(0.2 * var(--danger-border-boost)))', fontSize: 8 }}>Unspecified</Pill>}
                   {planExNamesLower.has(e.name.toUpperCase()) && <span style={{ color: UI.inkFaint, fontSize: 9, letterSpacing: '0.05em' }}>◆</span>}
                 </div>
               </div>
@@ -542,7 +542,7 @@ function LibraryScreen({ store, setStore, go, userId }) {
             width: sidebar ? 'calc(100% - 220px)' : '100%',
             maxWidth: sidebar ? 'none' : 440,
             padding: '12px 22px',
-            background: 'rgba(var(--bg-rgb),0.92)', borderTop: `0.5px solid ${UI.hair}`,
+            background: 'rgba(var(--bg-rgb),0.92)', borderTop: `var(--hair-width) solid ${UI.hair}`,
             backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
             display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
             zIndex: 15,
@@ -559,7 +559,7 @@ function LibraryScreen({ store, setStore, go, userId }) {
             </Btn>
             <Btn kind="ghost" onClick={deleteSelected}
               disabled={selected.size === 0}
-              style={{ color: UI.danger, borderColor: 'rgba(var(--danger-rgb),0.25)', opacity: selected.size === 0 ? 0.4 : 1, minHeight: 36, padding: '6px 14px', fontSize: 11 }}>
+              style={{ color: UI.danger, background: 'rgba(var(--danger-rgb),0.08)', borderColor: 'rgba(var(--danger-rgb),calc(0.25 * var(--danger-border-boost)))', opacity: selected.size === 0 ? 0.4 : 1, minHeight: 36, padding: '6px 14px', fontSize: 11 }}>
               Delete
             </Btn>
           </div>
@@ -649,7 +649,8 @@ const EQUIPMENT_TYPES = [
 const pickChipStyle = (on) => ({
   padding: '9px 13px', borderRadius: 4, cursor: 'pointer',
   border: `1px solid ${on ? 'var(--accent)' : UI.hairStrong}`,
-  background: on ? 'rgba(var(--accent-rgb),0.12)' : UI.bgInset,
+  background: on ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
+  textShadow: 'none',
   color: on ? 'var(--accent)' : UI.inkSoft,
   fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, lineHeight: 1.1,
   WebkitTapHighlightColor: 'transparent',
@@ -713,6 +714,31 @@ function SvgKnurl({ style }) {
         const x = (i - 1) * 5.2;
         return <line key={i} x1={x} y1="3" x2={x + 1.73} y2="0" stroke={`rgba(${knurlRgb},0.20)`} strokeWidth="1.5" />;
       })}
+    </svg>
+  );
+}
+
+// The app's grid overlay (see index.html's --bg-texture, togglable per theme
+// via Settings -> Appearance -> Grid) doesn't survive html2canvas:
+// repeating-linear-gradient background-images are silently dropped from the
+// export (verified against the exact CDN build the app loads, html2canvas
+// 1.4.1). An SVG <pattern> renders fine there, so screenshot mode gets its
+// own grid via this component instead of CSS, driven by the same
+// --knurl-rgb/--grid-alpha the live CSS grid uses so it matches whichever
+// theme is active, not just paper's colors. Absolutely positioned inset:0:
+// the caller must be position:relative (or :fixed) for that to resolve
+// against the right box.
+function SvgGrid({ style }) {
+  const knurlRgb = getComputedStyle(document.documentElement).getPropertyValue('--knurl-rgb').trim() || '236,228,208';
+  const gridAlpha = getComputedStyle(document.documentElement).getPropertyValue('--grid-alpha').trim() || '0.16';
+  return (
+    <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', zIndex: 0, pointerEvents: 'none', ...style }}>
+      <defs>
+        <pattern id="paperGridPattern" width="22" height="22" patternUnits="userSpaceOnUse">
+          <path d="M 22 0 L 0 0 0 22" fill="none" stroke={`rgba(${knurlRgb},${gridAlpha})`} strokeWidth="1" />
+        </pattern>
+      </defs>
+      <rect width="100%" height="100%" fill="url(#paperGridPattern)" />
     </svg>
   );
 }
@@ -1009,8 +1035,9 @@ function ExerciseWizard({ step, setStep, onClose, isDirty, store,
     <button key={key} onClick={onClick} style={{
       width: '100%', display: 'flex', alignItems: 'center', gap: 12, textAlign: 'left',
       padding: '12px 14px', borderRadius: 6, cursor: 'pointer',
-      background: active ? 'rgba(var(--accent-rgb),0.10)' : UI.bgInset,
+      background: active ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
       border: `1px solid ${active ? 'var(--accent)' : UI.hairStrong}`,
+      textShadow: 'none',
       WebkitTapHighlightColor: 'transparent', transition: 'border-color 0.12s, background 0.12s',
     }}>
       <span style={{
@@ -1079,7 +1106,7 @@ function ExerciseWizard({ step, setStep, onClose, isDirty, store,
   const overlayStyle = vp ? { ...overlayBase, position: 'fixed', left: 0, right: 0, top: vp.top, height: vp.height } : { ...overlayBase, position: 'fixed', inset: 0 };
   return (
     <div style={overlayStyle} onClick={e => { if (e.target === e.currentTarget) requestExit(); }}>
-      <div style={{ width: '100%', maxWidth: 360, maxHeight: '86vh', overflowY: 'auto', background: UI.bgRaised, border: `1px solid ${UI.hairStrong}`, borderRadius: 8, padding: '20px 20px 22px', display: 'flex', flexDirection: 'column', gap: 18, boxShadow: '0 32px 80px rgba(0,0,0,0.6)', animation: 'fadeUp 0.3s ease' }}>
+      <div style={{ width: '100%', maxWidth: 360, maxHeight: '86vh', overflowY: 'auto', background: UI.bgRaised, backgroundImage: 'var(--bg-texture)', border: `1px solid ${UI.hairStrong}`, borderRadius: 8, padding: '20px 20px 22px', display: 'flex', flexDirection: 'column', gap: 18, boxShadow: '0 32px 80px rgba(0,0,0,0.6)', animation: 'fadeUp 0.3s ease' }}>
         {confirming ? (
           <>
             <div style={{ fontFamily: UI.fontDisplay, fontSize: 22, color: UI.ink, fontWeight: 700, textTransform: 'uppercase' }}>Discard exercise?</div>
@@ -1264,7 +1291,7 @@ function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = ''
             rows={3}
             style={{
               width: '100%', boxSizing: 'border-box', background: 'transparent',
-              border: 'none', borderBottom: `0.5px solid ${UI.hairStrong}`,
+              border: 'none', borderBottom: `var(--hair-width) solid ${UI.hairStrong}`,
               padding: '6px 0', color: UI.ink, fontFamily: UI.fontUi, fontSize: 14,
               resize: 'none', outline: 'none',
             }}
@@ -1312,6 +1339,7 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
   const [editPullBodyweight, setEditPullBodyweight] = useStateL(autoEdit ? !!ex.pull_bodyweight : false);
   const [editEquipment, setEditEquipment] = useStateL(autoEdit ? (ex.equipment || null) : null);
   const [editYoutubeUrl, setEditYoutubeUrl] = useStateL(autoEdit ? (ex.youtube_url || '') : '');
+  const [editProgressionIncrement, setEditProgressionIncrement] = useStateL(autoEdit ? (ex.progression_increment ?? null) : null);
   const [noteVal, setNoteVal] = useStateL(autoEdit ? (ex.note || '') : '');
   const [editNotePinned, setEditNotePinned] = useStateL(autoEdit ? !!ex.note_pinned : false);
   const [showSizeInfoEdit, setShowSizeInfoEdit] = useStateL(false);
@@ -1334,14 +1362,14 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
     }
   };
 
-  const startEdit = () => { setEditName(ex.name); setEditTags([...(ex.tags || [])]); setEditCategory(ex.category || null); setEditMovementType(ex.movement_type ?? (ex.unilateral ? 'unilateral' : 'bilateral')); setEditLogMode(LB.exerciseLogMode(ex)); setEditPullBodyweight(!!ex.pull_bodyweight); setEditEquipment(ex.equipment || null); setEditYoutubeUrl(ex.youtube_url || ''); setNoteVal(ex.note || ''); setEditNotePinned(!!ex.note_pinned); setEditMode(true); };
+  const startEdit = () => { setEditName(ex.name); setEditTags([...(ex.tags || [])]); setEditCategory(ex.category || null); setEditMovementType(ex.movement_type ?? (ex.unilateral ? 'unilateral' : 'bilateral')); setEditLogMode(LB.exerciseLogMode(ex)); setEditPullBodyweight(!!ex.pull_bodyweight); setEditEquipment(ex.equipment || null); setEditYoutubeUrl(ex.youtube_url || ''); setNoteVal(ex.note || ''); setEditNotePinned(!!ex.note_pinned); setEditProgressionIncrement(ex.progression_increment ?? null); setEditMode(true); };
   const cancelEdit = () => { if (autoEdit) advanceQueue(); else setEditMode(false); };
   const saveEdit = () => {
     if (!editName.trim()) return;
     setStore(s => {
       const effLogMode = loggingPickerVisible(editEquipment, editMovementType) ? editLogMode : 'weight';
       const exercises = s.exercises.map(e => e.id === exId
-        ? { ...e, name: editName.trim(), tags: editTags, category: editCategory || null, unilateral: editMovementType === 'unilateral', movement_type: editMovementType, no_weight_reps: effLogMode !== 'weight', log_mode: effLogMode, pull_bodyweight: (editEquipment === 'bodyweight' && effLogMode === 'weight' ? editPullBodyweight : false), equipment: editEquipment || null, note: noteVal.trim(), note_pinned: noteVal.trim() ? editNotePinned : false, youtube_url: sanitizeYoutubeUrl(editYoutubeUrl) }
+        ? { ...e, name: editName.trim(), tags: editTags, category: editCategory || null, unilateral: editMovementType === 'unilateral', movement_type: editMovementType, no_weight_reps: effLogMode !== 'weight', log_mode: effLogMode, pull_bodyweight: (editEquipment === 'bodyweight' && effLogMode === 'weight' ? editPullBodyweight : false), equipment: editEquipment || null, note: noteVal.trim(), note_pinned: noteVal.trim() ? editNotePinned : false, youtube_url: sanitizeYoutubeUrl(editYoutubeUrl), progression_increment: editProgressionIncrement }
         : e);
       return { ...s, exercises };
     });
@@ -1553,6 +1581,15 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
               pullBodyweight={editPullBodyweight} onPullBodyweight={setEditPullBodyweight}
               hasLoggedWeight={LB.latestBodyweight(store) != null}
             />
+            <Field label="Progression increment (optional)">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: UI.bgInset, borderRadius: 4, padding: '10px 12px', border: `1px solid ${UI.hair}` }}>
+                <NumInput value={editProgressionIncrement} placeholder="Default" onChange={setEditProgressionIncrement} style={{ fontSize: 14 }} positiveOnly />
+                <span className="micro" style={{ flexShrink: 0 }}>{UI.unit()}</span>
+              </div>
+              <div style={{ fontFamily: UI.fontUi, fontSize: 10.5, color: UI.inkFaint, marginTop: 6, lineHeight: 1.4 }}>
+                How much weight Smart Progression and Meso bumps add for this exercise. Must be greater than 0. Leave blank to use the equipment default from Settings.
+              </div>
+            </Field>
             <Field label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><i className="fa-brands fa-youtube" style={{ color: '#FF0000', fontSize: 12 }} />Form video</span>}>
               <TextInput value={editYoutubeUrl} onChange={setEditYoutubeUrl} placeholder="YouTube link (optional)" />
             </Field>
@@ -1562,7 +1599,7 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
                 rows={3}
                 style={{
                   width: '100%', boxSizing: 'border-box', background: 'transparent',
-                  border: 'none', borderBottom: `0.5px solid ${UI.hairStrong}`,
+                  border: 'none', borderBottom: `var(--hair-width) solid ${UI.hairStrong}`,
                   padding: '6px 0', color: UI.ink, fontFamily: UI.fontUi, fontSize: 14,
                   resize: 'none', outline: 'none',
                 }}
@@ -1600,7 +1637,7 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
             style={{
               display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
               padding: '11px 12px', borderRadius: 6, textDecoration: 'none',
-              border: `0.5px solid ${UI.hairStrong}`, background: UI.bgRaised,
+              border: `var(--hair-width) solid ${UI.hairStrong}`, background: UI.bgRaised,
               color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 12,
               letterSpacing: '0.1em', textTransform: 'uppercase',
             }}>
@@ -1739,7 +1776,7 @@ function ProgressChart({ points, title, fmtVal }) {
         {gridVals.map((v, i) => (
           <g key={`g${i}`}>
             {i > 0 && <line x1={padL} y1={yOf(v).toFixed(1)} x2={w - padR} y2={yOf(v).toFixed(1)} stroke={UI.hair} strokeWidth="0.5" strokeDasharray="3 3" />}
-            <text x={padL - 5} y={(yOf(v) + 3).toFixed(1)} textAnchor="end" fontSize="8" fill={UI.inkFaint} fontFamily={UI.fontNum}>{axisVal(v, i === 3)}</text>
+            <text filter="url(#chart-text-lift)" x={padL - 5} y={(yOf(v) + 3).toFixed(1)} textAnchor="end" fontSize="8" fill={UI.inkFaint} fontFamily={UI.fontNum}>{axisVal(v, i === 3)}</text>
           </g>
         ))}
         <line x1={padL} y1={padT} x2={padL} y2={h - padB} stroke={UI.hair} strokeWidth="0.5" />
@@ -1749,8 +1786,8 @@ function ProgressChart({ points, title, fmtVal }) {
           <circle key={i} cx={x} cy={y} r="2" fill={UI.gold} />
         ))}
         {points.length > 1 && <>
-          <text x={padL} y={h - 6} textAnchor="start" fontSize="8" fill={UI.inkFaint} fontFamily={UI.fontUi}>{fmtDate(points[0].date)}</text>
-          <text x={w - padR} y={h - 6} textAnchor="end" fontSize="8" fill={UI.inkFaint} fontFamily={UI.fontUi}>{fmtDate(points[points.length - 1].date)}</text>
+          <text filter="url(#chart-text-lift)" x={padL} y={h - 6} textAnchor="start" fontSize="8" fill={UI.inkFaint} fontFamily={UI.fontUi}>{fmtDate(points[0].date)}</text>
+          <text filter="url(#chart-text-lift)" x={w - padR} y={h - 6} textAnchor="end" fontSize="8" fill={UI.inkFaint} fontFamily={UI.fontUi}>{fmtDate(points[points.length - 1].date)}</text>
         </>}
       </svg>
     </div>
@@ -1773,7 +1810,7 @@ function CardioLineChart({ points, label, formatVal, yMin, yMax }) {
   const pathD = xy.map(([x, y], i) => `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`).join(' ');
   const fmtDate = d => new Date(d).toLocaleDateString('en', { month: 'short', day: 'numeric' });
   return (
-    <div style={{ background: UI.bgInset, borderRadius: 6, padding: '10px 12px', border: `0.5px solid ${UI.hair}` }}>
+    <div style={{ background: UI.bgInset, borderRadius: 6, padding: '10px 12px', border: `var(--hair-width) solid ${UI.hair}` }}>
       <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>{label}</div>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 5, marginBottom: 2 }}>
         <span className="num" style={{ fontSize: 17, color: UI.gold }}>{formatVal(vals.reduce((s, v) => s + v, 0) / vals.length)}</span>
@@ -1784,12 +1821,12 @@ function CardioLineChart({ points, label, formatVal, yMin, yMax }) {
         <line x1={padL} y1={h - padB} x2={w - padR} y2={h - padB} stroke={UI.hair} strokeWidth="0.5" />
         <line x1={padL} y1={yOf(max).toFixed(1)} x2={w - padR} y2={yOf(max).toFixed(1)} stroke={UI.hair} strokeWidth="0.5" strokeDasharray="2 2" />
         {max > min && <line x1={padL} y1={yOf(min).toFixed(1)} x2={w - padR} y2={yOf(min).toFixed(1)} stroke={UI.hair} strokeWidth="0.5" strokeDasharray="2 2" />}
-        <text x={padL - 4} y={(yOf(max) + 2.5).toFixed(1)} textAnchor="end" fontSize="7" fill={UI.inkFaint} fontFamily={UI.fontUi}>{formatVal(max)}</text>
-        {max > min && (yOf(min) - yOf(max)) >= 10 && <text x={padL - 4} y={(yOf(min) + 2.5).toFixed(1)} textAnchor="end" fontSize="7" fill={UI.inkFaint} fontFamily={UI.fontUi}>{formatVal(min)}</text>}
+        <text filter="url(#chart-text-lift)" x={padL - 4} y={(yOf(max) + 2.5).toFixed(1)} textAnchor="end" fontSize="7" fill={UI.inkFaint} fontFamily={UI.fontUi}>{formatVal(max)}</text>
+        {max > min && (yOf(min) - yOf(max)) >= 10 && <text filter="url(#chart-text-lift)" x={padL - 4} y={(yOf(min) + 2.5).toFixed(1)} textAnchor="end" fontSize="7" fill={UI.inkFaint} fontFamily={UI.fontUi}>{formatVal(min)}</text>}
         <path d={pathD} fill="none" stroke={UI.gold} strokeWidth="1.2" opacity="0.7" />
         {xy.map(([x, y], i) => <circle key={i} cx={x} cy={y} r={xy.length > 60 ? 0 : 1.5} fill={UI.gold} />)}
-        <text x={padL} y={h - 4} textAnchor="start" fontSize="7" fill={UI.inkFaint} fontFamily={UI.fontUi}>{fmtDate(points[0].date)}</text>
-        <text x={w - padR} y={h - 4} textAnchor="end" fontSize="7" fill={UI.inkFaint} fontFamily={UI.fontUi}>{fmtDate(points[points.length - 1].date)}</text>
+        <text filter="url(#chart-text-lift)" x={padL} y={h - 4} textAnchor="start" fontSize="7" fill={UI.inkFaint} fontFamily={UI.fontUi}>{fmtDate(points[0].date)}</text>
+        <text filter="url(#chart-text-lift)" x={w - padR} y={h - 4} textAnchor="end" fontSize="7" fill={UI.inkFaint} fontFamily={UI.fontUi}>{fmtDate(points[points.length - 1].date)}</text>
       </svg>
     </div>
   );
@@ -1881,7 +1918,7 @@ function WorkoutEffortSheet({ dayId, dayName, sessions, exercises, dailyLogs, on
         {gridLines.map((lvl, gi) => (
           <g key={gi}>
             <line x1={padL} y1={yOf(lvl).toFixed(1)} x2={W - padR} y2={yOf(lvl).toFixed(1)} stroke={UI.hair} strokeWidth="0.5" strokeDasharray="3 3" />
-            <text x={padL - 6} y={(yOf(lvl) + 3).toFixed(1)} textAnchor="end" fontSize="8" fontFamily={UI.fontUi} fill={UI.inkFaint}>{fmtY(lvl)}</text>
+            <text filter="url(#chart-text-lift)" x={padL - 6} y={(yOf(lvl) + 3).toFixed(1)} textAnchor="end" fontSize="8" fontFamily={UI.fontUi} fill={UI.inkFaint}>{fmtY(lvl)}</text>
           </g>
         ))}
         <line x1={padL} y1={padTop} x2={padL} y2={padTop + plotH} stroke={UI.hair} strokeWidth="0.5" />
@@ -1894,7 +1931,7 @@ function WorkoutEffortSheet({ dayId, dayName, sessions, exercises, dailyLogs, on
           return (
             <g key={i}>
               <circle cx={cx} cy={cy} r={i === n - 1 ? '3.5' : '2.5'} fill="var(--accent)" />
-              {showLbl(i) && <text x={cx} y={(padTop + plotH + 18).toFixed(1)} textAnchor={anchor} fontSize="8" fontFamily={UI.fontUi} fill={UI.inkFaint}>{fmtDate(p.date)}</text>}
+              {showLbl(i) && <text filter="url(#chart-text-lift)" x={cx} y={(padTop + plotH + 18).toFixed(1)} textAnchor={anchor} fontSize="8" fontFamily={UI.fontUi} fill={UI.inkFaint}>{fmtDate(p.date)}</text>}
             </g>
           );
         })}
@@ -1916,42 +1953,35 @@ function WorkoutEffortSheet({ dayId, dayName, sessions, exercises, dailyLogs, on
     </div>
   );
 
+  // zIndex 400: same tier this popup always used (above ordinary Sheets/
+  // the account-switcher, below the lightbox), preserved explicitly since
+  // Sheet's own default (100) would drop it below either of those.
   const content = (
-    <div style={{ position: 'fixed', top: 0, right: 0, bottom: 0, left: 0, zIndex: 400, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', alignItems: 'center', background: 'rgba(0,0,0,0.55)' }} onClick={onClose}>
-      <div style={{ background: UI.bg, borderRadius: '6px 6px 0 0', borderTop: `0.5px solid ${UI.hairStrong}`, width: '100%', maxWidth: 480, maxHeight: '80vh', display: 'flex', flexDirection: 'column' }} onClick={e => e.stopPropagation()}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '20px 20px 0', flexShrink: 0 }}>
-          <span style={{ fontSize: 13, fontWeight: 700, color: UI.ink, fontFamily: UI.fontUi, textTransform: 'uppercase', letterSpacing: '0.08em' }}>{dayName}</span>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', color: UI.inkFaint, cursor: 'pointer', padding: 4, fontSize: 18, lineHeight: 1 }}>
-            <i className="fa-solid fa-xmark" />
-          </button>
+    <Sheet open onClose={onClose} title={dayName} zIndex={400}>
+      {sectionLabel('fa-gauge-high', 'EFFORT OVER TIME')}
+      {effortPts.length > 0
+        ? renderLine(effortPts, effortGridLines, v => FEEL_LBL[v])
+        : <div style={{ textAlign: 'center', padding: '12px 0 4px', fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi }}>No effort ratings yet</div>
+      }
+      {effortPts.length > 0 && (
+        <div style={{ marginTop: 6, textAlign: 'center' }}>
+          <span className="micro" style={{ color: UI.inkFaint }}>{effortPts.length} SESSION{effortPts.length !== 1 ? 'S' : ''} WITH EFFORT RATING</span>
         </div>
-        <div style={{ overflowY: 'auto', padding: '20px 20px 44px' }}>
-          {sectionLabel('fa-gauge-high', 'EFFORT OVER TIME')}
-          {effortPts.length > 0
-            ? renderLine(effortPts, effortGridLines, v => FEEL_LBL[v])
-            : <div style={{ textAlign: 'center', padding: '12px 0 4px', fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi }}>No effort ratings yet</div>
-          }
-          {effortPts.length > 0 && (
-            <div style={{ marginTop: 6, textAlign: 'center' }}>
-              <span className="micro" style={{ color: UI.inkFaint }}>{effortPts.length} SESSION{effortPts.length !== 1 ? 'S' : ''} WITH EFFORT RATING</span>
-            </div>
-          )}
+      )}
 
-          <div style={{ height: 0.5, background: UI.hair, margin: '20px 0' }} />
+      <div style={{ height: 0.5, background: UI.hair, margin: '20px 0' }} />
 
-          {sectionLabel('fa-dumbbell', 'VOLUME OVER TIME')}
-          {volumePts.length > 0
-            ? renderLine(volumePts, volGridLines, fmtVol)
-            : <div style={{ textAlign: 'center', padding: '12px 0 4px', fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi }}>No volume data</div>
-          }
-          {volumePts.length > 0 && (
-            <div style={{ marginTop: 6, textAlign: 'center' }}>
-              <span className="micro" style={{ color: UI.inkFaint }}>{volumePts.length} SESSION{volumePts.length !== 1 ? 'S' : ''} · {UI.unit().toUpperCase()}</span>
-            </div>
-          )}
+      {sectionLabel('fa-dumbbell', 'VOLUME OVER TIME')}
+      {volumePts.length > 0
+        ? renderLine(volumePts, volGridLines, fmtVol)
+        : <div style={{ textAlign: 'center', padding: '12px 0 4px', fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi }}>No volume data</div>
+      }
+      {volumePts.length > 0 && (
+        <div style={{ marginTop: 6, textAlign: 'center' }}>
+          <span className="micro" style={{ color: UI.inkFaint }}>{volumePts.length} SESSION{volumePts.length !== 1 ? 'S' : ''} · {UI.unit().toUpperCase()}</span>
         </div>
-      </div>
-    </div>
+      )}
+    </Sheet>
   );
   return ReactDOM.createPortal(content, document.body);
 }
@@ -2466,7 +2496,7 @@ function HistoryScreen({ store, setStore, go, userId, initialTab }) {
           fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase',
           display: 'flex', alignItems: 'center', gap: 5, WebkitTapHighlightColor: 'transparent',
         }}>
-          Filter{filterCount > 0 && <span style={{ background: UI.gold, color: '#0a0805', borderRadius: '50%', width: 14, height: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, fontWeight: 700 }}>{filterCount}</span>}
+          Filter{filterCount > 0 && <span style={{ background: UI.gold, color: 'var(--accent-ink)', borderRadius: '50%', width: 14, height: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, fontWeight: 700 }}>{filterCount}</span>}
         </button>
       ) : null} />
       <SubTabBar
@@ -2542,7 +2572,7 @@ function HistoryScreen({ store, setStore, go, userId, initialTab }) {
                         >
                           {s.dayName}
                           {s.isBonus && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.gold, background: 'rgba(var(--accent-rgb), 0.12)', border: `0.5px solid rgba(var(--accent-rgb), 0.3)`, borderRadius: 4, padding: '3px 6px' }}>BONUS</span>}
-                          {s.isDeload && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkSoft, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '3px 6px' }}>DELOAD</span>}
+                          {s.isDeload && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkSoft, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4, padding: '3px 6px' }}>DELOAD</span>}
                           {/* Ran under autoregulation / a mesocycle (mesoRecap captures the mode
                               at the time, so the badge stays right even if the plan changed since). */}
                           {s.mesoRecap && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.gold, background: 'rgba(var(--accent-rgb), 0.12)', border: `0.5px solid rgba(var(--accent-rgb), 0.3)`, borderRadius: 4, padding: '3px 6px' }}>{s.mesoRecap.meso ? 'MESO' : 'AUTO'}</span>}
@@ -2607,7 +2637,7 @@ function HistoryScreen({ store, setStore, go, userId, initialTab }) {
                   const l = item.log;
                   return (
                     <React.Fragment key={l.id}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 0', borderBottom: `0.5px solid ${UI.hair}` }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 0', borderBottom: `var(--hair-width) solid ${UI.hair}` }}>
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>
                             {LB.parseDate(l.date).toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'short' }).toUpperCase()}
@@ -2665,11 +2695,11 @@ function HistoryScreen({ store, setStore, go, userId, initialTab }) {
       {filtersOpen && (() => {
         const selSt = (active) => ({
           width: '100%', appearance: 'none', WebkitAppearance: 'none',
-          background: active ? 'rgba(var(--accent-rgb),0.08)' : 'transparent',
+          background: active ? 'rgba(var(--accent-rgb),0.16)' : 'transparent',
           border: `1px solid ${active ? UI.gold : UI.hairStrong}`,
           borderRadius: 4, color: active ? UI.gold : UI.ink,
           fontFamily: UI.fontUi, fontSize: 13, padding: '10px 36px 10px 12px',
-          cursor: 'pointer', outline: 'none', colorScheme: 'dark',
+          cursor: 'pointer', outline: 'none', colorScheme: ['light', 'paper'].includes(store.settings?.darkMode ?? 'dark') ? 'light' : 'dark',
         });
         const selWrap = { position: 'relative' };
         const selChevron = { position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', fontSize: 10, color: UI.inkFaint };
@@ -2736,16 +2766,30 @@ function HistoryScreen({ store, setStore, go, userId, initialTab }) {
 }
 
 // ─── FEEL ────────────────────────────────────────────────────────────
+// color: tuned for a dark canvas. colorLight: same hue, deep enough to stay
+// readable on light/paper's near-white surfaces (the bright set drops well
+// under WCAG AA there).
 const FEEL_LEVELS = [
-  { key: 'easy',      label: 'EASY',      color: '#38bdf8' },
-  { key: 'good',      label: 'GOOD',      color: '#4ade80' },
-  { key: 'hard',      label: 'HARD',      color: '#facc15' },
-  { key: 'very_hard', label: 'VERY HARD', color: '#f97316' },
-  { key: 'max',       label: 'MAX',       color: '#ef4444' },
+  { key: 'easy',      label: 'EASY',      color: '#38bdf8', colorLight: '#0369a1' },
+  { key: 'good',      label: 'GOOD',      color: '#4ade80', colorLight: '#15803d' },
+  { key: 'hard',      label: 'HARD',      color: '#facc15', colorLight: '#a16207' },
+  { key: 'very_hard', label: 'VERY HARD', color: '#f97316', colorLight: '#c2410c' },
+  { key: 'max',       label: 'MAX',       color: '#ef4444', colorLight: '#b91c1c' },
 ];
 
+// Generic light-canvas detector (works for 'light', 'paper', or any future
+// light theme) — perceived luminance of the live --bg-rgb, no theme-name
+// checks to keep in sync.
+function isLightCanvasActive() {
+  const parts = (getComputedStyle(document.documentElement).getPropertyValue('--bg-rgb') || '').trim().split(',').map(Number);
+  if (parts.length !== 3 || parts.some(isNaN)) return false;
+  return (0.2126 * parts[0] + 0.7152 * parts[1] + 0.0722 * parts[2]) > 140;
+}
+function feelColorOf(f) {
+  return f ? (isLightCanvasActive() ? f.colorLight : f.color) : UI.inkFaint;
+}
 function feelColor(key) {
-  return FEEL_LEVELS.find(f => f.key === key)?.color ?? UI.inkFaint;
+  return feelColorOf(FEEL_LEVELS.find(f => f.key === key));
 }
 function feelLabel(key) {
   return FEEL_LEVELS.find(f => f.key === key)?.label ?? null;
@@ -2764,14 +2808,15 @@ function FeelSelector({ value, onChange }) {
     <div style={{ display: 'flex', gap: 6 }}>
       {FEEL_LEVELS.map(f => {
         const active = value === f.key;
+        const fc = feelColorOf(f);
         return (
           <button key={f.key} onClick={() => onChange(active ? null : f.key)}
             style={{
               flex: 1, padding: '9px 2px', borderRadius: 4, cursor: 'pointer',
               display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5,
-              border: `1px solid ${active ? f.color : UI.hairStrong}`,
-              background: active ? `${f.color}22` : 'transparent',
-              color: active ? f.color : UI.inkSoft,
+              border: `1px solid ${active ? fc : UI.hairStrong}`,
+              background: active ? `${fc}22` : 'transparent',
+              color: active ? fc : UI.inkSoft,
               fontFamily: UI.fontUi, fontSize: 9, fontWeight: active ? 600 : 400,
               letterSpacing: '0.07em', WebkitTapHighlightColor: 'transparent',
             }}>
@@ -2821,9 +2866,10 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
   // Centered, faint, full-page background watermark, the two-column export's own
   // size (its actual size is computed and set in px by captureNodeAsPng's
   // data-shot-fill handling, not by CSS here, see the comment there for why).
-  const _shotIsLight = (store.settings?.darkMode ?? 'dark') === 'light';
+  const _shotIsLight = ['light', 'paper'].includes(store.settings?.darkMode ?? 'dark');
   const _shotDefaultStyle = { opacity: _shotIsLight ? 0.10 : 0.06, filter: _shotIsLight ? 'grayscale(1)' : 'grayscale(1) brightness(3)' };
   const _shotCustomStyle = { opacity: 0.13 };
+  const _shotGridOn = !!window.__gridEnabled;
   const s = store.sessions.find(x => x.id === sessionId);
   useEffectL(() => { if (!s) go({ name: 'hist' }); }, [!!s]);
   // Sessions outside the boot window carry no entries — lazy-load them into
@@ -2914,6 +2960,13 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
         ...st,
         sessions: st.sessions.filter(x => x.id !== sessionId),
         cardioLogs: (st.cardioLogs || []).filter(l => l.sessionId !== sessionId),
+        // cycleIndex advances by exactly +1 when a session finishes (screens-train.jsx),
+        // but deleting one never rolled that back, leaving a permanent +1 "ghost"
+        // advance behind every deleted session. Only safe to undo when this was
+        // provably the LAST session to advance it (nothing has advanced past it
+        // since): rolling back an older deleted session would incorrectly regress
+        // a rotation position later training has already legitimately moved past.
+        ...(s.cyclePos != null && st.cycleIndex === s.cyclePos + 1 ? { cycleIndex: s.cyclePos } : {}),
       };
       if (!doMesoRollback) return base;
       const cur = (st.mesoStates || []).find(m => m.scheduleId === s.scheduleId);
@@ -2937,6 +2990,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
     padding: '12px 8px', borderRadius: 6, cursor: 'pointer', textAlign: 'center', WebkitTapHighlightColor: 'transparent',
     background: sel ? `rgba(var(${TONE_RGB[tone]}),0.14)` : UI.bgInset,
     border: `1px solid ${sel ? `rgba(var(${TONE_RGB[tone]}),0.7)` : UI.hairStrong}`,
+    textShadow: sel ? 'var(--text-lift)' : 'none',
     ...(extra || {}),
   });
   const toneLbl = (tone, sel) => ({ fontFamily: UI.fontUi, fontSize: 13, fontWeight: sel ? 700 : 600, color: sel ? TONE_COL[tone] : UI.ink });
@@ -2971,7 +3025,20 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
       (s.entries || []).forEach(e => {
         if (e.isCardio || muscleOf(e.exId) !== muscle) return;
         const jRec = a.joint && a.joint[e.exId];
-        if (!jRec || jRec.answer == null) return;
+        if (!jRec || jRec.answer == null) {
+          // Never asked, or the sheet opened but the answer never landed (e.g.
+          // backgrounded/reloaded mid-session before the "asked, not answered"
+          // fix). Still offer a row when there's a completed set to judge, so
+          // it isn't silently stuck unrated forever — same "attempted" bar the
+          // live gate itself uses, opens the same blank joint sheet as a fresh
+          // ask, and the existing re-earn machinery below is already exId-
+          // agnostic (it just reads answers.joint[exId], present or not).
+          const workingSets = (e.sets || []).filter(st => !st.warmup && !st.skipped);
+          if (workingSets.some(st => st.done)) {
+            rows.push({ type: 'joint', subject: e.exId, name: e.name, sub: 'Not rated — tap to add', sel: null });
+          }
+          return;
+        }
         // Per-exercise feedback: joint + weight-feel + pump, all edited together in the
         // joint sheet (mirrors screens-train.jsx mesoRecapGroups). Old sessions that
         // predate the per-exercise move simply carry no weight/pump here.
@@ -3010,8 +3077,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
       const outcome = LB.mesoRepOutcome(workingSets, e.plannedReps ?? null, e.plannedRepsPerSet, e.plannedRepsMax ?? null);
       const allHit = attempted && outcome.allHit;
       const earlyMiss = attempted && outcome.earlyMiss; // feeds the rep-miss cut recompute
-      const catCfg = ex?.equipment ? (store.settings?.equipmentConfig?.[ex.equipment] ?? {}) : {};
-      const increment = catCfg.increment ?? (unit === 'lbs' ? 5 : 2.5);
+      const increment = LB.incrementForExercise(store, ex, unit === 'lbs' ? 5 : 2.5);
       out.push({ exId: e.exId, key: e.exId + '_' + s.dayId, muscle, allHit, earlyMiss, attempted, increment, name: e.name });
     });
     return out;
@@ -3318,7 +3384,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, lineHeight: 1 }}>
             {s.dayName}
             {s.isBonus && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.gold, background: 'rgba(var(--accent-rgb), 0.12)', border: `0.5px solid rgba(var(--accent-rgb), 0.3)`, borderRadius: 4, padding: '3px 6px', textTransform: 'uppercase' }}>BONUS</span>}
-            {s.isDeload && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkSoft, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '3px 6px', textTransform: 'uppercase' }}>DELOAD</span>}
+            {s.isDeload && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkSoft, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4, padding: '3px 6px', textTransform: 'uppercase' }}>DELOAD</span>}
           </span>
         }
         onBack={() => go(justFinished ? { name: 'home' } : (back || { name: 'hist' }))}
@@ -3350,7 +3416,10 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
 
       <div ref={captureRef} style={{
         padding: capturing ? '20px 22px 24px' : '14px 22px 28px',
-        background: UI.bg, position: 'relative',
+        // The CSS grid (--bg-texture) never survives html2canvas — always off
+        // while capturing, SvgGrid below draws the current theme's grid for
+        // the export instead (works for html2canvas, unlike the CSS version).
+        backgroundColor: UI.bg, backgroundImage: capturing ? 'none' : 'var(--bg-texture)', position: 'relative',
         // Escape #root's phone-shaped max-width (index.html) so the wider two-column
         // export isn't clipped: position:fixed is positioned against the viewport, not
         // any ancestor, as long as no ancestor between here and #root sets a transform/
@@ -3362,6 +3431,8 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
         // twoCol; position:fixed is an equally valid anchor for it).
         ...(twoCol ? { position: 'fixed', top: 0, left: '50%', transform: 'translateX(-50%)', width: SHOT_TWO_COL_WIDTH, zIndex: 500 } : {}),
       }}>
+
+        {capturing && _shotGridOn && <SvgGrid />}
 
         {/* Two-column only: centered, faint, full-capture watermark (same recipe as
             SessionCompareScreen / the plan poster). Needs its own stacking context
@@ -3388,7 +3459,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                 <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
                   <div className="display" style={{ fontSize: 26 }}>{s.dayName}</div>
                   {s.isBonus && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.gold, background: 'rgba(var(--accent-rgb), 0.12)', border: `0.5px solid rgba(var(--accent-rgb), 0.3)`, borderRadius: 4, padding: '3px 6px' }}>BONUS</span>}
-                  {s.isDeload && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkSoft, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '3px 6px' }}>DELOAD</span>}
+                  {s.isDeload && <span style={{ fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkSoft, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4, padding: '3px 6px' }}>DELOAD</span>}
                 </div>
               </div>
               <div className="micro-gold" style={{ letterSpacing: '0.18em', marginTop: 2 }}>ZANE</div>
@@ -3413,7 +3484,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                   ].map((st, k, arr) => (
                     <div key={st.label} style={{
                       flex: 1,
-                      borderRight: k < arr.length - 1 ? `0.5px solid ${UI.hair}` : 'none',
+                      borderRight: k < arr.length - 1 ? `var(--hair-width) solid ${UI.hair}` : 'none',
                       padding: '0 4px',
                     }}>
                       <div className="num" style={{ fontSize: 18, color: st.gold ? UI.gold : UI.ink, lineHeight: 1 }}>{st.value}</div>
@@ -3482,7 +3553,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
         {capturing && (
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', marginTop: -8 }}>
             {[['DURATION', duration != null ? `${duration} min` : '—', false], ['VOLUME', `${Math.round(vol).toLocaleString('en-US')} ${UI.unit()}`, true], ['SETS', LB.doneSetCount(s), false]].map(([label, value, gold], idx) => (
-              <div key={label} style={{ padding: '6px 12px', borderRight: idx < 2 ? `0.5px solid ${UI.hair}` : 'none', textAlign: 'center' }}>
+              <div key={label} style={{ padding: '6px 12px', borderRight: idx < 2 ? `var(--hair-width) solid ${UI.hair}` : 'none', textAlign: 'center' }}>
                 <div className="micro" style={{ color: UI.inkFaint, marginBottom: 3 }}>{label}</div>
                 <div className="num" style={{ fontSize: 16, color: gold ? UI.gold : UI.ink }}>{value}</div>
               </div>
@@ -3605,7 +3676,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
             borderRadius: 4, padding: '3px 8px', whiteSpace: 'nowrap',
           });
           const gains = s.mesoRecap.gains || [];
-          const collapseCard = { background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 8, overflow: 'hidden', marginBottom: 12 };
+          const collapseCard = { background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 8, overflow: 'hidden', marginBottom: 12 };
           const collapseHead = { width: '100%', display: 'flex', alignItems: 'center', gap: 12, padding: '16px', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left', WebkitTapHighlightColor: 'transparent' };
           const collapseTitle = { fontSize: 22, letterSpacing: '0.03em', color: UI.ink, lineHeight: 1 };
           const collapseSub = { fontFamily: UI.fontUi, fontSize: 11.5, color: UI.inkSoft, marginTop: 5 };
@@ -3677,11 +3748,11 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                   <i className={`fa-solid fa-chevron-${recapGainsOpen ? 'up' : 'down'}`} style={chevStyle} />
                 </button>
                 {recapGainsOpen && (
-                  <div style={{ padding: '2px 14px 12px' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '2px 14px 12px' }}>
                     {gains.length > 0 ? gains.map((item, i) => {
                       const up = (item.weightDelta || 0) !== 0 ? item.weightDelta > 0 : item.setDelta > 0;
                       return (
-                        <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, padding: '10px 0', borderBottom: i < gains.length - 1 ? `1px solid ${UI.hair}` : 'none' }}>
+                        <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, padding: '10px 12px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6 }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 9, minWidth: 0 }}>
                             <span style={{ width: 6, height: 6, borderRadius: '50%', background: up ? 'var(--accent)' : 'rgba(var(--danger-rgb),0.9)', flexShrink: 0 }} />
                             <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
@@ -3742,8 +3813,9 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                 return (
                   <button key={opt.key} onClick={() => setFbEdit(e => ({ ...e, sel: opt.key }))} style={{
                     width: '100%', marginBottom: 8, padding: '12px 14px',
-                    background: sel ? 'rgba(var(--accent-rgb),0.12)' : UI.bgInset,
+                    background: sel ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
                     border: `1px solid ${sel ? 'var(--accent)' : UI.hairStrong}`, borderRadius: 6, cursor: 'pointer', textAlign: 'left', WebkitTapHighlightColor: 'transparent',
+                    textShadow: sel ? 'var(--text-lift)' : 'none',
                   }}>
                     <div style={{ fontFamily: UI.fontUi, fontSize: 13, color: sel ? 'var(--accent)' : UI.ink, fontWeight: 600 }}>{opt.label}</div>
                     <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 2 }}>{opt.sub}</div>
@@ -3761,8 +3833,9 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                 return (
                   <button key={opt.key} onClick={() => setFbEdit(e => ({ ...e, sel: opt.key }))} style={{
                     width: '100%', marginBottom: 8, padding: '12px 14px',
-                    background: sel ? 'rgba(var(--accent-rgb),0.12)' : UI.bgInset,
+                    background: sel ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
                     border: `1px solid ${sel ? 'var(--accent)' : UI.hairStrong}`, borderRadius: 6, cursor: 'pointer', textAlign: 'left', WebkitTapHighlightColor: 'transparent',
+                    textShadow: sel ? 'var(--text-lift)' : 'none',
                   }}>
                     <div style={{ fontFamily: UI.fontUi, fontSize: 13, color: sel ? 'var(--accent)' : UI.ink, fontWeight: 600 }}>{opt.label}</div>
                     <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 2 }}>{opt.sub}</div>
@@ -3828,8 +3901,9 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                   const sel = fbEdit.volume === key;
                   return (
                     <button key={key} onClick={() => setFbEdit(e => ({ ...e, volume: key }))} style={{
-                      width: '100%', padding: '10px 14px', background: sel ? 'rgba(var(--accent-rgb),0.12)' : UI.bgInset,
+                      width: '100%', padding: '10px 14px', background: sel ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
                       border: `1px solid ${sel ? 'var(--accent)' : UI.hairStrong}`, borderRadius: 6, cursor: 'pointer', textAlign: 'left', WebkitTapHighlightColor: 'transparent',
+                      textShadow: 'none',
                     }}>
                       <div style={{ fontFamily: UI.fontUi, fontSize: 13, color: sel ? 'var(--accent)' : UI.ink, fontWeight: 600 }}>{mesoVolumeLbl(false)[key]}</div>
                     </button>
@@ -3848,7 +3922,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 14 }}>
               {muscleGroups.map(tag => (
                 <span key={tag} className="micro" style={{
-                  color: UI.inkFaint, border: `0.5px solid ${UI.hair}`,
+                  color: UI.inkFaint, border: `var(--hair-width) solid ${UI.hair}`,
                   borderRadius: 4, padding: '2px 8px',
                 }}>{tag}</span>
               ))}
@@ -4698,7 +4772,7 @@ function SessionEditSheet({ session, duration, exercises, store, setStore, onClo
               return (
                 <div style={{
                   padding: '10px 16px',
-                  background: st.technique ? 'rgba(var(--accent-rgb),0.06)' : 'transparent',
+                  background: st.technique ? 'rgba(var(--accent-rgb),0.13)' : 'transparent',
                   opacity: st.skipped ? 0.5 : st.warmup ? 0.7 : 1,
                 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -4936,7 +5010,7 @@ function TechniqueBlock({ st, highlight = false, decline = false }) {
   if (!st || !st.technique) return null;
   const railColor = highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.4)' : 'rgba(var(--accent-rgb),0.35)';
   const badgeColor = highlight ? UI.gold : decline ? 'rgba(var(--danger-rgb),0.85)' : UI.inkFaint;
-  const badgeBg = highlight ? UI.goldFaint : decline ? 'rgba(var(--danger-rgb),0.08)' : 'rgba(var(--accent-rgb),0.08)';
+  const badgeBg = highlight ? UI.goldFaint : decline ? 'rgba(var(--danger-rgb),0.08)' : 'rgba(var(--accent-rgb),0.16)';
   const badgeBorder = highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : 'rgba(var(--accent-rgb),0.25)';
   const chipColor = highlight ? UI.goldLight : decline ? 'rgba(var(--danger-rgb),0.85)' : UI.ink;
   const chipBorder = highlight ? UI.goldSoft : decline ? 'rgba(var(--danger-rgb),0.35)' : UI.hairStrong;
@@ -5029,9 +5103,10 @@ function SessionCompareScreen({ store, setStore, go, sessionId, compareId, back 
   // get their custom image, everyone else the faint centered ZANE mark.
   const _shotLogo = store.settings?.vipBackground || 'icons/zane-logo.png';
   const _shotIsCustom = _shotLogo !== 'icons/zane-logo.png';
-  const _shotIsLight = (store.settings?.darkMode ?? 'dark') === 'light';
+  const _shotIsLight = ['light', 'paper'].includes(store.settings?.darkMode ?? 'dark');
   const _shotDefaultStyle = { width: '85%', maxWidth: 320, opacity: _shotIsLight ? 0.14 : 0.04, filter: _shotIsLight ? 'grayscale(1)' : 'grayscale(1) brightness(3)', objectFit: 'contain' };
   const _shotCustomStyle = { width: '92%', maxWidth: 360, opacity: 0.16, objectFit: 'contain' };
+  const _shotGridOn = !!window.__gridEnabled;
   const s = store.sessions.find(x => x.id === sessionId);
   const candidates = s ? sameDaySessions(store.sessions, s) : [];
   // Default comparison should look backward in time — comparing an older
@@ -5105,7 +5180,14 @@ function SessionCompareScreen({ store, setStore, go, sessionId, compareId, back 
       />
       <Hairline />
 
-      <div ref={captureRef} style={{ padding: capturing ? '20px 22px 24px' : '14px 22px 28px', background: UI.bg, position: 'relative' }}>
+      <div ref={captureRef} style={{
+        padding: capturing ? '20px 22px 24px' : '14px 22px 28px', position: 'relative',
+        // See SessionDetailScreen's captureRef div: the CSS grid never
+        // survives html2canvas, SvgGrid below replaces it for the export.
+        backgroundColor: UI.bg, backgroundImage: capturing ? 'none' : 'var(--bg-texture)',
+      }}>
+
+        {capturing && _shotGridOn && <SvgGrid />}
 
         {/* Screenshot background watermark — centered, faint, full document (HomeScreen-style) */}
         {capturing && (
@@ -5209,7 +5291,7 @@ function SessionCompareScreen({ store, setStore, go, sessionId, compareId, back 
                       <div key={si} style={{
                         display: 'grid', gridTemplateColumns: '20px 1fr 100px 18px',
                         alignItems: currIsTechnique ? 'start' : 'center', gap: 10, padding: '6px 0',
-                        borderBottom: !isLastSet ? `0.5px solid ${UI.hair}` : 'none',
+                        borderBottom: !isLastSet ? `var(--hair-width) solid ${UI.hair}` : 'none',
                       }}>
                         <span className="num" style={{ fontSize: 11, color: UI.inkFaint }}>{si + 1}</span>
                         {currIsTechnique ? (
@@ -5263,7 +5345,7 @@ function SessionCompareScreen({ store, setStore, go, sessionId, compareId, back 
               <button key={c.id} onClick={() => { setPickerOpen(false); go({ name: 'compare', sessionId, compareId: c.id, back }); }} style={{
                 display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                 padding: '13px 2px', background: 'none', border: 'none', cursor: 'pointer',
-                borderBottom: `0.5px solid ${UI.hair}`, textAlign: 'left', WebkitTapHighlightColor: 'transparent',
+                borderBottom: `var(--hair-width) solid ${UI.hair}`, textAlign: 'left', WebkitTapHighlightColor: 'transparent',
               }}>
                 <span className="num" style={{ fontSize: 14, color: active ? 'var(--accent)' : UI.ink }}>
                   {fmtDate(c.date, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}
@@ -5293,7 +5375,7 @@ function ComparisonScreen({ session, onDismiss, go, userName }) {
   return (
     <Screen scroll={false} style={{ position: 'relative' }}>
       <TopBar title={userName} onBack={() => go({ name: 'settings' })} />
-      <div style={{ flexShrink: 0, padding: '12px 22px', borderBottom: `0.5px solid ${UI.hair}` }}>
+      <div style={{ flexShrink: 0, padding: '12px 22px', borderBottom: `var(--hair-width) solid ${UI.hair}` }}>
         <div className="micro" style={{ color: UI.inkFaint, marginBottom: 2 }}>
           {session.day_name} · COMPLETE
         </div>
@@ -5361,7 +5443,7 @@ function ComparisonScreen({ session, onDismiss, go, userName }) {
                   <div key={si} style={{
                     display: 'grid', gridTemplateColumns: '20px 1fr 100px 18px',
                     alignItems: 'center', gap: 10, padding: '6px 0',
-                    borderBottom: si < maxLen - 1 ? `0.5px solid ${UI.hair}` : 'none',
+                    borderBottom: si < maxLen - 1 ? `var(--hair-width) solid ${UI.hair}` : 'none',
                   }}>
                     <span className="num" style={{ fontSize: 11, color: UI.inkFaint }}>{si + 1}</span>
                     <span className="num" style={{ fontSize: 14, color: curr && (!curr.skipped || curr.done) ? UI.ink : UI.inkFaint }}>
@@ -5391,7 +5473,7 @@ function ComparisonScreen({ session, onDismiss, go, userName }) {
         })()}
       </div>
 
-      <div style={{ flexShrink: 0, padding: '14px 22px', paddingBottom: `calc(14px + env(safe-area-inset-bottom, 0px))`, borderTop: `0.5px solid ${UI.hair}` }}>
+      <div style={{ flexShrink: 0, padding: '14px 22px', paddingBottom: `calc(14px + env(safe-area-inset-bottom, 0px))`, borderTop: `var(--hair-width) solid ${UI.hair}` }}>
         <Btn onClick={onDismiss}>Got it</Btn>
       </div>
     </Screen>
@@ -5507,7 +5589,7 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
       <div style={{
         flexShrink: 0,
         padding: `calc(env(safe-area-inset-top, 0px) + 14px) 22px 14px`,
-        borderBottom: `0.5px solid ${UI.hair}`,
+        borderBottom: `var(--hair-width) solid ${UI.hair}`,
         position: 'sticky', top: 0, zIndex: 5,
         background: 'rgba(var(--bg-rgb),0.9)',
         backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
@@ -5546,7 +5628,7 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
       {/* Exercise chips */}
       <div ref={chipRowRef} style={{
         flexShrink: 0, display: 'flex', gap: 6, overflowX: 'auto',
-        padding: '10px 16px', borderBottom: `0.5px solid ${UI.hair}`,
+        padding: '10px 16px', borderBottom: `var(--hair-width) solid ${UI.hair}`,
         scrollbarWidth: 'none', WebkitOverflowScrolling: 'touch',
       }}>
         {entries.map((e, i) => {
@@ -5558,7 +5640,7 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
             <button key={i} onClick={() => { setExIdx(i); setFollowLive(i === liveIdx); }} style={{
               flexShrink: 0, padding: '6px 12px', borderRadius: 4,
               border: `${isCurrent ? '1.5px' : '1px'} solid ${isCurrent ? UI.gold : allDone ? UI.goldSoft : UI.hair}`,
-              background: isCurrent ? UI.goldFaint : allDone ? 'rgba(var(--accent-rgb),0.06)' : 'transparent',
+              background: isCurrent ? UI.goldFaint : allDone ? 'rgba(var(--accent-rgb),0.13)' : 'transparent',
               color: isCurrent ? UI.gold : allDone ? UI.goldSoft : UI.inkSoft,
               fontFamily: UI.fontUi, fontSize: 12, fontWeight: isCurrent ? 600 : 400,
               letterSpacing: '0.06em', cursor: 'pointer',
@@ -5597,13 +5679,13 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
             {(entry.category || entry.equipment || entry.movementType) && (
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 8 }}>
                 {entry.category && (
-                  <span style={{ fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase', color: UI.inkFaint, background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 4, padding: '2px 7px' }}>{entry.category}</span>
+                  <span style={{ fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase', color: UI.inkFaint, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 4, padding: '2px 7px' }}>{entry.category}</span>
                 )}
                 {entry.equipment && (
-                  <span style={{ fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase', color: UI.inkFaint, background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 4, padding: '2px 7px' }}>{entry.equipment}</span>
+                  <span style={{ fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase', color: UI.inkFaint, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 4, padding: '2px 7px' }}>{entry.equipment}</span>
                 )}
                 {entry.movementType && (
-                  <span style={{ fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase', color: UI.inkFaint, background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 4, padding: '2px 7px' }}>{entry.movementType}</span>
+                  <span style={{ fontFamily: UI.fontUi, fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase', color: UI.inkFaint, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 4, padding: '2px 7px' }}>{entry.movementType}</span>
                 )}
               </div>
             )}
@@ -5622,7 +5704,7 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
                 <div style={{ padding: '12px 0', opacity: done ? 1 : 0.35, transition: 'opacity 0.3s' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                     <span className="num" style={{ fontSize: 11, color: done ? UI.gold : UI.inkFaint }}>{i + 1}</span>
-                    <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkFaint, background: 'rgba(var(--accent-rgb),0.08)', border: `0.5px solid rgba(var(--accent-rgb),0.25)`, borderRadius: 4, padding: '2px 6px' }}>DROP SET</span>
+                    <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkFaint, background: 'rgba(var(--accent-rgb),0.16)', border: `0.5px solid rgba(var(--accent-rgb),0.25)`, borderRadius: 4, padding: '2px 6px' }}>DROP SET</span>
                     <div style={{ marginLeft: 'auto' }}>
                       {done ? <svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke={UI.gold} strokeWidth="1.8"><path d="M2 6l2.5 2.5L10 3"/></svg>
                              : <div style={{ width: 13, height: 13, borderRadius: '50%', border: `1px solid ${UI.hair}` }} />}
@@ -5651,7 +5733,7 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
                   <div style={{ padding: '12px 0', opacity: done ? 1 : 0.35, transition: 'opacity 0.3s' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                       <span className="num" style={{ fontSize: 11, color: done ? UI.gold : UI.inkFaint }}>{i + 1}</span>
-                      <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkFaint, background: 'rgba(var(--accent-rgb),0.08)', border: `0.5px solid rgba(var(--accent-rgb),0.25)`, borderRadius: 4, padding: '2px 6px' }}>{isMatch ? 'MYO MATCH' : 'MYO-REPS'}</span>
+                      <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkFaint, background: 'rgba(var(--accent-rgb),0.16)', border: `0.5px solid rgba(var(--accent-rgb),0.25)`, borderRadius: 4, padding: '2px 6px' }}>{isMatch ? 'MYO MATCH' : 'MYO-REPS'}</span>
                       {total > 0 && <span className="num" style={{ fontSize: 10, color: UI.inkFaint }}>{total} total</span>}
                       <div style={{ marginLeft: 'auto' }}>
                         {done ? <svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke={UI.gold} strokeWidth="1.8"><path d="M2 6l2.5 2.5L10 3"/></svg>
@@ -5686,7 +5768,7 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
                 <div style={{ padding: '12px 0', opacity: done ? 1 : 0.35, transition: 'opacity 0.3s' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                     <span className="num" style={{ fontSize: 11, color: done ? UI.gold : UI.inkFaint }}>{i + 1}</span>
-                    <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkFaint, background: 'rgba(var(--accent-rgb),0.08)', border: `0.5px solid rgba(var(--accent-rgb),0.25)`, borderRadius: 4, padding: '2px 6px' }}>AMRAP</span>
+                    <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkFaint, background: 'rgba(var(--accent-rgb),0.16)', border: `0.5px solid rgba(var(--accent-rgb),0.25)`, borderRadius: 4, padding: '2px 6px' }}>AMRAP</span>
                     <div style={{ marginLeft: 'auto' }}>
                       {done ? <svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke={UI.gold} strokeWidth="1.8"><path d="M2 6l2.5 2.5L10 3"/></svg>
                              : <div style={{ width: 13, height: 13, borderRadius: '50%', border: `1px solid ${UI.hair}` }} />}
@@ -5720,7 +5802,7 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
                   <div style={{ padding: '12px 0', opacity: done ? 1 : 0.35, transition: 'opacity 0.3s' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                       <span className="num" style={{ fontSize: 11, color: done ? UI.gold : UI.inkFaint }}>{i + 1}</span>
-                      <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkFaint, background: 'rgba(var(--accent-rgb),0.08)', border: `0.5px solid rgba(var(--accent-rgb),0.25)`, borderRadius: 4, padding: '2px 6px' }}>PARTIALS</span>
+                      <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkFaint, background: 'rgba(var(--accent-rgb),0.16)', border: `0.5px solid rgba(var(--accent-rgb),0.25)`, borderRadius: 4, padding: '2px 6px' }}>PARTIALS</span>
                       <div style={{ marginLeft: 'auto' }}>
                         {done ? <svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke={UI.gold} strokeWidth="1.8"><path d="M2 6l2.5 2.5L10 3"/></svg>
                                : <div style={{ width: 13, height: 13, borderRadius: '50%', border: `1px solid ${UI.hair}` }} />}
@@ -5746,7 +5828,7 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId }) {
                   <div style={{ padding: '12px 0', opacity: done ? 1 : 0.35, transition: 'opacity 0.3s' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                       <span className="num" style={{ fontSize: 11, color: done ? UI.gold : UI.inkFaint }}>{i + 1}</span>
-                      <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkFaint, background: 'rgba(var(--accent-rgb),0.08)', border: `0.5px solid rgba(var(--accent-rgb),0.25)`, borderRadius: 4, padding: '2px 6px' }}>STRETCH</span>
+                      <span style={{ fontFamily: UI.fontUi, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkFaint, background: 'rgba(var(--accent-rgb),0.16)', border: `0.5px solid rgba(var(--accent-rgb),0.25)`, borderRadius: 4, padding: '2px 6px' }}>STRETCH</span>
                       <div style={{ marginLeft: 'auto' }}>
                         {done ? <svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke={UI.gold} strokeWidth="1.8"><path d="M2 6l2.5 2.5L10 3"/></svg>
                                : <div style={{ width: 13, height: 13, borderRadius: '50%', border: `1px solid ${UI.hair}` }} />}
@@ -6108,7 +6190,7 @@ function ExerciseHistoryScreen({ store, go, exId, dayId, exName, back, userId })
               return (
                 <g key={i}>
                   <line x1={PAD_L} y1={y} x2={VW - PAD_R} y2={y} stroke={UI.hair} strokeWidth="0.5" strokeDasharray="3 3" />
-                  <text x={PAD_L - 5} y={y + 3.5} textAnchor="end" fontSize="8" fontFamily="JetBrains Mono, monospace" fill={UI.inkFaint}>
+                  <text filter="url(#chart-text-lift)" x={PAD_L - 5} y={y + 3.5} textAnchor="end" fontSize="8" fontFamily="JetBrains Mono, monospace" fill={UI.inkFaint}>
                     {isTimeEx ? LB.fmtDuration(v) : Math.round(v)}
                   </text>
                 </g>
@@ -6138,7 +6220,7 @@ function ExerciseHistoryScreen({ store, go, exId, dayId, exName, back, userId })
 
             {/* X-axis date labels */}
             {labelIdxs.map(xi => (
-              <text key={xi} x={xPos(xi)} y={VH - 4} textAnchor="middle" fontSize="7.5"
+              <text filter="url(#chart-text-lift)" key={xi} x={xPos(xi)} y={VH - 4} textAnchor="middle" fontSize="7.5"
                 fontFamily="JetBrains Mono, monospace" fill={UI.inkFaint}>
                 {fmtDate(allSessions[xi].ended)}
               </text>

@@ -153,7 +153,7 @@ function WaterRing({ percent, size = 128 }) {
       </svg>
       <div style={{
         position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
-        fontFamily: UI.fontNum, fontSize: 26, fontWeight: 600, color: WT_BLUE, fontVariantNumeric: 'tabular-nums',
+        fontFamily: UI.fontNum, fontSize: 26, fontWeight: 600, color: isLightCanvasActive() ? '#0369a1' : WT_BLUE, fontVariantNumeric: 'tabular-nums',
       }}>{percent}%</div>
     </div>
   );
@@ -223,12 +223,12 @@ function WaterDayChart({ entries, goalMl, startTime, endTime }) {
       {gridVals.map((v, i) => (
         <g key={i}>
           {i > 0 && <line x1={padL} y1={yOf(v).toFixed(1)} x2={W - padR} y2={yOf(v).toFixed(1)} stroke={UI.hair} strokeWidth="0.5" strokeDasharray="3 3" />}
-          <text x={padL - 5} y={(yOf(v) + 3).toFixed(1)} textAnchor="end" fontSize="8" fontFamily={UI.fontNum} fill={UI.inkFaint}>{wtAmt(v)}</text>
+          <text filter="url(#chart-text-lift)" x={padL - 5} y={(yOf(v) + 3).toFixed(1)} textAnchor="end" fontSize="8" fontFamily={UI.fontNum} fill={UI.inkFaint}>{wtAmt(v)}</text>
         </g>
       ))}
       <line x1={padL} y1={base} x2={W - padR} y2={base} stroke={UI.hair} strokeWidth="0.5" />
       {ticks.filter((_, i) => i % Math.ceil(span / 6) === 0).map((h, i) => (
-        <text key={i} x={xOf(h).toFixed(1)} y={H - 6} textAnchor="middle" fontSize="8" fontFamily={UI.fontNum} fill={UI.inkFaint}>{String(h).padStart(2, '0')}</text>
+        <text filter="url(#chart-text-lift)" key={i} x={xOf(h).toFixed(1)} y={H - 6} textAnchor="middle" fontSize="8" fontFamily={UI.fontNum} fill={UI.inkFaint}>{String(h).padStart(2, '0')}</text>
       ))}
       <line x1={xOf(nowDec).toFixed(1)} y1={padTop} x2={xOf(nowDec).toFixed(1)} y2={base} stroke={UI.inkFaint} strokeWidth="1" strokeDasharray="2 3" />
       <polyline points={expLine} fill="none" stroke={UI.gold} strokeWidth="1.5" strokeDasharray="5 4" opacity="0.8" />
@@ -416,7 +416,16 @@ function WaterScreen({ store, setStore, go, userId }) {
         </div>
       } />
 
-      <div ref={captureRef} style={{ padding: capturing ? '14px 22px 16px' : '14px 22px calc(env(safe-area-inset-bottom, 8px) + 24px)', display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {/* No background of its own while live (the Screen canvas behind it,
+          texture included, shows through). While capturing, an explicit solid
+          fill blocks that canvas out (the CSS grid never survives
+          html2canvas), and while the grid toggle is on SvgGrid redraws it in a
+          way html2canvas actually renders. */}
+      <div ref={captureRef} style={{ padding: capturing ? '14px 22px 16px' : '14px 22px calc(env(safe-area-inset-bottom, 8px) + 24px)', display: 'flex', flexDirection: 'column', gap: 16, position: 'relative', ...(capturing && { backgroundColor: UI.bg }) }}>
+        {/* Negative z-index: this div's flex children are plain (non-positioned),
+            which paint above a z-index:0 absolute sibling regardless of DOM
+            order, so the grid needs to sit behind that baseline instead. */}
+        {capturing && window.__gridEnabled && <SvgGrid style={{ zIndex: -1 }} />}
         {/* Hero */}
         <BracketFrame gold style={{ padding: 20 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 18 }}>
@@ -466,8 +475,9 @@ function WaterScreen({ store, setStore, go, userId }) {
         </div>
         )}
 
-        {/* Current bottle */}
-        {bottleEnabled && pendingBottle > 0 && (
+        {/* Current bottle (hidden while capturing: nobody sharing a screenshot
+            wants their exact bottle fill state broadcast) */}
+        {!capturing && bottleEnabled && pendingBottle > 0 && (
           <Card style={{ padding: '12px 14px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
               <span style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
@@ -526,8 +536,9 @@ function WaterScreen({ store, setStore, go, userId }) {
           <WaterDayChart entries={todayEntries} goalMl={goalMl} startTime={startTime} endTime={endTime} />
         </Card>
 
-        {/* Breakdown */}
-        {(Object.keys(breakdown.grouped).length > 0 || breakdown.milk > 0 || breakdown.custom > 0 || bottlesToday > 0) && (
+        {/* Breakdown (hidden while capturing: a shared screenshot is meant to
+            show the day's progress, not a full drink-by-drink inventory) */}
+        {!capturing && (Object.keys(breakdown.grouped).length > 0 || breakdown.milk > 0 || breakdown.custom > 0 || bottlesToday > 0) && (
           <Card style={{ padding: 14 }}>
             <div className="micro" style={{ color: UI.inkFaint, marginBottom: 10 }}>Other drinks today</div>
             {bottleEnabled && bottlesToday > 0 && <WaterBreakdownRow icon="fa-bottle-water" name="Bottles" value={`${bottlesToday}x`} />}
@@ -539,7 +550,9 @@ function WaterScreen({ store, setStore, go, userId }) {
           </Card>
         )}
 
-        {/* Today's log */}
+        {/* Today's log (hidden while capturing: a shared screenshot is the
+            day's totals, not a timestamped log of every single drink) */}
+        {!capturing && (
         <div>
           <Bezel style={{ marginBottom: 10 }}>Today's entries ({todayEntries.length})</Bezel>
           {todayEntries.length === 0 ? (
@@ -549,20 +562,19 @@ function WaterScreen({ store, setStore, go, userId }) {
               {[...todayEntries].sort((a, b) => wtHhmmToDecimal(b.time) - wtHhmmToDecimal(a.time)).map(e => (
                 <div key={e.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 12px', background: UI.bgInset, border: `1px solid ${UI.hair}`, borderRadius: 6 }}>
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, minWidth: 0 }}>
-                    <span className="num" style={{ fontSize: 12, color: WT_BLUE }}>{e.time}</span>
+                    <span className="num" style={{ fontSize: 12, color: isLightCanvasActive() ? '#0369a1' : WT_BLUE }}>{e.time}</span>
                     <span className="num" style={{ fontSize: 14, fontWeight: 600, color: UI.ink }}>+{e.amountMl} ml</span>
                     {e.name && <span style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{e.name}</span>}
                   </div>
-                  {!capturing && (
-                    <button onClick={() => deleteEntry(e)} aria-label="Delete" style={{ background: 'transparent', border: 'none', color: UI.inkFaint, cursor: 'pointer', padding: 6, WebkitTapHighlightColor: 'transparent' }}>
-                      <i className="fa-solid fa-trash" style={{ fontSize: 12 }} />
-                    </button>
-                  )}
+                  <button onClick={() => deleteEntry(e)} aria-label="Delete" style={{ background: 'transparent', border: 'none', color: UI.inkFaint, cursor: 'pointer', padding: 6, WebkitTapHighlightColor: 'transparent' }}>
+                    <i className="fa-solid fa-trash" style={{ fontSize: 12 }} />
+                  </button>
                 </div>
               ))}
             </div>
           )}
         </div>
+        )}
       </div>
 
       {/* ── Settings sheet ── */}
@@ -644,7 +656,7 @@ function WaterBreakdownRow({ icon, name, value, color }) {
       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, color: UI.ink }}>
         <i className={`fa-solid ${icon}`} style={{ fontSize: 12, color: color || UI.inkFaint, width: 16, textAlign: 'center' }} />{name}
       </span>
-      <span className="num" style={{ color: color || WT_BLUE, fontWeight: 600 }}>{value}</span>
+      <span className="num" style={{ color: color || (isLightCanvasActive() ? '#0369a1' : WT_BLUE), fontWeight: 600 }}>{value}</span>
     </div>
   );
 }
@@ -655,7 +667,7 @@ function WaterSettingsBody({ settings, patchSettings, go, onClose, onConfigureDr
   const [start, setStart] = useStateW(settings.waterStartTime || '08:00');
   const [end, setEnd] = useStateW(settings.waterEndTime || '22:00');
   const [bottleMlDraft, setBottleMlDraft] = useStateW(String(settings.waterBottleMl || 1500));
-  const timeColorScheme = settings.darkMode === 'light' ? 'light' : 'dark';
+  const timeColorScheme = ['light', 'paper'].includes(settings.darkMode ?? 'dark') ? 'light' : 'dark';
   const timeStyle = { ...wtInput, colorScheme: timeColorScheme };
 
   const bottleEnabled = settings.waterBottleEnabled !== false;
@@ -726,7 +738,7 @@ function WaterSettingsBody({ settings, patchSettings, go, onClose, onConfigureDr
 
       {/* Other drinks & coffee live in their own sub-sheet to keep this one tidy */}
       <Bezel style={{ marginBottom: 12 }}>Drinks</Bezel>
-      <button onClick={onConfigureDrinks} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', padding: '13px 12px', background: UI.bgInset, border: `1px solid ${UI.hair}`, borderRadius: 6, cursor: 'pointer', marginBottom: 20, WebkitTapHighlightColor: 'transparent' }}>
+      <button onClick={onConfigureDrinks} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', padding: '13px 12px', background: UI.bgInset, border: `1px solid ${UI.hair}`, borderRadius: 6, textShadow: 'none', cursor: 'pointer', marginBottom: 20, WebkitTapHighlightColor: 'transparent' }}>
         <span style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi }}>Other drinks & coffee</span>
         <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi }}>{drinkCount > 0 ? `${drinkCount} set` : 'Configure'}</span>
@@ -746,7 +758,7 @@ function WaterSettingsBody({ settings, patchSettings, go, onClose, onConfigureDr
 function wtSwatchBtnStyle(sel) {
   return {
     display: 'grid', placeItems: 'center', borderRadius: 6, cursor: 'pointer',
-    background: sel ? 'rgba(var(--accent-rgb),0.14)' : UI.bgInset,
+    background: sel ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
     border: `0.5px solid ${sel ? 'rgba(var(--accent-rgb),0.5)' : UI.hair}`,
     WebkitTapHighlightColor: 'transparent',
   };
@@ -877,7 +889,7 @@ function WaterConfigRow({ left, right, onRemove, onEdit, icon, color, active }) 
   return (
     <div onClick={onEdit} style={{
       display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 12px',
-      background: active ? 'rgba(var(--accent-rgb),0.10)' : UI.bgInset,
+      background: active ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
       border: `1px solid ${active ? 'rgba(var(--accent-rgb),0.35)' : UI.hair}`, borderRadius: 6, marginBottom: 6,
       cursor: onEdit ? 'pointer' : 'default', WebkitTapHighlightColor: 'transparent',
     }}>
@@ -902,7 +914,7 @@ function WaterStatsBody({ store, goalMl }) {
   const [period, setPeriod] = useStateW(30);
   const [from, setFrom] = useStateW(wtDateStr(-29));
   const [to, setTo] = useStateW(wtDateStr(0));
-  const timeColorScheme = store.settings?.darkMode === 'light' ? 'light' : 'dark';
+  const timeColorScheme = ['light', 'paper'].includes(store.settings?.darkMode ?? 'dark') ? 'light' : 'dark';
   const coffeeLabels = (store.settings?.waterCoffeeSizes || []).map(s => s.label);
 
   const range = useMemoW(() => {
@@ -931,7 +943,8 @@ function WaterStatsBody({ store, goalMl }) {
     <button onClick={() => setPeriod(id)} style={{
       flex: 1, padding: '7px 0', border: 'none', cursor: 'pointer',
       background: period === id ? 'var(--accent)' : 'transparent',
-      color: period === id ? '#0a0805' : UI.inkFaint,
+      color: period === id ? 'var(--accent-ink)' : UI.inkFaint,
+      textShadow: period === id ? 'none' : 'var(--text-lift)',
       fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.04em', WebkitTapHighlightColor: 'transparent',
     }}>{label}</button>
   );
@@ -991,11 +1004,11 @@ const wtIconBtn = {
 const wtTile = {
   display: 'flex', flexDirection: 'column', alignItems: 'center',
   padding: '14px 6px 10px', borderRadius: 6, border: `1px solid ${UI.hairStrong}`,
-  background: UI.bgInset, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+  background: UI.bgInset, textShadow: 'none', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
 };
 const wtDrinkTile = {
   display: 'flex', alignItems: 'center', gap: 10, padding: 12, borderRadius: 6,
-  border: `1px solid ${UI.hairStrong}`, background: UI.bgInset, cursor: 'pointer',
+  border: `1px solid ${UI.hairStrong}`, background: UI.bgInset, textShadow: 'none', cursor: 'pointer',
   WebkitTapHighlightColor: 'transparent', overflow: 'hidden',
 };
 const wtDrinkIcon = {
@@ -1016,12 +1029,12 @@ const wtInput = {
 const wtBigInput = { ...wtInput, fontSize: 22, padding: '12px 14px' };
 const wtPreset = {
   padding: '10px 0', borderRadius: 4, border: `1px solid ${UI.hairStrong}`, background: UI.bgInset,
-  color: UI.ink, fontFamily: UI.fontNum, fontSize: 14, fontWeight: 600, cursor: 'pointer',
+  color: UI.ink, textShadow: 'none', fontFamily: UI.fontNum, fontSize: 14, fontWeight: 600, cursor: 'pointer',
   WebkitTapHighlightColor: 'transparent',
 };
 const wtPillOpt = {
   padding: '13px 8px', borderRadius: 4, border: `1px solid ${UI.hairStrong}`, background: UI.bgInset,
-  color: UI.ink, fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, cursor: 'pointer', textAlign: 'center',
+  color: UI.ink, textShadow: 'none', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, cursor: 'pointer', textAlign: 'center',
   WebkitTapHighlightColor: 'transparent',
 };
 

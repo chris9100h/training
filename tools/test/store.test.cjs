@@ -2483,6 +2483,70 @@ async function testAsync(name, fn) {
     assert.ok(sugg && sugg.kg > 100, 'accepted bump does not block the next one');
   });
 
+  test('incrementForExercise: no override, no equipment config -> the caller fallback', () => {
+    const store = { settings: {} };
+    const ex = { id: 'leg', equipment: 'machine' };
+    assert.strictEqual(LB.incrementForExercise(store, ex, 2.5), 2.5);
+    assert.strictEqual(LB.incrementForExercise(store, ex, 5), 5, 'each caller keeps its own fallback');
+  });
+
+  test('incrementForExercise: no per-exercise override -> falls back to the equipment-category config', () => {
+    const store = { settings: { equipmentConfig: { machine: { increment: 1.25 } } } };
+    const ex = { id: 'leg', equipment: 'machine' };
+    assert.strictEqual(LB.incrementForExercise(store, ex, 2.5), 1.25);
+  });
+
+  test('incrementForExercise: a set per-exercise override wins over the equipment config and the fallback', () => {
+    const store = { settings: { equipmentConfig: { machine: { increment: 1.25 } } } };
+    const ex = { id: 'leg', equipment: 'machine', progression_increment: 0.5 };
+    assert.strictEqual(LB.incrementForExercise(store, ex, 2.5), 0.5);
+  });
+
+  test('incrementForExercise: an override of exactly 0 or negative is treated as unset, never applied literally', () => {
+    const store = { settings: { equipmentConfig: { machine: { increment: 1.25 } } } };
+    assert.strictEqual(LB.incrementForExercise(store, { id: 'leg', equipment: 'machine', progression_increment: 0 }, 2.5), 1.25, 'a 0 override falls through to the equipment config, it can never mean "bump by 0"');
+    assert.strictEqual(LB.incrementForExercise(store, { id: 'leg', equipment: 'machine', progression_increment: -1 }, 2.5), 1.25, 'a negative override falls through too, it would otherwise invert the Meso earn/cut sign convention');
+  });
+
+  test('incrementForExercise: an equipment-category increment of 0 or negative is also treated as unset', () => {
+    const store = { settings: { equipmentConfig: { machine: { increment: 0 } } } };
+    const ex = { id: 'leg', equipment: 'machine' };
+    assert.strictEqual(LB.incrementForExercise(store, ex, 2.5), 2.5);
+    store.settings.equipmentConfig.machine.increment = -3;
+    assert.strictEqual(LB.incrementForExercise(store, ex, 2.5), 2.5);
+  });
+
+  test('incrementForExercise: a caller-supplied catCfg is used instead of re-deriving it, and still honors the same >0 rule', () => {
+    const store = { settings: { equipmentConfig: { machine: { increment: 99 } } } }; // must be ignored: caller passed its own catCfg
+    const ex = { id: 'leg', equipment: 'machine' };
+    assert.strictEqual(LB.incrementForExercise(store, ex, 2.5, { increment: 4 }), 4);
+    assert.strictEqual(LB.incrementForExercise(store, ex, 2.5, { increment: 0 }), 2.5);
+  });
+
+  test('progressionSuggestion: a per-exercise progression_increment override changes the suggested bump size', () => {
+    const store = {
+      settings: { smartProgression: true, equipmentConfig: { machine: { increment: 5 } } },
+      exercises: [{ id: 'leg', name: 'Leg Press', equipment: 'machine', progression_increment: 1 }],
+      schedules: [],
+    };
+    const ref = { entry: { sets: [{ kg: 100, reps: 10, warmup: false }] } };
+    const sugg = LB.progressionSuggestion(store, 'leg', 'd1', 5, null, ref, null, null, 0);
+    assert.ok(sugg, 'bump still fires');
+    assert.strictEqual(sugg.kg, 101, 'uses the 1kg per-exercise override, not the 5kg equipment default');
+  });
+
+  test('progressionSuggestion: a 0 or negative progression_increment override falls back to the equipment config instead of permanently silencing the bump', () => {
+    const store = {
+      settings: { smartProgression: true, equipmentConfig: { machine: { increment: 5 } } },
+      exercises: [{ id: 'leg', name: 'Leg Press', equipment: 'machine', progression_increment: 0 }],
+      schedules: [],
+    };
+    const ref = { entry: { sets: [{ kg: 100, reps: 10, warmup: false }] } };
+    const sugg = LB.progressionSuggestion(store, 'leg', 'd1', 5, null, ref, null, null, 0);
+    assert.ok(sugg, 'bump still fires using the equipment-config increment, not silently disabled forever');
+    assert.strictEqual(sugg.kg, 105);
+  });
+
   test('build531Plan: catalog names resolve, 4 days, program_data stamped, assistance uncapped', () => {
     const FTO = _catWin.FIVE_THREE_ONE;
     assert.ok(FTO && Array.isArray(FTO.lifts) && FTO.lifts.length === 4, 'FIVE_THREE_ONE has 4 lifts');
@@ -3058,7 +3122,8 @@ async function testAsync(name, fn) {
     const mk = (id, ended, sets, opts = {}) => ({
       id, scheduleId: 'p', ended, date: ended.slice(0, 10), isDeload: !!opts.isDeload,
       ...(opts.signalWeight ? { signalWeight: opts.signalWeight } : {}),
-      entries: [{ exId: 'bench', sets }],
+      ...(opts.dayId != null ? { dayId: opts.dayId } : {}),
+      entries: opts.entries || [{ exId: 'bench', sets }],
       ...(opts.joint ? { mesoRecap: { raw: { answers: { joint: { bench: opts.joint } } } } } : {}),
     });
     const flat = [{ done: true, kg: 100, reps: 8 }];
@@ -3118,6 +3183,61 @@ async function testAsync(name, fn) {
       const bw = [{ done: true, reps: 12 }];
       const sessions = [mk('E0', '2026-07-07T10:00:00Z', bw), mk('E1', '2026-07-10T10:00:00Z', bw), mk('E2', '2026-07-13T10:00:00Z', bw)];
       assert.strictEqual(LB.detectStall(sessions, 'bench', muscleOf, { planId: 'p', atCeiling: () => false }).stalled, false, 'e1RM is meaningless without weight');
+    });
+
+    // Same exercise in two different day-slots (e.g. 2nd exercise, fresher, on Day A
+    // vs 3rd, more pre-fatigued, on Day B). Both slots are steadily progressing on
+    // their own terms, but Day B is consistently heavier/lower due to fatigue context.
+    // Without a dayId filter the newest-3 window can pick 1 Day A + 2 Day B sessions,
+    // where Day A's higher number sits at the OLDEST spot of the window and neither
+    // later Day B session beats it: a false stall from mixing two contexts.
+    const dayMix = [
+      mk('A1', '2026-06-01T10:00:00Z', [{ done: true, kg: 80, reps: 8 }], { dayId: 'A' }),
+      mk('A2', '2026-06-15T10:00:00Z', [{ done: true, kg: 85, reps: 8 }], { dayId: 'A' }),
+      mk('A3', '2026-07-15T10:00:00Z', [{ done: true, kg: 105, reps: 8 }], { dayId: 'A' }),
+      mk('B1', '2026-06-20T10:00:00Z', [{ done: true, kg: 60, reps: 8 }], { dayId: 'B' }),
+      mk('B2', '2026-07-18T10:00:00Z', [{ done: true, kg: 65, reps: 8 }], { dayId: 'B' }),
+      mk('B3', '2026-07-20T10:00:00Z', [{ done: true, kg: 70, reps: 8 }], { dayId: 'B' }),
+    ];
+
+    test('detectStall: pooling two day-slots without a dayId filter can read as a false stall', () => {
+      const out = LB.detectStall(dayMix, 'bench', muscleOf, { planId: 'p', atCeiling: () => false });
+      assert.strictEqual(out.stalled, true, 'the newest-3 window crosses day contexts and hides both slots\' real progress');
+    });
+
+    test('detectStall: dayId scoping clears the false stall, each day-slot is progressing on its own', () => {
+      const dayA = LB.detectStall(dayMix, 'bench', muscleOf, { planId: 'p', atCeiling: () => false, dayId: 'A' });
+      const dayB = LB.detectStall(dayMix, 'bench', muscleOf, { planId: 'p', atCeiling: () => false, dayId: 'B' });
+      assert.strictEqual(dayA.stalled, false, 'Day A alone (80 -> 85 -> 105) is steadily progressing');
+      assert.strictEqual(dayB.stalled, false, 'Day B alone (60 -> 65 -> 70) is steadily progressing too, just lighter');
+    });
+
+    // Same exercise twice in one session (top set + back-off block). occ picks a
+    // single entry per session instead of taking the best across both, so a flat,
+    // genuinely stalled top set is not masked by an unrelated, improving back-off set.
+    const occMix = [
+      mk('S1', '2026-07-01T10:00:00Z', [], { entries: [
+        { exId: 'bench', sets: [{ done: true, kg: 140, reps: 8 }] },
+        { exId: 'bench', sets: [{ done: true, kg: 100, reps: 8 }] },
+      ] }),
+      mk('S2', '2026-07-09T10:00:00Z', [], { entries: [
+        { exId: 'bench', sets: [{ done: true, kg: 140, reps: 8 }] },
+        { exId: 'bench', sets: [{ done: true, kg: 110, reps: 8 }] },
+      ] }),
+      mk('S3', '2026-07-17T10:00:00Z', [], { entries: [
+        { exId: 'bench', sets: [{ done: true, kg: 140, reps: 8 }] },
+        { exId: 'bench', sets: [{ done: true, kg: 145, reps: 8 }] },
+      ] }),
+    ];
+
+    test('detectStall: occ scoping isolates the top set, a flat top set stalls on its own', () => {
+      const out = LB.detectStall(occMix, 'bench', muscleOf, { planId: 'p', atCeiling: () => false, occ: 0 });
+      assert.strictEqual(out.stalled, true, 'the top set is flat at 140kg across all 3 sessions');
+    });
+
+    test('detectStall: occ scoping isolates the back-off set, its own improvement is not lost', () => {
+      const out = LB.detectStall(occMix, 'bench', muscleOf, { planId: 'p', atCeiling: () => false, occ: 1 });
+      assert.strictEqual(out.stalled, false, 'the back-off set climbs 100 -> 110 -> 145');
     });
   }
 

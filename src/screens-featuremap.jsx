@@ -23,6 +23,11 @@ const FM_ADMIN_EMAIL = 'office@btc-prime.biz';
 // Coach accent tint (deliberately distinct from the app accent). Single source
 // so it is not hardcoded at each use site.
 const FM_COACH_TINT = '#4aab97';
+// #4aab97 is tuned for a dark canvas — deep enough on light/paper instead,
+// same reasoning as the health charts' DIA_COLOR.
+function fmCoachTint() {
+  return isLightCanvasActive() ? '#1f7a68' : FM_COACH_TINT;
+}
 
 const FM_ROLES = {
   user:  { label: 'Lifter', color: 'var(--accent)' },
@@ -441,8 +446,9 @@ function FeatureMapScreen({ store, go }) {
             {[{ id: 'all', label: 'All' }, { id: 'user', label: 'Lifters' }, { id: 'coach', label: 'Coaches' }].map((t, i) => (
               <button key={t.id} onClick={() => setRole(t.id)} style={{
                 padding: '7px 14px', border: 'none', borderLeft: i ? `1px solid ${UI.hair}` : 'none', cursor: 'pointer',
-                background: roleFilter === t.id ? (t.id === 'coach' ? FM_COACH_TINT : UI.gold) : 'transparent',
-                color: roleFilter === t.id ? '#0a0805' : UI.inkSoft,
+                background: roleFilter === t.id ? (t.id === 'coach' ? fmCoachTint() : UI.gold) : 'transparent',
+                textShadow: roleFilter === t.id ? 'none' : 'var(--text-lift)',
+                color: roleFilter === t.id ? (t.id === 'coach' ? (isLightCanvasActive() ? '#f5f5f5' : '#0a0805') : 'var(--accent-ink)') : UI.inkSoft,
                 fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
               }}>{t.label}</button>
             ))}
@@ -478,7 +484,7 @@ function FeatureMapScreen({ store, go }) {
           return (
             <section key={g.meta.id} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, paddingTop: 6 }}>
-                <div style={{ width: 34, height: 34, borderRadius: 6, flexShrink: 0, display: 'grid', placeItems: 'center', border: `1px solid ${UI.hairStrong}`, background: 'rgba(var(--accent-rgb),0.08)', color: 'var(--accent)' }}>
+                <div style={{ width: 34, height: 34, borderRadius: 6, flexShrink: 0, display: 'grid', placeItems: 'center', border: `1px solid ${UI.hairStrong}`, background: 'rgba(var(--accent-rgb),0.16)', color: 'var(--accent)' }}>
                   <i className={`fa-solid ${g.meta.icon}`} style={{ fontSize: 15 }} />
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
@@ -535,6 +541,7 @@ function FeatureMapScreen({ store, go }) {
         bottom: 'calc(16px + env(safe-area-inset-bottom, 0px))',
         width: 46, height: 46, borderRadius: '50%',
         border: `1px solid ${UI.hairStrong}`, background: UI.bgCard, color: 'var(--accent)',
+        textShadow: 'none',
         cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
         boxShadow: '0 8px 24px rgba(0,0,0,0.4)', WebkitTapHighlightColor: 'transparent',
         opacity: 0, pointerEvents: 'none', transition: 'opacity 0.2s ease',
@@ -547,7 +554,8 @@ function FeatureMapScreen({ store, go }) {
 
 function FeatureCard({ card, isAdmin, onEdit, onToggleHide, onDelete }) {
   const [open, setOpen] = useStateFM(false);
-  const role = FM_ROLES[card.role] || FM_ROLES.user;
+  const role = { ...(FM_ROLES[card.role] || FM_ROLES.user) };
+  if (card.role === 'coach') role.color = fmCoachTint();
   const muted = card.hidden;
   return (
     <div data-reorder-item="true" style={{ position: 'relative', background: UI.bgCard, border: `1px solid ${UI.hair}`, borderRadius: 8, overflow: 'hidden', opacity: muted ? 0.55 : 1 }}>
@@ -581,7 +589,7 @@ function FeatureCard({ card, isAdmin, onEdit, onToggleHide, onDelete }) {
             </ul>
           )}
           {isAdmin && (
-            <div data-reorder-ignore="true" style={{ display: 'flex', gap: 8, marginTop: 12, paddingTop: 10, borderTop: `0.5px solid ${UI.hair}`, flexWrap: 'wrap' }}>
+            <div data-reorder-ignore="true" style={{ display: 'flex', gap: 8, marginTop: 12, paddingTop: 10, borderTop: `var(--hair-width) solid ${UI.hair}`, flexWrap: 'wrap' }}>
               <button onClick={onEdit} style={{ ...fmIconBtn(false), width: 'auto', padding: '0 10px' }} title="Edit"><i className="fa-solid fa-pen" /> <span style={{ fontFamily: UI.fontUi, fontSize: 11, marginLeft: 4 }}>Edit</span></button>
               {card.isCustom
                 ? <button onClick={onDelete} style={{ ...fmIconBtn(false), width: 'auto', padding: '0 10px', color: UI.danger }} title="Delete custom card"><i className="fa-solid fa-trash" /> <span style={{ fontFamily: UI.fontUi, fontSize: 11, marginLeft: 4 }}>Delete</span></button>
@@ -673,7 +681,7 @@ function FeatureEditor({ draft, busy, onChange, onClose, onSave, onRevert }) {
 function FeaturePublishSheet({ changes, busy, onClose, onDiscard, onDiscardAll, onPublish }) {
   const [confirmAll, setConfirmAll] = useStateFM(false);
   const [confirmPub, setConfirmPub] = useStateFM(false);
-  const tagColor = (t) => (t === 'Removed' || t === 'Hidden') ? UI.danger : (t === 'Reordered') ? FM_COACH_TINT : 'var(--accent)';
+  const tagColor = (t) => (t === 'Removed' || t === 'Hidden') ? UI.danger : (t === 'Reordered') ? fmCoachTint() : 'var(--accent)';
   const n = changes.length;
   return (
     <Sheet open={true} onClose={onClose} title={'Review & publish'} accent>
@@ -717,7 +725,7 @@ function FeaturePublishSheet({ changes, busy, onClose, onDiscard, onDiscardAll, 
             {confirmAll ? (
               <div style={{ display: 'flex', gap: 8 }}>
                 <button onClick={() => setConfirmAll(false)} style={{ ...fmPill(false), flex: 1, justifyContent: 'center', padding: '10px 0' }}>Cancel</button>
-                <button onClick={onDiscardAll} disabled={busy} style={{ ...fmPill(false), flex: 1, justifyContent: 'center', padding: '10px 0', color: UI.danger, borderColor: 'rgba(var(--danger-rgb),0.4)' }}>Discard all changes</button>
+                <button onClick={onDiscardAll} disabled={busy} style={{ ...fmPill(false), flex: 1, justifyContent: 'center', padding: '10px 0', color: UI.danger, background: 'rgba(var(--danger-rgb),0.08)', borderColor: 'rgba(var(--danger-rgb),calc(0.4 * var(--danger-border-boost)))' }}>Discard all changes</button>
               </div>
             ) : (
               <button onClick={() => setConfirmAll(true)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 12, letterSpacing: '0.04em', padding: '2px 0', alignSelf: 'center' }}>

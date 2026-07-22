@@ -35,9 +35,45 @@
     --ink-ghost: rgba(236,228,208,0.14);
     --hair: rgba(236,228,208,0.10);
     --hair-strong: rgba(236,228,208,0.18);
+    /* Width for every hairline border (the huge majority of UI.hair/
+       UI.hairStrong borders use this literal). A theme can widen it, e.g.
+       paper's 0.5px hairlines were reading as barely-there. */
+    --hair-width: 0.5px;
+    /* Empty-track color for input[type="range"] (see the rules below). Same
+       as --hair-strong for every theme except paper, which points this at
+       its own lighter bg-inset instead (see the paper block for why). */
+    --range-track: var(--hair-strong);
     /* RGB triple used by decorative textures (knurl, guilloche). Flipped to a
        dark value in light mode so the hash marks stay visible on a pale bg. */
     --knurl-rgb: 236,228,208;
+    /* Full background-image value for the theme's canvas (Screen component).
+       'none' for every theme except paper, which sets a graph-paper grid. */
+    --bg-texture: none;
+    /* Multiplier on every knurl/guilloche alpha stop below, so a theme (paper)
+       can make the texture read darker without every consumer changing. */
+    --knurl-opacity: 1;
+    /* text-shadow applied on Screen's root (inherits to everything under it
+       unless a surface with its own opaque/semi-opaque background — Card,
+       Sheet, a solid-fill Btn — resets it back to 'none'). 'none' for every
+       theme except paper, whose bare grid canvas needs plain text lifted off
+       the ruled lines to stay readable; a surface that already has its own
+       background doesn't need it and would just look muddy. */
+    --text-lift: none;
+    /* Same idea as --text-lift, but for the .knurl divider bar (box-shadow,
+       not text-shadow, since it is a flat gradient strip, not text). */
+    --knurl-lift: none;
+    /* Same idea as --text-lift, but for SVG chart <text> labels: CSS
+       text-shadow does not paint on SVG text at all in this browser (verified
+       directly: the computed value inherits fine, nothing renders), so those
+       need the SVG-native equivalent (a feDropShadow filter, see #chart-text-lift
+       below) instead, driven by this opacity rather than a text-shadow string.
+       0 (invisible) until the grid is on. */
+    --chart-text-lift-opacity: 0;
+    /* flood-color for that same filter: must track the theme's own bgRaised
+       tone (set in applyDarkMode) like --text-lift/--knurl-lift do, not stay
+       fixed on paper's old off-white. A light flood on dark-mode's small
+       axis labels reads as a glaring, illegible blob instead of a halo. */
+    --chart-text-lift-color: #f9fafb;
     /* Surface tints — cream-on-dark defaults; overridden in light mode */
     --surface-tint:      rgba(236,228,208,0.02);
     --surface-tint-sm:   rgba(236,228,208,0.03);
@@ -54,10 +90,20 @@
     --accent-light: #e5c97e;
     --accent-deep: #8b6f3d;
     --accent-rgb: 201,169,97;
-    --accent-faint: rgba(var(--accent-rgb),0.10);
-    --accent-soft: rgba(var(--accent-rgb),0.30);
+    /* Text/icon color for anything painted directly on a solid --accent fill
+       (badges, toggles, primary buttons). Near-black reads fine on every
+       accent color in the palette, all of which are mid-to-bright; only
+       paper's muted grey accent is dark enough to need a light ink instead. */
+    --accent-ink: #0a0805;
+    /* Multiplier on --accent-faint/--accent-soft below, same idea as
+       --knurl-opacity: a theme (paper) can richen these shared tint/border
+       tokens without every one of their many call sites changing. */
+    --accent-tint-boost: 1;
+    --accent-faint: rgba(var(--accent-rgb),calc(0.10 * var(--accent-tint-boost)));
+    --accent-soft: rgba(var(--accent-rgb),calc(0.30 * var(--accent-tint-boost)));
     --danger: #c87469;
     --danger-rgb: 200,116,105;
+    --danger-border-boost: 1;
     --ok: #8fb069;
     --ok-rgb: 143,176,105;
     --warn: #d97706;
@@ -85,6 +131,12 @@
     margin: 0 auto;
     width: 100%; max-width: 440px;
     background: var(--bg);
+    /* Peeks through around the floating TabBar dock's rounded corners and
+       on overscroll bounce, a flat surface with no blur (unlike TopBar/
+       TabBar's own frosted-glass backgrounds, which deliberately stay
+       ungridded so a crisp pattern doesn't fight the blur), so it gets the
+       same paper grid treatment as every other flat surface. */
+    background-image: var(--bg-texture);
     box-shadow: 0 0 0 1px var(--root-glow);
     display: flex; flex-direction: column;
     overflow: hidden;
@@ -104,6 +156,77 @@
     html, body { background: var(--bg); }
   }
   * { box-sizing: border-box; }
+  /* Form controls don't inherit text-shadow from ancestors by default (a
+     browser UA-stylesheet quirk, confirmed via computed-style inspection:
+     a plain div inherits --text-lift fine, a <button> wrapping the exact
+     same text computes text-shadow: none regardless of nesting depth).
+     Every plain-text nav row in the app (NavRow and its many lookalikes)
+     is a <button>, so paper's grid-lift silently never reached them. Force
+     it back to a normal inherited property; any component with its own
+     explicit textShadow (btnPrimary, Card, Sheet, ...) still wins over this
+     since inline styles always beat an element-selector rule. */
+  button, input, select, textarea { text-shadow: inherit; }
+  /* No theme ever styled ::placeholder, so every input/textarea's hint
+     text (an autofilled example, a computed "from macros" value shown as
+     a placeholder, ...) fell back to each browser's own default fade of
+     its `color`, unrelated to the ink scale every other faint/hint text
+     in the app is tuned against. Pin it to ink-faint explicitly instead. */
+  input::placeholder, textarea::placeholder { color: var(--ink-faint); opacity: 1; }
+  /* Native <input type="range"> styled via the CSS accent-color property
+     (the previous approach here) leaves the UNFILLED track color up to the
+     browser's own contrast heuristic against that accent-color value, with
+     no color-scheme declared anywhere in this app to hint it. Confirmed
+     directly: the exact same page, only the accent hex swapped (gold vs
+     copper), rendered one near-black and the other near-white, with no
+     theme change involved at all, an unpredictable per-color guess rather
+     than anything this app controls. Fully custom-style track + thumb
+     instead: the caller supplies the filled-vs-unfilled split via an inline
+     background gradient (see the watermark opacity slider), this rule set
+     just removes the native chrome and pins the thumb to the real accent
+     and the (transparent, WebKit) track background to whatever gradient the
+     caller set. */
+  input[type="range"] {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 4px;
+    border-radius: 999px;
+    outline: none;
+    cursor: pointer;
+  }
+  input[type="range"]::-webkit-slider-runnable-track {
+    -webkit-appearance: none;
+    height: 4px;
+    border-radius: 999px;
+    background: transparent;
+  }
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--accent);
+    margin-top: -7px;
+    cursor: pointer;
+  }
+  input[type="range"]::-moz-range-track {
+    height: 4px;
+    border-radius: 999px;
+    background: var(--range-track);
+  }
+  input[type="range"]::-moz-range-progress {
+    height: 4px;
+    border-radius: 999px;
+    background: var(--accent);
+  }
+  input[type="range"]::-moz-range-thumb {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--accent);
+    border: none;
+    cursor: pointer;
+  }
   /* Autoreg guide (screens-autoreg-guide.jsx), section 03 feedback options:
      two columns on a phone, three on a wide screen. A media query (not CSS
      auto-fit) so a narrow phone reliably keeps two columns instead of dropping
@@ -138,12 +261,12 @@
     background-image:
       repeating-linear-gradient(
         45deg,
-        rgba(var(--knurl-rgb),0.018) 0px, rgba(var(--knurl-rgb),0.018) 1px,
+        rgba(var(--knurl-rgb),calc(0.018 * var(--knurl-opacity))) 0px, rgba(var(--knurl-rgb),calc(0.018 * var(--knurl-opacity))) 1px,
         transparent 1px, transparent 10px
       ),
       repeating-linear-gradient(
         -45deg,
-        rgba(var(--knurl-rgb),0.018) 0px, rgba(var(--knurl-rgb),0.018) 1px,
+        rgba(var(--knurl-rgb),calc(0.018 * var(--knurl-opacity))) 0px, rgba(var(--knurl-rgb),calc(0.018 * var(--knurl-opacity))) 1px,
         transparent 1px, transparent 10px
       );
   }
@@ -151,7 +274,7 @@
     background-image: repeating-linear-gradient(
       0deg,
       transparent 0, transparent 5px,
-      rgba(var(--knurl-rgb),0.025) 5px, rgba(var(--knurl-rgb),0.025) 6px
+      rgba(var(--knurl-rgb),calc(0.025 * var(--knurl-opacity))) 5px, rgba(var(--knurl-rgb),calc(0.025 * var(--knurl-opacity))) 6px
     );
   }
 
@@ -185,7 +308,7 @@
   @keyframes pulseDot { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
   @keyframes fadeUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
   @keyframes rowFlash { 0% { box-shadow: inset 0 0 0 9999px rgba(143,176,105,0.20); } 100% { box-shadow: inset 0 0 0 9999px rgba(143,176,105,0); } }
-  @keyframes perfectWeekPulse { 0%, 100% { text-shadow: 0 0 0px rgba(var(--accent-rgb),0); } 50% { text-shadow: 0 0 14px rgba(var(--accent-rgb),0.9); } }
+  @keyframes perfectWeekPulse { 0%, 100% { text-shadow: var(--text-lift), 0 0 0px rgba(var(--accent-rgb),0); } 50% { text-shadow: var(--text-lift), 0 0 14px rgba(var(--accent-rgb),0.9); } }
   @keyframes tourRingPulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(var(--accent-rgb),0.5); } 60% { box-shadow: 0 0 0 8px rgba(var(--accent-rgb),0); } }
   /* Bigger/brighter ring than tourRingPulse, needs to read clearly on a tiny
      26px checkbox, so the subtler tour version isn't enough here. */
@@ -196,6 +319,11 @@
     50%       { box-shadow: 0 0 14px rgba(var(--accent-rgb),0.72), 0 0 36px rgba(var(--accent-rgb),0.26); }
   }
   .intensity-glow { animation: intensityGlow 2.5s ease-in-out infinite; }
+  @keyframes intensityGlowRaw {
+    0%, 100% { box-shadow: 0 0 6px rgba(var(--accent-raw-rgb),0.4), 0 0 20px rgba(var(--accent-raw-rgb),0.12); }
+    50%       { box-shadow: 0 0 14px rgba(var(--accent-raw-rgb),0.72), 0 0 36px rgba(var(--accent-raw-rgb),0.26); }
+  }
+  .intensity-glow-raw { animation: intensityGlowRaw 2.5s ease-in-out infinite; }
 
   /* Beyond-failure meso summary: the whole Options box smoulders when the end
      RIR dips below 0 (hot orange inner, red outer, same palette as the ember
@@ -272,16 +400,39 @@
   .knurl {
     height: 3px;
     flex-shrink: 0;
+    box-shadow: var(--knurl-lift);
     background: repeating-linear-gradient(
       -60deg,
-      rgba(var(--knurl-rgb),0.20) 0px, rgba(var(--knurl-rgb),0.20) 1.5px,
+      rgba(var(--knurl-rgb),calc(0.20 * var(--knurl-opacity))) 0px, rgba(var(--knurl-rgb),calc(0.20 * var(--knurl-opacity))) 1.5px,
       transparent 1.5px, transparent 6px
     );
+  }
+
+  /* Drives #chart-text-lift below (flood-opacity and flood-color ARE
+     CSS-styleable properties, unlike stdDeviation, so those two are the
+     themed knobs; the blur radius stays a fixed, always-small value since
+     it's invisible anyway whenever opacity is 0). */
+  #chart-text-lift feDropShadow {
+    flood-opacity: var(--chart-text-lift-opacity);
+    flood-color: var(--chart-text-lift-color);
   }
 </style>
 </head>
 <body>
 <div id="root"></div>
+<!-- Global, zero-size SVG defs: any <text filter="url(#chart-text-lift)">
+     anywhere in the app can reference this one filter (SVG filter refs work
+     document-wide, not just within their own <svg>). Paper-only grid-lift
+     for chart labels, see --chart-text-lift-opacity: 'plain text on the
+     paper grid needs lifting' also applies to axis/value labels drawn as SVG
+     text, which (verified directly) silently ignores CSS text-shadow. -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <filter id="chart-text-lift" x="-60%" y="-60%" width="220%" height="220%">
+      <feDropShadow dx="0" dy="0" stdDeviation="1.4" flood-color="#f9fafb" />
+    </filter>
+  </defs>
+</svg>
 <div id="err" style="display:none;position:fixed;inset:0;background:#07060a;color:#c87469;font-family:monospace;font-size:13px;padding:24px;overflow:auto;z-index:9999">
   <div id="err-log" style="white-space:pre-wrap"></div>
 </div>
@@ -441,7 +592,7 @@ window.ACCENT_PALETTE = {
   gold:   { hex: '#c9a961', light: '#e5c97e', deep: '#8b6f3d', rgb: '201,169,97',  label: 'Gold'   },
   copper: { hex: '#c47828', light: '#d9964a', deep: '#8a5010', rgb: '196,120,40',  label: 'Copper' },
   orange: { hex: '#d9733a', light: '#ed9560', deep: '#a34a18', rgb: '217,115,58',  label: 'Orange' },
-  red:    { hex: '#c96060', light: '#e08080', deep: '#8b3535', rgb: '201,96,96',   label: 'Red'    },
+  red:    { hex: '#8b3535', light: '#c96060', deep: '#601d1d', rgb: '139,53,53',   label: 'Red'    },
   pink:   { hex: '#c9699a', light: '#de8fb8', deep: '#8b3f65', rgb: '201,105,154', label: 'Pink'   },
   violet: { hex: '#9b6dd4', light: '#b88fe8', deep: '#6840a0', rgb: '155,109,212', label: 'Violet' },
   indigo: { hex: '#6272d4', light: '#8090e8', deep: '#3a49a0', rgb: '98,114,212',  label: 'Indigo' },
@@ -451,11 +602,38 @@ window.ACCENT_PALETTE = {
 };
 window.applyAccentColor = function(key) {
   var c = window.ACCENT_PALETTE[key] || window.ACCENT_PALETTE.gold;
+  // Some themes (paper) mute the chosen accent to a neutral tone instead of
+  // showing it at full color, e.g. so "today"/"completed" markers read as
+  // pencil-grey on a notebook page rather than a gold highlighter streak.
+  // Opt-out per device (Settings -> Appearance, paper only): the mute is a
+  // default, not mandatory, so a user who wants their real accent color even
+  // on paper can say so. Local-only preference, nothing to sync.
+  var mode = window.DARK_MODES && window.DARK_MODES[window.__currentDarkMode];
+  var wantsPaperAccent = localStorage.getItem('logbook-paper-accent-enabled') === 'true';
+  var ov = (mode && mode.accent && !wantsPaperAccent) ? mode : null;
+  window.__accentColorKey = key;
   var s = document.documentElement.style;
-  s.setProperty('--accent', c.hex);
-  s.setProperty('--accent-light', c.light);
-  s.setProperty('--accent-deep', c.deep);
-  s.setProperty('--accent-rgb', c.rgb);
+  s.setProperty('--accent', ov ? ov.accent : c.hex);
+  s.setProperty('--accent-light', ov ? ov.accentLight : c.light);
+  s.setProperty('--accent-deep', ov ? ov.accentDeep : c.deep);
+  s.setProperty('--accent-rgb', ov ? ov.accentRgb : c.rgb);
+  s.setProperty('--accent-ink', (ov && ov.accentInk) || '#0a0805');
+  // Same mute as --accent above, same reason: a red Sign out/Delete button
+  // would be the one spot of color left on an otherwise all-grey/black
+  // muted-Paper screen. Literal fallback (not the _DARK_DANGER constant,
+  // defined later in a script block that hasn't run yet on the very first
+  // boot-time call below) so this stays safe regardless of load order.
+  var realDanger = (mode && mode.danger) || '#c87469';
+  var realDangerRgb = (mode && mode.dangerRgb) || '200,116,105';
+  s.setProperty('--danger', ov ? ov.accent : realDanger);
+  s.setProperty('--danger-rgb', ov ? ov.accentRgb : realDangerRgb);
+  // Always the user's real chosen color, never muted by a theme override.
+  // For the rare element that's deliberately dark/immersive regardless of
+  // theme (e.g. a full-screen rest-timer countdown on a fixed near-black
+  // backdrop), muting to paper's grey would make it low-contrast there for
+  // no reason: that backdrop was never theme-reactive in the first place.
+  s.setProperty('--accent-raw', c.hex);
+  s.setProperty('--accent-raw-rgb', c.rgb);
 };
 window.applyAccentColor(localStorage.getItem('logbook-accent-color') || 'gold');
 </script>
@@ -466,6 +644,51 @@ var _DARK_INK          = '#ece4d0';
 var _DARK_INK_SOFT     = 'rgba(236,228,208,0.66)';
 var _DARK_HAIR         = 'rgba(236,228,208,0.10)';
 var _DARK_HAIR_STRONG  = 'rgba(236,228,208,0.18)';
+var _DARK_DANGER       = '#c87469';
+var _DARK_DANGER_RGB   = '200,116,105';
+// Grid overlay (Settings -> Appearance -> Grid), togglable independent of
+// theme: paper defaults it on (its defining look), every other theme
+// defaults it off (today's behavior), an explicit user choice then wins
+// everywhere. Both pieces below were paper-only originally, generalized
+// so any theme can render the same grid:
+//   - _GRID_TEXTURE only references var(--knurl-rgb), which applyDarkMode
+//     already sets per-theme (dark/black fall back to a light cream,
+//     light/paper set their own dark tone): no per-theme copy needed.
+//     0.16 alpha is fixed (not multiplied by --knurl-opacity, which is
+//     tuned for small accents like knurl dividers/guilloche and would
+//     read as a wall of dark squares tiled across a whole screen).
+//   - _textLiftFor(hex) builds the same halo paper always had, just
+//     driven by whichever theme's own bgRaised tone instead of paper's
+//     hardcoded #f9fafb, so dark themes get a dark halo instead of a
+//     light one bleeding into their text. Deliberately short-reaching
+//     (max 8px): a wider glow would wash out decorative art behind large
+//     display text (e.g. Home's day name over the watermark), not just
+//     grid lines.
+function _hexToRgb(hex) {
+  var n = parseInt(hex.replace('#', ''), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255].join(',');
+}
+function _textLiftFor(bgRaisedHex) {
+  var c = _hexToRgb(bgRaisedHex);
+  var solid = 'rgb(' + c + ')';
+  return '0 0 1px ' + solid + ', 0 0 1px ' + solid + ', 0 0 2px ' + solid + ', 0 0 2px ' + solid +
+    ', 0 0 3px ' + solid + ', 0 0 5px rgba(' + c + ',0.9), 0 0 8px rgba(' + c + ',0.6)';
+}
+// Same halo idea as _textLiftFor, but for the .knurl divider: a flat
+// gradient bar, not text, so text-shadow does not apply to it. A box-shadow
+// halo in the theme's own bgRaised tone keeps the grid from crossing right
+// through the knurl's own diagonal hash strokes.
+function _boxLiftFor(bgRaisedHex) {
+  var c = _hexToRgb(bgRaisedHex);
+  var solid = 'rgb(' + c + ')';
+  return '0 0 0 1px ' + solid + ', 0 0 3px 1px rgba(' + c + ',0.9), 0 0 6px 2px rgba(' + c + ',0.5)';
+}
+// --grid-alpha (not a fixed 0.16): a light grid line on a near-black bg
+// reads far louder than the same alpha's dark line on a light one (paper's
+// own knurlRgb is a muted blue-grey to begin with; dark/black's default
+// knurlRgb is a bright cream, so identical alpha is nowhere near identical
+// weight): set per-theme below, dark/black notably lower than paper/light.
+var _GRID_TEXTURE = 'repeating-linear-gradient(0deg, rgba(var(--knurl-rgb),var(--grid-alpha)) 0px, rgba(var(--knurl-rgb),var(--grid-alpha)) 1px, transparent 1px, transparent 22px), repeating-linear-gradient(90deg, rgba(var(--knurl-rgb),var(--grid-alpha)) 0px, rgba(var(--knurl-rgb),var(--grid-alpha)) 1px, transparent 1px, transparent 22px)';
 var _DARK_TINTS = {
   surfaceTint:     'rgba(236,228,208,0.02)',
   surfaceTintSm:   'rgba(236,228,208,0.03)',
@@ -480,12 +703,27 @@ var _DARK_TINTS = {
   successText:     '#7bc47b',
 };
 window.DARK_MODES = {
-  dark:  { bg: '#1a1820', bgRaised: '#252334', bgInset: '#2f2c3c', bgBody: '#141218', bgRgb: '26,24,32', inkFaint: 'rgba(236,228,208,0.54)', inkGhost: 'rgba(236,228,208,0.24)' },
-  black: { bg: '#07060a', bgRaised: '#100d0b', bgInset: '#1a1611', bgBody: '#050409', bgRgb: '7,6,10', inkFaint: 'rgba(236,228,208,0.34)', inkGhost: 'rgba(236,228,208,0.14)' },
+  dark:  { bg: '#1a1820', bgRaised: '#252334', bgInset: '#2f2c3c', bgBody: '#141218', bgRgb: '26,24,32', inkFaint: 'rgba(236,228,208,0.54)', inkGhost: 'rgba(236,228,208,0.24)', gridAlpha: 0.045 },
+  black: { bg: '#07060a', bgRaised: '#100d0b', bgInset: '#1a1611', bgBody: '#050409', bgRgb: '7,6,10', inkFaint: 'rgba(236,228,208,0.34)', inkGhost: 'rgba(236,228,208,0.14)', gridAlpha: 0.05 },
   light: {
     bg: '#f2ede4', bgRaised: '#eae3d6', bgInset: '#e2dacb', bgBody: '#e8e1d4', bgRgb: '242,237,228',
-    ink: '#1f1b16', inkSoft: 'rgba(31,27,22,0.66)', inkFaint: 'rgba(31,27,22,0.44)', inkGhost: 'rgba(31,27,22,0.16)',
-    hair: 'rgba(31,27,22,0.20)', hairStrong: 'rgba(31,27,22,0.42)', knurlRgb: '31,27,22',
+    ink: '#1f1b16', inkSoft: 'rgba(31,27,22,0.89)', inkFaint: 'rgba(31,27,22,0.72)', inkGhost: 'rgba(31,27,22,0.61)',
+    hair: 'rgba(31,27,22,0.50)', hairStrong: 'rgba(31,27,22,0.60)', knurlRgb: '31,27,22',
+    // The default --danger (#c87469) is a pale coral tuned for dark
+    // backgrounds; against this theme's light canvas it drops well under
+    // WCAG AA contrast (~3:1), which is why a "ghost" danger button (Sign
+    // out, Delete plan, ...) all but disappears here. Darker, more
+    // saturated red instead (~5.7:1 against this bg).
+    danger: '#a3392c', dangerRgb: '163,57,44',
+    // The border itself is a low-alpha rgba(var(--danger-rgb),X) at every
+    // call site (0.2-0.4 depending on how prominent that action is): fine
+    // against a dark bg, but at that alpha even the darker danger red above
+    // still blends to within ~20-25 RGB units of a light bg, reading as
+    // basically invisible. Same lever as --accent-tint-boost (right above):
+    // callers do rgba(var(--danger-rgb),calc(X * var(--danger-border-boost)))
+    // so this scales every site's border up together without hand-tuning
+    // each one, and dark/black stay untouched at the default boost of 1.
+    dangerBorderBoost: 1.8,
     surfaceTint:     'rgba(31,27,22,0.05)',
     surfaceTintSm:   'rgba(31,27,22,0.07)',
     surfaceTintMd:   'rgba(31,27,22,0.09)',
@@ -498,9 +736,67 @@ window.DARK_MODES = {
     neutralBorderSm: 'rgba(31,27,22,0.20)',
     successText:     '#2e7a30',
   },
+  // Grey canvas + near-black ink + a faint blue quad-ruled grid, like a
+  // real notebook page. knurlRgb drives the grid lines (see bgTexture) as
+  // well as the guilloche textures used elsewhere; kept blue on purpose
+  // (ruled-paper look) even though ink itself is neutral, not blue-black.
+  paper: {
+    bg: '#eff0f2', bgRaised: '#f9fafb', bgInset: '#e2e4e8', bgBody: '#e7e8eb', bgRgb: '239,240,242',
+    ink: '#141414', inkSoft: 'rgba(20,20,20,0.91)', inkFaint: 'rgba(20,20,20,0.84)', inkGhost: 'rgba(20,20,20,0.76)',
+    // Same fix as light's danger override (see there): the default coral
+    // is tuned for dark backgrounds and nearly vanishes here (~3:1 contrast),
+    // most visibly on the "ghost" danger buttons (Sign out, Delete plan, ...).
+    danger: '#a3392c', dangerRgb: '163,57,44',
+    // Same border-alpha fix as light (see there): a low-alpha border stays
+    // near-invisible against a light bg no matter how dark the base red is.
+    dangerBorderBoost: 1.8,
+    // Darker AND (via hairWidth below) wider than every other theme's
+    // hairline: a thin, faint border reads as "barely there" against paper's
+    // light canvas in a way the same border never was on a dark one.
+    hair: 'rgba(20,20,20,0.48)', hairStrong: 'rgba(20,20,20,0.55)', hairWidth: '1px',
+    knurlRgb: '50,70,120', knurlOpacity: 5,
+    // Grid on by default (its defining look); textLift/chartTextLiftOpacity/
+    // bgTexture are computed generically now (see _GRID_TEXTURE/_textLiftFor
+    // above applyDarkMode), not baked in per-theme here.
+    // Richens --accent-faint/--accent-soft (Card's accent border, badge
+    // fills, ...): those stay formula-derived from --accent-rgb, so this is
+    // the only lever paper has to make them less washed-out without touching
+    // every one of their call sites individually.
+    accentTintBoost: 1.6,
+    // The empty portion of a range slider's track (see input[type="range"]
+    // rules above) defaults to --hair-strong everywhere, but paper's
+    // hairStrong is deliberately darker/bolder than every other theme's (it
+    // needs to read as a real border on the light canvas), which makes an
+    // "empty/inactive" track look like a heavy line instead of a recessed
+    // groove. Paper wants the opposite feel here, so it points at its own
+    // light bgInset tone instead.
+    rangeTrack: 'var(--bg-inset)',
+    surfaceTint:     'rgba(20,20,20,0.035)',
+    surfaceTintSm:   'rgba(20,20,20,0.05)',
+    surfaceTintMd:   'rgba(20,20,20,0.07)',
+    surfaceTintLg:   'rgba(20,20,20,0.09)',
+    rootGlow:        'rgba(20,20,20,0.15)',
+    overlayTint:     'rgba(20,20,20,0.04)',
+    successTintXs:   'rgba(58,110,58,0.10)',
+    successBorder:   'rgba(58,110,58,0.36)',
+    neutralTint:     'rgba(20,20,20,0.07)',
+    neutralBorderSm: 'rgba(20,20,20,0.18)',
+    successText:     '#2e6b30',
+    // Deliberately NOT multiplied by knurlOpacity: that multiplier is tuned
+    // for small accents (.knurl dividers, guilloche), which only ever cover a
+    // few px. The grid tiles across an entire scrolling screen, so the same
+    // multiplier there reads as a wall of dark squares instead of a texture.
+    bgTexture: 'repeating-linear-gradient(0deg, rgba(var(--knurl-rgb),0.16) 0px, rgba(var(--knurl-rgb),0.16) 1px, transparent 1px, transparent 22px), repeating-linear-gradient(90deg, rgba(var(--knurl-rgb),0.16) 0px, rgba(var(--knurl-rgb),0.16) 1px, transparent 1px, transparent 22px)',
+    // Mutes the user's chosen accent color to pencil-grey (see applyAccentColor).
+    // accentInk pairs with it: near-black text/icons read poorly on this dark
+    // slate fill (unlike every other theme's bright/mid accent), so anything
+    // painted on top of --accent switches to a near-white ink here instead.
+    accent: '#4b5563', accentLight: '#6b7280', accentDeep: '#333c46', accentRgb: '75,85,99', accentInk: '#f5f5f5',
+  },
 };
 window.applyDarkMode = function(key) {
   var m = window.DARK_MODES[key] || window.DARK_MODES.dark;
+  window.__currentDarkMode = key;
   var t = _DARK_TINTS;
   var s = document.documentElement.style;
   s.setProperty('--bg', m.bg);
@@ -514,7 +810,25 @@ window.applyDarkMode = function(key) {
   s.setProperty('--ink-ghost', m.inkGhost);
   s.setProperty('--hair', m.hair || _DARK_HAIR);
   s.setProperty('--hair-strong', m.hairStrong || _DARK_HAIR_STRONG);
+  s.setProperty('--danger', m.danger || _DARK_DANGER);
+  s.setProperty('--danger-rgb', m.dangerRgb || _DARK_DANGER_RGB);
+  s.setProperty('--danger-border-boost', m.dangerBorderBoost || 1);
+  s.setProperty('--hair-width', m.hairWidth || '0.5px');
+  s.setProperty('--range-track', m.rangeTrack || 'var(--hair-strong)');
   s.setProperty('--knurl-rgb', m.knurlRgb || '236,228,208');
+  s.setProperty('--knurl-opacity', m.knurlOpacity || 1);
+  s.setProperty('--grid-alpha', m.gridAlpha ?? 0.16);
+  // Tri-state: an explicit user choice ('1'/'0') applies to every theme;
+  // untouched (null) falls back to today's behavior, grid on for paper only.
+  var _gridPref = localStorage.getItem('logbook-grid-enabled');
+  var gridEnabled = _gridPref === '1' ? true : _gridPref === '0' ? false : key === 'paper';
+  window.__gridEnabled = gridEnabled;
+  s.setProperty('--text-lift', gridEnabled ? _textLiftFor(m.bgRaised) : 'none');
+  s.setProperty('--knurl-lift', gridEnabled ? _boxLiftFor(m.bgRaised) : 'none');
+  s.setProperty('--chart-text-lift-opacity', gridEnabled ? 0.95 : 0);
+  s.setProperty('--chart-text-lift-color', m.bgRaised);
+  s.setProperty('--accent-tint-boost', m.accentTintBoost || 1);
+  s.setProperty('--bg-texture', gridEnabled ? _GRID_TEXTURE : 'none');
   s.setProperty('--surface-tint',      m.surfaceTint     || t.surfaceTint);
   s.setProperty('--surface-tint-sm',   m.surfaceTintSm   || t.surfaceTintSm);
   s.setProperty('--surface-tint-md',   m.surfaceTintMd   || t.surfaceTintMd);
@@ -526,8 +840,18 @@ window.applyDarkMode = function(key) {
   s.setProperty('--neutral-tint',      m.neutralTint     || t.neutralTint);
   s.setProperty('--neutral-border-sm', m.neutralBorderSm || t.neutralBorderSm);
   s.setProperty('--success-text',      m.successText     || t.successText);
+  // Re-derive --accent*: picks up this theme's mute-to-grey override if it
+  // has one (paper), or clears a previous theme's override otherwise.
+  window.applyAccentColor(window.__accentColorKey || localStorage.getItem('logbook-accent-color') || 'gold');
   var tc = document.querySelector('meta[name="theme-color"]');
   if (tc) tc.content = m.bg;
+};
+// Settings -> Appearance -> Grid toggle. enabled === null clears the
+// explicit choice back to the tri-state default (grid on for paper only).
+window.applyGridPreference = function(enabled) {
+  if (enabled === null) localStorage.removeItem('logbook-grid-enabled');
+  else localStorage.setItem('logbook-grid-enabled', enabled ? '1' : '0');
+  window.applyDarkMode(window.__currentDarkMode);
 };
 window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
 </script>

@@ -40,9 +40,14 @@ function Screen({ children, scroll = true, style = {} }) {
   return (
     <div style={{
       width: '100%', flex: 1, minHeight: 0,
-      background: UI.bg, color: UI.ink, fontFamily: UI.fontUi,
+      backgroundColor: UI.bg, backgroundImage: 'var(--bg-texture)', color: UI.ink, fontFamily: UI.fontUi,
       display: 'flex', flexDirection: 'column',
       overflow: scroll ? 'auto' : 'hidden',
+      // Inherits to every descendant (text-shadow is an inherited CSS
+      // property) except where a surface with its own background — Card,
+      // Sheet, a solid-fill Btn — resets it back to 'none'. 'none' outside
+      // paper, so this is a no-op everywhere else.
+      textShadow: 'var(--text-lift)',
       ...style,
     }}>{children}</div>
   );
@@ -191,7 +196,7 @@ const TAB_ICONS = {
   ),
 };
 
-function TabBar({ active, routeName, onChange, sidebar = false, currentUser = null, showCoaching = false, coachingBadge = null, showHealth = false }) {
+function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = false, coachingBadge = null, showHealth = false }) {
   const tabs = [
     { id: 'home', label: 'Train' },
     { id: 'plan', label: 'Plan' },
@@ -203,7 +208,6 @@ function TabBar({ active, routeName, onChange, sidebar = false, currentUser = nu
     return { ...t, isWaterSlot, iconKey: isWaterSlot ? 'water' : t.id, label: isWaterSlot ? 'Water' : t.label };
   });
   const idx = tabs.findIndex(t => t.id === active);
-  const [switchModal, setSwitchModal] = React.useState(false);
   // Health and its water tracker share one tab slot (routeName === 'water'
   // still lights up as 'health', see tabActive in app.jsx). Tapping the slot
   // while already on Health steps forward into the water tracker; tapping it
@@ -241,22 +245,8 @@ function TabBar({ active, routeName, onChange, sidebar = false, currentUser = nu
   };
 
   if (sidebar) {
-    const currentEmail = currentUser?.email || '';
-    const currentName  = currentUser?.name  || currentEmail.split('@')[0] || '—';
-    const qs           = window.LB || {};
-    const qsIcon = (email, size = 26) => {
-      if (email === 'office@btc-prime.biz') return <i className="fa-solid fa-dumbbell" style={{ fontSize: size }} />;
-      if (email === 'anja.knamm@gmail.com') return <span style={{ fontSize: size + 2, lineHeight: 1 }}>🩷</span>;
-      return null;
-    };
-    const otherEmail   = (qs.QS_EMAILS || []).find(e => e !== currentEmail);
-    const isQsUser     = (qs.QS_EMAILS || []).includes(currentEmail);
-    const hasOther     = otherEmail ? (qs.hasQuickSwitchSession?.(otherEmail) ?? false) : false;
-    const otherName    = otherEmail ? (qs.getQsName?.(otherEmail) || otherEmail.split('@')[0]) : '';
-
     return (
-      <>
-        <div style={{
+      <div style={{
           width: 220,
           flexShrink: 0,
           display: 'flex',
@@ -287,9 +277,14 @@ function TabBar({ active, routeName, onChange, sidebar = false, currentUser = nu
                   padding: '22px 16px',
                   borderRadius: 6,
                   background: on
-                    ? `rgba(var(--accent-rgb),0.12)`
+                    ? `rgba(var(--accent-rgb),0.22)`
                     : 'var(--surface-tint-sm)',
-                  border: `1px solid ${on ? UI.goldSoft : UI.hairStrong}`,
+                  // Full-strength accent border (not the 30%-alpha goldSoft) so
+                  // the active tab still reads as more prominent than an
+                  // inactive one on paper, where --accent is a mid-dark grey
+                  // rather than a vivid color and would otherwise lose to
+                  // hairStrong/inkSoft's own darkness.
+                  border: `1px solid ${on ? UI.gold : UI.hairStrong}`,
                   color: on ? UI.gold : UI.inkSoft,
                   fontFamily: UI.fontDisplay,
                   fontSize: 18,
@@ -307,7 +302,7 @@ function TabBar({ active, routeName, onChange, sidebar = false, currentUser = nu
                     )}
                     {!badge?.live && badge?.count > 0 && (
                       <div style={{ position: 'absolute', top: -4, right: -6, minWidth: 14, height: 14, borderRadius: '50%', background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1.5px solid var(--bg)' }}>
-                        <span style={{ fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, color: '#0a0805', lineHeight: 1 }}>{badge.count > 9 ? '9+' : badge.count}</span>
+                        <span style={{ fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, color: 'var(--accent-ink)', lineHeight: 1 }}>{badge.count > 9 ? '9+' : badge.count}</span>
                       </div>
                     )}
                   </div>
@@ -317,130 +312,7 @@ function TabBar({ active, routeName, onChange, sidebar = false, currentUser = nu
               );
             })}
           </div>
-          {isQsUser && otherEmail && (
-            <div style={{ padding: '0 14px' }}>
-              <div className="knurl" style={{ marginBottom: 12 }} />
-              <button onClick={() => setSwitchModal(true)} style={{
-                display: 'flex', alignItems: 'center', gap: 12,
-                width: '100%', padding: '12px 14px', borderRadius: 6,
-                background: 'var(--surface-tint-sm)',
-                border: `1px solid ${UI.hairStrong}`,
-                cursor: 'pointer',
-                WebkitTapHighlightColor: 'transparent',
-              }}>
-                <div style={{
-                  width: 38, height: 38, borderRadius: 4, flexShrink: 0,
-                  background: `rgba(var(--accent-rgb),0.12)`,
-                  border: `1px solid ${UI.goldSoft}`,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontFamily: UI.fontDisplay, fontSize: 18, color: UI.gold, fontWeight: 700,
-                }}>
-                  {qsIcon(currentEmail, 16) ?? currentName[0]?.toUpperCase()}
-                </div>
-                <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {currentName}
-                  </div>
-                  <div className="micro" style={{ marginTop: 2 }}>Switch User</div>
-                </div>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={UI.inkFaint} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
-                  <path d="M3 8h14M3 8l4-4M3 8l4 4M21 16H7M21 16l-4-4M21 16l-4 4"/>
-                </svg>
-              </button>
-            </div>
-          )}
         </div>
-
-        {switchModal && isQsUser && otherEmail && (
-          <div onClick={() => setSwitchModal(false)} style={{
-            position: 'fixed', inset: 0, zIndex: 200,
-            background: 'rgba(0,0,0,0.8)',
-            backdropFilter: 'blur(10px)',
-            WebkitBackdropFilter: 'blur(10px)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            padding: 40,
-            animation: 'sheet-fade 0.15s ease',
-          }}>
-            <div onClick={e => e.stopPropagation()} style={{
-              width: '100%', maxWidth: 520,
-              background: UI.bgRaised,
-              border: `1px solid ${UI.hairStrong}`,
-              borderRadius: 4,
-              padding: '32px 28px 22px',
-              boxShadow: '0 40px 100px rgba(0,0,0,0.8)',
-              animation: 'fadeUp 0.22s ease',
-            }}>
-              <div className="micro" style={{ marginBottom: 8 }}>Accounts</div>
-              <div style={{ fontFamily: UI.fontDisplay, fontSize: 32, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: UI.ink, marginBottom: 24 }}>Switch User</div>
-              <div style={{ display: 'flex', gap: 12 }}>
-                <div style={{
-                  flex: 1,
-                  background: `rgba(var(--accent-rgb),0.10)`,
-                  border: `1px solid ${UI.goldSoft}`,
-                  borderRadius: 6,
-                  padding: '28px 20px',
-                  display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14,
-                }}>
-                  <div style={{
-                    width: 64, height: 64, borderRadius: 4,
-                    background: `rgba(var(--accent-rgb),0.15)`,
-                    border: `1px solid ${UI.goldSoft}`,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontFamily: UI.fontDisplay, fontSize: 32, color: UI.gold, fontWeight: 700,
-                  }}>
-                    {qsIcon(currentEmail) ?? currentName[0]?.toUpperCase()}
-                  </div>
-                  <div style={{ textAlign: 'center' }}>
-                    <div style={{ fontFamily: UI.fontDisplay, fontSize: 24, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: UI.ink, lineHeight: 1.1, marginBottom: 8 }}>{currentName}</div>
-                    <div className="micro-gold">Active</div>
-                  </div>
-                </div>
-                <button
-                  onClick={async () => {
-                    if (!hasOther) return;
-                    setSwitchModal(false);
-                    try {
-                      await qs.quickSwitch(otherEmail);
-                      window.location.reload();
-                    } catch (e) {
-                      console.error('Quick switch failed', e);
-                    }
-                  }}
-                  style={{
-                    flex: 1,
-                    background: hasOther ? 'var(--surface-tint-md)' : 'transparent',
-                    border: `1px solid ${hasOther ? UI.hairStrong : UI.hair}`,
-                    borderRadius: 6,
-                    padding: '28px 20px',
-                    display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14,
-                    cursor: hasOther ? 'pointer' : 'default',
-                    WebkitTapHighlightColor: 'transparent',
-                    opacity: hasOther ? 1 : 0.4,
-                    transition: 'background 0.15s',
-                  }}
-                >
-                  <div style={{
-                    width: 64, height: 64, borderRadius: 4,
-                    background: 'var(--surface-tint-lg)',
-                    border: `1px solid ${UI.hairStrong}`,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontFamily: UI.fontDisplay, fontSize: 32, color: UI.inkSoft, fontWeight: 700,
-                  }}>
-                    {qsIcon(otherEmail) ?? otherName[0]?.toUpperCase()}
-                  </div>
-                  <div style={{ textAlign: 'center' }}>
-                    <div style={{ fontFamily: UI.fontDisplay, fontSize: 24, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: hasOther ? UI.inkSoft : UI.inkFaint, lineHeight: 1.1, marginBottom: 8 }}>{otherName}</div>
-                    <div className="micro" style={{ color: hasOther ? UI.inkFaint : 'rgba(var(--danger-rgb),0.7)' }}>
-                      {hasOther ? 'Tap to switch' : 'Set up in Settings'}
-                    </div>
-                  </div>
-                </button>
-              </div>
-              <button onClick={() => setSwitchModal(false)} style={{ ...btnPrimary, width: '100%', marginTop: 18 }}>Cancel</button>
-            </div>
-          </div>
-        )}
-      </>
     );
   }
 
@@ -488,7 +360,10 @@ function TabBar({ active, routeName, onChange, sidebar = false, currentUser = nu
               width: KEY, height: KEY, borderRadius: 6,
               background: 'linear-gradient(180deg, var(--accent-light), var(--accent))',
               border: '1px solid var(--accent-deep)',
-              boxShadow: '0 5px 16px rgba(var(--accent-rgb),0.35), inset 0 1px 0 rgba(255,240,200,0.45)',
+              // Neutral white highlight, not tinted warm-cream: that read as a
+              // yellow smudge once paper mutes --accent to grey. White reads
+              // as a plausible glossy sheen on every accent color, muted or not.
+              boxShadow: '0 5px 16px rgba(var(--accent-rgb),0.35), inset 0 1px 0 rgba(255,255,255,0.45)',
               transition: 'left 0.35s cubic-bezier(0.4, 0, 0.2, 1)',
               pointerEvents: 'none',
               zIndex: 0,
@@ -530,7 +405,7 @@ function TabBar({ active, routeName, onChange, sidebar = false, currentUser = nu
                 <div style={{
                   position: 'relative', width: KEY, height: ICON_H,
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  color: on ? '#0a0805' : UI.inkFaint,
+                  color: on ? 'var(--accent-ink)' : UI.inkFaint,
                   transform: on ? 'scale(1.2)' : 'scale(1)',
                   // Delay the darkening so the glyph only turns near-black once
                   // the gold plate has slid underneath it (plate is 0.35s) —
@@ -542,11 +417,11 @@ function TabBar({ active, routeName, onChange, sidebar = false, currentUser = nu
                 }}>
                   {React.cloneElement(TAB_ICONS[iconKey], { width: ICON_SZ, height: ICON_SZ })}
                   {badge?.live && (
-                    <div style={{ position: 'absolute', top: 5, right: 4, width: 8, height: 8, borderRadius: '50%', background: on ? '#0a0805' : 'var(--accent)', animation: 'pulseDot 1.5s ease-in-out infinite', border: `1.5px solid ${on ? 'var(--accent)' : 'var(--bg)'}` }} />
+                    <div style={{ position: 'absolute', top: 5, right: 4, width: 8, height: 8, borderRadius: '50%', background: on ? 'var(--accent-ink)' : 'var(--accent)', animation: 'pulseDot 1.5s ease-in-out infinite', border: `1.5px solid ${on ? 'var(--accent)' : 'var(--bg)'}` }} />
                   )}
                   {!badge?.live && badge?.count > 0 && (
-                    <div style={{ position: 'absolute', top: 1, right: -2, minWidth: 16, height: 16, borderRadius: '50%', background: on ? '#0a0805' : 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: `1.5px solid ${on ? 'var(--accent)' : 'var(--bg)'}`, padding: '0 3px' }}>
-                      <span style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, color: on ? 'var(--accent)' : '#0a0805', lineHeight: 1 }}>{badge.count > 9 ? '9+' : badge.count}</span>
+                    <div style={{ position: 'absolute', top: 1, right: -2, minWidth: 16, height: 16, borderRadius: '50%', background: on ? 'var(--accent-ink)' : 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: `1.5px solid ${on ? 'var(--accent)' : 'var(--bg)'}`, padding: '0 3px' }}>
+                      <span style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, color: on ? 'var(--accent)' : 'var(--accent-ink)', lineHeight: 1 }}>{badge.count > 9 ? '9+' : badge.count}</span>
                     </div>
                   )}
                 </div>
@@ -566,7 +441,7 @@ function TabBar({ active, routeName, onChange, sidebar = false, currentUser = nu
 // ─── Buttons ────────────────────────────────────────────────────────
 const btnPrimary = {
   background: `linear-gradient(180deg, var(--accent-light), var(--accent))`,
-  color: '#0a0805',
+  color: 'var(--accent-ink)',
   border: '1px solid var(--accent-deep)',
   borderRadius: 6,
   padding: '14px 24px', minHeight: 48,
@@ -575,6 +450,9 @@ const btnPrimary = {
   cursor: 'pointer',
   boxShadow: '0 6px 20px rgba(var(--accent-rgb),0.30)',
   WebkitTapHighlightColor: 'transparent',
+  // Solid fill of its own — the inherited grid-lift (paper only) would
+  // muddy already-high-contrast accent-ink text on top of it.
+  textShadow: 'none',
 };
 
 const btnGhost = {
@@ -607,11 +485,17 @@ function Card({ children, accent = false, style = {}, ...rest }) {
   return (
     <div {...rest} style={{
       background: accent
-        ? `rgba(var(--accent-rgb),0.06)`
+        ? `rgba(var(--accent-rgb),0.13)`
         : 'var(--surface-tint)',
       border: `1px solid ${accent ? UI.goldSoft : UI.hairStrong}`,
       borderRadius: 6,
       padding: 16,
+      // Card's own fill is translucent (surface-tint / accent-tint, both
+      // low-alpha), so a parent Screen's paper grid still shows through it
+      // (verified directly) and plain text on top still needs the same lift
+      // Screen gives its own children. 'none' outside paper, so this is a
+      // no-op on every other theme.
+      textShadow: 'var(--text-lift)',
       ...style,
     }}>{children}</div>
   );
@@ -629,7 +513,7 @@ function Label({ children, style = {} }) {
 }
 
 // ─── Constants ──────────────────────────────────────────────────────
-const MUSCLES = ['Abs','Back','Biceps','Calves','Chest','Forearms','Glutes','Hamstrings','Quads','Shoulders','Triceps'];
+const MUSCLES = ['Abs','Ab/Adductors','Back','Biceps','Calves','Chest','Forearms','Glutes','Hamstrings','Quads','Shoulders','Triceps'];
 const WEEKDAYS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
 const WEEKDAYS_FULL = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
 
@@ -681,7 +565,7 @@ function Pill({ children, gold = false, style = {}, ...rest }) {
 function Toggle({ on, onToggle }) {
   return (
     <div onClick={onToggle} style={{ width: 44, height: 26, borderRadius: 13, cursor: 'pointer', flexShrink: 0, background: on ? 'var(--accent)' : UI.bgInset, border: `0.5px solid ${on ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong}`, position: 'relative', transition: 'background 0.18s', WebkitTapHighlightColor: 'transparent' }}>
-      <div style={{ position: 'absolute', top: 3, left: on ? 21 : 3, width: 18, height: 18, borderRadius: '50%', background: on ? '#0a0805' : UI.inkFaint, transition: 'left 0.18s' }} />
+      <div style={{ position: 'absolute', top: 3, left: on ? 21 : 3, width: 18, height: 18, borderRadius: '50%', background: on ? 'var(--accent-ink)' : UI.inkFaint, transition: 'left 0.18s' }} />
     </div>
   );
 }
@@ -696,7 +580,12 @@ function Toggle({ on, onToggle }) {
 // edge plus an ambient glow — reserved for sheets that represent something
 // deliberately intense (currently just the Drop Set/Myo-Reps/AMRAP
 // Variations chain sheet), not a general-purpose "make it gold" switch.
-function Sheet({ open, onClose, title, titleColor, children, keyboardHeight = 0, accent = false, center = false }) {
+// zIndex: lets a caller override the default stacking tier (100) when it
+// must guarantee winning against a specific known overlay — e.g. sitting
+// above its own parent's opaque z-9998 wizard, or beating an ordinary Sheet
+// from underneath a still-open admin Sheet. Not a general-purpose knob:
+// only reach for it when there's a concrete overlay this Sheet must clear.
+function Sheet({ open, onClose, title, titleColor, children, keyboardHeight = 0, accent = false, center = false, zIndex = 100 }) {
   const [kbHeight, setKbHeight] = React.useState(0);
   const [vvHeight, setVvHeight] = React.useState(window.innerHeight);
   React.useEffect(() => {
@@ -766,7 +655,7 @@ function Sheet({ open, onClose, title, titleColor, children, keyboardHeight = 0,
     // (bottom: 0) and reserves the gap via paddingBottom exactly as before.
     <div onClick={onClose} style={{
       position: 'fixed', top: 0, left: 0, right: 0, bottom: keyboardHeight,
-      background: 'rgba(0,0,0,0.7)', zIndex: 100,
+      background: 'rgba(0,0,0,0.7)', zIndex,
       display: 'flex', alignItems: center ? 'center' : 'flex-end', justifyContent: 'center',
       paddingBottom: (effectiveKbHeight - keyboardHeight) + (floating ? 10 : 0),
       animation: 'sheet-fade 0.18s ease',
@@ -786,12 +675,18 @@ function Sheet({ open, onClose, title, titleColor, children, keyboardHeight = 0,
             shadow escapes freely. Its own box-shadow (not the panel's,
             which needs a separate static one for elevation) also avoids
             fighting over the same property while animating. */}
-        {accent && <div className="intensity-glow" style={{ position: 'absolute', inset: 0, borderRadius: cardLike ? 6 : '6px 6px 0 0', pointerEvents: 'none' }} />}
+        {accent && <div className="intensity-glow-raw" style={{ position: 'absolute', inset: 0, borderRadius: cardLike ? 6 : '6px 6px 0 0', pointerEvents: 'none' }} />}
         <div onClick={e => e.stopPropagation()} style={{
           width: '100%', boxSizing: 'border-box',
-          background: UI.bgRaised,
+          backgroundColor: UI.bgRaised, backgroundImage: 'var(--bg-texture)',
           borderRadius: cardLike ? 6 : '6px 6px 0 0',
           border: `1px solid ${edgeColor}`,
+          // The panel draws the same paper grid as Screen does (bg-texture
+          // above), so plain text sitting on it needs the same lift Screen
+          // gives its own children (verified directly: without this, the
+          // grid's ruled lines cut straight through the glyphs). 'none'
+          // outside paper, so this is a no-op on every other theme.
+          textShadow: 'var(--text-lift)',
           ...(!cardLike && { borderBottom: 'none' }),
           // Floating above the keyboard, every edge needs to read as a real
           // boundary on its own — the bottom-sheet variant gets that for free
@@ -917,7 +812,11 @@ const ICON_CALENDAR = (
 );
 
 // ─── useConfirm ─────────────────────────────────────────────────────
-function useConfirm() {
+// zIndex: lets a caller whose own UI already sits above the ordinary z-100
+// tier (e.g. a wizard's z-9998 overlay) keep its confirm dialog on top of
+// itself too — otherwise this hook's Sheet (portaled to document.body, but
+// still z-100) can render hidden behind the caller's own higher overlay.
+function useConfirm(zIndex = 100) {
   const [state, setState] = React.useState(null);
   // requireText: when set, the user must type this phrase (case-insensitive) to
   // unlock the confirm button — a deliberate friction gate for irreversible,
@@ -935,7 +834,7 @@ function useConfirm() {
   // Portal into document.body so the confirm sheet always sits above any other
   // Sheet (both zIndex: 100) regardless of where confirmEl is placed in the tree.
   const el = state && ReactDOM.createPortal(
-    <Sheet open={true} onClose={state.preventBackdropClose ? null : () => close(false)}>
+    <Sheet open={true} onClose={state.preventBackdropClose ? null : () => close(false)} zIndex={zIndex}>
       <div style={{ fontFamily: UI.fontDisplay, fontSize: 26, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: UI.ink, marginBottom: 10, textAlign: 'center' }}>{state.title}</div>
       <div style={{ fontSize: 14, color: UI.inkSoft, marginBottom: state.requireText ? 16 : 22, lineHeight: 1.5, textAlign: 'center' }}>{state.message}</div>
       {state.requireText && (
@@ -996,7 +895,7 @@ function Frame({ children, accent = false, style = {}, padding = 18, onClick }) 
   return (
     <div onClick={onClick} style={{
       background: accent
-        ? `rgba(var(--accent-rgb),0.06)`
+        ? `rgba(var(--accent-rgb),0.13)`
         : 'var(--surface-tint)',
       border: `1px solid ${accent ? UI.goldSoft : UI.hairStrong}`,
       borderRadius: 6,
@@ -1099,7 +998,7 @@ function ScreenHead({ ref_, title, sub, right, onBack, style = {} }) {
   );
 }
 
-function NumInput({ value, onChange, placeholder = '—', disabled, style = {} }) {
+function NumInput({ value, onChange, placeholder = 'Default', disabled, style = {}, positiveOnly }) {
   const [raw, setRaw] = React.useState(value != null ? String(value).replace('.', ',') : '');
   const focused = React.useRef(false);
   React.useEffect(() => { if (!focused.current) setRaw(value != null ? String(value).replace('.', ',') : ''); }, [value]);
@@ -1110,13 +1009,17 @@ function NumInput({ value, onChange, placeholder = '—', disabled, style = {} }
       onFocus={e => { focused.current = true; e.target.select(); }}
       onBlur={() => {
         focused.current = false;
-        const n = raw === '' ? null : parseFloat(raw.replace(',', '.'));
-        setRaw(n != null && !isNaN(n) ? String(n).replace('.', ',') : '');
+        // Re-derive raw from the committed value, not from a fresh parse of
+        // raw itself: onChange below only ever commits accepted input, so
+        // this guarantees the display can never show something (blank, a
+        // rejected in-progress edit) other than what's actually stored.
+        setRaw(value != null ? String(value).replace('.', ',') : '');
       }}
       onChange={e => {
         setRaw(e.target.value);
         const n = e.target.value === '' ? null : parseFloat(e.target.value.replace(',', '.'));
-        if (e.target.value === '' || !isNaN(n)) onChange(n ?? null);
+        const accepted = e.target.value === '' || (!isNaN(n) && (!positiveOnly || n > 0));
+        if (accepted) onChange(n ?? null);
       }}
       style={{
         background: 'transparent', border: 'none', outline: 'none',

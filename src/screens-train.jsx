@@ -21,7 +21,7 @@ function nearestDoneMyoBefore(sets, idx) {
 
 // ─── Mesocycle helpers ─────────────────────────────────────────────────────────
 const MESO_KEY = 'logbook-meso-state';
-const MESO_MUSCLE_PRIORITY = ['Back','Quads','Chest','Glutes','Hamstrings','Shoulders','Calves','Abs','Triceps','Biceps','Forearms'];
+const MESO_MUSCLE_PRIORITY = ['Back','Quads','Chest','Glutes','Hamstrings','Ab/Adductors','Shoulders','Calves','Abs','Triceps','Biceps','Forearms'];
 
 function primaryMuscleForExercise(ex) {
   if (!ex?.tags?.length) return null;
@@ -296,7 +296,7 @@ function Finisher({ partials, onPartials, stretch, onStretch, defaultKg, showWei
     }}>+ FINISHER</button>
   );
   const addChip = (label, onClick) => (
-    <button onClick={onClick} style={{ background: 'rgba(var(--accent-rgb),0.08)', border: '1px solid rgba(var(--accent-rgb),0.35)', borderRadius: 4, color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.06em', padding: '5px 9px', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>{label}</button>
+    <button onClick={onClick} style={{ background: 'rgba(var(--accent-rgb),0.16)', border: '1px solid rgba(var(--accent-rgb),0.35)', borderRadius: 4, color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.06em', padding: '5px 9px', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>{label}</button>
   );
   return (
     <div style={{ padding: '2px 0 8px' }}>
@@ -447,10 +447,11 @@ function PlateCalcSheet({ open, onClose, initialWeight, availablePlates }) {
           <button key={i} onClick={() => setTab(i)} style={{
             flex: 1, padding: '8px 0', borderRadius: 4, border: 'none', cursor: 'pointer',
             background: tab === i ? 'var(--accent)' : 'transparent',
-            color: tab === i ? '#0a0805' : UI.inkFaint,
+            color: tab === i ? 'var(--accent-ink)' : UI.inkFaint,
             fontFamily: UI.fontUi, fontSize: 12, letterSpacing: '0.06em',
             fontWeight: tab === i ? 600 : 400,
             boxShadow: 'none',
+            textShadow: 'none',
             transition: 'all 0.15s',
           }}>{l}</button>
         ))}
@@ -529,8 +530,9 @@ function PlateCalcSheet({ open, onClose, initialWeight, availablePlates }) {
             padding: '3px 9px', borderRadius: 6, cursor: 'pointer',
             background: 'linear-gradient(180deg, var(--accent-light), var(--accent))',
             border: `0.5px solid var(--accent-deep)`,
-            color: '#0a0805', fontFamily: UI.fontNum, fontSize: 10, letterSpacing: '0.06em',
+            color: 'var(--accent-ink)', fontFamily: UI.fontNum, fontSize: 10, letterSpacing: '0.06em',
             fontWeight: 700, boxShadow: '0 2px 8px rgba(var(--accent-rgb),0.45)',
+            textShadow: 'none',
           }}>
             +{correctionDelta} {UI.unit()}
           </button>
@@ -550,6 +552,7 @@ function PlateCalcSheet({ open, onClose, initialWeight, availablePlates }) {
           }} style={{
             height: 46, borderRadius: 4, border: 'none', cursor: 'pointer',
             background: 'var(--bg-raised)', boxShadow: `0 0 0 0.5px var(--hair)`,
+            textShadow: 'none',
             color: k === '⌫' ? UI.inkSoft : UI.ink,
             fontFamily: UI.fontNum, fontSize: 20, fontWeight: 400,
             WebkitTapHighlightColor: 'transparent', userSelect: 'none',
@@ -570,6 +573,7 @@ function CustomKeyboard({ visible, field, onType, onBackspace, onAdjust, onConfi
   const H = 40;
   const base = {
     background: 'var(--bg-raised)', border: `0.5px solid var(--hair)`, borderRadius: 6,
+    textShadow: 'none',
     color: 'var(--ink)', fontFamily: UI.fontNum, fontSize: 18, fontWeight: 500,
     cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
     WebkitTapHighlightColor: 'transparent', userSelect: 'none', padding: 0,
@@ -581,7 +585,7 @@ function CustomKeyboard({ visible, field, onType, onBackspace, onAdjust, onConfi
       onPointerDown={e => { e.preventDefault(); e.stopPropagation(); }}
       onTouchStart={e => { e.preventDefault(); e.stopPropagation(); }}
       style={{ position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 95,
-      background: 'var(--bg)',
+      background: 'var(--bg)', backgroundImage: 'var(--bg-texture)',
       padding: `5px 8px calc(env(safe-area-inset-bottom, 0px) + 5px)`,
     }}>
       {/* knurled top edge — same grip-texture seam the rest of the kit uses,
@@ -605,7 +609,7 @@ function CustomKeyboard({ visible, field, onType, onBackspace, onAdjust, onConfi
             ...base, gridColumn: 4, gridRow: '1 / span 4', fontSize: 20, fontWeight: 700,
             ...(confirmDisabled
               ? { background: 'var(--bg-inset)', color: 'var(--ink-faint)', borderColor: 'var(--hair)', cursor: 'default' }
-              : { background: 'linear-gradient(180deg, var(--accent-light), var(--accent))', color: '#0a0805', borderColor: 'var(--accent-deep)' }),
+              : { background: 'linear-gradient(180deg, var(--accent-light), var(--accent))', color: 'var(--accent-ink)', borderColor: 'var(--accent-deep)' }),
           }}
         >✓</button>
 
@@ -717,8 +721,12 @@ function RestGauge({ restStart, restDef, variant }) {
     </>);
   }
   // warmup overlay
+  // A blurred glow reads as light bleeding outward on a dark backdrop, but as
+  // a dark smudge on a light canvas theme (light or paper). Read live rather
+  // than threading a theme prop through every RestGauge caller, same trick SvgKnurl uses.
+  const isPaperGauge = isLightCanvasActive();
   return (<>
-    <div className="num" style={{ fontSize: 88, fontWeight: 300, letterSpacing: '-0.03em', lineHeight: 1, color: gaugeColor, textShadow: overrun ? '0 0 40px rgba(var(--danger-rgb),0.55), 0 0 80px rgba(var(--danger-rgb),0.25)' : '0 0 40px rgba(var(--accent-rgb),0.55), 0 0 80px rgba(var(--accent-rgb),0.25)', animation: 'timerPulse 1.6s ease-in-out infinite' }}>{mmss}</div>
+    <div className="num" style={{ fontSize: 88, fontWeight: 300, letterSpacing: '-0.03em', lineHeight: 1, color: gaugeColor, textShadow: isPaperGauge ? 'none' : (overrun ? '0 0 40px rgba(var(--danger-rgb),0.55), 0 0 80px rgba(var(--danger-rgb),0.25)' : '0 0 40px rgba(var(--accent-rgb),0.55), 0 0 80px rgba(var(--accent-rgb),0.25)'), animation: 'timerPulse 1.6s ease-in-out infinite' }}>{mmss}</div>
     <div style={{ height: 2, background: UI.hair, borderRadius: 4, overflow: 'hidden', marginTop: 22, width: 180 }}>
       <div style={{ height: '100%', width: `${pct}%`, background: gaugeColor, transition: 'width 0.25s linear' }} />
     </div>
@@ -735,9 +743,13 @@ function TimeCountdown({ startedAt, total }) {
   const pct = total > 0 ? Math.min(100, (el / total) * 100) : 100;
   return (
     <div style={{ textAlign: 'center' }}>
-      <div className="num" style={{ fontSize: 92, fontWeight: 300, letterSpacing: '-0.03em', lineHeight: 1, color: UI.gold, textShadow: '0 0 40px rgba(var(--accent-rgb),0.55), 0 0 80px rgba(var(--accent-rgb),0.25)', animation: remaining <= 3 ? 'timerPulse 0.7s ease-in-out infinite' : 'none' }}>{LB.fmtDuration(Math.ceil(remaining))}</div>
+      {/* This overlay's backdrop (see the fixed rgba(8,6,3,0.92) scrim it sits
+          on) is deliberately dark in every theme, so it needs the user's raw
+          accent color, not paper's muted grey which would go low-contrast
+          against that near-black backdrop for no reason. */}
+      <div className="num" style={{ fontSize: 92, fontWeight: 300, letterSpacing: '-0.03em', lineHeight: 1, color: 'var(--accent-raw)', textShadow: '0 0 40px rgba(var(--accent-raw-rgb),0.55), 0 0 80px rgba(var(--accent-raw-rgb),0.25)', animation: remaining <= 3 ? 'timerPulse 0.7s ease-in-out infinite' : 'none' }}>{LB.fmtDuration(Math.ceil(remaining))}</div>
       <div style={{ height: 3, background: UI.hair, borderRadius: 4, overflow: 'hidden', marginTop: 24, width: 220, marginLeft: 'auto', marginRight: 'auto' }}>
-        <div style={{ height: '100%', width: `${100 - pct}%`, background: UI.gold, transition: 'width 0.25s linear' }} />
+        <div style={{ height: '100%', width: `${100 - pct}%`, background: 'var(--accent-raw)', transition: 'width 0.25s linear' }} />
       </div>
     </div>
   );
@@ -1458,8 +1470,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       if (!isNoWeightReps && !LB.isAssisted(exercise)) {
         refKg = suggestion ? (suggestion.kg ?? null) : (prevSet ? prevSet.kg : null);
         if (refKg != null && refKg > 0) {
-          const catCfg = exercise?.equipment ? (store.settings?.equipmentConfig?.[exercise.equipment] ?? {}) : {};
-          increment = catCfg.increment ?? 2.5;
+          increment = LB.incrementForExercise(store, exercise, 2.5);
           loggedKg = session.entries[exIdx]?.sets[setIdx]?.kg ?? null;
           if (kb?.field === 'kg' && kb?.setIdx === setIdx) {
             const num = parseFloat((rawRef || '').replace(',', '.'));
@@ -1565,13 +1576,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       if (LB.is531MainLift(store, entry.exId, session.dayId)) return null; // 5/3/1 main lifts climb via the Training Max, never the Smart Progression toast
       if (!LB.progressionEnabled(store, entry?.plannedRepsMax, entry?.plannedProgressionOffset)) return null;
       if (!updatedSets.filter(s => !s.warmup).every(s => s.done || s.skipped)) return null;
-      const catCfg = exercise?.equipment ? (store.settings?.equipmentConfig?.[exercise.equipment] ?? {}) : {};
-      // Mirror progressionSuggestion's fallback (store.js) — that's what actually
+      const catCfg = LB.equipmentCfgFor(store, exercise);
+      // Mirror progressionSuggestion's fallback (store.js): that's what actually
       // seeds next session's weight, so the toast must fire under the same
       // condition, not silently stay quiet just because no increment was configured.
-      const increment = catCfg.increment ?? 2.5;
+      const increment = LB.incrementForExercise(store, exercise, 2.5, catCfg);
       // Index by true working-set position (warm-ups stripped, nothing else)
-      // so progressionTargetForSet(i) lines up correctly — filtering skipped/
+      // so progressionTargetForSet(i) lines up correctly: filtering skipped/
       // no-kg sets out before indexing (as this used to) shifts every later
       // set's target one slot whenever an earlier set was skipped, mirroring
       // the same bug store.js's progressionSuggestion had.
@@ -2853,12 +2864,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     if (!mesoState || !exercise) return null;
     const muscleOf = (id) => primaryMuscleForExercise(store.exercises?.find(x => x.id === id));
     const stall = LB.detectStall(endedSessions, exercise.id, muscleOf, {
-      planId: mesoState.scheduleId, atCeiling, exName: exercise.name,
+      planId: mesoState.scheduleId, atCeiling, exName: exercise.name, dayId: session.dayId, occ,
     });
     if (!stall.stalled) return { stalled: false, swap: null };
     const swap = LB.suggestSwap(exercise.id, store.exercises, window.SYSTEM_EXERCISES, muscleOf, { affinity: mesoState.affinity });
     return { stalled: true, swap };
-  }, [mesoState, exercise, endedSessions, store.exercises, overreach, cycleSets]);
+  }, [mesoState, exercise, endedSessions, store.exercises, overreach, cycleSets, session.dayId, occ]);
   // Holds the just-finished session's detector result (computed in finish() over
   // the sealed session) so the post-session deload offer can read the reason
   // strings after navigation. Cleared once consumed.
@@ -3436,6 +3447,17 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     const muscle = mesoJointMuscle;
     if (!mesoState || !exId) return;
 
+    // Marked "asked" here, on actually answering, not when the sheet opened:
+    // opening it only shows the question, it doesn't record anything. Marking
+    // it earlier let an abandoned-but-open sheet (backgrounded/reloaded mid-
+    // session, e.g. an iOS PWA reclaim during a rest period) latch as "asked"
+    // into the persisted set with no answer behind it — on remount the trigger
+    // effect below permanently skipped re-asking, so the exercise silently
+    // never got a chance to earn (or decline) anything for the rest of that
+    // session, with no trace in the recap at all.
+    askedJointRef.current.add(exId);
+    persistMesoAsked();
+
     if (answer === 'none') mesoJointFineRef.current.add(exId); else mesoJointFineRef.current.delete(exId);
 
     const record = mesoAnswersRef.current.joint[exId] || { exId };
@@ -3682,6 +3704,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     padding: '12px 8px', borderRadius: 6, cursor: 'pointer', textAlign: 'center', WebkitTapHighlightColor: 'transparent',
     background: sel ? `rgba(var(${TONE_RGB[tone]}),0.14)` : UI.bgInset,
     border: `1px solid ${sel ? `rgba(var(${TONE_RGB[tone]}),0.7)` : UI.hairStrong}`,
+    textShadow: sel ? 'var(--text-lift)' : 'none',
     ...(extra || {}),
   });
   const toneLbl = (tone, sel) => ({ fontFamily: UI.fontUi, fontSize: 13, fontWeight: sel ? 700 : 600, color: sel ? TONE_COL[tone] : UI.ink });
@@ -3861,8 +3884,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       // See LB.mesoRepOutcome for the exact per-set/range-aware rules.
       const { allHit, earlyMiss } = LB.mesoRepOutcome(workingSets, planReps, planRepsPerSet, planRepsMax);
 
-      const catCfg = ex?.equipment ? (store.settings?.equipmentConfig?.[ex.equipment] ?? {}) : {};
-      const increment = catCfg.increment ?? (unit === 'lbs' ? 5 : 2.5);
+      const increment = LB.incrementForExercise(store, ex, unit === 'lbs' ? 5 : 2.5);
 
       // Only a 'full' session advances the rep-miss cut. 'discounted'/'none'
       // freeze the streak: a rough day or deload must never push toward a cut
@@ -4035,6 +4057,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     if (!mesoState || !entry || isCardio || isMesoDeloadSession) return;
     if (session.readiness == null) return; // readiness is always the first prompt of a session
     if (mesoWeek == null) return; // pending period — meso not yet started
+    // A second exercise becoming eligible while another's sheet is still open
+    // must defer rather than reopen/overwrite it (same "defer + retry on
+    // dependency change" pattern as the soreness effect above): mesoJointOpen
+    // is a dependency below, so this re-runs the instant the open sheet closes.
+    if (mesoJointOpen) return;
     const exId = entry.exId;
     if (askedJointRef.current.has(exId)) return;
     const workingSets = entry.sets.filter(s => !s.warmup);
@@ -4044,13 +4071,17 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // about (joint/weight-feel/pump/affinity are all about how the sets
     // FELT). mesoRepOutcome's earn/miss gates already require s.done, so
     // this exercise can't have earned or cut anything either way, only the
-    // question itself needs suppressing. Still marks asked so this effect
-    // doesn't keep re-checking a skipped exercise on every later set change.
+    // question itself needs suppressing. Still marks asked (no sheet ever
+    // shown, nothing to answer, so marking it here rather than in
+    // handleJointAnswer is correct) so this effect doesn't keep re-checking a
+    // skipped exercise on every later set change.
     if (!workingSets.some(s => s.done)) { askedJointRef.current.add(exId); persistMesoAsked(); return; }
     const ex = store.exercises?.find(e => e.id === exId);
     const pm = primaryMuscleForExercise(ex);
-    askedJointRef.current.add(exId);
-    persistMesoAsked();
+    // NOT marked "asked" here anymore — see handleJointAnswer, which marks it
+    // only once the user actually answers, so an abandoned/unanswered sheet
+    // (backgrounded mid-session, app reload) is re-eligible on the next visit
+    // instead of silently and permanently skipping this exercise.
     mesoJointExIdxRef.current = exIdx;
     setMesoJointExId(exId);
     setMesoJointExName(entry.name);
@@ -4068,7 +4099,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // set (skipped, not done) must still re-run this effect. Keying only on
     // `done` left the signature unchanged on a skip, so the joint/pump/volume
     // sheet never fired and its boost gates / volume feedback were skipped.
-  }, [exIdx, entry?.sets?.map(s => s.done ? 1 : s.skipped ? 2 : 0).join(','), !!mesoState, session.readiness]);
+  }, [exIdx, entry?.sets?.map(s => s.done ? 1 : s.skipped ? 2 : 0).join(','), !!mesoState, session.readiness, mesoJointOpen]);
 
   // Flushes a requestFinishOpen() call that deferred because a meso feedback
   // sheet was open at the time (see finishOpenPendingRef above); re-runs as
@@ -5573,9 +5604,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         return (
           <button key={opt.key} onClick={() => setReadinessSel(opt.key)} style={{
             width: '100%', marginBottom: 8, padding: '14px 16px',
-            background: sel ? 'rgba(var(--accent-rgb),0.12)' : UI.bgInset,
-            border: `1px solid ${sel ? 'var(--accent)' : UI.hairStrong}`,
+            background: sel ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
+            border: `${sel ? '2px' : '1px'} solid ${sel ? 'var(--accent)' : UI.hairStrong}`,
             borderRadius: 6, cursor: 'pointer', textAlign: 'left',
+            textShadow: sel ? 'var(--text-lift)' : 'none',
             WebkitTapHighlightColor: 'transparent',
           }}>
             <div style={{ fontFamily: UI.fontUi, fontSize: 14, color: sel ? 'var(--accent)' : UI.ink, fontWeight: 600 }}>{opt.label}</div>
@@ -5786,8 +5818,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
             gap: 8,
           }}>
-            <span style={{ fontFamily: UI.fontDisplay, fontSize: 80, color: UI.gold, fontWeight: 900, lineHeight: 1, textShadow: '0 0 35px rgba(var(--accent-rgb),1), 0 0 80px rgba(var(--accent-rgb),0.6)' }}>★</span>
-            <span style={{ fontFamily: UI.fontUi, fontSize: 30, color: UI.gold, fontWeight: 900, letterSpacing: '0.22em', textShadow: '0 0 18px rgba(var(--accent-rgb),1), 0 0 45px rgba(var(--accent-rgb),0.8), 0 0 90px rgba(var(--accent-rgb),0.4)' }}>NEW BEST</span>
+            {/* Glow reads as light bleeding outward on the usual dark bg-body, but as
+                a dark smudge on paper's light one, so skip it there (same rule
+                CardioPROverlay already follows, screens-home.jsx). */}
+            <span style={{ fontFamily: UI.fontDisplay, fontSize: 80, color: UI.gold, fontWeight: 900, lineHeight: 1, textShadow: isLightCanvasActive() ? 'none' : '0 0 35px rgba(var(--accent-rgb),1), 0 0 80px rgba(var(--accent-rgb),0.6)' }}>★</span>
+            <span style={{ fontFamily: UI.fontUi, fontSize: 30, color: UI.gold, fontWeight: 900, letterSpacing: '0.22em', textShadow: isLightCanvasActive() ? 'none' : '0 0 18px rgba(var(--accent-rgb),1), 0 0 45px rgba(var(--accent-rgb),0.8), 0 0 90px rgba(var(--accent-rgb),0.4)' }}>NEW BEST</span>
             <span style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.inkSoft, fontWeight: 700, letterSpacing: '0.28em' }}>PERSONAL RECORD</span>
           </div>
         </div>,
@@ -5813,8 +5848,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
             gap: 6,
           }}>
-            <span style={{ fontFamily: UI.fontDisplay, fontSize: 72, color: UI.gold, fontWeight: 900, lineHeight: 1, textShadow: '0 0 30px rgba(var(--accent-rgb),0.9), 0 0 70px rgba(var(--accent-rgb),0.5)' }}>↑</span>
-            <span style={{ fontFamily: UI.fontUi, fontSize: 28, color: UI.gold, fontWeight: 900, letterSpacing: '0.2em', textShadow: '0 0 15px rgba(var(--accent-rgb),1), 0 0 40px rgba(var(--accent-rgb),0.8), 0 0 80px rgba(var(--accent-rgb),0.4)' }}>IMPROVEMENT</span>
+            <span style={{ fontFamily: UI.fontDisplay, fontSize: 72, color: UI.gold, fontWeight: 900, lineHeight: 1, textShadow: isLightCanvasActive() ? 'none' : '0 0 30px rgba(var(--accent-rgb),0.9), 0 0 70px rgba(var(--accent-rgb),0.5)' }}>↑</span>
+            <span style={{ fontFamily: UI.fontUi, fontSize: 28, color: UI.gold, fontWeight: 900, letterSpacing: '0.2em', textShadow: isLightCanvasActive() ? 'none' : '0 0 15px rgba(var(--accent-rgb),1), 0 0 40px rgba(var(--accent-rgb),0.8), 0 0 80px rgba(var(--accent-rgb),0.4)' }}>IMPROVEMENT</span>
           </div>
         </div>,
         document.body
@@ -5837,8 +5872,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
             gap: 6,
           }}>
-            <span style={{ fontFamily: UI.fontDisplay, fontSize: 72, color: UI.danger, fontWeight: 900, lineHeight: 1, textShadow: '0 0 30px rgba(var(--danger-rgb),0.9), 0 0 70px rgba(var(--danger-rgb),0.5)' }}>↓</span>
-            <span style={{ fontFamily: UI.fontUi, fontSize: 28, color: UI.danger, fontWeight: 900, letterSpacing: '0.2em', textShadow: '0 0 15px rgba(var(--danger-rgb),1), 0 0 40px rgba(var(--danger-rgb),0.8), 0 0 80px rgba(var(--danger-rgb),0.4)' }}>REGRESSION</span>
+            <span style={{ fontFamily: UI.fontDisplay, fontSize: 72, color: UI.danger, fontWeight: 900, lineHeight: 1, textShadow: isLightCanvasActive() ? 'none' : '0 0 30px rgba(var(--danger-rgb),0.9), 0 0 70px rgba(var(--danger-rgb),0.5)' }}>↓</span>
+            <span style={{ fontFamily: UI.fontUi, fontSize: 28, color: UI.danger, fontWeight: 900, letterSpacing: '0.2em', textShadow: isLightCanvasActive() ? 'none' : '0 0 15px rgba(var(--danger-rgb),1), 0 0 40px rgba(var(--danger-rgb),0.8), 0 0 80px rgba(var(--danger-rgb),0.4)' }}>REGRESSION</span>
           </div>
         </div>,
         document.body
@@ -5859,13 +5894,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               so this decorative ring (transparent, border-only) would otherwise
               sit on top of the buttons below and swallow every tap. */}
           <div style={{ animation: 'improvedBorderPulse 0.8s ease-in-out infinite', position: 'absolute', inset: 0, pointerEvents: 'none' }} />
-          <span style={{ fontFamily: UI.fontDisplay, fontSize: 64, color: UI.gold, fontWeight: 900, lineHeight: 1, textShadow: '0 0 30px rgba(var(--accent-rgb),0.9), 0 0 70px rgba(var(--accent-rgb),0.5)' }}>↑</span>
-          <span style={{ fontFamily: UI.fontUi, fontSize: 18, color: UI.gold, fontWeight: 900, letterSpacing: '0.22em', textShadow: '0 0 15px rgba(var(--accent-rgb),1), 0 0 40px rgba(var(--accent-rgb),0.8)' }}>PROGRESSION UNLOCKED</span>
+          <span style={{ fontFamily: UI.fontDisplay, fontSize: 64, color: UI.gold, fontWeight: 900, lineHeight: 1, textShadow: isLightCanvasActive() ? 'none' : '0 0 30px rgba(var(--accent-rgb),0.9), 0 0 70px rgba(var(--accent-rgb),0.5)' }}>↑</span>
+          <span style={{ fontFamily: UI.fontUi, fontSize: 18, color: UI.gold, fontWeight: 900, letterSpacing: '0.22em', textShadow: isLightCanvasActive() ? 'none' : '0 0 15px rgba(var(--accent-rgb),1), 0 0 40px rgba(var(--accent-rgb),0.8)' }}>PROGRESSION UNLOCKED</span>
           <span style={{ fontFamily: UI.fontDisplay, fontSize: 22, color: UI.ink, fontWeight: 700, marginTop: 4 }}>You've earned the next load.</span>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 16 }}>
             <span className="num" style={{ fontSize: 22, color: UI.inkSoft }}>{progressionUnlocked.currentKg}{UI.unit()}</span>
             <span style={{ color: UI.gold, fontSize: 20, lineHeight: 1 }}>→</span>
-            <span className="num" style={{ fontSize: 28, color: UI.gold, fontWeight: 700, textShadow: '0 0 20px rgba(var(--accent-rgb),0.8)' }}>{progressionUnlocked.nextKg}{UI.unit()}</span>
+            <span className="num" style={{ fontSize: 28, color: UI.gold, fontWeight: 700, textShadow: isLightCanvasActive() ? 'none' : '0 0 20px rgba(var(--accent-rgb),0.8)' }}>{progressionUnlocked.nextKg}{UI.unit()}</span>
           </div>
           <span className="micro" style={{ color: UI.inkFaint, marginTop: 6, letterSpacing: '0.12em' }}>{progressionUnlocked.exName}</span>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 24, width: '100%', maxWidth: 260 }}>
@@ -5895,7 +5930,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       {/* Outlier confirmation (reps / kg / both) */}
       {outlierConfirm && ReactDOM.createPortal(
         <div style={{ position: 'fixed', inset: 0, zIndex: 500, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', alignItems: 'center', background: 'rgba(0,0,0,0.55)' }}>
-          <div style={{ background: UI.bg, borderRadius: '6px 6px 0 0', borderTop: `0.5px solid ${UI.hairStrong}`, width: '100%', maxWidth: 480, padding: '20px 20px 44px' }}>
+          <div style={{ background: UI.bg, backgroundImage: 'var(--bg-texture)', borderRadius: '6px 6px 0 0', borderTop: `var(--hair-width) solid ${UI.hairStrong}`, width: '100%', maxWidth: 480, padding: '20px 20px 44px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
               <i className="fa-solid fa-triangle-exclamation" style={{ color: UI.gold, fontSize: 14 }} />
               <span style={{ fontWeight: 700, fontFamily: UI.fontUi, fontSize: 14, color: UI.ink }}>{(() => {
@@ -6038,7 +6073,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             <span style={{ fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.12em', color: 'var(--accent)', background: 'rgba(var(--accent-rgb),0.12)', border: `0.5px solid ${UI.goldSoft}`, borderRadius: 4, padding: '1px 6px' }}>DELOAD · 50%</span>
           )}
           {mesoState && mesoWeek != null && mesoState.weeks != null && (
-            <span style={{ fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkSoft, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '1px 6px' }}>
+            <span style={{ fontSize: 8, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.12em', color: UI.inkSoft, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4, padding: '1px 6px' }}>
               {isWeekdayMode ? 'W' : 'C'}{mesoWeek}/{mesoState.weeks}
             </span>
           )}
@@ -6064,7 +6099,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                 flexShrink: 0, maxWidth: 110,
                 padding: '5px 11px 4px', borderRadius: 4,
                 border: `1px solid ${active ? UI.gold : done ? UI.goldSoft : UI.hairStrong}`,
-                background: active ? UI.goldFaint : done ? 'rgba(var(--accent-rgb),0.05)' : 'transparent',
+                background: active ? UI.goldFaint : done ? 'rgba(var(--accent-rgb),0.11)' : 'transparent',
                 cursor: 'pointer',
                 WebkitTapHighlightColor: 'transparent',
                 transition: 'all 0.15s',
@@ -6126,7 +6161,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                 style={{
                   flexShrink: 0, width: 38, height: 38, borderRadius: 6,
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  border: `0.5px solid ${UI.hairStrong}`, background: UI.bgRaised,
+                  border: `var(--hair-width) solid ${UI.hairStrong}`, background: UI.bgRaised,
                   color: '#FF0000', textDecoration: 'none',
                 }}>
                 <i className="fa-brands fa-youtube" style={{ fontSize: 18 }} />
@@ -6160,7 +6195,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             const est = topDone ? LB.e1rm(topDone.kg, topDone.reps) : null;
             const sugg = est ? LB.suggest531Tm(est, main.tm, main.kind, u) : null;
             return (
-              <div style={{ marginTop: 10, padding: '10px 12px', background: 'rgba(var(--accent-rgb),0.06)', border: `1px solid ${UI.goldSoft}`, borderRadius: 6 }}>
+              <div style={{ marginTop: 10, padding: '10px 12px', background: 'rgba(var(--accent-rgb),0.13)', border: `1px solid ${UI.goldSoft}`, borderRadius: 6 }}>
                 <div className="micro-gold" style={{ marginBottom: 7 }}>5/3/1 · {deloadActive ? 'DELOAD' : `WEEK ${week}${week === 4 ? ' · DELOAD' : ''}`} · TM {main.tm}{u}</div>
                 <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
                   {wave.map((ws, i) => (
@@ -6299,7 +6334,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                     type="text" value={cardioForm.type}
                     onChange={e => setCardioForm(f => ({ ...f, type: e.target.value }))}
                     placeholder="e.g. Running, Cycling…"
-                    style={{ width: '100%', boxSizing: 'border-box', background: 'transparent', border: 'none', borderBottom: `0.5px solid ${UI.hairStrong}`, padding: '6px 0', color: UI.ink, fontFamily: UI.fontUi, fontSize: 13, outline: 'none' }}
+                    style={{ width: '100%', boxSizing: 'border-box', background: 'transparent', border: 'none', borderBottom: `var(--hair-width) solid ${UI.hairStrong}`, padding: '6px 0', color: UI.ink, fontFamily: UI.fontUi, fontSize: 13, outline: 'none' }}
                   />
                   {cardioTypeChips.length > 0 && (
                     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
@@ -6324,7 +6359,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                     type="text" inputMode="numeric" value={cardioForm.duration}
                     onChange={e => setCardioForm(f => ({ ...f, duration: e.target.value }))}
                     placeholder="e.g. 30"
-                    style={{ width: '100%', boxSizing: 'border-box', background: 'transparent', border: 'none', borderBottom: `0.5px solid ${UI.hairStrong}`, padding: '6px 0', color: UI.ink, fontFamily: UI.fontNum, fontSize: 22, outline: 'none' }}
+                    style={{ width: '100%', boxSizing: 'border-box', background: 'transparent', border: 'none', borderBottom: `var(--hair-width) solid ${UI.hairStrong}`, padding: '6px 0', color: UI.ink, fontFamily: UI.fontNum, fontSize: 22, outline: 'none' }}
                   />
                 </div>
 
@@ -6342,7 +6377,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                     type="text" inputMode="decimal" value={cardioForm.distance}
                     onChange={e => setCardioForm(f => ({ ...f, distance: e.target.value }))}
                     placeholder={`0.00 ${cardioForm.distUnit}`}
-                    style={{ width: '100%', boxSizing: 'border-box', background: 'transparent', border: 'none', borderBottom: `0.5px solid ${UI.hairStrong}`, padding: '6px 0', color: UI.ink, fontFamily: UI.fontNum, fontSize: 22, outline: 'none' }}
+                    style={{ width: '100%', boxSizing: 'border-box', background: 'transparent', border: 'none', borderBottom: `var(--hair-width) solid ${UI.hairStrong}`, padding: '6px 0', color: UI.ink, fontFamily: UI.fontNum, fontSize: 22, outline: 'none' }}
                   />
                 </div>
 
@@ -6576,9 +6611,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   <button onClick={() => startCountdown(bgSetIdx, heroSet.timeSec)} disabled={!(heroSet.timeSec > 0)} style={{
                     width: '80%', minHeight: 46, borderRadius: 6, border: `1px solid var(--accent-deep)`,
                     background: `linear-gradient(180deg, var(--accent-light), var(--accent))`,
-                    color: '#0a0805', cursor: 'pointer',
+                    color: 'var(--accent-ink)', cursor: 'pointer',
                     fontFamily: UI.fontUi, fontWeight: 700, fontSize: 14, letterSpacing: '0.16em',
                     boxShadow: '0 8px 30px rgba(var(--accent-rgb),0.30)', WebkitTapHighlightColor: 'transparent',
+                    textShadow: 'none',
                   }}>GO</button>
                 </div>
               )}
@@ -6766,10 +6802,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                         style={{
                           minWidth: 54, height: 42, borderRadius: 6, border: `1px solid var(--accent-deep)`,
                           background: (s.done || s.skipped) ? 'transparent' : `linear-gradient(180deg, var(--accent-light), var(--accent))`,
-                          color: (s.done || s.skipped) ? UI.inkFaint : '#0a0805', cursor: 'pointer',
+                          color: (s.done || s.skipped) ? UI.inkFaint : 'var(--accent-ink)', cursor: 'pointer',
                           fontFamily: UI.fontUi, fontWeight: 700, fontSize: 12, letterSpacing: '0.14em',
                           WebkitTapHighlightColor: 'transparent', justifySelf: 'center',
                           opacity: (s.done || s.skipped) ? 0.35 : 1,
+                          textShadow: (s.done || s.skipped) ? 'var(--text-lift)' : 'none',
                         }}>GO</button>}
 
                       {!isIntensityActive && !isCheckbox && !isTime && (isUnilateral ? (
@@ -6812,9 +6849,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                         style={{
                           width: 26, height: 26, borderRadius: 4, border: `1px solid ${s.skipped ? UI.inkFaint : s.done ? UI.gold : (!isNoWeightReps && ((!isBodyweight && s.kg == null) || (isUnilateral ? (s.repsL == null || s.repsR == null) : s.reps == null))) ? UI.hair : isCurrent ? UI.goldSoft : UI.hairStrong}`, cursor: 'pointer',
                           background: s.done ? UI.gold : 'transparent',
+                          textShadow: 'none',
                           display: 'flex', alignItems: 'center', justifyContent: 'center',
                           fontSize: s.skipped ? 12 : 14, fontWeight: 700,
-                          color: s.skipped ? UI.inkFaint : s.done ? '#0a0805' : 'transparent',
+                          color: s.skipped ? UI.inkFaint : s.done ? 'var(--accent-ink)' : 'transparent',
                           opacity: !s.done && !s.skipped && !isNoWeightReps && ((!isBodyweight && s.kg == null) || (isUnilateral ? (s.repsL == null || s.repsR == null) : s.reps == null)) ? 0.35 : 1,
                           flexShrink: 0, justifySelf: 'center',
                           WebkitTapHighlightColor: 'transparent',
@@ -6900,7 +6938,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                             <button onClick={() => {
                               setLpStretch({ kg: stretchShowWeight ? (s.kg ?? null) : null, timeSec: 30 });
                               setTimeout(() => activateStretchKb('lp', null, stretchShowWeight ? 'kg' : 'sec'), 150);
-                            }} style={{ background: 'rgba(var(--accent-rgb),0.08)', border: '1px solid rgba(var(--accent-rgb),0.35)', borderRadius: 4, color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.06em', padding: '5px 9px', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>+ Weighted stretch</button>
+                            }} style={{ background: 'rgba(var(--accent-rgb),0.16)', border: '1px solid rgba(var(--accent-rgb),0.35)', borderRadius: 4, color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.06em', padding: '5px 9px', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>+ Weighted stretch</button>
                           </div>
                         )}
                         <div style={{ padding: '0 4px 10px' }}>
@@ -6931,7 +6969,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                     const kgActive = kbField?.setIdx === 'stretch' && kbField?.target === 'ws' && kbField?.field === 'kg';
                     const secActive = kbField?.setIdx === 'stretch' && kbField?.target === 'ws' && kbField?.field === 'sec';
                     return (
-                      <div data-stretch-box="ws" style={{ background: 'rgba(var(--accent-rgb),0.05)', borderRadius: 6, margin: '2px 0 6px' }}>
+                      <div data-stretch-box="ws" style={{ background: 'rgba(var(--accent-rgb),0.11)', borderRadius: 6, margin: '2px 0 6px' }}>
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 6px 2px' }}>
                           <span className="micro-gold">WEIGHTED STRETCH</span>
                           <button onClick={() => {
@@ -7092,7 +7130,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           {!isCardio && !isTime && !isCheckbox && (
             <button className="intensity-glow" onClick={() => setIntensityOpen(true)} style={{
               width: '100%', marginTop: 6, padding: '8px 0',
-              background: 'rgba(var(--accent-rgb),0.08)',
+              background: 'rgba(var(--accent-rgb),0.16)',
               border: '1px solid rgba(var(--accent-rgb),0.5)',
               borderRadius: 6, cursor: 'pointer',
               color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700,
@@ -7230,6 +7268,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           <button onClick={() => setMesoRecapOpen(true)} style={{
             width: 44, minHeight: 44, borderRadius: 6,
             background: UI.bgRaised, border: `1px solid ${UI.hairStrong}`,
+            textShadow: 'none',
             display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
             cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
           }} aria-label="Session feedback">
@@ -7281,7 +7320,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                 .filter(e => e.remaining > 0);
               if (!incomplete.length) return null;
               return (
-                <div style={{ background: 'rgba(var(--accent-rgb),0.08)', border: `1px solid rgba(var(--accent-rgb),0.3)`, borderRadius: 6, padding: '10px 12px', marginBottom: 14 }}>
+                <div style={{ background: 'rgba(var(--accent-rgb),0.16)', border: `1px solid rgba(var(--accent-rgb),0.3)`, borderRadius: 6, padding: '10px 12px', marginBottom: 14 }}>
                   <div className="label" style={{ color: 'var(--accent)', marginBottom: 8 }}>Incomplete sets</div>
                   {incomplete.map(e => (
                     <div key={e.name} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, paddingBottom: 4 }}>
@@ -7337,7 +7376,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               if (elapsedMin < 20) {
                 return <Btn className="intensity-glow" onClick={onAddEx} style={{ width: '100%', marginBottom: 8 }}>+ Add another exercise</Btn>;
               } else if (elapsedMin < 45) {
-                return <Btn kind="ghost" onClick={onAddEx} style={{ width: '100%', marginBottom: 8, border: '1px solid rgba(var(--accent-rgb),0.6)', background: 'rgba(var(--accent-rgb),0.07)' }}>+ Add another exercise</Btn>;
+                return <Btn kind="ghost" onClick={onAddEx} style={{ width: '100%', marginBottom: 8, border: '1px solid rgba(var(--accent-rgb),0.6)', background: 'rgba(var(--accent-rgb),0.14)' }}>+ Add another exercise</Btn>;
               }
             }
             return <Btn kind="ghost" onClick={onAddEx} style={{ width: '100%', marginBottom: 8 }}>+ Add another exercise</Btn>;
@@ -7397,6 +7436,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           <button onClick={() => { setNotePicker(false); setSessionNoteOpen(true); }} style={{
             background: UI.bgInset, border: `1px solid ${UI.hair}`, borderRadius: 6,
             padding: '14px 16px', cursor: 'pointer', textAlign: 'left',
+            textShadow: 'none',
           }}>
             <div style={{ fontSize: 14, fontWeight: 600, color: UI.ink, marginBottom: 4 }}>Session note</div>
             <div style={{ fontSize: 12, color: UI.inkSoft }}>Only for this workout — e.g. how the set felt.</div>
@@ -7404,6 +7444,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           <button onClick={() => { setNotePicker(false); setExNoteVal(exercise?.note || ''); setExNotePinned(!!exercise?.note_pinned); setExNoteOpen(true); }} style={{
             background: UI.bgInset, border: `1px solid ${UI.hair}`, borderRadius: 6,
             padding: '14px 16px', cursor: 'pointer', textAlign: 'left',
+            textShadow: 'none',
           }}>
             <div style={{ fontSize: 14, fontWeight: 600, color: UI.ink, marginBottom: 4 }}>Exercise note</div>
             <div style={{ fontSize: 12, color: UI.inkSoft }}>Permanent — shown every session. Settings, technique cues.</div>
@@ -7494,9 +7535,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           const myoMatchTarget = nearestDoneMyoBefore(entry.sets, myoMatchAnchorIdx);
           const btnBase = (active) => ({
             width: '100%', textAlign: 'left', cursor: active ? 'pointer' : 'default',
-            background: active ? 'rgba(var(--accent-rgb),0.07)' : UI.bgInset,
+            background: active ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
             border: `1px solid ${active ? 'rgba(var(--accent-rgb),0.35)' : UI.hair}`,
             borderRadius: 6, padding: '14px 16px',
+            textShadow: active ? 'var(--text-lift)' : 'none',
             display: 'flex', alignItems: 'center', gap: 14,
             opacity: active ? 1 : 0.45,
             WebkitTapHighlightColor: 'transparent',
@@ -7688,7 +7730,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   <div style={{ display: 'grid', gridTemplateColumns: '28px 1fr 72px 56px 28px', gap: 8, alignItems: 'center', padding: '5px 4px' }}>
                     <div style={{
                       width: 24, height: 24, borderRadius: 4, flexShrink: 0,
-                      background: 'rgba(var(--accent-rgb),0.08)',
+                      background: 'rgba(var(--accent-rgb),0.16)',
                       outline: `1px solid rgba(var(--accent-rgb),0.3)`,
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
                       fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, color: UI.gold,
@@ -7771,7 +7813,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                 const isKgA = kbField?.setIdx === 'av' && kbField?.dropIdx === di && kbField?.field === 'kg';
                 const isRepsA = kbField?.setIdx === 'av' && kbField?.dropIdx === di && kbField?.field === 'reps';
                 return (
-                  <div key={di} data-av-row={di} style={{ padding: '6px 4px', borderBottom: di < avDrops.length - 1 ? `0.5px solid ${UI.hair}` : 'none' }}>
+                  <div key={di} data-av-row={di} style={{ padding: '6px 4px', borderBottom: di < avDrops.length - 1 ? `var(--hair-width) solid ${UI.hair}` : 'none' }}>
                     <input
                       type="text"
                       enterKeyHint="done"
@@ -7793,7 +7835,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                     <div style={{ display: 'grid', gridTemplateColumns: '28px 1fr 72px 56px 28px', gap: 8, alignItems: 'center' }}>
                       <div style={{
                         width: 24, height: 24, borderRadius: 4, flexShrink: 0,
-                        background: 'rgba(var(--accent-rgb),0.08)',
+                        background: 'rgba(var(--accent-rgb),0.16)',
                         outline: `1px solid rgba(var(--accent-rgb),0.3)`,
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
                         color: UI.gold,
@@ -7936,7 +7978,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                     <div style={{ display: 'grid', gridTemplateColumns: '28px 1fr 72px 56px 28px', gap: 8, alignItems: 'center', padding: '5px 4px' }}>
                       <div style={{
                         width: 24, height: 24, borderRadius: 4, flexShrink: 0,
-                        background: 'rgba(var(--accent-rgb),0.08)',
+                        background: 'rgba(var(--accent-rgb),0.16)',
                         outline: `1px solid rgba(var(--accent-rgb),0.3)`,
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
                         fontFamily: UI.fontUi, fontSize: isActiv ? 9 : 10, fontWeight: 700, color: UI.gold,
@@ -8358,6 +8400,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           <div style={{
             position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 61,
             background: 'var(--bg, #080603)',
+            backgroundImage: 'var(--bg-texture)',
             borderRadius: '8px 8px 0 0',
             boxShadow: `0 -1px 0 ${UI.hairStrong}, 0 -24px 60px rgba(0,0,0,0.7)`,
             padding: `18px 22px calc(env(safe-area-inset-bottom, 0px) + 24px)`,
@@ -8419,10 +8462,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                       width: '100%', minHeight: 46,
                       background: `linear-gradient(180deg, var(--accent-light), var(--accent))`,
                       border: `1px solid var(--accent-deep)`,
-                      color: '#0a0805', borderRadius: 6,
+                      color: 'var(--accent-ink)', borderRadius: 6,
                       fontFamily: UI.fontUi, fontWeight: 700, fontSize: 13, letterSpacing: '0.14em',
                       cursor: 'pointer', boxShadow: '0 8px 30px rgba(var(--accent-rgb),0.30)',
                       WebkitTapHighlightColor: 'transparent',
+                      textShadow: 'none',
                     }}>✓  Check warmup set</button>
                 </div>
               </div>
@@ -8446,7 +8490,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               ))}
             </div>
             {entry.note ? (
-              <div style={{ marginTop: 12, padding: '10px 14px', background: UI.bgInset, borderRadius: 6, border: `0.5px solid ${UI.hairStrong}` }}>
+              <div style={{ marginTop: 12, padding: '10px 14px', background: UI.bgInset, borderRadius: 6, border: `var(--hair-width) solid ${UI.hairStrong}` }}>
                 <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1.5 }}>{entry.note}</div>
               </div>
             ) : null}
@@ -8487,12 +8531,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             padding: '18px 56px',
             background: `linear-gradient(180deg, var(--accent-light), var(--accent))`,
             border: `1px solid var(--accent-deep)`,
-            color: '#0a0805', borderRadius: 6,
+            color: 'var(--accent-ink)', borderRadius: 6,
             fontFamily: UI.fontUi, fontWeight: 700, fontSize: 13, letterSpacing: '0.14em',
             cursor: 'pointer',
             boxShadow: '0 8px 40px rgba(var(--accent-rgb),0.40)',
             animation: 'pulseGold 2.2s ease-in-out infinite',
             WebkitTapHighlightColor: 'transparent',
+            textShadow: 'none',
           }}>Start now →</button>
         </div>
       )}
@@ -8569,8 +8614,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           return (
             <button key={opt.key} onClick={() => setMesoSorenessSel(opt.key)} style={{
               width: '100%', marginBottom: 8, padding: '12px 14px',
-              background: sel ? `rgba(var(--accent-rgb),0.12)` : UI.bgInset,
-              border: `1px solid ${sel ? 'var(--accent)' : UI.hairStrong}`,
+              // A low-alpha accent tint over the sheet's bg-raised landed
+              // almost exactly on UI.bgInset's own grey on paper (both cool
+              // greys, barely 2 units apart) — selected vs. unselected was
+              // nearly indistinguishable. Stronger fill + a thicker border
+              // (same recipe as the Home day strip's selected cell) instead.
+              background: sel ? `rgba(var(--accent-rgb),0.22)` : UI.bgInset,
+              border: `${sel ? '2px' : '1px'} solid ${sel ? 'var(--accent)' : UI.hairStrong}`,
               borderRadius: 6, cursor: 'pointer', textAlign: 'left',
               WebkitTapHighlightColor: 'transparent',
             }}>
@@ -8686,9 +8736,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             return (
               <button key={key} onClick={() => setMesoVolumeAnswer(key)} style={{
                 width: '100%', padding: '10px 14px',
-                background: sel ? `rgba(var(--accent-rgb),0.12)` : UI.bgInset,
-                border: `1px solid ${sel ? 'var(--accent)' : UI.hairStrong}`,
+                background: sel ? `rgba(var(--accent-rgb),0.22)` : UI.bgInset,
+                border: `${sel ? '2px' : '1px'} solid ${sel ? 'var(--accent)' : UI.hairStrong}`,
                 borderRadius: 6, cursor: 'pointer', textAlign: 'left',
+                textShadow: 'none',
                 WebkitTapHighlightColor: 'transparent',
               }}>
                 <div style={{ fontFamily: UI.fontUi, fontSize: 13, color: sel ? 'var(--accent)' : UI.ink, fontWeight: 600 }}>{WORKLOAD_LABELS[key]}</div>
@@ -8720,6 +8771,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
             width: '100%', marginBottom: 8, padding: '12px 14px',
             background: UI.bgInset, border: `1px solid ${UI.hairStrong}`,
             borderRadius: 6, cursor: 'pointer', textAlign: 'left',
+            textShadow: 'none',
             display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10,
             WebkitTapHighlightColor: 'transparent',
           }}>
@@ -8747,6 +8799,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               width: '100%', marginBottom: 8, padding: '12px 14px',
               background: UI.bgInset, border: `1px solid ${UI.hairStrong}`,
               borderRadius: 6, cursor: 'pointer', textAlign: 'left',
+              textShadow: 'none',
               display: structured ? 'block' : 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10,
               WebkitTapHighlightColor: 'transparent',
             }}>
@@ -8809,8 +8862,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           {mesoGainItems.map((item, i) => (
             <div key={i} style={{
               display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-              padding: '10px 0',
-              borderBottom: i < mesoGainItems.length - 1 ? `1px solid ${UI.hair}` : 'none',
+              padding: '10px 12px',
+              marginBottom: i < mesoGainItems.length - 1 ? 8 : 0,
+              background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6,
             }}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
                 <span style={{ fontFamily: UI.fontUi, fontSize: 14, fontWeight: 600, color: UI.ink }}>{item.name}</span>
@@ -8892,7 +8946,7 @@ const chainTitleStyle = { fontFamily: UI.fontDisplay, fontSize: 22, fontWeight: 
 
 function setInputStyle(done, current) {
   return {
-    background: done ? 'transparent' : current ? 'rgba(var(--accent-rgb),0.06)' : UI.bgInset,
+    background: done ? 'transparent' : current ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
     border: `1px solid ${done ? 'transparent' : current ? UI.goldSoft : UI.hair}`,
     borderRadius: 4, outline: 'none',
     color: done ? UI.inkSoft : UI.ink,

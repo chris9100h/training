@@ -197,7 +197,7 @@ function LoginScreen() {
         {inAppBrowser && (
           <div style={{
             width: '100%', marginBottom: 20, padding: '10px 14px', flexShrink: 0,
-            background: 'rgba(var(--accent-rgb),0.08)', border: `1px solid rgba(var(--accent-rgb),0.28)`,
+            background: 'rgba(var(--accent-rgb),0.16)', border: `1px solid rgba(var(--accent-rgb),0.28)`,
             borderRadius: 6, fontFamily: UI.fontUi, fontSize: 12, color: UI.inkSoft, lineHeight: 1.55,
           }}>
             <i className="fa-solid fa-circle-info" style={{ color: 'var(--accent)', marginRight: 6 }} />
@@ -488,7 +488,7 @@ function SkipReasonSheet({ modal, onClose, setStore, userId }) {
                     setStore(s => ({ ...s, skips: [...(s.skips || []), { id, date: data.dateKey, dayId: data.dayId, dayName: data.dayName, skipReason: reason, skippedAt: new Date().toISOString() }] }));
                   }
                   onClose();
-                }} style={{ background: isActive ? UI.goldFaint : UI.bgInset, border: `0.5px solid ${isActive ? UI.goldSoft : UI.hairStrong}`, borderRadius: 4, padding: '13px 16px', fontFamily: UI.fontUi, fontSize: 14, color: isActive ? UI.gold : UI.ink, textAlign: 'center', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+                }} style={{ background: isActive ? UI.goldFaint : UI.bgInset, border: `0.5px solid ${isActive ? UI.goldSoft : UI.hairStrong}`, borderRadius: 4, textShadow: isActive ? 'var(--text-lift)' : 'none', padding: '13px 16px', fontFamily: UI.fontUi, fontSize: 14, color: isActive ? UI.gold : UI.ink, textAlign: 'center', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
                   {reason}
                 </button>
               );
@@ -529,7 +529,7 @@ function RecentBannerDay({ banner, setStore, onOpenSkipSheet, onLog }) {
   const dateLabel = daysAgo === 1 ? 'YESTERDAY' : `${daysAgo}D AGO`;
   if (skip) {
     return (
-      <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 8 }}>
+      <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 8 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div className="micro" style={{ marginBottom: 3 }}>{dayName} · {dateLabel}</div>
           <span style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, letterSpacing: '0.04em', background: `rgba(var(--bg-rgb),0.5)`, border: `1px solid ${UI.hairStrong}`, borderRadius: 4, padding: '2px 8px', display: 'inline-block' }}>
@@ -602,8 +602,10 @@ function CardioPROverlay({ pr, onDone }) {
       display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6,
     }}>
       <div style={{ position: 'absolute', inset: 0, animation: 'improvedBorderPulse 0.7s ease-in-out infinite' }} />
-      <span style={{ fontFamily: UI.fontDisplay, fontSize: 72, color: UI.gold, fontWeight: 900, lineHeight: 1, textShadow: '0 0 30px rgba(var(--accent-rgb),1), 0 0 70px rgba(var(--accent-rgb),0.6)' }}>{isBest ? '★' : '↑'}</span>
-      <span style={{ fontFamily: UI.fontUi, fontSize: 28, color: UI.gold, fontWeight: 900, letterSpacing: '0.2em', textShadow: '0 0 15px rgba(var(--accent-rgb),1), 0 0 40px rgba(var(--accent-rgb),0.8)' }}>{isBest ? 'NEW BEST' : 'IMPROVEMENT'}</span>
+      {/* Glow reads as light bleeding outward on the usual dark bg-body, but as
+          a dark smudge on paper's light one, so skip it there. */}
+      <span style={{ fontFamily: UI.fontDisplay, fontSize: 72, color: UI.gold, fontWeight: 900, lineHeight: 1, textShadow: isLightCanvasActive() ? 'none' : '0 0 30px rgba(var(--accent-rgb),1), 0 0 70px rgba(var(--accent-rgb),0.6)' }}>{isBest ? '★' : '↑'}</span>
+      <span style={{ fontFamily: UI.fontUi, fontSize: 28, color: UI.gold, fontWeight: 900, letterSpacing: '0.2em', textShadow: isLightCanvasActive() ? 'none' : '0 0 15px rgba(var(--accent-rgb),1), 0 0 40px rgba(var(--accent-rgb),0.8)' }}>{isBest ? 'NEW BEST' : 'IMPROVEMENT'}</span>
       {pr.type && <span style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkSoft, fontWeight: 700, letterSpacing: '0.28em', textTransform: 'uppercase' }}>{pr.type}</span>}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 20, minWidth: 220 }}>
         {pr.items.map(it => {
@@ -710,7 +712,7 @@ function CardioQuickLogSheet({ open, onClose, store, setStore, userId, editLog, 
 
   const inputStyle = {
     width: '100%', boxSizing: 'border-box', background: UI.bgInset,
-    border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4,
+    border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4,
     padding: '10px 12px', fontFamily: UI.fontUi, fontSize: 14,
     color: UI.ink, outline: 'none',
   };
@@ -721,7 +723,7 @@ function CardioQuickLogSheet({ open, onClose, store, setStore, userId, editLog, 
       <div style={{ marginBottom: 14 }}>
         <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.07em' }}>Date</div>
         <div style={{ display: 'flex' }}>
-          <input type="date" value={form.date} max={todayStr} onChange={e => set('date', e.target.value)} style={{ ...inputStyle, flex: 1, minWidth: 0, colorScheme: 'dark' }} />
+          <input type="date" value={form.date} max={todayStr} onChange={e => set('date', e.target.value)} style={{ ...inputStyle, flex: 1, minWidth: 0, colorScheme: ['light', 'paper'].includes(store.settings?.darkMode ?? 'dark') ? 'light' : 'dark' }} />
         </div>
       </div>
 
@@ -758,12 +760,13 @@ function CardioQuickLogSheet({ open, onClose, store, setStore, userId, editLog, 
         <div style={{ flex: 1 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
             <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, textTransform: 'uppercase', letterSpacing: '0.07em' }}>Distance</span>
-            <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `0.5px solid ${UI.hairStrong}` }}>
+            <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}` }}>
               {['km', 'mi'].map(u => (
                 <button key={u} onClick={() => setDistUnit(u)} style={{
                   padding: '2px 7px', cursor: 'pointer', border: 'none',
                   background: distUnit === u ? 'var(--accent)' : 'transparent',
                   color: distUnit === u ? UI.bg : UI.inkFaint,
+                  textShadow: distUnit === u ? 'none' : 'var(--text-lift)',
                   fontFamily: UI.fontUi, fontSize: 9, fontWeight: 600, letterSpacing: '0.06em',
                   WebkitTapHighlightColor: 'transparent',
                 }}>{u}</button>
@@ -784,8 +787,9 @@ function CardioQuickLogSheet({ open, onClose, store, setStore, userId, editLog, 
           {[['1','Easy'],['2','Light'],['3','Steady'],['4','Solid'],['5','Hard'],['6','Max']].map(([n, lbl]) => (
             <button key={n} onClick={() => set('paceFeeling', form.paceFeeling === Number(n) ? null : Number(n))} style={{
               flex: 1, padding: '7px 2px', borderRadius: 8, cursor: 'pointer',
-              border: `0.5px solid ${form.paceFeeling === Number(n) ? 'var(--accent)' : UI.hairStrong}`,
-              background: form.paceFeeling === Number(n) ? `rgba(var(--accent-rgb),0.18)` : UI.bgInset,
+              border: `${form.paceFeeling === Number(n) ? '1.5px' : '0.5px'} solid ${form.paceFeeling === Number(n) ? 'var(--accent)' : UI.hairStrong}`,
+              background: form.paceFeeling === Number(n) ? `rgba(var(--accent-rgb),0.24)` : UI.bgInset,
+              textShadow: form.paceFeeling === Number(n) ? 'var(--text-lift)' : 'none',
               display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
               WebkitTapHighlightColor: 'transparent',
             }}>
@@ -806,8 +810,9 @@ function CardioQuickLogSheet({ open, onClose, store, setStore, userId, editLog, 
           {[1,2,3,4,5,6,7,8,9,10].map(n => (
             <button key={n} onClick={() => set('effort', form.effort === n ? null : n)} style={{
               flex: 1, padding: '7px 0', borderRadius: 6, cursor: 'pointer',
-              border: `0.5px solid ${form.effort === n ? 'var(--accent)' : UI.hairStrong}`,
-              background: form.effort === n ? `rgba(var(--accent-rgb),0.18)` : UI.bgInset,
+              border: `${form.effort === n ? '1.5px' : '0.5px'} solid ${form.effort === n ? 'var(--accent)' : UI.hairStrong}`,
+              background: form.effort === n ? `rgba(var(--accent-rgb),0.24)` : UI.bgInset,
+              textShadow: form.effort === n ? 'var(--text-lift)' : 'none',
               WebkitTapHighlightColor: 'transparent',
             }}>
               <span className="num" style={{ fontSize: 11, color: form.effort === n ? 'var(--accent)' : UI.inkSoft }}>{n}</span>
@@ -868,7 +873,7 @@ function CardioLiveSheet({ open, onFinish, onCancel }) {
         <div className="micro" style={{ color: UI.inkFaint }}>Recording…</div>
       </div>
       <Btn onClick={finish} style={{ width: '100%', marginBottom: 8 }}>Finish &amp; log</Btn>
-      <Btn kind="ghost" onClick={cancel} style={{ width: '100%', color: UI.danger, borderColor: 'rgba(var(--danger-rgb),0.2)' }}>Cancel</Btn>
+      <Btn kind="ghost" onClick={cancel} style={{ width: '100%', color: UI.danger, background: 'rgba(var(--danger-rgb),0.08)', borderColor: 'rgba(var(--danger-rgb),calc(0.2 * var(--danger-border-boost)))' }}>Cancel</Btn>
     </Sheet>
   );
 }
@@ -916,7 +921,7 @@ function CardioFinishFlow({ open, durationMin, store, setStore, onClose, onPR })
 
   const inputStyle = {
     width: '100%', boxSizing: 'border-box', background: UI.bgInset,
-    border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4,
+    border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4,
     padding: '10px 12px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, outline: 'none',
   };
 
@@ -946,12 +951,13 @@ function CardioFinishFlow({ open, durationMin, store, setStore, onClose, onPR })
     if (step === 2) return (
       <>
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
-          <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `0.5px solid ${UI.hairStrong}` }}>
+          <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}` }}>
             {['km', 'mi'].map(u => (
               <button key={u} onClick={() => setDistUnit(u)} style={{
                 padding: '2px 9px', cursor: 'pointer', border: 'none',
                 background: distUnit === u ? 'var(--accent)' : 'transparent',
                 color: distUnit === u ? UI.bg : UI.inkFaint,
+                textShadow: distUnit === u ? 'none' : 'var(--text-lift)',
                 fontFamily: UI.fontUi, fontSize: 9, fontWeight: 600, letterSpacing: '0.06em', WebkitTapHighlightColor: 'transparent',
               }}>{u}</button>
             ))}
@@ -966,7 +972,8 @@ function CardioFinishFlow({ open, durationMin, store, setStore, onClose, onPR })
           <button key={n} onClick={() => pick('paceFeeling', Number(n))} style={{
             flex: 1, padding: '10px 2px', borderRadius: 8, cursor: 'pointer',
             border: `0.5px solid ${form.paceFeeling === Number(n) ? 'var(--accent)' : UI.hairStrong}`,
-            background: form.paceFeeling === Number(n) ? 'rgba(var(--accent-rgb),0.18)' : UI.bgInset,
+            background: form.paceFeeling === Number(n) ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
+            textShadow: form.paceFeeling === Number(n) ? 'var(--text-lift)' : 'none',
             display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, WebkitTapHighlightColor: 'transparent',
           }}>
             <span className="num" style={{ fontSize: 14, color: form.paceFeeling === Number(n) ? 'var(--accent)' : UI.inkSoft }}>{n}</span>
@@ -981,7 +988,9 @@ function CardioFinishFlow({ open, durationMin, store, setStore, onClose, onPR })
           <button key={n} onClick={() => pick('effort', n)} style={{
             flex: 1, padding: '10px 0', borderRadius: 6, cursor: 'pointer',
             border: `0.5px solid ${form.effort === n ? 'var(--accent)' : UI.hairStrong}`,
-            background: form.effort === n ? 'rgba(var(--accent-rgb),0.18)' : UI.bgInset, WebkitTapHighlightColor: 'transparent',
+            background: form.effort === n ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
+            textShadow: 'none',
+            WebkitTapHighlightColor: 'transparent',
           }}>
             <span className="num" style={{ fontSize: 12, color: form.effort === n ? 'var(--accent)' : UI.inkSoft }}>{n}</span>
           </button>
@@ -1183,16 +1192,24 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
   const trainBg = store.settings?.vipBackground || 'icons/zane-logo.png';
   const isCustomBg = trainBg !== 'icons/zane-logo.png';
   const isLightMode = (store.settings?.darkMode ?? 'dark') === 'light';
+  const isPaperMode = (store.settings?.darkMode ?? 'dark') === 'paper';
   // watermarkOpacity (Settings -> Appearance slider) is a flat 0-100 override
   // applied identically to the logo or a VIP image, in any theme, once the
   // user has touched the slider. Unset (null, every existing user until they
   // open that sheet) falls back to these same per-theme/per-image defaults,
-  // unchanged from before the setting existed.
+  // unchanged from before the setting existed. Paper gets its own default
+  // (16%, same as a custom VIP image) rather than sharing light's 14%: its
+  // grid canvas needs a touch more mark to stay visible against it. Dark/black
+  // get that same bump, but only while the grid toggle is on (12%, not the
+  // full 16%): their default 4% is tuned for a bare canvas and reads as
+  // nearly gone once the grid gives the screen the busier look Paper always
+  // had.
+  const gridOn = !!window.__gridEnabled;
   const watermarkOpacityOverride = store.settings?.watermarkOpacity;
   const watermarkOpacity = watermarkOpacityOverride != null
     ? watermarkOpacityOverride / 100
-    : (isCustomBg ? 0.16 : (isLightMode ? 0.14 : 0.04));
-  const defaultLogoStyle = { width: '85%', maxWidth: 320, opacity: watermarkOpacity, filter: isLightMode ? 'grayscale(1)' : 'grayscale(1) brightness(3)', objectFit: 'contain' };
+    : (isCustomBg || isPaperMode ? 0.16 : (isLightMode ? 0.14 : (gridOn ? 0.12 : 0.04)));
+  const defaultLogoStyle = { width: '85%', maxWidth: 320, opacity: watermarkOpacity, filter: (isLightMode || isPaperMode) ? 'grayscale(1)' : 'grayscale(1) brightness(3)', objectFit: 'contain' };
   const today = LB.todaysDay(store);
   const sch = today?.schedule;
   const hasPlans = (store.schedules?.length || 0) > 0;
@@ -2837,8 +2854,8 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
             }}>Cancel</button>
             <button onClick={() => go({ name: 'train', sessionId: store.inProgress })} style={{
               flexShrink: 0, padding: '6px 14px', borderRadius: 4,
-              background: UI.gold, border: 'none', cursor: 'pointer',
-              fontSize: 12, fontWeight: 600, fontFamily: UI.fontUi, color: '#0a0805',
+              background: UI.gold, border: 'none', textShadow: 'none', cursor: 'pointer',
+              fontSize: 12, fontWeight: 600, fontFamily: UI.fontUi, color: 'var(--accent-ink)',
               letterSpacing: '0.08em',
             }}>Continue →</button>
           </div>
@@ -2867,7 +2884,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
               // the (now-frozen, possibly beyond-failure) meso RIR target.
               if (isViewingToday && store.statusMode === 'deload') {
                 return (
-                  <span style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase', color: UI.gold, background: 'rgba(var(--accent-rgb),0.1)', border: `0.5px solid rgba(var(--accent-rgb),0.4)`, borderRadius: 4, padding: '2px 8px' }}>
+                  <span style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase', color: UI.gold, background: 'rgba(var(--accent-rgb),0.18)', border: `0.5px solid rgba(var(--accent-rgb),0.4)`, borderRadius: 4, padding: '2px 8px' }}>
                     MESO · DELOAD
                   </span>
                 );
@@ -2885,7 +2902,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                   ? (() => { const d = new Date(m.startDate + 'T12:00:00'); return `${d.getDate().toString().padStart(2,'0')}.${(d.getMonth()+1).toString().padStart(2,'0')}`; })()
                   : 'D1';
                 return (
-                  <span style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase', color: UI.inkFaint, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '2px 8px' }}>
+                  <span style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase', color: UI.inkFaint, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4, padding: '2px 8px' }}>
                     {mesoLabel} · starts {startLabel}
                   </span>
                 );
@@ -2895,7 +2912,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
               const rir = (LB.mesoRirEnabled(sch) && typeof mesoRirForWeek === 'function') ? mesoRirForWeek(week, weeks, sch.mesocycle_start_rir ?? 3, sch.mesocycle_end_rir ?? 0) : null;
               const unit = weekdayMode ? 'W' : 'C';
               return (
-                <span style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase', color: UI.inkSoft, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '2px 8px' }}>
+                <span style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase', color: UI.inkSoft, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4, padding: '2px 8px' }}>
                   {mesoLabel} {unit}{week}/{weeks}{rir != null ? ` · ${rir} RIR` : ''}
                 </span>
               );
@@ -2921,19 +2938,19 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                       ? (() => { const d = new Date(m.startDate + 'T12:00:00'); return `${d.getDate().toString().padStart(2,'0')}.${(d.getMonth()+1).toString().padStart(2,'0')}`; })()
                       : null;
                     return (
-                      <span style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase', color: UI.inkFaint, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '2px 8px' }}>
+                      <span style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase', color: UI.inkFaint, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4, padding: '2px 8px' }}>
                         {startLabel ? `AUTO · starts ${startLabel}` : 'AUTO · pending'}
                       </span>
                     );
                   }
                   return (
-                    <span style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase', color: UI.gold, background: 'rgba(var(--accent-rgb),0.1)', border: `0.5px solid rgba(var(--accent-rgb),0.4)`, borderRadius: 4, padding: '2px 8px' }}>
+                    <span style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase', color: UI.gold, background: 'rgba(var(--accent-rgb),0.18)', border: `0.5px solid rgba(var(--accent-rgb),0.4)`, borderRadius: 4, padding: '2px 8px' }}>
                       {LB.autoregLoadOnly(sch) ? 'AUTO · LOAD' : 'AUTO'}
                     </span>
                   );
                 })()}
                 {deloadHintActive && (
-                  <span title="A muscle is at its ceiling. A deload is available whenever you want it." style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase', color: UI.gold, background: 'rgba(var(--accent-rgb),0.1)', border: `0.5px solid rgba(var(--accent-rgb),0.4)`, borderRadius: 4, padding: '2px 8px' }}>
+                  <span title="A muscle is at its ceiling. A deload is available whenever you want it." style={{ fontSize: 9, fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase', color: UI.gold, background: 'rgba(var(--accent-rgb),0.18)', border: `0.5px solid rgba(var(--accent-rgb),0.4)`, borderRadius: 4, padding: '2px 8px' }}>
                     Deload ready
                   </span>
                 )}
@@ -3005,12 +3022,12 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                 onClick={() => (weekdayMode || cycleWeekView) ? setSelectedWd(i) : setSelectedSlot(i)}
                 style={{
                   flex: 1, padding: '10px 4px 8px', textAlign: 'center',
-                  background: isSelected ? UI.goldFaint : isCompleted ? UI.goldFaint : isMissed ? 'rgba(var(--danger-rgb),0.08)' : isStatusDay ? 'rgba(var(--accent-rgb),0.06)' : isSkipped ? 'var(--neutral-tint)' : 'transparent',
+                  background: isSelected ? UI.goldFaint : isCompleted ? UI.goldFaint : isMissed ? 'rgba(var(--danger-rgb),0.08)' : isStatusDay ? 'rgba(var(--accent-rgb),0.13)' : isSkipped ? 'var(--neutral-tint)' : 'transparent',
                   border: `${isSelected ? '2px' : '0.5px'} solid ${isSelected ? UI.gold : isCompleted ? UI.goldSoft : isMissed ? 'rgba(var(--danger-rgb),0.4)' : isStatusDay ? 'rgba(var(--accent-rgb),0.25)' : isSkipped ? 'var(--neutral-border-sm)' : d.isToday ? UI.hairStrong : UI.hair}`,
                   borderRadius: 4, cursor: 'pointer',
                   minHeight: 56,
                 }}>
-                <div className="num" style={{ fontSize: 9, color: isSelected ? UI.gold : d.isToday ? UI.inkSoft : UI.inkFaint }}>
+                <div className="num" style={{ fontSize: 9, color: isSelected ? UI.gold : d.isToday ? UI.inkSoft : UI.inkFaint, textShadow: 'var(--text-lift)' }}>
                   {cycleWeekView && !weekdayMode ? (
                     <>
                       <div>{WEEKDAYS[d.weekday]}</div>
@@ -3020,17 +3037,17 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                     </>
                   ) : slotLabel}
                 </div>
-                <div style={{ fontSize: 11, fontWeight: 600, marginTop: 4, color: r ? UI.inkFaint : isSelected ? UI.gold : isMissed ? UI.danger : isStatusDay ? 'var(--accent)' : isSkipped ? UI.inkFaint : UI.ink, letterSpacing: '0.06em' }}>
+                <div style={{ fontSize: 11, fontWeight: 600, marginTop: 4, color: r ? UI.inkFaint : isSelected ? UI.gold : isMissed ? UI.danger : isStatusDay ? 'var(--accent)' : isSkipped ? UI.inkFaint : UI.ink, letterSpacing: '0.06em', textShadow: 'var(--text-lift)' }}>
                   {r ? '—' : d.name.slice(0, 4)}
                 </div>
                 <div style={{ height: 12, marginTop: 2, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                   {isCompleted && !isSelected && (
-                    <svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke={UI.gold} strokeWidth="1.5" style={{ display: 'block' }}>
+                    <svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke={UI.gold} strokeWidth="1.5" style={{ display: 'block' }} filter="url(#chart-text-lift)">
                       <path d="M2 6l2.5 2.5L10 3"/>
                     </svg>
                   )}
                   {isMissed && !isSelected && <div style={{ width: 4, height: 4, borderRadius: '50%', background: UI.danger }} />}
-                  {isSkipped && !isSelected && <span style={{ fontSize: 8, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1 }}>—</span>}
+                  {isSkipped && !isSelected && <span style={{ fontSize: 8, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1, textShadow: 'var(--text-lift)' }}>—</span>}
                   {isStatusDay && !isSelected && <i className={`fa-solid ${statusDayMode === 'sick' ? 'fa-bed-pulse' : 'fa-umbrella-beach'}`} style={{ fontSize: 7, color: 'var(--accent)', opacity: 0.7 }} />}
                   {isSelected && <div style={{ width: 4, height: 4, borderRadius: '50%', background: UI.gold }} />}
                 </div>
@@ -3053,7 +3070,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
               return (
                 <div key={i} style={{
                   flex: seg.count, height: 16, borderRadius: 4,
-                  background: isActive ? UI.goldFaint : 'rgba(var(--accent-rgb),0.06)',
+                  background: isActive ? UI.goldFaint : 'rgba(var(--accent-rgb),0.13)',
                   border: `0.5px solid ${isActive ? UI.goldSoft : UI.hair}`,
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                 }}>
@@ -3114,7 +3131,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                 </span>
                 {isViewingToday && (
                   <button onClick={handleClearStatus} style={{
-                    background: 'transparent', border: `0.5px solid ${UI.hairStrong}`,
+                    background: 'transparent', border: `var(--hair-width) solid ${UI.hairStrong}`,
                     borderRadius: 4, padding: '2px 8px', cursor: 'pointer',
                     fontFamily: UI.fontUi, fontSize: 9, fontWeight: 600, letterSpacing: '0.06em',
                     color: UI.inkFaint, WebkitTapHighlightColor: 'transparent',
@@ -3150,7 +3167,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                   return (
                     <span key={i} style={{
                       flexShrink: 0, fontSize: 10, fontFamily: UI.fontUi, color: UI.inkFaint,
-                      background: UI.bgInset, border: `0.5px solid ${UI.hair}`,
+                      background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`,
                       borderRadius: 4, padding: '3px 7px', whiteSpace: 'nowrap',
                     }}>
                       {(ex?.name || '?').toUpperCase()}
@@ -3231,9 +3248,13 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                       animation: 'pulseGold 3.5s ease-out infinite',
                       display: 'flex', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10,
                       WebkitTapHighlightColor: 'transparent',
+                      // Solid fill of its own — the inherited grid-lift (paper only,
+                      // via the button/input/select/textarea UA-reset fix) would
+                      // muddy the already-translucent accent-ink label on top of it.
+                      textShadow: 'none',
                     }}>
-                      <i className="fa-solid fa-dumbbell" style={{ fontSize: 13, color: 'rgba(10,8,5,0.55)' }} />
-                      <span style={{ color: 'rgba(10,8,5,0.75)', letterSpacing: '0.18em', fontWeight: 700, fontSize: 13, fontFamily: UI.fontUi }}>
+                      <i className="fa-solid fa-dumbbell" style={{ fontSize: 13, color: 'var(--accent-ink)', opacity: 0.55 }} />
+                      <span style={{ color: 'var(--accent-ink)', opacity: 0.75, letterSpacing: '0.18em', fontWeight: 700, fontSize: 13, fontFamily: UI.fontUi }}>
                         {isFlex && !isViewingToday ? 'CATCH UP' : (isFlex || isViewingToday || isFutureSlot ? 'START WORKOUT' : 'LOG SESSION')}
                       </span>
                     </button>
@@ -3314,7 +3335,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 18 }}>
                 {recentCardio.map(l => (
-                  <div key={l.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 12px', background: UI.bgInset, borderRadius: 8, border: `0.5px solid ${UI.hair}` }}>
+                  <div key={l.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 12px', background: UI.bgInset, borderRadius: 8, border: `var(--hair-width) solid ${UI.hair}` }}>
                     <i className="fa-solid fa-person-running" style={{ fontSize: 11, color: UI.inkFaint, width: 12 }} />
                     <span style={{ flex: 1, fontSize: 12, color: UI.ink, fontFamily: UI.fontUi, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{l.type || '—'}</span>
                     <span className="num" style={{ fontSize: 12, color: UI.gold, flexShrink: 0 }}>{l.durationMinutes}<span style={{ color: UI.inkFaint, fontSize: 9 }}>min</span></span>
@@ -3415,8 +3436,8 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
           const actionBtn = (onClick, icon, label, sub) => (
             <button onClick={onClick} style={{
               width: '100%', display: 'flex', alignItems: 'center', gap: 14,
-              padding: '12px 14px', background: UI.bgInset, border: `0.5px solid ${UI.hair}`,
-              borderRadius: 6, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+              padding: '12px 14px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`,
+              borderRadius: 6, textShadow: 'none', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
               marginBottom: 8,
             }}>
               <i className={`fa-solid ${icon}`} style={{ fontSize: 20, color: 'var(--accent)', width: 22, textAlign: 'center', flexShrink: 0 }} />
@@ -3475,8 +3496,8 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                 await LB.clearCachesAndReload();
               }} style={{
                 width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
-                padding: '12px 14px', background: UI.bgInset, border: `0.5px solid ${UI.hair}`,
-                borderRadius: 6, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+                padding: '12px 14px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`,
+                borderRadius: 6, textShadow: 'none', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
               }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <i className="fa-solid fa-arrows-rotate" style={{ fontSize: 16, color: 'var(--accent)' }} />
@@ -3497,7 +3518,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
           go({ name: 'coaching-client', coachingId: asSelf.id, clientId: userId, clientName: store.user.name, initialTab: 'checkins', isSelf: true, backRoute: 'home' });
         const navCheckinCoach = () =>
           go({ name: 'coaching', initialClientTab: 'checkin' });
-        const btnStyle = { width: '100%', display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 6, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' };
+        const btnStyle = { width: '100%', display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6, textShadow: 'none', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' };
         return (
           <Sheet open={checkinPickerOpen} onClose={() => setCheckinPickerOpen(false)} title="Which check-in?" titleColor="var(--accent)">
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -3532,8 +3553,8 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
           {sch && (
             <button onClick={() => { setWorkoutSubOpen(false); setBonusDayPickerOpen(true); }} style={{
               width: '100%', display: 'flex', alignItems: 'center', gap: 12,
-              padding: '12px 14px', background: UI.bgInset, border: `0.5px solid ${UI.hair}`,
-              borderRadius: 6, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+              padding: '12px 14px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`,
+              borderRadius: 6, textShadow: 'none', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
             }}>
               <div style={{ flex: 1, textAlign: 'left' }}>
                 <div style={{ fontSize: 14, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi }}>From plan</div>
@@ -3544,8 +3565,8 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
           )}
           <button onClick={() => { setWorkoutSubOpen(false); setFreestyleSubOpen(true); }} style={{
             width: '100%', display: 'flex', alignItems: 'center', gap: 12,
-            padding: '12px 14px', background: UI.bgInset, border: `0.5px solid ${UI.hair}`,
-            borderRadius: 6, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+            padding: '12px 14px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`,
+            borderRadius: 6, textShadow: 'none', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
           }}>
             <div style={{ flex: 1, textAlign: 'left' }}>
               <div style={{ fontSize: 14, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi }}>Freestyle</div>
@@ -3561,8 +3582,8 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <button onClick={startFreestyleSession} style={{
             width: '100%', display: 'flex', alignItems: 'center', gap: 12,
-            padding: '12px 14px', background: UI.bgInset, border: `0.5px solid ${UI.hair}`,
-            borderRadius: 6, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+            padding: '12px 14px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`,
+            borderRadius: 6, textShadow: 'none', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
           }}>
             <div style={{ flex: 1, textAlign: 'left' }}>
               <div style={{ fontSize: 14, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi }}>Empty session</div>
@@ -3576,7 +3597,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
               {(store.workoutTemplates || []).map(t => (
                 <div key={t.id} style={{
                   display: 'flex', alignItems: 'stretch', gap: 0,
-                  background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 6, overflow: 'hidden',
+                  background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6, overflow: 'hidden',
                 }}>
                   <button onClick={() => { setFreestyleSubOpen(false); setTemplatePreview(t); }} style={{
                     flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
@@ -3591,7 +3612,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                     setStore(s => ({ ...s, workoutTemplates: (s.workoutTemplates || []).filter(x => x.id !== t.id) }));
                   }} aria-label="Delete template" style={{
                     flexShrink: 0, width: 44, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    background: 'transparent', border: 'none', borderLeft: `0.5px solid ${UI.hair}`,
+                    background: 'transparent', border: 'none', borderLeft: `var(--hair-width) solid ${UI.hair}`,
                     color: 'rgba(var(--danger-rgb),0.7)', cursor: 'pointer',
                   }}>
                     <i className="fa-solid fa-trash" style={{ fontSize: 12 }} />
@@ -3612,8 +3633,8 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
           {(sch?.days || []).filter(d => d.items?.length > 0).map(d => (
             <button key={d.id} onClick={() => { setBonusDayPickerOpen(false); setDayPreview(d); }} style={{
               width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              padding: '12px 14px', background: UI.bgInset, border: `0.5px solid ${UI.hair}`,
-              borderRadius: 6, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+              padding: '12px 14px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`,
+              borderRadius: 6, textShadow: 'none', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
             }}>
               <span style={{ fontSize: 14, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi }}>{d.name}</span>
               <span className="micro" style={{ color: UI.inkFaint }}>{d.items.length} exercise{d.items.length !== 1 ? 's' : ''}</span>
@@ -3658,7 +3679,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                 width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                 padding: '12px 14px', background: UI.bgInset,
                 border: `0.5px solid ${isCurrent ? 'rgba(var(--accent-rgb),0.5)' : UI.hair}`,
-                borderRadius: 6, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+                borderRadius: 6, textShadow: 'none', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
               }}>
                 <span style={{ fontSize: 14, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi }}>{d.name}</span>
                 {isCurrent
@@ -3676,8 +3697,8 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
           {allMissedDays.map(m => (
             <button key={m.dateKey} onClick={() => startBacklogSession(m)} style={{
               width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              padding: '12px 14px', background: UI.bgInset, border: `0.5px solid ${UI.hair}`,
-              borderRadius: 6, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+              padding: '12px 14px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`,
+              borderRadius: 6, textShadow: 'none', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
             }}>
               <span style={{ fontSize: 14, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi }}>{m.dayName}</span>
               <span className="num" style={{ fontSize: 11, color: UI.inkFaint }}>
@@ -3758,6 +3779,7 @@ function UnitPromptModal({ onDone }) {
       <div style={{
         width: '100%', maxWidth: 320,
         background: UI.bgRaised,
+        backgroundImage: 'var(--bg-texture)',
         border: `1px solid ${UI.hairStrong}`,
         borderRadius: 6,
         padding: '28px 24px',
@@ -3778,6 +3800,7 @@ function UnitPromptModal({ onDone }) {
               background: UI.bgInset,
               border: `1px solid ${UI.hairStrong}`,
               color: UI.inkSoft,
+              textShadow: 'none',
               fontFamily: UI.fontUi, textAlign: 'center',
               WebkitTapHighlightColor: 'transparent',
               display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8,

@@ -24,7 +24,7 @@ function MiniSheet({ zIndex = 300, dim = true, onClose, style, title, titleColor
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', background: dim ? 'rgba(0,0,0,0.5)' : 'transparent' }}
       onClick={onClose}>
-      <div style={{ background: UI.bg, borderRadius: '8px 8px 0 0', borderTop: `0.5px solid ${UI.hairStrong}`, padding: '22px 22px calc(22px + env(safe-area-inset-bottom, 0px))', ...style }}
+      <div style={{ background: UI.bg, backgroundImage: 'var(--bg-texture)', borderRadius: '8px 8px 0 0', borderTop: `var(--hair-width) solid ${UI.hairStrong}`, padding: '22px 22px calc(22px + env(safe-area-inset-bottom, 0px))', ...style }}
         onClick={e => e.stopPropagation()}>
         {/* Same 28px title block the Sheet primitive renders (ui.jsx), so a MiniSheet
             heading stays locked to the canonical title spec instead of being hand-copied. */}
@@ -272,7 +272,7 @@ function PlanScreen({ store, setStore, go, userId, openNewPlan }) {
                     );
                   })()}
                   {s.mesocycle_weeks && !mesoPending && mesoCompletions > 0 && (
-                    <span style={{ fontFamily: UI.fontNum, fontSize: 10, fontWeight: 700, color: UI.gold, background: 'rgba(var(--accent-rgb),0.15)', borderRadius: 4, padding: '2px 6px', letterSpacing: '0.05em' }}>
+                    <span style={{ fontFamily: UI.fontNum, fontSize: 10, fontWeight: 700, color: UI.gold, background: 'rgba(var(--accent-rgb),0.15)', border: `1px solid ${UI.goldSoft}`, borderRadius: 4, padding: '2px 6px', letterSpacing: '0.05em' }}>
                       MESO {mesoCompletions + 1}
                     </span>
                   )}
@@ -285,7 +285,7 @@ function PlanScreen({ store, setStore, go, userId, openNewPlan }) {
                       </span>
                     );
                   })() : (
-                    <span style={{ fontFamily: UI.fontNum, fontSize: 10, fontWeight: 700, color: UI.gold, background: 'rgba(var(--accent-rgb),0.15)', borderRadius: 4, padding: '2px 6px', letterSpacing: '0.05em' }}>
+                    <span style={{ fontFamily: UI.fontNum, fontSize: 10, fontWeight: 700, color: UI.gold, background: 'rgba(var(--accent-rgb),0.15)', border: `1px solid ${UI.goldSoft}`, borderRadius: 4, padding: '2px 6px', letterSpacing: '0.05em' }}>
                       {LB.autoregLoadOnly(s) ? 'AUTO · LOAD' : 'AUTO'}
                     </span>
                   ))}
@@ -762,9 +762,10 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
   // translucent surface tint instead of a solid fill for the same reason.
   const _shotLogo = store.settings?.vipBackground || 'icons/zane-logo.png';
   const _shotIsCustom = _shotLogo !== 'icons/zane-logo.png';
-  const _shotIsLight = (store.settings?.darkMode ?? 'dark') === 'light';
+  const _shotIsLight = ['light', 'paper'].includes(store.settings?.darkMode ?? 'dark');
   const _shotDefaultStyle = { width: '75%', maxWidth: 620, opacity: _shotIsLight ? 0.10 : 0.06, filter: _shotIsLight ? 'grayscale(1)' : 'grayscale(1) brightness(3)', objectFit: 'contain' };
   const _shotCustomStyle = { width: '80%', maxWidth: 680, opacity: 0.13, objectFit: 'contain' };
+  const _shotGridOn = !!window.__gridEnabled;
   const takeScreenshot = async () => {
     const res = await captureNodeAsPng(captureRef.current, {
       filename: `${sch.name.replace(/[^a-z0-9]/gi, '-').toLowerCase()}-plan.png`,
@@ -1176,7 +1177,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
     return (
       <button onClick={() => setProgress531Open(true)} style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, width: '100%',
-        background: `rgba(var(--accent-rgb),0.06)`, border: `1px solid ${UI.goldSoft}`,
+        background: `rgba(var(--accent-rgb),0.13)`, border: `1px solid ${UI.goldSoft}`,
         borderRadius: 8, padding: '13px 16px', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
       }}>
         <span style={{ fontFamily: UI.fontUi, fontSize: 12, letterSpacing: '0.08em', textTransform: 'uppercase', color: UI.gold, fontWeight: 600 }}>Show 5/3/1 progress</span>
@@ -1352,6 +1353,10 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
       <div style={{ position: 'fixed', inset: 0, zIndex: 500, background: UI.bg, overflow: 'auto', display: capturing ? 'block' : 'none' }}>
           <div ref={captureRef} style={{ padding: '26px 28px 32px', width: 960, margin: '0 auto', position: 'relative' }}>
 
+            {/* The live CSS grid never survives html2canvas, so redraw it with
+                an SVG pattern instead when the grid toggle is on (see SvgGrid). */}
+            {_shotGridOn && <SvgGrid />}
+
             {/* Screenshot background watermark: centered, faint, full poster
                 (SessionCompareScreen's own recipe). Needs its own stacking
                 context below the real content, which is why the content is
@@ -1431,7 +1436,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
       {isPad ? (
         <div style={{ flex: 1, minHeight: 0, display: 'flex', overflow: 'hidden' }}>
           {/* Left sidebar: plan actions + vertical day chips */}
-          <div style={{ width: 210, flexShrink: 0, display: 'flex', flexDirection: 'column', borderRight: `0.5px solid ${UI.hair}`, overflow: 'hidden' }}>
+          <div style={{ width: 210, flexShrink: 0, display: 'flex', flexDirection: 'column', borderRight: `var(--hair-width) solid ${UI.hair}`, overflow: 'hidden' }}>
             {fromPlan && (
               <div style={{ flexShrink: 0, padding: '14px 14px 10px', display: 'flex', flexDirection: 'column', gap: 6 }}>
                 {planActions}
@@ -1448,6 +1453,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
                     flexShrink: 0, padding: '8px 12px 6px', borderRadius: 4,
                     border: `1px solid ${active ? selBorder : isToday ? UI.goldSoft : UI.hairStrong}`,
                     background: active ? selBg : 'transparent',
+                    textShadow: (active && !viewingActiveVersion) ? 'none' : 'var(--text-lift)',
                     cursor: 'pointer', WebkitTapHighlightColor: 'transparent', transition: 'all 0.15s',
                     display: 'flex', alignItems: 'center', gap: 8, textAlign: 'left',
                   }}>
@@ -1492,6 +1498,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
                   flexShrink: 0, maxWidth: 120, padding: '6px 12px 4px', borderRadius: 4,
                   border: `1px solid ${active ? selBorder : isToday ? UI.goldSoft : UI.hairStrong}`,
                   background: active ? selBg : 'transparent',
+                  textShadow: (active && !viewingActiveVersion) ? 'none' : 'var(--text-lift)',
                   cursor: 'pointer', WebkitTapHighlightColor: 'transparent', transition: 'all 0.15s',
                 }}>
                   <div style={{
@@ -1580,8 +1587,8 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
             {(store.coaching?.asCoach || []).filter(c => c.status === 'active').map(c => (
               <button key={c.id} onClick={() => { setPushError(''); setPushTarget(c); }} disabled={pushBusy} style={{
                 width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                padding: '12px 14px', background: UI.bgInset, border: `0.5px solid ${UI.hair}`,
-                borderRadius: 6, cursor: pushBusy ? 'default' : 'pointer', opacity: pushBusy ? 0.6 : 1,
+                padding: '12px 14px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`,
+                borderRadius: 6, textShadow: 'none', cursor: pushBusy ? 'default' : 'pointer', opacity: pushBusy ? 0.6 : 1,
                 WebkitTapHighlightColor: 'transparent',
               }}>
                 <span style={{ fontSize: 14, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi }}>{c.clientName}</span>
@@ -1594,7 +1601,12 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
       )}
 
       {pushTarget && (
-        <MiniSheet zIndex={400} onClose={() => { if (!pushBusy) { setPushTarget(null); setPushError(''); } }}>
+        // dim=false: pushOpen (underneath, MiniSheet default zIndex 300) stays
+        // mounted and already dimmed the page — without this, its own default
+        // dim=true stacked a second rgba(0,0,0,0.5) layer on top, visibly darker
+        // than every other nested MiniSheet in this file (previewBackup/
+        // restoreFromSheet both already set dim=false for the same reason).
+        <MiniSheet zIndex={400} dim={false} onClose={() => { if (!pushBusy) { setPushTarget(null); setPushError(''); } }}>
           <div className="label" style={{ color: UI.inkFaint, marginBottom: 4 }}>{pushTarget.clientName.toUpperCase()}</div>
           <div className="micro" style={{ color: UI.inkFaint, marginBottom: 18, lineHeight: 1.5, letterSpacing: '0.06em', textTransform: 'none' }}>
             Activate "{sch.name}" for them right away, or just add it to their plan list and talk it through first?
@@ -1820,7 +1832,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
               </div>
 
               {/* Restore button */}
-              <div style={{ padding: '12px 22px calc(16px + env(safe-area-inset-bottom, 0px))', borderTop: `0.5px solid ${UI.hairStrong}`, flexShrink: 0 }}>
+              <div style={{ padding: '12px 22px calc(16px + env(safe-area-inset-bottom, 0px))', borderTop: `var(--hair-width) solid ${UI.hairStrong}`, flexShrink: 0 }}>
                 <Btn onClick={() => { closePreview(); restoreBackup(previewBackup); }} style={{ width: '100%', textAlign: 'center', justifyContent: 'center' }}>Restore this backup</Btn>
               </div>
           </MiniSheet>
@@ -2312,6 +2324,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
                 flex: 1, padding: '8px 0', border: 'none', borderRadius: 4,
                 cursor: m.active ? 'default' : 'pointer',
                 background: m.active ? UI.bgRaised : 'transparent',
+                textShadow: 'none',
                 color: m.active ? UI.ink : UI.inkFaint,
                 fontFamily: UI.fontUi, fontSize: 12, fontWeight: m.active ? 600 : 400,
                 letterSpacing: '0.06em',
@@ -2342,9 +2355,9 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
           return (
             <button onClick={() => setModifiersOpen(true)} style={{
               display: 'flex', alignItems: 'center', gap: 12, width: '100%',
-              background: hellCycle ? 'rgba(210,45,0,0.10)' : (summary ? `rgba(var(--accent-rgb),0.06)` : UI.bgRaised),
+              background: hellCycle ? 'rgba(210,45,0,0.10)' : (summary ? `rgba(var(--accent-rgb),0.13)` : UI.bgRaised),
               border: `1px solid ${hellCycle ? 'rgba(255,120,40,0.6)' : (summary ? UI.goldSoft : UI.hairStrong)}`,
-              borderRadius: 6, padding: '13px 16px', cursor: 'pointer', textAlign: 'left',
+              borderRadius: 6, textShadow: 'none', padding: '13px 16px', cursor: 'pointer', textAlign: 'left',
               WebkitTapHighlightColor: 'transparent',
               ...(hellCycle ? { animation: 'hellGlow 2s ease-in-out infinite' } : {}),
             }}>
@@ -2356,7 +2369,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
               </svg>
               <div style={{ flex: 1, textAlign: 'center' }}>
                 <div style={{ fontFamily: UI.fontUi, fontSize: 11, letterSpacing: '0.08em', textTransform: 'uppercase', color: summary ? UI.gold : UI.inkSoft, fontWeight: 600, marginBottom: summary ? 3 : 0 }}>Options</div>
-                {summary && <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: hellCycle ? 'rgba(255,140,70,1)' : UI.ink, fontWeight: hellCycle ? 600 : 400 }}>{summary}</div>}
+                {summary && <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: hellCycle ? (['light', 'paper'].includes(store.settings?.darkMode ?? 'dark') ? '#b8390a' : 'rgba(255,140,70,1)') : UI.ink, fontWeight: hellCycle ? 600 : 400 }}>{summary}</div>}
               </div>
               <svg width="8" height="14" viewBox="0 0 8 14" fill="none" stroke={UI.inkFaint} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M2 2l5 5-5 5"/>
@@ -2486,7 +2499,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
           return (
             <button onClick={() => setTmEditOpen(true)} style={{
               display: 'flex', alignItems: 'center', gap: 12, width: '100%',
-              background: `rgba(var(--accent-rgb),0.06)`, border: `1px solid ${UI.goldSoft}`,
+              background: `rgba(var(--accent-rgb),0.13)`, border: `1px solid ${UI.goldSoft}`,
               borderRadius: 6, padding: '13px 16px', cursor: 'pointer', textAlign: 'left',
               WebkitTapHighlightColor: 'transparent',
             }}>
@@ -2514,7 +2527,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
           <Btn kind="ghost" onClick={toggleArchive} style={{ flex: 1, fontSize: 12, color: UI.inkSoft, borderColor: UI.hairStrong }}>
             {draft.archived ? 'Unarchive' : 'Archive plan'}
           </Btn>
-          <Btn kind="ghost" onClick={deleteSch} style={{ flex: 1, fontSize: 12, color: UI.danger, borderColor: 'rgba(var(--danger-rgb),0.25)' }}>Delete plan</Btn>
+          <Btn kind="ghost" onClick={deleteSch} style={{ flex: 1, fontSize: 12, color: UI.danger, background: 'rgba(var(--danger-rgb),0.08)', borderColor: 'rgba(var(--danger-rgb),calc(0.25 * var(--danger-border-boost)))' }}>Delete plan</Btn>
         </div>
       </div>
 
@@ -2704,7 +2717,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
             <button key={opt.key} onClick={opt.pick} style={{
               display: 'flex', alignItems: 'center', gap: 12, width: '100%',
               background: UI.bgInset, border: `1px solid ${UI.hairStrong}`,
-              borderRadius: 6, padding: '13px 14px', cursor: 'pointer', textAlign: 'left',
+              borderRadius: 6, textShadow: 'none', padding: '13px 14px', cursor: 'pointer', textAlign: 'left',
               WebkitTapHighlightColor: 'transparent',
             }}>
               <div style={{ flex: 1, minWidth: 0 }}>
@@ -2764,10 +2777,10 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
               <button onClick={toggleFlex} style={{
                 display: 'flex', alignItems: 'center', gap: 12, width: '100%',
                 background: UI.bgInset, border: `1px solid ${isFlex ? UI.goldSoft : UI.hairStrong}`,
-                borderRadius: 4, padding: '10px 12px', cursor: 'pointer', textAlign: 'left',
+                borderRadius: 4, textShadow: 'none', padding: '10px 12px', cursor: 'pointer', textAlign: 'left',
               }}>
                 <div style={{ width: 44, height: 26, borderRadius: 13, flexShrink: 0, position: 'relative', background: isFlex ? UI.gold : UI.hairStrong, border: `0.5px solid ${isFlex ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong}`, transition: 'background 0.15s' }}>
-                  <div style={{ position: 'absolute', top: 3, left: isFlex ? 21 : 3, width: 20, height: 20, borderRadius: '50%', background: isFlex ? '#0a0805' : '#fff', transition: 'left 0.15s' }} />
+                  <div style={{ position: 'absolute', top: 3, left: isFlex ? 21 : 3, width: 20, height: 20, borderRadius: '50%', background: isFlex ? 'var(--accent-ink)' : '#fff', transition: 'left 0.15s' }} />
                 </div>
                 <div style={{ flex: 1 }}>
                   <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.ink, fontWeight: 600 }}>Advance only when I train</div>
@@ -2796,7 +2809,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
                 }}>
                   <button onClick={toggle} style={{ flexShrink: 0, background: 'none', border: 'none', padding: 0, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
                     <div style={{ width: 44, height: 26, borderRadius: 13, position: 'relative', background: hasGoal ? UI.gold : UI.hairStrong, border: `0.5px solid ${hasGoal ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong}`, transition: 'background 0.15s' }}>
-                      <div style={{ position: 'absolute', top: 3, left: hasGoal ? 21 : 3, width: 20, height: 20, borderRadius: '50%', background: hasGoal ? '#0a0805' : '#fff', transition: 'left 0.15s' }} />
+                      <div style={{ position: 'absolute', top: 3, left: hasGoal ? 21 : 3, width: 20, height: 20, borderRadius: '50%', background: hasGoal ? 'var(--accent-ink)' : '#fff', transition: 'left 0.15s' }} />
                     </div>
                   </button>
                   <div style={{ flex: 1 }}>
@@ -2846,7 +2859,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
             const toggleUI = (on, onClick) => (
               <button onClick={onClick} style={{ flexShrink: 0, background: 'none', border: 'none', padding: 0, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
                 <div style={{ width: 44, height: 26, borderRadius: 13, position: 'relative', background: on ? UI.gold : UI.hairStrong, border: `0.5px solid ${on ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong}`, transition: 'background 0.15s' }}>
-                  <div style={{ position: 'absolute', top: 3, left: on ? 21 : 3, width: 20, height: 20, borderRadius: '50%', background: on ? '#0a0805' : '#fff', transition: 'left 0.15s' }} />
+                  <div style={{ position: 'absolute', top: 3, left: on ? 21 : 3, width: 20, height: 20, borderRadius: '50%', background: on ? 'var(--accent-ink)' : '#fff', transition: 'left 0.15s' }} />
                 </div>
               </button>
             );
@@ -2882,7 +2895,8 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
                             <button key={o.key} onClick={() => setDraft(d => ({ ...d, mesocycle_autoregulate_mode: o.key === 'load' ? 'load' : null }))} style={{
                               flex: 1, padding: '9px 8px', borderRadius: 6, cursor: 'pointer',
                               fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, textAlign: 'center',
-                              background: on ? 'rgba(var(--accent-rgb),0.12)' : UI.bgInset,
+                              background: on ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
+                              textShadow: on ? 'var(--text-lift)' : 'none',
                               color: on ? 'var(--accent)' : UI.inkFaint,
                               border: `1px solid ${on ? 'var(--accent)' : UI.hairStrong}`, WebkitTapHighlightColor: 'transparent',
                             }}>{o.label}</button>
@@ -3183,6 +3197,7 @@ function DayCopyPicker({ store, schedule, currentDayId, onClose, onCopy, multiSe
               <button key={key} onClick={() => setTab(key)} style={{
                 flex: 1, padding: '8px 0', borderRadius: 6, cursor: 'pointer',
                 background: tab === key ? UI.goldFaint : UI.bgInset,
+                textShadow: tab === key ? 'var(--text-lift)' : 'none',
                 border: `1px solid ${tab === key ? UI.goldSoft : UI.hairStrong}`,
                 color: tab === key ? UI.gold : UI.inkSoft,
                 fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase',
@@ -3198,7 +3213,7 @@ function DayCopyPicker({ store, schedule, currentDayId, onClose, onCopy, multiSe
               {templates.map(t => (
                 <button key={t.id} onClick={() => importTemplate(t)} style={{
                   background: UI.bgInset, border: `1px solid ${UI.hairStrong}`,
-                  borderRadius: 4, padding: '12px 14px', cursor: 'pointer',
+                  borderRadius: 4, textShadow: 'none', padding: '12px 14px', cursor: 'pointer',
                   textAlign: 'left', color: UI.ink, fontFamily: UI.fontUi, width: '100%',
                 }}
                 onMouseEnter={ev => ev.currentTarget.style.borderColor = UI.goldSoft}
@@ -3224,7 +3239,7 @@ function DayCopyPicker({ store, schedule, currentDayId, onClose, onCopy, multiSe
               return (
                 <button key={s.id} onClick={() => { setSelectedPlan(s); setSelectedIds(new Set()); }} style={{
                   background: UI.bgInset, border: `1px solid ${UI.hairStrong}`,
-                  borderRadius: 4, padding: '12px 14px', cursor: 'pointer',
+                  borderRadius: 4, textShadow: 'none', padding: '12px 14px', cursor: 'pointer',
                   textAlign: 'left', color: UI.ink, fontFamily: UI.fontUi, width: '100%',
                 }}
                 onMouseEnter={ev => ev.currentTarget.style.borderColor = UI.goldSoft}
@@ -3271,7 +3286,7 @@ function DayCopyPicker({ store, schedule, currentDayId, onClose, onCopy, multiSe
             return (
               <button key={d.id} onClick={() => onCopy(d, migrateId)} style={{
                 background: UI.bgInset, border: `1px solid ${UI.hairStrong}`,
-                borderRadius: 4, padding: '12px 14px', cursor: 'pointer',
+                borderRadius: 4, textShadow: 'none', padding: '12px 14px', cursor: 'pointer',
                 textAlign: 'left', color: UI.ink, fontFamily: UI.fontUi, width: '100%',
               }}
               onMouseEnter={ev => ev.currentTarget.style.borderColor = UI.goldSoft}
@@ -3298,7 +3313,7 @@ function DayCopyPicker({ store, schedule, currentDayId, onClose, onCopy, multiSe
             })} style={{
               background: sel ? UI.goldFaint : UI.bgInset,
               border: `1px solid ${sel ? UI.goldSoft : UI.hairStrong}`,
-              borderRadius: 4, padding: '12px 14px', cursor: 'pointer',
+              borderRadius: 4, textShadow: sel ? 'var(--text-lift)' : 'none', padding: '12px 14px', cursor: 'pointer',
               textAlign: 'left', color: UI.ink, fontFamily: UI.fontUi, width: '100%',
               display: 'flex', alignItems: 'flex-start', gap: 12,
             }}>
@@ -3838,7 +3853,7 @@ function DayEditor({ store, setStore, day, schedule, onClose, onSave, onDraftCha
       <Field label="Day type">
         <button onClick={() => setPickingType(true)} style={{
           width: '100%', textAlign: 'left', background: UI.bgInset,
-          border: `1px solid ${UI.hairStrong}`, borderRadius: 4, padding: '10px 14px',
+          border: `1px solid ${UI.hairStrong}`, borderRadius: 4, textShadow: 'none', padding: '10px 14px',
           cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           color: draft.name === 'REST' ? UI.inkFaint : UI.ink, fontSize: 15, fontWeight: 600, fontFamily: UI.fontUi,
         }}>
@@ -4177,7 +4192,10 @@ function computePlanSteps({ type, presetKey, customCount, weekdayCount }) {
 function PlanWizard({ store, setStore, go }) {
   const [step, setStep] = useStateS('name');
   const [confirming, setConfirming] = useStateS(false);
-  const [confirm531El, confirm531] = useConfirm();
+  // zIndex 9999: +1 over this wizard's own overlay (9998, see overlayBase
+  // below), so a 5/3/1-conversion confirm triggered mid-import can't render
+  // hidden behind the wizard, leaving an awaited promise nothing can resolve.
+  const [confirm531El, confirm531] = useConfirm(9999);
   const [name, setName] = useStateS('');
   const [type, setType] = useStateS(null);            // 'cycle' | 'weekday' | 'flex'
   const [presetKey, setPresetKey] = useStateS(null);  // SPLIT_PRESETS key | 'custom'
@@ -4326,7 +4344,8 @@ function PlanWizard({ store, setStore, go }) {
     <button key={key} onClick={onClick} style={{
       width: '100%', display: 'flex', alignItems: 'center', gap: 12, textAlign: 'left',
       padding: '12px 14px', borderRadius: 6, cursor: 'pointer',
-      background: active ? 'rgba(var(--accent-rgb),0.10)' : UI.bgInset,
+      background: active ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
+      textShadow: active ? 'var(--text-lift)' : 'none',
       border: `1px solid ${active ? 'var(--accent)' : UI.hairStrong}`,
       WebkitTapHighlightColor: 'transparent', transition: 'border-color 0.12s, background 0.12s',
     }}>
@@ -4408,8 +4427,8 @@ function PlanWizard({ store, setStore, go }) {
     const stdChip = (dt) => {
       const on = customDays[dayIdx]?.name === dt;
       return <button key={dt} onClick={() => pickDay(dt)}
-        style={{ padding: '13px 6px', borderRadius: 6, cursor: 'pointer', textAlign: 'center', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, letterSpacing: '0.04em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-          background: on ? 'rgba(var(--accent-rgb),0.12)' : UI.bgInset, color: on ? 'var(--accent)' : UI.inkFaint,
+        style={{ padding: '13px 6px', borderRadius: 6, cursor: 'pointer', textAlign: 'center', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, letterSpacing: '0.04em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', textShadow: 'none',
+          background: on ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset, color: on ? 'var(--accent)' : UI.inkFaint,
           border: `1px solid ${on ? 'var(--accent)' : UI.hairStrong}`, WebkitTapHighlightColor: 'transparent' }}>{dt}</button>;
     };
     const customChip = (dt) => {
@@ -4476,7 +4495,7 @@ function PlanWizard({ store, setStore, go }) {
               background: 'transparent', color: UI.inkFaint, border: `1px dashed ${UI.hairStrong}`, WebkitTapHighlightColor: 'transparent' }}>+ Custom day type</button>}
       {!creatingDayType && importGroups.length > 0 && (
         <button onClick={() => { setImportSel(new Set()); setImportPlan(null); setImportOpen(true); }}
-          style={{ padding: '12px 6px', borderRadius: 6, cursor: 'pointer', textAlign: 'center', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, letterSpacing: '0.04em', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+          style={{ padding: '12px 6px', borderRadius: 6, cursor: 'pointer', textAlign: 'center', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, letterSpacing: '0.04em', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, textShadow: 'none',
             background: UI.bgInset, color: UI.inkSoft, border: `1px solid ${UI.hairStrong}`, WebkitTapHighlightColor: 'transparent' }}>
           <i className="fa-solid fa-file-import" style={{ fontSize: 12 }} /> Import a day from a plan
         </button>
@@ -4502,8 +4521,8 @@ function PlanWizard({ store, setStore, go }) {
             }
           };
           return <button key={w} onClick={toggleWeekday}
-            style={{ padding: '12px 6px', borderRadius: 6, cursor: 'pointer', textAlign: 'center', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600,
-              background: on ? 'rgba(var(--accent-rgb),0.12)' : UI.bgInset, color: on ? 'var(--accent)' : UI.inkFaint,
+            style={{ padding: '12px 6px', borderRadius: 6, cursor: 'pointer', textAlign: 'center', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, textShadow: on ? 'var(--text-lift)' : 'none',
+              background: on ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset, color: on ? 'var(--accent)' : UI.inkFaint,
               border: `1px solid ${on ? 'var(--accent)' : UI.hairStrong}`, WebkitTapHighlightColor: 'transparent' }}>{w}</button>;
         })}
       </div>
@@ -4529,7 +4548,8 @@ function PlanWizard({ store, setStore, go }) {
                 <button key={o.key} onClick={() => setAutoregMode(o.key)} style={{
                   flex: 1, padding: '10px 8px', borderRadius: 6, cursor: 'pointer',
                   fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, textAlign: 'center',
-                  background: on ? 'rgba(var(--accent-rgb),0.12)' : UI.bgInset,
+                  background: on ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
+                  textShadow: on ? 'var(--text-lift)' : 'none',
                   color: on ? 'var(--accent)' : UI.inkFaint,
                   border: `1px solid ${on ? 'var(--accent)' : UI.hairStrong}`, WebkitTapHighlightColor: 'transparent',
                 }}>{o.label}</button>
@@ -4554,7 +4574,7 @@ function PlanWizard({ store, setStore, go }) {
             <span className="micro" style={{ color: mesoRirOn ? UI.gold : UI.inkFaint, flex: 1 }}>RIR TAPER</span>
             <button onClick={() => setMesoRirOn(o => !o)} style={{ flexShrink: 0, background: 'none', border: 'none', padding: 0, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
               <div style={{ width: 44, height: 26, borderRadius: 13, position: 'relative', background: mesoRirOn ? UI.gold : UI.hairStrong, border: `0.5px solid ${mesoRirOn ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong}`, transition: 'background 0.15s' }}>
-                <div style={{ position: 'absolute', top: 3, left: mesoRirOn ? 21 : 3, width: 20, height: 20, borderRadius: '50%', background: mesoRirOn ? '#0a0805' : '#fff', transition: 'left 0.15s' }} />
+                <div style={{ position: 'absolute', top: 3, left: mesoRirOn ? 21 : 3, width: 20, height: 20, borderRadius: '50%', background: mesoRirOn ? 'var(--accent-ink)' : '#fff', transition: 'left 0.15s' }} />
               </div>
             </button>
           </div>
@@ -4602,8 +4622,8 @@ function PlanWizard({ store, setStore, go }) {
         {importPlan.days.map(d => {
           const sel = importSel.has(d.key);
           return <button key={d.key} onClick={() => setImportSel(s => { const n = new Set(s); if (n.has(d.key)) n.delete(d.key); else n.add(d.key); return n; })}
-            style={{ display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left', padding: '11px 12px', borderRadius: 6, cursor: 'pointer',
-              background: sel ? 'rgba(var(--accent-rgb),0.10)' : UI.bgInset, border: `1px solid ${sel ? 'var(--accent)' : UI.hairStrong}`, WebkitTapHighlightColor: 'transparent' }}>
+            style={{ display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left', padding: '11px 12px', borderRadius: 6, cursor: 'pointer', textShadow: sel ? 'var(--text-lift)' : 'none',
+              background: sel ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset, border: `1px solid ${sel ? 'var(--accent)' : UI.hairStrong}`, WebkitTapHighlightColor: 'transparent' }}>
             <i className={`fa-solid ${sel ? 'fa-circle-check' : 'fa-circle'}`} style={{ fontSize: 16, color: sel ? 'var(--accent)' : UI.inkFaint, flexShrink: 0 }} />
             <span style={{ flex: 1, minWidth: 0 }}>
               <span style={{ display: 'block', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, color: sel ? 'var(--accent)' : UI.ink, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{d.name}</span>
@@ -4625,7 +4645,7 @@ function PlanWizard({ store, setStore, go }) {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 340, overflowY: 'auto', overscrollBehavior: 'contain' }}>
         {importGroups.map(g => (
           <button key={g.id} onClick={() => { setImportPlan(g); setImportSel(new Set()); }}
-            style={{ display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left', padding: '12px 12px', borderRadius: 6, cursor: 'pointer', background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, WebkitTapHighlightColor: 'transparent' }}>
+            style={{ display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left', padding: '12px 12px', borderRadius: 6, cursor: 'pointer', background: UI.bgInset, textShadow: 'none', border: `1px solid ${UI.hairStrong}`, WebkitTapHighlightColor: 'transparent' }}>
             <span style={{ flex: 1, minWidth: 0 }}>
               <span style={{ display: 'block', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, color: UI.ink, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{g.name}</span>
               <span className="micro" style={{ color: UI.inkFaint }}>{g.days.length} day{g.days.length !== 1 ? 's' : ''}</span>
@@ -4644,7 +4664,7 @@ function PlanWizard({ store, setStore, go }) {
   return (
     <div style={overlayStyle} onClick={e => { if (e.target === e.currentTarget) requestExit(); }}>
       {confirm531El}
-      <div style={{ position: 'relative', width: '100%', maxWidth: 360, maxHeight: '86vh', overflowY: 'auto', background: UI.bgRaised, border: `1px solid ${UI.hairStrong}`, borderRadius: 8, padding: '20px 20px 22px', display: 'flex', flexDirection: 'column', gap: 18, boxShadow: '0 32px 80px rgba(0,0,0,0.6)', animation: 'fadeUp 0.3s ease' }}>
+      <div style={{ position: 'relative', width: '100%', maxWidth: 360, maxHeight: '86vh', overflowY: 'auto', background: UI.bgRaised, backgroundImage: 'var(--bg-texture)', border: `1px solid ${UI.hairStrong}`, borderRadius: 8, padding: '20px 20px 22px', display: 'flex', flexDirection: 'column', gap: 18, boxShadow: '0 32px 80px rgba(0,0,0,0.6)', animation: 'fadeUp 0.3s ease' }}>
         {confirming ? (
           <>
             <div style={{ fontFamily: UI.fontDisplay, fontSize: 22, color: UI.ink, fontWeight: 700, textTransform: 'uppercase' }}>Discard plan?</div>
@@ -4683,23 +4703,23 @@ function PlanWizard({ store, setStore, go }) {
         {dayFlash && (
           <div style={{ position: 'absolute', inset: 0, borderRadius: 8, background: 'rgba(0,0,0,0.62)', display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}>
             <div style={{ width: 88, height: 88, borderRadius: '50%', background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 12px 40px rgba(0,0,0,0.6)' }}>
-              <i className="fa-solid fa-check" style={{ fontSize: 40, color: '#0a0805' }} />
+              <i className="fa-solid fa-check" style={{ fontSize: 40, color: 'var(--accent-ink)' }} />
             </div>
           </div>
         )}
       </div>
-      {wizInfoOpen && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(0,0,0,0.74)', backdropFilter: 'blur(14px)', WebkitBackdropFilter: 'blur(14px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }} onClick={e => { if (e.target === e.currentTarget) setWizInfoOpen(false); }}>
-          <div style={{ background: UI.bgRaised, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 8, padding: 18, width: '100%', maxWidth: 460, maxHeight: '82vh', overflowY: 'auto', overscrollBehavior: 'contain' }}>
-            <div style={{ fontFamily: UI.fontDisplay, fontSize: 22, color: 'var(--accent)', fontWeight: 400, textTransform: 'uppercase', letterSpacing: '0.02em', marginBottom: 14 }}>Progression</div>
-            <ProgressionInfoBody />
-            <Btn kind="ghost" onClick={() => { setWizInfoOpen(false); setWizGuideOpen(true); }} style={{ width: '100%', marginTop: 16 }}>See the full guide</Btn>
-            <Btn onClick={() => setWizInfoOpen(false)} style={{ width: '100%', marginTop: 8 }}>Got it</Btn>
-          </div>
-        </div>
-      )}
+      {/* zIndex 9999: exactly +1 over this wizard's own overlay (9998), so it
+          reliably paints on top of its own host regardless of DOM order. */}
+      <Sheet open={!!wizInfoOpen} onClose={() => setWizInfoOpen(false)} title="Progression" center zIndex={9999}>
+        <ProgressionInfoBody />
+        <Btn kind="ghost" onClick={() => { setWizInfoOpen(false); setWizGuideOpen(true); }} style={{ width: '100%', marginTop: 16 }}>See the full guide</Btn>
+        <Btn onClick={() => setWizInfoOpen(false)} style={{ width: '100%', marginTop: 8 }}>Got it</Btn>
+      </Sheet>
       {wizGuideOpen && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 10000, background: UI.bg, display: 'flex', flexDirection: 'column', paddingTop: 'env(safe-area-inset-top, 0px)' }}>
+        // No paddingTop here: AutoregGuideScreen's own Screen->TopBar already
+        // reserves env(safe-area-inset-top) (ui.jsx TopBar), so adding it here
+        // too stacked an extra blank strip above the title on notch devices.
+        <div style={{ position: 'fixed', inset: 0, zIndex: 10000, background: UI.bg, backgroundImage: 'var(--bg-texture)', display: 'flex', flexDirection: 'column' }}>
           <window.Screens.AutoregGuideScreen store={store} go={() => setWizGuideOpen(false)} back={{ name: 'wizard' }}
             mode={planMode === 'meso' ? 'C' : (planMode === 'autoregulate' ? (autoregMode === 'load' ? 'B' : 'A') : 'A')} />
         </div>
@@ -4726,6 +4746,7 @@ function NewPlanPickerModal({ onClose, go }) {
     <button onClick={onClick} style={{
       width: '100%', padding: '13px 14px', borderRadius: 6, cursor: 'pointer',
       background: UI.bgInset, border: `1px solid ${accent ? UI.goldSoft : UI.hairStrong}`, color: UI.inkSoft,
+      textShadow: 'none',
       fontFamily: UI.fontUi, textAlign: 'left', WebkitTapHighlightColor: 'transparent',
       display: 'flex', alignItems: 'center', gap: 14,
     }}>
@@ -4737,28 +4758,18 @@ function NewPlanPickerModal({ onClose, go }) {
       <i className="fa-solid fa-chevron-right" style={{ fontSize: 11, color: UI.inkFaint, flexShrink: 0 }} />
     </button>
   );
+  // zIndex 9998: this app-level tier (shared with PlanWizard/AutoCloseBanner)
+  // guarantees it beats the normal screen and WhatsNewModal (9997); nothing
+  // at this call site is ever open underneath it to worry about beating.
   return (
-    <div onClick={onClose} style={{
-      position: 'fixed', inset: 0, zIndex: 9998, background: 'rgba(0,0,0,0.72)',
-      backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)',
-      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 32,
-    }}>
-      <div onClick={e => e.stopPropagation()} style={{
-        width: '100%', maxWidth: 340, background: UI.bgRaised, border: `1px solid ${UI.hairStrong}`,
-        borderRadius: 6, padding: '28px 24px', display: 'flex', flexDirection: 'column', gap: 16,
-        boxShadow: '0 32px 80px rgba(0,0,0,0.6)', animation: 'fadeUp 0.3s ease',
-      }}>
-        <div>
-          <div style={{ fontFamily: UI.fontDisplay, fontSize: 22, color: 'var(--accent)', fontWeight: 400, marginBottom: 8, textTransform: 'uppercase' }}>New plan</div>
-          <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>Start from a full program, a ready-made split, or build your own.</div>
-        </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {opt('fa-trophy', 'Programs', 'Structured and self-progressing', () => { onClose(); go({ name: 'schedule-programs' }); }, true)}
-          {opt('fa-layer-group', 'Templates', 'Ready-made splits to make your own', () => { onClose(); go({ name: 'schedule-templates' }); })}
-          {opt('fa-sliders', 'Custom', 'Build it from scratch', () => { onClose(); go({ name: 'schedule-new' }); })}
-        </div>
+    <Sheet open onClose={onClose} title="New plan" center zIndex={9998}>
+      <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5, marginTop: -8, marginBottom: 8 }}>Start from a full program, a ready-made split, or build your own.</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {opt('fa-trophy', 'Programs', 'Structured and self-progressing', () => { onClose(); go({ name: 'schedule-programs' }); }, true)}
+        {opt('fa-layer-group', 'Templates', 'Ready-made splits to make your own', () => { onClose(); go({ name: 'schedule-templates' }); })}
+        {opt('fa-sliders', 'Custom', 'Build it from scratch', () => { onClose(); go({ name: 'schedule-new' }); })}
       </div>
-    </div>
+    </Sheet>
   );
 }
 
@@ -4778,7 +4789,7 @@ function StructuredProgramsScreen({ store, setStore, go }) {
         {has531 ? (
           <button onClick={() => go({ name: 'schedule-531' })} style={{
             width: '100%', textAlign: 'left', background: UI.bgInset, border: `1px solid ${UI.goldSoft}`,
-            borderRadius: 8, padding: 14, cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 8,
+            borderRadius: 8, textShadow: 'none', padding: 14, cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 8,
             WebkitTapHighlightColor: 'transparent',
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -4788,7 +4799,7 @@ function StructuredProgramsScreen({ store, setStore, go }) {
             <span style={{ fontSize: 12.5, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.45 }}>{window.FIVE_THREE_ONE.blurb}</span>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 2 }}>
               {window.FIVE_THREE_ONE.lifts.map((l, i) => (
-                <span key={i} className="micro" style={{ color: UI.inkFaint, background: UI.bgRaised, border: `0.5px solid ${UI.hair}`, borderRadius: 4, padding: '3px 6px', textTransform: 'none', letterSpacing: '0.02em' }}>{l.ex}</span>
+                <span key={i} className="micro" style={{ color: UI.inkFaint, background: UI.bgRaised, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 4, padding: '3px 6px', textTransform: 'none', letterSpacing: '0.02em' }}>{l.ex}</span>
               ))}
             </div>
           </button>
@@ -4816,7 +4827,7 @@ function ProgramTemplatesScreen({ store, setStore, go }) {
         {programs.map(p => (
           <button key={p.id} onClick={() => go({ name: 'plan-preview', programId: p.id })} style={{
             width: '100%', textAlign: 'left', background: UI.bgInset, border: `1px solid ${UI.hairStrong}`,
-            borderRadius: 8, padding: 14, cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 8,
+            borderRadius: 8, textShadow: 'none', padding: 14, cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 8,
             WebkitTapHighlightColor: 'transparent',
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -4826,7 +4837,7 @@ function ProgramTemplatesScreen({ store, setStore, go }) {
             <span style={{ fontSize: 12.5, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.45 }}>{p.blurb}</span>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 2 }}>
               {p.days.map((d, i) => (
-                <span key={i} className="micro" style={{ color: UI.inkFaint, background: UI.bgRaised, border: `0.5px solid ${UI.hair}`, borderRadius: 4, padding: '3px 6px', textTransform: 'none', letterSpacing: '0.02em' }}>{d.name}</span>
+                <span key={i} className="micro" style={{ color: UI.inkFaint, background: UI.bgRaised, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 4, padding: '3px 6px', textTransform: 'none', letterSpacing: '0.02em' }}>{d.name}</span>
               ))}
             </div>
           </button>
@@ -5070,7 +5081,7 @@ function FiveThreeOneSetupScreen({ store, setStore, go, userId }) {
                 <div className="micro" style={{ color: UI.inkFaint }}>Assistance</div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
                   {(assist[l.kind] || []).map(ref => (
-                    <span key={ref} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: UI.bgRaised, border: `0.5px solid ${UI.hair}`, borderRadius: 4, padding: '4px 8px', fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi }}>
+                    <span key={ref} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: UI.bgRaised, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 4, padding: '4px 8px', fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi }}>
                       {displayName(ref)}
                       <button onClick={() => removeAssist(l.kind, ref)} aria-label="Remove" style={{ background: 'none', border: 'none', color: UI.inkFaint, cursor: 'pointer', padding: 0, fontSize: 15, lineHeight: 1 }}>×</button>
                     </span>
@@ -5111,7 +5122,7 @@ function FiveThreeOneSetupScreen({ store, setStore, go, userId }) {
                 <div className="micro" style={{ color: UI.inkFaint }}>Assistance</div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
                   {(x.assistance || []).map(ref => (
-                    <span key={ref} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: UI.bgRaised, border: `0.5px solid ${UI.hair}`, borderRadius: 4, padding: '4px 8px', fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi }}>
+                    <span key={ref} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: UI.bgRaised, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 4, padding: '4px 8px', fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi }}>
                       {displayName(ref)}
                       <button onClick={() => removeExtraAssist(x.id, ref)} aria-label="Remove" style={{ background: 'none', border: 'none', color: UI.inkFaint, cursor: 'pointer', padding: 0, fontSize: 15, lineHeight: 1 }}>×</button>
                     </span>

@@ -48,7 +48,7 @@ class ErrorBoundary extends React.Component {
             </div>
             <button
               onClick={() => { this.setState({ error: null }); this.props.onGoHome?.(); }}
-              style={{ background: UI.gold, color: '#0a0a0a', border: 'none', borderRadius: 8, padding: '8px 18px', fontSize: 13, fontWeight: 600, fontFamily: UI.fontUi, cursor: 'pointer' }}
+              style={{ background: UI.gold, color: '#0a0a0a', border: 'none', borderRadius: 8, padding: '8px 18px', fontSize: 13, fontWeight: 600, fontFamily: UI.fontUi, cursor: 'pointer', textShadow: 'none' }}
             >
               Back to home
             </button>
@@ -74,6 +74,7 @@ function AutoCloseBanner({ notify, onDismiss }) {
       <div style={{
         width: '100%', maxWidth: 320,
         background: UI.bgRaised,
+        backgroundImage: 'var(--bg-texture)',
         border: `1px solid ${UI.hairStrong}`,
         borderRadius: 6,
         padding: '32px 28px',
@@ -104,8 +105,8 @@ function AutoCloseBanner({ notify, onDismiss }) {
           borderRadius: 6, border: 'none', cursor: 'pointer',
           background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)',
           boxShadow: '0 8px 24px rgba(var(--accent-rgb),0.4)',
-          color: '#0a0805', fontFamily: UI.fontUi, fontSize: 15, fontWeight: 700,
-          letterSpacing: '0.06em', WebkitTapHighlightColor: 'transparent',
+          color: 'var(--accent-ink)', fontFamily: UI.fontUi, fontSize: 15, fontWeight: 700,
+          letterSpacing: '0.06em', WebkitTapHighlightColor: 'transparent', textShadow: 'none',
         }}>
           GOT IT
         </button>
@@ -126,6 +127,7 @@ function UpdateBanner({ onUpdate }) {
       <div style={{
         width: '100%', maxWidth: 320,
         background: UI.bgRaised,
+        backgroundImage: 'var(--bg-texture)',
         border: `1px solid ${UI.goldSoft}`,
         borderRadius: 6,
         padding: '32px 28px',
@@ -155,8 +157,8 @@ function UpdateBanner({ onUpdate }) {
           borderRadius: 6, border: 'none', cursor: 'pointer',
           background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)',
           boxShadow: '0 8px 24px rgba(var(--accent-rgb),0.4)',
-          color: '#0a0805', fontFamily: UI.fontUi, fontSize: 15, fontWeight: 700,
-          letterSpacing: '0.06em',
+          color: 'var(--accent-ink)', fontFamily: UI.fontUi, fontSize: 15, fontWeight: 700,
+          letterSpacing: '0.06em', textShadow: 'none',
         }}>
           UPDATE NOW
         </button>
@@ -177,6 +179,7 @@ function WhatsNewModal({ entries, onDismiss }) {
       <div style={{
         width: '100%', maxWidth: 340, maxHeight: '82vh',
         background: UI.bgRaised,
+        backgroundImage: 'var(--bg-texture)',
         border: `1px solid ${UI.goldSoft}`,
         borderRadius: 6,
         padding: '28px 26px',
@@ -184,6 +187,10 @@ function WhatsNewModal({ entries, onDismiss }) {
         overflowY: 'auto',
         boxShadow: '0 32px 80px rgba(0,0,0,0.6), 0 0 0 0.5px rgba(var(--accent-rgb),0.2)',
         animation: 'fadeUp 0.3s ease',
+        // This panel draws the same paper grid Card/Sheet do (bg-texture
+        // above), so it needs the same lift or the grid cuts straight
+        // through the title/item text. 'none' outside paper, a no-op there.
+        textShadow: 'var(--text-lift)',
       }}>
         <div className="micro-gold">WHAT'S NEW</div>
         {entries.map((entry, ei) => (
@@ -209,8 +216,8 @@ function WhatsNewModal({ entries, onDismiss }) {
           borderRadius: 6, border: 'none', cursor: 'pointer',
           background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)',
           boxShadow: '0 8px 24px rgba(var(--accent-rgb),0.4)',
-          color: '#0a0805', fontFamily: UI.fontUi, fontSize: 15, fontWeight: 700,
-          letterSpacing: '0.06em', WebkitTapHighlightColor: 'transparent',
+          color: 'var(--accent-ink)', fontFamily: UI.fontUi, fontSize: 15, fontWeight: 700,
+          letterSpacing: '0.06em', WebkitTapHighlightColor: 'transparent', textShadow: 'none',
         }}>
           GOT IT
         </button>
@@ -253,7 +260,7 @@ function ErrorScreen({ onRetry }) {
           background: UI.gold, color: '#0a0a0a',
           border: 'none', borderRadius: 4,
           padding: '8px 18px', fontSize: 13, fontWeight: 600,
-          fontFamily: UI.fontUi, cursor: 'pointer',
+          fontFamily: UI.fontUi, cursor: 'pointer', textShadow: 'none',
         }}>
           Retry
         </button>
@@ -303,12 +310,6 @@ function App() {
   useEffectA(() => { userIdRef.current = userId; }, [userId]);
   useEffectA(() => { phaseRef.current = phase; }, [phase]);
   useEffectA(() => { routeRef.current = route; }, [route]);
-
-  useEffectA(() => {
-    if (store?.user?.email && store?.user?.name) {
-      LB.saveQsName(store.user.email, store.user.name);
-    }
-  }, [store?.user?.email, store?.user?.name]);
 
   // Boot-time admin support unread count
   useEffectA(() => {
@@ -923,8 +924,8 @@ function App() {
         unitPicked.current = false; // re-arm unit watcher for the new account
         recoveryInProgress.current = false; // clear so loadData can complete after a password reset
         // Cancel any pending retry from the previous account so it can't fire
-        // with the old uid after a quick account switch, and drop its stale
-        // pending state.
+        // with the old uid after an in-session account switch, and drop its
+        // stale pending state.
         clearTimeout(retryTimer.current);
         pendingStore.current = null;
         setUserId(session.user.id);
@@ -1442,7 +1443,7 @@ function App() {
   // non-tab route (e.g. plan → schedule-new) flips between them on iPad.
   const layout = (isPad && showTab) ? (
     <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
-      <TabBar active={tabActive} routeName={route.name} onChange={(t) => go({ name: t })} sidebar currentUser={{ email: store?.user?.email || '', name: store?.user?.name || '' }} showCoaching={showCoaching} coachingBadge={coachingBadge} showHealth={showHealth} />
+      <TabBar active={tabActive} routeName={route.name} onChange={(t) => go({ name: t })} sidebar showCoaching={showCoaching} coachingBadge={coachingBadge} showHealth={showHealth} />
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <ErrorBoundary key={route.name} onGoHome={() => go({ name: 'home' })}>
           {screen}

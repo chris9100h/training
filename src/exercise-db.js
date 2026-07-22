@@ -16,7 +16,7 @@
    logMode (see LB.exerciseLogMode): 'checkbox' (tick only) | 'reps' (reps, no
      weight) | 'weight' (weight + reps). Omit for normal weighted lifts.
    Vocabularies must match the app:
-     tags      → Abs Back Biceps Calves Chest Forearms Glutes Hamstrings Quads Shoulders Triceps
+     tags      → Abs Ab/Adductors Back Biceps Calves Chest Forearms Glutes Hamstrings Quads Shoulders Triceps
      equipment → no_equipment bodyweight cable dumbbell barbell_dual machine barbell_single
      category  → big | medium | small
      movement  → bilateral | unilateral | mobility */
@@ -150,11 +150,15 @@ window.SYSTEM_EXERCISES = [
   { id: 'sys_machine_hip_thrust', name: 'Machine Hip Thrust', tags: ['Glutes'], equipment: 'machine', category: 'medium' },
   { id: 'sys_barbell_glute_bridge', name: 'Barbell Glute Bridge', tags: ['Glutes'], equipment: 'barbell_dual', category: 'medium' },
   { id: 'sys_sumo_deadlift', name: 'Sumo Deadlift', tags: ['Glutes', 'Hamstrings', 'Quads'], equipment: 'barbell_dual', category: 'big' },
-  { id: 'sys_hip_abduction_machine', name: 'Hip Abduction Machine', tags: ['Glutes'], equipment: 'machine', category: 'small' },
   { id: 'sys_cable_glute_kickback', name: 'Cable Glute Kickback', tags: ['Glutes'], equipment: 'cable', category: 'small', movement: 'unilateral' },
   { id: 'sys_kettlebell_swing', name: 'Kettlebell Swing', tags: ['Glutes', 'Hamstrings'], equipment: 'dumbbell', category: 'medium' },
   { id: 'sys_single_leg_hip_thrust', name: 'Single-Leg Hip Thrust', tags: ['Glutes'], equipment: 'bodyweight', category: 'medium', movement: 'unilateral', logMode: 'reps' },
   { id: 'sys_machine_glute_kickback', name: 'Machine Glute Kickback', tags: ['Glutes'], equipment: 'machine', category: 'small', movement: 'unilateral' },
+  // ── Ab/Adductors ──
+  { id: 'sys_hip_abduction_machine', name: 'Hip Abduction Machine', tags: ['Ab/Adductors'], equipment: 'machine', category: 'small' },
+  { id: 'sys_hip_adduction_machine', name: 'Hip Adduction Machine', tags: ['Ab/Adductors'], equipment: 'machine', category: 'small' },
+  { id: 'sys_cable_hip_abduction', name: 'Cable Hip Abduction', tags: ['Ab/Adductors'], equipment: 'cable', category: 'small', movement: 'unilateral' },
+  { id: 'sys_cable_hip_adduction', name: 'Cable Hip Adduction', tags: ['Ab/Adductors'], equipment: 'cable', category: 'small', movement: 'unilateral' },
   // ── Calves ──
   { id: 'sys_standing_calf_raise', name: 'Standing Calf Raise', tags: ['Calves'], equipment: 'machine', category: 'small' },
   { id: 'sys_seated_calf_raise', name: 'Seated Calf Raise', tags: ['Calves'], equipment: 'machine', category: 'small' },

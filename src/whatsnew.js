@@ -17,6 +17,37 @@
    Entry shape: { id: string, date: string (YYYY-MM-DD), title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.640',
+    date: '2026-07-21',
+    title: 'Progression, dialed in 📈',
+    items: [
+      "🎯 New: custom weight jumps per exercise. Smart Progression and Meso used to bump every exercise on the same equipment by the same amount, now you can override it exercise by exercise.",
+      "💪 Perfect for the outliers: lateral raises don't need the same 2.5kg jumps as your bench press just because both happen to be \"dumbbell\". Set it once, done.",
+      "⚙️ Find it in the exercise editor under \"Progression increment\". Leave it blank and nothing changes, your equipment defaults still apply.",
+    ],
+  },
+  {
+    id: 'v2.638',
+    date: '2026-07-21',
+    title: 'Paper mode, sharpened ✏️',
+    items: [
+      "📝 Paper mode wrapped up its cutting phase: text stays sharp everywhere now, numbers, buttons, charts, all of it, no more grid lines slicing through your gains.",
+      "🎨 New: Full accent color in Paper. By default, Paper mutes your accent color to a calm pencil-grey. If you'd rather see your real color shine through even there, flip it on in Settings → Appearance.",
+      "🩸 Red got a glow-up: less bubblegum, more blood red.",
+    ],
+  },
+  {
+    id: 'v2.637',
+    date: '2026-07-20',
+    title: 'Notebook Mode: Meet Paper',
+    items: [
+      "📝 New theme: Paper. Light grid canvas, dark ink, zero cream, it's basically your old pen-and-paper log, just faster and it never runs out of pages.",
+      "🎨 Grab it under Settings → Appearance → Theme, right next to Dark, OLED and Light. Switch back anytime, no commitment issues here.",
+      "✏️ Your accent color quiets down to a soft pencil grey while you're on Paper, so nothing clashes with the grid, everything still reads like it was actually written down.",
+      "📸 Shows up in your session screenshots too, share a workout and it looks like a torn-out notebook page, not a random UI crop.",
+    ],
+  },
+  {
     id: 'v2.635',
     date: '2026-07-20',
     title: 'Meet The Water Tracker',

@@ -104,7 +104,7 @@ function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, 
       )}
 
       {/* Tab bar */}
-      <div style={{ display: 'flex', borderBottom: `0.5px solid ${UI.hair}`, background: UI.bg, flexShrink: 0 }}>
+      <div style={{ display: 'flex', borderBottom: `var(--hair-width) solid ${UI.hair}`, background: UI.bg, flexShrink: 0 }}>
         {TABS.map(t => (
           <button
             key={t.id}
@@ -127,7 +127,7 @@ function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, 
         <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
           {/* Sick / vacation status banner */}
           {clientStore.statusMode && (
-            <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px', background: 'var(--overlay-tint)', borderBottom: `0.5px solid ${UI.hairStrong}` }}>
+            <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px', background: 'var(--overlay-tint)', borderBottom: `var(--hair-width) solid ${UI.hairStrong}` }}>
               <i className={`fa-solid ${clientStore.statusMode === 'sick' ? 'fa-bed-pulse' : clientStore.statusMode === 'deload' ? 'fa-arrow-trend-down' : 'fa-umbrella-beach'}`} style={{ fontSize: 12, color: UI.inkFaint, flexShrink: 0 }} />
               <span style={{ flex: 1, fontSize: 12, fontFamily: UI.fontUi, color: UI.inkSoft, letterSpacing: '0.08em', fontWeight: 600 }}>
                 {clientStore.statusMode === 'sick' ? 'SICK' : clientStore.statusMode === 'deload' ? 'DELOAD' : 'VACATION'}
@@ -144,7 +144,7 @@ function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, 
           {clientStore.inProgress && !isSelf && (
             <div
               onClick={() => go({ name: 'spectator', targetUserId: clientId, userName: clientName })}
-              style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px', background: `rgba(var(--accent-rgb), 0.08)`, borderBottom: `0.5px solid rgba(var(--accent-rgb), 0.25)`, cursor: 'pointer' }}
+              style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px', background: `rgba(var(--accent-rgb), 0.16)`, borderBottom: `0.5px solid rgba(var(--accent-rgb), 0.25)`, cursor: 'pointer' }}
             >
               <div style={{ width: 8, height: 8, borderRadius: 4, background: 'var(--accent)', boxShadow: '0 0 6px rgba(var(--accent-rgb),0.8)', animation: 'pulseDot 1.5s ease-in-out infinite', flexShrink: 0 }} />
               <span style={{ flex: 1, fontSize: 12, fontFamily: UI.fontUi, color: 'var(--accent)', letterSpacing: '0.08em', fontWeight: 600 }}>TRAINING NOW · TAP TO WATCH</span>
@@ -438,7 +438,7 @@ function ClientProgramStatus({ sch, clientStore }) {
   return (
     <>
       <div className="micro" style={{ color: UI.inkFaint, margin: '0 0 8px', paddingLeft: 2 }}>PROGRAM</div>
-      <div style={{ padding: '14px 16px', background: UI.bgInset, borderRadius: 8, border: `0.5px solid ${UI.hair}`, marginBottom: 20 }}>
+      <div style={{ padding: '14px 16px', background: UI.bgInset, borderRadius: 8, border: `var(--hair-width) solid ${UI.hair}`, marginBottom: 20 }}>
         {isMeso && mesoBadge && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <i className="fa-solid fa-layer-group" style={{ fontSize: 12, color: UI.gold }} />
@@ -543,7 +543,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
           {todayDay?.items?.length > 0 ? (
             <div
               onClick={() => setPlanOpen(true)}
-              style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', background: UI.bgInset, borderRadius: 8, border: `0.5px solid ${UI.hair}`, marginBottom: 20, cursor: 'pointer' }}
+              style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', background: UI.bgInset, borderRadius: 8, border: `var(--hair-width) solid ${UI.hair}`, marginBottom: 20, cursor: 'pointer' }}
             >
               <div style={{ flex: 1 }}>
                 <div style={{ fontSize: 15, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>{todayDay.name}</div>
@@ -557,7 +557,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
               <ChevronRight />
             </div>
           ) : (
-            <div style={{ padding: '12px 16px', background: UI.bgInset, borderRadius: 8, border: `0.5px solid ${UI.hair}`, marginBottom: 20 }}>
+            <div style={{ padding: '12px 16px', background: UI.bgInset, borderRadius: 8, border: `var(--hair-width) solid ${UI.hair}`, marginBottom: 20 }}>
               <div style={{ fontSize: 13, color: UI.inkFaint, fontFamily: UI.fontUi }}>Rest day</div>
             </div>
           )}
@@ -632,7 +632,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
                     return (
                       <React.Fragment key={i}>
                         {ss.start && <SupersetHeader size={ss.size} />}
-                        <div style={{ padding: '10px 0', borderBottom: `0.5px solid ${UI.hair}`, ...(ss.member ? { borderLeft: `2px solid rgba(var(--accent-rgb),0.35)`, paddingLeft: 12 } : {}) }}>
+                        <div style={{ padding: '10px 0', borderBottom: `var(--hair-width) solid ${UI.hair}`, ...(ss.member ? { borderLeft: `2px solid rgba(var(--accent-rgb),0.35)`, paddingLeft: 12 } : {}) }}>
                         <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8, marginBottom: 6 }}>
                           <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>{e.name}</div>
                           {tgtStr && (
@@ -672,7 +672,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
                           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, alignItems: 'center' }}>
                             <span className="micro" style={{ color: UI.inkGhost }}>PREV</span>
                             {lastSets.map((s, j) => (
-                              <span key={j} className="num" style={{ fontSize: 11, color: UI.inkGhost, background: 'transparent', borderRadius: 4, padding: '1px 6px', border: `0.5px solid ${UI.hair}` }}>
+                              <span key={j} className="num" style={{ fontSize: 11, color: UI.inkGhost, background: 'transparent', borderRadius: 4, padding: '1px 6px', border: `var(--hair-width) solid ${UI.hair}` }}>
                                 {fmtSetChip(s)}
                               </span>
                             ))}
@@ -700,7 +700,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
                   // sheet shows the seeds instead of "First time, no weight data".
                   const hasWeight = seeds.some(s => s.kg != null || s.timeSec != null || s.reps != null || s.repsL != null || s.repsR != null);
                   return (
-                    <div key={idx} style={{ padding: '12px 4px', borderBottom: `0.5px solid ${UI.hair}` }}>
+                    <div key={idx} style={{ padding: '12px 4px', borderBottom: `var(--hair-width) solid ${UI.hair}` }}>
                       <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 6 }}>
                         <div style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>{ex?.name || item.exId}</div>
                         {(() => {
@@ -712,7 +712,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
                       </div>
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
                         {hasWeight ? seeds.map((s, j) => (
-                          <span key={j} className="num" style={{ fontSize: 12, color: UI.ink, background: UI.bgInset, borderRadius: 4, padding: '3px 8px', border: `0.5px solid ${UI.hairStrong}` }}>
+                          <span key={j} className="num" style={{ fontSize: 12, color: UI.ink, background: UI.bgInset, borderRadius: 4, padding: '3px 8px', border: `var(--hair-width) solid ${UI.hairStrong}` }}>
                             {s.timeSec != null ? LB.fmtDuration(s.timeSec) : <>{s.kg != null ? `${s.kg}${unit}` : '—'} × {s.reps ?? s.repsL ?? '—'}</>}
                           </span>
                         )) : (
@@ -734,7 +734,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
           <div className="micro" style={{ color: UI.inkFaint, margin: '0 0 8px', paddingLeft: 2 }}>WEEKLY ADHERENCE</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 20 }}>
             {weeks.map((w, i) => (
-              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', background: UI.bgInset, borderRadius: 6, border: `0.5px solid ${UI.hair}` }}>
+              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', background: UI.bgInset, borderRadius: 6, border: `var(--hair-width) solid ${UI.hair}` }}>
                 <div style={{ width: 72, flexShrink: 0, fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi }}>{w.label}</div>
                 <div style={{ flex: 1, height: 4, background: UI.bgRaised, borderRadius: 4, overflow: 'hidden' }}>
                   {w.planned > 0 && (
@@ -764,12 +764,12 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
       {/* Active plan */}
       <div className="micro" style={{ color: UI.inkFaint, margin: '0 0 8px', paddingLeft: 2 }}>ACTIVE PLAN</div>
       {activeSch ? (
-        <div style={{ padding: '12px 16px', background: UI.bgInset, borderRadius: 8, border: `0.5px solid ${UI.hair}`, marginBottom: 20 }}>
+        <div style={{ padding: '12px 16px', background: UI.bgInset, borderRadius: 8, border: `var(--hair-width) solid ${UI.hair}`, marginBottom: 20 }}>
           <div style={{ fontSize: 15, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>{activeSch.name}</div>
           <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>{trainingDayCount} training {trainingDayCount === 1 ? 'day' : 'days'}</div>
         </div>
       ) : (
-        <div style={{ padding: '12px 16px', background: UI.bgInset, borderRadius: 8, border: `0.5px solid ${UI.hair}`, marginBottom: 20, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>No active plan</div>
+        <div style={{ padding: '12px 16px', background: UI.bgInset, borderRadius: 8, border: `var(--hair-width) solid ${UI.hair}`, marginBottom: 20, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>No active plan</div>
       )}
 
       {/* Program status (5/3/1 cycle/TM + mesocycle week/RIR) */}
@@ -782,7 +782,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
       {recentSessions.length === 0
         ? <div style={{ color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13, padding: '12px 14px' }}>No sessions yet.</div>
         : recentSessions.map(s => (
-          <div key={s.id} onClick={() => onSelectSession?.(s)} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', background: UI.bgInset, borderRadius: 8, border: `0.5px solid ${UI.hair}`, marginBottom: 8, cursor: 'pointer' }}>
+          <div key={s.id} onClick={() => onSelectSession?.(s)} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', background: UI.bgInset, borderRadius: 8, border: `var(--hair-width) solid ${UI.hair}`, marginBottom: 8, cursor: 'pointer' }}>
             <div style={{ flex: 1 }}>
               <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>{s.dayName}</div>
               <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi }}>{fmtDate(s.date)}</div>
@@ -809,7 +809,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
                   ? Math.round((new Date(p.endedAt) - new Date(p.startedAt)) / 86400000) + 1
                   : Math.floor((Date.now() - new Date(p.startedAt).getTime()) / 86400000) + 1;
                 return (
-                  <div key={p.id || i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '9px 14px', background: UI.bgInset, borderRadius: 6, border: `0.5px solid ${UI.hair}` }}>
+                  <div key={p.id || i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '9px 14px', background: UI.bgInset, borderRadius: 6, border: `var(--hair-width) solid ${UI.hair}` }}>
                     <i className={`fa-solid ${icon}`} style={{ fontSize: 12, color: !p.endedAt ? 'var(--accent)' : UI.inkFaint, flexShrink: 0 }} />
                     <div style={{ flex: 1 }}>
                       <span style={{ fontSize: 12, fontFamily: UI.fontUi, fontWeight: 600, color: !p.endedAt ? UI.ink : UI.inkSoft }}>{modeLabel}</span>
@@ -847,8 +847,8 @@ function AdherenceChart({ weeks }) {
           <g key={i}>
             <rect x={x} y={0} width={barW} height={H} rx={2} style={{ fill: UI.bgRaised }} />
             {h > 0 && <rect x={x} y={H - h} width={barW} height={h} rx={2} fill={color} />}
-            {w.pct > 0 && <text x={x + barW / 2} y={H - h - 3} textAnchor="middle" fontSize={7} style={{ fill: color, fontFamily: UI.fontUi }}>{w.pct}%</text>}
-            <text x={x + barW / 2} y={H + 13} textAnchor="middle" fontSize={7} style={{ fill: UI.inkGhost, fontFamily: UI.fontUi }}>{labelText}</text>
+            {w.pct > 0 && <text filter="url(#chart-text-lift)" x={x + barW / 2} y={H - h - 3} textAnchor="middle" fontSize={7} style={{ fill: color, fontFamily: UI.fontUi }}>{w.pct}%</text>}
+            <text filter="url(#chart-text-lift)" x={x + barW / 2} y={H + 13} textAnchor="middle" fontSize={7} style={{ fill: UI.inkGhost, fontFamily: UI.fontUi }}>{labelText}</text>
           </g>
         );
       })}
@@ -961,7 +961,7 @@ function RollingVolumeChart({ sessions, planStartDate, clientStore }) {
           return (
             <g key={i}>
               <line x1={PAD_L} y1={y} x2={VW - PAD_R} y2={y} stroke={UI.hair} strokeWidth="0.5" strokeDasharray="3 3" />
-              <text x={PAD_L - 4} y={y + 3.5} textAnchor="end" fontSize="8" fontFamily="JetBrains Mono, monospace" fill={UI.inkFaint}>{fmtY(v)}</text>
+              <text filter="url(#chart-text-lift)" x={PAD_L - 4} y={y + 3.5} textAnchor="end" fontSize="8" fontFamily="JetBrains Mono, monospace" fill={UI.inkFaint}>{fmtY(v)}</text>
             </g>
           );
         })}
@@ -971,7 +971,7 @@ function RollingVolumeChart({ sessions, planStartDate, clientStore }) {
           <circle key={i} cx={px(i).toFixed(1)} cy={py(p.avg).toFixed(1)} r={i === 0 || i === n - 1 ? 3 : 2} fill="var(--accent)" />
         ))}
         {labelIdxs.map(i => (
-          <text key={i} x={px(i).toFixed(1)} y={VH - 4} textAnchor={i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle'} fontSize={7} style={{ fill: UI.inkGhost, fontFamily: UI.fontUi }}>{points[i].label}</text>
+          <text filter="url(#chart-text-lift)" key={i} x={px(i).toFixed(1)} y={VH - 4} textAnchor={i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle'} fontSize={7} style={{ fill: UI.inkGhost, fontFamily: UI.fontUi }}>{points[i].label}</text>
         ))}
       </svg>
       {listGroups.slice(0, showCount).map((g, i, arr) => (
@@ -1043,8 +1043,8 @@ function SessionsWeekChart({ sessions, planStartDate }) {
           <g key={i}>
             <rect x={x} y={0} width={barW} height={H} rx={2} style={{ fill: UI.bgRaised }} />
             {h > 0 && <rect x={x} y={H - h} width={barW} height={h} rx={2} fill="var(--accent)" />}
-            {w.count > 0 && <text x={x + barW / 2} y={H - h - 3} textAnchor="middle" fontSize={7} style={{ fill: 'var(--accent)', fontFamily: UI.fontUi }}>{w.count}</text>}
-            {labelIdxs.has(i) && <text x={x + barW / 2} y={H + 13} textAnchor="middle" fontSize={7} style={{ fill: UI.inkGhost, fontFamily: UI.fontUi }}>{w.label}</text>}
+            {w.count > 0 && <text filter="url(#chart-text-lift)" x={x + barW / 2} y={H - h - 3} textAnchor="middle" fontSize={7} style={{ fill: 'var(--accent)', fontFamily: UI.fontUi }}>{w.count}</text>}
+            {labelIdxs.has(i) && <text filter="url(#chart-text-lift)" x={x + barW / 2} y={H + 13} textAnchor="middle" fontSize={7} style={{ fill: UI.inkGhost, fontFamily: UI.fontUi }}>{w.label}</text>}
           </g>
         );
       })}
@@ -1054,7 +1054,7 @@ function SessionsWeekChart({ sessions, planStartDate }) {
 
 function StatBox({ label, value, gold, onClick }) {
   return (
-    <div onClick={onClick} style={{ flex: 1, background: UI.bgInset, borderRadius: 8, border: `0.5px solid ${UI.hair}`, padding: '12px 10px', textAlign: 'center', cursor: onClick ? 'pointer' : 'default' }}>
+    <div onClick={onClick} style={{ flex: 1, background: UI.bgInset, borderRadius: 8, border: `var(--hair-width) solid ${UI.hair}`, padding: '12px 10px', textAlign: 'center', cursor: onClick ? 'pointer' : 'default' }}>
       <div className="num" style={{ fontSize: 20, color: gold ? UI.gold : UI.ink, lineHeight: 1, marginBottom: 4 }}>{value}</div>
       <div className="micro" style={{ color: UI.inkFaint }}>{label}</div>
       {onClick && <div style={{ marginTop: 5 }}><i className="fa-solid fa-chart-line" style={{ fontSize: 7, color: UI.inkGhost }} /></div>}
@@ -1291,7 +1291,7 @@ function ClientPlanTab({ store, setStore, clientStore, setClientStore, clientId,
       <div style={{ display: 'flex', gap: 8, marginBottom: 16, justifyContent: 'flex-end' }}>
         <button
           onClick={() => go({ name: 'coaching-new-plan', coachingId, clientId, clientName: name })}
-          style={{ padding: '7px 14px', borderRadius: 6, border: `0.5px solid rgba(var(--accent-rgb),0.3)`, background: `rgba(var(--accent-rgb),0.06)`, color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
+          style={{ padding: '7px 14px', borderRadius: 6, border: `0.5px solid rgba(var(--accent-rgb),0.3)`, background: `rgba(var(--accent-rgb),0.13)`, color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
         >
           <i className="fa-solid fa-plus" style={{ fontSize: 9 }} />
           NEW PLAN
@@ -1299,7 +1299,7 @@ function ClientPlanTab({ store, setStore, clientStore, setClientStore, clientId,
         <input ref={importRef} type="file" accept=".json" style={{ display: 'none' }} onChange={importPlan} />
         <button
           onClick={() => setImportChoiceOpen(true)}
-          style={{ padding: '7px 14px', borderRadius: 6, border: `0.5px solid ${UI.hairStrong}`, background: 'transparent', color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
+          style={{ padding: '7px 14px', borderRadius: 6, border: `var(--hair-width) solid ${UI.hairStrong}`, background: 'transparent', color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
         >
           <i className="fa-solid fa-file-import" style={{ fontSize: 9 }} />
           IMPORT
@@ -1312,7 +1312,7 @@ function ClientPlanTab({ store, setStore, clientStore, setClientStore, clientId,
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <button
             onClick={() => { setImportChoiceOpen(false); importRef.current?.click(); }}
-            style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 6, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}
+            style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6, textShadow: 'none', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}
           >
             <i className="fa-solid fa-file-import" style={{ fontSize: 14, color: UI.inkSoft, width: 18, textAlign: 'center' }} />
             <div style={{ flex: 1, textAlign: 'left' }}>
@@ -1323,7 +1323,7 @@ function ClientPlanTab({ store, setStore, clientStore, setClientStore, clientId,
           </button>
           <button
             onClick={() => { setImportChoiceOpen(false); setOwnPlanPickerOpen(true); }}
-            style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 6, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}
+            style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6, textShadow: 'none', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}
           >
             <i className="fa-solid fa-clone" style={{ fontSize: 14, color: UI.inkSoft, width: 18, textAlign: 'center' }} />
             <div style={{ flex: 1, textAlign: 'left' }}>
@@ -1343,8 +1343,8 @@ function ClientPlanTab({ store, setStore, clientStore, setClientStore, clientId,
           ) : (store.schedules || []).filter(s => !s.archived).map(s => (
             <button key={s.id} onClick={() => importFromOwnPlan(s)} disabled={ownImportBusy} style={{
               width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              padding: '12px 14px', background: UI.bgInset, border: `0.5px solid ${UI.hair}`,
-              borderRadius: 6, cursor: ownImportBusy ? 'default' : 'pointer', opacity: ownImportBusy ? 0.6 : 1,
+              padding: '12px 14px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`,
+              borderRadius: 6, textShadow: 'none', cursor: ownImportBusy ? 'default' : 'pointer', opacity: ownImportBusy ? 0.6 : 1,
               WebkitTapHighlightColor: 'transparent',
             }}>
               <div style={{ textAlign: 'left' }}>
@@ -1379,13 +1379,13 @@ function ClientPlanTab({ store, setStore, clientStore, setClientStore, clientId,
               )}
               <button
                 onClick={() => go({ name: 'coaching-edit-plan', coachingId, clientId, scheduleId: sch.id, clientName: name })}
-                style={{ background: 'transparent', border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '5px 10px', cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 10, color: UI.inkSoft, letterSpacing: '0.08em' }}
+                style={{ background: 'transparent', border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, padding: '5px 10px', cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 10, color: UI.inkSoft, letterSpacing: '0.08em' }}
               >
                 EDIT
               </button>
               <button
                 onClick={() => exportPlan(sch)}
-                style={{ width: 30, height: 30, background: 'transparent', border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}
+                style={{ width: 30, height: 30, background: 'transparent', border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}
                 title="Export plan"
               >
                 <i className="fa-solid fa-share-from-square" style={{ fontSize: 10, color: UI.inkSoft }} />
@@ -1408,7 +1408,7 @@ function ClientPlanTab({ store, setStore, clientStore, setClientStore, clientId,
               </button>
               <button
                 onClick={() => discardPendingDraft(sch.id)}
-                style={{ background: 'transparent', border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '5px 10px', cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 10, color: UI.inkSoft, letterSpacing: '0.08em', whiteSpace: 'nowrap' }}
+                style={{ background: 'transparent', border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, padding: '5px 10px', cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 10, color: UI.inkSoft, letterSpacing: '0.08em', whiteSpace: 'nowrap' }}
               >
                 DISCARD
               </button>
@@ -1505,8 +1505,8 @@ function InlineExHistory({ exId, dayId, exName, sessions, exercises, onBack, uni
 
   return (
     <div style={{ overflowY: 'auto', flex: 1 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderBottom: `0.5px solid ${UI.hair}`, position: 'sticky', top: 0, background: UI.bg, zIndex: 1 }}>
-        <button onClick={onBack} style={{ width: 32, height: 32, borderRadius: 6, border: `0.5px solid ${UI.hair}`, background: UI.bgRaised, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderBottom: `var(--hair-width) solid ${UI.hair}`, position: 'sticky', top: 0, background: UI.bg, zIndex: 1 }}>
+        <button onClick={onBack} style={{ width: 32, height: 32, borderRadius: 6, border: `var(--hair-width) solid ${UI.hair}`, background: UI.bgRaised, textShadow: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
           <i className="fa-solid fa-chevron-left" style={{ fontSize: 12, color: UI.inkSoft }} />
         </button>
         <div style={{ flex: 1, fontSize: 14, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>{exName}</div>
@@ -1535,7 +1535,7 @@ function InlineExHistory({ exId, dayId, exName, sessions, exercises, onBack, uni
             {gridVals.map((v, i) => { const y = yPos(v); return (
               <g key={i}>
                 <line x1={PAD_L} y1={y} x2={VW - PAD_R} y2={y} stroke={UI.hair} strokeWidth="0.5" strokeDasharray="3 3" />
-                <text x={PAD_L - 5} y={y + 3.5} textAnchor="end" fontSize="8" fontFamily="JetBrains Mono, monospace" fill={UI.inkFaint}>{isTimeEx ? LB.fmtDuration(Math.round(v)) : Math.round(v)}</text>
+                <text filter="url(#chart-text-lift)" x={PAD_L - 5} y={y + 3.5} textAnchor="end" fontSize="8" fontFamily="JetBrains Mono, monospace" fill={UI.inkFaint}>{isTimeEx ? LB.fmtDuration(Math.round(v)) : Math.round(v)}</text>
               </g>
             ); })}
             {Array.from({ length: maxSets }, (_, si) => {
@@ -1550,7 +1550,7 @@ function InlineExHistory({ exId, dayId, exName, sessions, exercises, onBack, uni
               );
             })}
             {labelIdxs.map(xi => (
-              <text key={xi} x={xPos(xi)} y={VH - 4} textAnchor="middle" fontSize="7.5" fontFamily="JetBrains Mono, monospace" fill={UI.inkFaint}>{fmtD(exSessions[xi].ended)}</text>
+              <text filter="url(#chart-text-lift)" key={xi} x={xPos(xi)} y={VH - 4} textAnchor="middle" fontSize="7.5" fontFamily="JetBrains Mono, monospace" fill={UI.inkFaint}>{fmtD(exSessions[xi].ended)}</text>
             ))}
           </svg>
           {listSessions.slice(0, showCount).map((sess, i, arr) => (
@@ -1662,15 +1662,15 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
     const storeWithoutSelected = { ...clientStore, sessions: clientStore.sessions.filter(s => s.ended && s.ended < selected.ended) };
     return (
       <div style={{ overflowY: 'auto', flex: 1 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderBottom: `0.5px solid ${UI.hair}`, position: 'sticky', top: 0, background: UI.bg, zIndex: 1 }}>
-          <button onClick={() => { setSelected(null); onClearSelected?.(); }} style={{ width: 32, height: 32, borderRadius: 6, border: `0.5px solid ${UI.hair}`, background: UI.bgRaised, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderBottom: `var(--hair-width) solid ${UI.hair}`, position: 'sticky', top: 0, background: UI.bg, zIndex: 1 }}>
+          <button onClick={() => { setSelected(null); onClearSelected?.(); }} style={{ width: 32, height: 32, borderRadius: 6, border: `var(--hair-width) solid ${UI.hair}`, background: UI.bgRaised, textShadow: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
             <i className="fa-solid fa-chevron-left" style={{ fontSize: 12, color: UI.inkSoft }} />
           </button>
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>{selected.dayName}</div>
             <div style={{ fontSize: 11, color: UI.inkFaint }}>{fmtDate(selected.date)}</div>
           </div>
-          <button onClick={() => setNoteOpen(true)} style={{ background: 'transparent', border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '5px 12px', cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 11, color: UI.inkSoft }}>+ NOTE</button>
+          <button onClick={() => setNoteOpen(true)} style={{ background: 'transparent', border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, padding: '5px 12px', cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 11, color: UI.inkSoft }}>+ NOTE</button>
         </div>
         <div style={{ padding: '12px 12px 32px' }}>
           <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
@@ -1740,7 +1740,7 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
                 {ss.start && <SupersetHeader size={ss.size} />}
                 <div
                   onClick={() => e.exId && selected.dayId && setHistEx({ exId: e.exId, dayId: selected.dayId, exName: e.name })}
-                  style={{ padding: '10px 14px', borderBottom: `0.5px solid ${UI.hair}`, cursor: e.exId ? 'pointer' : 'default', WebkitTapHighlightColor: 'transparent', ...(ss.member ? { borderLeft: `2px solid rgba(var(--accent-rgb),0.35)`, paddingLeft: 12 } : {}) }}
+                  style={{ padding: '10px 14px', borderBottom: `var(--hair-width) solid ${UI.hair}`, cursor: e.exId ? 'pointer' : 'default', WebkitTapHighlightColor: 'transparent', ...(ss.member ? { borderLeft: `2px solid rgba(var(--accent-rgb),0.35)`, paddingLeft: 12 } : {}) }}
                 >
                   <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8, marginBottom: 6 }}>
                     <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>
@@ -1783,7 +1783,7 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, alignItems: 'center' }}>
                     <span className="micro" style={{ color: UI.inkGhost }}>PREV</span>
                     {lastSets.map((s, j) => (
-                      <span key={j} className="num" style={{ fontSize: 11, color: UI.inkGhost, background: 'transparent', borderRadius: 4, padding: '1px 6px', border: `0.5px solid ${UI.hair}` }}>
+                      <span key={j} className="num" style={{ fontSize: 11, color: UI.inkGhost, background: 'transparent', borderRadius: 4, padding: '1px 6px', border: `var(--hair-width) solid ${UI.hair}` }}>
                         {fmtSetChip(s)}
                       </span>
                     ))}
@@ -1797,7 +1797,7 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
         </div>
         <Sheet open={noteOpen} onClose={() => setNoteOpen(false)} title="Session Note">
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <textarea value={noteBody} onChange={e => setNoteBody(e.target.value)} placeholder={`Note for ${selected.dayName}…`} rows={4} style={{ background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '10px 12px', fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, outline: 'none', resize: 'none', width: '100%', boxSizing: 'border-box' }} />
+            <textarea value={noteBody} onChange={e => setNoteBody(e.target.value)} placeholder={`Note for ${selected.dayName}…`} rows={4} style={{ background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4, padding: '10px 12px', fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, outline: 'none', resize: 'none', width: '100%', boxSizing: 'border-box' }} />
             <Btn onClick={saveNote} disabled={noteSaving || !noteBody.trim()}>{noteSaving ? 'Saving…' : 'Save Note'}</Btn>
           </div>
         </Sheet>
@@ -1846,7 +1846,7 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
             ) : filteredSessions.map(s => {
               const vol = LB.totalVolume(s, clientStore.exercises, clientStore.dailyLogs);
               return (
-                <div key={s.id} onClick={() => setSelected(s)} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderBottom: `0.5px solid ${UI.hair}`, cursor: 'pointer' }}>
+                <div key={s.id} onClick={() => setSelected(s)} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderBottom: `var(--hair-width) solid ${UI.hair}`, cursor: 'pointer' }}>
                   <div style={{ flex: 1 }}>
                     <div style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>{s.dayName}</div>
                     <div style={{ fontSize: 11, color: UI.inkFaint }}>{fmtDate(s.date)} · {LB.doneSetCount(s)} sets</div>
@@ -1865,8 +1865,8 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
           ) : cardioLogs.map(log => {
             const act = CARDIO_ACTIVITY_MAP[log.type] || { label: log.type ? log.type.charAt(0).toUpperCase() + log.type.slice(1) : 'Cardio', icon: 'fa-person-running' };
             return (
-              <div key={log.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderBottom: `0.5px solid ${UI.hair}` }}>
-                <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'rgba(var(--accent-rgb),0.08)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <div key={log.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderBottom: `var(--hair-width) solid ${UI.hair}` }}>
+                <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'rgba(var(--accent-rgb),0.16)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                   <i className={`fa-solid ${act.icon}`} style={{ fontSize: 13, color: UI.gold }} />
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
@@ -1880,8 +1880,8 @@ function ClientSessionsTab({ clientStore, coachingId, userId, clientName, initia
                 </div>
                 {(log.effort != null || log.paceFeeling != null) && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 3, flexShrink: 0, alignItems: 'flex-end' }}>
-                    {log.effort != null && <span className="micro" style={{ background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 4, padding: '2px 6px', color: UI.inkSoft }}>E {log.effort}/10</span>}
-                    {log.paceFeeling != null && <span className="micro" style={{ background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 4, padding: '2px 6px', color: UI.inkSoft }}>PF {log.paceFeeling}/6</span>}
+                    {log.effort != null && <span className="micro" style={{ background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 4, padding: '2px 6px', color: UI.inkSoft }}>E {log.effort}/10</span>}
+                    {log.paceFeeling != null && <span className="micro" style={{ background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 4, padding: '2px 6px', color: UI.inkSoft }}>PF {log.paceFeeling}/6</span>}
                   </div>
                 )}
               </div>

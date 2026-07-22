@@ -28,13 +28,13 @@ const HEALTH_CARD_TOGGLES = [
 // select inputs (password/email change, OTP, admin tools, ...). Spread and
 // override for a sheet's specific padding/fontSize/etc.
 const SETTINGS_INPUT_STYLE = {
-  background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4,
+  background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4,
   padding: '10px 14px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink,
   outline: 'none', width: '100%', boxSizing: 'border-box',
 };
 // Same look, larger radius, for the multi-line support-ticket textareas.
 const SETTINGS_TEXTAREA_STYLE = {
-  width: '100%', background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`,
+  width: '100%', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`,
   borderRadius: 6, padding: '10px 12px', color: UI.ink, fontFamily: UI.fontUi,
   fontSize: 14, outline: 'none', resize: 'none', boxSizing: 'border-box', lineHeight: 1.5,
 };
@@ -50,11 +50,11 @@ function AdminTicketRow({ t, archived = false, catLabel, onClick }) {
       style={{
         width: '100%',
         background: archived ? UI.bgInset : UI.bgRaised,
-        border: `0.5px solid ${UI.hair}`,
+        border: `var(--hair-width) solid ${UI.hair}`,
         borderLeft: `3px solid ${archived ? UI.inkGhost : (statusColor[t.support_status] || UI.hairStrong)}`,
         borderRadius: 8, cursor: 'pointer', textAlign: 'left', padding: '12px 14px', marginBottom: 8,
         WebkitTapHighlightColor: 'transparent', display: 'flex', flexDirection: 'column',
-        gap: archived ? 4 : 5, opacity: archived ? 0.7 : 1,
+        gap: archived ? 4 : 5, opacity: archived ? 0.7 : 1, textShadow: 'none',
       }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <span style={{ fontSize: archived ? 13 : 14, fontWeight: 600, color: archived ? UI.inkSoft : UI.ink, fontFamily: UI.fontUi, flex: 1 }}>{t.client_name || t.client_email}</span>
@@ -114,7 +114,10 @@ function NavRow({ label, hint, onTap, first = false, accent = false }) {
   );
 }
 
-const accentBtn = { background: 'rgba(var(--accent-rgb),0.10)', border: '0.5px solid rgba(var(--accent-rgb),0.22)', color: 'var(--accent)', padding: '5px 14px', borderRadius: 6, cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', WebkitTapHighlightColor: 'transparent', flexShrink: 0 };
+// Alpha bumped from the original 0.10/0.22 — plenty visible against a vivid
+// accent color, but on paper's muted grey accent those read as barely-there
+// against bg-raised. Higher alpha keeps a normal accent legible too.
+const accentBtn = { background: 'rgba(var(--accent-rgb),0.16)', border: '1px solid rgba(var(--accent-rgb),0.4)', color: 'var(--accent)', padding: '5px 14px', borderRadius: 6, cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', WebkitTapHighlightColor: 'transparent', flexShrink: 0 };
 
 const isIosDevice = /iPhone|iPad|iPod/.test(navigator.userAgent) ||
   (/Mac/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
@@ -127,8 +130,8 @@ function SettingsSheet(props) {
 function FullSheet({ open, onClose, title, children }) {
   if (!open) return null;
   return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 200, background: UI.bg, display: 'flex', flexDirection: 'column', paddingTop: 'env(safe-area-inset-top, 0px)' }}>
-      <div style={{ display: 'flex', alignItems: 'center', padding: '14px 20px', borderBottom: `0.5px solid ${UI.hair}`, flexShrink: 0, background: UI.bgRaised }}>
+    <div style={{ position: 'fixed', inset: 0, zIndex: 200, background: UI.bg, backgroundImage: 'var(--bg-texture)', display: 'flex', flexDirection: 'column', paddingTop: 'env(safe-area-inset-top, 0px)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', padding: '14px 20px', borderBottom: `var(--hair-width) solid ${UI.hair}`, flexShrink: 0, background: UI.bgRaised }}>
         <div style={{ flex: 1, fontFamily: UI.fontDisplay, fontSize: 22, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--accent)' }}>{title}</div>
         <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 8, color: UI.inkFaint, WebkitTapHighlightColor: 'transparent', display: 'flex', alignItems: 'center' }}>
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
@@ -313,7 +316,7 @@ function ChangelogSheet({ open, onClose }) {
 
   const rowBtn = { width: '100%', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '12px 0', WebkitTapHighlightColor: 'transparent' };
   const chevron = () => <svg width="5" height="9" viewBox="0 0 6 10" fill="none" stroke={UI.inkFaint} strokeWidth="1.3" strokeLinecap="round"><path d="M1 1l4 4-4 4" /></svg>;
-  const badge = (n) => <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--accent)', background: 'rgba(var(--accent-rgb),0.12)', borderRadius: 999, padding: '1px 8px', fontFamily: UI.fontUi }}>{n}</span>;
+  const badge = (n) => <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--accent)', background: 'rgba(var(--accent-rgb),0.16)', border: `1px solid rgba(var(--accent-rgb),0.4)`, borderRadius: 999, padding: '1px 8px', fontFamily: UI.fontUi }}>{n}</span>;
   const titleRow = (entry) => (
     <button onClick={() => setSelected(entry)} style={rowBtn}>
       <span style={{ fontSize: 15, fontWeight: 500, color: UI.ink, fontFamily: UI.fontUi, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{entry.title}</span>
@@ -403,6 +406,9 @@ function PasskeySheet({ open, onClose }) {
   const [loadingList, setLoadingList] = useStateSet(false);
   const [adding, setAdding] = useStateSet(false);
   const [deletingId, setDeletingId] = useStateSet(null);
+  const [editingId, setEditingId] = useStateSet(null);
+  const [editName, setEditName] = useStateSet('');
+  const [renaming, setRenaming] = useStateSet(false);
   const [error, setError] = useStateSet('');
   const [successMsg, setSuccessMsg] = useStateSet('');
 
@@ -425,7 +431,7 @@ function PasskeySheet({ open, onClose }) {
 
   useEffectSet(() => {
     if (open) loadPasskeys();
-    else { setPasskeys([]); setError(''); setSuccessMsg(''); }
+    else { setPasskeys([]); setError(''); setSuccessMsg(''); setEditingId(null); setEditName(''); }
   }, [open]);
 
   const handleAdd = async () => {
@@ -458,6 +464,25 @@ function PasskeySheet({ open, onClose }) {
     }
   };
 
+  const startEdit = (pk) => { setEditingId(pk.id); setEditName(pk.friendly_name || ''); };
+  const cancelEdit = () => { setEditingId(null); setEditName(''); };
+
+  const handleRename = async (id) => {
+    const name = editName.trim();
+    if (!name || renaming) return;
+    setRenaming(true);
+    try {
+      await LB.updatePasskey(id, name);
+      setPasskeys(prev => prev.map(p => p.id === id ? { ...p, friendly_name: name } : p));
+      setEditingId(null); setEditName('');
+      flash('Passkey renamed');
+    } catch (e) {
+      flash(e.message || 'Failed to rename passkey', true);
+    } finally {
+      setRenaming(false);
+    }
+  };
+
   const fmtDate = (iso) => {
     if (!iso) return '';
     const d = new Date(iso);
@@ -485,7 +510,7 @@ function PasskeySheet({ open, onClose }) {
         </div>
 
         {(error || successMsg) && (
-          <div style={{ fontSize: 12, color: error ? UI.danger : UI.gold, fontFamily: UI.fontUi, marginBottom: 12, padding: '8px 12px', background: error ? 'rgba(var(--danger-rgb),0.06)' : 'rgba(var(--accent-rgb),0.08)', borderRadius: 6 }}>
+          <div style={{ fontSize: 12, color: error ? UI.danger : UI.gold, fontFamily: UI.fontUi, marginBottom: 12, padding: '8px 12px', background: error ? 'rgba(var(--danger-rgb),0.06)' : 'rgba(var(--accent-rgb),0.16)', borderRadius: 6 }}>
             {error || successMsg}
           </div>
         )}
@@ -500,25 +525,62 @@ function PasskeySheet({ open, onClose }) {
             {passkeys.map((pk, i) => (
               <React.Fragment key={pk.id}>
                 {i > 0 && <div className="knurl" />}
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 0' }}>
-                  <div>
-                    <div style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 500 }}>
-                      {pk.friendly_name || 'Passkey'}
+                {editingId === pk.id ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 0' }}>
+                    <input
+                      value={editName}
+                      onChange={e => setEditName(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter') handleRename(pk.id); if (e.key === 'Escape') cancelEdit(); }}
+                      placeholder="Passkey name"
+                      autoFocus
+                      style={{ ...SETTINGS_INPUT_STYLE, flex: 1, padding: '7px 10px', fontSize: 13 }}
+                    />
+                    <button onClick={() => handleRename(pk.id)} disabled={!editName.trim() || renaming} aria-label="Save name" style={{
+                      background: 'rgba(var(--accent-rgb),0.16)', border: '1px solid rgba(var(--accent-rgb),0.4)',
+                      color: 'var(--accent)', borderRadius: 6, width: 32, height: 32, flexShrink: 0,
+                      cursor: renaming ? 'default' : 'pointer', opacity: editName.trim() ? 1 : 0.5,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', WebkitTapHighlightColor: 'transparent',
+                    }}>
+                      <i className={`fa-solid ${renaming ? 'fa-spinner fa-spin' : 'fa-check'}`} style={{ fontSize: 13 }} />
+                    </button>
+                    <button onClick={cancelEdit} disabled={renaming} aria-label="Cancel" style={{
+                      background: 'none', border: `var(--hair-width) solid ${UI.hairStrong}`,
+                      color: UI.inkFaint, borderRadius: 6, width: 32, height: 32, flexShrink: 0,
+                      cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', WebkitTapHighlightColor: 'transparent',
+                    }}>
+                      <i className="fa-solid fa-xmark" style={{ fontSize: 13 }} />
+                    </button>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '10px 0' }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {pk.friendly_name || 'Passkey'}
+                      </div>
+                      <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>
+                        Added {fmtDate(pk.created_at)}
+                      </div>
                     </div>
-                    <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>
-                      Added {fmtDate(pk.created_at)}
+                    <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                      <button onClick={() => startEdit(pk)} disabled={!!deletingId} aria-label="Rename" style={{
+                        background: 'none', border: `var(--hair-width) solid ${UI.hairStrong}`,
+                        color: UI.inkSoft, borderRadius: 6, width: 30, height: 30,
+                        cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', WebkitTapHighlightColor: 'transparent',
+                      }}>
+                        <i className="fa-solid fa-pen" style={{ fontSize: 11 }} />
+                      </button>
+                      <button onClick={() => handleDelete(pk.id, pk.friendly_name)} disabled={!!deletingId} style={{
+                        background: 'rgba(var(--danger-rgb),0.08)', border: '0.5px solid rgba(var(--danger-rgb),0.2)',
+                        color: UI.danger, borderRadius: 6, padding: '5px 12px',
+                        fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
+                        cursor: deletingId ? 'default' : 'pointer', opacity: deletingId === pk.id ? 0.5 : 1,
+                        WebkitTapHighlightColor: 'transparent',
+                      }}>
+                        {deletingId === pk.id ? '…' : 'Remove'}
+                      </button>
                     </div>
                   </div>
-                  <button onClick={() => handleDelete(pk.id, pk.friendly_name)} disabled={!!deletingId} style={{
-                    background: 'rgba(var(--danger-rgb),0.08)', border: '0.5px solid rgba(var(--danger-rgb),0.2)',
-                    color: UI.danger, borderRadius: 6, padding: '5px 12px',
-                    fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
-                    cursor: deletingId ? 'default' : 'pointer', opacity: deletingId === pk.id ? 0.5 : 1,
-                    WebkitTapHighlightColor: 'transparent', flexShrink: 0,
-                  }}>
-                    {deletingId === pk.id ? '…' : 'Remove'}
-                  </button>
-                </div>
+                )}
               </React.Fragment>
             ))}
           </div>
@@ -560,7 +622,6 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
   const [plateInvTab, setPlateInvTab] = useStateSet(() => UI.unit() === 'lbs' ? 1 : 0);
   const [progDisclaimer, setProgDisclaimer] = useStateSet(false);
   const [activeSessions, setActiveSessions] = useStateSet([]);
-  const [qsSwitching, setQsSwitching] = useStateSet(false);
   const [activeGrants, setActiveGrants] = useStateSet([]);
   const [newGrantEmail, setNewGrantEmail] = useStateSet('');
   const [pendingUsers, setPendingUsers] = useStateSet([]);
@@ -582,6 +643,7 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
   const [allUsersNewOnly, setAllUsersNewOnly] = useStateSet(false);
   const [allUsersOnboardedOnly, setAllUsersOnboardedOnly] = useStateSet(false);
   const [allUsersOutdatedOnly, setAllUsersOutdatedOnly] = useStateSet(false);
+  const [allUsersRecentOnly, setAllUsersRecentOnly] = useStateSet(false);
   const [adminUserDetail, setAdminUserDetail] = useStateSet(null); // { userId, name, plans }
   const [adminUserDetailLoading, setAdminUserDetailLoading] = useStateSet(false);
   const [adminUserDetailSheet, setAdminUserDetailSheet] = useStateSet(false);
@@ -661,6 +723,18 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
   const [reminderTime, setReminderTime] = useStateSet(() => store.settings?.reminderTime ?? '07:00');
   const [cycleWeekView, setCycleWeekView] = useStateSet(() => store.settings?.cycleWeekView ?? localStorage.getItem('logbook-cycle-week-view') === 'true');
   const [darkMode, setDarkMode] = useStateSet(() => store.settings?.darkMode ?? localStorage.getItem('logbook-dark-mode') ?? 'dark');
+  // Paper mutes the chosen accent to grey by default (applyAccentColor,
+  // index.html); this is the opt-out, local-only (no store field, nothing to
+  // sync or back up), matching logbook-accent-color's own pattern.
+  const [paperAccentEnabled, setPaperAccentEnabled] = useStateSet(() => localStorage.getItem('logbook-paper-accent-enabled') === 'true');
+  // Grid overlay (index.html's window.applyGridPreference): local-only,
+  // theme-independent. Untouched (localStorage key absent) resolves to
+  // today's default (on for paper, off elsewhere) via window.__gridEnabled,
+  // which applyDarkMode already recomputes on every theme switch, so this
+  // just mirrors that resolved value rather than tracking the raw
+  // localStorage tri-state itself.
+  const [gridEnabled, setGridEnabled] = useStateSet(() => !!window.__gridEnabled);
+  useEffectSet(() => { setGridEnabled(!!window.__gridEnabled); }, [darkMode]);
   // Starts wherever the watermark is ALREADY sitting today (the same
   // per-theme/per-image defaults screens-home.jsx falls back to when
   // watermarkOpacity is unset), so the slider doesn't jump to an arbitrary
@@ -670,7 +744,8 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
     const explicit = store.settings?.watermarkOpacity;
     if (explicit != null) return explicit;
     if (store.settings?.vipBackground) return 16;
-    return (store.settings?.darkMode ?? 'dark') === 'light' ? 14 : 4;
+    const mode = store.settings?.darkMode ?? 'dark';
+    return mode === 'paper' ? 16 : mode === 'light' ? 14 : (gridEnabled ? 12 : 4);
   });
   const [showWarmupInSummary, setShowWarmupInSummary] = useStateSet(() => store.settings?.showWarmupInSummary ?? true);
   const [unitPickerOpen, setUnitPickerOpen] = useStateSet(false);
@@ -1504,14 +1579,6 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     await LB.deleteAllData(userId); await LB.signOut();
   };
 
-  // QS
-  const currentEmail = store.user?.email || '';
-  const otherQsEmail = LB.QS_EMAILS.find(e => e !== currentEmail);
-  const isQsUser = LB.QS_EMAILS.includes(currentEmail) && !!otherQsEmail;
-  const hasQsSession = isQsUser ? LB.hasQuickSwitchSession(otherQsEmail) : false;
-  const currentName = store.user?.name || currentEmail.split('@')[0];
-  const otherName = isQsUser ? (LB.getQsName(otherQsEmail) || otherQsEmail.split('@')[0]) : '';
-
   // Coaching derived values
   const hasCoaching = !!((store.coaching?.asCoach || []).filter(c => c.status === 'active').length > 0 || store.coaching?.asClient?.status === 'active');
   const selfOn = !!store.settings?.beYourOwnCoach;
@@ -1617,7 +1684,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
         )}
       </div>
       </div>
-      <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 8, padding: '16px 20px', paddingBottom: 'calc(env(safe-area-inset-bottom, 8px) + 16px)', borderTop: `0.5px solid ${UI.hair}`, background: UI.bg }}>
+      <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 8, padding: '16px 20px', paddingBottom: 'calc(env(safe-area-inset-bottom, 8px) + 16px)', borderTop: `var(--hair-width) solid ${UI.hair}`, background: UI.bg, backgroundImage: 'var(--bg-texture)' }}>
         <Btn kind="ghost" onClick={() => LB.clearCachesAndReload()}>Clear cache &amp; reload</Btn>
         <Btn kind="ghost" className="intensity-glow" onClick={() => setGuidesSheet(true)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
           Guides
@@ -1636,11 +1703,11 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           <Btn onClick={() => setSupportSheet(true)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
             Support Center
             {store.supportUnread > 0 && (
-              <span style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%', background: '#0a0805', flexShrink: 0, animation: 'pulseDot 1.5s ease-in-out infinite' }} />
+              <span style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%', background: 'var(--accent-ink)', flexShrink: 0, animation: 'pulseDot 1.5s ease-in-out infinite' }} />
             )}
           </Btn>
         )}
-        <Btn kind="ghost" onClick={handleSignOut} style={{ color: UI.danger, borderColor: 'rgba(var(--danger-rgb),0.2)' }}>Sign out</Btn>
+        <Btn kind="ghost" onClick={handleSignOut} style={{ color: UI.danger, background: 'rgba(var(--danger-rgb),0.08)', borderColor: 'rgba(var(--danger-rgb),calc(0.2 * var(--danger-border-boost)))' }}>Sign out</Btn>
         <div className="micro" style={{ textAlign: 'center', marginTop: 4 }}>Zane · {swVersion || '…'} · Data in Supabase</div>
       </div>
 
@@ -1656,10 +1723,10 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           ].map(g => (
             <button key={g.title} onClick={() => { setGuidesSheet(false); if (g.sheet === 'howto') setHowToSheet(true); else go({ name: g.route }); }} style={{
               display: 'flex', alignItems: 'center', gap: 12, width: '100%', textAlign: 'left', cursor: 'pointer',
-              background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '13px 14px',
-              WebkitTapHighlightColor: 'transparent', font: 'inherit', color: UI.ink,
+              background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, padding: '13px 14px',
+              WebkitTapHighlightColor: 'transparent', font: 'inherit', color: UI.ink, textShadow: 'none',
             }}>
-              <span style={{ width: 34, height: 34, borderRadius: 6, background: 'rgba(var(--accent-rgb),0.1)', border: `0.5px solid ${UI.hairStrong}`, display: 'grid', placeItems: 'center', flexShrink: 0 }}>
+              <span style={{ width: 34, height: 34, borderRadius: 6, background: 'rgba(var(--accent-rgb),0.18)', border: `var(--hair-width) solid ${UI.hairStrong}`, display: 'grid', placeItems: 'center', flexShrink: 0 }}>
                 <i className={`fa-solid ${g.icon}`} style={{ fontSize: 14, color: UI.gold }} />
               </span>
               <span style={{ flex: 1, minWidth: 0 }}>
@@ -1682,7 +1749,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             new Date(b.ended ?? b.started_at) - new Date(a.ended ?? a.started_at)
           );
           return (
-            <div style={{ display: 'flex', flexDirection: 'column' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {hiddenCount > 0 && (
                 <button onClick={() => { localStorage.removeItem('logbook-dismissed-sessions'); setActiveSessions(s => [...s]); }} style={{
                   alignSelf: 'flex-end', background: 'none', border: 'none', cursor: 'pointer',
@@ -1699,7 +1766,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                     const finishedStr = finishedMin != null ? (finishedMin < 60 ? `${finishedMin}m ago` : `${Math.round(finishedMin / 60)}h ago`) : 'done';
                     return (
                       <div key={s.session_id} onClick={() => go({ name: 'spectator', targetUserId: s.user_id, userName: s.user_name, sessionId: s.session_id })}
-                        style={{ display: 'grid', gridTemplateColumns: '12px 1fr 1fr 1fr', alignItems: 'center', gap: 10, padding: '9px 0', borderTop: i > 0 ? `0.5px solid ${UI.hair}` : 'none', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+                        style={{ display: 'grid', gridTemplateColumns: '12px 1fr 1fr 1fr', alignItems: 'center', gap: 10, padding: '9px 12px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
                         <div style={{ width: 5, height: 5, borderRadius: '50%', background: UI.inkFaint }} />
                         <span style={{ fontSize: 13, color: UI.inkSoft, fontWeight: 500, fontFamily: UI.fontUi }}>{s.user_name}</span>
                         <span className="display-it" style={{ fontSize: 13, color: UI.inkFaint, textAlign: 'center' }}>{s.day_name}</span>
@@ -1714,7 +1781,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                   const remMin = blended?.remainingMin ?? null; const ratio = blended?.progress ?? null; const finishing = remMin === 0;
                   return (
                     <div key={s.session_id || i} onClick={() => go({ name: 'spectator', targetUserId: s.user_id, userName: s.user_name })}
-                      style={{ display: 'grid', gridTemplateColumns: '12px 1fr 1fr 1fr', alignItems: 'center', gap: 10, padding: '9px 0', borderTop: i > 0 ? `0.5px solid ${UI.hair}` : 'none', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+                      style={{ display: 'grid', gridTemplateColumns: '12px 1fr 1fr 1fr', alignItems: 'center', gap: 10, padding: '9px 12px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
                       <div style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--accent)', animation: 'pulseDot 1.4s ease-in-out infinite' }} />
                       <span style={{ fontSize: 13, color: UI.ink, fontWeight: 500, fontFamily: UI.fontUi }}>{s.user_name}</span>
                       <span className="display-it" style={{ fontSize: 13, color: UI.inkSoft, textAlign: 'center' }}>{s.day_name}</span>
@@ -1734,19 +1801,21 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                 })
               }
               {isAdmin && (
-                <div style={{ marginTop: 16, paddingTop: 16, borderTop: `0.5px solid ${UI.hair}` }}>
+                <div style={{ marginTop: 16, paddingTop: 16, borderTop: `var(--hair-width) solid ${UI.hair}` }}>
                   <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>ACCESS</div>
                   {activeGrants.length === 0 && <div className="micro" style={{ color: UI.inkGhost, marginBottom: 8 }}>No other users have access yet.</div>}
-                  {activeGrants.map(email => (
-                    <div key={email} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 0', borderBottom: `0.5px solid ${UI.hair}` }}>
-                      <span style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi }}>{email}</span>
-                      <button onClick={() => removeGrant(email)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: UI.danger, fontSize: 18, lineHeight: 1, padding: '0 2px' }}>×</button>
-                    </div>
-                  ))}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {activeGrants.map(email => (
+                      <div key={email} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 10px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6 }}>
+                        <span style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi }}>{email}</span>
+                        <button onClick={() => removeGrant(email)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: UI.danger, fontSize: 18, lineHeight: 1, padding: '0 2px' }}>×</button>
+                      </div>
+                    ))}
+                  </div>
                   <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
                     <input value={newGrantEmail} onChange={e => setNewGrantEmail(e.target.value)} onKeyDown={e => e.key === 'Enter' && addGrant()} placeholder="email@example.com"
-                      style={{ flex: 1, background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '7px 10px', color: UI.ink, fontFamily: UI.fontUi, fontSize: 13, outline: 'none' }} />
-                    <button onClick={addGrant} disabled={!newGrantEmail.includes('@')} style={{ padding: '7px 14px', borderRadius: 4, border: 'none', cursor: 'pointer', background: newGrantEmail.includes('@') ? UI.gold : UI.bgInset, color: newGrantEmail.includes('@') ? '#0a0805' : UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600 }}>Add</button>
+                      style={{ flex: 1, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4, padding: '7px 10px', color: UI.ink, fontFamily: UI.fontUi, fontSize: 13, outline: 'none' }} />
+                    <button onClick={addGrant} disabled={!newGrantEmail.includes('@')} style={{ padding: '7px 14px', borderRadius: 4, border: 'none', cursor: 'pointer', background: newGrantEmail.includes('@') ? UI.gold : UI.bgInset, color: newGrantEmail.includes('@') ? 'var(--accent-ink)' : UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, textShadow: 'none' }}>Add</button>
                   </div>
                 </div>
               )}
@@ -1808,13 +1877,13 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       <SettingsSheet open={glucoseSheet} onClose={() => setGlucoseSheet(false)} title="Glucose">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
           <Row label="Blood glucose unit" first>
-            <div style={{ display: 'flex', gap: 0, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, overflow: 'hidden' }}>
+            <div style={{ display: 'flex', gap: 0, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, overflow: 'hidden' }}>
               {['mmol', 'mgdl'].map(u => (
                 <button key={u} onClick={() => setStore(s => ({ ...s, settings: { ...s.settings, glucoseUnit: u } }))}
                   style={{ padding: '5px 12px', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600,
                     background: (store.settings?.glucoseUnit ?? 'mmol') === u ? 'var(--accent)' : 'transparent',
-                    color: (store.settings?.glucoseUnit ?? 'mmol') === u ? '#0a0805' : UI.inkSoft,
-                    border: 'none', cursor: 'pointer', transition: 'background 0.15s' }}>
+                    color: (store.settings?.glucoseUnit ?? 'mmol') === u ? 'var(--accent-ink)' : UI.inkSoft,
+                    border: 'none', cursor: 'pointer', transition: 'background 0.15s', textShadow: (store.settings?.glucoseUnit ?? 'mmol') === u ? 'none' : 'var(--text-lift)' }}>
                   {u === 'mmol' ? 'mmol/L' : 'mg/dL'}
                 </button>
               ))}
@@ -1833,13 +1902,13 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             Defaults to °F on Imperial, °C otherwise. Override it here if that's wrong for you.
           </div>
           <Row label="Body temperature unit" first>
-            <div style={{ display: 'flex', gap: 0, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, overflow: 'hidden' }}>
+            <div style={{ display: 'flex', gap: 0, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, overflow: 'hidden' }}>
               {['c', 'f'].map(u => (
                 <button key={u} onClick={() => setStore(s => ({ ...s, settings: { ...s.settings, tempUnit: u } }))}
                   style={{ padding: '5px 12px', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600,
                     background: LB.defaultTempUnit(store.settings) === u ? 'var(--accent)' : 'transparent',
-                    color: LB.defaultTempUnit(store.settings) === u ? '#0a0805' : UI.inkSoft,
-                    border: 'none', cursor: 'pointer', transition: 'background 0.15s' }}>
+                    color: LB.defaultTempUnit(store.settings) === u ? 'var(--accent-ink)' : UI.inkSoft,
+                    border: 'none', cursor: 'pointer', transition: 'background 0.15s', textShadow: LB.defaultTempUnit(store.settings) === u ? 'none' : 'var(--text-lift)' }}>
                   {u === 'c' ? '°C' : '°F'}
                 </button>
               ))}
@@ -1966,7 +2035,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                     </div>
                     {confirmDeletePeriodId === p.id && (
                       <div style={{ display: 'flex', gap: 8, paddingBottom: 14 }}>
-                        <button onClick={() => setConfirmDeletePeriodId(null)} style={{ flex: 1, padding: '11px', background: UI.bgRaised, border: `0.5px solid ${UI.hair}`, borderRadius: 6, cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, color: UI.inkFaint, WebkitTapHighlightColor: 'transparent' }}>Cancel</button>
+                        <button onClick={() => setConfirmDeletePeriodId(null)} style={{ flex: 1, padding: '11px', background: UI.bgRaised, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6, cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, color: UI.inkFaint, WebkitTapHighlightColor: 'transparent', textShadow: 'none' }}>Cancel</button>
                         <button onClick={() => deletePeriod(p.id)} style={{ flex: 1, padding: '11px', background: 'rgba(var(--danger-rgb),0.12)', border: '0.5px solid rgba(var(--danger-rgb),0.4)', borderRadius: 6, cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, color: UI.danger, WebkitTapHighlightColor: 'transparent' }}>Delete</button>
                       </div>
                     )}
@@ -1974,7 +2043,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                 );
               })}
               {!showAllPeriods && allPeriods.length > PREVIEW && (
-                <button onClick={() => setShowAllPeriods(true)} style={{ width: '100%', marginTop: 8, padding: '7px 0', background: 'none', border: `0.5px solid ${UI.hair}`, borderRadius: 4, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11, cursor: 'pointer', WebkitTapHighlightColor: 'transparent', letterSpacing: '0.04em' }}>
+                <button onClick={() => setShowAllPeriods(true)} style={{ width: '100%', marginTop: 8, padding: '7px 0', background: 'none', border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 4, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11, cursor: 'pointer', WebkitTapHighlightColor: 'transparent', letterSpacing: '0.04em' }}>
                   Show all ({allPeriods.length})
                 </button>
               )}
@@ -1992,39 +2061,14 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       {/* ══ Account Sheet ══ */}
       <SettingsSheet open={accountSheet} onClose={() => setAccountSheet(false)} title="Account">
         <div>
-          {isQsUser && (
-            <>
-              <div className="micro" style={{ marginBottom: 10 }}>Quick switch</div>
-              <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
-                <div style={{ flex: 1, background: `linear-gradient(135deg, rgba(var(--accent-rgb),0.10), rgba(var(--accent-rgb),0.03))`, border: `0.5px solid ${UI.goldSoft}`, borderRadius: 6, padding: '10px 12px' }}>
-                  <div className="micro-gold" style={{ marginBottom: 4 }}>Active</div>
-                  <div style={{ fontFamily: UI.fontDisplay, fontSize: 18, color: UI.ink, lineHeight: 1.1 }}>{currentName}</div>
-                </div>
-                <button disabled={qsSwitching} onClick={async () => {
-                  if (hasQsSession) { setQsSwitching(true); try { await LB.quickSwitch(otherQsEmail); window.location.reload(); } catch (e) { setQsSwitching(false); } }
-                  else { const ok = await confirm(`You'll be signed out so ${otherName} can log in.`, { title: 'Set up quick switch?', ok: 'Sign out' }); if (ok) { await flushBeforeSignOut(userId); await LB.signOut(); } }
-                }} style={{ flex: 1, background: 'transparent', border: `0.5px solid ${hasQsSession ? UI.hair : UI.hairStrong}`, borderRadius: 6, padding: '10px 12px', textAlign: 'left', cursor: qsSwitching ? 'default' : 'pointer', WebkitTapHighlightColor: 'transparent', opacity: qsSwitching ? 0.5 : 1 }}>
-                  <div className="micro" style={{ marginBottom: 4, color: hasQsSession ? UI.inkFaint : 'rgba(var(--danger-rgb),0.7)' }}>{qsSwitching ? 'Switching…' : hasQsSession ? 'Tap to switch' : 'Log in first'}</div>
-                  <div style={{ fontFamily: UI.fontDisplay, fontSize: 18, color: hasQsSession ? UI.inkSoft : UI.inkFaint, lineHeight: 1.1 }}>{otherName}</div>
-                </button>
-              </div>
-              <Hairline style={{ marginBottom: 14 }} />
-            </>
-          )}
-          {''}
           <Row label="Push notifications" first>
             <button style={accentBtn} onClick={() => setPushSheet(true)}>Configure</button>
           </Row>
-          <Hairline style={{ margin: '14px 0' }} />
           {typeof window !== 'undefined' && window.PublicKeyCredential && (
-            <>
-              <NavRow label="Passkeys" onTap={() => setPasskeySheet(true)} first />
-              <Hairline style={{ margin: '14px 0' }} />
-            </>
+            <NavRow label="Passkeys" onTap={() => setPasskeySheet(true)} />
           )}
-          <NavRow label="Change password" onTap={() => { setPwMsg(null); setPwCurrent(''); setPwNew(''); setPwConfirm(''); setShowPw(false); setChangePasswordSheet(true); }} first />
-          <Hairline style={{ margin: '14px 0' }} />
-          <NavRow label="Change email" onTap={() => { setEmailMsg(null); setEmailNew(''); setChangeEmailSheet(true); }} first />
+          <NavRow label="Change password" onTap={() => { setPwMsg(null); setPwCurrent(''); setPwNew(''); setPwConfirm(''); setShowPw(false); setChangePasswordSheet(true); }} />
+          <NavRow label="Change email" onTap={() => { setEmailMsg(null); setEmailNew(''); setChangeEmailSheet(true); }} />
           <div style={{ marginTop: 24 }}>
             <Btn style={{ width: '100%' }} onClick={() => setAccountSheet(false)}>Done</Btn>
           </div>
@@ -2062,7 +2106,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                 )}
               </div>
               {pwMsg && (
-                <div style={{ fontSize: 12, color: pwMsg.ok ? 'var(--accent)' : UI.danger, fontFamily: UI.fontUi, padding: '8px 12px', background: pwMsg.ok ? 'rgba(var(--accent-rgb),0.08)' : 'rgba(var(--danger-rgb),0.08)', borderRadius: 6 }}>
+                <div style={{ fontSize: 12, color: pwMsg.ok ? 'var(--accent)' : UI.danger, fontFamily: UI.fontUi, padding: '8px 12px', background: pwMsg.ok ? 'rgba(var(--accent-rgb),0.16)' : 'rgba(var(--danger-rgb),0.08)', borderRadius: 6 }}>
                   {pwMsg.text}
                 </div>
               )}
@@ -2089,7 +2133,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                 <input type="email" value={emailNew} onChange={e => setEmailNew(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleChangeEmail()} placeholder="new@example.com" style={iStyle} autoComplete="email" autoCapitalize="none" spellCheck={false} />
               </div>
               {emailMsg && (
-                <div style={{ fontSize: 12, color: emailMsg.ok ? 'var(--accent)' : UI.danger, fontFamily: UI.fontUi, padding: '8px 12px', background: emailMsg.ok ? 'rgba(var(--accent-rgb),0.08)' : 'rgba(var(--danger-rgb),0.08)', borderRadius: 6, lineHeight: 1.55 }}>
+                <div style={{ fontSize: 12, color: emailMsg.ok ? 'var(--accent)' : UI.danger, fontFamily: UI.fontUi, padding: '8px 12px', background: emailMsg.ok ? 'rgba(var(--accent-rgb),0.16)' : 'rgba(var(--danger-rgb),0.08)', borderRadius: 6, lineHeight: 1.55 }}>
                   {emailMsg.text}
                 </div>
               )}
@@ -2210,7 +2254,23 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             })}
           </div>
           <div className="knurl" style={{ marginBottom: 14 }} />
-          <div className="micro" style={{ marginBottom: 10 }}>Watermark opacity</div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+            <span className="micro">Watermark opacity</span>
+            {store.settings?.watermarkOpacity != null && (
+              <button onClick={() => {
+                // Clears the explicit override so it falls back to the
+                // per-theme/per-image default again (same formula the initial
+                // slider position and screens-home.jsx's render both use).
+                const def = store.settings?.vipBackground ? 16 : darkMode === 'paper' ? 16 : darkMode === 'light' ? 14 : (gridEnabled ? 12 : 4);
+                setWatermarkOpacityPct(def);
+                setStore(s => ({ ...s, settings: { ...s.settings, watermarkOpacity: null } }));
+              }} style={{
+                background: 'none', border: 'none', cursor: 'pointer', padding: '2px 4px',
+                color: UI.gold, fontFamily: UI.fontUi, fontSize: 10, fontWeight: 600,
+                letterSpacing: '0.1em', textTransform: 'uppercase', WebkitTapHighlightColor: 'transparent',
+              }}>Reset</button>
+            )}
+          </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
             <input type="range" min="0" max="100" step="1" value={watermarkOpacityPct}
               onChange={e => {
@@ -2218,7 +2278,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                 setWatermarkOpacityPct(v);
                 setStore(s => ({ ...s, settings: { ...s.settings, watermarkOpacity: v } }));
               }}
-              style={{ flex: 1, accentColor: 'var(--accent)' }} />
+              style={{ flex: 1, background: `linear-gradient(to right, var(--accent) ${watermarkOpacityPct}%, var(--range-track) ${watermarkOpacityPct}%)` }} />
             <span className="num" style={{ fontSize: 13, color: UI.inkSoft, minWidth: 32, textAlign: 'right' }}>{watermarkOpacityPct}%</span>
           </div>
           <div style={{ fontFamily: UI.fontUi, fontSize: 10.5, color: UI.inkGhost, marginBottom: 14, lineHeight: 1.4 }}>
@@ -2229,17 +2289,35 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           </Row>
           <Row label="Theme">
             <div style={{ display: 'flex', gap: 4 }}>
-              {[['dark', 'Dark'], ['black', 'OLED'], ['light', 'Light']].map(([key, label]) => (
+              {[['dark', 'Dark'], ['black', 'OLED'], ['light', 'Light'], ['paper', 'Paper']].map(([key, label]) => (
                 <button key={key} onClick={() => { setDarkMode(key); localStorage.setItem('logbook-dark-mode', key); window.applyDarkMode(key); setStore(s => ({ ...s, settings: { ...s.settings, darkMode: key } })); }} style={{
                   padding: '6px 11px', borderRadius: 4, cursor: 'pointer',
                   background: darkMode === key ? UI.goldFaint : UI.bgInset,
                   border: `1px solid ${darkMode === key ? UI.goldSoft : UI.hairStrong}`,
                   color: darkMode === key ? UI.gold : UI.inkSoft,
                   fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
+                  textShadow: 'none',
                 }}>{label}</button>
               ))}
             </div>
           </Row>
+          <Row label="Grid">
+            <Toggle on={gridEnabled} onToggle={() => {
+              const n = !gridEnabled;
+              setGridEnabled(n);
+              window.applyGridPreference(n);
+            }} />
+          </Row>
+          {darkMode === 'paper' && (
+            <Row label="Full accent color in Paper">
+              <Toggle on={paperAccentEnabled} onToggle={() => {
+                const n = !paperAccentEnabled;
+                setPaperAccentEnabled(n);
+                localStorage.setItem('logbook-paper-accent-enabled', String(n));
+                window.applyAccentColor(store.settings?.accentColor || 'gold');
+              }} />
+            </Row>
+          )}
           <Row label="Unit preference">
             <button style={accentBtn} onClick={() => setUnitPickerOpen(true)}>
               {store.settings?.unit === 'lbs' ? 'Imperial' : store.settings?.unit === 'mixed' ? 'Mixed' : 'Metric'}
@@ -2258,7 +2336,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             <Btn kind="ghost" onClick={() => exportData()} style={{ flex: 1 }}>Export JSON</Btn>
             <Btn kind="ghost" onClick={() => setImportSheet(true)} disabled={importing} style={{ flex: 1 }}>{importing ? 'Importing…' : 'Import JSON'}</Btn>
           </div>
-          <Btn kind="ghost" onClick={handleDeleteAll} style={{ color: UI.danger, borderColor: 'rgba(var(--danger-rgb),0.2)' }}>Delete all data</Btn>
+          <Btn kind="ghost" onClick={handleDeleteAll} style={{ color: UI.danger, background: 'rgba(var(--danger-rgb),0.08)', borderColor: 'rgba(var(--danger-rgb),calc(0.2 * var(--danger-border-boost)))' }}>Delete all data</Btn>
         </div>
       </SettingsSheet>
 
@@ -2286,7 +2364,8 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                   <button key={u} onClick={() => setImportSourceUnit(u)} style={{
                     padding: '3px 10px', borderRadius: 4, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600,
                     background: importSourceUnit === u ? 'var(--accent)' : UI.bgInset,
-                    color: importSourceUnit === u ? '#0a0805' : UI.inkSoft,
+                    color: importSourceUnit === u ? 'var(--accent-ink)' : UI.inkSoft,
+                    textShadow: 'none',
                   }}>{u.toUpperCase()}</button>
                 ))}
               </div>
@@ -2406,7 +2485,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       {/* ══ Equipment config sheet ══ */}
       <SettingsSheet open={progConfigOpen} onClose={() => setProgConfigOpen(false)} title="Equipment setup">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginBottom: 20 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 80px 72px', gap: 8, padding: '0 4px 8px', borderBottom: `0.5px solid ${UI.hair}` }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 80px 72px', gap: 8, padding: '0 4px 8px', borderBottom: `var(--hair-width) solid ${UI.hair}` }}>
             <span className="micro">Equipment</span>
             <span className="micro" style={{ textAlign: 'center' }}>Increment</span>
             <span className="micro" style={{ textAlign: 'center' }}>Max {UI.unit()}</span>
@@ -2415,21 +2494,21 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             const cfg = store.settings?.equipmentConfig?.[key] ?? {};
             const setField = (field, val) => setStore(s => ({ ...s, settings: { ...s.settings, equipmentConfig: { ...s.settings?.equipmentConfig, [key]: { ...(s.settings?.equipmentConfig?.[key] ?? {}), [field]: val } } } }));
             return (
-              <div key={key} style={{ display: 'grid', gridTemplateColumns: '1fr 80px 72px', gap: 8, alignItems: 'center', padding: '10px 4px', borderBottom: `0.5px solid ${UI.hair}` }}>
+              <div key={key} style={{ display: 'grid', gridTemplateColumns: '1fr 80px 72px', gap: 8, alignItems: 'center', padding: '10px 4px', borderBottom: `var(--hair-width) solid ${UI.hair}` }}>
                 <span style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi }}>{label}</span>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 4, background: UI.bgInset, borderRadius: 4, padding: '6px 8px', border: `1px solid ${UI.hair}` }}>
-                  <NumInput value={cfg.increment ?? null} placeholder="—" onChange={v => setField('increment', v)} style={{ fontSize: 13, width: '100%' }} />
+                  <NumInput value={cfg.increment ?? null} placeholder="Default" onChange={v => setField('increment', v)} style={{ fontSize: 13, width: '100%' }} positiveOnly />
                   <span className="micro" style={{ flexShrink: 0 }}>{UI.unit()}</span>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 4, background: UI.bgInset, borderRadius: 4, padding: '6px 8px', border: `1px solid ${UI.hair}` }}>
-                  <NumInput value={cfg.maxKg ?? null} placeholder="—" onChange={v => setField('maxKg', v)} style={{ fontSize: 13, width: '100%' }} />
+                  <NumInput value={cfg.maxKg ?? null} placeholder="Default" onChange={v => setField('maxKg', v)} style={{ fontSize: 13, width: '100%' }} />
                   <span className="micro" style={{ flexShrink: 0 }}>{UI.unit()}</span>
                 </div>
               </div>
             );
           })}
         </div>
-        <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.6, marginBottom: 16 }}>Set equipment categories on exercises in the exercise library. Individual overrides can be set per exercise.</div>
+        <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.6, marginBottom: 16 }}>Set equipment categories on exercises in the exercise library. Need one exercise to step differently from the rest of its category? Set a Progression increment on that exercise's Edit screen to override this.</div>
         <Btn style={{ width: '100%' }} onClick={() => setProgConfigOpen(false)}>Done</Btn>
       </SettingsSheet>
 
@@ -2440,9 +2519,10 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             <button key={u} onClick={() => setPlateInvTab(i)} style={{
               flex: 1, padding: '8px 0', borderRadius: 4, border: 'none', cursor: 'pointer',
               background: plateInvTab === i ? 'var(--accent)' : 'transparent',
-              color: plateInvTab === i ? '#0a0805' : UI.inkFaint,
+              color: plateInvTab === i ? 'var(--accent-ink)' : UI.inkFaint,
               fontFamily: UI.fontUi, fontSize: 12, letterSpacing: '0.06em',
               fontWeight: plateInvTab === i ? 600 : 400, transition: 'all 0.15s',
+              textShadow: 'none',
             }}>{u.toUpperCase()}</button>
           ))}
         </div>
@@ -2539,7 +2619,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                 <NavRow label="Message all users" onTap={() => { setBroadcastMsg(null); setBroadcastSheet(true); }} />
                 <NavRow label="Update tools" onTap={() => setUpdateToolsSheet(true)} />
               </Frame>
-              <div style={{ borderTop: `0.5px solid ${UI.hair}`, paddingTop: 16 }}>
+              <div style={{ borderTop: `var(--hair-width) solid ${UI.hair}`, paddingTop: 16 }}>
                 <Btn onClick={() => setSupportInboxSheet(true)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, width: '100%', fontSize: 15, padding: '14px 16px' }}>
                   Support inbox
                   {adminUnread > 0 && (
@@ -2565,12 +2645,12 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             rows={5}
             style={{
               width: '100%', boxSizing: 'border-box', resize: 'vertical',
-              background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4,
+              background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4,
               padding: '10px 12px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, outline: 'none',
             }}
           />
           {broadcastMsg && (
-            <div style={{ fontSize: 12, color: broadcastMsg.ok ? 'var(--accent)' : UI.danger, fontFamily: UI.fontUi, padding: '8px 12px', background: broadcastMsg.ok ? 'rgba(var(--accent-rgb),0.08)' : 'rgba(var(--danger-rgb),0.08)', borderRadius: 6 }}>
+            <div style={{ fontSize: 12, color: broadcastMsg.ok ? 'var(--accent)' : UI.danger, fontFamily: UI.fontUi, padding: '8px 12px', background: broadcastMsg.ok ? 'rgba(var(--accent-rgb),0.16)' : 'rgba(var(--danger-rgb),0.08)', borderRadius: 6 }}>
               {broadcastMsg.text}
             </div>
           )}
@@ -2622,7 +2702,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                   ))}
                 </select>
                 {vipBgMsg && (
-                  <div style={{ fontSize: 12, color: vipBgMsg.ok ? 'var(--accent)' : UI.danger, fontFamily: UI.fontUi, padding: '8px 12px', background: vipBgMsg.ok ? 'rgba(var(--accent-rgb),0.08)' : 'rgba(var(--danger-rgb),0.08)', borderRadius: 6 }}>
+                  <div style={{ fontSize: 12, color: vipBgMsg.ok ? 'var(--accent)' : UI.danger, fontFamily: UI.fontUi, padding: '8px 12px', background: vipBgMsg.ok ? 'rgba(var(--accent-rgb),0.16)' : 'rgba(var(--danger-rgb),0.08)', borderRadius: 6 }}>
                     {vipBgMsg.text}
                   </div>
                 )}
@@ -2646,16 +2726,16 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             return <div className="micro" style={{ color: UI.inkGhost, padding: '4px 0 12px' }}>No backgrounds assigned yet.</div>;
           }
           return (
-            <div style={{ display: 'flex', flexDirection: 'column', paddingBottom: 8 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingBottom: 8 }}>
               {vipBgList.map((row, i) => {
                 const opt = opts.find(o => o.key === row.bg_key);
                 return (
-                  <div key={row.email} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '10px 0', borderTop: i > 0 ? `0.5px solid ${UI.hair}` : 'none' }}>
+                  <div key={row.email} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '10px 12px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6 }}>
                     <div style={{ minWidth: 0 }}>
                       <div style={{ fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.email}</div>
                       <div style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginTop: 1 }}>{opt?.label || row.bg_key}</div>
                     </div>
-                    <button onClick={() => { setVipBgEmail(row.email); setVipBgKey(''); setVipBgMsg(null); setVipBgListSheet(false); }} style={{ background: 'none', border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '4px 10px', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11, cursor: 'pointer', flexShrink: 0, WebkitTapHighlightColor: 'transparent' }}>
+                    <button onClick={() => { setVipBgEmail(row.email); setVipBgKey(''); setVipBgMsg(null); setVipBgListSheet(false); }} style={{ background: 'none', border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4, padding: '4px 10px', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11, cursor: 'pointer', flexShrink: 0, WebkitTapHighlightColor: 'transparent' }}>
                       Clear
                     </button>
                   </div>
@@ -2719,10 +2799,10 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                         <button key={c.key} onClick={() => setSupportCategoryDraft(c.key)} style={{
                           flex: 1, padding: '8px 4px', borderRadius: 6, cursor: 'pointer',
                           border: `0.5px solid ${supportCategoryDraft === c.key ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong}`,
-                          background: supportCategoryDraft === c.key ? 'rgba(var(--accent-rgb),0.1)' : UI.bgInset,
+                          background: supportCategoryDraft === c.key ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
                           color: supportCategoryDraft === c.key ? 'var(--accent)' : UI.inkFaint,
                           fontFamily: UI.fontUi, fontSize: 10, fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase',
-                          WebkitTapHighlightColor: 'transparent', textAlign: 'center',
+                          WebkitTapHighlightColor: 'transparent', textAlign: 'center', textShadow: supportCategoryDraft === c.key ? 'var(--text-lift)' : 'none',
                         }}>
                           <i className={`fa-solid ${c.icon}`} style={{ display: 'block', fontSize: 14, marginBottom: 4 }} />
                           {c.label}
@@ -2732,18 +2812,18 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                   </div>
                 </div>
                 {/* sticky compose at bottom */}
-                <div style={{ flexShrink: 0, borderTop: `0.5px solid ${UI.hair}`, padding: '14px 20px', paddingBottom: 'calc(env(safe-area-inset-bottom, 8px) + 14px)', display: 'flex', flexDirection: 'column', gap: 8, background: UI.bgRaised }}>
+                <div style={{ flexShrink: 0, borderTop: `var(--hair-width) solid ${UI.hair}`, padding: '14px 20px', paddingBottom: 'calc(env(safe-area-inset-bottom, 8px) + 14px)', display: 'flex', flexDirection: 'column', gap: 8, background: UI.bgRaised }}>
                   {supportImagePreview && (
                     <div style={{ position: 'relative', display: 'inline-block', alignSelf: 'flex-start' }}>
                       <img src={supportImagePreview} alt="" style={{ maxHeight: 100, maxWidth: 160, borderRadius: 6, display: 'block', objectFit: 'cover' }} />
-                      <button onClick={() => { setSupportImageFile(null); setSupportImagePreview(null); }} style={{ position: 'absolute', top: -6, right: -6, width: 20, height: 20, borderRadius: '50%', background: UI.inkSoft, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 11 }}>×</button>
+                      <button onClick={() => { setSupportImageFile(null); setSupportImagePreview(null); }} style={{ position: 'absolute', top: -6, right: -6, width: 20, height: 20, borderRadius: '50%', background: UI.inkSoft, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 11, textShadow: 'none' }}>×</button>
                     </div>
                   )}
                   <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
                     <textarea value={supportDraft} onChange={e => setSupportDraft(e.target.value)}
                       onPaste={onPasteSupportMessage}
                       placeholder="Describe your request…" rows={4} style={{ ...iStyle, flex: 1 }} />
-                    <label style={{ cursor: 'pointer', flexShrink: 0, width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 6, background: supportImageFile ? 'rgba(var(--accent-rgb),0.15)' : UI.bgInset, border: `0.5px solid ${supportImageFile ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong}`, color: supportImageFile ? 'var(--accent)' : UI.inkFaint }}>
+                    <label style={{ cursor: 'pointer', flexShrink: 0, width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 6, background: supportImageFile ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset, border: `0.5px solid ${supportImageFile ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong}`, color: supportImageFile ? 'var(--accent)' : UI.inkFaint }}>
                       <input type="file" accept="image/*" style={{ display: 'none' }} onChange={handleImagePick} />
                       <i className="fa-solid fa-image" style={{ fontSize: 15 }} />
                     </label>
@@ -2763,7 +2843,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             return (
               <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
                 {/* Header row */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 20px', borderBottom: `0.5px solid ${UI.hair}`, flexShrink: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 20px', borderBottom: `var(--hair-width) solid ${UI.hair}`, flexShrink: 0 }}>
                   <button onClick={() => { setSupportView('list'); setSupportActiveTicketId(null); setSupportDraft(''); }}
                     style={{ background: 'none', border: 'none', cursor: 'pointer', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13, padding: 0, flexShrink: 0, WebkitTapHighlightColor: 'transparent' }}>
                     ← Back
@@ -2808,11 +2888,11 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                 </div>
                 {/* Compose — sticks to bottom */}
                 {activeTicket?.status !== 'resolved' ? (
-                  <div style={{ flexShrink: 0, borderTop: `0.5px solid ${UI.hair}`, padding: '14px 20px', paddingBottom: 'calc(env(safe-area-inset-bottom, 8px) + 14px)', display: 'flex', flexDirection: 'column', gap: 8, background: UI.bgRaised }}>
+                  <div style={{ flexShrink: 0, borderTop: `var(--hair-width) solid ${UI.hair}`, padding: '14px 20px', paddingBottom: 'calc(env(safe-area-inset-bottom, 8px) + 14px)', display: 'flex', flexDirection: 'column', gap: 8, background: UI.bgRaised }}>
                     {supportImagePreview && (
                       <div style={{ position: 'relative', display: 'inline-block', alignSelf: 'flex-start' }}>
                         <img src={supportImagePreview} alt="" style={{ maxHeight: 100, maxWidth: 160, borderRadius: 6, display: 'block', objectFit: 'cover' }} />
-                        <button onClick={() => { setSupportImageFile(null); setSupportImagePreview(null); }} style={{ position: 'absolute', top: -6, right: -6, width: 20, height: 20, borderRadius: '50%', background: UI.inkSoft, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 11 }}>×</button>
+                        <button onClick={() => { setSupportImageFile(null); setSupportImagePreview(null); }} style={{ position: 'absolute', top: -6, right: -6, width: 20, height: 20, borderRadius: '50%', background: UI.inkSoft, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 11, textShadow: 'none' }}>×</button>
                       </div>
                     )}
                     <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
@@ -2820,7 +2900,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                         placeholder="Write a message…" rows={3} style={{ ...iStyle, flex: 1 }}
                         onPaste={onPasteSupportMessage}
                         onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleSupportSend(); }} />
-                      <label style={{ cursor: 'pointer', flexShrink: 0, width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 6, background: supportImageFile ? 'rgba(var(--accent-rgb),0.15)' : UI.bgInset, border: `0.5px solid ${supportImageFile ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong}`, color: supportImageFile ? 'var(--accent)' : UI.inkFaint }}>
+                      <label style={{ cursor: 'pointer', flexShrink: 0, width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 6, background: supportImageFile ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset, border: `0.5px solid ${supportImageFile ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong}`, color: supportImageFile ? 'var(--accent)' : UI.inkFaint }}>
                         <input type="file" accept="image/*" style={{ display: 'none' }} onChange={handleImagePick} />
                         <i className="fa-solid fa-image" style={{ fontSize: 15 }} />
                       </label>
@@ -2830,7 +2910,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                     </Btn>
                   </div>
                 ) : (
-                  <div style={{ flexShrink: 0, borderTop: `0.5px solid ${UI.hair}`, padding: '14px 20px', fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, textAlign: 'center', lineHeight: 1.5 }}>
+                  <div style={{ flexShrink: 0, borderTop: `var(--hair-width) solid ${UI.hair}`, padding: '14px 20px', fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, textAlign: 'center', lineHeight: 1.5 }}>
                     This ticket is resolved. Go back to open a new one.
                   </div>
                 )}
@@ -2847,7 +2927,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           const renderTicket = t => (
             <button key={t.coachingId}
               onClick={() => { setSupportActiveTicketId(t.coachingId); setSupportView('thread'); }}
-              style={{ width: '100%', background: UI.bgRaised, border: `0.5px solid ${UI.hair}`, borderLeft: `3px solid ${statusBorder[t.status] || UI.hairStrong}`, borderRadius: 8, padding: '11px 14px', textAlign: 'left', cursor: 'pointer', WebkitTapHighlightColor: 'transparent', display: 'flex', flexDirection: 'column', gap: 5 }}>
+              style={{ width: '100%', background: UI.bgRaised, border: `var(--hair-width) solid ${UI.hair}`, borderLeft: `3px solid ${statusBorder[t.status] || UI.hairStrong}`, borderRadius: 8, padding: '11px 14px', textAlign: 'left', cursor: 'pointer', WebkitTapHighlightColor: 'transparent', display: 'flex', flexDirection: 'column', gap: 5, textShadow: 'none' }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   <span className="micro" style={{ color: statusBorder[t.status] || UI.inkFaint }}>{statusLabel[t.status] || t.status}</span>
@@ -2904,12 +2984,12 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
               { key: 'resolved',    label: 'Resolved' },
             ];
             const sColor = { open: UI.danger, in_progress: UI.inkFaint, resolved: 'var(--accent)' };
-            const sBg    = { open: 'rgba(var(--danger-rgb),0.12)', in_progress: UI.bgInset, resolved: 'rgba(var(--accent-rgb),0.1)' };
+            const sBg    = { open: 'rgba(var(--danger-rgb),0.18)', in_progress: UI.bgInset, resolved: 'rgba(var(--accent-rgb),0.22)' };
             const currentStatus = supportInbox.find(t => t.coaching_id === supportTicket.coachingId)?.support_status || supportTicket.status || 'open';
             return (
               <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
                 {/* Back + meta */}
-                <div style={{ padding: '12px 20px', borderBottom: `0.5px solid ${UI.hair}`, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{ padding: '12px 20px', borderBottom: `var(--hair-width) solid ${UI.hair}`, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10 }}>
                   <button onClick={() => { setSupportTicket(null); setSupportAdminDraft(''); }}
                     style={{ background: 'none', border: 'none', cursor: 'pointer', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13, padding: 0, flexShrink: 0, WebkitTapHighlightColor: 'transparent' }}>
                     ← Back
@@ -2918,7 +2998,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                   {supportTicket.category && <span className="micro" style={{ color: UI.inkFaint }}>· {CATS[supportTicket.category] || supportTicket.category}</span>}
                 </div>
                 {/* Status picker */}
-                <div style={{ display: 'flex', gap: 6, padding: '12px 20px', flexShrink: 0, borderBottom: `0.5px solid ${UI.hair}` }}>
+                <div style={{ display: 'flex', gap: 6, padding: '12px 20px', flexShrink: 0, borderBottom: `var(--hair-width) solid ${UI.hair}` }}>
                   {STATUSES.map(s => (
                     <button key={s.key} onClick={() => handleSetSupportStatus(supportTicket.coachingId, s.key)} style={{
                       flex: 1, padding: '7px 4px', borderRadius: 6, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
@@ -2926,6 +3006,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                       background: currentStatus === s.key ? sBg[s.key] : 'transparent',
                       color: currentStatus === s.key ? sColor[s.key] : UI.inkFaint,
                       fontFamily: UI.fontUi, fontSize: 10, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
+                      textShadow: (currentStatus === s.key && s.key === 'in_progress') ? 'none' : 'var(--text-lift)',
                     }}>{s.label}</button>
                   ))}
                 </div>
@@ -2965,11 +3046,11 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                   <div ref={adminBottomRef} />
                 </div>
                 {/* Compose — sticks to bottom */}
-                <div style={{ flexShrink: 0, borderTop: `0.5px solid ${UI.hair}`, padding: '14px 20px', paddingBottom: 'calc(env(safe-area-inset-bottom, 8px) + 14px)', display: 'flex', flexDirection: 'column', gap: 8, background: UI.bgRaised }}>
+                <div style={{ flexShrink: 0, borderTop: `var(--hair-width) solid ${UI.hair}`, padding: '14px 20px', paddingBottom: 'calc(env(safe-area-inset-bottom, 8px) + 14px)', display: 'flex', flexDirection: 'column', gap: 8, background: UI.bgRaised }}>
                   {adminImagePreview && (
                     <div style={{ position: 'relative', display: 'inline-block', alignSelf: 'flex-start' }}>
                       <img src={adminImagePreview} alt="" style={{ maxHeight: 100, maxWidth: 160, borderRadius: 6, display: 'block', objectFit: 'cover' }} />
-                      <button onClick={() => { setAdminImageFile(null); setAdminImagePreview(null); }} style={{ position: 'absolute', top: -6, right: -6, width: 20, height: 20, borderRadius: '50%', background: UI.inkSoft, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 11 }}>×</button>
+                      <button onClick={() => { setAdminImageFile(null); setAdminImagePreview(null); }} style={{ position: 'absolute', top: -6, right: -6, width: 20, height: 20, borderRadius: '50%', background: UI.inkSoft, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 11, textShadow: 'none' }}>×</button>
                     </div>
                   )}
                   <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
@@ -2978,7 +3059,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                       onPaste={onPasteAdminMessage}
                       onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleAdminReply(); }}
                     />
-                    <label style={{ cursor: 'pointer', flexShrink: 0, width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 6, background: adminImageFile ? 'rgba(var(--accent-rgb),0.15)' : UI.bgInset, border: `0.5px solid ${adminImageFile ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong}`, color: adminImageFile ? 'var(--accent)' : UI.inkFaint }}>
+                    <label style={{ cursor: 'pointer', flexShrink: 0, width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 6, background: adminImageFile ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset, border: `0.5px solid ${adminImageFile ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong}`, color: adminImageFile ? 'var(--accent)' : UI.inkFaint }}>
                       <input type="file" accept="image/*" style={{ display: 'none' }} onChange={handleAdminImagePick} />
                       <i className="fa-solid fa-image" style={{ fontSize: 15 }} />
                     </label>
@@ -2999,7 +3080,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                       </Btn>
                     </div>
                   ) : (
-                    <Btn kind="ghost" onClick={() => setConfirmDeleteTicket(true)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7, color: 'rgba(var(--danger-rgb),0.7)', borderColor: 'rgba(var(--danger-rgb),0.25)' }}>
+                    <Btn kind="ghost" onClick={() => setConfirmDeleteTicket(true)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7, color: 'rgba(var(--danger-rgb),0.7)', background: 'rgba(var(--danger-rgb),0.08)', borderColor: 'rgba(var(--danger-rgb),calc(0.25 * var(--danger-border-boost)))' }}>
                       <i className="fa-solid fa-trash" style={{ fontSize: 12 }} /> Delete ticket
                     </Btn>
                   )}
@@ -3023,7 +3104,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                   <button key={f.key} onClick={() => setSupportCatFilter(f.key)} style={{
                     padding: '5px 14px', borderRadius: 999, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
                     border: `0.5px solid ${supportCatFilter === f.key ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong}`,
-                    background: supportCatFilter === f.key ? 'rgba(var(--accent-rgb),0.1)' : 'transparent',
+                    background: supportCatFilter === f.key ? 'rgba(var(--accent-rgb),0.18)' : 'transparent',
                     color: supportCatFilter === f.key ? 'var(--accent)' : UI.inkFaint,
                     fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600,
                   }}>{f.label}</button>
@@ -3040,7 +3121,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                   onClick={() => setSupportTicket({ coachingId: t.coaching_id, clientName: t.client_name, clientEmail: t.client_email, category: t.support_category, status: t.support_status })} />
               ))}
               {/* ── Archived section ── */}
-              <div style={{ borderTop: `0.5px solid ${UI.hair}`, marginTop: 4, paddingTop: 12 }}>
+              <div style={{ borderTop: `var(--hair-width) solid ${UI.hair}`, marginTop: 4, paddingTop: 12 }}>
                 <button onClick={async () => {
                   if (showArchived) { setShowArchived(false); return; }
                   setShowArchived(true);
@@ -3075,10 +3156,12 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       <SettingsSheet open={allUsersSheet} onClose={() => setAllUsersSheet(false)} title="All users">
         {(() => {
           const q = allUsersSearch.trim().toLowerCase();
+          const recentCutoff = Date.now() - 7 * 86400000;
           const filtered = allUsers.filter(u => {
             if (allUsersNewOnly && !isNewSignup(u)) return false;
             if (allUsersOnboardedOnly && !(u.plan_count > 0)) return false;
             if (allUsersOutdatedOnly && swVersion && u.sw_version === swVersion) return false;
+            if (allUsersRecentOnly && !(u.last_workout && new Date(u.last_workout).getTime() >= recentCutoff)) return false;
             if (!q) return true;
             return (u.name || '').toLowerCase().includes(q) || (u.email || '').toLowerCase().includes(q);
           });
@@ -3102,7 +3185,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                 value={allUsersSearch}
                 onChange={e => setAllUsersSearch(e.target.value)}
                 placeholder="Search by name or email…"
-                style={{ background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '10px 12px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, outline: 'none', width: '100%', boxSizing: 'border-box' }}
+                style={{ background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4, padding: '10px 12px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, outline: 'none', width: '100%', boxSizing: 'border-box' }}
               />
               <Frame style={{ padding: '0 14px' }}>
                 <Row label="New sign-ups only" first>
@@ -3110,6 +3193,9 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                 </Row>
                 <Row label="Onboarded only">
                   <Toggle on={allUsersOnboardedOnly} onToggle={() => setAllUsersOnboardedOnly(v => !v)} />
+                </Row>
+                <Row label="Trained in last 7 days">
+                  <Toggle on={allUsersRecentOnly} onToggle={() => setAllUsersRecentOnly(v => !v)} />
                 </Row>
                 <Row label="Outdated version only">
                   <Toggle on={allUsersOutdatedOnly} onToggle={() => setAllUsersOutdatedOnly(v => !v)} />
@@ -3132,13 +3218,13 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
               {filtered.length === 0 ? (
                 <div className="micro" style={{ color: UI.inkGhost, padding: '4px 0 12px' }}>No matching users.</div>
               ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', paddingBottom: 8 }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingBottom: 8 }}>
                   {filtered.map((u, i) => {
                     const isCurrent = swVersion && u.sw_version === swVersion;
                     const isNew = !seenSignups.has(u.user_id);
                     return (
-                      <div key={u.user_id} onClick={() => openUserDetail(u)} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 0', borderTop: i > 0 ? `0.5px solid ${UI.hair}` : 'none', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
-                        <div style={{ width: 34, height: 34, borderRadius: '50%', background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                      <div key={u.user_id} onClick={() => openUserDetail(u)} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 12px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+                        <div style={{ width: 34, height: 34, borderRadius: '50%', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                           <span style={{ fontFamily: UI.fontUi, fontSize: 14, fontWeight: 700, color: UI.inkSoft }}>{(u.name || u.email || '?')[0].toUpperCase()}</span>
                         </div>
                         <div style={{ flex: 1, minWidth: 0 }}>
@@ -3148,7 +3234,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                             {isNew && <span className="micro" style={{ flexShrink: 0, color: UI.gold }}>NEW</span>}
                           </div>
                           <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            {u.email} · joined {fmtAgo(u.created_at)} · {u.plan_count} {u.plan_count === 1 ? 'plan' : 'plans'}
+                            {u.plan_count} {u.plan_count === 1 ? 'plan' : 'plans'} · joined {fmtAgo(u.created_at)} · last workout {u.last_workout ? fmtAgo(u.last_workout) : 'never'}
                           </div>
                         </div>
                         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 5, flexShrink: 0 }}>
@@ -3182,7 +3268,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                   value={adminEmailSubject}
                   onChange={e => setAdminEmailSubject(e.target.value)}
                   placeholder="Subject"
-                  style={{ background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '10px 12px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, outline: 'none', width: '100%', boxSizing: 'border-box' }}
+                  style={{ background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4, padding: '10px 12px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, outline: 'none', width: '100%', boxSizing: 'border-box' }}
                 />
                 <textarea
                   value={adminEmailBody}
@@ -3191,12 +3277,12 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                   rows={5}
                   style={{
                     width: '100%', boxSizing: 'border-box', resize: 'vertical',
-                    background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4,
+                    background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4,
                     padding: '10px 12px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, outline: 'none',
                   }}
                 />
                 {adminEmailMsg && (
-                  <div style={{ fontSize: 12, color: adminEmailMsg.ok ? 'var(--accent)' : UI.danger, fontFamily: UI.fontUi, padding: '8px 12px', background: adminEmailMsg.ok ? 'rgba(var(--accent-rgb),0.08)' : 'rgba(var(--danger-rgb),0.08)', borderRadius: 6 }}>
+                  <div style={{ fontSize: 12, color: adminEmailMsg.ok ? 'var(--accent)' : UI.danger, fontFamily: UI.fontUi, padding: '8px 12px', background: adminEmailMsg.ok ? 'rgba(var(--accent-rgb),0.16)' : 'rgba(var(--danger-rgb),0.08)', borderRadius: 6 }}>
                     {adminEmailMsg.text}
                   </div>
                 )}
@@ -3208,11 +3294,11 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
               <div className="micro" style={{ color: UI.inkGhost, paddingBottom: 8 }}>PLANS</div>
               {(adminUserDetail.plans || []).length === 0
                 ? <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, fontStyle: 'italic' }}>No plans.</div>
-                : (adminUserDetail.plans || []).map((p, i) => {
+                : (adminUserDetail.plans || []).map((p, i, arr) => {
                     const isActive = p.id === adminUserDetail.activeScheduleId;
                     return (
                       <button key={p.id} onClick={() => { setAdminPlanDetail(p); setAdminPlanDetailSheet(true); }}
-                        style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 0', borderTop: i > 0 ? `0.5px solid ${UI.hair}` : 'none', background: 'none', border: 'none', width: '100%', textAlign: 'left', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+                        style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', marginBottom: i < arr.length - 1 ? 8 : 0, background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, width: '100%', textAlign: 'left', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                             <span style={{ fontSize: 13, color: p.archived ? UI.inkFaint : UI.ink, fontFamily: UI.fontUi, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</span>
@@ -3279,7 +3365,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                     <div className="display" style={{ fontSize: 30, color: isRest ? UI.inkSoft : UI.ink, fontStyle: isRest ? 'italic' : 'normal', lineHeight: 1.05, letterSpacing: '-0.01em' }}>{day.name}</div>
                   </div>
                   {isRest ? (
-                    <div style={{ background: UI.bgRaised, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: 36, textAlign: 'center' }}>
+                    <div style={{ background: UI.bgRaised, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, padding: 36, textAlign: 'center' }}>
                       <div className="display-it" style={{ fontSize: 32, color: UI.inkSoft, fontWeight: 300, marginBottom: 6 }}>Recover.</div>
                       <div style={{ fontSize: 13, color: UI.inkFaint }}>Recovery is part of the plan.</div>
                     </div>
@@ -3287,7 +3373,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                     const isUni = it.unilateral || it.movement_type === 'unilateral';
                     const isMob = it.movement_type === 'mobility';
                     return (
-                      <div key={it.exId || k} style={{ background: UI.bgRaised, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '12px 16px' }}>
+                      <div key={it.exId || k} style={{ background: UI.bgRaised, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, padding: '12px 16px' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
                           <div style={{ flex: 1, minWidth: 0 }}>
                             <span style={{ fontSize: 15, color: UI.ink, fontFamily: UI.fontUi }}>
@@ -3314,7 +3400,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       <SettingsSheet open={pushSheet} onClose={() => setPushSheet(false)} title="Push notifications">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginBottom: 8 }}>
           {isIosDevice && !pushEnabled && !iosDisclaimerSeen && (
-            <div style={{ background: 'rgba(var(--accent-rgb),0.07)', border: '0.5px solid rgba(var(--accent-rgb),0.2)', borderRadius: 6, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={{ background: 'rgba(var(--accent-rgb),0.14)', border: '0.5px solid rgba(var(--accent-rgb),0.2)', borderRadius: 6, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 10 }}>
               <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.55 }}>
                 Push notifications on iPhone and iPad require Zane to be installed as an app on your home screen. For instructions, see <span style={{ color: 'var(--accent)' }}>Guides → How to… → Install as app</span>.
               </div>
@@ -3358,7 +3444,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
               );
             }
             if (webPushVerified) return (
-              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10, background: 'rgba(var(--accent-rgb), 0.08)', border: '0.5px solid rgba(var(--accent-rgb), 0.25)', borderRadius: 6, padding: '8px 14px' }}>
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10, background: 'rgba(var(--accent-rgb), 0.16)', border: '0.5px solid rgba(var(--accent-rgb), 0.25)', borderRadius: 6, padding: '8px 14px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   <div style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--accent)', boxShadow: '0 0 5px rgba(var(--accent-rgb),0.7)', animation: 'pulseDot 1.5s ease-in-out infinite', flexShrink: 0 }} />
                   <span className="micro" style={{ color: 'var(--accent)' }}>ACTIVE</span>
@@ -3457,7 +3543,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           {reminderEnabled && (
             <Row label="Notify at">
               <input type="time" value={reminderTime} onChange={e => updateReminderTime(e.target.value)}
-                style={{ background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '5px 10px', color: UI.ink, fontFamily: UI.fontUi, fontSize: 13, outline: 'none', colorScheme: 'dark' }} />
+                style={{ background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4, padding: '5px 10px', color: UI.ink, fontFamily: UI.fontUi, fontSize: 13, outline: 'none', colorScheme: ['light', 'paper'].includes(store.settings?.darkMode ?? 'dark') ? 'light' : 'dark' }} />
             </Row>
           )}
           {reminderEnabled && store.nextReminderAt && (() => {

@@ -146,66 +146,6 @@ function nextCycleD1ISOFromSchedule(schedule, cycleStartDate) {
   return nextCycleD1ISO(cycleStartDate, (schedule?.days || []).length);
 }
 
-// ─── QUICK SWITCH ────────────────────────────────────────────────────────
-
-const QS_EMAILS = ['office@btc-prime.biz', 'anja.knamm@gmail.com'];
-
-function _qsKey(email) { return `zane-qs-${email}`; }
-
-function _persistQsSession(session, email) {
-  if (!email || !session?.access_token || !session?.refresh_token) return;
-  if (!QS_EMAILS.includes(email)) return;
-  try {
-    const existing = localStorage.getItem(_qsKey(email));
-    const name = existing ? (JSON.parse(existing).name || null) : null;
-    localStorage.setItem(_qsKey(email), JSON.stringify({
-      access_token: session.access_token,
-      refresh_token: session.refresh_token,
-      ...(name ? { name } : {}),
-    }));
-  } catch (_) {}
-}
-
-// Auto-save session on every sign-in and token refresh so quick switch stays current
-_supabase.auth.onAuthStateChange((event, session) => {
-  if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && session?.user?.email) {
-    _persistQsSession(session, session.user.email);
-  }
-});
-
-function saveQsName(email, name) {
-  if (!email || !name || !QS_EMAILS.includes(email)) return;
-  try {
-    const raw = localStorage.getItem(_qsKey(email));
-    if (!raw) return;
-    const data = JSON.parse(raw);
-    data.name = name;
-    localStorage.setItem(_qsKey(email), JSON.stringify(data));
-  } catch (_) {}
-}
-
-function getQsName(email) {
-  try {
-    const raw = localStorage.getItem(_qsKey(email));
-    return raw ? (JSON.parse(raw).name || null) : null;
-  } catch (_) { return null; }
-}
-
-function hasQuickSwitchSession(email) {
-  try { return !!localStorage.getItem(_qsKey(email)); } catch (_) { return false; }
-}
-
-async function quickSwitch(targetEmail) {
-  const raw = localStorage.getItem(_qsKey(targetEmail));
-  if (!raw) throw new Error('No saved session for ' + targetEmail);
-  const { access_token, refresh_token } = JSON.parse(raw);
-  const { error } = await _supabase.auth.setSession({ access_token, refresh_token });
-  if (error) {
-    localStorage.removeItem(_qsKey(targetEmail)); // remove stale tokens
-    throw error;
-  }
-}
-
 // ─── AUTH ────────────────────────────────────────────────────────────────
 
 async function signIn(email, password) {
@@ -258,6 +198,11 @@ async function listPasskeys() {
 
 async function deletePasskey(passkeyId) {
   const { error } = await _supabase.auth.passkey.delete({ passkeyId });
+  if (error) throw error;
+}
+
+async function updatePasskey(passkeyId, friendlyName) {
+  const { error } = await _supabase.auth.passkey.update({ passkeyId, friendlyName });
   if (error) throw error;
 }
 
@@ -338,7 +283,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
   const exerciseRows = (backup.exercises || []).map(e => {
     const newId = uid();
     idRemap[e.id] = newId;
-    return { id: newId, name: e.name, tags: e.tags ?? [], note: e.note ?? '', category: e.category ?? null, unilateral: e.unilateral ?? false, equipment: e.equipment ?? null, progression_reps: e.progression_reps ?? null, movement_type: e.movement_type ?? null, no_weight_reps: !!e.no_weight_reps, log_mode: e.log_mode ?? null, pull_bodyweight: !!e.pull_bodyweight, youtube_url: e.youtube_url ?? null, note_pinned: !!e.note_pinned, user_id: userId };
+    return { id: newId, name: e.name, tags: e.tags ?? [], note: e.note ?? '', category: e.category ?? null, unilateral: e.unilateral ?? false, equipment: e.equipment ?? null, progression_reps: e.progression_reps ?? null, movement_type: e.movement_type ?? null, no_weight_reps: !!e.no_weight_reps, log_mode: e.log_mode ?? null, pull_bodyweight: !!e.pull_bodyweight, youtube_url: e.youtube_url ?? null, note_pinned: !!e.note_pinned, progression_increment: e.progression_increment ?? null, user_id: userId };
   });
   // Exercises got fresh ids above — everything that references an exId must be
   // remapped or it dangles after restore. remapEx: single id; remapExKeyed:
@@ -845,7 +790,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   const histCutoff = historyWindowCutoffISO();
   const queries = [
     _supabase.from('zane_profiles').select('id, name, approved').eq('id', userId).maybeSingle(),
-    _supabase.from('zane_exercises').select('id, name, tags, note, category, unilateral, equipment, progression_reps, movement_type, no_weight_reps, log_mode, pull_bodyweight, youtube_url, note_pinned').eq('user_id', userId),
+    _supabase.from('zane_exercises').select('id, name, tags, note, category, unilateral, equipment, progression_reps, movement_type, no_weight_reps, log_mode, pull_bodyweight, youtube_url, note_pinned, progression_increment').eq('user_id', userId),
     _supabase.from('zane_schedules').select('id, name, days, archived, versions, is_flex, sessions_per_week, mesocycle_weeks, mesocycle_start_rir, mesocycle_end_rir, mesocycle_rir_enabled, mesocycle_autoregulate, mesocycle_autoregulate_mode, program_type, program_data, is_template').eq('user_id', userId),
     // Session METADATA stays complete (cheap; streaks/calendar need the full
     // date list) — the legacy entries JSONB is no longer selected.
@@ -1460,7 +1405,7 @@ async function syncStore(prev, next, userId) {
       return !p || JSON.stringify(p) !== JSON.stringify(e);
     });
     const removed = prev.exercises.filter(e => !next.exercises.find(x => x.id === e.id));
-    if (upsert.length)  ops.push(_supabase.from('zane_exercises').upsert(upsert.map(e => ({ id: e.id, name: e.name, tags: e.tags ?? [], note: e.note ?? '', category: e.category ?? null, unilateral: e.unilateral ?? false, equipment: e.equipment ?? null, progression_reps: e.progression_reps ?? null, movement_type: e.movement_type ?? null, no_weight_reps: !!e.no_weight_reps, log_mode: e.log_mode ?? null, pull_bodyweight: !!e.pull_bodyweight, youtube_url: e.youtube_url ?? null, note_pinned: !!e.note_pinned, user_id: userId }))));
+    if (upsert.length)  ops.push(_supabase.from('zane_exercises').upsert(upsert.map(e => ({ id: e.id, name: e.name, tags: e.tags ?? [], note: e.note ?? '', category: e.category ?? null, unilateral: e.unilateral ?? false, equipment: e.equipment ?? null, progression_reps: e.progression_reps ?? null, movement_type: e.movement_type ?? null, no_weight_reps: !!e.no_weight_reps, log_mode: e.log_mode ?? null, pull_bodyweight: !!e.pull_bodyweight, youtube_url: e.youtube_url ?? null, note_pinned: !!e.note_pinned, progression_increment: e.progression_increment ?? null, user_id: userId }))));
     if (removed.length) ops.push(_supabase.from('zane_exercises').delete().in('id', removed.map(e => e.id)));
   }
 
@@ -3557,6 +3502,35 @@ function progressionCeilingFor(store, base, plannedRepsMax, progressionOffset) {
   if (progressionOffset != null) return (base ?? 0) + progressionOffset;
   return (base ?? 0) + (store.settings?.progressionRangeTop ?? 4);
 }
+function equipmentCfgFor(store, ex) {
+  return ex?.equipment ? (store.settings?.equipmentConfig?.[ex.equipment] ?? {}) : {};
+}
+
+// The kg/lb step for a single Smart Progression / Meso weight bump on this
+// exercise. Precedence: an explicit per-exercise progression_increment
+// override (exercises keep raw snake_case field names, no camelCase mapping
+// layer, Migration 0184) > the exercise's equipment-category config
+// (equipmentConfig[equipment].increment) > the caller's own fallback. Call
+// sites disagree on that fallback today (a flat 2.5 for Smart Progression, a
+// unit-aware 2.5/5 for Meso/Autoreg): preserved as-is per caller, not
+// unified here, so this only adds the override, it doesn't change anyone's
+// existing default behavior.
+// Both the override and the category config require a strictly positive
+// value; 0 or negative is treated as unset and falls through the chain.
+// A step size of 0/negative isn't just "a small bump": computeMesoGains
+// (screens-train.jsx) writes it straight into weightBoostMap, and
+// resolveMesoSeedSuggestion reads that value's SIGN to decide whether a
+// session earned a bump or hit a rep-miss cut, so a negative increment
+// flips earns into cuts and cuts into bumps. It also sizes the outlier
+// "possible mistype" tolerance band (loggedKg < refKg - increment * 5),
+// which 0/negative collapses or inverts into near-constant false alarms.
+// A caller may pass a pre-computed catCfg (from equipmentCfgFor) to avoid
+// resolving the same equipment-config lookup twice when it also needs
+// catCfg.maxKg.
+function incrementForExercise(store, ex, fallback, catCfg = equipmentCfgFor(store, ex)) {
+  if (ex?.progression_increment > 0) return ex.progression_increment;
+  return catCfg.increment > 0 ? catCfg.increment : fallback;
+}
 
 // Returns { kg, reps } suggestion when all last sets hit top of rep range, null otherwise.
 // refOverride: a pre-fetched { entry: { sets } } reference (fetchSeedEntries) —
@@ -3566,8 +3540,8 @@ function progressionSuggestion(store, exId, dayId, plannedReps, plannedRepsPerSe
   if (is531MainLift(store, exId, dayId)) return null; // 5/3/1 main lifts climb via the Training Max, not Smart Progression
 
   const ex = findExercise(store, exId);
-  const catCfg = ex?.equipment ? (store.settings?.equipmentConfig?.[ex.equipment] ?? {}) : {};
-  const increment = catCfg.increment ?? 2.5;
+  const catCfg = equipmentCfgFor(store, ex);
+  const increment = incrementForExercise(store, ex, 2.5, catCfg);
   const maxKg = catCfg.maxKg ?? null;
 
   // Anchor on the best recent performance at the current weight, not just the
@@ -6193,6 +6167,17 @@ function detectStall(sessions, exId, muscleOfExId, opts = {}) {
   if (!exId || typeof muscleOfExId !== 'function') return out;
   const n = opts.n || STALL_SESSIONS;
   const planId = opts.planId ?? null;
+  // Same scoping bestRecentEntry/recentSessionsForExercise already use, for
+  // the same reason: this exercise can sit in a different slot on different
+  // days (e.g. 2nd exercise on Day A but 3rd, more pre-fatigued, on Day B),
+  // or twice in the same day (superset/back-off block). Pooling those
+  // together compares apples to oranges and can read as "no e1RM progress"
+  // even though each slot IS progressing on its own terms. dayId null keeps
+  // the old pool-everything behavior (e.g. for callers/tests that don't
+  // have a day context); the real screens-train.jsx call site always
+  // passes both.
+  const dayId = opts.dayId ?? null;
+  const occ = opts.occ ?? 0;
   const muscle = muscleOfExId(exId);
   // Muscle at its ceiling -> overreach/deload owns this, not a stalled lift (spec 6).
   if (muscle && typeof opts.atCeiling === 'function' && opts.atCeiling(muscle)) return out;
@@ -6201,14 +6186,14 @@ function detectStall(sessions, exId, muscleOfExId, opts = {}) {
   // filter: ended && !isDeload && this plan && signalWeight full). Build the best
   // e1RM per session over completed weighted working sets, effReps for unilateral.
   const qualifying = (sessions || [])
-    .filter(s => s && s.ended && !s.isDeload && (planId == null || s.scheduleId === planId) && (s.signalWeight || 'full') === 'full')
+    .filter(s => s && s.ended && !s.isDeload && (planId == null || s.scheduleId === planId) && (dayId == null || s.dayId === dayId) && (s.signalWeight || 'full') === 'full')
     .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''));
   const series = [];
   for (const s of qualifying) {
+    const entry = (s.entries || []).filter(e => e && !e.isCardio && e.exId === exId)[occ];
     let best = null;
-    for (const e of (s.entries || [])) {
-      if (!e || e.isCardio || e.exId !== exId) continue;
-      for (const st of (e.sets || [])) {
+    if (entry) {
+      for (const st of (entry.sets || [])) {
         if (!st || !st.done || st.warmup || st.skipped) continue;
         const reps = effReps(st);
         if (st.kg == null || reps == null || reps <= 0) continue; // non-weighted set -> no e1RM
@@ -6621,11 +6606,10 @@ window.LB = {
   clearPrecompileCaches, clearCachesAndReload,
   SUPABASE_URL, SUPABASE_ANON_KEY, PUSHOVER_URL, WEB_PUSH_URL, fnFetch,
   subscribeWebPush, unsubscribeWebPush, getWebPushSubscription,
-  QS_EMAILS, hasQuickSwitchSession, quickSwitch, saveQsName, getQsName,
-  signIn, signUp, signOut, signInWithPasskey, registerPasskey, listPasskeys, deletePasskey, resetPassword, deleteAllData, exportBackup, backupToBlob, readBackupText, importFromBackup, validateBackup,
+  signIn, signUp, signOut, signInWithPasskey, registerPasskey, listPasskeys, deletePasskey, updatePasskey, resetPassword, deleteAllData, exportBackup, backupToBlob, readBackupText, importFromBackup, validateBackup,
   loadFromSupabase, syncStore, mergeSessions, withCarriedWindowEntries, historyWindowCutoffISO, normalizeHiddenHealthCards,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
-  uid, todayISO, fmtISO, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, is531MainLift, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, healScheduleWeekdays, buildPlanSkeleton, instantiateProgram, is531Plan, round531, tmFrom531, tmBump531, weeks531, week531, fiveThreeOneSets, build531Plan, add531MainLift, current531Week, current531Cycle, compute531CycleBumps, resolve531CycleEnd, suggest531Tm, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, mesoActive, autoregLoadOnly, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, realignCycleForToday, todayCycleStripIndex,
+  uid, todayISO, fmtISO, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, incrementForExercise, equipmentCfgFor, is531MainLift, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, healScheduleWeekdays, buildPlanSkeleton, instantiateProgram, is531Plan, round531, tmFrom531, tmBump531, weeks531, week531, fiveThreeOneSets, build531Plan, add531MainLift, current531Week, current531Cycle, compute531CycleBumps, resolve531CycleEnd, suggest531Tm, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, mesoActive, autoregLoadOnly, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, realignCycleForToday, todayCycleStripIndex,
   effReps, fmtDuration, e1rm, isImprovement, isDecline, bestE1rmForExercise, bestAssistLoad, bestTimeForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, buildTimeSeedSets, latestBodyweight, bodyweightForDate, exerciseLogMode, isAssisted, shouldPullBodyweight, systemExerciseToRow, inferCurrentExIdx, calcBlended,
   refreshExerciseBests, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries,
   computeNextReminderAt,

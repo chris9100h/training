@@ -250,12 +250,12 @@ function TempScatterChart({ readings, from, to, unit, todayMode = false }) {
       {gridVals.map((v, i) => (
         <g key={i}>
           {i > 0 && <line x1={padL} y1={yOf(v).toFixed(1)} x2={W - padR} y2={yOf(v).toFixed(1)} stroke={UI.hair} strokeWidth="0.5" strokeDasharray="3 3" />}
-          <text x={padL - 5} y={(yOf(v) + 3).toFixed(1)} textAnchor="end" fontSize="8" fontFamily={UI.fontNum} fill={UI.inkFaint}>{Number(v.toFixed(dec))}</text>
+          <text filter="url(#chart-text-lift)" x={padL - 5} y={(yOf(v) + 3).toFixed(1)} textAnchor="end" fontSize="8" fontFamily={UI.fontNum} fill={UI.inkFaint}>{Number(v.toFixed(dec))}</text>
         </g>
       ))}
       <line x1={padL} y1={padTop + plotH} x2={W - padR} y2={padTop + plotH} stroke={UI.hair} strokeWidth="0.5" />
       {pts.length >= 2 && (
-        <polyline points={pts.map(p => `${xOf(p).toFixed(1)},${yOf(tempDisplay(p.valueC, unit)).toFixed(1)}`).join(' ')} fill="none" stroke="var(--accent)" strokeWidth="1.5" opacity="0.5" />
+        <polyline points={pts.map(p => `${xOf(p).toFixed(1)},${yOf(tempDisplay(p.valueC, unit)).toFixed(1)}`).join(' ')} fill="none" stroke="var(--accent)" strokeWidth="1.5" opacity={isLightCanvasActive() ? 0.8 : 0.5} />
       )}
       {pts.map((p, i) => (
         <circle key={i} cx={xOf(p).toFixed(1)} cy={yOf(tempDisplay(p.valueC, unit)).toFixed(1)} r={3} fill="var(--accent)" opacity={0.85} />
@@ -297,7 +297,9 @@ function BpScatterChart({ readings, from, to, todayMode = false }) {
     : p => padL + (healthDayDiff(from, p.date) / totalDays) * plotW;
   const yOf = v => padTop + (1 - (v - dom.min) / dom.range) * plotH;
   const gridVals = dom.gridVals || Array.from({ length: 4 }, (_, i) => dom.min + (dom.range / 3) * i);
-  const SYS_COLOR = 'var(--accent)', DIA_COLOR = '#4a9fe0';
+  // DIA_COLOR was a flat hex tuned for a dark canvas; on light/paper it drops
+  // well under WCAG AA, so pick a deeper shade of the same blue there instead.
+  const SYS_COLOR = 'var(--accent)', DIA_COLOR = isLightCanvasActive() ? '#0369a1' : '#4a9fe0';
   const hoverPoints = pts.map(p => ({
     x: xOf(p), y: yOf(p.systolic), date: p.date,
     rows: [
@@ -310,12 +312,12 @@ function BpScatterChart({ readings, from, to, todayMode = false }) {
   return (
     <ChartHover W={W} H={H} points={hoverPoints} mode="xy">
     <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display: 'block', overflow: 'visible' }}>
-      <line x1={padL} y1={yOf(BP_REF_SYS).toFixed(1)} x2={W - padR} y2={yOf(BP_REF_SYS).toFixed(1)} stroke={SYS_COLOR} strokeWidth="0.75" strokeDasharray="4 3" opacity="0.5" />
-      <line x1={padL} y1={yOf(BP_REF_DIA).toFixed(1)} x2={W - padR} y2={yOf(BP_REF_DIA).toFixed(1)} stroke={DIA_COLOR} strokeWidth="0.75" strokeDasharray="4 3" opacity="0.5" />
+      <line x1={padL} y1={yOf(BP_REF_SYS).toFixed(1)} x2={W - padR} y2={yOf(BP_REF_SYS).toFixed(1)} stroke={SYS_COLOR} strokeWidth="0.75" strokeDasharray="4 3" opacity={isLightCanvasActive() ? 0.75 : 0.5} />
+      <line x1={padL} y1={yOf(BP_REF_DIA).toFixed(1)} x2={W - padR} y2={yOf(BP_REF_DIA).toFixed(1)} stroke={DIA_COLOR} strokeWidth="0.75" strokeDasharray="4 3" opacity={isLightCanvasActive() ? 0.75 : 0.5} />
       {gridVals.map((v, i) => (
         <g key={i}>
           {i > 0 && <line x1={padL} y1={yOf(v).toFixed(1)} x2={W - padR} y2={yOf(v).toFixed(1)} stroke={UI.hair} strokeWidth="0.5" strokeDasharray="3 3" />}
-          <text x={padL - 5} y={(yOf(v) + 3).toFixed(1)} textAnchor="end" fontSize="8" fontFamily={UI.fontNum} fill={UI.inkFaint}>{Math.round(v)}</text>
+          <text filter="url(#chart-text-lift)" x={padL - 5} y={(yOf(v) + 3).toFixed(1)} textAnchor="end" fontSize="8" fontFamily={UI.fontNum} fill={UI.inkFaint}>{Math.round(v)}</text>
         </g>
       ))}
       <line x1={padL} y1={padTop + plotH} x2={W - padR} y2={padTop + plotH} stroke={UI.hair} strokeWidth="0.5" />
@@ -376,13 +378,13 @@ function GlucoseScatterChart({ readings, from, to, unit, todayMode = false }) {
     <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display: 'block', overflow: 'visible' }}>
       {/* fasted reference band */}
       <rect x={padL} y={yOf(refHigh).toFixed(1)} width={plotW} height={(yOf(refLow) - yOf(refHigh)).toFixed(1)}
-        fill="rgba(var(--accent-rgb),0.07)" />
+        fill={`rgba(var(--accent-rgb),${isLightCanvasActive() ? 0.16 : 0.07})`} />
       {/* fed upper reference line */}
       <line x1={padL} y1={fedY} x2={W - padR} y2={fedY} stroke="#4a9fe0" strokeWidth="0.75" strokeDasharray="4 3" opacity="0.5" />
       {gridVals.map((v, i) => (
         <g key={i}>
           {i > 0 && <line x1={padL} y1={yOf(v).toFixed(1)} x2={W - padR} y2={yOf(v).toFixed(1)} stroke={UI.hair} strokeWidth="0.5" strokeDasharray="3 3" />}
-          <text x={padL - 5} y={(yOf(v) + 3).toFixed(1)} textAnchor="end" fontSize="8" fontFamily={UI.fontNum} fill={UI.inkFaint}>{Number(v.toFixed(dec))}</text>
+          <text filter="url(#chart-text-lift)" x={padL - 5} y={(yOf(v) + 3).toFixed(1)} textAnchor="end" fontSize="8" fontFamily={UI.fontNum} fill={UI.inkFaint}>{Number(v.toFixed(dec))}</text>
         </g>
       ))}
       <line x1={padL} y1={padTop + plotH} x2={W - padR} y2={padTop + plotH} stroke={UI.hair} strokeWidth="0.5" />
@@ -482,7 +484,7 @@ function ChartHover({ W, H, points, children, mode = 'x', markerColor = 'var(--a
         <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
           <div style={{ position: 'absolute', left: leftPct + '%', top: (CHART_PLOT_TOP / H) * 100 + '%', height: (CHART_PLOT_H / H) * 100 + '%', width: 1, background: UI.hairStrong, transform: 'translateX(-0.5px)' }} />
           <div style={{ position: 'absolute', left: leftPct + '%', top: topPct + '%', width: 8, height: 8, borderRadius: '50%', background: p.color || markerColor, border: `2px solid ${UI.bgRaised}`, boxShadow: `0 0 0 1.5px ${p.color || markerColor}`, transform: 'translate(-50%, -50%)' }} />
-          <div style={{ position: 'absolute', left: leftPct + '%', top: topPct + '%', transform: `translate(${tx}, ${ty})`, background: UI.bgRaised, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '5px 8px', boxShadow: '0 4px 14px rgba(0,0,0,0.45)', whiteSpace: 'nowrap', zIndex: 5 }}>
+          <div style={{ position: 'absolute', left: leftPct + '%', top: topPct + '%', transform: `translate(${tx}, ${ty})`, background: UI.bgRaised, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, padding: '5px 8px', boxShadow: '0 4px 14px rgba(0,0,0,0.45)', whiteSpace: 'nowrap', zIndex: 5 }}>
             <div className="micro" style={{ color: UI.inkFaint, marginBottom: 2 }}>{healthFmtDate(p.date)}</div>
             {p.rows.map((r, i) => (
               <div key={i} style={{ display: 'flex', alignItems: 'baseline', gap: 6, fontFamily: UI.fontNum, fontSize: 12, lineHeight: 1.35 }}>
@@ -537,12 +539,13 @@ function HealthChartCard({ title, icon, tf, setTf, tfOptions = HEALTH_TFS, headl
             <i className="fa-solid fa-expand" style={{ fontSize: 11 }} />
           </button>
         )}
-        <div data-reorder-ignore="true" style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `0.5px solid ${UI.hairStrong}`, flexShrink: 0 }}>
+        <div data-reorder-ignore="true" style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}`, flexShrink: 0 }}>
           {tfOptions.map(t => (
             <button key={t.id} onClick={() => setTf(t.id)} style={{
               padding: '2px 8px', cursor: 'pointer', border: 'none',
               background: tf === t.id ? 'var(--accent)' : 'transparent',
-              color: tf === t.id ? '#0a0805' : UI.inkFaint,
+              color: tf === t.id ? 'var(--accent-ink)' : UI.inkFaint,
+              textShadow: tf === t.id ? 'none' : 'var(--text-lift)',
               fontFamily: UI.fontUi, fontSize: 9, fontWeight: 600, letterSpacing: '0.06em',
               WebkitTapHighlightColor: 'transparent',
             }}>{t.id}</button>
@@ -587,7 +590,7 @@ function HealthLineChart({ series, from, to, format, color = 'var(--accent)', yM
       {gridVals.map((v, i) => (
         <g key={i}>
           {i > 0 && <line x1={padL} y1={yOf(v).toFixed(1)} x2={W - padR} y2={yOf(v).toFixed(1)} stroke={UI.hair} strokeWidth="0.5" strokeDasharray="3 3" />}
-          <text x={padL - 5} y={(yOf(v) + 3).toFixed(1)} textAnchor="end" fontSize="8" fontFamily={UI.fontNum} fill={UI.inkFaint}>{format(Number(v.toFixed(dec)))}</text>
+          <text filter="url(#chart-text-lift)" x={padL - 5} y={(yOf(v) + 3).toFixed(1)} textAnchor="end" fontSize="8" fontFamily={UI.fontNum} fill={UI.inkFaint}>{format(Number(v.toFixed(dec)))}</text>
         </g>
       ))}
       <line x1={padL} y1={padTop + plotH} x2={W - padR} y2={padTop + plotH} stroke={UI.hair} strokeWidth="0.5" />
@@ -629,7 +632,7 @@ function HealthBarChart({ series, from, to, format, target, color = 'var(--accen
       {gridVals.map((v, i) => (
         <g key={i}>
           {i > 0 && <line x1={padL} y1={yOf(v).toFixed(1)} x2={W - padR} y2={yOf(v).toFixed(1)} stroke={UI.hair} strokeWidth="0.5" strokeDasharray="3 3" />}
-          <text x={padL - 5} y={(yOf(v) + 3).toFixed(1)} textAnchor="end" fontSize="8" fontFamily={UI.fontNum} fill={UI.inkFaint}>{format(Math.round(v))}</text>
+          <text filter="url(#chart-text-lift)" x={padL - 5} y={(yOf(v) + 3).toFixed(1)} textAnchor="end" fontSize="8" fontFamily={UI.fontNum} fill={UI.inkFaint}>{format(Math.round(v))}</text>
         </g>
       ))}
       <line x1={padL} y1={padTop + plotH} x2={W - padR} y2={padTop + plotH} stroke={UI.hair} strokeWidth="0.5" />
@@ -688,7 +691,7 @@ function HealthMacroChart({ series, from, to }) {
       {gridVals.map((v, i) => (
         <g key={i}>
           {i > 0 && <line x1={padL} y1={yOf(v).toFixed(1)} x2={W - padR} y2={yOf(v).toFixed(1)} stroke={UI.hair} strokeWidth="0.5" strokeDasharray="3 3" />}
-          <text x={padL - 5} y={(yOf(v) + 3).toFixed(1)} textAnchor="end" fontSize="8" fontFamily={UI.fontNum} fill={UI.inkFaint}>{Math.round(v / 100) / 10}k</text>
+          <text filter="url(#chart-text-lift)" x={padL - 5} y={(yOf(v) + 3).toFixed(1)} textAnchor="end" fontSize="8" fontFamily={UI.fontNum} fill={UI.inkFaint}>{Math.round(v / 100) / 10}k</text>
         </g>
       ))}
       <line x1={padL} y1={padTop + plotH} x2={W - padR} y2={padTop + plotH} stroke={UI.hair} strokeWidth="0.5" />
@@ -1153,7 +1156,7 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
 
   const inputStyle = {
     width: '100%', boxSizing: 'border-box', background: UI.bgInset,
-    border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4,
+    border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4,
     padding: '10px 12px', fontFamily: UI.fontNum, fontSize: 15, color: UI.ink, outline: 'none',
   };
   const labelStyle = { fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.07em' };
@@ -1163,7 +1166,7 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
       <input type="text" inputMode="decimal" placeholder="—" value={form[k]} onChange={e => set(k, e.target.value)} style={inputStyle} />
     </div>
   );
-  const waterQuickAddTileStyle = { padding: '10px 12px', borderRadius: 4, border: `0.5px solid ${UI.hairStrong}`, background: UI.bgInset, color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 12, whiteSpace: 'nowrap' };
+  const waterQuickAddTileStyle = { padding: '10px 12px', borderRadius: 4, border: `var(--hair-width) solid ${UI.hairStrong}`, background: UI.bgInset, color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 12, whiteSpace: 'nowrap' };
 
   // Full page (not a Sheet): the form has 15+ fields across several sections
   // plus the glucose/BP/temp add-forms, a bottom sheet's ~88dvh cap made it
@@ -1186,20 +1189,21 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
 
       {onSetStatus && (
         <div style={{ marginBottom: 18 }}>
-          <div style={{ display: 'flex', borderRadius: 6, overflow: 'hidden', border: `0.5px solid ${UI.hairStrong}` }}>
+          <div style={{ display: 'flex', borderRadius: 6, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}` }}>
             {[{ mode: 'sick', label: 'Sick', icon: 'fa-bed-pulse' }, { mode: null, label: 'Normal', icon: null }, { mode: 'vacation', label: 'Vacation', icon: 'fa-umbrella-beach' }].map(({ mode, label, icon }, i) => {
               const active = dayMode === mode;
               return (
                 <button key={String(mode)} onClick={() => onSetStatus(mode, date < todayISO ? date : null)} style={{
                   flex: 1, padding: '12px 4px', cursor: 'pointer', border: 'none',
-                  borderLeft: i > 0 ? `0.5px solid ${UI.hairStrong}` : 'none',
+                  borderLeft: i > 0 ? `var(--hair-width) solid ${UI.hairStrong}` : 'none',
                   background: active ? 'var(--accent)' : 'transparent',
+                  textShadow: active ? 'none' : 'var(--text-lift)',
                   display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5,
                   WebkitTapHighlightColor: 'transparent', transition: 'background 0.15s',
                 }}>
-                  {icon && <i className={`fa-solid ${icon}`} style={{ fontSize: 13, color: active ? '#0a0805' : UI.inkFaint }} />}
-                  {!icon && <i className="fa-solid fa-circle-check" style={{ fontSize: 13, color: active ? '#0a0805' : UI.inkFaint }} />}
-                  <span style={{ fontFamily: UI.fontUi, fontSize: 10, fontWeight: 600, letterSpacing: '0.07em', textTransform: 'uppercase', color: active ? '#0a0805' : UI.inkFaint }}>{label}</span>
+                  {icon && <i className={`fa-solid ${icon}`} style={{ fontSize: 13, color: active ? 'var(--accent-ink)' : UI.inkFaint }} />}
+                  {!icon && <i className="fa-solid fa-circle-check" style={{ fontSize: 13, color: active ? 'var(--accent-ink)' : UI.inkFaint }} />}
+                  <span style={{ fontFamily: UI.fontUi, fontSize: 10, fontWeight: 600, letterSpacing: '0.07em', textTransform: 'uppercase', color: active ? 'var(--accent-ink)' : UI.inkFaint }}>{label}</span>
                 </button>
               );
             })}
@@ -1242,12 +1246,13 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
       </CatSection>
 
       <CatSection label="NUTRITION" collapsed={collapsedCats.has('nutrition')} onToggle={() => toggleCat('nutrition')} extra={
-        <div onClick={e => e.stopPropagation()} style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `0.5px solid ${UI.hairStrong}` }}>
+        <div onClick={e => e.stopPropagation()} style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}` }}>
           {[{ id: false, label: 'Total carbs' }, { id: true, label: 'Net carbs' }].map(o => (
             <button key={String(o.id)} onClick={() => setNetCarbs(o.id)} style={{
               padding: '4px 10px', cursor: 'pointer', border: 'none',
               background: netCarbs === o.id ? 'var(--accent)' : 'transparent',
-              color: netCarbs === o.id ? '#0a0805' : UI.inkFaint,
+              color: netCarbs === o.id ? 'var(--accent-ink)' : UI.inkFaint,
+              textShadow: netCarbs === o.id ? 'none' : 'var(--text-lift)',
               fontFamily: UI.fontUi, fontSize: 9, fontWeight: 600, letterSpacing: '0.05em',
               WebkitTapHighlightColor: 'transparent',
             }}>{o.label}</button>
@@ -1275,7 +1280,7 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
           <input type="text" inputMode="decimal" placeholder={autoCals != null ? String(autoCals) : '—'} value={form.calories} onChange={e => set('calories', e.target.value)} style={inputStyle} />
         </div>
         <div>
-          <div style={labelStyle}>Off-plan note <span style={{ textTransform: 'none', fontWeight: 400, color: UI.inkGhost }}>(optional · prefills check-in)</span></div>
+          <div style={labelStyle}>Off-plan note <span style={{ textTransform: 'none', fontWeight: 400, color: UI.inkFaint }}>(optional · prefills check-in)</span></div>
           <textarea rows={2} placeholder="e.g. Birthday cake, 2 slices" value={form.offPlanNote} onChange={e => set('offPlanNote', e.target.value)} style={{ ...inputStyle, resize: 'none', fontFamily: UI.fontUi, fontSize: 14 }} />
         </div>
       </CatSection>
@@ -1324,7 +1329,7 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
           const ctxColor = { fasted: 'var(--accent)', fed: '#4a9fe0', other: UI.inkSoft }[g.context] || UI.inkSoft;
           const isConfirm = confirmDeleteGlId === g.id;
           return (
-            <div key={g.id} style={{ background: UI.bgInset, borderRadius: 6, marginBottom: 6, border: `0.5px solid ${UI.hairStrong}`, overflow: 'hidden' }}>
+            <div key={g.id} style={{ background: UI.bgInset, borderRadius: 6, marginBottom: 6, border: `var(--hair-width) solid ${UI.hairStrong}`, overflow: 'hidden' }}>
               <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '8px 10px' }}>
                 <span style={{ fontFamily: UI.fontUi, fontSize: 9, color: UI.inkFaint, minWidth: 32, paddingTop: 1 }}>{g.time}</span>
                 <div style={{ flex: 1 }}>
@@ -1340,18 +1345,18 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
                 <button onClick={() => setConfirmDeleteGlId(isConfirm ? null : g.id)} style={{ background: 'none', border: 'none', color: UI.inkGhost, fontSize: 14, cursor: 'pointer', padding: '0 2px', lineHeight: 1 }}>×</button>
               </div>
               {isConfirm && (
-                <div style={{ display: 'flex', gap: 0, borderTop: `0.5px solid ${UI.hairStrong}` }}>
+                <div style={{ display: 'flex', gap: 0, borderTop: `var(--hair-width) solid ${UI.hairStrong}` }}>
                   <button onClick={() => setConfirmDeleteGlId(null)} style={{ flex: 1, padding: '7px', background: 'none', border: 'none', cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 11, color: UI.inkSoft }}>Cancel</button>
-                  <button onClick={() => deleteGlucose(g.id)} style={{ flex: 1, padding: '7px', background: 'none', border: 'none', borderLeft: `0.5px solid ${UI.hairStrong}`, cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700, color: UI.danger }}>Delete</button>
+                  <button onClick={() => deleteGlucose(g.id)} style={{ flex: 1, padding: '7px', background: 'none', border: 'none', borderLeft: `var(--hair-width) solid ${UI.hairStrong}`, cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700, color: UI.danger }}>Delete</button>
                 </div>
               )}
             </div>
           );
         })}
         {addingGlucose ? (
-          <div style={{ background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '12px 10px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, padding: '12px 10px', display: 'flex', flexDirection: 'column', gap: 8 }}>
             {(() => {
-              const glInputSt = { background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '7px 10px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, outline: 'none', width: '100%', boxSizing: 'border-box' };
+              const glInputSt = { background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4, padding: '7px 10px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, outline: 'none', width: '100%', boxSizing: 'border-box' };
               return (
                 <div style={{ display: 'flex', gap: 8 }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
@@ -1380,7 +1385,8 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
                     flex: 1, padding: '6px 4px', cursor: 'pointer', borderRadius: 4,
                     border: `0.5px solid ${glForm.context === c ? 'var(--accent)' : UI.hairStrong}`,
                     background: glForm.context === c ? 'var(--accent)' : 'transparent',
-                    color: glForm.context === c ? '#0a0805' : UI.inkFaint,
+                    color: glForm.context === c ? 'var(--accent-ink)' : UI.inkFaint,
+                    textShadow: 'none',
                     fontFamily: UI.fontUi, fontSize: 10, fontWeight: 600, letterSpacing: '0.05em',
                     WebkitTapHighlightColor: 'transparent',
                   }}>{GLUCOSE_CTX_LABELS[c]}</button>
@@ -1405,7 +1411,7 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
             setAddingGlucose(true); setEditingGlucoseId(null);
           }} style={{
             width: '100%', padding: '9px', background: UI.bgInset, border: `0.5px dashed ${UI.hairStrong}`, borderRadius: 6,
-            color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 12, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+            color: UI.inkFaint, textShadow: 'none', fontFamily: UI.fontUi, fontSize: 12, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
           }}>+ Add reading</button>
         )}
       </CatSection>
@@ -1416,7 +1422,7 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
         {bpForDay.map(b => {
           const isConfirm = confirmDeleteBpId === b.id;
           return (
-            <div key={b.id} style={{ background: UI.bgInset, borderRadius: 6, marginBottom: 6, border: `0.5px solid ${UI.hairStrong}`, overflow: 'hidden' }}>
+            <div key={b.id} style={{ background: UI.bgInset, borderRadius: 6, marginBottom: 6, border: `var(--hair-width) solid ${UI.hairStrong}`, overflow: 'hidden' }}>
               <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '8px 10px' }}>
                 <span style={{ fontFamily: UI.fontUi, fontSize: 9, color: UI.inkFaint, minWidth: 32, paddingTop: 1 }}>{b.time}</span>
                 <div style={{ flex: 1 }}>
@@ -1429,18 +1435,18 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
                 <button onClick={() => setConfirmDeleteBpId(isConfirm ? null : b.id)} style={{ background: 'none', border: 'none', color: UI.inkGhost, fontSize: 14, cursor: 'pointer', padding: '0 2px', lineHeight: 1 }}>×</button>
               </div>
               {isConfirm && (
-                <div style={{ display: 'flex', gap: 0, borderTop: `0.5px solid ${UI.hairStrong}` }}>
+                <div style={{ display: 'flex', gap: 0, borderTop: `var(--hair-width) solid ${UI.hairStrong}` }}>
                   <button onClick={() => setConfirmDeleteBpId(null)} style={{ flex: 1, padding: '7px', background: 'none', border: 'none', cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 11, color: UI.inkSoft }}>Cancel</button>
-                  <button onClick={() => deleteBp(b.id)} style={{ flex: 1, padding: '7px', background: 'none', border: 'none', borderLeft: `0.5px solid ${UI.hairStrong}`, cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700, color: UI.danger }}>Delete</button>
+                  <button onClick={() => deleteBp(b.id)} style={{ flex: 1, padding: '7px', background: 'none', border: 'none', borderLeft: `var(--hair-width) solid ${UI.hairStrong}`, cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700, color: UI.danger }}>Delete</button>
                 </div>
               )}
             </div>
           );
         })}
         {addingBp ? (
-          <div style={{ background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '12px 10px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, padding: '12px 10px', display: 'flex', flexDirection: 'column', gap: 8 }}>
             {(() => {
-              const bpInputSt = { background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '7px 10px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, outline: 'none', width: '100%', boxSizing: 'border-box' };
+              const bpInputSt = { background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4, padding: '7px 10px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, outline: 'none', width: '100%', boxSizing: 'border-box' };
               return (
                 <div style={{ display: 'flex', gap: 8 }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
@@ -1483,7 +1489,7 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
             setAddingBp(true); setEditingBpId(null);
           }} style={{
             width: '100%', padding: '9px', background: UI.bgInset, border: `0.5px dashed ${UI.hairStrong}`, borderRadius: 6,
-            color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 12, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+            color: UI.inkFaint, textShadow: 'none', fontFamily: UI.fontUi, fontSize: 12, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
           }}>+ Add reading</button>
         )}
       </CatSection>
@@ -1494,7 +1500,7 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
         {tempForDay.map(t => {
           const isConfirm = confirmDeleteTempId === t.id;
           return (
-            <div key={t.id} style={{ background: UI.bgInset, borderRadius: 6, marginBottom: 6, border: `0.5px solid ${UI.hairStrong}`, overflow: 'hidden' }}>
+            <div key={t.id} style={{ background: UI.bgInset, borderRadius: 6, marginBottom: 6, border: `var(--hair-width) solid ${UI.hairStrong}`, overflow: 'hidden' }}>
               <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '8px 10px' }}>
                 <span style={{ fontFamily: UI.fontUi, fontSize: 9, color: UI.inkFaint, minWidth: 32, paddingTop: 1 }}>{t.time}</span>
                 <div style={{ flex: 1 }}>
@@ -1507,18 +1513,18 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
                 <button onClick={() => setConfirmDeleteTempId(isConfirm ? null : t.id)} style={{ background: 'none', border: 'none', color: UI.inkGhost, fontSize: 14, cursor: 'pointer', padding: '0 2px', lineHeight: 1 }}>×</button>
               </div>
               {isConfirm && (
-                <div style={{ display: 'flex', gap: 0, borderTop: `0.5px solid ${UI.hairStrong}` }}>
+                <div style={{ display: 'flex', gap: 0, borderTop: `var(--hair-width) solid ${UI.hairStrong}` }}>
                   <button onClick={() => setConfirmDeleteTempId(null)} style={{ flex: 1, padding: '7px', background: 'none', border: 'none', cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 11, color: UI.inkSoft }}>Cancel</button>
-                  <button onClick={() => deleteTemp(t.id)} style={{ flex: 1, padding: '7px', background: 'none', border: 'none', borderLeft: `0.5px solid ${UI.hairStrong}`, cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700, color: UI.danger }}>Delete</button>
+                  <button onClick={() => deleteTemp(t.id)} style={{ flex: 1, padding: '7px', background: 'none', border: 'none', borderLeft: `var(--hair-width) solid ${UI.hairStrong}`, cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700, color: UI.danger }}>Delete</button>
                 </div>
               )}
             </div>
           );
         })}
         {addingTemp ? (
-          <div style={{ background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 6, padding: '12px 10px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, padding: '12px 10px', display: 'flex', flexDirection: 'column', gap: 8 }}>
             {(() => {
-              const tInputSt = { background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '7px 10px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, outline: 'none', width: '100%', boxSizing: 'border-box' };
+              const tInputSt = { background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4, padding: '7px 10px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, outline: 'none', width: '100%', boxSizing: 'border-box' };
               return (
                 <div style={{ display: 'flex', gap: 8 }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
@@ -1557,13 +1563,13 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
             setAddingTemp(true); setEditingTempId(null);
           }} style={{
             width: '100%', padding: '9px', background: UI.bgInset, border: `0.5px dashed ${UI.hairStrong}`, borderRadius: 6,
-            color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 12, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+            color: UI.inkFaint, textShadow: 'none', fontFamily: UI.fontUi, fontSize: 12, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
           }}>+ Add reading</button>
         )}
       </CatSection>
 
       {coachFields.length > 0 && (
-        <div style={{ marginBottom: 18, padding: '14px 14px', borderRadius: 6, background: `rgba(var(--accent-rgb),0.05)`, border: `0.5px solid rgba(var(--accent-rgb),0.2)` }}>
+        <div style={{ marginBottom: 18, padding: '14px 14px', borderRadius: 6, background: `rgba(var(--accent-rgb),0.11)`, border: `0.5px solid rgba(var(--accent-rgb),0.2)` }}>
           <div className="micro-gold" style={{ marginBottom: 12 }}>YOUR COACH WANTS TO KNOW</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             {layoutRows(coachFields).map((row, ri) => (
@@ -1640,7 +1646,7 @@ function MacroTargetSheet({ open, onClose, store, setStore, coachingMacros }) {
     onClose();
   };
 
-  const inputStyle = { width: '100%', boxSizing: 'border-box', background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4, padding: '9px 10px', fontFamily: UI.fontNum, fontSize: 15, color: UI.ink, outline: 'none' };
+  const inputStyle = { width: '100%', boxSizing: 'border-box', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4, padding: '9px 10px', fontFamily: UI.fontNum, fontSize: 15, color: UI.ink, outline: 'none' };
   const num = (k, lbl) => (
     <div style={{ flex: 1 }}>
       <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>{lbl}</div>
@@ -1661,7 +1667,7 @@ function MacroTargetSheet({ open, onClose, store, setStore, coachingMacros }) {
   return (
     <Sheet open={open} onClose={requestClose} title="Macro Targets">
       {coachHasMacros && (
-        <div style={{ fontSize: 11, color: 'var(--accent)', fontFamily: UI.fontUi, padding: '6px 10px', background: `rgba(var(--accent-rgb),0.08)`, borderRadius: 6, border: `0.5px solid rgba(var(--accent-rgb),0.2)`, marginBottom: 14 }}>
+        <div style={{ fontSize: 11, color: 'var(--accent)', fontFamily: UI.fontUi, padding: '6px 10px', background: `rgba(var(--accent-rgb),0.16)`, borderRadius: 6, border: `0.5px solid rgba(var(--accent-rgb),0.2)`, marginBottom: 14 }}>
           Your coaching macros are active and take priority. These personal targets apply only if the coaching macros are removed.
         </div>
       )}
@@ -1743,7 +1749,7 @@ function HealthMetricsCard({ log, dateLabel, isToday, onJumpToday, dragHandle, t
         {stat('Fat', log?.fat != null ? log.fat : null, 'g')}
       </div>
       {dayTarget && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0 12px', marginTop: 6, paddingTop: 6, borderTop: `0.5px solid ${UI.hair}` }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0 12px', marginTop: 6, paddingTop: 6, borderTop: `var(--hair-width) solid ${UI.hair}` }}>
           {[dayTarget.protein, dayTarget.carbs, dayTarget.fat].map((v, i) => (
             <div key={i} style={{ textAlign: 'center' }}>
               <span className="num" style={{ fontSize: 10, color: UI.inkGhost }}>{v != null ? v : '—'}<span style={{ fontSize: 8 }}>g</span></span>
@@ -1752,13 +1758,13 @@ function HealthMetricsCard({ log, dateLabel, isToday, onJumpToday, dragHandle, t
         </div>
       )}
       {log?.offPlanNote && (
-        <div style={{ marginTop: 14, paddingTop: 14, borderTop: `0.5px solid ${UI.hair}` }}>
+        <div style={{ marginTop: 14, paddingTop: 14, borderTop: `var(--hair-width) solid ${UI.hair}` }}>
           <div className="micro" style={{ color: UI.inkFaint, marginBottom: 5 }}>OFF-PLAN</div>
           <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{log.offPlanNote}</div>
         </div>
       )}
       {log?.note && (
-        <div style={{ marginTop: 14, paddingTop: 14, borderTop: `0.5px solid ${UI.hair}` }}>
+        <div style={{ marginTop: 14, paddingTop: 14, borderTop: `var(--hair-width) solid ${UI.hair}` }}>
           <div className="micro" style={{ color: UI.inkFaint, marginBottom: 5 }}>NOTE</div>
           <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{log.note}</div>
         </div>
@@ -1817,12 +1823,13 @@ function HealthWeekCard({ stats, dragHandle, targets, tf, setTf, weightUnit }) {
   );
 
   const tfToggle = setTf ? (
-    <div data-reorder-ignore="true" style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `0.5px solid ${UI.hairStrong}` }}>
+    <div data-reorder-ignore="true" style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}` }}>
       {HEALTH_TFS.map(t => (
         <button key={t.id} onClick={() => setTf(t.id)} style={{
           padding: '2px 8px', cursor: 'pointer', border: 'none',
           background: tf === t.id ? 'var(--accent)' : 'transparent',
-          color: tf === t.id ? '#0a0805' : UI.inkFaint,
+          color: tf === t.id ? 'var(--accent-ink)' : UI.inkFaint,
+          textShadow: 'none',
           fontFamily: UI.fontUi, fontSize: 9, fontWeight: 600, letterSpacing: '0.06em',
           WebkitTapHighlightColor: 'transparent',
         }}>{t.id}</button>
@@ -1979,11 +1986,11 @@ function HealthDateStrip({ store, setStore, selectedDate, onSelect, onLog, targe
                 opacity: future ? 0.35 : 1, minHeight: 56,
                 WebkitTapHighlightColor: 'transparent',
               }}>
-              <div className="num" style={{ fontSize: 9, color: sel ? UI.gold : isToday ? UI.inkSoft : UI.inkFaint }}>
+              <div className="num" style={{ fontSize: 9, color: sel ? UI.gold : isToday ? UI.inkSoft : UI.inkFaint, textShadow: 'var(--text-lift)' }}>
                 {WEEKDAYS[i]}
               </div>
               <div style={{ fontSize: 11, fontWeight: 600, marginTop: 4, letterSpacing: '0.06em',
-                color: sel ? UI.gold : has ? UI.ink : UI.inkFaint }}>
+                color: sel ? UI.gold : has ? UI.ink : UI.inkFaint, textShadow: 'var(--text-lift)' }}>
                 {new Date(d + 'T12:00:00').getDate()}
               </div>
               {/* Day-type indicator — ALWAYS shown: dumbbell = training, dot = rest.
@@ -1996,7 +2003,7 @@ function HealthDateStrip({ store, setStore, selectedDate, onSelect, onLog, targe
                   <span style={{ width: 5, height: 5, borderRadius: '50%', border: `1px solid ${sel || has ? UI.goldSoft : UI.hairStrong}`, background: 'transparent', display: 'inline-block' }} />
                 )}
                 {has && (
-                  <svg width="9" height="9" viewBox="0 0 12 12" fill="none" stroke={UI.gold} strokeWidth="2">
+                  <svg width="9" height="9" viewBox="0 0 12 12" fill="none" stroke={UI.gold} strokeWidth="2" filter="url(#chart-text-lift)">
                     <path d="M2 6l2.5 2.5L10 3"/>
                   </svg>
                 )}
@@ -2030,7 +2037,8 @@ function HealthDateStrip({ store, setStore, selectedDate, onSelect, onLog, targe
                 <button key={type} onClick={() => setFlexDayType(type)} title={label} style={{
                   padding: '0 14px', border: 'none', borderLeft: i > 0 ? `1px solid ${UI.hairStrong}` : 'none',
                   background: active ? 'var(--accent)' : 'transparent',
-                  color: active ? '#0a0805' : UI.inkFaint, cursor: 'pointer',
+                  color: active ? 'var(--accent-ink)' : UI.inkFaint, cursor: 'pointer',
+                  textShadow: active ? 'none' : 'var(--text-lift)',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                   WebkitTapHighlightColor: 'transparent', transition: 'background 0.15s',
                 }}>
@@ -2044,7 +2052,8 @@ function HealthDateStrip({ store, setStore, selectedDate, onSelect, onLog, targe
         {onLog && <button data-tour="health-log-btn" onClick={onLog} style={{
           height: 34, borderRadius: 4, border: 'none',
           background: 'linear-gradient(180deg, var(--accent-light), var(--accent))',
-          color: '#0a0805', cursor: 'pointer', padding: '0 14px',
+          color: 'var(--accent-ink)', cursor: 'pointer', padding: '0 14px',
+          textShadow: 'none',
           fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, letterSpacing: '0.06em',
           flexShrink: 0, display: 'flex', alignItems: 'center', gap: 5,
           WebkitTapHighlightColor: 'transparent',
@@ -2114,7 +2123,7 @@ function GlucoseCard({ glucoseLogs, unit, tf: sharedTf, setTf: setSharedTf, drag
               context dots are separate flex items with no text of their own
               to fall back on for reflow. */}
           <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 12, rowGap: 4, marginTop: 4 }}>
-            <div style={{ height: 8, width: 28, background: 'rgba(var(--accent-rgb),0.15)', borderRadius: 4, flexShrink: 0 }} />
+            <div style={{ height: 8, width: 28, background: `rgba(var(--accent-rgb),${isLightCanvasActive() ? 0.3 : 0.15})`, borderRadius: 4, flexShrink: 0 }} />
             <span style={{ fontSize: 9, fontFamily: UI.fontUi, color: UI.inkFaint }}>
               Normal fasting {refLow.toFixed(dec)}–{refHigh.toFixed(dec)} {unitLabel}
             </span>
@@ -2348,7 +2357,7 @@ function WaterEntryChart({ entries }) {
       {gridVals.map((v, i) => (
         <g key={i}>
           {i > 0 && <line x1={padL} y1={yOf(v).toFixed(1)} x2={W - padR} y2={yOf(v).toFixed(1)} stroke={UI.hair} strokeWidth="0.5" strokeDasharray="3 3" />}
-          <text x={padL - 5} y={(yOf(v) + 3).toFixed(1)} textAnchor="end" fontSize="8" fontFamily={UI.fontNum} fill={UI.inkFaint}>{UI.waterToEntry(v)}</text>
+          <text filter="url(#chart-text-lift)" x={padL - 5} y={(yOf(v) + 3).toFixed(1)} textAnchor="end" fontSize="8" fontFamily={UI.fontNum} fill={UI.inkFaint}>{UI.waterToEntry(v)}</text>
         </g>
       ))}
       <line x1={padL} y1={padTop + plotH} x2={W - padR} y2={padTop + plotH} stroke={UI.hair} strokeWidth="0.5" />
@@ -2734,7 +2743,7 @@ function HealthScreen({ store, setStore, go, userId }) {
     ? `AVG TARGET · ${tf === '1M' ? 'LAST 30 DAYS' : 'LAST 3 MONTHS'}`
     : `DAILY TARGETS${fromCoach ? (selfCoachedMacros ? ' · FROM YOUR PLAN' : ' · FROM COACH') : ''}`;
   const targetRow = (
-    <div style={{ background: UI.bgInset, border: `0.5px solid ${UI.hair}`, borderRadius: 6, padding: '8px 12px', marginBottom: 12 }}>
+    <div style={{ background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6, padding: '8px 12px', marginBottom: 12 }}>
       <div style={{ display: 'flex', alignItems: 'center', marginBottom: effectiveTargets ? 2 : 0 }}>
         <span className="micro" style={{ color: UI.inkFaint, flex: 1 }}>{targetLabel}</span>
         <button data-reorder-ignore="true" onClick={() => setTargetOpen(true)} style={{
@@ -2770,7 +2779,7 @@ function HealthScreen({ store, setStore, go, userId }) {
         </div>
       )}
       {coachHasMacros && (
-        <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1.4, marginTop: 8, paddingTop: 8, borderTop: `0.5px solid ${UI.hair}` }}>
+        <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1.4, marginTop: 8, paddingTop: 8, borderTop: `var(--hair-width) solid ${UI.hair}` }}>
           {selfCoachedMacros
             ? 'These come from your active plan and take priority. Personal targets you set apply only without them.'
             : 'These come from your coaching plan and take priority. Personal targets you set apply only without coaching macros.'}
@@ -2913,7 +2922,7 @@ function HealthScreen({ store, setStore, go, userId }) {
         <div onClick={() => { setSelectedDate(today); setLogOpen(true); }} style={{
           margin: '0 16px 12px',
           padding: '10px 14px',
-          background: 'rgba(var(--accent-rgb), 0.08)',
+          background: 'rgba(var(--accent-rgb), 0.16)',
           border: `0.5px solid rgba(var(--accent-rgb), 0.3)`,
           borderRadius: 6,
           display: 'flex', alignItems: 'center', gap: 10,
@@ -3166,9 +3175,9 @@ function HealthClientLogs({ clientStore }) {
           {handle}
           <span style={HEALTH_CARD_HEADER_STYLE}>WEEKLY AVERAGES</span>
         </div>
-        <div style={{ background: UI.bgInset, borderRadius: 6, border: `0.5px solid ${UI.hair}`, overflow: 'hidden' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {weeks.map((w, i) => (
-            <div key={w.ws} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', borderTop: i ? `0.5px solid ${UI.hair}` : 'none' }}>
+            <div key={w.ws} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6 }}>
               <div style={{ width: 58, flexShrink: 0, fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi }}>{healthFmtDate(w.ws, { day: 'numeric', month: 'short' })}</div>
               <div style={{ flex: 1, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                 {w.weight != null && <span className="num" style={{ fontSize: 11, color: UI.inkSoft }}>{w.weight} {clientUnit}</span>}
@@ -3331,7 +3340,11 @@ function ExportSheet({ open, onClose, store }) {
       const cardio = cardioByDay();
       const sessions = sessionsByDay();
       const unit = (store.settings?.unit === 'lbs') ? 'lbs' : 'kg';
-      const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#c9a961';
+      // This export builds its own fixed dark card design regardless of the
+      // live app theme (cardBg/inkText/etc below are all hardcoded too), so
+      // it needs the user's raw accent color, not paper's muted grey which
+      // would go low-contrast against this always-dark card.
+      const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent-raw').trim() || '#c9a961';
       const cardBg  = '#201e2c';
       const inkText = '#e5e2ef';
       const inkSoft = '#9b97a8';
@@ -3437,9 +3450,10 @@ function ExportSheet({ open, onClose, store }) {
           <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
             {presets.map(p => (
               <button key={p.days} onClick={() => applyPreset(p.days)} style={{
-                flex: 1, padding: '7px 4px', borderRadius: 4, border: `0.5px solid ${UI.hairStrong}`,
+                flex: 1, padding: '7px 4px', borderRadius: 4, border: `var(--hair-width) solid ${UI.hairStrong}`,
                 background: from === healthShiftISO(today, -(p.days - 1)) && to === today ? 'var(--accent)' : UI.bgInset,
-                color: from === healthShiftISO(today, -(p.days - 1)) && to === today ? '#0a0805' : UI.inkSoft,
+                color: from === healthShiftISO(today, -(p.days - 1)) && to === today ? 'var(--accent-ink)' : UI.inkSoft,
+                textShadow: 'none',
                 fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, cursor: 'pointer',
                 WebkitTapHighlightColor: 'transparent',
               }}>{p.label}</button>
@@ -3450,14 +3464,14 @@ function ExportSheet({ open, onClose, store }) {
               <div className="label" style={{ color: UI.inkFaint, marginBottom: 4 }}>FROM</div>
               <input type="date" value={from} max={to}
                 onChange={e => e.target.value && setFrom(e.target.value)}
-                style={{ width: '100%', padding: '8px 10px', borderRadius: 4, border: `0.5px solid ${UI.hairStrong}`, background: UI.bgInset, color: UI.ink, fontFamily: UI.fontNum, fontSize: 13, outline: 'none' }} />
+                style={{ width: '100%', padding: '8px 10px', borderRadius: 4, border: `var(--hair-width) solid ${UI.hairStrong}`, background: UI.bgInset, color: UI.ink, fontFamily: UI.fontNum, fontSize: 13, outline: 'none' }} />
             </div>
             <div style={{ color: UI.inkFaint, fontSize: 11, paddingTop: 16 }}>→</div>
             <div style={{ flex: 1 }}>
               <div className="label" style={{ color: UI.inkFaint, marginBottom: 4 }}>TO</div>
               <input type="date" value={to} min={from} max={today}
                 onChange={e => e.target.value && setTo(e.target.value)}
-                style={{ width: '100%', padding: '8px 10px', borderRadius: 4, border: `0.5px solid ${UI.hairStrong}`, background: UI.bgInset, color: UI.ink, fontFamily: UI.fontNum, fontSize: 13, outline: 'none' }} />
+                style={{ width: '100%', padding: '8px 10px', borderRadius: 4, border: `var(--hair-width) solid ${UI.hairStrong}`, background: UI.bgInset, color: UI.ink, fontFamily: UI.fontNum, fontSize: 13, outline: 'none' }} />
             </div>
           </div>
           {(() => {
@@ -3468,8 +3482,9 @@ function ExportSheet({ open, onClose, store }) {
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           <button onClick={doExportCSV} disabled={!!exporting} style={{
-            width: '100%', padding: '13px 0', borderRadius: 6, border: `0.5px solid ${UI.hairStrong}`,
+            width: '100%', padding: '13px 0', borderRadius: 6, border: `var(--hair-width) solid ${UI.hairStrong}`,
             background: UI.bgInset, color: exporting ? UI.inkGhost : UI.ink,
+            textShadow: 'none',
             fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, cursor: exporting ? 'default' : 'pointer',
             display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
             WebkitTapHighlightColor: 'transparent',
@@ -3481,7 +3496,8 @@ function ExportSheet({ open, onClose, store }) {
             width: '100%', padding: '13px 0', borderRadius: 6, border: 'none',
             background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)',
             boxShadow: '0 6px 20px rgba(var(--accent-rgb),0.35)',
-            color: '#0a0805', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 700, cursor: exporting ? 'default' : 'pointer',
+            color: 'var(--accent-ink)', textShadow: 'none',
+            fontFamily: UI.fontUi, fontSize: 13, fontWeight: 700, cursor: exporting ? 'default' : 'pointer',
             display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
             WebkitTapHighlightColor: 'transparent',
             opacity: exporting ? 0.6 : 1,

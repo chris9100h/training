@@ -287,7 +287,7 @@ function CardioPlanDetailSheet({ plan, store, setStore, activeCardioPlanId, toda
 
         {/* Goal summary */}
         {plan.mode === 'goal' && plan.goal && (
-          <div style={{ padding: '10px 14px', background: UI.bgInset, borderRadius: 6, border: `0.5px solid ${UI.hair}` }}>
+          <div style={{ padding: '10px 14px', background: UI.bgInset, borderRadius: 6, border: `var(--hair-width) solid ${UI.hair}` }}>
             <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>GOAL</div>
             <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>
               {plan.goal.type === 'duration'
@@ -315,7 +315,7 @@ function CardioPlanDetailSheet({ plan, store, setStore, activeCardioPlanId, toda
         <Btn kind="ghost" onClick={async () => {
           if (!await confirm('Delete this cardio plan?', { ok: 'Delete', danger: true })) return;
           onDelete();
-        }} style={{ width: '100%', fontSize: 12, color: UI.danger, borderColor: 'rgba(var(--danger-rgb),0.25)' }}>Delete plan</Btn>
+        }} style={{ width: '100%', fontSize: 12, color: UI.danger, background: 'rgba(var(--danger-rgb),0.08)', borderColor: 'rgba(var(--danger-rgb),calc(0.25 * var(--danger-border-boost)))' }}>Delete plan</Btn>
       </div>
     </Sheet>
   );
@@ -573,7 +573,7 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
 
   const inputStyle = {
     width: '100%', boxSizing: 'border-box', padding: '10px 12px',
-    background: UI.bgInset, border: `0.5px solid ${UI.hairStrong}`, borderRadius: 4,
+    background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4,
     fontFamily: UI.fontUi, fontSize: 15, color: UI.ink, outline: 'none',
   };
 
@@ -588,7 +588,8 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
               <button key={a.id} onClick={() => { setActivityType(a.id); setShowCustom(false); }} style={{
                 padding: '14px 10px', borderRadius: 6, cursor: 'pointer',
                 border: `1px solid ${activityType === a.id ? 'var(--accent)' : UI.hairStrong}`,
-                background: activityType === a.id ? 'rgba(var(--accent-rgb),0.1)' : UI.bgInset,
+                background: activityType === a.id ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
+                textShadow: activityType === a.id ? 'var(--text-lift)' : 'none',
                 display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8,
                 WebkitTapHighlightColor: 'transparent',
               }}>
@@ -599,7 +600,8 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
             <button onClick={() => setShowCustom(v => !v)} style={{
               padding: '14px 10px', borderRadius: 6, cursor: 'pointer',
               border: `1px solid ${(showCustom || isCustomSel) ? 'var(--accent)' : UI.hairStrong}`,
-              background: (showCustom || isCustomSel) ? 'rgba(var(--accent-rgb),0.1)' : UI.bgInset,
+              background: (showCustom || isCustomSel) ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
+              textShadow: 'none',
               display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8,
               WebkitTapHighlightColor: 'transparent',
             }}>
@@ -620,7 +622,8 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
                   <button key={t} onClick={() => { setActivityType(t); setShowCustom(false); }} style={{
                     padding: '10px 14px', borderRadius: 6, cursor: 'pointer', textAlign: 'center',
                     border: `1px solid ${activityType === t ? 'var(--accent)' : UI.hairStrong}`,
-                    background: activityType === t ? 'rgba(var(--accent-rgb),0.1)' : UI.bgInset,
+                    background: activityType === t ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
+                    textShadow: activityType === t ? 'var(--text-lift)' : 'none',
                     fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600,
                     color: activityType === t ? 'var(--accent)' : UI.ink,
                     WebkitTapHighlightColor: 'transparent',
@@ -645,7 +648,8 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
           <button key={m.id} onClick={() => setMode(m.id)} style={{
             padding: '14px 16px', borderRadius: 6, cursor: 'pointer', textAlign: 'left',
             border: `1px solid ${mode === m.id ? 'var(--accent)' : UI.hairStrong}`,
-            background: mode === m.id ? 'rgba(var(--accent-rgb),0.08)' : UI.bgInset,
+            background: mode === m.id ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
+            textShadow: 'none',
             display: 'flex', gap: 14, alignItems: 'flex-start',
             WebkitTapHighlightColor: 'transparent',
           }}>
@@ -685,7 +689,8 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
               }} style={{
                 flex: 1, paddingTop: 10, paddingBottom: 10, borderRadius: 6, cursor: 'pointer',
                 border: `1px solid ${days[k] ? 'var(--accent)' : UI.hairStrong}`,
-                background: days[k] ? 'rgba(var(--accent-rgb),0.12)' : UI.bgInset,
+                background: days[k] ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
+                textShadow: days[k] ? 'var(--text-lift)' : 'none',
                 fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.04em',
                 color: days[k] ? 'var(--accent)' : UI.inkSoft,
                 WebkitTapHighlightColor: 'transparent',
@@ -695,7 +700,8 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
           <button onClick={() => setUseTargets(v => !v)} style={{
             padding: '12px 14px', borderRadius: 6, cursor: 'pointer', textAlign: 'left',
             border: `1px solid ${useTargets ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong}`,
-            background: useTargets ? 'rgba(var(--accent-rgb),0.07)' : UI.bgInset,
+            background: useTargets ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
+            textShadow: useTargets ? 'var(--text-lift)' : 'none',
             display: 'flex', alignItems: 'center', gap: 12,
             WebkitTapHighlightColor: 'transparent',
           }}>
@@ -729,16 +735,17 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
         const isDist = t.target_type !== 'duration';
         const dispDist = t.distance_m ? LB.mToDisplay(t.distance_m, du) : '';
         return (
-          <div key={keyId} style={{ padding: 12, background: UI.bgInset, borderRadius: 6, border: `0.5px solid ${UI.hair}`, ...(span ? { gridColumn: '1 / -1' } : {}) }}>
+          <div key={keyId} style={{ padding: 12, background: UI.bgInset, borderRadius: 6, border: `var(--hair-width) solid ${UI.hair}`, ...(span ? { gridColumn: '1 / -1' } : {}) }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
               <span style={{ fontSize: 13, fontWeight: 700, color: UI.inkSoft, fontFamily: UI.fontUi }}>{label}</span>
-              <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `0.5px solid ${UI.hairStrong}` }}>
+              <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}` }}>
                 {['distance','duration'].map(tt => {
                   const active = isDist ? tt === 'distance' : tt === 'duration';
                   return (
                     <button key={tt} onClick={() => upd({ target_type: tt })} style={{
                       padding: '4px 12px', cursor: 'pointer', border: 'none',
                       background: active ? UI.inkFaint : 'transparent',
+                      textShadow: 'none',
                       fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.08em',
                       color: active ? UI.bg : UI.inkFaint, WebkitTapHighlightColor: 'transparent',
                     }}>{tt === 'distance' ? du.toUpperCase() : 'MIN'}</button>
@@ -794,7 +801,7 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
               }} style={{
                 flex: 1, padding: '9px 8px', borderRadius: 6, cursor: on ? 'default' : 'pointer',
                 border: `1px solid ${on ? 'var(--accent)' : UI.hairStrong}`,
-                background: on ? 'rgba(var(--accent-rgb),0.1)' : UI.bgInset,
+                background: on ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
                 fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700, letterSpacing: '0.04em',
                 color: on ? 'var(--accent)' : UI.inkSoft, WebkitTapHighlightColor: 'transparent',
               }}>{o.label}</button>
@@ -839,7 +846,8 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
                 <button key={gt.id} onClick={() => setGoal(g => ({ ...g, type: gt.id }))} style={{
                   flex: 1, padding: '10px 8px', borderRadius: 6, cursor: 'pointer', textAlign: 'center',
                   border: `1px solid ${goal.type === gt.id ? 'var(--accent)' : UI.hairStrong}`,
-                  background: goal.type === gt.id ? 'rgba(var(--accent-rgb),0.1)' : UI.bgInset,
+                  background: goal.type === gt.id ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
+                  textShadow: 'none',
                   WebkitTapHighlightColor: 'transparent',
                 }}>
                   <div style={{ fontSize: 11, fontWeight: 700, color: goal.type === gt.id ? 'var(--accent)' : UI.ink, fontFamily: UI.fontUi }}>{gt.label}</div>
@@ -896,7 +904,7 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
             <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>DUE DATE</div>
             <div style={{ width: '100%', overflow: 'hidden', borderRadius: 4 }}>
               <input type="date" value={goalDue} min={LB.todayISO()} onChange={e => setGoalDue(e.target.value)}
-                style={{ ...inputStyle, colorScheme: 'dark' }} />
+                style={{ ...inputStyle, colorScheme: ['light', 'paper'].includes(store.settings?.darkMode ?? 'dark') ? 'light' : 'dark' }} />
             </div>
           </div>
 
@@ -915,7 +923,8 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
                 <button key={k} onClick={() => setDays(d => ({ ...d, [k]: !d[k] }))} style={{
                   flex: 1, paddingTop: 10, paddingBottom: 10, borderRadius: 6, cursor: 'pointer',
                   border: `1px solid ${days[k] ? 'var(--accent)' : UI.hairStrong}`,
-                  background: days[k] ? 'rgba(var(--accent-rgb),0.12)' : UI.bgInset,
+                  background: days[k] ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
+                  textShadow: days[k] ? 'var(--text-lift)' : 'none',
                   fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.04em',
                   color: days[k] ? 'var(--accent)' : UI.inkSoft,
                   WebkitTapHighlightColor: 'transparent',
@@ -999,13 +1008,13 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
       const actLabel = cpActivity(activityType).label;
       return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <div style={{ padding: '10px 14px', background: 'rgba(var(--accent-rgb),0.05)', border: '0.5px solid rgba(var(--accent-rgb),0.2)', borderRadius: 6 }}>
+          <div style={{ padding: '10px 14px', background: 'rgba(var(--accent-rgb),0.11)', border: '0.5px solid rgba(var(--accent-rgb),0.2)', borderRadius: 6 }}>
             <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.6 }}>
               Your <strong style={{ color: UI.ink }}>{actLabel}</strong> plan: <strong style={{ color: UI.ink }}>{total} sessions</strong> over <strong style={{ color: UI.ink }}>{totalWeeksPreview} weeks</strong>. Each session progresses slightly. Every 4th calendar week is a lighter recovery week.
             </div>
           </div>
           {preview?.warnings?.map((msg, i) => (
-            <div key={i} style={{ padding: '8px 12px', background: 'rgba(var(--accent-rgb),0.08)', border: '0.5px solid rgba(var(--accent-rgb),0.3)', borderRadius: 6 }}>
+            <div key={i} style={{ padding: '8px 12px', background: 'rgba(var(--accent-rgb),0.16)', border: '0.5px solid rgba(var(--accent-rgb),0.3)', borderRadius: 6 }}>
               <span style={{ fontSize: 11, color: UI.gold, fontFamily: UI.fontUi, lineHeight: 1.5 }}>⚠ {msg}</span>
             </div>
           ))}
@@ -1015,7 +1024,7 @@ function CardioPlanCreateSheet({ open, onClose, store, setStore, editPlan }) {
               <div key={i} style={{
                 display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                 padding: '10px 14px', borderRadius: 6,
-                background: isGoal ? 'rgba(var(--accent-rgb),0.08)' : UI.bgInset,
+                background: isGoal ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset,
                 border: `0.5px solid ${isGoal ? 'rgba(var(--accent-rgb),0.3)' : UI.hair}`,
               }}>
                 <div>
