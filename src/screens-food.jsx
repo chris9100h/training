@@ -36,6 +36,37 @@ function fdNowHHMM() {
 const fdInt = v => (v === '' || v == null || isNaN(parseInt(v, 10))) ? null : parseInt(v, 10);
 const fdRound1 = v => Math.round(v * 10) / 10;
 
+// Read a picked image file into a data URL.
+function fdReadImageFile(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error('read failed'));
+    reader.readAsDataURL(file);
+  });
+}
+// Downscale + re-encode a label photo to a bounded JPEG before upload: keeps
+// the request small (and cheap) while staying at the model's native ~1568px
+// image cap, above which the server just downsamples anyway. Returns the raw
+// base64 (no data: prefix) plus its mime type.
+async function fdDownscaleImage(file, maxDim = 1568, quality = 0.72) {
+  const dataUrl = await fdReadImageFile(file);
+  const img = await new Promise((resolve, reject) => {
+    const im = new Image();
+    im.onload = () => resolve(im);
+    im.onerror = () => reject(new Error('decode failed'));
+    im.src = dataUrl;
+  });
+  const scale = Math.min(1, maxDim / Math.max(img.width || 1, img.height || 1));
+  const w = Math.max(1, Math.round((img.width || 1) * scale));
+  const h = Math.max(1, Math.round((img.height || 1) * scale));
+  const canvas = document.createElement('canvas');
+  canvas.width = w; canvas.height = h;
+  canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+  const out = canvas.toDataURL('image/jpeg', quality);
+  return { base64: (out.split(',')[1] || ''), mimeType: 'image/jpeg' };
+}
+
 const FD_TABS = [
   { id: 'log', label: 'Log', icon: 'fa-list' },
   { id: 'search', label: 'Search', icon: 'fa-magnifying-glass' },
@@ -74,6 +105,9 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   const [searchError, setSearchError] = useStateFd(null);
   const [results, setResults] = useStateFd(null); // null = no search run yet
   const [scanOpen, setScanOpen] = useStateFd(false);
+  const [labelScanning, setLabelScanning] = useStateFd(false);
+  const [labelError, setLabelError] = useStateFd(null);
+  const labelInputRef = useRefFd(null);
 
   const [qtySheetOpen, setQtySheetOpen] = useStateFd(false);
   const [pendingFood, setPendingFood] = useStateFd(null);
@@ -261,6 +295,58 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     setScanOpen(false);
     setQuery(code);
     runSearch(code);
+  }
+
+  // Nutrition-label scan: the user photographs a Nährwerttabelle, we shrink it
+  // client-side and send it to the scan-label edge function (Claude vision),
+  // then prefill the Custom Item form with what it read for the user to verify.
+  // A scanned label is a per-user custom item, never a shared zane_foods entry.
+  async function handleLabelFile(e) {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = ''; // let the user re-pick the same photo after an error
+    if (!file) return;
+    setLabelError(null);
+    setLabelScanning(true);
+    try {
+      const { base64, mimeType } = await fdDownscaleImage(file);
+      if (!base64) { setLabelScanning(false); setLabelError('Could not read that image. Try again.'); return; }
+      const res = await LB.scanLabel(base64, mimeType);
+      setLabelScanning(false);
+      if (!res.ok) { setLabelError(res.error || 'Scan failed. Try again.'); return; }
+      prefillFromLabel(res.label);
+    } catch (_) {
+      setLabelScanning(false);
+      setLabelError('Could not read that image. Try again.');
+    }
+  }
+
+  function prefillFromLabel(label) {
+    if (!label || label.is_nutrition_label === false) {
+      setLabelError("That doesn't look like a nutrition label. Try a straight-on photo of the table.");
+      return;
+    }
+    const cal = label.calories, p = label.protein_g, c = label.carbs_g, f = label.fat_g, fib = label.fiber_g;
+    if (cal == null && p == null && c == null && f == null) {
+      setLabelError('Could not read the values. Try a clearer photo, or add it manually.');
+      return;
+    }
+    // Amount the prefilled macros describe: the serving grams when read per
+    // serving and stated, 100 for a per-100g/ml label, else blank for the user
+    // to fill. The custom form logs the macros as typed (no rescaling), so the
+    // amount is a label, not a multiplier.
+    let amountG = '';
+    if (label.basis === '100g' || label.basis === '100ml') amountG = '100';
+    else if (label.serving_size_g > 0) amountG = String(Math.round(label.serving_size_g));
+
+    resetCustomForm();
+    setCustomName(label.name || '');
+    setCustomG(amountG);
+    setCustomCal(cal != null ? String(Math.round(cal)) : '');
+    setCustomP(p != null ? String(Math.round(p)) : '');
+    setCustomC(c != null ? String(Math.round(c)) : '');
+    setCustomF(f != null ? String(Math.round(f)) : '');
+    setCustomFib(fib != null ? String(Math.round(fib)) : '');
+    setCustomOpen(true);
   }
 
   // Open straight from the search result, no server round-trip: the result
@@ -670,9 +756,15 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                   {searching ? <span style={{ fontFamily: UI.fontUi, fontSize: 11 }}>…</span> : <i className="fa-solid fa-magnifying-glass" style={{ fontSize: 13 }} />}
                 </button>
               </div>
-              <button onClick={() => { resetCustomForm(); setCustomOpen(true); }} style={fdLinkBtn}>
-                Can't find it? Add manually
-              </button>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 2 }}>
+                <button onClick={() => { setLabelError(null); resetCustomForm(); setCustomOpen(true); }} style={fdLinkBtn}>
+                  Can't find it? Add manually
+                </button>
+                <button onClick={() => labelInputRef.current && labelInputRef.current.click()} style={{ ...fdLinkBtn, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  <i className="fa-solid fa-camera" style={{ fontSize: 12 }} /> Scan a nutrition label
+                </button>
+                {labelError && <div style={{ fontSize: 11, color: 'var(--danger)', fontFamily: UI.fontUi, marginTop: 2, lineHeight: 1.4 }}>{labelError}</div>}
+              </div>
             </div>
 
             {searchError && <div style={{ fontSize: 11, color: 'var(--danger)', fontFamily: UI.fontUi }}>{searchError}</div>}
@@ -897,8 +989,24 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         </div>
       </Sheet>
 
+      {/* Hidden picker: opens the native camera (capture) or gallery on tap,
+          which works on iOS Safari without any library. */}
+      <input ref={labelInputRef} type="file" accept="image/*" capture="environment" onChange={handleLabelFile} style={{ display: 'none' }} />
+      {labelScanning && <FdLabelBusy />}
       {scanOpen && <FdScanner onClose={() => setScanOpen(false)} onDetect={handleScan} />}
     </Screen>
+  );
+}
+
+// Full-screen dim while the label photo is uploaded and read. Kept dead simple
+// (no cancel): the request is a couple of seconds and closing mid-flight would
+// just discard a result the user asked for.
+function FdLabelBusy() {
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 200, background: 'rgba(0,0,0,0.62)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16 }}>
+      <i className="fa-solid fa-spinner fa-spin" style={{ fontSize: 30, color: '#fff' }} />
+      <div style={{ color: '#fff', fontFamily: UI.fontUi, fontSize: 13, letterSpacing: '0.02em' }}>Reading label…</div>
+    </div>
   );
 }
 

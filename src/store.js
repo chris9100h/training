@@ -8,6 +8,7 @@ const WEB_PUSH_URL          = `${SUPABASE_URL}/functions/v1/web-push`;
 const COACHING_NOTIFY_URL   = `${SUPABASE_URL}/functions/v1/zane_coaching-notify`;
 const ADMIN_SEND_EMAIL_URL  = `${SUPABASE_URL}/functions/v1/admin-send-email`;
 const FOOD_SEARCH_URL       = `${SUPABASE_URL}/functions/v1/search-foods`;
+const SCAN_LABEL_URL        = `${SUPABASE_URL}/functions/v1/scan-label`;
 
 const VAPID_PUBLIC_KEY = 'BD14GEr1JXGYdRwx6kiqpZMTvbialpruEJnHUmcbxjOshGZvULZ10xqayRTt3iVCyTBWRIR5nsXNVSsP0YdKQDI';
 
@@ -1952,6 +1953,18 @@ async function searchFoods(query, source) {
 // and a dropped call self-heals on the next log of the same food.
 function cacheFood(source, sourceId) {
   fnFetch(FOOD_SEARCH_URL, { action: 'cache', source, sourceId });
+}
+
+// Reads a nutrition label from a photo (base64, no data: prefix) via the
+// scan-label edge function (Claude vision). Returns the extracted macros so
+// the client can prefill the Custom Item form. Scanned labels are logged as
+// per-user custom items, never written to the shared zane_foods cache.
+async function scanLabel(imageBase64, mimeType) {
+  const res = await fnFetch(SCAN_LABEL_URL, { image: imageBase64, mimeType });
+  if (!res) return { ok: false, error: 'Network error' };
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) return { ok: false, error: data?.error || `Request failed (${res.status})` };
+  return { ok: true, label: data };
 }
 
 function findExercise(state, exId) {
@@ -6753,7 +6766,7 @@ window.LB = {
   effReps, fmtDuration, e1rm, isImprovement, isDecline, bestE1rmForExercise, bestAssistLoad, bestTimeForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, buildTimeSeedSets, latestBodyweight, bodyweightForDate, exerciseLogMode, isAssisted, shouldPullBodyweight, systemExerciseToRow, inferCurrentExIdx, calcBlended,
   refreshExerciseBests, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries,
   computeNextReminderAt,
-  cancelPushover, adminSendEmail, searchFoods, cacheFood,
+  cancelPushover, adminSendEmail, searchFoods, cacheFood, scanLabel,
   subscribeToChanges,
   openStatusPeriod, closeStatusPeriod, updateStatusPeriodStart, clearStatusMode,
   startDeload, endDeload, deloadElapsed, deloadDaysRemaining, deloadPlanDays,
