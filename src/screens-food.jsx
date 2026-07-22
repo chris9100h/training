@@ -472,6 +472,28 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     setQtySheetOpen(true);
   }
 
+  // Reopens a previously-logged custom item (no foodId) through the scalable
+  // quantity sheet instead of the static Custom Item form: derives per-100g
+  // rates from the quantity it was originally logged at, exactly like
+  // prefillFromLabel does for a scanned label, so typing a new gram amount
+  // actually rescales the macros instead of leaving them frozen.
+  function openCustomAsScalable(item) {
+    const per100 = item.quantityG > 0 ? 100 / item.quantityG : 1;
+    setPendingFood({
+      custom: true, fromCache: true,
+      name: item.foodName, brand: item.brand || null,
+      kcalPer100g: item.calories * per100, proteinPer100g: item.protein * per100,
+      carbsPer100g: item.carbs * per100, fatPer100g: item.fat * per100,
+      fiberPer100g: item.fiber != null ? item.fiber * per100 : null,
+      servingSizeG: null, servingLabel: null,
+    });
+    setP100Str(String(fdRound1(item.protein * per100)));
+    setC100Str(String(fdRound1(item.carbs * per100)));
+    setF100Str(String(fdRound1(item.fat * per100)));
+    setQtyG(String(item.quantityG || 100));
+    setQtySheetOpen(true);
+  }
+
   // Reconstructs per-100g rates from a past entry (the log/favorite only
   // stores the already-scaled amounts, not per-100g), so a recent or
   // favorited DB-sourced item can be relogged at a different quantity
@@ -495,14 +517,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       setQtyG(String(l.quantityG || 100));
       setQtySheetOpen(true);
     } else {
-      setCustomName(l.foodName);
-      setCustomG(l.quantityG ? String(l.quantityG) : '');
-      setCustomCal(String(l.calories ?? ''));
-      setCustomP(String(l.protein ?? ''));
-      setCustomC(String(l.carbs ?? ''));
-      setCustomF(String(l.fat ?? ''));
-      setCustomFib(l.fiber != null ? String(l.fiber) : '');
-      setCustomOpen(true);
+      openCustomAsScalable(l);
     }
   }
 
@@ -675,14 +690,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       setQtyG(String(item.quantityG || 100));
       setQtySheetOpen(true);
     } else {
-      setCustomName(item.foodName);
-      setCustomG(item.quantityG ? String(item.quantityG) : '');
-      setCustomCal(String(item.calories ?? ''));
-      setCustomP(String(item.protein ?? ''));
-      setCustomC(String(item.carbs ?? ''));
-      setCustomF(String(item.fat ?? ''));
-      setCustomFib(item.fiber != null ? String(item.fiber) : '');
-      setCustomOpen(true);
+      openCustomAsScalable(item);
     }
   }
   function removeRecipeDraftItem(id) {
