@@ -175,7 +175,15 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     const raw = LB.caloriesFromMacros(p, c, f, netCarbs ? pendingFood?.fiberPer100g : null);
     setKcal100Str(raw != null ? String(Math.round(raw)) : '');
   }, [p100Str, c100Str, f100Str, kcal100Touched, pendingFood?.custom, pendingFood?.fiberPer100g, store.settings?.netCarbs]);
-  function onKcal100Change(v) { setKcal100Touched(true); setKcal100Str(fdDecimalFilter(v)); }
+  // Clearing the field back to empty un-overrides it (touched=false) rather
+  // than leaving it stuck empty forever: the effect above then recomputes
+  // it from the current macros on the very next render, same as if the
+  // field had never been touched.
+  function onKcal100Change(v) {
+    const filtered = fdDecimalFilter(v);
+    setKcal100Touched(filtered !== '');
+    setKcal100Str(filtered);
+  }
 
   const [customOpen, setCustomOpen] = useStateFd(false);
   const [customName, setCustomName] = useStateFd('');
@@ -200,7 +208,12 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     const raw = LB.caloriesFromMacros(p, c, f, netCarbs ? fdNum(customFib) : null);
     setCustomCal(raw != null ? String(Math.round(raw)) : '');
   }, [customP, customC, customF, customFib, customCalTouched, store.settings?.netCarbs]);
-  function onCustomCalChange(v) { setCustomCalTouched(true); setCustomCal(fdDecimalFilter(v)); }
+  // Same un-override-on-clear behavior as onKcal100Change above.
+  function onCustomCalChange(v) {
+    const filtered = fdDecimalFilter(v);
+    setCustomCalTouched(filtered !== '');
+    setCustomCal(filtered);
+  }
 
   // Recipe builder: a lightweight "mode" rather than its own sheet, so it can
   // reuse the Search tab's existing search/quantity/custom flows verbatim as
