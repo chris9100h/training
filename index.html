@@ -67,8 +67,13 @@
        directly: the computed value inherits fine, nothing renders), so those
        need the SVG-native equivalent (a feDropShadow filter, see #chart-text-lift
        below) instead, driven by this opacity rather than a text-shadow string.
-       0 (invisible) for every theme except paper. */
+       0 (invisible) until the grid is on. */
     --chart-text-lift-opacity: 0;
+    /* flood-color for that same filter: must track the theme's own bgRaised
+       tone (set in applyDarkMode) like --text-lift/--knurl-lift do, not stay
+       fixed on paper's old off-white. A light flood on dark-mode's small
+       axis labels reads as a glaring, illegible blob instead of a halo. */
+    --chart-text-lift-color: #f9fafb;
     /* Surface tints — cream-on-dark defaults; overridden in light mode */
     --surface-tint:      rgba(236,228,208,0.02);
     --surface-tint-sm:   rgba(236,228,208,0.03);
@@ -403,11 +408,14 @@
     );
   }
 
-  /* Drives #chart-text-lift below (feDropShadow's flood-opacity IS a
-     CSS-styleable property, unlike stdDeviation, so opacity is the one knob
-     themed per --chart-text-lift-opacity; the blur radius stays a fixed,
-     always-small value since it's invisible anyway whenever opacity is 0). */
-  #chart-text-lift feDropShadow { flood-opacity: var(--chart-text-lift-opacity); }
+  /* Drives #chart-text-lift below (flood-opacity and flood-color ARE
+     CSS-styleable properties, unlike stdDeviation, so those two are the
+     themed knobs; the blur radius stays a fixed, always-small value since
+     it's invisible anyway whenever opacity is 0). */
+  #chart-text-lift feDropShadow {
+    flood-opacity: var(--chart-text-lift-opacity);
+    flood-color: var(--chart-text-lift-color);
+  }
 </style>
 </head>
 <body>
@@ -818,6 +826,7 @@ window.applyDarkMode = function(key) {
   s.setProperty('--text-lift', gridEnabled ? _textLiftFor(m.bgRaised) : 'none');
   s.setProperty('--knurl-lift', gridEnabled ? _boxLiftFor(m.bgRaised) : 'none');
   s.setProperty('--chart-text-lift-opacity', gridEnabled ? 0.95 : 0);
+  s.setProperty('--chart-text-lift-color', m.bgRaised);
   s.setProperty('--accent-tint-boost', m.accentTintBoost || 1);
   s.setProperty('--bg-texture', gridEnabled ? _GRID_TEXTURE : 'none');
   s.setProperty('--surface-tint',      m.surfaceTint     || t.surfaceTint);
