@@ -167,11 +167,24 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   const [customOpen, setCustomOpen] = useStateFd(false);
   const [customName, setCustomName] = useStateFd('');
   const [customG, setCustomG] = useStateFd('');
-  const [customCal, setCustomCal] = useStateFd('');
   const [customP, setCustomP] = useStateFd('');
   const [customC, setCustomC] = useStateFd('');
   const [customF, setCustomF] = useStateFd('');
   const [customFib, setCustomFib] = useStateFd('');
+  // Calories are never typed in for a custom item, same "derive from
+  // macros" rule the rest of the app uses (e.g. MacroTargetSheet): a user
+  // guessing macros for an unsourced food has no more reason to trust a
+  // separately-typed calorie number than the P/C/F they just typed, so
+  // deriving it removes one number to enter and one way for it to
+  // disagree with the macros. Net-carb accounting matches the daily-log
+  // convention: fiber is subtracted only when settings.netCarbs is on.
+  const customCalPreview = useMemoFd(() => {
+    const p = fdNum(customP), c = fdNum(customC), f = fdNum(customF);
+    if (p == null && c == null && f == null) return null;
+    const netCarbs = !!store.settings?.netCarbs;
+    const raw = LB.caloriesFromMacros(p, c, f, netCarbs ? fdNum(customFib) : null);
+    return raw != null ? Math.round(raw) : null;
+  }, [customP, customC, customF, customFib, store.settings?.netCarbs]);
 
   // Recipe builder: a lightweight "mode" rather than its own sheet, so it can
   // reuse the Search tab's existing search/quantity/custom flows verbatim as
@@ -529,7 +542,6 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     resetCustomForm();
     setCustomName(label.name || '');
     setCustomG('');
-    setCustomCal(cal != null ? String(Math.round(cal)) : '');
     setCustomP(p != null ? String(Math.round(p)) : '');
     setCustomC(c != null ? String(Math.round(c)) : '');
     setCustomF(f != null ? String(Math.round(f)) : '');
@@ -662,15 +674,12 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   }
   function buildCustomEntry() {
     const name = customName.trim();
-    // Calories stay integer (matches the zane_food_logs.calories column), so a
-    // typed decimal is rounded; protein/carbs/fat/fiber keep full precision.
-    const calRaw = fdNum(customCal), p = fdNum(customP), c = fdNum(customC), f = fdNum(customF);
-    const cal = calRaw != null ? Math.round(calRaw) : null;
-    if (!name || cal == null || p == null || c == null || f == null) return null;
+    const p = fdNum(customP), c = fdNum(customC), f = fdNum(customF);
+    if (!name || p == null || c == null || f == null || customCalPreview == null) return null;
     return {
       id: LB.uid(), date: curDate, time: entryTime(),
       foodId: null, foodName: name, brand: null, source: 'custom',
-      quantityG: fdNum(customG) || 100, calories: cal, protein: p, carbs: c, fat: f,
+      quantityG: fdNum(customG) || 100, calories: customCalPreview, protein: p, carbs: c, fat: f,
       fiber: customFib !== '' ? fdNum(customFib) : null,
       createdAt: new Date().toISOString(),
     };
@@ -757,7 +766,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   }
 
   function resetCustomForm() {
-    setCustomName(''); setCustomG(''); setCustomCal(''); setCustomP(''); setCustomC(''); setCustomF(''); setCustomFib('');
+    setCustomName(''); setCustomG(''); setCustomP(''); setCustomC(''); setCustomF(''); setCustomFib('');
     setFavedId(null); setEditingDraftId(null);
   }
 
@@ -769,7 +778,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     closeCustomSheet();
     resetCustomForm();
   }
-  const customValid = customName.trim() && fdNum(customCal) != null && fdNum(customP) != null && fdNum(customC) != null && fdNum(customF) != null;
+  const customValid = customName.trim() && fdNum(customP) != null && fdNum(customC) != null && fdNum(customF) != null;
 
   // ── Recipes ──
   function openNewRecipe() { setRecipeNameInput(''); setRecipeNameMode('new'); setRecipeNameOpen(true); }
@@ -1283,8 +1292,10 @@ function FoodScreen({ store, setStore, go, userId, date }) {
           <Field label="Amount (g, optional)" style={{ flex: 1 }}>
             <input value={customG} onChange={e => setCustomG(fdDecimalFilter(e.target.value))} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
           </Field>
-          <Field label="Calories (kcal)" style={{ flex: 1 }}>
-            <input value={customCal} onChange={e => setCustomCal(fdDecimalFilter(e.target.value))} type="text" inputMode="decimal" placeholder="kcal" style={fdInputStyle} />
+          <Field label="Calories (from macros)" style={{ flex: 1 }}>
+            <div style={{ ...fdInputStyle, display: 'flex', alignItems: 'center', color: customCalPreview != null ? UI.ink : UI.inkFaint }}>
+              {customCalPreview != null ? `${customCalPreview} kcal` : '-'}
+            </div>
           </Field>
         </div>
         <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
