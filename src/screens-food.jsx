@@ -902,45 +902,53 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   );
 }
 
-// Live-camera barcode scanner using the native BarcodeDetector API (no
-// dependency). Works where the API is available (Chrome / Android). Where it
-// isn't (notably iOS Safari) it shows a clear fallback pointing to manual
-// barcode entry, which the search box already handles. Owns the camera stream
-// and detection loop, and tears both down on unmount.
+// Live-camera barcode scanner. Uses html5-qrcode (lazy-loaded via
+// window.__ensureBarcodeLib, same on-demand pattern as html2canvas), which
+// works on iOS Safari too (and uses the native BarcodeDetector internally
+// where it exists). Owns the scanner instance and tears the camera down on
+// unmount. Falls back to a "type the barcode" hint only if the library or
+// camera is unavailable, the search box already handles typed barcodes.
+const FD_SCANNER_ELEM_ID = 'fd-barcode-scanner-view';
 function FdScanner({ onClose, onDetect }) {
-  const videoRef = useRefFd(null);
-  const [status, setStatus] = useStateFd('init'); // 'init' | 'scanning' | 'unsupported' | 'error'
+  const [status, setStatus] = useStateFd('loading'); // 'loading' | 'scanning' | 'error'
+  const scannerRef = useRefFd(null);
+  const doneRef = useRefFd(false);
   useEffectFd(() => {
-    if (typeof window === 'undefined' || !('BarcodeDetector' in window)) { setStatus('unsupported'); return; }
-    let detector;
-    try { detector = new window.BarcodeDetector({ formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128'] }); }
-    catch (_) { setStatus('unsupported'); return; }
-    let stream = null, timer = null, cancelled = false, busy = false;
+    let cancelled = false;
     (async () => {
+      let lib;
+      try { lib = await window.__ensureBarcodeLib(); } catch (_) { lib = null; }
+      if (cancelled) return;
+      if (!lib || !window.Html5Qrcode) { setStatus('error'); return; }
       try {
-        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } } });
-        if (cancelled) { stream.getTracks().forEach(t => t.stop()); return; }
-        const v = videoRef.current;
-        if (v) { v.srcObject = stream; await v.play().catch(() => {}); }
+        const Formats = window.Html5QrcodeSupportedFormats;
+        const formats = Formats ? [Formats.EAN_13, Formats.EAN_8, Formats.UPC_A, Formats.UPC_E, Formats.UPC_EAN_EXTENSION, Formats.CODE_128] : undefined;
+        const scanner = new window.Html5Qrcode(FD_SCANNER_ELEM_ID, { formatsToSupport: formats, experimentalFeatures: { useBarCodeDetectorIfSupported: true }, verbose: false });
+        scannerRef.current = scanner;
+        await scanner.start(
+          { facingMode: 'environment' },
+          { fps: 10, qrbox: (w) => { const bw = Math.min(300, Math.floor(w * 0.85)); return { width: bw, height: Math.floor(bw * 0.6) }; } },
+          (text) => {
+            const raw = String(text || '').replace(/\D/g, '');
+            if (doneRef.current || !/^\d{8,14}$/.test(raw)) return;
+            doneRef.current = true;
+            onDetect(raw);
+          },
+          () => {}, // per-frame decode misses: ignore
+        );
+        if (cancelled) { scanner.stop().catch(() => {}); return; }
         setStatus('scanning');
-        timer = setInterval(async () => {
-          if (busy || cancelled || !videoRef.current) return;
-          busy = true;
-          try {
-            const codes = await detector.detect(videoRef.current);
-            const raw = codes && codes[0] && codes[0].rawValue ? String(codes[0].rawValue).replace(/\D/g, '') : '';
-            if (/^\d{8,14}$/.test(raw)) { cancelled = true; clearInterval(timer); onDetect(raw); }
-          } catch (_) {}
-          busy = false;
-        }, 250);
       } catch (_) {
         if (!cancelled) setStatus('error');
       }
     })();
-    return () => { cancelled = true; if (timer) clearInterval(timer); if (stream) stream.getTracks().forEach(t => t.stop()); };
+    return () => {
+      cancelled = true;
+      const s = scannerRef.current;
+      if (s) { try { s.stop().then(() => s.clear()).catch(() => {}); } catch (_) {} }
+    };
   }, []); // eslint-disable-line
 
-  const fallback = status === 'unsupported' || status === 'error';
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 200, background: '#000', display: 'flex', flexDirection: 'column', animation: 'sheet-up 0.22s ease' }}>
       <div style={{ padding: 'calc(env(safe-area-inset-top, 0px) + 12px) 18px 12px', display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -948,26 +956,20 @@ function FdScanner({ onClose, onDetect }) {
         <button onClick={onClose} aria-label="Close scanner" style={{ background: 'rgba(255,255,255,0.15)', border: 'none', color: '#fff', width: 34, height: 34, borderRadius: 4, cursor: 'pointer', fontSize: 18, lineHeight: 1 }}>×</button>
       </div>
       <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
-        {fallback ? (
+        {/* html5-qrcode renders the camera + scan region into this element. */}
+        <div id={FD_SCANNER_ELEM_ID} style={{ width: '100%', height: '100%' }} />
+        {status === 'error' ? (
           <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, padding: 32, textAlign: 'center' }}>
             <i className="fa-solid fa-barcode" style={{ fontSize: 34, color: 'rgba(255,255,255,0.45)' }} />
             <div style={{ color: '#fff', fontFamily: UI.fontUi, fontSize: 13, lineHeight: 1.5, maxWidth: 300 }}>
-              {status === 'unsupported'
-                ? "This browser can't scan barcodes. Type the barcode number into the search box instead, it looks it up the same way."
-                : 'Could not open the camera. Check the camera permission, or type the barcode number into search.'}
+              Could not start the scanner. Check the camera permission, or type the barcode number into search (it looks it up the same way).
             </div>
-            <button onClick={onClose} style={{ marginTop: 4, background: 'var(--accent)', color: 'var(--accent-ink)', border: 'none', borderRadius: 6, padding: '11px 22px', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', cursor: 'pointer' }}>Got it</button>
+            <button onClick={onClose} style={{ marginTop: 4, background: 'var(--accent)', color: 'var(--accent-ink)', border: 'none', borderRadius: 6, padding: '11px 22px', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', cursor: 'pointer', textShadow: 'none' }}>Got it</button>
           </div>
         ) : (
-          <>
-            <video ref={videoRef} muted playsInline style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-            <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}>
-              <div style={{ width: '74%', maxWidth: 320, height: 150, border: '2px solid rgba(255,255,255,0.85)', borderRadius: 8, boxShadow: '0 0 0 100vmax rgba(0,0,0,0.45)' }} />
-            </div>
-            <div style={{ position: 'absolute', bottom: 'calc(env(safe-area-inset-bottom, 0px) + 24px)', left: 0, right: 0, textAlign: 'center', color: 'rgba(255,255,255,0.85)', fontFamily: UI.fontUi, fontSize: 12 }}>
-              {status === 'scanning' ? 'Point the camera at a barcode' : 'Starting camera…'}
-            </div>
-          </>
+          <div style={{ position: 'absolute', bottom: 'calc(env(safe-area-inset-bottom, 0px) + 24px)', left: 0, right: 0, textAlign: 'center', color: 'rgba(255,255,255,0.85)', fontFamily: UI.fontUi, fontSize: 12 }}>
+            {status === 'scanning' ? 'Point the camera at a barcode' : 'Starting camera…'}
+          </div>
         )}
       </div>
     </div>
