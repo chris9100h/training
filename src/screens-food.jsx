@@ -845,10 +845,15 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                 {FD_HOURS.map(h => {
                   const es = byHour[h] || [];
                   const filled = es.length > 0;
+                  // Only today has a "current hour" to mark; a backdated day's
+                  // timeline stays plain. Local wall-clock hour (getHours()),
+                  // matching the user's own timezone, same as entryTime()/
+                  // fdNowHHMM() already do for the "log at now" default.
+                  const isNow = curDate === today && h === new Date().getHours();
                   return (
-                    <div key={h} style={fdHourRow(filled)}>
+                    <div key={h} style={fdHourRow(filled, isNow)}>
                       <div style={fdHourLabelCol}>
-                        <span className="num" style={{ fontSize: 11, color: filled ? UI.inkSoft : UI.inkGhost }}>{String(h).padStart(2, '0')}</span>
+                        <span className="num" style={{ fontSize: 11, fontWeight: isNow ? 700 : 400, color: isNow ? 'var(--accent)' : (filled ? UI.inkSoft : UI.inkGhost) }}>{String(h).padStart(2, '0')}</span>
                       </div>
                       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6, paddingBottom: filled ? 6 : 0 }}>
                         {es.map(e => (
@@ -868,7 +873,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                           </div>
                         ))}
                       </div>
-                      <button onClick={() => addAtHour(h)} aria-label={`Add food at ${String(h).padStart(2, '0')}:00`} style={fdHourAddBtn}>
+                      <button onClick={() => addAtHour(h)} aria-label={`Add food at ${String(h).padStart(2, '0')}:00`} style={fdHourAddBtn(isNow)}>
                         <i className="fa-solid fa-plus" style={{ fontSize: 11 }} />
                       </button>
                     </div>
@@ -1389,20 +1394,26 @@ const fdEmptyStyle = { textAlign: 'center', fontSize: 12, color: UI.inkFaint, pa
 // Timeline: an hour tick column, its entries, and an always-present add button.
 // Empty hours stay slim; hours with entries grow to fit them. The left column
 // carries a hairline "spine" so the 24 rows read as one continuous axis.
-function fdHourRow(filled) {
+// isNow (today's current local hour) gets an accent tint + border so "now" is
+// findable at a glance in a 24-row list.
+function fdHourRow(filled, isNow) {
   return {
-    display: 'flex', alignItems: 'flex-start', gap: 10,
-    borderTop: `var(--hair-width) solid ${UI.hair}`,
+    display: 'flex', alignItems: 'flex-start', gap: 10, borderRadius: 6,
+    borderTop: `var(--hair-width) solid ${isNow ? 'rgba(var(--accent-rgb),0.5)' : UI.hair}`,
+    background: isNow ? 'rgba(var(--accent-rgb),0.07)' : 'transparent',
     paddingTop: filled ? 8 : 0, minHeight: 34,
   };
 }
 const fdHourLabelCol = { width: 24, flexShrink: 0, paddingTop: 9, textAlign: 'right' };
-const fdHourAddBtn = {
-  flexShrink: 0, width: 30, height: 30, marginTop: 4, borderRadius: 4,
-  border: `1px solid ${UI.hairStrong}`, background: 'transparent', color: UI.inkSoft,
-  cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
-  WebkitTapHighlightColor: 'transparent',
-};
+function fdHourAddBtn(isNow) {
+  return {
+    flexShrink: 0, width: 30, height: 30, marginTop: 4, borderRadius: 4,
+    border: `1px solid ${isNow ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong}`,
+    background: 'transparent', color: isNow ? 'var(--accent)' : UI.inkSoft,
+    cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+    WebkitTapHighlightColor: 'transparent',
+  };
+}
 const fdEntryName = { fontSize: 13, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' };
 const fdEntryMeta = { fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi };
 const fdEntryRow = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '10px 12px', background: UI.bgInset, border: `1px solid ${UI.hair}`, borderRadius: 6 };
