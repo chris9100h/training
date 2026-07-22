@@ -76,6 +76,7 @@ interface FoodResult {
   fiberPer100g: number | null;
   servingSizeG: number | null;
   servingLabel: string | null;
+  cached?: boolean; // search results only, marks a hit already verified/cached in zane_foods
 }
 
 // ── Open Food Facts ─────────────────────────────────────────────────────────
@@ -208,11 +209,26 @@ function relevanceScore(item: FoodResult, query: string): number {
   return Math.max(textScore(item.name, q), item.brand ? textScore(item.brand, q) * 0.6 : 0);
 }
 
+// Marks which results already have a verified, cached zane_foods row (source
+// ids here are always plain digits, off/usda's own barcode/fdcId formats, so
+// no quoting is needed inside PostgREST's in.() list). Without this a user
+// has no way to tell a fresh upstream hit from one they (or anyone else)
+// already selected and verified before.
+async function annotateCached(results: FoodResult[]): Promise<FoodResult[]> {
+  if (!results.length) return results;
+  const ids = results.map((r) => `${r.source}:${r.sourceId}`);
+  const r = await dbFetch(`zane_foods?id=in.(${ids.join(',')})&select=id`).catch(() => null);
+  if (!r?.ok) return results.map((x) => ({ ...x, cached: false }));
+  const rows = await r.json().catch(() => []);
+  const cachedIds = new Set((Array.isArray(rows) ? rows : []).map((row: { id: string }) => row.id));
+  return results.map((x) => ({ ...x, cached: cachedIds.has(`${x.source}:${x.sourceId}`) }));
+}
+
 async function handleSearch(query: string, source?: string) {
   const isBarcode = /^\d{8,14}$/.test(query);
   if (isBarcode) {
     const hit = await lookupOffBarcode(query);
-    return { results: hit ? [hit] : [], isBarcode: true };
+    return { results: hit ? await annotateCached([hit]) : [], isBarcode: true };
   }
   const wantOff = source !== 'usda';
   const wantUsda = source !== 'off';
@@ -221,7 +237,7 @@ async function handleSearch(query: string, source?: string) {
     wantOff ? searchOff(query) : Promise.resolve([]),
     (wantUsda && usdaKey) ? searchUsda(query, usdaKey) : Promise.resolve([]),
   ]);
-  const results = [
+  const scored = [
     ...(offSettled.status === 'fulfilled' ? offSettled.value : []),
     ...(usdaSettled.status === 'fulfilled' ? usdaSettled.value : []),
   ]
@@ -229,6 +245,7 @@ async function handleSearch(query: string, source?: string) {
     .filter((x) => x.score > 0)
     .sort((a, b) => b.score - a.score)
     .map((x) => x.r);
+  const results = await annotateCached(scored);
   return { results, isBarcode: false };
 }
 

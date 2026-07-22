@@ -490,12 +490,15 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                     {results.map(r => (
                       <button key={`${r.source}:${r.sourceId}`} onClick={() => pickResult(r)} disabled={selecting === r.sourceId} style={fdResultRow}>
                         <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
-                          <div style={fdEntryName}>{r.name}</div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                            {r.cached && <i className="fa-solid fa-circle-check" style={{ fontSize: 11, color: 'var(--accent)', flexShrink: 0 }} title="Already verified and cached" />}
+                            <div style={{ ...fdEntryName, minWidth: 0 }}>{r.name}</div>
+                          </div>
                           {r.brand && <div style={fdEntryMeta}>{r.brand}</div>}
                         </div>
                         <div style={{ textAlign: 'right', flexShrink: 0 }}>
                           <div className="num" style={{ fontSize: 12, color: UI.inkSoft }}>{r.kcalPer100g != null ? Math.round(r.kcalPer100g) : '—'} kcal</div>
-                          <div style={fdEntryMeta}>/100g · {r.source === 'off' ? 'Open Food Facts' : 'USDA'}</div>
+                          <div style={fdEntryMeta}>/100g · {r.source === 'off' ? 'Open Food Facts' : 'USDA'}{r.cached ? ' · cached' : ''}</div>
                         </div>
                       </button>
                     ))}
