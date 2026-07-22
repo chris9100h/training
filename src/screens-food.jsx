@@ -182,6 +182,14 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   const [recipeNameOpen, setRecipeNameOpen] = useStateFd(false);
   const [recipeNameInput, setRecipeNameInput] = useStateFd('');
   const [recipeNameMode, setRecipeNameMode] = useStateFd('new'); // 'new' | 'rename'
+  // A one-tap recipe log (see addRecipeToLog) has no sheet to open/close, so
+  // without this nothing visibly changes on tap: users couldn't tell whether
+  // it registered and often tapped again, logging it twice. addingRecipeId
+  // disables the row for the duration of the write (blocks a fast double-tap
+  // from firing twice); recipeJustAddedId swaps the row's kcal for a brief
+  // checkmark afterwards, same idiom as the exercise library's "Added" state.
+  const [addingRecipeId, setAddingRecipeId] = useStateFd(null);
+  const [recipeJustAddedId, setRecipeJustAddedId] = useStateFd(null);
 
   const dayLabel = curDate === today ? 'Today' : curDate === fdShiftDate(today, -1) ? 'Yesterday' : fdFmtDate(curDate);
 
@@ -741,18 +749,28 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // fixed amount, no scaling: the whole point is "log this exact thing I eat
   // the same way every time" in a single tap.
   async function addRecipeToLog(recipe) {
+    if (addingRecipeId) return; // a request for another recipe is already in flight
     const items = recipe.items || [];
     if (!items.length) return;
-    const sum = k => items.reduce((a, i) => a + (i[k] || 0), 0);
-    const entry = {
-      id: LB.uid(), date: curDate, time: entryTime(),
-      foodId: null, foodName: recipe.name, brand: null, source: 'recipe',
-      quantityG: Math.round(sum('quantityG')), calories: Math.round(sum('calories')),
-      protein: fdRound1(sum('protein')), carbs: fdRound1(sum('carbs')), fat: fdRound1(sum('fat')),
-      fiber: items.some(i => i.fiber != null) ? fdRound1(sum('fiber')) : null,
-      createdAt: new Date().toISOString(),
-    };
-    await commitEntry(entry);
+    setAddingRecipeId(recipe.id);
+    try {
+      const sum = k => items.reduce((a, i) => a + (i[k] || 0), 0);
+      const entry = {
+        id: LB.uid(), date: curDate, time: entryTime(),
+        foodId: null, foodName: recipe.name, brand: null, source: 'recipe',
+        quantityG: Math.round(sum('quantityG')), calories: Math.round(sum('calories')),
+        protein: fdRound1(sum('protein')), carbs: fdRound1(sum('carbs')), fat: fdRound1(sum('fat')),
+        fiber: items.some(i => i.fiber != null) ? fdRound1(sum('fiber')) : null,
+        createdAt: new Date().toISOString(),
+      };
+      const ok = await commitEntry(entry);
+      if (ok) {
+        setRecipeJustAddedId(recipe.id);
+        setTimeout(() => setRecipeJustAddedId(id => id === recipe.id ? null : id), 2000);
+      }
+    } finally {
+      setAddingRecipeId(null);
+    }
   }
 
   const recipeDraftTotals = useMemoFd(() => {
@@ -1055,14 +1073,21 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                     {(store.foodRecipes || []).map(r => {
                       const items = r.items || [];
                       const kcal = Math.round(items.reduce((a, i) => a + (i.calories || 0), 0));
+                      const justAdded = recipeJustAddedId === r.id;
                       return (
                         <div key={r.id} style={fdQuickRowWrap}>
-                          <button onClick={() => addRecipeToLog(r)} style={fdQuickRowInner}>
+                          <button onClick={() => addRecipeToLog(r)} disabled={addingRecipeId === r.id} style={{ ...fdQuickRowInner, opacity: addingRecipeId === r.id ? 0.6 : 1 }}>
                             <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
                               <div style={fdEntryName}>{r.name}</div>
                               <div style={fdEntryMeta}>{items.length} ingredient{items.length === 1 ? '' : 's'} · P{Math.round(items.reduce((a, i) => a + (i.protein || 0), 0))} C{Math.round(items.reduce((a, i) => a + (i.carbs || 0), 0))} F{Math.round(items.reduce((a, i) => a + (i.fat || 0), 0))}</div>
                             </div>
-                            <div className="num" style={{ fontSize: 12, color: UI.inkSoft, flexShrink: 0 }}>{kcal} kcal</div>
+                            {justAdded ? (
+                              <span style={{ fontSize: 11, color: UI.gold, fontFamily: UI.fontUi, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+                                <i className="fa-solid fa-check" /> Added
+                              </span>
+                            ) : (
+                              <div className="num" style={{ fontSize: 12, color: UI.inkSoft, flexShrink: 0 }}>{kcal} kcal</div>
+                            )}
                           </button>
                           <button onClick={() => editRecipe(r)} aria-label="Edit recipe" style={fdSideBtn}>
                             <i className="fa-solid fa-pen" style={{ fontSize: 12 }} />
