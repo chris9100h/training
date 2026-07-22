@@ -254,12 +254,36 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     return [log, ...(s.dailyLogs || []).filter(l => l.id !== log.id && l.date !== dateStr)];
   }
 
-  function commitEntry(entry) {
+  // Commits a real log write (not a recipe-draft stage). If this is the
+  // FIRST food-tracker entry for the date and the day already carries
+  // manually-entered macros (typed into the Health tab's daily log, never
+  // touched by the tracker), warns before letting the tracker take over,
+  // same "you're about to overwrite the other side" confirm DailyLogScreen
+  // already shows in the opposite direction (requestFoodUnlock there warns
+  // that editing a locked field gets overwritten the next time food is
+  // logged). Once the tracker owns the day (>=1 entry already), no more
+  // nagging on every add, same as the lock only fires on that transition.
+  // Returns false if the user backs out, so callers can leave their sheet
+  // open instead of closing on a log that never happened.
+  async function commitEntry(entry) {
+    const alreadyFoodOwned = (store.foodLogs || []).some(l => l.date === entry.date);
+    if (!alreadyFoodOwned) {
+      const existingLog = (store.dailyLogs || []).find(l => l.date === entry.date);
+      const hasManualMacros = existingLog && (existingLog.protein != null || existingLog.carbs != null || existingLog.fat != null || existingLog.calories != null);
+      if (hasManualMacros) {
+        const ok = await confirm(
+          "This day already has manually-entered macros in the Health tab. Logging food here will overwrite them, and the Food Tracker will manage this day's macros from now on.",
+          { title: 'Overwrite manual macros?', ok: 'Continue', cancel: 'Cancel' }
+        );
+        if (!ok) return false;
+      }
+    }
     setStore(s => {
       const nextLogs = [entry, ...(s.foodLogs || [])];
       return { ...s, foodLogs: nextLogs, dailyLogs: patchDaily(s, entry.date, nextLogs.filter(l => l.date === entry.date)) };
     });
     setPendingHour(null);
+    return true;
   }
 
   // Time stamped on a newly logged entry: the timeline hour the user tapped
@@ -283,7 +307,10 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // straight to the day's log, or (while building a recipe) appends to the
   // draft ingredient list, or replaces an existing draft ingredient when one
   // is being edited.
-  function finishEntry(entry) {
+  // Returns whether the entry actually landed: always true for a recipe-draft
+  // stage (nothing is written to the day's log yet, so there's nothing to
+  // warn about), or commitEntry's result for a real log.
+  async function finishEntry(entry) {
     if (recipeMode) {
       if (editingDraftId) {
         const eid = editingDraftId;
@@ -291,9 +318,9 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       } else {
         setRecipeMode(m => ({ ...m, items: [...m.items, entry] }));
       }
-    } else {
-      commitEntry(entry);
+      return true;
     }
+    return commitEntry(entry);
   }
 
   async function deleteEntry(entry) {
@@ -580,10 +607,11 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     setStore(s => ({ ...s, foodFavorites: (s.foodFavorites || []).filter(f => f.id !== fav.id) }));
   }
 
-  function confirmLogFood() {
+  async function confirmLogFood() {
     const entry = buildQtyEntry();
     if (!entry) return;
-    finishEntry(entry);
+    const ok = await finishEntry(entry);
+    if (!ok) return; // user backed out of the overwrite warning; leave the sheet open
     // Only now (a real log, not a mere open) grow the shared cache, and only
     // for a freshly-fetched DB food that wasn't already cached. Not while
     // building a recipe (ingredients aren't standalone logs).
@@ -598,10 +626,11 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     setFavedId(null); setEditingDraftId(null);
   }
 
-  function submitCustomItem() {
+  async function submitCustomItem() {
     const entry = buildCustomEntry();
     if (!entry) return;
-    finishEntry(entry);
+    const ok = await finishEntry(entry);
+    if (!ok) return; // user backed out of the overwrite warning; leave the sheet open
     closeCustomSheet();
     resetCustomForm();
   }
@@ -682,7 +711,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // Recipes log as ONE entry (the sum of their ingredients), not N, and at a
   // fixed amount, no scaling: the whole point is "log this exact thing I eat
   // the same way every time" in a single tap.
-  function addRecipeToLog(recipe) {
+  async function addRecipeToLog(recipe) {
     const items = recipe.items || [];
     if (!items.length) return;
     const sum = k => items.reduce((a, i) => a + (i[k] || 0), 0);
@@ -694,7 +723,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       fiber: items.some(i => i.fiber != null) ? fdRound1(sum('fiber')) : null,
       createdAt: new Date().toISOString(),
     };
-    commitEntry(entry);
+    await commitEntry(entry);
   }
 
   const recipeDraftTotals = useMemoFd(() => {
