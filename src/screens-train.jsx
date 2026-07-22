@@ -8862,8 +8862,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           {mesoGainItems.map((item, i) => (
             <div key={i} style={{
               display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-              padding: '10px 0',
-              borderBottom: i < mesoGainItems.length - 1 ? `1px solid ${UI.hair}` : 'none',
+              padding: '10px 12px',
+              marginBottom: i < mesoGainItems.length - 1 ? 8 : 0,
+              background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6,
             }}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
                 <span style={{ fontFamily: UI.fontUi, fontSize: 14, fontWeight: 600, color: UI.ink }}>{item.name}</span>

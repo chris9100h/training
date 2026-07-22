@@ -3175,9 +3175,9 @@ function HealthClientLogs({ clientStore }) {
           {handle}
           <span style={HEALTH_CARD_HEADER_STYLE}>WEEKLY AVERAGES</span>
         </div>
-        <div style={{ background: UI.bgInset, borderRadius: 6, border: `var(--hair-width) solid ${UI.hair}`, overflow: 'hidden' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {weeks.map((w, i) => (
-            <div key={w.ws} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', borderTop: i ? `var(--hair-width) solid ${UI.hair}` : 'none' }}>
+            <div key={w.ws} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6 }}>
               <div style={{ width: 58, flexShrink: 0, fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi }}>{healthFmtDate(w.ws, { day: 'numeric', month: 'short' })}</div>
               <div style={{ flex: 1, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                 {w.weight != null && <span className="num" style={{ fontSize: 11, color: UI.inkSoft }}>{w.weight} {clientUnit}</span>}

@@ -80,9 +80,9 @@ function BlockRecap({ recap, evidence = null, escalation = 0 }) {
       {recap.loadPRs.length > 0 && (<>
         <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>WHAT YOU BUILT</div>
         <div className="knurl" style={{ marginBottom: 10 }} />
-        <div style={{ marginBottom: 16 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
           {recap.loadPRs.map((g, i) => (
-            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 0', borderBottom: i < recap.loadPRs.length - 1 ? `1px solid ${UI.hair}` : 'none' }}>
+            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 10px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6 }}>
               <span style={{ fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{g.name}</span>
               <span style={{ fontFamily: UI.fontNum, fontSize: 12, fontWeight: 700, color: 'var(--accent)', flexShrink: 0, marginLeft: 10 }}>+{g.weightDelta} {u}</span>
             </div>
@@ -92,9 +92,9 @@ function BlockRecap({ recap, evidence = null, escalation = 0 }) {
       {recap.setGains.some(g => g.setDelta > 0) && (<>
         <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>MORE SETS</div>
         <div className="knurl" style={{ marginBottom: 10 }} />
-        <div style={{ marginBottom: 16 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
           {recap.setGains.filter(g => g.setDelta > 0).map((g, i, arr) => (
-            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 0', borderBottom: i < arr.length - 1 ? `1px solid ${UI.hair}` : 'none' }}>
+            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 10px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6 }}>
               <span style={{ fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{g.name}</span>
               <span style={{ fontFamily: UI.fontNum, fontSize: 12, fontWeight: 700, color: 'var(--accent)', flexShrink: 0, marginLeft: 10 }}>+{g.setDelta} set{g.setDelta > 1 ? 's' : ''}</span>
             </div>
@@ -3748,11 +3748,11 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
                   <i className={`fa-solid fa-chevron-${recapGainsOpen ? 'up' : 'down'}`} style={chevStyle} />
                 </button>
                 {recapGainsOpen && (
-                  <div style={{ padding: '2px 14px 12px' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '2px 14px 12px' }}>
                     {gains.length > 0 ? gains.map((item, i) => {
                       const up = (item.weightDelta || 0) !== 0 ? item.weightDelta > 0 : item.setDelta > 0;
                       return (
-                        <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, padding: '10px 0', borderBottom: i < gains.length - 1 ? `1px solid ${UI.hair}` : 'none' }}>
+                        <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, padding: '10px 12px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6 }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 9, minWidth: 0 }}>
                             <span style={{ width: 6, height: 6, borderRadius: '50%', background: up ? 'var(--accent)' : 'rgba(var(--danger-rgb),0.9)', flexShrink: 0 }} />
                             <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
