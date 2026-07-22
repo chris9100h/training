@@ -550,7 +550,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
         id: f.id, user_id: userId, food_id: f.foodId ?? null, food_name: f.foodName,
         brand: f.brand ?? null, source: f.source ?? null, quantity_g: f.quantityG,
         calories: f.calories, protein: f.protein, carbs: f.carbs, fat: f.fat,
-        fiber: f.fiber ?? null, unit_label: f.unitLabel ?? null, unit_g: f.unitG ?? null,
+        fiber: f.fiber ?? null, units: f.units ?? [],
       }))
     ));
     stepsDone++;
@@ -901,7 +901,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     // Food tracker quick-add: user-starred foods and saved recipes (migration
     // 0187), own store only: a coach's read-only client view has no use for
     // another user's personal shortcuts (owner-only RLS, no coach-read policy).
-    isCoachLoad ? null : _supabase.from('zane_food_favorites').select('id, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, unit_label, unit_g, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
+    isCoachLoad ? null : _supabase.from('zane_food_favorites').select('id, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, units, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
     isCoachLoad ? null : _supabase.from('zane_food_recipes').select('id, name, items, created_at, updated_at').eq('user_id', userId).order('created_at', { ascending: false }),
   ];
   const [profileRes, exRes, schRes, sessRes, settRes, skipsRes, entriesRes,
@@ -1118,7 +1118,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
       source: f.source ?? null, quantityG: parseFloat(f.quantity_g), calories: f.calories,
       protein: parseFloat(f.protein), carbs: parseFloat(f.carbs), fat: parseFloat(f.fat),
       fiber: f.fiber != null ? parseFloat(f.fiber) : null,
-      unitLabel: f.unit_label ?? null, unitG: f.unit_g != null ? parseFloat(f.unit_g) : null,
+      units: f.units || [],
       createdAt: f.created_at,
     })),
     foodRecipes: (foodRecipesRes?.data || []).map(r => ({
@@ -1635,7 +1635,7 @@ async function syncStore(prev, next, userId) {
       id: f.id, user_id: userId, food_id: f.foodId ?? null, food_name: f.foodName,
       brand: f.brand ?? null, source: f.source ?? null, quantity_g: f.quantityG,
       calories: f.calories, protein: f.protein, carbs: f.carbs, fat: f.fat, fiber: f.fiber ?? null,
-      unit_label: f.unitLabel ?? null, unit_g: f.unitG ?? null,
+      units: f.units ?? [],
     }))));
     if (removed.length) ops.push(_supabase.from('zane_food_favorites').delete().in('id', removed.map(f => f.id)));
   }

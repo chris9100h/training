@@ -2310,8 +2310,7 @@ CREATE TABLE zane_food_favorites (
   fat         numeric     NOT NULL,
   fiber       numeric,
   created_at  timestamptz NOT NULL DEFAULT now(),
-  unit_label  text,                                  -- optional "1 unit = unit_g grams" (e.g. 'wrap')
-  unit_g      numeric
+  units       jsonb       NOT NULL DEFAULT '[]'       -- [{ label, grams }, ...], optional package/unit sizes
 );
 
 CREATE INDEX zane_food_favorites_user_idx ON public.zane_food_favorites USING btree (user_id, created_at DESC);
