@@ -324,6 +324,13 @@ async function handleSelect(source: 'off' | 'usda', sourceId: string): Promise<F
   const cached = await fetchCachedFood(`${source}:${sourceId}`);
   if (cached) return cached;
 
+  // Only a live upstream lookup is left. USDA needs the key for that, but a
+  // cached USDA row was already served above, so this only blocks a
+  // genuinely-new USDA item when the key is unset (and none can even surface
+  // in search then). Checked here, not in the request handler, so serving a
+  // cached USDA food never depends on the key being present.
+  if (source === 'usda' && !Deno.env.get('USDA_API_KEY')) return null;
+
   const food = source === 'off'
     ? await lookupOffBarcode(sourceId)
     : await lookupUsdaById(sourceId, Deno.env.get('USDA_API_KEY') ?? '');
@@ -394,11 +401,6 @@ Deno.serve(async (req) => {
     if (!source || !sourceId) {
       return new Response(JSON.stringify({ error: 'missing source/sourceId' }), {
         status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
-    }
-    if (source === 'usda' && !Deno.env.get('USDA_API_KEY')) {
-      return new Response(JSON.stringify({ error: 'USDA source unavailable (no API key configured)' }), {
-        status: 503, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
     const food = await handleSelect(source, sourceId);

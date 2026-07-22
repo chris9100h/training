@@ -18,7 +18,7 @@
    ingredient snapshots; adding one sums them into a single log entry
    (source: 'recipe'), not N separate ones. */
 
-const { useState: useStateFd, useEffect: useEffectFd, useMemo: useMemoFd } = React;
+const { useState: useStateFd, useEffect: useEffectFd, useMemo: useMemoFd, useRef: useRefFd } = React;
 
 function fdShiftDate(dateStr, deltaDays) {
   const d = new Date(dateStr + 'T12:00:00');
@@ -52,6 +52,7 @@ const FD_QUICK_TABS = [
   { id: 'favorites', label: 'Favorites' },
   { id: 'recipes', label: 'Recipes' },
 ];
+const FD_HOURS = Array.from({ length: 24 }, (_, i) => i);
 
 function FoodScreen({ store, setStore, go, userId, date }) {
   const [confirmEl, confirm] = useConfirm();
@@ -62,6 +63,10 @@ function FoodScreen({ store, setStore, go, userId, date }) {
 
   const [tab, setTab] = useStateFd('log');
   const [quickTab, setQuickTab] = useStateFd('recent');
+  // Hour (0-23) a timeline "+" was tapped for, so the next logged entry lands
+  // at that hour instead of now. Cleared after a log, or when the user leaves
+  // the timeline by tapping a main tab directly.
+  const [pendingHour, setPendingHour] = useStateFd(null);
 
   const [sourceFilter, setSourceFilter] = useStateFd(null); // null = all
   const [query, setQuery] = useStateFd('');
@@ -73,7 +78,13 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   const [qtySheetOpen, setQtySheetOpen] = useStateFd(false);
   const [pendingFood, setPendingFood] = useStateFd(null);
   const [qtyG, setQtyG] = useStateFd('');
-  const [saveFav, setSaveFav] = useStateFd(false);
+  // id of the favorite created from the currently-open sheet, so the star
+  // button can toggle it live (add on tap, remove on second tap) instead of
+  // deferring the save to when the food is actually logged.
+  const [favedId, setFavedId] = useStateFd(null);
+  // recipe draft item being edited: finishEntry replaces it in place rather
+  // than appending a new ingredient.
+  const [editingDraftId, setEditingDraftId] = useStateFd(null);
 
   const [customOpen, setCustomOpen] = useStateFd(false);
   const [customName, setCustomName] = useStateFd('');
@@ -89,9 +100,10 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // an ingredient picker (finishEntry below is the only branch point). The
   // banner renders on every tab so switching to Log to sanity-check doesn't
   // read as abandoning the draft.
-  const [recipeMode, setRecipeMode] = useStateFd(null); // { name, items: [] }
+  const [recipeMode, setRecipeMode] = useStateFd(null); // { editId?, name, items: [] }
   const [recipeNameOpen, setRecipeNameOpen] = useStateFd(false);
   const [recipeNameInput, setRecipeNameInput] = useStateFd('');
+  const [recipeNameMode, setRecipeNameMode] = useStateFd('new'); // 'new' | 'rename'
 
   const dayLabel = curDate === today ? 'Today' : curDate === fdShiftDate(today, -1) ? 'Yesterday' : fdFmtDate(curDate);
 
@@ -105,6 +117,17 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     carbs: dayEntries.reduce((a, e) => a + (e.carbs || 0), 0),
     fat: dayEntries.reduce((a, e) => a + (e.fat || 0), 0),
   }), [dayEntries]);
+
+  // Entries bucketed by the hour of their time, for the 0-23 timeline.
+  const byHour = useMemoFd(() => {
+    const m = {};
+    for (const e of dayEntries) {
+      const h = parseInt((e.time || '0:0').split(':')[0], 10) || 0;
+      (m[h] = m[h] || []).push(e);
+    }
+    Object.values(m).forEach(arr => arr.sort((a, b) => (a.time || '').localeCompare(b.time || '')));
+    return m;
+  }, [dayEntries]);
 
   // Recent strip: dedupe by food_id for DB items, by food_name for custom
   // ones. store.foodLogs is already recency-ordered (server query and local
@@ -158,14 +181,39 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       const nextLogs = [entry, ...(s.foodLogs || [])];
       return { ...s, foodLogs: nextLogs, dailyLogs: patchDaily(s, entry.date, nextLogs.filter(l => l.date === entry.date)) };
     });
+    setPendingHour(null);
   }
 
-  // Terminal step shared by the search-selected and custom-item flows: either
-  // commits straight to the day's log, or (while building a recipe) appends
-  // to the draft ingredient list instead.
+  // Time stamped on a newly logged entry: the timeline hour the user tapped
+  // "+" on, else the current wall-clock time.
+  function entryTime() {
+    return pendingHour != null ? `${String(pendingHour).padStart(2, '0')}:00` : fdNowHHMM();
+  }
+  // Timeline "+": remember the hour and jump to Search to pick a food for it.
+  function addAtHour(h) {
+    setPendingHour(h);
+    setQuery(''); setResults(null); setSearchError(null);
+    setTab('search');
+  }
+  // Main tab taps clear a pending timeline hour (the user navigated away from
+  // that intent); addAtHour uses the raw setTab so it is not cleared there.
+  function onTabChange(id) { setPendingHour(null); setTab(id); }
+
+  // Terminal step shared by the search-selected and custom-item flows: commits
+  // straight to the day's log, or (while building a recipe) appends to the
+  // draft ingredient list, or replaces an existing draft ingredient when one
+  // is being edited.
   function finishEntry(entry) {
-    if (recipeMode) setRecipeMode(m => ({ ...m, items: [...m.items, entry] }));
-    else commitEntry(entry);
+    if (recipeMode) {
+      if (editingDraftId) {
+        const eid = editingDraftId;
+        setRecipeMode(m => m ? { ...m, items: m.items.map(i => i.id === eid ? { ...entry, id: eid } : i) } : m);
+      } else {
+        setRecipeMode(m => ({ ...m, items: [...m.items, entry] }));
+      }
+    } else {
+      commitEntry(entry);
+    }
   }
 
   async function deleteEntry(entry) {
@@ -177,21 +225,32 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     });
   }
 
+  // Source the last dispatched search actually ran against, so the effect
+  // below can tell an already-served filter from one the user switched to
+  // mid-flight (which must still re-run once the in-flight request settles).
+  const lastSearchedSource = useRefFd(null);
   async function runSearch() {
     const q = query.trim();
     if (!q || searching) return;
+    const src = sourceFilter;
+    lastSearchedSource.current = src;
     setSearching(true); setSearchError(null);
-    const res = await LB.searchFoods(q, sourceFilter);
+    const res = await LB.searchFoods(q, src);
     setSearching(false);
     if (!res.ok) { setSearchError(res.error || 'Search failed. Try again.'); setResults([]); return; }
     setResults(res.results);
   }
   // Switching the source filter re-runs the last submitted query automatically
   // (a query is already an explicit user action, not the "hammer the API on
-  // every keystroke" case submit-triggered search is guarding against).
+  // every keystroke" case submit-triggered search is guarding against). Also
+  // depends on `searching`: a filter tapped mid-search would otherwise be
+  // dropped by runSearch's own in-flight guard and never retried, leaving the
+  // wrong source's results on screen. Re-running only when the last-searched
+  // source differs from the current one avoids a redundant duplicate search
+  // when a normal search completes.
   useEffectFd(() => {
-    if (results != null && query.trim()) runSearch();
-  }, [sourceFilter]); // eslint-disable-line
+    if (results != null && query.trim() && !searching && lastSearchedSource.current !== sourceFilter) runSearch();
+  }, [sourceFilter, searching]); // eslint-disable-line
 
   async function pickResult(r) {
     if (selecting) return;
@@ -202,6 +261,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       await confirm(res.error || 'Could not load this food. Try again.', { title: 'Lookup failed', ok: 'OK', cancel: null });
       return;
     }
+    setFavedId(null); setEditingDraftId(null);
     setPendingFood(res.food);
     setQtyG(res.food.servingSizeG ? String(Math.round(res.food.servingSizeG)) : '100');
     setQtySheetOpen(true);
@@ -213,6 +273,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // without another network round-trip. Recent (foodLogs) and Favorites
   // share this exact shape, so one function serves both strips.
   function reAddFromRecent(l) {
+    setFavedId(null); setEditingDraftId(null);
     if (l.foodId) {
       const per100 = l.quantityG > 0 ? 100 / l.quantityG : 1;
       setPendingFood({
@@ -251,82 +312,146 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     };
   }, [pendingFood, qtyG]);
 
-  function closeQtySheet() { setQtySheetOpen(false); setPendingFood(null); setQtyG(''); setSaveFav(false); }
+  function closeQtySheet() { setQtySheetOpen(false); setPendingFood(null); setQtyG(''); setFavedId(null); setEditingDraftId(null); }
+  function closeCustomSheet() { setCustomOpen(false); setFavedId(null); setEditingDraftId(null); }
 
-  function addFavorite(entry) {
-    const fav = {
-      id: LB.uid(), foodId: entry.foodId, foodName: entry.foodName, brand: entry.brand,
-      source: entry.source, quantityG: entry.quantityG, calories: entry.calories,
-      protein: entry.protein, carbs: entry.carbs, fat: entry.fat, fiber: entry.fiber,
-      createdAt: new Date().toISOString(),
-    };
-    setStore(s => ({ ...s, foodFavorites: [fav, ...(s.foodFavorites || [])] }));
-  }
-  function removeFavorite(fav) {
-    setStore(s => ({ ...s, foodFavorites: (s.foodFavorites || []).filter(f => f.id !== fav.id) }));
-  }
-
-  function confirmLogFood() {
-    if (!pendingFood || !qtyPreview) return;
-    const entry = {
-      id: LB.uid(), date: curDate, time: fdNowHHMM(),
+  // Build the entry the open sheet describes right now (without logging it), so
+  // both the log/ingredient action and the favorite toggle work off the same
+  // data. Returns null while the form is incomplete.
+  function buildQtyEntry() {
+    if (!pendingFood || !qtyPreview) return null;
+    return {
+      id: LB.uid(), date: curDate, time: entryTime(),
       foodId: `${pendingFood.source}:${pendingFood.sourceId}`,
       foodName: pendingFood.name, brand: pendingFood.brand || null, source: pendingFood.source,
       quantityG: fdInt(qtyG), calories: qtyPreview.calories, protein: qtyPreview.protein,
       carbs: qtyPreview.carbs, fat: qtyPreview.fat, fiber: qtyPreview.fiber,
       createdAt: new Date().toISOString(),
     };
-    if (saveFav) addFavorite(entry);
-    closeQtySheet();
-    finishEntry(entry);
   }
-
-  function resetCustomForm() {
-    setCustomName(''); setCustomG(''); setCustomCal(''); setCustomP(''); setCustomC(''); setCustomF(''); setCustomFib(''); setSaveFav(false);
-  }
-
-  function submitCustomItem() {
+  function buildCustomEntry() {
     const name = customName.trim();
     const cal = fdInt(customCal), p = fdInt(customP), c = fdInt(customC), f = fdInt(customF);
-    if (!name || cal == null || p == null || c == null || f == null) return;
-    const entry = {
-      id: LB.uid(), date: curDate, time: fdNowHHMM(),
+    if (!name || cal == null || p == null || c == null || f == null) return null;
+    return {
+      id: LB.uid(), date: curDate, time: entryTime(),
       foodId: null, foodName: name, brand: null, source: 'custom',
       quantityG: fdInt(customG) || 100, calories: cal, protein: p, carbs: c, fat: f,
       fiber: customFib !== '' ? fdInt(customFib) : null,
       createdAt: new Date().toISOString(),
     };
-    if (saveFav) addFavorite(entry);
-    setCustomOpen(false);
+  }
+
+  // Immediate favorite: tapping the star saves (or, on a second tap, removes)
+  // the favorite right away, independent of whether the food ends up logged.
+  function toggleFavorite(entry) {
+    if (!entry) return;
+    if (favedId) {
+      const id = favedId;
+      setFavedId(null);
+      setStore(s => ({ ...s, foodFavorites: (s.foodFavorites || []).filter(f => f.id !== id) }));
+    } else {
+      const fav = {
+        id: LB.uid(), foodId: entry.foodId, foodName: entry.foodName, brand: entry.brand,
+        source: entry.source, quantityG: entry.quantityG, calories: entry.calories,
+        protein: entry.protein, carbs: entry.carbs, fat: entry.fat, fiber: entry.fiber,
+        createdAt: new Date().toISOString(),
+      };
+      setFavedId(fav.id);
+      setStore(s => ({ ...s, foodFavorites: [fav, ...(s.foodFavorites || [])] }));
+    }
+  }
+  function removeFavorite(fav) {
+    setStore(s => ({ ...s, foodFavorites: (s.foodFavorites || []).filter(f => f.id !== fav.id) }));
+  }
+
+  function confirmLogFood() {
+    const entry = buildQtyEntry();
+    if (!entry) return;
     finishEntry(entry);
+    closeQtySheet();
+  }
+
+  function resetCustomForm() {
+    setCustomName(''); setCustomG(''); setCustomCal(''); setCustomP(''); setCustomC(''); setCustomF(''); setCustomFib('');
+    setFavedId(null); setEditingDraftId(null);
+  }
+
+  function submitCustomItem() {
+    const entry = buildCustomEntry();
+    if (!entry) return;
+    finishEntry(entry);
+    closeCustomSheet();
     resetCustomForm();
   }
   const customValid = customName.trim() && fdInt(customCal) != null && fdInt(customP) != null && fdInt(customC) != null && fdInt(customF) != null;
 
   // ── Recipes ──
-  function openNewRecipe() { setRecipeNameInput(''); setRecipeNameOpen(true); }
-  function startRecipe() {
+  function openNewRecipe() { setRecipeNameInput(''); setRecipeNameMode('new'); setRecipeNameOpen(true); }
+  function openRenameRecipe() { setRecipeNameInput(recipeMode?.name || ''); setRecipeNameMode('rename'); setRecipeNameOpen(true); }
+  function confirmRecipeName() {
     const name = recipeNameInput.trim();
     if (!name) return;
     setRecipeNameOpen(false);
-    setRecipeMode({ name, items: [] });
+    if (recipeNameMode === 'rename') {
+      setRecipeMode(m => m ? { ...m, name } : m);
+    } else {
+      setRecipeMode({ name, items: [] });
+      setTab('search');
+    }
+  }
+  // Open an existing recipe for editing: ingredients get fresh ephemeral ids
+  // for the draft (stored recipe items carry no id), and editId marks that
+  // saving updates in place instead of creating a new recipe.
+  function editRecipe(recipe) {
+    setRecipeMode({ editId: recipe.id, name: recipe.name, items: (recipe.items || []).map(i => ({ ...i, id: LB.uid() })) });
     setTab('search');
+  }
+  // Tap a draft ingredient to edit its amount: reopens the matching sheet
+  // prefilled, and editingDraftId makes finishEntry replace it in place.
+  function editDraftItem(item) {
+    setFavedId(null);
+    setEditingDraftId(item.id);
+    if (item.foodId) {
+      const per100 = item.quantityG > 0 ? 100 / item.quantityG : 1;
+      setPendingFood({
+        source: item.source, sourceId: item.foodId.slice((item.source || '').length + 1),
+        name: item.foodName, brand: item.brand || null,
+        kcalPer100g: item.calories * per100, proteinPer100g: item.protein * per100,
+        carbsPer100g: item.carbs * per100, fatPer100g: item.fat * per100,
+        fiberPer100g: item.fiber != null ? item.fiber * per100 : null,
+        servingSizeG: null, servingLabel: null,
+      });
+      setQtyG(String(item.quantityG || 100));
+      setQtySheetOpen(true);
+    } else {
+      setCustomName(item.foodName);
+      setCustomG(item.quantityG ? String(item.quantityG) : '');
+      setCustomCal(String(item.calories ?? ''));
+      setCustomP(String(item.protein ?? ''));
+      setCustomC(String(item.carbs ?? ''));
+      setCustomF(String(item.fat ?? ''));
+      setCustomFib(item.fiber != null ? String(item.fiber) : '');
+      setCustomOpen(true);
+    }
   }
   function removeRecipeDraftItem(id) {
     setRecipeMode(m => m ? { ...m, items: m.items.filter(i => i.id !== id) } : m);
   }
-  function cancelRecipe() { setRecipeMode(null); }
+  function cancelRecipe() { setRecipeMode(null); setEditingDraftId(null); }
   function saveRecipe() {
     if (!recipeMode || !recipeMode.items.length) { setRecipeMode(null); return; }
-    const recipe = {
-      id: LB.uid(), name: recipeMode.name,
-      items: recipeMode.items.map(i => ({
-        foodId: i.foodId, foodName: i.foodName, brand: i.brand, source: i.source,
-        quantityG: i.quantityG, calories: i.calories, protein: i.protein, carbs: i.carbs, fat: i.fat, fiber: i.fiber,
-      })),
-      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
-    };
-    setStore(s => ({ ...s, foodRecipes: [recipe, ...(s.foodRecipes || [])] }));
+    const items = recipeMode.items.map(i => ({
+      foodId: i.foodId, foodName: i.foodName, brand: i.brand, source: i.source,
+      quantityG: i.quantityG, calories: i.calories, protein: i.protein, carbs: i.carbs, fat: i.fat, fiber: i.fiber,
+    }));
+    const now = new Date().toISOString();
+    if (recipeMode.editId) {
+      const id = recipeMode.editId;
+      setStore(s => ({ ...s, foodRecipes: (s.foodRecipes || []).map(r => r.id === id ? { ...r, name: recipeMode.name, items, updatedAt: now } : r) }));
+    } else {
+      setStore(s => ({ ...s, foodRecipes: [{ id: LB.uid(), name: recipeMode.name, items, createdAt: now, updatedAt: now }, ...(s.foodRecipes || [])] }));
+    }
     setRecipeMode(null);
     setTab('quickadd'); setQuickTab('recipes');
   }
@@ -341,7 +466,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     if (!items.length) return;
     const sum = k => items.reduce((a, i) => a + (i[k] || 0), 0);
     const entry = {
-      id: LB.uid(), date: curDate, time: fdNowHHMM(),
+      id: LB.uid(), date: curDate, time: entryTime(),
       foodId: null, foodName: recipe.name, brand: null, source: 'recipe',
       quantityG: Math.round(sum('quantityG')), calories: Math.round(sum('calories')),
       protein: fdRound1(sum('protein')), carbs: fdRound1(sum('carbs')), fat: fdRound1(sum('fat')),
@@ -351,33 +476,57 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     commitEntry(entry);
   }
 
-  const recipeDraftKcal = useMemoFd(
-    () => recipeMode ? Math.round(recipeMode.items.reduce((a, i) => a + (i.calories || 0), 0)) : 0,
-    [recipeMode],
-  );
+  const recipeDraftTotals = useMemoFd(() => {
+    if (!recipeMode) return { calories: 0, protein: 0, carbs: 0, fat: 0 };
+    const sum = k => recipeMode.items.reduce((a, i) => a + (i[k] || 0), 0);
+    return { calories: Math.round(sum('calories')), protein: Math.round(sum('protein')), carbs: Math.round(sum('carbs')), fat: Math.round(sum('fat')) };
+  }, [recipeMode]);
 
   return (
     <Screen>
       {confirmEl}
       <TopBar title="Food" sub={dayLabel} onBack={() => go({ name: 'health' })} />
 
-      <div style={fdTabBarStyle}>
-        {FD_TABS.map(t => (
-          <button key={t.id} onClick={() => setTab(t.id)} style={fdTabBtn(tab === t.id)}>
-            <i className={`fa-solid ${t.icon}`} style={{ fontSize: 13 }} />
-            {t.label}
-          </button>
-        ))}
-      </div>
+      <SubTabBar tabs={FD_TABS} active={tab} onChange={onTabChange} />
 
       {recipeMode && (
         <div style={fdRecipeBanner}>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--accent)', fontFamily: UI.fontUi, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Building: {recipeMode.name}</div>
-            <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi }}>{recipeMode.items.length} ingredient{recipeMode.items.length === 1 ? '' : 's'}{recipeMode.items.length ? ` · ${recipeDraftKcal} kcal` : ''}</div>
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: recipeMode.items.length ? 8 : 6 }}>
+            <button onClick={openRenameRecipe} style={{ flex: 1, minWidth: 0, background: 'none', border: 'none', padding: 0, textAlign: 'left', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+              <div className="micro" style={{ color: UI.inkFaint }}>{recipeMode.editId ? 'Editing recipe' : 'New recipe'}</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--accent)', fontFamily: UI.fontUi, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{recipeMode.name}</span>
+                <i className="fa-solid fa-pen" style={{ fontSize: 9, color: UI.inkFaint, flexShrink: 0 }} />
+              </div>
+            </button>
+            <button onClick={cancelRecipe} style={fdBannerBtn}>Cancel</button>
+            <button onClick={saveRecipe} disabled={!recipeMode.items.length} style={{ ...fdBannerBtn, color: recipeMode.items.length ? 'var(--accent)' : UI.inkGhost, fontWeight: 700 }}>{recipeMode.editId ? 'Save' : 'Done'}</button>
           </div>
-          <button onClick={cancelRecipe} style={fdBannerBtn}>Cancel</button>
-          <button onClick={saveRecipe} disabled={!recipeMode.items.length} style={{ ...fdBannerBtn, color: recipeMode.items.length ? 'var(--accent)' : UI.inkGhost, fontWeight: 700 }}>Done</button>
+          {recipeMode.items.length > 0 ? (
+            <>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 14, marginBottom: 10 }}>
+                <span className="num" style={{ fontSize: 20, fontWeight: 300, color: UI.ink }}>{recipeDraftTotals.calories}<span style={{ fontSize: 10, color: UI.inkFaint, marginLeft: 3 }}>kcal</span></span>
+                <span className="num" style={{ fontSize: 12, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 9 }}>P</span> {recipeDraftTotals.protein}</span>
+                <span className="num" style={{ fontSize: 12, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 9 }}>C</span> {recipeDraftTotals.carbs}</span>
+                <span className="num" style={{ fontSize: 12, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 9 }}>F</span> {recipeDraftTotals.fat}</span>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 2, maxHeight: 168, overflowY: 'auto' }}>
+                {recipeMode.items.map(i => (
+                  <div key={i.id} style={fdDraftRow}>
+                    <button onClick={() => editDraftItem(i)} style={fdDraftMain}>
+                      <span style={{ ...fdEntryName, fontSize: 12 }}>{i.foodName}</span>
+                      <span style={fdEntryMeta}>{i.quantityG}g · {i.calories} kcal · P{Math.round(i.protein)} C{Math.round(i.carbs)} F{Math.round(i.fat)}</span>
+                    </button>
+                    <button onClick={() => removeRecipeDraftItem(i.id)} aria-label="Remove" style={fdInlineDeleteBtn}>
+                      <i className="fa-solid fa-trash" style={{ fontSize: 11 }} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </>
+          ) : (
+            <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1.4 }}>Search below and add ingredients with their usual amounts, then Done.</div>
+          )}
         </div>
       )}
 
@@ -410,56 +559,57 @@ function FoodScreen({ store, setStore, go, userId, date }) {
               </div>
             </Card>
 
-            {/* Entries list */}
+            {/* Hourly timeline: every hour 0-23 has a "+" that logs at exactly
+                that hour, with its entries listed underneath. */}
             <div>
-              <Bezel style={{ marginBottom: 10 }}>{dayLabel} entries ({dayEntries.length})</Bezel>
-              {dayEntries.length === 0 ? (
-                <div style={fdEmptyStyle}>Nothing logged for this day yet</div>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {dayEntries.map(e => (
-                    <div key={e.id} style={fdEntryRow}>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0, flex: 1 }}>
-                        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-                          <span className="num" style={{ fontSize: 11, color: 'var(--accent)' }}>{e.time}</span>
-                          <span style={fdEntryName}>{e.foodName}</span>
-                        </div>
-                        <span style={fdEntryMeta}>
-                          {e.quantityG ? `${e.quantityG}g · ` : ''}{e.calories} kcal · P{Math.round(e.protein)} C{Math.round(e.carbs)} F{Math.round(e.fat)}
-                        </span>
+              <Bezel style={{ marginBottom: 10 }}>Timeline</Bezel>
+              <div style={{ display: 'flex', flexDirection: 'column' }}>
+                {FD_HOURS.map(h => {
+                  const es = byHour[h] || [];
+                  const filled = es.length > 0;
+                  return (
+                    <div key={h} style={fdHourRow(filled)}>
+                      <div style={fdHourLabelCol}>
+                        <span className="num" style={{ fontSize: 11, color: filled ? UI.inkSoft : UI.inkGhost }}>{String(h).padStart(2, '0')}</span>
                       </div>
-                      <button onClick={() => deleteEntry(e)} aria-label="Delete" style={fdInlineDeleteBtn}>
-                        <i className="fa-solid fa-trash" style={{ fontSize: 12 }} />
+                      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6, paddingBottom: filled ? 6 : 0 }}>
+                        {es.map(e => (
+                          <div key={e.id} style={fdEntryRow}>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0, flex: 1 }}>
+                              <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                                <span className="num" style={{ fontSize: 10, color: 'var(--accent)' }}>{e.time}</span>
+                                <span style={fdEntryName}>{e.foodName}</span>
+                              </div>
+                              <span style={fdEntryMeta}>
+                                {e.quantityG ? `${e.quantityG}g · ` : ''}{e.calories} kcal · P{Math.round(e.protein)} C{Math.round(e.carbs)} F{Math.round(e.fat)}
+                              </span>
+                            </div>
+                            <button onClick={() => deleteEntry(e)} aria-label="Delete" style={fdInlineDeleteBtn}>
+                              <i className="fa-solid fa-trash" style={{ fontSize: 12 }} />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                      <button onClick={() => addAtHour(h)} aria-label={`Add food at ${String(h).padStart(2, '0')}:00`} style={fdHourAddBtn}>
+                        <i className="fa-solid fa-plus" style={{ fontSize: 11 }} />
                       </button>
                     </div>
-                  ))}
-                </div>
-              )}
+                  );
+                })}
+              </div>
             </div>
           </>
         )}
 
         {tab === 'search' && (
           <>
-            {recipeMode && recipeMode.items.length > 0 && (
-              <div>
-                <Bezel style={{ marginBottom: 10 }}>Added so far</Bezel>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {recipeMode.items.map(i => (
-                    <div key={i.id} style={fdEntryRow}>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={fdEntryName}>{i.foodName}</div>
-                        <div style={fdEntryMeta}>{i.quantityG}g · {i.calories} kcal</div>
-                      </div>
-                      <button onClick={() => removeRecipeDraftItem(i.id)} aria-label="Remove" style={fdInlineDeleteBtn}>
-                        <i className="fa-solid fa-trash" style={{ fontSize: 12 }} />
-                      </button>
-                    </div>
-                  ))}
-                </div>
+            {pendingHour != null && !recipeMode && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 12px', background: 'rgba(var(--accent-rgb),0.1)', border: `1px solid rgba(var(--accent-rgb),0.3)`, borderRadius: 6 }}>
+                <i className="fa-solid fa-clock" style={{ fontSize: 12, color: 'var(--accent)' }} />
+                <span style={{ flex: 1, fontSize: 12, color: UI.ink, fontFamily: UI.fontUi }}>Logging at {String(pendingHour).padStart(2, '0')}:00</span>
+                <button onClick={() => setPendingHour(null)} style={{ background: 'none', border: 'none', padding: '2px 4px', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>Now instead</button>
               </div>
             )}
-
             <div>
               <Bezel style={{ marginBottom: 10 }}>Search</Bezel>
               <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `1px solid ${UI.hairStrong}`, marginBottom: 10 }}>
@@ -585,9 +735,12 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                           <button onClick={() => addRecipeToLog(r)} style={fdQuickRowInner}>
                             <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
                               <div style={fdEntryName}>{r.name}</div>
-                              <div style={fdEntryMeta}>{items.length} ingredient{items.length === 1 ? '' : 's'}</div>
+                              <div style={fdEntryMeta}>{items.length} ingredient{items.length === 1 ? '' : 's'} · P{Math.round(items.reduce((a, i) => a + (i.protein || 0), 0))} C{Math.round(items.reduce((a, i) => a + (i.carbs || 0), 0))} F{Math.round(items.reduce((a, i) => a + (i.fat || 0), 0))}</div>
                             </div>
                             <div className="num" style={{ fontSize: 12, color: UI.inkSoft, flexShrink: 0 }}>{kcal} kcal</div>
+                          </button>
+                          <button onClick={() => editRecipe(r)} aria-label="Edit recipe" style={fdSideBtn}>
+                            <i className="fa-solid fa-pen" style={{ fontSize: 12 }} />
                           </button>
                           <button onClick={() => deleteRecipe(r)} aria-label="Delete recipe" style={fdSideBtn}>
                             <i className="fa-solid fa-trash" style={{ fontSize: 12 }} />
@@ -632,21 +785,21 @@ function FoodScreen({ store, setStore, go, userId, date }) {
               </div>
             )}
             {!recipeMode && (
-              <button onClick={() => setSaveFav(v => !v)} style={fdFavToggle}>
-                <i className="fa-solid fa-star" style={{ fontSize: 13, color: saveFav ? UI.gold : UI.inkGhost }} />
-                <span style={{ fontSize: 11, color: saveFav ? UI.ink : UI.inkFaint, fontFamily: UI.fontUi }}>Save as favorite</span>
+              <button onClick={() => toggleFavorite(buildQtyEntry())} disabled={!qtyPreview} style={fdFavBtn(!!favedId, !qtyPreview)}>
+                <i className={`fa-${favedId ? 'solid' : 'regular'} fa-star`} style={{ fontSize: 14, color: favedId ? UI.gold : UI.inkSoft }} />
+                {favedId ? 'Saved to favorites' : 'Save as favorite'}
               </button>
             )}
             <div style={{ display: 'flex', gap: 8 }}>
               <Btn kind="ghost" onClick={closeQtySheet} style={{ flex: 1 }}>Cancel</Btn>
-              <Btn onClick={confirmLogFood} disabled={!qtyPreview} style={{ flex: 2 }}>{recipeMode ? 'Add ingredient' : 'Add'}</Btn>
+              <Btn onClick={confirmLogFood} disabled={!qtyPreview} style={{ flex: 2 }}>{recipeMode ? (editingDraftId ? 'Update ingredient' : 'Add ingredient') : 'Add'}</Btn>
             </div>
           </>
         )}
       </Sheet>
 
       {/* ── Custom item sheet ── */}
-      <Sheet open={customOpen} onClose={() => setCustomOpen(false)} title="Custom item" titleColor="var(--accent)">
+      <Sheet open={customOpen} onClose={closeCustomSheet} title="Custom item" titleColor="var(--accent)">
         <Field label="Name" style={{ marginBottom: 12 }}>
           <TextInput value={customName} onChange={setCustomName} placeholder="e.g. Mom's lasagna" />
         </Field>
@@ -673,28 +826,30 @@ function FoodScreen({ store, setStore, go, userId, date }) {
           <input value={customFib} onChange={e => setCustomFib(e.target.value.replace(/[^0-9]/g, ''))} type="text" inputMode="numeric" placeholder="g" style={fdInputStyle} />
         </Field>
         {!recipeMode && (
-          <button onClick={() => setSaveFav(v => !v)} style={fdFavToggle}>
-            <i className="fa-solid fa-star" style={{ fontSize: 13, color: saveFav ? UI.gold : UI.inkGhost }} />
-            <span style={{ fontSize: 11, color: saveFav ? UI.ink : UI.inkFaint, fontFamily: UI.fontUi }}>Save as favorite</span>
+          <button onClick={() => toggleFavorite(buildCustomEntry())} disabled={!customValid} style={fdFavBtn(!!favedId, !customValid)}>
+            <i className={`fa-${favedId ? 'solid' : 'regular'} fa-star`} style={{ fontSize: 14, color: favedId ? UI.gold : UI.inkSoft }} />
+            {favedId ? 'Saved to favorites' : 'Save as favorite'}
           </button>
         )}
         <div style={{ display: 'flex', gap: 8 }}>
-          <Btn kind="ghost" onClick={() => setCustomOpen(false)} style={{ flex: 1 }}>Cancel</Btn>
-          <Btn onClick={submitCustomItem} disabled={!customValid} style={{ flex: 2 }}>{recipeMode ? 'Add ingredient' : 'Add'}</Btn>
+          <Btn kind="ghost" onClick={closeCustomSheet} style={{ flex: 1 }}>Cancel</Btn>
+          <Btn onClick={submitCustomItem} disabled={!customValid} style={{ flex: 2 }}>{recipeMode ? (editingDraftId ? 'Update ingredient' : 'Add ingredient') : 'Add'}</Btn>
         </div>
       </Sheet>
 
-      {/* ── New recipe name sheet ── */}
-      <Sheet open={recipeNameOpen} onClose={() => setRecipeNameOpen(false)} title="New recipe" titleColor="var(--accent)">
+      {/* ── Recipe name sheet (new + rename) ── */}
+      <Sheet open={recipeNameOpen} onClose={() => setRecipeNameOpen(false)} title={recipeNameMode === 'rename' ? 'Rename recipe' : 'New recipe'} titleColor="var(--accent)">
         <Field label="Name" style={{ marginBottom: 16 }}>
           <TextInput value={recipeNameInput} onChange={setRecipeNameInput} placeholder="e.g. Breakfast bowl" autoFocus />
         </Field>
-        <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: 1.5 }}>
-          Next you'll search and add each ingredient with its usual amount. Once saved, the whole recipe logs in one tap.
-        </div>
+        {recipeNameMode === 'new' && (
+          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: 1.5 }}>
+            Next you'll search and add each ingredient with its usual amount. Once saved, the whole recipe logs in one tap.
+          </div>
+        )}
         <div style={{ display: 'flex', gap: 8 }}>
           <Btn kind="ghost" onClick={() => setRecipeNameOpen(false)} style={{ flex: 1 }}>Cancel</Btn>
-          <Btn onClick={startRecipe} disabled={!recipeNameInput.trim()} style={{ flex: 2 }}>Start adding ingredients</Btn>
+          <Btn onClick={confirmRecipeName} disabled={!recipeNameInput.trim()} style={{ flex: 2 }}>{recipeNameMode === 'rename' ? 'Save name' : 'Start adding ingredients'}</Btn>
         </div>
       </Sheet>
     </Screen>
@@ -710,16 +865,6 @@ function fdNavBtn(disabled) {
     WebkitTapHighlightColor: 'transparent',
   };
 }
-function fdTabBtn(active) {
-  return {
-    flex: 1, padding: '10px 4px', border: 'none', cursor: 'pointer', background: 'transparent',
-    borderBottom: `2px solid ${active ? 'var(--accent)' : 'transparent'}`,
-    color: active ? 'var(--accent)' : UI.inkFaint,
-    fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase',
-    display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
-    WebkitTapHighlightColor: 'transparent',
-  };
-}
 function fdSegBtn(active) {
   return {
     flex: 1, padding: '7px 4px', border: 'none', cursor: 'pointer',
@@ -730,10 +875,9 @@ function fdSegBtn(active) {
     WebkitTapHighlightColor: 'transparent',
   };
 }
-const fdTabBarStyle = { display: 'flex', borderBottom: `1px solid ${UI.hairStrong}` };
 const fdRecipeBanner = {
-  display: 'flex', alignItems: 'center', gap: 10, padding: '10px 22px',
-  background: 'rgba(var(--accent-rgb),0.1)', borderBottom: `1px solid rgba(var(--accent-rgb),0.3)`,
+  padding: '12px 22px',
+  background: 'rgba(var(--accent-rgb),0.08)', borderBottom: `1px solid rgba(var(--accent-rgb),0.3)`,
 };
 const fdBannerBtn = {
   flexShrink: 0, background: 'none', border: 'none', padding: '4px 6px', cursor: 'pointer',
@@ -754,11 +898,42 @@ const fdLinkBtn = {
   marginTop: 8, background: 'none', border: 'none', padding: '4px 0', color: 'var(--accent)',
   fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
 };
-const fdFavToggle = {
-  display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none',
-  padding: '4px 0 14px', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+function fdFavBtn(active, disabled) {
+  return {
+    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, width: '100%',
+    padding: '11px 0', marginBottom: 12, borderRadius: 6,
+    border: `1px solid ${active ? UI.gold : UI.hairStrong}`,
+    background: active ? UI.bgInset : 'transparent',
+    color: disabled ? UI.inkGhost : (active ? UI.ink : UI.inkSoft),
+    fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, textShadow: 'none',
+    cursor: disabled ? 'default' : 'pointer', opacity: disabled ? 0.5 : 1,
+    WebkitTapHighlightColor: 'transparent',
+  };
+}
+const fdDraftRow = { display: 'flex', alignItems: 'center', gap: 6 };
+const fdDraftMain = {
+  flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1, alignItems: 'flex-start',
+  background: 'none', border: 'none', padding: '3px 0', cursor: 'pointer', textAlign: 'left',
+  WebkitTapHighlightColor: 'transparent',
 };
 const fdEmptyStyle = { textAlign: 'center', fontSize: 12, color: UI.inkFaint, padding: '18px 0', fontFamily: UI.fontUi };
+// Timeline: an hour tick column, its entries, and an always-present add button.
+// Empty hours stay slim; hours with entries grow to fit them. The left column
+// carries a hairline "spine" so the 24 rows read as one continuous axis.
+function fdHourRow(filled) {
+  return {
+    display: 'flex', alignItems: 'flex-start', gap: 10,
+    borderTop: `var(--hair-width) solid ${UI.hair}`,
+    paddingTop: filled ? 8 : 0, minHeight: 34,
+  };
+}
+const fdHourLabelCol = { width: 24, flexShrink: 0, paddingTop: 9, textAlign: 'right' };
+const fdHourAddBtn = {
+  flexShrink: 0, width: 30, height: 30, marginTop: 4, borderRadius: 4,
+  border: `1px solid ${UI.hairStrong}`, background: 'transparent', color: UI.inkSoft,
+  cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+  WebkitTapHighlightColor: 'transparent',
+};
 const fdEntryName = { fontSize: 13, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' };
 const fdEntryMeta = { fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi };
 const fdEntryRow = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '10px 12px', background: UI.bgInset, border: `1px solid ${UI.hair}`, borderRadius: 6 };
