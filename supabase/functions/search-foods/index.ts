@@ -1,17 +1,17 @@
 // Food-database lookup for the Zane-native macro tracker (FoodScreen).
 // Proxies two free/public sources: Open Food Facts (no key needed) and USDA
 // FoodData Central (needs USDA_API_KEY, must be set as a Supabase Edge
-// Function secret — sign up free at https://fdc.nal.usda.gov/api-key-signup).
+// Function secret, sign up free at https://fdc.nal.usda.gov/api-key-signup).
 // Open Food Facts is missing that secret requirement entirely, so it alone
 // is enough to make search work; USDA is skipped silently (not a hard
 // failure) whenever the key is unset.
 //
 // action: 'search' hits both sources (Open Food Facts only for a numeric
-// barcode query — USDA has no meaningful barcode lookup) and returns
+// barcode query, USDA has no meaningful barcode lookup) and returns
 // normalized, UNCACHED results. action: 'select' re-fetches the chosen item
 // server-side by id (never trusts client-submitted nutrition numbers) and
 // upserts it into zane_foods, the app's shared, organically-growing food
-// cache, before returning it. zane_food_logs itself is never touched here —
+// cache, before returning it. zane_food_logs itself is never touched here,
 // the client computes the specific-quantity macros and writes that entry
 // through the normal store/sync path once it knows the logged quantity.
 
@@ -127,10 +127,22 @@ async function lookupOffBarcode(barcode: string): Promise<FoodResult | null> {
 
 // ── USDA FoodData Central ───────────────────────────────────────────────────
 
+// USDA's two endpoints report nutrients in different shapes: the search
+// endpoint (/v1/foods/search) uses a flat { nutrientNumber, value }, while the
+// by-id endpoint (/v1/food/{fdcId}, used on 'select') nests it as
+// { nutrient: { number }, amount } instead. Checking both shapes here lets
+// one normalizer serve both callers instead of silently reading undefined
+// from the by-id shape (which is what previously made every USDA "select"
+// come back as 0 kcal / 0g macros, only the search list looked right).
 // deno-lint-ignore no-explicit-any
 function usdaNum(foodNutrients: any[], nutrientNumber: string): number | null {
-  const hit = (foodNutrients || []).find((n) => String(n?.nutrientNumber) === nutrientNumber);
-  return typeof hit?.value === 'number' ? hit.value : null;
+  for (const n of (foodNutrients || [])) {
+    const num = n?.nutrientNumber ?? n?.nutrient?.number;
+    if (String(num) !== nutrientNumber) continue;
+    const v = n?.value ?? n?.amount;
+    return typeof v === 'number' ? v : null;
+  }
+  return null;
 }
 
 // deno-lint-ignore no-explicit-any
