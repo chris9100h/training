@@ -189,9 +189,12 @@ function AutoregGuideScreen({ store, go, mode: modeProp, back }) {
   const cardStyle = { background: UI.bgRaised, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 8, padding: 18 };
   const h3 = { fontSize: 18, marginBottom: 7 };
 
-  // shared: section wrapper
-  const Section = ({ children, style }) => (
-    <div style={{ padding: '30px 0', borderTop: `var(--hair-width) solid ${UI.hair}`, ...style }}>
+  // shared: section wrapper. Divider is a knurl (not a plain hairline) so it
+  // gets the same grid lift-off shadow as every other knurl in the app:
+  // 'none' when the grid toggle is off, same as before.
+  const Section = ({ children, style, first = false }) => (
+    <div style={{ paddingBottom: 30, marginTop: first ? 0 : 30, ...style }}>
+      {!first && <div className="knurl" style={{ marginBottom: 30 }} />}
       <div style={{ maxWidth: 940, margin: '0 auto', padding: '0 4px' }}>{children}</div>
     </div>
   );
@@ -231,7 +234,7 @@ function AutoregGuideScreen({ store, go, mode: modeProp, back }) {
           </div>
 
           {/* ── 01 overview ── */}
-          <Section style={{ borderTop: 'none', marginTop: 14 }}>
+          <Section first style={{ marginTop: 14 }}>
             <AGSecHead n="01 / Overview" title={isB ? 'What Load only turns' : isC ? 'What a Mesocycle turns' : 'What Volume + Load turns'}
               sub={isA ? 'The full engine with no fixed end. Both dials move from your feedback, and it just keeps running.'
                 : isB ? 'Your programmed set counts stay untouched. The feedback engine points entirely at the weight on the bar.'
