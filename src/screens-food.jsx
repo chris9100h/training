@@ -2350,7 +2350,10 @@ const FD_MACRO_COLORS = { protein: 'var(--info)', carbs: 'var(--ok)', fat: 'var(
 // as a signed percent. The delta is intentionally neutral-colored rather
 // than green/red: whether running over or under a given macro is "good"
 // depends on the user's own goal (bulk vs cut), which this row has no way
-// to know, so it states the fact without editorializing.
+// to know, so it states the fact without editorializing. The track's
+// UI.hairStrong outline needs no light/dark special-casing: --hair-strong
+// is already ink-derived, so it's dark in the light theme and light in the
+// dark themes on its own.
 function FdHeroRow({ label, color, actual, target, unit = '' }) {
   if (target == null) return null;
   const pct = target > 0 ? Math.min(100, Math.round((actual / target) * 100)) : 0;
@@ -2358,7 +2361,7 @@ function FdHeroRow({ label, color, actual, target, unit = '' }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
       <span style={{ width: 46, flexShrink: 0, fontSize: 9, fontWeight: 700, letterSpacing: '0.05em', color, fontFamily: UI.fontUi }}>{label}</span>
-      <div style={{ flex: 1, height: 4, borderRadius: 4, background: UI.bgInset, overflow: 'hidden' }}>
+      <div style={{ flex: 1, height: 4, borderRadius: 2, background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, overflow: 'hidden' }}>
         <div style={{ width: `${pct}%`, height: '100%', background: color }} />
       </div>
       <span className="num" style={{ fontSize: 11, color, flexShrink: 0, textAlign: 'right' }}>
@@ -2387,7 +2390,7 @@ function FdCompositionBar({ label, protein, carbs, fat }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
       <span style={{ width: 46, flexShrink: 0, fontSize: 9, fontWeight: 700, letterSpacing: '0.05em', color: UI.inkFaint, fontFamily: UI.fontUi }}>{label}</span>
-      <div style={{ flex: 1, height: 8, borderRadius: 4, background: UI.bgInset, overflow: 'hidden', display: 'flex' }}>
+      <div style={{ flex: 1, height: 8, borderRadius: 2, background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, overflow: 'hidden', display: 'flex' }}>
         {segs.map((s, i) => s.pct > 0 && <div key={i} style={{ width: `${s.pct}%`, height: '100%', background: s.color }} />)}
       </div>
     </div>
