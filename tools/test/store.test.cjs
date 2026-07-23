@@ -973,6 +973,19 @@ async function testAsync(name, fn) {
     const out = LB.revertMesoSessionBoosts(st, delSess, [older]);
     assert.strictEqual(out.weightBoosts.tri_d1, 5, 'restored to the older session\'s own earned boost');
   });
+  test('revertMesoSessionBoosts: falls back to matching by name when the prior recap predates the `key` field', () => {
+    // Real production shape from before the 2026-07-19 change that started
+    // carrying `key` through mesoRecap.gains: rows only had name/weightDelta/
+    // setDelta. Restoring from a session finished before that date must still
+    // work, matched by the name the prior session's own entry used for this exId.
+    const st = { weightBoosts: { tri_d1: -2.5 }, repMissCounts: {} };
+    const older = {
+      id: 'Z', dayId: 'd1', ended: '2026-07-08T10:00:00Z', entries: [{ exId: 'tri', name: 'Triceps Pushdown' }],
+      mesoRecap: { gains: [{ name: 'Triceps Pushdown', weightDelta: 5, setDelta: 0 }] }, // no `key`
+    };
+    const out = LB.revertMesoSessionBoosts(st, delSess, [older]);
+    assert.strictEqual(out.weightBoosts.tri_d1, 5, 'restored via the name fallback, not silently cleared');
+  });
   test('revertMesoSessionBoosts: an older session whose recap has no weightDelta for the key still clears', () => {
     const st = { weightBoosts: { tri_d1: 2.5 }, repMissCounts: {} };
     const older = {

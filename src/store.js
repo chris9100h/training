@@ -5086,7 +5086,20 @@ function revertMesoSessionBoosts(mesoState, deletedSession, remainingSessions) {
   for (const exId of exIds) {
     const key = exId + '_' + dayId;
     const prior = earlierSameDay.find(x => (x.entries || []).some(e => e && !e.isCardio && e.exId === exId));
-    const priorGain = prior && prior.mesoRecap?.gains?.find(g => g.key === key);
+    const priorGains = prior?.mesoRecap?.gains;
+    let priorGain = priorGains?.find(g => g.key === key);
+    // mesoRecap.gains only started carrying a `key` per row from the commit that
+    // added post-hoc decline-toggling (2026-07-19); older recaps recorded just the
+    // exercise's display name. Without this fallback every prior session finished
+    // before that date would silently miss the lookup above and always degrade to
+    // a plain clear, even though the exact same information (matched by name) is
+    // sitting right there in the array. Restrict to rows that themselves have no
+    // key, so a newer, correctly-keyed recap never gets misattributed by a
+    // same-named exercise trained elsewhere in that same session.
+    if (!priorGain) {
+      const priorName = prior?.entries?.find(e => e && !e.isCardio && e.exId === exId)?.name;
+      if (priorName) priorGain = priorGains?.find(g => !g.key && g.name === priorName);
+    }
     const restoreWb = priorGain && priorGain.weightDelta ? priorGain.weightDelta : undefined;
     if (restoreWb == null) { if (key in wb) { delete wb[key]; changed = true; } }
     else if (wb[key] !== restoreWb) { wb[key] = restoreWb; changed = true; }
