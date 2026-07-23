@@ -18,6 +18,12 @@ const HEALTH_TFS = [{ id: '1W', days: 7 }, { id: '1M', days: 30 }, { id: '3M', d
 // the shared value, see GlucoseCard/BloodPressureCard/BodyTempCard.
 const HEALTH_TFS_TODAY = [{ id: '1D', days: 1 }, ...HEALTH_TFS];
 
+// How far back store.foodLogs is windowed client-side. Must mirror the
+// constant of the same name in store.js: a date older than this can still
+// have real Food Tracker rows server-side that this screen's local store
+// never receives (see foodOutsideWindow in DailyLogScreen below).
+const FOOD_HISTORY_WINDOW_DAYS = 30;
+
 // Whole-day difference between two 'YYYY-MM-DD' dates (b − a), noon-anchored to
 // dodge DST/midnight shifts.
 function healthDayDiff(a, b) {
@@ -782,8 +788,16 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
     () => (store.foodLogs || []).some(l => l.date === date),
     [store.foodLogs, date],
   );
+  // store.foodLogs is windowed to FOOD_HISTORY_WINDOW_DAYS days, so a date
+  // older than that can have real Food Tracker entries server-side that the
+  // check above can never see locally: it would then read a genuinely
+  // tracked old day as untracked. Lock those days too (can't verify locally,
+  // so don't risk a silent overwrite) instead of trusting an absence that
+  // might just be the window, not the truth.
+  const foodOutsideWindow = healthDayDiff(date, LB.todayISO()) > FOOD_HISTORY_WINDOW_DAYS;
+  const foodUnverifiable = foodOutsideWindow && !foodHasTrackerEntries;
   const [foodUnlocked, setFoodUnlocked] = useStateH(false);
-  const foodLocked = foodHasTrackerEntries && !foodUnlocked;
+  const foodLocked = (foodHasTrackerEntries || foodOutsideWindow) && !foodUnlocked;
   const todayISO = LB.todayISO();
   const dayStatusPeriod = useMemoH(() => {
     const ts = new Date(date + 'T12:00:00').getTime();
@@ -1172,7 +1186,9 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
 
   const requestFoodUnlock = async () => {
     const ok = await confirm(
-      "This day already has entries in the Food Tracker. Editing it here will be overwritten the next time you log food there.",
+      foodUnverifiable
+        ? "This day is more than 30 days old, so the app can't check locally whether the Food Tracker has entries for it. If it does, editing here will be overwritten the next time you log food there."
+        : "This day already has entries in the Food Tracker. Editing it here will be overwritten the next time you log food there.",
       { title: 'Overwrite food tracker?', ok: 'Continue', cancel: 'Cancel' }
     );
     if (ok) setFoodUnlocked(true);
@@ -1315,7 +1331,7 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
         {foodLocked && (
           <button onClick={requestFoodUnlock} style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 5, background: 'none', border: 'none', padding: '4px 0', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
             <i className="fa-solid fa-lock" style={{ fontSize: 9, color: UI.inkGhost }} />
-            <span style={{ fontSize: 10, fontFamily: UI.fontUi, color: UI.inkGhost }}>Managed by the Food Tracker, tap to override</span>
+            <span style={{ fontSize: 10, fontFamily: UI.fontUi, color: UI.inkGhost }}>{foodUnverifiable ? "Can't verify locally, over 30 days old, tap to override" : 'Managed by the Food Tracker, tap to override'}</span>
           </button>
         )}
         <div>
