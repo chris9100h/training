@@ -140,9 +140,18 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   const [quickQuery, setQuickQuery] = useStateFd('');
   function onQuickTabChange(id) { setQuickTab(id); setQuickQuery(''); }
   // Hour (0-23) a timeline "+" was tapped for, so the next logged entry lands
-  // at that hour instead of now. Cleared after a log, or when the user leaves
-  // the timeline by tapping a main tab directly.
+  // at that hour instead of now. Cleared once the staged batch that used it
+  // actually commits (see commitEntries), or when the user leaves the
+  // timeline by tapping a main tab directly.
   const [pendingHour, setPendingHour] = useStateFd(null);
+  // Foods picked (quantity already chosen) but not yet written to the log:
+  // tapping a search result / favorite / recent item, or submitting the
+  // Custom Item form, stages an entry here instead of committing it right
+  // away, so several can be picked in one sitting before "Add N items"
+  // commits the whole batch in one store update. Each entry already carries
+  // its own baked-in date/time (from entryTime() at stage time), so it stays
+  // correct even if curDate or pendingHour changes mid-batch.
+  const [staged, setStaged] = useStateFd([]);
 
   const [sourceFilter, setSourceFilter] = useStateFd(null); // null = all
   const [query, setQuery] = useStateFd('');
@@ -410,16 +419,40 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     );
   }
 
-  // Commits a real log write (not a recipe-draft stage).
-  async function commitEntry(entry) {
-    const ok = await warnIfOverwritingManualMacros(entry.date);
-    if (!ok) return false;
+  // Commits any number of entries in one store update, warning once per
+  // distinct date represented (usually just one, but a staged batch can in
+  // principle span dates if curDate changed mid-pick). Shared by a single
+  // recipe-log commit (commitEntry) and the staged multi-pick batch
+  // (commitStagedEntries).
+  async function commitEntries(entries) {
+    if (!entries.length) return false;
+    const dates = [...new Set(entries.map(e => e.date))];
+    for (const d of dates) {
+      const ok = await warnIfOverwritingManualMacros(d);
+      if (!ok) return false;
+    }
     setStore(s => {
-      const nextLogs = [entry, ...(s.foodLogs || [])];
-      return { ...s, foodLogs: nextLogs, dailyLogs: patchDaily(s, entry.date, nextLogs.filter(l => l.date === entry.date)) };
+      const nextLogs = [...entries, ...(s.foodLogs || [])];
+      let dailyLogs = s.dailyLogs || [];
+      for (const d of dates) dailyLogs = patchDaily({ ...s, dailyLogs }, d, nextLogs.filter(l => l.date === d));
+      return { ...s, foodLogs: nextLogs, dailyLogs };
     });
     setPendingHour(null);
     return true;
+  }
+  async function commitEntry(entry) {
+    return commitEntries([entry]);
+  }
+  function removeStaged(id) {
+    setStaged(list => list.filter(e => e.id !== id));
+  }
+  // "Add N items": commits the whole staged batch in one go, clearing it
+  // only on success (a declined overwrite-warning leaves the picks in place
+  // so the user doesn't lose them).
+  async function commitStagedEntries() {
+    if (!staged.length) return;
+    const ok = await commitEntries(staged);
+    if (ok) setStaged([]);
   }
 
   // Time stamped on a newly logged entry: the timeline hour the user tapped
@@ -862,13 +895,15 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     closeEditFavorite();
   }
 
-  async function confirmLogFood() {
+  // Stages the entry (see `staged` above) instead of committing it right
+  // away, so search/favorites/recent all share the same "pick, then Add N
+  // items" flow. Caching a freshly-fetched DB food still happens right here
+  // though, same as before: that's independent of whether the pick ever
+  // ends up committed.
+  function confirmLogFood() {
     const entry = buildQtyEntry();
     if (!entry) return;
-    const ok = await commitEntry(entry);
-    if (!ok) return; // user backed out of the overwrite warning; leave the sheet open
-    // Only now (a real log, not a mere open) grow the shared cache, and only
-    // for a freshly-fetched DB food that wasn't already cached.
+    setStaged(list => [...list, entry]);
     if (entry.foodId && pendingFood && !pendingFood.fromCache) {
       LB.cacheFood(pendingFood.source, pendingFood.sourceId);
     }
@@ -881,11 +916,10 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     setFavedId(null);
   }
 
-  async function submitCustomItem() {
+  function submitCustomItem() {
     const entry = buildCustomEntry();
     if (!entry) return;
-    const ok = await commitEntry(entry);
-    if (!ok) return; // user backed out of the overwrite warning; leave the sheet open
+    setStaged(list => [...list, entry]);
     closeCustomSheet();
     resetCustomForm();
   }
@@ -956,6 +990,33 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       <i className="fa-solid fa-clock" style={{ fontSize: 12, color: 'var(--accent)' }} />
       <span style={{ flex: 1, fontSize: 12, color: UI.ink, fontFamily: UI.fontUi }}>Logging at {String(pendingHour).padStart(2, '0')}:00</span>
       <button onClick={() => setPendingHour(null)} style={{ background: 'none', border: 'none', padding: '2px 4px', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>Now instead</button>
+    </div>
+  ) : null;
+
+  // Shown on both add-a-food tabs whenever there's a staged (picked, quantity
+  // already chosen, but not yet logged) batch: a review list plus the "Add N
+  // items" commit button. Lives here rather than per-tab so switching between
+  // Search and Quick Add mid-batch doesn't lose it, both stage into the same
+  // shared `staged` list.
+  const stagedPanel = staged.length > 0 ? (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: 12, background: 'rgba(var(--accent-rgb),0.08)', border: `1px solid rgba(var(--accent-rgb),0.3)`, borderRadius: 6 }}>
+      <Bezel>Picked ({staged.length})</Bezel>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 2, maxHeight: 168, overflowY: 'auto' }}>
+        {staged.map(e => (
+          <div key={e.id} style={fdDraftRow}>
+            <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
+              <span style={{ ...fdEntryName, fontSize: 12 }}>{e.foodName}</span>
+              <span style={fdEntryMeta}>{e.time} · {e.quantityG}g · {e.calories} kcal</span>
+            </div>
+            <button onClick={() => removeStaged(e.id)} aria-label="Remove" style={fdInlineDeleteBtn}>
+              <i className="fa-solid fa-trash" style={{ fontSize: 11 }} />
+            </button>
+          </div>
+        ))}
+      </div>
+      <Btn onClick={commitStagedEntries} style={{ width: '100%' }}>
+        Add {staged.length} item{staged.length === 1 ? '' : 's'}
+      </Btn>
     </div>
   ) : null;
 
@@ -1149,6 +1210,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                 </button>
               </div>
             )}
+            {stagedPanel}
           </>
         )}
 
@@ -1269,6 +1331,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                   </div>
               )
             )}
+            {stagedPanel}
           </>
         )}
       </div>
@@ -1562,8 +1625,10 @@ function RecipeEditorScreen({ open, onClose, onSave, recipe, store }) {
     onClose();
   };
 
-  function addItem(item) {
-    setItems(list => [...list, { id: LB.uid(), ...item }]);
+  // FdIngredientPicker only ever hands back a finished, already-quantified
+  // batch (its own "Add N ingredients" button), never a single item.
+  function addItems(newItems) {
+    setItems(list => [...list, ...newItems.map(item => ({ id: LB.uid(), ...item }))]);
   }
   function removeItem(id) {
     setItems(list => list.filter(i => i.id !== id));
@@ -1686,7 +1751,7 @@ function RecipeEditorScreen({ open, onClose, onSave, recipe, store }) {
         </div>
       </Sheet>
 
-      <FdIngredientPicker open={pickerOpen} onClose={() => setPickerOpen(false)} onAdd={addItem} store={store} />
+      <FdIngredientPicker open={pickerOpen} onClose={() => setPickerOpen(false)} onAdd={addItems} store={store} />
     </Screen>
   );
 }
@@ -1714,14 +1779,17 @@ const FD_PICKER_TABS = [
   { id: 'recent', label: 'Recent' },
 ];
 
-// Multi-select ingredient picker for the recipe editor: Search/Favorites/
-// Recent each add straight into the recipe (via onAdd) at a default quantity
-// that's immediately editable back in RecipeEditorScreen's ingredient list,
-// no separate per-item confirm step here, quantity is set directly in the
-// multi-pick as the user asked for. Picking the same food twice just adds a
-// second row, recipes have no dedup rule (e.g. "2 eggs" logged as two
-// separate 1-egg picks is fine).
+// Multi-select ingredient picker for the recipe editor. Tapping a search
+// result / favorite / recent item opens a quantity step (same idiom as
+// FoodScreen's own quantity sheet) to choose its amount; "Add" there stages
+// it (not yet in the recipe) instead of committing straight away. A running
+// "Add N ingredients" button at the bottom commits the whole staged batch
+// into the recipe in one go via onAdd. Picking the same food twice just
+// stages a second row, recipes have no dedup rule (e.g. "2 eggs" as two
+// separate 1-egg picks is fine). Correcting an already-committed ingredient
+// afterwards is RecipeEditorScreen's own per-row edit, not this sheet's job.
 function FdIngredientPicker({ open, onClose, onAdd, store }) {
+  const [confirmEl, confirm] = useConfirm();
   const [pickTab, setPickTab] = useStateFd('search');
   const [query, setQuery] = useStateFd('');
   const [searching, setSearching] = useStateFd(false);
@@ -1736,12 +1804,22 @@ function FdIngredientPicker({ open, onClose, onAdd, store }) {
   const [mFib, setMFib] = useStateFd('');
   const [mCal, setMCal] = useStateFd('');
   const [mCalTouched, setMCalTouched] = useStateFd(false);
+  const [staged, setStaged] = useStateFd([]);
+  // The item currently being quantified (normalized to per-100g rates), or
+  // null while browsing. Search/favorites/recent all funnel through this one
+  // quantity step before joining `staged`.
+  const [qtyItem, setQtyItem] = useStateFd(null);
+  const [qtyG, setQtyG] = useStateFd('');
+  const [qtyUnitIdx, setQtyUnitIdx] = useStateFd(null);
+  const [qtyCountStr, setQtyCountStr] = useStateFd('');
 
   useEffectFd(() => {
     if (!open) return;
     setPickTab('search'); setQuery(''); setResults(null); setSearchError(null);
     setManualOpen(false);
     setMName(''); setMG(''); setMP(''); setMC(''); setMF(''); setMFib(''); setMCal(''); setMCalTouched(false);
+    setStaged([]);
+    setQtyItem(null); setQtyG(''); setQtyUnitIdx(null); setQtyCountStr('');
   }, [open]);
 
   // Same auto-derive-unless-touched rule as the Custom Item sheet's own
@@ -1769,33 +1847,83 @@ function FdIngredientPicker({ open, onClose, onAdd, store }) {
     setResults(res.results);
   }
 
-  // A DB result carries per-100g rates; scale to the default quantity
-  // (its stated serving, else 100g) the same way pickResult/buildQtyEntry
-  // do in FoodScreen. Only caches a not-yet-cached result, same rule
-  // confirmLogFood/toggleFavorite use elsewhere: a recipe is as durable a
-  // record as a favorite, so it caches immediately rather than waiting on
-  // FoodScreen's own log-time cache trigger (which never runs for these).
-  function addFromSearch(r) {
-    const g = r.servingSizeG ? Math.round(r.servingSizeG) : 100;
-    const factor = g / 100;
-    onAdd({
-      foodId: `${r.source}:${r.sourceId}`, foodName: r.name, brand: r.brand || null, source: r.source,
-      quantityG: g,
-      calories: Math.round((r.kcalPer100g || 0) * factor),
-      protein: fdRound1((r.proteinPer100g || 0) * factor),
-      carbs: fdRound1((r.carbsPer100g || 0) * factor),
-      fat: fdRound1((r.fatPer100g || 0) * factor),
-      fiber: r.fiberPer100g != null ? fdRound1(r.fiberPer100g * factor) : null,
+  function closeQtySheet() { setQtyItem(null); setQtyG(''); setQtyUnitIdx(null); setQtyCountStr(''); }
+  // Opens the quantity step for a search result: per-100g rates are already
+  // right there in the search response, default amount is its stated
+  // serving (else 100g), same defaults pickResult uses in FoodScreen.
+  function openQtyForResult(r) {
+    setQtyItem({
+      name: r.name, brand: r.brand || null, source: r.source, sourceId: r.sourceId,
+      kcalPer100g: r.kcalPer100g, proteinPer100g: r.proteinPer100g, carbsPer100g: r.carbsPer100g,
+      fatPer100g: r.fatPer100g, fiberPer100g: r.fiberPer100g, fromCache: !!r.cached, units: null,
     });
-    if (!r.cached) LB.cacheFood(r.source, r.sourceId);
+    setQtyUnitIdx(null); setQtyCountStr('');
+    setQtyG(r.servingSizeG ? String(Math.round(r.servingSizeG)) : '100');
   }
-  // A favorite or a past log entry already carries scaled, ready-to-use
-  // macros (and is already cached, if it's a DB food), so it's added as-is.
-  function addFromLog(l) {
-    onAdd({
-      foodId: l.foodId || null, foodName: l.foodName, brand: l.brand || null, source: l.source,
-      quantityG: l.quantityG, calories: l.calories, protein: l.protein, carbs: l.carbs, fat: l.fat, fiber: l.fiber,
+  // Opens the quantity step for a favorite or a past log entry: both only
+  // carry already-scaled macros, so per-100g rates are derived from their
+  // own quantityG first, same trick reAddFromRecent uses in FoodScreen.
+  function openQtyForLog(l) {
+    const per100 = l.quantityG > 0 ? 100 / l.quantityG : 1;
+    setQtyItem({
+      name: l.foodName, brand: l.brand || null, source: l.source,
+      sourceId: l.foodId ? l.foodId.slice((l.source || '').length + 1) : null,
+      kcalPer100g: (LB.caloriesFromMacros(l.protein, l.carbs, l.fat) || 0) * per100,
+      proteinPer100g: l.protein * per100, carbsPer100g: l.carbs * per100, fatPer100g: l.fat * per100,
+      fiberPer100g: l.fiber != null ? l.fiber * per100 : null,
+      fromCache: true, units: l.units || null,
     });
+    setQtyUnitIdx(null); setQtyCountStr('');
+    setQtyG(String(l.quantityG || 100));
+  }
+  function selectQtyUnit(idx) {
+    setQtyUnitIdx(idx);
+    if (idx == null) { setQtyCountStr(''); return; }
+    const unit = qtyItem?.units?.[idx];
+    if (!unit || !(unit.grams > 0)) return;
+    const curG = fdNum(qtyG);
+    const count = curG != null ? fdRound1(curG / unit.grams) : 1;
+    setQtyCountStr(String(count));
+    setQtyG(String(fdRound1(count * unit.grams)));
+  }
+  function onQtyCountChange(v) {
+    const filtered = fdDecimalFilter(v);
+    setQtyCountStr(filtered);
+    const unit = qtyItem?.units?.[qtyUnitIdx];
+    const n = fdNum(filtered);
+    setQtyG(unit && n != null ? String(fdRound1(n * unit.grams)) : '');
+  }
+  const qtyPreview = useMemoFd(() => {
+    if (!qtyItem) return null;
+    const qty = fdNum(qtyG);
+    if (!qty || qty <= 0) return null;
+    const factor = qty / 100;
+    return {
+      calories: Math.round((qtyItem.kcalPer100g || 0) * factor),
+      protein: fdRound1((qtyItem.proteinPer100g || 0) * factor),
+      carbs: fdRound1((qtyItem.carbsPer100g || 0) * factor),
+      fat: fdRound1((qtyItem.fatPer100g || 0) * factor),
+      fiber: qtyItem.fiberPer100g != null ? fdRound1(qtyItem.fiberPer100g * factor) : null,
+    };
+  }, [qtyItem, qtyG]);
+  // "Add" on the quantity step: stages the item (not yet in the recipe, see
+  // the "Add N ingredients" button below) and caches a not-yet-cached DB
+  // food right away, same rule confirmLogFood/toggleFavorite use in
+  // FoodScreen (a recipe is as durable a record as a favorite).
+  function confirmStageItem() {
+    if (!qtyItem || !qtyPreview) return;
+    setStaged(list => [...list, {
+      tempId: LB.uid(),
+      foodId: qtyItem.sourceId ? `${qtyItem.source}:${qtyItem.sourceId}` : null,
+      foodName: qtyItem.name, brand: qtyItem.brand, source: qtyItem.source,
+      quantityG: fdNum(qtyG), calories: qtyPreview.calories, protein: qtyPreview.protein,
+      carbs: qtyPreview.carbs, fat: qtyPreview.fat, fiber: qtyPreview.fiber,
+    }]);
+    if (qtyItem.sourceId && !qtyItem.fromCache) LB.cacheFood(qtyItem.source, qtyItem.sourceId);
+    closeQtySheet();
+  }
+  function removeStaged(tempId) {
+    setStaged(list => list.filter(i => i.tempId !== tempId));
   }
 
   const recentPicks = useMemoFd(() => {
@@ -1810,150 +1938,234 @@ function FdIngredientPicker({ open, onClose, onAdd, store }) {
   }, [store.foodLogs]);
 
   const manualValid = mName.trim() && fdNum(mP) != null && fdNum(mC) != null && fdNum(mF) != null && fdNum(mCal) != null;
+  // A manual entry already carries its exact quantity and macros with
+  // nothing to scale, so it stages directly, skipping the quantity step.
   function submitManual() {
     if (!manualValid) return;
-    onAdd({
+    setStaged(list => [...list, {
+      tempId: LB.uid(),
       foodId: null, foodName: mName.trim(), brand: null, source: 'custom',
       quantityG: fdNum(mG) || 100, calories: Math.round(fdNum(mCal)), protein: fdNum(mP), carbs: fdNum(mC), fat: fdNum(mF),
       fiber: mFib !== '' ? fdNum(mFib) : null,
-    });
+    }]);
     setManualOpen(false);
     setMName(''); setMG(''); setMP(''); setMC(''); setMF(''); setMFib(''); setMCal(''); setMCalTouched(false);
   }
 
-  return (
-    <Sheet open={open} onClose={onClose} title="Add ingredients" titleColor="var(--accent)">
-      <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `1px solid ${UI.hairStrong}`, marginBottom: 12 }}>
-        {FD_PICKER_TABS.map(t => (
-          <button key={t.id} onClick={() => setPickTab(t.id)} style={fdSegBtn(pickTab === t.id)}>{t.label}</button>
-        ))}
-      </div>
+  async function requestClosePicker() {
+    if (staged.length && !await confirm(`${staged.length} picked ingredient${staged.length === 1 ? '' : 's'} won't be added.`, { title: 'Discard picks?', ok: 'Discard', cancel: 'Keep picking', danger: true })) return;
+    onClose();
+  }
+  function commitStaged() {
+    if (!staged.length) return;
+    // tempId only ever identified a row within this sheet's own staged
+    // list; RecipeEditorScreen assigns each item its real id on the way in.
+    onAdd(staged.map(({ tempId, ...item }) => item));
+    setStaged([]);
+    onClose();
+  }
 
-      {pickTab === 'search' && (
-        <>
-          <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
-            <div style={{ position: 'relative', width: '100%' }}>
-              <input value={query} onChange={e => setQuery(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') runPickerSearch(); }}
-                type="text" placeholder="Search food" style={{ ...fdInputStyle, paddingRight: 32 }} />
-              {query && (
-                <button onClick={() => { setQuery(''); setResults(null); setSearchError(null); }} aria-label="Clear search" style={fdClearBtn}>
-                  <i className="fa-solid fa-circle-xmark" style={{ fontSize: 15 }} />
-                </button>
-              )}
-            </div>
-            <button onClick={runPickerSearch} disabled={searching || !query.trim()} aria-label="Search" style={fdSearchBtn}>
-              {searching ? <span style={{ fontFamily: UI.fontUi, fontSize: 11 }}>…</span> : <i className="fa-solid fa-magnifying-glass" style={{ fontSize: 13 }} />}
-            </button>
-          </div>
-          {searchError && <div style={{ fontSize: 11, color: UI.danger, fontFamily: UI.fontUi, marginBottom: 10 }}>{searchError}</div>}
-          {results != null && (
-            results.length === 0 ? (
-              <div style={fdEmptyStyle}>No matches. Try a different search.</div>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 10, maxHeight: 280, overflowY: 'auto' }}>
-                {results.map(r => (
-                  <button key={`${r.source}:${r.sourceId}`} onClick={() => addFromSearch(r)} style={fdResultRow}>
-                    <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
-                      <div style={fdEntryName}>{r.name}</div>
-                      {r.brand && <div style={fdEntryMeta}>{r.brand}</div>}
-                    </div>
-                    <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                      <div className="num" style={{ fontSize: 12, color: UI.inkSoft }}>{r.kcalPer100g != null ? Math.round(r.kcalPer100g) : '—'} kcal</div>
-                      <div style={fdEntryMeta}>/100g</div>
-                    </div>
-                    <i className="fa-solid fa-plus" style={{ fontSize: 12, color: 'var(--accent)', flexShrink: 0 }} />
+  // Two sibling Sheets, not one nested in the other's children (the app's
+  // documented overlay convention, docs/internals.md "Modal-/Overlay-
+  // Landschaft": a Sheet that must render above another already-open Sheet
+  // gets a bumped zIndex instead, tier 200 = "must sit above a specific open
+  // Sheet/Screen", same tier Account-Switch/Chart-Popups already use).
+  return (
+    <>
+      <Sheet open={open} onClose={requestClosePicker} title="Add ingredients" titleColor="var(--accent)">
+        {confirmEl}
+        <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `1px solid ${UI.hairStrong}`, marginBottom: 12 }}>
+          {FD_PICKER_TABS.map(t => (
+            <button key={t.id} onClick={() => setPickTab(t.id)} style={fdSegBtn(pickTab === t.id)}>{t.label}</button>
+          ))}
+        </div>
+
+        {pickTab === 'search' && (
+          <>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+              <div style={{ position: 'relative', width: '100%' }}>
+                <input value={query} onChange={e => setQuery(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') runPickerSearch(); }}
+                  type="text" placeholder="Search food" style={{ ...fdInputStyle, paddingRight: 32 }} />
+                {query && (
+                  <button onClick={() => { setQuery(''); setResults(null); setSearchError(null); }} aria-label="Clear search" style={fdClearBtn}>
+                    <i className="fa-solid fa-circle-xmark" style={{ fontSize: 15 }} />
                   </button>
+                )}
+              </div>
+              <button onClick={runPickerSearch} disabled={searching || !query.trim()} aria-label="Search" style={fdSearchBtn}>
+                {searching ? <span style={{ fontFamily: UI.fontUi, fontSize: 11 }}>…</span> : <i className="fa-solid fa-magnifying-glass" style={{ fontSize: 13 }} />}
+              </button>
+            </div>
+            {searchError && <div style={{ fontSize: 11, color: UI.danger, fontFamily: UI.fontUi, marginBottom: 10 }}>{searchError}</div>}
+            {results != null && (
+              results.length === 0 ? (
+                <div style={fdEmptyStyle}>No matches. Try a different search.</div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 10, maxHeight: 280, overflowY: 'auto' }}>
+                  {results.map(r => (
+                    <button key={`${r.source}:${r.sourceId}`} onClick={() => openQtyForResult(r)} style={fdResultRow}>
+                      <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
+                        <div style={fdEntryName}>{r.name}</div>
+                        {r.brand && <div style={fdEntryMeta}>{r.brand}</div>}
+                      </div>
+                      <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                        <div className="num" style={{ fontSize: 12, color: UI.inkSoft }}>{r.kcalPer100g != null ? Math.round(r.kcalPer100g) : '—'} kcal</div>
+                        <div style={fdEntryMeta}>/100g</div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )
+            )}
+            {!manualOpen ? (
+              <button onClick={() => setManualOpen(true)} style={{ ...fdActionCard, width: '100%' }}>
+                <i className="fa-solid fa-keyboard" style={{ fontSize: 14 }} />
+                <span>Add manually</span>
+              </button>
+            ) : (
+              <div style={{ borderTop: `1px solid ${UI.hair}`, paddingTop: 14, marginTop: 4 }}>
+                <Field label="Name" style={{ marginBottom: 10 }}>
+                  <TextInput value={mName} onChange={setMName} placeholder="e.g. Homemade sauce" autoFocus />
+                </Field>
+                <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+                  <Field label="Amount (g)" style={{ flex: 1 }}>
+                    <input value={mG} onChange={e => setMG(fdDecimalFilter(e.target.value))} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
+                  </Field>
+                  <Field label="Calories (kcal)" style={{ flex: 1 }}>
+                    <input value={mCal} onChange={e => onMCalChange(e.target.value)} type="text" inputMode="decimal" placeholder="kcal" style={fdInputStyle} />
+                  </Field>
+                </div>
+                <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+                  <Field label="Protein (g)" style={{ flex: 1 }}>
+                    <input value={mP} onChange={e => setMP(fdDecimalFilter(e.target.value))} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
+                  </Field>
+                  <Field label="Carbs (g)" style={{ flex: 1 }}>
+                    <input value={mC} onChange={e => setMC(fdDecimalFilter(e.target.value))} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
+                  </Field>
+                  <Field label="Fat (g)" style={{ flex: 1 }}>
+                    <input value={mF} onChange={e => setMF(fdDecimalFilter(e.target.value))} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
+                  </Field>
+                </div>
+                <Field label="Fiber (g, optional)" style={{ marginBottom: 14 }}>
+                  <input value={mFib} onChange={e => setMFib(fdDecimalFilter(e.target.value))} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
+                </Field>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <Btn kind="ghost" onClick={() => setManualOpen(false)} style={{ flex: 1 }}>Cancel</Btn>
+                  <Btn onClick={submitManual} disabled={!manualValid} style={{ flex: 2 }}>Add ingredient</Btn>
+                </div>
+              </div>
+            )}
+          </>
+        )}
+
+        {pickTab === 'favorites' && (
+          (store.foodFavorites || []).length === 0 ? (
+            <div style={fdEmptyStyle}>No favorites yet.</div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 360, overflowY: 'auto' }}>
+              {store.foodFavorites.map(f => (
+                <button key={f.id} onClick={() => openQtyForLog(f)} style={fdResultRow}>
+                  <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
+                    <div style={fdEntryName}>{f.foodName}</div>
+                    {f.brand && <div style={fdEntryMeta}>{f.brand}</div>}
+                  </div>
+                  <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                    <div className="num" style={{ fontSize: 12, color: UI.inkSoft }}>{f.calories} kcal</div>
+                    <div style={fdEntryMeta}>{f.quantityG}g</div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )
+        )}
+
+        {pickTab === 'recent' && (
+          recentPicks.length === 0 ? (
+            <div style={fdEmptyStyle}>Nothing logged yet.</div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 360, overflowY: 'auto' }}>
+              {recentPicks.map(l => (
+                <button key={l.id} onClick={() => openQtyForLog(l)} style={fdResultRow}>
+                  <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
+                    <div style={fdEntryName}>{l.foodName}</div>
+                    {l.brand && <div style={fdEntryMeta}>{l.brand}</div>}
+                  </div>
+                  <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                    <div className="num" style={{ fontSize: 12, color: UI.inkSoft }}>{l.calories} kcal</div>
+                    <div style={fdEntryMeta}>{l.quantityG}g</div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )
+        )}
+
+        {staged.length > 0 && (
+          <div style={{ marginTop: 14, paddingTop: 14, borderTop: `1px solid ${UI.hair}` }}>
+            <Bezel style={{ marginBottom: 10 }}>Picked ({staged.length})</Bezel>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 2, maxHeight: 168, overflowY: 'auto' }}>
+              {staged.map(i => (
+                <div key={i.tempId} style={fdDraftRow}>
+                  <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
+                    <span style={{ ...fdEntryName, fontSize: 12 }}>{i.foodName}</span>
+                    <span style={fdEntryMeta}>{i.quantityG}g · {i.calories} kcal</span>
+                  </div>
+                  <button onClick={() => removeStaged(i.tempId)} aria-label="Remove" style={fdInlineDeleteBtn}>
+                    <i className="fa-solid fa-trash" style={{ fontSize: 11 }} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
+          <Btn kind="ghost" onClick={requestClosePicker} style={{ flex: 1 }}>Close</Btn>
+          <Btn onClick={commitStaged} disabled={!staged.length} style={{ flex: 2 }}>
+            Add {staged.length} ingredient{staged.length === 1 ? '' : 's'}
+          </Btn>
+        </div>
+      </Sheet>
+
+      {/* ── Quantity step for a tapped search result / favorite / recent item:
+          choose the amount, "Add" here stages it into the picker above. A
+          sibling Sheet (not nested in the picker's own children), bumped to
+          zIndex 200 so it renders above the still-open picker Sheet. ── */}
+      <Sheet open={!!qtyItem} onClose={closeQtySheet} title={qtyItem?.name || 'Amount'} titleColor="var(--accent)" zIndex={200}>
+        {qtyItem && (
+          <>
+            {qtyItem.brand && <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 14 }}>{qtyItem.brand}</div>}
+            {qtyItem.units?.length > 0 && (
+              <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `1px solid ${UI.hairStrong}`, marginBottom: 10, flexWrap: 'wrap' }}>
+                <button onClick={() => selectQtyUnit(null)} style={fdSegBtn(qtyUnitIdx == null)}>Grams</button>
+                {qtyItem.units.map((u, i) => (
+                  <button key={i} onClick={() => selectQtyUnit(i)} style={fdSegBtn(qtyUnitIdx === i)}>{u.label}</button>
                 ))}
               </div>
-            )
-          )}
-          {!manualOpen ? (
-            <button onClick={() => setManualOpen(true)} style={{ ...fdActionCard, width: '100%' }}>
-              <i className="fa-solid fa-keyboard" style={{ fontSize: 14 }} />
-              <span>Add manually</span>
-            </button>
-          ) : (
-            <div style={{ borderTop: `1px solid ${UI.hair}`, paddingTop: 14, marginTop: 4 }}>
-              <Field label="Name" style={{ marginBottom: 10 }}>
-                <TextInput value={mName} onChange={setMName} placeholder="e.g. Homemade sauce" autoFocus />
-              </Field>
-              <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
-                <Field label="Amount (g)" style={{ flex: 1 }}>
-                  <input value={mG} onChange={e => setMG(fdDecimalFilter(e.target.value))} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
-                </Field>
-                <Field label="Calories (kcal)" style={{ flex: 1 }}>
-                  <input value={mCal} onChange={e => onMCalChange(e.target.value)} type="text" inputMode="decimal" placeholder="kcal" style={fdInputStyle} />
-                </Field>
+            )}
+            <Field label={qtyUnitIdx == null ? 'Amount (g)' : `Count (${qtyItem.units[qtyUnitIdx].label})`} style={{ marginBottom: 14 }}>
+              <input
+                value={qtyUnitIdx == null ? qtyG : qtyCountStr}
+                onChange={e => qtyUnitIdx == null ? setQtyG(fdDecimalFilter(e.target.value)) : onQtyCountChange(e.target.value)}
+                type="text" inputMode="decimal" placeholder={qtyUnitIdx == null ? 'g' : 'count'} style={fdInputStyle} autoFocus
+              />
+            </Field>
+            {qtyPreview && (
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 14, marginBottom: 16 }}>
+                <span className="num" style={{ fontSize: 20, fontWeight: 300, color: UI.ink }}>{qtyPreview.calories}<span style={{ fontSize: 10, color: UI.inkFaint, marginLeft: 3 }}>kcal</span></span>
+                <span className="num" style={{ fontSize: 12, color: UI.inkSoft }}>P {qtyPreview.protein}</span>
+                <span className="num" style={{ fontSize: 12, color: UI.inkSoft }}>C {qtyPreview.carbs}</span>
+                <span className="num" style={{ fontSize: 12, color: UI.inkSoft }}>F {qtyPreview.fat}</span>
               </div>
-              <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
-                <Field label="Protein (g)" style={{ flex: 1 }}>
-                  <input value={mP} onChange={e => setMP(fdDecimalFilter(e.target.value))} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
-                </Field>
-                <Field label="Carbs (g)" style={{ flex: 1 }}>
-                  <input value={mC} onChange={e => setMC(fdDecimalFilter(e.target.value))} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
-                </Field>
-                <Field label="Fat (g)" style={{ flex: 1 }}>
-                  <input value={mF} onChange={e => setMF(fdDecimalFilter(e.target.value))} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
-                </Field>
-              </div>
-              <Field label="Fiber (g, optional)" style={{ marginBottom: 14 }}>
-                <input value={mFib} onChange={e => setMFib(fdDecimalFilter(e.target.value))} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
-              </Field>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <Btn kind="ghost" onClick={() => setManualOpen(false)} style={{ flex: 1 }}>Cancel</Btn>
-                <Btn onClick={submitManual} disabled={!manualValid} style={{ flex: 2 }}>Add ingredient</Btn>
-              </div>
+            )}
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Btn kind="ghost" onClick={closeQtySheet} style={{ flex: 1 }}>Cancel</Btn>
+              <Btn onClick={confirmStageItem} disabled={!qtyPreview} style={{ flex: 2 }}>Add</Btn>
             </div>
-          )}
-        </>
-      )}
-
-      {pickTab === 'favorites' && (
-        (store.foodFavorites || []).length === 0 ? (
-          <div style={fdEmptyStyle}>No favorites yet.</div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 360, overflowY: 'auto' }}>
-            {store.foodFavorites.map(f => (
-              <button key={f.id} onClick={() => addFromLog(f)} style={fdResultRow}>
-                <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
-                  <div style={fdEntryName}>{f.foodName}</div>
-                  {f.brand && <div style={fdEntryMeta}>{f.brand}</div>}
-                </div>
-                <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                  <div className="num" style={{ fontSize: 12, color: UI.inkSoft }}>{f.calories} kcal</div>
-                  <div style={fdEntryMeta}>{f.quantityG}g</div>
-                </div>
-                <i className="fa-solid fa-plus" style={{ fontSize: 12, color: 'var(--accent)', flexShrink: 0 }} />
-              </button>
-            ))}
-          </div>
-        )
-      )}
-
-      {pickTab === 'recent' && (
-        recentPicks.length === 0 ? (
-          <div style={fdEmptyStyle}>Nothing logged yet.</div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 360, overflowY: 'auto' }}>
-            {recentPicks.map(l => (
-              <button key={l.id} onClick={() => addFromLog(l)} style={fdResultRow}>
-                <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
-                  <div style={fdEntryName}>{l.foodName}</div>
-                  {l.brand && <div style={fdEntryMeta}>{l.brand}</div>}
-                </div>
-                <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                  <div className="num" style={{ fontSize: 12, color: UI.inkSoft }}>{l.calories} kcal</div>
-                  <div style={fdEntryMeta}>{l.quantityG}g</div>
-                </div>
-                <i className="fa-solid fa-plus" style={{ fontSize: 12, color: 'var(--accent)', flexShrink: 0 }} />
-              </button>
-            ))}
-          </div>
-        )
-      )}
-
-      <Btn kind="ghost" onClick={onClose} style={{ width: '100%', marginTop: 14 }}>Done</Btn>
-    </Sheet>
+          </>
+        )}
+      </Sheet>
+    </>
   );
 }
 
