@@ -293,6 +293,16 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   }, [store, macroTargets, curDate]);
   const goalCalories = dayTarget?.calories ?? (dayTarget ? LB.caloriesFromMacros(dayTarget.protein, dayTarget.carbs, dayTarget.fat) : null);
   const heroPercent = goalCalories > 0 ? Math.min(Math.round((dayTotals.calories / goalCalories) * 100), 100) : null;
+  // Same weighted-macro-distance formula HealthScreen's today card uses
+  // (LB.macroAdherence), computed live off dayTotals rather than reading
+  // dailyLogs.adherence: that stored field only gets reconciled by an
+  // effect living in HealthScreen, which isn't mounted while viewing this
+  // screen, so it would show a stale number right after logging something
+  // here. null (hidden) when there's no macro target to score against.
+  const dayAdherence = useMemoFd(
+    () => dayTarget ? LB.macroAdherence({ protein: dayTotals.protein, carbs: dayTotals.carbs, fat: dayTotals.fat }, dayTarget) : null,
+    [dayTarget, dayTotals],
+  );
 
   // Entries bucketed by the hour of their time, for the 0-23 timeline.
   const byHour = useMemoFd(() => {
@@ -1102,10 +1112,11 @@ function FoodScreen({ store, setStore, go, userId, date }) {
 
             {/* Totals hero: same BracketFrame-gold + progress-ring hero Water
                 uses for its own daily total, so this reads as the same kind of
-                primary "today" surface elsewhere in the app. The ring only
-                appears once a calorie target is resolvable (personal or coach
-                macros, see goalCalories above); with no target set it's just
-                the total and the macro chips, same as before. */}
+                primary "today" surface elsewhere in the app. The ring and the
+                adherence bar at the bottom both only appear once a macro
+                target is resolvable (personal or coach macros); with no
+                target set it's just the total and the macro chips, same as
+                before. */}
             <BracketFrame gold style={{ padding: 20 }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 18 }}>
                 <div style={{ minWidth: 0 }}>
@@ -1125,6 +1136,21 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                 </div>
                 {heroPercent != null && <FdRing percent={heroPercent} />}
               </div>
+              {dayAdherence != null && (
+                <div style={{ marginTop: 16, paddingTop: 16, borderTop: `1px solid ${UI.hair}` }}>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 5 }}>
+                    <span className={dayAdherence >= 97 ? 'perfect-week-pulse num' : 'num'} style={{ fontSize: 22, color: fdAdherenceColor(dayAdherence), fontWeight: 300, lineHeight: 1 }}>{dayAdherence}%</span>
+                    <span className={dayAdherence >= 97 ? 'perfect-week-pulse' : ''} style={{ fontSize: 11, color: fdAdherenceColor(dayAdherence), fontFamily: UI.fontUi, fontWeight: 600, letterSpacing: '0.08em' }}>
+                      {dayAdherence >= 97 ? 'PERFECT' : dayAdherence >= 90 ? 'STRONG' : dayAdherence >= 75 ? 'ON TRACK' : 'OFF TRACK'}
+                    </span>
+                    <span style={{ flex: 1 }} />
+                    <span style={{ fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.06em', textTransform: 'uppercase' }}>macro adherence</span>
+                  </div>
+                  <div style={{ height: 6, borderRadius: 4, background: UI.bgInset, overflow: 'hidden' }}>
+                    <div style={{ width: `${Math.min(100, dayAdherence)}%`, height: '100%', background: fdAdherenceColor(dayAdherence) }} />
+                  </div>
+                </div>
+              )}
             </BracketFrame>
 
             {/* Hourly timeline: every hour 0-23 has a "+" that logs at exactly
@@ -1593,6 +1619,19 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       {scanOpen && <FdScanner onClose={() => setScanOpen(false)} onDetect={handleScan} />}
     </Screen>
   );
+}
+
+// Same traffic-light thresholds as screens-health.jsx's adherenceColor
+// (green >=90, amber 75-89, red <75), duplicated locally rather than
+// relied on as a cross-file global: classic scripts share one execution
+// scope so calling screens-health.jsx's version would happen to work
+// given today's load order, but that's an implicit coupling this tiny a
+// helper isn't worth introducing.
+function fdAdherenceColor(a) {
+  if (a == null) return UI.inkFaint;
+  if (a >= 90) return 'var(--ok)';
+  if (a >= 75) return UI.warn;
+  return 'var(--danger)';
 }
 
 // Calorie-progress ring for the Log-tab hero, same shape as WaterRing
