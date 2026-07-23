@@ -2914,9 +2914,9 @@ const fdQuickRowInner = {
   cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
 };
 const fdSideBtn = {
-  flexShrink: 0, width: 38, background: 'transparent', border: `1px solid ${UI.hair}`, borderRadius: 6,
+  flexShrink: 0, width: 38, background: UI.bgInset, border: `1px solid ${UI.hair}`, borderRadius: 6,
   color: UI.inkFaint, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
-  display: 'flex', alignItems: 'center', justifyContent: 'center',
+  display: 'flex', alignItems: 'center', justifyContent: 'center', textShadow: 'none',
 };
 const fdPreset = {
   padding: '8px 12px', borderRadius: 4, border: `1px solid ${UI.hairStrong}`, background: UI.bgInset,
