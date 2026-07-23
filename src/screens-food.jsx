@@ -35,6 +35,20 @@ function fdNowHHMM() {
 }
 const fdNum = v => (v === '' || v == null || isNaN(parseFloat(v))) ? null : parseFloat(v);
 const fdRound1 = v => Math.round(v * 10) / 10;
+// Shared precondition for anything about to write a row that references a
+// zane_foods food_id (favorites, log entries, recipe ingredients): a DB food
+// only gets its zane_foods row on first log (see confirmLogFood), so any
+// other write that can reach it first (favoriting straight from search,
+// staging a recipe ingredient) must cache it itself, or the FK check on that
+// write fails every retry forever. Called from toggleFavorite, confirmLogFood
+// and FdIngredientPicker's confirmStageItem. Expects an object with source/
+// sourceId/fromCache (pendingFood and FdIngredientPicker's qtyItem both have
+// this shape already).
+async function ensureFoodCached(pendingFoodOrItem) {
+  if (pendingFoodOrItem?.sourceId && !pendingFoodOrItem.fromCache) {
+    await LB.cacheFood(pendingFoodOrItem.source, pendingFoodOrItem.sourceId);
+  }
+}
 // Input filter for decimal numeric fields (grams, macros): keeps digits and a
 // single decimal point, normalizing a typed comma to a point first (mobile
 // keyboards in German locale emit ',' on the decimal key, and many nutrition
@@ -49,6 +63,35 @@ function fdDecimalFilter(raw) {
   const dot = v.indexOf('.');
   if (dot !== -1) v = v.slice(0, dot + 1) + v.slice(dot + 1).replace(/\./g, '').slice(0, 1);
   return v;
+}
+
+// Shared "derive calories from protein/carbs/fat unless the user has typed
+// into the calorie field directly" rule, used by three calorie fields:
+// kcal100Str (scanned custom item, per-100g), customCal (Custom Item sheet)
+// and mCal (FdIngredientPicker's own manual entry). protein/carbs/fat are the
+// typed string values for those fields; fiber is passed already resolved to
+// a number-or-null (callers source it differently: a live per-100g figure vs
+// a typed fiber string, so fdNum'ing it is left to the caller). `active`
+// (default true) lets a caller suspend deriving under some other condition
+// (kcal100Str only derives while pendingFood.custom is true). Returns
+// [calStr, setCalStr, onChange, touched, setTouched]: the raw setters are
+// still needed for full-form resets that clear both the value and the
+// touched flag together.
+function useAutoDerivedCalories(protein, carbs, fat, fiber, netCarbs, active = true) {
+  const [calStr, setCalStr] = useStateFd('');
+  const [touched, setTouched] = useStateFd(false);
+  useEffectFd(() => {
+    if (touched || !active) return;
+    const p = fdNum(protein), c = fdNum(carbs), f = fdNum(fat);
+    const raw = LB.caloriesFromMacros(p, c, f, netCarbs ? fiber : null);
+    setCalStr(raw != null ? String(Math.round(raw)) : '');
+  }, [protein, carbs, fat, fiber, netCarbs, touched, active]);
+  function onChange(v) {
+    const filtered = fdDecimalFilter(v);
+    setTouched(filtered !== '');
+    setCalStr(filtered);
+  }
+  return [calStr, setCalStr, onChange, touched, setTouched];
 }
 
 // Read a picked image file into a data URL.
@@ -134,10 +177,16 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // One-time repair for favorites created before toggleFavorite cached their
   // food_id (see there): those never got a matching zane_foods row, so their
   // sync has been failing its FK check on every retry ever since. Re-cache on
-  // every open, a harmless no-op for foods that are already cached.
+  // every open, a harmless no-op for foods that are already cached. Skips
+  // foodIds that already appear in store.foodLogs (already logged means
+  // already cached, same reasoning as the fromCache flag above) and dedupes
+  // by foodId, so a food favorited more than once only fires one request.
   useEffectFd(() => {
+    const loggedFoodIds = new Set((store.foodLogs || []).map(l => l.foodId).filter(Boolean));
+    const requested = new Set();
     (store.foodFavorites || []).forEach(f => {
-      if (f.foodId && f.source && f.source !== 'custom') {
+      if (f.foodId && f.source && f.source !== 'custom' && !loggedFoodIds.has(f.foodId) && !requested.has(f.foodId)) {
+        requested.add(f.foodId);
         LB.cacheFood(f.source, f.foodId.slice(f.source.length + 1));
       }
     });
@@ -224,24 +273,12 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   const [p100Str, setP100Str] = useStateFd('');
   const [c100Str, setC100Str] = useStateFd('');
   const [f100Str, setF100Str] = useStateFd('');
-  const [kcal100Str, setKcal100Str] = useStateFd('');
-  const [kcal100Touched, setKcal100Touched] = useStateFd(false);
-  useEffectFd(() => {
-    if (kcal100Touched || !pendingFood?.custom) return;
-    const p = fdNum(p100Str), c = fdNum(c100Str), f = fdNum(f100Str);
-    const netCarbs = !!store.settings?.netCarbs;
-    const raw = LB.caloriesFromMacros(p, c, f, netCarbs ? pendingFood?.fiberPer100g : null);
-    setKcal100Str(raw != null ? String(Math.round(raw)) : '');
-  }, [p100Str, c100Str, f100Str, kcal100Touched, pendingFood?.custom, pendingFood?.fiberPer100g, store.settings?.netCarbs]);
   // Clearing the field back to empty un-overrides it (touched=false) rather
-  // than leaving it stuck empty forever: the effect above then recomputes
+  // than leaving it stuck empty forever: the hook's effect then recomputes
   // it from the current macros on the very next render, same as if the
-  // field had never been touched.
-  function onKcal100Change(v) {
-    const filtered = fdDecimalFilter(v);
-    setKcal100Touched(filtered !== '');
-    setKcal100Str(filtered);
-  }
+  // field had never been touched. Only derives while pendingFood.custom.
+  const [kcal100Str, setKcal100Str, onKcal100Change, kcal100Touched, setKcal100Touched] =
+    useAutoDerivedCalories(p100Str, c100Str, f100Str, pendingFood?.fiberPer100g, !!store.settings?.netCarbs, !!pendingFood?.custom);
 
   const [customOpen, setCustomOpen] = useStateFd(false);
   const [customName, setCustomName] = useStateFd('');
@@ -257,21 +294,8 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // and stops following further macro edits. Net-carb accounting matches
   // the daily-log convention: fiber is subtracted only when
   // settings.netCarbs is on.
-  const [customCal, setCustomCal] = useStateFd('');
-  const [customCalTouched, setCustomCalTouched] = useStateFd(false);
-  useEffectFd(() => {
-    if (customCalTouched) return;
-    const p = fdNum(customP), c = fdNum(customC), f = fdNum(customF);
-    const netCarbs = !!store.settings?.netCarbs;
-    const raw = LB.caloriesFromMacros(p, c, f, netCarbs ? fdNum(customFib) : null);
-    setCustomCal(raw != null ? String(Math.round(raw)) : '');
-  }, [customP, customC, customF, customFib, customCalTouched, store.settings?.netCarbs]);
-  // Same un-override-on-clear behavior as onKcal100Change above.
-  function onCustomCalChange(v) {
-    const filtered = fdDecimalFilter(v);
-    setCustomCalTouched(filtered !== '');
-    setCustomCal(filtered);
-  }
+  const [customCal, setCustomCal, onCustomCalChange, customCalTouched, setCustomCalTouched] =
+    useAutoDerivedCalories(customP, customC, customF, fdNum(customFib), !!store.settings?.netCarbs);
 
   // Recipe editor: a dedicated full-page screen (RecipeEditorScreen below),
   // not an in-place mode. recipeEditorRecipe is the recipe being edited
@@ -389,9 +413,16 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // way, never re-sorted, matching Favorites/Recipes' own alphabetical sort
   // being deliberately NOT applied to Recent.
   const recentFoodsAll = useMemoFd(() => {
+    // Backdated entries can be prepended to store.foodLogs out of date order
+    // (see commitEntries), so sort a copy by (date, time) descending before
+    // the first-seen-wins dedupe walk instead of trusting array order.
+    const sorted = [...(store.foodLogs || [])].sort((a, b) => {
+      if (a.date !== b.date) return a.date < b.date ? 1 : -1;
+      return (a.time || '') < (b.time || '') ? 1 : (a.time || '') > (b.time || '') ? -1 : 0;
+    });
     const seen = new Set();
     const out = [];
-    for (const l of (store.foodLogs || [])) {
+    for (const l of sorted) {
       const key = l.foodId || `custom:${l.foodName}`;
       if (seen.has(key)) continue;
       seen.add(key);
@@ -428,15 +459,19 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // patchDaily/doAdd use in screens-water.jsx. Calories come straight from the
   // source's own energy value (summed), never derived from the macros.
   function patchDaily(s, dateStr, entries) {
+    const existing = (s.dailyLogs || []).find(l => l.date === dateStr);
     const netCarbs = !!s.settings?.netCarbs;
+    // Also keep tracking fiber for a day that already has a fiber value, even
+    // if netCarbs is now globally off (mirrors DailyLogScreen.save() in
+    // screens-health.jsx).
+    const netForFiber = existing?.fiber != null ? true : netCarbs;
     const has = entries.length > 0;
     const sum = k => entries.reduce((a, e) => a + (e[k] || 0), 0);
     const calories = has ? Math.round(sum('calories')) : null;
     const protein = has ? Math.round(sum('protein')) : null;
     const carbs = has ? Math.round(sum('carbs')) : null;
     const fat = has ? Math.round(sum('fat')) : null;
-    const fiber = has && netCarbs ? Math.round(sum('fiber')) : null;
-    const existing = (s.dailyLogs || []).find(l => l.date === dateStr);
+    const fiber = has && netForFiber ? Math.round(sum('fiber')) : null;
     const now = new Date().toISOString();
     // Once the last entry for a day is removed there's no more macro data to
     // judge adherence against either, clear it right here instead of leaning
@@ -796,7 +831,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   function pickResult(r) {
     setPendingFood({ ...r, fromCache: !!r.cached });
     setFavedId(existingFavId(`${r.source}:${r.sourceId}`, r.name));
-    setQtyG(r.servingSizeG ? String(Math.round(r.servingSizeG)) : '100');
+    setQtyG(r.servingSizeG != null ? String(Math.round(r.servingSizeG)) : '100');
     openQtySheet();
   }
 
@@ -827,7 +862,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     setC100Str(String(fdRound1(item.carbs * per100)));
     setF100Str(String(fdRound1(item.fat * per100)));
     setKcal100Touched(false);
-    setQtyG(String(item.quantityG || 100));
+    setQtyG(item.quantityG != null ? String(item.quantityG) : '100');
     openQtySheet();
   }
 
@@ -875,7 +910,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         // favorite's configured units, same as the custom branch above.
         units: l.units ?? matchingFavorite(l.foodId, l.foodName)?.units,
       });
-      setQtyG(String(l.quantityG || 100));
+      setQtyG(l.quantityG != null ? String(l.quantityG) : '100');
       openQtySheet();
     } else {
       openCustomAsScalable(l);
@@ -981,10 +1016,11 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     const p = fdNum(customP), c = fdNum(customC), f = fdNum(customF);
     const cal = fdNum(customCal);
     if (!name || p == null || c == null || f == null || cal == null) return null;
+    const g = fdNum(customG);
     return {
       id: LB.uid(), date: curDate, time: entryTime(),
       foodId: null, foodName: name, brand: null, source: 'custom',
-      quantityG: fdNum(customG) || 100, calories: Math.round(cal), protein: p, carbs: c, fat: f,
+      quantityG: g != null ? g : 100, calories: Math.round(cal), protein: p, carbs: c, fat: f,
       fiber: customFib !== '' ? fdNum(customFib) : null,
       createdAt: new Date().toISOString(),
     };
@@ -1007,7 +1043,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // the favorite right away, independent of whether the food ends up logged.
   // Never creates a duplicate: if the food is already a favorite, it just
   // reflects (or removes) the existing one.
-  function toggleFavorite(entry) {
+  async function toggleFavorite(entry) {
     if (!entry) return;
     const already = favedId || existingFavId(entry.foodId, entry.foodName);
     if (already) {
@@ -1020,17 +1056,15 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         protein: entry.protein, carbs: entry.carbs, fat: entry.fat, fiber: entry.fiber,
         createdAt: new Date().toISOString(),
       };
-      setFavedId(fav.id);
-      setStore(s => ({ ...s, foodFavorites: [fav, ...(s.foodFavorites || [])] }));
       // foodFavorites.food_id is a real FK into zane_foods, but that row is
       // normally only cached once a food gets logged (see confirmLogFood).
       // Starring a food without ever logging it would otherwise sync a
       // favorite whose food_id points at nothing, failing its FK check on
-      // every retry forever. Trigger the same cache write here so favoriting
-      // alone is enough.
-      if (fav.foodId && pendingFood && !pendingFood.fromCache) {
-        LB.cacheFood(pendingFood.source, pendingFood.sourceId);
-      }
+      // every retry forever. Await the cache write BEFORE writing the
+      // favorite into the store, so the sync batch never races ahead of it.
+      if (fav.foodId) await ensureFoodCached(pendingFood);
+      setFavedId(fav.id);
+      setStore(s => ({ ...s, foodFavorites: [fav, ...(s.foodFavorites || [])] }));
     }
   }
   function removeFavorite(fav) {
@@ -1078,7 +1112,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     const built = buildQtyEntry();
     if (!built) return;
     if (editingEntry) {
-      const updated = { ...built, id: editingEntry.id, date: editingEntry.date, time: editingEntry.time };
+      const updated = { ...built, id: editingEntry.id, date: editingEntry.date, time: editingEntry.time, createdAt: editingEntry.createdAt };
       setStore(s => {
         const nextLogs = (s.foodLogs || []).map(l => l.id === editingEntry.id ? updated : l);
         return { ...s, foodLogs: nextLogs, dailyLogs: patchDaily(s, updated.date, nextLogs.filter(l => l.date === updated.date)) };
@@ -1088,9 +1122,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     }
     const entry = built;
     setStaged(list => [...list, entry]);
-    if (entry.foodId && pendingFood && !pendingFood.fromCache) {
-      LB.cacheFood(pendingFood.source, pendingFood.sourceId);
-    }
+    if (entry.foodId) ensureFoodCached(pendingFood);
     closeQtySheet();
   }
 
@@ -1147,7 +1179,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // stage, same reason a DB food needs its quantity sheet first.
   function addRecipeToLog(recipe) {
     if (!(recipe.items || []).length) return;
-    setRecipeLogPrompt({ recipe, chosenPortions: 1 });
+    setRecipeLogPrompt({ recipe, chosenPortions: 1, totalPortions: recipe.portions || 1 });
   }
   // Reopens an already-logged recipe entry's own portions prompt, so bumping
   // the count up or down doesn't need a delete + re-add. A recipe entry's
@@ -1159,18 +1191,26 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   function openEditRecipeEntry(entry) {
     const recipe = recipeEntryLiveRecipe(entry);
     if (!recipe || !(recipe.items || []).length) return;
-    const m = entry.foodName.match(/\(([\d.]+)\/[\d.]+\)$/);
+    const m = entry.foodName.match(/\(([\d.]+)\/([\d.]+)\)$/);
+    // The total-portions-at-log-time must come from the entry itself, not the
+    // live recipe (recipe.portions may have changed since logging, which
+    // would silently rescale this entry's macros against the wrong base).
+    // Preference: the entry's own remembered total, then the "(x/y)" suffix's
+    // denominator, then recipe.portions as a last-resort fallback for entries
+    // logged before this field existed.
+    const totalPortions = entry.loggedTotalPortions != null ? entry.loggedTotalPortions
+      : m ? parseFloat(m[2])
+      : (recipe.portions || 1);
     setEditingEntry(entry);
-    setRecipeLogPrompt({ recipe, chosenPortions: m ? parseFloat(m[1]) : (recipe.portions || 1) });
+    setRecipeLogPrompt({ recipe, chosenPortions: m ? parseFloat(m[1]) : totalPortions, totalPortions });
   }
   // Live macro preview for the portions prompt, same scaling math
   // confirmRecipeLog itself uses (not committed until Add is actually
   // tapped), so the Stepper's live number always matches what gets logged.
   const recipeLogPreview = useMemoFd(() => {
     if (!recipeLogPrompt) return null;
-    const { recipe, chosenPortions } = recipeLogPrompt;
+    const { recipe, chosenPortions, totalPortions } = recipeLogPrompt;
     const items = recipe.items || [];
-    const totalPortions = recipe.portions || 1;
     const scale = chosenPortions / totalPortions;
     const sum = k => items.reduce((a, i) => a + (i[k] || 0), 0);
     return {
@@ -1184,26 +1224,34 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // items" logs it together with whatever else is picked. Still a single log
   // entry either way, just staged instead of committed straight away.
   function confirmRecipeLog() {
-    const { recipe, chosenPortions } = recipeLogPrompt;
+    const { recipe, chosenPortions, totalPortions } = recipeLogPrompt;
     const items = recipe.items || [];
-    const totalPortions = recipe.portions || 1;
     const scale = chosenPortions / totalPortions;
     const sum = k => items.reduce((a, i) => a + (i[k] || 0), 0);
+    // Snapshot at the SAME scale as the entry's own totals, so the
+    // timeline's expanded ingredient list always adds back up to exactly
+    // what's shown collapsed. A later edit to the source recipe must
+    // never retroactively change this: copied here, not referenced.
+    const recipeItems = items.map(i => ({
+      foodName: i.foodName, quantityG: Math.round((i.quantityG || 0) * scale),
+      calories: Math.round((LB.caloriesFromMacros(i.protein, i.carbs, i.fat) || 0) * scale),
+      protein: fdRound1((i.protein || 0) * scale), carbs: fdRound1((i.carbs || 0) * scale), fat: fdRound1((i.fat || 0) * scale),
+      fiber: i.fiber != null ? fdRound1(i.fiber * scale) : null,
+    }));
     const built = {
       foodId: null, foodName: chosenPortions !== totalPortions ? `${recipe.name} (${chosenPortions}/${totalPortions})` : recipe.name, brand: null, source: 'recipe',
-      quantityG: Math.round(sum('quantityG') * scale), calories: Math.round(fdRecipeItemsCalories(items) * scale),
+      // The entry's own remembered total, so a later edit of this entry
+      // rescales against the total at LOG time, not against whatever
+      // recipe.portions has since become (see openEditRecipeEntry).
+      loggedTotalPortions: totalPortions,
+      quantityG: Math.round(sum('quantityG') * scale),
+      // Derived from the sum of the already-rounded recipeItems entries below
+      // (not a separately-rounded computation), so the collapsed total always
+      // exactly matches what the expanded per-ingredient view adds up to.
+      calories: recipeItems.reduce((a, i) => a + (i.calories || 0), 0),
       protein: fdRound1(sum('protein') * scale), carbs: fdRound1(sum('carbs') * scale), fat: fdRound1(sum('fat') * scale),
       fiber: items.some(i => i.fiber != null) ? fdRound1(sum('fiber') * scale) : null,
-      // Snapshot at the SAME scale as the entry's own totals, so the
-      // timeline's expanded ingredient list always adds back up to exactly
-      // what's shown collapsed. A later edit to the source recipe must
-      // never retroactively change this: copied here, not referenced.
-      recipeItems: items.map(i => ({
-        foodName: i.foodName, quantityG: Math.round((i.quantityG || 0) * scale),
-        calories: Math.round((LB.caloriesFromMacros(i.protein, i.carbs, i.fat) || 0) * scale),
-        protein: fdRound1((i.protein || 0) * scale), carbs: fdRound1((i.carbs || 0) * scale), fat: fdRound1((i.fat || 0) * scale),
-        fiber: i.fiber != null ? fdRound1(i.fiber * scale) : null,
-      })),
+      recipeItems,
     };
     // editingEntry (see openEditRecipeEntry) updates the existing row by id
     // and keeps its original date/time instead of staging a new one, same
@@ -1623,7 +1671,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                           {r.brand && <div style={fdEntryMeta}>{r.brand}</div>}
                         </div>
                         <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                          <div className="num" style={{ fontSize: 12, color: UI.inkSoft }}>{r.kcalPer100g != null ? Math.round(r.kcalPer100g) : '—'} kcal</div>
+                          <div className="num" style={{ fontSize: 12, color: UI.inkSoft }}>{r.kcalPer100g != null ? Math.round(r.kcalPer100g) : 'n/a'} kcal</div>
                           <div style={fdEntryMeta}>/100g · {r.source === 'off' ? 'Open Food Facts' : 'USDA'}{r.cached ? ' · cached' : ''}</div>
                         </div>
                       </button>
@@ -1988,7 +2036,9 @@ function FoodScreen({ store, setStore, go, userId, date }) {
               </div>
             )}
             <Btn onClick={confirmRecipeLog} style={{ width: '100%' }}>
-              Add {recipeLogPrompt.recipe.name} · {recipeLogPrompt.chosenPortions} portion{recipeLogPrompt.chosenPortions === 1 ? '' : 's'}
+              {editingEntry
+                ? <>Save · {recipeLogPrompt.chosenPortions} portion{recipeLogPrompt.chosenPortions === 1 ? '' : 's'}</>
+                : <>Add {recipeLogPrompt.recipe.name} · {recipeLogPrompt.chosenPortions} portion{recipeLogPrompt.chosenPortions === 1 ? '' : 's'}</>}
             </Btn>
           </>
         )}
@@ -2230,8 +2280,8 @@ function FdIngredientPicker({ open, onClose, onAdd, store }) {
   const [mC, setMC] = useStateFd('');
   const [mF, setMF] = useStateFd('');
   const [mFib, setMFib] = useStateFd('');
-  const [mCal, setMCal] = useStateFd('');
-  const [mCalTouched, setMCalTouched] = useStateFd(false);
+  const [mCal, setMCal, onMCalChange, mCalTouched, setMCalTouched] =
+    useAutoDerivedCalories(mP, mC, mF, fdNum(mFib), !!store.settings?.netCarbs);
   const [staged, setStaged] = useStateFd([]);
   // The item currently being quantified (normalized to per-100g rates), or
   // null while browsing. Search/favorites/recent all funnel through this one
@@ -2249,21 +2299,6 @@ function FdIngredientPicker({ open, onClose, onAdd, store }) {
     setStaged([]);
     setQtyItem(null); setQtyG(''); setQtyUnitIdx(null); setQtyCountStr('');
   }, [open]);
-
-  // Same auto-derive-unless-touched rule as the Custom Item sheet's own
-  // calorie field (customCal in FoodScreen).
-  useEffectFd(() => {
-    if (mCalTouched) return;
-    const p = fdNum(mP), c = fdNum(mC), f = fdNum(mF);
-    const netCarbs = !!store.settings?.netCarbs;
-    const raw = LB.caloriesFromMacros(p, c, f, netCarbs ? fdNum(mFib) : null);
-    setMCal(raw != null ? String(Math.round(raw)) : '');
-  }, [mP, mC, mF, mFib, mCalTouched, store.settings?.netCarbs]);
-  function onMCalChange(v) {
-    const filtered = fdDecimalFilter(v);
-    setMCalTouched(filtered !== '');
-    setMCal(filtered);
-  }
 
   async function runPickerSearch() {
     const q = query.trim();
@@ -2286,7 +2321,7 @@ function FdIngredientPicker({ open, onClose, onAdd, store }) {
       fatPer100g: r.fatPer100g, fiberPer100g: r.fiberPer100g, fromCache: !!r.cached, units: null,
     });
     setQtyUnitIdx(null); setQtyCountStr('');
-    setQtyG(r.servingSizeG ? String(Math.round(r.servingSizeG)) : '100');
+    setQtyG(r.servingSizeG != null ? String(Math.round(r.servingSizeG)) : '100');
   }
   // Opens the quantity step for a favorite or a past log entry: both only
   // carry already-scaled macros, so per-100g rates are derived from their
@@ -2302,7 +2337,7 @@ function FdIngredientPicker({ open, onClose, onAdd, store }) {
       fromCache: true, units: l.units || null,
     });
     setQtyUnitIdx(null); setQtyCountStr('');
-    setQtyG(String(l.quantityG || 100));
+    setQtyG(l.quantityG != null ? String(l.quantityG) : '100');
   }
   function selectQtyUnit(idx) {
     setQtyUnitIdx(idx);
@@ -2347,7 +2382,7 @@ function FdIngredientPicker({ open, onClose, onAdd, store }) {
       quantityG: fdNum(qtyG), calories: qtyPreview.calories, protein: qtyPreview.protein,
       carbs: qtyPreview.carbs, fat: qtyPreview.fat, fiber: qtyPreview.fiber,
     }]);
-    if (qtyItem.sourceId && !qtyItem.fromCache) LB.cacheFood(qtyItem.source, qtyItem.sourceId);
+    ensureFoodCached(qtyItem);
     closeQtySheet();
   }
   function removeStaged(tempId) {
@@ -2376,10 +2411,11 @@ function FdIngredientPicker({ open, onClose, onAdd, store }) {
   // nothing to scale, so it stages directly, skipping the quantity step.
   function submitManual() {
     if (!manualValid) return;
+    const g = fdNum(mG);
     setStaged(list => [...list, {
       tempId: LB.uid(),
       foodId: null, foodName: mName.trim(), brand: null, source: 'custom',
-      quantityG: fdNum(mG) || 100, calories: Math.round(fdNum(mCal)), protein: fdNum(mP), carbs: fdNum(mC), fat: fdNum(mF),
+      quantityG: g != null ? g : 100, calories: Math.round(fdNum(mCal)), protein: fdNum(mP), carbs: fdNum(mC), fat: fdNum(mF),
       fiber: mFib !== '' ? fdNum(mFib) : null,
     }]);
     setManualOpen(false);
@@ -2449,7 +2485,7 @@ function FdIngredientPicker({ open, onClose, onAdd, store }) {
                         {r.brand && <div style={fdEntryMeta}>{r.brand}</div>}
                       </div>
                       <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                        <div className="num" style={{ fontSize: 12, color: UI.inkSoft }}>{r.kcalPer100g != null ? Math.round(r.kcalPer100g) : '—'} kcal</div>
+                        <div className="num" style={{ fontSize: 12, color: UI.inkSoft }}>{r.kcalPer100g != null ? Math.round(r.kcalPer100g) : 'n/a'} kcal</div>
                         <div style={fdEntryMeta}>/100g</div>
                       </div>
                     </button>
