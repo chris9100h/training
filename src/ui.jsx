@@ -1313,22 +1313,23 @@ function attachDragReorderAxis(axis, container, getCb, options) {
   function updateTarget(pos) {
     const list = items();
     let insertIdx, line;
+    // Hit-test against the DRAGGED GHOST CARD's own visual center, not the
+    // raw pointer. The ghost is offset from the pointer by wherever within
+    // the source row the user actually grabbed it (state.offsetX/Y from
+    // beginDrag): a grab near the row's own bottom makes the ghost visibly
+    // track well behind the raw pointer, so hit-testing on the pointer
+    // directly needed MORE drag distance than what the card visually
+    // showed, mismatched by up to about the grabbed row's own height.
+    // Hit-testing on the ghost's own center instead ties the result to
+    // what's actually on screen, regardless of where in the row the drag
+    // started.
+    const grabOffset = axis === 'v' ? state.offsetY : state.offsetX;
+    const cardCenter = pos - grabOffset + state.srcSize / 2;
     if (opts.fixedSlots) {
-      // Direct hit-test: whichever slot's own rect is under the DRAGGED
-      // CARD's own center, not the reorder scan below's "insert boundary"
-      // (compares against each item's MIDPOINT, including the dragged
-      // item's own still-present rect as one of those boundaries), and not
-      // the raw pointer either. The ghost is offset from the pointer by
-      // wherever within the source row the user actually grabbed it
-      // (state.offsetX/Y from beginDrag): a grab near the row's own bottom
-      // makes the ghost visibly track well behind the raw pointer, so
-      // hit-testing on the pointer directly needed MORE drag distance than
-      // what the card visually showed, mismatched by up to about the
-      // grabbed row's own height. Hit-testing on the ghost's own center
-      // instead ties the result to what's actually on screen, regardless
-      // of where in the row the drag started.
-      const grabOffset = axis === 'v' ? state.offsetY : state.offsetX;
-      const cardCenter = pos - grabOffset + state.srcSize / 2;
+      // Direct hit-test: whichever slot's own rect is under the card
+      // center, not the reorder scan below's "insert boundary" (compares
+      // against each item's MIDPOINT, including the dragged item's own
+      // still-present rect as one of those boundaries).
       insertIdx = list.length - 1;
       for (let k = 0; k < list.length; k++) {
         const r = list[k].getBoundingClientRect();
@@ -1347,7 +1348,7 @@ function attachDragReorderAxis(axis, container, getCb, options) {
         const r = list[k].getBoundingClientRect();
         const start = axis === 'v' ? r.top : r.left;
         const size = axis === 'v' ? r.height : r.width;
-        if (pos < start + size / 2) { insertIdx = k; line = start - 3; break; }
+        if (cardCenter < start + size / 2) { insertIdx = k; line = start - 3; break; }
       }
       if (line === null) {
         const last = list[list.length - 1];
