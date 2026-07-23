@@ -781,8 +781,25 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // stores the already-scaled amounts, not per-100g), so a recent or
   // favorited DB-sourced item can be relogged at a different quantity
   // without another network round-trip. Recent (foodLogs) and Favorites
-  // share this exact shape, so one function serves both strips.
+  // share this exact shape, so one function serves both strips. Recipes
+  // can only ever reach this via Recent (never favorited, no star button
+  // on the recipe portion sheet), and need their own portion picker
+  // instead of the plain rescale path everything else below takes.
   function reAddFromRecent(l) {
+    if (l.source === 'recipe') {
+      // foodName may carry a "(chosen/total portions)" suffix (see
+      // confirmRecipeLog) when the whole batch wasn't logged; strip it to
+      // find the live recipe by name. Reopens the normal portion picker
+      // against the CURRENT recipe (ingredients/portions may have changed
+      // since it was logged) exactly like tapping it fresh from the
+      // Recipes tab, not a reconstruction from this entry's own
+      // already-scaled snapshot. Falls through to the plain rescale path
+      // below if the recipe was since renamed or deleted, so re-adding
+      // still works, just without the portion picker.
+      const baseName = l.foodName.replace(/ \([\d.]+\/\d+\)$/, '');
+      const recipe = (store.foodRecipes || []).find(r => r.name === baseName);
+      if (recipe) { addRecipeToLog(recipe); return; }
+    }
     setFavedId(existingFavId(l.foodId, l.foodName));
     if (l.foodId) {
       const per100 = l.quantityG > 0 ? 100 / l.quantityG : 1;
@@ -1637,7 +1654,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
               </div>
             )}
             {qtyPreview && (
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', background: UI.bgInset, border: `1px solid ${UI.hair}`, borderRadius: 6, marginBottom: 16 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', background: UI.bgInset, border: `1px solid ${UI.hair}`, borderRadius: 6, marginBottom: 16, textShadow: 'none' }}>
                 <span className="num" style={{ fontSize: 15, color: UI.ink }}>{qtyPreview.calories} kcal</span>
                 <span style={{ display: 'flex', gap: 10 }}>
                   <span className="num" style={{ fontSize: 12, color: UI.inkSoft }}>P {qtyPreview.protein}</span>
@@ -1802,7 +1819,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                 onChange={v => setRecipeLogPrompt(p => p ? { ...p, chosenPortions: Math.max(0.5, Math.round(v * 2) / 2) } : p)} big />
             </div>
             {recipeLogPreview && (
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', background: UI.bgInset, border: `1px solid ${UI.hair}`, borderRadius: 6, marginBottom: 16 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', background: UI.bgInset, border: `1px solid ${UI.hair}`, borderRadius: 6, marginBottom: 16, textShadow: 'none' }}>
                 <span className="num" style={{ fontSize: 15, color: UI.ink }}>{recipeLogPreview.calories} kcal</span>
                 <span style={{ display: 'flex', gap: 10 }}>
                   <span className="num" style={{ fontSize: 12, color: UI.inkSoft }}>P {recipeLogPreview.protein}</span>
@@ -2673,7 +2690,7 @@ function fdCopyMoveCheck(checked) {
 const fdInputStyle = {
   background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 4,
   color: UI.ink, fontFamily: UI.fontUi, fontSize: 14, padding: '10px 12px', width: '100%',
-  WebkitAppearance: 'none', boxSizing: 'border-box',
+  WebkitAppearance: 'none', boxSizing: 'border-box', textShadow: 'none',
 };
 const fdClearBtn = {
   position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)',
@@ -2685,6 +2702,7 @@ const fdSearchBtn = {
   width: 42, height: 42, borderRadius: 4, border: `1px solid ${UI.hairStrong}`,
   background: UI.bgInset, color: UI.inkSoft, cursor: 'pointer', flexShrink: 0,
   display: 'flex', alignItems: 'center', justifyContent: 'center', WebkitTapHighlightColor: 'transparent',
+  textShadow: 'none',
 };
 const fdActionCard = {
   flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
@@ -2737,6 +2755,11 @@ const fdCategoryCard = {
   padding: '10px 12px', borderRadius: 6,
   background: `linear-gradient(rgba(0,0,0,0.16),rgba(0,0,0,0.16)), ${UI.bgInset}`,
   border: `1px solid ${UI.hairStrong}`,
+  // Solid fill of its own (opaque UI.bgInset under the darkening layer, not
+  // a translucent tint the page's own paper grid would still show through,
+  // unlike ui.jsx's Card): the inherited grid-lift (paper theme only)
+  // would otherwise put a halo behind the colored macro text sitting on it.
+  textShadow: 'none',
 };
 // Tree connector linking a category card to its hour rows below (see the
 // timeline render): FdHourTrunk is one continuous vertical line spanning the
@@ -2800,7 +2823,12 @@ function FdMacroBits({ protein, carbs, fat }) {
 // deliberate element instead of another " · " so the macros read as their
 // own group, not a fourth clause in the same list.
 const fdMetaDivider = { display: 'inline-block', width: 1, height: 9, background: UI.hairStrong, margin: '0 6px', verticalAlign: 'middle' };
-const fdEntryRow = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '10px 12px', background: UI.bgInset, border: `1px solid ${UI.hair}`, borderRadius: 6 };
+// textShadow: 'none' since UI.bgInset is a solid, opaque fill (unlike ui.jsx's
+// Card, whose translucent surface-tint still shows the page's paper grid
+// through it and so keeps the inherited lift): the grid-lift text-shadow
+// Screen gives every descendant (paper theme only) would otherwise put a
+// halo behind plain text sitting on an already-opaque background.
+const fdEntryRow = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '10px 12px', background: UI.bgInset, border: `1px solid ${UI.hair}`, borderRadius: 6, textShadow: 'none' };
 const fdInlineDeleteBtn = { background: 'transparent', border: 'none', color: UI.inkFaint, cursor: 'pointer', padding: 6, WebkitTapHighlightColor: 'transparent' };
 // A recipe entry's own card chrome (background/border/radius/padding, same
 // values as fdEntryRow), but as a plain vertical stack instead of a single
@@ -2810,7 +2838,7 @@ const fdInlineDeleteBtn = { background: 'transparent', border: 'none', color: UI
 // loose list underneath. fdEntryRow itself stays a plain row (used
 // elsewhere for entries that never grow), this is only for the one entry
 // type that does.
-const fdEntryCard = { display: 'flex', flexDirection: 'column', background: UI.bgInset, border: `1px solid ${UI.hair}`, borderRadius: 6, padding: '10px 12px' };
+const fdEntryCard = { display: 'flex', flexDirection: 'column', background: UI.bgInset, border: `1px solid ${UI.hair}`, borderRadius: 6, padding: '10px 12px', textShadow: 'none' };
 const FD_INGREDIENT_GUTTER = 14;
 function FdIngredientTrunk() {
   return <div style={{ position: 'absolute', left: 4, top: 0, bottom: 0, width: 2, background: UI.hairStrong, pointerEvents: 'none' }} />;
