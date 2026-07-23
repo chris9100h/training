@@ -237,10 +237,11 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   const [recipeEditorOpen, setRecipeEditorOpen] = useStateFd(false);
   const [recipeEditorRecipe, setRecipeEditorRecipe] = useStateFd(null);
   // Prompt shown before a recipe actually gets logged (see addRecipeToLog):
-  // a plain yes/no for a single-portion recipe, or a portions stepper for
-  // one with more than one. chosenPortions defaults to 1 regardless of how
-  // many the recipe actually has, not "all of them": logging the whole
-  // batch by default would be the more surprising default of the two.
+  // always a portions stepper (half-portion steps), even for a recipe with
+  // just one portion, e.g. "1 cake" doesn't mean the only choice is the
+  // whole cake. chosenPortions defaults to 1 regardless of how many the
+  // recipe actually has, not "all of them": logging the whole batch by
+  // default would be the more surprising default of the two.
   const [recipeLogPrompt, setRecipeLogPrompt] = useStateFd(null); // { recipe, chosenPortions } | null
   // A one-tap recipe log (see addRecipeToLog) has no sheet to open/close, so
   // without this nothing visibly changes on tap: users couldn't tell whether
@@ -931,7 +932,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       const sum = k => items.reduce((a, i) => a + (i[k] || 0), 0);
       const entry = {
         id: LB.uid(), date: curDate, time: entryTime(),
-        foodId: null, foodName: totalPortions > 1 ? `${recipe.name} (${chosenPortions}/${totalPortions})` : recipe.name, brand: null, source: 'recipe',
+        foodId: null, foodName: chosenPortions !== totalPortions ? `${recipe.name} (${chosenPortions}/${totalPortions})` : recipe.name, brand: null, source: 'recipe',
         quantityG: Math.round(sum('quantityG') * scale), calories: Math.round(fdRecipeItemsCalories(items) * scale),
         protein: fdRound1(sum('protein') * scale), carbs: fdRound1(sum('carbs') * scale), fat: fdRound1(sum('fat') * scale),
         fiber: items.some(i => i.fiber != null) ? fdRound1(sum('fiber') * scale) : null,
@@ -1479,34 +1480,26 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       {labelScanning && <FdLabelBusy />}
       {scanOpen && <FdScanner onClose={() => setScanOpen(false)} onDetect={handleScan} />}
 
-      {/* ── Add a recipe to today's (or curDate's) log: a plain yes/no for a
-          single-portion recipe, a portions stepper for one with more. ── */}
+      {/* ── Add a recipe to today's (or curDate's) log: always a portions
+          stepper, even for a 1-portion recipe (e.g. "1 cake" doesn't mean
+          logging the whole cake is the only option, half of it or a second
+          one are just as valid). Half-portion steps, no upper cap: chosen
+          can go above the recipe's own portion count too. ── */}
       <Sheet open={!!recipeLogPrompt} onClose={() => setRecipeLogPrompt(null)} title={recipeLogPrompt?.recipe?.name || 'Add recipe'} titleColor="var(--accent)">
         {recipeLogPrompt && (
-          (recipeLogPrompt.recipe.portions || 1) <= 1 ? (
-            <>
-              <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: 1.4 }}>
-                Add {recipeLogPrompt.recipe.name} at {entryTime()}?
-              </div>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <Btn kind="ghost" onClick={() => setRecipeLogPrompt(null)} style={{ flex: 1 }}>No</Btn>
-                <Btn onClick={confirmRecipeLog} disabled={addingRecipeId === recipeLogPrompt.recipe.id} style={{ flex: 1 }}>Yes</Btn>
-              </div>
-            </>
-          ) : (
-            <>
-              <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: 1.4 }}>
-                Add {recipeLogPrompt.recipe.name}, how many of its {recipeLogPrompt.recipe.portions} portions, at {entryTime()}?
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 20 }}>
-                <Stepper value={recipeLogPrompt.chosenPortions} step={1} min={1}
-                  onChange={v => setRecipeLogPrompt(p => p ? { ...p, chosenPortions: Math.min(p.recipe.portions, Math.max(1, Math.round(v))) } : p)} big />
-              </div>
-              <Btn onClick={confirmRecipeLog} disabled={addingRecipeId === recipeLogPrompt.recipe.id} style={{ width: '100%' }}>
-                Add {recipeLogPrompt.recipe.name} · {recipeLogPrompt.chosenPortions} portion{recipeLogPrompt.chosenPortions === 1 ? '' : 's'}
-              </Btn>
-            </>
-          )
+          <>
+            <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: 1.4 }}>
+              How much of {recipeLogPrompt.recipe.name}, at {entryTime()}?
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 20 }}>
+              <Stepper value={recipeLogPrompt.chosenPortions} step={0.5} min={0.5}
+                suffix={recipeLogPrompt.chosenPortions === 1 ? ' portion' : ' portions'}
+                onChange={v => setRecipeLogPrompt(p => p ? { ...p, chosenPortions: Math.max(0.5, Math.round(v * 2) / 2) } : p)} big />
+            </div>
+            <Btn onClick={confirmRecipeLog} disabled={addingRecipeId === recipeLogPrompt.recipe.id} style={{ width: '100%' }}>
+              Add {recipeLogPrompt.recipe.name} · {recipeLogPrompt.chosenPortions} portion{recipeLogPrompt.chosenPortions === 1 ? '' : 's'}
+            </Btn>
+          </>
         )}
       </Sheet>
 
