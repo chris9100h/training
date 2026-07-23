@@ -6292,16 +6292,30 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                           <div className="micro" style={{ color: fg, letterSpacing: '0.1em', marginBottom: 4 }}>{f.label}</div>
                           <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>{f.msg}</div>
                           {f.swap && (
-                            <button onClick={() => applyStallSwap(f.swap)} style={{
-                              marginTop: 9, display: 'inline-flex', alignItems: 'center', gap: 6,
-                              padding: '7px 12px', background: `rgba(var(${rgbVar}),0.14)`,
-                              border: `1px solid rgba(var(${rgbVar}),0.45)`, borderRadius: 4,
-                              color: fg, fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700,
-                              letterSpacing: '0.04em', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
-                            }}>
-                              <i className="fa-solid fa-shuffle" style={{ fontSize: 10 }} />
-                              Swap to {f.swap.name}
-                            </button>
+                            <div style={{ marginTop: 9, display: 'flex', gap: 8 }}>
+                              <button onClick={() => applyStallSwap(f.swap)} style={{
+                                display: 'inline-flex', alignItems: 'center', gap: 6,
+                                padding: '7px 12px', background: `rgba(var(${rgbVar}),0.14)`,
+                                border: `1px solid rgba(var(${rgbVar}),0.45)`, borderRadius: 4,
+                                color: fg, fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700,
+                                letterSpacing: '0.04em', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+                              }}>
+                                <i className="fa-solid fa-shuffle" style={{ fontSize: 10 }} />
+                                Exercise
+                              </button>
+                              {/* Same manual swap flow the exercise toolbar's own ⇄
+                                  button uses (swapExercise → ExercisePicker → doSwap),
+                                  for when the suggested f.swap isn't what the user
+                                  wants: pick anything, not just the one suggestion. */}
+                              <button onClick={swapExercise} aria-label="Choose a different exercise to swap to" style={{
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                width: 32, background: `rgba(var(${rgbVar}),0.14)`,
+                                border: `1px solid rgba(var(${rgbVar}),0.45)`, borderRadius: 4,
+                                color: fg, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+                              }}>
+                                <i className="fa-solid fa-shuffle" style={{ fontSize: 10 }} />
+                              </button>
+                            </div>
                           )}
                         </div>
                       </div>
