@@ -566,6 +566,53 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   }
   const timelineDragRef = UI.useDragReorder({ onReorder: handleTimelineReorder, fixedSlots: true });
 
+  // Food log as an image: a dedicated "poster" tree (hero + every category
+  // that actually has entries, empty categories/hours dropped), rasterized
+  // via the same html2canvas flow the Plan poster and session-share camera
+  // button use (captureNodeAsPng, screens-lib.jsx). Always mounted, only
+  // ever hidden via display:none (see the poster's own comment further
+  // down for why it can't be conditionally rendered on `capturing`).
+  const [capturing, setCapturing] = useStateFd(false);
+  const captureRef = useRefFd(null);
+  // Same background-watermark treatment as the Plan poster (screens-schedule.jsx):
+  // VIPs get their own background image, everyone else gets the faint ZANE mark.
+  const _shotLogo = store.settings?.vipBackground || 'icons/zane-logo.png';
+  const _shotIsCustom = _shotLogo !== 'icons/zane-logo.png';
+  const _shotIsLight = ['light', 'paper'].includes(store.settings?.darkMode ?? 'dark');
+  const _shotDefaultStyle = { width: '75%', maxWidth: 620, opacity: _shotIsLight ? 0.10 : 0.06, filter: _shotIsLight ? 'grayscale(1)' : 'grayscale(1) brightness(3)', objectFit: 'contain' };
+  const _shotCustomStyle = { width: '80%', maxWidth: 680, opacity: 0.13, objectFit: 'contain' };
+  const _shotGridOn = !!window.__gridEnabled;
+  // Same shape as categoryTotals, but only categories with at least one
+  // logged hour survive, and each surviving category only lists the hours
+  // that actually have entries: the live timeline always renders all 24
+  // hours (so "+" is reachable everywhere), a shareable image shouldn't.
+  const posterCategories = useMemoFd(() => {
+    return categoryTotals
+      .map(cat => {
+        const hours = [];
+        for (let h = cat.startHour; h < cat.endHour; h++) {
+          const es = byHour[h] || [];
+          if (es.length) hours.push({ hour: h, entries: es });
+        }
+        return { ...cat, hours };
+      })
+      .filter(cat => cat.hours.length > 0);
+  }, [categoryTotals, byHour]);
+  const takeScreenshot = async () => {
+    const res = await captureNodeAsPng(captureRef.current, {
+      filename: `food-log-${curDate}.png`,
+      setCapturing,
+    });
+    if (!res?.ok) {
+      await confirm(res?.reason === 'unavailable'
+        ? 'Could not build the image. Check your connection and try again.'
+        : 'Could not build the image. Please try again.',
+        { title: 'Export failed', ok: 'OK', cancel: null });
+    } else if (res.saved) {
+      await confirm('Food log image saved to your files.', { title: 'Saved', ok: 'OK', cancel: null });
+    }
+  };
+
   function openCopyMove() {
     setCopyMoveIds([]);
     setCopyMoveTarget('');
@@ -1239,11 +1286,90 @@ function FoodScreen({ store, setStore, go, userId, date }) {
               <i className="fa-solid fa-plus" style={{ fontSize: 14 }} />
             </button>
           ) : tab === 'log' && dayEntries.length > 0 ? (
-            <button onClick={openCopyMove} aria-label="Copy or move entries" style={fdTopAddBtn}>
-              <i className="fa-solid fa-clone" style={{ fontSize: 13 }} />
-            </button>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={takeScreenshot} disabled={capturing} aria-label="Share food log as image" style={{ ...fdTopAddBtn, cursor: capturing ? 'default' : 'pointer', color: capturing ? UI.inkGhost : UI.inkSoft }}>
+                {capturing ? <span style={{ fontFamily: UI.fontUi, fontSize: 10 }}>…</span> : <i className="fa-solid fa-camera" style={{ fontSize: 13 }} />}
+              </button>
+              <button onClick={openCopyMove} aria-label="Copy or move entries" style={fdTopAddBtn}>
+                <i className="fa-solid fa-clone" style={{ fontSize: 13 }} />
+              </button>
+            </div>
           ) : undefined
         } />
+
+      {/* Food log poster: hero + every category that has entries, empty
+          categories and empty hours dropped entirely (unlike the live
+          timeline below, which always renders all 24 hours so "+" stays
+          reachable everywhere). Always mounted, only ever hidden via
+          display:none, never conditionally rendered on `capturing` itself:
+          captureNodeAsPng only flips capturing to true AFTER checking
+          captureRef.current is non-null, so if this tree were gated on
+          `capturing` the ref would still be null at that exact check (same
+          reasoning as the Plan poster, screens-schedule.jsx). No drag
+          handles, +, or edit/delete/chevron buttons: this is a static
+          image, not another interactive surface. */}
+      <div style={{ position: 'fixed', inset: 0, zIndex: 500, background: UI.bg, overflow: 'auto', display: capturing ? 'block' : 'none' }}>
+        <div ref={captureRef} style={{ padding: '26px 28px 32px', width: 480, margin: '0 auto', position: 'relative' }}>
+          {_shotGridOn && <SvgGrid />}
+          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', zIndex: 0, overflow: 'hidden' }}>
+            <img src={_shotLogo} data-shot-avatar="1" style={_shotIsCustom ? _shotCustomStyle : _shotDefaultStyle} />
+          </div>
+          <div style={{ position: 'relative', zIndex: 1 }}>
+            <div style={{ height: '0.5px', background: UI.gold, marginBottom: 16 }} />
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+              <div>
+                <div className="display" style={{ fontSize: 24, color: UI.gold, lineHeight: 1.1 }}>Food Log</div>
+                <div className="micro" style={{ color: UI.inkFaint, marginTop: 4 }}>{dayLabel}</div>
+              </div>
+              <div className="micro-gold" style={{ letterSpacing: '0.18em', marginTop: 2, flexShrink: 0, marginLeft: 12 }}>ZANE</div>
+            </div>
+
+            <BracketFrame gold style={{ padding: 20, marginTop: 16 }}>
+              <FdHeroContent dayTarget={dayTarget} dayAdherence={dayAdherence} dayTotals={dayTotals} goalCalories={goalCalories} />
+            </BracketFrame>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 20 }}>
+              {posterCategories.map(cat => (
+                <div key={cat.id}>
+                  <div style={fdCategoryCard}>
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: UI.ink, fontFamily: UI.fontUi }}>{cat.label}</div>
+                      <span style={fdEntryMeta}>{String(cat.startHour).padStart(2, '0')}:00 - {String(cat.endHour % 24).padStart(2, '0')}:00</span>
+                    </div>
+                    <div style={{ textAlign: 'right' }}>
+                      <div className="num" style={{ fontSize: 14, color: UI.warn }}>{cat.calories} kcal</div>
+                      <span style={fdEntryMeta}><FdMacroBits protein={cat.protein} carbs={cat.carbs} fat={cat.fat} strong /></span>
+                    </div>
+                  </div>
+                  <div style={{ position: 'relative', marginTop: 6, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <FdHourTrunk />
+                    {cat.hours.map(({ hour, entries }) => (
+                      <div key={hour} style={{ display: 'flex', alignItems: 'center' }}>
+                        <FdHourTick />
+                        <div style={fdHourLabelCol}>
+                          <span className="num" style={{ fontSize: 11, color: UI.inkSoft }}>{String(hour).padStart(2, '0')}</span>
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                          {entries.map(e => (
+                            <div key={e.id} style={fdEntryCard}>
+                              <span style={fdEntryName}>{e.foodName}</span>
+                              <span style={fdEntryMeta}>
+                                {e.quantityG ? `${e.quantityG}g · ` : ''}<span className="num" style={{ color: UI.warn }}>{e.calories} kcal</span>
+                                <span style={fdMetaDivider} />
+                                <FdMacroBits protein={e.protein} carbs={e.carbs} fat={e.fat} />
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
 
       <SubTabBar tabs={FD_TABS} active={tab} onChange={onTabChange} />
 
@@ -1269,35 +1395,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                 macro chips, same as before there was anything to compare
                 against. */}
             <BracketFrame gold style={{ padding: 20 }}>
-              {dayTarget ? (
-                <>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
-                    <FdRing percent={dayAdherence ?? 0} size={104} color={fdAdherenceColor(dayAdherence)} label="ADHERENCE" />
-                    <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 9 }}>
-                      <FdHeroRow label="KCAL" color={UI.warn} actual={dayTotals.calories} target={goalCalories} />
-                      <FdHeroRow label="PROTEIN" color={FD_MACRO_COLORS.protein} actual={dayTotals.protein} target={dayTarget.protein} unit="g" />
-                      <FdHeroRow label="CARBS" color={FD_MACRO_COLORS.carbs} actual={dayTotals.carbs} target={dayTarget.carbs} unit="g" />
-                      <FdHeroRow label="FAT" color={FD_MACRO_COLORS.fat} actual={dayTotals.fat} target={dayTarget.fat} unit="g" />
-                    </div>
-                  </div>
-                  <div style={{ marginTop: 16, paddingTop: 16, borderTop: `1px solid ${UI.hair}`, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                    <FdCompositionBar label="LOGGED" protein={dayTotals.protein} carbs={dayTotals.carbs} fat={dayTotals.fat} />
-                    <FdCompositionBar label="TARGET" protein={dayTarget.protein} carbs={dayTarget.carbs} fat={dayTarget.fat} />
-                  </div>
-                </>
-              ) : (
-                <div>
-                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-                    <span className="num" style={{ fontSize: 40, fontWeight: 300, color: UI.ink, lineHeight: 1 }}>{dayTotals.calories}</span>
-                    <span style={{ fontSize: 15, color: UI.inkFaint, fontFamily: UI.fontUi }}>kcal</span>
-                  </div>
-                  <div style={{ display: 'flex', gap: 14, marginTop: 12 }}>
-                    <span className="num" style={{ fontSize: 12, fontWeight: 600, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 10 }}>P</span> {Math.round(dayTotals.protein)}g</span>
-                    <span className="num" style={{ fontSize: 12, fontWeight: 600, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 10 }}>C</span> {Math.round(dayTotals.carbs)}g</span>
-                    <span className="num" style={{ fontSize: 12, fontWeight: 600, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 10 }}>F</span> {Math.round(dayTotals.fat)}g</span>
-                  </div>
-                </div>
-              )}
+              <FdHeroContent dayTarget={dayTarget} dayAdherence={dayAdherence} dayTotals={dayTotals} goalCalories={goalCalories} />
             </BracketFrame>
 
             {/* Hourly timeline: every hour 0-23 has a "+" that logs at exactly
@@ -2588,6 +2686,41 @@ function FdHeroRow({ label, color, actual, target, unit = '' }) {
 // two of these (one off dayTotals, one off dayTarget) let the hero compare
 // today's actual macro SPLIT against the target split at a glance, not just
 // each macro's absolute progress (the rows above already cover that).
+// Extracted from the Log tab's live hero so the exact same markup can be
+// reused verbatim in the screenshot poster below (FoodScreen), instead of
+// two copies drifting apart. Pure/presentational: everything it needs is
+// passed in, nothing read from FoodScreen's own closure.
+function FdHeroContent({ dayTarget, dayAdherence, dayTotals, goalCalories }) {
+  return dayTarget ? (
+    <>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
+        <FdRing percent={dayAdherence ?? 0} size={104} color={fdAdherenceColor(dayAdherence)} label="ADHERENCE" />
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 9 }}>
+          <FdHeroRow label="KCAL" color={UI.warn} actual={dayTotals.calories} target={goalCalories} />
+          <FdHeroRow label="PROTEIN" color={FD_MACRO_COLORS.protein} actual={dayTotals.protein} target={dayTarget.protein} unit="g" />
+          <FdHeroRow label="CARBS" color={FD_MACRO_COLORS.carbs} actual={dayTotals.carbs} target={dayTarget.carbs} unit="g" />
+          <FdHeroRow label="FAT" color={FD_MACRO_COLORS.fat} actual={dayTotals.fat} target={dayTarget.fat} unit="g" />
+        </div>
+      </div>
+      <div style={{ marginTop: 16, paddingTop: 16, borderTop: `1px solid ${UI.hair}`, display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <FdCompositionBar label="LOGGED" protein={dayTotals.protein} carbs={dayTotals.carbs} fat={dayTotals.fat} />
+        <FdCompositionBar label="TARGET" protein={dayTarget.protein} carbs={dayTarget.carbs} fat={dayTarget.fat} />
+      </div>
+    </>
+  ) : (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+        <span className="num" style={{ fontSize: 40, fontWeight: 300, color: UI.ink, lineHeight: 1 }}>{dayTotals.calories}</span>
+        <span style={{ fontSize: 15, color: UI.inkFaint, fontFamily: UI.fontUi }}>kcal</span>
+      </div>
+      <div style={{ display: 'flex', gap: 14, marginTop: 12 }}>
+        <span className="num" style={{ fontSize: 12, fontWeight: 600, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 10 }}>P</span> {Math.round(dayTotals.protein)}g</span>
+        <span className="num" style={{ fontSize: 12, fontWeight: 600, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 10 }}>C</span> {Math.round(dayTotals.carbs)}g</span>
+        <span className="num" style={{ fontSize: 12, fontWeight: 600, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 10 }}>F</span> {Math.round(dayTotals.fat)}g</span>
+      </div>
+    </div>
+  );
+}
 function FdCompositionBar({ label, protein, carbs, fat }) {
   const total = (protein || 0) * 4 + (carbs || 0) * 4 + (fat || 0) * 9;
   if (!total) return null;
