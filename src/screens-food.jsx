@@ -1274,7 +1274,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                       </div>
                       <div style={{ textAlign: 'right' }}>
                         <div className="num" style={{ fontSize: 14, color: UI.ink }}>{cat.calories} kcal</div>
-                        <span style={fdEntryMeta}>P{Math.round(cat.protein)} C{Math.round(cat.carbs)} F{Math.round(cat.fat)}</span>
+                        <span style={fdEntryMeta}><FdMacroBits protein={cat.protein} carbs={cat.carbs} fat={cat.fat} /></span>
                       </div>
                     </div>
                     <div style={{ position: 'relative', marginTop: 6, display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -1337,7 +1337,9 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                                         >
                                           <span style={fdEntryName}>{e.foodName}</span>
                                           <span style={fdEntryMeta}>
-                                            {e.quantityG ? `${e.quantityG}g · ` : ''}{e.calories} kcal · P{Math.round(e.protein)} C{Math.round(e.carbs)} F{Math.round(e.fat)}
+                                            {e.quantityG ? `${e.quantityG}g · ` : ''}{e.calories} kcal
+                                            <span style={fdMetaDivider} />
+                                            <FdMacroBits protein={e.protein} carbs={e.carbs} fat={e.fat} />
                                           </span>
                                         </div>
                                         {hasRecipeItems && (
@@ -1359,7 +1361,9 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                                               <div style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0, flex: 1 }}>
                                                 <span style={{ ...fdEntryName, fontSize: 11, fontWeight: 500 }}>{ri.foodName}</span>
                                                 <span style={fdEntryMeta}>
-                                                  {ri.quantityG}g · {ri.calories} kcal · P{Math.round(ri.protein)} C{Math.round(ri.carbs)} F{Math.round(ri.fat)}
+                                                  {ri.quantityG}g · {ri.calories} kcal
+                                                  <span style={fdMetaDivider} />
+                                                  <FdMacroBits protein={ri.protein} carbs={ri.carbs} fat={ri.fat} />
                                                 </span>
                                               </div>
                                             </div>
@@ -1615,7 +1619,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                 value={qtyUnitIdx == null ? qtyG : qtyCountStr}
                 onChange={e => qtyUnitIdx == null ? setQtyG(fdDecimalFilter(e.target.value)) : onQtyCountChange(e.target.value)}
                 type="text" inputMode="decimal" placeholder={qtyUnitIdx == null ? 'g' : 'count'}
-                autoFocus={!pendingFood.custom} style={fdBigInput} />
+                style={fdBigInput} />
             </Field>
             {qtyUnitIdx != null && (
               <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 14 }}>= {qtyG || 0}g</div>
@@ -1988,7 +1992,7 @@ function RecipeEditorScreen({ open, onClose, onSave, recipe, store }) {
           proportionally ── */}
       <Sheet open={!!editItem} onClose={closeEditItem} title={editItem?.foodName || 'Ingredient'} titleColor="var(--accent)">
         <Field label="Amount (g)" style={{ marginBottom: 16 }}>
-          <input value={editGrams} onChange={e => setEditGrams(fdDecimalFilter(e.target.value))} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} autoFocus />
+          <input value={editGrams} onChange={e => setEditGrams(fdDecimalFilter(e.target.value))} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
         </Field>
         <div style={{ display: 'flex', gap: 8 }}>
           <button onClick={removeEditItem} aria-label="Remove ingredient" style={{ ...fdSideBtn, width: 44, flexShrink: 0 }}>
@@ -2285,7 +2289,7 @@ function FdIngredientPicker({ open, onClose, onAdd, store }) {
             ) : (
               <div style={{ borderTop: `1px solid ${UI.hair}`, paddingTop: 14, marginTop: 4 }}>
                 <Field label="Name" style={{ marginBottom: 10 }}>
-                  <TextInput value={mName} onChange={setMName} placeholder="e.g. Homemade sauce" autoFocus />
+                  <TextInput value={mName} onChange={setMName} placeholder="e.g. Homemade sauce" />
                 </Field>
                 <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
                   <Field label="Amount (g)" style={{ flex: 1 }}>
@@ -2413,7 +2417,7 @@ function FdIngredientPicker({ open, onClose, onAdd, store }) {
               <input
                 value={qtyUnitIdx == null ? qtyG : qtyCountStr}
                 onChange={e => qtyUnitIdx == null ? setQtyG(fdDecimalFilter(e.target.value)) : onQtyCountChange(e.target.value)}
-                type="text" inputMode="decimal" placeholder={qtyUnitIdx == null ? 'g' : 'count'} style={fdInputStyle} autoFocus
+                type="text" inputMode="decimal" placeholder={qtyUnitIdx == null ? 'g' : 'count'} style={fdInputStyle}
               />
             </Field>
             {qtyPreview && (
@@ -2776,6 +2780,24 @@ function fdHourAddBtn(isNow) {
 }
 const fdEntryName = { fontSize: 13, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' };
 const fdEntryMeta = { fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi };
+// P/C/F in the same three colors the hero rows use (FD_MACRO_COLORS), so a
+// glance at any macro mention in the Log tab reads the same way, instead of
+// every digit sitting in the same flat fdEntryMeta gray. Inline, meant to
+// sit at the end of an existing fdEntryMeta line (colors override the
+// inherited gray; size/family still come from the parent span).
+function FdMacroBits({ protein, carbs, fat }) {
+  return (
+    <span style={{ display: 'inline-flex', gap: 6 }}>
+      <span className="num" style={{ color: FD_MACRO_COLORS.protein }}>P{Math.round(protein)}</span>
+      <span className="num" style={{ color: FD_MACRO_COLORS.carbs }}>C{Math.round(carbs)}</span>
+      <span className="num" style={{ color: FD_MACRO_COLORS.fat }}>F{Math.round(fat)}</span>
+    </span>
+  );
+}
+// Thin vertical rule separating "quantity · kcal" from the macro bits, a
+// deliberate element instead of another " · " so the macros read as their
+// own group, not a fourth clause in the same list.
+const fdMetaDivider = { display: 'inline-block', width: 1, height: 9, background: UI.hairStrong, margin: '0 6px', verticalAlign: 'middle' };
 const fdEntryRow = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '10px 12px', background: UI.bgInset, border: `1px solid ${UI.hair}`, borderRadius: 6 };
 const fdInlineDeleteBtn = { background: 'transparent', border: 'none', color: UI.inkFaint, cursor: 'pointer', padding: 6, WebkitTapHighlightColor: 'transparent' };
 // A recipe entry's own card chrome (background/border/radius/padding, same
