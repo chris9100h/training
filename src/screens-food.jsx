@@ -1064,6 +1064,23 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     if (!(recipe.items || []).length) return;
     setRecipeLogPrompt({ recipe, chosenPortions: 1 });
   }
+  // Live macro preview for the portions prompt, same scaling math
+  // confirmRecipeLog itself uses (not committed until Add is actually
+  // tapped), so the Stepper's live number always matches what gets logged.
+  const recipeLogPreview = useMemoFd(() => {
+    if (!recipeLogPrompt) return null;
+    const { recipe, chosenPortions } = recipeLogPrompt;
+    const items = recipe.items || [];
+    const totalPortions = recipe.portions || 1;
+    const scale = chosenPortions / totalPortions;
+    const sum = k => items.reduce((a, i) => a + (i[k] || 0), 0);
+    return {
+      calories: Math.round(fdRecipeItemsCalories(items) * scale),
+      protein: fdRound1(sum('protein') * scale),
+      carbs: fdRound1(sum('carbs') * scale),
+      fat: fdRound1(sum('fat') * scale),
+    };
+  }, [recipeLogPrompt]);
   // Stages the recipe (see `staged` above) same as everything else, "Add N
   // items" logs it together with whatever else is picked. Still a single log
   // entry either way, just staged instead of committed straight away.
@@ -1780,6 +1797,16 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                 suffix={recipeLogPrompt.chosenPortions === 1 ? ' portion' : ' portions'}
                 onChange={v => setRecipeLogPrompt(p => p ? { ...p, chosenPortions: Math.max(0.5, Math.round(v * 2) / 2) } : p)} big />
             </div>
+            {recipeLogPreview && (
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', background: UI.bgInset, border: `1px solid ${UI.hair}`, borderRadius: 6, marginBottom: 16 }}>
+                <span className="num" style={{ fontSize: 15, color: UI.ink }}>{recipeLogPreview.calories} kcal</span>
+                <span style={{ display: 'flex', gap: 10 }}>
+                  <span className="num" style={{ fontSize: 12, color: UI.inkSoft }}>P {recipeLogPreview.protein}</span>
+                  <span className="num" style={{ fontSize: 12, color: UI.inkSoft }}>C {recipeLogPreview.carbs}</span>
+                  <span className="num" style={{ fontSize: 12, color: UI.inkSoft }}>F {recipeLogPreview.fat}</span>
+                </span>
+              </div>
+            )}
             <Btn onClick={confirmRecipeLog} style={{ width: '100%' }}>
               Add {recipeLogPrompt.recipe.name} · {recipeLogPrompt.chosenPortions} portion{recipeLogPrompt.chosenPortions === 1 ? '' : 's'}
             </Btn>
