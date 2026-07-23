@@ -6301,7 +6301,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                                 letterSpacing: '0.04em', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
                               }}>
                                 <i className="fa-solid fa-shuffle" style={{ fontSize: 10 }} />
-                                Exercise
+                                to {f.swap.name}
                               </button>
                               {/* Same manual swap flow the exercise toolbar's own ⇄
                                   button uses (swapExercise → ExercisePicker → doSwap),
