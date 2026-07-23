@@ -29,10 +29,6 @@ function fdFmtDate(dateStr) {
   const d = new Date(dateStr + 'T12:00:00');
   return d.toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'short' });
 }
-function fdNowHHMM() {
-  const d = new Date();
-  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-}
 const fdNum = v => (v === '' || v == null || isNaN(parseFloat(v))) ? null : parseFloat(v);
 const fdRound1 = v => Math.round(v * 10) / 10;
 // Shared precondition for anything about to write a row that references a
@@ -553,7 +549,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // Time stamped on a newly logged entry: the timeline hour the user tapped
   // "+" on, else the current wall-clock time.
   function entryTime() {
-    return pendingHour != null ? `${String(pendingHour).padStart(2, '0')}:00` : fdNowHHMM();
+    return pendingHour != null ? `${String(pendingHour).padStart(2, '0')}:00` : LB.nowHHMM();
   }
   // Timeline "+": remember the hour and jump to Search to pick a food for it.
   function addAtHour(h) {
@@ -1502,7 +1498,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                         // Only today has a "current hour" to mark; a backdated day's
                         // timeline stays plain. Local wall-clock hour (getHours()),
                         // matching the user's own timezone, same as entryTime()/
-                        // fdNowHHMM() already do for the "log at now" default.
+                        // LB.nowHHMM() already do for the "log at now" default.
                         const isNow = curDate === today && h === new Date().getHours();
                         return (
                           <div key={h} style={{ display: 'flex', alignItems: 'center' }}>

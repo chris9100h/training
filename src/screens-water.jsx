@@ -62,10 +62,6 @@ function wtDateStr(offset = 0) {
   d.setDate(d.getDate() + offset);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
-function wtNowHHMM() {
-  const d = new Date();
-  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-}
 function wtHhmmToDecimal(t) {
   const [h, m] = (t || '0:0').split(':').map(Number);
   return (h || 0) + (m || 0) / 60;
@@ -303,7 +299,7 @@ function WaterScreen({ store, setStore, go, userId }) {
   }
 
   async function doAdd(amountMl, name, category) {
-    const entry = { id: LB.uid(), date: today, time: wtNowHHMM(), amountMl: parseInt(amountMl, 10), name: name || null, category: category || null, createdAt: new Date().toISOString() };
+    const entry = { id: LB.uid(), date: today, time: LB.nowHHMM(), amountMl: parseInt(amountMl, 10), name: name || null, category: category || null, createdAt: new Date().toISOString() };
     const prevTotal = total;
     setStore(s => {
       const nextLogs = [entry, ...(s.waterLogs || [])];
