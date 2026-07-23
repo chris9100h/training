@@ -653,7 +653,11 @@ function HealthBarChart({ series, from, to, format, target, color = 'var(--accen
 }
 
 // Stacked macro bars (protein / carbs / fat by calories) + per-day target tick.
-const MACRO_COLORS = { protein: 'var(--accent)', carbs: 'var(--ok)', fat: 'var(--danger)' };
+// protein uses the fixed --info blue rather than --accent: --accent is
+// user-customizable and collides with --ok/--danger the moment someone
+// picks green or red as their accent (a red accent made protein and fat
+// read as the same color here). Fixed generally, not just for red.
+const MACRO_COLORS = { protein: 'var(--info)', carbs: 'var(--ok)', fat: 'var(--danger)' };
 function HealthMacroChart({ series, from, to }) {
   // series = [{ date, protein, carbs, fat, calories, targetCal }]
   const pts = (series || []).filter(p => (p.protein != null || p.carbs != null || p.fat != null));

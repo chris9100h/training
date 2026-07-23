@@ -2337,8 +2337,13 @@ function FdRing({ percent, size = 128, color = 'var(--accent)', label }) {
 // relied on as a cross-file global for the same reason fdAdherenceColor
 // above isn't: classic scripts share one execution scope so reaching across
 // would happen to work today, but that's an implicit coupling this small a
-// token map isn't worth introducing.
-const FD_MACRO_COLORS = { protein: 'var(--accent)', carbs: 'var(--ok)', fat: 'var(--danger)' };
+// token map isn't worth introducing. protein uses the fixed --info blue
+// rather than --accent: --accent is user-customizable and collides with
+// --ok/--danger the moment someone picks green or red as their accent
+// (fixed here after exactly that: red accent made protein and fat read as
+// the same color). Applies generally, not just for a red accent, hence a
+// fixed token instead of a per-accent special case.
+const FD_MACRO_COLORS = { protein: 'var(--info)', carbs: 'var(--ok)', fat: 'var(--danger)' };
 
 // One metric row in the dense hero (KCAL/PROTEIN/CARBS/FAT): label, a thin
 // fill bar showing actual vs target, the actual/target pair, and the delta
