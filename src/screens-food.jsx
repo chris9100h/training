@@ -171,9 +171,6 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // button can toggle it live (add on tap, remove on second tap) instead of
   // deferring the save to when the food is actually logged.
   const [favedId, setFavedId] = useStateFd(null);
-  // recipe draft item being edited: finishEntry replaces it in place rather
-  // than appending a new ingredient.
-  const [editingDraftId, setEditingDraftId] = useStateFd(null);
   // Editable per-100g protein/carbs/fat for a scanned custom item, so the user
   // can correct a misread before logging. Kept as strings (decimals allowed);
   // only used on the pendingFood.custom path. kcal100Str is the per-100g
@@ -232,15 +229,19 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     setCustomCal(filtered);
   }
 
-  // Recipe builder: a lightweight "mode" rather than its own sheet, so it can
-  // reuse the Search tab's existing search/quantity/custom flows verbatim as
-  // an ingredient picker (finishEntry below is the only branch point). The
-  // banner renders on every tab so switching to Log to sanity-check doesn't
-  // read as abandoning the draft.
-  const [recipeMode, setRecipeMode] = useStateFd(null); // { editId?, name, items: [] }
-  const [recipeNameOpen, setRecipeNameOpen] = useStateFd(false);
-  const [recipeNameInput, setRecipeNameInput] = useStateFd('');
-  const [recipeNameMode, setRecipeNameMode] = useStateFd('new'); // 'new' | 'rename'
+  // Recipe editor: a dedicated full-page screen (RecipeEditorScreen below),
+  // not an in-place mode. recipeEditorRecipe is the recipe being edited
+  // (null while creating a new one); recipeEditorOpen just controls
+  // whether the screen is mounted. handleRecipeSave/handleRecipeDiscard
+  // (below) are what RecipeEditorScreen's onSave/onClose actually call.
+  const [recipeEditorOpen, setRecipeEditorOpen] = useStateFd(false);
+  const [recipeEditorRecipe, setRecipeEditorRecipe] = useStateFd(null);
+  // Prompt shown before a recipe actually gets logged (see addRecipeToLog):
+  // a plain yes/no for a single-portion recipe, or a portions stepper for
+  // one with more than one. chosenPortions defaults to 1 regardless of how
+  // many the recipe actually has, not "all of them": logging the whole
+  // batch by default would be the more surprising default of the two.
+  const [recipeLogPrompt, setRecipeLogPrompt] = useStateFd(null); // { recipe, chosenPortions } | null
   // A one-tap recipe log (see addRecipeToLog) has no sheet to open/close, so
   // without this nothing visibly changes on tap: users couldn't tell whether
   // it registered and often tapped again, logging it twice. addingRecipeId
@@ -437,26 +438,6 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // its own per-hour "+") ends that intent.
   function onTabChange(id) { if (id === 'log') setPendingHour(null); setTab(id); }
 
-  // Terminal step shared by the search-selected and custom-item flows: commits
-  // straight to the day's log, or (while building a recipe) appends to the
-  // draft ingredient list, or replaces an existing draft ingredient when one
-  // is being edited.
-  // Returns whether the entry actually landed: always true for a recipe-draft
-  // stage (nothing is written to the day's log yet, so there's nothing to
-  // warn about), or commitEntry's result for a real log.
-  async function finishEntry(entry) {
-    if (recipeMode) {
-      if (editingDraftId) {
-        const eid = editingDraftId;
-        setRecipeMode(m => m ? { ...m, items: m.items.map(i => i.id === eid ? { ...entry, id: eid } : i) } : m);
-      } else {
-        setRecipeMode(m => ({ ...m, items: [...m.items, entry] }));
-      }
-      return true;
-    }
-    return commitEntry(entry);
-  }
-
   async function deleteEntry(entry) {
     const ok = await confirm(`${entry.foodName} · ${entry.calories} kcal`, { title: 'Delete entry?', ok: 'Delete', cancel: 'Cancel', danger: true });
     if (!ok) return;
@@ -599,7 +580,6 @@ function FoodScreen({ store, setStore, go, userId, date }) {
 
     if (per100) {
       const name = label.name || '';
-      setEditingDraftId(null);
       setPendingFood({
         custom: true, fromCache: true,
         name, brand: label.brand || null,
@@ -642,7 +622,6 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // confirmLogFood -> LB.cacheFood), so a food that isn't cached yet
   // (r.cached false) is cached only once it's actually eaten.
   function pickResult(r) {
-    setEditingDraftId(null);
     setPendingFood({ ...r, fromCache: !!r.cached });
     setFavedId(existingFavId(`${r.source}:${r.sourceId}`, r.name));
     setQtyG(r.servingSizeG ? String(Math.round(r.servingSizeG)) : '100');
@@ -667,8 +646,8 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       fiberPer100g: item.fiber != null ? item.fiber * per100 : null,
       servingSizeG: null, servingLabel: null,
       // Set only on a favorite with units configured (see openEditFavorite);
-      // undefined everywhere else (recent items, recipe draft ingredients),
-      // which the quantity sheet's units?.length check treats as "no units".
+      // undefined otherwise, which the quantity sheet's units?.length check
+      // treats as "no units".
       units: item.units,
     });
     setP100Str(String(fdRound1(item.protein * per100)));
@@ -685,7 +664,6 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // without another network round-trip. Recent (foodLogs) and Favorites
   // share this exact shape, so one function serves both strips.
   function reAddFromRecent(l) {
-    setEditingDraftId(null);
     setFavedId(existingFavId(l.foodId, l.foodName));
     if (l.foodId) {
       const per100 = l.quantityG > 0 ? 100 / l.quantityG : 1;
@@ -775,8 +753,8 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     const n = fdNum(filtered);
     setQtyG(unit && n != null ? String(fdRound1(n * unit.grams)) : '');
   }
-  function closeQtySheet() { setQtySheetOpen(false); setPendingFood(null); setQtyG(''); setFavedId(null); setEditingDraftId(null); setP100Str(''); setC100Str(''); setF100Str(''); setKcal100Str(''); setKcal100Touched(false); setQtyUnitIdx(null); setQtyCountStr(''); }
-  function closeCustomSheet() { setCustomOpen(false); setFavedId(null); setEditingDraftId(null); }
+  function closeQtySheet() { setQtySheetOpen(false); setPendingFood(null); setQtyG(''); setFavedId(null); setP100Str(''); setC100Str(''); setF100Str(''); setKcal100Str(''); setKcal100Touched(false); setQtyUnitIdx(null); setQtyCountStr(''); }
+  function closeCustomSheet() { setCustomOpen(false); setFavedId(null); }
 
   // Build the entry the open sheet describes right now (without logging it), so
   // both the log/ingredient action and the favorite toggle work off the same
@@ -886,12 +864,11 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   async function confirmLogFood() {
     const entry = buildQtyEntry();
     if (!entry) return;
-    const ok = await finishEntry(entry);
+    const ok = await commitEntry(entry);
     if (!ok) return; // user backed out of the overwrite warning; leave the sheet open
     // Only now (a real log, not a mere open) grow the shared cache, and only
-    // for a freshly-fetched DB food that wasn't already cached. Not while
-    // building a recipe (ingredients aren't standalone logs).
-    if (!recipeMode && entry.foodId && pendingFood && !pendingFood.fromCache) {
+    // for a freshly-fetched DB food that wasn't already cached.
+    if (entry.foodId && pendingFood && !pendingFood.fromCache) {
       LB.cacheFood(pendingFood.source, pendingFood.sourceId);
     }
     closeQtySheet();
@@ -900,13 +877,13 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   function resetCustomForm() {
     setCustomName(''); setCustomG(''); setCustomP(''); setCustomC(''); setCustomF(''); setCustomFib('');
     setCustomCal(''); setCustomCalTouched(false);
-    setFavedId(null); setEditingDraftId(null);
+    setFavedId(null);
   }
 
   async function submitCustomItem() {
     const entry = buildCustomEntry();
     if (!entry) return;
-    const ok = await finishEntry(entry);
+    const ok = await commitEntry(entry);
     if (!ok) return; // user backed out of the overwrite warning; leave the sheet open
     closeCustomSheet();
     resetCustomForm();
@@ -914,104 +891,55 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   const customValid = customName.trim() && fdNum(customP) != null && fdNum(customC) != null && fdNum(customF) != null && fdNum(customCal) != null;
 
   // ── Recipes ──
-  function openNewRecipe() { setRecipeNameInput(''); setRecipeNameMode('new'); setRecipeNameOpen(true); }
-  function openRenameRecipe() { setRecipeNameInput(recipeMode?.name || ''); setRecipeNameMode('rename'); setRecipeNameOpen(true); }
-  function confirmRecipeName() {
-    const name = recipeNameInput.trim();
-    if (!name) return;
-    setRecipeNameOpen(false);
-    if (recipeNameMode === 'rename') {
-      setRecipeMode(m => m ? { ...m, name } : m);
-    } else {
-      setRecipeMode({ name, items: [] });
-      setTab('search');
-    }
-  }
-  // Open an existing recipe for editing: ingredients get fresh ephemeral ids
-  // for the draft (stored recipe items carry no id), and editId marks that
-  // saving updates in place instead of creating a new recipe.
-  function editRecipe(recipe) {
-    setRecipeMode({ editId: recipe.id, name: recipe.name, items: (recipe.items || []).map(i => ({ ...i, id: LB.uid() })) });
-    setTab('search');
-  }
-  // Tap a draft ingredient to edit its amount: reopens the matching sheet
-  // prefilled, and editingDraftId makes finishEntry replace it in place.
-  function editDraftItem(item) {
-    setFavedId(null);
-    setEditingDraftId(item.id);
-    if (item.foodId) {
-      const per100 = item.quantityG > 0 ? 100 / item.quantityG : 1;
-      setPendingFood({
-        source: item.source, sourceId: item.foodId.slice((item.source || '').length + 1),
-        name: item.foodName, brand: item.brand || null,
-        // See reAddFromRecent: always derived from the stored macros, not
-        // item.calories directly.
-        kcalPer100g: LB.caloriesFromMacros(item.protein, item.carbs, item.fat) * per100,
-        proteinPer100g: item.protein * per100,
-        carbsPer100g: item.carbs * per100, fatPer100g: item.fat * per100,
-        fiberPer100g: item.fiber != null ? item.fiber * per100 : null,
-        servingSizeG: null, servingLabel: null, fromCache: true,
-      });
-      setQtyG(String(item.quantityG || 100));
-      openQtySheet();
-    } else {
-      openCustomAsScalable(item);
-    }
-  }
-  function removeRecipeDraftItem(id) {
-    setRecipeMode(m => m ? { ...m, items: m.items.filter(i => i.id !== id) } : m);
-  }
-  function cancelRecipe() { setRecipeMode(null); setEditingDraftId(null); }
-  function saveRecipe() {
-    if (!recipeMode || !recipeMode.items.length) { setRecipeMode(null); return; }
-    const items = recipeMode.items.map(i => ({
-      foodId: i.foodId, foodName: i.foodName, brand: i.brand, source: i.source,
-      quantityG: i.quantityG, calories: i.calories, protein: i.protein, carbs: i.carbs, fat: i.fat, fiber: i.fiber,
-    }));
+  function openNewRecipe() { setRecipeEditorRecipe(null); setRecipeEditorOpen(true); }
+  function editRecipe(recipe) { setRecipeEditorRecipe(recipe); setRecipeEditorOpen(true); }
+  // RecipeEditorScreen's onSave: it owns its own draft (name/items/portions)
+  // entirely locally and only ever hands back the finished shape, so saving
+  // is just the usual upsert-by-id-or-prepend every other store collection
+  // write in this file already does.
+  function handleRecipeSave(draft) {
     const now = new Date().toISOString();
-    if (recipeMode.editId) {
-      const id = recipeMode.editId;
-      setStore(s => ({ ...s, foodRecipes: (s.foodRecipes || []).map(r => r.id === id ? { ...r, name: recipeMode.name, items, updatedAt: now } : r) }));
-    } else {
-      setStore(s => ({ ...s, foodRecipes: [{ id: LB.uid(), name: recipeMode.name, items, createdAt: now, updatedAt: now }, ...(s.foodRecipes || [])] }));
-    }
-    setRecipeMode(null);
+    setStore(s => {
+      if (recipeEditorRecipe?.id) {
+        const id = recipeEditorRecipe.id;
+        return { ...s, foodRecipes: (s.foodRecipes || []).map(r => r.id === id ? { ...r, ...draft, updatedAt: now } : r) };
+      }
+      return { ...s, foodRecipes: [{ id: LB.uid(), ...draft, createdAt: now, updatedAt: now }, ...(s.foodRecipes || [])] };
+    });
+    setRecipeEditorOpen(false);
     setTab('quickadd'); setQuickTab('recipes');
   }
   function deleteRecipe(recipe) {
     setStore(s => ({ ...s, foodRecipes: (s.foodRecipes || []).filter(r => r.id !== recipe.id) }));
   }
-  // Recipe items are a fixed jsonb snapshot (zane_food_recipes.items), so an
-  // ingredient added before calories-always-from-macros became the rule
-  // still carries whatever calories it was snapshotted with. Recomputing
-  // from each item's own protein/carbs/fat at every use, not just once at
-  // write time, makes an old recipe self-heal exactly like
-  // reAddFromRecent/editDraftItem already do for a single re-added item,
-  // with no separate migration needed for the jsonb blobs themselves.
-  function recipeItemsCalories(items) {
-    return Math.round((items || []).reduce((a, i) => a + (LB.caloriesFromMacros(i.protein, i.carbs, i.fat) || 0), 0));
-  }
 
-  // Recipes log as ONE entry (the sum of their ingredients), not N, and at a
-  // fixed amount, no scaling: the whole point is "log this exact thing I eat
-  // the same way every time" in a single tap.
-  async function addRecipeToLog(recipe) {
-    if (addingRecipeId) return; // a request for another recipe is already in flight
+  // Opens the add-to-log prompt (see recipeLogPrompt's Sheet further down)
+  // instead of logging straight away: a single-portion recipe still just
+  // gets a plain yes/no, but one with more than one portion needs to ask
+  // how many to log, so there's no way to always commit instantly here.
+  function addRecipeToLog(recipe) {
+    if (!(recipe.items || []).length) return;
+    setRecipeLogPrompt({ recipe, chosenPortions: 1 });
+  }
+  async function confirmRecipeLog() {
+    const { recipe, chosenPortions } = recipeLogPrompt;
     const items = recipe.items || [];
-    if (!items.length) return;
+    const totalPortions = recipe.portions || 1;
+    const scale = chosenPortions / totalPortions;
     setAddingRecipeId(recipe.id);
     try {
       const sum = k => items.reduce((a, i) => a + (i[k] || 0), 0);
       const entry = {
         id: LB.uid(), date: curDate, time: entryTime(),
-        foodId: null, foodName: recipe.name, brand: null, source: 'recipe',
-        quantityG: Math.round(sum('quantityG')), calories: recipeItemsCalories(items),
-        protein: fdRound1(sum('protein')), carbs: fdRound1(sum('carbs')), fat: fdRound1(sum('fat')),
-        fiber: items.some(i => i.fiber != null) ? fdRound1(sum('fiber')) : null,
+        foodId: null, foodName: totalPortions > 1 ? `${recipe.name} (${chosenPortions}/${totalPortions})` : recipe.name, brand: null, source: 'recipe',
+        quantityG: Math.round(sum('quantityG') * scale), calories: Math.round(fdRecipeItemsCalories(items) * scale),
+        protein: fdRound1(sum('protein') * scale), carbs: fdRound1(sum('carbs') * scale), fat: fdRound1(sum('fat') * scale),
+        fiber: items.some(i => i.fiber != null) ? fdRound1(sum('fiber') * scale) : null,
         createdAt: new Date().toISOString(),
       };
       const ok = await commitEntry(entry);
       if (ok) {
+        setRecipeLogPrompt(null);
         setRecipeJustAddedId(recipe.id);
         setTimeout(() => setRecipeJustAddedId(id => id === recipe.id ? null : id), 2000);
       }
@@ -1020,15 +948,9 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     }
   }
 
-  const recipeDraftTotals = useMemoFd(() => {
-    if (!recipeMode) return { calories: 0, protein: 0, carbs: 0, fat: 0 };
-    const sum = k => recipeMode.items.reduce((a, i) => a + (i[k] || 0), 0);
-    return { calories: recipeItemsCalories(recipeMode.items), protein: Math.round(sum('protein')), carbs: Math.round(sum('carbs')), fat: Math.round(sum('fat')) };
-  }, [recipeMode]);
-
   // Shown on both add-a-food tabs (Search and Quick Add) whenever a timeline
   // hour is pending, so the target time is always visible and cancelable.
-  const pendingHourBanner = pendingHour != null && !recipeMode ? (
+  const pendingHourBanner = pendingHour != null ? (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 12px', background: 'rgba(var(--accent-rgb),0.1)', border: `1px solid rgba(var(--accent-rgb),0.3)`, borderRadius: 6 }}>
       <i className="fa-solid fa-clock" style={{ fontSize: 12, color: 'var(--accent)' }} />
       <span style={{ flex: 1, fontSize: 12, color: UI.ink, fontFamily: UI.fontUi }}>Logging at {String(pendingHour).padStart(2, '0')}:00</span>
@@ -1041,7 +963,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       {confirmEl}
       <TopBar title="Food" sub={dayLabel} onBack={() => go({ name: 'health' })}
         right={
-          tab === 'quickadd' && quickTab === 'recipes' && !recipeMode && (store.foodRecipes || []).length > 0 ? (
+          tab === 'quickadd' && quickTab === 'recipes' && (store.foodRecipes || []).length > 0 ? (
             <button onClick={openNewRecipe} aria-label="New recipe" style={fdTopAddBtn}>
               <i className="fa-solid fa-plus" style={{ fontSize: 14 }} />
             </button>
@@ -1053,47 +975,6 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         } />
 
       <SubTabBar tabs={FD_TABS} active={tab} onChange={onTabChange} />
-
-      {recipeMode && (
-        <div style={fdRecipeBanner}>
-          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: recipeMode.items.length ? 8 : 6 }}>
-            <button onClick={openRenameRecipe} style={{ flex: 1, minWidth: 0, background: 'none', border: 'none', padding: 0, textAlign: 'left', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
-              <div className="micro" style={{ color: UI.inkFaint }}>{recipeMode.editId ? 'Editing recipe' : 'New recipe'}</div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-                <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--accent)', fontFamily: UI.fontUi, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{recipeMode.name}</span>
-                <i className="fa-solid fa-pen" style={{ fontSize: 9, color: UI.inkFaint, flexShrink: 0 }} />
-              </div>
-            </button>
-            <button onClick={cancelRecipe} style={fdBannerBtn}>Cancel</button>
-            <button onClick={saveRecipe} disabled={!recipeMode.items.length} style={{ ...fdBannerBtn, color: recipeMode.items.length ? 'var(--accent)' : UI.inkGhost, fontWeight: 700 }}>{recipeMode.editId ? 'Save' : 'Done'}</button>
-          </div>
-          {recipeMode.items.length > 0 ? (
-            <>
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: 14, marginBottom: 10 }}>
-                <span className="num" style={{ fontSize: 20, fontWeight: 300, color: UI.ink }}>{recipeDraftTotals.calories}<span style={{ fontSize: 10, color: UI.inkFaint, marginLeft: 3 }}>kcal</span></span>
-                <span className="num" style={{ fontSize: 12, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 9 }}>P</span> {recipeDraftTotals.protein}</span>
-                <span className="num" style={{ fontSize: 12, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 9 }}>C</span> {recipeDraftTotals.carbs}</span>
-                <span className="num" style={{ fontSize: 12, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 9 }}>F</span> {recipeDraftTotals.fat}</span>
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 2, maxHeight: 168, overflowY: 'auto' }}>
-                {recipeMode.items.map(i => (
-                  <div key={i.id} style={fdDraftRow}>
-                    <button onClick={() => editDraftItem(i)} style={fdDraftMain}>
-                      <span style={{ ...fdEntryName, fontSize: 12 }}>{i.foodName}</span>
-                      <span style={fdEntryMeta}>{i.quantityG}g · {Math.round(LB.caloriesFromMacros(i.protein, i.carbs, i.fat) || 0)} kcal · P{Math.round(i.protein)} C{Math.round(i.carbs)} F{Math.round(i.fat)}</span>
-                    </button>
-                    <button onClick={() => removeRecipeDraftItem(i.id)} aria-label="Remove" style={fdInlineDeleteBtn}>
-                      <i className="fa-solid fa-trash" style={{ fontSize: 11 }} />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </>
-          ) : (
-            <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1.4 }}>Search below and add ingredients with their usual amounts, then Done.</div>
-          )}
-        </div>
-      )}
 
       <div style={{ padding: '14px 22px calc(env(safe-area-inset-bottom, 8px) + 24px)', display: 'flex', flexDirection: 'column', gap: 16 }}>
 
@@ -1358,7 +1239,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                     {recipesFiltered.map(r => {
                       const items = r.items || [];
-                      const kcal = recipeItemsCalories(items);
+                      const kcal = fdRecipeItemsCalories(items);
                       const justAdded = recipeJustAddedId === r.id;
                       return (
                         <div key={r.id} style={fdQuickRowWrap}>
@@ -1459,15 +1340,13 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                 </span>
               </div>
             )}
-            {!recipeMode && (
-              <button onClick={() => toggleFavorite(buildQtyEntry())} disabled={!qtyPreview || qtyNameMissing} style={fdFavBtn(!!favedId, !qtyPreview || qtyNameMissing)}>
-                <i className={`fa-${favedId ? 'solid' : 'regular'} fa-star`} style={{ fontSize: 14, color: favedId ? UI.gold : UI.inkSoft }} />
-                {favedId ? 'Saved to favorites' : 'Save as favorite'}
-              </button>
-            )}
+            <button onClick={() => toggleFavorite(buildQtyEntry())} disabled={!qtyPreview || qtyNameMissing} style={fdFavBtn(!!favedId, !qtyPreview || qtyNameMissing)}>
+              <i className={`fa-${favedId ? 'solid' : 'regular'} fa-star`} style={{ fontSize: 14, color: favedId ? UI.gold : UI.inkSoft }} />
+              {favedId ? 'Saved to favorites' : 'Save as favorite'}
+            </button>
             <div style={{ display: 'flex', gap: 8 }}>
               <Btn kind="ghost" onClick={closeQtySheet} style={{ flex: 1 }}>Cancel</Btn>
-              <Btn onClick={confirmLogFood} disabled={!qtyPreview || qtyNameMissing} style={{ flex: 2 }}>{recipeMode ? (editingDraftId ? 'Update ingredient' : 'Add ingredient') : 'Add'}</Btn>
+              <Btn onClick={confirmLogFood} disabled={!qtyPreview || qtyNameMissing} style={{ flex: 2 }}>Add</Btn>
             </div>
           </>
         )}
@@ -1500,31 +1379,13 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         <Field label="Fiber (g, optional)" style={{ marginBottom: 16 }}>
           <input value={customFib} onChange={e => setCustomFib(fdDecimalFilter(e.target.value))} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
         </Field>
-        {!recipeMode && (
-          <button onClick={() => toggleFavorite(buildCustomEntry())} disabled={!customValid} style={fdFavBtn(!!favedId, !customValid)}>
-            <i className={`fa-${favedId ? 'solid' : 'regular'} fa-star`} style={{ fontSize: 14, color: favedId ? UI.gold : UI.inkSoft }} />
-            {favedId ? 'Saved to favorites' : 'Save as favorite'}
-          </button>
-        )}
+        <button onClick={() => toggleFavorite(buildCustomEntry())} disabled={!customValid} style={fdFavBtn(!!favedId, !customValid)}>
+          <i className={`fa-${favedId ? 'solid' : 'regular'} fa-star`} style={{ fontSize: 14, color: favedId ? UI.gold : UI.inkSoft }} />
+          {favedId ? 'Saved to favorites' : 'Save as favorite'}
+        </button>
         <div style={{ display: 'flex', gap: 8 }}>
           <Btn kind="ghost" onClick={closeCustomSheet} style={{ flex: 1 }}>Cancel</Btn>
-          <Btn onClick={submitCustomItem} disabled={!customValid} style={{ flex: 2 }}>{recipeMode ? (editingDraftId ? 'Update ingredient' : 'Add ingredient') : 'Add'}</Btn>
-        </div>
-      </Sheet>
-
-      {/* ── Recipe name sheet (new + rename) ── */}
-      <Sheet open={recipeNameOpen} onClose={() => setRecipeNameOpen(false)} title={recipeNameMode === 'rename' ? 'Rename recipe' : 'New recipe'} titleColor="var(--accent)">
-        <Field label="Name" style={{ marginBottom: 16 }}>
-          <TextInput value={recipeNameInput} onChange={setRecipeNameInput} placeholder="e.g. Breakfast bowl" autoFocus />
-        </Field>
-        {recipeNameMode === 'new' && (
-          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: 1.5 }}>
-            Next you'll search and add each ingredient with its usual amount. Once saved, the whole recipe logs in one tap.
-          </div>
-        )}
-        <div style={{ display: 'flex', gap: 8 }}>
-          <Btn kind="ghost" onClick={() => setRecipeNameOpen(false)} style={{ flex: 1 }}>Cancel</Btn>
-          <Btn onClick={confirmRecipeName} disabled={!recipeNameInput.trim()} style={{ flex: 2 }}>{recipeNameMode === 'rename' ? 'Save name' : 'Start adding ingredients'}</Btn>
+          <Btn onClick={submitCustomItem} disabled={!customValid} style={{ flex: 2 }}>Add</Btn>
         </div>
       </Sheet>
 
@@ -1617,7 +1478,489 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       <input ref={labelInputRef} type="file" accept="image/*" capture="environment" onChange={handleLabelFile} style={{ display: 'none' }} />
       {labelScanning && <FdLabelBusy />}
       {scanOpen && <FdScanner onClose={() => setScanOpen(false)} onDetect={handleScan} />}
+
+      {/* ── Add a recipe to today's (or curDate's) log: a plain yes/no for a
+          single-portion recipe, a portions stepper for one with more. ── */}
+      <Sheet open={!!recipeLogPrompt} onClose={() => setRecipeLogPrompt(null)} title={recipeLogPrompt?.recipe?.name || 'Add recipe'} titleColor="var(--accent)">
+        {recipeLogPrompt && (
+          (recipeLogPrompt.recipe.portions || 1) <= 1 ? (
+            <>
+              <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: 1.4 }}>
+                Add {recipeLogPrompt.recipe.name} at {entryTime()}?
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <Btn kind="ghost" onClick={() => setRecipeLogPrompt(null)} style={{ flex: 1 }}>No</Btn>
+                <Btn onClick={confirmRecipeLog} disabled={addingRecipeId === recipeLogPrompt.recipe.id} style={{ flex: 1 }}>Yes</Btn>
+              </div>
+            </>
+          ) : (
+            <>
+              <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: 1.4 }}>
+                Add {recipeLogPrompt.recipe.name}, how many of its {recipeLogPrompt.recipe.portions} portions, at {entryTime()}?
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 20 }}>
+                <Stepper value={recipeLogPrompt.chosenPortions} step={1} min={1}
+                  onChange={v => setRecipeLogPrompt(p => p ? { ...p, chosenPortions: Math.min(p.recipe.portions, Math.max(1, Math.round(v))) } : p)} big />
+              </div>
+              <Btn onClick={confirmRecipeLog} disabled={addingRecipeId === recipeLogPrompt.recipe.id} style={{ width: '100%' }}>
+                Add {recipeLogPrompt.recipe.name} · {recipeLogPrompt.chosenPortions} portion{recipeLogPrompt.chosenPortions === 1 ? '' : 's'}
+              </Btn>
+            </>
+          )
+        )}
+      </Sheet>
+
+      <RecipeEditorScreen open={recipeEditorOpen} onClose={() => setRecipeEditorOpen(false)} onSave={handleRecipeSave} recipe={recipeEditorRecipe} store={store} />
     </Screen>
+  );
+}
+
+// Recipe items are a fixed jsonb snapshot (zane_food_recipes.items), so an
+// ingredient added before calories-always-from-macros became the rule still
+// carries whatever calories it was snapshotted with. Recomputing from each
+// item's own protein/carbs/fat at every use, not just once at write time,
+// makes an old recipe self-heal exactly like reAddFromRecent already does
+// for a single re-added item, with no separate migration needed for the
+// jsonb blobs themselves. Shared by FoodScreen (recipe rows, add-to-log) and
+// RecipeEditorScreen (the batch hero).
+function fdRecipeItemsCalories(items) {
+  return Math.round((items || []).reduce((a, i) => a + (LB.caloriesFromMacros(i.protein, i.carbs, i.fat) || 0), 0));
+}
+
+// Recipe editor: a dedicated full page (same "full page, not a Sheet" idiom
+// screens-health.jsx's DailyLogScreen uses), not an in-place FoodScreen mode.
+// Owns its own draft (name/items/portions) entirely locally; onSave only ever
+// receives the finished shape once the user actually confirms saving.
+// `recipe` is the recipe being edited, null while creating a new one.
+function RecipeEditorScreen({ open, onClose, onSave, recipe, store }) {
+  const [confirmEl, confirm] = useConfirm();
+  const [name, setName] = useStateFd('');
+  const [items, setItems] = useStateFd([]);
+  const [portions, setPortions] = useStateFd(1);
+  const [pickerOpen, setPickerOpen] = useStateFd(false);
+  const [editItem, setEditItem] = useStateFd(null);
+  const [editGrams, setEditGrams] = useStateFd('');
+  // Snapshot of the draft as it was opened, to detect unsaved edits on close.
+  const initialSnap = useRefFd(null);
+
+  useEffectFd(() => {
+    if (!open) return;
+    const n = recipe?.name || '';
+    const it = recipe?.items || [];
+    const p = recipe?.portions || 1;
+    setName(n); setItems(it); setPortions(p);
+    initialSnap.current = JSON.stringify({ name: n, items: it, portions: p });
+  }, [open, recipe]);
+
+  // Batch totals, the whole recipe as cooked, independent of portions:
+  // portions is purely metadata for how a batch splits up when logging it
+  // later (see FoodScreen's addRecipeToLog/confirmRecipeLog), not a divisor
+  // applied here.
+  const totals = useMemoFd(() => ({
+    calories: fdRecipeItemsCalories(items),
+    protein: fdRound1(items.reduce((a, i) => a + (i.protein || 0), 0)),
+    carbs: fdRound1(items.reduce((a, i) => a + (i.carbs || 0), 0)),
+    fat: fdRound1(items.reduce((a, i) => a + (i.fat || 0), 0)),
+  }), [items]);
+
+  const isDirty = () => initialSnap.current != null && JSON.stringify({ name, items, portions }) !== initialSnap.current;
+  const requestClose = async () => {
+    if (isDirty() && !await confirm("Your changes to this recipe won't be saved.", { title: 'Discard changes?', ok: 'Discard', cancel: 'Keep editing', danger: true })) return;
+    onClose();
+  };
+
+  function addItem(item) {
+    setItems(list => [...list, { id: LB.uid(), ...item }]);
+  }
+  function removeItem(id) {
+    setItems(list => list.filter(i => i.id !== id));
+  }
+  function openEditItem(item) { setEditItem(item); setEditGrams(String(item.quantityG ?? '')); }
+  function closeEditItem() { setEditItem(null); setEditGrams(''); }
+  // Rescales every field on the item by the same factor (newGrams/oldGrams)
+  // rather than re-deriving per-100g rates: mathematically identical, one
+  // fewer intermediate step.
+  function saveEditItem() {
+    const g = fdNum(editGrams);
+    if (!editItem || !(g > 0) || !(editItem.quantityG > 0)) return;
+    const factor = g / editItem.quantityG;
+    setItems(list => list.map(i => i.id !== editItem.id ? i : {
+      ...i, quantityG: Math.round(g),
+      calories: Math.round((i.calories || 0) * factor),
+      protein: fdRound1((i.protein || 0) * factor),
+      carbs: fdRound1((i.carbs || 0) * factor),
+      fat: fdRound1((i.fat || 0) * factor),
+      fiber: i.fiber != null ? fdRound1(i.fiber * factor) : null,
+    }));
+    closeEditItem();
+  }
+  async function removeEditItem() {
+    if (!editItem) return;
+    const ok = await confirm(`${editItem.foodName} · ${editItem.quantityG}g`, { title: 'Remove ingredient?', ok: 'Remove', cancel: 'Cancel', danger: true });
+    if (!ok) return;
+    removeItem(editItem.id);
+    closeEditItem();
+  }
+
+  async function requestSave() {
+    const trimmed = name.trim();
+    if (!trimmed || !items.length) return;
+    const ok = await confirm(<RecipeSaveRecap name={trimmed} portions={portions} totals={totals} />,
+      { title: recipe ? 'Save recipe?' : 'Add recipe?', ok: recipe ? 'Save' : 'Add' });
+    if (!ok) return;
+    onSave({ name: trimmed, items, portions });
+  }
+  const canSave = !!(name.trim() && items.length);
+
+  if (!open) return null;
+  return (
+    <Screen style={{ position: 'fixed', inset: 0, zIndex: 100, animation: 'sheet-up 0.22s ease' }}>
+      <TopBar title={recipe ? 'Edit Recipe' : 'New Recipe'} onBack={requestClose}
+        right={
+          <div style={{ display: 'flex', gap: 8 }}>
+            {items.length > 0 && (
+              <button onClick={() => setPickerOpen(true)} aria-label="Add ingredients" style={fdTopAddBtn}>
+                <i className="fa-solid fa-plus" style={{ fontSize: 14 }} />
+              </button>
+            )}
+            <button onClick={requestSave} disabled={!canSave} aria-label="Save recipe" style={{ ...fdTopAddBtn, opacity: canSave ? 1 : 0.4 }}>
+              <i className="fa-solid fa-check" style={{ fontSize: 14 }} />
+            </button>
+          </div>
+        } />
+      <div style={{ padding: '14px 22px calc(env(safe-area-inset-bottom, 8px) + 24px)', display: 'flex', flexDirection: 'column', gap: 16 }}>
+        {confirmEl}
+        <Field label="Name">
+          <TextInput value={name} onChange={setName} placeholder="e.g. Breakfast bowl" />
+        </Field>
+
+        <BracketFrame gold style={{ padding: 20 }}>
+          <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>Whole batch</div>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+            <span className="num" style={{ fontSize: 40, fontWeight: 300, color: UI.ink, lineHeight: 1 }}>{totals.calories}</span>
+            <span style={{ fontSize: 15, color: UI.inkFaint, fontFamily: UI.fontUi }}>kcal</span>
+          </div>
+          <div style={{ display: 'flex', gap: 14, marginTop: 12 }}>
+            <span className="num" style={{ fontSize: 12, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 10 }}>P</span> {totals.protein}g</span>
+            <span className="num" style={{ fontSize: 12, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 10 }}>C</span> {totals.carbs}g</span>
+            <span className="num" style={{ fontSize: 12, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 10 }}>F</span> {totals.fat}g</span>
+          </div>
+        </BracketFrame>
+
+        <div>
+          <div className="micro" style={{ color: UI.inkFaint, marginBottom: 10, textAlign: 'center' }}>Portions</div>
+          <div style={{ display: 'flex', justifyContent: 'center' }}>
+            <Stepper value={portions} step={1} min={1} onChange={v => setPortions(Math.max(1, Math.round(v)))} big />
+          </div>
+        </div>
+
+        <div>
+          <Bezel style={{ marginBottom: 10 }}>Ingredients</Bezel>
+          {items.length === 0 ? (
+            <Btn onClick={() => setPickerOpen(true)} style={{ width: '100%' }}>
+              <i className="fa-solid fa-plus" style={{ marginRight: 8 }} /> Add ingredients
+            </Btn>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              {items.map(i => (
+                <div key={i.id} style={fdDraftRow}>
+                  <button onClick={() => openEditItem(i)} style={fdDraftMain}>
+                    <span style={{ ...fdEntryName, fontSize: 12 }}>{i.foodName}</span>
+                    <span style={fdEntryMeta}>{i.quantityG}g · {Math.round(LB.caloriesFromMacros(i.protein, i.carbs, i.fat) || 0)} kcal · P{Math.round(i.protein)} C{Math.round(i.carbs)} F{Math.round(i.fat)}</span>
+                  </button>
+                  <button onClick={() => removeItem(i.id)} aria-label="Remove" style={fdInlineDeleteBtn}>
+                    <i className="fa-solid fa-trash" style={{ fontSize: 11 }} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ── Edit an already-added ingredient's amount, rescaling its macros
+          proportionally ── */}
+      <Sheet open={!!editItem} onClose={closeEditItem} title={editItem?.foodName || 'Ingredient'} titleColor="var(--accent)">
+        <Field label="Amount (g)" style={{ marginBottom: 16 }}>
+          <input value={editGrams} onChange={e => setEditGrams(fdDecimalFilter(e.target.value))} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} autoFocus />
+        </Field>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={removeEditItem} aria-label="Remove ingredient" style={{ ...fdSideBtn, width: 44, flexShrink: 0 }}>
+            <i className="fa-solid fa-trash" style={{ fontSize: 13 }} />
+          </button>
+          <Btn kind="ghost" onClick={closeEditItem} style={{ flex: 1 }}>Cancel</Btn>
+          <Btn onClick={saveEditItem} disabled={!(fdNum(editGrams) > 0)} style={{ flex: 2 }}>Save</Btn>
+        </div>
+      </Sheet>
+
+      <FdIngredientPicker open={pickerOpen} onClose={() => setPickerOpen(false)} onAdd={addItem} store={store} />
+    </Screen>
+  );
+}
+
+// Presentational body for RecipeEditorScreen's save confirm dialog
+// (useConfirm's message accepts any React node, not just a string).
+function RecipeSaveRecap({ name, portions, totals }) {
+  return (
+    <div style={{ textAlign: 'left' }}>
+      <div style={{ fontSize: 14, fontWeight: 700, color: UI.ink, fontFamily: UI.fontUi, marginBottom: 4 }}>{name}</div>
+      <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 10 }}>{portions} portion{portions === 1 ? '' : 's'}</div>
+      <div style={{ display: 'flex', gap: 14 }}>
+        <span className="num" style={{ fontSize: 16, color: UI.ink }}>{totals.calories}<span style={{ fontSize: 10, color: UI.inkFaint, marginLeft: 3 }}>kcal</span></span>
+        <span className="num" style={{ fontSize: 13, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 10 }}>P</span> {totals.protein}</span>
+        <span className="num" style={{ fontSize: 13, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 10 }}>C</span> {totals.carbs}</span>
+        <span className="num" style={{ fontSize: 13, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 10 }}>F</span> {totals.fat}</span>
+      </div>
+    </div>
+  );
+}
+
+const FD_PICKER_TABS = [
+  { id: 'search', label: 'Search' },
+  { id: 'favorites', label: 'Favorites' },
+  { id: 'recent', label: 'Recent' },
+];
+
+// Multi-select ingredient picker for the recipe editor: Search/Favorites/
+// Recent each add straight into the recipe (via onAdd) at a default quantity
+// that's immediately editable back in RecipeEditorScreen's ingredient list,
+// no separate per-item confirm step here, quantity is set directly in the
+// multi-pick as the user asked for. Picking the same food twice just adds a
+// second row, recipes have no dedup rule (e.g. "2 eggs" logged as two
+// separate 1-egg picks is fine).
+function FdIngredientPicker({ open, onClose, onAdd, store }) {
+  const [pickTab, setPickTab] = useStateFd('search');
+  const [query, setQuery] = useStateFd('');
+  const [searching, setSearching] = useStateFd(false);
+  const [searchError, setSearchError] = useStateFd(null);
+  const [results, setResults] = useStateFd(null);
+  const [manualOpen, setManualOpen] = useStateFd(false);
+  const [mName, setMName] = useStateFd('');
+  const [mG, setMG] = useStateFd('');
+  const [mP, setMP] = useStateFd('');
+  const [mC, setMC] = useStateFd('');
+  const [mF, setMF] = useStateFd('');
+  const [mFib, setMFib] = useStateFd('');
+  const [mCal, setMCal] = useStateFd('');
+  const [mCalTouched, setMCalTouched] = useStateFd(false);
+
+  useEffectFd(() => {
+    if (!open) return;
+    setPickTab('search'); setQuery(''); setResults(null); setSearchError(null);
+    setManualOpen(false);
+    setMName(''); setMG(''); setMP(''); setMC(''); setMF(''); setMFib(''); setMCal(''); setMCalTouched(false);
+  }, [open]);
+
+  // Same auto-derive-unless-touched rule as the Custom Item sheet's own
+  // calorie field (customCal in FoodScreen).
+  useEffectFd(() => {
+    if (mCalTouched) return;
+    const p = fdNum(mP), c = fdNum(mC), f = fdNum(mF);
+    const netCarbs = !!store.settings?.netCarbs;
+    const raw = LB.caloriesFromMacros(p, c, f, netCarbs ? fdNum(mFib) : null);
+    setMCal(raw != null ? String(Math.round(raw)) : '');
+  }, [mP, mC, mF, mFib, mCalTouched, store.settings?.netCarbs]);
+  function onMCalChange(v) {
+    const filtered = fdDecimalFilter(v);
+    setMCalTouched(filtered !== '');
+    setMCal(filtered);
+  }
+
+  async function runPickerSearch() {
+    const q = query.trim();
+    if (!q || searching) return;
+    setSearching(true); setSearchError(null);
+    const res = await LB.searchFoods(q, null);
+    setSearching(false);
+    if (!res.ok) { setSearchError(res.error || 'Search failed. Try again.'); setResults([]); return; }
+    setResults(res.results);
+  }
+
+  // A DB result carries per-100g rates; scale to the default quantity
+  // (its stated serving, else 100g) the same way pickResult/buildQtyEntry
+  // do in FoodScreen. Only caches a not-yet-cached result, same rule
+  // confirmLogFood/toggleFavorite use elsewhere: a recipe is as durable a
+  // record as a favorite, so it caches immediately rather than waiting on
+  // FoodScreen's own log-time cache trigger (which never runs for these).
+  function addFromSearch(r) {
+    const g = r.servingSizeG ? Math.round(r.servingSizeG) : 100;
+    const factor = g / 100;
+    onAdd({
+      foodId: `${r.source}:${r.sourceId}`, foodName: r.name, brand: r.brand || null, source: r.source,
+      quantityG: g,
+      calories: Math.round((r.kcalPer100g || 0) * factor),
+      protein: fdRound1((r.proteinPer100g || 0) * factor),
+      carbs: fdRound1((r.carbsPer100g || 0) * factor),
+      fat: fdRound1((r.fatPer100g || 0) * factor),
+      fiber: r.fiberPer100g != null ? fdRound1(r.fiberPer100g * factor) : null,
+    });
+    if (!r.cached) LB.cacheFood(r.source, r.sourceId);
+  }
+  // A favorite or a past log entry already carries scaled, ready-to-use
+  // macros (and is already cached, if it's a DB food), so it's added as-is.
+  function addFromLog(l) {
+    onAdd({
+      foodId: l.foodId || null, foodName: l.foodName, brand: l.brand || null, source: l.source,
+      quantityG: l.quantityG, calories: l.calories, protein: l.protein, carbs: l.carbs, fat: l.fat, fiber: l.fiber,
+    });
+  }
+
+  const recentPicks = useMemoFd(() => {
+    const seen = new Set(); const out = [];
+    for (const l of (store.foodLogs || [])) {
+      const key = l.foodId || `custom:${l.foodName}`;
+      if (seen.has(key)) continue;
+      seen.add(key); out.push(l);
+      if (out.length >= 20) break;
+    }
+    return out;
+  }, [store.foodLogs]);
+
+  const manualValid = mName.trim() && fdNum(mP) != null && fdNum(mC) != null && fdNum(mF) != null && fdNum(mCal) != null;
+  function submitManual() {
+    if (!manualValid) return;
+    onAdd({
+      foodId: null, foodName: mName.trim(), brand: null, source: 'custom',
+      quantityG: fdNum(mG) || 100, calories: Math.round(fdNum(mCal)), protein: fdNum(mP), carbs: fdNum(mC), fat: fdNum(mF),
+      fiber: mFib !== '' ? fdNum(mFib) : null,
+    });
+    setManualOpen(false);
+    setMName(''); setMG(''); setMP(''); setMC(''); setMF(''); setMFib(''); setMCal(''); setMCalTouched(false);
+  }
+
+  return (
+    <Sheet open={open} onClose={onClose} title="Add ingredients" titleColor="var(--accent)">
+      <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `1px solid ${UI.hairStrong}`, marginBottom: 12 }}>
+        {FD_PICKER_TABS.map(t => (
+          <button key={t.id} onClick={() => setPickTab(t.id)} style={fdSegBtn(pickTab === t.id)}>{t.label}</button>
+        ))}
+      </div>
+
+      {pickTab === 'search' && (
+        <>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+            <div style={{ position: 'relative', width: '100%' }}>
+              <input value={query} onChange={e => setQuery(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') runPickerSearch(); }}
+                type="text" placeholder="Search food" style={{ ...fdInputStyle, paddingRight: 32 }} />
+              {query && (
+                <button onClick={() => { setQuery(''); setResults(null); setSearchError(null); }} aria-label="Clear search" style={fdClearBtn}>
+                  <i className="fa-solid fa-circle-xmark" style={{ fontSize: 15 }} />
+                </button>
+              )}
+            </div>
+            <button onClick={runPickerSearch} disabled={searching || !query.trim()} aria-label="Search" style={fdSearchBtn}>
+              {searching ? <span style={{ fontFamily: UI.fontUi, fontSize: 11 }}>…</span> : <i className="fa-solid fa-magnifying-glass" style={{ fontSize: 13 }} />}
+            </button>
+          </div>
+          {searchError && <div style={{ fontSize: 11, color: UI.danger, fontFamily: UI.fontUi, marginBottom: 10 }}>{searchError}</div>}
+          {results != null && (
+            results.length === 0 ? (
+              <div style={fdEmptyStyle}>No matches. Try a different search.</div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 10, maxHeight: 280, overflowY: 'auto' }}>
+                {results.map(r => (
+                  <button key={`${r.source}:${r.sourceId}`} onClick={() => addFromSearch(r)} style={fdResultRow}>
+                    <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
+                      <div style={fdEntryName}>{r.name}</div>
+                      {r.brand && <div style={fdEntryMeta}>{r.brand}</div>}
+                    </div>
+                    <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                      <div className="num" style={{ fontSize: 12, color: UI.inkSoft }}>{r.kcalPer100g != null ? Math.round(r.kcalPer100g) : '—'} kcal</div>
+                      <div style={fdEntryMeta}>/100g</div>
+                    </div>
+                    <i className="fa-solid fa-plus" style={{ fontSize: 12, color: 'var(--accent)', flexShrink: 0 }} />
+                  </button>
+                ))}
+              </div>
+            )
+          )}
+          {!manualOpen ? (
+            <button onClick={() => setManualOpen(true)} style={{ ...fdActionCard, width: '100%' }}>
+              <i className="fa-solid fa-keyboard" style={{ fontSize: 14 }} />
+              <span>Add manually</span>
+            </button>
+          ) : (
+            <div style={{ borderTop: `1px solid ${UI.hair}`, paddingTop: 14, marginTop: 4 }}>
+              <Field label="Name" style={{ marginBottom: 10 }}>
+                <TextInput value={mName} onChange={setMName} placeholder="e.g. Homemade sauce" autoFocus />
+              </Field>
+              <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+                <Field label="Amount (g)" style={{ flex: 1 }}>
+                  <input value={mG} onChange={e => setMG(fdDecimalFilter(e.target.value))} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
+                </Field>
+                <Field label="Calories (kcal)" style={{ flex: 1 }}>
+                  <input value={mCal} onChange={e => onMCalChange(e.target.value)} type="text" inputMode="decimal" placeholder="kcal" style={fdInputStyle} />
+                </Field>
+              </div>
+              <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+                <Field label="Protein (g)" style={{ flex: 1 }}>
+                  <input value={mP} onChange={e => setMP(fdDecimalFilter(e.target.value))} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
+                </Field>
+                <Field label="Carbs (g)" style={{ flex: 1 }}>
+                  <input value={mC} onChange={e => setMC(fdDecimalFilter(e.target.value))} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
+                </Field>
+                <Field label="Fat (g)" style={{ flex: 1 }}>
+                  <input value={mF} onChange={e => setMF(fdDecimalFilter(e.target.value))} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
+                </Field>
+              </div>
+              <Field label="Fiber (g, optional)" style={{ marginBottom: 14 }}>
+                <input value={mFib} onChange={e => setMFib(fdDecimalFilter(e.target.value))} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
+              </Field>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <Btn kind="ghost" onClick={() => setManualOpen(false)} style={{ flex: 1 }}>Cancel</Btn>
+                <Btn onClick={submitManual} disabled={!manualValid} style={{ flex: 2 }}>Add ingredient</Btn>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
+      {pickTab === 'favorites' && (
+        (store.foodFavorites || []).length === 0 ? (
+          <div style={fdEmptyStyle}>No favorites yet.</div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 360, overflowY: 'auto' }}>
+            {store.foodFavorites.map(f => (
+              <button key={f.id} onClick={() => addFromLog(f)} style={fdResultRow}>
+                <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
+                  <div style={fdEntryName}>{f.foodName}</div>
+                  {f.brand && <div style={fdEntryMeta}>{f.brand}</div>}
+                </div>
+                <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                  <div className="num" style={{ fontSize: 12, color: UI.inkSoft }}>{f.calories} kcal</div>
+                  <div style={fdEntryMeta}>{f.quantityG}g</div>
+                </div>
+                <i className="fa-solid fa-plus" style={{ fontSize: 12, color: 'var(--accent)', flexShrink: 0 }} />
+              </button>
+            ))}
+          </div>
+        )
+      )}
+
+      {pickTab === 'recent' && (
+        recentPicks.length === 0 ? (
+          <div style={fdEmptyStyle}>Nothing logged yet.</div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 360, overflowY: 'auto' }}>
+            {recentPicks.map(l => (
+              <button key={l.id} onClick={() => addFromLog(l)} style={fdResultRow}>
+                <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
+                  <div style={fdEntryName}>{l.foodName}</div>
+                  {l.brand && <div style={fdEntryMeta}>{l.brand}</div>}
+                </div>
+                <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                  <div className="num" style={{ fontSize: 12, color: UI.inkSoft }}>{l.calories} kcal</div>
+                  <div style={fdEntryMeta}>{l.quantityG}g</div>
+                </div>
+                <i className="fa-solid fa-plus" style={{ fontSize: 12, color: 'var(--accent)', flexShrink: 0 }} />
+              </button>
+            ))}
+          </div>
+        )
+      )}
+
+      <Btn kind="ghost" onClick={onClose} style={{ width: '100%', marginTop: 14 }}>Done</Btn>
+    </Sheet>
   );
 }
 
@@ -1787,14 +2130,6 @@ function fdCopyMoveCheck(checked) {
     display: 'flex', alignItems: 'center', justifyContent: 'center',
   };
 }
-const fdRecipeBanner = {
-  padding: '12px 22px',
-  background: 'rgba(var(--accent-rgb),0.08)', borderBottom: `1px solid rgba(var(--accent-rgb),0.3)`,
-};
-const fdBannerBtn = {
-  flexShrink: 0, background: 'none', border: 'none', padding: '4px 6px', cursor: 'pointer',
-  color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, WebkitTapHighlightColor: 'transparent',
-};
 const fdInputStyle = {
   background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 4,
   color: UI.ink, fontFamily: UI.fontUi, fontSize: 14, padding: '10px 12px', width: '100%',

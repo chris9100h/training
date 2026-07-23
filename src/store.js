@@ -559,7 +559,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
     prog('Uploading food recipes…');
     await unwrap(_supabase.from('zane_food_recipes').upsert(
       backup.foodRecipes.map(r => ({
-        id: r.id, user_id: userId, name: r.name, items: r.items || [],
+        id: r.id, user_id: userId, name: r.name, items: r.items || [], portions: r.portions || 1,
       }))
     ));
     stepsDone++;
@@ -902,7 +902,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     // 0187), own store only: a coach's read-only client view has no use for
     // another user's personal shortcuts (owner-only RLS, no coach-read policy).
     isCoachLoad ? null : _supabase.from('zane_food_favorites').select('id, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, units, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
-    isCoachLoad ? null : _supabase.from('zane_food_recipes').select('id, name, items, created_at, updated_at').eq('user_id', userId).order('created_at', { ascending: false }),
+    isCoachLoad ? null : _supabase.from('zane_food_recipes').select('id, name, items, portions, created_at, updated_at').eq('user_id', userId).order('created_at', { ascending: false }),
   ];
   const [profileRes, exRes, schRes, sessRes, settRes, skipsRes, entriesRes,
          bestsRes, sessionStatsRes,
@@ -1122,7 +1122,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
       createdAt: f.created_at,
     })),
     foodRecipes: (foodRecipesRes?.data || []).map(r => ({
-      id: r.id, name: r.name, items: r.items || [], createdAt: r.created_at, updatedAt: r.updated_at,
+      id: r.id, name: r.name, items: r.items || [], portions: r.portions || 1, createdAt: r.created_at, updatedAt: r.updated_at,
     })),
     glucoseLogs: (glucoseLogsRes?.data || []).map(l => ({
       id: l.id, date: l.date, time: l.time,
@@ -1647,7 +1647,7 @@ async function syncStore(prev, next, userId) {
     });
     const removed = (prev.foodRecipes || []).filter(r => !(next.foodRecipes || []).find(x => x.id === r.id));
     if (upsert.length) ops.push(_supabase.from('zane_food_recipes').upsert(upsert.map(r => ({
-      id: r.id, user_id: userId, name: r.name, items: r.items || [],
+      id: r.id, user_id: userId, name: r.name, items: r.items || [], portions: r.portions || 1,
     }))));
     if (removed.length) ops.push(_supabase.from('zane_food_recipes').delete().in('id', removed.map(r => r.id)));
   }

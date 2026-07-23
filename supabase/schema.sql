@@ -2327,7 +2327,8 @@ CREATE TABLE zane_food_recipes (
   name        text        NOT NULL,
   items       jsonb       NOT NULL DEFAULT '[]',
   created_at  timestamptz NOT NULL DEFAULT now(),
-  updated_at  timestamptz NOT NULL DEFAULT now()
+  updated_at  timestamptz NOT NULL DEFAULT now(),
+  portions    integer     NOT NULL DEFAULT 1  -- how many servings the batch in `items` splits into
 );
 
 CREATE INDEX zane_food_recipes_user_idx ON public.zane_food_recipes USING btree (user_id, created_at DESC);

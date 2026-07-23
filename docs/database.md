@@ -300,11 +300,11 @@ User-markierte Lieblings-Lebensmittel im Food Tracker ("Quick Add"), gleiches Sh
 
 ### `zane_food_recipes`
 
-Eine benannte Liste von Zutaten, die der User in einem Tap zusammen loggt (z.B. "Breakfast bowl"). `items` ist ein jsonb-Snapshot (kein Kind-Table), gleiches "strukturierter Inhalt als jsonb"-Muster wie z.B. `zane_schedules.days`/`zane_workout_templates.exercises`. Jedes Item ist geformt wie eine `zane_food_logs`-Zeile minus `date`/`time` (`{ foodId, foodName, brand, source, quantityG, calories, protein, carbs, fat, fiber }`). Hinzufügen eines Rezepts summiert alle Items und schreibt **eine** `zane_food_logs`-Zeile mit `source: 'recipe'`, `food_id: null`, keine Skalierung, das Rezept loggt exakt wie gespeichert.
+Eine benannte Liste von Zutaten, die der User zusammen loggt (z.B. "Breakfast bowl"). `items` ist ein jsonb-Snapshot (kein Kind-Table), gleiches "strukturierter Inhalt als jsonb"-Muster wie z.B. `zane_schedules.days`/`zane_workout_templates.exercises`. Jedes Item ist geformt wie eine `zane_food_logs`-Zeile minus `date`/`time` (`{ foodId, foodName, brand, source, quantityG, calories, protein, carbs, fat, fiber }`); Kalorien werden bei jeder Nutzung live aus den gespeicherten Makros neu berechnet (`recipeItemsCalories` in `screens-food.jsx`), nicht aus dem gespeicherten `calories`-Feld gelesen. `items` sind die ganze Batch wie gekocht; `portions` sagt, in wie viele Portionen sie sich aufteilt. Hinzufügen zum Log fragt (Portionen-Stepper bei `portions > 1`, sonst einfache Ja/Nein-Bestätigung) wie viele Portionen geloggt werden, und schreibt **eine** `zane_food_logs`-Zeile mit `source: 'recipe'`, `food_id: null`, Makros auf `(Batch-Summe / portions) * gewählte Portionen` skaliert.
 
-- `id` (text), `user_id` (uuid), `name` (text), `items` (jsonb, Default `[]`), `created_at`/`updated_at` (timestamptz)
+- `id` (text), `user_id` (uuid), `name` (text), `items` (jsonb, Default `[]`), `portions` (integer, Default `1`), `created_at`/`updated_at` (timestamptz)
 - Store field: `store.foodRecipes`. Gleiches Sync-/Merge-Muster wie `zane_food_favorites`.
-- RLS: nur eigene Zeilen, kein Coach-Zugriff. Migration 0187.
+- RLS: nur eigene Zeilen, kein Coach-Zugriff. Migration 0187, `portions` Migration 0190.
 
 ### `zane_cardio_logs`
 
