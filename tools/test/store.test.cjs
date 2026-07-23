@@ -933,7 +933,7 @@ async function testAsync(name, fn) {
     assert.strictEqual(JSON.stringify(LB.clearMesoWeightBoostDeclines(undefined, undefined)), '{}');
   });
 
-  // ── revertMesoSessionBoosts (delete a meso session → drop its orphaned boost) ──
+  // ── revertMesoSessionBoosts (delete a meso session → restore what it overwrote) ──
   const mesoStateWB = { weightBoosts: { tri_d1: 2.5, chest_d1: 5, tri_d2: 2.5 }, repMissCounts: { tri_d1: 1 } };
   const delSess = { id: 'A', dayId: 'd1', ended: '2026-07-15T10:00:00Z', entries: [{ exId: 'tri' }, { exId: 'chest' }] };
   test('revertMesoSessionBoosts: clears the deleted session\'s day keys, leaves other days', () => {
@@ -955,10 +955,58 @@ async function testAsync(name, fn) {
     const later = { id: 'B', dayId: 'd1', ended: '2026-07-16T10:00:00Z', entries: [{ exId: 'tri' }, { exId: 'chest' }] };
     assert.strictEqual(LB.revertMesoSessionBoosts(mesoStateWB, delSess, [later]), mesoStateWB);
   });
-  test('revertMesoSessionBoosts: an OLDER same-day session does not block the rollback', () => {
+  test('revertMesoSessionBoosts: an OLDER same-day session with no recap degrades to a plain clear', () => {
     const older = { id: 'Z', dayId: 'd1', ended: '2026-07-14T10:00:00Z', entries: [{ exId: 'tri' }] };
     const out = LB.revertMesoSessionBoosts(mesoStateWB, delSess, [older]);
-    assert.ok(!('tri_d1' in out.weightBoosts));
+    assert.ok(!('tri_d1' in out.weightBoosts), 'no recap to restore from → same as before this logic existed');
+  });
+  test('revertMesoSessionBoosts: restores the weight boost the prior same-exercise session had earned', () => {
+    // delSess itself currently owns a DIFFERENT value (-2.5, e.g. a cut it applied);
+    // the older session (before delSess) had earned +5 for the same key. Deleting
+    // delSess must bring back the older session's own +5, not just clear to nothing
+    // and not leave delSess's own -2.5 in place.
+    const st = { weightBoosts: { tri_d1: -2.5 }, repMissCounts: {} };
+    const older = {
+      id: 'Z', dayId: 'd1', ended: '2026-07-08T10:00:00Z', entries: [{ exId: 'tri' }],
+      mesoRecap: { gains: [{ name: 'Tri', key: 'tri_d1', weightDelta: 5, setDelta: 0 }] },
+    };
+    const out = LB.revertMesoSessionBoosts(st, delSess, [older]);
+    assert.strictEqual(out.weightBoosts.tri_d1, 5, 'restored to the older session\'s own earned boost');
+  });
+  test('revertMesoSessionBoosts: an older session whose recap has no weightDelta for the key still clears', () => {
+    const st = { weightBoosts: { tri_d1: 2.5 }, repMissCounts: {} };
+    const older = {
+      id: 'Z', dayId: 'd1', ended: '2026-07-08T10:00:00Z', entries: [{ exId: 'tri' }],
+      mesoRecap: { gains: [{ name: 'Tri', key: 'tri_d1', weightDelta: 0, setDelta: 1 }] }, // set-gain only, no boost
+    };
+    const out = LB.revertMesoSessionBoosts(st, delSess, [older]);
+    assert.ok(!('tri_d1' in out.weightBoosts), 'older session earned no boost for this key either → clear');
+  });
+  test('revertMesoSessionBoosts: a same-day session further back is not picked over the nearer one', () => {
+    const st = { weightBoosts: { tri_d1: -2.5 }, repMissCounts: {} };
+    const nearer = {
+      id: 'Y', dayId: 'd1', ended: '2026-07-08T10:00:00Z', entries: [{ exId: 'tri' }],
+      mesoRecap: { gains: [{ key: 'tri_d1', weightDelta: 2.5, setDelta: 0 }] },
+    };
+    const further = {
+      id: 'X', dayId: 'd1', ended: '2026-07-01T10:00:00Z', entries: [{ exId: 'tri' }],
+      mesoRecap: { gains: [{ key: 'tri_d1', weightDelta: 7.5, setDelta: 0 }] },
+    };
+    const out = LB.revertMesoSessionBoosts(st, delSess, [nearer, further]);
+    assert.strictEqual(out.weightBoosts.tri_d1, 2.5, 'restores from the NEAREST earlier session, not an older one further back');
+  });
+  test('revertMesoSessionBoosts: restores repMissCounts from the deleted session\'s own pre-finish snapshot', () => {
+    const st = { weightBoosts: {}, repMissCounts: { tri_d1: 0 } }; // delSess's own finish reset it to 0
+    const sess = {
+      id: 'A', dayId: 'd1', ended: '2026-07-15T10:00:00Z', entries: [{ exId: 'tri' }],
+      mesoRecap: { raw: { repMissBase: { tri_d1: 1 } } }, // pre-finish streak was 1
+    };
+    const out = LB.revertMesoSessionBoosts(st, sess, []);
+    assert.strictEqual(out.repMissCounts.tri_d1, 1, 'restored to the pre-session streak, not dropped to absent');
+  });
+  test('revertMesoSessionBoosts: repMissCounts falls back to a plain clear without a repMissBase snapshot', () => {
+    const out = LB.revertMesoSessionBoosts(mesoStateWB, delSess, []);
+    assert.ok(!('tri_d1' in out.repMissCounts), 'delSess carries no mesoRecap → same as before this logic existed');
   });
   test('revertMesoSessionBoosts: deleting a deload session is a no-op', () => {
     const out = LB.revertMesoSessionBoosts(mesoStateWB, { ...delSess, isDeload: true }, []);

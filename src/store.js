@@ -5022,49 +5022,78 @@ function clearMesoWeightBoostDeclines(prevDeclines, sessionKeys) {
   return changed ? next : (prevDeclines || {});
 }
 
-// Rolling back the meso weight levers when a finished session is DELETED. The
-// weight boost / rep-miss counts a session earned live on in the meso state
-// after the session row is gone, so a re-log (the usual "delete, then log again
-// with feedback" flow) would seed on an older, lower "last actual" weight with
-// that orphaned boost still stacked on top: delete a 55 kg session that earned
-// +2.5 and the next seed becomes 50 + 2.5 = 52.5 instead of building on the 55
-// you actually did. Clear this session's exId_dayId keys from weightBoosts and
-// repMissCounts so the re-log starts clean. Guard: only when the deleted session
-// was the most recent non-deload session of its day, so a boost a LATER session
-// of the same day set (reearnMesoWeightBoosts replaces per session) survives.
-// A deload session earns nothing, so it never needs a rollback. Set-count deltas
-// are intentionally left untouched (a separate, accumulating lever). Returns a
-// new state, or the same object when nothing changed. Pure/testable.
+// Rolling back the meso weight levers when a finished session is DELETED. A
+// weight boost / rep-miss count is a "last write wins" field: every session
+// that trains a key REPLACES it wholesale (reearnMesoWeightBoosts always
+// clears the key first, computeMesoGains does the same for repMissCounts).
+// So the moment the deleted session finished, it already overwrote whatever
+// an EARLIER session for that same exId+day had left behind, boost or not.
+// A rollback that just clears the deleted session's own keys would drop that
+// earlier session's still-live value on the floor instead of bringing it
+// back: delete this week's session and last week's earned +2.5 kg is gone
+// too, not just this week's own outcome, because it was already consumed
+// (replaced) the moment this week's session finished.
+// So per exId+day key the deleted session owned (guard unchanged: not
+// retrained by a LATER same-day session, that key already survived that
+// session's own finish and must stay untouched):
+//   - weightBoosts restores to whatever the most recent EARLIER same-day
+//     session that actually trained that exId had itself recorded (its own
+//     mesoRecap.gains entry for the key), or clears when no such session
+//     exists or it predates mesoRecap tracking (same degrade-to-clear as
+//     before this restore logic existed).
+//   - repMissCounts restores from the deleted session's OWN pre-finish
+//     snapshot (mesoRecap.raw.repMissBase, captured before computeMesoGains
+//     advanced it that session), no history scan needed.
+//   - weightBoostDeclines still just clears: a restored (or cleared) boost
+//     should be offered fresh, not silently suppressed by a decline that
+//     belonged to the deleted session's own evaluation.
+// A deload session earns nothing, so it never needs a rollback, and is
+// excluded from the earlier-session scan too (never a valid key owner). Set-
+// count deltas are intentionally left untouched (a separate, accumulating
+// lever). Returns a new state, or the same object when nothing changed.
+// Pure/testable.
 function revertMesoSessionBoosts(mesoState, deletedSession, remainingSessions) {
   if (!mesoState || !deletedSession || deletedSession.isDeload) return mesoState;
   const dayId = deletedSession.dayId;
   if (!dayId) return mesoState;
   const delEnded = deletedSession.ended || '';
   // Per exercise: a boost/key is owned by whichever session most recently trained
-  // that exId on this day. So clear only the deleted session's keys whose exId was
-  // NOT retrained by a LATER same-day session (those keys were already replaced at
-  // that later session's finish and must survive). A day-wide "any later session
-  // exists" guard would orphan the boost of an exercise the later session dropped.
+  // that exId on this day. So only roll back the deleted session's keys whose exId
+  // was NOT retrained by a LATER same-day session (those keys were already
+  // replaced at that later session's finish and must survive). A day-wide "any
+  // later session exists" guard would orphan the boost of an exercise the later
+  // session dropped.
   const retrainedLater = new Set();
   for (const x of (remainingSessions || [])) {
     if (!x || !x.ended || x.isDeload || x.dayId !== dayId || (x.ended || '') <= delEnded) continue;
     for (const e of (x.entries || [])) if (e && !e.isCardio && e.exId) retrainedLater.add(e.exId);
   }
-  const keys = new Set((deletedSession.entries || [])
+  const exIds = new Set((deletedSession.entries || [])
     .filter(e => e && !e.isCardio && e.exId && !retrainedLater.has(e.exId))
-    .map(e => e.exId + '_' + dayId));
-  if (!keys.size) return mesoState;
+    .map(e => e.exId));
+  if (!exIds.size) return mesoState;
+  // Same-day, non-deload, ended sessions strictly BEFORE the deleted one, newest
+  // first, so .find() below picks each exercise's most recent earlier finish: the
+  // one whose outcome the deleted session's own finish overwrote.
+  const earlierSameDay = (remainingSessions || [])
+    .filter(x => x && x.ended && !x.isDeload && x.dayId === dayId && x.ended < delEnded)
+    .sort((a, b) => (a.ended < b.ended ? 1 : a.ended > b.ended ? -1 : 0));
   const wb = { ...(mesoState.weightBoosts || {}) };
   const wbd = { ...(mesoState.weightBoostDeclines || {}) };
   const rmc = { ...(mesoState.repMissCounts || {}) };
+  const repMissBase = deletedSession.mesoRecap?.raw?.repMissBase;
   let changed = false;
-  for (const k of keys) {
-    if (k in wb) { delete wb[k]; changed = true; }
-    // A decline is tied to the boost it declined: if that boost's key is being
-    // rolled back (this session owned it and no later one retrained), the
-    // decline is stale too, whether or not the key survived in wb above.
-    if (k in wbd) { delete wbd[k]; changed = true; }
-    if (k in rmc) { delete rmc[k]; changed = true; }
+  for (const exId of exIds) {
+    const key = exId + '_' + dayId;
+    const prior = earlierSameDay.find(x => (x.entries || []).some(e => e && !e.isCardio && e.exId === exId));
+    const priorGain = prior && prior.mesoRecap?.gains?.find(g => g.key === key);
+    const restoreWb = priorGain && priorGain.weightDelta ? priorGain.weightDelta : undefined;
+    if (restoreWb == null) { if (key in wb) { delete wb[key]; changed = true; } }
+    else if (wb[key] !== restoreWb) { wb[key] = restoreWb; changed = true; }
+    if (key in wbd) { delete wbd[key]; changed = true; }
+    const restoreRmc = repMissBase && (key in repMissBase) ? repMissBase[key] : undefined;
+    if (restoreRmc == null) { if (key in rmc) { delete rmc[key]; changed = true; } }
+    else if (rmc[key] !== restoreRmc) { rmc[key] = restoreRmc; changed = true; }
   }
   if (!changed) return mesoState;
   return { ...mesoState, weightBoosts: wb, weightBoostDeclines: wbd, repMissCounts: rmc };
