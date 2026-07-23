@@ -2891,10 +2891,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const blockRecapRef = useRefT(null);
   // The "≥X reps · next weight" hint is Smart Progression's promise. On a meso
   // plan the feedback engine owns the weight from week 2 on (Smart Progression is
-  // vetoed, see LB.resolveMesoSeedSuggestion), so instead of promising a bump that
-  // can't fire we show an "auto · feedback-driven" label there. The SP promise
-  // still shows on non-meso plans and in the first block's week 1, where Smart
-  // Progression is actually the weight authority.
+  // vetoed, see LB.resolveMesoSeedSuggestion), so instead of promising a specific
+  // rep count that isn't SP's own to promise, we just show "next weight" there:
+  // Meso's own ladder is still what's actually being graded (progressionTarget
+  // mirrors it, see progressionTargetForSet), only the exact number is left out
+  // of the hint to keep it one line. The SP promise (with the number) still shows
+  // on non-meso plans and in the first block's week 1, where Smart Progression is
+  // actually the weight authority.
   const spHintApplies = !mesoState || !LB.mesoActive(mesoSch) || (mesoWeek === 1 && (mesoState.completions ?? 0) === 0);
   // Beyond-failure block: a negative RIR target prescribes |RIR| lengthened
   // partials on every working set this session (RIR -3 → 3 partials). Auto-
@@ -6512,7 +6515,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   ) : null}
                   {progressionTarget && (
                     <div className="micro" style={{ color: UI.gold, opacity: 0.65, marginTop: 3 }}>
-                      {spHintApplies ? `≥${progressionTarget} reps · next weight` : `auto · feedback-driven · ≥${progressionTarget} reps · next weight`}
+                      {spHintApplies ? `≥${progressionTarget} reps · next weight` : 'next weight'}
                     </div>
                   )}
                   {/* Autoreg v2 P0: Rough-day suggestion. Non-binding, display only:
