@@ -173,14 +173,30 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // foodIds that already appear in store.foodLogs (already logged means
   // already cached, same reasoning as the fromCache flag above) and dedupes
   // by foodId, so a food favorited more than once only fires one request.
+  // A favorite the user simply hasn't logged/quick-added yet is a normal
+  // steady state, not a legacy-data case, so once a foodId is successfully
+  // cached it's remembered in localStorage (logbook-food-fav-cache-repaired,
+  // a JSON array of foodIds): without that, this effect would keep re-firing
+  // one network request per such favorite on every single mount of this
+  // screen (i.e. every tab switch) forever, not just once.
   useEffectFd(() => {
     const loggedFoodIds = new Set((store.foodLogs || []).map(l => l.foodId).filter(Boolean));
+    let repaired;
+    try { repaired = new Set(JSON.parse(localStorage.getItem('logbook-food-fav-cache-repaired') || '[]')); }
+    catch (_) { repaired = new Set(); }
     const requested = new Set();
+    const toRequest = [];
     (store.foodFavorites || []).forEach(f => {
-      if (f.foodId && f.source && f.source !== 'custom' && !loggedFoodIds.has(f.foodId) && !requested.has(f.foodId)) {
+      if (f.foodId && f.source && f.source !== 'custom' && !loggedFoodIds.has(f.foodId) && !repaired.has(f.foodId) && !requested.has(f.foodId)) {
         requested.add(f.foodId);
-        LB.cacheFood(f.source, f.foodId.slice(f.source.length + 1));
+        toRequest.push(f);
       }
+    });
+    if (!toRequest.length) return;
+    Promise.all(toRequest.map(f => LB.cacheFood(f.source, f.foodId.slice(f.source.length + 1)).then(res => ({ foodId: f.foodId, ok: !!(res && res.ok) })))).then(results => {
+      let changed = false;
+      results.forEach(r => { if (r.ok) { repaired.add(r.foodId); changed = true; } });
+      if (changed) { try { localStorage.setItem('logbook-food-fav-cache-repaired', JSON.stringify([...repaired])); } catch (_) {} }
     });
   }, []);
 
@@ -334,7 +350,12 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     protein: dayEntries.reduce((a, e) => a + (e.protein || 0), 0),
     carbs: dayEntries.reduce((a, e) => a + (e.carbs || 0), 0),
     fat: dayEntries.reduce((a, e) => a + (e.fat || 0), 0),
-  }), [dayEntries]);
+    // Only tracked when netCarbs is on: FdCompositionBar (in the hero below)
+    // needs it to derive the same net-carb-aware total this calories field
+    // above already is, so its percentage bar never diverges from the kcal
+    // figure shown right above it in the same hero.
+    fiber: store.settings?.netCarbs ? dayEntries.reduce((a, e) => a + (e.fiber || 0), 0) : null,
+  }), [dayEntries, store.settings?.netCarbs]);
 
   // The calorie target for the currently-viewed day (curDate, which can be
   // backdated), same resolution HealthScreen uses: coach macros win over
@@ -883,6 +904,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     setFavedId(existingFavId(l.foodId, l.foodName));
     if (l.foodId) {
       const per100 = l.quantityG > 0 ? 100 / l.quantityG : 1;
+      const netCarbs = !!store.settings?.netCarbs;
       setPendingFood({
         source: l.source, sourceId: l.foodId.slice((l.source || '').length + 1),
         name: l.foodName, brand: l.brand || null,
@@ -890,8 +912,10 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         // computing at read time (rather than trusting whatever calories
         // this entry happened to be logged with) keeps a re-add correct
         // even for an entry from before this rule existed, without needing
-        // every historical row to already be fixed.
-        kcalPer100g: LB.caloriesFromMacros(l.protein, l.carbs, l.fat) * per100,
+        // every historical row to already be fixed. Fiber only enters the
+        // subtraction when netCarbs is on, same rule every other caller of
+        // caloriesFromMacros in this file follows.
+        kcalPer100g: LB.caloriesFromMacros(l.protein, l.carbs, l.fat, netCarbs ? l.fiber : null) * per100,
         proteinPer100g: l.protein * per100,
         carbsPer100g: l.carbs * per100, fatPer100g: l.fat * per100,
         fiberPer100g: l.fiber != null ? l.fiber * per100 : null,
@@ -925,15 +949,22 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       const n = parseFloat(s);
       return Number.isFinite(n) ? n : 0;
     };
-    const kcal100 = custom ? (fdNum(kcal100Str) || 0) : (pendingFood.kcalPer100g || 0);
-    return {
-      calories: Math.round(kcal100 * factor),
-      protein: fdRound1(rate(p100Str, 'proteinPer100g') * factor),
-      carbs: fdRound1(rate(c100Str, 'carbsPer100g') * factor),
-      fat: fdRound1(rate(f100Str, 'fatPer100g') * factor),
-      fiber: pendingFood.fiberPer100g != null ? fdRound1(pendingFood.fiberPer100g * factor) : null,
-    };
-  }, [pendingFood, qtyG, p100Str, c100Str, f100Str, kcal100Str]);
+    const netCarbs = !!store.settings?.netCarbs;
+    const protein = fdRound1(rate(p100Str, 'proteinPer100g') * factor);
+    const carbs = fdRound1(rate(c100Str, 'carbsPer100g') * factor);
+    const fat = fdRound1(rate(f100Str, 'fatPer100g') * factor);
+    const fiber = pendingFood.fiberPer100g != null ? fdRound1(pendingFood.fiberPer100g * factor) : null;
+    // A custom item's calories still come from kcal100Str (already
+    // netCarbs-aware, see useAutoDerivedCalories above), scaled by amount; a
+    // real DB food now derives them from the scaled macros here instead of
+    // pendingFood's own fixed per-100g energy value, so a high-fiber food
+    // logged via search/barcode/recent respects net-carb mode the same way
+    // a Custom Item with identical macros already does.
+    const calories = custom
+      ? Math.round((fdNum(kcal100Str) || 0) * factor)
+      : Math.round(LB.caloriesFromMacros(protein, carbs, fat, netCarbs ? fiber : null) || 0);
+    return { calories, protein, carbs, fat, fiber };
+  }, [pendingFood, qtyG, p100Str, c100Str, f100Str, kcal100Str, store.settings?.netCarbs]);
 
   // A scanned custom item needs a name before it can be logged/favorited; a
   // DB food always has one, so this only ever gates the custom path.
@@ -1054,7 +1085,14 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       // favorite whose food_id points at nothing, failing its FK check on
       // every retry forever. Await the cache write BEFORE writing the
       // favorite into the store, so the sync batch never races ahead of it.
-      if (fav.foodId) await ensureFoodCached(pendingFood);
+      if (fav.foodId) {
+        await ensureFoodCached(pendingFood);
+        // Marks the still-open pendingFood cached, so confirmLogFood
+        // (tapping Add right after starring, same sheet visit) sees
+        // fromCache: true and skips its own redundant ensureFoodCached call
+        // for the same food.
+        setPendingFood(f => (f ? { ...f, fromCache: true } : f));
+      }
       setFavedId(fav.id);
       setStore(s => ({ ...s, foodFavorites: [fav, ...(s.foodFavorites || [])] }));
     }
@@ -1114,7 +1152,11 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     }
     const entry = built;
     setStaged(list => [...list, entry]);
-    if (entry.foodId) ensureFoodCached(pendingFood);
+    // Marks pendingFood cached once this resolves (see toggleFavorite's own
+    // ensureFoodCached call above), so starring then logging the same food
+    // in one sheet visit, in either order, only ever fires one cache
+    // request instead of one from each call site.
+    if (entry.foodId) ensureFoodCached(pendingFood).then(() => setPendingFood(f => (f ? { ...f, fromCache: true } : f)));
     closeQtySheet();
   }
 
@@ -1231,30 +1273,34 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     if (!recipeLogPrompt) return null;
     const { recipe, chosenPortions, totalPortions } = recipeLogPrompt;
     const items = recipe.items || [];
+    const netCarbs = !!store.settings?.netCarbs;
     const scale = chosenPortions / totalPortions;
     const sum = k => items.reduce((a, i) => a + (i[k] || 0), 0);
     return {
-      calories: Math.round(fdRecipeItemsCalories(items) * scale),
+      calories: Math.round(fdRecipeItemsCalories(items, netCarbs) * scale),
       protein: fdRound1(sum('protein') * scale),
       carbs: fdRound1(sum('carbs') * scale),
       fat: fdRound1(sum('fat') * scale),
     };
-  }, [recipeLogPrompt]);
+  }, [recipeLogPrompt, store.settings?.netCarbs]);
   // Stages the recipe (see `staged` above) same as everything else, "Add N
   // items" logs it together with whatever else is picked. Still a single log
   // entry either way, just staged instead of committed straight away.
   function confirmRecipeLog() {
     const { recipe, chosenPortions, totalPortions } = recipeLogPrompt;
     const items = recipe.items || [];
+    const netCarbs = !!store.settings?.netCarbs;
     const scale = chosenPortions / totalPortions;
     const sum = k => items.reduce((a, i) => a + (i[k] || 0), 0);
     // Snapshot at the SAME scale as the entry's own totals, so the
     // timeline's expanded ingredient list always adds back up to exactly
-    // what's shown collapsed. A later edit to the source recipe must
-    // never retroactively change this: copied here, not referenced.
+    // what's shown collapsed (each row still needs its own whole-number
+    // kcal, so it's individually rounded here). A later edit to the source
+    // recipe must never retroactively change this: copied here, not
+    // referenced.
     const recipeItems = items.map(i => ({
       foodName: i.foodName, quantityG: Math.round((i.quantityG || 0) * scale),
-      calories: Math.round((LB.caloriesFromMacros(i.protein, i.carbs, i.fat) || 0) * scale),
+      calories: Math.round((LB.caloriesFromMacros(i.protein, i.carbs, i.fat, netCarbs ? i.fiber : null) || 0) * scale),
       protein: fdRound1((i.protein || 0) * scale), carbs: fdRound1((i.carbs || 0) * scale), fat: fdRound1((i.fat || 0) * scale),
       fiber: i.fiber != null ? fdRound1(i.fiber * scale) : null,
     }));
@@ -1265,10 +1311,17 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       // recipe.portions has since become (see openEditRecipeEntry).
       loggedTotalPortions: totalPortions,
       quantityG: Math.round(sum('quantityG') * scale),
-      // Derived from the sum of the already-rounded recipeItems entries below
-      // (not a separately-rounded computation), so the collapsed total always
-      // exactly matches what the expanded per-ingredient view adds up to.
-      calories: recipeItems.reduce((a, i) => a + (i.calories || 0), 0),
+      // Same expression recipeLogPreview above already showed on the
+      // portions sheet (fdRecipeItemsCalories sums every ingredient's exact
+      // calories and rounds once, then this scales and rounds again), NOT
+      // derived from summing recipeItems' own already-rounded per-ingredient
+      // calories above: guarantees the total the user saw right before
+      // tapping Add is exactly what gets logged. Can differ from the sum of
+      // recipeItems by a kcal in rare cases (independent per-ingredient
+      // rounding vs. rounding the aggregate), the smaller and better-hidden
+      // of the two possible mismatches (that sum only surfaces behind the
+      // expand chevron, this total is the headline number).
+      calories: Math.round(fdRecipeItemsCalories(items, netCarbs) * scale),
       protein: fdRound1(sum('protein') * scale), carbs: fdRound1(sum('carbs') * scale), fat: fdRound1(sum('fat') * scale),
       fiber: items.some(i => i.fiber != null) ? fdRound1(sum('fiber') * scale) : null,
       recipeItems,
@@ -1796,7 +1849,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                     {recipesFiltered.map(r => {
                       const items = r.items || [];
-                      const kcal = fdRecipeItemsCalories(items);
+                      const kcal = fdRecipeItemsCalories(items, !!store.settings?.netCarbs);
                       return (
                         <div key={r.id} style={fdQuickRowWrap}>
                           <button onClick={() => addRecipeToLog(r)} style={fdQuickRowInner}>
@@ -2118,10 +2171,13 @@ function FoodScreen({ store, setStore, go, userId, date }) {
 // item's own protein/carbs/fat at every use, not just once at write time,
 // makes an old recipe self-heal exactly like reAddFromRecent already does
 // for a single re-added item, with no separate migration needed for the
-// jsonb blobs themselves. Shared by FoodScreen (recipe rows, add-to-log) and
-// RecipeEditorScreen (the batch hero).
-function fdRecipeItemsCalories(items) {
-  return Math.round((items || []).reduce((a, i) => a + (LB.caloriesFromMacros(i.protein, i.carbs, i.fat) || 0), 0));
+// jsonb blobs themselves. Shared by FoodScreen (recipe rows, add-to-log),
+// RecipeEditorScreen (the batch hero) and RecipeShareSheet (the share
+// preview). netCarbs (settings.netCarbs, passed by each caller) decides
+// whether fiber is subtracted from carbs, same rule every other
+// caloriesFromMacros call in this file follows.
+function fdRecipeItemsCalories(items, netCarbs) {
+  return Math.round((items || []).reduce((a, i) => a + (LB.caloriesFromMacros(i.protein, i.carbs, i.fat, netCarbs ? i.fiber : null) || 0), 0));
 }
 
 // ── Recipe share (receiver side) ────────────────────────────────────────────
@@ -2151,12 +2207,16 @@ function RecipeShareSheet({ store, setStore, token, onClose }) {
 
   const recipe = state.share?.recipe;
   const items = Array.isArray(recipe?.items) ? recipe.items : [];
+  const netCarbs = !!store.settings?.netCarbs;
+  // fdRound1 (one decimal), matching RecipeEditorScreen's own totals below:
+  // plain Math.round here made the same recipe show whole-number macros in
+  // a share-link preview but one-decimal macros everywhere else.
   const totals = useMemoFd(() => ({
-    calories: fdRecipeItemsCalories(items),
-    protein: Math.round(items.reduce((a, i) => a + (Number(i.protein) || 0), 0)),
-    carbs: Math.round(items.reduce((a, i) => a + (Number(i.carbs) || 0), 0)),
-    fat: Math.round(items.reduce((a, i) => a + (Number(i.fat) || 0), 0)),
-  }), [state.share]); // eslint-disable-line
+    calories: fdRecipeItemsCalories(items, netCarbs),
+    protein: fdRound1(items.reduce((a, i) => a + (Number(i.protein) || 0), 0)),
+    carbs: fdRound1(items.reduce((a, i) => a + (Number(i.carbs) || 0), 0)),
+    fat: fdRound1(items.reduce((a, i) => a + (Number(i.fat) || 0), 0)),
+  }), [state.share, netCarbs]); // eslint-disable-line
 
   function adopt() {
     const now = new Date().toISOString();
@@ -2276,11 +2336,11 @@ function RecipeEditorScreen({ open, onClose, onSave, recipe, store }) {
   // later (see FoodScreen's addRecipeToLog/confirmRecipeLog), not a divisor
   // applied here.
   const totals = useMemoFd(() => ({
-    calories: fdRecipeItemsCalories(items),
+    calories: fdRecipeItemsCalories(items, !!store.settings?.netCarbs),
     protein: fdRound1(items.reduce((a, i) => a + (i.protein || 0), 0)),
     carbs: fdRound1(items.reduce((a, i) => a + (i.carbs || 0), 0)),
     fat: fdRound1(items.reduce((a, i) => a + (i.fat || 0), 0)),
-  }), [items]);
+  }), [items, store.settings?.netCarbs]);
 
   const isDirty = () => initialSnap.current != null && JSON.stringify({ name, items, portions }) !== initialSnap.current;
   const requestClose = async () => {
@@ -2513,10 +2573,11 @@ function FdIngredientPicker({ open, onClose, onAdd, store }) {
   // own quantityG first, same trick reAddFromRecent uses in FoodScreen.
   function openQtyForLog(l) {
     const per100 = l.quantityG > 0 ? 100 / l.quantityG : 1;
+    const netCarbs = !!store.settings?.netCarbs;
     setQtyItem({
       name: l.foodName, brand: l.brand || null, source: l.source,
       sourceId: l.foodId ? l.foodId.slice((l.source || '').length + 1) : null,
-      kcalPer100g: (LB.caloriesFromMacros(l.protein, l.carbs, l.fat) || 0) * per100,
+      kcalPer100g: (LB.caloriesFromMacros(l.protein, l.carbs, l.fat, netCarbs ? l.fiber : null) || 0) * per100,
       proteinPer100g: l.protein * per100, carbsPer100g: l.carbs * per100, fatPer100g: l.fat * per100,
       fiberPer100g: l.fiber != null ? l.fiber * per100 : null,
       fromCache: true, units: l.units || null,
@@ -2546,14 +2607,16 @@ function FdIngredientPicker({ open, onClose, onAdd, store }) {
     const qty = fdNum(qtyG);
     if (!qty || qty <= 0) return null;
     const factor = qty / 100;
+    const netCarbs = !!store.settings?.netCarbs;
+    const protein = fdRound1((qtyItem.proteinPer100g || 0) * factor);
+    const carbs = fdRound1((qtyItem.carbsPer100g || 0) * factor);
+    const fat = fdRound1((qtyItem.fatPer100g || 0) * factor);
+    const fiber = qtyItem.fiberPer100g != null ? fdRound1(qtyItem.fiberPer100g * factor) : null;
     return {
-      calories: Math.round((qtyItem.kcalPer100g || 0) * factor),
-      protein: fdRound1((qtyItem.proteinPer100g || 0) * factor),
-      carbs: fdRound1((qtyItem.carbsPer100g || 0) * factor),
-      fat: fdRound1((qtyItem.fatPer100g || 0) * factor),
-      fiber: qtyItem.fiberPer100g != null ? fdRound1(qtyItem.fiberPer100g * factor) : null,
+      calories: Math.round(LB.caloriesFromMacros(protein, carbs, fat, netCarbs ? fiber : null) || 0),
+      protein, carbs, fat, fiber,
     };
-  }, [qtyItem, qtyG]);
+  }, [qtyItem, qtyG, store.settings?.netCarbs]);
   // "Add" on the quantity step: stages the item (not yet in the recipe, see
   // the "Add N ingredients" button below) and caches a not-yet-cached DB
   // food right away, same rule confirmLogFood/toggleFavorite use in
@@ -2939,8 +3002,8 @@ function FdHeroContent({ dayTarget, dayAdherence, dayTotals, goalCalories }) {
         </div>
       </div>
       <div style={{ marginTop: 16, paddingTop: 16, borderTop: `1px solid ${UI.hair}`, display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <FdCompositionBar label="LOGGED" protein={dayTotals.protein} carbs={dayTotals.carbs} fat={dayTotals.fat} />
-        <FdCompositionBar label="TARGET" protein={dayTarget.protein} carbs={dayTarget.carbs} fat={dayTarget.fat} />
+        <FdCompositionBar label="LOGGED" protein={dayTotals.protein} carbs={dayTotals.carbs} fat={dayTotals.fat} fiber={dayTotals.fiber} />
+        <FdCompositionBar label="TARGET" protein={dayTarget.protein} carbs={dayTarget.carbs} fat={dayTarget.fat} fiber={dayTarget.fiber} />
       </div>
     </>
   ) : (
@@ -2957,12 +3020,20 @@ function FdHeroContent({ dayTarget, dayAdherence, dayTotals, goalCalories }) {
     </div>
   );
 }
-function FdCompositionBar({ label, protein, carbs, fat }) {
-  const total = (protein || 0) * 4 + (carbs || 0) * 4 + (fat || 0) * 9;
+function FdCompositionBar({ label, protein, carbs, fat, fiber }) {
+  // Routed through LB.caloriesFromMacros (net-carb aware) instead of a
+  // plain P*4+C*4+F*9 sum, so this bar's own 100% reference never diverges
+  // from the fiber-aware total the hero's kcal number shows right above it.
+  // The clamped net-carb grams (same clamp caloriesFromMacros applies
+  // internally) also has to replace raw carbs in the CARBS segment's own
+  // numerator below, not just the total's denominator, or the three
+  // segments would stop summing to 100% the moment fiber is subtracted.
+  const netCarbsG = Math.max(0, (carbs || 0) - (fiber || 0));
+  const total = LB.caloriesFromMacros(protein, carbs, fat, fiber) || 0;
   if (!total) return null;
   const segs = [
     { pct: (protein || 0) * 4 / total * 100, color: FD_MACRO_COLORS.protein },
-    { pct: (carbs || 0) * 4 / total * 100, color: FD_MACRO_COLORS.carbs },
+    { pct: netCarbsG * 4 / total * 100, color: FD_MACRO_COLORS.carbs },
     { pct: (fat || 0) * 9 / total * 100, color: FD_MACRO_COLORS.fat },
   ];
   return (
