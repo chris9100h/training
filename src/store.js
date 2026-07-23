@@ -6376,7 +6376,13 @@ function detectStall(sessions, exId, muscleOfExId, opts = {}) {
   if (jrec && jrec.answer && jrec.answer !== 'none') return out;
   if (jrec && jrec.pump === 'low') return out;
 
-  // Flat/declining = NO new e1RM best across the window (chronological running max).
+  // Flat/declining = NO new e1RM best across the window (chronological running max)
+  // AND the most recent session isn't already climbing again on its own. That
+  // second half matters separately: an intentional lighter session (not a
+  // flagged deload, just a deliberate weight drop) pulls the running max down
+  // for a bit, and without this the recovery back up still reads as "stalled"
+  // until it clears the OLDEST session in the window, even though session-
+  // over-session it's already trending up again.
   const chrono = series.slice().reverse().map(x => x.est);
   let progressed = false, mx = chrono[0];
   for (let i = 1; i < chrono.length; i++) {
@@ -6384,6 +6390,7 @@ function detectStall(sessions, exId, muscleOfExId, opts = {}) {
     if (chrono[i] > mx) mx = chrono[i];
   }
   if (progressed) return out;
+  if (chrono[chrono.length - 1] > chrono[chrono.length - 2] + 1e-6) return out;
 
   out.stalled = true;
   const oldest = series[series.length - 1].session;

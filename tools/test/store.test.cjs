@@ -3148,6 +3148,30 @@ async function testAsync(name, fn) {
       assert.strictEqual(LB.detectStall(sessions, 'bench', muscleOf, { planId: 'p', atCeiling: () => false }).stalled, false);
     });
 
+    test('detectStall: recovering from an intentional lighter session → not stalled even below the window\'s oldest', () => {
+      // 100 -> 85 (deliberately light, not flagged isDeload) -> 90: climbing
+      // again session-over-session, even though 90 still hasn't cleared the
+      // window's oldest (100). Must not read as "still stalled".
+      const sessions = [
+        mk('E0', '2026-07-07T10:00:00Z', flat),
+        mk('E1', '2026-07-10T10:00:00Z', [{ done: true, kg: 85, reps: 8 }]),
+        mk('E2', '2026-07-13T10:00:00Z', [{ done: true, kg: 90, reps: 8 }]),
+      ];
+      assert.strictEqual(LB.detectStall(sessions, 'bench', muscleOf, { planId: 'p', atCeiling: () => false }).stalled, false);
+    });
+
+    test('detectStall: a lighter session that keeps declining is still a stall', () => {
+      // 100 -> 85 -> 80: not recovering, the latest session is a new LOW, not
+      // a climb. Must still stall (the recovery carve-out is not a blanket
+      // exemption for any window that contains a dip).
+      const sessions = [
+        mk('E0', '2026-07-07T10:00:00Z', flat),
+        mk('E1', '2026-07-10T10:00:00Z', [{ done: true, kg: 85, reps: 8 }]),
+        mk('E2', '2026-07-13T10:00:00Z', [{ done: true, kg: 80, reps: 8 }]),
+      ];
+      assert.strictEqual(LB.detectStall(sessions, 'bench', muscleOf, { planId: 'p', atCeiling: () => false }).stalled, true);
+    });
+
     test('detectStall: muscle at its ceiling → not a stall (overreach owns it)', () => {
       const sessions = [mk('E0', '2026-07-07T10:00:00Z', flat), mk('E1', '2026-07-10T10:00:00Z', flat), mk('E2', '2026-07-13T10:00:00Z', flat)];
       assert.strictEqual(LB.detectStall(sessions, 'bench', muscleOf, { planId: 'p', atCeiling: () => true }).stalled, false, 'ceiling gate not green');
@@ -3190,13 +3214,18 @@ async function testAsync(name, fn) {
     // their own terms, but Day B is consistently heavier/lower due to fatigue context.
     // Without a dayId filter the newest-3 window can pick 1 Day A + 2 Day B sessions,
     // where Day A's higher number sits at the OLDEST spot of the window and neither
-    // later Day B session beats it: a false stall from mixing two contexts.
+    // later Day B session beats it: a false stall from mixing two contexts. B2/B3 are
+    // deliberately EQUAL (a plateau, not a further rise) so this stays a clean false
+    // stall on its own: an increase between them would also satisfy detectStall's own
+    // "already climbing again" recovery check below, for the right reason (Day B
+    // really is climbing there) but for the wrong test, muddying what this one
+    // demonstrates.
     const dayMix = [
       mk('A1', '2026-06-01T10:00:00Z', [{ done: true, kg: 80, reps: 8 }], { dayId: 'A' }),
       mk('A2', '2026-06-15T10:00:00Z', [{ done: true, kg: 85, reps: 8 }], { dayId: 'A' }),
       mk('A3', '2026-07-15T10:00:00Z', [{ done: true, kg: 105, reps: 8 }], { dayId: 'A' }),
       mk('B1', '2026-06-20T10:00:00Z', [{ done: true, kg: 60, reps: 8 }], { dayId: 'B' }),
-      mk('B2', '2026-07-18T10:00:00Z', [{ done: true, kg: 65, reps: 8 }], { dayId: 'B' }),
+      mk('B2', '2026-07-18T10:00:00Z', [{ done: true, kg: 70, reps: 8 }], { dayId: 'B' }),
       mk('B3', '2026-07-20T10:00:00Z', [{ done: true, kg: 70, reps: 8 }], { dayId: 'B' }),
     ];
 
@@ -3209,7 +3238,7 @@ async function testAsync(name, fn) {
       const dayA = LB.detectStall(dayMix, 'bench', muscleOf, { planId: 'p', atCeiling: () => false, dayId: 'A' });
       const dayB = LB.detectStall(dayMix, 'bench', muscleOf, { planId: 'p', atCeiling: () => false, dayId: 'B' });
       assert.strictEqual(dayA.stalled, false, 'Day A alone (80 -> 85 -> 105) is steadily progressing');
-      assert.strictEqual(dayB.stalled, false, 'Day B alone (60 -> 65 -> 70) is steadily progressing too, just lighter');
+      assert.strictEqual(dayB.stalled, false, 'Day B alone (60 -> 70 -> 70) climbed once and held, not stalled either');
     });
 
     // Same exercise twice in one session (top set + back-off block). occ picks a
