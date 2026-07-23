@@ -1359,7 +1359,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                   <div style={{ position: 'relative', marginTop: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
                     <FdHourTrunk />
                     {cat.hours.map(({ hour, entries }) => (
-                      <div key={hour} style={{ display: 'flex', alignItems: 'center' }}>
+                      <div key={hour} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                         <FdHourTick />
                         <div style={fdHourLabelCol}>
                           <span className="num" style={{ fontSize: 11, color: UI.inkSoft }}>{String(hour).padStart(2, '0')}</span>
