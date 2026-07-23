@@ -1199,16 +1199,17 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
   // open that sheet) falls back to these same per-theme/per-image defaults,
   // unchanged from before the setting existed. Paper gets its own default
   // (16%, same as a custom VIP image) rather than sharing light's 14%: its
-  // grid canvas needs a touch more mark to stay visible against it. Dark/black
+  // grid canvas needs a touch more mark to stay visible against it, but like
+  // dark/black that bump only applies while the grid toggle is on. Dark/black
   // get that same bump, but only while the grid toggle is on (12%, not the
   // full 16%): their default 4% is tuned for a bare canvas and reads as
   // nearly gone once the grid gives the screen the busier look Paper always
-  // had.
+  // had. Paper's own grid-off value follows the same 4% floor.
   const gridOn = !!window.__gridEnabled;
   const watermarkOpacityOverride = store.settings?.watermarkOpacity;
   const watermarkOpacity = watermarkOpacityOverride != null
     ? watermarkOpacityOverride / 100
-    : (isCustomBg || isPaperMode ? 0.16 : (isLightMode ? 0.14 : (gridOn ? 0.12 : 0.04)));
+    : (isCustomBg ? 0.16 : (isPaperMode ? (gridOn ? 0.16 : 0.04) : (isLightMode ? 0.14 : (gridOn ? 0.12 : 0.04))));
   const defaultLogoStyle = { width: '85%', maxWidth: 320, opacity: watermarkOpacity, filter: (isLightMode || isPaperMode) ? 'grayscale(1)' : 'grayscale(1) brightness(3)', objectFit: 'contain' };
   const today = LB.todaysDay(store);
   const sch = today?.schedule;
