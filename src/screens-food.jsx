@@ -1232,6 +1232,10 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // or deleted, which is how callers detect "can't reopen the portion
   // picker for this one anymore".
   function recipeEntryLiveRecipe(entry) {
+    if (entry.recipeId) return (store.foodRecipes || []).find(r => r.id === entry.recipeId) || null;
+    // Older entries logged before recipeId was tracked have no stable id to
+    // resolve by, only this best-effort name match (wrong on a name
+    // collision, but strictly better than nothing for pre-existing data).
     const baseName = entry.foodName.replace(/ \([\d.]+\/\d+\)$/, '');
     return (store.foodRecipes || []).find(r => r.name === baseName) || null;
   }
@@ -1306,6 +1310,10 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     }));
     const built = {
       foodId: null, foodName: chosenPortions !== totalPortions ? `${recipe.name} (${chosenPortions}/${totalPortions})` : recipe.name, brand: null, source: 'recipe',
+      // Stable id back to the source recipe, so recipeEntryLiveRecipe can
+      // resolve this entry correctly even if another recipe later gets the
+      // same name (a plain name match, the old fallback, can't tell them apart).
+      recipeId: recipe.id,
       // The entry's own remembered total, so a later edit of this entry
       // rescales against the total at LOG time, not against whatever
       // recipe.portions has since become (see openEditRecipeEntry).

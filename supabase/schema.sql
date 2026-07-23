@@ -2277,6 +2277,13 @@ CREATE TABLE zane_food_logs (
   fat          numeric     NOT NULL,
   fiber        numeric,
   recipe_items jsonb,                                    -- ingredient snapshot for a source:'recipe' entry, null otherwise
+  -- Migration 0194: forward reference to zane_food_recipes, which is defined
+  -- further below (this table predates it, migration 0186 vs. 0187). Harmless
+  -- for schema.sql's own purpose (a parsed/diffed snapshot, not executed
+  -- top-to-bottom by any tool in this repo), but a genuinely fresh from-scratch
+  -- run of this file would need zane_food_recipes created first.
+  recipe_id    text        REFERENCES public.zane_food_recipes(id) ON DELETE SET NULL,  -- stable back-ref, source:'recipe' entries only
+  logged_total_portions integer,                          -- recipe.portions at log time, source:'recipe' entries only
   created_at   timestamptz DEFAULT now()
 );
 

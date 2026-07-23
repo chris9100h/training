@@ -555,6 +555,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
         source: l.source ?? null, quantity_g: l.quantityG,
         calories: l.calories, protein: l.protein, carbs: l.carbs, fat: l.fat,
         fiber: l.fiber ?? null, recipe_items: l.recipeItems ?? null,
+        recipe_id: l.recipeId ?? null, logged_total_portions: l.loggedTotalPortions ?? null,
       }))
     ));
     stepsDone++;
@@ -927,7 +928,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     // denormalized at write time. Coach reads a client's via coach-of-client RLS.
     // Windowed to FOOD_HISTORY_WINDOW_DAYS (see its own comment): nothing
     // reads food history further back than that today.
-    _supabase.from('zane_food_logs').select('id, date, time, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, recipe_items, created_at').eq('user_id', userId).gte('date', foodHistCutoff).order('date', { ascending: false }).order('time', { ascending: false }),
+    _supabase.from('zane_food_logs').select('id, date, time, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, recipe_items, recipe_id, logged_total_portions, created_at').eq('user_id', userId).gte('date', foodHistCutoff).order('date', { ascending: false }).order('time', { ascending: false }),
     // Food tracker quick-add: user-starred foods and saved recipes (migration
     // 0187), own store only: a coach's read-only client view has no use for
     // another user's personal shortcuts (owner-only RLS, no coach-read policy).
@@ -1141,6 +1142,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
       quantityG: parseFloat(l.quantity_g), calories: l.calories,
       protein: parseFloat(l.protein), carbs: parseFloat(l.carbs), fat: parseFloat(l.fat),
       fiber: l.fiber != null ? parseFloat(l.fiber) : null, recipeItems: l.recipe_items ?? null,
+      recipeId: l.recipe_id ?? null, loggedTotalPortions: l.logged_total_portions ?? null,
       createdAt: l.created_at,
     })),
     // Food Tracker quick-add (migration 0187), own store only.
@@ -1626,6 +1628,7 @@ async function syncStore(prev, next, userId) {
       food_name: l.foodName, brand: l.brand ?? null, source: l.source ?? null,
       quantity_g: l.quantityG, calories: l.calories, protein: l.protein,
       carbs: l.carbs, fat: l.fat, fiber: l.fiber ?? null, recipe_items: l.recipeItems ?? null,
+      recipe_id: l.recipeId ?? null, logged_total_portions: l.loggedTotalPortions ?? null,
     }))));
     if (removed.length) ops.push(_supabase.from('zane_food_logs').delete().in('id', removed.map(l => l.id)));
   }
@@ -4808,7 +4811,7 @@ async function refreshHealthLogs(userId) {
     _supabase.from('zane_blood_pressure_logs').select('id, date, time, systolic, diastolic, note, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
     _supabase.from('zane_body_temp_logs').select('id, date, time, value_c, note, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
     _supabase.from('zane_water_logs').select('id, date, time, amount_ml, name, category, breakdown, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
-    _supabase.from('zane_food_logs').select('id, date, time, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, recipe_items, created_at').eq('user_id', userId).gte('date', foodHistCutoff).order('date', { ascending: false }).order('time', { ascending: false }),
+    _supabase.from('zane_food_logs').select('id, date, time, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, recipe_items, recipe_id, logged_total_portions, created_at').eq('user_id', userId).gte('date', foodHistCutoff).order('date', { ascending: false }).order('time', { ascending: false }),
   ]);
   if (dailyRes.error || cardioRes.error || glucoseRes.error || bpRes.error || tempRes.error || waterRes.error || foodRes.error) return null;
   return {
@@ -4856,6 +4859,7 @@ async function refreshHealthLogs(userId) {
       quantityG: parseFloat(l.quantity_g), calories: l.calories,
       protein: parseFloat(l.protein), carbs: parseFloat(l.carbs), fat: parseFloat(l.fat),
       fiber: l.fiber != null ? parseFloat(l.fiber) : null, recipeItems: l.recipe_items ?? null,
+      recipeId: l.recipe_id ?? null, loggedTotalPortions: l.logged_total_portions ?? null,
       createdAt: l.created_at,
     })),
   };
