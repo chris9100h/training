@@ -1204,9 +1204,9 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       </div>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 14 }}>
         <span className="num" style={{ fontSize: 18, fontWeight: 300, color: UI.ink }}>{stagedTotals.calories}<span style={{ fontSize: 10, color: UI.inkFaint, marginLeft: 3 }}>kcal</span></span>
-        <span className="num" style={{ fontSize: 12, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 9 }}>P</span> {stagedTotals.protein}</span>
-        <span className="num" style={{ fontSize: 12, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 9 }}>C</span> {stagedTotals.carbs}</span>
-        <span className="num" style={{ fontSize: 12, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 9 }}>F</span> {stagedTotals.fat}</span>
+        <span className="num" style={{ fontSize: 12, fontWeight: 600, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 9 }}>P</span> {stagedTotals.protein}</span>
+        <span className="num" style={{ fontSize: 12, fontWeight: 600, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 9 }}>C</span> {stagedTotals.carbs}</span>
+        <span className="num" style={{ fontSize: 12, fontWeight: 600, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 9 }}>F</span> {stagedTotals.fat}</span>
       </div>
       {pickedExpanded && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 2, maxHeight: 168, overflowY: 'auto' }}>
@@ -1292,9 +1292,9 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                     <span style={{ fontSize: 15, color: UI.inkFaint, fontFamily: UI.fontUi }}>kcal</span>
                   </div>
                   <div style={{ display: 'flex', gap: 14, marginTop: 12 }}>
-                    <span className="num" style={{ fontSize: 12, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 10 }}>P</span> {Math.round(dayTotals.protein)}g</span>
-                    <span className="num" style={{ fontSize: 12, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 10 }}>C</span> {Math.round(dayTotals.carbs)}g</span>
-                    <span className="num" style={{ fontSize: 12, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 10 }}>F</span> {Math.round(dayTotals.fat)}g</span>
+                    <span className="num" style={{ fontSize: 12, fontWeight: 600, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 10 }}>P</span> {Math.round(dayTotals.protein)}g</span>
+                    <span className="num" style={{ fontSize: 12, fontWeight: 600, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 10 }}>C</span> {Math.round(dayTotals.carbs)}g</span>
+                    <span className="num" style={{ fontSize: 12, fontWeight: 600, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 10 }}>F</span> {Math.round(dayTotals.fat)}g</span>
                   </div>
                 </div>
               )}
@@ -1703,9 +1703,9 @@ function FoodScreen({ store, setStore, go, userId, date }) {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', background: UI.bgInset, border: `1px solid ${UI.hair}`, borderRadius: 6, marginBottom: 16, textShadow: 'none' }}>
                 <span className="num" style={{ fontSize: 15, color: UI.ink }}>{qtyPreview.calories} kcal</span>
                 <span style={{ display: 'flex', gap: 10 }}>
-                  <span className="num" style={{ fontSize: 12, color: UI.inkSoft }}>P {qtyPreview.protein}</span>
-                  <span className="num" style={{ fontSize: 12, color: UI.inkSoft }}>C {qtyPreview.carbs}</span>
-                  <span className="num" style={{ fontSize: 12, color: UI.inkSoft }}>F {qtyPreview.fat}</span>
+                  <span className="num" style={{ fontSize: 12, fontWeight: 600, color: UI.inkSoft }}>P {qtyPreview.protein}</span>
+                  <span className="num" style={{ fontSize: 12, fontWeight: 600, color: UI.inkSoft }}>C {qtyPreview.carbs}</span>
+                  <span className="num" style={{ fontSize: 12, fontWeight: 600, color: UI.inkSoft }}>F {qtyPreview.fat}</span>
                 </span>
               </div>
             )}
@@ -1868,9 +1868,9 @@ function FoodScreen({ store, setStore, go, userId, date }) {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', background: UI.bgInset, border: `1px solid ${UI.hair}`, borderRadius: 6, marginBottom: 16, textShadow: 'none' }}>
                 <span className="num" style={{ fontSize: 15, color: UI.ink }}>{recipeLogPreview.calories} kcal</span>
                 <span style={{ display: 'flex', gap: 10 }}>
-                  <span className="num" style={{ fontSize: 12, color: UI.inkSoft }}>P {recipeLogPreview.protein}</span>
-                  <span className="num" style={{ fontSize: 12, color: UI.inkSoft }}>C {recipeLogPreview.carbs}</span>
-                  <span className="num" style={{ fontSize: 12, color: UI.inkSoft }}>F {recipeLogPreview.fat}</span>
+                  <span className="num" style={{ fontSize: 12, fontWeight: 600, color: UI.inkSoft }}>P {recipeLogPreview.protein}</span>
+                  <span className="num" style={{ fontSize: 12, fontWeight: 600, color: UI.inkSoft }}>C {recipeLogPreview.carbs}</span>
+                  <span className="num" style={{ fontSize: 12, fontWeight: 600, color: UI.inkSoft }}>F {recipeLogPreview.fat}</span>
                 </span>
               </div>
             )}
@@ -2014,9 +2014,9 @@ function RecipeEditorScreen({ open, onClose, onSave, recipe, store }) {
             <span style={{ fontSize: 15, color: UI.inkFaint, fontFamily: UI.fontUi }}>kcal</span>
           </div>
           <div style={{ display: 'flex', gap: 14, marginTop: 12 }}>
-            <span className="num" style={{ fontSize: 12, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 10 }}>P</span> {totals.protein}g</span>
-            <span className="num" style={{ fontSize: 12, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 10 }}>C</span> {totals.carbs}g</span>
-            <span className="num" style={{ fontSize: 12, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 10 }}>F</span> {totals.fat}g</span>
+            <span className="num" style={{ fontSize: 12, fontWeight: 600, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 10 }}>P</span> {totals.protein}g</span>
+            <span className="num" style={{ fontSize: 12, fontWeight: 600, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 10 }}>C</span> {totals.carbs}g</span>
+            <span className="num" style={{ fontSize: 12, fontWeight: 600, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 10 }}>F</span> {totals.fat}g</span>
           </div>
         </BracketFrame>
 
@@ -2039,7 +2039,7 @@ function RecipeEditorScreen({ open, onClose, onSave, recipe, store }) {
                 <div key={i.id} style={fdEntryRow}>
                   <button onClick={() => openEditItem(i)} style={fdDraftMain}>
                     <span style={{ ...fdEntryName, fontSize: 12 }}>{i.foodName}</span>
-                    <span style={fdEntryMeta}>{i.quantityG}g · {Math.round(LB.caloriesFromMacros(i.protein, i.carbs, i.fat) || 0)} kcal · P{Math.round(i.protein)} C{Math.round(i.carbs)} F{Math.round(i.fat)}</span>
+                    <span style={fdEntryMeta}>{i.quantityG}g · {Math.round(LB.caloriesFromMacros(i.protein, i.carbs, i.fat) || 0)} kcal · <span style={{ fontWeight: 600 }}>P{Math.round(i.protein)} C{Math.round(i.carbs)} F{Math.round(i.fat)}</span></span>
                   </button>
                   <button onClick={() => removeItem(i.id)} aria-label="Remove" style={fdInlineDeleteBtn}>
                     <i className="fa-solid fa-trash" style={{ fontSize: 11 }} />
@@ -2080,9 +2080,9 @@ function RecipeSaveRecap({ name, portions, totals }) {
       <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 10 }}>{portions} portion{portions === 1 ? '' : 's'}</div>
       <div style={{ display: 'flex', gap: 14 }}>
         <span className="num" style={{ fontSize: 16, color: UI.ink }}>{totals.calories}<span style={{ fontSize: 10, color: UI.inkFaint, marginLeft: 3 }}>kcal</span></span>
-        <span className="num" style={{ fontSize: 13, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 10 }}>P</span> {totals.protein}</span>
-        <span className="num" style={{ fontSize: 13, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 10 }}>C</span> {totals.carbs}</span>
-        <span className="num" style={{ fontSize: 13, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 10 }}>F</span> {totals.fat}</span>
+        <span className="num" style={{ fontSize: 13, fontWeight: 600, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 10 }}>P</span> {totals.protein}</span>
+        <span className="num" style={{ fontSize: 13, fontWeight: 600, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 10 }}>C</span> {totals.carbs}</span>
+        <span className="num" style={{ fontSize: 13, fontWeight: 600, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 10 }}>F</span> {totals.fat}</span>
       </div>
     </div>
   );
@@ -2432,9 +2432,9 @@ function FdIngredientPicker({ open, onClose, onAdd, store }) {
             <Bezel style={{ marginBottom: 10 }}>Picked ({staged.length})</Bezel>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 14, marginBottom: 10 }}>
               <span className="num" style={{ fontSize: 18, fontWeight: 300, color: UI.ink }}>{stagedTotals.calories}<span style={{ fontSize: 10, color: UI.inkFaint, marginLeft: 3 }}>kcal</span></span>
-              <span className="num" style={{ fontSize: 12, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 9 }}>P</span> {stagedTotals.protein}</span>
-              <span className="num" style={{ fontSize: 12, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 9 }}>C</span> {stagedTotals.carbs}</span>
-              <span className="num" style={{ fontSize: 12, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 9 }}>F</span> {stagedTotals.fat}</span>
+              <span className="num" style={{ fontSize: 12, fontWeight: 600, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 9 }}>P</span> {stagedTotals.protein}</span>
+              <span className="num" style={{ fontSize: 12, fontWeight: 600, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 9 }}>C</span> {stagedTotals.carbs}</span>
+              <span className="num" style={{ fontSize: 12, fontWeight: 600, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 9 }}>F</span> {stagedTotals.fat}</span>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 2, maxHeight: 168, overflowY: 'auto' }}>
               {staged.map(i => (
@@ -2486,9 +2486,9 @@ function FdIngredientPicker({ open, onClose, onAdd, store }) {
             {qtyPreview && (
               <div style={{ display: 'flex', alignItems: 'baseline', gap: 14, marginBottom: 16 }}>
                 <span className="num" style={{ fontSize: 20, fontWeight: 300, color: UI.ink }}>{qtyPreview.calories}<span style={{ fontSize: 10, color: UI.inkFaint, marginLeft: 3 }}>kcal</span></span>
-                <span className="num" style={{ fontSize: 12, color: UI.inkSoft }}>P {qtyPreview.protein}</span>
-                <span className="num" style={{ fontSize: 12, color: UI.inkSoft }}>C {qtyPreview.carbs}</span>
-                <span className="num" style={{ fontSize: 12, color: UI.inkSoft }}>F {qtyPreview.fat}</span>
+                <span className="num" style={{ fontSize: 12, fontWeight: 600, color: UI.inkSoft }}>P {qtyPreview.protein}</span>
+                <span className="num" style={{ fontSize: 12, fontWeight: 600, color: UI.inkSoft }}>C {qtyPreview.carbs}</span>
+                <span className="num" style={{ fontSize: 12, fontWeight: 600, color: UI.inkSoft }}>F {qtyPreview.fat}</span>
               </div>
             )}
             <div style={{ display: 'flex', gap: 8 }}>
@@ -2573,7 +2573,7 @@ function FdHeroRow({ label, color, actual, target, unit = '' }) {
       <div style={{ flex: 1, height: 4, borderRadius: 1, background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, overflow: 'hidden' }}>
         <div style={{ width: `${pct}%`, height: '100%', background: color }} />
       </div>
-      <span className="num" style={{ fontSize: 11, color, flexShrink: 0, textAlign: 'right' }}>
+      <span className="num" style={{ fontSize: 11, fontWeight: 600, color, flexShrink: 0, textAlign: 'right' }}>
         {Math.round(actual)}{unit} / {Math.round(target)}{unit}
       </span>
       <span className="num" style={{ fontSize: 10, color: UI.inkFaint, flexShrink: 0, width: 30, textAlign: 'right' }}>
@@ -2857,11 +2857,11 @@ const fdEntryMeta = { fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi };
 function FdMacroBits({ protein, carbs, fat }) {
   return (
     <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 6 }}>
-      <span className="num" style={{ color: FD_MACRO_COLORS.protein }}>P{Math.round(protein)}</span>
+      <span className="num" style={{ fontWeight: 600, color: FD_MACRO_COLORS.protein }}>P{Math.round(protein)}</span>
       <span style={{ color: UI.inkGhost }}>·</span>
-      <span className="num" style={{ color: FD_MACRO_COLORS.carbs }}>C{Math.round(carbs)}</span>
+      <span className="num" style={{ fontWeight: 600, color: FD_MACRO_COLORS.carbs }}>C{Math.round(carbs)}</span>
       <span style={{ color: UI.inkGhost }}>·</span>
-      <span className="num" style={{ color: FD_MACRO_COLORS.fat }}>F{Math.round(fat)}</span>
+      <span className="num" style={{ fontWeight: 600, color: FD_MACRO_COLORS.fat }}>F{Math.round(fat)}</span>
     </span>
   );
 }
