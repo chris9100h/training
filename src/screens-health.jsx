@@ -51,11 +51,6 @@ const healthInt = v => (v === '' || v == null || isNaN(parseInt(v, 10))) ? null 
 
 const caloriesFromMacros = LB.caloriesFromMacros;
 
-function healthFmtDate(iso, opts = { weekday: 'short', day: 'numeric', month: 'short' }) {
-  if (!iso) return '';
-  return new Date(iso + 'T12:00:00').toLocaleDateString('en-US', opts);
-}
-
 // Windowed series builder for the charts — pure, so HealthScreen (dailyLogs)
 // and HealthClientLogs (a coach's client logs) can share it instead of
 // reimplementing the same ~90 lines against differently-named data.
@@ -485,7 +480,7 @@ function ChartHover({ W, H, points, children, mode = 'x', markerColor = 'var(--a
           <div style={{ position: 'absolute', left: leftPct + '%', top: (CHART_PLOT_TOP / H) * 100 + '%', height: (CHART_PLOT_H / H) * 100 + '%', width: 1, background: UI.hairStrong, transform: 'translateX(-0.5px)' }} />
           <div style={{ position: 'absolute', left: leftPct + '%', top: topPct + '%', width: 8, height: 8, borderRadius: '50%', background: p.color || markerColor, border: `2px solid ${UI.bgRaised}`, boxShadow: `0 0 0 1.5px ${p.color || markerColor}`, transform: 'translate(-50%, -50%)' }} />
           <div style={{ position: 'absolute', left: leftPct + '%', top: topPct + '%', transform: `translate(${tx}, ${ty})`, background: UI.bgRaised, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, padding: '5px 8px', boxShadow: '0 4px 14px rgba(0,0,0,0.45)', whiteSpace: 'nowrap', zIndex: 5 }}>
-            <div className="micro" style={{ color: UI.inkFaint, marginBottom: 2 }}>{healthFmtDate(p.date)}</div>
+            <div className="micro" style={{ color: UI.inkFaint, marginBottom: 2 }}>{LB.fmtDayLabel(p.date)}</div>
             {p.rows.map((r, i) => (
               <div key={i} style={{ display: 'flex', alignItems: 'baseline', gap: 6, fontFamily: UI.fontNum, fontSize: 12, lineHeight: 1.35 }}>
                 {r.label != null && <span style={{ fontSize: 9, color: r.color || UI.inkFaint, fontFamily: UI.fontUi, minWidth: 12 }}>{r.label}</span>}
@@ -1215,7 +1210,7 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
       <div style={{ padding: '18px 22px calc(env(safe-area-inset-bottom, 8px) + 22px)' }}>
       {confirmEl}
       <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 14 }}>
-        {healthFmtDate(date, { weekday: 'long', day: 'numeric', month: 'long' })}
+        {LB.fmtDayLabel(date, { weekday: 'long', day: 'numeric', month: 'long' })}
       </div>
 
       {onSetStatus && (
@@ -1827,7 +1822,7 @@ function HealthWeekCard({ stats, dragHandle, targets, tf, setTf, weightUnit }) {
     weight, steps, stepsSum, calories, protein, carbs, fat, water, adherence,
     snapTgtCal, snapTgtProt, snapTgtCarb, snapTgtFat } = stats;
   const r = v => v == null ? null : Math.round(v);
-  const range = `${healthFmtDate(from, { day: 'numeric', month: 'short' })} – ${healthFmtDate(to, { day: 'numeric', month: 'short' })}`;
+  const range = `${LB.fmtDayLabel(from, { day: 'numeric', month: 'short' })} – ${LB.fmtDayLabel(to, { day: 'numeric', month: 'short' })}`;
   // The 1W window anchors on the selected day, so it can be a past week: only
   // call it "THIS WEEK" when the window still includes today.
   const periodLabel = tf === '1W' ? (to >= LB.todayISO() ? 'THIS WEEK' : 'WEEK') : tf === '1M' ? 'LAST 30 DAYS' : 'LAST 3 MONTHS';
@@ -2195,7 +2190,7 @@ function GlucoseCard({ glucoseLogs, unit, tf: sharedTf, setTf: setSharedTf, drag
                   <div key={n.id} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
                     <span style={{ width: 7, height: 7, borderRadius: '50%', background: CTX_COLORS[n.context] || UI.inkSoft, display: 'inline-block', flexShrink: 0, marginTop: 2 }} />
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 9, fontFamily: UI.fontUi, color: UI.inkGhost }}>{healthFmtDate(n.date, { day: 'numeric', month: 'short' })} · {n.time}</div>
+                      <div style={{ fontSize: 9, fontFamily: UI.fontUi, color: UI.inkGhost }}>{LB.fmtDayLabel(n.date, { day: 'numeric', month: 'short' })} · {n.time}</div>
                       {n.note && <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.4, marginTop: 1 }}>{n.note}</div>}
                     </div>
                     <span className="num" style={{ flexShrink: 0, fontSize: 11, color: UI.inkFaint }}>{glucoseDisplay(n.valueMmol, unit)}</span>
@@ -2275,7 +2270,7 @@ function BloodPressureCard({ bpLogs, tf: sharedTf, setTf: setSharedTf, dragHandl
                 {sortedReadings.map(n => (
                   <div key={n.id} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 9, fontFamily: UI.fontUi, color: UI.inkGhost }}>{healthFmtDate(n.date, { day: 'numeric', month: 'short' })} · {n.time}</div>
+                      <div style={{ fontSize: 9, fontFamily: UI.fontUi, color: UI.inkGhost }}>{LB.fmtDayLabel(n.date, { day: 'numeric', month: 'short' })} · {n.time}</div>
                       {n.note && <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.4, marginTop: 1 }}>{n.note}</div>}
                     </div>
                     <span className="num" style={{ flexShrink: 0, fontSize: 11, color: UI.inkFaint }}>{n.systolic}/{n.diastolic}</span>
@@ -2344,7 +2339,7 @@ function BodyTempCard({ tempLogs, unit, tf: sharedTf, setTf: setSharedTf, dragHa
                 {sortedReadings.map(n => (
                   <div key={n.id} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 9, fontFamily: UI.fontUi, color: UI.inkGhost }}>{healthFmtDate(n.date, { day: 'numeric', month: 'short' })} · {n.time}</div>
+                      <div style={{ fontSize: 9, fontFamily: UI.fontUi, color: UI.inkGhost }}>{LB.fmtDayLabel(n.date, { day: 'numeric', month: 'short' })} · {n.time}</div>
                       {n.note && <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.4, marginTop: 1 }}>{n.note}</div>}
                     </div>
                     <span className="num" style={{ flexShrink: 0, fontSize: 11, color: UI.inkFaint }}>{tempDisplay(n.valueC, unit)}{unitLabel}</span>
@@ -2879,7 +2874,7 @@ function HealthScreen({ store, setStore, go, userId }) {
   );
 
   const handle = <DragHandle style={{ width: 20, height: 22, marginLeft: -4, cursor: 'grab' }} />;
-  const dayLabel = selectedDate === today ? 'Today' : healthFmtDate(selectedDate, { weekday: 'short', day: 'numeric', month: 'short' });
+  const dayLabel = selectedDate === today ? 'Today' : LB.fmtDayLabel(selectedDate, { weekday: 'short', day: 'numeric', month: 'short' });
   const trainedSelected = LB.isLoggedTrainingDay(store.sessions, selectedDate);
   const cardioSelected = (store.cardioLogs || []).some(l => l.date === selectedDate);
   // Honors a flex plan's explicit Training|Rest override (via targetsSnap.dayType).
@@ -3190,7 +3185,7 @@ function HealthClientLogs({ clientStore }) {
   const selectedLog = logs.find(l => l.date === selectedDate) || null;
   const trainedSelected = LB.isLoggedTrainingDay(clientStore?.sessions, selectedDate);
   const cardioSelected = cardioLogs.some(l => l.date === selectedDate);
-  const dayLabel = selectedDate === today ? 'Today' : healthFmtDate(selectedDate, { weekday: 'short', day: 'numeric', month: 'short' });
+  const dayLabel = selectedDate === today ? 'Today' : LB.fmtDayLabel(selectedDate, { weekday: 'short', day: 'numeric', month: 'short' });
 
   const handle = <DragHandle style={{ width: 20, height: 22, marginLeft: -4, cursor: 'grab' }} />;
   // Opens a chart full-width in a sheet, offered only on charts the 2-col grid
@@ -3268,7 +3263,7 @@ function HealthClientLogs({ clientStore }) {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {weeks.map((w, i) => (
             <div key={w.ws} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6 }}>
-              <div style={{ width: 58, flexShrink: 0, fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi }}>{healthFmtDate(w.ws, { day: 'numeric', month: 'short' })}</div>
+              <div style={{ width: 58, flexShrink: 0, fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi }}>{LB.fmtDayLabel(w.ws, { day: 'numeric', month: 'short' })}</div>
               <div style={{ flex: 1, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                 {w.weight != null && <span className="num" style={{ fontSize: 11, color: UI.inkSoft }}>{w.weight} {clientUnit}</span>}
                 {w.steps != null && <span style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi }}>{Math.round(w.steps).toLocaleString()} st</span>}

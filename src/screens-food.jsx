@@ -25,10 +25,6 @@ function fdShiftDate(dateStr, deltaDays) {
   d.setDate(d.getDate() + deltaDays);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
-function fdFmtDate(dateStr) {
-  const d = new Date(dateStr + 'T12:00:00');
-  return d.toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'short' });
-}
 const fdNum = v => (v === '' || v == null || isNaN(parseFloat(v))) ? null : parseFloat(v);
 const fdRound1 = v => Math.round(v * 10) / 10;
 // Shared precondition for anything about to write a row that references a
@@ -327,7 +323,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   const [editUnitNewLabel, setEditUnitNewLabel] = useStateFd('');
   const [editUnitNewGrams, setEditUnitNewGrams] = useStateFd('');
 
-  const dayLabel = curDate === today ? 'Today' : curDate === fdShiftDate(today, -1) ? 'Yesterday' : fdFmtDate(curDate);
+  const dayLabel = curDate === today ? 'Today' : curDate === fdShiftDate(today, -1) ? 'Yesterday' : LB.fmtDayLabel(curDate);
 
   const dayEntries = useMemoFd(
     () => (store.foodLogs || []).filter(l => l.date === curDate).sort((a, b) => b.time.localeCompare(a.time)),
