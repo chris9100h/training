@@ -1226,7 +1226,15 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                               <div data-reorder-ignore="true" style={fdHourLabelCol}>
                                 <span className="num" style={{ fontSize: 11, fontWeight: isNow ? 700 : 400, color: isNow ? 'var(--accent)' : (filled ? UI.inkSoft : UI.inkGhost) }}>{String(h).padStart(2, '0')}</span>
                               </div>
-                              <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                              {/* alignSelf: stretch (this column, and the empty-hour
+                                  placeholder's flex: 1 below) makes the data-reorder-item
+                                  element's own rect span the row's full height instead of
+                                  shrink-wrapping its content and sitting centered within a
+                                  taller row (fdHourRow's alignItems: center). An empty hour's
+                                  placeholder was 1px tall, centered in a ~40-46px row: its
+                                  actual drop-hittable area was a sliver around that single
+                                  pixel, not the row a user sees and aims for. */}
+                              <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6, alignSelf: 'stretch' }}>
                                 {filled ? es.map(e => (
                                   <div key={e.id} data-reorder-item="true" style={fdEntryRow}>
                                     <DragHandle style={{ width: 14, height: 22, marginRight: 2 }} />
@@ -1240,7 +1248,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                                       <i className="fa-solid fa-trash" style={{ fontSize: 12 }} />
                                     </button>
                                   </div>
-                                )) : <div data-reorder-item="true" data-reorder-ignore="true" style={{ height: 1 }} />}
+                                )) : <div data-reorder-item="true" data-reorder-ignore="true" style={{ flex: 1 }} />}
                               </div>
                               <button data-reorder-ignore="true" onClick={() => addAtHour(h)} aria-label={`Add food at ${String(h).padStart(2, '0')}:00`} style={fdHourAddBtn(isNow)}>
                                 <i className="fa-solid fa-plus" style={{ fontSize: 11 }} />
