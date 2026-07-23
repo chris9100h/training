@@ -451,6 +451,13 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     const ok = await commitEntries(staged);
     if (ok) setStaged([]);
   }
+  // TopBar back: warns first if there's a staged-but-uncommitted batch, same
+  // "Discard picks?" wording FdIngredientPicker's own back/backdrop already
+  // uses, so an accidental tap here doesn't silently drop everything picked.
+  async function requestLeaveFood() {
+    if (staged.length && !await confirm(`${staged.length} picked item${staged.length === 1 ? '' : 's'} won't be added.`, { title: 'Discard picks?', ok: 'Discard', cancel: 'Keep picking', danger: true })) return;
+    go({ name: 'health' });
+  }
 
   // Time stamped on a newly logged entry: the timeline hour the user tapped
   // "+" on, else the current wall-clock time.
@@ -1037,7 +1044,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   return (
     <Screen>
       {confirmEl}
-      <TopBar title="Food" sub={dayLabel} onBack={() => go({ name: 'health' })}
+      <TopBar title="Food" sub={dayLabel} onBack={requestLeaveFood}
         right={
           tab === 'quickadd' && quickTab === 'recipes' && (store.foodRecipes || []).length > 0 ? (
             <button onClick={openNewRecipe} aria-label="New recipe" style={fdTopAddBtn}>
