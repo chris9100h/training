@@ -2048,6 +2048,12 @@ function FdIngredientPicker({ open, onClose, onAdd, store }) {
     }
     return out;
   }, [store.foodLogs]);
+  // Alphabetical, same as FoodScreen's own favoritesFiltered: store.foodFavorites
+  // is otherwise recency/insertion-ordered, which read as random here.
+  const favoritesSorted = useMemoFd(
+    () => [...(store.foodFavorites || [])].sort((a, b) => a.foodName.localeCompare(b.foodName)),
+    [store.foodFavorites],
+  );
 
   const manualValid = mName.trim() && fdNum(mP) != null && fdNum(mC) != null && fdNum(mF) != null && fdNum(mCal) != null;
   // A manual entry already carries its exact quantity and macros with
@@ -2177,11 +2183,11 @@ function FdIngredientPicker({ open, onClose, onAdd, store }) {
         )}
 
         {pickTab === 'favorites' && (
-          (store.foodFavorites || []).length === 0 ? (
+          favoritesSorted.length === 0 ? (
             <div style={fdEmptyStyle}>No favorites yet.</div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 360, overflowY: 'auto' }}>
-              {store.foodFavorites.map(f => (
+              {favoritesSorted.map(f => (
                 <button key={f.id} onClick={() => openQtyForLog(f)} style={fdResultRow}>
                   <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
                     <div style={fdEntryName}>{f.foodName}</div>
@@ -2361,7 +2367,7 @@ function FdHeroRow({ label, color, actual, target, unit = '' }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
       <span style={{ width: 46, flexShrink: 0, fontSize: 9, fontWeight: 700, letterSpacing: '0.05em', color, fontFamily: UI.fontUi }}>{label}</span>
-      <div style={{ flex: 1, height: 4, borderRadius: 2, background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, overflow: 'hidden' }}>
+      <div style={{ flex: 1, height: 4, borderRadius: 1, background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, overflow: 'hidden' }}>
         <div style={{ width: `${pct}%`, height: '100%', background: color }} />
       </div>
       <span className="num" style={{ fontSize: 11, color, flexShrink: 0, textAlign: 'right' }}>
