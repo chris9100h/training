@@ -234,12 +234,17 @@ function relevanceScore(item: FoodResult, query: string): number {
 // verified DB), used two ways: as the standalone "Zane" source, and folded
 // into an "All" search so a food someone already selected reliably surfaces
 // (and sorts to the top) instead of being buried in raw OFF/USDA output.
-// The query is stripped of PostgREST's or=()/wildcard reserved chars ( ) , *
-// and then percent-encoded, so it can never break out of the ilike value.
+// The query is stripped of PostgREST's or=()/wildcard reserved chars ( ) , *,
+// then SQL ILIKE's own wildcard chars % and _ are escaped (plus a literal
+// backslash, so it can't cancel out that escaping), and only then percent-
+// encoded. This keeps the query from breaking out of the ilike value AND
+// keeps a literal %/_ typed by the user (e.g. "Joghurt 1,5% Fett") matching
+// itself instead of being read as "any characters"/"any single character".
 async function searchCache(query: string, sourceFilter?: 'off' | 'usda'): Promise<FoodResult[]> {
   const safe = query.replace(/[(),*]/g, ' ').replace(/\s+/g, ' ').trim();
   if (!safe) return [];
-  const pat = `*${encodeURIComponent(safe)}*`;
+  const escaped = safe.replace(/[\\%_]/g, '\\$&');
+  const pat = `*${encodeURIComponent(escaped)}*`;
   const parts = [`or=(name.ilike.${pat},brand.ilike.${pat})`, 'select=*', 'limit=25'];
   if (sourceFilter) parts.push(`source=eq.${sourceFilter}`);
   const r = await dbFetch(`zane_foods?${parts.join('&')}`).catch(() => null);

@@ -23,7 +23,7 @@ const FM_ADMIN_EMAIL = 'office@btc-prime.biz';
 // Coach accent tint (deliberately distinct from the app accent). Single source
 // so it is not hardcoded at each use site.
 const FM_COACH_TINT = '#4aab97';
-// #4aab97 is tuned for a dark canvas — deep enough on light/paper instead,
+// #4aab97 is tuned for a dark canvas: deep enough on light/paper instead,
 // same reasoning as the health charts' DIA_COLOR.
 function fmCoachTint() {
   return isLightCanvasActive() ? '#1f7a68' : FM_COACH_TINT;

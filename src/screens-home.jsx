@@ -3048,7 +3048,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                     </svg>
                   )}
                   {isMissed && !isSelected && <div style={{ width: 4, height: 4, borderRadius: '50%', background: UI.danger }} />}
-                  {isSkipped && !isSelected && <span style={{ fontSize: 8, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1, textShadow: 'var(--text-lift)' }}>—</span>}
+                  {isSkipped && !isSelected && <span style={{ fontSize: 8, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1, textShadow: 'var(--text-lift)' }}>-</span>}
                   {isStatusDay && !isSelected && <i className={`fa-solid ${statusDayMode === 'sick' ? 'fa-bed-pulse' : 'fa-umbrella-beach'}`} style={{ fontSize: 7, color: 'var(--accent)', opacity: 0.7 }} />}
                   {isSelected && <div style={{ width: 4, height: 4, borderRadius: '50%', background: UI.gold }} />}
                 </div>
@@ -3249,7 +3249,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                       animation: 'pulseGold 3.5s ease-out infinite',
                       display: 'flex', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10,
                       WebkitTapHighlightColor: 'transparent',
-                      // Solid fill of its own — the inherited grid-lift (paper only,
+                      // Solid fill of its own: the inherited grid-lift (paper only,
                       // via the button/input/select/textarea UA-reset fix) would
                       // muddy the already-translucent accent-ink label on top of it.
                       textShadow: 'none',

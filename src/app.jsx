@@ -23,7 +23,10 @@ function unseenWhatsNew() {
 // screens-food.jsx): stash the token BEFORE anything else runs, so it survives
 // the login (or even signup + approval) roundtrip a logged-out recipient goes
 // through, then scrub it from the URL so a later reload doesn't re-trigger.
-// Consumed (and cleared) by the RecipeShareSheet overlay once the app is ready.
+// Consumed by the RecipeShareSheet overlay once the app is ready; cleared from
+// localStorage as soon as it's read into state below (not only on sheet close),
+// so a backgrounded/killed app (common on iOS) can't leave a stale token behind
+// that re-opens the same old share on the next launch or a different account.
 const PENDING_SHARE_KEY = 'logbook-pending-share';
 try {
   const _shareToken = new URLSearchParams(window.location.search).get('share');
@@ -305,7 +308,14 @@ function App() {
   const onboardingChecked = useRefA(false);
   const [unitPromptOpen, setUnitPromptOpen] = useStateA(false);
   const [pendingShare, setPendingShare] = useStateA(() => {   // ?share=<token> stashed by the module-scope block above
-    try { return localStorage.getItem(PENDING_SHARE_KEY); } catch (_) { return null; }
+    try {
+      const token = localStorage.getItem(PENDING_SHARE_KEY);
+      // Clear right away, now that the token is consumed into state: the sheet
+      // below still opens off `pendingShare`, but a killed/backgrounded app
+      // can no longer strand the key for the next launch to re-read.
+      if (token) localStorage.removeItem(PENDING_SHARE_KEY);
+      return token;
+    } catch (_) { return null; }
   });
   const unitPicked                = useRefA(false); // user chose a unit this session — silences the reset watcher
   const retryTimer                = useRefA(null);  // one-shot retry after a failed sync
@@ -916,8 +926,8 @@ function App() {
               cardioLogs: [...localOnlyCardioLogs, ...mergeById(fresh.cardioLogs, cur.cardioLogs, base?.cardioLogs, delCardioIds)],
               waterLogs: [...localOnlyWaterLogs, ...mergeById(fresh.waterLogs, cur.waterLogs, base?.waterLogs, delWaterIds)],
               foodLogs: [...localOnlyFoodLogs, ...mergeById(fresh.foodLogs, cur.foodLogs, base?.foodLogs, delFoodIds)],
-              foodFavorites: [...localOnlyFavorites, ...(fresh.foodFavorites || []).filter(f => !delFavIds?.has(f.id))],
-              foodRecipes: [...localOnlyRecipes, ...(fresh.foodRecipes || []).filter(r => !delRecipeIds?.has(r.id))],
+              foodFavorites: [...localOnlyFavorites, ...mergeById(fresh.foodFavorites, cur.foodFavorites, base?.foodFavorites, delFavIds)],
+              foodRecipes: [...localOnlyRecipes, ...mergeById(fresh.foodRecipes, cur.foodRecipes, base?.foodRecipes, delRecipeIds)],
               workoutTemplates: [...localOnlyTemplates, ...(fresh.workoutTemplates || []).filter(t => !delTplIds?.has(t.id))],
               checkinSchemaTemplates: [...localOnlyCheckinTemplates, ...(fresh.checkinSchemaTemplates || []).filter(t => !delCheckinTplIds?.has(t.id))],
               cardioPlans: [...localOnlyCardioPlans, ...(fresh.cardioPlans || []).filter(p => !delCardioPlanIds?.has(p.id))],

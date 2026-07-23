@@ -1602,7 +1602,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
 
       {pushTarget && (
         // dim=false: pushOpen (underneath, MiniSheet default zIndex 300) stays
-        // mounted and already dimmed the page — without this, its own default
+        // mounted and already dimmed the page. Without this, its own default
         // dim=true stacked a second rgba(0,0,0,0.5) layer on top, visibly darker
         // than every other nested MiniSheet in this file (previewBackup/
         // restoreFromSheet both already set dim=false for the same reason).
