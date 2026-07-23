@@ -114,7 +114,7 @@ function NavRow({ label, hint, onTap, first = false, accent = false }) {
   );
 }
 
-// Alpha bumped from the original 0.10/0.22 — plenty visible against a vivid
+// Alpha bumped from the original 0.10/0.22, plenty visible against a vivid
 // accent color, but on paper's muted grey accent those read as barely-there
 // against bg-raised. Higher alpha keeps a normal accent legible too.
 const accentBtn = { background: 'rgba(var(--accent-rgb),0.16)', border: '1px solid rgba(var(--accent-rgb),0.4)', color: 'var(--accent)', padding: '5px 14px', borderRadius: 6, cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', WebkitTapHighlightColor: 'transparent', flexShrink: 0 };

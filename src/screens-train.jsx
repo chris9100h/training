@@ -3460,7 +3460,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     // opening it only shows the question, it doesn't record anything. Marking
     // it earlier let an abandoned-but-open sheet (backgrounded/reloaded mid-
     // session, e.g. an iOS PWA reclaim during a rest period) latch as "asked"
-    // into the persisted set with no answer behind it — on remount the trigger
+    // into the persisted set with no answer behind it. On remount the trigger
     // effect below permanently skipped re-asking, so the exercise silently
     // never got a chance to earn (or decline) anything for the rest of that
     // session, with no trace in the recap at all.
@@ -4087,7 +4087,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     if (!workingSets.some(s => s.done)) { askedJointRef.current.add(exId); persistMesoAsked(); return; }
     const ex = store.exercises?.find(e => e.id === exId);
     const pm = primaryMuscleForExercise(ex);
-    // NOT marked "asked" here anymore — see handleJointAnswer, which marks it
+    // NOT marked "asked" here anymore: see handleJointAnswer, which marks it
     // only once the user actually answers, so an abandoned/unanswered sheet
     // (backgrounded mid-session, app reload) is re-eligible on the next visit
     // instead of silently and permanently skipping this exercise.
@@ -8674,7 +8674,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               width: '100%', marginBottom: 8, padding: '12px 14px',
               // A low-alpha accent tint over the sheet's bg-raised landed
               // almost exactly on UI.bgInset's own grey on paper (both cool
-              // greys, barely 2 units apart) — selected vs. unselected was
+              // greys, barely 2 units apart). Selected vs. unselected was
               // nearly indistinguishable. Stronger fill + a thicker border
               // (same recipe as the Home day strip's selected cell) instead.
               background: sel ? `rgba(var(--accent-rgb),0.22)` : UI.bgInset,

@@ -44,8 +44,8 @@ function Screen({ children, scroll = true, style = {} }) {
       display: 'flex', flexDirection: 'column',
       overflow: scroll ? 'auto' : 'hidden',
       // Inherits to every descendant (text-shadow is an inherited CSS
-      // property) except where a surface with its own background — Card,
-      // Sheet, a solid-fill Btn — resets it back to 'none'. 'none' outside
+      // property) except where a surface with its own background, like Card,
+      // Sheet, or a solid-fill Btn, resets it back to 'none'. 'none' outside
       // paper, so this is a no-op everywhere else.
       textShadow: 'var(--text-lift)',
       ...style,
@@ -457,7 +457,7 @@ const btnPrimary = {
   cursor: 'pointer',
   boxShadow: '0 6px 20px rgba(var(--accent-rgb),0.30)',
   WebkitTapHighlightColor: 'transparent',
-  // Solid fill of its own — the inherited grid-lift (paper only) would
+  // Solid fill of its own: the inherited grid-lift (paper only) would
   // muddy already-high-contrast accent-ink text on top of it.
   textShadow: 'none',
 };
@@ -588,7 +588,7 @@ function Toggle({ on, onToggle }) {
 // deliberately intense (currently just the Drop Set/Myo-Reps/AMRAP
 // Variations chain sheet), not a general-purpose "make it gold" switch.
 // zIndex: lets a caller override the default stacking tier (100) when it
-// must guarantee winning against a specific known overlay — e.g. sitting
+// must guarantee winning against a specific known overlay, e.g. sitting
 // above its own parent's opaque z-9998 wizard, or beating an ordinary Sheet
 // from underneath a still-open admin Sheet. Not a general-purpose knob:
 // only reach for it when there's a concrete overlay this Sheet must clear.
@@ -828,7 +828,7 @@ const ICON_CALENDAR = (
 // ─── useConfirm ─────────────────────────────────────────────────────
 // zIndex: lets a caller whose own UI already sits above the ordinary z-100
 // tier (e.g. a wizard's z-9998 overlay) keep its confirm dialog on top of
-// itself too — otherwise this hook's Sheet (portaled to document.body, but
+// itself too: otherwise this hook's Sheet (portaled to document.body, but
 // still z-100) can render hidden behind the caller's own higher overlay.
 function useConfirm(zIndex = 100) {
   const [state, setState] = React.useState(null);

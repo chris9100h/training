@@ -2778,7 +2778,7 @@ const FEEL_LEVELS = [
 ];
 
 // Generic light-canvas detector (works for 'light', 'paper', or any future
-// light theme) — perceived luminance of the live --bg-rgb, no theme-name
+// light theme): perceived luminance of the live --bg-rgb, no theme-name
 // checks to keep in sync.
 function isLightCanvasActive() {
   const parts = (getComputedStyle(document.documentElement).getPropertyValue('--bg-rgb') || '').trim().split(',').map(Number);
@@ -3029,13 +3029,13 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
           // Never asked, or the sheet opened but the answer never landed (e.g.
           // backgrounded/reloaded mid-session before the "asked, not answered"
           // fix). Still offer a row when there's a completed set to judge, so
-          // it isn't silently stuck unrated forever — same "attempted" bar the
+          // it isn't silently stuck unrated forever: same "attempted" bar the
           // live gate itself uses, opens the same blank joint sheet as a fresh
           // ask, and the existing re-earn machinery below is already exId-
           // agnostic (it just reads answers.joint[exId], present or not).
           const workingSets = (e.sets || []).filter(st => !st.warmup && !st.skipped);
           if (workingSets.some(st => st.done)) {
-            rows.push({ type: 'joint', subject: e.exId, name: e.name, sub: 'Not rated — tap to add', sel: null });
+            rows.push({ type: 'joint', subject: e.exId, name: e.name, sub: 'Not rated, tap to add', sel: null });
           }
           return;
         }
@@ -3416,7 +3416,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
 
       <div ref={captureRef} style={{
         padding: capturing ? '20px 22px 24px' : '14px 22px 28px',
-        // The CSS grid (--bg-texture) never survives html2canvas — always off
+        // The CSS grid (--bg-texture) never survives html2canvas, always off
         // while capturing, SvgGrid below draws the current theme's grid for
         // the export instead (works for html2canvas, unlike the CSS version).
         backgroundColor: UI.bg, backgroundImage: capturing ? 'none' : 'var(--bg-texture)', position: 'relative',
