@@ -297,7 +297,7 @@ User-markierte Lieblings-Lebensmittel im Food Tracker ("Quick Add"), gleiches Sh
 - `quantity_g` (numeric), `calories` (int), `protein`/`carbs`/`fat` (numeric), `fiber` (numeric, nullable), `created_at` (timestamptz)
 - `units` (jsonb, Default `[]`): optionale Liste von Stück-/Packungsgrößen, je `{ label, grams }` (z.B. `{ label: 'Pc', grams: 62 }`), mehrere pro Favorit möglich. Beim erneuten Hinzufügen bietet die Mengen-Sheet einen Grams/Unit-Picker: bei gewählter Einheit ist das Eingabefeld eine Stückzahl, `quantity_g` wird daraus als `count * grams` abgeleitet. Editierbar im Favorites-Tab über den Stift-Button (Liste hinzufügen/entfernen). Migration 0188 führte ursprünglich ein einzelnes `unit_label`/`unit_g`-Paar ein, Migration 0189 ersetzte es durch dieses Array (bestehende Werte automatisch übernommen) und droppte die beiden alten Spalten.
 - Store field: `store.foodFavorites`. Eigene, einfache User-Collection (kein Health-Tab-Live-Polling, kein Coach-Read), als Store-Collection über den syncStore-Diff gesynct + Boot-Merge/Anti-Resurrection, gleiches Muster wie `zane_workout_templates`.
-- RLS: nur eigene Zeilen (`FOR ALL USING/WITH CHECK auth.uid() = user_id`), kein Coach-Zugriff. Migration 0187.
+- RLS: nur eigene Zeilen (`FOR ALL USING/WITH CHECK (select auth.uid()) = user_id`), kein Coach-Zugriff. Migration 0187, `auth.uid()`-Wrapping (initPlan-Caching) Migration 0192.
 
 ### `zane_food_recipes`
 
@@ -305,7 +305,7 @@ Eine benannte Liste von Zutaten, die der User zusammen loggt (z.B. "Breakfast bo
 
 - `id` (text), `user_id` (uuid), `name` (text), `items` (jsonb, Default `[]`), `portions` (integer, Default `1`), `created_at`/`updated_at` (timestamptz)
 - Store field: `store.foodRecipes`. Gleiches Sync-/Merge-Muster wie `zane_food_favorites`.
-- RLS: nur eigene Zeilen, kein Coach-Zugriff. Migration 0187, `portions` Migration 0190.
+- RLS: nur eigene Zeilen, kein Coach-Zugriff. Migration 0187, `portions` Migration 0190, `auth.uid()`-Wrapping (initPlan-Caching) Migration 0192.
 
 ### `zane_cardio_logs`
 

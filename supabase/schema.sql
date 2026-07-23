@@ -2320,7 +2320,7 @@ ALTER TABLE zane_food_favorites ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "zane_food_favorites_own"
   ON zane_food_favorites FOR ALL
-  USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+  USING ((select auth.uid()) = user_id) WITH CHECK ((select auth.uid()) = user_id);
 
 CREATE TABLE zane_food_recipes (
   id          text        PRIMARY KEY,
@@ -2338,7 +2338,7 @@ ALTER TABLE zane_food_recipes ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "zane_food_recipes_own"
   ON zane_food_recipes FOR ALL
-  USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+  USING ((select auth.uid()) = user_id) WITH CHECK ((select auth.uid()) = user_id);
 
 -- ── Support tickets (migrations 0085/0086 + archive_support_tickets) ────────────
 -- A support ticket is a zane_coaching row with id LIKE 'support_%' between the
