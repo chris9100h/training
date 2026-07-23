@@ -1151,24 +1151,24 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
     return window.__h2cPromise;
   };
 
-  // Lazily load the barcode-scanner decoder (html5-qrcode) the first time the
-  // food scanner is opened. iOS Safari has no native BarcodeDetector, so this
-  // library provides scanning there (where the native API exists it uses it
-  // internally). Same on-demand pattern as html2canvas above, not preloaded
-  // and not in the SW cache since it (and the food lookup) needs the network.
-  window.__ensureBarcodeLib = function () {
-    if (window.Html5Qrcode) return Promise.resolve(window.Html5Qrcode);
-    if (!window.__bcPromise) {
-      window.__bcPromise = new Promise(function (resolve, reject) {
-        var s = document.createElement('script');
-        s.src = 'https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js';
-        s.crossOrigin = 'anonymous';
-        s.onload = function () { resolve(window.Html5Qrcode); };
-        s.onerror = function () { window.__bcPromise = null; reject(new Error('html5-qrcode failed to load')); };
-        document.head.appendChild(s);
-      });
+  // Lazily load the barcode-scanner decoder (zbar-wasm, a WebAssembly build
+  // of the ZBar C library) the first time the food scanner is opened. iOS
+  // Safari has no native BarcodeDetector (WebKit has never shipped it), and
+  // the previous html5-qrcode-based decoder had years of widely-reported
+  // failures decoding 1D barcodes (EAN/UPC) specifically on iOS Safari;
+  // zbar-wasm runs its own compiled decoder, so it doesn't depend on any
+  // browser barcode API at all. Same on-demand pattern as html2canvas above,
+  // not preloaded and not in the SW cache since it (and the food lookup)
+  // needs the network. Native dynamic import(), not a script tag: the
+  // published browser build is an ES module.
+  window.__ensureZbarWasm = function () {
+    if (window.__zbarWasm) return Promise.resolve(window.__zbarWasm);
+    if (!window.__zbarWasmPromise) {
+      window.__zbarWasmPromise = import('https://cdn.jsdelivr.net/npm/@undecaf/zbar-wasm@0.11.0/dist/index.mjs')
+        .then(function (mod) { window.__zbarWasm = mod; return mod; })
+        .catch(function (e) { window.__zbarWasmPromise = null; throw e; });
     }
-    return window.__bcPromise;
+    return window.__zbarWasmPromise;
   };
 
   boot();

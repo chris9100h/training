@@ -5,7 +5,7 @@ const CACHE = 'zane-v2.654';
 // change, so a routine deploy never re-downloads ~7MB of unchanged images.
 // activate() below intentionally never deletes this cache.
 const PHOTOS_CACHE = 'zane-photos-v1';
-const CDN_HOSTS = ['unpkg.com', 'cdnjs.cloudflare.com', 'fonts.googleapis.com', 'fonts.gstatic.com'];
+const CDN_HOSTS = ['unpkg.com', 'cdnjs.cloudflare.com', 'fonts.googleapis.com', 'fonts.gstatic.com', 'cdn.jsdelivr.net'];
 // Works at any base path (e.g. /training/ on GitHub Pages, / on custom domain)
 const BASE = self.registration.scope.replace(/\/$/, '');
 // Boot shell — everything the app needs to actually start. Cached atomically

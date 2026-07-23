@@ -2794,53 +2794,94 @@ function FdLabelBusy() {
   );
 }
 
-// Live-camera barcode scanner. Uses html5-qrcode (lazy-loaded via
-// window.__ensureBarcodeLib, same on-demand pattern as html2canvas), which
-// works on iOS Safari too (and uses the native BarcodeDetector internally
-// where it exists). Owns the scanner instance and tears the camera down on
-// unmount. Falls back to a "type the barcode" hint only if the library or
-// camera is unavailable, the search box already handles typed barcodes.
-const FD_SCANNER_ELEM_ID = 'fd-barcode-scanner-view';
+// Live-camera barcode scanner. Uses zbar-wasm (lazy-loaded via
+// window.__ensureZbarWasm, same on-demand pattern as html2canvas): a real
+// ZBar decoder compiled to WebAssembly, so it never depends on a browser
+// barcode API at all. iOS Safari has no native BarcodeDetector (WebKit has
+// never shipped it), and the previous html5-qrcode-based decoder had years
+// of widely-reported failures decoding 1D barcodes (EAN/UPC) specifically
+// on iOS Safari; zbar-wasm's own decoding doesn't hit that class of bug.
+// This component owns the camera stream directly (getUserMedia) and draws
+// each frame to a reused (Offscreen)Canvas for zbar-wasm to scan, following
+// the library's own reference demo: recreating the canvas every frame
+// (instead of resizing one in place) measurably slows decoding. Falls back
+// to a "type the barcode" hint only if the library or camera is
+// unavailable, the search box already handles typed barcodes.
+//
+// Known limitation, not fixable from here: multiple long-standing WebKit
+// bugs make getUserMedia flaky specifically for a home-screen-installed
+// ("standalone") PWA on iOS (permission not persisting, camera failing to
+// restart after backgrounding, a camera-rotation bug on iOS 26) that don't
+// reproduce in a plain Safari tab. That's a platform limitation independent
+// of which decoder library is used.
 function FdScanner({ onClose, onDetect }) {
   const [status, setStatus] = useStateFd('loading'); // 'loading' | 'scanning' | 'error'
-  const scannerRef = useRefFd(null);
+  const videoRef = useRefFd(null);
+  const streamRef = useRefFd(null);
+  const canvasRef = useRefFd(null);
+  const rafRef = useRefFd(null);
   const doneRef = useRefFd(false);
   useEffectFd(() => {
     let cancelled = false;
+    let zbarWasm = null;
+
+    async function detectFrame() {
+      const video = videoRef.current;
+      if (!video || !video.videoWidth || !video.videoHeight) return;
+      const w = video.videoWidth, h = video.videoHeight;
+      let canvas = canvasRef.current;
+      if (!canvas || canvas.width !== w || canvas.height !== h) {
+        canvas = (typeof OffscreenCanvas !== 'undefined') ? new OffscreenCanvas(w, h) : document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        canvasRef.current = canvas;
+      }
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(video, 0, 0, w, h);
+      const imageData = ctx.getImageData(0, 0, w, h);
+      let symbols;
+      try { symbols = await zbarWasm.scanImageData(imageData); } catch (_) { return; }
+      if (doneRef.current || cancelled || !symbols?.length) return;
+      const raw = symbols[0].decode().replace(/\D/g, '');
+      if (!/^\d{8,14}$/.test(raw)) return;
+      doneRef.current = true;
+      onDetect(raw);
+    }
+    // Promise-chained rAF (not a fixed setInterval): waits for the previous
+    // frame's draw + WASM decode to finish before scheduling the next one,
+    // so it naturally throttles to whatever the device can sustain instead
+    // of piling up overlapping scans.
+    function tick() {
+      if (cancelled || doneRef.current) return;
+      detectFrame().finally(() => {
+        if (!cancelled && !doneRef.current) rafRef.current = requestAnimationFrame(tick);
+      });
+    }
+
     (async () => {
-      let lib;
-      try { lib = await window.__ensureBarcodeLib(); } catch (_) { lib = null; }
+      try { zbarWasm = await window.__ensureZbarWasm(); } catch (_) { zbarWasm = null; }
       if (cancelled) return;
-      if (!lib || !window.Html5Qrcode) { setStatus('error'); return; }
+      if (!zbarWasm) { setStatus('error'); return; }
+      let stream;
       try {
-        const Formats = window.Html5QrcodeSupportedFormats;
-        const formats = Formats ? [Formats.EAN_13, Formats.EAN_8, Formats.UPC_A, Formats.UPC_E, Formats.UPC_EAN_EXTENSION, Formats.CODE_128] : undefined;
-        const scanner = new window.Html5Qrcode(FD_SCANNER_ELEM_ID, { formatsToSupport: formats, experimentalFeatures: { useBarCodeDetectorIfSupported: true }, verbose: false });
-        scannerRef.current = scanner;
-        await scanner.start(
-          { facingMode: 'environment' },
-          // No qrbox: scan the whole frame (its shaded overlay is what letterboxed
-          // the view and drew brackets outside the image). The video is forced to
-          // fill the screen via CSS below, and we draw our own centered frame.
-          { fps: 10 },
-          (text) => {
-            const raw = String(text || '').replace(/\D/g, '');
-            if (doneRef.current || !/^\d{8,14}$/.test(raw)) return;
-            doneRef.current = true;
-            onDetect(raw);
-          },
-          () => {}, // per-frame decode misses: ignore
-        );
-        if (cancelled) { scanner.stop().catch(() => {}); return; }
-        setStatus('scanning');
+        stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: 'environment' } });
       } catch (_) {
         if (!cancelled) setStatus('error');
+        return;
       }
+      if (cancelled) { stream.getTracks().forEach(t => t.stop()); return; }
+      streamRef.current = stream;
+      const video = videoRef.current;
+      video.srcObject = stream;
+      try { await video.play(); } catch (_) {}
+      if (cancelled) return;
+      setStatus('scanning');
+      rafRef.current = requestAnimationFrame(tick);
     })();
     return () => {
       cancelled = true;
-      const s = scannerRef.current;
-      if (s) { try { s.stop().then(() => s.clear()).catch(() => {}); } catch (_) {} }
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      const stream = streamRef.current;
+      if (stream) stream.getTracks().forEach(t => t.stop());
     };
   }, []); // eslint-disable-line
 
@@ -2851,11 +2892,7 @@ function FdScanner({ onClose, onDetect }) {
         <button onClick={onClose} aria-label="Close scanner" style={{ background: 'rgba(255,255,255,0.15)', border: 'none', color: '#fff', width: 34, height: 34, borderRadius: 4, cursor: 'pointer', fontSize: 18, lineHeight: 1 }}>×</button>
       </div>
       <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
-        {/* html5-qrcode renders the camera into this element. Force the video it
-            injects to fill the area (cover), so the preview is truly full-screen
-            instead of letterboxed at the container's width. */}
-        <style>{`#${FD_SCANNER_ELEM_ID}{position:absolute!important;inset:0!important;width:100%!important;height:100%!important;overflow:hidden;}#${FD_SCANNER_ELEM_ID} video{position:absolute!important;top:0;left:0;width:100%!important;height:100%!important;object-fit:cover!important;}`}</style>
-        <div id={FD_SCANNER_ELEM_ID} />
+        <video ref={videoRef} muted autoPlay playsInline style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />
         {status === 'error' ? (
           <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, padding: 32, textAlign: 'center' }}>
             <i className="fa-solid fa-barcode" style={{ fontSize: 34, color: 'rgba(255,255,255,0.45)' }} />
