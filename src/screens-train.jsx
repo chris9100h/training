@@ -1366,22 +1366,32 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // assisted exercise "best" is the highest (least-negative) load, compared kg
   // to kg with no Epley and no >0 gate (loads are negative). Everything else
   // uses the estimated 1RM, folding in the local + windowed-server best.
+  // Must beat sessionBestPrVal too, not just the historical (pre-session)
+  // prior: that prior is fixed for the whole session (bestE1rmForExercise
+  // only reads ENDED sessions, so it can't see a set completed minutes ago
+  // in this same one), so on its own it lets every later, WORSE set in the
+  // same exercise re-clear the same old bar and flash again. sessionBestPrVal
+  // (already computed above for the row's PERSONAL RECORD watermark) is the
+  // running best across this exercise's own already-done sets THIS session,
+  // still excluding the set currently completing (it isn't marked done in
+  // this closure's `entry` yet), so it's exactly "beats what this exercise
+  // has already shown today," the missing half of the comparison.
   const isNewBestSet = (kg, reps, timeSec = null) => {
     if (!entry || newBestShownRef.current[entry.exId]) return false;
     // Time-based exercise: "best" is the longest duration ever logged.
     if (LB.exerciseLogMode(exercise) === 'time') {
       if (timeSec == null) return false;
       const prior = LB.bestTimeForExercise(store, entry.exId, session.id);
-      return prior != null && timeSec > prior;
+      return prior != null && timeSec > prior && timeSec > sessionBestPrVal;
     }
     if (LB.isAssisted(exercise)) {
       if (kg == null) return false;
       const prior = LB.bestAssistLoad(store, entry.exId, session.id);
-      return prior != null && kg > prior;
+      return prior != null && kg > prior && kg > sessionBestPrVal;
     }
     const cE1rm = (kg != null && reps != null && reps > 0) ? LB.e1rm(kg, reps) : 0;
     const priorBest = Math.max(LB.bestE1rmForExercise(store, entry.exId, session.id), remoteBestE1rmRef.current[entry.exId] || 0);
-    return cE1rm > 0 && priorBest > 0 && cE1rm > priorBest;
+    return cE1rm > 0 && priorBest > 0 && cE1rm > priorBest && cE1rm > sessionBestPrVal;
   };
 
   // A weighted stretch always needs a positive hold. The editor shows 30s by
@@ -6502,7 +6512,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   ) : null}
                   {progressionTarget && (
                     <div className="micro" style={{ color: UI.gold, opacity: 0.65, marginTop: 3 }}>
-                      {spHintApplies ? `≥${progressionTarget} reps · next weight` : 'auto · feedback-driven'}
+                      {spHintApplies ? `≥${progressionTarget} reps · next weight` : `auto · feedback-driven · ≥${progressionTarget} reps · next weight`}
                     </div>
                   )}
                   {/* Autoreg v2 P0: Rough-day suggestion. Non-binding, display only:
