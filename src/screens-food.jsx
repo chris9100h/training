@@ -152,6 +152,13 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // its own baked-in date/time (from entryTime() at stage time), so it stays
   // correct even if curDate or pendingHour changes mid-batch.
   const [staged, setStaged] = useStateFd([]);
+  // The picked-items panel (stagedPanel below) starts collapsed to a one-line
+  // summary + totals each time a fresh batch begins, expand shows the actual
+  // list. Auto-collapses again once staged empties out (committed or
+  // cleared), so the next pick starts collapsed too rather than remembering
+  // the last expand state.
+  const [pickedExpanded, setPickedExpanded] = useStateFd(false);
+  useEffectFd(() => { if (!staged.length) setPickedExpanded(false); }, [staged.length]);
 
   const [sourceFilter, setSourceFilter] = useStateFd(null); // null = all
   const [query, setQuery] = useStateFd('');
@@ -984,33 +991,43 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   }), [staged]);
 
   // Shown on both add-a-food tabs whenever there's a staged (picked, quantity
-  // already chosen, but not yet logged) batch: running totals, a review list,
-  // and the "Add N items" commit button. Lives here rather than per-tab so
+  // already chosen, but not yet logged) batch, right at the top next to
+  // pendingHourBanner: collapsed to a one-line "Adding N items" + totals by
+  // default, expanding reveals the actual list. The "Add N items" commit
+  // button stays visible either way, collapsing only hides the per-item
+  // review, not the ability to commit. Lives here rather than per-tab so
   // switching between Search and Quick Add mid-batch doesn't lose it, both
   // (and a staged recipe, see confirmRecipeLog) stage into the same shared
   // `staged` list.
   const stagedPanel = staged.length > 0 ? (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: 12, background: 'rgba(var(--accent-rgb),0.08)', border: `1px solid rgba(var(--accent-rgb),0.3)`, borderRadius: 6 }}>
-      <Bezel>Picked ({staged.length})</Bezel>
+      <div onClick={() => setPickedExpanded(v => !v)} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+        <i className={`fa-solid fa-chevron-${pickedExpanded ? 'down' : 'right'}`} style={{ fontSize: 9, color: pickedExpanded ? 'var(--accent)' : UI.inkGhost, width: 9, flexShrink: 0 }} />
+        <span style={{ fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: pickedExpanded ? 'var(--accent)' : UI.inkFaint, flex: 1 }}>
+          Adding {staged.length} item{staged.length === 1 ? '' : 's'}
+        </span>
+      </div>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 14 }}>
         <span className="num" style={{ fontSize: 18, fontWeight: 300, color: UI.ink }}>{stagedTotals.calories}<span style={{ fontSize: 10, color: UI.inkFaint, marginLeft: 3 }}>kcal</span></span>
         <span className="num" style={{ fontSize: 12, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 9 }}>P</span> {stagedTotals.protein}</span>
         <span className="num" style={{ fontSize: 12, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 9 }}>C</span> {stagedTotals.carbs}</span>
         <span className="num" style={{ fontSize: 12, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 9 }}>F</span> {stagedTotals.fat}</span>
       </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 2, maxHeight: 168, overflowY: 'auto' }}>
-        {staged.map(e => (
-          <div key={e.id} style={fdDraftRow}>
-            <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
-              <span style={{ ...fdEntryName, fontSize: 12 }}>{e.foodName}</span>
-              <span style={fdEntryMeta}>{e.time} · {e.quantityG}g · {e.calories} kcal</span>
+      {pickedExpanded && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2, maxHeight: 168, overflowY: 'auto' }}>
+          {staged.map(e => (
+            <div key={e.id} style={fdDraftRow}>
+              <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
+                <span style={{ ...fdEntryName, fontSize: 12 }}>{e.foodName}</span>
+                <span style={fdEntryMeta}>{e.time} · {e.quantityG}g · {e.calories} kcal</span>
+              </div>
+              <button onClick={() => removeStaged(e.id)} aria-label="Remove" style={fdInlineDeleteBtn}>
+                <i className="fa-solid fa-trash" style={{ fontSize: 11 }} />
+              </button>
             </div>
-            <button onClick={() => removeStaged(e.id)} aria-label="Remove" style={fdInlineDeleteBtn}>
-              <i className="fa-solid fa-trash" style={{ fontSize: 11 }} />
-            </button>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
       <Btn onClick={commitStagedEntries} style={{ width: '100%' }}>
         Add {staged.length} item{staged.length === 1 ? '' : 's'}
       </Btn>
@@ -1140,6 +1157,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         {tab === 'search' && (
           <>
             {pendingHourBanner}
+            {stagedPanel}
             <div>
               <Bezel style={{ marginBottom: 10 }}>Search</Bezel>
               <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `1px solid ${UI.hairStrong}`, marginBottom: 10 }}>
@@ -1207,13 +1225,13 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                 </button>
               </div>
             )}
-            {stagedPanel}
           </>
         )}
 
         {tab === 'quickadd' && (
           <>
             {pendingHourBanner}
+            {stagedPanel}
             <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `1px solid ${UI.hairStrong}` }}>
               {FD_QUICK_TABS.map(t => (
                 <button key={t.id} onClick={() => onQuickTabChange(t.id)} style={fdSegBtn(quickTab === t.id)}>{t.label}</button>
@@ -1321,7 +1339,6 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                   </div>
               )
             )}
-            {stagedPanel}
           </>
         )}
       </div>
