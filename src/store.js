@@ -7,6 +7,8 @@ const PUSHOVER_URL          = `${SUPABASE_URL}/functions/v1/pushover`;
 const WEB_PUSH_URL          = `${SUPABASE_URL}/functions/v1/web-push`;
 const COACHING_NOTIFY_URL   = `${SUPABASE_URL}/functions/v1/zane_coaching-notify`;
 const ADMIN_SEND_EMAIL_URL  = `${SUPABASE_URL}/functions/v1/admin-send-email`;
+const FOOD_SEARCH_URL       = `${SUPABASE_URL}/functions/v1/search-foods`;
+const SCAN_LABEL_URL        = `${SUPABASE_URL}/functions/v1/scan-label`;
 
 const VAPID_PUBLIC_KEY = 'BD14GEr1JXGYdRwx6kiqpZMTvbialpruEJnHUmcbxjOshGZvULZ10xqayRTt3iVCyTBWRIR5nsXNVSsP0YdKQDI';
 
@@ -101,6 +103,22 @@ function todayISO() {
 // returns the UTC date and is off by one day for any non-UTC timezone.
 function fmtISO(d) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+// Local wall-clock time as HH:MM. Shared helper (was duplicated identically
+// in screens-water.jsx and screens-food.jsx as wtNowHHMM/fdNowHHMM) so a
+// future change to how a logged time is captured doesn't need to be applied
+// to more than one copy.
+function nowHHMM() {
+  const d = new Date();
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+// Short display date (e.g. "Wed, Jul 23"), en-US per the app-wide locale
+// standard. Shared helper (was duplicated as healthFmtDate/fdFmtDate in
+// screens-health.jsx/screens-food.jsx with a locale mismatch until both
+// were standardized) so a future format tweak only needs to happen once.
+function fmtDayLabel(iso, opts = { weekday: 'short', day: 'numeric', month: 'short' }) {
+  if (!iso) return '';
+  return new Date(iso + 'T12:00:00').toLocaleDateString('en-US', opts);
 }
 // Returns the coming Monday as YYYY-MM-DD (returns today if today is Monday).
 function nextMondayISO() {
@@ -221,6 +239,9 @@ async function deleteAllData(userId, { keepPush = false } = {}) {
     unwrap(_supabase.from('zane_cardio_logs').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_daily_logs').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_water_logs').delete().eq('user_id', userId)),
+    unwrap(_supabase.from('zane_food_logs').delete().eq('user_id', userId)),
+    unwrap(_supabase.from('zane_food_favorites').delete().eq('user_id', userId)),
+    unwrap(_supabase.from('zane_food_recipes').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_workout_templates').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_glucose_logs').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_blood_pressure_logs').delete().eq('user_id', userId)),
@@ -391,6 +412,9 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
     + (backup.cardioLogs?.length ? 1 : 0)
     + (backup.dailyLogs?.length ? 1 : 0)
     + (backup.waterLogs?.length ? 1 : 0)
+    + (backup.foodLogs?.length ? 1 : 0)
+    + (backup.foodFavorites?.length ? 1 : 0)
+    + (backup.foodRecipes?.length ? 1 : 0)
     + (backup.workoutTemplates?.length ? 1 : 0)
     + (backup.checkinSchemaTemplates?.length ? 1 : 0)
     + (backup.glucoseLogs?.length ? 1 : 0)
@@ -518,6 +542,41 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
         id: l.id, user_id: userId, date: l.date, time: l.time,
         amount_ml: l.amountMl, name: l.name ?? null, category: l.category ?? null,
         breakdown: l.breakdown ?? null,
+      }))
+    ));
+    stepsDone++;
+  }
+  if (backup.foodLogs?.length) {
+    prog('Uploading food logs…');
+    await unwrap(_supabase.from('zane_food_logs').upsert(
+      backup.foodLogs.map(l => ({
+        id: l.id, user_id: userId, date: l.date, time: l.time,
+        food_id: l.foodId ?? null, food_name: l.foodName, brand: l.brand ?? null,
+        source: l.source ?? null, quantity_g: l.quantityG,
+        calories: l.calories, protein: l.protein, carbs: l.carbs, fat: l.fat,
+        fiber: l.fiber ?? null, recipe_items: l.recipeItems ?? null,
+      }))
+    ));
+    stepsDone++;
+  }
+  if (backup.foodFavorites?.length) {
+    prog('Uploading food favorites…');
+    await unwrap(_supabase.from('zane_food_favorites').upsert(
+      backup.foodFavorites.map(f => ({
+        id: f.id, user_id: userId, food_id: f.foodId ?? null, food_name: f.foodName,
+        brand: f.brand ?? null, source: f.source ?? null, quantity_g: f.quantityG,
+        calories: f.calories, protein: f.protein, carbs: f.carbs, fat: f.fat,
+        fiber: f.fiber ?? null, units: f.units ?? [],
+      }))
+    ));
+    stepsDone++;
+  }
+  if (backup.foodRecipes?.length) {
+    prog('Uploading food recipes…');
+    await unwrap(_supabase.from('zane_food_recipes').upsert(
+      backup.foodRecipes.map(r => ({
+        id: r.id, user_id: userId, name: r.name, items: r.items || [], portions: r.portions || 1,
+        updated_at: r.updatedAt ?? new Date().toISOString(),
       }))
     ));
     stepsDone++;
@@ -735,9 +794,19 @@ async function setupNewUser(userId, name, unit) {
 // 8-week volume chart with margin, so boot stays O(sessions), never O(sets).
 const HISTORY_WINDOW_DAYS = 70;
 
-function historyWindowCutoffISO(now = new Date()) {
+// How far back boot loads zane_food_logs. Unlike sessions, a food log row IS
+// its own full record (no separate heavy sub-table to window instead), so
+// this windows the whole row: entries older than this simply aren't fetched.
+// Nothing today reads food history past this (the Log tab's own day nav caps
+// backdating/browsing at 14 days), so the only effect is that anything older
+// quietly drops out of the local cache after the first boot on this window,
+// harmlessly, it's never deleted server-side (syncBase and the live store
+// both window together at boot, so there is never a diff to delete).
+const FOOD_HISTORY_WINDOW_DAYS = 30;
+
+function historyWindowCutoffISO(now = new Date(), days = HISTORY_WINDOW_DAYS) {
   const d = new Date(now);
-  d.setDate(d.getDate() - HISTORY_WINDOW_DAYS);
+  d.setDate(d.getDate() - days);
   return d.toISOString().slice(0, 10);
 }
 
@@ -788,6 +857,7 @@ function normalizeHiddenHealthCards(arr) {
 async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   const isCoachLoad = !!_opts.coachLoad;
   const histCutoff = historyWindowCutoffISO();
+  const foodHistCutoff = historyWindowCutoffISO(new Date(), FOOD_HISTORY_WINDOW_DAYS);
   const queries = [
     _supabase.from('zane_profiles').select('id, name, approved').eq('id', userId).maybeSingle(),
     _supabase.from('zane_exercises').select('id, name, tags, note, category, unilateral, equipment, progression_reps, movement_type, no_weight_reps, log_mode, pull_bodyweight, youtube_url, note_pinned, progression_increment').eq('user_id', userId),
@@ -853,13 +923,23 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     // Water tracker per-entry logs (migration 0180): multiple entries per day,
     // all records for the user. Coach reads a client's via coach-of-client RLS.
     _supabase.from('zane_water_logs').select('id, date, time, amount_ml, name, category, breakdown, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
+    // Food tracker per-entry logs (migration 0186): multiple entries per day,
+    // denormalized at write time. Coach reads a client's via coach-of-client RLS.
+    // Windowed to FOOD_HISTORY_WINDOW_DAYS (see its own comment): nothing
+    // reads food history further back than that today.
+    _supabase.from('zane_food_logs').select('id, date, time, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, recipe_items, created_at').eq('user_id', userId).gte('date', foodHistCutoff).order('date', { ascending: false }).order('time', { ascending: false }),
+    // Food tracker quick-add: user-starred foods and saved recipes (migration
+    // 0187), own store only: a coach's read-only client view has no use for
+    // another user's personal shortcuts (owner-only RLS, no coach-read policy).
+    isCoachLoad ? null : _supabase.from('zane_food_favorites').select('id, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, units, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
+    isCoachLoad ? null : _supabase.from('zane_food_recipes').select('id, name, items, portions, created_at, updated_at').eq('user_id', userId).order('created_at', { ascending: false }),
   ];
   const [profileRes, exRes, schRes, sessRes, settRes, skipsRes, entriesRes,
          bestsRes, sessionStatsRes,
          coachInfoRes, coachClientsRes, unreadNotesRes, coachingRowRes, selfRowRes,
          cardioLogsRes, cardioPlansRes, dailyLogsRes, statusPeriodsRes,
          supportTicketsRes, glucoseLogsRes, bloodPressureLogsRes, bodyTempLogsRes, templatesRes, mesoStatesRes,
-         checkinTemplatesRes, planDraftsRes, waterLogsRes] = await Promise.all(queries);
+         checkinTemplatesRes, planDraftsRes, waterLogsRes, foodLogsRes, foodFavoritesRes, foodRecipesRes] = await Promise.all(queries);
 
   // A failed request (offline, RLS, server error) also yields no data — bail
   // out so the caller can surface an error instead of mistaking this for a
@@ -891,11 +971,14 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   if (templatesRes.error) throw templatesRes.error;
   if (mesoStatesRes.error) throw mesoStatesRes.error;
   if (waterLogsRes.error) throw waterLogsRes.error;
+  if (foodLogsRes.error) throw foodLogsRes.error;
   // Coaching queries are null on coach loads (skipped) — guard with optional chaining.
   if (coachInfoRes?.error) throw coachInfoRes.error;
   if (coachClientsRes?.error) throw coachClientsRes.error;
   if (unreadNotesRes?.error) throw unreadNotesRes.error;
   if (checkinTemplatesRes?.error) throw checkinTemplatesRes.error;
+  if (foodFavoritesRes?.error) throw foodFavoritesRes.error;
+  if (foodRecipesRes?.error) throw foodRecipesRes.error;
   // coachingRowRes/selfRowRes use maybeSingle() and only drive optional banner
   // UI. There is no DB uniqueness constraint on (client_id, active), so a client
   // with >1 active coach yields a PGRST116 "multiple rows" error — do NOT throw
@@ -1048,6 +1131,29 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
       id: l.id, date: l.date, time: l.time,
       amountMl: l.amount_ml ?? 0, name: l.name ?? null,
       category: l.category ?? null, breakdown: l.breakdown ?? null, createdAt: l.created_at,
+    })),
+    // Food tracker per-entry logs (migration 0186). Denormalized at write
+    // time: name/brand/macros are copied, never re-derived from foodId.
+    // numeric columns come back as strings from PostgREST, parseFloat them.
+    foodLogs: (foodLogsRes?.data || []).map(l => ({
+      id: l.id, date: l.date, time: l.time, foodId: l.food_id ?? null,
+      foodName: l.food_name, brand: l.brand ?? null, source: l.source ?? null,
+      quantityG: parseFloat(l.quantity_g), calories: l.calories,
+      protein: parseFloat(l.protein), carbs: parseFloat(l.carbs), fat: parseFloat(l.fat),
+      fiber: l.fiber != null ? parseFloat(l.fiber) : null, recipeItems: l.recipe_items ?? null,
+      createdAt: l.created_at,
+    })),
+    // Food Tracker quick-add (migration 0187), own store only.
+    foodFavorites: (foodFavoritesRes?.data || []).map(f => ({
+      id: f.id, foodId: f.food_id ?? null, foodName: f.food_name, brand: f.brand ?? null,
+      source: f.source ?? null, quantityG: parseFloat(f.quantity_g), calories: f.calories,
+      protein: parseFloat(f.protein), carbs: parseFloat(f.carbs), fat: parseFloat(f.fat),
+      fiber: f.fiber != null ? parseFloat(f.fiber) : null,
+      units: f.units || [],
+      createdAt: f.created_at,
+    })),
+    foodRecipes: (foodRecipesRes?.data || []).map(r => ({
+      id: r.id, name: r.name, items: r.items || [], portions: r.portions || 1, createdAt: r.created_at, updatedAt: r.updated_at,
     })),
     glucoseLogs: (glucoseLogsRes?.data || []).map(l => ({
       id: l.id, date: l.date, time: l.time,
@@ -1257,6 +1363,21 @@ async function autoArchiveMissedDays(userId, state) {
 }
 
 // ─── SYNC ────────────────────────────────────────────────────────────────
+
+// Diff a previous/next array of {id, ...} rows into { upsert, removed } lists.
+// Uses a Map for O(n) lookups instead of a nested find-in-filter (avoids O(n*m) diffing).
+function diffCollectionById(prevList, nextList) {
+  const prevMap = new Map((prevList || []).map(x => [x.id, x]));
+  const nextIds = new Set();
+  const upsert = [];
+  (nextList || []).forEach(item => {
+    nextIds.add(item.id);
+    const p = prevMap.get(item.id);
+    if (!p || JSON.stringify(p) !== JSON.stringify(item)) upsert.push(item);
+  });
+  const removed = (prevList || []).filter(x => !nextIds.has(x.id));
+  return { upsert, removed };
+}
 
 // Dual-write entries then sets sequentially (sets FK-depend on entries existing first).
 // prevSessions: pass prev store sessions to skip unchanged sets; pass null to write all.
@@ -1478,11 +1599,7 @@ async function syncStore(prev, next, userId) {
   }
 
   if (prev.cardioLogs !== next.cardioLogs) {
-    const upsert = (next.cardioLogs || []).filter(l => {
-      const p = (prev.cardioLogs || []).find(x => x.id === l.id);
-      return !p || JSON.stringify(p) !== JSON.stringify(l);
-    });
-    const removed = (prev.cardioLogs || []).filter(l => !(next.cardioLogs || []).find(x => x.id === l.id));
+    const { upsert, removed } = diffCollectionById(prev.cardioLogs, next.cardioLogs);
     if (upsert.length) ops.push(_supabase.from('zane_cardio_logs').upsert(upsert.map(l => ({
       id: l.id, user_id: userId, date: l.date, type: l.type ?? null,
       duration_minutes: l.durationMinutes, distance_m: l.distanceM ?? null,
@@ -1493,17 +1610,24 @@ async function syncStore(prev, next, userId) {
   }
 
   if (prev.waterLogs !== next.waterLogs) {
-    const upsert = (next.waterLogs || []).filter(l => {
-      const p = (prev.waterLogs || []).find(x => x.id === l.id);
-      return !p || JSON.stringify(p) !== JSON.stringify(l);
-    });
-    const removed = (prev.waterLogs || []).filter(l => !(next.waterLogs || []).find(x => x.id === l.id));
+    const { upsert, removed } = diffCollectionById(prev.waterLogs, next.waterLogs);
     if (upsert.length) ops.push(_supabase.from('zane_water_logs').upsert(upsert.map(l => ({
       id: l.id, user_id: userId, date: l.date, time: l.time,
       amount_ml: l.amountMl, name: l.name ?? null, category: l.category ?? null,
       breakdown: l.breakdown ?? null,
     }))));
     if (removed.length) ops.push(_supabase.from('zane_water_logs').delete().in('id', removed.map(l => l.id)));
+  }
+
+  if (prev.foodLogs !== next.foodLogs) {
+    const { upsert, removed } = diffCollectionById(prev.foodLogs, next.foodLogs);
+    if (upsert.length) ops.push(_supabase.from('zane_food_logs').upsert(upsert.map(l => ({
+      id: l.id, user_id: userId, date: l.date, time: l.time, food_id: l.foodId ?? null,
+      food_name: l.foodName, brand: l.brand ?? null, source: l.source ?? null,
+      quantity_g: l.quantityG, calories: l.calories, protein: l.protein,
+      carbs: l.carbs, fat: l.fat, fiber: l.fiber ?? null, recipe_items: l.recipeItems ?? null,
+    }))));
+    if (removed.length) ops.push(_supabase.from('zane_food_logs').delete().in('id', removed.map(l => l.id)));
   }
 
   if (prev.cardioPlans !== next.cardioPlans) {
@@ -1533,6 +1657,26 @@ async function syncStore(prev, next, userId) {
       id: t.id, user_id: userId, name: t.name, exercises: t.exercises || [],
     }))));
     if (removed.length) ops.push(_supabase.from('zane_workout_templates').delete().in('id', removed.map(t => t.id)));
+  }
+
+  if (prev.foodFavorites !== next.foodFavorites) {
+    const { upsert, removed } = diffCollectionById(prev.foodFavorites, next.foodFavorites);
+    if (upsert.length) ops.push(_supabase.from('zane_food_favorites').upsert(upsert.map(f => ({
+      id: f.id, user_id: userId, food_id: f.foodId ?? null, food_name: f.foodName,
+      brand: f.brand ?? null, source: f.source ?? null, quantity_g: f.quantityG,
+      calories: f.calories, protein: f.protein, carbs: f.carbs, fat: f.fat, fiber: f.fiber ?? null,
+      units: f.units ?? [],
+    }))));
+    if (removed.length) ops.push(_supabase.from('zane_food_favorites').delete().in('id', removed.map(f => f.id)));
+  }
+
+  if (prev.foodRecipes !== next.foodRecipes) {
+    const { upsert, removed } = diffCollectionById(prev.foodRecipes, next.foodRecipes);
+    if (upsert.length) ops.push(_supabase.from('zane_food_recipes').upsert(upsert.map(r => ({
+      id: r.id, user_id: userId, name: r.name, items: r.items || [], portions: r.portions || 1,
+      updated_at: new Date().toISOString(),
+    }))));
+    if (removed.length) ops.push(_supabase.from('zane_food_recipes').delete().in('id', removed.map(r => r.id)));
   }
 
   if (prev.checkinSchemaTemplates !== next.checkinSchemaTemplates) {
@@ -1729,8 +1873,6 @@ async function syncStore(prev, next, userId) {
       status_mode_since: next.statusModeSince ?? null,
       deload_prompt_dismissed_at: next.deloadPromptDismissedAt ?? null,
       sw_version: next.settings?.swVersion ?? null,
-      water_bottles_today: next.settings?.waterBottlesToday ?? 0,
-      water_bottles_date: next.settings?.waterBottlesDate ?? null,
       tz_offset_minutes: next.settings?.tzOffsetMinutes ?? null,
     };
     // Plan-position / active-plan fields are action-advanced and prone to a
@@ -1758,6 +1900,14 @@ async function syncStore(prev, next, userId) {
     if (prev.settings?.waterReminderEnabled !== next.settings?.waterReminderEnabled) settingsRow.water_reminder_enabled = next.settings?.waterReminderEnabled ?? false;
     if (prev.settings?.waterBottleEnabled !== next.settings?.waterBottleEnabled) settingsRow.water_bottle_enabled  = next.settings?.waterBottleEnabled ?? true;
     if (prev.settings?.waterBottleMl      !== next.settings?.waterBottleMl)      settingsRow.water_bottle_ml       = next.settings?.waterBottleMl ?? 1500;
+    // Bottle-empty counter: same gating, for the same reason. Used to be
+    // written unconditionally on every sync, so confirming "Bottle empty?" on
+    // one device got silently clobbered back to 0 the next time any OTHER
+    // device synced an unrelated change, since that device's own stale
+    // (pre-confirm) counter went out on every upsert regardless of whether
+    // it had actually changed there.
+    if (prev.settings?.waterBottlesToday  !== next.settings?.waterBottlesToday)  settingsRow.water_bottles_today   = next.settings?.waterBottlesToday ?? 0;
+    if (prev.settings?.waterBottlesDate   !== next.settings?.waterBottlesDate)   settingsRow.water_bottles_date    = next.settings?.waterBottlesDate ?? null;
     if (JSON.stringify(prev.settings?.waterDrinks) !== JSON.stringify(next.settings?.waterDrinks)) settingsRow.water_drinks = next.settings?.waterDrinks ?? null;
     if (JSON.stringify(prev.settings?.waterCoffeeSizes) !== JSON.stringify(next.settings?.waterCoffeeSizes)) settingsRow.water_coffee_sizes = next.settings?.waterCoffeeSizes ?? null;
     ops.push(_supabase.from('zane_user_settings').upsert(settingsRow));
@@ -1820,6 +1970,55 @@ async function adminSendEmail(to, subject, message) {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) return { ok: false, error: data?.error || `Request failed (${res.status})` };
   return { ok: true };
+}
+
+// Food tracker: search Open Food Facts + USDA FoodData Central (plus our own
+// zane_foods cache) via the search-foods edge function. Results carry all the
+// macros needed to log directly, nothing is cached server-side until a food
+// is actually logged (see cacheFood).
+async function searchFoods(query, source) {
+  const res = await fnFetch(FOOD_SEARCH_URL, { action: 'search', query, source: source || undefined });
+  if (!res) return { ok: false, error: 'Network error' };
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) return { ok: false, error: data?.error || `Request failed (${res.status})` };
+  return { ok: true, results: data.results || [], isBarcode: !!data.isBarcode };
+}
+
+// Fire-and-forget: adds a just-logged DB food to the shared zane_foods cache
+// (server re-fetches by id and upserts). The log itself never waits on this,
+// and a dropped call self-heals on the next log of the same food.
+function cacheFood(source, sourceId) {
+  fnFetch(FOOD_SEARCH_URL, { action: 'cache', source, sourceId });
+}
+
+// Reads a nutrition label from a photo (base64, no data: prefix) via the
+// scan-label edge function (xAI Grok vision). Returns the extracted macros so
+// the client can prefill the Custom Item form. Scanned labels are logged as
+// per-user custom items, never written to the shared zane_foods cache.
+async function scanLabel(imageBase64, mimeType) {
+  const res = await fnFetch(SCAN_LABEL_URL, { image: imageBase64, mimeType });
+  if (!res) return { ok: false, error: 'Network error' };
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) return { ok: false, error: data?.error || `Request failed (${res.status})` };
+  return { ok: true, label: data };
+}
+
+// ── Recipe sharing ──────────────────────────────────────────────────────────
+// A share is a server-side jsonb snapshot of the recipe (zane_recipe_shares),
+// keyed by an unguessable token that doubles as the deep link (?share=<token>).
+// Both RPCs are authenticated-only; the token itself is the authorization to
+// read that one snapshot. Re-sharing the same recipe returns the same token.
+async function createRecipeShare(recipeId, recipe) {
+  const { data, error } = await _supabase.rpc('create_recipe_share', { p_recipe_id: recipeId, p_recipe: recipe });
+  if (error) return { ok: false, error: error.message };
+  return { ok: true, token: data };
+}
+
+async function fetchRecipeShare(token) {
+  const { data, error } = await _supabase.rpc('get_recipe_share', { p_token: token });
+  if (error) return { ok: false, error: error.message };
+  if (!data?.recipe) return { ok: false, error: 'This share link is invalid or was removed.' };
+  return { ok: true, share: data };
 }
 
 function findExercise(state, exId) {
@@ -3073,6 +3272,18 @@ function dedupeVersionsByDate(versions) {
     .sort((a, b) => b.validFrom.localeCompare(a.validFrom));
 }
 
+// Invariant: schedule.days must always mirror schedule.versions[0].days (the
+// newest version), since a lot of code still reads schedule.days directly
+// instead of resolving the active version. Every write site that rotates or
+// replaces `versions` must rebuild `days` from the new versions[0] in the
+// same step, or schedule.days silently drifts from the version that is
+// actually current. Centralized here instead of hand-copied at each call
+// site, one missed spot caused the "Update plan?" prompt to stop firing on
+// versioned plans.
+function withVersionedDays(schedule, versions) {
+  return { ...schedule, versions, days: versions[0]?.days || schedule.days };
+}
+
 // Cycle position for a date-based (non-versioned, non-flex) plan, derived
 // from cycleStartDate — calendar days since start, wrapped to the plan's
 // length. Used to be duplicated within this same file (todaysDay/nextDay)
@@ -3941,7 +4152,7 @@ async function submitCheckin(coachingId, clientId, responses, userId, weekStartA
   try {
     const d = new Date(weekStart + 'T12:00:00');
     const endDate = new Date(d); endDate.setDate(d.getDate() + 6);
-    const fmt = (dt) => dt.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
+    const fmt = (dt) => dt.toLocaleDateString('en-US', { day: '2-digit', month: 'short' });
     const weekLabel = `${isEdit ? '✏️ EDITED · ' : ''}Week of ${fmt(d)} – ${fmt(endDate)}`;
     const lines = [weekLabel, '------------'];
     const wUnit = (typeof window !== 'undefined' && window.__UNIT) || 'kg';
@@ -4579,21 +4790,23 @@ async function endDeload(userId, store, setStore) {
   if (coachingId) {
     try {
       const threadId = await getOrCreateCoachingThread(coachingId, 'Status Updates', userId);
-      await addCoachingNote(coachingId, 'general', null, null, 'Status: Deload finished — back to normal training.', userId, threadId);
+      await addCoachingNote(coachingId, 'general', null, null, 'Status: Deload finished, back to normal training.', userId, threadId);
     } catch (_) {}
   }
 }
 
 async function refreshHealthLogs(userId) {
-  const [dailyRes, cardioRes, glucoseRes, bpRes, tempRes, waterRes] = await Promise.all([
+  const foodHistCutoff = historyWindowCutoffISO(new Date(), FOOD_HISTORY_WINDOW_DAYS);
+  const [dailyRes, cardioRes, glucoseRes, bpRes, tempRes, waterRes, foodRes] = await Promise.all([
     _supabase.from('zane_daily_logs').select('id, date, weight, steps, calories, protein, carbs, fat, fiber, water_ml, note, off_plan_note, adherence, targets_snap, daily_coach_fields, updated_at, created_at').eq('user_id', userId).order('date', { ascending: false }),
     _supabase.from('zane_cardio_logs').select('id, date, type, duration_minutes, distance_m, pace_feeling, effort, note, session_id, created_at').eq('user_id', userId).order('date', { ascending: false }),
     _supabase.from('zane_glucose_logs').select('id, date, time, value_mmol, context, note, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
     _supabase.from('zane_blood_pressure_logs').select('id, date, time, systolic, diastolic, note, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
     _supabase.from('zane_body_temp_logs').select('id, date, time, value_c, note, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
     _supabase.from('zane_water_logs').select('id, date, time, amount_ml, name, category, breakdown, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
+    _supabase.from('zane_food_logs').select('id, date, time, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, recipe_items, created_at').eq('user_id', userId).gte('date', foodHistCutoff).order('date', { ascending: false }).order('time', { ascending: false }),
   ]);
-  if (dailyRes.error || cardioRes.error || glucoseRes.error || bpRes.error || tempRes.error || waterRes.error) return null;
+  if (dailyRes.error || cardioRes.error || glucoseRes.error || bpRes.error || tempRes.error || waterRes.error || foodRes.error) return null;
   return {
     dailyLogs: (dailyRes.data || []).map(l => ({
       id: l.id, date: l.date,
@@ -4632,6 +4845,14 @@ async function refreshHealthLogs(userId) {
       id: l.id, date: l.date, time: l.time,
       amountMl: l.amount_ml ?? 0, name: l.name ?? null,
       category: l.category ?? null, breakdown: l.breakdown ?? null, createdAt: l.created_at,
+    })),
+    foodLogs: (foodRes?.data || []).map(l => ({
+      id: l.id, date: l.date, time: l.time, foodId: l.food_id ?? null,
+      foodName: l.food_name, brand: l.brand ?? null, source: l.source ?? null,
+      quantityG: parseFloat(l.quantity_g), calories: l.calories,
+      protein: parseFloat(l.protein), carbs: parseFloat(l.carbs), fat: parseFloat(l.fat),
+      fiber: l.fiber != null ? parseFloat(l.fiber) : null, recipeItems: l.recipe_items ?? null,
+      createdAt: l.created_at,
     })),
   };
 }
@@ -4860,49 +5081,91 @@ function clearMesoWeightBoostDeclines(prevDeclines, sessionKeys) {
   return changed ? next : (prevDeclines || {});
 }
 
-// Rolling back the meso weight levers when a finished session is DELETED. The
-// weight boost / rep-miss counts a session earned live on in the meso state
-// after the session row is gone, so a re-log (the usual "delete, then log again
-// with feedback" flow) would seed on an older, lower "last actual" weight with
-// that orphaned boost still stacked on top: delete a 55 kg session that earned
-// +2.5 and the next seed becomes 50 + 2.5 = 52.5 instead of building on the 55
-// you actually did. Clear this session's exId_dayId keys from weightBoosts and
-// repMissCounts so the re-log starts clean. Guard: only when the deleted session
-// was the most recent non-deload session of its day, so a boost a LATER session
-// of the same day set (reearnMesoWeightBoosts replaces per session) survives.
-// A deload session earns nothing, so it never needs a rollback. Set-count deltas
-// are intentionally left untouched (a separate, accumulating lever). Returns a
-// new state, or the same object when nothing changed. Pure/testable.
+// Rolling back the meso weight levers when a finished session is DELETED. A
+// weight boost / rep-miss count is a "last write wins" field: every session
+// that trains a key REPLACES it wholesale (reearnMesoWeightBoosts always
+// clears the key first, computeMesoGains does the same for repMissCounts).
+// So the moment the deleted session finished, it already overwrote whatever
+// an EARLIER session for that same exId+day had left behind, boost or not.
+// A rollback that just clears the deleted session's own keys would drop that
+// earlier session's still-live value on the floor instead of bringing it
+// back: delete this week's session and last week's earned +2.5 kg is gone
+// too, not just this week's own outcome, because it was already consumed
+// (replaced) the moment this week's session finished.
+// So per exId+day key the deleted session owned (guard unchanged: not
+// retrained by a LATER same-day session, that key already survived that
+// session's own finish and must stay untouched):
+//   - weightBoosts restores to whatever the most recent EARLIER same-day
+//     session that actually trained that exId had itself recorded (its own
+//     mesoRecap.gains entry for the key), or clears when no such session
+//     exists or it predates mesoRecap tracking (same degrade-to-clear as
+//     before this restore logic existed).
+//   - repMissCounts restores from the deleted session's OWN pre-finish
+//     snapshot (mesoRecap.raw.repMissBase, captured before computeMesoGains
+//     advanced it that session), no history scan needed.
+//   - weightBoostDeclines still just clears: a restored (or cleared) boost
+//     should be offered fresh, not silently suppressed by a decline that
+//     belonged to the deleted session's own evaluation.
+// A deload session earns nothing, so it never needs a rollback, and is
+// excluded from the earlier-session scan too (never a valid key owner). Set-
+// count deltas are intentionally left untouched (a separate, accumulating
+// lever). Returns a new state, or the same object when nothing changed.
+// Pure/testable.
 function revertMesoSessionBoosts(mesoState, deletedSession, remainingSessions) {
   if (!mesoState || !deletedSession || deletedSession.isDeload) return mesoState;
   const dayId = deletedSession.dayId;
   if (!dayId) return mesoState;
   const delEnded = deletedSession.ended || '';
   // Per exercise: a boost/key is owned by whichever session most recently trained
-  // that exId on this day. So clear only the deleted session's keys whose exId was
-  // NOT retrained by a LATER same-day session (those keys were already replaced at
-  // that later session's finish and must survive). A day-wide "any later session
-  // exists" guard would orphan the boost of an exercise the later session dropped.
+  // that exId on this day. So only roll back the deleted session's keys whose exId
+  // was NOT retrained by a LATER same-day session (those keys were already
+  // replaced at that later session's finish and must survive). A day-wide "any
+  // later session exists" guard would orphan the boost of an exercise the later
+  // session dropped.
   const retrainedLater = new Set();
   for (const x of (remainingSessions || [])) {
     if (!x || !x.ended || x.isDeload || x.dayId !== dayId || (x.ended || '') <= delEnded) continue;
     for (const e of (x.entries || [])) if (e && !e.isCardio && e.exId) retrainedLater.add(e.exId);
   }
-  const keys = new Set((deletedSession.entries || [])
+  const exIds = new Set((deletedSession.entries || [])
     .filter(e => e && !e.isCardio && e.exId && !retrainedLater.has(e.exId))
-    .map(e => e.exId + '_' + dayId));
-  if (!keys.size) return mesoState;
+    .map(e => e.exId));
+  if (!exIds.size) return mesoState;
+  // Same-day, non-deload, ended sessions strictly BEFORE the deleted one, newest
+  // first, so .find() below picks each exercise's most recent earlier finish: the
+  // one whose outcome the deleted session's own finish overwrote.
+  const earlierSameDay = (remainingSessions || [])
+    .filter(x => x && x.ended && !x.isDeload && x.dayId === dayId && x.ended < delEnded)
+    .sort((a, b) => (a.ended < b.ended ? 1 : a.ended > b.ended ? -1 : 0));
   const wb = { ...(mesoState.weightBoosts || {}) };
   const wbd = { ...(mesoState.weightBoostDeclines || {}) };
   const rmc = { ...(mesoState.repMissCounts || {}) };
+  const repMissBase = deletedSession.mesoRecap?.raw?.repMissBase;
   let changed = false;
-  for (const k of keys) {
-    if (k in wb) { delete wb[k]; changed = true; }
-    // A decline is tied to the boost it declined: if that boost's key is being
-    // rolled back (this session owned it and no later one retrained), the
-    // decline is stale too, whether or not the key survived in wb above.
-    if (k in wbd) { delete wbd[k]; changed = true; }
-    if (k in rmc) { delete rmc[k]; changed = true; }
+  for (const exId of exIds) {
+    const key = exId + '_' + dayId;
+    const prior = earlierSameDay.find(x => (x.entries || []).some(e => e && !e.isCardio && e.exId === exId));
+    const priorGains = prior?.mesoRecap?.gains;
+    let priorGain = priorGains?.find(g => g.key === key);
+    // mesoRecap.gains only started carrying a `key` per row from the commit that
+    // added post-hoc decline-toggling (2026-07-19); older recaps recorded just the
+    // exercise's display name. Without this fallback every prior session finished
+    // before that date would silently miss the lookup above and always degrade to
+    // a plain clear, even though the exact same information (matched by name) is
+    // sitting right there in the array. Restrict to rows that themselves have no
+    // key, so a newer, correctly-keyed recap never gets misattributed by a
+    // same-named exercise trained elsewhere in that same session.
+    if (!priorGain) {
+      const priorName = prior?.entries?.find(e => e && !e.isCardio && e.exId === exId)?.name;
+      if (priorName) priorGain = priorGains?.find(g => !g.key && g.name === priorName);
+    }
+    const restoreWb = priorGain && priorGain.weightDelta ? priorGain.weightDelta : undefined;
+    if (restoreWb == null) { if (key in wb) { delete wb[key]; changed = true; } }
+    else if (wb[key] !== restoreWb) { wb[key] = restoreWb; changed = true; }
+    if (key in wbd) { delete wbd[key]; changed = true; }
+    const restoreRmc = repMissBase && (key in repMissBase) ? repMissBase[key] : undefined;
+    if (restoreRmc == null) { if (key in rmc) { delete rmc[key]; changed = true; } }
+    else if (rmc[key] !== restoreRmc) { rmc[key] = restoreRmc; changed = true; }
   }
   if (!changed) return mesoState;
   return { ...mesoState, weightBoosts: wb, weightBoostDeclines: wbd, repMissCounts: rmc };
@@ -5837,8 +6100,14 @@ const LANDMARK_MRV_ALPHA = 0.35;
 // muscle is still at its ceiling, it re-asks with escalated evidence.
 const DELOAD_NUDGE_COOLDOWN = 3;
 // Autoreg v2 P4. Strength-stall: a lift's e1RM flat/declining over this many
-// qualifying sessions at green gates counts as a stall (spec 10: N = 3).
-const STALL_SESSIONS = 3;
+// qualifying sessions at green gates counts as a stall. 4, not 3: with the
+// oldest session as the baseline, that gives 3 real chances to beat the
+// running max before it counts as stalled, not 2, since intermediate/
+// advanced lifters can go a long stretch between reps added. Exported so
+// the training screen's stall-card copy ("flat here N sessions") can read
+// this instead of hardcoding a number that would silently drift out of
+// sync with it.
+const STALL_SESSIONS = 4;
 // Re-entry ramp (spec 7 / 10): a sick/vacation break longer than this many days
 // arms the ease-in; a break of a week or less needs no ramp.
 const REENTRY_MIN_BREAK_DAYS = 7;
@@ -6214,7 +6483,13 @@ function detectStall(sessions, exId, muscleOfExId, opts = {}) {
   if (jrec && jrec.answer && jrec.answer !== 'none') return out;
   if (jrec && jrec.pump === 'low') return out;
 
-  // Flat/declining = NO new e1RM best across the window (chronological running max).
+  // Flat/declining = NO new e1RM best across the window (chronological running max)
+  // AND the most recent session isn't already climbing again on its own. That
+  // second half matters separately: an intentional lighter session (not a
+  // flagged deload, just a deliberate weight drop) pulls the running max down
+  // for a bit, and without this the recovery back up still reads as "stalled"
+  // until it clears the OLDEST session in the window, even though session-
+  // over-session it's already trending up again.
   const chrono = series.slice().reverse().map(x => x.est);
   let progressed = false, mx = chrono[0];
   for (let i = 1; i < chrono.length; i++) {
@@ -6222,6 +6497,7 @@ function detectStall(sessions, exId, muscleOfExId, opts = {}) {
     if (chrono[i] > mx) mx = chrono[i];
   }
   if (progressed) return out;
+  if (chrono[chrono.length - 1] > chrono[chrono.length - 2] + 1e-6) return out;
 
   out.stalled = true;
   const oldest = series[series.length - 1].session;
@@ -6367,7 +6643,7 @@ function timeAgo(iso, { capDays } = {}) {
   if (hrs < 24) return `${hrs}h ago`;
   const days = Math.floor(hrs / 24);
   if (capDays == null || days < capDays) return `${days}d ago`;
-  return new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+  return new Date(iso).toLocaleDateString('en-US', { day: 'numeric', month: 'short' });
 }
 
 // "today"/"yesterday"/"Nd ago" from a pre-computed day difference (today=0).
@@ -6609,11 +6885,11 @@ window.LB = {
   signIn, signUp, signOut, signInWithPasskey, registerPasskey, listPasskeys, deletePasskey, updatePasskey, resetPassword, deleteAllData, exportBackup, backupToBlob, readBackupText, importFromBackup, validateBackup,
   loadFromSupabase, syncStore, mergeSessions, withCarriedWindowEntries, historyWindowCutoffISO, normalizeHiddenHealthCards,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
-  uid, todayISO, fmtISO, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, incrementForExercise, equipmentCfgFor, is531MainLift, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, healScheduleWeekdays, buildPlanSkeleton, instantiateProgram, is531Plan, round531, tmFrom531, tmBump531, weeks531, week531, fiveThreeOneSets, build531Plan, add531MainLift, current531Week, current531Cycle, compute531CycleBumps, resolve531CycleEnd, suggest531Tm, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, mesoActive, autoregLoadOnly, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, realignCycleForToday, todayCycleStripIndex,
+  uid, todayISO, fmtISO, nowHHMM, fmtDayLabel, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, incrementForExercise, equipmentCfgFor, is531MainLift, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, healScheduleWeekdays, buildPlanSkeleton, instantiateProgram, is531Plan, round531, tmFrom531, tmBump531, weeks531, week531, fiveThreeOneSets, build531Plan, add531MainLift, current531Week, current531Cycle, compute531CycleBumps, resolve531CycleEnd, suggest531Tm, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, mesoActive, autoregLoadOnly, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, withVersionedDays, realignCycleForToday, todayCycleStripIndex,
   effReps, fmtDuration, e1rm, isImprovement, isDecline, bestE1rmForExercise, bestAssistLoad, bestTimeForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, buildTimeSeedSets, latestBodyweight, bodyweightForDate, exerciseLogMode, isAssisted, shouldPullBodyweight, systemExerciseToRow, inferCurrentExIdx, calcBlended,
   refreshExerciseBests, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries,
   computeNextReminderAt,
-  cancelPushover, adminSendEmail,
+  cancelPushover, adminSendEmail, searchFoods, cacheFood, scanLabel, createRecipeShare, fetchRecipeShare,
   subscribeToChanges,
   openStatusPeriod, closeStatusPeriod, updateStatusPeriodStart, clearStatusMode,
   startDeload, endDeload, deloadElapsed, deloadDaysRemaining, deloadPlanDays,
@@ -6632,7 +6908,7 @@ window.LB = {
   microcycleSetsByMuscle, detectOverreach,
   blockStartTs, blockSessions, buildBlockRecap, deloadNudgeDecision, recordDeloadDecline, clearDeloadNudge,
   updateLandmarkMrv, snapshotBlockStart, backoffDeltas, muscleRosterKeys, updateMevFloors, redistributeMevFloors,
-  detectStall, suggestSwap, reentryRamp,
+  detectStall, suggestSwap, reentryRamp, STALL_SESSIONS,
   mesoGateSetsFromAnswers, isMesoSessionEditable, applyMesoFeedbackEdit, reearnMesoBoostsFromAnswers, mesoRecapGainsFromEdit, recomputeMesoRepMissCut, remapMesoAnswersExId, deriveSignalWeight, remapMesoRecapRawForSwap, remapMesoStateExId, mesoRowHasExId, laterSessionTrainsExId,
   mesoSetTarget, mesoEarnTarget, mesoRepOutcome, reshapeSetsUnilateral,
 };

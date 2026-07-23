@@ -134,7 +134,7 @@ function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, 
                 {clientStore.statusModeSince && (() => {
                   const since = new Date(clientStore.statusModeSince);
                   const days = Math.floor((Date.now() - since.getTime()) / 86400000) + 1;
-                  const dateStr = since.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }).toUpperCase();
+                  const dateStr = since.toLocaleDateString('en-US', { day: 'numeric', month: 'short' }).toUpperCase();
                   return ` · SINCE ${dateStr} (${days}d)`;
                 })()}
               </span>
@@ -803,8 +803,8 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
               {sorted.map((p, i) => {
                 const icon = p.mode === 'sick' ? 'fa-bed-pulse' : p.mode === 'deload' ? 'fa-arrow-trend-down' : 'fa-umbrella-beach';
                 const modeLabel = p.mode === 'sick' ? 'Sick' : p.mode === 'deload' ? 'Deload' : 'Vacation';
-                const startDate = new Date(p.startedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
-                const endDate = p.endedAt ? new Date(p.endedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : null;
+                const startDate = new Date(p.startedAt).toLocaleDateString('en-US', { day: 'numeric', month: 'short' });
+                const endDate = p.endedAt ? new Date(p.endedAt).toLocaleDateString('en-US', { day: 'numeric', month: 'short' }) : null;
                 const days = p.endedAt
                   ? Math.round((new Date(p.endedAt) - new Date(p.startedAt)) / 86400000) + 1
                   : Math.floor((Date.now() - new Date(p.startedAt).getTime()) / 86400000) + 1;
@@ -1025,7 +1025,7 @@ function SessionsWeekChart({ sessions, planStartDate }) {
   const weeks = Array.from({ length: weekCount }, (_, i) => {
     const mon = new Date(startMonday); mon.setDate(startMonday.getDate() + (offset + i) * 7);
     const key = localDateKey(mon);
-    return { key, count: byWeek[key] || 0, label: mon.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) };
+    return { key, count: byWeek[key] || 0, label: mon.toLocaleDateString('en-US', { day: '2-digit', month: 'short' }) };
   });
 
   const n = weeks.length;

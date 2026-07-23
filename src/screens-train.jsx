@@ -1366,22 +1366,32 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // assisted exercise "best" is the highest (least-negative) load, compared kg
   // to kg with no Epley and no >0 gate (loads are negative). Everything else
   // uses the estimated 1RM, folding in the local + windowed-server best.
+  // Must beat sessionBestPrVal too, not just the historical (pre-session)
+  // prior: that prior is fixed for the whole session (bestE1rmForExercise
+  // only reads ENDED sessions, so it can't see a set completed minutes ago
+  // in this same one), so on its own it lets every later, WORSE set in the
+  // same exercise re-clear the same old bar and flash again. sessionBestPrVal
+  // (already computed above for the row's PERSONAL RECORD watermark) is the
+  // running best across this exercise's own already-done sets THIS session,
+  // still excluding the set currently completing (it isn't marked done in
+  // this closure's `entry` yet), so it's exactly "beats what this exercise
+  // has already shown today," the missing half of the comparison.
   const isNewBestSet = (kg, reps, timeSec = null) => {
     if (!entry || newBestShownRef.current[entry.exId]) return false;
     // Time-based exercise: "best" is the longest duration ever logged.
     if (LB.exerciseLogMode(exercise) === 'time') {
       if (timeSec == null) return false;
       const prior = LB.bestTimeForExercise(store, entry.exId, session.id);
-      return prior != null && timeSec > prior;
+      return prior != null && timeSec > prior && timeSec > sessionBestPrVal;
     }
     if (LB.isAssisted(exercise)) {
       if (kg == null) return false;
       const prior = LB.bestAssistLoad(store, entry.exId, session.id);
-      return prior != null && kg > prior;
+      return prior != null && kg > prior && kg > sessionBestPrVal;
     }
     const cE1rm = (kg != null && reps != null && reps > 0) ? LB.e1rm(kg, reps) : 0;
     const priorBest = Math.max(LB.bestE1rmForExercise(store, entry.exId, session.id), remoteBestE1rmRef.current[entry.exId] || 0);
-    return cE1rm > 0 && priorBest > 0 && cE1rm > priorBest;
+    return cE1rm > 0 && priorBest > 0 && cE1rm > priorBest && cE1rm > sessionBestPrVal;
   };
 
   // A weighted stretch always needs a positive hold. The editor shows 30s by
@@ -2287,7 +2297,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               { validFrom: genesis, days: curSch.days },
             ]);
           }
-          schedulesUpdate = s.schedules.map(sch2 => sch2.id === curSch.id ? { ...sch2, versions: newVersions } : sch2);
+          // schedule.days must always mirror the NEWEST version (versions[0],
+          // see findSessionPlanDay's comment further down this file): this
+          // inserts a new versions[0] (validFrom: todayStr) without it, any
+          // code still reading schedule.days directly (or a later
+          // applyPlanAndFinish write racing the version resolution) would
+          // silently work off the pre-rotation order.
+          schedulesUpdate = s.schedules.map(sch2 => sch2.id === curSch.id ? LB.withVersionedDays(sch2, newVersions) : sch2);
         }
       }
       return {
@@ -2879,13 +2895,6 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // (offerEmergentDeload) framings. Built once over a snapshot that includes the
   // just-finished session, since store.sessions lags a tick behind.
   const blockRecapRef = useRefT(null);
-  // The "≥X reps · next weight" hint is Smart Progression's promise. On a meso
-  // plan the feedback engine owns the weight from week 2 on (Smart Progression is
-  // vetoed, see LB.resolveMesoSeedSuggestion), so instead of promising a bump that
-  // can't fire we show an "auto · feedback-driven" label there. The SP promise
-  // still shows on non-meso plans and in the first block's week 1, where Smart
-  // Progression is actually the weight authority.
-  const spHintApplies = !mesoState || !LB.mesoActive(mesoSch) || (mesoWeek === 1 && (mesoState.completions ?? 0) === 0);
   // Beyond-failure block: a negative RIR target prescribes |RIR| lengthened
   // partials on every working set this session (RIR -3 → 3 partials). Auto-
   // attached at set completion / seeded into the intensity-chain finisher.
@@ -5112,9 +5121,27 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     });
   };
 
+  // The day array this session was actually seeded from: whichever version
+  // was active on the session's own date for a versioned plan (same source
+  // buildSessionEntries used, screens-home.jsx), else schedule.days for an
+  // unversioned one. NOT schedule.days directly: on a versioned plan
+  // schedule.days is supposed to always mirror the NEWEST version
+  // (versions[0], see todayCycleStripIndex's comment), but reading it
+  // directly here compares the session against the wrong array the moment
+  // that ever drifts, and applyPlanAndFinish below must patch the SAME
+  // array it read here, or accepting "Update plan?" permanently breaks the
+  // mirror itself: the next diff check would then compare against an array
+  // that already silently absorbed the change, reading "no changes" forever
+  // after, on every future session for that plan.
+  const findSessionPlanDay = (schedule) => {
+    if (!schedule) return null;
+    const days = LB.getPlanDaysForDate(schedule, session.date.slice(0, 10)) || schedule.days || [];
+    return days.find(d => d.id === session.dayId) || null;
+  };
+
   const computePlanDiff = () => {
     const schedule = store.schedules?.find(s => s.id === session.scheduleId);
-    const day = schedule?.days?.find(d => d.id === session.dayId);
+    const day = findSessionPlanDay(schedule);
     if (!day) return [];
 
     // Non-cardio plan items, keeping the original day.items index for applyPlanAndFinish
@@ -5295,7 +5322,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
   const applyPlanAndFinish = () => {
     const schedule = store.schedules?.find(s => s.id === session.scheduleId);
-    const day = schedule?.days?.find(d => d.id === session.dayId);
+    const day = findSessionPlanDay(schedule);
     if (schedule && day) {
       // 1. Apply swaps and set-count changes (positional, by originalIdx)
       let newItems = day.items.map((item, i) => {
@@ -5359,13 +5386,29 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         const sg = sessionGroups.get(it.exId);
         return sg !== (it.supersetGroup || null) ? { ...it, supersetGroup: sg } : it;
       });
-      setStore(s => ({
-        ...s,
-        schedules: s.schedules.map(sch => sch.id === schedule.id ? {
-          ...sch,
-          days: sch.days.map(d => d.id === day.id ? { ...d, items: newItems } : d),
-        } : sch),
-      }));
+      setStore(s => {
+        const sch = s.schedules.find(sc => sc.id === schedule.id);
+        if (!sch) return s;
+        const patchDays = (days) => (days || []).map(d => d.id === day.id ? { ...d, items: newItems } : d);
+        const activeIdx = LB.getActiveVersionIdx(sch, session.date.slice(0, 10));
+        // Unversioned plan: schedule.days is the only source, patch it directly.
+        if (activeIdx < 0) {
+          return { ...s, schedules: s.schedules.map(sc => sc.id === sch.id ? { ...sc, days: patchDays(sc.days) } : sc) };
+        }
+        // Versioned plan: patch the version this session actually seeded
+        // from (found via findSessionPlanDay above), not schedule.days.
+        // schedule.days must keep mirroring the NEWEST version (versions[0],
+        // see findSessionPlanDay's comment): only re-sync it when that's
+        // the version just patched; an older version's edit must not touch
+        // schedule.days at all.
+        const versions = sch.versions.map((v, i) => i === activeIdx ? { ...v, days: patchDays(v.days) } : v);
+        return {
+          ...s,
+          schedules: s.schedules.map(sc => sc.id === sch.id ? {
+            ...sc, versions, days: activeIdx === 0 ? versions[0].days : sc.days,
+          } : sc),
+        };
+      });
     }
     // Mirror each wizard-picked rep target onto its live session entry too (not
     // just the plan), so the persisted zane_session_entries row and any later
@@ -6239,8 +6282,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               flags.push({ icon: 'fa-lightbulb', tone: 'accent', label: 'Not clicking', msg: 'You keep flagging this one to swap. Pick a variation you enjoy and you will actually stick with it.' });
             }
             // Autoreg v2 P4: strength-stall + concrete swap (spec 6). A LIFT whose
-            // e1RM has gone flat over 3 sessions at green gates (joints fine, pump ok,
-            // muscle not at its ceiling) gets a distinct nudge and a concrete sibling
+            // e1RM has gone flat over LB.STALL_SESSIONS sessions at green gates
+            // (joints fine, pump ok, muscle not at its ceiling) gets a distinct
+            // nudge and a concrete sibling
             // to try. Kept apart from the pump-flat / disliked voices above: this is
             // about the exercise stalling, not the muscle or your preference.
             // Precomputed in the `stallInfo` memo above (pure over the ended history /
@@ -6250,8 +6294,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               flags.push({
                 icon: 'fa-arrow-trend-down', tone: 'accent', label: 'Strength stall',
                 msg: swap
-                  ? 'e1RM has been flat here 3 sessions and your gates are green. The stimulus may be stale, a different movement could get it climbing again.'
-                  : 'e1RM has been flat here 3 sessions and your gates are green. A different variation for this muscle could get things moving again.',
+                  ? `e1RM has been flat here ${LB.STALL_SESSIONS} sessions and your gates are green. The stimulus may be stale, a different movement could get it climbing again.`
+                  : `e1RM has been flat here ${LB.STALL_SESSIONS} sessions and your gates are green. A different variation for this muscle could get things moving again.`,
                 swap,
               });
             }
@@ -6279,16 +6323,30 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                           <div className="micro" style={{ color: fg, letterSpacing: '0.1em', marginBottom: 4 }}>{f.label}</div>
                           <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>{f.msg}</div>
                           {f.swap && (
-                            <button onClick={() => applyStallSwap(f.swap)} style={{
-                              marginTop: 9, display: 'inline-flex', alignItems: 'center', gap: 6,
-                              padding: '7px 12px', background: `rgba(var(${rgbVar}),0.14)`,
-                              border: `1px solid rgba(var(${rgbVar}),0.45)`, borderRadius: 4,
-                              color: fg, fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700,
-                              letterSpacing: '0.04em', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
-                            }}>
-                              <i className="fa-solid fa-shuffle" style={{ fontSize: 10 }} />
-                              Swap to {f.swap.name}
-                            </button>
+                            <div style={{ marginTop: 9, display: 'flex', gap: 8 }}>
+                              <button onClick={() => applyStallSwap(f.swap)} style={{
+                                display: 'inline-flex', alignItems: 'center', gap: 6,
+                                padding: '7px 12px', background: `rgba(var(${rgbVar}),0.14)`,
+                                border: `1px solid rgba(var(${rgbVar}),0.45)`, borderRadius: 4,
+                                color: fg, fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700,
+                                letterSpacing: '0.04em', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+                              }}>
+                                <i className="fa-solid fa-shuffle" style={{ fontSize: 10 }} />
+                                to {f.swap.name}
+                              </button>
+                              {/* Same manual swap flow the exercise toolbar's own ⇄
+                                  button uses (swapExercise → ExercisePicker → doSwap),
+                                  for when the suggested f.swap isn't what the user
+                                  wants: pick anything, not just the one suggestion. */}
+                              <button onClick={swapExercise} aria-label="Choose a different exercise to swap to" style={{
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                width: 32, background: `rgba(var(${rgbVar}),0.14)`,
+                                border: `1px solid rgba(var(${rgbVar}),0.45)`, borderRadius: 4,
+                                color: fg, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+                              }}>
+                                <i className="fa-solid fa-shuffle" style={{ fontSize: 10 }} />
+                              </button>
+                            </div>
                           )}
                         </div>
                       </div>
@@ -6502,7 +6560,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   ) : null}
                   {progressionTarget && (
                     <div className="micro" style={{ color: UI.gold, opacity: 0.65, marginTop: 3 }}>
-                      {spHintApplies ? `≥${progressionTarget} reps · next weight` : 'auto · feedback-driven'}
+                      ≥{progressionTarget} reps · next weight
                     </div>
                   )}
                   {/* Autoreg v2 P0: Rough-day suggestion. Non-binding, display only:

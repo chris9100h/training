@@ -1244,7 +1244,7 @@ function CheckInSchemaBuilder({ coachingId, initial, coachDefault, onSave, onSav
                   style={{ flex: 1, minWidth: 0, background: 'none', border: 'none', textAlign: 'left', cursor: 'pointer', padding: 0 }}>
                   <div style={{ fontSize: 13, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi }}>{t.name}</div>
                   <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>
-                    {fieldCount} field{fieldCount !== 1 ? 's' : ''} · {new Date(t.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
+                    {fieldCount} field{fieldCount !== 1 ? 's' : ''} · {new Date(t.createdAt).toLocaleDateString('en-US', { day: 'numeric', month: 'short' })}
                   </div>
                 </button>
                 <button onClick={async () => { if (!unchanged && await confirm(`Update template "${t.name}" with your current form? This replaces its saved content.`, { title: 'Update template?', ok: 'Update' })) onSaveTemplate(t.name, draft, t.id); }}

@@ -929,6 +929,7 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
     'src/screens-coaching-tabs.jsx',
     'src/screens-health.jsx',
     'src/screens-water.jsx',
+    'src/screens-food.jsx',
     'src/screens-onboarding.jsx',
     'src/screens-cardio.jsx',
     'src/screens-featuremap.jsx',
@@ -1148,6 +1149,26 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
       });
     }
     return window.__h2cPromise;
+  };
+
+  // Lazily load the barcode-scanner decoder (zbar-wasm, a WebAssembly build
+  // of the ZBar C library) the first time the food scanner is opened. iOS
+  // Safari has no native BarcodeDetector (WebKit has never shipped it), and
+  // the previous html5-qrcode-based decoder had years of widely-reported
+  // failures decoding 1D barcodes (EAN/UPC) specifically on iOS Safari;
+  // zbar-wasm runs its own compiled decoder, so it doesn't depend on any
+  // browser barcode API at all. Same on-demand pattern as html2canvas above,
+  // not preloaded and not in the SW cache since it (and the food lookup)
+  // needs the network. Native dynamic import(), not a script tag: the
+  // published browser build is an ES module.
+  window.__ensureZbarWasm = function () {
+    if (window.__zbarWasm) return Promise.resolve(window.__zbarWasm);
+    if (!window.__zbarWasmPromise) {
+      window.__zbarWasmPromise = import('https://cdn.jsdelivr.net/npm/@undecaf/zbar-wasm@0.11.0/dist/index.mjs')
+        .then(function (mod) { window.__zbarWasm = mod; return mod; })
+        .catch(function (e) { window.__zbarWasmPromise = null; throw e; });
+    }
+    return window.__zbarWasmPromise;
   };
 
   boot();

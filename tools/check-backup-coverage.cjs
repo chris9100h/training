@@ -38,6 +38,7 @@ const BACKUP_ENUM = [
   'zane_workout_templates', 'zane_glucose_logs', 'zane_cardio_plans',
   'zane_status_periods', 'zane_meso_states', 'zane_checkin_schema_templates',
   'zane_blood_pressure_logs', 'zane_body_temp_logs', 'zane_water_logs',
+  'zane_food_logs', 'zane_food_favorites', 'zane_food_recipes',
 ];
 // Tables restored by spreading the whole store row (…s). Their column coverage is
 // governed by what loadFromSupabase SELECTs, so they are export-checked only.
@@ -57,6 +58,8 @@ const EXCLUDED = {
   zane_coaching_notes: 'coaching (export archive only)',
   zane_coaching_macros: 'coaching (export archive only)',
   zane_checkins: 'coaching (export archive only)',
+  zane_foods: 'shared/global reference cache (Open Food Facts/USDA), not per-user data',
+  zane_recipe_shares: 'recipe share-link snapshots (RPC-only); an adopted share becomes a normal zane_food_recipes row',
 };
 
 // Columns that legitimately never round-trip.
@@ -126,7 +129,7 @@ function captureImportedColumns() {
     skips: [{}], cardioLogs: [{}], dailyLogs: [{}], workoutTemplates: [{}],
     glucoseLogs: [{}], cardioPlans: [{}], statusPeriods: [{}], mesoStates: [{}],
     checkinSchemaTemplates: [{}], bloodPressureLogs: [{}], bodyTempLogs: [{}],
-    waterLogs: [{}],
+    waterLogs: [{}], foodLogs: [{}], foodFavorites: [{}], foodRecipes: [{}],
     activeScheduleId: null, cycleIndex: 0, customDayTypes: [],
   };
   return LB.importFromBackup(backup, 'u1', () => {}).then(() => written);

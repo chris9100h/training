@@ -2227,6 +2227,194 @@ $$;
 
 REVOKE EXECUTE ON FUNCTION public.collapse_water_logs() FROM PUBLIC;
 
+-- ── Food tracker (migration 0186) ───────────────────────────────────────────────
+-- zane_foods: shared/global reference cache (Open Food Facts + USDA FoodData
+-- Central), NOT per-user data. Populated only when a user selects a search
+-- result to log (search-foods Edge Function, service-role key), keyed
+-- deterministically (source:source_id) so re-selecting upserts instead of
+-- duplicating.
+-- zane_food_logs: per-user log entries, denormalized at write time so a later
+-- refresh of a cached food never retroactively changes a historical entry.
+
+CREATE TABLE zane_foods (
+  id                text        PRIMARY KEY,          -- `${source}:${source_id}`
+  source            text        NOT NULL CHECK (source IN ('off','usda')),
+  source_id         text        NOT NULL,
+  name              text        NOT NULL,
+  brand             text,
+  kcal_per_100g     numeric,
+  protein_per_100g  numeric,
+  carbs_per_100g    numeric,
+  fat_per_100g      numeric,
+  fiber_per_100g    numeric,
+  serving_size_g    numeric,
+  serving_label     text,
+  raw               jsonb,
+  cached_at         timestamptz NOT NULL DEFAULT now(),
+  created_at        timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX zane_foods_source_idx ON public.zane_foods USING btree (source, source_id);
+
+ALTER TABLE zane_foods ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "authenticated read foods"
+  ON zane_foods FOR SELECT TO authenticated USING (true);
+
+CREATE TABLE zane_food_logs (
+  id           text        PRIMARY KEY,
+  user_id      uuid        NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  date         text        NOT NULL,                  -- YYYY-MM-DD
+  time         text        NOT NULL,                  -- HH:MM local
+  food_id      text        REFERENCES public.zane_foods(id) ON DELETE SET NULL,
+  food_name    text        NOT NULL,
+  brand        text,
+  source       text,                                  -- 'off' | 'usda' | 'custom' | null
+  quantity_g   numeric     NOT NULL,
+  calories     integer     NOT NULL,
+  protein      numeric     NOT NULL,
+  carbs        numeric     NOT NULL,
+  fat          numeric     NOT NULL,
+  fiber        numeric,
+  recipe_items jsonb,                                    -- ingredient snapshot for a source:'recipe' entry, null otherwise
+  created_at   timestamptz DEFAULT now()
+);
+
+CREATE INDEX zane_food_logs_user_date ON public.zane_food_logs USING btree (user_id, date DESC, "time" DESC);
+
+ALTER TABLE zane_food_logs ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users manage own food logs"
+  ON zane_food_logs FOR ALL TO public
+  USING (((select auth.uid()) = user_id)) WITH CHECK (((select auth.uid()) = user_id));
+CREATE POLICY "coaches read client food logs"
+  ON zane_food_logs FOR SELECT TO public
+  USING (EXISTS ( SELECT 1 FROM zane_coaching zc
+    WHERE zc.client_id = zane_food_logs.user_id
+      AND zc.coach_id = (select auth.uid()) AND zc.coach_id <> zc.client_id AND zc.status = 'active' AND zc.id NOT LIKE 'support_%'));
+
+-- ── Food Tracker quick-add (migration 0187) ─────────────────────────────────────
+-- Both simple owned collections (mirrors zane_workout_templates), no coach
+-- visibility, not part of the Health tab's live-refresh polling.
+
+CREATE TABLE zane_food_favorites (
+  id          text        PRIMARY KEY,
+  user_id     uuid        NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  food_id     text        REFERENCES public.zane_foods(id) ON DELETE SET NULL,
+  food_name   text        NOT NULL,
+  brand       text,
+  source      text,                                  -- 'off' | 'usda' | 'custom' | null
+  quantity_g  numeric     NOT NULL,
+  calories    integer     NOT NULL,
+  protein     numeric     NOT NULL,
+  carbs       numeric     NOT NULL,
+  fat         numeric     NOT NULL,
+  fiber       numeric,
+  created_at  timestamptz NOT NULL DEFAULT now(),
+  units       jsonb       NOT NULL DEFAULT '[]'       -- [{ label, grams }, ...], optional package/unit sizes
+);
+
+CREATE INDEX zane_food_favorites_user_idx ON public.zane_food_favorites USING btree (user_id, created_at DESC);
+
+ALTER TABLE zane_food_favorites ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "zane_food_favorites_own"
+  ON zane_food_favorites FOR ALL
+  USING ((select auth.uid()) = user_id) WITH CHECK ((select auth.uid()) = user_id);
+
+CREATE TABLE zane_food_recipes (
+  id          text        PRIMARY KEY,
+  user_id     uuid        NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  name        text        NOT NULL,
+  items       jsonb       NOT NULL DEFAULT '[]',
+  created_at  timestamptz NOT NULL DEFAULT now(),
+  updated_at  timestamptz NOT NULL DEFAULT now(),
+  portions    integer     NOT NULL DEFAULT 1  -- how many servings the batch in `items` splits into
+);
+
+CREATE INDEX zane_food_recipes_user_idx ON public.zane_food_recipes USING btree (user_id, created_at DESC);
+
+ALTER TABLE zane_food_recipes ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "zane_food_recipes_own"
+  ON zane_food_recipes FOR ALL
+  USING ((select auth.uid()) = user_id) WITH CHECK ((select auth.uid()) = user_id);
+
+-- ── Recipe sharing (migration 0193) ─────────────────────────────────────────────
+-- One row per shared recipe, keyed by an unguessable token that doubles as the
+-- deep link (.../?share=<token>). `recipe` is a jsonb snapshot taken when the
+-- share is (re)created: the link keeps working even if the sharer later edits
+-- or deletes the source recipe. Re-sharing the same recipe refreshes the
+-- snapshot and returns the SAME token (upsert on user_id+recipe_id).
+-- RLS is enabled with NO policies: clients can never reach the table directly,
+-- the only doors are the two SECURITY DEFINER RPCs below (authenticated only,
+-- no anon grant; the token itself is the authorization to read one snapshot).
+
+CREATE TABLE public.zane_recipe_shares (
+  token       text PRIMARY KEY,          -- 32 hex chars from gen_random_uuid()
+  user_id     uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  recipe_id   text NOT NULL,             -- sharer's zane_food_recipes.id; no FK on purpose, the share outlives the recipe
+  recipe      jsonb NOT NULL,            -- { name, portions, items: [...] } snapshot
+  created_at  timestamptz NOT NULL DEFAULT now()  -- bumped on re-share
+);
+
+CREATE UNIQUE INDEX zane_recipe_shares_user_recipe ON public.zane_recipe_shares (user_id, recipe_id);
+
+ALTER TABLE zane_recipe_shares ENABLE ROW LEVEL SECURITY;
+-- No policies on purpose: all access goes through the RPCs below.
+
+CREATE OR REPLACE FUNCTION public.create_recipe_share(p_recipe_id text, p_recipe jsonb)
+RETURNS text
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path TO 'public', 'pg_temp'
+AS $$
+DECLARE
+  v_uid   uuid := auth.uid();
+  v_token text;
+BEGIN
+  IF v_uid IS NULL THEN RAISE EXCEPTION 'Not authenticated'; END IF;
+  IF p_recipe_id IS NULL OR btrim(p_recipe_id) = '' THEN RAISE EXCEPTION 'Missing recipe id'; END IF;
+  IF p_recipe IS NULL OR jsonb_typeof(p_recipe) <> 'object'
+     OR jsonb_typeof(p_recipe->'items') <> 'array'
+     OR COALESCE(btrim(p_recipe->>'name'), '') = '' THEN
+    RAISE EXCEPTION 'Invalid recipe';
+  END IF;
+  IF length(p_recipe::text) > 20000 THEN RAISE EXCEPTION 'Recipe too large'; END IF;
+
+  INSERT INTO zane_recipe_shares (token, user_id, recipe_id, recipe)
+  VALUES (replace(gen_random_uuid()::text, '-', ''), v_uid, p_recipe_id, p_recipe)
+  ON CONFLICT (user_id, recipe_id)
+  DO UPDATE SET recipe = EXCLUDED.recipe, created_at = now()
+  RETURNING token INTO v_token;
+
+  RETURN v_token;
+END;
+$$;
+
+REVOKE EXECUTE ON FUNCTION public.create_recipe_share(text, jsonb) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.create_recipe_share(text, jsonb) TO authenticated;
+
+CREATE OR REPLACE FUNCTION public.get_recipe_share(p_token text)
+RETURNS jsonb
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path TO 'public', 'pg_temp'
+AS $$
+  SELECT jsonb_build_object(
+    'recipe',    s.recipe,
+    'sharedBy',  COALESCE(p.name, 'A Zane user'),
+    'createdAt', s.created_at
+  )
+  FROM zane_recipe_shares s
+  LEFT JOIN zane_profiles p ON p.id = s.user_id
+  WHERE s.token = p_token;
+$$;
+
+REVOKE EXECUTE ON FUNCTION public.get_recipe_share(text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.get_recipe_share(text) TO authenticated;
+
 -- ── Support tickets (migrations 0085/0086 + archive_support_tickets) ────────────
 -- A support ticket is a zane_coaching row with id LIKE 'support_%' between the
 -- user (client_id) and the admin (coach_id), carrying support_status/category.

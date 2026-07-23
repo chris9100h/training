@@ -19,6 +19,20 @@ function unseenWhatsNew() {
   return idx === -1 ? [all[0]] : all.slice(0, idx); // newest-first: before the seen entry = unseen
 }
 
+// Recipe-share deep link (…/?share=<token>, see RecipeShareSheet in
+// screens-food.jsx): stash the token BEFORE anything else runs, so it survives
+// the login (or even signup + approval) roundtrip a logged-out recipient goes
+// through, then scrub it from the URL so a later reload doesn't re-trigger.
+// Consumed (and cleared) by the RecipeShareSheet overlay once the app is ready.
+const PENDING_SHARE_KEY = 'logbook-pending-share';
+try {
+  const _shareToken = new URLSearchParams(window.location.search).get('share');
+  if (_shareToken && /^[a-f0-9]{16,64}$/i.test(_shareToken)) {
+    localStorage.setItem(PENDING_SHARE_KEY, _shareToken);
+    window.history.replaceState(null, '', window.location.pathname + window.location.hash);
+  }
+} catch (_) {}
+
 function useIsPad() {
   const [isPad, setIsPad] = useStateA(() => window.innerWidth >= 768);
   useEffectA(() => {
@@ -62,7 +76,7 @@ class ErrorBoundary extends React.Component {
 
 function AutoCloseBanner({ notify, onDismiss }) {
   const { dayName, date, durationMinutes } = notify;
-  const dateLabel = date ? new Date(date + 'T12:00:00').toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' }) : '';
+  const dateLabel = date ? new Date(date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' }) : '';
   return (
     <div style={{
       position: 'fixed', inset: 0, zIndex: 9998,
@@ -290,6 +304,9 @@ function App() {
   const [onboardingState, setOnboardingState] = useStateA(null); // null | { phase:'prompt' } | { phase:'tour', tourKey }
   const onboardingChecked = useRefA(false);
   const [unitPromptOpen, setUnitPromptOpen] = useStateA(false);
+  const [pendingShare, setPendingShare] = useStateA(() => {   // ?share=<token> stashed by the module-scope block above
+    try { return localStorage.getItem(PENDING_SHARE_KEY); } catch (_) { return null; }
+  });
   const unitPicked                = useRefA(false); // user chose a unit this session — silences the reset watcher
   const retryTimer                = useRefA(null);  // one-shot retry after a failed sync
   const waitingWorker             = useRefA(null);
@@ -403,6 +420,7 @@ function App() {
           const serverBpIds       = new Set((fresh.bloodPressureLogs || []).map(l => l.id));
           const serverTempIds     = new Set((fresh.bodyTempLogs || []).map(l => l.id));
           const serverWaterIds    = new Set((fresh.waterLogs || []).map(l => l.id));
+          const serverFoodIds     = new Set((fresh.foodLogs || []).map(l => l.id));
           // Daily logs are one-per-date: also drop a local row whose date the
           // server already has (a divergent id from a pre-RPC multi-device write).
           const localOnlyDaily   = (s.dailyLogs   || []).filter(l => !serverDailyIds.has(l.id) && !serverDailyDates.has(l.date));
@@ -411,6 +429,7 @@ function App() {
           const localOnlyBp      = (s.bloodPressureLogs || []).filter(l => !serverBpIds.has(l.id));
           const localOnlyTemp    = (s.bodyTempLogs || []).filter(l => !serverTempIds.has(l.id));
           const localOnlyWater   = (s.waterLogs || []).filter(l => !serverWaterIds.has(l.id));
+          const localOnlyFood    = (s.foodLogs || []).filter(l => !serverFoodIds.has(l.id));
           // For ids on both sides keep the local row when it carries an unsynced
           // edit (id in the persisted base AND local differs from base) so a
           // background refresh doesn't clobber a health edit made offline.
@@ -430,12 +449,14 @@ function App() {
           const delBp      = delDel(base?.bloodPressureLogs, s.bloodPressureLogs);
           const delTemp    = delDel(base?.bodyTempLogs, s.bodyTempLogs);
           const delWater   = delDel(base?.waterLogs, s.waterLogs);
+          const delFood    = delDel(base?.foodLogs, s.foodLogs);
           const nextDaily   = [...localOnlyDaily,   ...LB.mergeCollectionById(fresh.dailyLogs, s.dailyLogs, base?.dailyLogs, delDaily)];
           const nextCardio  = [...localOnlyCardio,  ...LB.mergeCollectionById(fresh.cardioLogs, s.cardioLogs, base?.cardioLogs, delCardio)];
           const nextGlucose = [...localOnlyGlucose, ...LB.mergeCollectionById(fresh.glucoseLogs || [], s.glucoseLogs, base?.glucoseLogs, delGlucose)];
           const nextBp      = [...localOnlyBp,      ...LB.mergeCollectionById(fresh.bloodPressureLogs || [], s.bloodPressureLogs, base?.bloodPressureLogs, delBp)];
           const nextTemp    = [...localOnlyTemp,    ...LB.mergeCollectionById(fresh.bodyTempLogs || [], s.bodyTempLogs, base?.bodyTempLogs, delTemp)];
           const nextWater   = [...localOnlyWater,   ...LB.mergeCollectionById(fresh.waterLogs || [], s.waterLogs, base?.waterLogs, delWater)];
+          const nextFood    = [...localOnlyFood,    ...LB.mergeCollectionById(fresh.foodLogs || [], s.foodLogs, base?.foodLogs, delFood)];
           // refreshHealthLogs re-maps every row into a fresh object, so these
           // merged arrays are new references even when nothing actually changed —
           // which forced a full re-render of the active screen on EVERY
@@ -450,7 +471,8 @@ function App() {
           const bpSame = sameLogs(nextBp, s.bloodPressureLogs);
           const tSame = sameLogs(nextTemp, s.bodyTempLogs);
           const wSame = sameLogs(nextWater, s.waterLogs);
-          if (dSame && cSame && gSame && bpSame && tSame && wSame) return s;
+          const fSame = sameLogs(nextFood, s.foodLogs);
+          if (dSame && cSame && gSame && bpSame && tSame && wSame && fSame) return s;
           return { ...s,
             dailyLogs:   dSame ? s.dailyLogs : nextDaily,
             cardioLogs:  cSame ? s.cardioLogs : nextCardio,
@@ -458,6 +480,7 @@ function App() {
             bloodPressureLogs: bpSame ? s.bloodPressureLogs : nextBp,
             bodyTempLogs: tSame ? s.bodyTempLogs : nextTemp,
             waterLogs: wSame ? s.waterLogs : nextWater,
+            foodLogs: fSame ? s.foodLogs : nextFood,
           };
         });
       }).catch(() => {});
@@ -744,6 +767,17 @@ function App() {
             const serverWaterIds = new Set((fresh.waterLogs || []).map(l => l.id));
             const baseWaterIds = base ? new Set((base.waterLogs || []).map(l => l.id)) : null;
             const localOnlyWaterLogs = (cur.waterLogs || []).filter(x => !serverWaterIds.has(x.id) && !baseWaterIds?.has(x.id));
+            const serverFoodIds = new Set((fresh.foodLogs || []).map(l => l.id));
+            const baseFoodIds = base ? new Set((base.foodLogs || []).map(l => l.id)) : null;
+            const localOnlyFoodLogs = (cur.foodLogs || []).filter(x => !serverFoodIds.has(x.id) && !baseFoodIds?.has(x.id));
+            // Food Tracker quick-add (favorites/recipes, migration 0187): same
+            // owned-list shape and guard as workoutTemplates below.
+            const serverFavIds = new Set((fresh.foodFavorites || []).map(f => f.id));
+            const baseFavIds = base ? new Set((base.foodFavorites || []).map(f => f.id)) : null;
+            const localOnlyFavorites = (cur.foodFavorites || []).filter(x => !serverFavIds.has(x.id) && !baseFavIds?.has(x.id));
+            const serverRecipeIds = new Set((fresh.foodRecipes || []).map(r => r.id));
+            const baseRecipeIds = base ? new Set((base.foodRecipes || []).map(r => r.id)) : null;
+            const localOnlyRecipes = (cur.foodRecipes || []).filter(x => !serverRecipeIds.has(x.id) && !baseRecipeIds?.has(x.id));
             // Templates and cardio plans need the same resurrection guard as
             // exercises/schedules — previously missing here entirely, so a
             // template saved (or a cardio plan created) offline before the
@@ -774,6 +808,12 @@ function App() {
             const delCardioIds = baseCardioIds ? new Set([...baseCardioIds].filter(id => !curCardioIdSet.has(id))) : null;
             const curWaterIdSet = new Set((cur.waterLogs || []).map(l => l.id));
             const delWaterIds = baseWaterIds ? new Set([...baseWaterIds].filter(id => !curWaterIdSet.has(id))) : null;
+            const curFoodIdSet = new Set((cur.foodLogs || []).map(l => l.id));
+            const delFoodIds = baseFoodIds ? new Set([...baseFoodIds].filter(id => !curFoodIdSet.has(id))) : null;
+            const curFavIdSet = new Set((cur.foodFavorites || []).map(f => f.id));
+            const delFavIds = baseFavIds ? new Set([...baseFavIds].filter(id => !curFavIdSet.has(id))) : null;
+            const curRecipeIdSet = new Set((cur.foodRecipes || []).map(r => r.id));
+            const delRecipeIds = baseRecipeIds ? new Set([...baseRecipeIds].filter(id => !curRecipeIdSet.has(id))) : null;
             const curTplIdSet = new Set((cur.workoutTemplates || []).map(t => t.id));
             const delTplIds = baseTplIds ? new Set([...baseTplIds].filter(id => !curTplIdSet.has(id))) : null;
             const curCheckinTplIdSet = new Set((cur.checkinSchemaTemplates || []).map(t => t.id));
@@ -845,9 +885,11 @@ function App() {
             // every other no-base fallback in this merge (fixed: this used to
             // read `base && (...)`, which is falsy when base is null/undefined
             // and so took the server value on a no-base boot instead of cur,
-            // the opposite of the intended rule). Bottle counters are
-            // deliberately NOT in this list, they are day-scoped device state.
-            const WATER_SYNC_KEYS = ['waterGoalMl', 'waterStartTime', 'waterEndTime', 'waterReminderEnabled', 'waterDrinks', 'waterCoffeeSizes', 'waterBottleEnabled', 'waterBottleMl'];
+            // the opposite of the intended rule). Bottle counters are included
+            // too: confirming "Bottle empty?" on one device must reset the
+            // progress ring and show the emptied bottle under "Other drinks
+            // today" on every device, the same as any other water stat.
+            const WATER_SYNC_KEYS = ['waterGoalMl', 'waterStartTime', 'waterEndTime', 'waterReminderEnabled', 'waterDrinks', 'waterCoffeeSizes', 'waterBottleEnabled', 'waterBottleMl', 'waterBottlesToday', 'waterBottlesDate'];
             const mergedSettings = { ...fresh.settings, ...cur.settings, ...(fresh.settings.unit == null ? { unit: null } : {}) };
             for (const k of WATER_SYNC_KEYS) {
               const localUnsynced = !base || JSON.stringify(cur.settings?.[k]) !== JSON.stringify(base.settings?.[k]);
@@ -873,6 +915,9 @@ function App() {
               dailyLogs: [...localOnlyDailyLogs, ...mergeById(fresh.dailyLogs, cur.dailyLogs, base?.dailyLogs, delDailyIds)],
               cardioLogs: [...localOnlyCardioLogs, ...mergeById(fresh.cardioLogs, cur.cardioLogs, base?.cardioLogs, delCardioIds)],
               waterLogs: [...localOnlyWaterLogs, ...mergeById(fresh.waterLogs, cur.waterLogs, base?.waterLogs, delWaterIds)],
+              foodLogs: [...localOnlyFoodLogs, ...mergeById(fresh.foodLogs, cur.foodLogs, base?.foodLogs, delFoodIds)],
+              foodFavorites: [...localOnlyFavorites, ...(fresh.foodFavorites || []).filter(f => !delFavIds?.has(f.id))],
+              foodRecipes: [...localOnlyRecipes, ...(fresh.foodRecipes || []).filter(r => !delRecipeIds?.has(r.id))],
               workoutTemplates: [...localOnlyTemplates, ...(fresh.workoutTemplates || []).filter(t => !delTplIds?.has(t.id))],
               checkinSchemaTemplates: [...localOnlyCheckinTemplates, ...(fresh.checkinSchemaTemplates || []).filter(t => !delCheckinTplIds?.has(t.id))],
               cardioPlans: [...localOnlyCardioPlans, ...(fresh.cardioPlans || []).filter(p => !delCardioPlanIds?.has(p.id))],
@@ -1373,12 +1418,12 @@ function App() {
   const onRetrySync = () => { setStorageFull(false); flushSync(userId); };
 
   const props = { store, setStore, go, userId, syncStatus, storageFull, onRetrySync, flushBeforeSignOut };
-  const tabRoutes = ['home', 'plan', 'lib', 'cardio-plans', 'hist', 'health', 'water', 'coaching'];
+  const tabRoutes = ['home', 'plan', 'lib', 'cardio-plans', 'hist', 'health', 'water', 'food', 'coaching'];
   const showTab = tabRoutes.includes(route.name);
-  // Library and cardio-plans live under the merged "Plan" tab; the water tracker
-  // lives under the Health tab: keep the right tab lit for each.
+  // Library and cardio-plans live under the merged "Plan" tab; the water and
+  // food trackers live under the Health tab: keep the right tab lit for each.
   const tabActive = (route.name === 'lib' || route.name === 'cardio-plans') ? 'plan'
-    : (route.name === 'water') ? 'health'
+    : (route.name === 'water' || route.name === 'food') ? 'health'
     : route.name;
 
   const showCoaching = !!(
@@ -1410,6 +1455,7 @@ function App() {
     case 'hist':          screen = <window.Screens.HistoryScreen {...props} initialTab={route.initialTab} />; break;
     case 'health':        screen = <window.Screens.HealthScreen {...props} />; break;
     case 'water':         screen = <window.Screens.WaterScreen {...props} />; break;
+    case 'food':          screen = <window.Screens.FoodScreen {...props} date={route.date} />; break;
     case 'session':          screen = <window.Screens.SessionDetailScreen {...props} sessionId={route.sessionId} justFinished={route.justFinished} back={route.back} />; break;
     case 'compare':          screen = <window.Screens.SessionCompareScreen {...props} sessionId={route.sessionId} compareId={route.compareId} back={route.back} />; break;
     case 'exerciseHistory':  screen = <window.Screens.ExerciseHistoryScreen {...props} exId={route.exId} dayId={route.dayId} exName={route.exName} back={route.back} />; break;
@@ -1502,6 +1548,15 @@ function App() {
             unitPicked.current = true; // latch before setStore so the reset watcher won't re-null
             setUnitPromptOpen(false);
             setStore(s => s ? { ...s, settings: { ...s.settings, unit: chosenUnit } } : s);
+          }}
+        />
+      )}
+      {pendingShare && store && window.Screens?.RecipeShareSheet && (
+        <window.Screens.RecipeShareSheet
+          store={store} setStore={setStore} token={pendingShare}
+          onClose={() => {
+            try { localStorage.removeItem(PENDING_SHARE_KEY); } catch (_) {}
+            setPendingShare(null);
           }}
         />
       )}

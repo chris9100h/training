@@ -51,11 +51,6 @@ const healthInt = v => (v === '' || v == null || isNaN(parseInt(v, 10))) ? null 
 
 const caloriesFromMacros = LB.caloriesFromMacros;
 
-function healthFmtDate(iso, opts = { weekday: 'short', day: 'numeric', month: 'short' }) {
-  if (!iso) return '';
-  return new Date(iso + 'T12:00:00').toLocaleDateString('en-GB', opts);
-}
-
 // Windowed series builder for the charts — pure, so HealthScreen (dailyLogs)
 // and HealthClientLogs (a coach's client logs) can share it instead of
 // reimplementing the same ~90 lines against differently-named data.
@@ -485,7 +480,7 @@ function ChartHover({ W, H, points, children, mode = 'x', markerColor = 'var(--a
           <div style={{ position: 'absolute', left: leftPct + '%', top: (CHART_PLOT_TOP / H) * 100 + '%', height: (CHART_PLOT_H / H) * 100 + '%', width: 1, background: UI.hairStrong, transform: 'translateX(-0.5px)' }} />
           <div style={{ position: 'absolute', left: leftPct + '%', top: topPct + '%', width: 8, height: 8, borderRadius: '50%', background: p.color || markerColor, border: `2px solid ${UI.bgRaised}`, boxShadow: `0 0 0 1.5px ${p.color || markerColor}`, transform: 'translate(-50%, -50%)' }} />
           <div style={{ position: 'absolute', left: leftPct + '%', top: topPct + '%', transform: `translate(${tx}, ${ty})`, background: UI.bgRaised, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, padding: '5px 8px', boxShadow: '0 4px 14px rgba(0,0,0,0.45)', whiteSpace: 'nowrap', zIndex: 5 }}>
-            <div className="micro" style={{ color: UI.inkFaint, marginBottom: 2 }}>{healthFmtDate(p.date)}</div>
+            <div className="micro" style={{ color: UI.inkFaint, marginBottom: 2 }}>{LB.fmtDayLabel(p.date)}</div>
             {p.rows.map((r, i) => (
               <div key={i} style={{ display: 'flex', alignItems: 'baseline', gap: 6, fontFamily: UI.fontNum, fontSize: 12, lineHeight: 1.35 }}>
                 {r.label != null && <span style={{ fontSize: 9, color: r.color || UI.inkFaint, fontFamily: UI.fontUi, minWidth: 12 }}>{r.label}</span>}
@@ -653,7 +648,11 @@ function HealthBarChart({ series, from, to, format, target, color = 'var(--accen
 }
 
 // Stacked macro bars (protein / carbs / fat by calories) + per-day target tick.
-const MACRO_COLORS = { protein: 'var(--accent)', carbs: 'var(--ok)', fat: 'var(--danger)' };
+// protein uses the fixed --info blue rather than --accent: --accent is
+// user-customizable and collides with --ok/--danger the moment someone
+// picks green or red as their accent (a red accent made protein and fat
+// read as the same color here). Fixed generally, not just for red.
+const MACRO_COLORS = { protein: 'var(--info)', carbs: 'var(--ok)', fat: 'var(--danger)' };
 function HealthMacroChart({ series, from, to }) {
   // series = [{ date, protein, carbs, fat, calories, targetCal }]
   const pts = (series || []).filter(p => (p.protein != null || p.carbs != null || p.fat != null));
@@ -752,7 +751,7 @@ function CatSection({ label, extra, collapsed, onToggle, children }) {
   );
 }
 
-function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeCoachingSchema, onSetStatus, userId, glucoseLogs, glucoseUnit, bloodPressureLogs, bodyTempLogs, tempUnit }) {
+function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeCoachingSchema, onSetStatus, userId, glucoseLogs, glucoseUnit, bloodPressureLogs, bodyTempLogs, tempUnit, go }) {
   // Always-current store snapshot: saveTemp's fever nudge awaits a Supabase
   // write and then a user-interaction-gated confirm dialog, both arbitrarily
   // long, so it re-reads statusMode from this ref (not the closed-over
@@ -775,6 +774,16 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
   );
   const [waterUnlocked, setWaterUnlocked] = useStateH(false);
   const waterLocked = waterHasTrackerEntries && !waterUnlocked;
+  // The Food Tracker owns protein/carbs/fat/fiber/calories for a day the
+  // moment it has any entry for that day, same "tracker owns this field"
+  // pattern as water above, but per-date rather than today-only: backdated
+  // food logging is in scope, so a past day can lock too.
+  const foodHasTrackerEntries = useMemoH(
+    () => (store.foodLogs || []).some(l => l.date === date),
+    [store.foodLogs, date],
+  );
+  const [foodUnlocked, setFoodUnlocked] = useStateH(false);
+  const foodLocked = foodHasTrackerEntries && !foodUnlocked;
   const todayISO = LB.todayISO();
   const dayStatusPeriod = useMemoH(() => {
     const ts = new Date(date + 'T12:00:00').getTime();
@@ -1026,6 +1035,7 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
   useEffectH(() => {
     if (!open) return;
     setWaterUnlocked(false);
+    setFoodUnlocked(false);
     const net = existing?.fiber != null ? true : !!store.settings?.netCarbs;
     setNetCarbs(net);
     // Blank the calories field when the saved value matches what the saved
@@ -1087,9 +1097,15 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
 
   const save = () => {
     if (!canSave) return;
-    const protein = healthInt(form.protein), carbs = healthInt(form.carbs), fat = healthInt(form.fat);
-    const fiber = netCarbs ? healthInt(form.fiber) : null;
-    const calories = form.calories !== '' ? healthInt(form.calories) : autoCals;
+    // Belt and suspenders, same reasoning as waterMl below: the locked fields
+    // render no real input while foodLocked (see the NUTRITION section), but
+    // save() itself never trusts the form for them either, so nothing can
+    // persist an override the user never confirmed through requestFoodUnlock.
+    const protein = foodLocked ? (existing?.protein ?? null) : healthInt(form.protein);
+    const carbs = foodLocked ? (existing?.carbs ?? null) : healthInt(form.carbs);
+    const fat = foodLocked ? (existing?.fat ?? null) : healthInt(form.fat);
+    const fiber = foodLocked ? (existing?.fiber ?? null) : (netCarbs ? healthInt(form.fiber) : null);
+    const calories = foodLocked ? (existing?.calories ?? null) : (form.calories !== '' ? healthInt(form.calories) : autoCals);
     // Single source of truth for the day type: a logged session wins, then a
     // flex Training|Rest override (set from the header), then cycle/week's
     // planned-day assumption (flex defaults to rest).
@@ -1154,16 +1170,26 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
     if (ok) setWaterUnlocked(true);
   };
 
+  const requestFoodUnlock = async () => {
+    const ok = await confirm(
+      "This day already has entries in the Food Tracker. Editing it here will be overwritten the next time you log food there.",
+      { title: 'Overwrite food tracker?', ok: 'Continue', cancel: 'Cancel' }
+    );
+    if (ok) setFoodUnlocked(true);
+  };
+
   const inputStyle = {
     width: '100%', boxSizing: 'border-box', background: UI.bgInset,
     border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 4,
     padding: '10px 12px', fontFamily: UI.fontNum, fontSize: 15, color: UI.ink, outline: 'none',
   };
   const labelStyle = { fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.07em' };
-  const numField = (k, label, unit) => (
+  const numField = (k, label, unit, locked = false) => (
     <div style={{ flex: 1 }}>
       <div style={labelStyle}>{label}{unit ? ` (${unit})` : ''}</div>
-      <input type="text" inputMode="decimal" placeholder="—" value={form[k]} onChange={e => set(k, e.target.value)} style={inputStyle} />
+      {locked
+        ? <div onClick={requestFoodUnlock} style={{ ...inputStyle, opacity: 0.45, cursor: 'pointer' }}>{form[k] || ''}</div>
+        : <input type="text" inputMode="decimal" placeholder="" value={form[k]} onChange={e => set(k, e.target.value)} style={inputStyle} />}
     </div>
   );
   const waterQuickAddTileStyle = { padding: '10px 12px', borderRadius: 4, border: `var(--hair-width) solid ${UI.hairStrong}`, background: UI.bgInset, color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 12, whiteSpace: 'nowrap' };
@@ -1184,7 +1210,7 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
       <div style={{ padding: '18px 22px calc(env(safe-area-inset-bottom, 8px) + 22px)' }}>
       {confirmEl}
       <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 14 }}>
-        {healthFmtDate(date, { weekday: 'long', day: 'numeric', month: 'long' })}
+        {LB.fmtDayLabel(date, { weekday: 'long', day: 'numeric', month: 'long' })}
       </div>
 
       {onSetStatus && (
@@ -1259,14 +1285,19 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
           ))}
         </div>
       }>
+        {go && (
+          <button onClick={() => go({ name: 'food', date })} style={{ display: 'flex', alignItems: 'center', gap: 5, background: 'none', border: 'none', padding: '0 0 10px', color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+            Log food <i className="fa-solid fa-arrow-right" style={{ fontSize: 9 }} />
+          </button>
+        )}
         <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-          {numField('protein', 'Protein', 'g')}
-          {numField('carbs', 'Carbs', 'g')}
-          {numField('fat', 'Fat', 'g')}
+          {numField('protein', 'Protein', 'g', foodLocked)}
+          {numField('carbs', 'Carbs', 'g', foodLocked)}
+          {numField('fat', 'Fat', 'g', foodLocked)}
         </div>
         {netCarbs && (
           <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-            {numField('fiber', 'Fiber', 'g')}
+            {numField('fiber', 'Fiber', 'g', foodLocked)}
             <div style={{ flex: 1 }}>
               <div style={labelStyle}>Net carbs (g)</div>
               <div style={{ ...inputStyle, color: netCarbsVal != null ? UI.inkSoft : UI.inkGhost, pointerEvents: 'none', userSelect: 'none' }}>
@@ -1277,8 +1308,16 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
         )}
         <div style={{ marginBottom: 12 }}>
           <div style={labelStyle}>Calories (kcal){autoCals != null && form.calories === '' ? (netCarbs ? ' · net carbs' : ' · from macros') : ''}</div>
-          <input type="text" inputMode="decimal" placeholder={autoCals != null ? String(autoCals) : '—'} value={form.calories} onChange={e => set('calories', e.target.value)} style={inputStyle} />
+          {foodLocked
+            ? <div onClick={requestFoodUnlock} style={{ ...inputStyle, opacity: 0.45, cursor: 'pointer' }}>{form.calories || ''}</div>
+            : <input type="text" inputMode="decimal" placeholder={autoCals != null ? String(autoCals) : ''} value={form.calories} onChange={e => set('calories', e.target.value)} style={inputStyle} />}
         </div>
+        {foodLocked && (
+          <button onClick={requestFoodUnlock} style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 5, background: 'none', border: 'none', padding: '4px 0', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+            <i className="fa-solid fa-lock" style={{ fontSize: 9, color: UI.inkGhost }} />
+            <span style={{ fontSize: 10, fontFamily: UI.fontUi, color: UI.inkGhost }}>Managed by the Food Tracker, tap to override</span>
+          </button>
+        )}
         <div>
           <div style={labelStyle}>Off-plan note <span style={{ textTransform: 'none', fontWeight: 400, color: UI.inkFaint }}>(optional · prefills check-in)</span></div>
           <textarea rows={2} placeholder="e.g. Birthday cake, 2 slices" value={form.offPlanNote} onChange={e => set('offPlanNote', e.target.value)} style={{ ...inputStyle, resize: 'none', fontFamily: UI.fontUi, fontSize: 14 }} />
@@ -1783,7 +1822,7 @@ function HealthWeekCard({ stats, dragHandle, targets, tf, setTf, weightUnit }) {
     weight, steps, stepsSum, calories, protein, carbs, fat, water, adherence,
     snapTgtCal, snapTgtProt, snapTgtCarb, snapTgtFat } = stats;
   const r = v => v == null ? null : Math.round(v);
-  const range = `${healthFmtDate(from, { day: 'numeric', month: 'short' })} – ${healthFmtDate(to, { day: 'numeric', month: 'short' })}`;
+  const range = `${LB.fmtDayLabel(from, { day: 'numeric', month: 'short' })} – ${LB.fmtDayLabel(to, { day: 'numeric', month: 'short' })}`;
   // The 1W window anchors on the selected day, so it can be a past week: only
   // call it "THIS WEEK" when the window still includes today.
   const periodLabel = tf === '1W' ? (to >= LB.todayISO() ? 'THIS WEEK' : 'WEEK') : tf === '1M' ? 'LAST 30 DAYS' : 'LAST 3 MONTHS';
@@ -1960,7 +1999,7 @@ function HealthDateStrip({ store, setStore, selectedDate, onSelect, onLog, targe
   };
   const sunday = days[6];
   // Month label for the week — spans two months at a boundary (e.g. "MAY – JUN").
-  const mLabel = iso => new Date(iso + 'T12:00:00').toLocaleDateString('en-GB', { month: 'short' }).toUpperCase();
+  const mLabel = iso => new Date(iso + 'T12:00:00').toLocaleDateString('en-US', { month: 'short' }).toUpperCase();
   const monthLabel = mLabel(monday) === mLabel(sunday)
     ? `${mLabel(monday)} ${new Date(sunday + 'T12:00:00').getFullYear()}`
     : `${mLabel(monday)} – ${mLabel(sunday)}`;
@@ -2151,7 +2190,7 @@ function GlucoseCard({ glucoseLogs, unit, tf: sharedTf, setTf: setSharedTf, drag
                   <div key={n.id} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
                     <span style={{ width: 7, height: 7, borderRadius: '50%', background: CTX_COLORS[n.context] || UI.inkSoft, display: 'inline-block', flexShrink: 0, marginTop: 2 }} />
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 9, fontFamily: UI.fontUi, color: UI.inkGhost }}>{healthFmtDate(n.date, { day: 'numeric', month: 'short' })} · {n.time}</div>
+                      <div style={{ fontSize: 9, fontFamily: UI.fontUi, color: UI.inkGhost }}>{LB.fmtDayLabel(n.date, { day: 'numeric', month: 'short' })} · {n.time}</div>
                       {n.note && <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.4, marginTop: 1 }}>{n.note}</div>}
                     </div>
                     <span className="num" style={{ flexShrink: 0, fontSize: 11, color: UI.inkFaint }}>{glucoseDisplay(n.valueMmol, unit)}</span>
@@ -2231,7 +2270,7 @@ function BloodPressureCard({ bpLogs, tf: sharedTf, setTf: setSharedTf, dragHandl
                 {sortedReadings.map(n => (
                   <div key={n.id} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 9, fontFamily: UI.fontUi, color: UI.inkGhost }}>{healthFmtDate(n.date, { day: 'numeric', month: 'short' })} · {n.time}</div>
+                      <div style={{ fontSize: 9, fontFamily: UI.fontUi, color: UI.inkGhost }}>{LB.fmtDayLabel(n.date, { day: 'numeric', month: 'short' })} · {n.time}</div>
                       {n.note && <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.4, marginTop: 1 }}>{n.note}</div>}
                     </div>
                     <span className="num" style={{ flexShrink: 0, fontSize: 11, color: UI.inkFaint }}>{n.systolic}/{n.diastolic}</span>
@@ -2300,7 +2339,7 @@ function BodyTempCard({ tempLogs, unit, tf: sharedTf, setTf: setSharedTf, dragHa
                 {sortedReadings.map(n => (
                   <div key={n.id} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 9, fontFamily: UI.fontUi, color: UI.inkGhost }}>{healthFmtDate(n.date, { day: 'numeric', month: 'short' })} · {n.time}</div>
+                      <div style={{ fontSize: 9, fontFamily: UI.fontUi, color: UI.inkGhost }}>{LB.fmtDayLabel(n.date, { day: 'numeric', month: 'short' })} · {n.time}</div>
                       {n.note && <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.4, marginTop: 1 }}>{n.note}</div>}
                     </div>
                     <span className="num" style={{ flexShrink: 0, fontSize: 11, color: UI.inkFaint }}>{tempDisplay(n.valueC, unit)}{unitLabel}</span>
@@ -2596,6 +2635,52 @@ function HealthScreen({ store, setStore, go, userId }) {
     if (targets !== cachedTargets) setCachedTargets(targets);
   }, [targets]);
 
+  // The Food Tracker's rollup (screens-food.jsx) writes calories/protein/
+  // carbs/fat straight into a day's log but doesn't know about targets or
+  // adherence, the same division of labor DailyLogScreen.save() already has
+  // for the manual form. Reconciles adherence/targetsSnap for any date
+  // store.foodLogs touched, the exact same computation save() does
+  // (including the flex day-type override guard), whenever a food entry
+  // changes.
+  const foodTouchedDates = useMemoH(() => {
+    const set = new Set();
+    (store.foodLogs || []).forEach(l => set.add(l.date));
+    return set;
+  }, [store.foodLogs]);
+  useEffectH(() => {
+    if (!foodTouchedDates.size || !effectiveTargets) return;
+    const flexActive = LB.isFlexPlan((store.schedules || []).find(s => s.id === store.activeScheduleId));
+    setStore(s => {
+      const touchedLogs = (s.dailyLogs || []).filter(log => foodTouchedDates.has(log.date));
+      if (!touchedLogs.length) return s;
+      const reconciled = new Map();
+      touchedLogs.forEach(log => {
+        const dayMode = log.date === today ? (s.statusMode ?? null) : (() => {
+          const ts = new Date(log.date + 'T12:00:00').getTime();
+          const period = (s.statusPeriods || []).find(p => {
+            const start = new Date(p.startedAt).getTime();
+            const end = p.endedAt ? new Date(p.endedAt).getTime() : Date.now();
+            return ts >= start && ts <= end;
+          });
+          return period?.mode || null;
+        })();
+        const isTraining = LB.isTrainingDayForDate(s, log.date);
+        let { adherence, targetsSnap } = dayMode
+          ? { adherence: null, targetsSnap: null }
+          : LB.dailyLogAdherence(log, effectiveTargets, isTraining);
+        if (!dayMode && flexActive && !targetsSnap) {
+          const dt = log.targetsSnap?.dayType;
+          if (dt === 'training' || dt === 'rest') targetsSnap = { dayType: dt };
+        }
+        if (log.adherence === adherence && JSON.stringify(log.targetsSnap) === JSON.stringify(targetsSnap)) return;
+        reconciled.set(log.date, { ...log, adherence, targetsSnap });
+      });
+      if (!reconciled.size) return s;
+      const nextLogs = s.dailyLogs.map(log => reconciled.has(log.date) ? reconciled.get(log.date) : log);
+      return { ...s, dailyLogs: nextLogs };
+    });
+  }, [foodTouchedDates, effectiveTargets, store.schedules, store.activeScheduleId]);
+
   // Two-sided retroactive heal for a past day's saved day type:
   //  • DOWNGRADE training → rest: a training-tagged day with NO logged session
   //    was never earned. For cycle/week that's a planned training day skipped
@@ -2789,7 +2874,7 @@ function HealthScreen({ store, setStore, go, userId }) {
   );
 
   const handle = <DragHandle style={{ width: 20, height: 22, marginLeft: -4, cursor: 'grab' }} />;
-  const dayLabel = selectedDate === today ? 'Today' : healthFmtDate(selectedDate, { weekday: 'short', day: 'numeric', month: 'short' });
+  const dayLabel = selectedDate === today ? 'Today' : LB.fmtDayLabel(selectedDate, { weekday: 'short', day: 'numeric', month: 'short' });
   const trainedSelected = LB.isLoggedTrainingDay(store.sessions, selectedDate);
   const cardioSelected = (store.cardioLogs || []).some(l => l.date === selectedDate);
   // Honors a flex plan's explicit Training|Rest override (via targetsSnap.dayType).
@@ -2933,7 +3018,7 @@ function HealthScreen({ store, setStore, go, userId }) {
           <div style={{ flex: 1 }}>
             <div style={{ fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700, color: 'var(--accent)', letterSpacing: '0.07em', textTransform: 'uppercase' }}>
               {store.statusMode === 'sick' ? 'Sick' : store.statusMode === 'deload' ? 'Deload' : 'Vacation'}
-              {store.statusModeSince ? ` · Since ${new Date(store.statusModeSince).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}` : ''}
+              {store.statusModeSince ? ` · Since ${new Date(store.statusModeSince).toLocaleDateString('en-US', { day: 'numeric', month: 'short' })}` : ''}
             </div>
             <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>Tap to manage or deactivate</div>
           </div>
@@ -2977,7 +3062,7 @@ function HealthScreen({ store, setStore, go, userId }) {
           React.cloneElement(expandableCards[expandedCardId], { dragHandle: null, onExpand: null, compact: false })}
       </Sheet>
 
-      <DailyLogScreen open={logOpen} onClose={() => setLogOpen(false)} store={store} setStore={setStore} date={selectedDate} targets={effectiveTargets} activeCoachingSchema={activeCoachingSchema} onSetStatus={handleSetStatus} userId={userId} glucoseLogs={store.glucoseLogs || []} glucoseUnit={store.settings?.glucoseUnit ?? 'mmol'} bloodPressureLogs={store.bloodPressureLogs || []} bodyTempLogs={store.bodyTempLogs || []} tempUnit={LB.defaultTempUnit(store.settings)} />
+      <DailyLogScreen open={logOpen} onClose={() => setLogOpen(false)} store={store} setStore={setStore} date={selectedDate} targets={effectiveTargets} activeCoachingSchema={activeCoachingSchema} onSetStatus={handleSetStatus} userId={userId} glucoseLogs={store.glucoseLogs || []} glucoseUnit={store.settings?.glucoseUnit ?? 'mmol'} bloodPressureLogs={store.bloodPressureLogs || []} bodyTempLogs={store.bodyTempLogs || []} tempUnit={LB.defaultTempUnit(store.settings)} go={go} />
       <MacroTargetSheet open={targetOpen} onClose={() => setTargetOpen(false)} store={store} setStore={setStore} coachingMacros={coachingMacros} />
       <ExportSheet open={exportOpen} onClose={() => setExportOpen(false)} store={store} />
     </Screen>
@@ -3100,7 +3185,7 @@ function HealthClientLogs({ clientStore }) {
   const selectedLog = logs.find(l => l.date === selectedDate) || null;
   const trainedSelected = LB.isLoggedTrainingDay(clientStore?.sessions, selectedDate);
   const cardioSelected = cardioLogs.some(l => l.date === selectedDate);
-  const dayLabel = selectedDate === today ? 'Today' : healthFmtDate(selectedDate, { weekday: 'short', day: 'numeric', month: 'short' });
+  const dayLabel = selectedDate === today ? 'Today' : LB.fmtDayLabel(selectedDate, { weekday: 'short', day: 'numeric', month: 'short' });
 
   const handle = <DragHandle style={{ width: 20, height: 22, marginLeft: -4, cursor: 'grab' }} />;
   // Opens a chart full-width in a sheet, offered only on charts the 2-col grid
@@ -3178,7 +3263,7 @@ function HealthClientLogs({ clientStore }) {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {weeks.map((w, i) => (
             <div key={w.ws} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6 }}>
-              <div style={{ width: 58, flexShrink: 0, fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi }}>{healthFmtDate(w.ws, { day: 'numeric', month: 'short' })}</div>
+              <div style={{ width: 58, flexShrink: 0, fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi }}>{LB.fmtDayLabel(w.ws, { day: 'numeric', month: 'short' })}</div>
               <div style={{ flex: 1, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                 {w.weight != null && <span className="num" style={{ fontSize: 11, color: UI.inkSoft }}>{w.weight} {clientUnit}</span>}
                 {w.steps != null && <span style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi }}>{Math.round(w.steps).toLocaleString()} st</span>}
@@ -3356,7 +3441,7 @@ function ExportSheet({ open, onClose, store }) {
         ? `<p style="color:${inkFaint};font-size:14px;text-align:center;padding:40px">No data in this range.</p>`
         : logs.map(l => {
           const date = new Date(l.date + 'T12:00:00');
-          const dateLabel = date.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+          const dateLabel = date.toLocaleDateString('en-US', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
           const cardioMin = cardio[l.date]?.min;
           const adh = l.adherence != null ? Math.round(l.adherence) : null;
           const daySessions = sessions[l.date] || [];

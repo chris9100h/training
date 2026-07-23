@@ -189,9 +189,12 @@ function AutoregGuideScreen({ store, go, mode: modeProp, back }) {
   const cardStyle = { background: UI.bgRaised, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 8, padding: 18 };
   const h3 = { fontSize: 18, marginBottom: 7 };
 
-  // shared: section wrapper
-  const Section = ({ children, style }) => (
-    <div style={{ padding: '30px 0', borderTop: `var(--hair-width) solid ${UI.hair}`, ...style }}>
+  // shared: section wrapper. Divider is a knurl (not a plain hairline) so it
+  // gets the same grid lift-off shadow as every other knurl in the app:
+  // 'none' when the grid toggle is off, same as before.
+  const Section = ({ children, style, first = false }) => (
+    <div style={{ paddingBottom: 30, marginTop: first ? 0 : 30, ...style }}>
+      {!first && <div className="knurl" style={{ marginBottom: 30 }} />}
       <div style={{ maxWidth: 940, margin: '0 auto', padding: '0 4px' }}>{children}</div>
     </div>
   );
@@ -231,7 +234,7 @@ function AutoregGuideScreen({ store, go, mode: modeProp, back }) {
           </div>
 
           {/* ── 01 overview ── */}
-          <Section style={{ borderTop: 'none', marginTop: 14 }}>
+          <Section first style={{ marginTop: 14 }}>
             <AGSecHead n="01 / Overview" title={isB ? 'What Load only turns' : isC ? 'What a Mesocycle turns' : 'What Volume + Load turns'}
               sub={isA ? 'The full engine with no fixed end. Both dials move from your feedback, and it just keeps running.'
                 : isB ? 'Your programmed set counts stay untouched. The feedback engine points entirely at the weight on the bar.'
@@ -385,9 +388,9 @@ function AutoregGuideScreen({ store, go, mode: modeProp, back }) {
           {/* ── stall + concrete swap (modus-agnostic) ── */}
           <Section>
             <AGSecHead n="Stall · Swap" title="When a lift stops moving"
-              sub="Separate from a tired muscle: sometimes one exercise just stalls. If your estimated 1RM on a lift goes flat for three sessions while your gates are green (joints fine, good pump, the muscle not at its ceiling), the app flags it and names a concrete alternative to try." />
+              sub="Separate from a tired muscle: sometimes one exercise just stalls. If your estimated 1RM on a lift goes flat for four sessions while your gates are green (joints fine, good pump, the muscle not at its ceiling), the app flags it and names a concrete alternative to try." />
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 11 }}>
-              <AGStat k="The signal" v="Flat 3 sessions" s="Three sessions with no new estimated 1RM on that lift, while joints, pump and muscle volume all read fine. That points at the exercise, not fatigue." />
+              <AGStat k="The signal" v="Flat 4 sessions" s="Four sessions with no new estimated 1RM on that lift, while joints, pump and muscle volume all read fine. That points at the exercise, not fatigue." />
               <AGStat k="The swap" v="A real change" vColor={UI.gold} s="It names a sibling for the same muscle with a different movement or equipment, so the stimulus actually changes, not just a rename." />
               <AGStat k="One tap" v="Or ignore it" s="Tap to swap it in and your sets carry over, or wave it off and keep grinding. Always a suggestion, never forced." />
             </div>

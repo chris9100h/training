@@ -68,7 +68,7 @@ function AdminTicketRow({ t, archived = false, catLabel, onClick }) {
         !archived && <div style={{ fontSize: 12, color: UI.inkGhost, fontFamily: UI.fontUi, fontStyle: 'italic' }}>No messages yet</div>
       )}
       {!archived && t.last_message_at && (
-        <div className="micro" style={{ color: UI.inkGhost }}>{new Date(t.last_message_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} · {new Date(t.last_message_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</div>
+        <div className="micro" style={{ color: UI.inkGhost }}>{new Date(t.last_message_at).toLocaleDateString('en-US', { day: 'numeric', month: 'short' })} · {new Date(t.last_message_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}</div>
       )}
     </button>
   );
@@ -486,7 +486,7 @@ function PasskeySheet({ open, onClose }) {
   const fmtDate = (iso) => {
     if (!iso) return '';
     const d = new Date(iso);
-    return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+    return d.toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' });
   };
 
   return (
@@ -745,7 +745,7 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
     if (explicit != null) return explicit;
     if (store.settings?.vipBackground) return 16;
     const mode = store.settings?.darkMode ?? 'dark';
-    return mode === 'paper' ? 16 : mode === 'light' ? 14 : (gridEnabled ? 12 : 4);
+    return mode === 'paper' ? (gridEnabled ? 16 : 4) : mode === 'light' ? 14 : (gridEnabled ? 12 : 4);
   });
   const [showWarmupInSummary, setShowWarmupInSummary] = useStateSet(() => store.settings?.showWarmupInSummary ?? true);
   const [unitPickerOpen, setUnitPickerOpen] = useStateSet(false);
@@ -2261,7 +2261,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                 // Clears the explicit override so it falls back to the
                 // per-theme/per-image default again (same formula the initial
                 // slider position and screens-home.jsx's render both use).
-                const def = store.settings?.vipBackground ? 16 : darkMode === 'paper' ? 16 : darkMode === 'light' ? 14 : (gridEnabled ? 12 : 4);
+                const def = store.settings?.vipBackground ? 16 : darkMode === 'paper' ? (gridEnabled ? 16 : 4) : darkMode === 'light' ? 14 : (gridEnabled ? 12 : 4);
                 setWatermarkOpacityPct(def);
                 setStore(s => ({ ...s, settings: { ...s.settings, watermarkOpacity: null } }));
               }} style={{
@@ -2877,7 +2877,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                             {n.body ? <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, lineHeight: 1.55, padding: hasImg ? '0 6px 4px' : 0 }}>{n.body}</div> : null}
                           </div>
                           <div className="micro" style={{ color: UI.inkGhost, marginTop: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
-                            <span>{isMe ? 'You' : 'Support'} · {new Date(n.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} {new Date(n.created_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</span>
+                            <span>{isMe ? 'You' : 'Support'} · {new Date(n.created_at).toLocaleDateString('en-US', { day: 'numeric', month: 'short' })} {new Date(n.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}</span>
                             {isMe && n.id === lastReadId && <span style={{ color: 'var(--accent)', fontWeight: 600 }}>Seen</span>}
                           </div>
                         </div>
@@ -3036,7 +3036,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                             {n.body ? <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, lineHeight: 1.55, padding: hasImg ? '0 6px 4px' : 0 }}>{n.body}</div> : null}
                           </div>
                           <div className="micro" style={{ color: UI.inkGhost, marginTop: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
-                            <span>{isAdminMsg ? 'You' : supportTicket.clientName} · {new Date(n.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} {new Date(n.created_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</span>
+                            <span>{isAdminMsg ? 'You' : supportTicket.clientName} · {new Date(n.created_at).toLocaleDateString('en-US', { day: 'numeric', month: 'short' })} {new Date(n.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}</span>
                             {isAdminMsg && n.id === lastReadId && <span style={{ color: 'var(--accent)', fontWeight: 600 }}>Seen</span>}
                           </div>
                         </div>
@@ -3551,8 +3551,8 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             const todayMid = new Date(); todayMid.setHours(0, 0, 0, 0);
             const tomorrowMid = new Date(todayMid); tomorrowMid.setDate(todayMid.getDate() + 1);
             const remMid = new Date(dt); remMid.setHours(0, 0, 0, 0);
-            const timeStr = dt.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
-            const dateStr = remMid.getTime() === todayMid.getTime() ? 'Today' : remMid.getTime() === tomorrowMid.getTime() ? 'Tomorrow' : dt.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+            const timeStr = dt.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+            const dateStr = remMid.getTime() === todayMid.getTime() ? 'Today' : remMid.getTime() === tomorrowMid.getTime() ? 'Tomorrow' : dt.toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'short' });
             return <div className="micro" style={{ color: UI.inkFaint, textAlign: 'right', paddingTop: 6 }}>Next · {dateStr} · {timeStr}</div>;
           })()}
           <Btn onClick={() => setReminderSheet(false)}>Done</Btn>

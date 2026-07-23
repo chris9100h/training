@@ -178,9 +178,9 @@
 
     /* stall + concrete swap (modus-agnostic) */
     out+='<section class="sec">'+sechead('Stall · Swap','When a lift stops moving',
-      'Separate from a tired muscle: sometimes one exercise just stalls. If your estimated 1RM on a lift goes flat for three sessions while your gates are green (joints fine, good pump, the muscle not at its ceiling), the app flags it and names a concrete alternative to try.');
+      'Separate from a tired muscle: sometimes one exercise just stalls. If your estimated 1RM on a lift goes flat for four sessions while your gates are green (joints fine, good pump, the muscle not at its ceiling), the app flags it and names a concrete alternative to try.');
     out+='<div class="grid g180">'+
-      stat('The signal','Flat 3 sessions',null,'Three sessions with no new estimated 1RM on that lift, while joints, pump and muscle volume all read fine. That points at the exercise, not fatigue.')+
+      stat('The signal','Flat 4 sessions',null,'Four sessions with no new estimated 1RM on that lift, while joints, pump and muscle volume all read fine. That points at the exercise, not fatigue.')+
       stat('The swap','A real change','var(--accent)','It names a sibling for the same muscle with a different movement or equipment, so the stimulus actually changes, not just a rename.')+
       stat('One tap','Or ignore it',null,'Tap to swap it in and your sets carry over, or wave it off and keep grinding. Always a suggestion, never forced.')+
       '</div>';

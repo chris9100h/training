@@ -608,7 +608,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
         // version for that date instead of stacking a duplicate that
         // getActiveVersionIdx could never actually surface anyway.
         const newVersions = LB.dedupeVersionsByDate([newVer, ...(x.versions || [])]);
-        return { ...x, days: newVersions[0].days, versions: newVersions };
+        return LB.withVersionedDays(x, newVersions);
       }),
     }));
     setRestoreFromSheet(false);
@@ -977,7 +977,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
       // Resync days to the newest version, mirroring doReactivate/doRestoreBackup:
       // editing a date can change which version is newest, and sch.days must stay
       // equal to versions[0].days.
-      schedules: s.schedules.map(x => x.id === sch.id ? { ...x, days: newVersions[0].days, versions: newVersions } : x),
+      schedules: s.schedules.map(x => x.id === sch.id ? LB.withVersionedDays(x, newVersions) : x),
     }));
     setEditingStartDate(false);
     setEditStartDateVal('');
@@ -993,7 +993,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
     const newIdx = newVersions.indexOf(newVer);
     setStore(s => ({
       ...s,
-      schedules: s.schedules.map(x => x.id === sch.id ? { ...x, days: newVersions[0].days, versions: newVersions } : x),
+      schedules: s.schedules.map(x => x.id === sch.id ? LB.withVersionedDays(x, newVersions) : x),
     }));
     setReactivateSheet(false);
     setReactivateDate('');
@@ -2136,7 +2136,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
     const versions = (original.versions || []).map((v, i) =>
       i === editVerIdx ? { ...v, days: draft.days } : v
     );
-    const savedDraft = { ...draft, versions, days: versions[0].days };
+    const savedDraft = LB.withVersionedDays(draft, versions);
     setStore(s => ({ ...s, schedules: s.schedules.map(x => x.id === savedDraft.id ? savedDraft : x) }));
 
     const asClient = store.coaching?.asClient;

@@ -91,6 +91,7 @@ Diese Datei enthält die verbindlichen Regeln und den Überblick; sie bewusst sc
   - `logbook-seen-signups`: vom Admin per „Got it" abgehakte Registrierungen im Account-Tab-Feed (Array von user_ids, per Gerät)
   - `logbook-fever-nudge-declined-date`: Datum der letzten Ablehnung des „Als Sick markieren?"-Prompts nach einer Fieber-Temperaturmessung, verhindert wiederholtes Nachfragen am selben Tag (per Gerät)
   - `logbook-paper-accent-enabled`: Opt-out aus Papers Grau-Muting der Akzentfarbe (`applyAccentColor`, `index.html`), Default aus, Toggle in Settings → Appearance (nur sichtbar wenn Paper aktiv), per Gerät
+  - `logbook-pending-share`: gestashter Token eines geöffneten Rezept-Share-Links (`?share=<token>`, `app.jsx`), überlebt so den Login-/Signup-Roundtrip; gelöscht sobald das `RecipeShareSheet` geschlossen wird
 
 ## What's New / Changelog
 
@@ -161,6 +162,7 @@ Migrationen liegen in `supabase/migrations/` als nummerierte SQL-Dateien. **Die 
 - `zane_skips`: übersprungene Trainingstage · `zane_status_periods`: Sick/Vacation/Deload-Historie
 - `zane_daily_logs`: Health-Tageslog (UNIQUE user_id+date, Sync via RPC) · `zane_glucose_logs`, `zane_blood_pressure_logs`, `zane_body_temp_logs`, `zane_cardio_logs`, `zane_cardio_plans`: Health/Cardio
 - `zane_water_logs`: Per-Entry-Wasserlog des Water-Trackers (`WaterScreen`); Tagessumme wird zurück in `zane_daily_logs.water_ml` gespiegelt; Store-Collection wie Cardio-Logs. Migration 0180. Vergangene Tage werden stündlich per Cron zu einer Zeile zusammengefasst (`breakdown`-jsonb hält die Getränke-Aufschlüsselung), Migration 0183
+- `zane_foods`: geteilter/globaler Referenz-Cache (Open Food Facts/USDA, **keine** Per-User-Daten), befüllt nur bei Auswahl eines Suchtreffers · `zane_food_logs`: Per-Entry-Food-Log des Macro-Trackers (`FoodScreen`), zum Schreibzeitpunkt denormalisiert, Tagessumme gespiegelt in `zane_daily_logs.protein`/`carbs`/`fat`/`calories`/`fiber`; Store-Collection wie `zane_water_logs`. Migration 0186 · `zane_food_favorites`/`zane_food_recipes`: Food-Tracker-"Quick Add" (User-Favoriten bzw. benannte Zutaten-Listen als jsonb-Snapshot), eigene simple User-Collections wie `zane_workout_templates`, kein Coach-Zugriff. Migration 0187 · `zane_recipe_shares`: Rezept-Share-Links (Token → jsonb-Snapshot, Deep-Link `?share=<token>`), RLS ohne Policies, Zugriff nur über die RPCs `create_recipe_share`/`get_recipe_share` (authenticated-only), kein Store-Field, nicht im Backup. Migration 0193
 - `zane_coaching` (+ `_threads`, `_notes`, `_macros`) und `zane_checkins`: Coaching; Sonderfälle Support-Tickets (id-Präfix `support_`) und Self-Coaching (`self_`) · `zane_checkin_schema_templates`: bis zu 5 gespeicherte Check-in-Schema-Vorlagen je Coach
 - `zane_user_settings`: eine Zeile je User, alle Settings
 - `zane_profiles`, `zane_app_config`, `zane_feature_grants`, `zane_push_subscriptions`, `zane_pushover_active`: Accounts, Admin-Config, Grants, Push
