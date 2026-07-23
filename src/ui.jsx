@@ -1242,6 +1242,11 @@ UI.niceStepDomain = (dataMin, dataMax, step, opts) => {
 // from/to are indices into the data-reorder-item set (DOM order). Mark any
 // descendant that must NOT start a drag (e.g. a delete button) with
 // data-reorder-ignore="true". The callback is a no-op when from === to.
+// Pass { fixedSlots: true } when the items themselves never actually move
+// (e.g. one per fixed hour/category) and dragging instead reassigns which
+// slot an item's data belongs to: to is then the raw drop-line index
+// (no "assume the source was removed" shift), so a real move into the very
+// next slot still fires instead of reading as a same-position no-op.
 // One pointer-driven engine shared by the vertical (attachDragReorder) and
 // horizontal (attachDragReorderH) reorder flavors, parameterized by axis.
 // Per-axis constants preserve each list type's existing feel: vertical lists
@@ -1456,7 +1461,16 @@ function attachDragReorderAxis(axis, container, getCb, options) {
     if (!state.started) { teardown(); return; }
     const from = state.fromIdx;
     let to = state.insertIdx;
-    if (to > from) to -= 1;
+    // fixedSlots: the items occupy immovable positions (e.g. hour rows) and
+    // dragging reassigns which slot an item's DATA belongs to, rather than
+    // permuting the items' own order. The standard "assume the source item
+    // is removed, so every later index shifts down by one" adjustment below
+    // makes dropping into the very NEXT slot collapse to "to === from" (a
+    // real, one-slot move reads identical to a true no-op drop), silently
+    // swallowing it before the callback ever fires. Skip the adjustment and
+    // hand back the raw drop-line index instead, so the caller sees exactly
+    // which slot the pointer landed on.
+    if (!opts.fixedSlots && to > from) to -= 1;
     // Swallow the click the pointerup synthesizes, so a drag doesn't also fire
     // the row's tap handler (open editor).
     const swallow = e => { e.stopPropagation(); e.preventDefault(); };

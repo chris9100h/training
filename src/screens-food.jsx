@@ -534,22 +534,20 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       foodLogs: (s.foodLogs || []).map(l => l.id === entry.id ? { ...l, time: hh + (l.time || '00:00').slice(2) } : l),
     }));
   }
-  // UI.useDragReorder hands back from/to indices already adjusted for a
-  // conventional array reorder (it assumes removing the source shifts every
-  // later index down by one, see attachDragReorderAxis's onUp in ui.jsx).
-  // That assumption doesn't hold here: hour rows never actually move, only
-  // the dragged entry's own hour changes, so reverse that adjustment back
-  // into the raw drop-line position first, then read the hour straight off
-  // whichever timelineSlots entry sits there.
+  // fixedSlots: true (see UI.useDragReorder in ui.jsx) hands back the raw
+  // drop-line index as `to`, not one adjusted for a conventional array
+  // reorder: hour rows never actually move here, only the dragged entry's
+  // own hour changes, and a plain reorder-shaped index would make dropping
+  // into the very next hour collapse to "same as source", silently
+  // swallowing the single most common move.
   function handleTimelineReorder(from, to) {
     const src = timelineSlots[from];
     if (!src || !src.entry) return;
-    const insertIdx = to > from ? to + 1 : to;
-    const target = timelineSlots[Math.min(insertIdx, timelineSlots.length - 1)];
+    const target = timelineSlots[Math.min(to, timelineSlots.length - 1)];
     if (!target || target.hour === src.hour) return;
     moveEntryToHour(src.entry, target.hour);
   }
-  const timelineDragRef = UI.useDragReorder({ onReorder: handleTimelineReorder });
+  const timelineDragRef = UI.useDragReorder({ onReorder: handleTimelineReorder, fixedSlots: true });
 
   function openCopyMove() {
     setCopyMoveIds([]);
