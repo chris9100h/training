@@ -575,12 +575,18 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   const [capturing, setCapturing] = useStateFd(false);
   const captureRef = useRefFd(null);
   // Same background-watermark treatment as the Plan poster (screens-schedule.jsx):
-  // VIPs get their own background image, everyone else gets the faint ZANE mark.
+  // VIPs get their own background image, everyone else gets the ZANE mark.
+  // Bumped past the Plan poster's own opacity: that poster's day cards are
+  // spaced apart with real gaps between them, so the mark stays visible even
+  // at a faint 0.06/0.10. This poster's category/entry cards (see below) are
+  // a translucent surface tint rather than a solid fill specifically so the
+  // mark reads through the cards themselves too, not just the gaps, which
+  // needs a stronger base opacity to actually show up under that tint.
   const _shotLogo = store.settings?.vipBackground || 'icons/zane-logo.png';
   const _shotIsCustom = _shotLogo !== 'icons/zane-logo.png';
   const _shotIsLight = ['light', 'paper'].includes(store.settings?.darkMode ?? 'dark');
-  const _shotDefaultStyle = { width: '75%', maxWidth: 620, opacity: _shotIsLight ? 0.10 : 0.06, filter: _shotIsLight ? 'grayscale(1)' : 'grayscale(1) brightness(3)', objectFit: 'contain' };
-  const _shotCustomStyle = { width: '80%', maxWidth: 680, opacity: 0.13, objectFit: 'contain' };
+  const _shotDefaultStyle = { width: '75%', maxWidth: 620, opacity: _shotIsLight ? 0.16 : 0.11, filter: _shotIsLight ? 'grayscale(1)' : 'grayscale(1) brightness(3)', objectFit: 'contain' };
+  const _shotCustomStyle = { width: '80%', maxWidth: 680, opacity: 0.19, objectFit: 'contain' };
   const _shotGridOn = !!window.__gridEnabled;
   // Same shape as categoryTotals, but only categories with at least one
   // logged hour survive, and each surviving category only lists the hours
@@ -1328,10 +1334,19 @@ function FoodScreen({ store, setStore, go, userId, date }) {
               <FdHeroContent dayTarget={dayTarget} dayAdherence={dayAdherence} dayTotals={dayTotals} goalCalories={goalCalories} />
             </BracketFrame>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 20 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginTop: 20 }}>
               {posterCategories.map(cat => (
                 <div key={cat.id}>
-                  <div style={fdCategoryCard}>
+                  {/* Translucent surface-tint fill (not fdCategoryCard's
+                      opaque one), same reason the Plan poster's day cards
+                      use var(--surface-tint-lg) instead of a solid
+                      background: an opaque card blocks the watermark
+                      entirely wherever it sits, leaving it visible only in
+                      the thin gaps between cards. textShadow explicitly
+                      restored to the inherited lift (fdCategoryCard resets
+                      it to 'none' for its own opaque-background reason,
+                      which no longer applies once the fill is translucent). */}
+                  <div style={{ ...fdCategoryCard, background: 'var(--surface-tint-lg)', textShadow: 'var(--text-lift)' }}>
                     <div>
                       <div style={{ fontSize: 13, fontWeight: 700, color: UI.ink, fontFamily: UI.fontUi }}>{cat.label}</div>
                       <span style={fdEntryMeta}>{String(cat.startHour).padStart(2, '0')}:00 - {String(cat.endHour % 24).padStart(2, '0')}:00</span>
@@ -1341,7 +1356,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                       <span style={fdEntryMeta}><FdMacroBits protein={cat.protein} carbs={cat.carbs} fat={cat.fat} strong /></span>
                     </div>
                   </div>
-                  <div style={{ position: 'relative', marginTop: 6, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <div style={{ position: 'relative', marginTop: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
                     <FdHourTrunk />
                     {cat.hours.map(({ hour, entries }) => (
                       <div key={hour} style={{ display: 'flex', alignItems: 'center' }}>
@@ -1349,9 +1364,9 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                         <div style={fdHourLabelCol}>
                           <span className="num" style={{ fontSize: 11, color: UI.inkSoft }}>{String(hour).padStart(2, '0')}</span>
                         </div>
-                        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
                           {entries.map(e => (
-                            <div key={e.id} style={fdEntryCard}>
+                            <div key={e.id} style={{ ...fdEntryCard, background: 'var(--surface-tint-md)', textShadow: 'var(--text-lift)' }}>
                               <span style={fdEntryName}>{e.foodName}</span>
                               <span style={fdEntryMeta}>
                                 {e.quantityG ? `${e.quantityG}g · ` : ''}<span className="num" style={{ color: UI.warn }}>{e.calories} kcal</span>
