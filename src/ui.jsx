@@ -1312,22 +1312,48 @@ function attachDragReorderAxis(axis, container, getCb, options) {
 
   function updateTarget(pos) {
     const list = items();
-    let insertIdx = list.length;
-    let line = null;
-    for (let k = 0; k < list.length; k++) {
-      const r = list[k].getBoundingClientRect();
-      const start = axis === 'v' ? r.top : r.left;
-      const size = axis === 'v' ? r.height : r.width;
-      if (pos < start + size / 2) { insertIdx = k; line = start - 3; break; }
-    }
-    if (line === null) {
-      const last = list[list.length - 1];
-      if (last) {
-        const r = last.getBoundingClientRect();
-        line = (axis === 'v' ? r.bottom : r.right) + 3;
-      } else {
-        const r = container.getBoundingClientRect();
-        line = axis === 'v' ? r.top : r.left;
+    let insertIdx, line;
+    if (opts.fixedSlots) {
+      // Direct hit-test: whichever slot's own rect the pointer is physically
+      // over (clamped to the first/last slot beyond the list's bounds), not
+      // the reorder scan below's "insert boundary" (compares against each
+      // item's MIDPOINT, including the dragged item's own still-present
+      // rect as one of those boundaries). That boundary-based scan leaves a
+      // dead zone spanning roughly 1.5 slots around the source position in
+      // both directions: the pointer has to clear the source's own midpoint
+      // AND reach the next slot's midpoint before it registers, so a single
+      // slot's worth of drag motion isn't always enough. A rect hit-test has
+      // no such zone: crossing into an adjacent slot's rect at all is
+      // enough, symmetric in both directions.
+      insertIdx = list.length - 1;
+      for (let k = 0; k < list.length; k++) {
+        const r = list[k].getBoundingClientRect();
+        const start = axis === 'v' ? r.top : r.left;
+        const size = axis === 'v' ? r.height : r.width;
+        if (pos < start + size) { insertIdx = k; break; }
+      }
+      insertIdx = Math.max(0, insertIdx);
+      const hit = list[insertIdx];
+      const r = hit ? hit.getBoundingClientRect() : container.getBoundingClientRect();
+      line = (axis === 'v' ? r.top : r.left) - 3;
+    } else {
+      insertIdx = list.length;
+      line = null;
+      for (let k = 0; k < list.length; k++) {
+        const r = list[k].getBoundingClientRect();
+        const start = axis === 'v' ? r.top : r.left;
+        const size = axis === 'v' ? r.height : r.width;
+        if (pos < start + size / 2) { insertIdx = k; line = start - 3; break; }
+      }
+      if (line === null) {
+        const last = list[list.length - 1];
+        if (last) {
+          const r = last.getBoundingClientRect();
+          line = (axis === 'v' ? r.bottom : r.right) + 3;
+        } else {
+          const r = container.getBoundingClientRect();
+          line = axis === 'v' ? r.top : r.left;
+        }
       }
     }
     state.insertIdx = insertIdx;
