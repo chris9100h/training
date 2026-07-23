@@ -5999,8 +5999,14 @@ const LANDMARK_MRV_ALPHA = 0.35;
 // muscle is still at its ceiling, it re-asks with escalated evidence.
 const DELOAD_NUDGE_COOLDOWN = 3;
 // Autoreg v2 P4. Strength-stall: a lift's e1RM flat/declining over this many
-// qualifying sessions at green gates counts as a stall (spec 10: N = 3).
-const STALL_SESSIONS = 3;
+// qualifying sessions at green gates counts as a stall. 4, not 3: with the
+// oldest session as the baseline, that gives 3 real chances to beat the
+// running max before it counts as stalled, not 2, since intermediate/
+// advanced lifters can go a long stretch between reps added. Exported so
+// the training screen's stall-card copy ("flat here N sessions") can read
+// this instead of hardcoding a number that would silently drift out of
+// sync with it.
+const STALL_SESSIONS = 4;
 // Re-entry ramp (spec 7 / 10): a sick/vacation break longer than this many days
 // arms the ease-in; a break of a week or less needs no ramp.
 const REENTRY_MIN_BREAK_DAYS = 7;
@@ -6801,7 +6807,7 @@ window.LB = {
   microcycleSetsByMuscle, detectOverreach,
   blockStartTs, blockSessions, buildBlockRecap, deloadNudgeDecision, recordDeloadDecline, clearDeloadNudge,
   updateLandmarkMrv, snapshotBlockStart, backoffDeltas, muscleRosterKeys, updateMevFloors, redistributeMevFloors,
-  detectStall, suggestSwap, reentryRamp,
+  detectStall, suggestSwap, reentryRamp, STALL_SESSIONS,
   mesoGateSetsFromAnswers, isMesoSessionEditable, applyMesoFeedbackEdit, reearnMesoBoostsFromAnswers, mesoRecapGainsFromEdit, recomputeMesoRepMissCut, remapMesoAnswersExId, deriveSignalWeight, remapMesoRecapRawForSwap, remapMesoStateExId, mesoRowHasExId, laterSessionTrainsExId,
   mesoSetTarget, mesoEarnTarget, mesoRepOutcome, reshapeSetsUnilateral,
 };

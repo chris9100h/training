@@ -6252,8 +6252,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               flags.push({ icon: 'fa-lightbulb', tone: 'accent', label: 'Not clicking', msg: 'You keep flagging this one to swap. Pick a variation you enjoy and you will actually stick with it.' });
             }
             // Autoreg v2 P4: strength-stall + concrete swap (spec 6). A LIFT whose
-            // e1RM has gone flat over 3 sessions at green gates (joints fine, pump ok,
-            // muscle not at its ceiling) gets a distinct nudge and a concrete sibling
+            // e1RM has gone flat over LB.STALL_SESSIONS sessions at green gates
+            // (joints fine, pump ok, muscle not at its ceiling) gets a distinct
+            // nudge and a concrete sibling
             // to try. Kept apart from the pump-flat / disliked voices above: this is
             // about the exercise stalling, not the muscle or your preference.
             // Precomputed in the `stallInfo` memo above (pure over the ended history /
@@ -6263,8 +6264,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               flags.push({
                 icon: 'fa-arrow-trend-down', tone: 'accent', label: 'Strength stall',
                 msg: swap
-                  ? 'e1RM has been flat here 3 sessions and your gates are green. The stimulus may be stale, a different movement could get it climbing again.'
-                  : 'e1RM has been flat here 3 sessions and your gates are green. A different variation for this muscle could get things moving again.',
+                  ? `e1RM has been flat here ${LB.STALL_SESSIONS} sessions and your gates are green. The stimulus may be stale, a different movement could get it climbing again.`
+                  : `e1RM has been flat here ${LB.STALL_SESSIONS} sessions and your gates are green. A different variation for this muscle could get things moving again.`,
                 swap,
               });
             }

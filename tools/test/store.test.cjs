@@ -3128,11 +3128,12 @@ async function testAsync(name, fn) {
     });
     const flat = [{ done: true, kg: 100, reps: 8 }];
 
-    test('detectStall: flat e1RM over 3 sessions at green gates → stalled with evidence', () => {
+    test('detectStall: flat e1RM over 4 sessions at green gates → stalled with evidence', () => {
       const sessions = [
-        mk('E0', '2026-07-07T10:00:00Z', flat),
-        mk('E1', '2026-07-10T10:00:00Z', flat),
-        mk('E2', '2026-07-13T10:00:00Z', flat),
+        mk('E0', '2026-07-01T10:00:00Z', flat),
+        mk('E1', '2026-07-04T10:00:00Z', flat),
+        mk('E2', '2026-07-07T10:00:00Z', flat),
+        mk('E3', '2026-07-10T10:00:00Z', flat),
       ];
       const out = LB.detectStall(sessions, 'bench', muscleOf, { planId: 'p', atCeiling: () => false, exName: 'Bench' });
       assert.strictEqual(out.stalled, true, 'flat e1RM at green gates is a stall');
@@ -3141,104 +3142,121 @@ async function testAsync(name, fn) {
 
     test('detectStall: improving e1RM on the latest session → not stalled', () => {
       const sessions = [
-        mk('E0', '2026-07-07T10:00:00Z', flat),
-        mk('E1', '2026-07-10T10:00:00Z', flat),
-        mk('E2', '2026-07-13T10:00:00Z', [{ done: true, kg: 105, reps: 8 }]),
+        mk('E0', '2026-07-01T10:00:00Z', flat),
+        mk('E1', '2026-07-04T10:00:00Z', flat),
+        mk('E2', '2026-07-07T10:00:00Z', flat),
+        mk('E3', '2026-07-10T10:00:00Z', [{ done: true, kg: 105, reps: 8 }]),
       ];
       assert.strictEqual(LB.detectStall(sessions, 'bench', muscleOf, { planId: 'p', atCeiling: () => false }).stalled, false);
     });
 
     test('detectStall: recovering from an intentional lighter session → not stalled even below the window\'s oldest', () => {
-      // 100 -> 85 (deliberately light, not flagged isDeload) -> 90: climbing
+      // 100 -> 85 (deliberately light, not flagged isDeload) -> 85 -> 90: climbing
       // again session-over-session, even though 90 still hasn't cleared the
       // window's oldest (100). Must not read as "still stalled".
       const sessions = [
-        mk('E0', '2026-07-07T10:00:00Z', flat),
-        mk('E1', '2026-07-10T10:00:00Z', [{ done: true, kg: 85, reps: 8 }]),
-        mk('E2', '2026-07-13T10:00:00Z', [{ done: true, kg: 90, reps: 8 }]),
+        mk('E0', '2026-07-01T10:00:00Z', flat),
+        mk('E1', '2026-07-04T10:00:00Z', [{ done: true, kg: 85, reps: 8 }]),
+        mk('E2', '2026-07-07T10:00:00Z', [{ done: true, kg: 85, reps: 8 }]),
+        mk('E3', '2026-07-10T10:00:00Z', [{ done: true, kg: 90, reps: 8 }]),
       ];
       assert.strictEqual(LB.detectStall(sessions, 'bench', muscleOf, { planId: 'p', atCeiling: () => false }).stalled, false);
     });
 
     test('detectStall: a lighter session that keeps declining is still a stall', () => {
-      // 100 -> 85 -> 80: not recovering, the latest session is a new LOW, not
-      // a climb. Must still stall (the recovery carve-out is not a blanket
+      // 100 -> 85 -> 82 -> 80: not recovering, every later session is a new LOW,
+      // not a climb. Must still stall (the recovery carve-out is not a blanket
       // exemption for any window that contains a dip).
       const sessions = [
-        mk('E0', '2026-07-07T10:00:00Z', flat),
-        mk('E1', '2026-07-10T10:00:00Z', [{ done: true, kg: 85, reps: 8 }]),
-        mk('E2', '2026-07-13T10:00:00Z', [{ done: true, kg: 80, reps: 8 }]),
+        mk('E0', '2026-07-01T10:00:00Z', flat),
+        mk('E1', '2026-07-04T10:00:00Z', [{ done: true, kg: 85, reps: 8 }]),
+        mk('E2', '2026-07-07T10:00:00Z', [{ done: true, kg: 82, reps: 8 }]),
+        mk('E3', '2026-07-10T10:00:00Z', [{ done: true, kg: 80, reps: 8 }]),
       ];
       assert.strictEqual(LB.detectStall(sessions, 'bench', muscleOf, { planId: 'p', atCeiling: () => false }).stalled, true);
     });
 
     test('detectStall: muscle at its ceiling → not a stall (overreach owns it)', () => {
-      const sessions = [mk('E0', '2026-07-07T10:00:00Z', flat), mk('E1', '2026-07-10T10:00:00Z', flat), mk('E2', '2026-07-13T10:00:00Z', flat)];
+      const sessions = [
+        mk('E0', '2026-07-01T10:00:00Z', flat), mk('E1', '2026-07-04T10:00:00Z', flat),
+        mk('E2', '2026-07-07T10:00:00Z', flat), mk('E3', '2026-07-10T10:00:00Z', flat),
+      ];
       assert.strictEqual(LB.detectStall(sessions, 'bench', muscleOf, { planId: 'p', atCeiling: () => true }).stalled, false, 'ceiling gate not green');
     });
 
     test('detectStall: a joint flag on the latest session → not a clean stall', () => {
       const sessions = [
-        mk('E0', '2026-07-07T10:00:00Z', flat),
-        mk('E1', '2026-07-10T10:00:00Z', flat),
-        mk('E2', '2026-07-13T10:00:00Z', flat, { joint: { exId: 'bench', answer: 'sharp' } }),
+        mk('E0', '2026-07-01T10:00:00Z', flat),
+        mk('E1', '2026-07-04T10:00:00Z', flat),
+        mk('E2', '2026-07-07T10:00:00Z', flat),
+        mk('E3', '2026-07-10T10:00:00Z', flat, { joint: { exId: 'bench', answer: 'sharp' } }),
       ];
       assert.strictEqual(LB.detectStall(sessions, 'bench', muscleOf, { planId: 'p', atCeiling: () => false }).stalled, false, 'joint flag is not a green gate');
     });
 
     test('detectStall: a discounted (rough) session is ignored, never fakes or breaks a stall', () => {
-      // Three full flat sessions = a stall. A newest DISCOUNTED session with a big PR
+      // Four full flat sessions = a stall. A newest DISCOUNTED session with a big PR
       // would break it if counted, but signalWeight discipline drops it.
       const sessions = [
-        mk('E0', '2026-07-07T10:00:00Z', flat),
-        mk('E1', '2026-07-10T10:00:00Z', flat),
-        mk('E2', '2026-07-13T10:00:00Z', flat),
-        mk('E3', '2026-07-16T10:00:00Z', [{ done: true, kg: 130, reps: 10 }], { signalWeight: 'discounted' }),
+        mk('E0', '2026-07-01T10:00:00Z', flat),
+        mk('E1', '2026-07-04T10:00:00Z', flat),
+        mk('E2', '2026-07-07T10:00:00Z', flat),
+        mk('E3', '2026-07-10T10:00:00Z', flat),
+        mk('E4', '2026-07-13T10:00:00Z', [{ done: true, kg: 130, reps: 10 }], { signalWeight: 'discounted' }),
       ];
       assert.strictEqual(LB.detectStall(sessions, 'bench', muscleOf, { planId: 'p', atCeiling: () => false }).stalled, true, 'the rough-day PR must not count');
     });
 
-    test('detectStall: fewer than 3 weighted sessions → not enough data', () => {
-      const sessions = [mk('E0', '2026-07-07T10:00:00Z', flat), mk('E1', '2026-07-10T10:00:00Z', flat)];
-      assert.strictEqual(LB.detectStall(sessions, 'bench', muscleOf, { planId: 'p', atCeiling: () => false }).stalled, false);
+    test('detectStall: fewer than 4 weighted sessions → not enough data', () => {
+      const sessions = [
+        mk('E0', '2026-07-01T10:00:00Z', flat), mk('E1', '2026-07-04T10:00:00Z', flat), mk('E2', '2026-07-07T10:00:00Z', flat),
+      ];
+      assert.strictEqual(LB.detectStall(sessions, 'bench', muscleOf, { planId: 'p', atCeiling: () => false }).stalled, false, '3 sessions of history, one short of the 4 needed');
     });
 
     test('detectStall: reps-only (no kg) exercise never stalls (no e1RM)', () => {
       const bw = [{ done: true, reps: 12 }];
-      const sessions = [mk('E0', '2026-07-07T10:00:00Z', bw), mk('E1', '2026-07-10T10:00:00Z', bw), mk('E2', '2026-07-13T10:00:00Z', bw)];
+      const sessions = [
+        mk('E0', '2026-07-01T10:00:00Z', bw), mk('E1', '2026-07-04T10:00:00Z', bw),
+        mk('E2', '2026-07-07T10:00:00Z', bw), mk('E3', '2026-07-10T10:00:00Z', bw),
+      ];
       assert.strictEqual(LB.detectStall(sessions, 'bench', muscleOf, { planId: 'p', atCeiling: () => false }).stalled, false, 'e1RM is meaningless without weight');
     });
 
     // Same exercise in two different day-slots (e.g. 2nd exercise, fresher, on Day A
     // vs 3rd, more pre-fatigued, on Day B). Both slots are steadily progressing on
     // their own terms, but Day B is consistently heavier/lower due to fatigue context.
-    // Without a dayId filter the newest-3 window can pick 1 Day A + 2 Day B sessions,
-    // where Day A's higher number sits at the OLDEST spot of the window and neither
-    // later Day B session beats it: a false stall from mixing two contexts. B2/B3 are
-    // deliberately EQUAL (a plateau, not a further rise) so this stays a clean false
-    // stall on its own: an increase between them would also satisfy detectStall's own
-    // "already climbing again" recovery check below, for the right reason (Day B
-    // really is climbing there) but for the wrong test, muddying what this one
-    // demonstrates.
+    // Without a dayId filter the newest-4 window can pick 1 Day A + 3 Day B sessions,
+    // where Day A's higher number sits at the OLDEST spot of the window and none of
+    // the later Day B sessions beat it: a false stall from mixing two contexts. B3/B4
+    // are deliberately EQUAL (a plateau, not a further rise) so this stays a clean
+    // false stall on its own: an increase between them would also satisfy
+    // detectStall's own "already climbing again" recovery check, for the right
+    // reason (Day B really is climbing there) but for the wrong test, muddying what
+    // this one demonstrates. A4 sits chronologically between B1 and B2 so it's the
+    // single Day A session pulled into the pooled newest-4 window, anchoring it as
+    // the oldest of the four.
     const dayMix = [
-      mk('A1', '2026-06-01T10:00:00Z', [{ done: true, kg: 80, reps: 8 }], { dayId: 'A' }),
-      mk('A2', '2026-06-15T10:00:00Z', [{ done: true, kg: 85, reps: 8 }], { dayId: 'A' }),
-      mk('A3', '2026-07-15T10:00:00Z', [{ done: true, kg: 105, reps: 8 }], { dayId: 'A' }),
-      mk('B1', '2026-06-20T10:00:00Z', [{ done: true, kg: 60, reps: 8 }], { dayId: 'B' }),
-      mk('B2', '2026-07-18T10:00:00Z', [{ done: true, kg: 70, reps: 8 }], { dayId: 'B' }),
-      mk('B3', '2026-07-20T10:00:00Z', [{ done: true, kg: 70, reps: 8 }], { dayId: 'B' }),
+      mk('A1', '2026-01-01T10:00:00Z', [{ done: true, kg: 75, reps: 8 }], { dayId: 'A' }),
+      mk('A2', '2026-01-08T10:00:00Z', [{ done: true, kg: 80, reps: 8 }], { dayId: 'A' }),
+      mk('A3', '2026-01-15T10:00:00Z', [{ done: true, kg: 85, reps: 8 }], { dayId: 'A' }),
+      mk('A4', '2026-03-01T10:00:00Z', [{ done: true, kg: 105, reps: 8 }], { dayId: 'A' }),
+      mk('B1', '2026-02-01T10:00:00Z', [{ done: true, kg: 60, reps: 8 }], { dayId: 'B' }),
+      mk('B2', '2026-04-01T10:00:00Z', [{ done: true, kg: 65, reps: 8 }], { dayId: 'B' }),
+      mk('B3', '2026-04-10T10:00:00Z', [{ done: true, kg: 70, reps: 8 }], { dayId: 'B' }),
+      mk('B4', '2026-04-20T10:00:00Z', [{ done: true, kg: 70, reps: 8 }], { dayId: 'B' }),
     ];
 
     test('detectStall: pooling two day-slots without a dayId filter can read as a false stall', () => {
       const out = LB.detectStall(dayMix, 'bench', muscleOf, { planId: 'p', atCeiling: () => false });
-      assert.strictEqual(out.stalled, true, 'the newest-3 window crosses day contexts and hides both slots\' real progress');
+      assert.strictEqual(out.stalled, true, 'the newest-4 window crosses day contexts and hides both slots\' real progress');
     });
 
     test('detectStall: dayId scoping clears the false stall, each day-slot is progressing on its own', () => {
       const dayA = LB.detectStall(dayMix, 'bench', muscleOf, { planId: 'p', atCeiling: () => false, dayId: 'A' });
       const dayB = LB.detectStall(dayMix, 'bench', muscleOf, { planId: 'p', atCeiling: () => false, dayId: 'B' });
-      assert.strictEqual(dayA.stalled, false, 'Day A alone (80 -> 85 -> 105) is steadily progressing');
-      assert.strictEqual(dayB.stalled, false, 'Day B alone (60 -> 70 -> 70) climbed once and held, not stalled either');
+      assert.strictEqual(dayA.stalled, false, 'Day A alone (75 -> 80 -> 85 -> 105) is steadily progressing');
+      assert.strictEqual(dayB.stalled, false, 'Day B alone (60 -> 65 -> 70 -> 70) climbed and held, not stalled either');
     });
 
     // Same exercise twice in one session (top set + back-off block). occ picks a
@@ -3255,18 +3273,22 @@ async function testAsync(name, fn) {
       ] }),
       mk('S3', '2026-07-17T10:00:00Z', [], { entries: [
         { exId: 'bench', sets: [{ done: true, kg: 140, reps: 8 }] },
+        { exId: 'bench', sets: [{ done: true, kg: 130, reps: 8 }] },
+      ] }),
+      mk('S4', '2026-07-25T10:00:00Z', [], { entries: [
+        { exId: 'bench', sets: [{ done: true, kg: 140, reps: 8 }] },
         { exId: 'bench', sets: [{ done: true, kg: 145, reps: 8 }] },
       ] }),
     ];
 
     test('detectStall: occ scoping isolates the top set, a flat top set stalls on its own', () => {
       const out = LB.detectStall(occMix, 'bench', muscleOf, { planId: 'p', atCeiling: () => false, occ: 0 });
-      assert.strictEqual(out.stalled, true, 'the top set is flat at 140kg across all 3 sessions');
+      assert.strictEqual(out.stalled, true, 'the top set is flat at 140kg across all 4 sessions');
     });
 
     test('detectStall: occ scoping isolates the back-off set, its own improvement is not lost', () => {
       const out = LB.detectStall(occMix, 'bench', muscleOf, { planId: 'p', atCeiling: () => false, occ: 1 });
-      assert.strictEqual(out.stalled, false, 'the back-off set climbs 100 -> 110 -> 145');
+      assert.strictEqual(out.stalled, false, 'the back-off set climbs 100 -> 110 -> 130 -> 145');
     });
   }
 
