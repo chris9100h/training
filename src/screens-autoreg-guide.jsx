@@ -388,9 +388,9 @@ function AutoregGuideScreen({ store, go, mode: modeProp, back }) {
           {/* ── stall + concrete swap (modus-agnostic) ── */}
           <Section>
             <AGSecHead n="Stall · Swap" title="When a lift stops moving"
-              sub="Separate from a tired muscle: sometimes one exercise just stalls. If your estimated 1RM on a lift goes flat for three sessions while your gates are green (joints fine, good pump, the muscle not at its ceiling), the app flags it and names a concrete alternative to try." />
+              sub="Separate from a tired muscle: sometimes one exercise just stalls. If your estimated 1RM on a lift goes flat for four sessions while your gates are green (joints fine, good pump, the muscle not at its ceiling), the app flags it and names a concrete alternative to try." />
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 11 }}>
-              <AGStat k="The signal" v="Flat 3 sessions" s="Three sessions with no new estimated 1RM on that lift, while joints, pump and muscle volume all read fine. That points at the exercise, not fatigue." />
+              <AGStat k="The signal" v="Flat 4 sessions" s="Four sessions with no new estimated 1RM on that lift, while joints, pump and muscle volume all read fine. That points at the exercise, not fatigue." />
               <AGStat k="The swap" v="A real change" vColor={UI.gold} s="It names a sibling for the same muscle with a different movement or equipment, so the stimulus actually changes, not just a rename." />
               <AGStat k="One tap" v="Or ignore it" s="Tap to swap it in and your sets carry over, or wave it off and keep grinding. Always a suggestion, never forced." />
             </div>
