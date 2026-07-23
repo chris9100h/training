@@ -251,6 +251,11 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   const [labelScanning, setLabelScanning] = useStateFd(false);
   const [labelError, setLabelError] = useStateFd(null);
   const labelInputRef = useRefFd(null);
+  // Which AI reads the nutrition label photo: 'grok' (scan-label, the
+  // long-standing default) or 'claude' (scan-label-claude), same request/
+  // response contract either way. Per-device only, not a synced setting:
+  // this is a comparison toggle, not a user-facing preference.
+  const [labelScannerProvider, setLabelScannerProvider] = useStateFd(() => localStorage.getItem('logbook-label-scanner-provider') || 'grok');
 
   const [qtySheetOpen, setQtySheetOpen] = useStateFd(false);
   const [pendingFood, setPendingFood] = useStateFd(null);
@@ -752,8 +757,9 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   }
 
   // Nutrition-label scan: the user photographs a Nährwerttabelle, we shrink it
-  // client-side and send it to the scan-label edge function (Claude vision),
-  // then prefill the Custom Item form with what it read for the user to verify.
+  // client-side and send it to the scan-label edge function (labelScannerProvider
+  // picks xAI Grok or Claude vision, see the Scan sheet's toggle below), then
+  // prefill the Custom Item form with what it read for the user to verify.
   // A scanned label is a per-user custom item, never a shared zane_foods entry.
   async function handleLabelFile(e) {
     const file = e.target.files && e.target.files[0];
@@ -764,7 +770,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     try {
       const { base64, mimeType } = await fdDownscaleImage(file);
       if (!base64) { setLabelScanning(false); setLabelError('Could not read that image. Try again.'); return; }
-      const res = await LB.scanLabel(base64, mimeType);
+      const res = await LB.scanLabel(base64, mimeType, labelScannerProvider);
       setLabelScanning(false);
       if (!res.ok) { setLabelError(res.error || 'Scan failed. Try again.'); return; }
       prefillFromLabel(res.label);
@@ -2081,6 +2087,14 @@ function FoodScreen({ store, setStore, go, userId, date }) {
             <span style={{ fontSize: 13, fontWeight: 700, color: UI.ink }}>Nutrition label</span>
             <span style={{ fontSize: 10, color: UI.inkFaint, lineHeight: 1.3 }}>Photograph the facts table</span>
           </button>
+        </div>
+        <div style={{ marginTop: 14 }}>
+          <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>Label reader (nutrition label only)</div>
+          <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `1px solid ${UI.hairStrong}` }}>
+            {[['grok', 'Grok'], ['claude', 'Claude']].map(([id, label]) => (
+              <button key={id} onClick={() => { setLabelScannerProvider(id); localStorage.setItem('logbook-label-scanner-provider', id); }} style={fdSegBtn(labelScannerProvider === id)}>{label}</button>
+            ))}
+          </div>
         </div>
       </Sheet>
 

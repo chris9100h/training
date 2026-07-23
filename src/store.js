@@ -9,6 +9,7 @@ const COACHING_NOTIFY_URL   = `${SUPABASE_URL}/functions/v1/zane_coaching-notify
 const ADMIN_SEND_EMAIL_URL  = `${SUPABASE_URL}/functions/v1/admin-send-email`;
 const FOOD_SEARCH_URL       = `${SUPABASE_URL}/functions/v1/search-foods`;
 const SCAN_LABEL_URL        = `${SUPABASE_URL}/functions/v1/scan-label`;
+const SCAN_LABEL_CLAUDE_URL = `${SUPABASE_URL}/functions/v1/scan-label-claude`;
 
 const VAPID_PUBLIC_KEY = 'BD14GEr1JXGYdRwx6kiqpZMTvbialpruEJnHUmcbxjOshGZvULZ10xqayRTt3iVCyTBWRIR5nsXNVSsP0YdKQDI';
 
@@ -2005,11 +2006,16 @@ function cacheFood(source, sourceId) {
 }
 
 // Reads a nutrition label from a photo (base64, no data: prefix) via the
-// scan-label edge function (xAI Grok vision). Returns the extracted macros so
-// the client can prefill the Custom Item form. Scanned labels are logged as
-// per-user custom items, never written to the shared zane_foods cache.
-async function scanLabel(imageBase64, mimeType) {
-  const res = await fnFetch(SCAN_LABEL_URL, { image: imageBase64, mimeType });
+// scan-label edge function. Two interchangeable backends share the exact
+// same request/response contract, see logbook-label-scanner-provider in
+// CLAUDE.md's localStorage-keys list for how the client picks one:
+// 'grok' (xAI Grok vision, scan-label, the long-standing default) or
+// 'claude' (Anthropic vision, scan-label-claude). Returns the extracted
+// macros so the client can prefill the Custom Item form. Scanned labels are
+// logged as per-user custom items, never written to the shared zane_foods cache.
+async function scanLabel(imageBase64, mimeType, provider) {
+  const url = provider === 'claude' ? SCAN_LABEL_CLAUDE_URL : SCAN_LABEL_URL;
+  const res = await fnFetch(url, { image: imageBase64, mimeType });
   if (!res) return { ok: false, error: 'Network error' };
   const data = await res.json().catch(() => ({}));
   if (!res.ok) return { ok: false, error: data?.error || `Request failed (${res.status})` };
