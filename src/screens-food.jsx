@@ -1330,7 +1330,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                       </div>
                       <div style={{ textAlign: 'right' }}>
                         <div className="num" style={{ fontSize: 14, color: UI.warn }}>{cat.calories} kcal</div>
-                        <span style={fdEntryMeta}><FdMacroBits protein={cat.protein} carbs={cat.carbs} fat={cat.fat} /></span>
+                        <span style={fdEntryMeta}><FdMacroBits protein={cat.protein} carbs={cat.carbs} fat={cat.fat} strong /></span>
                       </div>
                     </div>
                     <div style={{ position: 'relative', marginTop: 6, display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -2854,14 +2854,20 @@ const fdEntryMeta = { fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi };
 // every digit sitting in the same flat fdEntryMeta gray. Inline, meant to
 // sit at the end of an existing fdEntryMeta line (colors override the
 // inherited gray; size/family still come from the parent span).
-function FdMacroBits({ protein, carbs, fat }) {
+// strong bumps the weight to 700 (from the default 600): the category card
+// (fdCategoryCard) layers a black wash under this to darken it below the
+// hour rows, and FD_MACRO_COLORS's muted pastel tones lose enough contrast
+// against that darker backdrop to read as thin again even at 600, the same
+// reason that card's own label is 700 rather than the entry name's 600.
+function FdMacroBits({ protein, carbs, fat, strong }) {
+  const w = strong ? 700 : 600;
   return (
     <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 6 }}>
-      <span className="num" style={{ fontWeight: 600, color: FD_MACRO_COLORS.protein }}>P{Math.round(protein)}</span>
+      <span className="num" style={{ fontWeight: w, color: FD_MACRO_COLORS.protein }}>P{Math.round(protein)}</span>
       <span style={{ color: UI.inkGhost }}>·</span>
-      <span className="num" style={{ fontWeight: 600, color: FD_MACRO_COLORS.carbs }}>C{Math.round(carbs)}</span>
+      <span className="num" style={{ fontWeight: w, color: FD_MACRO_COLORS.carbs }}>C{Math.round(carbs)}</span>
       <span style={{ color: UI.inkGhost }}>·</span>
-      <span className="num" style={{ fontWeight: 600, color: FD_MACRO_COLORS.fat }}>F{Math.round(fat)}</span>
+      <span className="num" style={{ fontWeight: w, color: FD_MACRO_COLORS.fat }}>F{Math.round(fat)}</span>
     </span>
   );
 }
