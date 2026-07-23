@@ -17,6 +17,17 @@
    Entry shape: { id: string, date: string (YYYY-MM-DD), title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.653',
+    date: '2026-07-23',
+    title: "Log it, drag it, fix it 🍽️",
+    items: [
+      "🥣 Recipes and favorites got serious upgrades: the recipe editor is now its own full page, favorites can save real portion shortcuts (multiple per favorite, like \"1 scoop\" and \"1 bag\"), and logging the same recipe again is one tap, with a live macro preview as you dial in portions.",
+      "✋ Your log finally listens back: drag any entry to a different hour, tap the pencil to fix a typo or nudge a recipe's portions up or down without deleting and redoing everything, and expand a logged recipe to see exactly what went into it.",
+      "✨ A whole polish pass: the timeline now groups into meal categories, the daily hero got denser and easier to scan at a glance, macros read bolder and in consistent colors everywhere, and we killed the annoying keyboard pop-up that used to hijack your screen just for checking today's macros.",
+      "🐛 Squashed some bugs along the way: deleting a session now correctly gives back any weight boosts it earned, \"Update plan?\" stopped nagging you when nothing actually changed, and a stalling lift now gets 3 real chances before we flag it (used to be 2).",
+    ],
+  },
+  {
     id: 'v2.645',
     date: '2026-07-22',
     title: 'Food tracking, unlocked 🍽️',
