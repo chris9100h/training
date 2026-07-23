@@ -2297,7 +2297,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
               { validFrom: genesis, days: curSch.days },
             ]);
           }
-          schedulesUpdate = s.schedules.map(sch2 => sch2.id === curSch.id ? { ...sch2, versions: newVersions } : sch2);
+          // schedule.days must always mirror the NEWEST version (versions[0],
+          // see findSessionPlanDay's comment further down this file): this
+          // inserts a new versions[0] (validFrom: todayStr) without it, any
+          // code still reading schedule.days directly (or a later
+          // applyPlanAndFinish write racing the version resolution) would
+          // silently work off the pre-rotation order.
+          schedulesUpdate = s.schedules.map(sch2 => sch2.id === curSch.id ? { ...sch2, versions: newVersions, days: newVersions[0].days } : sch2);
         }
       }
       return {
@@ -5115,9 +5121,27 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     });
   };
 
+  // The day array this session was actually seeded from: whichever version
+  // was active on the session's own date for a versioned plan (same source
+  // buildSessionEntries used, screens-home.jsx), else schedule.days for an
+  // unversioned one. NOT schedule.days directly: on a versioned plan
+  // schedule.days is supposed to always mirror the NEWEST version
+  // (versions[0], see todayCycleStripIndex's comment), but reading it
+  // directly here compares the session against the wrong array the moment
+  // that ever drifts, and applyPlanAndFinish below must patch the SAME
+  // array it read here, or accepting "Update plan?" permanently breaks the
+  // mirror itself: the next diff check would then compare against an array
+  // that already silently absorbed the change, reading "no changes" forever
+  // after, on every future session for that plan.
+  const findSessionPlanDay = (schedule) => {
+    if (!schedule) return null;
+    const days = LB.getPlanDaysForDate(schedule, session.date.slice(0, 10)) || schedule.days || [];
+    return days.find(d => d.id === session.dayId) || null;
+  };
+
   const computePlanDiff = () => {
     const schedule = store.schedules?.find(s => s.id === session.scheduleId);
-    const day = schedule?.days?.find(d => d.id === session.dayId);
+    const day = findSessionPlanDay(schedule);
     if (!day) return [];
 
     // Non-cardio plan items, keeping the original day.items index for applyPlanAndFinish
@@ -5298,7 +5322,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
   const applyPlanAndFinish = () => {
     const schedule = store.schedules?.find(s => s.id === session.scheduleId);
-    const day = schedule?.days?.find(d => d.id === session.dayId);
+    const day = findSessionPlanDay(schedule);
     if (schedule && day) {
       // 1. Apply swaps and set-count changes (positional, by originalIdx)
       let newItems = day.items.map((item, i) => {
@@ -5362,13 +5386,29 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         const sg = sessionGroups.get(it.exId);
         return sg !== (it.supersetGroup || null) ? { ...it, supersetGroup: sg } : it;
       });
-      setStore(s => ({
-        ...s,
-        schedules: s.schedules.map(sch => sch.id === schedule.id ? {
-          ...sch,
-          days: sch.days.map(d => d.id === day.id ? { ...d, items: newItems } : d),
-        } : sch),
-      }));
+      setStore(s => {
+        const sch = s.schedules.find(sc => sc.id === schedule.id);
+        if (!sch) return s;
+        const patchDays = (days) => (days || []).map(d => d.id === day.id ? { ...d, items: newItems } : d);
+        const activeIdx = LB.getActiveVersionIdx(sch, session.date.slice(0, 10));
+        // Unversioned plan: schedule.days is the only source, patch it directly.
+        if (activeIdx < 0) {
+          return { ...s, schedules: s.schedules.map(sc => sc.id === sch.id ? { ...sc, days: patchDays(sc.days) } : sc) };
+        }
+        // Versioned plan: patch the version this session actually seeded
+        // from (found via findSessionPlanDay above), not schedule.days.
+        // schedule.days must keep mirroring the NEWEST version (versions[0],
+        // see findSessionPlanDay's comment): only re-sync it when that's
+        // the version just patched; an older version's edit must not touch
+        // schedule.days at all.
+        const versions = sch.versions.map((v, i) => i === activeIdx ? { ...v, days: patchDays(v.days) } : v);
+        return {
+          ...s,
+          schedules: s.schedules.map(sc => sc.id === sch.id ? {
+            ...sc, versions, days: activeIdx === 0 ? versions[0].days : sc.days,
+          } : sc),
+        };
+      });
     }
     // Mirror each wizard-picked rep target onto its live session entry too (not
     // just the plan), so the persisted zane_session_entries row and any later
