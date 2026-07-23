@@ -313,7 +313,6 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     return LB.dayTargetFromMacros(macroTargets, isTraining);
   }, [store, macroTargets, curDate]);
   const goalCalories = dayTarget?.calories ?? (dayTarget ? LB.caloriesFromMacros(dayTarget.protein, dayTarget.carbs, dayTarget.fat) : null);
-  const heroPercent = goalCalories > 0 ? Math.min(Math.round((dayTotals.calories / goalCalories) * 100), 100) : null;
   // Same weighted-macro-distance formula HealthScreen's today card uses
   // (LB.macroAdherence), computed live off dayTotals rather than reading
   // dailyLogs.adherence: that stored field only gets reconciled by an
@@ -347,6 +346,23 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     }
     return { ...cat, calories: Math.round(calories), protein: fdRound1(protein), carbs: fdRound1(carbs), fat: fdRound1(fat) };
   }), [byHour]);
+
+  // Flat drag-reorder slot list for the whole timeline, in EXACT render order
+  // (category by category, hour by hour): one slot per logged entry, or one
+  // placeholder slot for an hour with nothing logged (so an empty hour still
+  // has an anchor to drop onto). Used only to map UI.useDragReorder's from/to
+  // indices back to an actual hour; see handleTimelineReorder.
+  const timelineSlots = useMemoFd(() => {
+    const out = [];
+    for (const cat of FD_MEAL_CATEGORIES) {
+      for (let h = cat.startHour; h < cat.endHour; h++) {
+        const es = byHour[h] || [];
+        if (es.length) es.forEach(e => out.push({ entry: e, hour: h }));
+        else out.push({ entry: null, hour: h });
+      }
+    }
+    return out;
+  }, [byHour]);
 
   // Recent strip: dedupe by food_id for DB items, by food_name for custom
   // ones. store.foodLogs is already recency-ordered (server query and local
@@ -507,6 +523,33 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       return { ...s, foodLogs: nextLogs, dailyLogs: patchDaily(s, entry.date, nextLogs.filter(l => l.date === entry.date)) };
     });
   }
+
+  // Re-hours a dragged entry, keeping its own minute (":MM") and every other
+  // field untouched. The day's macro totals don't change (same entries,
+  // different hour bucket), so no patchDaily call is needed here.
+  function moveEntryToHour(entry, hour) {
+    const hh = String(hour).padStart(2, '0');
+    setStore(s => ({
+      ...s,
+      foodLogs: (s.foodLogs || []).map(l => l.id === entry.id ? { ...l, time: hh + (l.time || '00:00').slice(2) } : l),
+    }));
+  }
+  // UI.useDragReorder hands back from/to indices already adjusted for a
+  // conventional array reorder (it assumes removing the source shifts every
+  // later index down by one, see attachDragReorderAxis's onUp in ui.jsx).
+  // That assumption doesn't hold here: hour rows never actually move, only
+  // the dragged entry's own hour changes, so reverse that adjustment back
+  // into the raw drop-line position first, then read the hour straight off
+  // whichever timelineSlots entry sits there.
+  function handleTimelineReorder(from, to) {
+    const src = timelineSlots[from];
+    if (!src || !src.entry) return;
+    const insertIdx = to > from ? to + 1 : to;
+    const target = timelineSlots[Math.min(insertIdx, timelineSlots.length - 1)];
+    if (!target || target.hour === src.hour) return;
+    moveEntryToHour(src.entry, target.hour);
+  }
+  const timelineDragRef = UI.useDragReorder({ onReorder: handleTimelineReorder });
 
   function openCopyMove() {
     setCopyMoveIds([]);
@@ -1097,44 +1140,39 @@ function FoodScreen({ store, setStore, go, userId, date }) {
               </button>
             </div>
 
-            {/* Totals hero: same BracketFrame-gold + progress-ring hero Water
-                uses for its own daily total, so this reads as the same kind of
-                primary "today" surface elsewhere in the app. The ring and the
-                adherence bar at the bottom both only appear once a macro
-                target is resolvable (personal or coach macros); with no
-                target set it's just the total and the macro chips, same as
-                before. */}
+            {/* Totals hero: same BracketFrame-gold hero Water uses for its own
+                daily total. The dense ring+rows+composition layout only
+                appears once a macro target is resolvable (personal or coach
+                macros); with no target set it's just the bare total and the
+                macro chips, same as before there was anything to compare
+                against. */}
             <BracketFrame gold style={{ padding: 20 }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 18 }}>
-                <div style={{ minWidth: 0 }}>
-                  <div className="micro" style={{ color: UI.inkFaint }}>{dayLabel}</div>
-                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginTop: 4 }}>
+              {dayTarget ? (
+                <>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
+                    <FdRing percent={dayAdherence ?? 0} size={104} color={fdAdherenceColor(dayAdherence)} label="ADHERENCE" />
+                    <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 9 }}>
+                      <FdHeroRow label="KCAL" color={UI.warn} actual={dayTotals.calories} target={goalCalories} />
+                      <FdHeroRow label="PROTEIN" color={FD_MACRO_COLORS.protein} actual={dayTotals.protein} target={dayTarget.protein} unit="g" />
+                      <FdHeroRow label="CARBS" color={FD_MACRO_COLORS.carbs} actual={dayTotals.carbs} target={dayTarget.carbs} unit="g" />
+                      <FdHeroRow label="FAT" color={FD_MACRO_COLORS.fat} actual={dayTotals.fat} target={dayTarget.fat} unit="g" />
+                    </div>
+                  </div>
+                  <div style={{ marginTop: 16, paddingTop: 16, borderTop: `1px solid ${UI.hair}`, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    <FdCompositionBar label="LOGGED" protein={dayTotals.protein} carbs={dayTotals.carbs} fat={dayTotals.fat} />
+                    <FdCompositionBar label="TARGET" protein={dayTarget.protein} carbs={dayTarget.carbs} fat={dayTarget.fat} />
+                  </div>
+                </>
+              ) : (
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
                     <span className="num" style={{ fontSize: 40, fontWeight: 300, color: UI.ink, lineHeight: 1 }}>{dayTotals.calories}</span>
                     <span style={{ fontSize: 15, color: UI.inkFaint, fontFamily: UI.fontUi }}>kcal</span>
                   </div>
-                  {goalCalories != null && (
-                    <div style={{ fontSize: 12, color: UI.inkSoft, marginTop: 8, fontFamily: UI.fontUi }}>of {goalCalories} kcal</div>
-                  )}
                   <div style={{ display: 'flex', gap: 14, marginTop: 12 }}>
                     <span className="num" style={{ fontSize: 12, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 10 }}>P</span> {Math.round(dayTotals.protein)}g</span>
                     <span className="num" style={{ fontSize: 12, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 10 }}>C</span> {Math.round(dayTotals.carbs)}g</span>
                     <span className="num" style={{ fontSize: 12, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 10 }}>F</span> {Math.round(dayTotals.fat)}g</span>
-                  </div>
-                </div>
-                {heroPercent != null && <FdRing percent={heroPercent} />}
-              </div>
-              {dayAdherence != null && (
-                <div style={{ marginTop: 16, paddingTop: 16, borderTop: `1px solid ${UI.hair}` }}>
-                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 5 }}>
-                    <span className={dayAdherence >= 97 ? 'perfect-week-pulse num' : 'num'} style={{ fontSize: 22, color: fdAdherenceColor(dayAdherence), fontWeight: 300, lineHeight: 1 }}>{dayAdherence}%</span>
-                    <span className={dayAdherence >= 97 ? 'perfect-week-pulse' : ''} style={{ fontSize: 11, color: fdAdherenceColor(dayAdherence), fontFamily: UI.fontUi, fontWeight: 600, letterSpacing: '0.08em' }}>
-                      {dayAdherence >= 97 ? 'PERFECT' : dayAdherence >= 90 ? 'STRONG' : dayAdherence >= 75 ? 'ON TRACK' : 'OFF TRACK'}
-                    </span>
-                    <span style={{ flex: 1 }} />
-                    <span style={{ fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.06em', textTransform: 'uppercase' }}>macro adherence</span>
-                  </div>
-                  <div style={{ height: 6, borderRadius: 4, background: UI.bgInset, overflow: 'hidden' }}>
-                    <div style={{ width: `${Math.min(100, dayAdherence)}%`, height: '100%', background: fdAdherenceColor(dayAdherence) }} />
                   </div>
                 </div>
               )}
@@ -1149,10 +1187,18 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                 tree-style trunk line (FdHourTrunk, spanning the whole
                 indented block) and a short branch tick per row (FdHourTick)
                 connecting each one back to the trunk, so the card visually
-                reads as the root of the hours below it. */}
+                reads as the root of the hours below it.
+                Already-logged entries are drag-reorderable across the WHOLE
+                day (UI.useDragReorder, same engine as health-card/plan-item
+                reordering elsewhere), re-houring an entry to wherever it's
+                dropped instead of just permuting a list: see timelineSlots/
+                handleTimelineReorder. Every hour, filled or empty, carries
+                data-reorder-item so the drop-line has somewhere to land even
+                on an hour with nothing logged yet; only the entry rows
+                themselves (not the hour label or "+") can start a drag. */}
             <div>
               <Bezel style={{ marginBottom: 10 }}>Timeline</Bezel>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div ref={timelineDragRef} data-reorder-list="true" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 {categoryTotals.map(cat => (
                   <div key={cat.id}>
                     <div style={fdCategoryCard}>
@@ -1179,25 +1225,26 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                           <div key={h} style={{ display: 'flex', alignItems: 'center' }}>
                             <FdHourTick />
                             <div style={{ ...fdHourRow(filled, isNow), flex: 1, minWidth: 0 }}>
-                              <div style={fdHourLabelCol}>
+                              <div data-reorder-ignore="true" style={fdHourLabelCol}>
                                 <span className="num" style={{ fontSize: 11, fontWeight: isNow ? 700 : 400, color: isNow ? 'var(--accent)' : (filled ? UI.inkSoft : UI.inkGhost) }}>{String(h).padStart(2, '0')}</span>
                               </div>
                               <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
-                                {es.map(e => (
-                                  <div key={e.id} style={fdEntryRow}>
+                                {filled ? es.map(e => (
+                                  <div key={e.id} data-reorder-item="true" style={fdEntryRow}>
+                                    <DragHandle style={{ width: 14, height: 22, marginRight: 2 }} />
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0, flex: 1 }}>
                                       <span style={fdEntryName}>{e.foodName}</span>
                                       <span style={fdEntryMeta}>
                                         {e.quantityG ? `${e.quantityG}g · ` : ''}{e.calories} kcal · P{Math.round(e.protein)} C{Math.round(e.carbs)} F{Math.round(e.fat)}
                                       </span>
                                     </div>
-                                    <button onClick={() => deleteEntry(e)} aria-label="Delete" style={fdInlineDeleteBtn}>
+                                    <button data-reorder-ignore="true" onClick={() => deleteEntry(e)} aria-label="Delete" style={fdInlineDeleteBtn}>
                                       <i className="fa-solid fa-trash" style={{ fontSize: 12 }} />
                                     </button>
                                   </div>
-                                ))}
+                                )) : <div data-reorder-item="true" data-reorder-ignore="true" style={{ height: 1 }} />}
                               </div>
-                              <button onClick={() => addAtHour(h)} aria-label={`Add food at ${String(h).padStart(2, '0')}:00`} style={fdHourAddBtn(isNow)}>
+                              <button data-reorder-ignore="true" onClick={() => addAtHour(h)} aria-label={`Add food at ${String(h).padStart(2, '0')}:00`} style={fdHourAddBtn(isNow)}>
                                 <i className="fa-solid fa-plus" style={{ fontSize: 11 }} />
                               </button>
                             </div>
@@ -1784,9 +1831,9 @@ function RecipeEditorScreen({ open, onClose, onSave, recipe, store }) {
               <i className="fa-solid fa-plus" style={{ marginRight: 8 }} /> Add ingredients
             </Btn>
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               {items.map(i => (
-                <div key={i.id} style={fdDraftRow}>
+                <div key={i.id} style={fdEntryRow}>
                   <button onClick={() => openEditItem(i)} style={fdDraftMain}>
                     <span style={{ ...fdEntryName, fontSize: 12 }}>{i.foodName}</span>
                     <span style={fdEntryMeta}>{i.quantityG}g · {Math.round(LB.caloriesFromMacros(i.protein, i.carbs, i.fat) || 0)} kcal · P{Math.round(i.protein)} C{Math.round(i.carbs)} F{Math.round(i.fat)}</span>
@@ -2259,28 +2306,85 @@ function fdAdherenceColor(a) {
   return 'var(--danger)';
 }
 
-// Calorie-progress ring for the Log-tab hero, same shape as WaterRing
-// (screens-water.jsx) so both daily-total heroes read as the same idiom. Uses
-// the live accent color instead of a fixed hex: unlike Water's own semantic
-// blue (deliberately decoupled from the user's accent), Food has no such
-// fixed identity, and var(--accent) already adapts per theme on its own, so
-// no light/dark special-casing is needed here the way WaterRing needs for its
-// hardcoded blue.
-function FdRing({ percent, size = 128 }) {
+// Adherence-progress ring for the Log-tab hero, same shape as WaterRing
+// (screens-water.jsx) so both daily-total heroes read as the same idiom.
+// Takes an explicit color (fdAdherenceColor's tier color, unlike the old
+// fixed var(--accent) stroke) and an optional small label under the number,
+// so the ring itself carries the same "PERFECT/STRONG/..." semantic tone the
+// hero's rows do instead of always reading as a flat accent-colored dial.
+function FdRing({ percent, size = 128, color = 'var(--accent)', label }) {
   const r = 50, circ = 2 * Math.PI * r;
   const offset = circ * (1 - Math.min(percent, 100) / 100);
   return (
     <div style={{ position: 'relative', width: size, height: size, flexShrink: 0 }}>
       <svg width={size} height={size} viewBox="0 0 120 120" style={{ transform: 'rotate(-90deg)' }}>
         <circle cx="60" cy="60" r={r} fill="none" stroke={UI.hair} strokeWidth="12" />
-        <circle cx="60" cy="60" r={r} fill="none" stroke="var(--accent)" strokeWidth="12" strokeLinecap="round"
+        <circle cx="60" cy="60" r={r} fill="none" stroke={color} strokeWidth="12" strokeLinecap="round"
           strokeDasharray={circ.toFixed(1)} strokeDashoffset={offset.toFixed(1)}
           style={{ transition: 'stroke-dashoffset 0.7s cubic-bezier(0.22,1,0.36,1)' }} />
       </svg>
       <div style={{
-        position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
-        fontFamily: UI.fontNum, fontSize: 26, fontWeight: 600, color: 'var(--accent)', fontVariantNumeric: 'tabular-nums',
-      }}>{percent}%</div>
+        position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+      }}>
+        <span style={{ fontFamily: UI.fontNum, fontSize: 26, fontWeight: 600, color, fontVariantNumeric: 'tabular-nums' }}>{percent}%</span>
+        {label && <span style={{ fontSize: 8, fontWeight: 700, letterSpacing: '0.08em', color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>{label}</span>}
+      </div>
+    </div>
+  );
+}
+
+// Local duplicate of screens-health.jsx's MACRO_COLORS (same values), not
+// relied on as a cross-file global for the same reason fdAdherenceColor
+// above isn't: classic scripts share one execution scope so reaching across
+// would happen to work today, but that's an implicit coupling this small a
+// token map isn't worth introducing.
+const FD_MACRO_COLORS = { protein: 'var(--accent)', carbs: 'var(--ok)', fat: 'var(--danger)' };
+
+// One metric row in the dense hero (KCAL/PROTEIN/CARBS/FAT): label, a thin
+// fill bar showing actual vs target, the actual/target pair, and the delta
+// as a signed percent. The delta is intentionally neutral-colored rather
+// than green/red: whether running over or under a given macro is "good"
+// depends on the user's own goal (bulk vs cut), which this row has no way
+// to know, so it states the fact without editorializing.
+function FdHeroRow({ label, color, actual, target, unit = '' }) {
+  if (target == null) return null;
+  const pct = target > 0 ? Math.min(100, Math.round((actual / target) * 100)) : 0;
+  const delta = target > 0 ? Math.round(((actual - target) / target) * 100) : 0;
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <span style={{ width: 46, flexShrink: 0, fontSize: 9, fontWeight: 700, letterSpacing: '0.05em', color, fontFamily: UI.fontUi }}>{label}</span>
+      <div style={{ flex: 1, height: 4, borderRadius: 4, background: UI.bgInset, overflow: 'hidden' }}>
+        <div style={{ width: `${pct}%`, height: '100%', background: color }} />
+      </div>
+      <span className="num" style={{ fontSize: 11, color, flexShrink: 0, textAlign: 'right' }}>
+        {Math.round(actual)}{unit} / {Math.round(target)}{unit}
+      </span>
+      <span className="num" style={{ fontSize: 10, color: UI.inkFaint, flexShrink: 0, width: 30, textAlign: 'right' }}>
+        {delta > 0 ? '+' : ''}{delta}%
+      </span>
+    </div>
+  );
+}
+
+// Macro-composition bar (protein/carbs/fat share of total energy, 4/4/9
+// kcal per g, same conversion HealthScreen's own composition bar uses):
+// two of these (one off dayTotals, one off dayTarget) let the hero compare
+// today's actual macro SPLIT against the target split at a glance, not just
+// each macro's absolute progress (the rows above already cover that).
+function FdCompositionBar({ label, protein, carbs, fat }) {
+  const total = (protein || 0) * 4 + (carbs || 0) * 4 + (fat || 0) * 9;
+  if (!total) return null;
+  const segs = [
+    { pct: (protein || 0) * 4 / total * 100, color: FD_MACRO_COLORS.protein },
+    { pct: (carbs || 0) * 4 / total * 100, color: FD_MACRO_COLORS.carbs },
+    { pct: (fat || 0) * 9 / total * 100, color: FD_MACRO_COLORS.fat },
+  ];
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <span style={{ width: 46, flexShrink: 0, fontSize: 9, fontWeight: 700, letterSpacing: '0.05em', color: UI.inkFaint, fontFamily: UI.fontUi }}>{label}</span>
+      <div style={{ flex: 1, height: 8, borderRadius: 4, background: UI.bgInset, overflow: 'hidden', display: 'flex' }}>
+        {segs.map((s, i) => s.pct > 0 && <div key={i} style={{ width: `${s.pct}%`, height: '100%', background: s.color }} />)}
+      </div>
     </div>
   );
 }
