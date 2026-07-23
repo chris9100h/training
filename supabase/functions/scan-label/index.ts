@@ -12,10 +12,12 @@
 // search-foods, this has no free fallback source).
 //
 // The model is configurable via the optional XAI_MODEL secret (default
-// 'grok-4'), because xAI rotates and deprecates model ids quickly: if xAI
-// renames the current vision model, point XAI_MODEL at it instead of editing
-// this file. A model the API rejects surfaces xAI's own error text to the
-// client so the fix is obvious.
+// 'grok-4.3'), because xAI rotates and deprecates model ids quickly: grok-4
+// itself, the original default here, was deprecated 2026-05-15 and retires
+// 2026-08-15, which is exactly this scenario. If xAI deprecates grok-4.3 too,
+// point XAI_MODEL at the replacement instead of editing this file. A model
+// the API rejects surfaces xAI's own error text to the client so the fix is
+// obvious.
 //
 // One action: POST { image: <base64, no data: prefix>, mimeType?: 'image/jpeg' }
 // -> { is_nutrition_label, name, brand, basis, serving_size_g, serving_label,
@@ -32,7 +34,7 @@ const ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsI
 // xAI is OpenAI-compatible; the image goes in a user message as an image_url
 // data URI, exactly like OpenAI vision.
 const XAI_URL = 'https://api.x.ai/v1/chat/completions';
-const DEFAULT_MODEL = 'grok-4';
+const DEFAULT_MODEL = 'grok-4.3';
 const ALLOWED_MIME = new Set(['image/jpeg', 'image/png']);
 const MAX_IMAGE_CHARS = 8_000_000;
 
