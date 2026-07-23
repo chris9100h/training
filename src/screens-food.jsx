@@ -1273,7 +1273,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                         <span style={fdEntryMeta}>{String(cat.startHour).padStart(2, '0')}:00 - {String(cat.endHour % 24).padStart(2, '0')}:00</span>
                       </div>
                       <div style={{ textAlign: 'right' }}>
-                        <div className="num" style={{ fontSize: 14, color: UI.ink }}>{cat.calories} kcal</div>
+                        <div className="num" style={{ fontSize: 14, color: UI.warn }}>{cat.calories} kcal</div>
                         <span style={fdEntryMeta}><FdMacroBits protein={cat.protein} carbs={cat.carbs} fat={cat.fat} /></span>
                       </div>
                     </div>
@@ -1337,7 +1337,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                                         >
                                           <span style={fdEntryName}>{e.foodName}</span>
                                           <span style={fdEntryMeta}>
-                                            {e.quantityG ? `${e.quantityG}g · ` : ''}{e.calories} kcal
+                                            {e.quantityG ? `${e.quantityG}g · ` : ''}<span className="num" style={{ color: UI.warn }}>{e.calories} kcal</span>
                                             <span style={fdMetaDivider} />
                                             <FdMacroBits protein={e.protein} carbs={e.carbs} fat={e.fat} />
                                           </span>
@@ -1361,7 +1361,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                                               <div style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0, flex: 1 }}>
                                                 <span style={{ ...fdEntryName, fontSize: 11, fontWeight: 500 }}>{ri.foodName}</span>
                                                 <span style={fdEntryMeta}>
-                                                  {ri.quantityG}g · {ri.calories} kcal
+                                                  {ri.quantityG}g · <span className="num" style={{ color: UI.warn }}>{ri.calories} kcal</span>
                                                   <span style={fdMetaDivider} />
                                                   <FdMacroBits protein={ri.protein} carbs={ri.carbs} fat={ri.fat} />
                                                 </span>
@@ -2787,9 +2787,11 @@ const fdEntryMeta = { fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi };
 // inherited gray; size/family still come from the parent span).
 function FdMacroBits({ protein, carbs, fat }) {
   return (
-    <span style={{ display: 'inline-flex', gap: 6 }}>
+    <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 6 }}>
       <span className="num" style={{ color: FD_MACRO_COLORS.protein }}>P{Math.round(protein)}</span>
+      <span style={{ color: UI.inkGhost }}>·</span>
       <span className="num" style={{ color: FD_MACRO_COLORS.carbs }}>C{Math.round(carbs)}</span>
+      <span style={{ color: UI.inkGhost }}>·</span>
       <span className="num" style={{ color: FD_MACRO_COLORS.fat }}>F{Math.round(fat)}</span>
     </span>
   );
