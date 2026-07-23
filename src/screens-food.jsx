@@ -764,10 +764,11 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       carbsPer100g: item.carbs * per100, fatPer100g: item.fat * per100,
       fiberPer100g: item.fiber != null ? item.fiber * per100 : null,
       servingSizeG: null, servingLabel: null,
-      // Set only on a favorite with units configured (see openEditFavorite);
-      // undefined otherwise, which the quantity sheet's units?.length check
-      // treats as "no units".
-      units: item.units,
+      // zane_food_logs never stores units (see matchingFavorite); a
+      // favorite matching this same name still offers its configured
+      // shortcuts, else undefined, which the quantity sheet's units?.length
+      // check treats as "no units".
+      units: item.units ?? matchingFavorite(null, item.foodName)?.units,
     });
     setP100Str(String(fdRound1(item.protein * per100)));
     setC100Str(String(fdRound1(item.carbs * per100)));
@@ -796,8 +797,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       // already-scaled snapshot. Falls through to the plain rescale path
       // below if the recipe was since renamed or deleted, so re-adding
       // still works, just without the portion picker.
-      const baseName = l.foodName.replace(/ \([\d.]+\/\d+\)$/, '');
-      const recipe = (store.foodRecipes || []).find(r => r.name === baseName);
+      const recipe = recipeEntryLiveRecipe(l);
       if (recipe) { addRecipeToLog(recipe); return; }
     }
     setFavedId(existingFavId(l.foodId, l.foodName));
@@ -818,9 +818,9 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         servingSizeG: null, servingLabel: null,
         // Already in the log (so already cached): don't re-cache it on re-log.
         fromCache: true,
-        // Only present on a favorite (see openEditFavorite); undefined for a
-        // plain Recent entry, same "no units" fallback as the custom branch.
-        units: l.units,
+        // zane_food_logs never stores units; fall back to a matching
+        // favorite's configured units, same as the custom branch above.
+        units: l.units ?? matchingFavorite(l.foodId, l.foodName)?.units,
       });
       setQtyG(String(l.quantityG || 100));
       openQtySheet();
@@ -937,12 +937,17 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     };
   }
 
-  // Id of an existing favorite matching this food (by food_id for DB items, by
-  // name for custom ones), or null. Used to reflect the already-favorited
-  // state on open and to prevent duplicate favorites.
+  // Existing favorite matching this food (by food_id for DB items, by name
+  // for custom ones), or null. zane_food_logs rows never carry their own
+  // units (only zane_food_favorites does, see openEditFavorite), so this
+  // also backs the units fallback in reAddFromRecent/openCustomAsScalable:
+  // a food re-opened from Log/Recent still offers a matching favorite's
+  // configured portion-size shortcuts instead of silently losing them.
+  function matchingFavorite(foodId, foodName) {
+    return (store.foodFavorites || []).find(x => foodId ? x.foodId === foodId : (x.foodId == null && x.foodName === foodName)) || null;
+  }
   function existingFavId(foodId, foodName) {
-    const f = (store.foodFavorites || []).find(x => foodId ? x.foodId === foodId : (x.foodId == null && x.foodName === foodName));
-    return f ? f.id : null;
+    return matchingFavorite(foodId, foodName)?.id ?? null;
   }
 
   // Immediate favorite: tapping the star saves (or, on a second tap, removes)
@@ -1074,12 +1079,36 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     setStore(s => ({ ...s, foodRecipes: (s.foodRecipes || []).filter(r => r.id !== recipe.id) }));
   }
 
+  // Finds the live recipe a logged/recent recipe entry was built from, by
+  // name (its own foodName may carry a "(chosen/total portions)" suffix, see
+  // confirmRecipeLog). Returns null once the recipe has since been renamed
+  // or deleted, which is how callers detect "can't reopen the portion
+  // picker for this one anymore".
+  function recipeEntryLiveRecipe(entry) {
+    const baseName = entry.foodName.replace(/ \([\d.]+\/\d+\)$/, '');
+    return (store.foodRecipes || []).find(r => r.name === baseName) || null;
+  }
+
   // Opens the portions prompt (see recipeLogPrompt's Sheet further down): a
   // recipe still needs its portions chosen before it has a fixed quantity to
   // stage, same reason a DB food needs its quantity sheet first.
   function addRecipeToLog(recipe) {
     if (!(recipe.items || []).length) return;
     setRecipeLogPrompt({ recipe, chosenPortions: 1 });
+  }
+  // Reopens an already-logged recipe entry's own portions prompt, so bumping
+  // the count up or down doesn't need a delete + re-add. A recipe entry's
+  // "quantity" is portions of the whole batch, not grams of one food, so
+  // this reuses the SAME Sheet addRecipeToLog opens (never the generic
+  // gram-rescale quantity sheet openEditEntry uses), pre-filled with the
+  // portions this entry was actually logged at and routed through
+  // editingEntry so confirmRecipeLog updates it in place.
+  function openEditRecipeEntry(entry) {
+    const recipe = recipeEntryLiveRecipe(entry);
+    if (!recipe || !(recipe.items || []).length) return;
+    const m = entry.foodName.match(/\(([\d.]+)\/[\d.]+\)$/);
+    setEditingEntry(entry);
+    setRecipeLogPrompt({ recipe, chosenPortions: m ? parseFloat(m[1]) : (recipe.portions || 1) });
   }
   // Live macro preview for the portions prompt, same scaling math
   // confirmRecipeLog itself uses (not committed until Add is actually
@@ -1107,8 +1136,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     const totalPortions = recipe.portions || 1;
     const scale = chosenPortions / totalPortions;
     const sum = k => items.reduce((a, i) => a + (i[k] || 0), 0);
-    const entry = {
-      id: LB.uid(), date: curDate, time: entryTime(),
+    const built = {
       foodId: null, foodName: chosenPortions !== totalPortions ? `${recipe.name} (${chosenPortions}/${totalPortions})` : recipe.name, brand: null, source: 'recipe',
       quantityG: Math.round(sum('quantityG') * scale), calories: Math.round(fdRecipeItemsCalories(items) * scale),
       protein: fdRound1(sum('protein') * scale), carbs: fdRound1(sum('carbs') * scale), fat: fdRound1(sum('fat') * scale),
@@ -1123,9 +1151,20 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         protein: fdRound1((i.protein || 0) * scale), carbs: fdRound1((i.carbs || 0) * scale), fat: fdRound1((i.fat || 0) * scale),
         fiber: i.fiber != null ? fdRound1(i.fiber * scale) : null,
       })),
-      createdAt: new Date().toISOString(),
     };
-    setStaged(list => [...list, entry]);
+    // editingEntry (see openEditRecipeEntry) updates the existing row by id
+    // and keeps its original date/time instead of staging a new one, same
+    // in-place-update shape confirmLogFood uses for a non-recipe entry.
+    if (editingEntry) {
+      const updated = { ...built, id: editingEntry.id, date: editingEntry.date, time: editingEntry.time, createdAt: editingEntry.createdAt };
+      setStore(s => {
+        const nextLogs = (s.foodLogs || []).map(l => l.id === editingEntry.id ? updated : l);
+        return { ...s, foodLogs: nextLogs, dailyLogs: patchDaily(s, updated.date, nextLogs.filter(l => l.date === updated.date)) };
+      });
+      setEditingEntry(null);
+    } else {
+      setStaged(list => [...list, { id: LB.uid(), date: curDate, time: entryTime(), createdAt: new Date().toISOString(), ...built }]);
+    }
     setRecipeLogPrompt(null);
   }
 
@@ -1326,17 +1365,18 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                                   // other entry's row is instead tap-to-edit, reopening
                                   // the scalable quantity sheet on its current values
                                   // (openEditEntry) for fixing a typo without a delete +
-                                  // re-add. isRecipe alone (not hasRecipeItems) gates
-                                  // edit: a recipe's "quantity" is really portions of the
-                                  // whole batch, which the sheet's simple per-100g scaling
-                                  // doesn't model, true regardless of whether this
-                                  // particular entry happens to have an ingredient
-                                  // snapshot to show (recipe_items shipped after some
-                                  // entries were already logged, so older recipe rows
-                                  // have neither a chevron nor edit, not one falling back
-                                  // to the other).
+                                  // re-add. A recipe's "quantity" is really portions of
+                                  // the whole batch, which that sheet's per-100g scaling
+                                  // doesn't model, so it gets its own portions-only edit
+                                  // instead (openEditRecipeEntry, the pencil button
+                                  // below), gated on the source recipe still existing.
+                                  // hasRecipeItems separately gates the chevron/expand
+                                  // (recipe_items shipped after some entries were already
+                                  // logged, so older recipe rows have no snapshot to show,
+                                  // but can still be portion-edited).
                                   const isRecipe = e.source === 'recipe';
                                   const hasRecipeItems = isRecipe && e.recipeItems?.length > 0;
+                                  const canEditPortions = isRecipe && !!recipeEntryLiveRecipe(e);
                                   const expanded = expandedEntryIds.has(e.id);
                                   // Expanded, the ingredient tree joins the SAME card the
                                   // header sits in (fdEntryCard), not a separate loose list
@@ -1359,6 +1399,12 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                                             <FdMacroBits protein={e.protein} carbs={e.carbs} fat={e.fat} />
                                           </span>
                                         </div>
+                                        {canEditPortions && (
+                                          <button data-reorder-ignore="true" onClick={() => openEditRecipeEntry(e)}
+                                            aria-label="Edit portions" style={fdInlineDeleteBtn}>
+                                            <i className="fa-solid fa-pen" style={{ fontSize: 11 }} />
+                                          </button>
+                                        )}
                                         {hasRecipeItems && (
                                           <button data-reorder-ignore="true" onClick={() => toggleEntryExpanded(e.id)}
                                             aria-label={expanded ? 'Collapse ingredients' : 'Expand ingredients'} style={fdInlineDeleteBtn}>
@@ -1807,7 +1853,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
           logging the whole cake is the only option, half of it or a second
           one are just as valid). Half-portion steps, no upper cap: chosen
           can go above the recipe's own portion count too. ── */}
-      <Sheet open={!!recipeLogPrompt} onClose={() => setRecipeLogPrompt(null)} title={recipeLogPrompt?.recipe?.name || 'Add recipe'} titleColor="var(--accent)">
+      <Sheet open={!!recipeLogPrompt} onClose={() => { setRecipeLogPrompt(null); setEditingEntry(null); }} title={recipeLogPrompt?.recipe?.name || 'Add recipe'} titleColor="var(--accent)">
         {recipeLogPrompt && (
           <>
             <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: 1.4 }}>
