@@ -445,7 +445,7 @@ function fmtWeek(weekStart) {
   if (!weekStart) return '';
   const d = new Date(weekStart + 'T12:00:00');
   const end = new Date(d); end.setDate(d.getDate() + 6);
-  const fmt = (dt) => dt.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
+  const fmt = (dt) => dt.toLocaleDateString('en-US', { day: '2-digit', month: 'short' });
   return `${fmt(d)} – ${fmt(end)}`;
 }
 

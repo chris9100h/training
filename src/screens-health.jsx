@@ -53,7 +53,7 @@ const caloriesFromMacros = LB.caloriesFromMacros;
 
 function healthFmtDate(iso, opts = { weekday: 'short', day: 'numeric', month: 'short' }) {
   if (!iso) return '';
-  return new Date(iso + 'T12:00:00').toLocaleDateString('en-GB', opts);
+  return new Date(iso + 'T12:00:00').toLocaleDateString('en-US', opts);
 }
 
 // Windowed series builder for the charts — pure, so HealthScreen (dailyLogs)
@@ -2004,7 +2004,7 @@ function HealthDateStrip({ store, setStore, selectedDate, onSelect, onLog, targe
   };
   const sunday = days[6];
   // Month label for the week — spans two months at a boundary (e.g. "MAY – JUN").
-  const mLabel = iso => new Date(iso + 'T12:00:00').toLocaleDateString('en-GB', { month: 'short' }).toUpperCase();
+  const mLabel = iso => new Date(iso + 'T12:00:00').toLocaleDateString('en-US', { month: 'short' }).toUpperCase();
   const monthLabel = mLabel(monday) === mLabel(sunday)
     ? `${mLabel(monday)} ${new Date(sunday + 'T12:00:00').getFullYear()}`
     : `${mLabel(monday)} – ${mLabel(sunday)}`;
@@ -3023,7 +3023,7 @@ function HealthScreen({ store, setStore, go, userId }) {
           <div style={{ flex: 1 }}>
             <div style={{ fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700, color: 'var(--accent)', letterSpacing: '0.07em', textTransform: 'uppercase' }}>
               {store.statusMode === 'sick' ? 'Sick' : store.statusMode === 'deload' ? 'Deload' : 'Vacation'}
-              {store.statusModeSince ? ` · Since ${new Date(store.statusModeSince).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}` : ''}
+              {store.statusModeSince ? ` · Since ${new Date(store.statusModeSince).toLocaleDateString('en-US', { day: 'numeric', month: 'short' })}` : ''}
             </div>
             <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 2 }}>Tap to manage or deactivate</div>
           </div>
@@ -3446,7 +3446,7 @@ function ExportSheet({ open, onClose, store }) {
         ? `<p style="color:${inkFaint};font-size:14px;text-align:center;padding:40px">No data in this range.</p>`
         : logs.map(l => {
           const date = new Date(l.date + 'T12:00:00');
-          const dateLabel = date.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+          const dateLabel = date.toLocaleDateString('en-US', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
           const cardioMin = cardio[l.date]?.min;
           const adh = l.adherence != null ? Math.round(l.adherence) : null;
           const daySessions = sessions[l.date] || [];

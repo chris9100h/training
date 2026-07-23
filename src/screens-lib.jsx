@@ -1764,7 +1764,7 @@ function ProgressChart({ points, title, fmtVal }) {
     return [x, yOf(p.est)];
   });
   const path = xy.map(([x,y], i) => `${i===0?'M':'L'}${x.toFixed(1)},${y.toFixed(1)}`).join(' ');
-  const fmtDate = d => new Date(d).toLocaleDateString('en', { month: 'short', day: 'numeric' });
+  const fmtDate = d => new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   const unit = UI.unit();
   // Default axis: rounded kg/lbs values (est. 1RM). A time exercise passes
   // fmtVal (fmtDuration) and its own title, the geometry stays identical.
@@ -1808,7 +1808,7 @@ function CardioLineChart({ points, label, formatVal, yMin, yMax }) {
     return [x, yOf(p.value)];
   });
   const pathD = xy.map(([x, y], i) => `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`).join(' ');
-  const fmtDate = d => new Date(d).toLocaleDateString('en', { month: 'short', day: 'numeric' });
+  const fmtDate = d => new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   return (
     <div style={{ background: UI.bgInset, borderRadius: 6, padding: '10px 12px', border: `var(--hair-width) solid ${UI.hair}` }}>
       <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>{label}</div>

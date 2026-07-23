@@ -4126,7 +4126,7 @@ async function submitCheckin(coachingId, clientId, responses, userId, weekStartA
   try {
     const d = new Date(weekStart + 'T12:00:00');
     const endDate = new Date(d); endDate.setDate(d.getDate() + 6);
-    const fmt = (dt) => dt.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
+    const fmt = (dt) => dt.toLocaleDateString('en-US', { day: '2-digit', month: 'short' });
     const weekLabel = `${isEdit ? '✏️ EDITED · ' : ''}Week of ${fmt(d)} – ${fmt(endDate)}`;
     const lines = [weekLabel, '------------'];
     const wUnit = (typeof window !== 'undefined' && window.__UNIT) || 'kg';
@@ -6617,7 +6617,7 @@ function timeAgo(iso, { capDays } = {}) {
   if (hrs < 24) return `${hrs}h ago`;
   const days = Math.floor(hrs / 24);
   if (capDays == null || days < capDays) return `${days}d ago`;
-  return new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+  return new Date(iso).toLocaleDateString('en-US', { day: 'numeric', month: 'short' });
 }
 
 // "today"/"yesterday"/"Nd ago" from a pre-computed day difference (today=0).

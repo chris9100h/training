@@ -62,7 +62,7 @@ class ErrorBoundary extends React.Component {
 
 function AutoCloseBanner({ notify, onDismiss }) {
   const { dayName, date, durationMinutes } = notify;
-  const dateLabel = date ? new Date(date + 'T12:00:00').toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' }) : '';
+  const dateLabel = date ? new Date(date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' }) : '';
   return (
     <div style={{
       position: 'fixed', inset: 0, zIndex: 9998,

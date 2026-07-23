@@ -2982,7 +2982,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
               ? WEEKDAYS[i]
               : isFlex
                 ? `D${(d.slotIdx ?? i) + 1}`
-                : d.date.toLocaleDateString(undefined, { day: 'numeric', month: 'numeric' }).replace(/\.$/, '');
+                : d.date.toLocaleDateString('en-US', { day: 'numeric', month: 'numeric' });
             let isCompleted = false;
             if (!r && isFlex) {
               // Earlier slots in the current rotation pass that have a session,
@@ -3033,7 +3033,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
                     <>
                       <div>{WEEKDAYS[d.weekday]}</div>
                       <div style={{ fontSize: 7, marginTop: 1, opacity: 0.75 }}>
-                        {d.date.toLocaleDateString(undefined, { day: 'numeric', month: 'numeric' }).replace(/\.$/, '')}
+                        {d.date.toLocaleDateString('en-US', { day: 'numeric', month: 'numeric' })}
                       </div>
                     </>
                   ) : slotLabel}
