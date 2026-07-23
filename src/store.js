@@ -2003,6 +2003,24 @@ async function scanLabel(imageBase64, mimeType) {
   return { ok: true, label: data };
 }
 
+// ── Recipe sharing ──────────────────────────────────────────────────────────
+// A share is a server-side jsonb snapshot of the recipe (zane_recipe_shares),
+// keyed by an unguessable token that doubles as the deep link (?share=<token>).
+// Both RPCs are authenticated-only; the token itself is the authorization to
+// read that one snapshot. Re-sharing the same recipe returns the same token.
+async function createRecipeShare(recipeId, recipe) {
+  const { data, error } = await _supabase.rpc('create_recipe_share', { p_recipe_id: recipeId, p_recipe: recipe });
+  if (error) return { ok: false, error: error.message };
+  return { ok: true, token: data };
+}
+
+async function fetchRecipeShare(token) {
+  const { data, error } = await _supabase.rpc('get_recipe_share', { p_token: token });
+  if (error) return { ok: false, error: error.message };
+  if (!data?.recipe) return { ok: false, error: 'This share link is invalid or was removed.' };
+  return { ok: true, share: data };
+}
+
 function findExercise(state, exId) {
   return state.exercises.find(e => e.id === exId);
 }
@@ -6871,7 +6889,7 @@ window.LB = {
   effReps, fmtDuration, e1rm, isImprovement, isDecline, bestE1rmForExercise, bestAssistLoad, bestTimeForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, buildTimeSeedSets, latestBodyweight, bodyweightForDate, exerciseLogMode, isAssisted, shouldPullBodyweight, systemExerciseToRow, inferCurrentExIdx, calcBlended,
   refreshExerciseBests, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries,
   computeNextReminderAt,
-  cancelPushover, adminSendEmail, searchFoods, cacheFood, scanLabel,
+  cancelPushover, adminSendEmail, searchFoods, cacheFood, scanLabel, createRecipeShare, fetchRecipeShare,
   subscribeToChanges,
   openStatusPeriod, closeStatusPeriod, updateStatusPeriodStart, clearStatusMode,
   startDeload, endDeload, deloadElapsed, deloadDaysRemaining, deloadPlanDays,

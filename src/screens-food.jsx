@@ -1155,6 +1155,34 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   function deleteRecipe(recipe) {
     setStore(s => ({ ...s, foodRecipes: (s.foodRecipes || []).filter(r => r.id !== recipe.id) }));
   }
+  // ── Recipe sharing (sender side) ──
+  // Creates (or refreshes) the server-side snapshot for this recipe and opens
+  // the share-link Sheet below. The Sheet's own buttons hand the link to the
+  // OS share sheet / clipboard IN a fresh tap: calling navigator.share right
+  // here, after the RPC roundtrip, would land outside iOS Safari's transient
+  // user-activation window and get rejected.
+  const [shareSheet, setShareSheet] = useStateFd(null); // { recipe, status: 'busy'|'ready'|'error', url?, error?, copied? } | null
+  async function openShareRecipe(recipe) {
+    setShareSheet({ recipe, status: 'busy' });
+    const res = await LB.createRecipeShare(recipe.id, { name: recipe.name, portions: recipe.portions || 1, items: recipe.items || [] });
+    setShareSheet(cur => {
+      if (!cur || cur.recipe.id !== recipe.id) return cur; // closed in the meantime
+      return res.ok
+        ? { recipe, status: 'ready', url: `${location.origin}${location.pathname}?share=${res.token}` }
+        : { recipe, status: 'error', error: res.error || 'Could not create the share link.' };
+    });
+  }
+  async function copyShareLink() {
+    if (!shareSheet?.url) return;
+    try {
+      await navigator.clipboard.writeText(shareSheet.url);
+      setShareSheet(cur => cur ? { ...cur, copied: true } : cur);
+    } catch (_) { /* link is shown selectable in the Sheet as the manual fallback */ }
+  }
+  function shareShareLink() {
+    if (!shareSheet?.url) return;
+    navigator.share({ title: `${shareSheet.recipe.name} · Zane recipe`, url: shareSheet.url }).catch(() => {});
+  }
 
   // Finds the live recipe a logged/recent recipe entry was built from, by
   // name (its own foodName may carry a "(chosen/total portions)" suffix, see
@@ -1778,6 +1806,9 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                             </div>
                             <div className="num" style={{ fontSize: 12, color: UI.inkSoft, flexShrink: 0 }}>{kcal} kcal</div>
                           </button>
+                          <button onClick={() => openShareRecipe(r)} aria-label="Share recipe" style={fdSideBtn}>
+                            <i className="fa-solid fa-share-from-square" style={{ fontSize: 12 }} />
+                          </button>
                           <button onClick={() => editRecipe(r)} aria-label="Edit recipe" style={fdSideBtn}>
                             <i className="fa-solid fa-pen" style={{ fontSize: 12 }} />
                           </button>
@@ -2036,6 +2067,39 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         )}
       </Sheet>
 
+      {/* ── Recipe share-link sheet (sender side, see openShareRecipe) ── */}
+      <Sheet open={!!shareSheet} onClose={() => setShareSheet(null)} title={shareSheet ? `Share ${shareSheet.recipe.name}` : 'Share recipe'} titleColor="var(--accent)">
+        {shareSheet?.status === 'busy' && (
+          <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, padding: '8px 0 16px' }}>Creating the share link…</div>
+        )}
+        {shareSheet?.status === 'error' && (
+          <>
+            <div style={{ fontSize: 12, color: UI.danger, fontFamily: UI.fontUi, marginBottom: 14, lineHeight: 1.4 }}>{shareSheet.error}</div>
+            <Btn onClick={() => openShareRecipe(shareSheet.recipe)} style={{ width: '100%' }}>Try again</Btn>
+          </>
+        )}
+        {shareSheet?.status === 'ready' && (
+          <>
+            <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 14, lineHeight: 1.4 }}>
+              Anyone with this link can open the recipe in Zane and add a copy to their own recipes. The link carries a snapshot: edits you make later are not sent along.
+            </div>
+            <div className="num" style={{ fontSize: 11, color: UI.inkFaint, padding: '10px 12px', background: UI.bgInset, border: `1px solid ${UI.hair}`, borderRadius: 6, wordBreak: 'break-all', userSelect: 'all', WebkitUserSelect: 'all', marginBottom: 14, textShadow: 'none' }}>
+              {shareSheet.url}
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Btn kind="ghost" onClick={copyShareLink} style={{ flex: 1 }}>
+                <i className={`fa-solid ${shareSheet.copied ? 'fa-check' : 'fa-copy'}`} style={{ marginRight: 8 }} />{shareSheet.copied ? 'Copied' : 'Copy link'}
+              </Btn>
+              {typeof navigator.share === 'function' && (
+                <Btn onClick={shareShareLink} style={{ flex: 1 }}>
+                  <i className="fa-solid fa-share-from-square" style={{ marginRight: 8 }} /> Share…
+                </Btn>
+              )}
+            </div>
+          </>
+        )}
+      </Sheet>
+
       <RecipeEditorScreen open={recipeEditorOpen} onClose={() => setRecipeEditorOpen(false)} onSave={handleRecipeSave} recipe={recipeEditorRecipe} store={store} />
     </Screen>
   );
@@ -2051,6 +2115,128 @@ function FoodScreen({ store, setStore, go, userId, date }) {
 // RecipeEditorScreen (the batch hero).
 function fdRecipeItemsCalories(items) {
   return Math.round((items || []).reduce((a, i) => a + (LB.caloriesFromMacros(i.protein, i.carbs, i.fat) || 0), 0));
+}
+
+// ── Recipe share (receiver side) ────────────────────────────────────────────
+// App-level overlay for an incoming ?share=<token> deep link, mounted from
+// app.jsx once the app is 'ready' (NOT inside FoodScreen: the link must
+// resolve no matter which screen the app opened on). Fetches the snapshot,
+// previews it, and "Add to my recipes" copies it into store.foodRecipes as a
+// brand-new fully-owned recipe: fresh item ids, whitelisted item fields only
+// (the snapshot is another user's jsonb, so never spread it blindly), and a
+// "(2)"-style suffix when the name is already taken (FoodScreen resolves a
+// logged recipe entry back to its source BY NAME, duplicates would make that
+// ambiguous). The copy then syncs through the normal foodRecipes collection
+// diff like any hand-built recipe.
+function RecipeShareSheet({ store, setStore, token, onClose }) {
+  const [state, setState] = useStateFd({ status: 'loading' }); // { status: 'loading'|'error'|'ready', share?, error? }
+  const [added, setAdded] = useStateFd(false);
+
+  useEffectFd(() => {
+    let dead = false;
+    (async () => {
+      const res = await LB.fetchRecipeShare(token);
+      if (dead) return;
+      setState(res.ok ? { status: 'ready', share: res.share } : { status: 'error', error: res.error || 'Could not load this share link.' });
+    })();
+    return () => { dead = true; };
+  }, [token]);
+
+  const recipe = state.share?.recipe;
+  const items = Array.isArray(recipe?.items) ? recipe.items : [];
+  const totals = useMemoFd(() => ({
+    calories: fdRecipeItemsCalories(items),
+    protein: Math.round(items.reduce((a, i) => a + (Number(i.protein) || 0), 0)),
+    carbs: Math.round(items.reduce((a, i) => a + (Number(i.carbs) || 0), 0)),
+    fat: Math.round(items.reduce((a, i) => a + (Number(i.fat) || 0), 0)),
+  }), [state.share]); // eslint-disable-line
+
+  function adopt() {
+    const now = new Date().toISOString();
+    const num = v => (Number.isFinite(Number(v)) ? Number(v) : 0);
+    setStore(s => {
+      if (!s) return s;
+      const names = new Set((s.foodRecipes || []).map(r => r.name));
+      const base = String(recipe.name || 'Shared recipe');
+      let name = base, n = 2;
+      while (names.has(name)) { name = `${base} (${n})`; n++; }
+      const copy = {
+        id: LB.uid(), name,
+        portions: parseInt(recipe.portions, 10) > 0 ? parseInt(recipe.portions, 10) : 1,
+        items: items.map(i => ({
+          id: LB.uid(),
+          foodId: typeof i.foodId === 'string' ? i.foodId : null,
+          foodName: String(i.foodName || 'Item'),
+          brand: i.brand != null ? String(i.brand) : null,
+          source: typeof i.source === 'string' ? i.source : null,
+          quantityG: num(i.quantityG),
+          calories: Math.round(num(i.calories)),
+          protein: num(i.protein), carbs: num(i.carbs), fat: num(i.fat),
+          fiber: i.fiber != null && Number.isFinite(Number(i.fiber)) ? Number(i.fiber) : null,
+        })),
+        createdAt: now, updatedAt: now,
+      };
+      return { ...s, foodRecipes: [copy, ...(s.foodRecipes || [])] };
+    });
+    setAdded(true);
+  }
+
+  return (
+    <Sheet open onClose={onClose} title="Shared recipe" titleColor="var(--accent)">
+      {state.status === 'loading' && (
+        <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, padding: '8px 0 16px' }}>Loading recipe…</div>
+      )}
+      {state.status === 'error' && (
+        <>
+          <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 14, lineHeight: 1.4 }}>{state.error}</div>
+          <Btn onClick={onClose} style={{ width: '100%' }}>Close</Btn>
+        </>
+      )}
+      {state.status === 'ready' && (
+        <>
+          <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 4 }}>
+            {String(state.share.sharedBy || 'A Zane user')} shared a recipe with you:
+          </div>
+          <div style={{ fontSize: 16, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi, marginBottom: 2 }}>{String(recipe.name || 'Recipe')}</div>
+          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 12 }}>
+            {items.length} ingredient{items.length === 1 ? '' : 's'} · makes {recipe.portions || 1} portion{(recipe.portions || 1) === 1 ? '' : 's'}
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 12, maxHeight: '38vh', overflowY: 'auto' }}>
+            {items.map((i, idx) => (
+              <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, padding: '8px 12px', background: UI.bgInset, border: `1px solid ${UI.hair}`, borderRadius: 6, textShadow: 'none' }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 12, color: UI.ink, fontFamily: UI.fontUi, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{String(i.foodName || 'Item')}</div>
+                  <div className="num" style={{ fontSize: 10, color: UI.inkFaint }}>{Math.round(Number(i.quantityG) || 0)} g</div>
+                </div>
+                <span className="num" style={{ fontSize: 11, color: UI.inkSoft, flexShrink: 0 }}>{Math.round(LB.caloriesFromMacros(i.protein, i.carbs, i.fat) || 0)} kcal</span>
+              </div>
+            ))}
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', background: UI.bgInset, border: `1px solid ${UI.hair}`, borderRadius: 6, marginBottom: 16, textShadow: 'none' }}>
+            <span className="num" style={{ fontSize: 15, color: UI.ink }}>{totals.calories} kcal</span>
+            <span style={{ display: 'flex', gap: 10 }}>
+              <span className="num" style={{ fontSize: 12, fontWeight: 600, color: UI.inkSoft }}>P {totals.protein}</span>
+              <span className="num" style={{ fontSize: 12, fontWeight: 600, color: UI.inkSoft }}>C {totals.carbs}</span>
+              <span className="num" style={{ fontSize: 12, fontWeight: 600, color: UI.inkSoft }}>F {totals.fat}</span>
+            </span>
+          </div>
+          {added ? (
+            <>
+              <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 12, lineHeight: 1.4 }}>
+                <i className="fa-solid fa-check" style={{ marginRight: 6, color: 'var(--accent)' }} />
+                Added. You'll find it under Food log, Quick Add, Recipes.
+              </div>
+              <Btn onClick={onClose} style={{ width: '100%' }}>Done</Btn>
+            </>
+          ) : (
+            <Btn onClick={adopt} style={{ width: '100%' }}>
+              <i className="fa-solid fa-plus" style={{ marginRight: 8 }} /> Add to my recipes
+            </Btn>
+          )}
+        </>
+      )}
+    </Sheet>
+  );
 }
 
 // Recipe editor: a dedicated full page (same "full page, not a Sheet" idiom
@@ -3138,4 +3324,4 @@ const fdPreset = {
 };
 
 window.Screens = window.Screens || {};
-Object.assign(window.Screens, { FoodScreen });
+Object.assign(window.Screens, { FoodScreen, RecipeShareSheet });

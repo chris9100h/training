@@ -19,6 +19,20 @@ function unseenWhatsNew() {
   return idx === -1 ? [all[0]] : all.slice(0, idx); // newest-first: before the seen entry = unseen
 }
 
+// Recipe-share deep link (…/?share=<token>, see RecipeShareSheet in
+// screens-food.jsx): stash the token BEFORE anything else runs, so it survives
+// the login (or even signup + approval) roundtrip a logged-out recipient goes
+// through, then scrub it from the URL so a later reload doesn't re-trigger.
+// Consumed (and cleared) by the RecipeShareSheet overlay once the app is ready.
+const PENDING_SHARE_KEY = 'logbook-pending-share';
+try {
+  const _shareToken = new URLSearchParams(window.location.search).get('share');
+  if (_shareToken && /^[a-f0-9]{16,64}$/i.test(_shareToken)) {
+    localStorage.setItem(PENDING_SHARE_KEY, _shareToken);
+    window.history.replaceState(null, '', window.location.pathname + window.location.hash);
+  }
+} catch (_) {}
+
 function useIsPad() {
   const [isPad, setIsPad] = useStateA(() => window.innerWidth >= 768);
   useEffectA(() => {
@@ -290,6 +304,9 @@ function App() {
   const [onboardingState, setOnboardingState] = useStateA(null); // null | { phase:'prompt' } | { phase:'tour', tourKey }
   const onboardingChecked = useRefA(false);
   const [unitPromptOpen, setUnitPromptOpen] = useStateA(false);
+  const [pendingShare, setPendingShare] = useStateA(() => {   // ?share=<token> stashed by the module-scope block above
+    try { return localStorage.getItem(PENDING_SHARE_KEY); } catch (_) { return null; }
+  });
   const unitPicked                = useRefA(false); // user chose a unit this session — silences the reset watcher
   const retryTimer                = useRefA(null);  // one-shot retry after a failed sync
   const waitingWorker             = useRefA(null);
@@ -1531,6 +1548,15 @@ function App() {
             unitPicked.current = true; // latch before setStore so the reset watcher won't re-null
             setUnitPromptOpen(false);
             setStore(s => s ? { ...s, settings: { ...s.settings, unit: chosenUnit } } : s);
+          }}
+        />
+      )}
+      {pendingShare && store && window.Screens?.RecipeShareSheet && (
+        <window.Screens.RecipeShareSheet
+          store={store} setStore={setStore} token={pendingShare}
+          onClose={() => {
+            try { localStorage.removeItem(PENDING_SHARE_KEY); } catch (_) {}
+            setPendingShare(null);
           }}
         />
       )}

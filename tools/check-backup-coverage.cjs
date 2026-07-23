@@ -59,6 +59,7 @@ const EXCLUDED = {
   zane_coaching_macros: 'coaching (export archive only)',
   zane_checkins: 'coaching (export archive only)',
   zane_foods: 'shared/global reference cache (Open Food Facts/USDA), not per-user data',
+  zane_recipe_shares: 'recipe share-link snapshots (RPC-only); an adopted share becomes a normal zane_food_recipes row',
 };
 
 // Columns that legitimately never round-trip.
