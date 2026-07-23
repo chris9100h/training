@@ -786,9 +786,19 @@ async function setupNewUser(userId, name, unit) {
 // 8-week volume chart with margin, so boot stays O(sessions), never O(sets).
 const HISTORY_WINDOW_DAYS = 70;
 
-function historyWindowCutoffISO(now = new Date()) {
+// How far back boot loads zane_food_logs. Unlike sessions, a food log row IS
+// its own full record (no separate heavy sub-table to window instead), so
+// this windows the whole row: entries older than this simply aren't fetched.
+// Nothing today reads food history past this (the Log tab's own day nav caps
+// backdating/browsing at 14 days), so the only effect is that anything older
+// quietly drops out of the local cache after the first boot on this window,
+// harmlessly, it's never deleted server-side (syncBase and the live store
+// both window together at boot, so there is never a diff to delete).
+const FOOD_HISTORY_WINDOW_DAYS = 30;
+
+function historyWindowCutoffISO(now = new Date(), days = HISTORY_WINDOW_DAYS) {
   const d = new Date(now);
-  d.setDate(d.getDate() - HISTORY_WINDOW_DAYS);
+  d.setDate(d.getDate() - days);
   return d.toISOString().slice(0, 10);
 }
 
@@ -839,6 +849,7 @@ function normalizeHiddenHealthCards(arr) {
 async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   const isCoachLoad = !!_opts.coachLoad;
   const histCutoff = historyWindowCutoffISO();
+  const foodHistCutoff = historyWindowCutoffISO(new Date(), FOOD_HISTORY_WINDOW_DAYS);
   const queries = [
     _supabase.from('zane_profiles').select('id, name, approved').eq('id', userId).maybeSingle(),
     _supabase.from('zane_exercises').select('id, name, tags, note, category, unilateral, equipment, progression_reps, movement_type, no_weight_reps, log_mode, pull_bodyweight, youtube_url, note_pinned, progression_increment').eq('user_id', userId),
@@ -906,7 +917,9 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     _supabase.from('zane_water_logs').select('id, date, time, amount_ml, name, category, breakdown, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
     // Food tracker per-entry logs (migration 0186): multiple entries per day,
     // denormalized at write time. Coach reads a client's via coach-of-client RLS.
-    _supabase.from('zane_food_logs').select('id, date, time, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, recipe_items, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
+    // Windowed to FOOD_HISTORY_WINDOW_DAYS (see its own comment): nothing
+    // reads food history further back than that today.
+    _supabase.from('zane_food_logs').select('id, date, time, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, recipe_items, created_at').eq('user_id', userId).gte('date', foodHistCutoff).order('date', { ascending: false }).order('time', { ascending: false }),
     // Food tracker quick-add: user-starred foods and saved recipes (migration
     // 0187), own store only: a coach's read-only client view has no use for
     // another user's personal shortcuts (owner-only RLS, no coach-read policy).
@@ -4751,12 +4764,13 @@ async function endDeload(userId, store, setStore) {
   if (coachingId) {
     try {
       const threadId = await getOrCreateCoachingThread(coachingId, 'Status Updates', userId);
-      await addCoachingNote(coachingId, 'general', null, null, 'Status: Deload finished — back to normal training.', userId, threadId);
+      await addCoachingNote(coachingId, 'general', null, null, 'Status: Deload finished, back to normal training.', userId, threadId);
     } catch (_) {}
   }
 }
 
 async function refreshHealthLogs(userId) {
+  const foodHistCutoff = historyWindowCutoffISO(new Date(), FOOD_HISTORY_WINDOW_DAYS);
   const [dailyRes, cardioRes, glucoseRes, bpRes, tempRes, waterRes, foodRes] = await Promise.all([
     _supabase.from('zane_daily_logs').select('id, date, weight, steps, calories, protein, carbs, fat, fiber, water_ml, note, off_plan_note, adherence, targets_snap, daily_coach_fields, updated_at, created_at').eq('user_id', userId).order('date', { ascending: false }),
     _supabase.from('zane_cardio_logs').select('id, date, type, duration_minutes, distance_m, pace_feeling, effort, note, session_id, created_at').eq('user_id', userId).order('date', { ascending: false }),
@@ -4764,7 +4778,7 @@ async function refreshHealthLogs(userId) {
     _supabase.from('zane_blood_pressure_logs').select('id, date, time, systolic, diastolic, note, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
     _supabase.from('zane_body_temp_logs').select('id, date, time, value_c, note, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
     _supabase.from('zane_water_logs').select('id, date, time, amount_ml, name, category, breakdown, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
-    _supabase.from('zane_food_logs').select('id, date, time, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, recipe_items, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
+    _supabase.from('zane_food_logs').select('id, date, time, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, recipe_items, created_at').eq('user_id', userId).gte('date', foodHistCutoff).order('date', { ascending: false }).order('time', { ascending: false }),
   ]);
   if (dailyRes.error || cardioRes.error || glucoseRes.error || bpRes.error || tempRes.error || waterRes.error || foodRes.error) return null;
   return {
