@@ -1193,8 +1193,8 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
     <div style={{ flex: 1 }}>
       <div style={labelStyle}>{label}{unit ? ` (${unit})` : ''}</div>
       {locked
-        ? <div onClick={requestFoodUnlock} style={{ ...inputStyle, opacity: 0.45, cursor: 'pointer' }}>{form[k] || '—'}</div>
-        : <input type="text" inputMode="decimal" placeholder="—" value={form[k]} onChange={e => set(k, e.target.value)} style={inputStyle} />}
+        ? <div onClick={requestFoodUnlock} style={{ ...inputStyle, opacity: 0.45, cursor: 'pointer' }}>{form[k] || ''}</div>
+        : <input type="text" inputMode="decimal" placeholder="" value={form[k]} onChange={e => set(k, e.target.value)} style={inputStyle} />}
     </div>
   );
   const waterQuickAddTileStyle = { padding: '10px 12px', borderRadius: 4, border: `var(--hair-width) solid ${UI.hairStrong}`, background: UI.bgInset, color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 12, whiteSpace: 'nowrap' };
@@ -1314,8 +1314,8 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
         <div style={{ marginBottom: 12 }}>
           <div style={labelStyle}>Calories (kcal){autoCals != null && form.calories === '' ? (netCarbs ? ' · net carbs' : ' · from macros') : ''}</div>
           {foodLocked
-            ? <div onClick={requestFoodUnlock} style={{ ...inputStyle, opacity: 0.45, cursor: 'pointer' }}>{form.calories || '—'}</div>
-            : <input type="text" inputMode="decimal" placeholder={autoCals != null ? String(autoCals) : '—'} value={form.calories} onChange={e => set('calories', e.target.value)} style={inputStyle} />}
+            ? <div onClick={requestFoodUnlock} style={{ ...inputStyle, opacity: 0.45, cursor: 'pointer' }}>{form.calories || ''}</div>
+            : <input type="text" inputMode="decimal" placeholder={autoCals != null ? String(autoCals) : ''} value={form.calories} onChange={e => set('calories', e.target.value)} style={inputStyle} />}
         </div>
         {foodLocked && (
           <button onClick={requestFoodUnlock} style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 5, background: 'none', border: 'none', padding: '4px 0', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
@@ -2656,9 +2656,10 @@ function HealthScreen({ store, setStore, go, userId }) {
     if (!foodTouchedDates.size || !effectiveTargets) return;
     const flexActive = LB.isFlexPlan((store.schedules || []).find(s => s.id === store.activeScheduleId));
     setStore(s => {
-      let changed = false;
-      const nextLogs = (s.dailyLogs || []).map(log => {
-        if (!foodTouchedDates.has(log.date)) return log;
+      const touchedLogs = (s.dailyLogs || []).filter(log => foodTouchedDates.has(log.date));
+      if (!touchedLogs.length) return s;
+      const reconciled = new Map();
+      touchedLogs.forEach(log => {
         const dayMode = log.date === today ? (s.statusMode ?? null) : (() => {
           const ts = new Date(log.date + 'T12:00:00').getTime();
           const period = (s.statusPeriods || []).find(p => {
@@ -2676,13 +2677,14 @@ function HealthScreen({ store, setStore, go, userId }) {
           const dt = log.targetsSnap?.dayType;
           if (dt === 'training' || dt === 'rest') targetsSnap = { dayType: dt };
         }
-        if (log.adherence === adherence && JSON.stringify(log.targetsSnap) === JSON.stringify(targetsSnap)) return log;
-        changed = true;
-        return { ...log, adherence, targetsSnap };
+        if (log.adherence === adherence && JSON.stringify(log.targetsSnap) === JSON.stringify(targetsSnap)) return;
+        reconciled.set(log.date, { ...log, adherence, targetsSnap });
       });
-      return changed ? { ...s, dailyLogs: nextLogs } : s;
+      if (!reconciled.size) return s;
+      const nextLogs = s.dailyLogs.map(log => reconciled.has(log.date) ? reconciled.get(log.date) : log);
+      return { ...s, dailyLogs: nextLogs };
     });
-  }, [foodTouchedDates, effectiveTargets]);
+  }, [foodTouchedDates, effectiveTargets, store.schedules, store.activeScheduleId]);
 
   // Two-sided retroactive heal for a past day's saved day type:
   //  • DOWNGRADE training → rest: a training-tagged day with NO logged session
