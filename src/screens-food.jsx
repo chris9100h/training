@@ -170,6 +170,17 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // the last expand state.
   const [pickedExpanded, setPickedExpanded] = useStateFd(false);
   useEffectFd(() => { if (!staged.length) setPickedExpanded(false); }, [staged.length]);
+  // Which timeline entries (by id) currently show their expanded ingredient
+  // list, for a source:'recipe' entry's chevron. Per-device UI state only,
+  // not persisted.
+  const [expandedEntryIds, setExpandedEntryIds] = useStateFd(() => new Set());
+  function toggleEntryExpanded(id) {
+    setExpandedEntryIds(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
 
   const [sourceFilter, setSourceFilter] = useStateFd(null); // null = all
   const [query, setQuery] = useStateFd('');
@@ -186,6 +197,12 @@ function FoodScreen({ store, setStore, go, userId, date }) {
 
   const [qtySheetOpen, setQtySheetOpen] = useStateFd(false);
   const [pendingFood, setPendingFood] = useStateFd(null);
+  // Set while the quantity sheet is editing an ALREADY-LOGGED timeline entry
+  // in place (openEditEntry) rather than picking a new one to stage: holds
+  // the original entry so confirmLogFood can update it by id and preserve
+  // its own date/time (its own commit path skips the staging entirely, an
+  // in-place edit isn't a new item to batch). null the rest of the time.
+  const [editingEntry, setEditingEntry] = useStateFd(null);
   const [qtyG, setQtyG] = useStateFd(''); // always grams, the actual source of truth for qtyPreview/buildQtyEntry
   // Amount field mode when pendingFood.units has entries: null means the
   // field is grams (qtyG itself, typed directly); otherwise it's an index
@@ -855,7 +872,17 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     const n = fdNum(filtered);
     setQtyG(unit && n != null ? String(fdRound1(n * unit.grams)) : '');
   }
-  function closeQtySheet() { setQtySheetOpen(false); setPendingFood(null); setQtyG(''); setFavedId(null); setP100Str(''); setC100Str(''); setF100Str(''); setKcal100Str(''); setKcal100Touched(false); setQtyUnitIdx(null); setQtyCountStr(''); }
+  function closeQtySheet() { setQtySheetOpen(false); setPendingFood(null); setQtyG(''); setFavedId(null); setP100Str(''); setC100Str(''); setF100Str(''); setKcal100Str(''); setKcal100Touched(false); setQtyUnitIdx(null); setQtyCountStr(''); setEditingEntry(null); }
+  // Reopens an already-logged (non-recipe) timeline entry through the same
+  // scalable quantity sheet used to log it in the first place, deriving
+  // per-100g rates from what it was actually logged at (reAddFromRecent
+  // already does exactly this for both a DB food and a custom item);
+  // editingEntry then routes confirmLogFood to update it in place instead
+  // of staging a new one.
+  function openEditEntry(entry) {
+    setEditingEntry(entry);
+    reAddFromRecent(entry);
+  }
   function closeCustomSheet() { setCustomOpen(false); setFavedId(null); }
 
   // Build the entry the open sheet describes right now (without logging it), so
@@ -967,10 +994,24 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // away, so search/favorites/recent all share the same "pick, then Add N
   // items" flow. Caching a freshly-fetched DB food still happens right here
   // though, same as before: that's independent of whether the pick ever
-  // ends up committed.
+  // ends up committed. editingEntry (see openEditEntry) skips staging
+  // entirely: an in-place fix isn't a new pick to batch, it updates the
+  // existing row by id and keeps its own original date/time (buildQtyEntry
+  // only knows about curDate/entryTime(), which the sheet may have opened
+  // under different than whenever the entry was originally logged).
   function confirmLogFood() {
-    const entry = buildQtyEntry();
-    if (!entry) return;
+    const built = buildQtyEntry();
+    if (!built) return;
+    if (editingEntry) {
+      const updated = { ...built, id: editingEntry.id, date: editingEntry.date, time: editingEntry.time };
+      setStore(s => {
+        const nextLogs = (s.foodLogs || []).map(l => l.id === editingEntry.id ? updated : l);
+        return { ...s, foodLogs: nextLogs, dailyLogs: patchDaily(s, updated.date, nextLogs.filter(l => l.date === updated.date)) };
+      });
+      closeQtySheet();
+      return;
+    }
+    const entry = built;
     setStaged(list => [...list, entry]);
     if (entry.foodId && pendingFood && !pendingFood.fromCache) {
       LB.cacheFood(pendingFood.source, pendingFood.sourceId);
@@ -1038,6 +1079,16 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       quantityG: Math.round(sum('quantityG') * scale), calories: Math.round(fdRecipeItemsCalories(items) * scale),
       protein: fdRound1(sum('protein') * scale), carbs: fdRound1(sum('carbs') * scale), fat: fdRound1(sum('fat') * scale),
       fiber: items.some(i => i.fiber != null) ? fdRound1(sum('fiber') * scale) : null,
+      // Snapshot at the SAME scale as the entry's own totals, so the
+      // timeline's expanded ingredient list always adds back up to exactly
+      // what's shown collapsed. A later edit to the source recipe must
+      // never retroactively change this: copied here, not referenced.
+      recipeItems: items.map(i => ({
+        foodName: i.foodName, quantityG: Math.round((i.quantityG || 0) * scale),
+        calories: Math.round((LB.caloriesFromMacros(i.protein, i.carbs, i.fat) || 0) * scale),
+        protein: fdRound1((i.protein || 0) * scale), carbs: fdRound1((i.carbs || 0) * scale), fat: fdRound1((i.fat || 0) * scale),
+        fiber: i.fiber != null ? fdRound1(i.fiber * scale) : null,
+      })),
       createdAt: new Date().toISOString(),
     };
     setStaged(list => [...list, entry]);
@@ -1235,20 +1286,62 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                                   actual drop-hittable area was a sliver around that single
                                   pixel, not the row a user sees and aims for. */}
                               <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6, alignSelf: 'stretch' }}>
-                                {filled ? es.map(e => (
-                                  <div key={e.id} data-reorder-item="true" style={fdEntryRow}>
-                                    <DragHandle style={{ width: 14, height: 22, marginRight: 2 }} />
-                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0, flex: 1 }}>
-                                      <span style={fdEntryName}>{e.foodName}</span>
-                                      <span style={fdEntryMeta}>
-                                        {e.quantityG ? `${e.quantityG}g · ` : ''}{e.calories} kcal · P{Math.round(e.protein)} C{Math.round(e.carbs)} F{Math.round(e.fat)}
-                                      </span>
-                                    </div>
-                                    <button data-reorder-ignore="true" onClick={() => deleteEntry(e)} aria-label="Delete" style={fdInlineDeleteBtn}>
-                                      <i className="fa-solid fa-trash" style={{ fontSize: 12 }} />
-                                    </button>
-                                  </div>
-                                )) : <div data-reorder-item="true" data-reorder-ignore="true" style={{ flex: 1 }} />}
+                                {filled ? es.map(e => {
+                                  // A recipe entry's own row expands to its ingredient
+                                  // snapshot (recipeItems, see confirmRecipeLog); any
+                                  // other entry's row is instead tap-to-edit, reopening
+                                  // the scalable quantity sheet on its current values
+                                  // (openEditEntry) for fixing a typo without a delete +
+                                  // re-add. isRecipe alone (not hasRecipeItems) gates
+                                  // edit: a recipe's "quantity" is really portions of the
+                                  // whole batch, which the sheet's simple per-100g scaling
+                                  // doesn't model, true regardless of whether this
+                                  // particular entry happens to have an ingredient
+                                  // snapshot to show (recipe_items shipped after some
+                                  // entries were already logged, so older recipe rows
+                                  // have neither a chevron nor edit, not one falling back
+                                  // to the other).
+                                  const isRecipe = e.source === 'recipe';
+                                  const hasRecipeItems = isRecipe && e.recipeItems?.length > 0;
+                                  const expanded = expandedEntryIds.has(e.id);
+                                  return (
+                                    <React.Fragment key={e.id}>
+                                      <div data-reorder-item="true" style={fdEntryRow}>
+                                        <DragHandle style={{ width: 14, height: 22, marginRight: 2 }} />
+                                        <div
+                                          onClick={() => { if (hasRecipeItems) toggleEntryExpanded(e.id); else if (!isRecipe) openEditEntry(e); }}
+                                          style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0, flex: 1, cursor: (hasRecipeItems || !isRecipe) ? 'pointer' : 'default' }}
+                                        >
+                                          <span style={fdEntryName}>{e.foodName}</span>
+                                          <span style={fdEntryMeta}>
+                                            {e.quantityG ? `${e.quantityG}g · ` : ''}{e.calories} kcal · P{Math.round(e.protein)} C{Math.round(e.carbs)} F{Math.round(e.fat)}
+                                          </span>
+                                        </div>
+                                        {hasRecipeItems && (
+                                          <button data-reorder-ignore="true" onClick={() => toggleEntryExpanded(e.id)}
+                                            aria-label={expanded ? 'Collapse ingredients' : 'Expand ingredients'} style={fdInlineDeleteBtn}>
+                                            <i className={`fa-solid fa-chevron-${expanded ? 'down' : 'right'}`} style={{ fontSize: 11 }} />
+                                          </button>
+                                        )}
+                                        <button data-reorder-ignore="true" onClick={() => deleteEntry(e)} aria-label="Delete" style={fdInlineDeleteBtn}>
+                                          <i className="fa-solid fa-trash" style={{ fontSize: 12 }} />
+                                        </button>
+                                      </div>
+                                      {hasRecipeItems && expanded && (
+                                        <div style={fdRecipeIngredientList}>
+                                          {e.recipeItems.map((ri, i) => (
+                                            <div key={i} style={fdRecipeIngredientRow}>
+                                              <span style={{ ...fdEntryName, fontSize: 11, fontWeight: 500 }}>{ri.foodName}</span>
+                                              <span style={fdEntryMeta}>
+                                                {ri.quantityG}g · {ri.calories} kcal · P{Math.round(ri.protein)} C{Math.round(ri.carbs)} F{Math.round(ri.fat)}
+                                              </span>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      )}
+                                    </React.Fragment>
+                                  );
+                                }) : <div data-reorder-item="true" data-reorder-ignore="true" style={{ flex: 1 }} />}
                               </div>
                               <button data-reorder-ignore="true" onClick={() => addAtHour(h)} aria-label={`Add food at ${String(h).padStart(2, '0')}:00`} style={fdHourAddBtn(isNow)}>
                                 <i className="fa-solid fa-plus" style={{ fontSize: 11 }} />
@@ -2648,6 +2741,12 @@ const fdEntryName = { fontSize: 13, fontWeight: 600, color: UI.ink, fontFamily: 
 const fdEntryMeta = { fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi };
 const fdEntryRow = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '10px 12px', background: UI.bgInset, border: `1px solid ${UI.hair}`, borderRadius: 6 };
 const fdInlineDeleteBtn = { background: 'transparent', border: 'none', color: UI.inkFaint, cursor: 'pointer', padding: 6, WebkitTapHighlightColor: 'transparent' };
+// A recipe entry's expanded ingredient snapshot (see confirmRecipeLog's
+// recipeItems), indented under the entry row it belongs to, plain neutral
+// rows (no card chrome of their own, this is a nested detail, not another
+// pickable item).
+const fdRecipeIngredientList = { display: 'flex', flexDirection: 'column', gap: 4, paddingLeft: 22 };
+const fdRecipeIngredientRow = { display: 'flex', flexDirection: 'column', gap: 1 };
 const fdResultRow = {
   display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '10px 12px',
   background: UI.bgInset, border: `1px solid ${UI.hair}`, borderRadius: 6, textShadow: 'none',

@@ -2276,6 +2276,7 @@ CREATE TABLE zane_food_logs (
   carbs        numeric     NOT NULL,
   fat          numeric     NOT NULL,
   fiber        numeric,
+  recipe_items jsonb,                                    -- ingredient snapshot for a source:'recipe' entry, null otherwise
   created_at   timestamptz DEFAULT now()
 );
 
