@@ -252,14 +252,6 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // recipe actually has, not "all of them": logging the whole batch by
   // default would be the more surprising default of the two.
   const [recipeLogPrompt, setRecipeLogPrompt] = useStateFd(null); // { recipe, chosenPortions } | null
-  // A one-tap recipe log (see addRecipeToLog) has no sheet to open/close, so
-  // without this nothing visibly changes on tap: users couldn't tell whether
-  // it registered and often tapped again, logging it twice. addingRecipeId
-  // disables the row for the duration of the write (blocks a fast double-tap
-  // from firing twice); recipeJustAddedId swaps the row's kcal for a brief
-  // checkmark afterwards, same idiom as the exercise library's "Added" state.
-  const [addingRecipeId, setAddingRecipeId] = useStateFd(null);
-  const [recipeJustAddedId, setRecipeJustAddedId] = useStateFd(null);
 
   // Copy/move entries from the viewed day onto another one, at their
   // original time-of-day. copyMoveIds are foodLogs ids picked from
@@ -403,10 +395,10 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // (requestFoodUnlock there warns that editing a locked field gets
   // overwritten the next time food is logged). Once the tracker owns the
   // day (>=1 entry already), no more nagging on every add, same as the lock
-  // only fires on that transition. Shared by commitEntry (single add) and
-  // submitCopyMove (bulk copy/move onto another date). Returns false if the
-  // user backs out, so callers can leave their sheet open instead of
-  // closing on a log that never happened.
+  // only fires on that transition. Shared by commitEntries (single add or a
+  // staged batch) and submitCopyMove (bulk copy/move onto another date).
+  // Returns false if the user backs out, so callers can leave their sheet
+  // open instead of closing on a log that never happened.
   async function warnIfOverwritingManualMacros(dateStr) {
     const alreadyFoodOwned = (store.foodLogs || []).some(l => l.date === dateStr);
     if (alreadyFoodOwned) return true;
@@ -421,9 +413,10 @@ function FoodScreen({ store, setStore, go, userId, date }) {
 
   // Commits any number of entries in one store update, warning once per
   // distinct date represented (usually just one, but a staged batch can in
-  // principle span dates if curDate changed mid-pick). Shared by a single
-  // recipe-log commit (commitEntry) and the staged multi-pick batch
-  // (commitStagedEntries).
+  // principle span dates if curDate changed mid-pick). The only way anything
+  // ever reaches store.foodLogs now: every add flow (search/favorites/
+  // recent/custom/recipe) stages first, commitStagedEntries below is what
+  // actually calls this.
   async function commitEntries(entries) {
     if (!entries.length) return false;
     const dates = [...new Set(entries.map(e => e.date))];
@@ -439,9 +432,6 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     });
     setPendingHour(null);
     return true;
-  }
-  async function commitEntry(entry) {
-    return commitEntries([entry]);
   }
   function removeStaged(id) {
     setStaged(list => list.filter(e => e.id !== id));
@@ -948,39 +938,32 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     setStore(s => ({ ...s, foodRecipes: (s.foodRecipes || []).filter(r => r.id !== recipe.id) }));
   }
 
-  // Opens the add-to-log prompt (see recipeLogPrompt's Sheet further down)
-  // instead of logging straight away: a single-portion recipe still just
-  // gets a plain yes/no, but one with more than one portion needs to ask
-  // how many to log, so there's no way to always commit instantly here.
+  // Opens the portions prompt (see recipeLogPrompt's Sheet further down): a
+  // recipe still needs its portions chosen before it has a fixed quantity to
+  // stage, same reason a DB food needs its quantity sheet first.
   function addRecipeToLog(recipe) {
     if (!(recipe.items || []).length) return;
     setRecipeLogPrompt({ recipe, chosenPortions: 1 });
   }
-  async function confirmRecipeLog() {
+  // Stages the recipe (see `staged` above) same as everything else, "Add N
+  // items" logs it together with whatever else is picked. Still a single log
+  // entry either way, just staged instead of committed straight away.
+  function confirmRecipeLog() {
     const { recipe, chosenPortions } = recipeLogPrompt;
     const items = recipe.items || [];
     const totalPortions = recipe.portions || 1;
     const scale = chosenPortions / totalPortions;
-    setAddingRecipeId(recipe.id);
-    try {
-      const sum = k => items.reduce((a, i) => a + (i[k] || 0), 0);
-      const entry = {
-        id: LB.uid(), date: curDate, time: entryTime(),
-        foodId: null, foodName: chosenPortions !== totalPortions ? `${recipe.name} (${chosenPortions}/${totalPortions})` : recipe.name, brand: null, source: 'recipe',
-        quantityG: Math.round(sum('quantityG') * scale), calories: Math.round(fdRecipeItemsCalories(items) * scale),
-        protein: fdRound1(sum('protein') * scale), carbs: fdRound1(sum('carbs') * scale), fat: fdRound1(sum('fat') * scale),
-        fiber: items.some(i => i.fiber != null) ? fdRound1(sum('fiber') * scale) : null,
-        createdAt: new Date().toISOString(),
-      };
-      const ok = await commitEntry(entry);
-      if (ok) {
-        setRecipeLogPrompt(null);
-        setRecipeJustAddedId(recipe.id);
-        setTimeout(() => setRecipeJustAddedId(id => id === recipe.id ? null : id), 2000);
-      }
-    } finally {
-      setAddingRecipeId(null);
-    }
+    const sum = k => items.reduce((a, i) => a + (i[k] || 0), 0);
+    const entry = {
+      id: LB.uid(), date: curDate, time: entryTime(),
+      foodId: null, foodName: chosenPortions !== totalPortions ? `${recipe.name} (${chosenPortions}/${totalPortions})` : recipe.name, brand: null, source: 'recipe',
+      quantityG: Math.round(sum('quantityG') * scale), calories: Math.round(fdRecipeItemsCalories(items) * scale),
+      protein: fdRound1(sum('protein') * scale), carbs: fdRound1(sum('carbs') * scale), fat: fdRound1(sum('fat') * scale),
+      fiber: items.some(i => i.fiber != null) ? fdRound1(sum('fiber') * scale) : null,
+      createdAt: new Date().toISOString(),
+    };
+    setStaged(list => [...list, entry]);
+    setRecipeLogPrompt(null);
   }
 
   // Shown on both add-a-food tabs (Search and Quick Add) whenever a timeline
@@ -993,14 +976,28 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     </div>
   ) : null;
 
+  const stagedTotals = useMemoFd(() => ({
+    calories: Math.round(staged.reduce((a, e) => a + (e.calories || 0), 0)),
+    protein: fdRound1(staged.reduce((a, e) => a + (e.protein || 0), 0)),
+    carbs: fdRound1(staged.reduce((a, e) => a + (e.carbs || 0), 0)),
+    fat: fdRound1(staged.reduce((a, e) => a + (e.fat || 0), 0)),
+  }), [staged]);
+
   // Shown on both add-a-food tabs whenever there's a staged (picked, quantity
-  // already chosen, but not yet logged) batch: a review list plus the "Add N
-  // items" commit button. Lives here rather than per-tab so switching between
-  // Search and Quick Add mid-batch doesn't lose it, both stage into the same
-  // shared `staged` list.
+  // already chosen, but not yet logged) batch: running totals, a review list,
+  // and the "Add N items" commit button. Lives here rather than per-tab so
+  // switching between Search and Quick Add mid-batch doesn't lose it, both
+  // (and a staged recipe, see confirmRecipeLog) stage into the same shared
+  // `staged` list.
   const stagedPanel = staged.length > 0 ? (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: 12, background: 'rgba(var(--accent-rgb),0.08)', border: `1px solid rgba(var(--accent-rgb),0.3)`, borderRadius: 6 }}>
       <Bezel>Picked ({staged.length})</Bezel>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 14 }}>
+        <span className="num" style={{ fontSize: 18, fontWeight: 300, color: UI.ink }}>{stagedTotals.calories}<span style={{ fontSize: 10, color: UI.inkFaint, marginLeft: 3 }}>kcal</span></span>
+        <span className="num" style={{ fontSize: 12, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 9 }}>P</span> {stagedTotals.protein}</span>
+        <span className="num" style={{ fontSize: 12, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 9 }}>C</span> {stagedTotals.carbs}</span>
+        <span className="num" style={{ fontSize: 12, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 9 }}>F</span> {stagedTotals.fat}</span>
+      </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 2, maxHeight: 168, overflowY: 'auto' }}>
         {staged.map(e => (
           <div key={e.id} style={fdDraftRow}>
@@ -1303,21 +1300,14 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                     {recipesFiltered.map(r => {
                       const items = r.items || [];
                       const kcal = fdRecipeItemsCalories(items);
-                      const justAdded = recipeJustAddedId === r.id;
                       return (
                         <div key={r.id} style={fdQuickRowWrap}>
-                          <button onClick={() => addRecipeToLog(r)} disabled={addingRecipeId === r.id} style={{ ...fdQuickRowInner, opacity: addingRecipeId === r.id ? 0.6 : 1 }}>
+                          <button onClick={() => addRecipeToLog(r)} style={fdQuickRowInner}>
                             <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
                               <div style={fdEntryName}>{r.name}</div>
                               <div style={fdEntryMeta}>{items.length} ingredient{items.length === 1 ? '' : 's'} · P{Math.round(items.reduce((a, i) => a + (i.protein || 0), 0))} C{Math.round(items.reduce((a, i) => a + (i.carbs || 0), 0))} F{Math.round(items.reduce((a, i) => a + (i.fat || 0), 0))}</div>
                             </div>
-                            {justAdded ? (
-                              <span style={{ fontSize: 11, color: UI.gold, fontFamily: UI.fontUi, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
-                                <i className="fa-solid fa-check" /> Added
-                              </span>
-                            ) : (
-                              <div className="num" style={{ fontSize: 12, color: UI.inkSoft, flexShrink: 0 }}>{kcal} kcal</div>
-                            )}
+                            <div className="num" style={{ fontSize: 12, color: UI.inkSoft, flexShrink: 0 }}>{kcal} kcal</div>
                           </button>
                           <button onClick={() => editRecipe(r)} aria-label="Edit recipe" style={fdSideBtn}>
                             <i className="fa-solid fa-pen" style={{ fontSize: 12 }} />
@@ -1559,7 +1549,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                 suffix={recipeLogPrompt.chosenPortions === 1 ? ' portion' : ' portions'}
                 onChange={v => setRecipeLogPrompt(p => p ? { ...p, chosenPortions: Math.max(0.5, Math.round(v * 2) / 2) } : p)} big />
             </div>
-            <Btn onClick={confirmRecipeLog} disabled={addingRecipeId === recipeLogPrompt.recipe.id} style={{ width: '100%' }}>
+            <Btn onClick={confirmRecipeLog} style={{ width: '100%' }}>
               Add {recipeLogPrompt.recipe.name} · {recipeLogPrompt.chosenPortions} portion{recipeLogPrompt.chosenPortions === 1 ? '' : 's'}
             </Btn>
           </>
@@ -1964,6 +1954,12 @@ function FdIngredientPicker({ open, onClose, onAdd, store }) {
     setStaged([]);
     onClose();
   }
+  const stagedTotals = useMemoFd(() => ({
+    calories: Math.round(staged.reduce((a, i) => a + (i.calories || 0), 0)),
+    protein: fdRound1(staged.reduce((a, i) => a + (i.protein || 0), 0)),
+    carbs: fdRound1(staged.reduce((a, i) => a + (i.carbs || 0), 0)),
+    fat: fdRound1(staged.reduce((a, i) => a + (i.fat || 0), 0)),
+  }), [staged]);
 
   // Two sibling Sheets, not one nested in the other's children (the app's
   // documented overlay convention, docs/internals.md "Modal-/Overlay-
@@ -2103,6 +2099,12 @@ function FdIngredientPicker({ open, onClose, onAdd, store }) {
         {staged.length > 0 && (
           <div style={{ marginTop: 14, paddingTop: 14, borderTop: `1px solid ${UI.hair}` }}>
             <Bezel style={{ marginBottom: 10 }}>Picked ({staged.length})</Bezel>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 14, marginBottom: 10 }}>
+              <span className="num" style={{ fontSize: 18, fontWeight: 300, color: UI.ink }}>{stagedTotals.calories}<span style={{ fontSize: 10, color: UI.inkFaint, marginLeft: 3 }}>kcal</span></span>
+              <span className="num" style={{ fontSize: 12, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 9 }}>P</span> {stagedTotals.protein}</span>
+              <span className="num" style={{ fontSize: 12, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 9 }}>C</span> {stagedTotals.carbs}</span>
+              <span className="num" style={{ fontSize: 12, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 9 }}>F</span> {stagedTotals.fat}</span>
+            </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 2, maxHeight: 168, overflowY: 'auto' }}>
               {staged.map(i => (
                 <div key={i.tempId} style={fdDraftRow}>
