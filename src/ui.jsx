@@ -592,7 +592,7 @@ function Toggle({ on, onToggle }) {
 // above its own parent's opaque z-9998 wizard, or beating an ordinary Sheet
 // from underneath a still-open admin Sheet. Not a general-purpose knob:
 // only reach for it when there's a concrete overlay this Sheet must clear.
-function Sheet({ open, onClose, title, titleColor, children, keyboardHeight = 0, accent = false, center = false, zIndex = 100 }) {
+function Sheet({ open, onClose, title, titleColor, titleRight, children, keyboardHeight = 0, accent = false, center = false, zIndex = 100 }) {
   const [kbHeight, setKbHeight] = React.useState(0);
   const [vvHeight, setVvHeight] = React.useState(window.innerHeight);
   React.useEffect(() => {
@@ -738,11 +738,18 @@ function Sheet({ open, onClose, title, titleColor, children, keyboardHeight = 0,
           maxHeight: center ? '82dvh' : (floating ? `calc(${Math.max(0, vvHeight - keyboardHeight)}px - env(safe-area-inset-top, 0px) - 32px)` : '88dvh'), overflow: 'auto', overscrollBehavior: 'contain',
         }}>
           <div style={{ width: 36, height: 3, background: accent ? 'var(--accent)' : UI.hairStrong, borderRadius: 4, margin: '0 auto 16px' }} />
-          {title && (
+          {title && (titleRight ? (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 16 }}>
+              <div style={{ fontFamily: UI.fontDisplay, fontSize: 28, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: titleColor || UI.ink, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {title}
+              </div>
+              <div style={{ flexShrink: 0 }}>{titleRight}</div>
+            </div>
+          ) : (
             <div style={{ fontFamily: UI.fontDisplay, fontSize: 28, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: titleColor || UI.ink, marginBottom: 16 }}>
               {title}
             </div>
-          )}
+          ))}
           {children}
         </div>
       </div>

@@ -2034,20 +2034,21 @@ function FoodScreen({ store, setStore, go, userId, date }) {
           logging the whole cake is the only option, half of it or a second
           one are just as valid). Half-portion steps, no upper cap: chosen
           can go above the recipe's own portion count too. ── */}
-      <Sheet open={!!recipeLogPrompt} onClose={() => { setRecipeLogPrompt(null); setEditingEntry(null); }} title={recipeLogPrompt?.recipe?.name || 'Add recipe'} titleColor="var(--accent)">
+      <Sheet open={!!recipeLogPrompt} onClose={() => { setRecipeLogPrompt(null); setEditingEntry(null); }} title={recipeLogPrompt?.recipe?.name || 'Add recipe'} titleColor="var(--accent)"
+        titleRight={recipeLogPrompt && (
+          <button onClick={() => openShareRecipe(recipeLogPrompt.recipe)} aria-label="Share recipe" style={{
+            width: 30, height: 30, background: UI.bgInset, border: `1px solid ${UI.hair}`, borderRadius: 4,
+            color: UI.inkFaint, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', textShadow: 'none',
+          }}>
+            <i className="fa-solid fa-share-from-square" style={{ fontSize: 12 }} />
+          </button>
+        )}
+      >
         {recipeLogPrompt && (
           <>
-            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10, marginBottom: 16 }}>
-              <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.4 }}>
-                How much of {recipeLogPrompt.recipe.name}, at {entryTime()}?
-              </div>
-              <button onClick={() => openShareRecipe(recipeLogPrompt.recipe)} aria-label="Share recipe" style={{
-                flexShrink: 0, width: 30, height: 30, background: UI.bgInset, border: `1px solid ${UI.hair}`, borderRadius: 4,
-                color: UI.inkFaint, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
-                display: 'flex', alignItems: 'center', justifyContent: 'center', textShadow: 'none',
-              }}>
-                <i className="fa-solid fa-share-from-square" style={{ fontSize: 12 }} />
-              </button>
+            <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: 1.4 }}>
+              How much of {recipeLogPrompt.recipe.name}, at {entryTime()}?
             </div>
             <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 20 }}>
               <Stepper value={recipeLogPrompt.chosenPortions} step={0.5} min={0.5}
