@@ -98,7 +98,18 @@ const FD_QUICK_TABS = [
   { id: 'favorites', label: 'Favorites' },
   { id: 'recipes', label: 'Recipes' },
 ];
-const FD_HOURS = Array.from({ length: 24 }, (_, i) => i);
+// Purely a display grouping for the Log tab's timeline: each range is
+// [startHour, endHour), fixed for now (not a per-user setting). The hourly
+// rows themselves (and their own "+") are unchanged, this just adds a
+// read-only summary card above each cluster, no interaction of its own.
+const FD_MEAL_CATEGORIES = [
+  { id: 'breakfast', label: 'Breakfast', startHour: 0, endHour: 9 },
+  { id: 'snack1', label: 'Snack 1', startHour: 9, endHour: 11 },
+  { id: 'lunch', label: 'Lunch', startHour: 11, endHour: 13 },
+  { id: 'snack2', label: 'Snack 2', startHour: 13, endHour: 16 },
+  { id: 'dinner', label: 'Dinner', startHour: 16, endHour: 20 },
+  { id: 'snack3', label: 'Snack 3', startHour: 20, endHour: 24 },
+];
 
 function FoodScreen({ store, setStore, go, userId, date }) {
   const [confirmEl, confirm] = useConfirm();
@@ -324,6 +335,18 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     Object.values(m).forEach(arr => arr.sort((a, b) => (a.time || '').localeCompare(b.time || '')));
     return m;
   }, [dayEntries]);
+
+  // Read-only per-category totals shown above each cluster of hours in the
+  // timeline (see FD_MEAL_CATEGORIES), summed straight off byHour's buckets.
+  const categoryTotals = useMemoFd(() => FD_MEAL_CATEGORIES.map(cat => {
+    let calories = 0, protein = 0, carbs = 0, fat = 0;
+    for (let h = cat.startHour; h < cat.endHour; h++) {
+      for (const e of (byHour[h] || [])) {
+        calories += e.calories || 0; protein += e.protein || 0; carbs += e.carbs || 0; fat += e.fat || 0;
+      }
+    }
+    return { ...cat, calories: Math.round(calories), protein: fdRound1(protein), carbs: fdRound1(carbs), fat: fdRound1(fat) };
+  }), [byHour]);
 
   // Recent strip: dedupe by food_id for DB items, by food_name for custom
   // ones. store.foodLogs is already recency-ordered (server query and local
@@ -1118,44 +1141,61 @@ function FoodScreen({ store, setStore, go, userId, date }) {
             </BracketFrame>
 
             {/* Hourly timeline: every hour 0-23 has a "+" that logs at exactly
-                that hour, with its entries listed underneath. */}
+                that hour, with its entries listed underneath, grouped under a
+                read-only per-meal summary card (FD_MEAL_CATEGORIES). Adding
+                still only ever happens through an hour's own "+", the
+                category card itself has no tap target. */}
             <div>
               <Bezel style={{ marginBottom: 10 }}>Timeline</Bezel>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {FD_HOURS.map(h => {
-                  const es = byHour[h] || [];
-                  const filled = es.length > 0;
-                  // Only today has a "current hour" to mark; a backdated day's
-                  // timeline stays plain. Local wall-clock hour (getHours()),
-                  // matching the user's own timezone, same as entryTime()/
-                  // fdNowHHMM() already do for the "log at now" default.
-                  const isNow = curDate === today && h === new Date().getHours();
-                  return (
-                    <div key={h} style={fdHourRow(filled, isNow)}>
-                      <div style={fdHourLabelCol}>
-                        <span className="num" style={{ fontSize: 11, fontWeight: isNow ? 700 : 400, color: isNow ? 'var(--accent)' : (filled ? UI.inkSoft : UI.inkGhost) }}>{String(h).padStart(2, '0')}</span>
+                {categoryTotals.map(cat => (
+                  <React.Fragment key={cat.id}>
+                    <div style={fdCategoryCard}>
+                      <div>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: UI.ink, fontFamily: UI.fontUi }}>{cat.label}</div>
+                        <span style={fdEntryMeta}>{String(cat.startHour).padStart(2, '0')}:00 - {String(cat.endHour % 24).padStart(2, '0')}:00</span>
                       </div>
-                      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
-                        {es.map(e => (
-                          <div key={e.id} style={fdEntryRow}>
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0, flex: 1 }}>
-                              <span style={fdEntryName}>{e.foodName}</span>
-                              <span style={fdEntryMeta}>
-                                {e.quantityG ? `${e.quantityG}g · ` : ''}{e.calories} kcal · P{Math.round(e.protein)} C{Math.round(e.carbs)} F{Math.round(e.fat)}
-                              </span>
-                            </div>
-                            <button onClick={() => deleteEntry(e)} aria-label="Delete" style={fdInlineDeleteBtn}>
-                              <i className="fa-solid fa-trash" style={{ fontSize: 12 }} />
-                            </button>
-                          </div>
-                        ))}
+                      <div style={{ textAlign: 'right' }}>
+                        <div className="num" style={{ fontSize: 14, color: UI.ink }}>{cat.calories} kcal</div>
+                        <span style={fdEntryMeta}>P{Math.round(cat.protein)} C{Math.round(cat.carbs)} F{Math.round(cat.fat)}</span>
                       </div>
-                      <button onClick={() => addAtHour(h)} aria-label={`Add food at ${String(h).padStart(2, '0')}:00`} style={fdHourAddBtn(isNow)}>
-                        <i className="fa-solid fa-plus" style={{ fontSize: 11 }} />
-                      </button>
                     </div>
-                  );
-                })}
+                    {Array.from({ length: cat.endHour - cat.startHour }, (_, i) => cat.startHour + i).map(h => {
+                      const es = byHour[h] || [];
+                      const filled = es.length > 0;
+                      // Only today has a "current hour" to mark; a backdated day's
+                      // timeline stays plain. Local wall-clock hour (getHours()),
+                      // matching the user's own timezone, same as entryTime()/
+                      // fdNowHHMM() already do for the "log at now" default.
+                      const isNow = curDate === today && h === new Date().getHours();
+                      return (
+                        <div key={h} style={fdHourRow(filled, isNow)}>
+                          <div style={fdHourLabelCol}>
+                            <span className="num" style={{ fontSize: 11, fontWeight: isNow ? 700 : 400, color: isNow ? 'var(--accent)' : (filled ? UI.inkSoft : UI.inkGhost) }}>{String(h).padStart(2, '0')}</span>
+                          </div>
+                          <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                            {es.map(e => (
+                              <div key={e.id} style={fdEntryRow}>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0, flex: 1 }}>
+                                  <span style={fdEntryName}>{e.foodName}</span>
+                                  <span style={fdEntryMeta}>
+                                    {e.quantityG ? `${e.quantityG}g · ` : ''}{e.calories} kcal · P{Math.round(e.protein)} C{Math.round(e.carbs)} F{Math.round(e.fat)}
+                                  </span>
+                                </div>
+                                <button onClick={() => deleteEntry(e)} aria-label="Delete" style={fdInlineDeleteBtn}>
+                                  <i className="fa-solid fa-trash" style={{ fontSize: 12 }} />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                          <button onClick={() => addAtHour(h)} aria-label={`Add food at ${String(h).padStart(2, '0')}:00`} style={fdHourAddBtn(isNow)}>
+                            <i className="fa-solid fa-plus" style={{ fontSize: 11 }} />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </React.Fragment>
+                ))}
               </div>
             </div>
           </>
@@ -2414,6 +2454,14 @@ const fdDraftMain = {
   WebkitTapHighlightColor: 'transparent',
 };
 const fdEmptyStyle = { textAlign: 'center', fontSize: 12, color: UI.inkFaint, padding: '18px 0', fontFamily: UI.fontUi };
+// Read-only meal-category header above a cluster of timeline hours (see
+// FD_MEAL_CATEGORIES): no border accent/interaction of its own, gold tint
+// only, since it's a summary, not a control.
+const fdCategoryCard = {
+  display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
+  padding: '10px 12px', borderRadius: 6,
+  background: 'rgba(var(--accent-rgb),0.08)', border: `1px solid rgba(var(--accent-rgb),0.3)`,
+};
 // Timeline: an hour tick column, its entries, and an always-present add
 // button, each hour its own bordered card (same idiom as the active-users
 // list) with its content centered vertically instead of pinned to the top.
