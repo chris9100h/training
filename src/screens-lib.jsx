@@ -2831,7 +2831,13 @@ function FeelSelector({ value, onChange }) {
 
 // ─── SET COMPARISON HELPERS ──────────────────────────────────────────
 // Shared by SessionDetailScreen, ComparisonScreen, and the LAST TIME card.
-// Canonical logic lives in store.js (window.LB) — one definition, no drift.
+// Canonical logic lives in store.js (window.LB), one definition, no drift.
+// This file loads before screens-coaching-core.jsx (see index.html's
+// SOURCES), which also references these two as plain global identifiers
+// instead of redeclaring them, since a duplicate top-level const across
+// classic scripts sharing one global scope throws and kills the whole file
+// that loads second. Renaming or removing these needs a matching update
+// there too.
 const isImprovement = LB.isImprovement;
 const isDecline = LB.isDecline;
 

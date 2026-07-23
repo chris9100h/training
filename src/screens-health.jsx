@@ -18,12 +18,6 @@ const HEALTH_TFS = [{ id: '1W', days: 7 }, { id: '1M', days: 30 }, { id: '3M', d
 // the shared value, see GlucoseCard/BloodPressureCard/BodyTempCard.
 const HEALTH_TFS_TODAY = [{ id: '1D', days: 1 }, ...HEALTH_TFS];
 
-// How far back store.foodLogs is windowed client-side. Must mirror the
-// constant of the same name in store.js: a date older than this can still
-// have real Food Tracker rows server-side that this screen's local store
-// never receives (see foodOutsideWindow in DailyLogScreen below).
-const FOOD_HISTORY_WINDOW_DAYS = 30;
-
 // Whole-day difference between two 'YYYY-MM-DD' dates (b − a), noon-anchored to
 // dodge DST/midnight shifts.
 function healthDayDiff(a, b) {
@@ -788,13 +782,17 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
     () => (store.foodLogs || []).some(l => l.date === date),
     [store.foodLogs, date],
   );
-  // store.foodLogs is windowed to FOOD_HISTORY_WINDOW_DAYS days, so a date
+  // store.foodLogs is windowed to LB.FOOD_HISTORY_WINDOW_DAYS days, so a date
   // older than that can have real Food Tracker entries server-side that the
   // check above can never see locally: it would then read a genuinely
   // tracked old day as untracked. Lock those days too (can't verify locally,
   // so don't risk a silent overwrite) instead of trusting an absence that
-  // might just be the window, not the truth.
-  const foodOutsideWindow = healthDayDiff(date, LB.todayISO()) > FOOD_HISTORY_WINDOW_DAYS;
+  // might just be the window, not the truth. Reads the constant off LB
+  // rather than declaring its own copy: this file and store.js are both
+  // classic scripts sharing one global scope, so a same-named top-level
+  // const in both throws "already been declared" and silently kills every
+  // other declaration in whichever of the two loads second.
+  const foodOutsideWindow = healthDayDiff(date, LB.todayISO()) > LB.FOOD_HISTORY_WINDOW_DAYS;
   const foodUnverifiable = foodOutsideWindow && !foodHasTrackerEntries;
   const [foodUnlocked, setFoodUnlocked] = useStateH(false);
   const foodLocked = (foodHasTrackerEntries || foodOutsideWindow) && !foodUnlocked;

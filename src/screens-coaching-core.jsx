@@ -63,9 +63,14 @@ function fmtRelative(iso) { return LB.timeAgo(iso); }
 
 
 
-// Canonical set-comparison logic lives in store.js (window.LB) — no drift.
-const isImprovement = LB.isImprovement;
-const isDecline = LB.isDecline;
+// Canonical set-comparison logic lives in store.js (window.LB), no drift.
+// NOT redeclared here: screens-lib.jsx (loaded earlier, see index.html's
+// SOURCES) already declares isImprovement/isDecline as top-level const at
+// module scope. Classic scripts share one global scope, so a same-named
+// top-level const in two of them throws "already been declared" and
+// silently kills every other declaration in whichever file loads second,
+// which would be this one. Used below as the plain global identifiers
+// screens-lib.jsx already put in scope.
 
 // ─── Default check-in form schema ────────────────────────────────────────────
 // Mirrors the current fixed fields. A coach can replace this per coaching

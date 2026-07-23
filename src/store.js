@@ -798,11 +798,17 @@ const HISTORY_WINDOW_DAYS = 70;
 // How far back boot loads zane_food_logs. Unlike sessions, a food log row IS
 // its own full record (no separate heavy sub-table to window instead), so
 // this windows the whole row: entries older than this simply aren't fetched.
-// Nothing today reads food history past this (the Log tab's own day nav caps
-// backdating/browsing at 14 days), so the only effect is that anything older
-// quietly drops out of the local cache after the first boot on this window,
-// harmlessly, it's never deleted server-side (syncBase and the live store
-// both window together at boot, so there is never a diff to delete).
+// The Food tab's own day nav caps backdating/browsing at 14 days, well
+// inside the window, but the Health tab's date picker can reach further
+// back (DailyLogScreen's foodOutsideWindow lock handles that gap). Anything
+// older than this quietly drops out of the local cache after the first boot
+// on this window, harmlessly, it's never deleted server-side (syncBase and
+// the live store both window together at boot, so there is never a diff to
+// delete). Exposed on window.LB (below) instead of also being declared as
+// its own top-level const in screens-health.jsx: this file and every
+// screens-*.jsx file are classic scripts sharing one global scope, so a
+// same-named top-level const in two of them throws "already been declared"
+// and silently kills every other declaration in whichever file loads second.
 const FOOD_HISTORY_WINDOW_DAYS = 30;
 
 function historyWindowCutoffISO(now = new Date(), days = HISTORY_WINDOW_DAYS) {
@@ -6891,7 +6897,7 @@ window.LB = {
   SUPABASE_URL, SUPABASE_ANON_KEY, PUSHOVER_URL, WEB_PUSH_URL, fnFetch,
   subscribeWebPush, unsubscribeWebPush, getWebPushSubscription,
   signIn, signUp, signOut, signInWithPasskey, registerPasskey, listPasskeys, deletePasskey, updatePasskey, resetPassword, deleteAllData, exportBackup, backupToBlob, readBackupText, importFromBackup, validateBackup,
-  loadFromSupabase, syncStore, mergeSessions, withCarriedWindowEntries, historyWindowCutoffISO, normalizeHiddenHealthCards,
+  loadFromSupabase, syncStore, mergeSessions, withCarriedWindowEntries, historyWindowCutoffISO, normalizeHiddenHealthCards, FOOD_HISTORY_WINDOW_DAYS,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
   uid, todayISO, fmtISO, nowHHMM, fmtDayLabel, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, incrementForExercise, equipmentCfgFor, is531MainLift, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, healScheduleWeekdays, buildPlanSkeleton, instantiateProgram, is531Plan, round531, tmFrom531, tmBump531, weeks531, week531, fiveThreeOneSets, build531Plan, add531MainLift, current531Week, current531Cycle, compute531CycleBumps, resolve531CycleEnd, suggest531Tm, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, mesoActive, autoregLoadOnly, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, withVersionedDays, realignCycleForToday, todayCycleStripIndex,
   effReps, fmtDuration, e1rm, isImprovement, isDecline, bestE1rmForExercise, bestAssistLoad, bestTimeForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, buildTimeSeedSets, latestBodyweight, bodyweightForDate, exerciseLogMode, isAssisted, shouldPullBodyweight, systemExerciseToRow, inferCurrentExIdx, calcBlended,
