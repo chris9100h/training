@@ -1806,9 +1806,6 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                             </div>
                             <div className="num" style={{ fontSize: 12, color: UI.inkSoft, flexShrink: 0 }}>{kcal} kcal</div>
                           </button>
-                          <button onClick={() => openShareRecipe(r)} aria-label="Share recipe" style={fdSideBtn}>
-                            <i className="fa-solid fa-share-from-square" style={{ fontSize: 12 }} />
-                          </button>
                           <button onClick={() => editRecipe(r)} aria-label="Edit recipe" style={fdSideBtn}>
                             <i className="fa-solid fa-pen" style={{ fontSize: 12 }} />
                           </button>
@@ -2040,8 +2037,17 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       <Sheet open={!!recipeLogPrompt} onClose={() => { setRecipeLogPrompt(null); setEditingEntry(null); }} title={recipeLogPrompt?.recipe?.name || 'Add recipe'} titleColor="var(--accent)">
         {recipeLogPrompt && (
           <>
-            <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: 1.4 }}>
-              How much of {recipeLogPrompt.recipe.name}, at {entryTime()}?
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10, marginBottom: 16 }}>
+              <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.4 }}>
+                How much of {recipeLogPrompt.recipe.name}, at {entryTime()}?
+              </div>
+              <button onClick={() => openShareRecipe(recipeLogPrompt.recipe)} aria-label="Share recipe" style={{
+                flexShrink: 0, width: 30, height: 30, background: UI.bgInset, border: `1px solid ${UI.hair}`, borderRadius: 4,
+                color: UI.inkFaint, cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', textShadow: 'none',
+              }}>
+                <i className="fa-solid fa-share-from-square" style={{ fontSize: 12 }} />
+              </button>
             </div>
             <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 20 }}>
               <Stepper value={recipeLogPrompt.chosenPortions} step={0.5} min={0.5}
@@ -2068,7 +2074,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       </Sheet>
 
       {/* ── Recipe share-link sheet (sender side, see openShareRecipe) ── */}
-      <Sheet open={!!shareSheet} onClose={() => setShareSheet(null)} title={shareSheet ? `Share ${shareSheet.recipe.name}` : 'Share recipe'} titleColor="var(--accent)">
+      <Sheet open={!!shareSheet} onClose={() => setShareSheet(null)} title={shareSheet ? `Share ${shareSheet.recipe.name}` : 'Share recipe'} titleColor="var(--accent)" zIndex={200}>
         {shareSheet?.status === 'busy' && (
           <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, padding: '8px 0 16px' }}>Creating the share link…</div>
         )}
