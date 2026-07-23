@@ -2303,7 +2303,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           // code still reading schedule.days directly (or a later
           // applyPlanAndFinish write racing the version resolution) would
           // silently work off the pre-rotation order.
-          schedulesUpdate = s.schedules.map(sch2 => sch2.id === curSch.id ? { ...sch2, versions: newVersions, days: newVersions[0].days } : sch2);
+          schedulesUpdate = s.schedules.map(sch2 => sch2.id === curSch.id ? LB.withVersionedDays(sch2, newVersions) : sch2);
         }
       }
       return {

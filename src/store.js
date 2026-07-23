@@ -560,6 +560,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
     await unwrap(_supabase.from('zane_food_recipes').upsert(
       backup.foodRecipes.map(r => ({
         id: r.id, user_id: userId, name: r.name, items: r.items || [], portions: r.portions || 1,
+        updated_at: r.updatedAt ?? new Date().toISOString(),
       }))
     ));
     stepsDone++;
@@ -1334,6 +1335,21 @@ async function autoArchiveMissedDays(userId, state) {
 
 // ─── SYNC ────────────────────────────────────────────────────────────────
 
+// Diff a previous/next array of {id, ...} rows into { upsert, removed } lists.
+// Uses a Map for O(n) lookups instead of a nested find-in-filter (avoids O(n*m) diffing).
+function diffCollectionById(prevList, nextList) {
+  const prevMap = new Map((prevList || []).map(x => [x.id, x]));
+  const nextIds = new Set();
+  const upsert = [];
+  (nextList || []).forEach(item => {
+    nextIds.add(item.id);
+    const p = prevMap.get(item.id);
+    if (!p || JSON.stringify(p) !== JSON.stringify(item)) upsert.push(item);
+  });
+  const removed = (prevList || []).filter(x => !nextIds.has(x.id));
+  return { upsert, removed };
+}
+
 // Dual-write entries then sets sequentially (sets FK-depend on entries existing first).
 // prevSessions: pass prev store sessions to skip unchanged sets; pass null to write all.
 async function _syncEntryRelational(sessions, userId, prevSessions, onStep) {
@@ -1554,11 +1570,7 @@ async function syncStore(prev, next, userId) {
   }
 
   if (prev.cardioLogs !== next.cardioLogs) {
-    const upsert = (next.cardioLogs || []).filter(l => {
-      const p = (prev.cardioLogs || []).find(x => x.id === l.id);
-      return !p || JSON.stringify(p) !== JSON.stringify(l);
-    });
-    const removed = (prev.cardioLogs || []).filter(l => !(next.cardioLogs || []).find(x => x.id === l.id));
+    const { upsert, removed } = diffCollectionById(prev.cardioLogs, next.cardioLogs);
     if (upsert.length) ops.push(_supabase.from('zane_cardio_logs').upsert(upsert.map(l => ({
       id: l.id, user_id: userId, date: l.date, type: l.type ?? null,
       duration_minutes: l.durationMinutes, distance_m: l.distanceM ?? null,
@@ -1569,11 +1581,7 @@ async function syncStore(prev, next, userId) {
   }
 
   if (prev.waterLogs !== next.waterLogs) {
-    const upsert = (next.waterLogs || []).filter(l => {
-      const p = (prev.waterLogs || []).find(x => x.id === l.id);
-      return !p || JSON.stringify(p) !== JSON.stringify(l);
-    });
-    const removed = (prev.waterLogs || []).filter(l => !(next.waterLogs || []).find(x => x.id === l.id));
+    const { upsert, removed } = diffCollectionById(prev.waterLogs, next.waterLogs);
     if (upsert.length) ops.push(_supabase.from('zane_water_logs').upsert(upsert.map(l => ({
       id: l.id, user_id: userId, date: l.date, time: l.time,
       amount_ml: l.amountMl, name: l.name ?? null, category: l.category ?? null,
@@ -1583,11 +1591,7 @@ async function syncStore(prev, next, userId) {
   }
 
   if (prev.foodLogs !== next.foodLogs) {
-    const upsert = (next.foodLogs || []).filter(l => {
-      const p = (prev.foodLogs || []).find(x => x.id === l.id);
-      return !p || JSON.stringify(p) !== JSON.stringify(l);
-    });
-    const removed = (prev.foodLogs || []).filter(l => !(next.foodLogs || []).find(x => x.id === l.id));
+    const { upsert, removed } = diffCollectionById(prev.foodLogs, next.foodLogs);
     if (upsert.length) ops.push(_supabase.from('zane_food_logs').upsert(upsert.map(l => ({
       id: l.id, user_id: userId, date: l.date, time: l.time, food_id: l.foodId ?? null,
       food_name: l.foodName, brand: l.brand ?? null, source: l.source ?? null,
@@ -1627,11 +1631,7 @@ async function syncStore(prev, next, userId) {
   }
 
   if (prev.foodFavorites !== next.foodFavorites) {
-    const upsert = (next.foodFavorites || []).filter(f => {
-      const p = (prev.foodFavorites || []).find(x => x.id === f.id);
-      return !p || JSON.stringify(p) !== JSON.stringify(f);
-    });
-    const removed = (prev.foodFavorites || []).filter(f => !(next.foodFavorites || []).find(x => x.id === f.id));
+    const { upsert, removed } = diffCollectionById(prev.foodFavorites, next.foodFavorites);
     if (upsert.length) ops.push(_supabase.from('zane_food_favorites').upsert(upsert.map(f => ({
       id: f.id, user_id: userId, food_id: f.foodId ?? null, food_name: f.foodName,
       brand: f.brand ?? null, source: f.source ?? null, quantity_g: f.quantityG,
@@ -1642,13 +1642,10 @@ async function syncStore(prev, next, userId) {
   }
 
   if (prev.foodRecipes !== next.foodRecipes) {
-    const upsert = (next.foodRecipes || []).filter(r => {
-      const p = (prev.foodRecipes || []).find(x => x.id === r.id);
-      return !p || JSON.stringify(p) !== JSON.stringify(r);
-    });
-    const removed = (prev.foodRecipes || []).filter(r => !(next.foodRecipes || []).find(x => x.id === r.id));
+    const { upsert, removed } = diffCollectionById(prev.foodRecipes, next.foodRecipes);
     if (upsert.length) ops.push(_supabase.from('zane_food_recipes').upsert(upsert.map(r => ({
       id: r.id, user_id: userId, name: r.name, items: r.items || [], portions: r.portions || 1,
+      updated_at: new Date().toISOString(),
     }))));
     if (removed.length) ops.push(_supabase.from('zane_food_recipes').delete().in('id', removed.map(r => r.id)));
   }
@@ -3226,6 +3223,18 @@ function dedupeVersionsByDate(versions) {
       return true;
     })
     .sort((a, b) => b.validFrom.localeCompare(a.validFrom));
+}
+
+// Invariant: schedule.days must always mirror schedule.versions[0].days (the
+// newest version), since a lot of code still reads schedule.days directly
+// instead of resolving the active version. Every write site that rotates or
+// replaces `versions` must rebuild `days` from the new versions[0] in the
+// same step, or schedule.days silently drifts from the version that is
+// actually current. Centralized here instead of hand-copied at each call
+// site, one missed spot caused the "Update plan?" prompt to stop firing on
+// versioned plans.
+function withVersionedDays(schedule, versions) {
+  return { ...schedule, versions, days: versions[0]?.days || schedule.days };
 }
 
 // Cycle position for a date-based (non-versioned, non-flex) plan, derived
@@ -6828,7 +6837,7 @@ window.LB = {
   signIn, signUp, signOut, signInWithPasskey, registerPasskey, listPasskeys, deletePasskey, updatePasskey, resetPassword, deleteAllData, exportBackup, backupToBlob, readBackupText, importFromBackup, validateBackup,
   loadFromSupabase, syncStore, mergeSessions, withCarriedWindowEntries, historyWindowCutoffISO, normalizeHiddenHealthCards,
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
-  uid, todayISO, fmtISO, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, incrementForExercise, equipmentCfgFor, is531MainLift, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, healScheduleWeekdays, buildPlanSkeleton, instantiateProgram, is531Plan, round531, tmFrom531, tmBump531, weeks531, week531, fiveThreeOneSets, build531Plan, add531MainLift, current531Week, current531Cycle, compute531CycleBumps, resolve531CycleEnd, suggest531Tm, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, mesoActive, autoregLoadOnly, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, realignCycleForToday, todayCycleStripIndex,
+  uid, todayISO, fmtISO, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, incrementForExercise, equipmentCfgFor, is531MainLift, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, healScheduleWeekdays, buildPlanSkeleton, instantiateProgram, is531Plan, round531, tmFrom531, tmBump531, weeks531, week531, fiveThreeOneSets, build531Plan, add531MainLift, current531Week, current531Cycle, compute531CycleBumps, resolve531CycleEnd, suggest531Tm, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, mesoActive, autoregLoadOnly, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, withVersionedDays, realignCycleForToday, todayCycleStripIndex,
   effReps, fmtDuration, e1rm, isImprovement, isDecline, bestE1rmForExercise, bestAssistLoad, bestTimeForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, buildTimeSeedSets, latestBodyweight, bodyweightForDate, exerciseLogMode, isAssisted, shouldPullBodyweight, systemExerciseToRow, inferCurrentExIdx, calcBlended,
   refreshExerciseBests, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries,
   computeNextReminderAt,
