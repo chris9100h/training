@@ -1304,9 +1304,15 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                                   const isRecipe = e.source === 'recipe';
                                   const hasRecipeItems = isRecipe && e.recipeItems?.length > 0;
                                   const expanded = expandedEntryIds.has(e.id);
+                                  // Expanded, the ingredient tree joins the SAME card the
+                                  // header sits in (fdEntryCard), not a separate loose list
+                                  // underneath: one continuous bordered surface, header on
+                                  // top, ingredients branching off a trunk line below it
+                                  // (FdIngredientTrunk/Tick), same idiom as the timeline's
+                                  // own hour-row tree (FdHourTrunk/Tick).
                                   return (
-                                    <React.Fragment key={e.id}>
-                                      <div data-reorder-item="true" style={fdEntryRow}>
+                                    <div key={e.id} data-reorder-item="true" style={fdEntryCard}>
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                                         <DragHandle style={{ width: 14, height: 22, marginRight: 2 }} />
                                         <div
                                           onClick={() => { if (hasRecipeItems) toggleEntryExpanded(e.id); else if (!isRecipe) openEditEntry(e); }}
@@ -1328,18 +1334,22 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                                         </button>
                                       </div>
                                       {hasRecipeItems && expanded && (
-                                        <div style={fdRecipeIngredientList}>
+                                        <div style={{ position: 'relative', marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                                          <FdIngredientTrunk />
                                           {e.recipeItems.map((ri, i) => (
-                                            <div key={i} style={fdRecipeIngredientRow}>
-                                              <span style={{ ...fdEntryName, fontSize: 11, fontWeight: 500 }}>{ri.foodName}</span>
-                                              <span style={fdEntryMeta}>
-                                                {ri.quantityG}g · {ri.calories} kcal · P{Math.round(ri.protein)} C{Math.round(ri.carbs)} F{Math.round(ri.fat)}
-                                              </span>
+                                            <div key={i} style={{ display: 'flex', alignItems: 'center' }}>
+                                              <FdIngredientTick />
+                                              <div style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0, flex: 1 }}>
+                                                <span style={{ ...fdEntryName, fontSize: 11, fontWeight: 500 }}>{ri.foodName}</span>
+                                                <span style={fdEntryMeta}>
+                                                  {ri.quantityG}g · {ri.calories} kcal · P{Math.round(ri.protein)} C{Math.round(ri.carbs)} F{Math.round(ri.fat)}
+                                                </span>
+                                              </div>
                                             </div>
                                           ))}
                                         </div>
                                       )}
-                                    </React.Fragment>
+                                    </div>
                                   );
                                 }) : <div data-reorder-item="true" data-reorder-ignore="true" style={{ flex: 1 }} />}
                               </div>
@@ -2741,12 +2751,26 @@ const fdEntryName = { fontSize: 13, fontWeight: 600, color: UI.ink, fontFamily: 
 const fdEntryMeta = { fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi };
 const fdEntryRow = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '10px 12px', background: UI.bgInset, border: `1px solid ${UI.hair}`, borderRadius: 6 };
 const fdInlineDeleteBtn = { background: 'transparent', border: 'none', color: UI.inkFaint, cursor: 'pointer', padding: 6, WebkitTapHighlightColor: 'transparent' };
-// A recipe entry's expanded ingredient snapshot (see confirmRecipeLog's
-// recipeItems), indented under the entry row it belongs to, plain neutral
-// rows (no card chrome of their own, this is a nested detail, not another
-// pickable item).
-const fdRecipeIngredientList = { display: 'flex', flexDirection: 'column', gap: 4, paddingLeft: 22 };
-const fdRecipeIngredientRow = { display: 'flex', flexDirection: 'column', gap: 1 };
+// A recipe entry's own card chrome (background/border/radius/padding, same
+// values as fdEntryRow), but as a plain vertical stack instead of a single
+// horizontal row: the header row sits on top, and when expanded the
+// ingredient tree (FdIngredientTrunk/Tick, same idiom as the timeline's own
+// FdHourTrunk/FdHourTick) joins it INSIDE the same card, not as a separate
+// loose list underneath. fdEntryRow itself stays a plain row (used
+// elsewhere for entries that never grow), this is only for the one entry
+// type that does.
+const fdEntryCard = { display: 'flex', flexDirection: 'column', background: UI.bgInset, border: `1px solid ${UI.hair}`, borderRadius: 6, padding: '10px 12px' };
+const FD_INGREDIENT_GUTTER = 14;
+function FdIngredientTrunk() {
+  return <div style={{ position: 'absolute', left: 4, top: 0, bottom: 0, width: 2, background: UI.hairStrong, pointerEvents: 'none' }} />;
+}
+function FdIngredientTick() {
+  return (
+    <div style={{ width: FD_INGREDIENT_GUTTER, flexShrink: 0, display: 'flex', alignItems: 'center' }}>
+      <div style={{ marginLeft: 4, width: FD_INGREDIENT_GUTTER - 4, height: 2, background: UI.hairStrong }} />
+    </div>
+  );
+}
 const fdResultRow = {
   display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '10px 12px',
   background: UI.bgInset, border: `1px solid ${UI.hair}`, borderRadius: 6, textShadow: 'none',
