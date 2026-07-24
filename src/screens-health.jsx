@@ -2519,6 +2519,10 @@ function HealthScreen({ store, setStore, go, userId }) {
   const [logOpen, setLogOpen] = useStateH(false);
   const [targetOpen, setTargetOpen] = useStateH(false);
   const [coachingMacros, setCoachingMacros] = useStateH(null);
+  // Whether the async coach-macros load has settled. Lets the targets cache
+  // tell a transient load-null (protect the cache) from a genuine no/removed-
+  // targets null (clear the cache). True immediately when there's no coach.
+  const [coachingMacrosLoaded, setCoachingMacrosLoaded] = useStateH(false);
   const [tf, setTf] = useStateH('1W');
   const [capturing, setCapturing] = useStateH(false);
   const [exportOpen, setExportOpen] = useStateH(false);
@@ -2628,9 +2632,12 @@ function HealthScreen({ store, setStore, go, userId }) {
   };
 
   useEffectH(() => {
-    if (!coachingId) { setCoachingMacros(null); return; }
+    if (!coachingId) { setCoachingMacros(null); setCoachingMacrosLoaded(true); return; }
     let cancelled = false;
-    LB.loadCoachingMacros(coachingId).then(data => { if (!cancelled) setCoachingMacros(data[0] || null); }).catch(() => {});
+    setCoachingMacrosLoaded(false);
+    LB.loadCoachingMacros(coachingId)
+      .then(data => { if (!cancelled) { setCoachingMacros(data[0] || null); setCoachingMacrosLoaded(true); } })
+      .catch(() => { if (!cancelled) setCoachingMacrosLoaded(true); });
     return () => { cancelled = true; };
   }, [coachingId]);
 
@@ -2672,10 +2679,17 @@ function HealthScreen({ store, setStore, go, userId }) {
   // previous visit so adherence bar + target rows are visible on the first render.
   const effectiveTargets = targets ?? cachedTargets;
   useEffectH(() => {
-    if (targets === null && cachedTargets !== null) return; // don't overwrite a good cache with a transient null
+    // Only protect the cache from a null while coach macros are still loading
+    // (a real target may be about to arrive). Once the load has settled (or
+    // there's no coach), a null is genuine, no or just-removed targets, and MUST
+    // clear the cache, otherwise removed targets keep displaying and scoring
+    // adherence forever (the guard used to key off cachedTargets !== null, which
+    // could never tell a transient load-null from a real cleared-null).
+    const macrosSettled = !coachingId || coachingMacrosLoaded;
+    if (targets === null && cachedTargets !== null && !macrosSettled) return;
     try { localStorage.setItem(targetsCacheKey, JSON.stringify(targets)); } catch {}
     if (targets !== cachedTargets) setCachedTargets(targets);
-  }, [targets]);
+  }, [targets, coachingMacrosLoaded]);
 
   // The Food Tracker's rollup (screens-food.jsx) writes calories/protein/
   // carbs/fat straight into a day's log but doesn't know about targets or
@@ -2715,7 +2729,12 @@ function HealthScreen({ store, setStore, go, userId }) {
           if (dt === 'training' || dt === 'rest') targetsSnap = { dayType: dt };
         }
         if (log.adherence === adherence && JSON.stringify(log.targetsSnap) === JSON.stringify(targetsSnap)) return;
-        reconciled.set(log.date, { ...log, adherence, targetsSnap });
+        // Bump updatedAt so sync_daily_logs_batch's `updated_at < EXCLUDED`
+        // staleness guard accepts this write. The Food-Tracker rollup already
+        // persisted this row with its own timestamp; re-sending the reconciled
+        // adherence with that SAME timestamp would be silently dropped server-
+        // side, leaving the coach/check-in with null/stale adherence forever.
+        reconciled.set(log.date, { ...log, adherence, targetsSnap, updatedAt: new Date().toISOString() });
       });
       if (!reconciled.size) return s;
       const nextLogs = s.dailyLogs.map(log => reconciled.has(log.date) ? reconciled.get(log.date) : log);
