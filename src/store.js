@@ -963,7 +963,11 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     _supabase.from('zane_food_logs').select('id, date, time, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, recipe_items, recipe_id, logged_total_portions, planned, template_slot_id, created_at').eq('user_id', userId).gte('date', foodHistCutoff).order('date', { ascending: false }).order('time', { ascending: false }),
     // Food tracker quick-add: user-starred foods and saved recipes (migration
     // 0187), own store only: a coach's read-only client view has no use for
-    // another user's personal shortcuts (owner-only RLS, no coach-read policy).
+    // another user's personal shortcuts. Favorites are owner-only RLS; recipes
+    // DO have a coach-of-client read policy (migration 0200) but are still
+    // skipped on a coach load because the client view doesn't render them,
+    // pushMealPlanToClient fetches the client's recipes directly when it needs
+    // them for its dedup.
     isCoachLoad ? null : _supabase.from('zane_food_favorites').select('id, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, units, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
     isCoachLoad ? null : _supabase.from('zane_food_recipes').select('id, name, items, portions, created_at, updated_at').eq('user_id', userId).order('created_at', { ascending: false }),
     // Plan Mode meal-template slots (migration 0197), own store only, same
@@ -3999,6 +4003,17 @@ async function loadClientStore(clientId) {
 // failure; the note is best-effort. Returns the new plan id.
 async function pushMealPlanToClient({ plan, slots, recipes, coachUserId, coachingId, clientId, activateNow }) {
   const clientData = await loadClientStore(clientId);
+  // loadClientStore is a coach-load, which deliberately skips the client's
+  // recipes (loadFromSupabase nulls that query), so clientData.foodRecipes is
+  // always empty and the name-dedup below would always miss, inserting a
+  // duplicate same-named recipe on every push. Fetch the client's recipes
+  // directly instead (coach-of-client read RLS on zane_food_recipes, migration
+  // 0200). Best-effort: on failure fall back to always-copy.
+  let clientRecipes = [];
+  try {
+    const { data } = await _supabase.from('zane_food_recipes').select('id, name').eq('user_id', clientId);
+    clientRecipes = data || [];
+  } catch (_) { clientRecipes = []; }
   const newPlanId = uid();
   const nowISO = new Date().toISOString();
   const planCopy = { id: newPlanId, name: plan.name, archived: false, isTemplate: false, coachId: coachUserId, createdAt: nowISO, updatedAt: nowISO };
@@ -4008,7 +4023,7 @@ async function pushMealPlanToClient({ plan, slots, recipes, coachUserId, coachin
     if (!s.recipeId || s.recipeId in recipeIdMap) continue;
     const src = (recipes || []).find(r => r.id === s.recipeId);
     if (!src) { recipeIdMap[s.recipeId] = null; continue; }
-    const existing = (clientData.foodRecipes || []).find(r => r.name.trim().toLowerCase() === src.name.trim().toLowerCase());
+    const existing = clientRecipes.find(r => (r.name || '').trim().toLowerCase() === src.name.trim().toLowerCase());
     if (existing) { recipeIdMap[s.recipeId] = existing.id; continue; }
     const nid = uid();
     recipeIdMap[s.recipeId] = nid;
