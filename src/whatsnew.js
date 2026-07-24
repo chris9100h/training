@@ -17,6 +17,15 @@
    Entry shape: { id: string, date: string (YYYY-MM-DD), title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.659',
+    date: '2026-07-24',
+    title: 'Meal reminders ⏰',
+    items: [
+      "⏰ Plan Mode can nudge you now: if a planned meal is still unchecked an hour after its time, you get a friendly push to log it. Turn it on under Settings → Health → Meal reminders (needs Plan Mode and notifications on).",
+      "🔕 No spam: at most one nudge per meal, and the moment you check it off it goes quiet.",
+    ],
+  },
+  {
     id: 'v2.657',
     date: '2026-07-24',
     title: 'Plan Mode 🍱',
