@@ -152,7 +152,12 @@ const FD_MEAL_CATEGORIES = [
 // slot.id becomes templateSlotId, which the dedup keys off.
 function fdMaterializeSlotEntry(slot, dateISO) {
   return {
-    id: LB.uid(), date: dateISO, time: `${String(slot.hour ?? 12).padStart(2, '0')}:00`,
+    // Deterministic per (day, slot): two devices auto-filling the same morning
+    // before either has synced would otherwise materialize the same slot with
+    // different random ids, and the purely id-based boot-merge would union both
+    // into duplicate meals (and double-count once checked off). A stable id makes
+    // the two rows collide so mergeById collapses them into one.
+    id: `pl_${dateISO}_${slot.id}`, date: dateISO, time: `${String(slot.hour ?? 12).padStart(2, '0')}:00`,
     foodId: slot.foodId ?? null, foodName: slot.foodName, brand: slot.brand ?? null, source: slot.source ?? null,
     quantityG: slot.quantityG, calories: slot.calories, protein: slot.protein, carbs: slot.carbs, fat: slot.fat,
     fiber: slot.fiber ?? null, recipeItems: slot.recipeItems ?? null, recipeId: slot.recipeId ?? null,
@@ -616,10 +621,10 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     return [...list].sort((a, b) => a.name.localeCompare(b.name));
   }, [store.foodRecipes, quickQuery]);
 
-  const shiftDay = (delta) => setCurDate(d => {
-    const next = fdShiftDate(d, delta);
-    return next > today ? d : next;
-  });
+  // Unbounded both ways: backward lazy-fetches outside the boot window, forward
+  // is needed for Plan Mode (plan tomorrow's meals), matching the calendar input
+  // (no max) and the day-nav comment below.
+  const shiftDay = (delta) => setCurDate(d => fdShiftDate(d, delta));
 
   // Writes the day's summed macros into the daily log, same one-call shape
   // patchDaily/doAdd use in screens-water.jsx. Calories come straight from the
@@ -702,7 +707,11 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     setStore(s => {
       const nextLogs = [...entries, ...(s.foodLogs || [])];
       let dailyLogs = s.dailyLogs || [];
-      for (const d of dates) dailyLogs = patchDaily({ ...s, dailyLogs }, d, nextLogs.filter(l => l.date === d));
+      // Only re-roll the daily log for dates this batch actually LOGGED onto: a
+      // planned-only add must never reach patchDaily, which would (with no logged
+      // entries) null the day's macros and silently wipe manually-entered Health
+      // macros. loggedDates already excludes planned-only dates.
+      for (const d of loggedDates) dailyLogs = patchDaily({ ...s, dailyLogs }, d, nextLogs.filter(l => l.date === d));
       return { ...s, foodLogs: nextLogs, dailyLogs };
     });
     setPendingHour(null);
@@ -756,9 +765,16 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // Flip an entry between planned and logged (Plan Mode). Checking a planned
   // entry off (planned -> logged) is the primary action on the timeline's
   // planned cards; patchDaily then folds its macros into the day, since a
-  // logged entry counts and a planned one doesn't. No confirm: it's a one-tap
-  // "I ate this", trivially reversible via the same toggle.
-  function setEntryPlanned(entry, planned) {
+  // logged entry counts and a planned one doesn't.
+  async function setEntryPlanned(entry, planned) {
+    // Flipping TO logged claims the day for the tracker. If this is the first
+    // logged entry on a day that carries manual Health-tab macros, warn before
+    // patchDaily overwrites them, same as a fresh logged add (commitEntries).
+    // Flipping back to planned only removes it from the day, so no warning.
+    if (!planned) {
+      const ok = await warnIfOverwritingManualMacros(entry.date);
+      if (!ok) return;
+    }
     setStore(s => {
       const nextLogs = (s.foodLogs || []).map(l => l.id === entry.id ? { ...l, planned } : l);
       return { ...s, foodLogs: nextLogs, dailyLogs: patchDaily(s, entry.date, nextLogs.filter(l => l.date === entry.date)) };
@@ -863,13 +879,17 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // the same s.
   async function submitCopyMove() {
     if (!copyMoveIds.length || !copyMoveTarget || copyMoveTarget === curDate) return;
-    const ok = await warnIfOverwritingManualMacros(copyMoveTarget);
-    if (!ok) return;
     const targetDate = copyMoveTarget, mode = copyMoveMode, ids = copyMoveIds, sourceDate = curDate;
     // A day that hasn't happened yet can't already have something "eaten" on
     // it: landing on a future date forces planned, regardless of whether the
-    // source entry was logged or planned itself.
+    // source entry was logged or planned itself. Planned clones never touch the
+    // target's daily log, so a future target neither warns about overwriting
+    // manual macros nor gets a patchDaily (which would null them).
     const targetIsFuture = targetDate > today;
+    if (!targetIsFuture) {
+      const ok = await warnIfOverwritingManualMacros(targetDate);
+      if (!ok) return;
+    }
     setStore(s => {
       const selected = (s.foodLogs || []).filter(l => ids.includes(l.id));
       if (!selected.length) return s;
@@ -877,7 +897,8 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       const clones = selected.map(l => ({ ...l, id: LB.uid(), date: targetDate, createdAt: now, planned: targetIsFuture ? true : l.planned }));
       const remaining = mode === 'move' ? (s.foodLogs || []).filter(l => !ids.includes(l.id)) : (s.foodLogs || []);
       const nextLogs = [...clones, ...remaining];
-      let dailyLogs = patchDaily(s, targetDate, nextLogs.filter(l => l.date === targetDate));
+      let dailyLogs = s.dailyLogs || [];
+      if (!targetIsFuture) dailyLogs = patchDaily({ ...s, dailyLogs }, targetDate, nextLogs.filter(l => l.date === targetDate));
       if (mode === 'move') {
         dailyLogs = patchDaily({ ...s, dailyLogs }, sourceDate, nextLogs.filter(l => l.date === sourceDate));
       }
@@ -1345,10 +1366,17 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // from the Log it / Plan it button tapped; on an edit it comes from the
   // sheet's planned/logged switch (qtyEditPlanned). Defaults false so every
   // non-plan-mode caller logs exactly as before.
-  function confirmLogFood(planned = false) {
+  async function confirmLogFood(planned = false) {
     const built = buildQtyEntry();
     if (!built) return;
     if (editingEntry) {
+      // Editing an entry to Logged (qtyEditPlanned false) can be the first
+      // logged entry claiming a day that carries manual Health-tab macros; warn
+      // before patchDaily overwrites them, same as the checkbox flip.
+      if (!qtyEditPlanned) {
+        const ok = await warnIfOverwritingManualMacros(editingEntry.date);
+        if (!ok) return;
+      }
       const updated = { ...built, id: editingEntry.id, date: editingEntry.date, time: editingEntry.time, createdAt: editingEntry.createdAt, planned: qtyEditPlanned };
       setStore(s => {
         const nextLogs = (s.foodLogs || []).map(l => l.id === editingEntry.id ? updated : l);
@@ -1474,9 +1502,30 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     const totalPortions = entry.loggedTotalPortions != null ? entry.loggedTotalPortions
       : m ? parseFloat(m[2])
       : (recipe.portions || 1);
+    const origChosen = m ? parseFloat(m[1]) : totalPortions;
+    // Rescale from the entry's OWN frozen ingredient snapshot, not the live
+    // recipe: changing the portion count of a past entry must not retroactively
+    // bake in ingredient edits made to the recipe since it was logged (that
+    // silently rewrote historical macros/daily totals). The stored recipeItems
+    // are at origChosen scale, so rebuild a full-batch (totalPortions) item list
+    // and hand THAT to the portions prompt in place of the live recipe, keeping
+    // confirmRecipeLog's normal chosen/total math but sourcing it from the
+    // snapshot. Legacy entries without a snapshot fall back to the live recipe.
+    const snap = (entry.recipeItems && entry.recipeItems.length) ? entry.recipeItems : null;
+    const promptRecipe = snap ? (() => {
+      const perTotal = origChosen ? totalPortions / origChosen : 1;
+      return { ...recipe, portions: totalPortions, items: snap.map(i => ({
+        foodName: i.foodName,
+        quantityG: (i.quantityG || 0) * perTotal,
+        protein: (i.protein || 0) * perTotal,
+        carbs: (i.carbs || 0) * perTotal,
+        fat: (i.fat || 0) * perTotal,
+        fiber: i.fiber != null ? i.fiber * perTotal : null,
+      })) };
+    })() : recipe;
     setEditingEntry(entry);
     setQtyEditPlanned(!!entry.planned);
-    setRecipeLogPrompt({ recipe, chosenPortions: m ? parseFloat(m[1]) : totalPortions, totalPortions });
+    setRecipeLogPrompt({ recipe: promptRecipe, chosenPortions: origChosen, totalPortions });
   }
   // Live macro preview for the portions prompt, same scaling math
   // confirmRecipeLog itself uses (not committed until Add is actually
@@ -1498,7 +1547,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // Stages the recipe (see `staged` above) same as everything else, "Add N
   // items" logs it together with whatever else is picked. Still a single log
   // entry either way, just staged instead of committed straight away.
-  function confirmRecipeLog(planned = false) {
+  async function confirmRecipeLog(planned = false) {
     const { recipe, chosenPortions, totalPortions } = recipeLogPrompt;
     const items = recipe.items || [];
     const netCarbs = !!store.settings?.netCarbs;
@@ -1548,7 +1597,13 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     if (editingEntry) {
       // planned/logged comes from the sheet's own switch (qtyEditPlanned,
       // seeded from the entry in openEditRecipeEntry), same as the non-recipe
-      // edit path.
+      // edit path. Editing to Logged can be the first logged entry claiming a
+      // day with manual Health-tab macros, so warn before patchDaily overwrites
+      // them, same as commitEntries / the checkbox flip.
+      if (!qtyEditPlanned) {
+        const ok = await warnIfOverwritingManualMacros(editingEntry.date);
+        if (!ok) return;
+      }
       const updated = { ...built, id: editingEntry.id, date: editingEntry.date, time: editingEntry.time, createdAt: editingEntry.createdAt, planned: qtyEditPlanned };
       setStore(s => {
         const nextLogs = (s.foodLogs || []).map(l => l.id === editingEntry.id ? updated : l);
@@ -2718,8 +2773,11 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
     setStore(s => {
       const list = s.foodMealPlans || [];
       const plan = { id, name: (name || '').trim() || 'Meal plan', archived: false, isTemplate: asTemplate, coachId: null, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
-      // The first (or only) NON-template plan becomes active automatically.
-      const makeActive = !asTemplate && (!s.activeMealTemplateId || !list.some(p => p.id === s.activeMealTemplateId && !p.archived));
+      // The first (or only) NON-template plan becomes active automatically. The
+      // membership check also excludes templates so a stale template-active
+      // state (e.g. after deleting the last real plan) self-heals: a newly
+      // created real plan then correctly claims active.
+      const makeActive = !asTemplate && (!s.activeMealTemplateId || !list.some(p => p.id === s.activeMealTemplateId && !p.archived && !p.isTemplate));
       return { ...s, foodMealPlans: [plan, ...list], ...(makeActive ? { activeMealTemplateId: id } : {}) };
     });
     setViewedPlanId(id);
@@ -2736,7 +2794,10 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
     setStore(s => {
       const remainingPlans = (s.foodMealPlans || []).filter(p => p.id !== plan.id);
       const remainingSlots = (s.foodTemplateSlots || []).filter(x => x.mealPlanId !== plan.id);
-      const nextActive = s.activeMealTemplateId === plan.id ? (remainingPlans.find(p => !p.archived)?.id ?? null) : s.activeMealTemplateId;
+      // Fall back to a real plan only, never a client template: a coach's own
+      // plans and client templates share this array, and an active template
+      // would auto-fill the coach's own day and block new plans from activating.
+      const nextActive = s.activeMealTemplateId === plan.id ? (remainingPlans.find(p => !p.archived && !p.isTemplate)?.id ?? null) : s.activeMealTemplateId;
       return { ...s, foodMealPlans: remainingPlans, foodTemplateSlots: remainingSlots, activeMealTemplateId: nextActive };
     });
     setManageOpen(false);
