@@ -1087,7 +1087,7 @@ function ClientSetupTab(props) {
       <SubTabBar tabs={[{ id: 'plan', label: 'Plan', icon: 'fa-calendar-days' }, { id: 'nutrition', label: 'Nutrition', icon: 'fa-utensils' }]}
         active={sub} onChange={setSub} />
       {sub === 'plan'      && <ClientPlanTab {...props} />}
-      {sub === 'nutrition' && <ClientNutritionTab coachingId={props.coachingId} userId={props.userId} />}
+      {sub === 'nutrition' && <ClientNutritionTab coachingId={props.coachingId} userId={props.userId} clientId={props.clientId} clientName={props.clientName} store={props.store} />}
     </div>
   );
 }

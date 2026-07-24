@@ -3984,6 +3984,60 @@ async function loadClientStore(clientId) {
   return loadFromSupabase(clientId, 0, { coachLoad: true });
 }
 
+// Push a meal plan into a client's account (Plan Mode coaching). Copies the
+// plan + its slots, copies referenced recipes (deduped by name against the
+// client's own), enables the client's plan mode so the plan is reachable, and
+// optionally activates it. Mirrors the training pushToClient: ordered writes
+// (plan first, active pointer second) via syncStore retargeted to the client,
+// best-effort coaching note after. Shared by the coach's FoodTemplateScreen
+// and the client-detail Nutrition tab. Foods carry self-contained snapshots so
+// there is no food-library dedup, unlike a schedule push. Throws on write
+// failure; the note is best-effort. Returns the new plan id.
+async function pushMealPlanToClient({ plan, slots, recipes, coachUserId, coachingId, clientId, activateNow }) {
+  const clientData = await loadClientStore(clientId);
+  const newPlanId = uid();
+  const nowISO = new Date().toISOString();
+  const planCopy = { id: newPlanId, name: plan.name, archived: false, isTemplate: false, coachId: coachUserId, createdAt: nowISO, updatedAt: nowISO };
+  const recipeIdMap = {};
+  const newRecipes = [];
+  for (const s of (slots || [])) {
+    if (!s.recipeId || s.recipeId in recipeIdMap) continue;
+    const src = (recipes || []).find(r => r.id === s.recipeId);
+    if (!src) { recipeIdMap[s.recipeId] = null; continue; }
+    const existing = (clientData.foodRecipes || []).find(r => r.name.trim().toLowerCase() === src.name.trim().toLowerCase());
+    if (existing) { recipeIdMap[s.recipeId] = existing.id; continue; }
+    const nid = uid();
+    recipeIdMap[s.recipeId] = nid;
+    newRecipes.push({ id: nid, name: src.name, items: src.items || [], portions: src.portions || 1, createdAt: nowISO, updatedAt: nowISO });
+  }
+  const slotCopies = (slots || []).map(s => ({
+    ...s, id: uid(), mealPlanId: newPlanId,
+    recipeId: s.recipeId ? (recipeIdMap[s.recipeId] ?? null) : null,
+    createdAt: nowISO,
+  }));
+  const withPlan = {
+    ...clientData,
+    settings: { ...clientData.settings, planMode: true },
+    foodRecipes: [...(clientData.foodRecipes || []), ...newRecipes],
+    foodMealPlans: [...(clientData.foodMealPlans || []), planCopy],
+    foodTemplateSlots: [...(clientData.foodTemplateSlots || []), ...slotCopies],
+  };
+  await syncStore(clientData, withPlan, clientId);
+  if (activateNow) {
+    await syncStore(withPlan, { ...withPlan, activeMealTemplateId: newPlanId }, clientId);
+  }
+  try {
+    const threadId = await getOrCreateCoachingThread(coachingId, `New meal plan: ${plan.name}`, coachUserId);
+    const body = activateNow
+      ? `Pushed a new meal plan: ${plan.name}\n\nIt's now your active plan.`
+      : `Pushed a new meal plan: ${plan.name}\n\nIt's in your meal plans but not active yet, let's talk it through before you switch to it.`;
+    await addCoachingNote(coachingId, 'general', null, null, body, coachUserId, threadId);
+  } catch (noteErr) {
+    console.warn('Meal plan pushed, but the coaching note could not be posted:', noteErr);
+  }
+  return newPlanId;
+}
+
 async function loadCoachClientsStatus() {
   const { data, error } = await _supabase.rpc('get_coach_clients_status');
   if (error) throw error;
@@ -7055,7 +7109,7 @@ window.LB = {
   subscribeToChanges,
   openStatusPeriod, closeStatusPeriod, updateStatusPeriodStart, clearStatusMode,
   startDeload, endDeload, deloadElapsed, deloadDaysRemaining, deloadPlanDays,
-  loadClientStore, loadCoachClientsStatus, reloadCoachingState, enableSelfCoaching, inviteClient, respondToCoachingInvite, endCoaching,
+  loadClientStore, pushMealPlanToClient, loadCoachClientsStatus, reloadCoachingState, enableSelfCoaching, inviteClient, respondToCoachingInvite, endCoaching,
   addCoachingNote, markCoachingNotesRead, loadCoachingNotes, loadCoachingThreads, createCoachingThread, deleteCoachingThread, getOrCreateCoachingThread, uploadChatImage,
   unreadCoachingNotes, isNoteFromClient, techniqueRounds, groupBySuperset, supersetLabel, timeAgo, dayLabel, cyclePosFromStartDate, mergeCollectionById, mergePlanDrafts, caloriesFromMacros, detectCacheVersion,
   loadCoachingMacros, addCoachingMacros,

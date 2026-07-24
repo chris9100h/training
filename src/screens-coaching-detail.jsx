@@ -1643,13 +1643,54 @@ function ClientNotesTab({ coachingId, userId, clientName, store, setStore }) {
 
 // ─── Tab: Nutrition ───────────────────────────────────────────────────────────
 
-function ClientNutritionTab({ coachingId, userId }) {
+function ClientNutritionTab({ coachingId, userId, clientId, clientName, store }) {
   const [macros, setMacros] = useStateC([]);
   const [loading, setLoading] = useStateC(true);
   const [saving, setSaving] = useStateC(false);
   const [historyOpen, setHistoryOpen] = useStateC(false);
   const emptyForm = { proteinTraining: '', carbsTraining: '', fatTraining: '', proteinRest: '', carbsRest: '', fatRest: '' };
   const [form, setForm] = useStateC(emptyForm);
+
+  // Meal plans (Plan Mode): the coach can push one of their OWN meal plans to
+  // this client, mirroring the training plan push. store here is the coach's
+  // store (their own plans/slots/recipes). The client's current meal plans are
+  // read directly via the coach-of-client RLS.
+  const coachMealPlans = (store?.foodMealPlans || []).filter(p => !p.archived);
+  const [clientMealPlans, setClientMealPlans] = useStateC(null);
+  const [clientActiveMealId, setClientActiveMealId] = useStateC(null);
+  const [mealPickerOpen, setMealPickerOpen] = useStateC(false);
+  const [mealPushTarget, setMealPushTarget] = useStateC(null); // the coach plan chosen to push
+  const [mealPushBusy, setMealPushBusy] = useStateC(false);
+  const loadClientMealPlans = () => {
+    if (!clientId) return;
+    Promise.all([
+      LB.supabase.from('zane_food_meal_plans').select('id, name, archived, coach_id').eq('user_id', clientId).order('created_at', { ascending: false }),
+      LB.supabase.from('zane_user_settings').select('active_meal_template_id').eq('user_id', clientId).maybeSingle(),
+    ]).then(([plansRes, settRes]) => {
+      setClientMealPlans((plansRes.data || []).filter(p => !p.archived));
+      setClientActiveMealId(settRes.data?.active_meal_template_id ?? null);
+    }).catch(() => { setClientMealPlans([]); });
+  };
+  useEffectC(() => { loadClientMealPlans(); }, [clientId]);
+  const doPushMeal = async (activateNow) => {
+    if (!mealPushTarget) return;
+    setMealPushBusy(true);
+    try {
+      await LB.pushMealPlanToClient({
+        plan: mealPushTarget,
+        slots: (store?.foodTemplateSlots || []).filter(s => s.mealPlanId === mealPushTarget.id),
+        recipes: store?.foodRecipes || [],
+        coachUserId: userId, coachingId, clientId, activateNow,
+      });
+      setMealPushTarget(null);
+      setMealPickerOpen(false);
+      loadClientMealPlans();
+    } catch (e) {
+      alert(e?.message || 'Push failed.');
+    } finally {
+      setMealPushBusy(false);
+    }
+  };
 
   // Calories auto-computed via the shared formula (no fiber — this form has
   // no net-carb concept); 0 is treated as "nothing entered yet", not a real value.
@@ -1785,6 +1826,65 @@ function ClientNutritionTab({ coachingId, userId }) {
           })}
         </>
       )}
+
+      {/* Meal plans (Plan Mode): push one of the coach's own plans to this client */}
+      <div style={{ marginTop: 24, borderTop: `var(--hair-width) solid ${UI.hair}`, paddingTop: 20 }}>
+        <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>MEAL PLANS</div>
+        {clientMealPlans === null ? (
+          <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 12 }}>Loading…</div>
+        ) : clientMealPlans.length === 0 ? (
+          <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 12, lineHeight: 1.5 }}>No meal plans yet. Push one of yours to get {clientName || 'them'} started.</div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 12 }}>
+            {clientMealPlans.map(p => (
+              <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', background: UI.bgInset, borderRadius: 6, border: `var(--hair-width) solid ${UI.hair}` }}>
+                <span style={{ flex: 1, minWidth: 0, fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</span>
+                {p.coach_id && <i className="fa-solid fa-user-group" style={{ fontSize: 10, color: UI.inkGhost }} title="From coach" />}
+                {p.id === clientActiveMealId && <span className="micro" style={{ color: 'var(--accent)' }}>ACTIVE</span>}
+              </div>
+            ))}
+          </div>
+        )}
+        <Btn onClick={() => setMealPickerOpen(true)} style={{ width: '100%' }}>
+          <i className="fa-solid fa-paper-plane" style={{ marginRight: 8 }} /> Push a meal plan
+        </Btn>
+      </div>
+
+      {/* Pick one of the coach's own meal plans to push */}
+      <Sheet open={mealPickerOpen && !mealPushTarget} onClose={() => setMealPickerOpen(false)} title="Push a meal plan" titleColor="var(--accent)">
+        <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 12, lineHeight: 1.5 }}>
+          Copies one of your meal plans (and any recipes it uses) into {clientName || 'the client'}’s account. You’ll pick whether it activates right away.
+        </div>
+        {coachMealPlans.length === 0 ? (
+          <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, padding: '12px 0' }}>You have no meal plans yet. Create one in the Food tab (turn on Meal planning in Settings).</div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {coachMealPlans.map(p => (
+              <button key={p.id} onClick={() => setMealPushTarget(p)} style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '11px 12px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+                <span style={{ flex: 1, textAlign: 'left', fontSize: 13, color: UI.ink, fontFamily: UI.fontUi }}>{p.name}{p.isTemplate ? ' · template' : ''}</span>
+                <i className="fa-solid fa-chevron-right" style={{ fontSize: 12, color: UI.inkFaint }} />
+              </button>
+            ))}
+          </div>
+        )}
+      </Sheet>
+
+      {/* Activate now vs add only */}
+      <Sheet open={!!mealPushTarget} onClose={() => !mealPushBusy && setMealPushTarget(null)} title={mealPushTarget?.name || 'Meal plan'} titleColor="var(--accent)">
+        {mealPushTarget && (
+          <>
+            <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: 1.5 }}>
+              Activate “{mealPushTarget.name}” for {clientName || 'them'} right away, or just add it to their meal plans and talk it through first?
+            </div>
+            <Btn onClick={() => doPushMeal(true)} disabled={mealPushBusy} style={{ width: '100%', marginBottom: 8 }}>
+              {mealPushBusy ? 'Pushing…' : 'Push & activate now'}
+            </Btn>
+            <Btn kind="ghost" onClick={() => doPushMeal(false)} disabled={mealPushBusy} style={{ width: '100%' }}>
+              {mealPushBusy ? 'Pushing…' : 'Add only, talk to them first'}
+            </Btn>
+          </>
+        )}
+      </Sheet>
     </div>
   );
 }

@@ -2709,62 +2709,22 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
     }));
     setPlanSheet(null);
   }
-  // Push a meal plan into a client's account: copy the plan + its slots, and
-  // (per the design) copy any referenced recipes too, deduped by name against
-  // the client's own recipes, so the client can still portion-edit them. Foods
-  // themselves carry self-contained snapshots, so unlike a training push there
-  // is no food-library dedup. Also enables the client's plan mode so the plan
-  // is actually reachable for them. Mirrors screens-schedule.jsx pushToClient:
-  // ordered writes (plan first, active pointer second), best-effort note after.
+  // Thin wrapper over LB.pushMealPlanToClient (shared with the client-detail
+  // Nutrition tab): copies the plan + its slots (+ referenced recipes) into the
+  // client's account and optionally activates it. client is a coaching row
+  // (client.id = coachingId, client.clientId = the client user id).
   async function pushMealPlanToClient(plan, client, activateNow) {
     setPushBusy(true);
     try {
-      const clientData = await LB.loadClientStore(client.clientId);
-      const newPlanId = LB.uid();
-      const nowISO = new Date().toISOString();
-      const planCopy = { id: newPlanId, name: plan.name, archived: false, isTemplate: false, coachId: userId, createdAt: nowISO, updatedAt: nowISO };
-      const planSlots = (store.foodTemplateSlots || []).filter(s => s.mealPlanId === plan.id);
-      // Recipe copy + remap: one client recipe per distinct source recipe.
-      const recipeIdMap = {};
-      const newRecipes = [];
-      for (const s of planSlots) {
-        if (!s.recipeId || s.recipeId in recipeIdMap) continue;
-        const src = (store.foodRecipes || []).find(r => r.id === s.recipeId);
-        if (!src) { recipeIdMap[s.recipeId] = null; continue; }
-        const existing = (clientData.foodRecipes || []).find(r => r.name.trim().toLowerCase() === src.name.trim().toLowerCase());
-        if (existing) { recipeIdMap[s.recipeId] = existing.id; continue; }
-        const nid = LB.uid();
-        recipeIdMap[s.recipeId] = nid;
-        newRecipes.push({ id: nid, name: src.name, items: src.items || [], portions: src.portions || 1, createdAt: nowISO, updatedAt: nowISO });
-      }
-      const slotCopies = planSlots.map(s => ({
-        ...s, id: LB.uid(), mealPlanId: newPlanId,
-        recipeId: s.recipeId ? (recipeIdMap[s.recipeId] ?? null) : null,
-        createdAt: nowISO,
-      }));
-      const withPlan = {
-        ...clientData,
-        settings: { ...clientData.settings, planMode: true },
-        foodRecipes: [...(clientData.foodRecipes || []), ...newRecipes],
-        foodMealPlans: [...(clientData.foodMealPlans || []), planCopy],
-        foodTemplateSlots: [...(clientData.foodTemplateSlots || []), ...slotCopies],
-      };
-      await LB.syncStore(clientData, withPlan, client.clientId);
-      if (activateNow) {
-        await LB.syncStore(withPlan, { ...withPlan, activeMealTemplateId: newPlanId }, client.clientId);
-      }
+      await LB.pushMealPlanToClient({
+        plan,
+        slots: (store.foodTemplateSlots || []).filter(s => s.mealPlanId === plan.id),
+        recipes: store.foodRecipes || [],
+        coachUserId: userId, coachingId: client.id, clientId: client.clientId, activateNow,
+      });
       setPushTarget(null);
       setPushPlan(null);
       setPushDone({ clientName: client.clientName, planName: plan.name, activated: activateNow });
-      try {
-        const threadId = await LB.getOrCreateCoachingThread(client.id, `New meal plan: ${plan.name}`, userId);
-        const body = activateNow
-          ? `Pushed a new meal plan: ${plan.name}\n\nIt's now your active plan.`
-          : `Pushed a new meal plan: ${plan.name}\n\nIt's in your meal plans but not active yet, let's talk it through before you switch to it.`;
-        await LB.addCoachingNote(client.id, 'general', null, null, body, userId, threadId);
-      } catch (noteErr) {
-        console.warn('Meal plan pushed, but the coaching note could not be posted:', noteErr);
-      }
     } catch (e) {
       await confirm(e?.message || 'Push failed. Please try again.', { title: 'Push failed', ok: 'OK', cancel: null });
     } finally {
