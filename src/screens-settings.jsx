@@ -601,6 +601,17 @@ function SettingsScreen({ store, setStore, go, userId, openSupportInbox, openSup
   const [healthCardsSheet, setHealthCardsSheet] = useStateSet(false);
   const [glucoseSheet, setGlucoseSheet] = useStateSet(false);
   const [bodyTempSheet, setBodyTempSheet] = useStateSet(false);
+  // Health sheet's three sub-categories: Health (glucose/body temp/cards),
+  // Water (the same settings body the Water tracker's own settings sheet
+  // uses, WaterSettingsBody/WaterDrinksConfigBody from screens-water.jsx,
+  // reused verbatim rather than duplicated) and Food (meal planning/
+  // reminders). waterDrinksConfigSheet is a push/pop off waterSubSheet, same
+  // as it is off the Water screen's own settings sheet, not a third
+  // simultaneous layer.
+  const [healthSubSheet, setHealthSubSheet] = useStateSet(false);
+  const [waterSubSheet, setWaterSubSheet] = useStateSet(false);
+  const [waterDrinksConfigSheet, setWaterDrinksConfigSheet] = useStateSet(false);
+  const [foodSubSheet, setFoodSubSheet] = useStateSet(false);
   const [accountSheet, setAccountSheet] = useStateSet(false);
   const [trainingSheet, setTrainingSheet] = useStateSet(false);
   const [appearanceSheet, setAppearanceSheet] = useStateSet(false);
@@ -1615,6 +1626,11 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
 
   const activeCount = activeSessions.filter(s => !s.is_finished).length;
 
+  // Same shape as WaterScreen's own patchSettings (screens-water.jsx): lets
+  // the reused WaterSettingsBody/WaterDrinksConfigBody write through here
+  // exactly as they do from the Water tracker itself.
+  const patchSettings = (patch) => setStore(s => ({ ...s, settings: { ...s.settings, ...patch } }));
+
   return (
     <Screen scroll={false}>
       <TopBar title="Settings" onBack={() => go({ name: 'home' })} />
@@ -1849,7 +1865,8 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
         </div>
       </SettingsSheet>
 
-      {/* ══ Health Sheet ══ */}
+      {/* ══ Health Sheet: top-level hub, three sub-categories below the
+          Health tab toggle ══ */}
       <SettingsSheet open={healthSheet} onClose={() => setHealthSheet(false)} title="Health">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
           <Row label="Health tab" first>
@@ -1860,41 +1877,75 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           </div>
 
           <div style={{ marginTop: 16 }}>
-            <Row label="Meal planning" first>
-              <Toggle on={!!store.settings?.planMode} onToggle={() => setStore(s => ({ ...s, settings: { ...s.settings, planMode: !s.settings?.planMode } }))} />
-            </Row>
-            <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
-              Plan meals ahead in the Food Tracker and check them off as you eat. Adds a "Plan" option next to "Log" when you add food, and a projected total for the day. Off by default: with it off the Food Tracker works exactly as before.
-            </div>
-            {store.settings?.planMode && (
-              <div style={{ marginTop: 16 }}>
-                <Row label="Meal reminders" first>
-                  <Toggle on={!!store.settings?.mealReminderEnabled} onToggle={() => {
-                    const next = !store.settings?.mealReminderEnabled;
-                    // Push not active, so send them to the push sheet first, same
-                    // as the training reminder toggle does, instead of enabling a
-                    // reminder that can never be delivered.
-                    if (next && !pushEnabled) { setHealthSheet(false); setPushSheet(true); return; }
-                    setStore(s => ({ ...s, settings: { ...s.settings, mealReminderEnabled: next } }));
-                  }} />
-                </Row>
-                <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
-                  Get a nudge when a planned meal is still unlogged an hour after its time. Needs notifications on.
-                </div>
-              </div>
-            )}
-          </div>
-
-          <div style={{ marginTop: 16 }}>
-            <NavRow label="Glucose" first onTap={() => setGlucoseSheet(true)} />
-            <NavRow label="Body Temperature" onTap={() => setBodyTempSheet(true)} />
-            <NavRow label="Cards" hint={(store.settings?.hiddenHealthCards || []).length ? `${store.settings.hiddenHealthCards.length} hidden` : null} onTap={() => setHealthCardsSheet(true)} />
+            <NavRow label="Health" first onTap={() => setHealthSubSheet(true)} />
+            <NavRow label="Water" onTap={() => setWaterSubSheet(true)} />
+            <NavRow label="Food" onTap={() => setFoodSubSheet(true)} />
             {(store.statusPeriods || []).length > 0 && (
               <NavRow label="Sick & Vacation periods" hint={`${(store.statusPeriods || []).length}`} onTap={() => { setShowAllPeriods(false); setPeriodsSheet(true); }} />
             )}
           </div>
           <div style={{ marginTop: 24 }}>
             <Btn style={{ width: '100%' }} onClick={() => setHealthSheet(false)}>Done</Btn>
+          </div>
+        </div>
+      </SettingsSheet>
+
+      {/* ══ Health › Health (glucose/body temp/cards) ══ */}
+      <SettingsSheet open={healthSubSheet} onClose={() => setHealthSubSheet(false)} title="Health">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+          <NavRow label="Glucose" first onTap={() => setGlucoseSheet(true)} />
+          <NavRow label="Body Temperature" onTap={() => setBodyTempSheet(true)} />
+          <NavRow label="Cards" hint={(store.settings?.hiddenHealthCards || []).length ? `${store.settings.hiddenHealthCards.length} hidden` : null} onTap={() => setHealthCardsSheet(true)} />
+          <div style={{ marginTop: 24 }}>
+            <Btn style={{ width: '100%' }} onClick={() => setHealthSubSheet(false)}>Done</Btn>
+          </div>
+        </div>
+      </SettingsSheet>
+
+      {/* ══ Health › Water: the exact settings body the Water tracker's own
+          settings sheet uses (screens-water.jsx), so there is one source of
+          truth for these fields rather than a second copy drifting apart. ══ */}
+      <SettingsSheet open={waterSubSheet} onClose={() => setWaterSubSheet(false)} title="Water">
+        <WaterSettingsBody settings={store.settings || {}} patchSettings={patchSettings} go={go}
+          onClose={() => setWaterSubSheet(false)}
+          onConfigureDrinks={() => { setWaterSubSheet(false); setWaterDrinksConfigSheet(true); }} />
+      </SettingsSheet>
+
+      {/* ══ Health › Water › Drinks & coffee (push off Water, same as off the
+          Water screen's own settings sheet, not a third simultaneous layer) ══ */}
+      <SettingsSheet open={waterDrinksConfigSheet} onClose={() => { setWaterDrinksConfigSheet(false); setWaterSubSheet(true); }} title="Drinks & coffee">
+        <WaterDrinksConfigBody settings={store.settings || {}} patchSettings={patchSettings}
+          onClose={() => { setWaterDrinksConfigSheet(false); setWaterSubSheet(true); }} />
+      </SettingsSheet>
+
+      {/* ══ Health › Food (meal planning/reminders) ══ */}
+      <SettingsSheet open={foodSubSheet} onClose={() => setFoodSubSheet(false)} title="Food">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+          <Row label="Meal planning" first>
+            <Toggle on={!!store.settings?.planMode} onToggle={() => setStore(s => ({ ...s, settings: { ...s.settings, planMode: !s.settings?.planMode } }))} />
+          </Row>
+          <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
+            Plan meals ahead in the Food Tracker and check them off as you eat. Adds a "Plan" option next to "Log" when you add food, and a projected total for the day. Off by default: with it off the Food Tracker works exactly as before.
+          </div>
+          {store.settings?.planMode && (
+            <div style={{ marginTop: 16 }}>
+              <Row label="Meal reminders" first>
+                <Toggle on={!!store.settings?.mealReminderEnabled} onToggle={() => {
+                  const next = !store.settings?.mealReminderEnabled;
+                  // Push not active, so send them to the push sheet first, same
+                  // as the training reminder toggle does, instead of enabling a
+                  // reminder that can never be delivered.
+                  if (next && !pushEnabled) { setFoodSubSheet(false); setPushSheet(true); return; }
+                  setStore(s => ({ ...s, settings: { ...s.settings, mealReminderEnabled: next } }));
+                }} />
+              </Row>
+              <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
+                Get a nudge when a planned meal is still unlogged an hour after its time. Needs notifications on.
+              </div>
+            </div>
+          )}
+          <div style={{ marginTop: 24 }}>
+            <Btn style={{ width: '100%' }} onClick={() => setFoodSubSheet(false)}>Done</Btn>
           </div>
         </div>
       </SettingsSheet>
