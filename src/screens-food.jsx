@@ -549,7 +549,10 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   const splitInitialSnap = useRefFd(null);
   function splitEntryUnit(e) {
     if (!(e.quantityG > 0)) return null;
-    return matchingFavorite(e.foodId, e.foodName)?.units?.[0] || null;
+    // Prefer the unit this entry was actually logged in (loggedUnit); only a
+    // legacy entry logged before that column existed falls back to guessing
+    // via a matching favorite's first configured unit.
+    return e.loggedUnit || matchingFavorite(e.foodId, e.foodName)?.units?.[0] || null;
   }
   const splitUnit = (e) => splitEntryUnit(e)?.label || ((e.quantityG != null && e.quantityG > 0) ? 'g' : 'kcal');
   const splitOrigAmount = (e) => (e.quantityG != null && e.quantityG > 0) ? e.quantityG : (e.calories || 0);
@@ -1230,10 +1233,10 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       carbsPer100g: item.carbs * per100, fatPer100g: item.fat * per100,
       fiberPer100g: item.fiber != null ? item.fiber * per100 : null,
       servingSizeG: null, servingLabel: null,
-      // zane_food_logs never stores units (see matchingFavorite); a
-      // favorite matching this same name still offers its configured
-      // shortcuts, else undefined, which the quantity sheet's units?.length
-      // check treats as "no units".
+      // zane_food_logs never stores the full units picker list (see
+      // matchingFavorite); a favorite matching this same name still offers
+      // its configured shortcuts, else undefined, which the quantity
+      // sheet's units?.length check treats as "no units".
       units: item.units ?? matchingFavorite(null, item.foodName)?.units,
     });
     setP100Str(String(fdRound1(item.protein * per100)));
@@ -1287,8 +1290,9 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         servingSizeG: null, servingLabel: null,
         // Already in the log (so already cached): don't re-cache it on re-log.
         fromCache: true,
-        // zane_food_logs never stores units; fall back to a matching
-        // favorite's configured units, same as the custom branch above.
+        // zane_food_logs never stores the full units picker list; fall back
+        // to a matching favorite's configured units, same as the custom
+        // branch above.
         units: l.units ?? matchingFavorite(l.foodId, l.foodName)?.units,
       });
       setQtyG(l.quantityG != null ? String(l.quantityG) : '100');
@@ -1407,6 +1411,10 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       source: custom ? 'custom' : pendingFood.source,
       quantityG: fdNum(qtyG), calories: qtyPreview.calories, protein: qtyPreview.protein,
       carbs: qtyPreview.carbs, fat: qtyPreview.fat, fiber: qtyPreview.fiber,
+      // The exact unit this entry was logged in (e.g. "Pc"), so a later
+      // "count" view (the split sheet) reads back what was actually used
+      // instead of guessing via a matching favorite's first unit.
+      loggedUnit: qtyUnitIdx != null ? (pendingFood.units?.[qtyUnitIdx] || null) : null,
       createdAt: new Date().toISOString(),
     };
   }
@@ -1426,11 +1434,13 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   }
 
   // Existing favorite matching this food (by food_id for DB items, by name
-  // for custom ones), or null. zane_food_logs rows never carry their own
-  // units (only zane_food_favorites does, see openEditFavorite), so this
-  // also backs the units fallback in reAddFromRecent/openCustomAsScalable:
-  // a food re-opened from Log/Recent still offers a matching favorite's
-  // configured portion-size shortcuts instead of silently losing them.
+  // for custom ones), or null. zane_food_logs rows only ever remember the
+  // ONE unit an entry was actually logged in (loggedUnit, e.g. for the split
+  // sheet); the full picker list of available units still only lives on
+  // zane_food_favorites (see openEditFavorite), so this also backs the units
+  // fallback in reAddFromRecent/openCustomAsScalable: a food re-opened from
+  // Log/Recent still offers a matching favorite's configured portion-size
+  // shortcuts instead of silently losing them.
   function matchingFavorite(foodId, foodName) {
     return (store.foodFavorites || []).find(x => foodId ? x.foodId === foodId : (x.foodId == null && x.foodName === foodName)) || null;
   }

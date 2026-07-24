@@ -564,6 +564,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
         calories: l.calories, protein: l.protein, carbs: l.carbs, fat: l.fat,
         fiber: l.fiber ?? null, recipe_items: l.recipeItems ?? null,
         recipe_id: l.recipeId ?? null, logged_total_portions: l.loggedTotalPortions ?? null,
+        logged_unit: l.loggedUnit ?? null,
         planned: l.planned ?? false, template_slot_id: l.templateSlotId ?? null,
       }))
     ));
@@ -960,7 +961,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     // denormalized at write time. Coach reads a client's via coach-of-client RLS.
     // Windowed to FOOD_HISTORY_WINDOW_DAYS (see its own comment): nothing
     // reads food history further back than that today.
-    _supabase.from('zane_food_logs').select('id, date, time, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, recipe_items, recipe_id, logged_total_portions, planned, template_slot_id, created_at').eq('user_id', userId).gte('date', foodHistCutoff).order('date', { ascending: false }).order('time', { ascending: false }),
+    _supabase.from('zane_food_logs').select('id, date, time, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, recipe_items, recipe_id, logged_total_portions, logged_unit, planned, template_slot_id, created_at').eq('user_id', userId).gte('date', foodHistCutoff).order('date', { ascending: false }).order('time', { ascending: false }),
     // Food tracker quick-add: user-starred foods and saved recipes (migration
     // 0187), own store only: a coach's read-only client view has no use for
     // another user's personal shortcuts. Favorites are owner-only RLS; recipes
@@ -1680,6 +1681,7 @@ async function syncStore(prev, next, userId) {
       quantity_g: l.quantityG, calories: l.calories, protein: l.protein,
       carbs: l.carbs, fat: l.fat, fiber: l.fiber ?? null, recipe_items: l.recipeItems ?? null,
       recipe_id: l.recipeId ?? null, logged_total_portions: l.loggedTotalPortions ?? null,
+      logged_unit: l.loggedUnit ?? null,
       planned: l.planned ?? false, template_slot_id: l.templateSlotId ?? null,
     }))));
     if (removed.length) ops.push(_supabase.from('zane_food_logs').delete().in('id', removed.map(l => l.id)));
@@ -2708,6 +2710,11 @@ function mapFoodLogRow(l) {
     protein: parseFloat(l.protein), carbs: parseFloat(l.carbs), fat: parseFloat(l.fat),
     fiber: l.fiber != null ? parseFloat(l.fiber) : null, recipeItems: l.recipe_items ?? null,
     recipeId: l.recipe_id ?? null, loggedTotalPortions: l.logged_total_portions ?? null,
+    // Which unit (e.g. "Pc") the entry was actually logged in, {label, grams},
+    // or null when logged in plain grams/kcal. Lets a "count" view (the
+    // timeline's split-into-multiple-meals sheet) read back the exact unit
+    // used instead of guessing via a matching favorite's first unit.
+    loggedUnit: l.logged_unit ?? null,
     // Plan Mode: a planned entry sits in the timeline but does NOT count toward
     // the day's real macro totals until checked off (planned -> logged). Absent
     // on legacy rows -> false -> logged, so old data reads unchanged.
@@ -2758,7 +2765,7 @@ async function fetchFoodLogsForDates(userId, dates) {
   const ds = [...new Set((dates || []).filter(Boolean))];
   if (!ds.length || !userId) return {};
   const { data, error } = await _supabase.from('zane_food_logs')
-    .select('id, date, time, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, recipe_items, recipe_id, logged_total_portions, planned, template_slot_id, created_at')
+    .select('id, date, time, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, recipe_items, recipe_id, logged_total_portions, logged_unit, planned, template_slot_id, created_at')
     .eq('user_id', userId)
     .in('date', ds);
   if (error) throw error;
@@ -5050,7 +5057,7 @@ async function refreshHealthLogs(userId) {
     _supabase.from('zane_blood_pressure_logs').select('id, date, time, systolic, diastolic, note, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
     _supabase.from('zane_body_temp_logs').select('id, date, time, value_c, note, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
     _supabase.from('zane_water_logs').select('id, date, time, amount_ml, name, category, breakdown, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
-    _supabase.from('zane_food_logs').select('id, date, time, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, recipe_items, recipe_id, logged_total_portions, planned, template_slot_id, created_at').eq('user_id', userId).gte('date', foodHistCutoff).order('date', { ascending: false }).order('time', { ascending: false }),
+    _supabase.from('zane_food_logs').select('id, date, time, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, recipe_items, recipe_id, logged_total_portions, logged_unit, planned, template_slot_id, created_at').eq('user_id', userId).gte('date', foodHistCutoff).order('date', { ascending: false }).order('time', { ascending: false }),
   ]);
   if (dailyRes.error || cardioRes.error || glucoseRes.error || bpRes.error || tempRes.error || waterRes.error || foodRes.error) return null;
   return {
