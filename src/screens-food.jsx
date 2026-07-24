@@ -2920,7 +2920,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
               Combines these items into one recipe entry. Off by default: it only replaces this log entry, on saves it to Quick Add, Recipes too.
             </div>
             <Field label="Recipe name" style={{ marginBottom: 16 }}>
-              <TextInput value={recipeBlockName} onChange={setRecipeBlockName} placeholder="e.g. Breakfast bowl" autoFocus />
+              <TextInput value={recipeBlockName} onChange={setRecipeBlockName} placeholder="e.g. Breakfast bowl" />
             </Field>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
               <span style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi }}>Save as reusable recipe</span>
