@@ -549,10 +549,12 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   const splitInitialSnap = useRefFd(null);
   function splitEntryUnit(e) {
     if (!(e.quantityG > 0)) return null;
-    // Prefer the unit this entry was actually logged in (loggedUnit); only a
-    // legacy entry logged before that column existed falls back to guessing
-    // via a matching favorite's first configured unit.
-    return e.loggedUnit || matchingFavorite(e.foodId, e.foodName)?.units?.[0] || null;
+    // Trust loggedUnit alone, no favorite-guess fallback: a row logged
+    // straight in grams (loggedUnit null) is indistinguishable in the DB from
+    // an old entry logged before this column existed, so guessing via a
+    // matching favorite's units would wrongly relabel an intentional gram
+    // entry as a unit count too (the bug this replaced).
+    return e.loggedUnit || null;
   }
   const splitUnit = (e) => splitEntryUnit(e)?.label || ((e.quantityG != null && e.quantityG > 0) ? 'g' : 'kcal');
   const splitOrigAmount = (e) => (e.quantityG != null && e.quantityG > 0) ? e.quantityG : (e.calories || 0);
