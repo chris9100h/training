@@ -3987,17 +3987,23 @@ function FdProjectionLine({ planned, projected, goal, macros }) {
           +{planned} kcal → <span style={{ color: UI.ink, fontWeight: 600 }}>{projected}</span>{goal ? <span style={{ color: UI.inkFaint }}> / {Math.round(goal)}</span> : ''} projected
         </span>
       </div>
-      {/* Bodybuilders track macros, not just kcal: same "+delta → projected"
-          shape as the kcal line above, per macro (logged + still-planned). */}
+      {/* Bodybuilders track macros, not just kcal: a small two-column table,
+          still-to-eat vs. the full logged+planned projection, each centered
+          under its own header. */}
       {macros && (
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, paddingLeft: 2, flexWrap: 'wrap' }}>
-          {[['P', FD_MACRO_COLORS.protein, macros.protein], ['C', FD_MACRO_COLORS.carbs, macros.carbs], ['F', FD_MACRO_COLORS.fat, macros.fat]].map(([label, color, m]) => (
-            <span key={label} className="num" style={{ fontSize: 11, fontWeight: 600 }}>
-              <span style={{ color }}>{label}</span>{' '}
-              <span style={{ color: UI.inkFaint }}>+{Math.round(m.delta)}→</span>
-              <span style={{ color: UI.inkSoft }}>{Math.round(m.total)}g</span>
-            </span>
-          ))}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr' }}>
+          <div style={{ textAlign: 'center', paddingRight: 10, borderRight: `1px solid ${UI.hairStrong}` }}>
+            <div className="micro" style={{ marginBottom: 5 }}>Still planned</div>
+            <div style={{ display: 'flex', justifyContent: 'center' }}>
+              <FdMacroBits protein={macros.protein.delta} carbs={macros.carbs.delta} fat={macros.fat.delta} />
+            </div>
+          </div>
+          <div style={{ textAlign: 'center', paddingLeft: 10 }}>
+            <div className="micro" style={{ marginBottom: 5 }}>Plan + Logged</div>
+            <div style={{ display: 'flex', justifyContent: 'center' }}>
+              <FdMacroBits protein={macros.protein.total} carbs={macros.carbs.total} fat={macros.fat.total} />
+            </div>
+          </div>
         </div>
       )}
     </div>
