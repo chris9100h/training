@@ -486,18 +486,13 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     protein: entries.reduce((a, e) => a + (e.protein || 0), 0),
     carbs: entries.reduce((a, e) => a + (e.carbs || 0), 0),
     fat: entries.reduce((a, e) => a + (e.fat || 0), 0),
-    // Only tracked when netCarbs is on: FdCompositionBar (in the hero below)
-    // needs it to derive the same net-carb-aware total this calories field
-    // above already is, so its percentage bar never diverges from the kcal
-    // figure shown right above it in the same hero.
-    fiber: store.settings?.netCarbs ? entries.reduce((a, e) => a + (e.fiber || 0), 0) : null,
   });
-  const dayTotals = useMemoFd(() => sumTotals(loggedEntries), [loggedEntries, store.settings?.netCarbs]);
+  const dayTotals = useMemoFd(() => sumTotals(loggedEntries), [loggedEntries]);
   // Planning aid: where the day is headed if every planned entry gets eaten
   // (logged + planned). Only shown when plan mode is on and the day actually
   // has planned entries, kept strictly separate from dayTotals above so the
   // real total is never inflated by something not yet eaten.
-  const projectedTotals = useMemoFd(() => sumTotals(dayEntries), [dayEntries, store.settings?.netCarbs]);
+  const projectedTotals = useMemoFd(() => sumTotals(dayEntries), [dayEntries]);
 
   // The calorie target for the currently-viewed day (curDate, which can be
   // backdated), same resolution HealthScreen uses: coach macros win over
@@ -3921,11 +3916,6 @@ function FdHeroRow({ label, color, actual, target, unit = '' }) {
   );
 }
 
-// Macro-composition bar (protein/carbs/fat share of total energy, 4/4/9
-// kcal per g, same conversion HealthScreen's own composition bar uses):
-// two of these (one off dayTotals, one off dayTarget) let the hero compare
-// today's actual macro SPLIT against the target split at a glance, not just
-// each macro's absolute progress (the rows above already cover that).
 // Extracted from the Log tab's live hero so the exact same markup can be
 // reused verbatim in the screenshot poster below (FoodScreen), instead of
 // two copies drifting apart. Pure/presentational: everything it needs is
@@ -3952,10 +3942,6 @@ function FdHeroContent({ dayTarget, dayAdherence, dayTotals, goalCalories, proje
           <FdHeroRow label="CARBS" color={FD_MACRO_COLORS.carbs} actual={dayTotals.carbs} target={dayTarget.carbs} unit="g" />
           <FdHeroRow label="FAT" color={FD_MACRO_COLORS.fat} actual={dayTotals.fat} target={dayTarget.fat} unit="g" />
         </div>
-      </div>
-      <div style={{ marginTop: 16, paddingTop: 16, borderTop: `1px solid ${UI.hair}`, display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <FdCompositionBar label="LOGGED" protein={dayTotals.protein} carbs={dayTotals.carbs} fat={dayTotals.fat} fiber={dayTotals.fiber} />
-        <FdCompositionBar label="TARGET" protein={dayTarget.protein} carbs={dayTarget.carbs} fat={dayTarget.fat} fiber={dayTarget.fiber} />
       </div>
       {projectionLine}
     </>
@@ -3997,32 +3983,6 @@ function FdProjectionLine({ macros }) {
     </div>
   );
 }
-function FdCompositionBar({ label, protein, carbs, fat, fiber }) {
-  // Routed through LB.caloriesFromMacros (net-carb aware) instead of a
-  // plain P*4+C*4+F*9 sum, so this bar's own 100% reference never diverges
-  // from the fiber-aware total the hero's kcal number shows right above it.
-  // The clamped net-carb grams (same clamp caloriesFromMacros applies
-  // internally) also has to replace raw carbs in the CARBS segment's own
-  // numerator below, not just the total's denominator, or the three
-  // segments would stop summing to 100% the moment fiber is subtracted.
-  const netCarbsG = Math.max(0, (carbs || 0) - (fiber || 0));
-  const total = LB.caloriesFromMacros(protein, carbs, fat, fiber) || 0;
-  if (!total) return null;
-  const segs = [
-    { pct: (protein || 0) * 4 / total * 100, color: FD_MACRO_COLORS.protein },
-    { pct: netCarbsG * 4 / total * 100, color: FD_MACRO_COLORS.carbs },
-    { pct: (fat || 0) * 9 / total * 100, color: FD_MACRO_COLORS.fat },
-  ];
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-      <span style={{ width: 46, flexShrink: 0, fontSize: 9, fontWeight: 700, letterSpacing: '0.05em', color: UI.inkFaint, fontFamily: UI.fontUi }}>{label}</span>
-      <div style={{ flex: 1, height: 8, borderRadius: 2, background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, overflow: 'hidden', display: 'flex' }}>
-        {segs.map((s, i) => s.pct > 0 && <div key={i} style={{ width: `${s.pct}%`, height: '100%', background: s.color }} />)}
-      </div>
-    </div>
-  );
-}
-
 // Full-screen dim while the label photo is uploaded and read. Kept dead simple
 // (no cancel): the request is a couple of seconds and closing mid-flight would
 // just discard a result the user asked for.
