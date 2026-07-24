@@ -2195,6 +2195,21 @@ async function refreshExerciseBests(userId) {
   } catch (_) { return null; }
 }
 
+// All-time top-N exercises by session-entry count (server aggregate, same
+// family as get_exercise_best_e1rm / get_session_stats). The client only ever
+// holds session.entries for the 70-day boot window (HISTORY_WINDOW_DAYS) plus
+// whatever old sessions happen to be cached from unrelated detail-view visits,
+// so counting entries locally would silently under-count for older accounts.
+// Returns [{ exId, count }] (already ranked/limited server-side), or null on
+// error so the caller keeps whatever it last had.
+async function fetchTopExercises(userId, limit) {
+  try {
+    const { data, error } = await _supabase.rpc('get_top_exercises', { p_user_id: userId, p_limit: limit });
+    if (error || !data) return null;
+    return data.map(r => ({ exId: r.ex_id, count: r.session_count }));
+  } catch (_) { return null; }
+}
+
 // Total volume (kg) of all completed working sets in a session (warm-ups excluded).
 // For ended sessions we don't require done:true — a kbApply race can leave sets as
 // done:false in Supabase even though the user actually performed them.
@@ -6929,7 +6944,7 @@ window.LB = {
   saveToLocal, loadFromLocal, saveBase, loadBase, clearLocal,
   uid, todayISO, fmtISO, nowHHMM, fmtDayLabel, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, incrementForExercise, equipmentCfgFor, is531MainLift, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, healScheduleWeekdays, buildPlanSkeleton, instantiateProgram, is531Plan, round531, tmFrom531, tmBump531, weeks531, week531, fiveThreeOneSets, build531Plan, add531MainLift, current531Week, current531Cycle, compute531CycleBumps, resolve531CycleEnd, suggest531Tm, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, mesoActive, autoregLoadOnly, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, withVersionedDays, realignCycleForToday, todayCycleStripIndex,
   effReps, fmtDuration, e1rm, isImprovement, isDecline, bestE1rmForExercise, bestAssistLoad, bestTimeForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, buildTimeSeedSets, latestBodyweight, bodyweightForDate, exerciseLogMode, isAssisted, shouldPullBodyweight, systemExerciseToRow, inferCurrentExIdx, calcBlended,
-  refreshExerciseBests, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries, fetchFoodLogsForDates,
+  refreshExerciseBests, fetchTopExercises, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries, fetchFoodLogsForDates,
   computeNextReminderAt,
   cancelPushover, adminSendEmail, searchFoods, cacheFood, scanLabel, createRecipeShare, fetchRecipeShare,
   subscribeToChanges,

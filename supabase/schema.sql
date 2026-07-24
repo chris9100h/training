@@ -2766,3 +2766,26 @@ $$;
 
 REVOKE EXECUTE ON FUNCTION public.admin_schema_inventory() FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.admin_schema_inventory() TO service_role;
+
+-- All-time top-N exercises by session-entry count (Migration 0195). The client
+-- only ever holds session.entries for the 70-day boot window plus whatever old
+-- sessions happen to be cached from unrelated detail-view visits, so counting
+-- entries locally under-counts for older accounts.
+CREATE OR REPLACE FUNCTION public.get_top_exercises(p_user_id uuid DEFAULT NULL, p_limit int DEFAULT 5)
+ RETURNS TABLE(ex_id text, session_count bigint)
+ LANGUAGE sql STABLE SECURITY INVOKER SET search_path TO 'public'
+AS $function$
+  WITH uid AS (SELECT COALESCE(p_user_id, auth.uid()) AS id)
+  SELECT e.ex_id, COUNT(*) AS session_count
+  FROM zane_session_entries e
+  JOIN zane_sessions s ON s.id = e.session_id
+  WHERE e.user_id = (SELECT id FROM uid)
+    AND e.ex_id IS NOT NULL
+    AND s.ended IS NOT NULL
+  GROUP BY e.ex_id
+  ORDER BY session_count DESC
+  LIMIT GREATEST(p_limit, 1);
+$function$;
+
+REVOKE EXECUTE ON FUNCTION public.get_top_exercises(uuid, int) FROM PUBLIC, anon;
+GRANT  EXECUTE ON FUNCTION public.get_top_exercises(uuid, int) TO authenticated;

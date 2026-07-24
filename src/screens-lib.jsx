@@ -1987,7 +1987,7 @@ function WorkoutEffortSheet({ dayId, dayName, sessions, exercises, dailyLogs, on
 }
 
 // ─── STATS TAB ───────────────────────────────────────────────────────
-function StatsTab({ store, sessions, go }) {
+function StatsTab({ store, setStore, sessions, go, userId }) {
   const today = new Date(); today.setHours(12, 0, 0, 0);
   // Stable per-day key so the date-scoped memos below re-run when the calendar
   // day rolls over (long-lived PWA session), but stay memoized within a day.
@@ -2041,6 +2041,28 @@ function StatsTab({ store, sessions, go }) {
     if (isCycleMode) return selectedCycleStart && selectedCycleEnd && d >= selectedCycleStart && d <= selectedCycleEnd;
     return d >= monday && d <= sunday;
   }), [sessions, isCycleMode, selectedCycleStart, selectedCycleEnd]);
+
+  // Sessions windowed out of the 70-day boot fetch carry rollup aggregates (aggExercises)
+  // but no local entries. If just one of them gets lazy-loaded elsewhere (e.g. opening
+  // its own detail view), setsPerMuscle would otherwise sum only that session and
+  // silently present a partial cycle total as complete, batch-fetch the rest too.
+  useEffectL(() => {
+    const needIds = thisPeriodSessions
+      .filter(s => s.ended && !(s.entries || []).length && (s.aggExercises || 0) > 0)
+      .map(s => s.id);
+    if (!needIds.length) return;
+    let on = true;
+    LB.fetchSessionEntries(needIds)
+      .then(bySession => {
+        if (!on) return;
+        setStore(st => ({
+          ...st,
+          sessions: st.sessions.map(x => (bySession[x.id] && !(x.entries || []).length) ? { ...x, entries: bySession[x.id] } : x),
+        }));
+      })
+      .catch(() => {});
+    return () => { on = false; };
+  }, [thisPeriodSessions]);
 
   // Calendar-week sessions — used for consistency card ("This Week")
   const thisWeekSessions = useMemoL(() => sessions.filter(s => {
@@ -2212,10 +2234,19 @@ function StatsTab({ store, sessions, go }) {
     return { missedWorkouts: missed, sickVacationMissed: sickVac };
   }, [todayKey, sessions, store.skips, store.statusPeriods, store.activeScheduleId, store.cycleStartDate, planStart]);
 
-  const exCounts = {};
-  sessions.forEach(s => s.entries.forEach(e => { exCounts[e.exId] = (exCounts[e.exId] || 0) + 1; }));
-  const topExercises = Object.entries(exCounts).sort((a, b) => b[1] - a[1]).slice(0, 5)
-    .map(([id, count]) => ({ id, name: store.exercises.find(e => e.id === id)?.name || '?', count }));
+  // All-time ranking (not period-scoped like setsPerMuscle above), so it can't
+  // rely on client-loaded session.entries: those only cover the 70-day boot
+  // window (HISTORY_WINDOW_DAYS) plus whatever old sessions happen to be
+  // cached from unrelated detail-view visits. get_top_exercises counts
+  // zane_session_entries server-side across every ended session instead.
+  const [topExerciseCounts, setTopExerciseCounts] = useStateL(null);
+  useEffectL(() => {
+    let on = true;
+    LB.fetchTopExercises(userId, 5).then(rows => { if (on && rows) setTopExerciseCounts(rows); }).catch(() => {});
+    return () => { on = false; };
+  }, [userId]);
+  const topExercises = (topExerciseCounts || [])
+    .map(({ exId, count }) => ({ id: exId, name: store.exercises.find(e => e.id === exId)?.name || '?', count }));
 
   const maxSets = Math.max(...setsPerMuscle.map(x => x.sets), 1);
   const maxWeekVol = Math.max(...weeklyVolume.map(w => w.vol), 1);
@@ -2690,7 +2721,7 @@ function HistoryScreen({ store, setStore, go, userId, initialTab }) {
         );
       })()}
 
-      {tab === 'stats' && <StatsTab store={store} sessions={sessions} go={go} />}
+      {tab === 'stats' && <StatsTab store={store} setStore={setStore} sessions={sessions} go={go} userId={userId} />}
 
       {filtersOpen && (() => {
         const selSt = (active) => ({

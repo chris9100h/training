@@ -151,7 +151,7 @@ function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, 
               <ChevronRight color={'var(--accent)'} />
             </div>
           )}
-          {tab === 'overview'   && <ClientOverviewTab clientStore={clientStore} coachingId={coachingId} userId={userId} onSelectSession={openSession} />}
+          {tab === 'overview'   && <ClientOverviewTab clientStore={clientStore} coachingId={coachingId} userId={userId} clientId={clientId} onSelectSession={openSession} />}
           {tab === 'sessions'   && <ClientSessionsTab clientStore={clientStore} coachingId={coachingId} userId={userId} clientName={clientName} initialSelected={selectedSession} onClearSelected={() => setSelectedSession(null)} />}
           {tab === 'checkins'   && (isSelf
             ? <ClientCheckInTab coachingId={coachingId} clientId={clientId} userId={userId} store={store} setStore={setStore} isSelf />
@@ -453,7 +453,7 @@ function ClientProgramStatus({ sch, clientStore }) {
   );
 }
 
-function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession }) {
+function ClientOverviewTab({ clientStore, coachingId, userId, clientId, onSelectSession }) {
   const sessions = clientStore.sessions || [];
   const ended = sessions.filter(s => s.ended).sort((a, b) => (b.ended || '').localeCompare(a.ended || ''));
   const [chartOpen, setChartOpen] = useStateC(null);
@@ -492,6 +492,21 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
 
   const adherenceLabel = `Adherence (${weeks.length}w)`;
   const chartTitles = { adherence: adherenceLabel, volume: 'Avg Vol / Cycle', sessions: 'Sessions per Week' };
+
+  // Sessions outside the boot window arrive with entries:[] (aggExercises>0), so
+  // LB.bestRecentEntry below finds nothing locally for an exercise the client
+  // genuinely trained before, just not recently, and the Up Today preview would
+  // wrongly claim "First time, no weight data yet". Same seedRefs fallback
+  // screens-schedule.jsx uses for the identical plan-preview shape. clientId
+  // (not userId, the coach's own id) scopes the RPC to the client's data via
+  // the coach-of RLS policy on zane_session_entries/zane_sets.
+  const [seedRefs, setSeedRefs] = useStateC({});
+  useEffectC(() => {
+    let on = true;
+    if (!todayDay?.items?.length) { setSeedRefs({}); return; }
+    LB.fetchSeedEntries(clientStore, todayDay.items, todayDay.id, clientId).then(refs => { if (on) setSeedRefs(refs || {}); });
+    return () => { on = false; };
+  }, [todayDay?.id, clientId]);
 
   // Sessions to show: current week (weekday plan) or current cycle window (cycle plan)
   const recentSessions = useMemoC(() => {
@@ -691,8 +706,9 @@ function ClientOverviewTab({ clientStore, coachingId, userId, onSelectSession })
                   const ex = (clientStore.exercises || []).find(e => e.id === item.exId);
                   // Nth appearance of this exercise -> its Nth past occurrence.
                   const occ = arr.slice(0, idx).filter(x => x.exId === item.exId).length;
-                  const last = LB.bestRecentEntry(clientStore, item.exId, todayDay.id, 3, occ);
-                  const suggestion = LB.progressionSuggestion(clientStore, item.exId, todayDay.id, item.reps, item.repsPerSet || null, undefined, item.repsMax || null, item.progressionOffset ?? null, occ);
+                  const seedRef = seedRefs[item.exId];
+                  const last = seedRef ?? LB.bestRecentEntry(clientStore, item.exId, todayDay.id, 3, occ);
+                  const suggestion = LB.progressionSuggestion(clientStore, item.exId, todayDay.id, item.reps, item.repsPerSet || null, seedRef, item.repsMax || null, item.progressionOffset ?? null, occ);
                   const bodyweightKg = LB.shouldPullBodyweight(ex) ? LB.latestBodyweight(clientStore) : null;
                   const seeds = LB.buildSeedSets(item, last, suggestion, ex?.unilateral, clientStore, bodyweightKg, clientStore.statusMode === 'deload');
                   // Reps-only / bodyweight / checkbox exercises seed with kg==null
