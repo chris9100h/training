@@ -3321,6 +3321,14 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
   const [pickerOpen, setPickerOpen] = useStateFd(false);
   const [pickerTab, setPickerTab] = useStateFd('favorites');
   const [pickerQuery, setPickerQuery] = useStateFd('');
+  // Database search (Search tab): separate from pickerQuery, which only
+  // live-filters the already-loaded favorites/recipes lists. This one is an
+  // explicit, network-backed lookup (same LB.searchFoods used everywhere
+  // else), so it needs its own query/results/error/loading state.
+  const [pickerSearchQuery, setPickerSearchQuery] = useStateFd('');
+  const [pickerSearching, setPickerSearching] = useStateFd(false);
+  const [pickerSearchError, setPickerSearchError] = useStateFd(null);
+  const [pickerResults, setPickerResults] = useStateFd(null);
   const [draft, setDraft] = useStateFd(null);
   const netCarbs = !!store.settings?.netCarbs;
   // A flex plan has no fixed weekday schedule to look ahead at, so a Training/
@@ -3504,6 +3512,33 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
     draftInitialSnap.current = snapDraft(d);
     setDraft(d);
   }
+  async function runPickerFoodSearch() {
+    const q = pickerSearchQuery.trim();
+    if (!q || pickerSearching) return;
+    setPickerSearching(true); setPickerSearchError(null);
+    const res = await LB.searchFoods(q, null);
+    setPickerSearching(false);
+    if (!res.ok) { setPickerSearchError(res.error || 'Search failed. Try again.'); setPickerResults([]); return; }
+    setPickerResults(res.results);
+  }
+  // Third way into the config sheet, alongside openAddFood/openAddRecipe:
+  // a fresh database pick instead of something already in the user's
+  // library. Its per100 rates come straight off the result (no reverse
+  // derivation like per100From needs for a favorite's fixed snapshot).
+  // sourceId/fromCache ride along on the draft purely so saveDraft can
+  // cache the food on commit, same as logging or favoriting one does.
+  function openAddSearchResult(r) {
+    setPickerOpen(false);
+    const d = {
+      id: null, kind: 'food', foodId: r.sourceId ? `${r.source}:${r.sourceId}` : null,
+      foodName: r.name, brand: r.brand || null, source: r.source, sourceId: r.sourceId, fromCache: !!r.cached,
+      per100: { cal: r.kcalPer100g || 0, p: r.proteinPer100g || 0, c: r.carbsPer100g || 0, f: r.fatPer100g || 0, fib: r.fiberPer100g ?? null },
+      gramsStr: r.servingSizeG != null ? String(Math.round(r.servingSizeG)) : '100',
+      hour: 8, dayType: 'any',
+    };
+    draftInitialSnap.current = snapDraft(d);
+    setDraft(d);
+  }
   function openEditSlot(slot) {
     let d;
     if (slot.source === 'recipe') {
@@ -3596,6 +3631,11 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
 
   function saveDraft() {
     if (!draft || !draftBuilt) return;
+    // A fresh database pick (openAddSearchResult) may never have been cached
+    // before; fire-and-forget like confirmLogFood does, not awaited like
+    // toggleFavorite has to be, since food_id on template slots is a plain
+    // text column (no FK into zane_foods) unlike favorites/logs.
+    if (draft.sourceId) ensureFoodCached(draft);
     const common = { hour: draft.hour, dayType: draft.dayType };
     const todayISO = LB.todayISO();
     setStore(s => {
@@ -3644,7 +3684,7 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
         onBack={viewedPlan ? () => setViewedPlanId(null) : onClose}
         right={viewedPlan ? (
           <div style={{ display: 'flex', gap: 8 }}>
-            <button onClick={() => { setPickerQuery(''); setPickerOpen(true); }} aria-label="Add meal" style={fdTopAddBtn}>
+            <button onClick={() => { setPickerQuery(''); setPickerSearchQuery(''); setPickerResults(null); setPickerSearchError(null); setPickerOpen(true); }} aria-label="Add meal" style={fdTopAddBtn}>
               <i className="fa-solid fa-plus" style={{ fontSize: 14 }} />
             </button>
             <button onClick={() => setNameDraft({ id: viewedPlan.id, name: viewedPlan.name, initialName: viewedPlan.name })} style={fdEditBtn}>Edit</button>
@@ -3720,7 +3760,7 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
             </div>
 
             {slots.length === 0 ? (
-              <Btn onClick={() => { setPickerQuery(''); setPickerOpen(true); }} style={{ width: '100%' }}>
+              <Btn onClick={() => { setPickerQuery(''); setPickerSearchQuery(''); setPickerResults(null); setPickerSearchError(null); setPickerOpen(true); }} style={{ width: '100%' }}>
                 <i className="fa-solid fa-plus" style={{ marginRight: 8 }} /> Add a meal
               </Btn>
             ) : (
@@ -3758,39 +3798,79 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
         )}
       </div>
 
-      {/* Food source picker: the user's Favorites and Recipes */}
+      {/* Food source picker: the user's Favorites and Recipes, or a fresh database search */}
       <Sheet open={pickerOpen} onClose={() => setPickerOpen(false)} title="Add to template" titleColor="var(--accent)">
         <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `1px solid ${UI.hairStrong}`, marginBottom: 10 }}>
-          {[['favorites', 'Favorites'], ['recipes', 'Recipes']].map(([id, label]) => (
+          {[['favorites', 'Favorites'], ['recipes', 'Recipes'], ['search', 'Search']].map(([id, label]) => (
             <button key={id} onClick={() => setPickerTab(id)} style={fdSegBtn(pickerTab === id)}>{label}</button>
           ))}
         </div>
-        <input value={pickerQuery} onChange={e => setPickerQuery(e.target.value)} type="text" placeholder="Filter…" style={{ ...fdInputStyle, marginBottom: 10 }} />
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: '46vh', overflowY: 'auto' }}>
-          {pickerTab === 'favorites' ? (
-            favs.length === 0 ? <div style={fdEmptyHint}>No favorites yet. Star a food to reuse it here.</div>
-            : favs.map(f => (
-              <button key={f.id} onClick={() => openAddFood(f)} style={fdPickRow}>
-                <div style={{ minWidth: 0, flex: 1, textAlign: 'left' }}>
-                  <div style={fdEntryName}>{f.foodName}</div>
-                  <div style={fdEntryMeta}>{f.quantityG}g · <span className="num" style={{ color: UI.warn }}>{f.calories} kcal</span></div>
-                </div>
-                <i className="fa-solid fa-plus" style={{ fontSize: 12, color: 'var(--accent)' }} />
+        {pickerTab === 'search' ? (
+          <>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+              <div style={{ position: 'relative', width: '100%' }}>
+                <input value={pickerSearchQuery} onChange={e => setPickerSearchQuery(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') runPickerFoodSearch(); }}
+                  type="text" placeholder="Search food" style={{ ...fdInputStyle, paddingRight: 32 }} />
+                {pickerSearchQuery && (
+                  <button onClick={() => { setPickerSearchQuery(''); setPickerResults(null); setPickerSearchError(null); }} aria-label="Clear search" style={fdClearBtn}>
+                    <i className="fa-solid fa-circle-xmark" style={{ fontSize: 15 }} />
+                  </button>
+                )}
+              </div>
+              <button onClick={runPickerFoodSearch} disabled={pickerSearching || !pickerSearchQuery.trim()} aria-label="Search" style={fdSearchBtn}>
+                {pickerSearching ? <span style={{ fontFamily: UI.fontUi, fontSize: 11 }}>…</span> : <i className="fa-solid fa-magnifying-glass" style={{ fontSize: 13 }} />}
               </button>
-            ))
-          ) : (
-            recipes.length === 0 ? <div style={fdEmptyHint}>No recipes yet.</div>
-            : recipes.map(r => (
-              <button key={r.id} onClick={() => openAddRecipe(r)} style={fdPickRow}>
-                <div style={{ minWidth: 0, flex: 1, textAlign: 'left' }}>
-                  <div style={fdEntryName}>{r.name}</div>
-                  <div style={fdEntryMeta}>{r.portions} portion{r.portions === 1 ? '' : 's'}</div>
+            </div>
+            {pickerSearchError && <div style={{ fontSize: 11, color: UI.danger, fontFamily: UI.fontUi, marginBottom: 10 }}>{pickerSearchError}</div>}
+            {pickerResults != null && (
+              pickerResults.length === 0 ? <div style={fdEmptyHint}>No matches. Try a different search.</div> : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: '46vh', overflowY: 'auto' }}>
+                  {pickerResults.map(r => (
+                    <button key={`${r.source}:${r.sourceId}`} onClick={() => openAddSearchResult(r)} style={fdPickRow}>
+                      <div style={{ minWidth: 0, flex: 1, textAlign: 'left' }}>
+                        <div style={fdEntryName}>{r.name}</div>
+                        {r.brand && <div style={fdEntryMeta}>{r.brand}</div>}
+                      </div>
+                      <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                        <div className="num" style={{ fontSize: 12, color: UI.inkSoft }}>{r.kcalPer100g != null ? Math.round(r.kcalPer100g) : 'n/a'} kcal</div>
+                        <div style={fdEntryMeta}>/100g</div>
+                      </div>
+                    </button>
+                  ))}
                 </div>
-                <i className="fa-solid fa-plus" style={{ fontSize: 12, color: 'var(--accent)' }} />
-              </button>
-            ))
-          )}
-        </div>
+              )
+            )}
+          </>
+        ) : (
+          <>
+            <input value={pickerQuery} onChange={e => setPickerQuery(e.target.value)} type="text" placeholder="Filter…" style={{ ...fdInputStyle, marginBottom: 10 }} />
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: '46vh', overflowY: 'auto' }}>
+              {pickerTab === 'favorites' ? (
+                favs.length === 0 ? <div style={fdEmptyHint}>No favorites yet. Star a food to reuse it here.</div>
+                : favs.map(f => (
+                  <button key={f.id} onClick={() => openAddFood(f)} style={fdPickRow}>
+                    <div style={{ minWidth: 0, flex: 1, textAlign: 'left' }}>
+                      <div style={fdEntryName}>{f.foodName}</div>
+                      <div style={fdEntryMeta}>{f.quantityG}g · <span className="num" style={{ color: UI.warn }}>{f.calories} kcal</span></div>
+                    </div>
+                    <i className="fa-solid fa-plus" style={{ fontSize: 12, color: 'var(--accent)' }} />
+                  </button>
+                ))
+              ) : (
+                recipes.length === 0 ? <div style={fdEmptyHint}>No recipes yet.</div>
+                : recipes.map(r => (
+                  <button key={r.id} onClick={() => openAddRecipe(r)} style={fdPickRow}>
+                    <div style={{ minWidth: 0, flex: 1, textAlign: 'left' }}>
+                      <div style={fdEntryName}>{r.name}</div>
+                      <div style={fdEntryMeta}>{r.portions} portion{r.portions === 1 ? '' : 's'}</div>
+                    </div>
+                    <i className="fa-solid fa-plus" style={{ fontSize: 12, color: 'var(--accent)' }} />
+                  </button>
+                ))
+              )}
+            </div>
+          </>
+        )}
       </Sheet>
 
       {/* Slot config: amount + hour + day type */}
