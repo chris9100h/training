@@ -1808,31 +1808,24 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     fat: fdRound1(staged.reduce((a, e) => a + (e.fat || 0), 0)),
   }), [staged]);
 
-  // Shown on both add-a-food tabs whenever there's a staged (picked, quantity
-  // already chosen, but not yet logged) batch, right at the top next to
-  // pendingHourBanner: collapsed to a one-line "Adding N items" + totals by
-  // default, expanding reveals the actual list. The "Add N items" commit
-  // button stays visible either way, collapsing only hides the per-item
-  // review, not the ability to commit. Lives here rather than per-tab so
-  // switching between Search and Quick Add mid-batch doesn't lose it, both
-  // (and a staged recipe, see confirmRecipeLog) stage into the same shared
-  // `staged` list.
+  // Docked bar shown on both add-a-food tabs whenever there's a staged
+  // (picked, quantity already chosen, but not yet logged) batch. Rendered
+  // OUTSIDE the scrolling Screen (see the wrapping div in the return below)
+  // as a fixed, non-scrolling footer, so it never scrolls out of view while
+  // paging through search results or the Quick Add lists, the exact "forgot
+  // to hit Add and lost the picks" complaint this replaced: the previous
+  // version sat inline at the top of the scrollable content and disappeared
+  // the moment you scrolled past it. Single collapsed line by default (count
+  // + kcal + the Add button, all always reachable); tapping it reveals the
+  // per-item review, growing upward off the docked bar rather than pushing
+  // the bar itself around. Lives here rather than per-tab so switching
+  // between Search and Quick Add mid-batch doesn't lose it, both (and a
+  // staged recipe, see confirmRecipeLog) stage into the same shared `staged`
+  // list.
   const stagedPanel = staged.length > 0 ? (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: 12, background: 'rgba(var(--accent-rgb),0.08)', border: `1px solid rgba(var(--accent-rgb),0.3)`, borderRadius: 6 }}>
-      <div onClick={() => setPickedExpanded(v => !v)} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
-        <i className={`fa-solid fa-chevron-${pickedExpanded ? 'down' : 'right'}`} style={{ fontSize: 9, color: pickedExpanded ? 'var(--accent)' : UI.inkGhost, width: 9, flexShrink: 0 }} />
-        <span style={{ fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: pickedExpanded ? 'var(--accent)' : UI.inkFaint, flex: 1 }}>
-          Adding {staged.length} item{staged.length === 1 ? '' : 's'}
-        </span>
-      </div>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 14 }}>
-        <span className="num" style={{ fontSize: 18, fontWeight: 300, color: UI.ink }}>{stagedTotals.calories}<span style={{ fontSize: 10, color: UI.inkFaint, marginLeft: 3 }}>kcal</span></span>
-        <span className="num" style={{ fontSize: 12, fontWeight: 600, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 9 }}>P</span> {stagedTotals.protein}</span>
-        <span className="num" style={{ fontSize: 12, fontWeight: 600, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 9 }}>C</span> {stagedTotals.carbs}</span>
-        <span className="num" style={{ fontSize: 12, fontWeight: 600, color: UI.inkSoft }}><span style={{ color: UI.inkGhost, fontSize: 9 }}>F</span> {stagedTotals.fat}</span>
-      </div>
+    <div style={{ flexShrink: 0, borderTop: `1px solid rgba(var(--accent-rgb),0.35)`, background: 'rgba(var(--bg-rgb),0.96)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)' }}>
       {pickedExpanded && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 2, maxHeight: 168, overflowY: 'auto' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2, maxHeight: 168, overflowY: 'auto', padding: '8px 14px 0' }}>
           {staged.map(e => (
             <div key={e.id} style={fdDraftRow}>
               <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
@@ -1846,13 +1839,29 @@ function FoodScreen({ store, setStore, go, userId, date }) {
           ))}
         </div>
       )}
-      <Btn onClick={commitStagedEntries} style={{ width: '100%' }}>
-        Add {staged.length} item{staged.length === 1 ? '' : 's'}
-      </Btn>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 14px' }}>
+        <button onClick={() => setPickedExpanded(v => !v)} aria-label={pickedExpanded ? 'Collapse picked items' : 'Expand picked items'}
+          style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, flex: 1, background: 'none', border: 'none', padding: 0, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+          <i className={`fa-solid fa-chevron-${pickedExpanded ? 'down' : 'up'}`} style={{ fontSize: 9, color: 'var(--accent)', flexShrink: 0 }} />
+          <span className="num" style={{ fontSize: 13, fontWeight: 700, color: UI.ink, flexShrink: 0 }}>{staged.length}</span>
+          <span style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint, textTransform: 'uppercase', letterSpacing: '0.05em', flexShrink: 0 }}>item{staged.length === 1 ? '' : 's'}</span>
+          <span className="num" style={{ fontSize: 12, color: UI.inkSoft, marginLeft: 'auto', paddingRight: 8, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{stagedTotals.calories} kcal</span>
+        </button>
+        <Btn onClick={commitStagedEntries} style={{ flexShrink: 0, padding: '8px 18px', minHeight: 34 }}>
+          Add
+        </Btn>
+      </div>
     </div>
   ) : null;
 
   return (
+    // Wraps Screen (which still owns TopBar/content scrolling exactly as
+    // before) alongside stagedPanel as a sibling flex item instead of a
+    // scrolling child, the same "scrolling area + fixed footer" split
+    // app.jsx already uses for Screen + TabBar, so the picked-items bar
+    // stays docked to the bottom of the FoodScreen's own space (above
+    // TabBar, never overlapping it) regardless of scroll position.
+    <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
     <Screen>
       {confirmEl}
       <TopBar title="Food" sub={dayLabel} onBack={requestLeaveFood}
@@ -2182,7 +2191,6 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         {tab === 'search' && (
           <>
             {pendingHourBanner}
-            {stagedPanel}
             <div>
               <Bezel style={{ marginBottom: 10 }}>Search</Bezel>
               <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `1px solid ${UI.hairStrong}`, marginBottom: 10 }}>
@@ -2256,7 +2264,6 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         {tab === 'quickadd' && (
           <>
             {pendingHourBanner}
-            {stagedPanel}
             <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `1px solid ${UI.hairStrong}` }}>
               {FD_QUICK_TABS.map(t => (
                 <button key={t.id} onClick={() => onQuickTabChange(t.id)} style={fdSegBtn(quickTab === t.id)}>{t.label}</button>
@@ -2794,6 +2801,8 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         })()}
       </Sheet>
     </Screen>
+    {(tab === 'search' || tab === 'quickadd') && stagedPanel}
+    </div>
   );
 }
 
