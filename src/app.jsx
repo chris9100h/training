@@ -23,10 +23,12 @@ function unseenWhatsNew() {
 // screens-food.jsx): stash the token BEFORE anything else runs, so it survives
 // the login (or even signup + approval) roundtrip a logged-out recipient goes
 // through, then scrub it from the URL so a later reload doesn't re-trigger.
-// Consumed by the RecipeShareSheet overlay once the app is ready; cleared from
-// localStorage as soon as it's read into state below (not only on sheet close),
-// so a backgrounded/killed app (common on iOS) can't leave a stale token behind
-// that re-opens the same old share on the next launch or a different account.
+// Consumed by the RecipeShareSheet overlay once the app is ready (store loaded);
+// kept in localStorage until then and cleared only on actual consumption (sheet
+// close), so a reload/kill during the logged-out recipient's sign-up + approval
+// roundtrip re-reads the still-present token instead of losing the recipe. Worst
+// case a share the user never closed re-offers on the next launch, harmless (the
+// same account-agnostic recipe), which is the accepted cost of not losing it.
 const PENDING_SHARE_KEY = 'logbook-pending-share';
 try {
   const _shareToken = new URLSearchParams(window.location.search).get('share');
@@ -309,12 +311,13 @@ function App() {
   const [unitPromptOpen, setUnitPromptOpen] = useStateA(false);
   const [pendingShare, setPendingShare] = useStateA(() => {   // ?share=<token> stashed by the module-scope block above
     try {
-      const token = localStorage.getItem(PENDING_SHARE_KEY);
-      // Clear right away, now that the token is consumed into state: the sheet
-      // below still opens off `pendingShare`, but a killed/backgrounded app
-      // can no longer strand the key for the next launch to re-read.
-      if (token) localStorage.removeItem(PENDING_SHARE_KEY);
-      return token;
+      // Read but do NOT remove here: the sheet only opens once `store` is ready
+      // (see below), which for a logged-out recipient is after sign-up +
+      // approval. Removing on first mount stranded the token in React state
+      // only, so any reload/kill during that roundtrip (the common relaunch-
+      // after-approval path) lost the recipe. Keeping it in localStorage lets a
+      // fresh mount re-read it; it's cleared on actual consumption (sheet close).
+      return localStorage.getItem(PENDING_SHARE_KEY);
     } catch (_) { return null; }
   });
   const unitPicked                = useRefA(false); // user chose a unit this session — silences the reset watcher
