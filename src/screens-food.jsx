@@ -1872,7 +1872,11 @@ function FoodScreen({ store, setStore, go, userId, date }) {
             <div key={e.id} style={fdDraftRow}>
               <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
                 <span style={{ ...fdEntryName, fontSize: 12 }}>{e.foodName}</span>
-                <span style={fdEntryMeta}>{e.time} · {e.quantityG}g · {e.calories} kcal</span>
+                <span style={fdEntryMeta}>
+                  {e.time} · {e.quantityG ? `${e.quantityG}g · ` : ''}<span className="num" style={{ color: UI.warn }}>{e.calories} kcal</span>
+                  <span style={fdMetaDivider} />
+                  <FdMacroBits protein={e.protein} carbs={e.carbs} fat={e.fat} />
+                </span>
               </div>
               <button onClick={() => removeStaged(e.id)} aria-label="Remove" style={fdInlineDeleteBtn}>
                 <i className="fa-solid fa-trash" style={{ fontSize: 11 }} />
