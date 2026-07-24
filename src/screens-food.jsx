@@ -547,15 +547,14 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // Snapshot of the split as it opened, to detect unsaved edits on backdrop-
   // close (same pattern as the meal-slot draft's requestCloseDraft).
   const splitInitialSnap = useRefFd(null);
-  // Undo for the last APPLIED split (not the sheet draft above): the exact
-  // pre-split entries plus the ids of what replaced them, captured once in
-  // applySplit, so undoSplit can put this exact state back regardless of
-  // what happens to the new entries afterward (no attempt to merge in a
-  // later edit, undo always means "back to before the split"). Auto-clears
-  // after a few seconds (splitUndoTimer); a second split before that just
-  // replaces it, same as any other toast. `date` rides along separately
-  // from curDate since the user may have flipped to a different day by the
-  // time Undo is tapped.
+  // Toast for the last APPLIED split (not the sheet draft above): just enough
+  // to look the batch back up (batchId) and label the toast (count). The
+  // actual undo data (the exact pre-split entries) lives on the entries
+  // themselves now (split_batch, see undoSplitBatch), not in this local
+  // state, so the toast is only a convenience shortcut, not the only way to
+  // reach undo, see splitBatchAt/the Undo Split block in the sheet below for
+  // the persistent path. Auto-clears after a few seconds (splitUndoTimer); a
+  // second split before that just replaces it, same as any other toast.
   const [splitUndo, setSplitUndo] = useStateFd(null);
   const splitUndoTimer = useRefFd(null);
   useEffectFd(() => () => clearTimeout(splitUndoTimer.current), []);
@@ -573,17 +572,33 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   const splitDisplayFromAmount = (e, amt) => { const u = splitEntryUnit(e); return u ? amt / u.grams : amt; };
   const splitAmountFromDisplay = (e, display) => { const u = splitEntryUnit(e); return u ? display * u.grams : display; };
   const splitDisplayStr = (e, amt) => String(Math.round(splitDisplayFromAmount(e, amt) * 100) / 100);
+  // Opens with a fresh even-split draft when there's actually something to
+  // split (2+ items); also opens, draft-less, when the hour holds nothing
+  // but the result of an earlier split (splitBatchAt), purely so that
+  // result has a way back to "Undo Split" (see the sheet below). Neither
+  // applies (a single item that was never split) -> no-op, same as before.
   function openSplit(h) {
     const entries = byHour[h] || [];
-    if (entries.length < 2) return;
-    const qtys = {};
-    entries.forEach(e => { qtys[e.id] = fdEvenSplit(splitOrigAmount(e), 2).map(v => splitDisplayStr(e, v)); });
-    const nextHours = [Math.min(23, h + 4)];
-    splitInitialSnap.current = JSON.stringify({ count: 2, hours: nextHours, qtys });
+    const batch = splitBatchAt(h);
+    if (entries.length < 2 && !batch) return;
     setSplitHour(h);
-    setSplitCount(2);
-    setSplitHours(nextHours);
-    setSplitQtys(qtys);
+    if (entries.length >= 2) {
+      const qtys = {};
+      entries.forEach(e => { qtys[e.id] = fdEvenSplit(splitOrigAmount(e), 2).map(v => splitDisplayStr(e, v)); });
+      const nextHours = [Math.min(23, h + 4)];
+      splitInitialSnap.current = JSON.stringify({ count: 2, hours: nextHours, qtys });
+      setSplitCount(2);
+      setSplitHours(nextHours);
+      setSplitQtys(qtys);
+    } else {
+      // Undo-only open: no draft to speak of, so the snapshot matches the
+      // untouched defaults and backdrop-close never has anything to warn
+      // about here (see requestCloseSplit's dirty check).
+      splitInitialSnap.current = JSON.stringify({ count: 2, hours: [], qtys: {} });
+      setSplitCount(2);
+      setSplitHours([]);
+      setSplitQtys({});
+    }
   }
   // Backdrop tap used to drop the whole split configuration (meal count,
   // hours, every hand-adjusted amount) silently.
@@ -647,6 +662,12 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     const entries = byHour[splitHour] || [];
     const hours = [splitHour, ...splitHours];
     const now = new Date().toISOString();
+    // Every entry the split creates carries the SAME batch: {id, the exact
+    // pre-split entries}, redundantly, so undoSplitBatch can restore from
+    // whichever one still exists later (see split_batch's own doc comment
+    // in docs/database.md). `entries` here are the exact original objects
+    // (not recomputed), so restoring them is a straight put-back.
+    const batch = { id: LB.uid(), removedEntries: entries };
     const toAdd = [];
     const removeIds = new Set();
     entries.forEach(e => {
@@ -657,7 +678,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       hours.forEach((h, i) => {
         const amt = amts[i] || 0;
         if (amt <= 0) return;
-        toAdd.push({ ...e, ...fdScaleEntry(e, origAmt > 0 ? amt / origAmt : 0), id: LB.uid(), time: `${String(h).padStart(2, '0')}:00`, createdAt: now });
+        toAdd.push({ ...e, ...fdScaleEntry(e, origAmt > 0 ? amt / origAmt : 0), id: LB.uid(), time: `${String(h).padStart(2, '0')}:00`, createdAt: now, splitBatch: batch });
       });
       removeIds.add(e.id);
     });
@@ -667,27 +688,54 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       const dailyLogs = patchDaily(s, curDate, nextLogs.filter(l => l.date === curDate));
       return { ...s, foodLogs: nextLogs, dailyLogs };
     });
-    // Undo snapshot: `entries` are the exact original objects (not
-    // recomputed), so restoring them is a straight put-back, not a rebuild.
     clearTimeout(splitUndoTimer.current);
-    setSplitUndo({ date: curDate, removedEntries: entries, addedIds: toAdd.map(e => e.id), count: hours.length });
+    setSplitUndo({ batchId: batch.id, count: hours.length });
     splitUndoTimer.current = setTimeout(() => setSplitUndo(null), 6000);
     setSplitHour(null);
   }
-  // Reverses the last applySplit: drops exactly the entries it added and
-  // restores exactly the ones it deleted. Ignores whatever curDate is now
-  // (see splitUndo's own comment) and does nothing if the toast already
-  // auto-cleared or a newer split replaced it.
+  // The split_batch of the first entry at hour h that has one, or null, so
+  // the timeline button and the sheet can offer "Undo Split" for an hour
+  // that's a split result (see openSplit/the Undo Split block in the sheet).
+  function splitBatchAt(h) {
+    return (byHour[h] || []).find(e => e.splitBatch)?.splitBatch || null;
+  }
+  // Core restore, no confirmation: drops every CURRENT entry carrying this
+  // batch id (wherever they've since ended up, in case one was moved to
+  // another day) and restores the exact pre-split entries from whichever
+  // surviving sibling still carries them. No attempt to merge in a later
+  // edit, undo always means "back to before the split". No-op if nothing
+  // with this batch id remains (every entry from it was itself edited/
+  // deleted since, taking the restore data down with the last one).
+  function restoreSplitBatch(batchId) {
+    setStore(s => {
+      const logs = s.foodLogs || [];
+      const batchEntries = logs.filter(l => l.splitBatch?.id === batchId);
+      if (!batchEntries.length) return s;
+      const removedEntries = batchEntries[0].splitBatch.removedEntries;
+      const touchedDates = new Set([...batchEntries.map(l => l.date), ...removedEntries.map(l => l.date)]);
+      const nextLogs = [...removedEntries, ...logs.filter(l => l.splitBatch?.id !== batchId)];
+      let dailyLogs = s.dailyLogs || [];
+      touchedDates.forEach(d => { dailyLogs = patchDaily({ ...s, dailyLogs }, d, nextLogs.filter(l => l.date === d)); });
+      return { ...s, foodLogs: nextLogs, dailyLogs };
+    });
+  }
+  // Toast's one-tap Undo: no confirmation, same "just applied it, reverse
+  // immediately" convention every other toast in this app follows.
   function undoSplit() {
     if (!splitUndo) return;
     clearTimeout(splitUndoTimer.current);
-    const { date, removedEntries, addedIds } = splitUndo;
-    setStore(s => {
-      const nextLogs = [...removedEntries, ...(s.foodLogs || []).filter(l => !addedIds.includes(l.id))];
-      const dailyLogs = patchDaily(s, date, nextLogs.filter(l => l.date === date));
-      return { ...s, foodLogs: nextLogs, dailyLogs };
-    });
+    restoreSplitBatch(splitUndo.batchId);
     setSplitUndo(null);
+  }
+  // Reopening the split sheet on an old result and tapping "Undo Split" can
+  // be long after the fact and much less obviously reversible than the
+  // toast, so this confirms first.
+  async function undoSplitBatch(batchId) {
+    const ok = await confirm('This deletes the split and restores the original entry as it was before.', { title: 'Undo split?', ok: 'Undo', cancel: 'Cancel', danger: true });
+    if (!ok) return;
+    restoreSplitBatch(batchId);
+    if (splitUndo?.batchId === batchId) { clearTimeout(splitUndoTimer.current); setSplitUndo(null); }
+    setSplitHour(null);
   }
   const dayEntries = useMemoFd(
     () => (store.foodLogs || []).filter(l => l.date === curDate).sort((a, b) => b.time.localeCompare(a.time)),
@@ -2270,11 +2318,14 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                                 <button onClick={() => addAtHour(h)} aria-label={`Add food at ${String(h).padStart(2, '0')}:00`} style={fdHourAddBtn(isNow)}>
                                   <i className="fa-solid fa-plus" style={{ fontSize: 11 }} />
                                 </button>
-                                {/* Only once this hour stacks more than one item: a
+                                {/* Once this hour stacks more than one item (a
                                     meal-prep batch logged/planned all at one hour but
-                                    really eaten at different times. Splits it across
-                                    hours without retyping every item's amount. */}
-                                {es.length > 1 && (
+                                    really eaten at different times, splittable across
+                                    hours without retyping every item's amount), OR it's
+                                    itself the result of an earlier split (down to a
+                                    single item by now, but still the only way back to
+                                    "Undo Split" for it). */}
+                                {(es.length > 1 || es.some(e => e.splitBatch)) && (
                                   <button onClick={() => openSplit(h)} aria-label={`Split ${String(h).padStart(2, '0')}:00 into multiple meals`} style={fdHourAddBtn(isNow)}>
                                     <i className="fa-solid fa-arrows-split-up-and-left" style={{ fontSize: 11 }} />
                                   </button>
@@ -2674,55 +2725,78 @@ function FoodScreen({ store, setStore, go, userId, date }) {
           goes to each one. Deletes the original entries and replaces them
           with the redistributed set on Split. ── */}
       <Sheet open={splitHour != null} onClose={requestCloseSplit} title={`Split ${splitHour != null ? String(splitHour).padStart(2, '0') + ':00' : ''}`} titleColor="var(--accent)">
-        {splitHour != null && (
-          <>
-            <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: 1.4 }}>
-              Really eaten at more than one time? Redistribute these items across meals, each amount adjustable on its own.
-            </div>
-            <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8, textAlign: 'center' }}>Meals</div>
-            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 16 }}>
-              <Stepper value={splitCount} step={1} min={2} suffix={splitCount === 1 ? ' meal' : ' meals'} onChange={setSplitCountTo} />
-            </div>
-            <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
-              {[splitHour, ...splitHours].map((h, i) => (
-                <div key={i} style={{ flex: '1 1 100px' }}>
-                  <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4, textAlign: 'center' }}>Meal {i + 1}</div>
-                  {i === 0 ? (
-                    <div style={{ ...fdInputStyle, textAlign: 'center', color: UI.inkSoft }}>{String(h).padStart(2, '0')}:00</div>
-                  ) : (
-                    <Stepper value={h} step={1} min={0} suffix=":00"
-                      onChange={v => setSplitHours(prev => prev.map((x, xi) => xi === i - 1 ? Math.max(0, Math.min(23, Math.round(v))) : x))} />
-                  )}
-                </div>
-              ))}
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginBottom: 16 }}>
-              {(byHour[splitHour] || []).map(e => {
-                const unit = splitEntryUnit(e);
-                return (
-                  <div key={e.id}>
-                    <div style={fdEntryName}>
-                      {e.foodName}
-                      {unit && <span style={{ ...fdEntryMeta, marginLeft: 6 }}>&middot; in {unit.label}</span>}
-                    </div>
-                    <div style={{ display: 'flex', gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
-                      {[splitHour, ...splitHours].map((h, i) => (
-                        <div key={i} style={{ flex: '1 1 80px' }}>
-                          <input value={(splitQtys[e.id] || [])[i] ?? ''} onChange={ev => updateSplitQty(e.id, i, ev.target.value)}
-                            type="text" inputMode="decimal" placeholder={splitUnit(e)} style={fdInputStyle} />
-                        </div>
-                      ))}
-                    </div>
+        {splitHour != null && (() => {
+          const entries = byHour[splitHour] || [];
+          const batch = splitBatchAt(splitHour);
+          const canConfigure = entries.length >= 2;
+          return (
+            <>
+              {/* However this hour got here (still mid-batch, or fully
+                  reduced to one leftover item), a split it's part of can
+                  always be undone from here, not just the 6s toast right
+                  after applying it. */}
+              {batch && (
+                <div style={{ marginBottom: canConfigure ? 20 : 0, paddingBottom: canConfigure ? 20 : 0, borderBottom: canConfigure ? `1px solid ${UI.hairStrong}` : 'none' }}>
+                  <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 12, lineHeight: 1.4 }}>
+                    This meal was split from another time. Undo it to delete the split and put the original entry back exactly as it was.
                   </div>
-                );
-              })}
-            </div>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <Btn kind="ghost" onClick={() => setSplitHour(null)} style={{ flex: 1 }}>Cancel</Btn>
-              <Btn onClick={applySplit} style={{ flex: 2 }}>Split</Btn>
-            </div>
-          </>
-        )}
+                  <Btn kind="ghost" onClick={() => undoSplitBatch(batch.id)} style={{ width: '100%', color: UI.danger, borderColor: 'rgba(var(--danger-rgb),0.4)' }}>
+                    <i className="fa-solid fa-rotate-left" style={{ marginRight: 8 }} /> Undo Split
+                  </Btn>
+                </div>
+              )}
+              {canConfigure && (
+                <>
+                  <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: 1.4 }}>
+                    Really eaten at more than one time? Redistribute these items across meals, each amount adjustable on its own.
+                  </div>
+                  <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8, textAlign: 'center' }}>Meals</div>
+                  <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 16 }}>
+                    <Stepper value={splitCount} step={1} min={2} suffix={splitCount === 1 ? ' meal' : ' meals'} onChange={setSplitCountTo} />
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+                    {[splitHour, ...splitHours].map((h, i) => (
+                      <div key={i} style={{ flex: '1 1 100px' }}>
+                        <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4, textAlign: 'center' }}>Meal {i + 1}</div>
+                        {i === 0 ? (
+                          <div style={{ ...fdInputStyle, textAlign: 'center', color: UI.inkSoft }}>{String(h).padStart(2, '0')}:00</div>
+                        ) : (
+                          <Stepper value={h} step={1} min={0} suffix=":00"
+                            onChange={v => setSplitHours(prev => prev.map((x, xi) => xi === i - 1 ? Math.max(0, Math.min(23, Math.round(v))) : x))} />
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginBottom: 16 }}>
+                    {entries.map(e => {
+                      const unit = splitEntryUnit(e);
+                      return (
+                        <div key={e.id}>
+                          <div style={fdEntryName}>
+                            {e.foodName}
+                            {unit && <span style={{ ...fdEntryMeta, marginLeft: 6 }}>&middot; in {unit.label}</span>}
+                          </div>
+                          <div style={{ display: 'flex', gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
+                            {[splitHour, ...splitHours].map((h, i) => (
+                              <div key={i} style={{ flex: '1 1 80px' }}>
+                                <input value={(splitQtys[e.id] || [])[i] ?? ''} onChange={ev => updateSplitQty(e.id, i, ev.target.value)}
+                                  type="text" inputMode="decimal" placeholder={splitUnit(e)} style={fdInputStyle} />
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <Btn kind="ghost" onClick={() => setSplitHour(null)} style={{ flex: 1 }}>Cancel</Btn>
+                    <Btn onClick={applySplit} style={{ flex: 2 }}>Split</Btn>
+                  </div>
+                </>
+              )}
+            </>
+          );
+        })()}
       </Sheet>
 
       {/* ── Units for a favorite (e.g. "1 Pc = 62g", "1 Pack = 500g") ── */}

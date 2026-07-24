@@ -2288,6 +2288,7 @@ CREATE TABLE zane_food_logs (
   recipe_id    text        REFERENCES public.zane_food_recipes(id) ON DELETE SET NULL,  -- stable back-ref, source:'recipe' entries only
   logged_total_portions integer,                          -- recipe.portions at log time, source:'recipe' entries only
   logged_unit  jsonb,                                     -- {label, grams} the entry was actually logged in, null if logged in grams/kcal (0202)
+  split_batch  jsonb,                                     -- {id, removedEntries} for a split-into-meals result entry, redundant per sibling, null otherwise (0203)
   planned      boolean     NOT NULL DEFAULT false,        -- Plan Mode (0196): true = in the timeline but not eaten yet, excluded from daily totals until checked off
   template_slot_id text,                                  -- Plan Mode (0196): soft back-ref to the template slot this planned entry came from (no FK, advisory only)
   created_at   timestamptz DEFAULT now()
