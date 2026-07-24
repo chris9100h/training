@@ -520,10 +520,14 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // times without retyping every item's amount. splitHour is the hour being
   // split (null = sheet closed); splitHours holds the target hour for each
   // additional meal (length splitCount-1, meal 1 stays at splitHour);
-  // splitQtys maps entry id -> per-meal amount STRING array (length
+  // splitQtys maps entry id -> per-meal DISPLAY-value STRING array (length
   // splitCount, same input-as-you-type convention as every other quantity
-  // field here), in splitUnit(entry): grams when the entry has a quantity,
-  // else kcal (a food/recipe with no gram weight has nothing else to scale by).
+  // field here). The display value is a unit count (e.g. "Pc") whenever the
+  // matching favorite defines one (splitEntryUnit), since that's exactly why
+  // a unit gets defined, so the user never has to do the gram math by hand;
+  // otherwise grams, or kcal for an entry with no gram weight at all. The
+  // underlying scaling (splitOrigAmount/fdScaleEntry) always works in grams/
+  // kcal, splitDisplayFromAmount/splitAmountFromDisplay convert at the edges.
   const [splitHour, setSplitHour] = useStateFd(null);
   const [splitCount, setSplitCount] = useStateFd(2);
   const [splitHours, setSplitHours] = useStateFd([]);
@@ -531,13 +535,20 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // Snapshot of the split as it opened, to detect unsaved edits on backdrop-
   // close (same pattern as the meal-slot draft's requestCloseDraft).
   const splitInitialSnap = useRefFd(null);
-  const splitUnit = (e) => (e.quantityG != null && e.quantityG > 0) ? 'g' : 'kcal';
+  function splitEntryUnit(e) {
+    if (!(e.quantityG > 0)) return null;
+    return matchingFavorite(e.foodId, e.foodName)?.units?.[0] || null;
+  }
+  const splitUnit = (e) => splitEntryUnit(e)?.label || ((e.quantityG != null && e.quantityG > 0) ? 'g' : 'kcal');
   const splitOrigAmount = (e) => (e.quantityG != null && e.quantityG > 0) ? e.quantityG : (e.calories || 0);
+  const splitDisplayFromAmount = (e, amt) => { const u = splitEntryUnit(e); return u ? amt / u.grams : amt; };
+  const splitAmountFromDisplay = (e, display) => { const u = splitEntryUnit(e); return u ? display * u.grams : display; };
+  const splitDisplayStr = (e, amt) => String(Math.round(splitDisplayFromAmount(e, amt) * 100) / 100);
   function openSplit(h) {
     const entries = byHour[h] || [];
     if (entries.length < 2) return;
     const qtys = {};
-    entries.forEach(e => { qtys[e.id] = fdEvenSplit(splitOrigAmount(e), 2).map(String); });
+    entries.forEach(e => { qtys[e.id] = fdEvenSplit(splitOrigAmount(e), 2).map(v => splitDisplayStr(e, v)); });
     const nextHours = [Math.min(23, h + 4)];
     splitInitialSnap.current = JSON.stringify({ count: 2, hours: nextHours, qtys });
     setSplitHour(h);
@@ -560,6 +571,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // to reason about rather than guessing how to redistribute a partial edit).
   function setSplitCountTo(n) {
     n = Math.max(2, Math.min(6, Math.round(n)));
+    const entries = byHour[splitHour] || [];
     setSplitCount(n);
     setSplitHours(prev => {
       const next = prev.slice(0, n - 1);
@@ -568,7 +580,12 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     });
     setSplitQtys(prev => {
       const out = {};
-      for (const id in prev) out[id] = fdEvenSplit(prev[id].reduce((a, b) => a + (fdNum(b) || 0), 0), n).map(String);
+      for (const id in prev) {
+        const e = entries.find(x => x.id === id);
+        if (!e) { out[id] = prev[id]; continue; }
+        const totalAmt = prev[id].reduce((a, b) => a + splitAmountFromDisplay(e, fdNum(b) || 0), 0);
+        out[id] = fdEvenSplit(totalAmt, n).map(v => splitDisplayStr(e, v));
+      }
       return out;
     });
   }
@@ -588,9 +605,11 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     const removeIds = new Set();
     entries.forEach(e => {
       const origAmt = splitOrigAmount(e);
-      const qtys = (splitQtys[e.id] || []).map(v => fdNum(v) || 0);
+      // splitQtys holds display values (unit count, grams, or kcal per
+      // splitUnit); convert back to the grams/kcal basis fdScaleEntry works in.
+      const amts = (splitQtys[e.id] || []).map(v => splitAmountFromDisplay(e, fdNum(v) || 0));
       hours.forEach((h, i) => {
-        const amt = qtys[i] || 0;
+        const amt = amts[i] || 0;
         if (amt <= 0) return;
         toAdd.push({ ...e, ...fdScaleEntry(e, origAmt > 0 ? amt / origAmt : 0), id: LB.uid(), time: `${String(h).padStart(2, '0')}:00`, createdAt: now });
       });
@@ -2510,19 +2529,25 @@ function FoodScreen({ store, setStore, go, userId, date }) {
               ))}
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginBottom: 16 }}>
-              {(byHour[splitHour] || []).map(e => (
-                <div key={e.id}>
-                  <div style={fdEntryName}>{e.foodName}</div>
-                  <div style={{ display: 'flex', gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
-                    {[splitHour, ...splitHours].map((h, i) => (
-                      <div key={i} style={{ flex: '1 1 80px' }}>
-                        <input value={(splitQtys[e.id] || [])[i] ?? ''} onChange={ev => updateSplitQty(e.id, i, ev.target.value)}
-                          type="text" inputMode="decimal" placeholder={splitUnit(e)} style={fdInputStyle} />
-                      </div>
-                    ))}
+              {(byHour[splitHour] || []).map(e => {
+                const unit = splitEntryUnit(e);
+                return (
+                  <div key={e.id}>
+                    <div style={fdEntryName}>
+                      {e.foodName}
+                      {unit && <span style={{ ...fdEntryMeta, marginLeft: 6 }}>&middot; in {unit.label}</span>}
+                    </div>
+                    <div style={{ display: 'flex', gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
+                      {[splitHour, ...splitHours].map((h, i) => (
+                        <div key={i} style={{ flex: '1 1 80px' }}>
+                          <input value={(splitQtys[e.id] || [])[i] ?? ''} onChange={ev => updateSplitQty(e.id, i, ev.target.value)}
+                            type="text" inputMode="decimal" placeholder={splitUnit(e)} style={fdInputStyle} />
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
               <Btn kind="ghost" onClick={() => setSplitHour(null)} style={{ flex: 1 }}>Cancel</Btn>
