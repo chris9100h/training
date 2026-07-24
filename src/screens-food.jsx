@@ -2427,7 +2427,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
 
       <RecipeEditorScreen open={recipeEditorOpen} onClose={() => setRecipeEditorOpen(false)} onSave={handleRecipeSave} recipe={recipeEditorRecipe} store={store} />
 
-      <FoodTemplateScreen open={templateOpen} onClose={() => setTemplateOpen(false)} store={store} setStore={setStore} />
+      <FoodTemplateScreen open={templateOpen} onClose={() => setTemplateOpen(false)} store={store} setStore={setStore} userId={userId} />
 
       {/* Per-entry overflow actions (kebab), one menu instead of a row of inline
           buttons. Recomputes its options from the open entry. */}
@@ -2621,7 +2621,7 @@ function RecipeShareSheet({ store, setStore, token, onClose }) {
 // (grams for a food, portions for a recipe); editing an existing slot adjusts
 // its hour and day-type (and a food slot's grams), recipe portions are set at
 // add time (re-add to change them).
-function FoodTemplateScreen({ open, onClose, store, setStore }) {
+function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
   const [confirmEl, confirm] = useConfirm();
   const [pickerOpen, setPickerOpen] = useStateFd(false);
   const [pickerTab, setPickerTab] = useStateFd('favorites');
@@ -2629,10 +2629,22 @@ function FoodTemplateScreen({ open, onClose, store, setStore }) {
   const [draft, setDraft] = useStateFd(null);
   const netCarbs = !!store.settings?.netCarbs;
 
+  // Coach mode mirrors the training PlanScreen: a My Plans / Client Templates
+  // split (by isTemplate), and a plan can be pushed to a client.
+  const isCoach = (store.coaching?.asCoach || []).some(c => c.status === 'active');
+  const coachClients = useMemoFd(() => (store.coaching?.asCoach || []).filter(c => c.status === 'active'), [store.coaching]);
+  const [planSubTab, setPlanSubTab] = useStateFd('mine'); // 'mine' | 'templates'
+  const [pushPlan, setPushPlan] = useStateFd(null);   // plan being pushed
+  const [pushTarget, setPushTarget] = useStateFd(null); // client picked for the activate-choice step
+  const [pushBusy, setPushBusy] = useStateFd(false);
+  const [pushDone, setPushDone] = useStateFd(null);   // { clientName, planName, activated }
+
   // Multiple named meal plans (Cut/Bulk/...), exactly one active (mirrors the
   // training schedule model). viewedPlanId is the plan currently being edited
-  // on this screen, defaulting to the active one.
-  const plans = useMemoFd(() => (store.foodMealPlans || []).filter(p => !p.archived), [store.foodMealPlans]);
+  // on this screen, defaulting to the active one. When coaching, the plan list
+  // is bucketed by isTemplate (My Plans vs Client Templates).
+  const inBucket = p => !isCoach || (planSubTab === 'templates' ? !!p.isTemplate : !p.isTemplate);
+  const plans = useMemoFd(() => (store.foodMealPlans || []).filter(p => !p.archived && inBucket(p)), [store.foodMealPlans, isCoach, planSubTab]);
   const activeId = store.activeMealTemplateId;
   const [viewedPlanId, setViewedPlanId] = useStateFd(null);
   const [planSheet, setPlanSheet] = useStateFd(null);     // plan actions menu target
@@ -2651,11 +2663,14 @@ function FoodTemplateScreen({ open, onClose, store, setStore }) {
 
   function createPlan(name) {
     const id = LB.uid();
+    // A plan created while in the coach's Client Templates bucket is a template
+    // (never the coach's own active eating plan).
+    const asTemplate = isCoach && planSubTab === 'templates';
     setStore(s => {
       const list = s.foodMealPlans || [];
-      const plan = { id, name: (name || '').trim() || 'Meal plan', archived: false, isTemplate: false, coachId: null, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
-      // The first (or only) plan becomes active automatically.
-      const makeActive = !s.activeMealTemplateId || !list.some(p => p.id === s.activeMealTemplateId && !p.archived);
+      const plan = { id, name: (name || '').trim() || 'Meal plan', archived: false, isTemplate: asTemplate, coachId: null, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+      // The first (or only) NON-template plan becomes active automatically.
+      const makeActive = !asTemplate && (!s.activeMealTemplateId || !list.some(p => p.id === s.activeMealTemplateId && !p.archived));
       return { ...s, foodMealPlans: [plan, ...list], ...(makeActive ? { activeMealTemplateId: id } : {}) };
     });
     setViewedPlanId(id);
@@ -2682,6 +2697,79 @@ function FoodTemplateScreen({ open, onClose, store, setStore }) {
     if (nameDraft.id) renamePlan(nameDraft.id, nameDraft.name);
     else createPlan(nameDraft.name);
     setNameDraft(null);
+  }
+  // Coach bucket flip (My Plans <-> Client Templates), mirrors PlanScreen's
+  // toggleTemplate. Pure flag, no data move. A template that gets flipped out
+  // of My Plans should also stop being this coach's own active plan.
+  function toggleTemplate(plan) {
+    setStore(s => ({
+      ...s,
+      foodMealPlans: (s.foodMealPlans || []).map(p => p.id === plan.id ? { ...p, isTemplate: !p.isTemplate, updatedAt: new Date().toISOString() } : p),
+      activeMealTemplateId: (!plan.isTemplate && s.activeMealTemplateId === plan.id) ? null : s.activeMealTemplateId,
+    }));
+    setPlanSheet(null);
+  }
+  // Push a meal plan into a client's account: copy the plan + its slots, and
+  // (per the design) copy any referenced recipes too, deduped by name against
+  // the client's own recipes, so the client can still portion-edit them. Foods
+  // themselves carry self-contained snapshots, so unlike a training push there
+  // is no food-library dedup. Also enables the client's plan mode so the plan
+  // is actually reachable for them. Mirrors screens-schedule.jsx pushToClient:
+  // ordered writes (plan first, active pointer second), best-effort note after.
+  async function pushMealPlanToClient(plan, client, activateNow) {
+    setPushBusy(true);
+    try {
+      const clientData = await LB.loadClientStore(client.clientId);
+      const newPlanId = LB.uid();
+      const nowISO = new Date().toISOString();
+      const planCopy = { id: newPlanId, name: plan.name, archived: false, isTemplate: false, coachId: userId, createdAt: nowISO, updatedAt: nowISO };
+      const planSlots = (store.foodTemplateSlots || []).filter(s => s.mealPlanId === plan.id);
+      // Recipe copy + remap: one client recipe per distinct source recipe.
+      const recipeIdMap = {};
+      const newRecipes = [];
+      for (const s of planSlots) {
+        if (!s.recipeId || s.recipeId in recipeIdMap) continue;
+        const src = (store.foodRecipes || []).find(r => r.id === s.recipeId);
+        if (!src) { recipeIdMap[s.recipeId] = null; continue; }
+        const existing = (clientData.foodRecipes || []).find(r => r.name.trim().toLowerCase() === src.name.trim().toLowerCase());
+        if (existing) { recipeIdMap[s.recipeId] = existing.id; continue; }
+        const nid = LB.uid();
+        recipeIdMap[s.recipeId] = nid;
+        newRecipes.push({ id: nid, name: src.name, items: src.items || [], portions: src.portions || 1, createdAt: nowISO, updatedAt: nowISO });
+      }
+      const slotCopies = planSlots.map(s => ({
+        ...s, id: LB.uid(), mealPlanId: newPlanId,
+        recipeId: s.recipeId ? (recipeIdMap[s.recipeId] ?? null) : null,
+        createdAt: nowISO,
+      }));
+      const withPlan = {
+        ...clientData,
+        settings: { ...clientData.settings, planMode: true },
+        foodRecipes: [...(clientData.foodRecipes || []), ...newRecipes],
+        foodMealPlans: [...(clientData.foodMealPlans || []), planCopy],
+        foodTemplateSlots: [...(clientData.foodTemplateSlots || []), ...slotCopies],
+      };
+      await LB.syncStore(clientData, withPlan, client.clientId);
+      if (activateNow) {
+        await LB.syncStore(withPlan, { ...withPlan, activeMealTemplateId: newPlanId }, client.clientId);
+      }
+      setPushTarget(null);
+      setPushPlan(null);
+      setPushDone({ clientName: client.clientName, planName: plan.name, activated: activateNow });
+      try {
+        const threadId = await LB.getOrCreateCoachingThread(client.id, `New meal plan: ${plan.name}`, userId);
+        const body = activateNow
+          ? `Pushed a new meal plan: ${plan.name}\n\nIt's now your active plan.`
+          : `Pushed a new meal plan: ${plan.name}\n\nIt's in your meal plans but not active yet, let's talk it through before you switch to it.`;
+        await LB.addCoachingNote(client.id, 'general', null, null, body, userId, threadId);
+      } catch (noteErr) {
+        console.warn('Meal plan pushed, but the coaching note could not be posted:', noteErr);
+      }
+    } catch (e) {
+      await confirm(e?.message || 'Push failed. Please try again.', { title: 'Push failed', ok: 'OK', cancel: null });
+    } finally {
+      setPushBusy(false);
+    }
   }
 
   const per100From = (m, q) => ({
@@ -2830,6 +2918,9 @@ function FoodTemplateScreen({ open, onClose, store, setStore }) {
         )} />
       <div style={{ padding: '14px 22px calc(env(safe-area-inset-bottom, 8px) + 24px)', display: 'flex', flexDirection: 'column', gap: 16 }}>
         {confirmEl}
+        {isCoach && (
+          <SubTabBar tabs={[{ id: 'mine', label: 'My Plans' }, { id: 'templates', label: 'Client Templates' }]} active={planSubTab} onChange={setPlanSubTab} />
+        )}
         {/* Plan selector: one plan active (auto-fills the log), the rest are
             drafts you can switch to or push (Cut / Bulk / ...). */}
         <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 2 }}>
@@ -2851,9 +2942,13 @@ function FoodTemplateScreen({ open, onClose, store, setStore }) {
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 15, fontWeight: 700, color: UI.ink, fontFamily: UI.fontUi, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{viewedPlan.name}</div>
-                <div style={fdEntryMeta}>{viewedPlanId === activeId ? 'Active plan' : 'Not active'}</div>
+                <div style={fdEntryMeta}>{planSubTab === 'templates' ? 'Client template' : (viewedPlanId === activeId ? 'Active plan' : 'Not active')}</div>
               </div>
-              {viewedPlanId !== activeId && <Btn kind="ghost" onClick={() => activatePlan(viewedPlanId)} style={{ padding: '7px 14px' }}>Activate</Btn>}
+              {planSubTab === 'templates' ? (
+                <Btn kind="ghost" onClick={() => setPushPlan(viewedPlan)} style={{ padding: '7px 14px' }}>Push</Btn>
+              ) : viewedPlanId !== activeId && (
+                <Btn kind="ghost" onClick={() => activatePlan(viewedPlanId)} style={{ padding: '7px 14px' }}>Activate</Btn>
+              )}
               <button onClick={() => setPlanSheet(viewedPlan)} aria-label="Plan actions" style={fdInlineDeleteBtn}>
                 <i className="fa-solid fa-ellipsis-vertical" style={{ fontSize: 14 }} />
               </button>
@@ -2989,13 +3084,23 @@ function FoodTemplateScreen({ open, onClose, store, setStore }) {
         )}
       </Sheet>
 
-      {/* Plan actions (rename / activate / delete) */}
+      {/* Plan actions (activate / push / template bucket / rename / delete) */}
       <Sheet open={!!planSheet} onClose={() => setPlanSheet(null)} title={planSheet?.name || 'Plan'} titleColor="var(--accent)">
         {planSheet && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {planSheet.id !== activeId && (
+            {planSheet.id !== activeId && !planSheet.isTemplate && (
               <Btn onClick={() => { const id = planSheet.id; setPlanSheet(null); activatePlan(id); }} style={{ width: '100%' }}>
-                <i className="fa-solid fa-circle-check" style={{ marginRight: 8 }} /> Activate
+                <i className="fa-solid fa-circle-check" style={{ marginRight: 8 }} /> Activate for me
+              </Btn>
+            )}
+            {isCoach && (
+              <Btn onClick={() => { const p = planSheet; setPlanSheet(null); setPushPlan(p); }} style={{ width: '100%' }}>
+                <i className="fa-solid fa-paper-plane" style={{ marginRight: 8 }} /> Push to client
+              </Btn>
+            )}
+            {isCoach && (
+              <Btn kind="ghost" onClick={() => toggleTemplate(planSheet)} style={{ width: '100%' }}>
+                <i className="fa-solid fa-user-group" style={{ marginRight: 8 }} /> {planSheet.isTemplate ? 'Move to My Plans' : 'Mark as client template'}
               </Btn>
             )}
             <Btn kind="ghost" onClick={() => { setNameDraft({ id: planSheet.id, name: planSheet.name }); setPlanSheet(null); }} style={{ width: '100%' }}>
@@ -3005,6 +3110,56 @@ function FoodTemplateScreen({ open, onClose, store, setStore }) {
               <i className="fa-solid fa-trash" style={{ marginRight: 8 }} /> Delete plan
             </Btn>
           </div>
+        )}
+      </Sheet>
+
+      {/* Push: pick a client */}
+      <Sheet open={!!pushPlan && !pushTarget} onClose={() => setPushPlan(null)} title="Push to client" titleColor="var(--accent)">
+        {pushPlan && (
+          <>
+            <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 12, lineHeight: 1.5 }}>
+              Copies “{pushPlan.name}” (and any recipes it uses) into a client’s account. You’ll pick whether it activates right away.
+            </div>
+            {coachClients.length === 0 ? <div style={fdEmptyHint}>No active clients.</div> : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {coachClients.map(c => (
+                  <button key={c.id} onClick={() => setPushTarget(c)} style={fdPickRow}>
+                    <span style={{ flex: 1, textAlign: 'left', ...fdEntryName }}>{c.clientName || 'Client'}</span>
+                    <i className="fa-solid fa-chevron-right" style={{ fontSize: 12, color: UI.inkFaint }} />
+                  </button>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+      </Sheet>
+
+      {/* Push: activate now vs add only */}
+      <Sheet open={!!pushTarget} onClose={() => !pushBusy && setPushTarget(null)} title={pushTarget?.clientName || 'Client'} titleColor="var(--accent)">
+        {pushTarget && pushPlan && (
+          <>
+            <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: 1.5 }}>
+              Activate “{pushPlan.name}” for them right away, or just add it to their meal plans and talk it through first?
+            </div>
+            <Btn onClick={() => pushMealPlanToClient(pushPlan, pushTarget, true)} disabled={pushBusy} style={{ width: '100%', marginBottom: 8 }}>
+              {pushBusy ? 'Pushing…' : 'Push & activate now'}
+            </Btn>
+            <Btn kind="ghost" onClick={() => pushMealPlanToClient(pushPlan, pushTarget, false)} disabled={pushBusy} style={{ width: '100%' }}>
+              {pushBusy ? 'Pushing…' : 'Add only, talk to them first'}
+            </Btn>
+          </>
+        )}
+      </Sheet>
+
+      {/* Push: success */}
+      <Sheet open={!!pushDone} onClose={() => setPushDone(null)} title="Pushed" titleColor="var(--accent)">
+        {pushDone && (
+          <>
+            <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: 1.5 }}>
+              “{pushDone.planName}” is in {pushDone.clientName}’s account{pushDone.activated ? ' and active now' : ', not activated yet'}.
+            </div>
+            <Btn onClick={() => setPushDone(null)} style={{ width: '100%' }}>Done</Btn>
+          </>
         )}
       </Sheet>
 
