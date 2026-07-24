@@ -11,8 +11,10 @@
 // bookkeeping. Planned meals sit on the hour (a template slot's time is HH:00),
 // so an on-the-hour meal fires precisely at its +1h point; a manually-planned
 // off-the-hour meal fires at the following hourly tick, which is fine for a
-// "you forgot to log this" nudge. A day that hasn't happened yet can't have a
-// checked-off meal, so only today's local date is queried.
+// "you forgot to log this" nudge. Both today and yesterday are queried: a meal
+// at/after 23:00 has its +1h threshold land after local midnight, so it is
+// measured against "now + a full day" and fires in the first tick(s) of the
+// next local day rather than never.
 //
 // Scheduled via pg_cron (migration 0201_meal_reminder.sql), POST with an empty
 // body, same pattern as the training/water reminders (migrations 0028/0182).
@@ -26,6 +28,7 @@ const corsHeaders = {
 const PUSHOVER_TOKEN = 'a2vfbj4vu92hwzp5t9b6cbzkc18vw9';
 const GRACE_MS = 60 * 60 * 1000;      // fire once a planned meal is this far past its time
 const WINDOW_MS = 60 * 60 * 1000;     // = cron cadence (hourly): the meal fires on the tick that crosses the grace threshold
+const DAY_MS = 24 * 60 * 60 * 1000;   // one local day, for the late-meal (>=23:00) day-boundary look-back
 
 function dbFetch(path: string, options: RequestInit = {}) {
   const base = Deno.env.get('SUPABASE_URL') ?? '';
@@ -78,23 +81,32 @@ async function sendReminders() {
     const tz = row.tz_offset_minutes ?? 0;
     const shifted = new Date(now + tz * 60000);
     const localDate = shifted.toISOString().slice(0, 10);
+    // Yesterday's local date too: a meal at/after 23:00 has its (time + 1h grace)
+    // land AFTER local midnight, i.e. on the next local day, where the row is no
+    // longer "today". Querying yesterday as well lets those late meals fire in
+    // the first tick(s) after midnight instead of never (an earlier bug).
+    const yesterday = new Date(shifted.getTime() - DAY_MS).toISOString().slice(0, 10);
     const localMsSinceMidnight =
       (shifted.getUTCHours() * 3600 + shifted.getUTCMinutes() * 60 + shifted.getUTCSeconds()) * 1000;
 
-    // Today's still-planned (unchecked) entries. A failed fetch must not be read
-    // as "nothing planned", so skip this user rather than guessing.
+    // Still-planned (unchecked) entries for today and yesterday. A failed fetch
+    // must not be read as "nothing planned", so skip this user rather than guess.
     const eRes = await dbFetch(
-      `zane_food_logs?user_id=eq.${row.user_id}&date=eq.${localDate}&planned=eq.true&select=time,food_name`
+      `zane_food_logs?user_id=eq.${row.user_id}&date=in.(${yesterday},${localDate})&planned=eq.true&select=date,time,food_name`
     );
     if (!eRes.ok) { console.error(`[meal-reminder] food log query failed for ${row.user_id}: ${eRes.status}`); continue; }
-    const entries: { time: string | null; food_name: string | null }[] = await eRes.json().catch(() => []);
+    const entries: { date: string | null; time: string | null; food_name: string | null }[] = await eRes.json().catch(() => []);
 
     // A meal is due for a nudge if its (planned time + grace) crossed the current
     // clock within the last cron interval: 0 <= now - (mealTime + grace) < WINDOW.
+    // A yesterday row is measured against "now + a full day" so a 23:00 meal's
+    // threshold (24:00 = today 00:00) is reached exactly at the first tick today;
+    // an ordinary yesterday meal is then far past the window and never re-fires.
     const due = entries.filter(e => {
       const [h, m] = (e.time ?? '0:0').split(':').map(Number);
       const mealMs = ((h || 0) * 3600 + (m || 0) * 60) * 1000;
-      const past = localMsSinceMidnight - mealMs - GRACE_MS;
+      const dayOffset = e.date === localDate ? 0 : DAY_MS;
+      const past = localMsSinceMidnight + dayOffset - mealMs - GRACE_MS;
       return past >= 0 && past < WINDOW_MS;
     });
     if (!due.length) continue;
