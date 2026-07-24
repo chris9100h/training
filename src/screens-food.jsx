@@ -558,6 +558,19 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   const [splitUndo, setSplitUndo] = useStateFd(null);
   const splitUndoTimer = useRefFd(null);
   useEffectFd(() => () => clearTimeout(splitUndoTimer.current), []);
+  // "Create recipe from block": the mirror of Split, folding a stacked
+  // hour's 2+ items into ONE recipe-shaped entry instead of fanning one
+  // entry out. recipeBlockHour is the hour being combined (null = sheet
+  // closed). recipeBlockSave defaults OFF: off replaces the block with a
+  // single log entry only ("temporary", no zane_food_recipes row, nothing
+  // to reuse later); on ALSO saves it as a real recipe under Quick Add,
+  // Recipes, same as building one in the recipe editor. Undo reuses the
+  // exact same split_batch/restoreSplitBatch machinery as Split (see there),
+  // tagged kind:'merge' instead of 'split'.
+  const [recipeBlockHour, setRecipeBlockHour] = useStateFd(null);
+  const [recipeBlockName, setRecipeBlockName] = useStateFd('');
+  const [recipeBlockSave, setRecipeBlockSave] = useStateFd(false);
+  const recipeBlockInitialSnap = useRefFd(null);
   function splitEntryUnit(e) {
     if (!(e.quantityG > 0)) return null;
     // Trust loggedUnit alone, no favorite-guess fallback: a row logged
@@ -662,12 +675,15 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     const entries = byHour[splitHour] || [];
     const hours = [splitHour, ...splitHours];
     const now = new Date().toISOString();
-    // Every entry the split creates carries the SAME batch: {id, the exact
-    // pre-split entries}, redundantly, so undoSplitBatch can restore from
-    // whichever one still exists later (see split_batch's own doc comment
-    // in docs/database.md). `entries` here are the exact original objects
-    // (not recomputed), so restoring them is a straight put-back.
-    const batch = { id: LB.uid(), removedEntries: entries };
+    // Every entry the split creates carries the SAME batch: {id, kind, the
+    // exact pre-split entries}, redundantly, so undoSplitBatch can restore
+    // from whichever one still exists later (see split_batch's own doc
+    // comment in docs/database.md). `entries` here are the exact original
+    // objects (not recomputed), so restoring them is a straight put-back.
+    // kind labels which direction this batch went (this is 1 hour's items
+    // fanned out to N; applyBlockRecipe's is the mirror, N items folded into
+    // 1), purely so the shared Undo UI can word itself correctly.
+    const batch = { id: LB.uid(), kind: 'split', removedEntries: entries };
     const toAdd = [];
     const removeIds = new Set();
     entries.forEach(e => {
@@ -689,13 +705,14 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       return { ...s, foodLogs: nextLogs, dailyLogs };
     });
     clearTimeout(splitUndoTimer.current);
-    setSplitUndo({ batchId: batch.id, count: hours.length });
+    setSplitUndo({ batchId: batch.id, count: hours.length, kind: 'split' });
     splitUndoTimer.current = setTimeout(() => setSplitUndo(null), 6000);
     setSplitHour(null);
   }
   // The split_batch of the first entry at hour h that has one, or null, so
-  // the timeline button and the sheet can offer "Undo Split" for an hour
-  // that's a split result (see openSplit/the Undo Split block in the sheet).
+  // the timeline button and the sheet can offer an Undo block for an hour
+  // that's the result of an earlier split OR combine (see openSplit/the
+  // Undo block in the sheet, applyBlockRecipe for the other direction).
   function splitBatchAt(h) {
     return (byHour[h] || []).find(e => e.splitBatch)?.splitBatch || null;
   }
@@ -727,15 +744,96 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     restoreSplitBatch(splitUndo.batchId);
     setSplitUndo(null);
   }
-  // Reopening the split sheet on an old result and tapping "Undo Split" can
-  // be long after the fact and much less obviously reversible than the
-  // toast, so this confirms first.
-  async function undoSplitBatch(batchId) {
-    const ok = await confirm('This deletes the split and restores the original entry as it was before.', { title: 'Undo split?', ok: 'Undo', cancel: 'Cancel', danger: true });
+  // Reopening the split sheet on an old result and tapping Undo can be long
+  // after the fact and much less obviously reversible than the toast, so
+  // this confirms first. kind is passed in by the caller (it already knows
+  // which one it's showing), not re-derived here.
+  async function undoSplitBatch(batchId, kind) {
+    const isMerge = kind === 'merge';
+    const ok = await confirm(
+      isMerge ? 'This deletes the combined recipe entry and restores the original entries as they were before.' : 'This deletes the split and restores the original entry as it was before.',
+      { title: isMerge ? 'Undo combine?' : 'Undo split?', ok: 'Undo', cancel: 'Cancel', danger: true }
+    );
     if (!ok) return;
     restoreSplitBatch(batchId);
     if (splitUndo?.batchId === batchId) { clearTimeout(splitUndoTimer.current); setSplitUndo(null); }
     setSplitHour(null);
+  }
+  function openBlockRecipe(h) {
+    const entries = byHour[h] || [];
+    if (entries.length < 2) return;
+    setRecipeBlockHour(h);
+    setRecipeBlockName('');
+    setRecipeBlockSave(false);
+    recipeBlockInitialSnap.current = JSON.stringify({ name: '', save: false });
+  }
+  // Backdrop tap used to drop the whole block-recipe draft (name, save
+  // toggle) silently, same pattern as requestCloseSplit.
+  async function requestCloseBlockRecipe() {
+    if (recipeBlockHour != null) {
+      const cur = JSON.stringify({ name: recipeBlockName, save: recipeBlockSave });
+      if (cur !== recipeBlockInitialSnap.current && !await confirm("Your recipe won't be created.", { title: 'Discard?', ok: 'Discard', cancel: 'Keep editing', danger: true })) return;
+    }
+    setRecipeBlockHour(null);
+  }
+  // Folds the block's items into one recipe-shaped log entry (source:
+  // 'recipe', recipeItems built straight from them at their current
+  // amounts, no rescaling since this IS the batch, not a portion of one).
+  // recipeBlockSave additionally saves the same items as a real
+  // zane_food_recipes row (with foodId/brand/source, unlike recipeItems'
+  // own leaner shape) so it can be reused later like any other recipe;
+  // off, it's just this one entry. Tags the new entry with a split_batch
+  // (kind:'merge') the same way applySplit does, so the shared Undo
+  // machinery works for this direction too.
+  function applyBlockRecipe() {
+    if (recipeBlockHour == null) return;
+    const entries = byHour[recipeBlockHour] || [];
+    const name = recipeBlockName.trim();
+    if (entries.length < 2 || !name) return;
+    const sum = k => entries.reduce((a, e) => a + (e[k] || 0), 0);
+    const hasFiber = entries.some(e => e.fiber != null);
+    const now = new Date().toISOString();
+    const recipeId = recipeBlockSave ? LB.uid() : null;
+    const recipeItems = entries.map(e => ({
+      foodName: e.foodName, quantityG: e.quantityG ?? null, calories: e.calories,
+      protein: e.protein, carbs: e.carbs, fat: e.fat, fiber: e.fiber ?? null,
+    }));
+    const merged = {
+      id: LB.uid(), date: curDate, time: `${String(recipeBlockHour).padStart(2, '0')}:00`,
+      foodId: null, foodName: name, brand: null, source: 'recipe', recipeId,
+      loggedTotalPortions: 1,
+      quantityG: Math.round(sum('quantityG')), calories: Math.round(sum('calories')),
+      protein: fdRound1(sum('protein')), carbs: fdRound1(sum('carbs')), fat: fdRound1(sum('fat')),
+      fiber: hasFiber ? fdRound1(sum('fiber')) : null,
+      recipeItems, loggedUnit: null,
+      // A block mixing planned and logged items is an edge case; conservative
+      // default (same bias warnIfOverwritingManualMacros uses elsewhere):
+      // logged unless EVERY item was still only planned.
+      planned: entries.every(e => e.planned), templateSlotId: null,
+      createdAt: now,
+      splitBatch: { id: LB.uid(), kind: 'merge', removedEntries: entries },
+    };
+    const removeIds = new Set(entries.map(e => e.id));
+    setStore(s => {
+      const nextLogs = [merged, ...(s.foodLogs || []).filter(l => !removeIds.has(l.id))];
+      const dailyLogs = patchDaily(s, curDate, nextLogs.filter(l => l.date === curDate));
+      const nextRecipes = recipeBlockSave
+        ? [{
+            id: recipeId, name,
+            items: entries.map(e => ({
+              foodId: e.foodId ?? null, foodName: e.foodName, brand: e.brand ?? null, source: e.source ?? null,
+              quantityG: e.quantityG ?? null, calories: e.calories, protein: e.protein, carbs: e.carbs, fat: e.fat,
+              fiber: e.fiber ?? null,
+            })),
+            portions: 1, createdAt: now, updatedAt: now,
+          }, ...(s.foodRecipes || [])]
+        : s.foodRecipes;
+      return { ...s, foodLogs: nextLogs, dailyLogs, foodRecipes: nextRecipes };
+    });
+    clearTimeout(splitUndoTimer.current);
+    setSplitUndo({ batchId: merged.splitBatch.id, count: entries.length, kind: 'merge' });
+    splitUndoTimer.current = setTimeout(() => setSplitUndo(null), 6000);
+    setRecipeBlockHour(null);
   }
   const dayEntries = useMemoFd(
     () => (store.foodLogs || []).filter(l => l.date === curDate).sort((a, b) => b.time.localeCompare(a.time)),
@@ -2330,6 +2428,16 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                                     <i className="fa-solid fa-arrows-split-up-and-left" style={{ fontSize: 11 }} />
                                   </button>
                                 )}
+                                {/* Mirror of Split: folds this stack into one
+                                    recipe-shaped entry instead of fanning one
+                                    entry out. Only offered to actually START
+                                    that (2+ items); undoing an existing one
+                                    reuses the Split button/sheet above. */}
+                                {es.length > 1 && (
+                                  <button onClick={() => openBlockRecipe(h)} aria-label={`Create a recipe from ${String(h).padStart(2, '0')}:00`} style={fdHourAddBtn(isNow)}>
+                                    <i className="fa-solid fa-bowl-food" style={{ fontSize: 11 }} />
+                                  </button>
+                                )}
                               </div>
                             </div>
                           </div>
@@ -2732,16 +2840,19 @@ function FoodScreen({ store, setStore, go, userId, date }) {
           return (
             <>
               {/* However this hour got here (still mid-batch, or fully
-                  reduced to one leftover item), a split it's part of can
-                  always be undone from here, not just the 6s toast right
-                  after applying it. */}
+                  reduced to one leftover item, or the single result of a
+                  block combined into a recipe), an earlier split OR combine
+                  it's part of can always be undone from here, not just the
+                  6s toast right after applying it. */}
               {batch && (
                 <div style={{ marginBottom: canConfigure ? 20 : 0, paddingBottom: canConfigure ? 20 : 0, borderBottom: canConfigure ? `1px solid ${UI.hairStrong}` : 'none' }}>
                   <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 12, lineHeight: 1.4 }}>
-                    This meal was split from another time. Undo it to delete the split and put the original entry back exactly as it was.
+                    {batch.kind === 'merge'
+                      ? 'This entry was combined from a block of items. Undo it to delete the combined recipe and put the original entries back exactly as they were.'
+                      : 'This meal was split from another time. Undo it to delete the split and put the original entry back exactly as it was.'}
                   </div>
-                  <Btn kind="ghost" onClick={() => undoSplitBatch(batch.id)} style={{ width: '100%', color: UI.danger, borderColor: 'rgba(var(--danger-rgb),0.4)' }}>
-                    <i className="fa-solid fa-rotate-left" style={{ marginRight: 8 }} /> Undo Split
+                  <Btn kind="ghost" onClick={() => undoSplitBatch(batch.id, batch.kind)} style={{ width: '100%', color: UI.danger, borderColor: 'rgba(var(--danger-rgb),0.4)' }}>
+                    <i className="fa-solid fa-rotate-left" style={{ marginRight: 8 }} /> {batch.kind === 'merge' ? 'Undo Combine' : 'Undo Split'}
                   </Btn>
                 </div>
               )}
@@ -2797,6 +2908,40 @@ function FoodScreen({ store, setStore, go, userId, date }) {
             </>
           );
         })()}
+      </Sheet>
+
+      {/* ── Combine a stacked hour's items into one recipe-shaped entry, either
+          just for this log (temporary, no library row) or also saved as a real
+          reusable recipe. ── */}
+      <Sheet open={recipeBlockHour != null} onClose={requestCloseBlockRecipe} title="Create recipe" titleColor="var(--accent)">
+        {recipeBlockHour != null && (
+          <>
+            <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: 1.4 }}>
+              Combines these items into one recipe entry. Off by default: it only replaces this log entry, on saves it to Quick Add, Recipes too.
+            </div>
+            <Field label="Recipe name" style={{ marginBottom: 16 }}>
+              <TextInput value={recipeBlockName} onChange={setRecipeBlockName} placeholder="e.g. Breakfast bowl" autoFocus />
+            </Field>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+              <span style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi }}>Save as reusable recipe</span>
+              <Toggle on={recipeBlockSave} onToggle={() => setRecipeBlockSave(v => !v)} />
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 20, maxHeight: 220, overflowY: 'auto' }}>
+              {(byHour[recipeBlockHour] || []).map(e => (
+                <div key={e.id} style={fdEntryRow}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={fdEntryName}>{e.foodName}</div>
+                    <span style={fdEntryMeta}>{e.quantityG ? `${e.quantityG}g · ` : ''}{e.calories} kcal</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Btn kind="ghost" onClick={() => setRecipeBlockHour(null)} style={{ flex: 1 }}>Cancel</Btn>
+              <Btn onClick={applyBlockRecipe} disabled={!recipeBlockName.trim()} style={{ flex: 2 }}>Create recipe</Btn>
+            </div>
+          </>
+        )}
       </Sheet>
 
       {/* ── Units for a favorite (e.g. "1 Pc = 62g", "1 Pack = 500g") ── */}
@@ -2995,16 +3140,16 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         })()}
       </Sheet>
     </Screen>
-    {/* Transient toast for the last applied split (see splitUndo/undoSplit),
-        rendered the same "fixed footer sibling of Screen" way as
-        stagedPanel below so it never overlaps TabBar either. Sits above
-        stagedPanel: it's the momentary one of the two, stagedPanel is the
-        one meant to persist until dealt with. */}
+    {/* Transient toast for the last applied split OR block-recipe combine
+        (see splitUndo/undoSplit), rendered the same "fixed footer sibling of
+        Screen" way as stagedPanel below so it never overlaps TabBar either.
+        Sits above stagedPanel: it's the momentary one of the two, stagedPanel
+        is the one meant to persist until dealt with. */}
     {splitUndo && (
       <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderTop: `1px solid ${UI.hairStrong}`, background: 'rgba(var(--bg-rgb),0.96)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)' }}>
-        <i className="fa-solid fa-arrows-split-up-and-left" style={{ fontSize: 12, color: UI.inkFaint, flexShrink: 0 }} />
+        <i className={`fa-solid ${splitUndo.kind === 'merge' ? 'fa-bowl-food' : 'fa-arrows-split-up-and-left'}`} style={{ fontSize: 12, color: UI.inkFaint, flexShrink: 0 }} />
         <span style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.inkSoft, flex: 1, minWidth: 0 }}>
-          Split into {splitUndo.count} meals
+          {splitUndo.kind === 'merge' ? `Combined ${splitUndo.count} items into a recipe` : `Split into ${splitUndo.count} meals`}
         </span>
         <button onClick={undoSplit} style={{ background: 'none', border: 'none', padding: '4px 8px', color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', cursor: 'pointer', WebkitTapHighlightColor: 'transparent', flexShrink: 0 }}>
           Undo
