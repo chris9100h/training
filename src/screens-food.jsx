@@ -1853,12 +1853,21 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         <button onClick={() => setPickedExpanded(v => !v)} aria-label={pickedExpanded ? 'Collapse picked items' : 'Expand picked items'}
           style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, flex: 1, background: 'none', border: 'none', padding: 0, cursor: 'pointer', WebkitTapHighlightColor: 'transparent', overflow: 'hidden' }}>
           <i className={`fa-solid fa-chevron-${pickedExpanded ? 'down' : 'up'}`} style={{ fontSize: 9, color: 'var(--accent)', flexShrink: 0 }} />
-          <span className="num" style={{ fontSize: 13, fontWeight: 700, color: UI.ink, flexShrink: 0 }}>{staged.length}</span>
+          <span style={{ fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, color: UI.ink, flexShrink: 0, whiteSpace: 'nowrap' }}>
+            Adding {staged.length} item{staged.length === 1 ? '' : 's'}
+          </span>
           {/* Same coloring as the Log tab's hero (FdHeroRow/FD_MACRO_COLORS):
               kcal in UI.warn, P/C/F via the shared FdMacroBits, so this bar
-              reads consistently with the rest of the food module. */}
-          <span className="num" style={{ fontSize: 12, fontWeight: 600, color: UI.warn, flexShrink: 0 }}>{stagedTotals.calories} kcal</span>
-          <FdMacroBits protein={stagedTotals.protein} carbs={stagedTotals.carbs} fat={stagedTotals.fat} />
+              reads consistently with the rest of the food module. Smaller
+              (fontSize 10, same as fdEntryMeta elsewhere) and the one part
+              allowed to clip on a narrow screen, so "Adding N items" and the
+              Add button both stay fully readable no matter what. FdMacroBits
+              itself sets no font-size, it inherits this span's, same as
+              every other call site (they all sit inside an fdEntryMeta span). */}
+          <span style={{ display: 'flex', alignItems: 'baseline', gap: 6, fontSize: 10, marginLeft: 'auto', minWidth: 0, overflow: 'hidden', whiteSpace: 'nowrap' }}>
+            <span className="num" style={{ color: UI.warn, fontWeight: 600 }}>{stagedTotals.calories} kcal</span>
+            <FdMacroBits protein={stagedTotals.protein} carbs={stagedTotals.carbs} fat={stagedTotals.fat} />
+          </span>
         </button>
         <Btn onClick={commitStagedEntries} style={{ flexShrink: 0, padding: '8px 18px', minHeight: 34 }}>
           Add
