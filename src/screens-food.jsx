@@ -168,6 +168,29 @@ function fdSlotMatchesDate(slot, store, dateISO) {
   return slot.dayType === 'training' ? isTraining : !isTraining;
 }
 
+// Plan Mode "did I eat this?" checkbox on a timeline entry: an empty
+// accent-bordered box when planned (not eaten yet), the same box filled with a
+// check once logged (eaten). Tapping toggles the entry's planned state.
+function FdCheckbox({ checked, onToggle }) {
+  return (
+    <button
+      data-reorder-ignore="true"
+      onClick={onToggle}
+      aria-label={checked ? 'Mark as planned' : 'Mark as eaten'}
+      style={{
+        width: 24, height: 24, flexShrink: 0, borderRadius: 4, padding: 0, cursor: 'pointer',
+        border: `1.5px solid var(--accent)`,
+        background: checked ? 'var(--accent)' : 'transparent',
+        color: checked ? 'var(--accent-ink)' : 'transparent',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        WebkitTapHighlightColor: 'transparent',
+      }}
+    >
+      <i className="fa-solid fa-check" style={{ fontSize: 12 }} />
+    </button>
+  );
+}
+
 function FoodScreen({ store, setStore, go, userId, date }) {
   const [confirmEl, confirm] = useConfirm();
   const today = LB.todayISO();
@@ -443,6 +466,10 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // Meal-template manager overlay (FoodTemplateScreen), only reachable in plan
   // mode. Controls the recurring fixum slots that auto-fill each day's plan.
   const [templateOpen, setTemplateOpen] = useStateFd(false);
+  // Timeline entry whose overflow (kebab) action menu is open, or null. The
+  // per-row secondary actions (edit, ingredients, delete) live in this one
+  // menu instead of a cluster of inline buttons, to save width on mobile.
+  const [entryMenu, setEntryMenu] = useStateFd(null);
   const dayEntries = useMemoFd(
     () => (store.foodLogs || []).filter(l => l.date === curDate).sort((a, b) => b.time.localeCompare(a.time)),
     [store.foodLogs, curDate],
@@ -1799,7 +1826,6 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                                   // but can still be portion-edited).
                                   const isRecipe = e.source === 'recipe';
                                   const hasRecipeItems = isRecipe && e.recipeItems?.length > 0;
-                                  const canEditPortions = isRecipe && !!recipeEntryLiveRecipe(e);
                                   const expanded = expandedEntryIds.has(e.id);
                                   // Expanded, the ingredient tree joins the SAME card the
                                   // header sits in (fdEntryCard), not a separate loose list
@@ -1808,49 +1834,33 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                                   // (FdIngredientTrunk/Tick), same idiom as the timeline's
                                   // own hour-row tree (FdHourTrunk/Tick).
                                   // Plan Mode: a planned (not-yet-eaten) entry
-                                  // reads as a dashed, muted card with a check
-                                  // button to confirm it (planned -> logged).
-                                  // The check is the primary action on it; edit/
-                                  // delete stay available. A logged entry looks
-                                  // and behaves exactly as before.
+                                  // reads as a dashed, muted card. Its checkbox
+                                  // (empty accent box) is checked off to mark it
+                                  // eaten (planned -> logged); a logged entry
+                                  // shows the same box filled. Secondary actions
+                                  // (edit, ingredients, delete) live in the
+                                  // overflow menu, so the row stays narrow.
                                   const isPlanned = !!e.planned;
                                   return (
                                     <div key={e.id} data-reorder-item="true" style={isPlanned ? { ...fdEntryCard, borderStyle: 'dashed', borderColor: UI.hairStrong, background: 'transparent' } : fdEntryCard}>
                                       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                                         <DragHandle style={{ width: 14, height: 22, marginRight: 2 }} />
+                                        {planMode && (
+                                          <FdCheckbox checked={!isPlanned} onToggle={() => setEntryPlanned(e, !isPlanned)} />
+                                        )}
                                         <div
                                           onClick={() => { if (hasRecipeItems) toggleEntryExpanded(e.id); else if (!isRecipe) openEditEntry(e); }}
                                           style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0, flex: 1, cursor: (hasRecipeItems || !isRecipe) ? 'pointer' : 'default', opacity: isPlanned ? 0.7 : 1 }}
                                         >
-                                          <span style={fdEntryName}>
-                                            {isPlanned && <span style={fdPlannedChip}>PLANNED</span>}
-                                            {e.foodName}
-                                          </span>
+                                          <span style={fdEntryName}>{e.foodName}</span>
                                           <span style={fdEntryMeta}>
                                             {e.quantityG ? `${e.quantityG}g · ` : ''}<span className="num" style={{ color: UI.warn }}>{e.calories} kcal</span>
                                             <span style={fdMetaDivider} />
                                             <FdMacroBits protein={e.protein} carbs={e.carbs} fat={e.fat} />
                                           </span>
                                         </div>
-                                        {isPlanned && (
-                                          <button data-reorder-ignore="true" onClick={() => setEntryPlanned(e, false)} aria-label="Mark as eaten" title="Mark as eaten" style={{ ...fdInlineDeleteBtn, color: 'var(--accent)' }}>
-                                            <i className="fa-regular fa-circle-check" style={{ fontSize: 16 }} />
-                                          </button>
-                                        )}
-                                        {canEditPortions && (
-                                          <button data-reorder-ignore="true" onClick={() => openEditRecipeEntry(e)}
-                                            aria-label="Edit portions" style={fdInlineDeleteBtn}>
-                                            <i className="fa-solid fa-pen" style={{ fontSize: 11 }} />
-                                          </button>
-                                        )}
-                                        {hasRecipeItems && (
-                                          <button data-reorder-ignore="true" onClick={() => toggleEntryExpanded(e.id)}
-                                            aria-label={expanded ? 'Collapse ingredients' : 'Expand ingredients'} style={fdInlineDeleteBtn}>
-                                            <i className={`fa-solid fa-chevron-${expanded ? 'down' : 'right'}`} style={{ fontSize: 11 }} />
-                                          </button>
-                                        )}
-                                        <button data-reorder-ignore="true" onClick={() => deleteEntry(e)} aria-label="Delete" style={fdInlineDeleteBtn}>
-                                          <i className="fa-solid fa-trash" style={{ fontSize: 12 }} />
+                                        <button data-reorder-ignore="true" onClick={() => setEntryMenu(e)} aria-label="More actions" style={fdInlineDeleteBtn}>
+                                          <i className="fa-solid fa-ellipsis-vertical" style={{ fontSize: 14 }} />
                                         </button>
                                       </div>
                                       {hasRecipeItems && expanded && (
@@ -2414,6 +2424,40 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       <RecipeEditorScreen open={recipeEditorOpen} onClose={() => setRecipeEditorOpen(false)} onSave={handleRecipeSave} recipe={recipeEditorRecipe} store={store} />
 
       <FoodTemplateScreen open={templateOpen} onClose={() => setTemplateOpen(false)} store={store} setStore={setStore} />
+
+      {/* Per-entry overflow actions (kebab), one menu instead of a row of inline
+          buttons. Recomputes its options from the open entry. */}
+      <Sheet open={!!entryMenu} onClose={() => setEntryMenu(null)} title={entryMenu?.foodName || 'Entry'} titleColor="var(--accent)">
+        {entryMenu && (() => {
+          const me = entryMenu;
+          const meIsRecipe = me.source === 'recipe';
+          const meHasItems = meIsRecipe && me.recipeItems?.length > 0;
+          const meCanPortions = meIsRecipe && !!recipeEntryLiveRecipe(me);
+          const meExpanded = expandedEntryIds.has(me.id);
+          const act = (fn) => { setEntryMenu(null); fn(); };
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {meHasItems && (
+                <Btn kind="ghost" onClick={() => act(() => toggleEntryExpanded(me.id))} style={{ width: '100%' }}>
+                  <i className={`fa-solid fa-chevron-${meExpanded ? 'up' : 'down'}`} style={{ marginRight: 8 }} /> {meExpanded ? 'Hide ingredients' : 'Show ingredients'}
+                </Btn>
+              )}
+              {meCanPortions ? (
+                <Btn kind="ghost" onClick={() => act(() => openEditRecipeEntry(me))} style={{ width: '100%' }}>
+                  <i className="fa-solid fa-pen" style={{ marginRight: 8 }} /> Edit portions
+                </Btn>
+              ) : !meIsRecipe ? (
+                <Btn kind="ghost" onClick={() => act(() => openEditEntry(me))} style={{ width: '100%' }}>
+                  <i className="fa-solid fa-pen" style={{ marginRight: 8 }} /> Edit
+                </Btn>
+              ) : null}
+              <Btn kind="ghost" onClick={() => act(() => deleteEntry(me))} style={{ width: '100%', color: UI.danger }}>
+                <i className="fa-solid fa-trash" style={{ marginRight: 8 }} /> Delete
+              </Btn>
+            </div>
+          );
+        })()}
+      </Sheet>
     </Screen>
   );
 }
@@ -3892,8 +3936,6 @@ function fdHourAddBtn(isNow) {
   };
 }
 const fdEntryName = { fontSize: 13, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' };
-// Small "PLANNED" tag prefixing a planned entry's name (Plan Mode).
-const fdPlannedChip = { display: 'inline-block', fontSize: 8, fontWeight: 700, letterSpacing: '0.06em', color: 'var(--accent)', border: `1px solid rgba(var(--accent-rgb),0.4)`, borderRadius: 4, padding: '1px 4px', marginRight: 6, verticalAlign: 'middle', fontFamily: UI.fontUi };
 // Plan Mode: the "Meal template" entry-point button in the Log tab.
 const fdTemplateBtn = { display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '11px 14px', background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 6, color: UI.ink, fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' };
 // Day-type badge on a template slot row (DAILY / TRAIN / REST).
