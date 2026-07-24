@@ -1827,7 +1827,13 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // back) mid-batch doesn't lose it, both (and a staged recipe, see
   // confirmRecipeLog) stage into the same shared `staged` list.
   const stagedPanel = staged.length > 0 ? (
-    <div style={{ flexShrink: 0, borderTop: `1px solid rgba(var(--accent-rgb),0.35)`, background: 'rgba(var(--bg-rgb),0.96)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)' }}>
+    // Same breathing box-shadow as the Intensity sheet (.intensity-glow,
+    // index.html): a live batch waiting to be added is easy to forget about
+    // otherwise, the glow keeps drawing the eye back to it. Regular
+    // --accent-rgb (not the -raw variant the Intensity sheet's own backdrop
+    // glow uses), since this bar sits on the normal theme-reactive Screen
+    // background and should mute along with everything else on Paper.
+    <div className="intensity-glow" style={{ flexShrink: 0, position: 'relative', zIndex: 1, borderTop: `1px solid rgba(var(--accent-rgb),0.35)`, background: 'rgba(var(--bg-rgb),0.96)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)' }}>
       {pickedExpanded && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 2, maxHeight: 168, overflowY: 'auto', padding: '8px 14px 0' }}>
           {staged.map(e => (
