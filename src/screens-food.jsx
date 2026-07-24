@@ -1032,12 +1032,18 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // logged hour survive, and each surviving category only lists the hours
   // that actually have entries: the live timeline always renders all 24
   // hours (so "+" is reachable everywhere), a shareable image shouldn't.
+  // Planned-but-not-yet-checked-off entries are dropped here too, same
+  // "logged truth only" rule categoryTotals already applies to its kcal
+  // sums: a screenshot is what you actually ate, an unchecked planned item
+  // (that isn't even counted in its own category's total above it) has no
+  // business appearing as its own card, and an hour with nothing BUT a
+  // still-planned entry shouldn't appear at all.
   const posterCategories = useMemoFd(() => {
     return categoryTotals
       .map(cat => {
         const hours = [];
         for (let h = cat.startHour; h < cat.endHour; h++) {
-          const es = byHour[h] || [];
+          const es = (byHour[h] || []).filter(e => !e.planned);
           if (es.length) hours.push({ hour: h, entries: es });
         }
         return { ...cat, hours };
