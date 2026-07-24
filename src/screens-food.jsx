@@ -1906,8 +1906,9 @@ function FoodScreen({ store, setStore, go, userId, date }) {
               Add button both stay fully readable no matter what. FdMacroBits
               itself sets no font-size, it inherits this span's, same as
               every other call site (they all sit inside an fdEntryMeta span). */}
-          <span style={{ display: 'flex', alignItems: 'baseline', gap: 6, fontSize: 10, marginLeft: 'auto', minWidth: 0, overflow: 'hidden', whiteSpace: 'nowrap' }}>
+          <span style={{ display: 'flex', alignItems: 'baseline', fontSize: 10, marginLeft: 'auto', minWidth: 0, overflow: 'hidden', whiteSpace: 'nowrap' }}>
             <span className="num" style={{ color: UI.warn, fontWeight: 600 }}>{stagedTotals.calories} kcal</span>
+            <span style={fdMetaDivider} />
             <FdMacroBits protein={stagedTotals.protein} carbs={stagedTotals.carbs} fat={stagedTotals.fat} />
           </span>
         </button>
