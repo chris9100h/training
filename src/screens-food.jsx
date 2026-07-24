@@ -3937,7 +3937,11 @@ function FdHeroRow({ label, color, actual, target, unit = '' }) {
 function FdHeroContent({ dayTarget, dayAdherence, dayTotals, goalCalories, projected }) {
   const projectionLine = projected ? (
     <FdProjectionLine planned={Math.round(projected.calories - dayTotals.calories)} projected={projected.calories} goal={goalCalories}
-      macros={{ protein: projected.protein - dayTotals.protein, carbs: projected.carbs - dayTotals.carbs, fat: projected.fat - dayTotals.fat }} />
+      macros={{
+        protein: { delta: projected.protein - dayTotals.protein, total: projected.protein },
+        carbs:   { delta: projected.carbs   - dayTotals.carbs,   total: projected.carbs },
+        fat:     { delta: projected.fat     - dayTotals.fat,     total: projected.fat },
+      }} />
   ) : null;
   return dayTarget ? (
     <>
@@ -3983,12 +3987,17 @@ function FdProjectionLine({ planned, projected, goal, macros }) {
           +{planned} kcal → <span style={{ color: UI.ink, fontWeight: 600 }}>{projected}</span>{goal ? <span style={{ color: UI.inkFaint }}> / {Math.round(goal)}</span> : ''} projected
         </span>
       </div>
-      {/* Bodybuilders track macros, not just kcal: same P/C/F bits the timeline
-          rows use, as the still-to-eat delta (mirrors the kcal "+N" above it). */}
+      {/* Bodybuilders track macros, not just kcal: same "+delta → projected"
+          shape as the kcal line above, per macro (logged + still-planned). */}
       {macros && (
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, paddingLeft: 2 }}>
-          <span className="num" style={{ fontSize: 11, color: UI.inkFaint }}>+</span>
-          <FdMacroBits protein={macros.protein} carbs={macros.carbs} fat={macros.fat} />
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, paddingLeft: 2, flexWrap: 'wrap' }}>
+          {[['P', FD_MACRO_COLORS.protein, macros.protein], ['C', FD_MACRO_COLORS.carbs, macros.carbs], ['F', FD_MACRO_COLORS.fat, macros.fat]].map(([label, color, m]) => (
+            <span key={label} className="num" style={{ fontSize: 11, fontWeight: 600 }}>
+              <span style={{ color }}>{label}</span>{' '}
+              <span style={{ color: UI.inkFaint }}>+{Math.round(m.delta)}→</span>
+              <span style={{ color: UI.inkSoft }}>{Math.round(m.total)}g</span>
+            </span>
+          ))}
         </div>
       )}
     </div>

@@ -4027,7 +4027,11 @@ async function pushMealPlanToClient({ plan, slots, recipes, coachUserId, coachin
     await syncStore(withPlan, { ...withPlan, activeMealTemplateId: newPlanId }, clientId);
   }
   try {
-    const threadId = await getOrCreateCoachingThread(coachingId, `New meal plan: ${plan.name}`, coachUserId);
+    // Same 'Nutrition' thread the macros-update flow (ClientNutritionTab) posts
+    // to, not a per-plan thread: meal-plan pushes are nutrition coaching, they
+    // belong grouped with everything else under that tab, not scattered across
+    // one new thread per plan name.
+    const threadId = await getOrCreateCoachingThread(coachingId, 'Nutrition', coachUserId);
     const body = activateNow
       ? `Pushed a new meal plan: ${plan.name}\n\nIt's now your active plan.`
       : `Pushed a new meal plan: ${plan.name}\n\nIt's in your meal plans but not active yet, let's talk it through before you switch to it.`;
