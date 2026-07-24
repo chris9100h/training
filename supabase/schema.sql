@@ -221,6 +221,7 @@ CREATE TABLE public.zane_skips (
 CREATE TABLE public.zane_user_settings (
   user_id uuid NOT NULL,
   active_schedule_id text,
+  active_meal_template_id text,   -- Migration 0199: active meal plan pointer (mirrors active_schedule_id)
   cycle_index integer NOT NULL DEFAULT 0,
   last_advanced_date date,
   unit text,
@@ -2373,6 +2374,7 @@ CREATE TABLE zane_food_template_slots (
   hour         integer     NOT NULL DEFAULT 12,       -- 0-23
   day_type     text        NOT NULL DEFAULT 'any',    -- 'any' | 'training' | 'rest'
   sort_idx     integer     NOT NULL DEFAULT 0,
+  meal_plan_id text,                                  -- Migration 0199: which meal plan this slot belongs to (soft ref, no FK)
   created_at   timestamptz NOT NULL DEFAULT now()
 );
 
@@ -2383,6 +2385,36 @@ ALTER TABLE zane_food_template_slots ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "zane_food_template_slots_own"
   ON zane_food_template_slots FOR ALL
   USING ((select auth.uid()) = user_id) WITH CHECK ((select auth.uid()) = user_id);
+-- Coach can read/write a client's slots (a push copies a plan + its slots), migration 0199.
+CREATE POLICY "coach can read client meal slots"   ON zane_food_template_slots FOR SELECT USING (zane_is_coach_of(user_id));
+CREATE POLICY "coach can write client meal slots"  ON zane_food_template_slots FOR INSERT WITH CHECK (zane_is_coach_of(user_id));
+CREATE POLICY "coach can update client meal slots" ON zane_food_template_slots FOR UPDATE USING (zane_is_coach_of(user_id));
+CREATE POLICY "coach can delete client meal slots" ON zane_food_template_slots FOR DELETE USING (zane_is_coach_of(user_id));
+
+-- Plan Mode meal plans (migration 0199): named containers (Cut/Bulk), one active
+-- per user (zane_user_settings.active_meal_template_id). Mirrors zane_schedules:
+-- is_template = coach My-Plans/Client-Templates bucket; coach_id attributes a
+-- coach-authored/pushed plan. Slots reference this via meal_plan_id.
+CREATE TABLE zane_food_meal_plans (
+  id          text        PRIMARY KEY,
+  user_id     uuid        NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  name        text        NOT NULL,
+  archived    boolean     NOT NULL DEFAULT false,
+  is_template boolean     NOT NULL DEFAULT false,
+  coach_id    uuid,
+  created_at  timestamptz NOT NULL DEFAULT now(),
+  updated_at  timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX zane_food_meal_plans_user_idx ON public.zane_food_meal_plans USING btree (user_id, created_at DESC);
+
+ALTER TABLE zane_food_meal_plans ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "own meal plans"                     ON zane_food_meal_plans FOR ALL    USING ((select auth.uid()) = user_id) WITH CHECK ((select auth.uid()) = user_id);
+CREATE POLICY "coach can read client meal plans"   ON zane_food_meal_plans FOR SELECT USING (zane_is_coach_of(user_id));
+CREATE POLICY "coach can write client meal plans"  ON zane_food_meal_plans FOR INSERT WITH CHECK (zane_is_coach_of(user_id));
+CREATE POLICY "coach can update client meal plans" ON zane_food_meal_plans FOR UPDATE USING (zane_is_coach_of(user_id));
+CREATE POLICY "coach can delete client meal plans" ON zane_food_meal_plans FOR DELETE USING (zane_is_coach_of(user_id));
 
 -- Plan Mode auto-fill markers (migration 0198): one row per (user, date) the
 -- meal template was already auto-materialized for, cross-device. id is

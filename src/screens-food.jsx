@@ -284,8 +284,10 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // escape hatch to pull the fixums back after clearing the day on purpose.
   useEffectFd(() => {
     if (!planMode || curDate !== today) return;
-    const slots = store.foodTemplateSlots || [];
-    if (!slots.length) return;
+    // Only the ACTIVE meal plan's slots auto-fill the day.
+    const activePlanId = store.activeMealTemplateId;
+    const slots = (store.foodTemplateSlots || []).filter(s => s.mealPlanId === activePlanId);
+    if (!activePlanId || !slots.length) return;
     const markerId = `${userId}_${today}`;
     if ((store.foodTemplateDays || []).some(d => d.id === markerId)) return;
     const existingSlotIds = new Set((store.foodLogs || []).filter(l => l.date === today && l.templateSlotId).map(l => l.templateSlotId));
@@ -303,7 +305,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         foodLogs: toAdd.length ? [...toAdd, ...(s.foodLogs || [])] : (s.foodLogs || []),
       };
     });
-  }, [planMode, curDate, today, userId, store.foodTemplateSlots, store.foodTemplateDays]);
+  }, [planMode, curDate, today, userId, store.foodTemplateSlots, store.foodTemplateDays, store.activeMealTemplateId]);
 
   const [tab, setTab] = useStateFd('log');
   const [quickTab, setQuickTab] = useStateFd('recent');
@@ -1744,8 +1746,10 @@ function FoodScreen({ store, setStore, go, userId, date }) {
             {planMode && (
               <button onClick={() => setTemplateOpen(true)} style={fdTemplateBtn}>
                 <i className="fa-regular fa-calendar-check" style={{ fontSize: 13, color: 'var(--accent)' }} />
-                <span style={{ flex: 1, textAlign: 'left' }}>Meal template</span>
-                <span className="num" style={{ fontSize: 11, color: UI.inkFaint }}>{(store.foodTemplateSlots || []).length || ''}</span>
+                <span style={{ flex: 1, textAlign: 'left' }}>Meal plans</span>
+                <span style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 120 }}>
+                  {(store.foodMealPlans || []).find(p => p.id === store.activeMealTemplateId)?.name || ''}
+                </span>
                 <i className="fa-solid fa-chevron-right" style={{ fontSize: 11, color: UI.inkFaint }} />
               </button>
             )}
@@ -2625,10 +2629,60 @@ function FoodTemplateScreen({ open, onClose, store, setStore }) {
   const [draft, setDraft] = useStateFd(null);
   const netCarbs = !!store.settings?.netCarbs;
 
+  // Multiple named meal plans (Cut/Bulk/...), exactly one active (mirrors the
+  // training schedule model). viewedPlanId is the plan currently being edited
+  // on this screen, defaulting to the active one.
+  const plans = useMemoFd(() => (store.foodMealPlans || []).filter(p => !p.archived), [store.foodMealPlans]);
+  const activeId = store.activeMealTemplateId;
+  const [viewedPlanId, setViewedPlanId] = useStateFd(null);
+  const [planSheet, setPlanSheet] = useStateFd(null);     // plan actions menu target
+  const [nameDraft, setNameDraft] = useStateFd(null);     // { id: string|null, name } for create/rename
+  useEffectFd(() => {
+    if (!open) return;
+    if (viewedPlanId && plans.some(p => p.id === viewedPlanId)) return;
+    setViewedPlanId(activeId && plans.some(p => p.id === activeId) ? activeId : (plans[0]?.id ?? null));
+  }, [open, plans, activeId]);
+  const viewedPlan = plans.find(p => p.id === viewedPlanId) || null;
+
   const slots = useMemoFd(
-    () => [...(store.foodTemplateSlots || [])].sort((a, b) => (a.hour - b.hour) || ((a.sortIdx || 0) - (b.sortIdx || 0))),
-    [store.foodTemplateSlots],
+    () => [...(store.foodTemplateSlots || [])].filter(s => s.mealPlanId === viewedPlanId).sort((a, b) => (a.hour - b.hour) || ((a.sortIdx || 0) - (b.sortIdx || 0))),
+    [store.foodTemplateSlots, viewedPlanId],
   );
+
+  function createPlan(name) {
+    const id = LB.uid();
+    setStore(s => {
+      const list = s.foodMealPlans || [];
+      const plan = { id, name: (name || '').trim() || 'Meal plan', archived: false, isTemplate: false, coachId: null, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+      // The first (or only) plan becomes active automatically.
+      const makeActive = !s.activeMealTemplateId || !list.some(p => p.id === s.activeMealTemplateId && !p.archived);
+      return { ...s, foodMealPlans: [plan, ...list], ...(makeActive ? { activeMealTemplateId: id } : {}) };
+    });
+    setViewedPlanId(id);
+  }
+  function renamePlan(id, name) {
+    setStore(s => ({ ...s, foodMealPlans: (s.foodMealPlans || []).map(p => p.id === id ? { ...p, name: (name || '').trim() || p.name, updatedAt: new Date().toISOString() } : p) }));
+  }
+  function activatePlan(id) {
+    setStore(s => ({ ...s, activeMealTemplateId: id }));
+  }
+  async function deletePlan(plan) {
+    const n = (store.foodTemplateSlots || []).filter(x => x.mealPlanId === plan.id).length;
+    if (!await confirm(`Delete "${plan.name}"${n ? ` and its ${n} meal${n === 1 ? '' : 's'}` : ''}?`, { title: 'Delete plan?', ok: 'Delete', cancel: 'Cancel', danger: true })) return;
+    setStore(s => {
+      const remainingPlans = (s.foodMealPlans || []).filter(p => p.id !== plan.id);
+      const remainingSlots = (s.foodTemplateSlots || []).filter(x => x.mealPlanId !== plan.id);
+      const nextActive = s.activeMealTemplateId === plan.id ? (remainingPlans.find(p => !p.archived)?.id ?? null) : s.activeMealTemplateId;
+      return { ...s, foodMealPlans: remainingPlans, foodTemplateSlots: remainingSlots, activeMealTemplateId: nextActive };
+    });
+    setPlanSheet(null);
+  }
+  function saveName() {
+    if (!nameDraft) return;
+    if (nameDraft.id) renamePlan(nameDraft.id, nameDraft.name);
+    else createPlan(nameDraft.name);
+    setNameDraft(null);
+  }
 
   const per100From = (m, q) => ({
     cal: q ? (m.calories || 0) / q * 100 : 0, p: q ? (m.protein || 0) / q * 100 : 0,
@@ -2665,15 +2719,18 @@ function FoodTemplateScreen({ open, onClose, store, setStore }) {
   // it). Closes back to the log so the result is visible right away.
   async function applyToToday() {
     const todayISO = LB.todayISO();
+    // Applies the ACTIVE plan (that's what auto-fills the log), regardless of
+    // which plan is being viewed.
+    const inActive = slot => slot.mealPlanId === activeId;
     const present = new Set((store.foodLogs || []).filter(l => l.date === todayISO && l.templateSlotId).map(l => l.templateSlotId));
-    const pending = (store.foodTemplateSlots || []).filter(slot => fdSlotMatchesDate(slot, store, todayISO) && !present.has(slot.id));
+    const pending = (store.foodTemplateSlots || []).filter(slot => inActive(slot) && fdSlotMatchesDate(slot, store, todayISO) && !present.has(slot.id));
     if (!pending.length) {
-      await confirm('Your template meals are already in today’s plan.', { title: 'Nothing to add', ok: 'OK', cancel: null });
+      await confirm('Your active plan’s meals are already in today’s plan.', { title: 'Nothing to add', ok: 'OK', cancel: null });
       return;
     }
     setStore(s => {
       const present2 = new Set((s.foodLogs || []).filter(l => l.date === todayISO && l.templateSlotId).map(l => l.templateSlotId));
-      const entries = (s.foodTemplateSlots || []).filter(slot => fdSlotMatchesDate(slot, s, todayISO) && !present2.has(slot.id)).map(slot => fdMaterializeSlotEntry(slot, todayISO));
+      const entries = (s.foodTemplateSlots || []).filter(slot => slot.mealPlanId === s.activeMealTemplateId && fdSlotMatchesDate(slot, s, todayISO) && !present2.has(slot.id)).map(slot => fdMaterializeSlotEntry(slot, todayISO));
       return entries.length ? { ...s, foodLogs: [...entries, ...(s.foodLogs || [])] } : s;
     });
     onClose();
@@ -2733,15 +2790,17 @@ function FoodTemplateScreen({ open, onClose, store, setStore }) {
       if (draft.id) {
         return { ...s, foodTemplateSlots: list.map(x => x.id === draft.id ? { ...x, ...draftBuilt, ...common } : x) };
       }
-      const sortIdx = list.reduce((m, x) => Math.max(m, x.sortIdx || 0), 0) + 1;
-      const slot = { id: LB.uid(), ...draftBuilt, ...common, sortIdx, createdAt: new Date().toISOString() };
+      const sortIdx = list.filter(x => x.mealPlanId === viewedPlanId).reduce((m, x) => Math.max(m, x.sortIdx || 0), 0) + 1;
+      const slot = { id: LB.uid(), ...draftBuilt, ...common, mealPlanId: viewedPlanId, sortIdx, createdAt: new Date().toISOString() };
       // Fill today right away so a freshly added fixum shows in today's plan,
-      // not only from tomorrow's auto-fill. The once-per-day auto-fill marker
-      // is unaffected, and templateSlotId dedup keeps the effect from adding a
-      // second copy. Only when today matches the slot's day type.
+      // not only from tomorrow's auto-fill. ONLY when this plan is the active
+      // one (an inactive plan never auto-fills, so editing it must not leak
+      // into today), the day type matches, and no copy is already there. The
+      // once-per-day marker is unaffected, and templateSlotId dedup keeps the
+      // effect from adding a second copy.
       let foodLogs = s.foodLogs || [];
       const alreadyToday = foodLogs.some(l => l.date === todayISO && l.templateSlotId === slot.id);
-      if (fdSlotMatchesDate(slot, s, todayISO) && !alreadyToday) {
+      if (viewedPlanId === s.activeMealTemplateId && fdSlotMatchesDate(slot, s, todayISO) && !alreadyToday) {
         foodLogs = [fdMaterializeSlotEntry(slot, todayISO), ...foodLogs];
       }
       return { ...s, foodTemplateSlots: [...list, slot], foodLogs };
@@ -2763,56 +2822,89 @@ function FoodTemplateScreen({ open, onClose, store, setStore }) {
   if (!open) return null;
   return (
     <Screen style={{ position: 'fixed', inset: 0, zIndex: 100, animation: 'sheet-up 0.22s ease' }}>
-      <TopBar title="Meal Template" onBack={onClose}
-        right={
-          <button onClick={() => { setPickerQuery(''); setPickerOpen(true); }} aria-label="Add slot" style={fdTopAddBtn}>
+      <TopBar title="Meal Plans" onBack={onClose}
+        right={viewedPlan && (
+          <button onClick={() => { setPickerQuery(''); setPickerOpen(true); }} aria-label="Add meal" style={fdTopAddBtn}>
             <i className="fa-solid fa-plus" style={{ fontSize: 14 }} />
           </button>
-        } />
+        )} />
       <div style={{ padding: '14px 22px calc(env(safe-area-inset-bottom, 8px) + 24px)', display: 'flex', flexDirection: 'column', gap: 16 }}>
         {confirmEl}
-        <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>
-          Your recurring meals. Each slot auto-fills as a planned entry when you open its day, filtered by day type. Check them off as you eat.
+        {/* Plan selector: one plan active (auto-fills the log), the rest are
+            drafts you can switch to or push (Cut / Bulk / ...). */}
+        <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 2 }}>
+          {plans.map(p => (
+            <button key={p.id} onClick={() => setViewedPlanId(p.id)} style={fdPlanChip(p.id === viewedPlanId, p.id === activeId)}>
+              {p.id === activeId && <i className="fa-solid fa-circle-check" style={{ fontSize: 10, marginRight: 5 }} />}
+              {p.name}
+            </button>
+          ))}
+          <button onClick={() => setNameDraft({ id: null, name: '' })} style={fdPlanChip(false, false)}>
+            <i className="fa-solid fa-plus" style={{ fontSize: 10, marginRight: 5 }} />New
+          </button>
         </div>
-        {slots.length > 0 && (
-          <Btn kind="ghost" onClick={applyToToday} style={{ width: '100%' }}>
-            <i className="fa-regular fa-calendar-plus" style={{ marginRight: 8 }} /> Apply to today’s plan
-          </Btn>
-        )}
-        {slots.length === 0 ? (
-          <Btn onClick={() => { setPickerQuery(''); setPickerOpen(true); }} style={{ width: '100%' }}>
-            <i className="fa-solid fa-plus" style={{ marginRight: 8 }} /> Add a meal
-          </Btn>
+
+        {!viewedPlan ? (
+          <div style={fdEmptyHint}>No meal plan yet. Create one (e.g. “Cut” or “Bulk”) to start planning your recurring meals.</div>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {slots.map(slot => (
-              <div key={slot.id} style={fdEntryCard}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <div style={{ width: 40, flexShrink: 0, textAlign: 'center' }}>
-                    <span className="num" style={{ fontSize: 15, color: UI.inkSoft }}>{String(slot.hour).padStart(2, '0')}</span>
-                    <div className="num" style={{ fontSize: 9, color: UI.inkGhost }}>:00</div>
-                  </div>
-                  <div onClick={() => openEditSlot(slot)} style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0, flex: 1, cursor: 'pointer' }}>
-                    <span style={fdEntryName}>
-                      <span style={fdDayTypeChip(slot.dayType)}>{slot.dayType === 'training' ? 'TRAIN' : slot.dayType === 'rest' ? 'REST' : 'DAILY'}</span>
-                      {slot.foodName}
-                    </span>
-                    <span style={fdEntryMeta}>
-                      {slot.quantityG ? `${slot.quantityG}g · ` : ''}<span className="num" style={{ color: UI.warn }}>{slot.calories} kcal</span>
-                      <span style={fdMetaDivider} />
-                      <FdMacroBits protein={slot.protein} carbs={slot.carbs} fat={slot.fat} />
-                    </span>
-                  </div>
-                  <button onClick={() => openEditSlot(slot)} aria-label="Edit" style={fdInlineDeleteBtn}>
-                    <i className="fa-solid fa-pen" style={{ fontSize: 11 }} />
-                  </button>
-                  <button onClick={() => deleteSlot(slot)} aria-label="Remove" style={fdInlineDeleteBtn}>
-                    <i className="fa-solid fa-trash" style={{ fontSize: 12 }} />
-                  </button>
-                </div>
+          <>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 15, fontWeight: 700, color: UI.ink, fontFamily: UI.fontUi, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{viewedPlan.name}</div>
+                <div style={fdEntryMeta}>{viewedPlanId === activeId ? 'Active plan' : 'Not active'}</div>
               </div>
-            ))}
-          </div>
+              {viewedPlanId !== activeId && <Btn kind="ghost" onClick={() => activatePlan(viewedPlanId)} style={{ padding: '7px 14px' }}>Activate</Btn>}
+              <button onClick={() => setPlanSheet(viewedPlan)} aria-label="Plan actions" style={fdInlineDeleteBtn}>
+                <i className="fa-solid fa-ellipsis-vertical" style={{ fontSize: 14 }} />
+              </button>
+            </div>
+
+            <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>
+              Recurring meals for this plan. The active plan auto-fills each day as planned entries, filtered by day type. Check them off as you eat.
+            </div>
+
+            {viewedPlanId === activeId && slots.length > 0 && (
+              <Btn kind="ghost" onClick={applyToToday} style={{ width: '100%' }}>
+                <i className="fa-regular fa-calendar-plus" style={{ marginRight: 8 }} /> Apply to today’s plan
+              </Btn>
+            )}
+
+            {slots.length === 0 ? (
+              <Btn onClick={() => { setPickerQuery(''); setPickerOpen(true); }} style={{ width: '100%' }}>
+                <i className="fa-solid fa-plus" style={{ marginRight: 8 }} /> Add a meal
+              </Btn>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {slots.map(slot => (
+                  <div key={slot.id} style={fdEntryCard}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <div style={{ width: 40, flexShrink: 0, textAlign: 'center' }}>
+                        <span className="num" style={{ fontSize: 15, color: UI.inkSoft }}>{String(slot.hour).padStart(2, '0')}</span>
+                        <div className="num" style={{ fontSize: 9, color: UI.inkGhost }}>:00</div>
+                      </div>
+                      <div onClick={() => openEditSlot(slot)} style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0, flex: 1, cursor: 'pointer' }}>
+                        <span style={fdEntryName}>
+                          <span style={fdDayTypeChip(slot.dayType)}>{slot.dayType === 'training' ? 'TRAIN' : slot.dayType === 'rest' ? 'REST' : 'DAILY'}</span>
+                          {slot.foodName}
+                        </span>
+                        <span style={fdEntryMeta}>
+                          {slot.quantityG ? `${slot.quantityG}g · ` : ''}<span className="num" style={{ color: UI.warn }}>{slot.calories} kcal</span>
+                          <span style={fdMetaDivider} />
+                          <FdMacroBits protein={slot.protein} carbs={slot.carbs} fat={slot.fat} />
+                        </span>
+                      </div>
+                      <button onClick={() => openEditSlot(slot)} aria-label="Edit" style={fdInlineDeleteBtn}>
+                        <i className="fa-solid fa-pen" style={{ fontSize: 11 }} />
+                      </button>
+                      <button onClick={() => deleteSlot(slot)} aria-label="Remove" style={fdInlineDeleteBtn}>
+                        <i className="fa-solid fa-trash" style={{ fontSize: 12 }} />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
         )}
       </div>
 
@@ -2892,6 +2984,40 @@ function FoodTemplateScreen({ open, onClose, store, setStore }) {
             <div style={{ display: 'flex', gap: 8 }}>
               <Btn kind="ghost" onClick={() => setDraft(null)} style={{ flex: 1 }}>Cancel</Btn>
               <Btn onClick={saveDraft} disabled={!draftBuilt} style={{ flex: 2 }}>{draft.id ? 'Save' : 'Add to template'}</Btn>
+            </div>
+          </>
+        )}
+      </Sheet>
+
+      {/* Plan actions (rename / activate / delete) */}
+      <Sheet open={!!planSheet} onClose={() => setPlanSheet(null)} title={planSheet?.name || 'Plan'} titleColor="var(--accent)">
+        {planSheet && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {planSheet.id !== activeId && (
+              <Btn onClick={() => { const id = planSheet.id; setPlanSheet(null); activatePlan(id); }} style={{ width: '100%' }}>
+                <i className="fa-solid fa-circle-check" style={{ marginRight: 8 }} /> Activate
+              </Btn>
+            )}
+            <Btn kind="ghost" onClick={() => { setNameDraft({ id: planSheet.id, name: planSheet.name }); setPlanSheet(null); }} style={{ width: '100%' }}>
+              <i className="fa-solid fa-pen" style={{ marginRight: 8 }} /> Rename
+            </Btn>
+            <Btn kind="ghost" onClick={() => deletePlan(planSheet)} style={{ width: '100%', color: UI.danger }}>
+              <i className="fa-solid fa-trash" style={{ marginRight: 8 }} /> Delete plan
+            </Btn>
+          </div>
+        )}
+      </Sheet>
+
+      {/* Create / rename a plan */}
+      <Sheet open={!!nameDraft} onClose={() => setNameDraft(null)} title={nameDraft?.id ? 'Rename plan' : 'New meal plan'} titleColor="var(--accent)">
+        {nameDraft && (
+          <>
+            <Field label="Name" style={{ marginBottom: 16 }}>
+              <TextInput value={nameDraft.name} onChange={v => setNameDraft(d => ({ ...d, name: v }))} placeholder="e.g. Cut, Bulk, Maintenance" />
+            </Field>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Btn kind="ghost" onClick={() => setNameDraft(null)} style={{ flex: 1 }}>Cancel</Btn>
+              <Btn onClick={saveName} disabled={!nameDraft.name.trim()} style={{ flex: 2 }}>{nameDraft.id ? 'Save' : 'Create'}</Btn>
             </div>
           </>
         )}
@@ -3945,6 +4071,17 @@ function fdDayTypeChip(dayType) {
 }
 // A favorite/recipe row in the template food-source picker.
 const fdPickRow = { display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '10px 12px', background: UI.bgInset, border: `1px solid ${UI.hair}`, borderRadius: 6, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' };
+// A meal-plan chip in the FoodTemplateScreen plan selector. selected = the
+// plan currently being viewed/edited; active = the plan that auto-fills.
+function fdPlanChip(selected, active) {
+  return {
+    flexShrink: 0, whiteSpace: 'nowrap', padding: '6px 12px', borderRadius: 6, cursor: 'pointer',
+    fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600, WebkitTapHighlightColor: 'transparent',
+    border: `1px solid ${selected ? 'var(--accent)' : UI.hairStrong}`,
+    background: selected ? 'rgba(var(--accent-rgb),0.12)' : 'transparent',
+    color: selected ? 'var(--accent)' : (active ? UI.ink : UI.inkSoft),
+  };
+}
 const fdEmptyHint = { fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, textAlign: 'center', padding: '18px 8px', lineHeight: 1.5 };
 const fdEntryMeta = { fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi };
 // P/C/F in the same three colors the hero rows use (FD_MACRO_COLORS), so a

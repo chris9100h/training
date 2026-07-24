@@ -244,6 +244,7 @@ async function deleteAllData(userId, { keepPush = false } = {}) {
     unwrap(_supabase.from('zane_food_favorites').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_food_recipes').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_food_template_slots').delete().eq('user_id', userId)),
+    unwrap(_supabase.from('zane_food_meal_plans').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_workout_templates').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_glucose_logs').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_blood_pressure_logs').delete().eq('user_id', userId)),
@@ -336,6 +337,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
   const settingsRow = {
     user_id: userId,
     active_schedule_id: backup.activeScheduleId ?? null,
+    active_meal_template_id: backup.activeMealTemplateId ?? null,
     cycle_index: backup.cycleIndex ?? 0,
     cycle_start_date: backup.cycleStartDate ?? null,
     week_plan_start_date: backup.weekPlanStartDate ?? null,
@@ -419,6 +421,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
     + (backup.foodFavorites?.length ? 1 : 0)
     + (backup.foodRecipes?.length ? 1 : 0)
     + (backup.foodTemplateSlots?.length ? 1 : 0)
+    + (backup.foodMealPlans?.length ? 1 : 0)
     + (backup.workoutTemplates?.length ? 1 : 0)
     + (backup.checkinSchemaTemplates?.length ? 1 : 0)
     + (backup.glucoseLogs?.length ? 1 : 0)
@@ -583,6 +586,16 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
       backup.foodRecipes.map(r => ({
         id: r.id, user_id: userId, name: r.name, items: r.items || [], portions: r.portions || 1,
         updated_at: r.updatedAt ?? new Date().toISOString(),
+      }))
+    ));
+    stepsDone++;
+  }
+  if (backup.foodMealPlans?.length) {
+    prog('Uploading meal plans…');
+    await unwrap(_supabase.from('zane_food_meal_plans').upsert(
+      backup.foodMealPlans.map(p => ({
+        id: p.id, user_id: userId, name: p.name, archived: !!p.archived, is_template: !!p.isTemplate,
+        coach_id: p.coachId ?? null, updated_at: p.updatedAt ?? new Date().toISOString(),
       }))
     ));
     stepsDone++;
@@ -954,18 +967,22 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     isCoachLoad ? null : _supabase.from('zane_food_recipes').select('id, name, items, portions, created_at, updated_at').eq('user_id', userId).order('created_at', { ascending: false }),
     // Plan Mode meal-template slots (migration 0197), own store only, same
     // owner-only reasoning as favorites/recipes above.
-    isCoachLoad ? null : _supabase.from('zane_food_template_slots').select('id, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, recipe_items, recipe_id, logged_total_portions, hour, day_type, sort_idx, created_at').eq('user_id', userId).order('sort_idx', { ascending: true }),
+    isCoachLoad ? null : _supabase.from('zane_food_template_slots').select('id, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, recipe_items, recipe_id, logged_total_portions, hour, day_type, sort_idx, meal_plan_id, created_at').eq('user_id', userId).order('sort_idx', { ascending: true }),
     // Plan Mode auto-fill markers (migration 0198): which days the template was
     // already auto-materialized for, cross-device. Only recent days matter (the
     // fill effect only ever runs for today), so window like the food logs.
     isCoachLoad ? null : _supabase.from('zane_food_template_days').select('id, date').eq('user_id', userId).gte('date', foodHistCutoff),
+    // Plan Mode meal plans (migration 0199): named containers (Cut/Bulk), one
+    // active. Mirrors zane_schedules. Own store only, same reasoning as the
+    // slots/favorites/recipes above.
+    isCoachLoad ? null : _supabase.from('zane_food_meal_plans').select('id, name, archived, is_template, coach_id, created_at, updated_at').eq('user_id', userId).order('created_at', { ascending: false }),
   ];
   const [profileRes, exRes, schRes, sessRes, settRes, skipsRes, entriesRes,
          bestsRes, sessionStatsRes,
          coachInfoRes, coachClientsRes, unreadNotesRes, coachingRowRes, selfRowRes,
          cardioLogsRes, cardioPlansRes, dailyLogsRes, statusPeriodsRes,
          supportTicketsRes, glucoseLogsRes, bloodPressureLogsRes, bodyTempLogsRes, templatesRes, mesoStatesRes,
-         checkinTemplatesRes, planDraftsRes, waterLogsRes, foodLogsRes, foodFavoritesRes, foodRecipesRes, foodTemplateSlotsRes, foodTemplateDaysRes] = await Promise.all(queries);
+         checkinTemplatesRes, planDraftsRes, waterLogsRes, foodLogsRes, foodFavoritesRes, foodRecipesRes, foodTemplateSlotsRes, foodTemplateDaysRes, foodMealPlansRes] = await Promise.all(queries);
 
   // A failed request (offline, RLS, server error) also yields no data — bail
   // out so the caller can surface an error instead of mistaking this for a
@@ -1007,6 +1024,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   if (foodRecipesRes?.error) throw foodRecipesRes.error;
   if (foodTemplateSlotsRes?.error) throw foodTemplateSlotsRes.error;
   if (foodTemplateDaysRes?.error) throw foodTemplateDaysRes.error;
+  if (foodMealPlansRes?.error) throw foodMealPlansRes.error;
   // coachingRowRes/selfRowRes use maybeSingle() and only drive optional banner
   // UI. There is no DB uniqueness constraint on (client_id, active), so a client
   // with >1 active coach yields a PGRST116 "multiple rows" error — do NOT throw
@@ -1178,6 +1196,10 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     })),
     foodTemplateSlots: (foodTemplateSlotsRes?.data || []).map(mapTemplateSlotRow),
     foodTemplateDays: (foodTemplateDaysRes?.data || []).map(d => ({ id: d.id, date: d.date })),
+    foodMealPlans: (foodMealPlansRes?.data || []).map(p => ({
+      id: p.id, name: p.name, archived: !!p.archived, isTemplate: !!p.is_template,
+      coachId: p.coach_id ?? null, createdAt: p.created_at, updatedAt: p.updated_at,
+    })),
     glucoseLogs: (glucoseLogsRes?.data || []).map(l => ({
       id: l.id, date: l.date, time: l.time,
       valueMmol: l.value_mmol != null ? parseFloat(l.value_mmol) : null,
@@ -1225,6 +1247,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     // with the windowed sessions, so PR detection stays exact mid-session.
     exerciseBests,
     activeScheduleId: sett.active_schedule_id ?? null,
+    activeMealTemplateId: sett.active_meal_template_id ?? null,
     activeCardioPlanId: sett.active_cardio_plan_id ?? null,
     cycleIndex: sett.cycle_index ?? 0,
     cycleStartDate: sett.cycle_start_date ?? null,
@@ -1717,6 +1740,15 @@ async function syncStore(prev, next, userId) {
     if (removed.length) ops.push(_supabase.from('zane_food_template_days').delete().in('id', removed.map(d => d.id)));
   }
 
+  if (prev.foodMealPlans !== next.foodMealPlans) {
+    const { upsert, removed } = diffCollectionById(prev.foodMealPlans, next.foodMealPlans);
+    if (upsert.length) ops.push(_supabase.from('zane_food_meal_plans').upsert(upsert.map(p => ({
+      id: p.id, user_id: userId, name: p.name, archived: !!p.archived, is_template: !!p.isTemplate,
+      coach_id: p.coachId ?? null, updated_at: p.updatedAt ?? new Date().toISOString(),
+    }))));
+    if (removed.length) ops.push(_supabase.from('zane_food_meal_plans').delete().in('id', removed.map(p => p.id)));
+  }
+
   if (prev.checkinSchemaTemplates !== next.checkinSchemaTemplates) {
     const upsert = (next.checkinSchemaTemplates || []).filter(t => {
       const p = (prev.checkinSchemaTemplates || []).find(x => x.id === t.id);
@@ -1804,6 +1836,7 @@ async function syncStore(prev, next, userId) {
 
   const settingsChanged =
     prev.activeScheduleId          !== next.activeScheduleId          ||
+    prev.activeMealTemplateId      !== next.activeMealTemplateId      ||
     prev.cycleIndex                !== next.cycleIndex                ||
     prev.cycleStartDate            !== next.cycleStartDate            ||
     prev.weekPlanStartDate         !== next.weekPlanStartDate         ||
@@ -1923,6 +1956,7 @@ async function syncStore(prev, next, userId) {
     // means "changed here"); an omitted column is left untouched on the existing
     // row by the PostgREST merge upsert.
     if (prev.activeScheduleId  !== next.activeScheduleId)  settingsRow.active_schedule_id  = next.activeScheduleId ?? null;
+    if (prev.activeMealTemplateId !== next.activeMealTemplateId) settingsRow.active_meal_template_id = next.activeMealTemplateId ?? null;
     if (prev.cycleIndex        !== next.cycleIndex)        settingsRow.cycle_index         = next.cycleIndex ?? 0;
     if (prev.cycleStartDate    !== next.cycleStartDate)    settingsRow.cycle_start_date     = next.cycleStartDate ?? null;
     if (prev.weekPlanStartDate !== next.weekPlanStartDate) settingsRow.week_plan_start_date = next.weekPlanStartDate ?? null;
@@ -2686,6 +2720,7 @@ function mapTemplateSlotRow(r) {
     fiber: r.fiber != null ? parseFloat(r.fiber) : null, recipeItems: r.recipe_items ?? null,
     recipeId: r.recipe_id ?? null, loggedTotalPortions: r.logged_total_portions ?? null,
     hour: r.hour, dayType: r.day_type ?? 'any', sortIdx: r.sort_idx ?? 0,
+    mealPlanId: r.meal_plan_id ?? null,
     createdAt: r.created_at,
   };
 }
@@ -2698,7 +2733,7 @@ function templateSlotRow(userId) {
     calories: t.calories, protein: t.protein, carbs: t.carbs, fat: t.fat,
     fiber: t.fiber ?? null, recipe_items: t.recipeItems ?? null, recipe_id: t.recipeId ?? null,
     logged_total_portions: t.loggedTotalPortions ?? null, hour: t.hour,
-    day_type: t.dayType ?? 'any', sort_idx: t.sortIdx ?? 0,
+    day_type: t.dayType ?? 'any', sort_idx: t.sortIdx ?? 0, meal_plan_id: t.mealPlanId ?? null,
   });
 }
 

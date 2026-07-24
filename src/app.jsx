@@ -794,6 +794,9 @@ function App() {
             const serverTemplateDayIds = new Set((fresh.foodTemplateDays || []).map(d => d.id));
             const baseTemplateDayIds = base ? new Set((base.foodTemplateDays || []).map(d => d.id)) : null;
             const localOnlyTemplateDays = (cur.foodTemplateDays || []).filter(x => !serverTemplateDayIds.has(x.id) && !baseTemplateDayIds?.has(x.id));
+            const serverMealPlanIds = new Set((fresh.foodMealPlans || []).map(p => p.id));
+            const baseMealPlanIds = base ? new Set((base.foodMealPlans || []).map(p => p.id)) : null;
+            const localOnlyMealPlans = (cur.foodMealPlans || []).filter(x => !serverMealPlanIds.has(x.id) && !baseMealPlanIds?.has(x.id));
             // Templates and cardio plans need the same resurrection guard as
             // exercises/schedules — previously missing here entirely, so a
             // template saved (or a cardio plan created) offline before the
@@ -834,6 +837,8 @@ function App() {
             const delTemplateSlotIds = baseTemplateSlotIds ? new Set([...baseTemplateSlotIds].filter(id => !curTemplateSlotIdSet.has(id))) : null;
             const curTemplateDayIdSet = new Set((cur.foodTemplateDays || []).map(d => d.id));
             const delTemplateDayIds = baseTemplateDayIds ? new Set([...baseTemplateDayIds].filter(id => !curTemplateDayIdSet.has(id))) : null;
+            const curMealPlanIdSet = new Set((cur.foodMealPlans || []).map(p => p.id));
+            const delMealPlanIds = baseMealPlanIds ? new Set([...baseMealPlanIds].filter(id => !curMealPlanIdSet.has(id))) : null;
             const curTplIdSet = new Set((cur.workoutTemplates || []).map(t => t.id));
             const delTplIds = baseTplIds ? new Set([...baseTplIds].filter(id => !curTplIdSet.has(id))) : null;
             const curCheckinTplIdSet = new Set((cur.checkinSchemaTemplates || []).map(t => t.id));
@@ -893,6 +898,10 @@ function App() {
             // the server's whole tuple.
             const PLAN_POS_FIELDS = ['activeScheduleId', 'cycleIndex', 'cycleStartDate', 'lastAdvancedDate'];
             const planPosSrc = (!base || PLAN_POS_FIELDS.some(f => cur[f] !== base[f])) ? cur : fresh;
+            // Same coupled-pointer treatment for the active meal plan (no cycle
+            // fields, just the scalar), so a coach's push-and-activate on the
+            // server isn't reverted by a stale local value, and vice versa.
+            const mealPlanPosSrc = (!base || cur.activeMealTemplateId !== base.activeMealTemplateId) ? cur : fresh;
             // Scalar state: the local cache is authoritative — it always holds
             // the most recent state on this device, including unsynced offline
             // edits. For items with IDs we use an ID-based merge instead.
@@ -923,6 +932,7 @@ function App() {
               // still holds the old kg/lbs value; and the water config above.
               settings: mergedSettings,
               activeScheduleId: planPosSrc.activeScheduleId,
+              activeMealTemplateId: mealPlanPosSrc.activeMealTemplateId,
               cycleIndex: planPosSrc.cycleIndex,
               cycleStartDate: planPosSrc.cycleStartDate,
               lastAdvancedDate: planPosSrc.lastAdvancedDate,
@@ -940,6 +950,7 @@ function App() {
               foodRecipes: [...localOnlyRecipes, ...mergeById(fresh.foodRecipes, cur.foodRecipes, base?.foodRecipes, delRecipeIds)],
               foodTemplateSlots: [...localOnlyTemplateSlots, ...mergeById(fresh.foodTemplateSlots, cur.foodTemplateSlots, base?.foodTemplateSlots, delTemplateSlotIds)],
               foodTemplateDays: [...localOnlyTemplateDays, ...mergeById(fresh.foodTemplateDays, cur.foodTemplateDays, base?.foodTemplateDays, delTemplateDayIds)],
+              foodMealPlans: [...localOnlyMealPlans, ...mergeById(fresh.foodMealPlans, cur.foodMealPlans, base?.foodMealPlans, delMealPlanIds)],
               workoutTemplates: [...localOnlyTemplates, ...(fresh.workoutTemplates || []).filter(t => !delTplIds?.has(t.id))],
               checkinSchemaTemplates: [...localOnlyCheckinTemplates, ...(fresh.checkinSchemaTemplates || []).filter(t => !delCheckinTplIds?.has(t.id))],
               cardioPlans: [...localOnlyCardioPlans, ...(fresh.cardioPlans || []).filter(p => !delCardioPlanIds?.has(p.id))],

@@ -324,8 +324,20 @@ Plan-Mode-Meal-Template (Migration 0197): wiederkehrende „Fixum"-Slots, die de
 - `hour` (integer, NOT NULL, Default 12): 0-23, die feste Zeit, an der der materialisierte `planned`-Eintrag landet
 - `day_type` (text, NOT NULL, Default `'any'`): `'any' | 'training' | 'rest'` (via `LB.isTrainingDayForDate`)
 - `sort_idx` (integer, NOT NULL, Default 0), `created_at` (timestamptz)
+- `meal_plan_id` (text, nullable, Migration 0199): welchem `zane_food_meal_plans`-Plan der Slot gehört (weicher Verweis, kein FK: Slot-Cleanup ist clientseitig, vermeidet Cascade-Races mit dem Sync-Diff). Store-Feld `mealPlanId`.
 - Store field: `store.foodTemplateSlots`. Gleiches Collection-Sync-/Boot-Merge-Muster wie `zane_food_recipes`.
-- RLS: nur eigene Zeilen, kein Coach-Zugriff. Migration 0197.
+- RLS: eigene Zeilen + Coach-of-Client (SELECT/INSERT/UPDATE/DELETE via `zane_is_coach_of`, Migration 0199, damit ein Coach beim Push einen Plan samt Slots in den Client-Account schreibt). Migration 0197, Coach-Policies + `meal_plan_id` Migration 0199.
+
+### `zane_food_meal_plans`
+
+Plan-Mode-Meal-Plans (Migration 0199): benannte Container (Cut/Bulk), spiegelt `zane_schedules`. Ein User hat mehrere, genau **einer aktiv** (`zane_user_settings.active_meal_template_id`, Skalar-Zeiger wie `active_schedule_id`, nie ein Flag pro Zeile). Nur die Slots des aktiven Plans befüllen den Tag automatisch. `is_template` ist das Coach-Bucket-Flag (My Plans / Client Templates, wie bei Schedules); `coach_id` attributiert einen coach-authorten/gepushten Plan. Migration backfillt bestehende flache Slots in einen Default-Plan „My meals" je User.
+
+- `id` (text, PK, `LB.uid()`, Default-Plan aus Migration deterministisch `mp_<user_id>`), `user_id` (uuid)
+- `name` (text), `archived` (boolean, NOT NULL, Default false), `is_template` (boolean, NOT NULL, Default false)
+- `coach_id` (uuid, nullable): Coach, der den Plan authort/gepusht hat, sonst null
+- `created_at`/`updated_at` (timestamptz)
+- Store field: `store.foodMealPlans` (`{ id, name, archived, isTemplate, coachId, createdAt, updatedAt }`). Aktiv-Zeiger `store.activeMealTemplateId` (Setting, coupled-Boot-Merge wie `activeScheduleId`). Verwaltung in `FoodTemplateScreen` (Plan-Liste + Slots des gewählten Plans).
+- RLS: eigene Zeilen + Coach-of-Client (SELECT/INSERT/UPDATE/DELETE via `zane_is_coach_of`, wie `zane_schedules`). Migration 0199.
 
 ### `zane_food_template_days`
 
@@ -394,7 +406,7 @@ Historie der Sick/Vacation/Deload-Phasen. Store field: `store.statusPeriods`. Mi
 
 Eine Zeile je User. Neue Settings immer an den drei Stellen in `store.js` ergänzen (siehe CLAUDE.md, Abschnitt „Store").
 
-Basisspalten: `user_id` (uuid), `active_schedule_id` (text), `cycle_index` (int), `cycle_start_date` (text), `last_advanced_date` (date), `week_plan_start_date` (date), `in_progress_session_id` (text), `unit` (text), `rest_default`/`rest_big`/`rest_medium`/`rest_small` (int), `push_enabled` (boolean), `pushover_user_key` (text), `cycle_week_view` (boolean), `accent_color` (text), `dark_mode` (text), `tempo_enabled` (boolean), `tempo_eccentric` (numeric), `tempo_concentric` (numeric), `smart_progression` (boolean), `progression_range_top` (int), `equipment_config` (jsonb), `custom_day_types` (text[]), `reminder_enabled` (boolean), `reminder_time` (text, HH:MM), `next_reminder_at` (timestamptz), `show_warmup_in_summary` (boolean), `show_coaching_tab` (boolean), `be_your_own_coach` (boolean), `session_timeout_minutes` (int, default 90)
+Basisspalten: `user_id` (uuid), `active_schedule_id` (text), `active_meal_template_id` (text, Plan-Mode aktiver Meal-Plan-Zeiger, Store `activeMealTemplateId`, Migration 0199), `cycle_index` (int), `cycle_start_date` (text), `last_advanced_date` (date), `week_plan_start_date` (date), `in_progress_session_id` (text), `unit` (text), `rest_default`/`rest_big`/`rest_medium`/`rest_small` (int), `push_enabled` (boolean), `pushover_user_key` (text), `cycle_week_view` (boolean), `accent_color` (text), `dark_mode` (text), `tempo_enabled` (boolean), `tempo_eccentric` (numeric), `tempo_concentric` (numeric), `smart_progression` (boolean), `progression_range_top` (int), `equipment_config` (jsonb), `custom_day_types` (text[]), `reminder_enabled` (boolean), `reminder_time` (text, HH:MM), `next_reminder_at` (timestamptz), `show_warmup_in_summary` (boolean), `show_coaching_tab` (boolean), `be_your_own_coach` (boolean), `session_timeout_minutes` (int, default 90)
 
 **RLS:** eigene Zeile voll (`FOR ALL`) · ein aktiver Coach (`zane_is_coach_of`) darf eine Client-Zeile lesen, updaten **und** inserten (Migration 0163; die INSERT-Policy fehlte ursprünglich als einzige der Coach-Client-Tabellen, obwohl `syncStore`s `upsert()` sie auch für den reinen Update-Fall braucht, Postgres prüft bei `ON CONFLICT DO UPDATE` immer erst die INSERT-Policy). Praktisch relevant für Coach-Writes wie „Push to client" (`PlanViewerScreen`), die `active_schedule_id`/`cycle_index`/`cycle_start_date`/`week_plan_start_date` fürs Aktivieren eines Plans setzen.
 
