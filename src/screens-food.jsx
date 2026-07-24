@@ -1808,20 +1808,24 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     fat: fdRound1(staged.reduce((a, e) => a + (e.fat || 0), 0)),
   }), [staged]);
 
-  // Docked bar shown on both add-a-food tabs whenever there's a staged
-  // (picked, quantity already chosen, but not yet logged) batch. Rendered
-  // OUTSIDE the scrolling Screen (see the wrapping div in the return below)
-  // as a fixed, non-scrolling footer, so it never scrolls out of view while
-  // paging through search results or the Quick Add lists, the exact "forgot
-  // to hit Add and lost the picks" complaint this replaced: the previous
-  // version sat inline at the top of the scrollable content and disappeared
-  // the moment you scrolled past it. Single collapsed line by default (count
-  // + kcal + the Add button, all always reachable); tapping it reveals the
-  // per-item review, growing upward off the docked bar rather than pushing
-  // the bar itself around. Lives here rather than per-tab so switching
-  // between Search and Quick Add mid-batch doesn't lose it, both (and a
-  // staged recipe, see confirmRecipeLog) stage into the same shared `staged`
-  // list.
+  // Docked bar shown whenever there's a staged (picked, quantity already
+  // chosen, but not yet logged) batch, on ANY tab, not just Search/Quick Add:
+  // rendered unconditionally in the return below, a staged pick is still
+  // part of the food module even after flipping over to Log to check
+  // something, and shouldn't quietly vanish (and be forgotten) just because
+  // the tab changed. Rendered OUTSIDE the scrolling Screen (see the wrapping
+  // div in the return below) as a fixed, non-scrolling footer, so it never
+  // scrolls out of view while paging through search results or the Quick
+  // Add lists either, the exact "forgot to hit Add and lost the picks"
+  // complaint this replaced: the previous version sat inline at the top of
+  // the scrollable content and disappeared the moment you scrolled past it.
+  // Single collapsed line by default (count, kcal + P/C/F in the same colors
+  // the Log tab's hero card uses, and the Add button, all always reachable);
+  // tapping it reveals the per-item review, growing upward off the docked
+  // bar rather than pushing the bar itself around. Lives here rather than
+  // per-tab so switching between Search and Quick Add (or over to Log and
+  // back) mid-batch doesn't lose it, both (and a staged recipe, see
+  // confirmRecipeLog) stage into the same shared `staged` list.
   const stagedPanel = staged.length > 0 ? (
     <div style={{ flexShrink: 0, borderTop: `1px solid rgba(var(--accent-rgb),0.35)`, background: 'rgba(var(--bg-rgb),0.96)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)' }}>
       {pickedExpanded && (
@@ -1839,13 +1843,16 @@ function FoodScreen({ store, setStore, go, userId, date }) {
           ))}
         </div>
       )}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 14px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px' }}>
         <button onClick={() => setPickedExpanded(v => !v)} aria-label={pickedExpanded ? 'Collapse picked items' : 'Expand picked items'}
-          style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, flex: 1, background: 'none', border: 'none', padding: 0, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+          style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, flex: 1, background: 'none', border: 'none', padding: 0, cursor: 'pointer', WebkitTapHighlightColor: 'transparent', overflow: 'hidden' }}>
           <i className={`fa-solid fa-chevron-${pickedExpanded ? 'down' : 'up'}`} style={{ fontSize: 9, color: 'var(--accent)', flexShrink: 0 }} />
           <span className="num" style={{ fontSize: 13, fontWeight: 700, color: UI.ink, flexShrink: 0 }}>{staged.length}</span>
-          <span style={{ fontFamily: UI.fontUi, fontSize: 10, color: UI.inkFaint, textTransform: 'uppercase', letterSpacing: '0.05em', flexShrink: 0 }}>item{staged.length === 1 ? '' : 's'}</span>
-          <span className="num" style={{ fontSize: 12, color: UI.inkSoft, marginLeft: 'auto', paddingRight: 8, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{stagedTotals.calories} kcal</span>
+          {/* Same coloring as the Log tab's hero (FdHeroRow/FD_MACRO_COLORS):
+              kcal in UI.warn, P/C/F via the shared FdMacroBits, so this bar
+              reads consistently with the rest of the food module. */}
+          <span className="num" style={{ fontSize: 12, fontWeight: 600, color: UI.warn, flexShrink: 0 }}>{stagedTotals.calories} kcal</span>
+          <FdMacroBits protein={stagedTotals.protein} carbs={stagedTotals.carbs} fat={stagedTotals.fat} />
         </button>
         <Btn onClick={commitStagedEntries} style={{ flexShrink: 0, padding: '8px 18px', minHeight: 34 }}>
           Add
@@ -2801,7 +2808,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         })()}
       </Sheet>
     </Screen>
-    {(tab === 'search' || tab === 'quickadd') && stagedPanel}
+    {stagedPanel}
     </div>
   );
 }
