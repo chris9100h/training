@@ -30,11 +30,11 @@ async function sendWebPush(userId: string, title: string, message: string) {
 }
 
 async function sendReminders() {
-  // Query all push-enabled users with a due reminder — not just Pushover users.
+  // Query all push-enabled users with a due reminder, not just Pushover users.
   const r = await dbFetch(
-    'zane_user_settings?reminder_enabled=eq.true&next_reminder_at=not.is.null&push_enabled=eq.true&select=user_id,pushover_user_key,next_reminder_at'
+    'zane_user_settings?reminder_enabled=eq.true&next_reminder_at=not.is.null&push_enabled=eq.true&select=user_id,pushover_user_key,use_pushover,next_reminder_at'
   );
-  const rows: { user_id: string; pushover_user_key: string | null; next_reminder_at: string }[] = await r.json().catch(() => []);
+  const rows: { user_id: string; pushover_user_key: string | null; use_pushover: boolean | null; next_reminder_at: string }[] = await r.json().catch(() => []);
 
   const now = Date.now();
   const oneHourAgo = now - 3600_000;
@@ -45,9 +45,15 @@ async function sendReminders() {
     if (scheduledAt > now || scheduledAt < oneHourAgo) continue;
 
     const title = 'Zane · Training Reminder';
-    const message = "Training day ahead — time to get after it! 💪";
+    const message = "Training day ahead. Time to get after it! 💪";
 
-    if (row.pushover_user_key) {
+    // Respect the user's channel choice: Pushover only when they turned it on
+    // (use_pushover) and set a key, otherwise native Web Push. This used to send
+    // BOTH whenever a key existed, so a Pushover user got the same reminder
+    // twice. Matches the water/meal reminder "Pushover instead of Web Push"
+    // semantics.
+    const viaPushover = !!row.use_pushover && !!row.pushover_user_key;
+    if (viaPushover) {
       try {
         const res = await fetch('https://api.pushover.net/1/messages.json', {
           method: 'POST',
@@ -58,9 +64,9 @@ async function sendReminders() {
       } catch (e) {
         console.error(`[reminder] pushover error for ${row.user_id}:`, e);
       }
+    } else {
+      await sendWebPush(row.user_id, title, message);
     }
-
-    await sendWebPush(row.user_id, title, message);
 
     // Clear next_reminder_at regardless of push success so we don't retry endlessly
     await dbFetch(`zane_user_settings?user_id=eq.${row.user_id}`, {
