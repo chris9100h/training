@@ -2350,6 +2350,40 @@ CREATE POLICY "zane_food_recipes_own"
   ON zane_food_recipes FOR ALL
   USING ((select auth.uid()) = user_id) WITH CHECK ((select auth.uid()) = user_id);
 
+-- ── Plan Mode meal templates (migration 0197) ───────────────────────────────
+-- Recurring fixum slots that auto-fill each day's plan. Denormalized food/
+-- recipe snapshot (same shape as a food log entry) + fixed hour + day_type
+-- filter. Owner-only, like favorites/recipes.
+CREATE TABLE zane_food_template_slots (
+  id           text        PRIMARY KEY,
+  user_id      uuid        NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  food_id      text,
+  food_name    text        NOT NULL,
+  brand        text,
+  source       text,                                  -- 'off' | 'usda' | 'custom' | 'recipe' | null
+  quantity_g   numeric     NOT NULL,
+  calories     integer     NOT NULL,
+  protein      numeric     NOT NULL,
+  carbs        numeric     NOT NULL,
+  fat          numeric     NOT NULL,
+  fiber        numeric,
+  recipe_items jsonb,                                 -- ingredient snapshot for a source:'recipe' slot
+  recipe_id    text,                                  -- soft ref to the source recipe (no FK)
+  logged_total_portions integer,                      -- recipe batch total, recipe slots only
+  hour         integer     NOT NULL DEFAULT 12,       -- 0-23
+  day_type     text        NOT NULL DEFAULT 'any',    -- 'any' | 'training' | 'rest'
+  sort_idx     integer     NOT NULL DEFAULT 0,
+  created_at   timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX zane_food_template_slots_user_idx ON public.zane_food_template_slots USING btree (user_id, sort_idx);
+
+ALTER TABLE zane_food_template_slots ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "zane_food_template_slots_own"
+  ON zane_food_template_slots FOR ALL
+  USING ((select auth.uid()) = user_id) WITH CHECK ((select auth.uid()) = user_id);
+
 -- ── Recipe sharing (migration 0193) ─────────────────────────────────────────────
 -- One row per shared recipe, keyed by an unguessable token that doubles as the
 -- deep link (.../?share=<token>). `recipe` is a jsonb snapshot taken when the

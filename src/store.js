@@ -243,6 +243,7 @@ async function deleteAllData(userId, { keepPush = false } = {}) {
     unwrap(_supabase.from('zane_food_logs').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_food_favorites').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_food_recipes').delete().eq('user_id', userId)),
+    unwrap(_supabase.from('zane_food_template_slots').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_workout_templates').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_glucose_logs').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_blood_pressure_logs').delete().eq('user_id', userId)),
@@ -417,6 +418,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
     + (backup.foodLogs?.length ? 1 : 0)
     + (backup.foodFavorites?.length ? 1 : 0)
     + (backup.foodRecipes?.length ? 1 : 0)
+    + (backup.foodTemplateSlots?.length ? 1 : 0)
     + (backup.workoutTemplates?.length ? 1 : 0)
     + (backup.checkinSchemaTemplates?.length ? 1 : 0)
     + (backup.glucoseLogs?.length ? 1 : 0)
@@ -582,6 +584,13 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
         id: r.id, user_id: userId, name: r.name, items: r.items || [], portions: r.portions || 1,
         updated_at: r.updatedAt ?? new Date().toISOString(),
       }))
+    ));
+    stepsDone++;
+  }
+  if (backup.foodTemplateSlots?.length) {
+    prog('Uploading meal template…');
+    await unwrap(_supabase.from('zane_food_template_slots').upsert(
+      backup.foodTemplateSlots.map(templateSlotRow(userId))
     ));
     stepsDone++;
   }
@@ -943,13 +952,16 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     // another user's personal shortcuts (owner-only RLS, no coach-read policy).
     isCoachLoad ? null : _supabase.from('zane_food_favorites').select('id, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, units, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
     isCoachLoad ? null : _supabase.from('zane_food_recipes').select('id, name, items, portions, created_at, updated_at').eq('user_id', userId).order('created_at', { ascending: false }),
+    // Plan Mode meal-template slots (migration 0197), own store only, same
+    // owner-only reasoning as favorites/recipes above.
+    isCoachLoad ? null : _supabase.from('zane_food_template_slots').select('id, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, recipe_items, recipe_id, logged_total_portions, hour, day_type, sort_idx, created_at').eq('user_id', userId).order('sort_idx', { ascending: true }),
   ];
   const [profileRes, exRes, schRes, sessRes, settRes, skipsRes, entriesRes,
          bestsRes, sessionStatsRes,
          coachInfoRes, coachClientsRes, unreadNotesRes, coachingRowRes, selfRowRes,
          cardioLogsRes, cardioPlansRes, dailyLogsRes, statusPeriodsRes,
          supportTicketsRes, glucoseLogsRes, bloodPressureLogsRes, bodyTempLogsRes, templatesRes, mesoStatesRes,
-         checkinTemplatesRes, planDraftsRes, waterLogsRes, foodLogsRes, foodFavoritesRes, foodRecipesRes] = await Promise.all(queries);
+         checkinTemplatesRes, planDraftsRes, waterLogsRes, foodLogsRes, foodFavoritesRes, foodRecipesRes, foodTemplateSlotsRes] = await Promise.all(queries);
 
   // A failed request (offline, RLS, server error) also yields no data — bail
   // out so the caller can surface an error instead of mistaking this for a
@@ -989,6 +1001,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   if (checkinTemplatesRes?.error) throw checkinTemplatesRes.error;
   if (foodFavoritesRes?.error) throw foodFavoritesRes.error;
   if (foodRecipesRes?.error) throw foodRecipesRes.error;
+  if (foodTemplateSlotsRes?.error) throw foodTemplateSlotsRes.error;
   // coachingRowRes/selfRowRes use maybeSingle() and only drive optional banner
   // UI. There is no DB uniqueness constraint on (client_id, active), so a client
   // with >1 active coach yields a PGRST116 "multiple rows" error — do NOT throw
@@ -1158,6 +1171,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     foodRecipes: (foodRecipesRes?.data || []).map(r => ({
       id: r.id, name: r.name, items: r.items || [], portions: r.portions || 1, createdAt: r.created_at, updatedAt: r.updated_at,
     })),
+    foodTemplateSlots: (foodTemplateSlotsRes?.data || []).map(mapTemplateSlotRow),
     glucoseLogs: (glucoseLogsRes?.data || []).map(l => ({
       id: l.id, date: l.date, time: l.time,
       valueMmol: l.value_mmol != null ? parseFloat(l.value_mmol) : null,
@@ -1683,6 +1697,12 @@ async function syncStore(prev, next, userId) {
       updated_at: r.updatedAt ?? new Date().toISOString(),
     }))));
     if (removed.length) ops.push(_supabase.from('zane_food_recipes').delete().in('id', removed.map(r => r.id)));
+  }
+
+  if (prev.foodTemplateSlots !== next.foodTemplateSlots) {
+    const { upsert, removed } = diffCollectionById(prev.foodTemplateSlots, next.foodTemplateSlots);
+    if (upsert.length) ops.push(_supabase.from('zane_food_template_slots').upsert(upsert.map(templateSlotRow(userId))));
+    if (removed.length) ops.push(_supabase.from('zane_food_template_slots').delete().in('id', removed.map(t => t.id)));
   }
 
   if (prev.checkinSchemaTemplates !== next.checkinSchemaTemplates) {
@@ -2640,6 +2660,34 @@ function mapFoodLogRow(l) {
     planned: l.planned ?? false, templateSlotId: l.template_slot_id ?? null,
     createdAt: l.created_at,
   };
+}
+
+// Plan Mode meal-template slot (zane_food_template_slots). Carries the same
+// denormalized food/recipe snapshot as a log entry (so materializing a planned
+// entry from it needs no re-fetch) plus a fixed hour and a day_type filter
+// ('any' | 'training' | 'rest').
+function mapTemplateSlotRow(r) {
+  return {
+    id: r.id, foodId: r.food_id ?? null, foodName: r.food_name, brand: r.brand ?? null,
+    source: r.source ?? null, quantityG: parseFloat(r.quantity_g), calories: r.calories,
+    protein: parseFloat(r.protein), carbs: parseFloat(r.carbs), fat: parseFloat(r.fat),
+    fiber: r.fiber != null ? parseFloat(r.fiber) : null, recipeItems: r.recipe_items ?? null,
+    recipeId: r.recipe_id ?? null, loggedTotalPortions: r.logged_total_portions ?? null,
+    hour: r.hour, dayType: r.day_type ?? 'any', sortIdx: r.sort_idx ?? 0,
+    createdAt: r.created_at,
+  };
+}
+// Store slot -> DB row (curried on userId), shared by syncStore and
+// importFromBackup so both write the exact same column set.
+function templateSlotRow(userId) {
+  return t => ({
+    id: t.id, user_id: userId, food_id: t.foodId ?? null, food_name: t.foodName,
+    brand: t.brand ?? null, source: t.source ?? null, quantity_g: t.quantityG,
+    calories: t.calories, protein: t.protein, carbs: t.carbs, fat: t.fat,
+    fiber: t.fiber ?? null, recipe_items: t.recipeItems ?? null, recipe_id: t.recipeId ?? null,
+    logged_total_portions: t.loggedTotalPortions ?? null, hour: t.hour,
+    day_type: t.dayType ?? 'any', sort_idx: t.sortIdx ?? 0,
+  });
 }
 
 // Lazy-load food log entries for specific dates outside the boot window

@@ -311,6 +311,22 @@ Eine benannte Liste von Zutaten, die der User zusammen loggt (z.B. "Breakfast bo
 - Store field: `store.foodRecipes`. Gleiches Sync-/Merge-Muster wie `zane_food_favorites`.
 - RLS: nur eigene Zeilen, kein Coach-Zugriff. Migration 0187, `portions` Migration 0190, `auth.uid()`-Wrapping (initPlan-Caching) Migration 0192.
 
+### `zane_food_template_slots`
+
+Plan-Mode-Meal-Template (Migration 0197): wiederkehrende „Fixum"-Slots, die den Tagesplan automatisch befüllen. Ein Slot trägt denselben denormalisierten Food-/Rezept-Snapshot wie eine `zane_food_logs`-Zeile (damit die Materialisierung eines geplanten Eintrags kein Re-Fetch braucht) plus eine feste Stunde und einen Tag-Typ-Filter. Beim Öffnen des heutigen Food-Tags legt `FoodScreen` je passendem Slot (Tag-Typ) einen `planned`-Eintrag an der Slot-Stunde an (einmal pro Tag/Gerät, localStorage-Marker `logbook-food-template-applied`, Dedup über `zane_food_logs.template_slot_id`). Verwaltung in `FoodTemplateScreen` (nur bei Plan Mode). Slot-Foods kommen aus den bestehenden Favorites/Recipes.
+
+- `id` (text), `user_id` (uuid)
+- `food_id` (text, nullable), `food_name` (text), `brand` (text, nullable), `source` (text, nullable: `'off'|'usda'|'custom'|'recipe'|null`)
+- `quantity_g` (numeric), `calories` (integer), `protein`/`carbs`/`fat` (numeric), `fiber` (numeric, nullable)
+- `recipe_items` (jsonb, nullable): Zutaten-Snapshot bei `source: 'recipe'`, sonst null
+- `recipe_id` (text, nullable): weicher Verweis auf das Quell-Rezept (kein FK: ein gelöschtes Rezept darf den Slot nicht mitlöschen), nur bei Rezept-Slots
+- `logged_total_portions` (integer, nullable): Rezept-Batch-Total zum Slot-Erstellungszeitpunkt, nur bei Rezept-Slots
+- `hour` (integer, NOT NULL, Default 12): 0-23, die feste Zeit, an der der materialisierte `planned`-Eintrag landet
+- `day_type` (text, NOT NULL, Default `'any'`): `'any' | 'training' | 'rest'` (via `LB.isTrainingDayForDate`)
+- `sort_idx` (integer, NOT NULL, Default 0), `created_at` (timestamptz)
+- Store field: `store.foodTemplateSlots`. Gleiches Collection-Sync-/Boot-Merge-Muster wie `zane_food_recipes`.
+- RLS: nur eigene Zeilen, kein Coach-Zugriff. Migration 0197.
+
 ### `zane_recipe_shares`
 
 Share-Links für Rezepte (Share-Button im Recipes-Tab des Food Trackers). Eine Zeile pro geteiltem Rezept, gekeyt über einen nicht erratbaren Token, der zugleich der Deep-Link ist (`…/?share=<token>`). `recipe` ist ein jsonb-**Snapshot** zum Zeitpunkt des Teilens (`{ name, portions, items }`, Shape wie bei `zane_food_recipes`): der Link funktioniert weiter, wenn der Sharer das Original später editiert oder löscht, und leakt umgekehrt keine späteren Änderungen. Erneutes Teilen desselben Rezepts refresht den Snapshot und liefert **denselben** Token (Upsert über `user_id`+`recipe_id`), Re-Shares stapeln also keine Zeilen.

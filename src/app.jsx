@@ -788,6 +788,9 @@ function App() {
             const serverRecipeIds = new Set((fresh.foodRecipes || []).map(r => r.id));
             const baseRecipeIds = base ? new Set((base.foodRecipes || []).map(r => r.id)) : null;
             const localOnlyRecipes = (cur.foodRecipes || []).filter(x => !serverRecipeIds.has(x.id) && !baseRecipeIds?.has(x.id));
+            const serverTemplateSlotIds = new Set((fresh.foodTemplateSlots || []).map(t => t.id));
+            const baseTemplateSlotIds = base ? new Set((base.foodTemplateSlots || []).map(t => t.id)) : null;
+            const localOnlyTemplateSlots = (cur.foodTemplateSlots || []).filter(x => !serverTemplateSlotIds.has(x.id) && !baseTemplateSlotIds?.has(x.id));
             // Templates and cardio plans need the same resurrection guard as
             // exercises/schedules — previously missing here entirely, so a
             // template saved (or a cardio plan created) offline before the
@@ -824,6 +827,8 @@ function App() {
             const delFavIds = baseFavIds ? new Set([...baseFavIds].filter(id => !curFavIdSet.has(id))) : null;
             const curRecipeIdSet = new Set((cur.foodRecipes || []).map(r => r.id));
             const delRecipeIds = baseRecipeIds ? new Set([...baseRecipeIds].filter(id => !curRecipeIdSet.has(id))) : null;
+            const curTemplateSlotIdSet = new Set((cur.foodTemplateSlots || []).map(t => t.id));
+            const delTemplateSlotIds = baseTemplateSlotIds ? new Set([...baseTemplateSlotIds].filter(id => !curTemplateSlotIdSet.has(id))) : null;
             const curTplIdSet = new Set((cur.workoutTemplates || []).map(t => t.id));
             const delTplIds = baseTplIds ? new Set([...baseTplIds].filter(id => !curTplIdSet.has(id))) : null;
             const curCheckinTplIdSet = new Set((cur.checkinSchemaTemplates || []).map(t => t.id));
@@ -928,6 +933,7 @@ function App() {
               foodLogs: [...localOnlyFoodLogs, ...mergeById(fresh.foodLogs, cur.foodLogs, base?.foodLogs, delFoodIds)],
               foodFavorites: [...localOnlyFavorites, ...mergeById(fresh.foodFavorites, cur.foodFavorites, base?.foodFavorites, delFavIds)],
               foodRecipes: [...localOnlyRecipes, ...mergeById(fresh.foodRecipes, cur.foodRecipes, base?.foodRecipes, delRecipeIds)],
+              foodTemplateSlots: [...localOnlyTemplateSlots, ...mergeById(fresh.foodTemplateSlots, cur.foodTemplateSlots, base?.foodTemplateSlots, delTemplateSlotIds)],
               workoutTemplates: [...localOnlyTemplates, ...(fresh.workoutTemplates || []).filter(t => !delTplIds?.has(t.id))],
               checkinSchemaTemplates: [...localOnlyCheckinTemplates, ...(fresh.checkinSchemaTemplates || []).filter(t => !delCheckinTplIds?.has(t.id))],
               cardioPlans: [...localOnlyCardioPlans, ...(fresh.cardioPlans || []).filter(p => !delCardioPlanIds?.has(p.id))],

@@ -146,6 +146,28 @@ const FD_MEAL_CATEGORIES = [
   { id: 'snack3', label: 'Snack 3', startHour: 20, endHour: 24 },
 ];
 
+// Build the planned food-log entry a template slot materializes into on a
+// given date. Shared by the auto-fill effect (opening a day) and the immediate
+// fill when a new slot is added, so both produce an identical entry shape.
+// slot.id becomes templateSlotId, which the dedup keys off.
+function fdMaterializeSlotEntry(slot, dateISO) {
+  return {
+    id: LB.uid(), date: dateISO, time: `${String(slot.hour ?? 12).padStart(2, '0')}:00`,
+    foodId: slot.foodId ?? null, foodName: slot.foodName, brand: slot.brand ?? null, source: slot.source ?? null,
+    quantityG: slot.quantityG, calories: slot.calories, protein: slot.protein, carbs: slot.carbs, fat: slot.fat,
+    fiber: slot.fiber ?? null, recipeItems: slot.recipeItems ?? null, recipeId: slot.recipeId ?? null,
+    loggedTotalPortions: slot.loggedTotalPortions ?? null, planned: true, templateSlotId: slot.id,
+    createdAt: new Date().toISOString(),
+  };
+}
+// Does a slot's day_type apply on a given date? ('any' always; 'training' /
+// 'rest' via the plan's training-day check).
+function fdSlotMatchesDate(slot, store, dateISO) {
+  if (slot.dayType === 'any' || !slot.dayType) return true;
+  const isTraining = LB.isTrainingDayForDate(store, dateISO);
+  return slot.dayType === 'training' ? isTraining : !isTraining;
+}
+
 function FoodScreen({ store, setStore, go, userId, date }) {
   const [confirmEl, confirm] = useConfirm();
   const today = LB.todayISO();
@@ -228,6 +250,37 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       if (changed) { try { localStorage.setItem('logbook-food-fav-cache-repaired', JSON.stringify([...repaired])); } catch (_) {} }
     });
   }, []);
+
+  // Plan Mode meal templates: on opening today, auto-materialize each matching
+  // template slot (by day-type: any / training / rest) as a planned entry at
+  // its fixed hour, unless the day already has one from that slot. Runs once
+  // per day per device via a localStorage marker (logbook-food-template-applied),
+  // so deleting an auto-planned entry doesn't make it reappear on reopen. Only
+  // for TODAY: a backdated day is never auto-filled. Cross-device caveat: a
+  // second device opening the same day for the first time re-materializes only
+  // slots whose synced entries were deleted elsewhere (the templateSlotId dedup
+  // below skips the rest), an accepted rarity for an opt-in power feature.
+  useEffectFd(() => {
+    if (!planMode || curDate !== today) return;
+    const slots = store.foodTemplateSlots || [];
+    if (!slots.length) return;
+    let applied;
+    try { applied = new Set(JSON.parse(localStorage.getItem('logbook-food-template-applied') || '[]')); }
+    catch (_) { applied = new Set(); }
+    if (applied.has(today)) return;
+    const existingSlotIds = new Set((store.foodLogs || []).filter(l => l.date === today && l.templateSlotId).map(l => l.templateSlotId));
+    const toAdd = slots
+      .filter(s => fdSlotMatchesDate(s, store, today) && !existingSlotIds.has(s.id))
+      .map(s => fdMaterializeSlotEntry(s, today));
+    // Mark applied even when nothing was added (all slots already present), so
+    // the effect never re-runs for today. Prune old dates to keep the marker
+    // from growing without bound.
+    applied.add(today);
+    const cutoff = fdShiftDate(today, -60);
+    try { localStorage.setItem('logbook-food-template-applied', JSON.stringify([...applied].filter(d => d >= cutoff))); } catch (_) {}
+    // Planned entries never touch the daily log, so no patchDaily here.
+    if (toAdd.length) setStore(s => ({ ...s, foodLogs: [...toAdd, ...(s.foodLogs || [])] }));
+  }, [planMode, curDate, today, store.foodTemplateSlots]);
 
   const [tab, setTab] = useStateFd('log');
   const [quickTab, setQuickTab] = useStateFd('recent');
@@ -387,6 +440,9 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // is ever planned, so loggedEntries === dayEntries and every total below is
   // exactly what it was before.
   const planMode = !!store.settings?.planMode;
+  // Meal-template manager overlay (FoodTemplateScreen), only reachable in plan
+  // mode. Controls the recurring fixum slots that auto-fill each day's plan.
+  const [templateOpen, setTemplateOpen] = useStateFd(false);
   const dayEntries = useMemoFd(
     () => (store.foodLogs || []).filter(l => l.date === curDate).sort((a, b) => b.time.localeCompare(a.time)),
     [store.foodLogs, curDate],
@@ -1657,6 +1713,15 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                 projected={planMode && plannedEntries.length ? projectedTotals : null} />
             </BracketFrame>
 
+            {planMode && (
+              <button onClick={() => setTemplateOpen(true)} style={fdTemplateBtn}>
+                <i className="fa-regular fa-calendar-check" style={{ fontSize: 13, color: 'var(--accent)' }} />
+                <span style={{ flex: 1, textAlign: 'left' }}>Meal template</span>
+                <span className="num" style={{ fontSize: 11, color: UI.inkFaint }}>{(store.foodTemplateSlots || []).length || ''}</span>
+                <i className="fa-solid fa-chevron-right" style={{ fontSize: 11, color: UI.inkFaint }} />
+              </button>
+            )}
+
             {/* Hourly timeline: every hour 0-23 has a "+" that logs at exactly
                 that hour, with its entries listed underneath, grouped under a
                 read-only per-meal summary card (FD_MEAL_CATEGORIES). Adding
@@ -2339,6 +2404,8 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       </Sheet>
 
       <RecipeEditorScreen open={recipeEditorOpen} onClose={() => setRecipeEditorOpen(false)} onSave={handleRecipeSave} recipe={recipeEditorRecipe} store={store} />
+
+      <FoodTemplateScreen open={templateOpen} onClose={() => setTemplateOpen(false)} store={store} setStore={setStore} />
     </Screen>
   );
 }
@@ -2489,6 +2556,271 @@ function RecipeShareSheet({ store, setStore, token, onClose }) {
 // Owns its own draft (name/items/portions) entirely locally; onSave only ever
 // receives the finished shape once the user actually confirms saving.
 // `recipe` is the recipe being edited, null while creating a new one.
+// Plan Mode meal-template manager (full-page overlay, opened from FoodScreen's
+// Log tab). Manages the recurring fixum slots (store.foodTemplateSlots) that
+// auto-fill each day's plan: a slot is a food or recipe snapshot + a fixed
+// hour + a day-type filter (any / training / rest). A slot's food comes from
+// the user's existing Favorites or Recipes (the natural home of repeated
+// fixums), so there's no separate search here. Adding chooses the amount
+// (grams for a food, portions for a recipe); editing an existing slot adjusts
+// its hour and day-type (and a food slot's grams), recipe portions are set at
+// add time (re-add to change them).
+function FoodTemplateScreen({ open, onClose, store, setStore }) {
+  const [confirmEl, confirm] = useConfirm();
+  const [pickerOpen, setPickerOpen] = useStateFd(false);
+  const [pickerTab, setPickerTab] = useStateFd('favorites');
+  const [pickerQuery, setPickerQuery] = useStateFd('');
+  const [draft, setDraft] = useStateFd(null);
+  const netCarbs = !!store.settings?.netCarbs;
+
+  const slots = useMemoFd(
+    () => [...(store.foodTemplateSlots || [])].sort((a, b) => (a.hour - b.hour) || ((a.sortIdx || 0) - (b.sortIdx || 0))),
+    [store.foodTemplateSlots],
+  );
+
+  const per100From = (m, q) => ({
+    cal: q ? (m.calories || 0) / q * 100 : 0, p: q ? (m.protein || 0) / q * 100 : 0,
+    c: q ? (m.carbs || 0) / q * 100 : 0, f: q ? (m.fat || 0) / q * 100 : 0,
+    fib: (m.fiber != null && q) ? m.fiber / q * 100 : null,
+  });
+  function openAddFood(fav) {
+    const q = fav.quantityG || 100;
+    setPickerOpen(false);
+    setDraft({ id: null, kind: 'food', foodId: fav.foodId ?? null, foodName: fav.foodName, brand: fav.brand ?? null, source: fav.source ?? null, per100: per100From(fav, q), gramsStr: String(q), hour: 8, dayType: 'any' });
+  }
+  function openAddRecipe(recipe) {
+    setPickerOpen(false);
+    setDraft({ id: null, kind: 'recipe', recipeId: recipe.id, name: recipe.name, recipe, portions: 1, hour: 8, dayType: 'any' });
+  }
+  function openEditSlot(slot) {
+    if (slot.source === 'recipe') {
+      setDraft({ id: slot.id, kind: 'recipe', recipeId: slot.recipeId ?? null, name: slot.foodName, recipe: null, portions: null, hour: slot.hour, dayType: slot.dayType, slot });
+    } else {
+      const q = slot.quantityG || 100;
+      setDraft({ id: slot.id, kind: 'food', foodId: slot.foodId ?? null, foodName: slot.foodName, brand: slot.brand ?? null, source: slot.source ?? null, per100: per100From(slot, q), gramsStr: String(q), hour: slot.hour, dayType: slot.dayType });
+    }
+  }
+  async function deleteSlot(slot) {
+    if (!await confirm(`${slot.foodName}`, { title: 'Remove from template?', ok: 'Remove', cancel: 'Cancel', danger: true })) return;
+    setStore(s => ({ ...s, foodTemplateSlots: (s.foodTemplateSlots || []).filter(x => x.id !== slot.id) }));
+  }
+
+  // Live macros for the config sheet. A food slot scales its per-100g base by
+  // the typed grams; a recipe slot (add only) scales the recipe by portions,
+  // exactly like confirmRecipeLog. A recipe EDIT keeps the slot's stored macros
+  // (only hour/day-type change), so it has no live recompute.
+  const draftBuilt = useMemoFd(() => {
+    if (!draft) return null;
+    if (draft.kind === 'food') {
+      const g = fdNum(draft.gramsStr);
+      if (g == null || !(g > 0)) return null;
+      const sc = g / 100;
+      return {
+        foodId: draft.foodId, foodName: draft.foodName, brand: draft.brand, source: draft.source,
+        quantityG: g, calories: Math.round(draft.per100.cal * sc), protein: fdRound1(draft.per100.p * sc),
+        carbs: fdRound1(draft.per100.c * sc), fat: fdRound1(draft.per100.f * sc),
+        fiber: draft.per100.fib != null ? fdRound1(draft.per100.fib * sc) : null,
+        recipeItems: null, recipeId: null, loggedTotalPortions: null,
+      };
+    }
+    if (draft.recipe) {
+      const recipe = draft.recipe;
+      const items = recipe.items || [];
+      const totalPortions = recipe.portions || 1;
+      const scale = draft.portions / totalPortions;
+      const sum = k => items.reduce((a, i) => a + (i[k] || 0), 0);
+      const recipeItems = items.map(i => ({
+        foodName: i.foodName, quantityG: Math.round((i.quantityG || 0) * scale),
+        calories: Math.round((LB.caloriesFromMacros(i.protein, i.carbs, i.fat, netCarbs ? i.fiber : null) || 0) * scale),
+        protein: fdRound1((i.protein || 0) * scale), carbs: fdRound1((i.carbs || 0) * scale),
+        fat: fdRound1((i.fat || 0) * scale), fiber: i.fiber != null ? fdRound1(i.fiber * scale) : null,
+      }));
+      return {
+        foodId: null, foodName: draft.portions !== totalPortions ? `${recipe.name} (${draft.portions}/${totalPortions})` : recipe.name,
+        brand: null, source: 'recipe', quantityG: Math.round(sum('quantityG') * scale),
+        calories: Math.round(fdRecipeItemsCalories(items, netCarbs) * scale), protein: fdRound1(sum('protein') * scale),
+        carbs: fdRound1(sum('carbs') * scale), fat: fdRound1(sum('fat') * scale),
+        fiber: items.some(i => i.fiber != null) ? fdRound1(sum('fiber') * scale) : null,
+        recipeItems, recipeId: recipe.id, loggedTotalPortions: totalPortions,
+      };
+    }
+    // recipe edit: no macro recompute, reuse the existing slot's food fields.
+    return { ...draft.slot };
+  }, [draft, netCarbs]);
+
+  function saveDraft() {
+    if (!draft || !draftBuilt) return;
+    const common = { hour: draft.hour, dayType: draft.dayType };
+    const todayISO = LB.todayISO();
+    setStore(s => {
+      const list = s.foodTemplateSlots || [];
+      // Edit: update the slot only. Existing materialized entries for today keep
+      // their own (possibly already-eaten) state, not retro-rewritten from here.
+      if (draft.id) {
+        return { ...s, foodTemplateSlots: list.map(x => x.id === draft.id ? { ...x, ...draftBuilt, ...common } : x) };
+      }
+      const sortIdx = list.reduce((m, x) => Math.max(m, x.sortIdx || 0), 0) + 1;
+      const slot = { id: LB.uid(), ...draftBuilt, ...common, sortIdx, createdAt: new Date().toISOString() };
+      // Fill today right away so a freshly added fixum shows in today's plan,
+      // not only from tomorrow's auto-fill. The once-per-day auto-fill marker
+      // is unaffected, and templateSlotId dedup keeps the effect from adding a
+      // second copy. Only when today matches the slot's day type.
+      let foodLogs = s.foodLogs || [];
+      const alreadyToday = foodLogs.some(l => l.date === todayISO && l.templateSlotId === slot.id);
+      if (fdSlotMatchesDate(slot, s, todayISO) && !alreadyToday) {
+        foodLogs = [fdMaterializeSlotEntry(slot, todayISO), ...foodLogs];
+      }
+      return { ...s, foodTemplateSlots: [...list, slot], foodLogs };
+    });
+    setDraft(null);
+  }
+
+  const favs = useMemoFd(() => {
+    const q = pickerQuery.trim().toLowerCase();
+    const list = q ? (store.foodFavorites || []).filter(f => f.foodName.toLowerCase().includes(q) || (f.brand || '').toLowerCase().includes(q)) : (store.foodFavorites || []);
+    return [...list].sort((a, b) => a.foodName.localeCompare(b.foodName));
+  }, [store.foodFavorites, pickerQuery]);
+  const recipes = useMemoFd(() => {
+    const q = pickerQuery.trim().toLowerCase();
+    const list = q ? (store.foodRecipes || []).filter(r => r.name.toLowerCase().includes(q)) : (store.foodRecipes || []);
+    return [...list].sort((a, b) => a.name.localeCompare(b.name));
+  }, [store.foodRecipes, pickerQuery]);
+
+  if (!open) return null;
+  return (
+    <Screen style={{ position: 'fixed', inset: 0, zIndex: 100, animation: 'sheet-up 0.22s ease' }}>
+      <TopBar title="Meal Template" onBack={onClose}
+        right={
+          <button onClick={() => { setPickerQuery(''); setPickerOpen(true); }} aria-label="Add slot" style={fdTopAddBtn}>
+            <i className="fa-solid fa-plus" style={{ fontSize: 14 }} />
+          </button>
+        } />
+      <div style={{ padding: '14px 22px calc(env(safe-area-inset-bottom, 8px) + 24px)', display: 'flex', flexDirection: 'column', gap: 16 }}>
+        {confirmEl}
+        <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>
+          Your recurring meals. Each slot auto-fills as a planned entry when you open its day, filtered by day type. Check them off as you eat.
+        </div>
+        {slots.length === 0 ? (
+          <Btn onClick={() => { setPickerQuery(''); setPickerOpen(true); }} style={{ width: '100%' }}>
+            <i className="fa-solid fa-plus" style={{ marginRight: 8 }} /> Add a meal
+          </Btn>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {slots.map(slot => (
+              <div key={slot.id} style={fdEntryCard}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div style={{ width: 40, flexShrink: 0, textAlign: 'center' }}>
+                    <span className="num" style={{ fontSize: 15, color: UI.inkSoft }}>{String(slot.hour).padStart(2, '0')}</span>
+                    <div className="num" style={{ fontSize: 9, color: UI.inkGhost }}>:00</div>
+                  </div>
+                  <div onClick={() => openEditSlot(slot)} style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0, flex: 1, cursor: 'pointer' }}>
+                    <span style={fdEntryName}>
+                      <span style={fdDayTypeChip(slot.dayType)}>{slot.dayType === 'training' ? 'TRAIN' : slot.dayType === 'rest' ? 'REST' : 'DAILY'}</span>
+                      {slot.foodName}
+                    </span>
+                    <span style={fdEntryMeta}>
+                      {slot.quantityG ? `${slot.quantityG}g · ` : ''}<span className="num" style={{ color: UI.warn }}>{slot.calories} kcal</span>
+                      <span style={fdMetaDivider} />
+                      <FdMacroBits protein={slot.protein} carbs={slot.carbs} fat={slot.fat} />
+                    </span>
+                  </div>
+                  <button onClick={() => openEditSlot(slot)} aria-label="Edit" style={fdInlineDeleteBtn}>
+                    <i className="fa-solid fa-pen" style={{ fontSize: 11 }} />
+                  </button>
+                  <button onClick={() => deleteSlot(slot)} aria-label="Remove" style={fdInlineDeleteBtn}>
+                    <i className="fa-solid fa-trash" style={{ fontSize: 12 }} />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Food source picker: the user's Favorites and Recipes */}
+      <Sheet open={pickerOpen} onClose={() => setPickerOpen(false)} title="Add to template" titleColor="var(--accent)">
+        <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `1px solid ${UI.hairStrong}`, marginBottom: 10 }}>
+          {[['favorites', 'Favorites'], ['recipes', 'Recipes']].map(([id, label]) => (
+            <button key={id} onClick={() => setPickerTab(id)} style={fdSegBtn(pickerTab === id)}>{label}</button>
+          ))}
+        </div>
+        <input value={pickerQuery} onChange={e => setPickerQuery(e.target.value)} type="text" placeholder="Filter…" style={{ ...fdInputStyle, marginBottom: 10 }} />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: '46vh', overflowY: 'auto' }}>
+          {pickerTab === 'favorites' ? (
+            favs.length === 0 ? <div style={fdEmptyHint}>No favorites yet. Star a food to reuse it here.</div>
+            : favs.map(f => (
+              <button key={f.id} onClick={() => openAddFood(f)} style={fdPickRow}>
+                <div style={{ minWidth: 0, flex: 1, textAlign: 'left' }}>
+                  <div style={fdEntryName}>{f.foodName}</div>
+                  <div style={fdEntryMeta}>{f.quantityG}g · <span className="num" style={{ color: UI.warn }}>{f.calories} kcal</span></div>
+                </div>
+                <i className="fa-solid fa-plus" style={{ fontSize: 12, color: 'var(--accent)' }} />
+              </button>
+            ))
+          ) : (
+            recipes.length === 0 ? <div style={fdEmptyHint}>No recipes yet.</div>
+            : recipes.map(r => (
+              <button key={r.id} onClick={() => openAddRecipe(r)} style={fdPickRow}>
+                <div style={{ minWidth: 0, flex: 1, textAlign: 'left' }}>
+                  <div style={fdEntryName}>{r.name}</div>
+                  <div style={fdEntryMeta}>{r.portions} portion{r.portions === 1 ? '' : 's'}</div>
+                </div>
+                <i className="fa-solid fa-plus" style={{ fontSize: 12, color: 'var(--accent)' }} />
+              </button>
+            ))
+          )}
+        </div>
+      </Sheet>
+
+      {/* Slot config: amount + hour + day type */}
+      <Sheet open={!!draft} onClose={() => setDraft(null)} title={draft?.foodName || draft?.name || 'Meal slot'} titleColor="var(--accent)">
+        {draft && (
+          <>
+            {draft.kind === 'food' ? (
+              <Field label="Amount (g)" style={{ marginBottom: 14 }}>
+                <input value={draft.gramsStr} onChange={e => setDraft(d => ({ ...d, gramsStr: fdDecimalFilter(e.target.value) }))} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
+              </Field>
+            ) : draft.recipe ? (
+              <div style={{ marginBottom: 14 }}>
+                <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8, textAlign: 'center' }}>Portions</div>
+                <div style={{ display: 'flex', justifyContent: 'center' }}>
+                  <Stepper value={draft.portions} step={0.5} min={0.5} suffix={draft.portions === 1 ? ' portion' : ' portions'}
+                    onChange={v => setDraft(d => ({ ...d, portions: Math.max(0.5, Math.round(v * 2) / 2) }))} big />
+                </div>
+              </div>
+            ) : null}
+            {draftBuilt && (
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', background: UI.bgInset, border: `1px solid ${UI.hair}`, borderRadius: 6, marginBottom: 14, textShadow: 'none' }}>
+                <span className="num" style={{ fontSize: 15, color: UI.ink }}>{draftBuilt.calories} kcal</span>
+                <span style={{ display: 'flex', gap: 10 }}>
+                  <span className="num" style={{ fontSize: 12, fontWeight: 600, color: UI.inkSoft }}>P {draftBuilt.protein}</span>
+                  <span className="num" style={{ fontSize: 12, fontWeight: 600, color: UI.inkSoft }}>C {draftBuilt.carbs}</span>
+                  <span className="num" style={{ fontSize: 12, fontWeight: 600, color: UI.inkSoft }}>F {draftBuilt.fat}</span>
+                </span>
+              </div>
+            )}
+            <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>Time</div>
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 14 }}>
+              <Stepper value={draft.hour} step={1} min={0} max={23} suffix=":00"
+                onChange={v => setDraft(d => ({ ...d, hour: Math.max(0, Math.min(23, Math.round(v))) }))} big />
+            </div>
+            <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>Day type</div>
+            <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `1px solid ${UI.hairStrong}`, marginBottom: 16 }}>
+              {[['any', 'Every day'], ['training', 'Training'], ['rest', 'Rest']].map(([id, label]) => (
+                <button key={id} onClick={() => setDraft(d => ({ ...d, dayType: id }))} style={fdSegBtn(draft.dayType === id)}>{label}</button>
+              ))}
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Btn kind="ghost" onClick={() => setDraft(null)} style={{ flex: 1 }}>Cancel</Btn>
+              <Btn onClick={saveDraft} disabled={!draftBuilt} style={{ flex: 2 }}>{draft.id ? 'Save' : 'Add to template'}</Btn>
+            </div>
+          </>
+        )}
+      </Sheet>
+    </Screen>
+  );
+}
+
 function RecipeEditorScreen({ open, onClose, onSave, recipe, store }) {
   const [confirmEl, confirm] = useConfirm();
   const [name, setName] = useStateFd('');
@@ -3527,6 +3859,16 @@ function fdHourAddBtn(isNow) {
 const fdEntryName = { fontSize: 13, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' };
 // Small "PLANNED" tag prefixing a planned entry's name (Plan Mode).
 const fdPlannedChip = { display: 'inline-block', fontSize: 8, fontWeight: 700, letterSpacing: '0.06em', color: 'var(--accent)', border: `1px solid rgba(var(--accent-rgb),0.4)`, borderRadius: 4, padding: '1px 4px', marginRight: 6, verticalAlign: 'middle', fontFamily: UI.fontUi };
+// Plan Mode: the "Meal template" entry-point button in the Log tab.
+const fdTemplateBtn = { display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '11px 14px', background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 6, color: UI.ink, fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' };
+// Day-type badge on a template slot row (DAILY / TRAIN / REST).
+function fdDayTypeChip(dayType) {
+  const accent = dayType !== 'any';
+  return { display: 'inline-block', fontSize: 8, fontWeight: 700, letterSpacing: '0.06em', color: accent ? 'var(--accent)' : UI.inkFaint, border: `1px solid ${accent ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong}`, borderRadius: 4, padding: '1px 4px', marginRight: 6, verticalAlign: 'middle', fontFamily: UI.fontUi };
+}
+// A favorite/recipe row in the template food-source picker.
+const fdPickRow = { display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '10px 12px', background: UI.bgInset, border: `1px solid ${UI.hair}`, borderRadius: 6, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' };
+const fdEmptyHint = { fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, textAlign: 'center', padding: '18px 8px', lineHeight: 1.5 };
 const fdEntryMeta = { fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi };
 // P/C/F in the same three colors the hero rows use (FD_MACRO_COLORS), so a
 // glance at any macro mention in the Log tab reads the same way, instead of
