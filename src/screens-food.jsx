@@ -1112,6 +1112,22 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     });
     setCopyMoveOpen(false);
   }
+  // Mass delete: the same picker sheet's third mode, one patchDaily for
+  // curDate instead of one confirm + one write per entry. Mirrors
+  // deleteEntry's confirm wording (name/kcal) but for a whole selection, a
+  // count and the combined kcal rather than every individual food name.
+  async function deleteBulkEntries() {
+    if (!copyMoveIds.length) return;
+    const ids = copyMoveIds;
+    const totalKcal = dayEntries.filter(e => ids.includes(e.id)).reduce((a, e) => a + (e.calories || 0), 0);
+    const ok = await confirm(`${ids.length} ${ids.length === 1 ? 'entry' : 'entries'} · ${totalKcal} kcal`, { title: 'Delete entries?', ok: 'Delete', cancel: 'Cancel', danger: true });
+    if (!ok) return;
+    setStore(s => {
+      const nextLogs = (s.foodLogs || []).filter(l => !ids.includes(l.id));
+      return { ...s, foodLogs: nextLogs, dailyLogs: patchDaily(s, curDate, nextLogs.filter(l => l.date === curDate)) };
+    });
+    setCopyMoveOpen(false);
+  }
 
   // Sets the query text and, when it lands back at empty, resets the search
   // state along with it (so a stale results list, and the "Add manually"
@@ -1940,8 +1956,8 @@ function FoodScreen({ store, setStore, go, userId, date }) {
               <button onClick={takeScreenshot} disabled={capturing} aria-label="Share food log as image" style={{ ...fdTopAddBtn, cursor: capturing ? 'default' : 'pointer', color: capturing ? UI.inkGhost : UI.inkSoft }}>
                 {capturing ? <span style={{ fontFamily: UI.fontUi, fontSize: 10 }}>…</span> : <i className="fa-solid fa-camera" style={{ fontSize: 13 }} />}
               </button>
-              <button onClick={openCopyMove} aria-label="Copy or move entries" style={fdTopAddBtn}>
-                <i className="fa-solid fa-clone" style={{ fontSize: 13 }} />
+              <button onClick={openCopyMove} aria-label="Select entries" style={fdTopAddBtn}>
+                <i className="fa-solid fa-list-check" style={{ fontSize: 13 }} />
               </button>
             </div>
           ) : undefined
@@ -2580,10 +2596,10 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         )}
       </Sheet>
 
-      {/* ── Copy/move entries from the viewed day onto another one ── */}
-      <Sheet open={copyMoveOpen} onClose={() => setCopyMoveOpen(false)} title="Copy or move entries" titleColor="var(--accent)">
+      {/* ── Copy/move/delete a picked set of entries from the viewed day ── */}
+      <Sheet open={copyMoveOpen} onClose={() => setCopyMoveOpen(false)} title="Manage entries" titleColor="var(--accent)">
         <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 12, lineHeight: 1.4 }}>
-          Pick entries below, they land on the new day at the same time.
+          {copyMoveMode === 'delete' ? 'Pick entries below to delete them together.' : 'Pick entries below, they land on the new day at the same time.'}
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 16, maxHeight: 260, overflowY: 'auto' }}>
           {dayEntries.map(e => {
@@ -2601,17 +2617,26 @@ function FoodScreen({ store, setStore, go, userId, date }) {
             );
           })}
         </div>
-        <Field label="To" style={{ marginBottom: 14 }}>
-          <input type="date" value={copyMoveTarget} onChange={e => setCopyMoveTarget(e.target.value)}
-            style={{ ...fdInputStyle, colorScheme: ['light', 'paper'].includes(store.settings?.darkMode ?? 'dark') ? 'light' : 'dark' }} />
-        </Field>
+        {copyMoveMode !== 'delete' && (
+          <Field label="To" style={{ marginBottom: 14 }}>
+            <input type="date" value={copyMoveTarget} onChange={e => setCopyMoveTarget(e.target.value)}
+              style={{ ...fdInputStyle, colorScheme: ['light', 'paper'].includes(store.settings?.darkMode ?? 'dark') ? 'light' : 'dark' }} />
+          </Field>
+        )}
         <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `1px solid ${UI.hairStrong}`, marginBottom: 16 }}>
           <button onClick={() => setCopyMoveMode('copy')} style={fdSegBtn(copyMoveMode === 'copy')}>Copy</button>
           <button onClick={() => setCopyMoveMode('move')} style={fdSegBtn(copyMoveMode === 'move')}>Move</button>
+          <button onClick={() => setCopyMoveMode('delete')} style={fdSegBtn(copyMoveMode === 'delete', true)}>Delete</button>
         </div>
-        <Btn onClick={submitCopyMove} disabled={!copyMoveIds.length || !copyMoveTarget || copyMoveTarget === curDate} style={{ width: '100%' }}>
-          {copyMoveMode === 'move' ? 'Move' : 'Copy'}{copyMoveIds.length ? ` ${copyMoveIds.length}` : ''} {copyMoveIds.length === 1 ? 'entry' : 'entries'}
-        </Btn>
+        {copyMoveMode === 'delete' ? (
+          <Btn onClick={deleteBulkEntries} disabled={!copyMoveIds.length} style={{ width: '100%', background: UI.danger, borderColor: 'rgba(var(--danger-rgb),0.6)' }}>
+            Delete{copyMoveIds.length ? ` ${copyMoveIds.length}` : ''} {copyMoveIds.length === 1 ? 'entry' : 'entries'}
+          </Btn>
+        ) : (
+          <Btn onClick={submitCopyMove} disabled={!copyMoveIds.length || !copyMoveTarget || copyMoveTarget === curDate} style={{ width: '100%' }}>
+            {copyMoveMode === 'move' ? 'Move' : 'Copy'}{copyMoveIds.length ? ` ${copyMoveIds.length}` : ''} {copyMoveIds.length === 1 ? 'entry' : 'entries'}
+          </Btn>
+        )}
       </Sheet>
 
       {/* ── Split a stacked hour (a meal-prep batch) across multiple meal
@@ -4546,10 +4571,10 @@ function fdNavBtn(disabled) {
     WebkitTapHighlightColor: 'transparent',
   };
 }
-function fdSegBtn(active) {
+function fdSegBtn(active, danger) {
   return {
     flex: 1, padding: '7px 4px', border: 'none', cursor: 'pointer',
-    background: active ? 'var(--accent)' : 'transparent',
+    background: active ? (danger ? UI.danger : 'var(--accent)') : 'transparent',
     color: active ? 'var(--accent-ink)' : UI.inkFaint,
     textShadow: active ? 'none' : 'var(--text-lift)',
     fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.03em',
