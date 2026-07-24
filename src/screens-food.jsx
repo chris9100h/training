@@ -3936,7 +3936,8 @@ function FdHeroRow({ label, color, actual, target, unit = '' }) {
 // untouched.
 function FdHeroContent({ dayTarget, dayAdherence, dayTotals, goalCalories, projected }) {
   const projectionLine = projected ? (
-    <FdProjectionLine planned={Math.round(projected.calories - dayTotals.calories)} projected={projected.calories} goal={goalCalories} />
+    <FdProjectionLine planned={Math.round(projected.calories - dayTotals.calories)} projected={projected.calories} goal={goalCalories}
+      macros={{ protein: projected.protein - dayTotals.protein, carbs: projected.carbs - dayTotals.carbs, fat: projected.fat - dayTotals.fat }} />
   ) : null;
   return dayTarget ? (
     <>
@@ -3973,13 +3974,23 @@ function FdHeroContent({ dayTarget, dayAdherence, dayTotals, goalCalories, proje
 // Plan Mode projection: "+N kcal planned -> M projected (of GOAL)". Sits under
 // the real totals as a lighter, dashed-topped line so it reads as a forecast,
 // not part of the logged truth above it.
-function FdProjectionLine({ planned, projected, goal }) {
+function FdProjectionLine({ planned, projected, goal, macros }) {
   return (
-    <div style={{ marginTop: 14, paddingTop: 12, borderTop: `1px dashed ${UI.hairStrong}`, display: 'flex', alignItems: 'center', gap: 8 }}>
-      <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.06em', color: 'var(--accent)', fontFamily: UI.fontUi }}>PLANNED</span>
-      <span className="num" style={{ fontSize: 12, color: UI.inkSoft }}>
-        +{planned} kcal → <span style={{ color: UI.ink, fontWeight: 600 }}>{projected}</span>{goal ? <span style={{ color: UI.inkFaint }}> / {Math.round(goal)}</span> : ''} projected
-      </span>
+    <div style={{ marginTop: 14, paddingTop: 12, borderTop: `1px dashed ${UI.hairStrong}`, display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.06em', color: 'var(--accent)', fontFamily: UI.fontUi }}>PLANNED</span>
+        <span className="num" style={{ fontSize: 12, color: UI.inkSoft }}>
+          +{planned} kcal → <span style={{ color: UI.ink, fontWeight: 600 }}>{projected}</span>{goal ? <span style={{ color: UI.inkFaint }}> / {Math.round(goal)}</span> : ''} projected
+        </span>
+      </div>
+      {/* Bodybuilders track macros, not just kcal: same P/C/F bits the timeline
+          rows use, as the still-to-eat delta (mirrors the kcal "+N" above it). */}
+      {macros && (
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, paddingLeft: 2 }}>
+          <span className="num" style={{ fontSize: 11, color: UI.inkFaint }}>+</span>
+          <FdMacroBits protein={macros.protein} carbs={macros.carbs} fat={macros.fat} />
+        </div>
+      )}
     </div>
   );
 }
