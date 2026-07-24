@@ -2027,13 +2027,27 @@ function StatsTab({ store, setStore, sessions, go, userId }) {
   })();
 
   const [cycleViewOffset, setCycleViewOffset] = useStateL(0);
+  const selectedCycleNum = currentCycleNum + cycleViewOffset;
+  // Version-aware boundaries for the SELECTED cycle, mirroring how
+  // cycleWindowStart above already handles the current one. A naive
+  // cycleWindowStart + offset*cycleLen shift assumes cycleLen (today's day
+  // count) held for every past cycle too, which breaks as soon as the
+  // schedule was ever re-versioned with a different day count: an old
+  // cycle's window silently lands on the wrong dates, in the worst case
+  // overlapping the CURRENT cycle's own range. getCycleStartForNum is
+  // already the correct, version-aware way to do this (it's what
+  // cycleWindowStart itself calls for offset 0), so use it for every offset.
   const selectedCycleStart = isCycleMode && cycleWindowStart ? (() => {
+    if (sch?.versions?.length) return LB.getCycleStartForNum(sch, selectedCycleNum + 1) || null;
     const d = new Date(cycleWindowStart); d.setDate(cycleWindowStart.getDate() + cycleViewOffset * cycleLen); return d;
   })() : null;
   const selectedCycleEnd = isCycleMode && selectedCycleStart ? (cycleViewOffset === 0 ? today : (() => {
+    if (sch?.versions?.length) {
+      const nextStart = LB.getCycleStartForNum(sch, selectedCycleNum + 2);
+      if (nextStart) { const d = new Date(nextStart); d.setDate(d.getDate() - 1); return d; }
+    }
     const d = new Date(selectedCycleStart); d.setDate(selectedCycleStart.getDate() + cycleLen - 1); return d;
   })()) : null;
-  const selectedCycleNum = currentCycleNum + cycleViewOffset;
 
   // Sessions in the selected training period (cycle or calendar week)
   const thisPeriodSessions = useMemoL(() => sessions.filter(s => {
