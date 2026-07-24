@@ -2653,6 +2653,12 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
   const [pickerQuery, setPickerQuery] = useStateFd('');
   const [draft, setDraft] = useStateFd(null);
   const netCarbs = !!store.settings?.netCarbs;
+  // A flex plan has no fixed weekday schedule to look ahead at, so a Training/
+  // Rest slot's day-type match (LB.isTrainingDayForDate) can't tell in advance
+  // either, it defaults to Rest until a session is actually logged or the
+  // Health tab's Training|Rest slider is set for that day. Surfaced as a
+  // disclaimer at the day-type picker below, the exact point that choice is made.
+  const activeFlexPlan = LB.isFlexPlan((store.schedules || []).find(s => s.id === store.activeScheduleId));
   // Snapshot of the draft as it was opened, to detect unsaved edits on
   // backdrop-close (same pattern as RecipeEditorScreen's initialSnap).
   const draftInitialSnap = useRefFd(null);
@@ -3144,11 +3150,19 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
                 onChange={v => setDraft(d => ({ ...d, hour: Math.max(0, Math.min(23, Math.round(v))) }))} big />
             </div>
             <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>Day type</div>
-            <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `1px solid ${UI.hairStrong}`, marginBottom: 16 }}>
+            <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `1px solid ${UI.hairStrong}`, marginBottom: draft.dayType !== 'any' && activeFlexPlan ? 10 : 16 }}>
               {[['any', 'Every day'], ['training', 'Training'], ['rest', 'Rest']].map(([id, label]) => (
                 <button key={id} onClick={() => setDraft(d => ({ ...d, dayType: id }))} style={fdSegBtn(draft.dayType === id)}>{label}</button>
               ))}
             </div>
+            {draft.dayType !== 'any' && activeFlexPlan && (
+              <div style={{ marginBottom: 16, padding: '8px 10px', borderRadius: 4, border: `1px solid ${UI.hairStrong}`, background: UI.bgInset }}>
+                <span style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.4 }}>
+                  <i className="fa-solid fa-circle-info" style={{ marginRight: 5, color: UI.inkFaint }} />
+                  Your active plan is flexible, so there's no fixed schedule to check ahead of time. A day only counts as Training once you've actually trained or set it manually in the Health tab, until then it's assumed to be Rest.
+                </span>
+              </div>
+            )}
             <div style={{ display: 'flex', gap: 8 }}>
               <Btn kind="ghost" onClick={() => setDraft(null)} style={{ flex: 1 }}>Cancel</Btn>
               <Btn onClick={saveDraft} disabled={!draftBuilt} style={{ flex: 2 }}>{draft.id ? 'Save' : 'Add to template'}</Btn>

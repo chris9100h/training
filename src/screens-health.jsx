@@ -2000,6 +2000,11 @@ function HealthDateStrip({ store, setStore, selectedDate, onSelect, onLog, targe
     (l.coachFields && Object.keys(l.coachFields).length)
   );
   const loggedSet = new Set((store.dailyLogs || []).filter(hasLogContent).map(l => l.date));
+  // Navigation itself is unbounded forward (a flex plan's Training|Rest
+  // override needs to reach future dates, same reasoning as the food
+  // logger), but manually logging weight/steps/water/notes for a day that
+  // hasn't happened doesn't make sense, so the LOG button stays gated.
+  const selectedIsFuture = selectedDate > today;
 
   // Flex Training|Rest override for the selected day (header slider). Only in the
   // user's own tab (setStore present, not the read-only coach view), only for a
@@ -2052,15 +2057,14 @@ function HealthDateStrip({ store, setStore, selectedDate, onSelect, onLog, targe
           const has = loggedSet.has(d);
           const trained = LB.isTrainingDayForDate(store, d);
           const isToday = d === today;
-          const future = d > today;
           return (
-            <div key={d} onClick={() => !future && onSelect(d)}
+            <div key={d} onClick={() => onSelect(d)}
               style={{
                 flex: 1, padding: '10px 4px 8px', textAlign: 'center',
                 background: sel ? UI.goldFaint : has ? UI.goldFaint : 'transparent',
                 border: `${sel ? '2px' : '0.5px'} solid ${sel ? UI.gold : has ? UI.goldSoft : isToday ? UI.hairStrong : UI.hair}`,
-                borderRadius: 4, cursor: future ? 'default' : 'pointer',
-                opacity: future ? 0.35 : 1, minHeight: 56,
+                borderRadius: 4, cursor: 'pointer',
+                minHeight: 56,
                 WebkitTapHighlightColor: 'transparent',
               }}>
               <div className="num" style={{ fontSize: 9, color: sel ? UI.gold : isToday ? UI.inkSoft : UI.inkFaint, textShadow: 'var(--text-lift)' }}>
@@ -2100,7 +2104,7 @@ function HealthDateStrip({ store, setStore, selectedDate, onSelect, onLog, targe
           }}>
             <i className="fa-solid fa-calendar-day" style={{ fontSize: 14 }} />
           </button>
-          <input type="date" value={selectedDate} max={LB.todayISO()}
+          <input type="date" value={selectedDate}
             onChange={e => e.target.value && onSelect(e.target.value)}
             style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', opacity: 0, cursor: 'pointer' }}
           />
@@ -2126,7 +2130,7 @@ function HealthDateStrip({ store, setStore, selectedDate, onSelect, onLog, targe
           </div>
         )}
         <div style={{ flex: 1 }} />
-        {onLog && <button data-tour="health-log-btn" onClick={onLog} style={{
+        {onLog && !selectedIsFuture && <button data-tour="health-log-btn" onClick={onLog} style={{
           height: 34, borderRadius: 4, border: 'none',
           background: 'linear-gradient(180deg, var(--accent-light), var(--accent))',
           color: 'var(--accent-ink)', cursor: 'pointer', padding: '0 14px',
