@@ -1860,6 +1860,15 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           </div>
 
           <div style={{ marginTop: 16 }}>
+            <Row label="Meal planning" first>
+              <Toggle on={!!store.settings?.planMode} onToggle={() => setStore(s => ({ ...s, settings: { ...s.settings, planMode: !s.settings?.planMode } }))} />
+            </Row>
+            <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
+              Plan meals ahead in the Food Tracker and check them off as you eat. Adds a "Plan" option next to "Log" when you add food, and a projected total for the day. Off by default: with it off the Food Tracker works exactly as before.
+            </div>
+          </div>
+
+          <div style={{ marginTop: 16 }}>
             <NavRow label="Glucose" first onTap={() => setGlucoseSheet(true)} />
             <NavRow label="Body Temperature" onTap={() => setBodyTempSheet(true)} />
             <NavRow label="Cards" hint={(store.settings?.hiddenHealthCards || []).length ? `${store.settings.hiddenHealthCards.length} hidden` : null} onTap={() => setHealthCardsSheet(true)} />

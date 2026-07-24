@@ -259,6 +259,7 @@ CREATE TABLE public.zane_user_settings (
   manual_calories boolean NOT NULL DEFAULT false,
   onboarding_completed boolean DEFAULT false,
   net_carbs boolean NOT NULL DEFAULT false,
+  plan_mode boolean NOT NULL DEFAULT false,
   default_checkin_schema jsonb,
   status_mode text,
   status_mode_since timestamp with time zone,
@@ -2284,6 +2285,8 @@ CREATE TABLE zane_food_logs (
   -- run of this file would need zane_food_recipes created first.
   recipe_id    text        REFERENCES public.zane_food_recipes(id) ON DELETE SET NULL,  -- stable back-ref, source:'recipe' entries only
   logged_total_portions integer,                          -- recipe.portions at log time, source:'recipe' entries only
+  planned      boolean     NOT NULL DEFAULT false,        -- Plan Mode (0196): true = in the timeline but not eaten yet, excluded from daily totals until checked off
+  template_slot_id text,                                  -- Plan Mode (0196): soft back-ref to the template slot this planned entry came from (no FK, advisory only)
   created_at   timestamptz DEFAULT now()
 );
 
