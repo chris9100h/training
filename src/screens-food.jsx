@@ -547,6 +547,18 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // Snapshot of the split as it opened, to detect unsaved edits on backdrop-
   // close (same pattern as the meal-slot draft's requestCloseDraft).
   const splitInitialSnap = useRefFd(null);
+  // Undo for the last APPLIED split (not the sheet draft above): the exact
+  // pre-split entries plus the ids of what replaced them, captured once in
+  // applySplit, so undoSplit can put this exact state back regardless of
+  // what happens to the new entries afterward (no attempt to merge in a
+  // later edit, undo always means "back to before the split"). Auto-clears
+  // after a few seconds (splitUndoTimer); a second split before that just
+  // replaces it, same as any other toast. `date` rides along separately
+  // from curDate since the user may have flipped to a different day by the
+  // time Undo is tapped.
+  const [splitUndo, setSplitUndo] = useStateFd(null);
+  const splitUndoTimer = useRefFd(null);
+  useEffectFd(() => () => clearTimeout(splitUndoTimer.current), []);
   function splitEntryUnit(e) {
     if (!(e.quantityG > 0)) return null;
     // Trust loggedUnit alone, no favorite-guess fallback: a row logged
@@ -655,7 +667,27 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       const dailyLogs = patchDaily(s, curDate, nextLogs.filter(l => l.date === curDate));
       return { ...s, foodLogs: nextLogs, dailyLogs };
     });
+    // Undo snapshot: `entries` are the exact original objects (not
+    // recomputed), so restoring them is a straight put-back, not a rebuild.
+    clearTimeout(splitUndoTimer.current);
+    setSplitUndo({ date: curDate, removedEntries: entries, addedIds: toAdd.map(e => e.id), count: hours.length });
+    splitUndoTimer.current = setTimeout(() => setSplitUndo(null), 6000);
     setSplitHour(null);
+  }
+  // Reverses the last applySplit: drops exactly the entries it added and
+  // restores exactly the ones it deleted. Ignores whatever curDate is now
+  // (see splitUndo's own comment) and does nothing if the toast already
+  // auto-cleared or a newer split replaced it.
+  function undoSplit() {
+    if (!splitUndo) return;
+    clearTimeout(splitUndoTimer.current);
+    const { date, removedEntries, addedIds } = splitUndo;
+    setStore(s => {
+      const nextLogs = [...removedEntries, ...(s.foodLogs || []).filter(l => !addedIds.includes(l.id))];
+      const dailyLogs = patchDaily(s, date, nextLogs.filter(l => l.date === date));
+      return { ...s, foodLogs: nextLogs, dailyLogs };
+    });
+    setSplitUndo(null);
   }
   const dayEntries = useMemoFd(
     () => (store.foodLogs || []).filter(l => l.date === curDate).sort((a, b) => b.time.localeCompare(a.time)),
@@ -2823,6 +2855,22 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         })()}
       </Sheet>
     </Screen>
+    {/* Transient toast for the last applied split (see splitUndo/undoSplit),
+        rendered the same "fixed footer sibling of Screen" way as
+        stagedPanel below so it never overlaps TabBar either. Sits above
+        stagedPanel: it's the momentary one of the two, stagedPanel is the
+        one meant to persist until dealt with. */}
+    {splitUndo && (
+      <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderTop: `1px solid ${UI.hairStrong}`, background: 'rgba(var(--bg-rgb),0.96)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)' }}>
+        <i className="fa-solid fa-arrows-split-up-and-left" style={{ fontSize: 12, color: UI.inkFaint, flexShrink: 0 }} />
+        <span style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.inkSoft, flex: 1, minWidth: 0 }}>
+          Split into {splitUndo.count} meals
+        </span>
+        <button onClick={undoSplit} style={{ background: 'none', border: 'none', padding: '4px 8px', color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', cursor: 'pointer', WebkitTapHighlightColor: 'transparent', flexShrink: 0 }}>
+          Undo
+        </button>
+      </div>
+    )}
     {stagedPanel}
     </div>
   );
