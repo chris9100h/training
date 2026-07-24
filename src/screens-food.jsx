@@ -3329,6 +3329,17 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
   const [pickerSearching, setPickerSearching] = useStateFd(false);
   const [pickerSearchError, setPickerSearchError] = useStateFd(null);
   const [pickerResults, setPickerResults] = useStateFd(null);
+  // Scan entry points for the Search tab, mirroring FoodScreen's own
+  // scanPickerOpen/scanOpen/labelScanning/labelError trio. The AI-provider
+  // toggle (grok/claude) isn't duplicated here: it's a per-device debug
+  // comparison, not a user setting (see logbook-label-scanner-provider in
+  // CLAUDE.md), so this just reads whatever FoodScreen's own Scan sheet last
+  // set, same as any other screen that doesn't expose it.
+  const [pickerScanPickerOpen, setPickerScanPickerOpen] = useStateFd(false);
+  const [pickerScanOpen, setPickerScanOpen] = useStateFd(false);
+  const [pickerLabelScanning, setPickerLabelScanning] = useStateFd(false);
+  const [pickerLabelError, setPickerLabelError] = useStateFd(null);
+  const pickerLabelInputRef = useRefFd(null);
   const [draft, setDraft] = useStateFd(null);
   const netCarbs = !!store.settings?.netCarbs;
   // A flex plan has no fixed weekday schedule to look ahead at, so a Training/
@@ -3512,8 +3523,10 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
     draftInitialSnap.current = snapDraft(d);
     setDraft(d);
   }
-  async function runPickerFoodSearch() {
-    const q = pickerSearchQuery.trim();
+  // override lets a scanned barcode search immediately (handlePickerScan),
+  // without waiting a tick for setPickerSearchQuery to land first.
+  async function runPickerFoodSearch(override) {
+    const q = (typeof override === 'string' ? override : pickerSearchQuery).trim();
     if (!q || pickerSearching) return;
     setPickerSearching(true); setPickerSearchError(null);
     const res = await LB.searchFoods(q, null);
@@ -3534,6 +3547,76 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
       foodName: r.name, brand: r.brand || null, source: r.source, sourceId: r.sourceId, fromCache: !!r.cached,
       per100: { cal: r.kcalPer100g || 0, p: r.proteinPer100g || 0, c: r.carbsPer100g || 0, f: r.fatPer100g || 0, fib: r.fiberPer100g ?? null },
       gramsStr: r.servingSizeG != null ? String(Math.round(r.servingSizeG)) : '100',
+      hour: 8, dayType: 'any',
+    };
+    draftInitialSnap.current = snapDraft(d);
+    setDraft(d);
+  }
+  // A scanned barcode runs straight through the normal search (same as
+  // FoodScreen's handleScan): the found product shows as a result to tap,
+  // no separate code path needed.
+  function handlePickerScan(code) {
+    setPickerScanOpen(false);
+    setPickerSearchQuery(code);
+    runPickerFoodSearch(code);
+  }
+  // Nutrition-label scan, mirrors FoodScreen's handleLabelFile/prefillFromLabel
+  // pair, but funnels straight into the config sheet (openAddSearchResult's
+  // draft shape) instead of FoodScreen's qty-sheet/custom-item-form pair,
+  // since this screen has no manual-macro-entry fallback UI of its own.
+  async function handlePickerLabelFile(e) {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = ''; // let the user re-pick the same photo after an error
+    if (!file) return;
+    setPickerLabelError(null);
+    setPickerLabelScanning(true);
+    try {
+      const { base64, mimeType } = await fdDownscaleImage(file);
+      if (!base64) { setPickerLabelScanning(false); setPickerLabelError('Could not read that image. Try again.'); return; }
+      const provider = localStorage.getItem('logbook-label-scanner-provider') || 'grok';
+      const res = await LB.scanLabel(base64, mimeType, provider);
+      setPickerLabelScanning(false);
+      if (!res.ok) { setPickerLabelError(res.error || 'Scan failed. Try again.'); return; }
+      openAddFromLabel(res.label);
+    } catch (_) {
+      setPickerLabelScanning(false);
+      setPickerLabelError('Could not read that image. Try again.');
+    }
+  }
+  // Same per-100 normalization FoodScreen's prefillFromLabel does (the
+  // label's own printed calories never makes it in, calories are derived
+  // from protein/carbs/fat like every other source): a 100g/100ml basis is
+  // used as-is, a serving-only reading is converted through its stated gram
+  // weight. Neither present (no scalable basis at all) has nothing to build
+  // a per100 draft from, so it errors rather than guessing. source: 'custom'
+  // and no sourceId, same as any hand-typed food: a scanned label is a
+  // per-user item, never a shared zane_foods entry, so saveDraft's cache
+  // step correctly skips it.
+  function openAddFromLabel(label) {
+    if (!label || label.is_nutrition_label === false) {
+      setPickerLabelError("That doesn't look like a nutrition label. Try a straight-on photo of the table.");
+      return;
+    }
+    const cal = label.calories, p = label.protein_g, c = label.carbs_g, f = label.fat_g, fib = label.fiber_g;
+    if (cal == null && p == null && c == null && f == null) {
+      setPickerLabelError('Could not read the values. Try a clearer photo.');
+      return;
+    }
+    const per100 = (label.basis === '100g' || label.basis === '100ml')
+      ? { p, c, f, fib }
+      : (label.serving_size_g > 0)
+        ? (k => ({ p: p != null ? p * k : null, c: c != null ? c * k : null, f: f != null ? f * k : null, fib: fib != null ? fib * k : null }))(100 / label.serving_size_g)
+        : null;
+    if (!per100) {
+      setPickerLabelError('Could not tell the portion size from this label. Try a photo that shows the serving size, or use Search instead.');
+      return;
+    }
+    setPickerOpen(false);
+    const d = {
+      id: null, kind: 'food', foodId: null,
+      foodName: label.name || '', brand: label.brand || null, source: 'custom',
+      per100: { cal: LB.caloriesFromMacros(per100.p, per100.c, per100.f, netCarbs ? per100.fib : null) || 0, p: per100.p || 0, c: per100.c || 0, f: per100.f || 0, fib: per100.fib ?? null },
+      gramsStr: label.serving_size_g > 0 ? String(Math.round(label.serving_size_g)) : '100',
       hour: 8, dayType: 'any',
     };
     draftInitialSnap.current = snapDraft(d);
@@ -3684,7 +3767,7 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
         onBack={viewedPlan ? () => setViewedPlanId(null) : onClose}
         right={viewedPlan ? (
           <div style={{ display: 'flex', gap: 8 }}>
-            <button onClick={() => { setPickerQuery(''); setPickerSearchQuery(''); setPickerResults(null); setPickerSearchError(null); setPickerOpen(true); }} aria-label="Add meal" style={fdTopAddBtn}>
+            <button onClick={() => { setPickerQuery(''); setPickerSearchQuery(''); setPickerResults(null); setPickerSearchError(null); setPickerLabelError(null); setPickerOpen(true); }} aria-label="Add meal" style={fdTopAddBtn}>
               <i className="fa-solid fa-plus" style={{ fontSize: 14 }} />
             </button>
             <button onClick={() => setNameDraft({ id: viewedPlan.id, name: viewedPlan.name, initialName: viewedPlan.name })} style={fdEditBtn}>Edit</button>
@@ -3760,7 +3843,7 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
             </div>
 
             {slots.length === 0 ? (
-              <Btn onClick={() => { setPickerQuery(''); setPickerSearchQuery(''); setPickerResults(null); setPickerSearchError(null); setPickerOpen(true); }} style={{ width: '100%' }}>
+              <Btn onClick={() => { setPickerQuery(''); setPickerSearchQuery(''); setPickerResults(null); setPickerSearchError(null); setPickerLabelError(null); setPickerOpen(true); }} style={{ width: '100%' }}>
                 <i className="fa-solid fa-plus" style={{ marginRight: 8 }} /> Add a meal
               </Btn>
             ) : (
@@ -3810,18 +3893,22 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
             <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
               <div style={{ position: 'relative', width: '100%' }}>
                 <input value={pickerSearchQuery} onChange={e => setPickerSearchQuery(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') runPickerFoodSearch(); }}
-                  type="text" placeholder="Search food" style={{ ...fdInputStyle, paddingRight: 32 }} />
+                  type="text" placeholder="Search food, or scan →" style={{ ...fdInputStyle, paddingRight: 32 }} />
                 {pickerSearchQuery && (
                   <button onClick={() => { setPickerSearchQuery(''); setPickerResults(null); setPickerSearchError(null); }} aria-label="Clear search" style={fdClearBtn}>
                     <i className="fa-solid fa-circle-xmark" style={{ fontSize: 15 }} />
                   </button>
                 )}
               </div>
-              <button onClick={runPickerFoodSearch} disabled={pickerSearching || !pickerSearchQuery.trim()} aria-label="Search" style={fdSearchBtn}>
+              <button onClick={() => setPickerScanPickerOpen(true)} aria-label="Scan barcode or nutrition label" style={fdSearchBtn}>
+                <i className="fa-solid fa-barcode" style={{ fontSize: 14 }} />
+              </button>
+              <button onClick={() => runPickerFoodSearch()} disabled={pickerSearching || !pickerSearchQuery.trim()} aria-label="Search" style={fdSearchBtn}>
                 {pickerSearching ? <span style={{ fontFamily: UI.fontUi, fontSize: 11 }}>…</span> : <i className="fa-solid fa-magnifying-glass" style={{ fontSize: 13 }} />}
               </button>
             </div>
             {pickerSearchError && <div style={{ fontSize: 11, color: UI.danger, fontFamily: UI.fontUi, marginBottom: 10 }}>{pickerSearchError}</div>}
+            {pickerLabelError && <div style={{ fontSize: 11, color: UI.danger, fontFamily: UI.fontUi, marginBottom: 10, lineHeight: 1.4 }}>{pickerLabelError}</div>}
             {pickerResults != null && (
               pickerResults.length === 0 ? <div style={fdEmptyHint}>No matches. Try a different search.</div> : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: '46vh', overflowY: 'auto' }}>
@@ -3872,6 +3959,28 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
           </>
         )}
       </Sheet>
+
+      {/* ── Barcode vs. label picker (opened by the Search tab's scan button) ── */}
+      <Sheet open={pickerScanPickerOpen} onClose={() => setPickerScanPickerOpen(false)} title="Scan" titleColor="var(--accent)">
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10 }}>
+          <button onClick={() => { setPickerScanPickerOpen(false); setPickerScanOpen(true); }} style={fdScanChoice}>
+            <i className="fa-solid fa-barcode" style={{ fontSize: 22, color: 'var(--accent)' }} />
+            <span style={{ fontSize: 13, fontWeight: 700, color: UI.ink }}>Barcode</span>
+            <span style={{ fontSize: 10, color: UI.inkFaint, lineHeight: 1.3 }}>The code on the packaging</span>
+          </button>
+          <button onClick={() => { setPickerScanPickerOpen(false); setPickerLabelError(null); pickerLabelInputRef.current && pickerLabelInputRef.current.click(); }} style={fdScanChoice}>
+            <i className="fa-solid fa-camera" style={{ fontSize: 22, color: 'var(--accent)' }} />
+            <span style={{ fontSize: 13, fontWeight: 700, color: UI.ink }}>Nutrition label</span>
+            <span style={{ fontSize: 10, color: UI.inkFaint, lineHeight: 1.3 }}>Photograph the facts table</span>
+          </button>
+        </div>
+      </Sheet>
+
+      {/* Hidden picker: opens the native camera (capture) or gallery on tap,
+          which works on iOS Safari without any library. */}
+      <input ref={pickerLabelInputRef} type="file" accept="image/*" capture="environment" onChange={handlePickerLabelFile} style={{ display: 'none' }} />
+      {pickerLabelScanning && <FdLabelBusy />}
+      {pickerScanOpen && <FdScanner onClose={() => setPickerScanOpen(false)} onDetect={handlePickerScan} />}
 
       {/* Slot config: amount + hour + day type */}
       <Sheet open={!!draft} onClose={requestCloseDraft} title={draft?.foodName || draft?.name || 'Meal slot'} titleColor="var(--accent)">
