@@ -3801,7 +3801,7 @@ function FoodTemplateScreen({ open, onClose, store, setStore, userId }) {
       {/* Food source picker: the user's Favorites and Recipes, or a fresh database search */}
       <Sheet open={pickerOpen} onClose={() => setPickerOpen(false)} title="Add to template" titleColor="var(--accent)">
         <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `1px solid ${UI.hairStrong}`, marginBottom: 10 }}>
-          {[['favorites', 'Favorites'], ['recipes', 'Recipes'], ['search', 'Search']].map(([id, label]) => (
+          {[['search', 'Search'], ['favorites', 'Favorites'], ['recipes', 'Recipes']].map(([id, label]) => (
             <button key={id} onClick={() => setPickerTab(id)} style={fdSegBtn(pickerTab === id)}>{label}</button>
           ))}
         </div>
