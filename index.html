@@ -286,6 +286,24 @@
   .micro-gold { font-family: "Inter", system-ui, sans-serif; font-size: 9px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
   .label { font-family: "Inter", system-ui, sans-serif; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-faint); font-weight: 500; }
 
+  /* Health tab's Today/Week stat cells (HealthMetricsCard's stat(), HealthWeekCard's
+     cell(), screens-health.jsx): a value + unit pair (e.g. "155.9 lbs") in a narrow
+     flex/grid column, with nothing clipping overflow. On a small phone a long value
+     (a 3-digit weight, a 5-digit step count) can render wider than its column and
+     spill into the next stat instead of wrapping, reported as "the step count is
+     overlapping the lbs". Shrinking these two font sizes below a phone-width
+     breakpoint keeps every value+unit pair inside its own column. */
+  .health-stat-value { font-size: 22px; }
+  .health-stat-unit { font-size: 11px; }
+  .health-cell-value { font-size: 16px; }
+  .health-cell-unit { font-size: 9px; }
+  @media (max-width: 430px) {
+    .health-stat-value { font-size: 18px; }
+    .health-stat-unit { font-size: 9px; }
+    .health-cell-value { font-size: 13px; }
+    .health-cell-unit { font-size: 8px; }
+  }
+
   @keyframes sheet-up { from { transform: translateY(30%); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
   @keyframes sheet-fade { from { opacity: 0; } to { opacity: 1; } }
   @keyframes timerPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }

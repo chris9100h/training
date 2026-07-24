@@ -1763,8 +1763,8 @@ function HealthMetricsCard({ log, dateLabel, isToday, onJumpToday, dragHandle, t
   const wUnit = weightUnit || UI.unit();
   const stat = (label, value, unit) => (
     <div style={{ flex: 1, minWidth: 0, textAlign: 'center' }}>
-      <div className="num" style={{ fontSize: 22, color: value != null ? UI.ink : UI.inkGhost, fontWeight: 300 }}>
-        {value != null ? value : '—'}{value != null && unit ? <span style={{ fontSize: 11, color: UI.inkFaint, marginLeft: 3 }}>{unit}</span> : ''}
+      <div className="num health-stat-value" style={{ color: value != null ? UI.ink : UI.inkGhost, fontWeight: 300 }}>
+        {value != null ? value : '—'}{value != null && unit ? <span className="health-stat-unit" style={{ color: UI.inkFaint, marginLeft: 3 }}>{unit}</span> : ''}
       </div>
       <div style={{ fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.08em', textTransform: 'uppercase', marginTop: 2 }}>{label}</div>
     </div>
@@ -1879,8 +1879,8 @@ function HealthWeekCard({ stats, dragHandle, targets, tf, setTf, weightUnit }) {
 
   const cell = (label, value, unit) => (
     <div style={{ minWidth: 0, textAlign: 'center' }}>
-      <div className="num" style={{ fontSize: 16, color: value != null ? UI.ink : UI.inkGhost, fontWeight: 300, whiteSpace: 'nowrap' }}>
-        {value != null ? value : '—'}{value != null && unit ? <span style={{ fontSize: 9, color: UI.inkFaint, marginLeft: 2 }}>{unit}</span> : ''}
+      <div className="num health-cell-value" style={{ color: value != null ? UI.ink : UI.inkGhost, fontWeight: 300, whiteSpace: 'nowrap' }}>
+        {value != null ? value : '—'}{value != null && unit ? <span className="health-cell-unit" style={{ color: UI.inkFaint, marginLeft: 2 }}>{unit}</span> : ''}
       </div>
       <div style={{ fontSize: 8.5, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.07em', textTransform: 'uppercase', marginTop: 2 }}>{label}</div>
     </div>
