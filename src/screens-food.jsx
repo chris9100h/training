@@ -27,6 +27,32 @@ function fdShiftDate(dateStr, deltaDays) {
 }
 const fdNum = v => (v === '' || v == null || isNaN(parseFloat(v))) ? null : parseFloat(v);
 const fdRound1 = v => Math.round(v * 10) / 10;
+// Splits `total` into `n` whole-number parts as evenly as possible, remainder
+// (from integer rounding) landing on the first parts so they always sum back
+// to `total` exactly. Used by the timeline's "split into multiple meals".
+function fdEvenSplit(total, n) {
+  const base = Math.floor(total / n);
+  const rem = Math.round(total) - base * n;
+  return Array.from({ length: n }, (_, i) => base + (i < rem ? 1 : 0));
+}
+// Scales a food-log entry's amount/macros/ingredient-snapshot by `scale`, for
+// "split into multiple meals": a fixed-composition food or recipe batch
+// scales every field (and each recipeItems ingredient) linearly by the same
+// factor, same math the quantity sheet's per-100g preview already uses.
+function fdScaleEntry(e, scale) {
+  const sc = (v) => v != null ? Math.round(v * scale) : v;
+  const sc1 = (v) => v != null ? fdRound1(v * scale) : v;
+  return {
+    quantityG: sc(e.quantityG), calories: sc(e.calories),
+    protein: sc1(e.protein), carbs: sc1(e.carbs), fat: sc1(e.fat),
+    fiber: e.fiber != null ? sc1(e.fiber) : null,
+    recipeItems: e.recipeItems ? e.recipeItems.map(ri => ({
+      ...ri, quantityG: sc(ri.quantityG), calories: sc(ri.calories),
+      protein: sc1(ri.protein), carbs: sc1(ri.carbs), fat: sc1(ri.fat),
+      fiber: ri.fiber != null ? sc1(ri.fiber) : null,
+    })) : null,
+  };
+}
 // Shared precondition for anything about to write a row that references a
 // zane_foods food_id (favorites, log entries, recipe ingredients): a DB food
 // only gets its zane_foods row on first log (see confirmLogFood), so any
@@ -489,6 +515,95 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // per-row secondary actions (edit, ingredients, delete) live in this one
   // menu instead of a cluster of inline buttons, to save width on mobile.
   const [entryMenu, setEntryMenu] = useStateFd(null);
+  // "Split into multiple meals": an hour that stacks several items really
+  // eaten at different times (a meal-prep batch), redistributed across N
+  // times without retyping every item's amount. splitHour is the hour being
+  // split (null = sheet closed); splitHours holds the target hour for each
+  // additional meal (length splitCount-1, meal 1 stays at splitHour);
+  // splitQtys maps entry id -> per-meal amount STRING array (length
+  // splitCount, same input-as-you-type convention as every other quantity
+  // field here), in splitUnit(entry): grams when the entry has a quantity,
+  // else kcal (a food/recipe with no gram weight has nothing else to scale by).
+  const [splitHour, setSplitHour] = useStateFd(null);
+  const [splitCount, setSplitCount] = useStateFd(2);
+  const [splitHours, setSplitHours] = useStateFd([]);
+  const [splitQtys, setSplitQtys] = useStateFd({});
+  // Snapshot of the split as it opened, to detect unsaved edits on backdrop-
+  // close (same pattern as the meal-slot draft's requestCloseDraft).
+  const splitInitialSnap = useRefFd(null);
+  const splitUnit = (e) => (e.quantityG != null && e.quantityG > 0) ? 'g' : 'kcal';
+  const splitOrigAmount = (e) => (e.quantityG != null && e.quantityG > 0) ? e.quantityG : (e.calories || 0);
+  function openSplit(h) {
+    const entries = byHour[h] || [];
+    if (entries.length < 2) return;
+    const qtys = {};
+    entries.forEach(e => { qtys[e.id] = fdEvenSplit(splitOrigAmount(e), 2).map(String); });
+    const nextHours = [Math.min(23, h + 4)];
+    splitInitialSnap.current = JSON.stringify({ count: 2, hours: nextHours, qtys });
+    setSplitHour(h);
+    setSplitCount(2);
+    setSplitHours(nextHours);
+    setSplitQtys(qtys);
+  }
+  // Backdrop tap used to drop the whole split configuration (meal count,
+  // hours, every hand-adjusted amount) silently.
+  async function requestCloseSplit() {
+    if (splitHour != null) {
+      const cur = JSON.stringify({ count: splitCount, hours: splitHours, qtys: splitQtys });
+      if (cur !== splitInitialSnap.current && !await confirm("Your split changes won't be applied.", { title: 'Discard changes?', ok: 'Discard', cancel: 'Keep editing', danger: true })) return;
+    }
+    setSplitHour(null);
+  }
+  // Changing the meal count keeps meal 1 at splitHour, grows/shrinks the
+  // target-hour list (new hours default +4h from the previous one), and
+  // re-evens every item's split (any per-item hand-edits are reset, simplest
+  // to reason about rather than guessing how to redistribute a partial edit).
+  function setSplitCountTo(n) {
+    n = Math.max(2, Math.min(6, Math.round(n)));
+    setSplitCount(n);
+    setSplitHours(prev => {
+      const next = prev.slice(0, n - 1);
+      while (next.length < n - 1) next.push(Math.min(23, (next[next.length - 1] ?? splitHour) + 4));
+      return next;
+    });
+    setSplitQtys(prev => {
+      const out = {};
+      for (const id in prev) out[id] = fdEvenSplit(prev[id].reduce((a, b) => a + (fdNum(b) || 0), 0), n).map(String);
+      return out;
+    });
+  }
+  function updateSplitQty(entryId, idx, raw) {
+    setSplitQtys(prev => {
+      const arr = [...(prev[entryId] || [])];
+      arr[idx] = fdDecimalFilter(raw);
+      return { ...prev, [entryId]: arr };
+    });
+  }
+  function applySplit() {
+    if (splitHour == null) return;
+    const entries = byHour[splitHour] || [];
+    const hours = [splitHour, ...splitHours];
+    const now = new Date().toISOString();
+    const toAdd = [];
+    const removeIds = new Set();
+    entries.forEach(e => {
+      const origAmt = splitOrigAmount(e);
+      const qtys = (splitQtys[e.id] || []).map(v => fdNum(v) || 0);
+      hours.forEach((h, i) => {
+        const amt = qtys[i] || 0;
+        if (amt <= 0) return;
+        toAdd.push({ ...e, ...fdScaleEntry(e, origAmt > 0 ? amt / origAmt : 0), id: LB.uid(), time: `${String(h).padStart(2, '0')}:00`, createdAt: now });
+      });
+      removeIds.add(e.id);
+    });
+    if (!toAdd.length) return;
+    setStore(s => {
+      const nextLogs = [...toAdd, ...(s.foodLogs || []).filter(l => !removeIds.has(l.id))];
+      const dailyLogs = patchDaily(s, curDate, nextLogs.filter(l => l.date === curDate));
+      return { ...s, foodLogs: nextLogs, dailyLogs };
+    });
+    setSplitHour(null);
+  }
   const dayEntries = useMemoFd(
     () => (store.foodLogs || []).filter(l => l.date === curDate).sort((a, b) => b.time.localeCompare(a.time)),
     [store.foodLogs, curDate],
@@ -1978,9 +2093,20 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                                   );
                                 }) : <div data-reorder-item="true" data-reorder-ignore="true" style={{ flex: 1 }} />}
                               </div>
-                              <button data-reorder-ignore="true" onClick={() => addAtHour(h)} aria-label={`Add food at ${String(h).padStart(2, '0')}:00`} style={fdHourAddBtn(isNow)}>
-                                <i className="fa-solid fa-plus" style={{ fontSize: 11 }} />
-                              </button>
+                              <div data-reorder-ignore="true" style={{ display: 'flex', flexDirection: 'column', gap: 6, flexShrink: 0 }}>
+                                <button onClick={() => addAtHour(h)} aria-label={`Add food at ${String(h).padStart(2, '0')}:00`} style={fdHourAddBtn(isNow)}>
+                                  <i className="fa-solid fa-plus" style={{ fontSize: 11 }} />
+                                </button>
+                                {/* Only once this hour stacks more than one item: a
+                                    meal-prep batch logged/planned all at one hour but
+                                    really eaten at different times. Splits it across
+                                    hours without retyping every item's amount. */}
+                                {es.length > 1 && (
+                                  <button onClick={() => openSplit(h)} aria-label={`Split ${String(h).padStart(2, '0')}:00 into multiple meals`} style={fdHourAddBtn(isNow)}>
+                                    <i className="fa-solid fa-arrows-split-up-and-left" style={{ fontSize: 11 }} />
+                                  </button>
+                                )}
+                              </div>
                             </div>
                           </div>
                         );
@@ -2354,6 +2480,56 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         <Btn onClick={submitCopyMove} disabled={!copyMoveIds.length || !copyMoveTarget || copyMoveTarget === curDate} style={{ width: '100%' }}>
           {copyMoveMode === 'move' ? 'Move' : 'Copy'}{copyMoveIds.length ? ` ${copyMoveIds.length}` : ''} {copyMoveIds.length === 1 ? 'entry' : 'entries'}
         </Btn>
+      </Sheet>
+
+      {/* ── Split a stacked hour (a meal-prep batch) across multiple meal
+          times: how many meals, at what hours, and how much of each item
+          goes to each one. Deletes the original entries and replaces them
+          with the redistributed set on Split. ── */}
+      <Sheet open={splitHour != null} onClose={requestCloseSplit} title={`Split ${splitHour != null ? String(splitHour).padStart(2, '0') + ':00' : ''}`} titleColor="var(--accent)">
+        {splitHour != null && (
+          <>
+            <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: 1.4 }}>
+              Really eaten at more than one time? Redistribute these items across meals, each amount adjustable on its own.
+            </div>
+            <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8, textAlign: 'center' }}>Meals</div>
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 16 }}>
+              <Stepper value={splitCount} step={1} min={2} suffix={splitCount === 1 ? ' meal' : ' meals'} onChange={setSplitCountTo} />
+            </div>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+              {[splitHour, ...splitHours].map((h, i) => (
+                <div key={i} style={{ flex: '1 1 100px' }}>
+                  <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4, textAlign: 'center' }}>Meal {i + 1}</div>
+                  {i === 0 ? (
+                    <div style={{ ...fdInputStyle, textAlign: 'center', color: UI.inkSoft }}>{String(h).padStart(2, '0')}:00</div>
+                  ) : (
+                    <Stepper value={h} step={1} min={0} suffix=":00"
+                      onChange={v => setSplitHours(prev => prev.map((x, xi) => xi === i - 1 ? Math.max(0, Math.min(23, Math.round(v))) : x))} />
+                  )}
+                </div>
+              ))}
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginBottom: 16 }}>
+              {(byHour[splitHour] || []).map(e => (
+                <div key={e.id}>
+                  <div style={fdEntryName}>{e.foodName}</div>
+                  <div style={{ display: 'flex', gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
+                    {[splitHour, ...splitHours].map((h, i) => (
+                      <div key={i} style={{ flex: '1 1 80px' }}>
+                        <input value={(splitQtys[e.id] || [])[i] ?? ''} onChange={ev => updateSplitQty(e.id, i, ev.target.value)}
+                          type="text" inputMode="decimal" placeholder={splitUnit(e)} style={fdInputStyle} />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Btn kind="ghost" onClick={() => setSplitHour(null)} style={{ flex: 1 }}>Cancel</Btn>
+              <Btn onClick={applySplit} style={{ flex: 2 }}>Split</Btn>
+            </div>
+          </>
+        )}
       </Sheet>
 
       {/* ── Units for a favorite (e.g. "1 Pc = 62g", "1 Pack = 500g") ── */}
