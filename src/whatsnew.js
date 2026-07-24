@@ -17,6 +17,20 @@
    Entry shape: { id: string, date: string (YYYY-MM-DD), title: string, items: string[] } */
 window.WHATS_NEW = [
   {
+    id: 'v2.664',
+    date: '2026-07-24',
+    title: "Today's greatest hits 🎶",
+    items: [
+      "🍱 The big one: Plan Mode. Flip it on (Settings → Health) and every food entry gets a Log it or Plan it choice, so you can pencil in tomorrow's meals today and just check them off as you go. Set your go-to meals once (breakfast at 8, a shake at 3, whatever your routine is) and they auto-fill your day from then on, even split differently for training vs. rest days. Build as many meal plans as you want (Cut, Bulk, Maintenance...), only one's ever active, switch with one tap. Coaches can push a plan straight to a client too, just like a training plan.",
+      "⏰ Plan Mode gained a memory: if a planned meal's still unchecked an hour after its time, you get a friendly push to log it. At most one nudge per meal, and checking it off silences it instantly. Turn it on under Settings → Health → Meal reminders.",
+      "🔀 Logged a bunch of stuff under one time and want it spread across your actual meals? Open a timeslot with 2+ items and hit Split: it fans them out across separate times in a couple of taps, using your favorites' real portion sizes instead of guessing.",
+      "🥣 Or go the other way: turn a stack of items into one clean recipe. Give it a name and you're done, temporary by default (just tidies up today's log), or flip \"Save as reusable recipe\" to add it to Quick Add / Recipes for next time too.",
+      "↩️ Changed your mind about a split or a combine? Undo isn't a 6-second window anymore, it's always one tap away: reopen that timeslot whenever you want, today or next week, and put it back exactly how it was.",
+      "🧹 Cleaning up a day now has a real delete mode too: select multiple entries in Manage Entries (same sheet as Copy/Move) and clear them all at once. The sheet also sorts chronologically and groups into meal categories now, and an accidental tap outside it won't silently wipe your selections anymore.",
+      "✨ Smaller fixes: step counts no longer collide with \"lbs\" on narrow screens, accent colors (gold especially) read properly in Light and Paper mode now, and Health settings got sorted into Health / Water / Food tabs so they're easier to find your way around.",
+    ],
+  },
+  {
     id: 'v2.659',
     date: '2026-07-24',
     title: 'Meal reminders ⏰',
